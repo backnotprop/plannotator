@@ -430,6 +430,12 @@ function JobCard({
         </button>
       )}
 
+      {job.warning && (
+        <p role="status" data-agent-job-warning className="mt-1.5 ml-5 text-[10px] leading-snug text-warning">
+          {job.warning}
+        </p>
+      )}
+
       {/* Error details — fallback for when the dockview detail panel is not available */}
       {!onViewDetails && job.status === 'failed' && job.error && expanded && (
         <div className="mt-2 rounded bg-destructive/5 border border-destructive/20 p-2">

@@ -243,9 +243,13 @@ export const CLAUDE_JOB_SHELL_GUIDANCE =
  *   Claude Code's sandbox cannot start (Linux without bubblewrap/socat,
  *   AppArmor-restricted user namespaces), a command falls back to running
  *   unsandboxed only with permission, which dontAsk refuses, so every Bash
- *   call fails. The job stays read-only through `--tools`, the allowlist and
- *   the disallow list; `--settings` outranks user/project settings but not
- *   managed policy, so an enterprise-enforced sandbox still wins.
+ *   call fails. Opting out runs the job's commands WITHOUT OS containment,
+ *   exactly like any user who never enabled Claude's sandbox (Claude Code's
+ *   default). `--tools`, the command allowlist and the disallow list are
+ *   unchanged, but the allowlist LIMITS what the model can run; it does not
+ *   contain it (allowlisted prefixes such as `git -C` or `gh api` accept
+ *   arguments that execute or write). `--settings` outranks user/project
+ *   settings but not managed policy, so an enterprise-enforced sandbox wins.
  */
 export function claudeJobIsolationArgs(opts?: ClaudeJobCommandOptions): string[] {
   return [
@@ -405,4 +409,62 @@ export function formatClaudeLogEvent(line: string): string | null {
   } catch {
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Blocked-shell detection (#1627)
+// ---------------------------------------------------------------------------
+
+/** Job warning shown when a Claude job could not run a single shell command. */
+export const CLAUDE_SHELL_BLOCKED_WARNING =
+  "Claude Code refused every shell command this job tried, so it could not inspect the repository with git. " +
+  "If your Claude Code settings enable its sandbox and the sandbox cannot start on this machine " +
+  "(for example Linux without bubblewrap and socat), set PLANNOTATOR_CLAUDE_SANDBOX=0 or " +
+  "{ \"claudeSandbox\": false } in ~/.plannotator/config.json and run the job again.";
+
+/** A Bash tool_result that reads as a refusal rather than a command's own failure. */
+function isBashRefusal(content: unknown): boolean {
+  const text = typeof content === "string"
+    ? content
+    : Array.isArray(content)
+      ? content.map((c) => (c && typeof c === "object" && typeof (c as { text?: unknown }).text === "string" ? (c as { text: string }).text : "")).join(" ")
+      : "";
+  return /permission to use bash has been denied|sandbox/i.test(text);
+}
+
+/**
+ * Decide from a Claude job's stream-json stdout whether its shell was blocked
+ * outright, the #1627 shape. Rule: at least TWO Bash calls were refused (listed
+ * in the result event's `permission_denials`, or answered by an error
+ * tool_result that reads as a permission/sandbox refusal) AND not one Bash
+ * call succeeded. A single refused compound command followed by working
+ * single commands is the model's own mistake, not a blocked shell, and a job
+ * that never needed Bash has no refusals at all, so neither warns.
+ */
+export function detectClaudeShellBlocked(stdout: string): boolean {
+  const bashIds = new Set<string>();
+  const refused = new Set<string>();
+  let succeeded = 0;
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    let event: any;
+    try { event = JSON.parse(line); } catch { continue; }
+    if (event?.type === "assistant" && Array.isArray(event.message?.content)) {
+      for (const block of event.message.content) {
+        if (block?.type === "tool_use" && block.name === "Bash" && typeof block.id === "string") bashIds.add(block.id);
+      }
+    } else if (event?.type === "user" && Array.isArray(event.message?.content)) {
+      for (const block of event.message.content) {
+        if (block?.type !== "tool_result" || !bashIds.has(block.tool_use_id)) continue;
+        if (block.is_error !== true) succeeded++;
+        else if (isBashRefusal(block.content)) refused.add(block.tool_use_id);
+      }
+    } else if (event?.type === "result" && Array.isArray(event.permission_denials)) {
+      for (const d of event.permission_denials) {
+        if (d?.tool_name === "Bash") refused.add(typeof d.tool_use_id === "string" ? d.tool_use_id : `denial-${refused.size}`);
+      }
+    }
+  }
+  return succeeded === 0 && refused.size >= 2;
 }

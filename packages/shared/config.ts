@@ -259,9 +259,11 @@ export interface PlannotatorConfig {
    * without bubblewrap/socat, AppArmor-restricted user namespaces): jobs run
    * with `--permission-mode dontAsk`, so the unsandboxed fallback is refused
    * and every Bash call dead-ends (#1627). False passes
-   * `--settings {"sandbox":{"enabled":false}}` for the job only; the job stays
-   * read-only through its tool allowlist. Managed (enterprise) settings still
-   * win. Mirrors the PLANNOTATOR_CLAUDE_SANDBOX env var, which takes precedence.
+   * `--settings {"sandbox":{"enabled":false}}` for the job only, so its
+   * commands run WITHOUT OS containment, the same as for any user who never
+   * enabled Claude's sandbox (the default). The job's command allowlist still
+   * limits what the model can run, but it is not a containment boundary.
+   * Managed (enterprise) settings still win. Mirrors the PLANNOTATOR_CLAUDE_SANDBOX env var, which takes precedence.
    */
   claudeSandbox?: boolean;
   /**

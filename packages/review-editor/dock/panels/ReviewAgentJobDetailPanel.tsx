@@ -145,6 +145,11 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
           )}
           <CopyButton text={fullCommand} variant="inline" label="Command" />
         </div>
+        {job.warning && (
+          <p role="status" data-agent-job-warning className="mt-2 rounded bg-warning/10 border border-warning/30 px-3 py-2 text-xs text-foreground/80 whitespace-pre-wrap break-words">
+            {job.warning}
+          </p>
+        )}
         {/* Prompt disclosures in header */}
         {userMessage && (
           <div className="mt-3 space-y-1.5">

@@ -92,6 +92,9 @@ export interface AgentJobInfo {
   exitCode?: number;
   /** Last ~500 chars of stderr on failure. */
   error?: string;
+  /** Non-fatal problem worth surfacing on a job that may still be "done"
+   *  (e.g. a Claude job whose every shell command was refused, #1627). */
+  warning?: string;
   /** The actual command that was spawned (for display/debug). */
   command: string[];
   /** Working directory where the process was spawned. */

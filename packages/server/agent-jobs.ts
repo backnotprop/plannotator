@@ -9,7 +9,7 @@
  */
 
 import { resolve as resolvePath } from "node:path";
-import { formatClaudeLogEvent } from "./claude-review";
+import { CLAUDE_SHELL_BLOCKED_WARNING, detectClaudeShellBlocked, formatClaudeLogEvent } from "./claude-review";
 import {
   MARKER_ENGINES,
   formatMarkerLogEvent,
@@ -435,6 +435,12 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
 
         if (exitCode !== 0 && stderrBuf) {
           entry.info.error = stderrBuf;
+        }
+
+        // #1627: a Claude job whose every shell command was refused (sandbox that
+        // cannot start, under dontAsk) otherwise finishes looking normal.
+        if (captureStdout && (provider === "claude" || spawnOptions?.engine === "claude") && detectClaudeShellBlocked(stdoutBuf)) {
+          entry.info.warning = CLAUDE_SHELL_BLOCKED_WARNING;
         }
 
         // Ingest results before broadcasting completion so annotations arrive first

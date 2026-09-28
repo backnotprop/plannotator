@@ -251,3 +251,49 @@ describe("POST /api/agents/jobs — OpenCode runs in the review's cwd (#1609)", 
     }
   });
 });
+
+describe("Claude blocked-shell warning (#1627)", () => {
+  const line = (o: unknown) => JSON.stringify(o);
+  const denied = "Permission to use Bash has been denied because Claude Code is running in don't ask mode.";
+  const streamFor = (secondOk: boolean) => [
+    line({ type: "assistant", message: { content: [{ type: "tool_use", id: "a", name: "Bash", input: { command: "git merge-base main HEAD" } }] } }),
+    line({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "a", content: denied, is_error: true }] } }),
+    line({ type: "assistant", message: { content: [{ type: "tool_use", id: "b", name: "Bash", input: { command: "git diff" } }] } }),
+    line({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "b", content: secondOk ? "diff --git a/x b/x" : denied, is_error: !secondOk }] } }),
+    line({ type: "result", is_error: false, permission_denials: secondOk ? [{ tool_name: "Bash", tool_use_id: "a" }] : [{ tool_name: "Bash", tool_use_id: "a" }, { tool_name: "Bash", tool_use_id: "b" }] }),
+  ].join("\n");
+
+  async function runClaudeJob(stream: string, provider = "claude") {
+    let seen: { warning?: string } | undefined;
+    let done: (() => void) | undefined;
+    const completed = new Promise<void>((resolve) => { done = resolve; });
+    const handler = createAgentJobHandler({
+      mode: "review",
+      getServerUrl: () => "http://localhost:1234",
+      getCwd: () => tmpdir(),
+      async buildCommand() {
+        return { command: [process.execPath, "-e", `process.stdout.write(${JSON.stringify(stream)})`], captureStdout: true };
+      },
+      async onJobComplete(job) {
+        seen = { warning: job.warning };
+        done?.();
+      },
+    });
+    const res = await handler.handle(post({ provider }), JOBS_URL);
+    expect(res?.status).toBe(201);
+    await completed;
+    handler.killAll();
+    return seen;
+  }
+
+  test("a Claude job whose every shell command was refused carries the opt-out warning", async () => {
+    const seen = await runClaudeJob(streamFor(false));
+    expect(seen?.warning).toContain("PLANNOTATOR_CLAUDE_SANDBOX=0");
+    expect(seen?.warning).toContain("claudeSandbox");
+  });
+
+  test("no warning once a shell command ran", async () => {
+    const seen = await runClaudeJob(streamFor(true));
+    expect(seen?.warning).toBeUndefined();
+  });
+});

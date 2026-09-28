@@ -26,7 +26,7 @@ import {
 } from "../generated/agent-jobs.ts";
 import { resolveGuideLaunchInstructions } from "../generated/guide-instructions-store.ts";
 import type { GuideLaunchReview } from "../generated/guide-format.ts";
-import { formatClaudeLogEvent } from "../generated/claude-review.ts";
+import { CLAUDE_SHELL_BLOCKED_WARNING, detectClaudeShellBlocked, formatClaudeLogEvent } from "../generated/claude-review.ts";
 import {
 	MARKER_ENGINES,
 	formatMarkerLogEvent,
@@ -396,6 +396,12 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 
 				if (exitCode !== 0 && stderrBuf) {
 					entry.info.error = stderrBuf;
+				}
+
+				// #1627: a Claude job whose every shell command was refused (sandbox that
+				// cannot start, under dontAsk) otherwise finishes looking normal.
+				if (captureStdout && (provider === "claude" || spawnOptions?.engine === "claude") && detectClaudeShellBlocked(stdoutBuf)) {
+					entry.info.warning = CLAUDE_SHELL_BLOCKED_WARNING;
 				}
 
 				// Ingest results before broadcasting completion
