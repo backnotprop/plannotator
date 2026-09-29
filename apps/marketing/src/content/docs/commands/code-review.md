@@ -205,6 +205,12 @@ Files whose content cannot be reliably identified, such as oversized untracked
 files, do not restore as viewed. Workspace, non-Git, and piped-patch reviews retain
 their existing draft-based viewed tracking.
 
+Progress is stored under `~/.plannotator/review-progress/` (or
+`PLANNOTATOR_DATA_DIR`), one small record per file that includes the file's path.
+Nothing prunes it; `plannotator uninstall --purge` removes it. To turn it off, set
+`PLANNOTATOR_REVIEW_PROGRESS=0` or add `{ "reviewProgress": false }` to
+`~/.plannotator/config.json`; viewed marks then use the draft-based tracking.
+
 ### Auto-mark viewed
 
 Files check themselves off as you read. On the all-files surface a file is

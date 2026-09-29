@@ -9,6 +9,7 @@ export {
   resolveCursorSandbox,
   resolveFeedbackHistory,
   resolveGuideHistory,
+  resolveReviewProgress,
   resolveGitRemoteCheck,
   parseReviewAnalysisConfig,
   isAgentTerminalSide,

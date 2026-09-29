@@ -18,6 +18,7 @@ import {
   resolveUseGlimpse,
   resolveAnnotateHistory,
   resolveGuideHistory,
+  resolveReviewProgress,
   resolveUseJina,
   resolveTodoProviderEnabled,
   resolveUrlHost,
@@ -327,6 +328,12 @@ describe("config.json boolean coercion", () => {
       resolve: resolveGuideHistory,
     },
     {
+      name: "resolveReviewProgress",
+      envVar: "PLANNOTATOR_REVIEW_PROGRESS",
+      key: "reviewProgress",
+      resolve: (config) => resolveReviewProgress(config),
+    },
+    {
       name: "resolveUseJina",
       envVar: "PLANNOTATOR_JINA",
       key: "jina",
@@ -402,6 +409,22 @@ describe("config.json boolean coercion", () => {
       });
     });
   }
+});
+
+describe("resolveReviewProgress env handling", () => {
+  test("off/on vocabulary wins over the config key", () => {
+    for (const v of ["0", "false", "FALSE", "off", "disabled", " false "]) {
+      expect(resolveReviewProgress({ reviewProgress: true }, { PLANNOTATOR_REVIEW_PROGRESS: v })).toBe(false);
+    }
+    for (const v of ["1", "true", "on"]) {
+      expect(resolveReviewProgress({ reviewProgress: false }, { PLANNOTATOR_REVIEW_PROGRESS: v })).toBe(true);
+    }
+  });
+
+  test("an empty-but-set env var counts as unset, so the config key decides", () => {
+    expect(resolveReviewProgress({ reviewProgress: false }, { PLANNOTATOR_REVIEW_PROGRESS: "" })).toBe(false);
+    expect(resolveReviewProgress({}, { PLANNOTATOR_REVIEW_PROGRESS: "" })).toBe(true);
+  });
 });
 
 describe("favicon config persistence", () => {

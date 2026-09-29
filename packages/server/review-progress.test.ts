@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readdirSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -24,7 +24,7 @@ function git(...args: string[]) {
 beforeEach(() => {
   const env = { ...process.env };
   restoreEnv = () => {
-    for (const key of ["PLANNOTATOR_DATA_DIR", "PLANNOTATOR_AI", "PLANNOTATOR_REMOTE", "PLANNOTATOR_PORT"]) {
+    for (const key of ["PLANNOTATOR_DATA_DIR", "PLANNOTATOR_AI", "PLANNOTATOR_REMOTE", "PLANNOTATOR_PORT", "PLANNOTATOR_REVIEW_PROGRESS"]) {
       if (env[key] === undefined) delete process.env[key]; else process.env[key] = env[key];
     }
   };
@@ -84,6 +84,24 @@ for (const [name, start] of [["Bun", startBun], ["Pi", startPi]] as const) {
         body: JSON.stringify({ key: p.data.key, changes: paths.map(path => ({ path, viewed, fingerprint: p.data.fingerprints[path] })) }),
       });
     }
+
+    test("PLANNOTATOR_REVIEW_PROGRESS=0 neither reads nor writes progress", async () => {
+      // A record from an earlier session must not be served while the opt-out is on.
+      const earlier = await snapshot();
+      saveReviewProgress(earlier, [{ path: "a.txt", viewed: true, fingerprint: earlier.fingerprints["a.txt"] }]);
+      const store = join(root, "data", "review-progress");
+      process.env.PLANNOTATOR_REVIEW_PROGRESS = "0";
+      const server = await open();
+      const diff = await (await fetch(`${server.url}/api/diff`)).json();
+      const endpoint = `${server.url}/api/review-progress?snapshot=${encodeURIComponent(diff.snapshotId)}`;
+      expect(await (await fetch(endpoint)).json()).toEqual({ available: false });
+      const post = await fetch(endpoint, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "x", changes: [{ path: "a.txt", viewed: true, fingerprint: "x" }] }),
+      });
+      expect(await post.json()).toEqual({ available: false });
+      expect(readdirSync(store, { recursive: true }).filter(name => String(name).endsWith(".json"))).toHaveLength(1);
+    });
 
     test("submit, stop, edit one file and reopen: only the changed file is unviewed", async () => {
       const first = await open();

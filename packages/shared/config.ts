@@ -212,6 +212,14 @@ export interface PlannotatorConfig {
    */
   guideHistory?: boolean;
   /**
+   * Remember which files a code review marked viewed, across review sessions,
+   * under ~/.plannotator/review-progress/ (or PLANNOTATOR_DATA_DIR). Records
+   * carry repo file paths in plain text and nothing prunes them. Set to false
+   * to never read or write them; viewed marks then ride the annotation draft,
+   * as they do for review modes without a durable identity. Default: true.
+   */
+  reviewProgress?: boolean;
+  /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
    * callouts, tables, diagrams, task lists, and the other PFM extensions.
@@ -722,6 +730,26 @@ export function resolveGuideHistory(config: PlannotatorConfig): boolean {
     return envVal === "1" || envVal.toLowerCase() === "true";
   }
   return coerceConfigBoolean(config.guideHistory, true);
+}
+
+/**
+ * Resolve whether code review persists viewed-file progress across sessions.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_REVIEW_PROGRESS env var  →  config.reviewProgress  →  default true
+ *
+ * Env `0` / `false` / `off` / `disabled` turn it off and `1` / `true` / `on`
+ * turn it on; an empty (or unrecognized) value counts as unset, so the config
+ * key still decides.
+ */
+export function resolveReviewProgress(
+  config: PlannotatorConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const v = env.PLANNOTATOR_REVIEW_PROGRESS?.trim().toLowerCase();
+  if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
+  if (v === "1" || v === "true" || v === "on") return true;
+  return coerceConfigBoolean(config.reviewProgress, true);
 }
 
 export function resolveUseJina(cliNoJina: boolean, config: PlannotatorConfig): boolean {

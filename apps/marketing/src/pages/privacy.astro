@@ -87,6 +87,7 @@ import Footer from '../components/Footer.astro';
           <li>Set <code>PLANNOTATOR_JINA=0</code> or use <code>--no-jina</code> to prevent URL annotation from using Jina. The requested URL is still fetched directly.</li>
           <li>Set <code>PLANNOTATOR_AI=disabled</code> to disable the in-app AI and review-agent surfaces.</li>
           <li>Set <code>PLANNOTATOR_FEEDBACK_HISTORY=0</code> to stop archiving submitted feedback locally, or delete <code>~/.plannotator/feedback/</code> to remove what has been archived.</li>
+          <li>Set <code>PLANNOTATOR_REVIEW_PROGRESS=0</code> to stop code review saving which files you marked viewed (records include repository file paths), or delete <code>~/.plannotator/review-progress/</code> to remove saved progress.</li>
           <li>Self-host the share portal and paste service, or do not use link sharing.</li>
           <li>Do not send a share link through a service you do not trust with the content or key in that link.</li>
           <li>The automatic GitHub release check currently has no opt-out setting.</li>
