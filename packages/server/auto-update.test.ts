@@ -8,6 +8,9 @@ import {
   compareStableVersions,
   deriveAutoUpdateNotice,
   installerCommand,
+  installerFlagArgs,
+  parseInstallFlags,
+  readInstallFlags,
   isCheckDue,
   isManagedBinary,
   isNewerStableVersion,
@@ -165,6 +168,7 @@ describe("runAutoUpdateCheck gates", () => {
         resultPath: autoUpdatePaths(dataDir).result,
         lockPath: autoUpdatePaths(dataDir).lock,
         platform: "linux",
+        flags: [],
       },
     ]);
     expect(readAutoUpdateState(dataDir).pending).toEqual({ version: "0.28.0", fromVersion: "0.27.22", startedAt: NOW });
@@ -238,4 +242,145 @@ describe("installer command", () => {
     expect(file).toBe("/bin/sh");
     expect(args[1]).toContain('--version "$PLANNOTATOR_UPDATE_VERSION"');
   });
+});
+
+describe("remembered install flags", () => {
+  const writeFlags = (body: string) => writeFileSync(autoUpdatePaths(dataDir).installFlags, body);
+
+  test("a well-formed file yields its flags in a stable order", () => {
+    writeFlags('{"v":1,"flags":["skip-skills","minimal","skip-codex"]}\n');
+    expect(readInstallFlags(dataDir)).toEqual({ flags: ["minimal", "skip-codex", "skip-skills"] });
+  });
+
+  test("an empty set is a valid file, not a problem", () => {
+    writeFlags('{"v":1,"flags":[]}\n');
+    expect(readInstallFlags(dataDir)).toEqual({ flags: [] });
+  });
+
+  test("missing and malformed files mean no flags, with a reason for update.log", () => {
+    expect(readInstallFlags(dataDir).flags).toEqual([]);
+    expect(readInstallFlags(dataDir).problem).toContain("no install-flags.json");
+    writeFlags("{not json");
+    expect(readInstallFlags(dataDir)).toMatchObject({ flags: [], problem: expect.stringContaining("malformed") });
+    writeFlags('{"flags":"--minimal"}');
+    expect(readInstallFlags(dataDir)).toMatchObject({ flags: [], problem: expect.stringContaining("malformed") });
+  });
+
+  test("unknown and hostile entries are dropped, known ones kept", () => {
+    const r = parseInstallFlags({
+      flags: ["skip-codex", "--minimal", "evil; rm -rf ~", "-SkipSkills", "version", 7, null, { id: "minimal" }, "__proto__", "toString"],
+    });
+    expect(r.flags).toEqual(["skip-codex"]);
+    expect(r.problem).toContain("dropped");
+  });
+
+  test("a mutually-exclusive pair drops both sides", () => {
+    expect(parseInstallFlags({ flags: ["minimal", "no-minimal", "skip-kiro"] }).flags).toEqual(["skip-kiro"]);
+    expect(parseInstallFlags({ flags: ["verify-attestation", "skip-attestation"] }).flags).toEqual([]);
+  });
+
+  test("flags are spelled for each installer", () => {
+    const flags = ["minimal", "with-call-flow", "skip-opencode"] as const;
+    expect(installerFlagArgs(flags, "linux")).toEqual(["--minimal", "--with-call-flow", "--skip-opencode"]);
+    expect(installerFlagArgs(flags, "win32")).toEqual(["-Minimal", "-WithCallFlow", "-SkipOpencode"]);
+  });
+
+  test("the check passes the remembered flags to the installer and logs them", async () => {
+    writeFlags('{"v":1,"flags":["minimal","bogus"]}');
+    expect(await runAutoUpdateCheck(deps())).toBe("launched");
+    expect(launches[0].flags).toEqual(["minimal"]);
+    const log = readFileSync(autoUpdatePaths(dataDir).log, "utf-8");
+    expect(log).toContain("dropped 1");
+    expect(log).toContain("with minimal");
+  });
+
+  test("with no file the check launches with no flags and says so in update.log", async () => {
+    expect(await runAutoUpdateCheck(deps())).toBe("launched");
+    expect(launches[0].flags).toEqual([]);
+    expect(readFileSync(autoUpdatePaths(dataDir).log, "utf-8")).toContain("no install-flags.json");
+  });
+
+  test("POSIX passes flags as argv after the script, never inside it", () => {
+    const { args, env } = installerCommand("linux", ["minimal", "skip-skills"]);
+    expect(args.slice(0, 2)).toEqual(["-c", args[1]]);
+    expect(args[1]).toContain('--non-interactive "$@"');
+    expect(args[1]).not.toContain("--minimal");
+    expect(args.slice(2)).toEqual(["plannotator-auto-update", "--minimal", "--skip-skills"]);
+    expect(env).toEqual({});
+  });
+
+  test("Windows carries the flags in the environment and the encoded wrapper splats them", () => {
+    const { args, env } = installerCommand("win32", ["minimal", "skip-codex"]);
+    expect(env).toEqual({ PLANNOTATOR_UPDATE_FLAGS: "-Minimal -SkipCodex" });
+    const script = Buffer.from(args[args.indexOf("-EncodedCommand") + 1], "base64").toString("utf16le");
+    expect(script).toContain("$env:PLANNOTATOR_UPDATE_FLAGS");
+    expect(script).toContain("-NonInteractive @installFlags");
+    // The wrapper re-checks every switch against the same allowlist.
+    for (const flag of installerFlagArgs(["minimal", "skip-codex", "skip-skills", "no-minimal"], "win32")) {
+      expect(script).toContain(`'${flag}'`);
+    }
+    // No flag value is ever baked into the encoded text.
+    expect(installerCommand("win32", []).args).toEqual(args);
+  });
+});
+
+describe.skipIf(process.platform === "win32" || !Bun.which("curl"))("POSIX wrapper end to end", () => {
+  test("the downloaded installer receives the version and the remembered flags as argv", () => {
+    const script = join(dataDir, "fake-install.sh");
+    writeFileSync(script, 'for a in "$@"; do echo "ARG:$a"; done\n');
+    const { file, args } = installerCommand("linux", ["minimal", "skip-codex"]);
+    const paths = autoUpdatePaths(dataDir);
+    const r = Bun.spawnSync([file, ...args], {
+      env: {
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        TMPDIR: dataDir,
+        PLANNOTATOR_UPDATE_VERSION: "v0.28.0",
+        PLANNOTATOR_UPDATE_RESULT: paths.result,
+        PLANNOTATOR_UPDATE_LOCK: paths.lock,
+        PLANNOTATOR_UPDATE_SCRIPT_URL: `file://${script}`,
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const argv = r.stdout.toString().split("\n").filter((l) => l.startsWith("ARG:")).map((l) => l.slice(4));
+    expect(argv).toEqual(["--version", "v0.28.0", "--non-interactive", "--minimal", "--skip-codex"]);
+    expect(JSON.parse(readFileSync(paths.result, "utf-8"))).toEqual({ version: "v0.28.0", exitCode: 0 });
+  });
+});
+
+// Runs the real encoded wrapper under Windows PowerShell (the same
+// powershell.exe launchInstaller spawns), downloading a stand-in installer
+// from a local server. The stand-in declares the real installer's switches, so
+// this proves the flags bind as switches rather than arriving as text.
+describe.skipIf(process.platform !== "win32" || !Bun.which("powershell.exe"))("Windows wrapper end to end", () => {
+  test("the downloaded installer is bound with the version and the remembered switches", async () => {
+    const fake = [
+      "param([string]$Version, [switch]$NonInteractive, [switch]$Minimal, [switch]$SkipCodex, [switch]$SkipSkills)",
+      'Write-Output ("BOUND:" + $Version + "|" + [bool]$NonInteractive + "|" + [bool]$Minimal + "|" + [bool]$SkipCodex + "|" + [bool]$SkipSkills)',
+      "exit 0",
+    ].join("\r\n");
+    const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response(fake) });
+    try {
+      const { file, args, env } = installerCommand("win32", ["minimal", "skip-codex"]);
+      const paths = autoUpdatePaths(dataDir);
+      const proc = Bun.spawn([file, ...args], {
+        env: {
+          ...process.env,
+          ...env,
+          PLANNOTATOR_UPDATE_VERSION: "v0.28.0",
+          PLANNOTATOR_UPDATE_RESULT: paths.result,
+          PLANNOTATOR_UPDATE_LOCK: paths.lock,
+          PLANNOTATOR_UPDATE_SCRIPT_URL: `http://127.0.0.1:${server.port}/install.ps1`,
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const out = await new Response(proc.stdout).text();
+      await proc.exited;
+      expect(out).toContain("BOUND:v0.28.0|True|True|True|False");
+      expect(JSON.parse(readFileSync(paths.result, "utf-8"))).toEqual({ version: "v0.28.0", exitCode: 0 });
+    } finally {
+      server.stop(true);
+    }
+  }, 60_000);
 });

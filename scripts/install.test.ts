@@ -2546,6 +2546,77 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
 );
 
 // ---------------------------------------------------------------------------
+// install-flags.json (#1634): each successful run records the install-affecting
+// flags it was given, so a background auto-update re-runs with the same ones.
+// ---------------------------------------------------------------------------
+describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
+  "install.sh remembers its command-line flags",
+  () => {
+    const readFlags = (home: string) =>
+      JSON.parse(readFileSync(join(home, ".plannotator", "install-flags.json"), "utf-8"));
+
+    test("a full install records its opt-out flags as neutral ids", () => {
+      const { code, home } = runSummaryInstall(["codex"], ["--skip-codex", "--skip-skills"]);
+      expect(code).toBe(0);
+      expect(readFlags(home)).toEqual({ v: 1, flags: ["skip-codex", "skip-skills"] });
+    });
+
+    test("a minimal install records --minimal (the binary-only early exit writes it too)", () => {
+      const { code, home } = runSummaryInstall([], ["--minimal", "--skip-gemini"]);
+      expect(code).toBe(0);
+      expect(readFlags(home)).toEqual({ v: 1, flags: ["minimal", "skip-gemini"] });
+    });
+
+    test("a run with no flags records an empty set; non-install flags are never recorded", () => {
+      const { code, home } = runSummaryInstall([]);
+      expect(code).toBe(0);
+      // runSummaryInstall passes --version, --non-interactive and --no-extras.
+      expect(readFlags(home)).toEqual({ v: 1, flags: [] });
+    });
+
+    test("the file lands in PLANNOTATOR_DATA_DIR when it is set", () => {
+      const sandbox = setupInstallSandbox({ gh: "pass-all" });
+      const dataDir = join(sandbox.home, "custom-data");
+      const r = Bun.spawnSync(
+        ["bash", join(scriptsDir, "install.sh"), "--version", "v99.9.9", "--minimal", "--skip-attestation", "--non-interactive"],
+        {
+          env: {
+            HOME: sandbox.home,
+            TMPDIR: join(sandbox.home, "tmp"),
+            PATH: `${sandbox.stub}:/usr/bin:/bin`,
+            STUB_CHECKSUM: FAKE_BINARY_SHA256,
+            STUB_ATT_JSON: ATTESTATION_FIXTURE,
+            PLANNOTATOR_DATA_DIR: dataDir,
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      expect(r.exitCode).toBe(0);
+      expect(JSON.parse(readFileSync(join(dataDir, "install-flags.json"), "utf-8"))).toEqual({
+        v: 1,
+        flags: ["minimal", "skip-attestation"],
+      });
+      expect(existsSync(join(sandbox.home, ".plannotator", "install-flags.json"))).toBe(false);
+    });
+  },
+);
+
+describe("install-flags.json is written by every installer", () => {
+  test("install.ps1 and install.cmd record the same neutral ids after both exits", () => {
+    const ps = readScript("install.ps1");
+    const cmd = readScript("install.cmd");
+    for (const id of ["minimal", "no-minimal", "verify-attestation", "skip-attestation", "with-call-flow", "skip-codex", "skip-gemini", "skip-kiro", "skip-vibe", "skip-opencode", "skip-skills"]) {
+      expect(ps).toContain(`$ids += "${id}"`);
+      expect(cmd).toContain(`call :AddInstallFlag ${id}`);
+    }
+    // Called in the minimal gate and once at the end of the full install.
+    expect(ps.split("\n").filter((l) => l.trim() === "Write-InstallFlags")).toHaveLength(2);
+    expect(cmd.split("\n").filter((l) => l.trim() === "call :WriteInstallFlags")).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // M7: the Windows installers' bundle extraction, exercised under PowerShell
 // against the captured REAL attestations response (scripts/fixtures/). The
 // scanner must emit each attestations[].bundle as a byte-exact substring of

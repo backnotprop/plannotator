@@ -208,6 +208,39 @@ if ($configDir -eq "~") {
     $configDir = Join-Path $env:USERPROFILE ($configDir.Substring(2))
 }
 
+# Remember the install-affecting choices this run took from COMMAND-LINE
+# switches (#1634), so a background auto-update re-runs this script with the
+# same ones. Only the known switch set is written, as neutral ids shared with
+# install.sh / install.cmd (never raw arguments, paths, or secrets); env vars
+# and config.json survive on their own and are not recorded. A run with none of
+# these switches writes an empty set, which is how a manual re-run with no
+# switches goes back to defaults. Best effort: a failed write never fails the
+# install.
+function Write-InstallFlags {
+    $ids = @()
+    if ($Minimal) { $ids += "minimal" }
+    if ($NoMinimal) { $ids += "no-minimal" }
+    if ($VerifyAttestation) { $ids += "verify-attestation" }
+    if ($SkipAttestation) { $ids += "skip-attestation" }
+    if ($WithCallFlow) { $ids += "with-call-flow" }
+    if ($SkipCodex) { $ids += "skip-codex" }
+    if ($SkipGemini) { $ids += "skip-gemini" }
+    if ($SkipKiro) { $ids += "skip-kiro" }
+    if ($SkipVibe) { $ids += "skip-vibe" }
+    if ($SkipOpencode) { $ids += "skip-opencode" }
+    if ($SkipSkills) { $ids += "skip-skills" }
+    $quoted = ($ids | ForEach-Object { '"' + $_ + '"' }) -join ","
+    $path = Join-Path $configDir "install-flags.json"
+    $tmp = "$path.tmp.$PID"
+    try {
+        New-Item -ItemType Directory -Force -Path $configDir -ErrorAction Stop | Out-Null
+        [System.IO.File]::WriteAllText($tmp, ('{"v":1,"flags":[' + $quoted + ']}' + "`n"))
+        Move-Item -Force -LiteralPath $tmp -Destination $path -ErrorAction Stop
+    } catch {
+        Remove-Item -Force -LiteralPath $tmp -ErrorAction SilentlyContinue
+    }
+}
+
 function Install-SemSidecar {
     if ($env:PLANNOTATOR_SKIP_SEM_INSTALL -match '^(1|true|yes)$') {
         Write-Host "Skipping semantic diff sidecar install (PLANNOTATOR_SKIP_SEM_INSTALL is set)"
@@ -703,9 +736,11 @@ function Show-PathAdvice {
 # Binary-only mode stops here (see the $minimal resolution near the top): the
 # binary is installed, so add it to PATH and exit before any sidecar download,
 # agent integration, skill checkout, config write, or cleanup runs. Only the
-# binary and its PATH entry are added - none of the sem sidecar, CallDiff, agent-terminal
+# binary, its PATH entry, and install-flags.json (Write-InstallFlags, so a
+# later auto-update stays binary-only) are added - none of the sem sidecar, CallDiff, agent-terminal
 # runtime, or per-agent skills, hooks, or config.
 if ($minimal) {
+    Write-InstallFlags
     Show-PathAdvice
     Write-Host ""
     Write-Host "Minimal install complete - only the plannotator binary was installed."
@@ -1681,3 +1716,6 @@ if ((Test-Path $pluginHooks) -and (Test-Path $claudeSettings)) {
         Write-Host "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
     }
 }
+
+# The full install completed: remember its command-line switches for auto-update.
+Write-InstallFlags

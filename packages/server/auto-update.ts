@@ -91,6 +91,7 @@ export function autoUpdatePaths(dataDir: string = getPlannotatorDataDir()) {
     result: join(dataDir, "update-result.json"),
     lock: join(dataDir, "update.lock"),
     log: join(dataDir, "update.log"),
+    installFlags: join(dataDir, "install-flags.json"),
   };
 }
 
@@ -271,6 +272,98 @@ function acquireLock(lockPath: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Remembered install flags
+// ---------------------------------------------------------------------------
+
+/**
+ * The install-affecting command-line flags the installers remember in
+ * `install-flags.json` (written by install.sh / install.ps1 / install.cmd after
+ * a successful run), as neutral ids with their spelling per installer. This is
+ * the strict allowlist: anything else in the file is dropped.
+ */
+export const INSTALL_FLAG_SPELLINGS = {
+  minimal: { posix: "--minimal", powershell: "-Minimal" },
+  "no-minimal": { posix: "--no-minimal", powershell: "-NoMinimal" },
+  "verify-attestation": { posix: "--verify-attestation", powershell: "-VerifyAttestation" },
+  "skip-attestation": { posix: "--skip-attestation", powershell: "-SkipAttestation" },
+  "with-call-flow": { posix: "--with-call-flow", powershell: "-WithCallFlow" },
+  "skip-codex": { posix: "--skip-codex", powershell: "-SkipCodex" },
+  "skip-gemini": { posix: "--skip-gemini", powershell: "-SkipGemini" },
+  "skip-kiro": { posix: "--skip-kiro", powershell: "-SkipKiro" },
+  "skip-vibe": { posix: "--skip-vibe", powershell: "-SkipVibe" },
+  "skip-opencode": { posix: "--skip-opencode", powershell: "-SkipOpencode" },
+  "skip-skills": { posix: "--skip-skills", powershell: "-SkipSkills" },
+} as const;
+
+export type InstallFlagId = keyof typeof INSTALL_FLAG_SPELLINGS;
+
+const MUTUALLY_EXCLUSIVE: Array<[InstallFlagId, InstallFlagId]> = [
+  ["minimal", "no-minimal"],
+  ["verify-attestation", "skip-attestation"],
+];
+
+function isInstallFlagId(value: unknown): value is InstallFlagId {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(INSTALL_FLAG_SPELLINGS, value);
+}
+
+export interface InstallFlagsRead {
+  flags: InstallFlagId[];
+  /** Why the file could not be used as-is, for update.log. */
+  problem?: string;
+}
+
+/**
+ * Validate the parsed contents of install-flags.json. Known ids are kept in
+ * allowlist order without duplicates; unknown entries are dropped; a
+ * mutually-exclusive pair (which no installer writes) drops both sides.
+ */
+export function parseInstallFlags(raw: unknown): InstallFlagsRead {
+  if (!raw || typeof raw !== "object" || !Array.isArray((raw as { flags?: unknown }).flags)) {
+    return { flags: [], problem: "install-flags.json is malformed" };
+  }
+  const entries = (raw as { flags: unknown[] }).flags;
+  const present = new Set<InstallFlagId>();
+  let dropped = 0;
+  for (const entry of entries) {
+    if (isInstallFlagId(entry)) present.add(entry);
+    else dropped++;
+  }
+  for (const [a, b] of MUTUALLY_EXCLUSIVE) {
+    if (present.has(a) && present.has(b)) {
+      present.delete(a);
+      present.delete(b);
+      dropped += 2;
+    }
+  }
+  const flags = (Object.keys(INSTALL_FLAG_SPELLINGS) as InstallFlagId[]).filter((id) => present.has(id));
+  return dropped > 0
+    ? { flags, problem: `dropped ${dropped} unrecognized or conflicting install-flags.json entr${dropped === 1 ? "y" : "ies"}` }
+    : { flags };
+}
+
+/** Read install-flags.json; a missing or unreadable file means no flags. */
+export function readInstallFlags(dataDir?: string): InstallFlagsRead {
+  const path = autoUpdatePaths(dataDir).installFlags;
+  let text: string;
+  try {
+    text = readFileSync(path, "utf-8");
+  } catch {
+    return { flags: [], problem: "no install-flags.json; running the installer with default flags" };
+  }
+  try {
+    return parseInstallFlags(JSON.parse(text));
+  } catch {
+    return { flags: [], problem: "install-flags.json is malformed; running the installer with default flags" };
+  }
+}
+
+/** The flags spelled for the installer the platform runs. */
+export function installerFlagArgs(flags: readonly InstallFlagId[], platform: NodeJS.Platform): string[] {
+  const key = platform === "win32" ? "powershell" : "posix";
+  return flags.filter(isInstallFlagId).map((id) => INSTALL_FLAG_SPELLINGS[id][key]);
+}
+
+// ---------------------------------------------------------------------------
 // The check
 // ---------------------------------------------------------------------------
 
@@ -280,6 +373,8 @@ export interface InstallerLaunch {
   resultPath: string;
   lockPath: string;
   platform: NodeJS.Platform;
+  /** Validated remembered install flags (see readInstallFlags). */
+  flags: InstallFlagId[];
 }
 
 export interface AutoUpdateDeps {
@@ -365,13 +460,17 @@ export async function runAutoUpdateCheck(deps: AutoUpdateDeps): Promise<AutoUpda
       { ...base, lastCheckAt: now, pending: { version, fromVersion: current, startedAt: now } },
       deps.dataDir,
     );
-    log(`installing v${version} (from v${current})`, deps.dataDir);
+    const remembered = readInstallFlags(deps.dataDir);
+    if (remembered.problem) log(remembered.problem, deps.dataDir);
+    const flagNote = remembered.flags.length > 0 ? ` with ${remembered.flags.join(", ")}` : "";
+    log(`installing v${version} (from v${current})${flagNote}`, deps.dataDir);
     deps.launchInstaller({
       version: `v${version}`,
       logPath: paths.log,
       resultPath: paths.result,
       lockPath: paths.lock,
       platform: deps.platform,
+      flags: remembered.flags,
     });
     return "launched";
   } catch (err) {
@@ -403,15 +502,17 @@ async function fetchLatestTag(): Promise<string | null> {
 
 /**
  * The detached wrapper. It downloads the same script a user pipes by hand,
- * runs it for exactly `version` without prompts, records the exit code, and
- * releases the lock. Inputs travel as environment variables, never
- * interpolated into the command text.
+ * runs it for exactly `version` without prompts plus the remembered install
+ * flags, records the exit code, and releases the lock. Inputs travel as
+ * environment variables or argv entries, never interpolated into the command
+ * text: on POSIX the flags are the wrapper's own positional parameters
+ * (`"$@"`).
  */
 const POSIX_WRAPPER = `
 tmp=$(mktemp "\${TMPDIR:-/tmp}/plannotator-install.XXXXXX") || exit 1
 code=1
 if curl -fsSL "$PLANNOTATOR_UPDATE_SCRIPT_URL" -o "$tmp"; then
-  bash "$tmp" --version "$PLANNOTATOR_UPDATE_VERSION" --non-interactive </dev/null
+  bash "$tmp" --version "$PLANNOTATOR_UPDATE_VERSION" --non-interactive "$@" </dev/null
   code=$?
 else
   echo "auto-update: could not download $PLANNOTATOR_UPDATE_SCRIPT_URL"
@@ -422,12 +523,30 @@ echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] auto-update: install.sh exited $code"
 rm -f "$PLANNOTATOR_UPDATE_LOCK"
 `;
 
+// The allowlist the Windows wrapper re-checks each flag against. Built from the
+// constant table above, never from input.
+const POWERSHELL_ALLOWED_FLAGS = Object.values(INSTALL_FLAG_SPELLINGS)
+  .map((s) => `'${s.powershell}'`)
+  .join(",");
+
+/**
+ * Windows: the remembered switches arrive space-separated in
+ * PLANNOTATOR_UPDATE_FLAGS, are re-checked against the allowlist, and are
+ * splatted as an array, so they are never parsed as script text.
+ */
 const POWERSHELL_WRAPPER = `
 $code = 1
+$allowedFlags = @(${POWERSHELL_ALLOWED_FLAGS})
+$installFlags = @()
+if ($env:PLANNOTATOR_UPDATE_FLAGS) {
+  foreach ($f in $env:PLANNOTATOR_UPDATE_FLAGS.Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)) {
+    if ($allowedFlags -ccontains $f) { $installFlags += $f }
+  }
+}
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("plannotator-install-" + [guid]::NewGuid().ToString('N') + ".ps1")
 try {
   Invoke-WebRequest -UseBasicParsing -Uri $env:PLANNOTATOR_UPDATE_SCRIPT_URL -OutFile $tmp
-  & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $tmp -Version $env:PLANNOTATOR_UPDATE_VERSION -NonInteractive
+  & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $tmp -Version $env:PLANNOTATOR_UPDATE_VERSION -NonInteractive @installFlags
   $code = $LASTEXITCODE
 } catch {
   Write-Output "auto-update: $_"
@@ -443,9 +562,14 @@ Remove-Item -Force -ErrorAction SilentlyContinue $env:PLANNOTATOR_UPDATE_LOCK
 /**
  * The detached process to spawn. Windows gets the wrapper as
  * -EncodedCommand (base64 UTF-16LE), so its quotes and newlines never go
- * through command-line quoting at all.
+ * through command-line quoting at all, and the flags as an env var; POSIX gets
+ * the flags as argv after the `sh -c` script (`$0` is a fixed label).
  */
-export function installerCommand(platform: NodeJS.Platform): { file: string; args: string[] } {
+export function installerCommand(
+  platform: NodeJS.Platform,
+  flags: readonly InstallFlagId[] = [],
+): { file: string; args: string[]; env: Record<string, string> } {
+  const flagArgs = installerFlagArgs(flags, platform);
   if (platform === "win32") {
     return {
       file: "powershell.exe",
@@ -457,23 +581,25 @@ export function installerCommand(platform: NodeJS.Platform): { file: string; arg
         "-EncodedCommand",
         Buffer.from(POWERSHELL_WRAPPER, "utf16le").toString("base64"),
       ],
+      env: { PLANNOTATOR_UPDATE_FLAGS: flagArgs.join(" ") },
     };
   }
-  return { file: "/bin/sh", args: ["-c", POSIX_WRAPPER] };
+  return { file: "/bin/sh", args: ["-c", POSIX_WRAPPER, "plannotator-auto-update", ...flagArgs], env: {} };
 }
 
 export function launchInstaller(launch: InstallerLaunch): void {
   const isWindows = launch.platform === "win32";
   const logFd = openSync(launch.logPath, "a");
   try {
+    const { file, args, env: commandEnv } = installerCommand(launch.platform, launch.flags);
     const env = {
       ...process.env,
       PLANNOTATOR_UPDATE_VERSION: launch.version,
       PLANNOTATOR_UPDATE_RESULT: launch.resultPath,
       PLANNOTATOR_UPDATE_LOCK: launch.lockPath,
       PLANNOTATOR_UPDATE_SCRIPT_URL: isWindows ? INSTALL_PS1_URL : INSTALL_SH_URL,
+      ...commandEnv,
     };
-    const { file, args } = installerCommand(launch.platform);
     const child = spawn(file, args, {
       detached: true,
       stdio: ["ignore", logFd, logFd],

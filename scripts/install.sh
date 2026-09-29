@@ -952,13 +952,44 @@ print_path_advice() {
     echo "To uninstall later: plannotator uninstall"
 }
 
+# Remember the install-affecting choices this run took from COMMAND-LINE flags
+# (#1634), so a background auto-update re-runs this script with the same ones:
+# someone who installed with --minimal or --skip-codex must not get a full
+# install back on the next update. Only the known flag set is written, as
+# neutral ids (never raw argv, paths, or secrets); env vars and config.json
+# already survive on their own and are not recorded. A run with none of these
+# flags writes an empty set, which is how a manual re-run with no flags goes
+# back to defaults. Best effort: a failed write never fails the install.
+write_install_flags() {
+    _if_list=""
+    _if_add() { if [ -z "$_if_list" ]; then _if_list="\"$1\""; else _if_list="$_if_list,\"$1\""; fi; }
+    [ "$MINIMAL_FLAG" = "1" ] && _if_add minimal
+    [ "$MINIMAL_FLAG" = "0" ] && _if_add no-minimal
+    [ "$VERIFY_ATTESTATION_FLAG" = "1" ] && _if_add verify-attestation
+    [ "$VERIFY_ATTESTATION_FLAG" = "0" ] && _if_add skip-attestation
+    [ "$WITH_CALL_FLOW_FLAG" = "1" ] && _if_add with-call-flow
+    [ "$SKIP_CODEX_FLAG" = "1" ] && _if_add skip-codex
+    [ "$SKIP_GEMINI_FLAG" = "1" ] && _if_add skip-gemini
+    [ "$SKIP_KIRO_FLAG" = "1" ] && _if_add skip-kiro
+    [ "$SKIP_VIBE_FLAG" = "1" ] && _if_add skip-vibe
+    [ "$SKIP_OPENCODE_FLAG" = "1" ] && _if_add skip-opencode
+    [ "$SKIP_SKILLS_FLAG" = "1" ] && _if_add skip-skills
+    _if_path="$_config_dir/install-flags.json"
+    {
+        mkdir -p "$_config_dir" &&
+        printf '{"v":1,"flags":[%s]}\n' "$_if_list" > "$_if_path.tmp.$$" &&
+        mv -f "$_if_path.tmp.$$" "$_if_path"
+    } 2>/dev/null || rm -f "$_if_path.tmp.$$" 2>/dev/null || true
+}
+
 # Binary-only mode stops here: the binary is installed, so print PATH advice and
 # exit before any sidecar download, agent integration, skill checkout, config
 # write, cache clear, or cleanup migration runs. No persistent state is written
-# outside $INSTALL_DIR (the temp download file was already cleaned up above; the
-# config dir may have been read, never written). See the MINIMAL_FLAG /
+# outside $INSTALL_DIR except install-flags.json (write_install_flags above),
+# which is what lets a later auto-update stay binary-only. See the MINIMAL_FLAG /
 # PLANNOTATOR_MINIMAL resolution near the top.
 if [ "$minimal" -eq 1 ]; then
+    write_install_flags
     print_path_advice
     echo ""
     echo "Minimal install complete — only the plannotator binary was installed."
@@ -2316,3 +2347,6 @@ if [ -f "$PLUGIN_HOOKS" ] && [ -f "$CLAUDE_SETTINGS" ] && grep -q '"command".*pl
     echo ""
     echo "⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️"
 fi
+
+# The full install completed: remember its command-line flags for auto-update.
+write_install_flags
