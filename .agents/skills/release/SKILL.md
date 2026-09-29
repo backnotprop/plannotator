@@ -126,6 +126,7 @@ Bump the version string in these **7 files** (and only these — other package.j
 | `apps/pi-extension/package.json` | `"version"` |
 | `apps/hook/.claude-plugin/plugin.json` | `"version"` |
 | `apps/copilot/plugin.json` | `"version"` |
+| `apps/codex-plugin/.codex-plugin/plugin.json` | `"version"` |
 | `openpackage.yml` (root) | `version:` |
 | `packages/server/package.json` | `"version"` |
 

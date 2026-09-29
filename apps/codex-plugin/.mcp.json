@@ -1,0 +1,40 @@
+{
+  "mcpServers": {
+    "plannotator": {
+      "command": "plannotator",
+      "args": ["mcp"],
+      "startup_timeout_sec": 30,
+      "tool_timeout_sec": 345600,
+      "env_vars": [
+        "PLANNOTATOR_REMOTE",
+        "PLANNOTATOR_PORT",
+        "PLANNOTATOR_URL_HOST",
+        "PLANNOTATOR_BROWSER",
+        "PLANNOTATOR_DATA_DIR",
+        "PLANNOTATOR_SHARE",
+        "PLANNOTATOR_SHARE_URL",
+        "PLANNOTATOR_PASTE_URL",
+        "PLANNOTATOR_JINA",
+        "JINA_API_KEY",
+        "PLANNOTATOR_ANNOTATE_HISTORY",
+        "PLANNOTATOR_FEEDBACK_HISTORY",
+        "PLANNOTATOR_SKIP_BROWSER_OPEN",
+        "PLANNOTATOR_GLIMPSE",
+        "PLANNOTATOR_GLIMPSE_WIDTH",
+        "PLANNOTATOR_GLIMPSE_HEIGHT",
+        "PLANNOTATOR_AI",
+        "PLANNOTATOR_AGENT_TERMINAL_REMOTE",
+        "PLANNOTATOR_FILE_BROWSER_MAX_FILES",
+        "PLANNOTATOR_DEBUG",
+        "PLANNOTATOR_ORIGIN",
+        "SSH_TTY",
+        "SSH_CONNECTION",
+        "DISPLAY",
+        "WAYLAND_DISPLAY",
+        "BROWSER",
+        "XDG_DATA_HOME",
+        "__CFBundleIdentifier"
+      ]
+    }
+  }
+}

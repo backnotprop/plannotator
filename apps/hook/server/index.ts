@@ -179,6 +179,7 @@ import {
   formatSubcommandHelp,
   formatTopLevelHelp,
   formatVersion,
+  getCliVersion,
   isInteractiveNoArgInvocation,
   isSubcommandHelpInvocation,
   isTopLevelHelpInvocation,
@@ -189,6 +190,7 @@ import {
 } from "./cli";
 import { exitOnUnknownSubcommand } from "./unknown-subcommand";
 import { completeAnnotateCommand } from "./annotate-command";
+import { runMcpCommand } from "./mcp-command";
 import {
   annotateStartupFailureExitCode,
   isStrictAnnotateInvocation,
@@ -623,6 +625,21 @@ const detectedOrigin: Origin =
   process.env.GEMINI_CLI ? "gemini-cli" :
   process.env.OMPCODE ? "oh-my-pi" :
   "claude-code";
+
+// `plannotator mcp`: stdio MCP server for the Codex plugin. It never returns
+// (the process lives as long as the client keeps stdin open). Codex does not
+// set CODEX_THREAD_ID for MCP servers, so the origin defaults to codex here
+// unless PLANNOTATOR_ORIGIN says otherwise.
+if (args[0] === "mcp") {
+  await runMcpCommand({
+    htmlContent: planHtmlContent,
+    origin: originOverride && originOverride in AGENT_CONFIG ? originOverride : "codex",
+    version: getCliVersion(),
+    sharingEnabled,
+    shareBaseUrl,
+    pasteApiUrl,
+  });
+}
 
 type OpenCodeBridgeAgent = {
   name: string;

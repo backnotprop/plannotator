@@ -124,8 +124,13 @@ export function isVersionInvocation(args: string[]): boolean {
 
 declare const __CLI_VERSION__: string;
 
+/** The bare CLI version (`dev` for unversioned local builds). */
+export function getCliVersion(): string {
+  return typeof __CLI_VERSION__ !== "undefined" ? __CLI_VERSION__ : "dev";
+}
+
 export function formatVersion(): string {
-  return `plannotator ${typeof __CLI_VERSION__ !== "undefined" ? __CLI_VERSION__ : "dev"}`;
+  return `plannotator ${getCliVersion()}`;
 }
 
 export function isInteractiveNoArgInvocation(
@@ -153,6 +158,7 @@ export function formatTopLevelHelp(): string {
     "  plannotator guide share --id <savedGuideId> | --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--public] [--ttl <7d>] [--json]",
     "  plannotator guide unshare <id> --token <deleteToken>",
     "  plannotator sessions",
+    "  plannotator mcp",
     "  plannotator uninstall [--purge] [--yes] [--dry-run]",
     "  plannotator improve-context",
     "",
@@ -289,6 +295,15 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Reads the hook event on stdin and emits additionalContext JSON (PFM reminder",
     "and/or compound improvement hook), or exits silently when nothing is enabled.",
     "Not intended to be run directly.",
+  ].join("\n"),
+  mcp: [
+    "Usage:",
+    "  plannotator mcp",
+    "",
+    "Run a stdio MCP server exposing an `annotate` tool (used by the Codex plugin).",
+    "The tool opens a file, folder, or URL in the annotation UI, blocks until the",
+    "user decides, and returns the feedback as the tool result. stdout carries the",
+    "MCP protocol; logs and the session URL go to stderr.",
   ].join("\n"),
   sessions: [
     "Usage:",

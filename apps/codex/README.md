@@ -4,6 +4,8 @@ Code review, markdown annotation, and plan review are supported in Codex.
 
 Plan review uses Codex's experimental `Stop` hook. This is a post-render review flow: when a turn stops, Plannotator reads the current rollout transcript, extracts the latest plan, and opens the normal plan review UI. If you deny the plan, Plannotator returns continuation feedback so Codex revises the plan in the same turn.
 
+> **Codex plugin (annotate over MCP):** `apps/codex-plugin/` is a native Codex plugin that adds an `annotate` MCP tool. Codex calls it with a file, folder, or URL, and your Plannotator feedback returns as the tool result. See [its README](../codex-plugin/README.md). It is installed separately from the Stop hook below and works alongside it.
+
 ## Install
 
 **macOS / Linux / WSL:**

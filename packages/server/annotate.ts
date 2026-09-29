@@ -179,8 +179,13 @@ export interface AnnotateServerResult {
     selectedMessageId?: string;
     feedbackScope?: "message" | "messages";
   }>;
-  /** Stop the server */
-  stop: () => void;
+  /**
+   * Stop the server. `closeActiveConnections` also drops open connections
+   * (the browser's SSE streams, keep-alive sockets) instead of leaving them
+   * to the client; long-lived hosts that run many sessions in one process
+   * (`plannotator mcp`) pass true so a finished session holds nothing open.
+   */
+  stop: (closeActiveConnections?: boolean) => void;
 }
 
 // --- Server Implementation ---
@@ -1331,7 +1336,7 @@ export async function startAnnotateServer(
   // walk yields between directories while requests remain serviceable.
   void warmFileListCache(process.cwd(), "code");
 
-  const stop = () => {
+  const stop = (closeActiveConnections = false) => {
     // Every disposal step is guarded individually (runGuardedShutdown):
     // agent-terminal teardown is historically fragile (#1314), and in a flat
     // sequence one throwing step would skip everything after it — notably
@@ -1349,7 +1354,7 @@ export async function startAnnotateServer(
         ["agent terminal", () => agentTerminal.dispose()],
         ["live proxy", () => liveProxy?.stop()],
       ],
-      () => server.stop(),
+      () => server.stop(closeActiveConnections),
     );
   };
 

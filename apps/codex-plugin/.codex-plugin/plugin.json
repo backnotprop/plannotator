@@ -1,0 +1,21 @@
+{
+  "name": "plannotator",
+  "version": "0.27.22",
+  "description": "Annotate documents in Plannotator and send the feedback straight back to Codex.",
+  "author": {
+    "name": "backnotprop"
+  },
+  "keywords": ["annotate", "review", "markdown", "feedback"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Plannotator",
+    "shortDescription": "Annotate documents and send feedback to Codex",
+    "longDescription": "Open a markdown file, a folder of documents, or a URL in Plannotator's annotation UI. Your annotations come back to Codex as the tool result when you send feedback.",
+    "developerName": "backnotprop",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Read"],
+    "websiteURL": "https://plannotator.ai",
+    "defaultPrompt": ["Annotate README.md in Plannotator"]
+  }
+}

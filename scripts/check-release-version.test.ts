@@ -11,6 +11,7 @@ const jsonVersionPaths = [
   "apps/pi-extension/package.json",
   "apps/hook/.claude-plugin/plugin.json",
   "apps/copilot/plugin.json",
+  "apps/codex-plugin/.codex-plugin/plugin.json",
   "packages/server/package.json",
 ] as const;
 

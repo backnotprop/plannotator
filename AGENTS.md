@@ -20,6 +20,11 @@ plannotator/
 │   │   ├── server.ts             # OpenCode 2 adapter (experimental V2 plugin API)
 │   │   ├── plannotator.html      # Built plan review app
 │   │   └── review-editor.html    # Built code review app
+│   ├── codex-plugin/             # Codex plugin: `plannotator mcp` stdio MCP server (annotate tool) + plannotator-annotate skill
+│   │   ├── .codex-plugin/plugin.json
+│   │   ├── .mcp.json             # Runs `plannotator mcp`; tool_timeout_sec + env_vars passthrough
+│   │   ├── .agents/plugins/marketplace.json  # Local marketplace (source "./") for `codex plugin marketplace add <path>`
+│   │   └── skills/plannotator-annotate/
 │   ├── amp-plugin/               # Amp plugin
 │   │   ├── plannotator.ts        # Native Amp command-palette integration
 │   │   └── README.md             # Install and local development notes
@@ -684,6 +689,19 @@ The advertised `appUrl` is the proxy under its LOCALHOST spelling with the targe
 **Live restore resilience:** a `find-and-mark` that resolves nothing in live mode keeps its record, seeded with unresolved placeholder targets from the durable anchor/text params, so the mutation-driven reconcile re-acquires the pin once a lazy route or data-dependent tree finishes rendering. Srcdoc restores keep the old fail-closed drop (a static document would never re-resolve).
 
 **Known limitations (documented, not bugs):** hardcoded absolute origins in the app, origin-pinned CORS to secondary APIs, and OAuth `redirect_uri` flows land outside the proxy; frame-busting apps break the wrapper; content-encoded HTML that survives the encoding strip renders without the bridge; cross-page annotation clicks do not navigate; a redirect to a DIFFERENT loopback service (another port) is passed through un-rewritten and the iframe leaves the proxy, which is why the probe refuses such targets up front. Manual smoke loop: `scripts/live-annotate-smoke.sh` (not CI).
+
+### Codex plugin: annotate over MCP
+
+`apps/codex-plugin/` is a native Codex plugin whose `.mcp.json` runs `plannotator mcp`: a stdio MCP server (`apps/hook/server/mcp-protocol.ts`, hand-rolled JSON-RPC, no SDK dependency) with one model-facing tool, `annotate` (`mcp-annotate.ts`, wired to the real pipeline in `mcp-command.ts`). One call is one annotate session: the target resolves through the CLI's own `resolveAnnotateTarget` (file, folder, URL, live app), the annotate server starts and opens the browser exactly like `plannotator annotate`, and the call **blocks** until the human decides. The result's text is byte-for-byte the plaintext CLI output (feedback, `The user approved.`) with explicit sentences where the CLI prints nothing (close, empty submit); `structuredContent` is the `--json` record. Blocking is deliberate: the tool result is the one channel every Codex surface (exec, TUI, desktop) delivers to the model. Behaviors that are Codex facts, measured against Codex 0.157.1 and its source:
+
+- **cwd**: Codex starts a plugin MCP server without an explicit `cwd` in the session's working directory (`-C`), not its own process cwd, so relative targets resolve like the CLI's. The tool also takes `cwd`.
+- **Timeout**: the Codex default is 300s per tool call (`codex-mcp/src/rmcp_client.rs`); `.mcp.json`'s `tool_timeout_sec` (honored for plugin servers, parsed straight into `McpServerConfig`) is 345600 to match the Stop hook.
+- **Environment**: Codex spawns MCP servers with an allowlisted env (`HOME`, `PATH`, `SHELL`, `USER`, `LANG`, `TERM`, `TMPDIR`, …; `rmcp-client/src/utils.rs`). Every `PLANNOTATOR_*` knob plus `SSH_TTY`/`SSH_CONNECTION` must be listed in `.mcp.json`'s `env_vars`, or remote detection silently fails. Add new runtime env vars there too.
+- **Approval**: the tool is annotated `readOnlyHint: true`, which is what makes Codex's default `auto` approval mode run it without a prompt.
+- **Cancellation**: `notifications/cancelled` for the call, or stdin EOF, stops the annotate server and sends no result. Every MCP session end (decision, cancel, EOF) stops with `closeActiveConnections`, so the open tab's SSE stream and keep-alive sockets are dropped too (the CLI never needed this because its process exits).
+- **Remote URL**: stdout is the protocol, so the URL goes to stderr (Codex's log), an MCP log notification, and a progress notification. Codex only logs those, and its TUI renders URL-mode elicitations for `https` only, so a remote user finds the URL with `plannotator sessions`.
+
+The tool also declares an MCP Apps view, `ui://plannotator/annotate` (`mcp-annotate-app.ts`, one self-contained HTML string): a status card that polls the app-only `annotate_session_status` tool (`_meta.ui.visibility: ["app"]`, hidden from the model) through host-proxied `tools/call`, opens the session with `ui/open-link` (the sandbox cannot load localhost), and posts the feedback with `ui/message` **only** when the session finished and no `ui/notifications/tool-result` arrived within 5s, so a spec-following host never delivers it twice. Codex desktop renders it only behind the server-side `enable_mcp_apps` experiment; everywhere else the tool result is unchanged. The installer does not install this plugin, and it coexists with the Codex Stop hook and the shell-based core skills (the plugin's skill is namespaced `plannotator:plannotator-annotate`). The plugin's `plugin.json` version is in the release version guard (`scripts/check-release-version.mjs`).
 
 ## Archive Flow
 

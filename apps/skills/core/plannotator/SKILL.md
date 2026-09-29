@@ -164,11 +164,13 @@ Lists active Plannotator server sessions. `--open` reopens session N (default 1)
 plannotator setup-goal <interview|facts> <bundle.json | -> [--json]
 plannotator uninstall [--purge] [--yes] [--dry-run]
 plannotator improve-context
+plannotator mcp
 ```
 
 - `setup-goal` opens the interview or facts-acceptance UI for /goal workflows; it is driven by the `plannotator-setup-goal` skill and takes a bundle JSON (`-` reads stdin). Do not hand-build bundles.
 - `uninstall` removes Plannotator-installed components (`--purge` also deletes local data; `--yes` is required without a TTY; `--dry-run` previews).
 - `improve-context` and `install-runtime` are internal integration commands (hook plumbing and managed runtime install). Never run `improve-context` directly; `plannotator install-runtime agent-terminal` exists for reinstalling the optional annotate-terminal runtime and is normally run by the installer.
+- `mcp` runs a stdio MCP server (the Codex plugin's `annotate` tool). An MCP client launches it; running it by hand just waits on stdin. If the `annotate` MCP tool is available, call it instead of shelling out to `plannotator annotate`.
 - Additional host-internal subcommands (the `opencode-*` and `copilot-plan` family) are invoked by their plugins, not by you.
 
 ## Environment variables that change behavior

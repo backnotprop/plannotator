@@ -9,6 +9,7 @@ const JSON_VERSION_PATHS = [
   "apps/pi-extension/package.json",
   "apps/hook/.claude-plugin/plugin.json",
   "apps/copilot/plugin.json",
+  "apps/codex-plugin/.codex-plugin/plugin.json",
   "packages/server/package.json",
 ];
 const OPENPACKAGE_PATH = "openpackage.yml";
