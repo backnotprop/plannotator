@@ -785,7 +785,7 @@ jobs:
           Write-Host "✓ PLANNOTATOR_DATA_DIR tilde expansion found config.json"
           Write-Host "✓ Config-driven verifyAttestation rejected before download/install"
 
-      - name: Reinstall while plannotator.exe is running (auto-update path, #1634)
+      - name: Reinstall while plannotator.exe is running (auto-update path)
         shell: pwsh
         run: |
           # Background auto-update runs install.ps1 while a session may still be
