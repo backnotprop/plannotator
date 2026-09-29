@@ -37,7 +37,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { loadConfig, resolveAutoUpdate } from "@plannotator/shared/config";
 import { listSessions, type SessionInfo } from "./sessions";
@@ -186,11 +186,12 @@ export function managedBinaryPath(
   env: NodeJS.ProcessEnv = process.env,
   home: string = homedir(),
 ): string {
+  // Join with the TARGET platform's separator, not the host's.
   if (platform === "win32") {
-    const localAppData = env.LOCALAPPDATA || join(home, "AppData", "Local");
-    return join(localAppData, "plannotator", "plannotator.exe");
+    const localAppData = env.LOCALAPPDATA || win32.join(home, "AppData", "Local");
+    return win32.join(localAppData, "plannotator", "plannotator.exe");
   }
-  return join(home, ".local", "bin", "plannotator");
+  return posix.join(home, ".local", "bin", "plannotator");
 }
 
 export function isManagedBinary(

@@ -223,7 +223,7 @@ describe("managed binary", () => {
     const env = { LOCALAPPDATA: "C:\\Users\\u\\AppData\\Local" };
     expect(isManagedBinary("/home/u/.local/bin/plannotator", "linux", env, "/home/u")).toBe(true);
     expect(isManagedBinary("/opt/homebrew/bin/plannotator", "darwin", env, "/home/u")).toBe(false);
-    expect(managedBinaryPath("win32", env, "C:\\Users\\u")).toContain(join("plannotator", "plannotator.exe"));
+    expect(managedBinaryPath("win32", env, "C:\\Users\\u")).toBe("C:\\Users\\u\\AppData\\Local\\plannotator\\plannotator.exe");
   });
 });
 
