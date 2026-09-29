@@ -999,7 +999,10 @@ const ReviewApp: React.FC = () => {
     isApiMode: !!origin,
     submitted: !!submitted,
     onDraftTargetMerge: (items) => draftTargetMergeRef.current(items),
-    persistViewedFiles: reviewProgressStatus === 'unsupported' || reviewProgressStatus === 'error',
+    // Only once the diff snapshot is known and progress support is settled:
+    // before that the status reads 'unsupported' (no snapshot yet), and a
+    // true -> false flip would flash the draft banner for a viewed-only draft.
+    persistViewedFiles: !!snapshotId && (reviewProgressStatus === 'unsupported' || reviewProgressStatus === 'error'),
   });
 
   // In-place PR / scope switch onto a target holding an unsent draft (#1590):
@@ -2587,7 +2590,10 @@ const ReviewApp: React.FC = () => {
   // gates nothing on submit.
   const autoViewedEnabled = useConfigValue('reviewAutoViewed');
   const markFilesViewed = useCallback((paths: string[]) => {
-    persistViewed(paths, true);
+    // Auto-view re-reports files that are already checked; only persist the
+    // ones this call actually changes.
+    const newlyViewed = paths.filter(path => !viewedFilesRef.current.has(path));
+    if (newlyViewed.length > 0) persistViewed(newlyViewed, true);
     setViewedFiles(prev => {
       const missing = paths.filter(path => !prev.has(path));
       if (missing.length === 0) return prev;

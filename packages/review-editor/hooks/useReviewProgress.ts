@@ -12,6 +12,8 @@ interface ProgressData {
 type ProgressStatus = 'loading' | 'ready' | 'unsupported' | 'error';
 
 const PROGRESS_TIMEOUT_MS = 5000;
+/** The server refuses more than 5000 changes per POST; stay well under it. */
+const MAX_CHANGES_PER_REQUEST = 1000;
 
 /** Persist explicit mutations, never hydrated state. Requests are serialized so
  * a quick check/uncheck cannot arrive in reverse order. Each captures its own
@@ -40,12 +42,15 @@ export function useReviewProgress({
   const writes = useRef(Promise.resolve());
   const [loaded, setLoaded] = useState<{ snapshot: typeof snapshot; status: ProgressStatus } | null>(null);
   const loadedContext = useRef(contextKey);
+  // One toast per failure streak: a success re-arms it, so a later, separate
+  // failure is reported again instead of being swallowed for the page lifetime.
   const warned = useRef(false);
   const warn = useCallback(() => {
     if (warned.current) return;
     warned.current = true;
     toast.error('Could not save or restore viewed-file progress');
   }, []);
+  const recovered = useCallback(() => { warned.current = false; }, []);
 
   const save = useCallback((target: typeof snapshot, pending: typeof snapshot.pending) => {
     const data = target.data;
@@ -55,18 +60,31 @@ export function useReviewProgress({
       Object.hasOwn(data.fingerprints, path) ? [{ path, viewed, fingerprint: data.fingerprints[path] }] : []);
     if (!changes.length) return;
     const url = `/api/review-progress?snapshot=${encodeURIComponent(target.id)}`;
-    const body = JSON.stringify({ key: data.key, changes });
-    writes.current = writes.current.then(async () => {
-      const response = await fetch(url, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true,
-        signal: AbortSignal.timeout(PROGRESS_TIMEOUT_MS),
-      });
-      if (!response.ok) throw new Error('Progress save failed');
-      for (const { path } of changes) {
-        if (target.pending.get(path) === edits.get(path)) target.pending.delete(path);
-      }
-    }).catch(warn);
-  }, [warn]);
+    for (let start = 0; start < changes.length; start += MAX_CHANGES_PER_REQUEST) {
+      const chunk = changes.slice(start, start + MAX_CHANGES_PER_REQUEST);
+      const body = JSON.stringify({ key: data.key, changes: chunk });
+      const settle = () => {
+        for (const { path } of chunk) {
+          if (target.pending.get(path) === edits.get(path)) target.pending.delete(path);
+        }
+      };
+      writes.current = writes.current.then(async () => {
+        const response = await fetch(url, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true,
+          signal: AbortSignal.timeout(PROGRESS_TIMEOUT_MS),
+        });
+        if (response.status === 400) {
+          // The server rejected the update itself (not a transient failure):
+          // retrying the same edits could never succeed, so drop them.
+          settle();
+          throw new Error('Progress update rejected');
+        }
+        if (!response.ok) throw new Error('Progress save failed');
+        settle();
+        recovered();
+      }).catch(warn);
+    }
+  }, [warn, recovered]);
 
   const load = useCallback((target: typeof snapshot) => {
     if (!target.id) return;
@@ -87,6 +105,7 @@ export function useReviewProgress({
         if (active.current !== target || target.loadVersion !== version) return;
         target.data = data;
         target.status = data.available ? 'ready' : 'unsupported';
+        recovered();
         setLoaded({ snapshot: target, status: target.status });
         if (!data.available) return;
         const viewed = new Set(data.viewedFiles);
@@ -115,7 +134,7 @@ export function useReviewProgress({
         setLoaded({ snapshot: target, status: 'error' });
         warn();
       });
-  }, [contextKey, setViewedFiles, setSuppressedFiles, save, warn]);
+  }, [contextKey, setViewedFiles, setSuppressedFiles, save, warn, recovered]);
 
   useEffect(() => {
     load(snapshot);

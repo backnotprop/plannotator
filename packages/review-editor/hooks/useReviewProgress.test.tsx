@@ -230,4 +230,55 @@ describe.if(hasDom)('durable review progress binding', () => {
     await act(async () => { abortRequest!(); await api.flush(); });
     expect(writes).toEqual([true, false]);
   });
+
+  test('a large edit set is written in chunks the server accepts', async () => {
+    originalFetch = globalThis.fetch;
+    const paths = Array.from({ length: 6000 }, (_, i) => `f${i}.ts`);
+    const sizes: number[] = [];
+    globalThis.fetch = (async (_url: unknown, options?: RequestInit) => {
+      if (options?.method === 'POST') {
+        sizes.push(JSON.parse(String(options.body)).changes.length);
+        return Response.json({ ok: true });
+      }
+      return Response.json({ ...payload(), fingerprints: Object.fromEntries(paths.map(p => [p, p])) });
+    }) as typeof fetch;
+    await render('one');
+    await act(async () => { api.persistViewed(paths, true); await api.flush(); });
+    // The server refuses more than 5000 changes in one POST.
+    expect(sizes.every(size => size <= 5000)).toBe(true);
+    expect(sizes.reduce((a, b) => a + b, 0)).toBe(6000);
+  });
+
+  test('edits the server rejects as invalid are dropped, not retried forever', async () => {
+    originalFetch = globalThis.fetch;
+    let posts = 0;
+    globalThis.fetch = (async (_url: unknown, options?: RequestInit) => {
+      if (options?.method !== 'POST') return Response.json(payload());
+      posts++;
+      return Response.json({ error: 'Invalid viewed-file update' }, { status: 400 });
+    }) as typeof fetch;
+    await render('one');
+    await act(async () => { api.persistViewed(['a.ts'], true); });
+    await act(async () => { await api.flush(); });
+    await act(async () => { await api.flush(); });
+    expect(posts).toBe(1);
+  });
+
+  test('a failure after a later success warns again', async () => {
+    originalFetch = globalThis.fetch;
+    const { toast } = await import('sonner');
+    const errors = spyOn(toast, 'error').mockImplementation(() => 0 as never);
+    restoreMocks.push(() => errors.mockRestore());
+    const outcomes = [500, 200, 500];
+    globalThis.fetch = (async (_url: unknown, options?: RequestInit) => {
+      if (options?.method !== 'POST') return Response.json(payload());
+      return new Response('{}', { status: outcomes.shift() ?? 200 });
+    }) as typeof fetch;
+    await render('one');
+    for (const viewed of [true, false, true]) {
+      await act(async () => { api.persistViewed(['b.ts'], viewed); await Promise.resolve(); });
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+    }
+    expect(errors).toHaveBeenCalledTimes(2);
+  });
 });
