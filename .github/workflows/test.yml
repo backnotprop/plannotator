@@ -784,3 +784,41 @@ jobs:
 
           Write-Host "✓ PLANNOTATOR_DATA_DIR tilde expansion found config.json"
           Write-Host "✓ Config-driven verifyAttestation rejected before download/install"
+
+      - name: Reinstall while plannotator.exe is running (auto-update path, #1634)
+        shell: pwsh
+        run: |
+          # Background auto-update runs install.ps1 while a session may still be
+          # running the installed exe. Windows refuses to overwrite or delete a
+          # running .exe, so install.ps1 renames it aside first. Exercise that
+          # for real: keep the installed binary running, reinstall, and check
+          # the swap, the survivor, and the later .old sweep.
+          $installDir = "$env:LOCALAPPDATA\plannotator"
+          $exe = Join-Path $installDir "plannotator.exe"
+          $env:PLANNOTATOR_DATA_DIR = Join-Path $env:RUNNER_TEMP "plannotator-running-exe"
+          $env:PLANNOTATOR_BROWSER = "$env:SystemRoot\System32\whoami.exe"
+          $sentinel = Join-Path $installDir "plannotator.exe.older-notes.txt"
+          Set-Content -Path $sentinel -Value "not ours to delete"
+
+          $proc = Start-Process -PassThru -WindowStyle Hidden -FilePath $exe -ArgumentList 'annotate','README.md'
+          Start-Sleep -Seconds 5
+          if ($proc.HasExited) { throw "plannotator.exe exited early (code $($proc.ExitCode)); the running-exe case was not exercised" }
+          $locked = $false
+          try { [System.IO.File]::Delete($exe) } catch { $locked = $true }
+          if (-not $locked) { throw "Deleting the running exe succeeded, so this step does not cover the locked case" }
+
+          .\scripts\install.ps1 v0.17.1 -SkipAttestation
+          if (-not (Test-Path $exe)) { throw "plannotator.exe missing after reinstalling over a running binary" }
+          if ($proc.HasExited) { throw "the running plannotator.exe died during the reinstall" }
+          $aside = @(Get-ChildItem -Path $installDir -Filter "plannotator.exe.old*" -File | Where-Object { $_.Name -ne (Split-Path $sentinel -Leaf) })
+          if ($aside.Count -ne 1) { throw "expected the running exe renamed aside once, found: $($aside.Name -join ', ')" }
+          if ((Get-Item $exe).Length -le 0) { throw "the newly installed plannotator.exe is empty" }
+
+          Stop-Process -Id $proc.Id -Force
+          $proc.WaitForExit()
+          Start-Sleep -Seconds 1
+          .\scripts\install.ps1 v0.17.1 -SkipAttestation
+          $left = @(Get-ChildItem -Path $installDir -Filter "plannotator.exe.old*" -File | Where-Object { $_.Name -ne (Split-Path $sentinel -Leaf) })
+          if ($left.Count -ne 0) { throw "stale renamed-aside exe not swept: $($left.Name -join ', ')" }
+          if (-not (Test-Path $sentinel)) { throw "the .old sweep deleted an unrelated file" }
+          Write-Host "✓ Reinstalled over a running plannotator.exe; the aside copy was swept later and nothing else was touched"

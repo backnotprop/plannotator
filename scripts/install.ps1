@@ -656,7 +656,10 @@ if ($verifyAttestationResolved) {
 # one that is still locked is left under a unique name and swept next time.
 # This is what lets a background auto-update (#1634) run while a session is open.
 $targetExe = "$installDir\plannotator.exe"
-Get-ChildItem -Path $installDir -Filter "plannotator.exe.old*" -ErrorAction SilentlyContinue |
+# Only the two names this block creates are swept (-Filter alone would also
+# match any other file that happens to start with the prefix).
+Get-ChildItem -Path $installDir -Filter "plannotator.exe.old*" -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match '^plannotator\.exe\.old(-[0-9a-f]{32})?$' } |
     ForEach-Object { Remove-Item -Force $_.FullName -ErrorAction SilentlyContinue }
 $asideExe = $null
 if (Test-Path $targetExe) {
