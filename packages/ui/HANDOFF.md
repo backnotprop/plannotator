@@ -1525,7 +1525,7 @@ Core-only; `@plannotator/ui` imports none of it, so ui's exact `0.25.6` pin is u
 
 The guide chain's engine plumbing (Claude/Codex/marker commands, output parsing, `composeGuideMethodology`, sessions) stays in the server. It ships in core 0.25.6 alongside what that unpublished version already carries; ui needs no change for it.
 
-## Host link widgets (0.47.0, core 0.26.0)
+## Host link widgets (0.47.0, core 0.25.7)
 
 Additive. `components/MarkdownEditor` re-exports the engine's new link seam beside `wikiLinks`: `linkWidgets(...specs: LinkWidgetSpec[]): Extension`, `refreshLinkWidgets: StateEffectType<null>`, and the types `LinkWidgetSpec` (`{ match(link: LinkWidgetLink): WidgetType | null }`) and `LinkWidgetLink` (`{ url; text; title?; from; to }`). They are the engine's own objects (identity pinned by `MarkdownEditor.linkWidgets.test.tsx`); hosts import them from `@plannotator/ui/components/MarkdownEditor`, never from `@plannotator/atomic-editor`.
 
@@ -1545,7 +1545,7 @@ Also new in 0.47.0 (all additive, all no-op for a host that passes nothing):
 - **Agent job warnings** (#1627): `AgentsTab` shows `AgentJobInfo.warning` under a job row when present.
 - **Request changes on PR reviews** (#1611): `buildDecisionSpec`'s platform input takes optional `requestChangesSupported`. Absent keeps the previous copy; `false` says request-changes posts as a comment; `true` with `selfAuthored` mutes Request changes and adds a live `Comment…` row.
 
-### `@plannotator/core` 0.26.0
+### `@plannotator/core` 0.25.7
 
 Required by ui 0.47.0 (`components/ModelSourceHint` and `hooks/useModelCatalogs` import the new `ModelsSource` type). Changes since the published 0.25.6, all additive:
 
@@ -1558,7 +1558,7 @@ Minor rather than patch because of the new exports (`cliVersionFrom`, `ModelsSou
 
 ## Publishing & versioning
 
-- **core 0.26.0 / ui 0.47.0 (host link widgets + model source hint + `persistViewedFiles`): both packages change, and both need unpublished upstream packages first.** Order: `@plannotator/atomic-editor` 0.9.0, then `@plannotator/markdown-editor` 0.5.0, then `bun install` here to refresh `bun.lock`, then publish `core` 0.26.0, then `ui` 0.47.0. ui pins core `0.26.0` exactly, `@plannotator/atomic-editor` `^0.9.0` and `@plannotator/markdown-editor` `^0.5.0`. See "Host link widgets (0.47.0, core 0.26.0)".
+- **core 0.25.7 / ui 0.47.0 (host link widgets + model source hint + `persistViewedFiles`): both packages change, and both need unpublished upstream packages first.** Order: `@plannotator/atomic-editor` 0.9.0, then `@plannotator/markdown-editor` 0.5.0, then `bun install` here to refresh `bun.lock`, then publish `core` 0.25.7, then `ui` 0.47.0. ui pins core `0.25.7` exactly, `@plannotator/atomic-editor` `^0.9.0` and `@plannotator/markdown-editor` `^0.5.0`. See "Host link widgets (0.47.0, core 0.25.7)".
 - **ui 0.46.1 (fix, ui only, core pin unchanged at `0.25.6`):** `useVimSelection` (mounted by every `Viewer`) now only clears a page selection whose anchor or focus lies inside the viewer's own container; with vim off it used to clear the WHOLE page's selection on every mount and `contentVersion` change, so a selection in another host panel vanished whenever the document behind it loaded or changed.
 - **ui 0.45.0 (annotation card header slot + mentions on the card's edit box): `@plannotator/ui` only — `@plannotator/core` is UNCHANGED at `0.25.5`, so this publishes alone** (core 0.25.5 must already be published). Purely additive over 0.44.0, both props on `AnnotationPanel`: `renderCardHeader` (the header-row twin of `renderCardFooter`, wrapper `[data-annotation-card-header]`, renders under `readOnly`, open-document cards only in the All-files view) and `mentionSource` (the 0.43.0 type, applied to the card's EDIT box, saving `onEdit(id, { text, mentions })` only when a source was supplied and a pick survived). Nothing is removed, no new supported imports (`components/MentionAutocomplete` is internal glue), no export-, share- or archive-visible change, and Plannotator passes neither — `packages/editor` and `packages/review-editor` have zero source diff, and the panel is byte-identical to 0.44.0. Known difference from `CommentPopover`: no chips in the card's edit box (follow-up named in the section). See "Annotation card header slot and mentions on the edit box (0.45.0)".
 - **ui 0.44.0 (mention token chips in the composer): `@plannotator/ui` only — `@plannotator/core` is UNCHANGED at `0.25.5`, so this publishes alone** (core 0.25.5 must already be published). Purely additive over 0.43.2: the `@Label` tokens a `mentionSource` composer inserted render as chips in the composer's existing highlight overlay, `MentionSource.tokenClassName?` lets a host restyle them (under the metric rule), `useMentionAutocomplete` also returns the surviving `mentions`, and `utils/composerTokens` joins the supported-import list. Nothing is removed, no export-, share- or archive-visible change, and Plannotator passes none of it — with neither `mentionSource` nor `skillReferences` the composer is byte-identical to 0.43.2. See "Mention token chips in the composer (0.44.0)".
