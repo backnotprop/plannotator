@@ -117,6 +117,9 @@ jobs:
           packages/ui/components/DiagramBlock.anchor.test.tsx
           packages/ui/components/blocks/QuestionBlock.test.tsx
           packages/ui/hooks/useAnnotationHighlighter.questionSkip.test.tsx
+          packages/ui/hooks/usePinpoint.question.test.tsx
+          packages/ui/components/AnnotationPanel.questions.test.tsx
+          packages/editor/hooks/useQuestionAnswers.test.tsx
           packages/ui/components/diagram/DiagramViewer.test.tsx
           packages/ui/utils/diagramAnchor.test.ts
           packages/ui/utils/diagramAnchorGraphviz.test.ts

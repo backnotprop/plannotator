@@ -5,6 +5,7 @@ import type { UpdateInfo } from '@plannotator/ui/hooks/useUpdateCheck';
 import { FeedbackButton, ApproveButton, ExitButton } from '@plannotator/ui/components/ToolbarButtons';
 import { ApproveDropdown } from '@plannotator/ui/components/ApproveDropdown';
 import { DecisionControl, type DecisionHandler } from '@plannotator/ui/components/DecisionControl';
+import { QuestionProgressChip } from '@plannotator/ui/components/QuestionProgressChip';
 import type { DecisionActionId, DecisionSpec } from '@plannotator/ui/utils/decisionSpec';
 import { Settings } from '@plannotator/ui/components/Settings';
 import { PlanHeaderMenu } from '@plannotator/ui/components/PlanHeaderMenu';
@@ -78,6 +79,12 @@ interface AppHeaderProps {
   agentName: string;
   availableAgents: Agent[];
   showAnnotationsWarning: boolean;
+  /** `:::question` progress: the "N/M answered" chip beside the decision
+   *  control. Absent (or total 0): no chip. */
+  questionProgress?: { done: number; total: number; hasOpen: boolean; onJump: () => void };
+  /** Plan review's primary feedback label ("Send Feedback" by default;
+   *  "Send answers" when the only feedback is question answers). */
+  feedbackLabel?: string;
   /** The unified annotate decision control (spec + handlers + close title).
    *  App owns the spec derivation and every handler; the header only mounts
    *  the control beside the ghost Close. Absent outside annotate mode. */
@@ -184,6 +191,8 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   agentName,
   availableAgents,
   showAnnotationsWarning,
+  questionProgress,
+  feedbackLabel = 'Send Feedback',
   annotateDecision,
   callbackConfig,
   taterMode,
@@ -320,6 +329,14 @@ export const AppHeader = React.memo<AppHeaderProps>(({
 
         {!compactTouchLayout && isApiMode && (!linkedDocIsActive || annotateMode) && !archiveMode && !goalSetupMode && (
           <>
+            {questionProgress && questionProgress.total > 0 && (
+              <QuestionProgressChip
+                done={questionProgress.done}
+                total={questionProgress.total}
+                hasOpen={questionProgress.hasOpen}
+                onJump={questionProgress.onJump}
+              />
+            )}
             {annotateMode ? (
               <>
                 <ExitButton
@@ -344,8 +361,8 @@ export const AppHeader = React.memo<AppHeaderProps>(({
                 onClick={onFeedback}
                 disabled={isSubmitting}
                 isLoading={isSubmitting}
-                label="Send Feedback"
-                title="Send Feedback"
+                label={feedbackLabel}
+                title={feedbackLabel}
               />
             )}
 

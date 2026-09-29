@@ -2,7 +2,7 @@ import React, { useId, useRef, useState } from 'react';
 import {
   emptyQuestionAnswer,
   isQuestionAnswerEmpty,
-  isQuestionAnswered,
+  questionStatus,
   recommendedQuestionAnswer,
   type IndexedQuestion,
   type QuestionAnswer,
@@ -32,8 +32,11 @@ import { renderProseBody } from './proseBody';
 /** Pointer travel (px) above which a press on a choice row is a drag. */
 const DRAG_THRESHOLD_MOUSE = 4;
 const DRAG_THRESHOLD_TOUCH = 10;
+/** A second click on the same choice within this window is a double-click:
+ *  it selects a word, so the pick its first click made is taken back. */
+const DOUBLE_CLICK_REVERT_MS = 800;
 
-type Status = 'open' | 'answered' | 'skipped' | 'settled';
+const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(' ');
 
@@ -101,6 +104,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   const noteOpen = notePinned ?? !!answer?.note?.trim();
   const pressRef = useRef<{ x: number; y: number; touch: boolean } | null>(null);
   const noteRef = useRef<HTMLTextAreaElement>(null);
+  const lastPickRef = useRef<{ label: string; before: QuestionAnswer | undefined; at: number } | null>(null);
 
   const inline = (text: string) => (
     <InlineMarkdown
@@ -115,13 +119,13 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     />
   );
 
-  const answered = !!answer && isQuestionAnswered(answer);
-  const skipped = !!answer?.skipped && !answered;
-  const settledLabels = question.choices.filter((c) => c.settled).map((c) => c.label);
   // A note alone does not change a settled choice: the [x] stays drawn (and
   // the status stays Settled) until the reviewer picks, fills Other or skips.
-  const settled = !answered && !skipped && settledLabels.length > 0;
-  const status: Status = answered ? 'answered' : skipped ? 'skipped' : settled ? 'settled' : 'open';
+  const status = questionStatus(question, answer);
+  const answered = status === 'answered';
+  const skipped = status === 'skipped';
+  const settled = status === 'settled';
+  const settledLabels = question.choices.filter((c) => c.settled).map((c) => c.label);
   const hasRecommendation = question.choices.some((c) => c.recommended) || !!question.suggestedText;
   const selected = answered || skipped ? answer!.selected : settledLabels;
   const base = answer ?? emptyQuestionAnswer(indexed);
@@ -132,6 +136,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   };
 
   const pick = (label: string, checked: boolean) => {
+    lastPickRef.current = { label, before: answer, at: now() };
     const { skipped: _s, ...rest } = base;
     if (question.kind === 'multi') {
       const nextSelected = checked
@@ -190,10 +195,23 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   const onRowPointerDown = (event: React.PointerEvent) => {
     pressRef.current = { x: event.clientX, y: event.clientY, touch: event.pointerType === 'touch' };
   };
-  const onRowClick = (event: React.MouseEvent) => {
+  const onRowClick = (event: React.MouseEvent, label: string) => {
     const press = pressRef.current;
     pressRef.current = null;
     if (event.target instanceof HTMLInputElement) return;
+    // A double-click selects a word to annotate, never picks: the second
+    // click is cancelled, and the pick the first click made (if any, on this
+    // choice, just now) is taken back.
+    if (event.detail >= 2) {
+      event.preventDefault();
+      const last = lastPickRef.current;
+      lastPickRef.current = null;
+      if (onAnswer && last && last.label === label && now() - last.at <= DOUBLE_CLICK_REVERT_MS) {
+        const before = last.before;
+        onAnswer(blockId, before && !isQuestionAnswerEmpty(before) ? before : null, question.key);
+      }
+      return;
+    }
     const limit = press?.touch ? DRAG_THRESHOLD_TOUCH : DRAG_THRESHOLD_MOUSE;
     const moved = !!press && Math.hypot(event.clientX - press.x, event.clientY - press.y) > limit;
     const selection = typeof window !== 'undefined' ? window.getSelection() : null;
@@ -283,7 +301,9 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           )}
           <textarea
             className={cx(
-              'mt-2.5 block min-h-[74px] w-full resize-y rounded-[7px] border border-border bg-background px-2.5 py-2 text-[13.5px] leading-normal text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring focus:ring-1 focus:ring-ring disabled:cursor-default',
+              // annotation-exclude: typed text is not document text, so a
+              // text-search restore of another annotation never lands in it.
+              'annotation-exclude mt-2.5 block min-h-[74px] w-full resize-y rounded-[7px] border border-border bg-background px-2.5 py-2 text-[13.5px] leading-normal text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring focus:ring-1 focus:ring-ring disabled:cursor-default',
               skipped && 'opacity-55',
             )}
             aria-labelledby={promptId}
@@ -308,8 +328,9 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                   readOnly ? 'cursor-default' : 'cursor-pointer hover:bg-muted/45',
                   checked && 'bg-primary/12 hover:bg-primary/12',
                 )}
+                data-question-option=""
                 onPointerDown={onRowPointerDown}
-                onClickCapture={onRowClick}
+                onClickCapture={(event) => onRowClick(event, choice.label)}
               >
                 <input
                   type={inputType}
@@ -345,7 +366,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
               onChange={(e) => setOther(e.target.value)}
               placeholder={readOnly ? '' : 'Other…'}
               aria-label={number > 0 ? `Other answer to question ${number}` : 'Other answer'}
-              className="min-w-0 flex-1 border-0 border-b border-transparent bg-transparent py-[3px] text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring"
+              className="annotation-exclude min-w-0 flex-1 border-0 border-b border-transparent bg-transparent py-[3px] text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring"
             />
           </div>
         </div>
@@ -358,7 +379,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           </p>
           <textarea
             ref={noteRef}
-            className="block min-h-[54px] w-full resize-y rounded-[7px] border border-border bg-background px-2.5 py-2 text-[13.5px] leading-normal text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring focus:ring-1 focus:ring-ring"
+            className="annotation-exclude block min-h-[54px] w-full resize-y rounded-[7px] border border-border bg-background px-2.5 py-2 text-[13.5px] leading-normal text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring focus:ring-1 focus:ring-ring"
             aria-labelledby={noteLabelId}
             placeholder="Context for the agent…"
             value={answer?.note ?? ''}

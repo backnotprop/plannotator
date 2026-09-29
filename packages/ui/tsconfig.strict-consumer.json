@@ -29,6 +29,8 @@
     "components/BlockRenderer.tsx",
     "components/blocks/QuestionBlock.tsx",
     "utils/questionAnswers.ts",
+    "components/QuestionProgressChip.tsx",
+    "components/QuestionsPanelSection.tsx",
     "components/InlineMarkdown.tsx",
     "components/Viewer.tsx",
     "test-consumer/viewer-document-header.tsx",

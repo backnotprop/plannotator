@@ -13,6 +13,8 @@ import { cn } from '../lib/utils';
 import { resolveReplyParents, resolveThreadRootTimestamps } from '@plannotator/core/annotation-threads';
 import { ROOT_DOCUMENT_GROUP_KEY } from '../utils/annotationScope';
 import type { AnnotationScope, AnnotationDocumentGroup } from '../utils/annotationScope';
+import type { QuestionPanelRow } from '../utils/questionAnswers';
+import { QuestionsPanelSection } from './QuestionsPanelSection';
 
 // Card type-word colors. Deletion uses `destructive` (reliably red on every
 // theme, matching the in-document .deletion highlight). Comment uses the
@@ -177,6 +179,16 @@ interface PanelProps {
   onDeleteInDocument?: (path: string, id: string) => void;
   /** Edit an annotation in its owning document's store. */
   onEditInDocument?: (path: string, id: string, updates: Partial<Annotation>) => void;
+  /**
+   * `:::question` rows for the open document (`buildQuestionPanelRows`).
+   * Supplied, a Questions section renders above a Comments section and the
+   * answer annotations (rows carrying `questionAnswer`) leave the comment
+   * timeline; a row whose question is gone offers Remove through `onDelete`.
+   * Absent, the panel is unchanged and answers list as comment cards.
+   */
+  questionRows?: readonly QuestionPanelRow[];
+  /** A Questions row was clicked (the host scrolls to the card). */
+  onSelectQuestion?: (row: QuestionPanelRow) => void;
 }
 
 export const AnnotationPanel: React.FC<PanelProps> = ({
@@ -212,13 +224,20 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   onSelectInDocument,
   onDeleteInDocument,
   onEditInDocument,
+  questionRows,
+  onSelectQuestion,
 }) => {
   const isMobile = useIsMobile();
   const embedded = presentation === 'embedded';
   const mobilePanel = isMobile && !embedded;
   const [copiedText, setCopiedText] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
-  const sortedAnnotations = [...annotations].sort((a, b) => a.createdA - b.createdA);
+  // With a Questions section, answers are listed there, not as comments.
+  const showQuestions = questionRows !== undefined && questionRows.length > 0;
+  const timelineAnnotations = questionRows !== undefined
+    ? annotations.filter((a) => a.questionAnswer == null)
+    : annotations;
+  const sortedAnnotations = [...timelineAnnotations].sort((a, b) => a.createdA - b.createdA);
   const sortedCodeAnnotations = [...codeAnnotations].sort((a, b) => a.createdAt - b.createdAt);
   // Replies (`inReplyTo`) thread under their parent: each reply is lifted to
   // sit right after its parent (and the parent's earlier replies) at the
@@ -237,6 +256,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
     return a.ts - b.ts;
   });
   const totalCount = annotations.length + codeAnnotations.length + (editorAnnotations?.length ?? 0);
+  const timelineCount = timelineAnnotations.length + codeAnnotations.length + (editorAnnotations?.length ?? 0);
 
   // --- Cross-file scope (opt-in: a host that passes neither prop is unchanged) ---
   const scopeEnabled = annotationScope !== undefined && onAnnotationScopeChange !== undefined;
@@ -383,11 +403,28 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
         {directEdits?.map((item) => (
           <DirectEditsCard key={item.id} {...item} onDiscard={readOnly ? undefined : item.onDiscard} />
         ))}
+        {showQuestions && (
+          <>
+            <QuestionsPanelSection
+              rows={questionRows!}
+              onSelect={onSelectQuestion}
+              onRemoveOrphan={readOnly ? undefined : (row) => { if (row.annotationId) onDelete(row.annotationId); }}
+            />
+            <div className="mx-0.5 mt-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+              <span className="flex-1">Comments</span>
+              <span className="tabular-nums">{showGroups ? groupedTotal : timelineCount}</span>
+            </div>
+          </>
+        )}
         {showGroups ? (
           <>
             {groups.map((group) => {
               const collapsed = collapsedGroups.has(group.path);
-              const sorted = [...group.annotations].sort((a, b) => a.createdA - b.createdA);
+              // The open document's answers are in the Questions section.
+              const groupAnnotations = group.isCurrent && questionRows !== undefined
+                ? group.annotations.filter((a) => a.questionAnswer == null)
+                : group.annotations;
+              const sorted = [...groupAnnotations].sort((a, b) => a.createdA - b.createdA);
               const threaded = threadReplies(sorted);
               return (
                 <section key={group.path} data-annotation-group={group.path}>
@@ -509,7 +546,11 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
               </button>
             )}
           </>
-        ) : totalCount === 0 ? (
+        ) : timelineCount === 0 && showQuestions ? (
+          <p className="px-1 py-2.5 text-[12.5px] text-muted-foreground">
+            Select text in the document to comment. Question and option text is selectable too.
+          </p>
+        ) : timelineCount === 0 ? (
           (!directEdits || directEdits.length === 0) && (
             <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
               <p className="text-xs text-muted-foreground/60">

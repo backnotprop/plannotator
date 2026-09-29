@@ -13,6 +13,13 @@ export interface UndoHistoryApi<TAction> {
   readonly canUndo: boolean;
   readonly canRedo: boolean;
   record: (action: TAction) => void;
+  /**
+   * Coalesce into the newest undo entry: when it is still `expected` (the
+   * same object), replace it with `next`, or drop it when `next` is null.
+   * Returns false, changing nothing, when anything was recorded, undone or
+   * cleared since. Used to fold a typing burst into one entry.
+   */
+  replaceLast: (expected: TAction, next: TAction | null) => boolean;
   undo: () => boolean;
   redo: () => boolean;
   clear: () => void;
@@ -56,6 +63,16 @@ export function useUndoHistory<TAction>({
       record(action) {
         const history = historyRef.current;
         history.state = recordUndoAction(history.state, action, optionsRef.current.capacity);
+      },
+      replaceLast(expected, next) {
+        const history = historyRef.current;
+        const { past, future } = history.state;
+        if (past.length === 0 || past[past.length - 1] !== expected || future.length > 0) return false;
+        history.state = {
+          past: next === null ? past.slice(0, -1) : [...past.slice(0, -1), next],
+          future,
+        };
+        return true;
       },
       undo() {
         const history = historyRef.current;

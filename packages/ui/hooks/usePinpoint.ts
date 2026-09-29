@@ -137,12 +137,22 @@ export function usePinpoint({
 
     const handleClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
+      // A `:::question` card's form controls are the answer UI, never a pin
+      // target: a click on a radio, a checkbox or a text box answers.
+      const inQuestion = !!target.closest?.('fieldset.question-block');
+      if (inQuestion && target.closest('input, textarea, select')) return;
       const resolved = resolveSemanticTargetAtPoint(
         buildSemanticTargetGraph(container),
         target,
         { clientX: e.clientX, clientY: e.clientY },
       );
       if (!resolved) return;
+
+      // Pinning a choice's text must not also pick the choice: the row is a
+      // <label>, which would forward this click to its radio or checkbox.
+      if (inQuestion && target.closest('[data-question-option]')) {
+        e.preventDefault();
+      }
 
       // Prevent link navigation in pinpoint mode
       const link = (target.closest('a') as HTMLAnchorElement | null);

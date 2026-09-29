@@ -360,6 +360,7 @@ An agent writes `:::question` (pick one), `:::question-multi` (pick any) or `:::
 - **One new optional prop:** `Viewer` `onAnswerQuestion?(blockId, answer | null, key)`. Apply it with `upsertQuestionAnswerAnnotation(annotations, blockId, answer, key)` from `utils/questionAnswers` and store the result. Without the prop (or under `readOnly`) the cards render read-only, still showing stored answers.
 - **Export:** `exportAnnotations` / `exportLinkedDocAnnotations` / `exportAnnotationEntry` print answers in an "Answers to your questions" section before the numbered feedback, with no host action.
 - An unparseable block (no prompt) renders as the ordinary directive callout; a ui older than 0.48.0 renders every `:::question` that way.
+- **Progress and panel (optional):** pass `questionRows={buildQuestionPanelRows(blocks, annotations)}` to `AnnotationPanel` for the Questions section (answers then leave the comment timeline), and mount `QuestionProgressChip` with `questionProgress(rows)` / `nextOpenQuestionKey(rows)` / `focusQuestionCard(key)` for the "N/M answered" chip.
 
 See HANDOFF.md § "Questions in documents (0.48.0, core 0.25.8)".
 

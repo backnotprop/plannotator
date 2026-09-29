@@ -9,6 +9,7 @@ import {
   parseQuestionBlock,
   questionExportItems,
   questionKey,
+  questionStatus,
   recommendedQuestionAnswer,
   type QuestionAnswer,
 } from "./question-block";
@@ -263,8 +264,41 @@ Answer:
     expect(out).toContain("### Q5. Transport? (line 71)\nAnswer: WS\n");
   });
 
+  test("a note alone on a settled question counts it answered by the settled choice", () => {
+    // PR 1 review: the note printed alone and the question read as unanswered.
+    const out = formatQuestionAnswersSection(items, [answer({ key: key(5), prompt: "Transport?", note: "REST is fine for v1" })]);
+    expect(out).toContain("1 of 5 questions answered.\n");
+    expect(out).toContain("### Q5. Transport? (line 71)\nAnswer: REST (already settled in the document)\nNote: REST is fine for v1\n");
+  });
+
+  test("a multi-line note keeps its line breaks; a one-line note stays on the Note line", () => {
+    const multi = formatQuestionAnswersSection(items, [
+      answer({ key: key(1), prompt: "Where", selected: ["Nowhere"], note: "First line.\nSecond line." }),
+    ]);
+    expect(multi).toContain("Answer: Nowhere\nNote:\n> First line.\n> Second line.\n");
+    const single = formatQuestionAnswersSection(items, [answer({ key: key(1), prompt: "Where", selected: ["Nowhere"], note: "one line" })]);
+    expect(single).toContain("Answer: Nowhere\nNote: one line\n");
+  });
+
   test("no reportable answer means no section", () => {
     expect(formatQuestionAnswersSection(items, [])).toBe("");
     expect(formatQuestionAnswersSection(items, [answer({ key: key(1) })])).toBe("");
+  });
+});
+
+describe("questionStatus", () => {
+  const parsed = (body: string) => parseQuestionBlock("question", body)!;
+  const settledQ = parsed("Transport?\n- [x] REST\n- [ ] WS");
+  const openQ = parsed("Transport?\n- [ ] REST\n- [ ] WS");
+  const base = (over: Partial<QuestionAnswer>): QuestionAnswer => ({ v: 1, key: settledQ.key, kind: "single", prompt: "Transport?", selected: [], ...over });
+
+  test("answered beats skipped beats settled beats open; a note alone changes nothing", () => {
+    expect(questionStatus(openQ)).toBe("open");
+    expect(questionStatus(openQ, base({ note: "hm" }))).toBe("open");
+    expect(questionStatus(settledQ)).toBe("settled");
+    expect(questionStatus(settledQ, base({ note: "hm" }))).toBe("settled");
+    expect(questionStatus(settledQ, base({ skipped: true }))).toBe("skipped");
+    expect(questionStatus(settledQ, base({ selected: ["WS"] }))).toBe("answered");
+    expect(questionStatus(openQ, base({ other: "gRPC" }))).toBe("answered");
   });
 });

@@ -404,6 +404,23 @@ export const isQuestionAnswered = (answer: QuestionAnswer): boolean =>
 export const isQuestionAnswerEmpty = (answer: QuestionAnswer): boolean =>
   !isQuestionAnswered(answer) && !answer.skipped && !answer.note?.trim();
 
+/** How a question reads to the reviewer: `answered` (a pick, Other or free
+ *  text), `skipped`, `settled` (the agent marked a choice `[x]` and the
+ *  reviewer has not picked, filled Other or skipped; a note alone keeps it
+ *  settled), or `open`. The card, the panel and the progress chip all use
+ *  this one rule. */
+export type QuestionStatus = 'open' | 'answered' | 'skipped' | 'settled';
+
+export const questionStatus = (
+  question: Pick<ParsedQuestion, 'choices'>,
+  answer?: QuestionAnswer | null,
+): QuestionStatus => {
+  if (answer && isQuestionAnswered(answer)) return 'answered';
+  if (answer?.skipped) return 'skipped';
+  if (question.choices.some((c) => c.settled)) return 'settled';
+  return 'open';
+};
+
 /** An empty answer for a question, ready to edit. */
 export const emptyQuestionAnswer = (indexed: Pick<IndexedQuestion, 'line' | 'question'>): QuestionAnswer => ({
   v: 1,
@@ -472,9 +489,21 @@ export const formatQuestionAnswerText = (answer: QuestionAnswer): string => {
  * `Answer: X (your recommendation)`, a bulleted list for several picks, a
  * blockquote for free text, `Skipped`, then `Note: …`.
  */
-export const formatQuestionAnswerLines = (answer: QuestionAnswer, opts: { recommended?: boolean } = {}): string => {
+export const formatQuestionAnswerLines = (
+  answer: QuestionAnswer,
+  opts: { recommended?: boolean; settledLabels?: readonly string[] } = {},
+): string => {
   const rec = opts.recommended ? ' (your recommendation)' : '';
   let out = '';
+  // A settled question the reviewer only added a note to: the settled
+  // choice stands as the answer, printed with the note.
+  const settled = opts.settledLabels ?? [];
+  if (settled.length > 0 && !isQuestionAnswered(answer) && !answer.skipped) {
+    const labels = settled.map(oneLine);
+    out += labels.length > 1
+      ? `Answer (already settled in the document):\n${labels.map((l) => `- ${l}\n`).join('')}`
+      : `Answer: ${labels[0]} (already settled in the document)\n`;
+  }
   const picks = [...answer.selected.map(oneLine)];
   if (answer.other?.trim()) picks.push(`Other: ${oneLine(answer.other)}`);
   if (answer.text?.trim()) {
@@ -486,7 +515,14 @@ export const formatQuestionAnswerLines = (answer: QuestionAnswer, opts: { recomm
   } else if (answer.skipped) {
     out += 'Skipped\n';
   }
-  if (answer.note?.trim()) out += `Note: ${answer.note.trim().replace(/\r?\n/g, ' ')}\n`;
+  const note = answer.note?.trim();
+  if (note) {
+    // A multi-line note keeps its line breaks, as a blockquote like free
+    // text; a one-line note stays on the `Note:` line.
+    out += /\r?\n/.test(note)
+      ? `Note:\n> ${note.replace(/\r?\n/g, '\n> ')}\n`
+      : `Note: ${note}\n`;
+  }
   return out;
 };
 
@@ -500,6 +536,8 @@ export interface QuestionExportItem {
   suggestedText?: string;
   /** The agent marked a choice `[x]`: decided, not waiting on the reviewer. */
   settled: boolean;
+  /** The `[x]` choice labels. Absent reads as none. */
+  settledLabels?: string[];
 }
 
 export const questionExportItems = (indexed: ReadonlyArray<IndexedQuestion>): QuestionExportItem[] =>
@@ -511,6 +549,7 @@ export const questionExportItems = (indexed: ReadonlyArray<IndexedQuestion>): Qu
     recommendedLabels: question.choices.filter((c) => c.recommended).map((c) => c.label),
     ...(question.suggestedText ? { suggestedText: question.suggestedText } : {}),
     settled: question.choices.some((c) => c.settled),
+    settledLabels: question.choices.filter((c) => c.settled).map((c) => c.label),
   }));
 
 export const QUESTION_ANSWERS_HEADING = 'Answers to your questions';
@@ -521,7 +560,9 @@ export const QUESTION_ANSWERS_HEADING = 'Answers to your questions';
  *
  * `Q<n>` is the document order of every question block, so numbers match the
  * "Question N of M" eyebrows. Questions the agent already settled with `[x]`
- * and the reviewer left alone are neither counted nor listed as unanswered.
+ * and the reviewer left alone are neither counted nor listed as unanswered;
+ * one the reviewer only added a note to counts as answered by its settled
+ * choice, which is printed with the note.
  * An answer whose question is no longer in the document is still reported.
  */
 export const formatQuestionAnswersSection = (
@@ -538,9 +579,13 @@ export const formatQuestionAnswersSection = (
 
   const open = questions.filter((q) => !q.settled || byKey.has(q.key));
   const settledUntouched = questions.length - open.length;
+  // A settled question with only a note (no pick, Other or skip) counts as
+  // answered: the settled choice stands.
+  const settledStands = (q: QuestionExportItem, a: QuestionAnswer): boolean =>
+    q.settled && !isQuestionAnswered(a) && !a.skipped;
   const answered = open.filter((q) => {
     const a = byKey.get(q.key);
-    return a ? isQuestionAnswered(a) : false;
+    return a ? isQuestionAnswered(a) || settledStands(q, a) : false;
   }).length;
 
   let out = `${h} ${QUESTION_ANSWERS_HEADING}\n\n`;
@@ -563,6 +608,7 @@ export const formatQuestionAnswersSection = (
     out += `${sub} Q${q.number}. ${oneLine(q.prompt)}${where}\n`;
     out += formatQuestionAnswerLines(a, {
       recommended: isQuestionAnswered(a) && isRecommendedQuestionAnswer(a, q.recommendedLabels, q.suggestedText),
+      ...(settledStands(q, a) ? { settledLabels: q.settledLabels ?? [] } : {}),
     });
     out += '\n';
   }
