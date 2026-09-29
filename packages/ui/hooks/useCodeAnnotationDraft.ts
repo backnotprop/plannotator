@@ -72,6 +72,8 @@ interface UseCodeAnnotationDraftOptions {
   autoViewSuppressed?: Set<string>;
   isApiMode: boolean;
   submitted: boolean;
+  /** Hosts with independent review-progress storage omit viewed state from drafts. */
+  persistViewedFiles?: boolean;
   /** Receives the unsent items found on a target the session switched onto
    *  in place (#1590), already filtered to ids the session neither holds nor
    *  deleted. The host adds them to its state; autosave then saves the merge.
@@ -125,12 +127,15 @@ export function useCodeAnnotationDraft({
   submitted,
   onDraftTargetMerge,
   targetLoadTimeoutMs = TARGET_LOAD_TIMEOUT_MS,
+  persistViewedFiles = true,
 }: UseCodeAnnotationDraftOptions): UseCodeAnnotationDraftResult {
   const [draftBanner, setDraftBanner] = useState<{ count: number; viewedCount: number; timeAgo: string } | null>(null);
   const draftDataRef = useRef<DraftData | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasMountedRef = useRef(false);
   const draftGenerationRef = useRef(0);
+  const persistViewedRef = useRef(persistViewedFiles);
+  persistViewedRef.current = persistViewedFiles;
   // True once the user has actually had annotations this session. Used to decide
   // whether an empty state is a real "cleared everything" edit (persist it) vs a
   // fresh/unengaged session (leave the server alone). Keyed on annotations only —
@@ -186,6 +191,9 @@ export function useCodeAnnotationDraft({
         return data as DraftData | null;
       })
       .then((data: DraftData | null) => {
+        // Keep even a viewed-only draft while independent progress support is
+        // unresolved; a failed/unsupported load may need to offer it later.
+        draftDataRef.current = data;
         const generation = readDraftGeneration(data?.draftGeneration);
         if (generation !== null) {
           draftGenerationRef.current = Math.max(draftGenerationRef.current, generation);
@@ -193,7 +201,7 @@ export function useCodeAnnotationDraft({
         const annotationCount = (Array.isArray(data?.codeAnnotations) ? data.codeAnnotations.length : 0)
           + (Array.isArray(data?.descriptionAnnotations) ? data.descriptionAnnotations.length : 0)
           + (Array.isArray(data?.commentAnnotations) ? data.commentAnnotations.length : 0);
-        const viewedCount = Array.isArray(data?.viewedFiles) ? data.viewedFiles.length : 0;
+        const viewedCount = persistViewedRef.current && Array.isArray(data?.viewedFiles) ? data.viewedFiles.length : 0;
         if (annotationCount > 0 || viewedCount > 0) {
           draftDataRef.current = data;
           setDraftBanner({
@@ -209,6 +217,15 @@ export function useCodeAnnotationDraft({
       });
   }, [isApiMode]);
 
+  useEffect(() => {
+    const data = draftDataRef.current;
+    if (!data) return;
+    const count = (data.codeAnnotations?.length ?? 0)
+      + (data.descriptionAnnotations?.length ?? 0) + (data.commentAnnotations?.length ?? 0);
+    const viewedCount = persistViewedFiles ? data.viewedFiles?.length ?? 0 : 0;
+    setDraftBanner(count || viewedCount ? { count, viewedCount, timeAgo: formatTimeAgo(data.ts || 0) } : null);
+  }, [persistViewedFiles]);
+
   // Debounced auto-save on annotation/viewed changes
   useEffect(() => {
     if (!isApiMode || submitted) return;
@@ -223,7 +240,7 @@ export function useCodeAnnotationDraft({
     //     via `allAnnotations` and have their own lifecycle, separate from the draft.
     if (annotations.some((a) => !a.source) || descriptionAnnotations.length > 0 || commentAnnotations.length > 0) hasHadAnnotationsRef.current = true;
 
-    const isEmpty = annotations.length === 0 && descriptionAnnotations.length === 0 && commentAnnotations.length === 0 && viewedFiles.size === 0;
+    const isEmpty = annotations.length === 0 && descriptionAnnotations.length === 0 && commentAnnotations.length === 0 && (!persistViewedFiles || viewedFiles.size === 0);
     // Leave the server alone for an empty state until the user has actually had
     // annotations this session. This preserves an unrestored draft sitting on disk
     // at mount (the draft-recovery banner can still offer it).
@@ -259,8 +276,8 @@ export function useCodeAnnotationDraft({
         codeAnnotations: annotations,
         descriptionAnnotations,
         commentAnnotations,
-        viewedFiles: [...viewedFiles],
-        ...(autoViewSuppressed && autoViewSuppressed.size > 0
+        ...(persistViewedFiles ? { viewedFiles: [...viewedFiles] } : {}),
+        ...(persistViewedFiles && autoViewSuppressed && autoViewSuppressed.size > 0
           ? { autoViewSuppressed: [...autoViewSuppressed] }
           : {}),
         draftGeneration,
@@ -273,7 +290,7 @@ export function useCodeAnnotationDraft({
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [annotations, descriptionAnnotations, commentAnnotations, viewedFiles, autoViewSuppressed, isApiMode, submitted, saveNudge]);
+  }, [annotations, descriptionAnnotations, commentAnnotations, viewedFiles, autoViewSuppressed, isApiMode, submitted, saveNudge, persistViewedFiles]);
 
   const restoreDraft = useCallback(() => {
     // Cancel any pending autosave so it can't fire with pre-restore state and
@@ -286,9 +303,9 @@ export function useCodeAnnotationDraft({
       annotations: data?.codeAnnotations ?? [],
       descriptionAnnotations: data?.descriptionAnnotations ?? [],
       commentAnnotations: data?.commentAnnotations ?? [],
-      viewedFiles: data?.viewedFiles ?? [],
-      autoViewSuppressed: data?.autoViewSuppressed ?? [],
       patchChanged: data?.patchChanged === true,
+      viewedFiles: persistViewedRef.current ? data?.viewedFiles ?? [] : [],
+      autoViewSuppressed: persistViewedRef.current ? data?.autoViewSuppressed ?? [] : [],
     };
   }, []);
 

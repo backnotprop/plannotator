@@ -101,6 +101,7 @@ const PURGE_OWNED_TOP_LEVEL = [
   "history",
   "feedback",
   "drafts",
+  "review-progress",
   "active",
   "hooks",
   "compound",

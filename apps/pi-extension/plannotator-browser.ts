@@ -413,6 +413,7 @@ async function createCodeReviewBrowserSession(
 	let initialBase: string | undefined;
 	let initialBaseExplicit = false;
 	let initialFingerprint: string | undefined;
+	let initialFileIdentities: Record<string, string> | undefined;
 	let worktreeCleanup: (() => void | Promise<void>) | undefined;
 	let worktreePool: WorktreePool | undefined;
 	let exitHandler: (() => void) | undefined;
@@ -688,6 +689,7 @@ async function createCodeReviewBrowserSession(
 			gitRef = result.gitRef;
 			diffError = result.error;
 			initialFingerprint = result.fingerprint;
+			initialFileIdentities = result.fileIdentities;
 			// Remember which base the initial diff was computed against so it can
 			// be forwarded to the server below. Only matters when the caller
 			// overrode the detected default; otherwise it matches gitCtx already.
@@ -725,6 +727,7 @@ async function createCodeReviewBrowserSession(
 		openStatePinned: openStateFromFlags,
 		gitRemoteCheck: options.gitRemoteCheck,
 		initialFingerprint,
+		initialFileIdentities,
 		prMetadata,
 		prPatchIncomplete,
 		workspace,

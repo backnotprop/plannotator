@@ -465,6 +465,41 @@ Freshness: the endpoint checks the snapshot id only, not a per-image VCS fingerp
 
 Server side, every decision is in `packages/shared/review-image.ts` (vendored to Pi): eligibility via `findPatchFileEntry`, caps (`MAX_REVIEW_IMAGE_PREVIEW_BYTES` 10 MB, `MAX_REVIEW_IMAGE_PREVIEW_PIXELS` 50 MP, both in `packages/core/diff-paths.ts`), sniffing, header dimensions, error mapping and headers; both servers only say where the current mode reads a side, behind a 4-wide read limiter. Which object each side is comes from ONE table per VCS shared with hunk expansion: `resolveDiffSideSources` (git), `resolveJjSideRevs` (jj), `resolveGitButlerSideSources`; bytes come from `readDiffSideBytes` (`git cat-file --batch-check` then `cat-file blob <oid>`, never `show`; worktree reads refuse symlinks and require the realpath inside the repository toplevel) over the optional runtime methods `runGitBytes` / `readFileBytes` / `realPath` / `runJjBytes` (absent means unavailable). PR mode reads the local checkout at the fixed merge-base/head commits first and falls back to `fetchPRFileBytes` (GitHub contents API, then the blobs API for files over 1 MB after a size check; GitLab JSON files API), base64 in both cases so bytes survive the CLI's text stdout. Workspace mode delegates per child repo (`WorkspaceReviewSession.getFileBytes`). Off: static patch, P4, the guide chain and guides.show.
 
+### Durable viewed-file progress (#1136)
+
+Viewed marks are independent of annotation drafts and survive feedback submission,
+server restarts, and reopening a review. `packages/shared/review-progress.ts` owns
+fingerprinting, storage and request validation, mirrored into Pi by `vendor.sh`.
+`GET/POST /api/review-progress?snapshot=<snapshotId>` loads or updates progress;
+writes carry the server-issued scope key and displayed per-file fingerprints and
+reject stale snapshots. The review UI restores automatically through
+`useReviewProgress`; explicit viewed/unviewed mutations (including auto-view and
+stage-to-view) save immediately, and pending saves flush before switches/decisions.
+
+Storage is `${dataDir}/review-progress/{scopeHash}/{pathHash}.json`: atomic per-file
+records prevent independent tabs/processes from overwriting unrelated marks.
+Local Git scopes include canonical worktree root, branch and comparison selection
+(base ref only for base-relative modes), never HEAD except when detached. PRs use
+their URL and layer/full-stack scope. Workspace/non-Git reviews and piped patches
+keep the existing draft behavior. Local Git carries a generation-time
+`fileIdentities` sidecar: `--raw --patch --no-abbrev` supplies object IDs, paths and
+modes without changing rendered patch bytes or existing annotation draft keys.
+Bounded worktree hashes are checked against the displayed index line; no live
+files are read at click time. This also covers mode-only changes and pure renames.
+Files without reliable identities (including oversized untracked files) cannot
+restore as viewed. Platform text patches use per-file patch hashes when full IDs
+are absent; opaque binary/metadata-only patches without IDs cannot restore.
+A mismatch is unviewed regardless of the auto-mark setting. Explicit unchecks
+override platform seeds; in-session auto-view suppression survives content refresh.
+Progress loading has explicit loading/ready/unsupported/error states: unsuccessful
+loads preserve current marks and retain the legacy draft fallback, and a later
+mutation or flush retries errors. Requests and the entire pre-decision/switch flush
+each have a five-second limit, so stalled persistence cannot block review actions
+indefinitely; a timeout warns and unsaved edits remain pending for a later retry.
+Legacy draft viewed fields are ignored only on
+progress-enabled surfaces (and deferred while capability detection is pending).
+Purge uninstall removes `review-progress`; ordinary uninstall preserves it.
+
 ### GitButler review invariants
 
 GitButler is a distinct VCS provider, ordered after JJ and before Git in both Bun and Pi. It is selected only while symbolic `HEAD` is `refs/heads/gitbutler/workspace` (or legacy `gitbutler/integration`) and the repository has GitButler's local target-ref configuration; a leftover database or an ordinary branch with the reserved name is not detection. An active workspace requires `but >= 0.21.0` on `PATH`, and a missing/incompatible CLI is an explicit error rather than a fallback to ordinary Git staging against the synthetic workspace commit. `--gitbutler` forces this provider; `--git` remains the escape hatch.
@@ -719,6 +754,7 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/file-content`   | GET    | Returns `{ oldContent, newContent }` for expandable diff context (`?path=&oldPath=&base=`) |
 | `/api/review-image`   | GET    | One side of a changed image as raw bytes for the Before/After preview (`?path=&side=old\|new&snapshot=`; #1598). Serves only a file in the current patch whose chunk has no hunks and whose path is `png jpg jpeg gif webp svg avif bmp ico apng`; the old path is taken from the chunk, never the client. `Content-Type` is sniffed from magic bytes; every image response carries `nosniff`, `Content-Security-Policy: sandbox; …` and `Cross-Origin-Resource-Policy: same-origin`, plus `ETag` (304 on `If-None-Match`) and `X-Image-Width`/`X-Image-Height` when the header parses. Errors are JSON `{ reason, error }`: `400 unavailable\|bad-request`, `404 not-in-diff\|absent\|missing`, `409 stale`, `413 too-large` (10 MB per side or 50 megapixels), `415 not-image\|lfs-pointer`, `502 fetch-failed`. Advertised by `imagePreviewSupported` on every diff payload (false for static-patch and P4 sessions). |
 | `/api/git-add`        | POST   | Stage/unstage a file (body: `{ filePath, undo? }`) |
+| `/api/review-progress?snapshot=<snapshotId>` | GET/POST | Load or save durable viewed-file progress. GET returns `{ available, key?, fingerprints?, viewedFiles?, suppressedFiles? }`; POST takes `{ key, changes: [{ path, fingerprint, viewed }] }`. Stale snapshots return 409. |
 | `/api/feedback`       | POST   | Submit review (body: feedback, annotations, agentSwitch) |
 | `/api/image`          | GET    | Serve image by path query param            |
 | `/api/upload`         | POST   | Upload image, returns `{ path, originalName }` |

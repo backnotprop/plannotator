@@ -192,6 +192,19 @@ The review UI shows your changes in a familiar diff format:
 - **Unified diff** showing additions and deletions in context
 - **Annotation tools** with the same annotation types as plan review (delete, comment, quick label, "looks good")
 
+### Viewed tracking
+
+For local Git and pull-request reviews, viewed marks are saved independently of
+annotation drafts. They survive feedback submission, server restarts, and reopening
+the same review—even with **Auto-mark viewed** turned off. Unchanged files keep
+their marks; changed files become unviewed. Local Git progress is scoped to the
+worktree, branch, and comparison selection; pull-request progress is scoped to the
+PR and its Layer or Full-stack view.
+
+Files whose content cannot be reliably identified, such as oversized untracked
+files, do not restore as viewed. Workspace, non-Git, and piped-patch reviews retain
+their existing draft-based viewed tracking.
+
 ### Auto-mark viewed
 
 Files check themselves off as you read. On the all-files surface a file is
@@ -330,6 +343,7 @@ Runtime keys use Plannotator's runtime identifiers. For code review, the current
 | `/api/image` | GET | Serve image by path |
 | `/api/upload` | POST | Upload image attachment |
 | `/api/draft` | GET/POST/DELETE | Auto-save annotation drafts |
+| `/api/review-progress?snapshot=<snapshotId>` | GET/POST | Load or save durable viewed-file progress; writes carry the scope key and per-file fingerprints, and stale snapshots are rejected |
 | `/api/ai/capabilities` | GET | Check available AI providers |
 | `/api/ai/session` | POST | Create or fork an AI session |
 | `/api/ai/query` | POST | Send prompt, stream SSE response |

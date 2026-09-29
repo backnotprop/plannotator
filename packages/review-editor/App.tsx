@@ -112,6 +112,7 @@ import { PRSwitchOverlay } from './components/PRSwitchOverlay';
 import { usePRStack } from './hooks/usePRStack';
 import { useDiffFreshness } from './hooks/useDiffFreshness';
 import { useAutoViewed } from './hooks/useAutoViewed';
+import { useReviewProgress } from './hooks/useReviewProgress';
 import { resolveDiffSwitchUnviews } from './utils/autoViewed';
 import { needsAutoViewedNotice, markAutoViewedNoticeSeen, turnOffAutoViewed, toggleAutoViewed } from './utils/autoViewedNotice';
 import { usePRSession, type PRSessionUpdate } from './hooks/usePRSession';
@@ -531,7 +532,7 @@ const ReviewApp: React.FC = () => {
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
   // Auto-mark-viewed (Rule 3): files the reviewer manually UN-viewed. That
   // gesture means "come back to this", so auto-view must never re-check them.
-  // Owned here because it rides the review draft alongside viewedFiles.
+  // Restored alongside durable viewed state (legacy drafts on unsupported surfaces).
   const [autoViewSuppressed, setAutoViewSuppressed] = useState<Set<string>>(new Set());
   // Read by the diff-apply path, which must not re-run on every checkmark.
   const viewedFilesRef = useRef(viewedFiles);
@@ -664,6 +665,10 @@ const ReviewApp: React.FC = () => {
   }, [repoInfo]);
 
   const { prMetadata, prStackInfo, prStackTree, prDiffScope, prDiffScopeOptions, prPatchIncomplete, prPatchUpgradeAvailable, updatePRSession } = usePRSession();
+  const { status: reviewProgressStatus, persistViewed, flush: flushReviewProgress } = useReviewProgress({
+    snapshotId, contextKey: JSON.stringify([prMetadata?.url, committedBase]),
+    enabled: !!origin, setViewedFiles, setSuppressedFiles: setAutoViewSuppressed,
+  });
   const reviewHistoryContext = snapshotId ?? prMetadata?.url ?? diffData?.gitRef ?? 'loading';
   const applyReviewHistory = useCallback((action: ReviewHistoryAction, direction: HistoryDirection) => {
     switch (action.kind) {
@@ -994,6 +999,7 @@ const ReviewApp: React.FC = () => {
     isApiMode: !!origin,
     submitted: !!submitted,
     onDraftTargetMerge: (items) => draftTargetMergeRef.current(items),
+    persistViewedFiles: reviewProgressStatus === 'unsupported' || reviewProgressStatus === 'error',
   });
 
   // In-place PR / scope switch onto a target holding an unsent draft (#1590):
@@ -2568,18 +2574,20 @@ const ReviewApp: React.FC = () => {
       // suppresses auto-view for this file; marking it viewed by hand clears
       // that suppression.
       applyAutoViewSuppression(filePath, willBeViewed);
+      persistViewed([filePath], willBeViewed);
       // Sync viewed state to GitHub (fire and forget — best effort)
       // Capture willBeViewed inside the callback to ensure correctness with React batching
       syncPlatformViewed([filePath], willBeViewed);
       return next;
     });
-  }, [syncPlatformViewed, applyAutoViewSuppression]);
+  }, [syncPlatformViewed, applyAutoViewSuppression, persistViewed]);
 
   // Auto-mark-viewed. The marker never decides anything the reviewer can't
   // undo: it only ADDS to viewedFiles, exactly like the `v` shortcut, and
   // gates nothing on submit.
   const autoViewedEnabled = useConfigValue('reviewAutoViewed');
   const markFilesViewed = useCallback((paths: string[]) => {
+    persistViewed(paths, true);
     setViewedFiles(prev => {
       const missing = paths.filter(path => !prev.has(path));
       if (missing.length === 0) return prev;
@@ -2587,7 +2595,7 @@ const ReviewApp: React.FC = () => {
       for (const path of missing) next.add(path);
       return next;
     });
-  }, []);
+  }, [persistViewed]);
   const handleAutoView = useCallback(() => {
     // The notice fires the first time auto-view demonstrates itself. Deferred
     // (not lost) behind the guide takeover or a first-run dialog — the file
@@ -2619,7 +2627,7 @@ const ReviewApp: React.FC = () => {
     // Rule 4 — only the review target. The guide takeover CSS-hides the dock
     // (so its files are not what the reviewer is reading), and a commit diff
     // is a documented session-only detour, not the change under review.
-    suspended: guideOpen || !!commitShaFromMode(activeDiffBase),
+    suspended: guideOpen || !!commitShaFromMode(activeDiffBase) || reviewProgressStatus === 'loading',
     viewedFiles,
     suppressedFiles: autoViewSuppressed,
     onMark: markFilesViewed,
@@ -2662,13 +2670,14 @@ const ReviewApp: React.FC = () => {
   const handleFileViewedFromStage = useCallback(
     (path: string) => {
       setViewedFiles(prev => new Set(prev).add(path));
+      persistViewed([path], true);
       // Staging marks a file viewed, so it is a deliberate "I am done with
       // this" exactly like `v`, the header button and the tree row — and like
       // them it must clear any auto-view suppression, or a file the reviewer
       // un-viewed and later staged would stay permanently off-limits.
       applyAutoViewSuppression(path, true);
     },
-    [applyAutoViewSuppression],
+    [applyAutoViewSuppression, persistViewed],
   );
   // Files already staged when the sidecar snapshot was taken — the hook folds
   // these into the effective staged set so pre-staged files toggle correctly.
@@ -2809,6 +2818,7 @@ const ReviewApp: React.FC = () => {
   prStackCallbacksRef.current = {
     applyPRResponse,
     onError: (message) => setDiffError(message),
+    beforeSwitch: flushReviewProgress,
   };
 
   // Shared helper: fetch a diff switch and update state.
@@ -2833,6 +2843,7 @@ const ReviewApp: React.FC = () => {
   ): Promise<boolean> => {
     setIsLoadingDiff(true);
     try {
+      await flushReviewProgress();
       const res = await fetch('/api/diff/switch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2894,17 +2905,11 @@ const ReviewApp: React.FC = () => {
       if (data.imagePreviewSupported !== undefined) setImagePreviewSupported(data.imagePreviewSupported === true);
 
       const nextFiles = orderFilesBySections(parseDiffToFiles(data.rawPatch), data.sections);
-      // Rule 5 of auto-mark-viewed: a checkmark on content that has since
-      // changed is misleading, so it drops. No platform sync — GitHub applies
-      // the same rule to its own viewed state server-side.
-      //
-      // This is the ONE apply path every diff transition funnels through, so
-      // the scope gate lives in resolveDiffSwitchUnviews rather than here: an
-      // opt-in from the caller, re-checked against the identity of the diff.
-      // Without it, entering a commit detour or folding whitespace out would
-      // strip checkmarks off files nothing changed in.
+      // Durable progress reconciles every new snapshot independently of the
+      // auto-view setting. Keep the legacy in-memory rule only for surfaces
+      // without a stable persistence identity (e.g. piped patches).
       const unviewed = resolveDiffSwitchUnviews({
-        enabled: autoViewedEnabled,
+        enabled: autoViewedEnabled && reviewProgressStatus !== 'ready',
         contentRefresh: options?.contentRefresh === true,
         requestedDiffType: fullDiffType,
         activeDiffType: diffType,
@@ -3014,7 +3019,7 @@ const ReviewApp: React.FC = () => {
     } finally {
       setIsLoadingDiff(false);
     }
-  }, [dockApi, resetStagedFiles, selectedBase, diffHideWhitespace, files, activeFileIndex, openDiffFile, applySemanticDiffAdvert, applyCallFlowAdvert, clearPendingSelection, autoViewedEnabled, diffType]);
+  }, [dockApi, resetStagedFiles, selectedBase, diffHideWhitespace, files, activeFileIndex, openDiffFile, applySemanticDiffAdvert, applyCallFlowAdvert, clearPendingSelection, autoViewedEnabled, diffType, reviewProgressStatus, flushReviewProgress]);
 
   // Switch the base branch the current diff compares against.
   // Only triggers a refetch when the active mode actually uses a base.
@@ -3856,6 +3861,7 @@ const ReviewApp: React.FC = () => {
   const handleSendFeedback = useCallback(async (): Promise<boolean> => {
     setIsSendingFeedback(true);
     try {
+      await flushReviewProgress();
       const agentSwitchSettings = getAgentSwitchSettings('review');
       const effectiveAgent = getEffectiveAgentName(agentSwitchSettings);
 
@@ -3882,12 +3888,13 @@ const ReviewApp: React.FC = () => {
       setIsSendingFeedback(false);
       return false;
     }
-  }, [feedbackMarkdown, allAnnotations, getDraftGeneration]);
+  }, [feedbackMarkdown, allAnnotations, getDraftGeneration, flushReviewProgress]);
 
   // Exit review session without sending any feedback
   const handleExit = useCallback(async () => {
     setIsExiting(true);
     try {
+      await flushReviewProgress();
       const res = await fetch(`/api/exit?draftGeneration=${getDraftGeneration()}`, { method: 'POST' });
       if (res.ok) {
         setSubmitted('exited');
@@ -3898,7 +3905,7 @@ const ReviewApp: React.FC = () => {
       console.error('Failed to exit review:', error);
       setIsExiting(false);
     }
-  }, [getDraftGeneration]);
+  }, [getDraftGeneration, flushReviewProgress]);
 
   // Approve — bare (LGTM), with a composer note, or with the live annotations
   // riding along (PR5 delivery, spec §6.4). The old LGTM placeholder is gone:
@@ -3910,6 +3917,7 @@ const ReviewApp: React.FC = () => {
   const handleApprove = useCallback(async (options?: { note?: string; withAnnotations?: boolean }) => {
     setIsApproving(true);
     try {
+      await flushReviewProgress();
       const res = await fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3932,7 +3940,7 @@ const ReviewApp: React.FC = () => {
       setTimeout(() => setCopyFeedback(null), 2000);
       setIsApproving(false);
     }
-  }, [getDraftGeneration, feedbackMarkdown, allAnnotations]);
+  }, [getDraftGeneration, feedbackMarkdown, allAnnotations, flushReviewProgress]);
 
   // --- The unified review decision control, agent mode (spec §3.2/§4) ------
   // One primary, one callback: the header's left segment, the global
@@ -4174,6 +4182,7 @@ const ReviewApp: React.FC = () => {
         : action === 'request_changes' && prMetadata.platform === 'github'
           ? `Changes requested on ${platformLabel}${prLinks ? ': ' + prLinks : ''}`
           : `${mrLabel === 'MR' ? 'Merge request' : 'Pull request'} reviewed on ${platformLabel}${prLinks ? ': ' + prLinks : ''}`;
+      await flushReviewProgress();
       fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4193,7 +4202,7 @@ const ReviewApp: React.FC = () => {
     } finally {
       setIsPlatformActioning(false);
     }
-  }, [platformOpenPR, platformLabel, mrLabel, prMetadata, getDraftGeneration]);
+  }, [platformOpenPR, platformLabel, mrLabel, prMetadata, getDraftGeneration, flushReviewProgress]);
 
   const openPlatformDialog = useCallback((action: PRReviewAction, chooseEvent = false) => {
     const diffPaths = new Set(files.map(f => f.path));

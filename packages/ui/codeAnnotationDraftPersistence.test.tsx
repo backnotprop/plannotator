@@ -167,6 +167,35 @@ async function mountSession(opts: HookOptions): Promise<Session> {
 // ---------------------------------------------------------------------------
 
 describe('code-review annotation draft persistence', () => {
+  test.skipIf(!hasDom)('a viewed-only draft is offered if independent progress becomes unavailable after loading', async () => {
+    saveDraft(DRAFT_KEY, { viewedFiles: ['a.ts'], autoViewSuppressed: ['b.ts'], ts: Date.now() });
+    const s = await mountSession(options({ persistViewedFiles: false }));
+    expect(s.result.current!.draftBanner).toBeNull();
+    await s.rerender(options({ persistViewedFiles: true }));
+    expect(s.result.current!.draftBanner?.viewedCount).toBe(1);
+    let restored: ReturnType<HookResult['restoreDraft']>;
+    await act(async () => { restored = s.result.current!.restoreDraft(); });
+    expect(restored!.viewedFiles).toEqual(['a.ts']);
+    expect(restored!.autoViewSuppressed).toEqual(['b.ts']);
+    await s.unmount();
+  });
+
+  test.skipIf(!hasDom)('independent progress never restores legacy viewed marks or puts them in annotation drafts', async () => {
+    saveDraft(DRAFT_KEY, { codeAnnotations: [ANNOTATION], viewedFiles: ['stale.ts'], autoViewSuppressed: ['stale.ts'], ts: Date.now() });
+    const s = await mountSession(options({ persistViewedFiles: false }));
+    expect(s.result.current!.draftBanner?.viewedCount).toBe(0);
+    let restored: ReturnType<HookResult['restoreDraft']>;
+    await act(async () => { restored = s.result.current!.restoreDraft(); });
+    expect(restored!.annotations).toHaveLength(1);
+    expect(restored!.viewedFiles).toEqual([]);
+    expect(restored!.autoViewSuppressed).toEqual([]);
+    await s.rerender(options({ persistViewedFiles: false, annotations: [ANNOTATION], viewedFiles: new Set(['fresh.ts']) }));
+    await tick(DEBOUNCE_WAIT_MS);
+    expect(loadDraft(DRAFT_KEY)).toMatchObject({ codeAnnotations: [ANNOTATION] });
+    expect((loadDraft(DRAFT_KEY) as { viewedFiles?: string[] }).viewedFiles).toBeUndefined();
+    await s.unmount();
+  });
+
   test.skipIf(!hasDom)('deleting every annotation removes the draft so it does not resurrect (#948)', async () => {
     // Session 1: mount empty (lets the on-mount GET settle so hasMountedRef is
     // set), then the user adds an annotation -> it autosaves to disk.

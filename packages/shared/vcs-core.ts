@@ -186,6 +186,7 @@ export interface PrepareLocalReviewDiffOptions {
 }
 
 export interface PreparedLocalReviewDiff {
+  fileIdentities?: Record<string, string>;
   gitContext: GitContext;
   diffType: DiffType;
   base: string;
@@ -569,6 +570,7 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
       const base = resolveInitialBase(gitContext, diffType, options.requestedBase, ownsRequestedDiffType);
       const result = await provider.runDiff(diffType, base, gitContext.cwd ?? options.cwd, {
         hideWhitespace: options.hideWhitespace,
+        captureFileIdentities: provider.id === "git",
       });
       const resultContext = result.gitContext ?? gitContext;
       const effectiveContext = fallback
@@ -591,6 +593,7 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
         gitRef: result.label,
         error: result.error,
         fingerprint: result.fingerprint,
+        fileIdentities: result.fileIdentities,
       };
     },
 
