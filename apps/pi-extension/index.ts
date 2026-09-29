@@ -1452,16 +1452,16 @@ export default function plannotator(pi: ExtensionAPI): void {
 			// Denied
 			persistState();
 			const feedbackText = result.feedback || "Plan rejected. Please revise.";
-			const { buildPlanFileRule, getPlanDeniedPrompt, getPlanToolName } = await loadPlannotatorPrompts();
+			const { buildPlanFileRule, composePlanDeniedMessage, getPlanToolName } = await loadPlannotatorPrompts();
 			return {
 				content: [
 					{
 						type: "text",
-						text: getPlanDeniedPrompt("pi", loadConfig(), {
+						text: composePlanDeniedMessage("pi", loadConfig(), {
 							toolName: getPlanToolName("pi"),
 							planFileRule: buildPlanFileRule(getPlanToolName("pi"), inputPath),
 							feedback: feedbackText,
-						}),
+						}, { answersOnly: result.answersOnly }),
 					},
 				],
 				details: { approved: false, feedback: feedbackText },

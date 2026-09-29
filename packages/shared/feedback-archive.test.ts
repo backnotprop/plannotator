@@ -340,6 +340,44 @@ describe("feedback archive: diagram anchors", () => {
   });
 });
 
+describe("feedback archive: question answers", () => {
+  test("an answer records its validated questionAnswer; a malformed one and a plain comment stay answer-free", () => {
+    // Regression: without the field an answer archives only as its one-line
+    // text, so the index cannot say which question it answered (key), which
+    // labels were picked, or that it was skipped.
+    const dataDir = useTempDataDir();
+    const answer = {
+      v: 1,
+      key: "q-1a2b3c4d",
+      kind: "single",
+      prompt: "Where should losing conflict versions be kept?",
+      selected: ["Local only, purged after 30 days"],
+      note: "keep the log reachable",
+      sourceLine: 22,
+    };
+    appendFeedbackRecord({
+      project: PROJECT,
+      origin: "claude-code",
+      surface: "annotate",
+      decision: "feedback",
+      target: { filePath: "/tmp/plan.md" },
+      feedback: "## Answers to your questions",
+      annotations: [
+        { id: "ann-question-q-1a2b3c4d", type: "COMMENT", text: "Answer: Local only", originalText: answer.prompt, blockId: "block-3", questionAnswer: { ...answer, unknownField: "dropped" } },
+        { id: "ann-question-bad", type: "COMMENT", text: "x", originalText: "y", questionAnswer: { v: 2, key: "nope" } },
+        { id: "t1", type: "COMMENT", text: "plain", originalText: "some words" },
+      ],
+    });
+    const record = readIndex(dataDir)[0]!;
+    expect(record.annotations?.[0]?.questionAnswer).toEqual(answer);
+    expect(record.annotations?.[1]).not.toHaveProperty("questionAnswer");
+    expect(record.annotations?.[2]).not.toHaveProperty("questionAnswer");
+    // Additive: the existing fields of an answer row are unchanged.
+    expect(record.annotations?.[0]?.text).toBe("Answer: Local only");
+    expect(record.annotations?.[0]?.blockId).toBe("block-3");
+  });
+});
+
 describe("feedback archive: element identity", () => {
   test("a raw-HTML pinpoint records its element identity and route; other annotations stay identity-free", () => {
     // Regression: without these fields a pinpoint archives as the bridge's

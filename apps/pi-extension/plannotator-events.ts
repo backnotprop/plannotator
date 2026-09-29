@@ -146,6 +146,9 @@ export interface PlannotatorReviewResultEvent {
 	savedPath?: string;
 	agentSwitch?: string;
 	permissionMode?: string;
+	/** Not approved, and the reviewer's only feedback was answers to the plan's
+	 *  questions: compose the reply with `composePlanDeniedMessage`. */
+	answersOnly?: boolean;
 }
 
 export interface PlannotatorPlanApprovedEvent {
@@ -359,6 +362,7 @@ export function registerPlannotatorEventListeners(
 							savedPath: result.savedPath,
 							agentSwitch: result.agentSwitch,
 							permissionMode: result.permissionMode,
+							...(result.answersOnly ? { answersOnly: true } : {}),
 						} satisfies PlannotatorReviewResultEvent;
 						setStoredReviewStatus(session.reviewId, { status: "completed", ...reviewResult });
 						pi.events.emit(PLANNOTATOR_REVIEW_RESULT_CHANNEL, reviewResult);

@@ -4,7 +4,7 @@
  * finding submits cleanly while a broken line finding is still rejected.
  */
 import { describe, expect, test } from "bun:test";
-import { createAnnotationStore, transformReviewInput } from "./external-annotation";
+import { createAnnotationStore, transformPlanInput, transformReviewInput, validateAnnotationPatch } from "./external-annotation";
 
 function ok(body: unknown) {
   const r = transformReviewInput(body);
@@ -146,5 +146,24 @@ describe("annotation store update — identity fields are pinned", () => {
     expect(updated).toEqual({ id: "a1", source: "tool", text: "after", dismissed: true });
     expect(store.version).toBe(v + 1);
     expect(store.update("missing", { text: "x" })).toBeNull();
+  });
+});
+
+// Owner decision 5: agents may read answers to `:::question` blocks but never
+// write them. What regresses: the external-annotations API starts passing a
+// `questionAnswer` through, so a script or agent could answer for the human.
+describe("external annotations never carry questionAnswer", () => {
+  const questionAnswer = { v: 1, key: "q-1a2b3c4d", kind: "single", prompt: "Which?", selected: ["A"] };
+
+  test("POST drops it", () => {
+    const r = transformPlanInput({ source: "agent", text: "Answer: A", originalText: "Which?", questionAnswer });
+    if ("error" in r) throw new Error(r.error);
+    expect(r.annotations[0]).not.toHaveProperty("questionAnswer");
+  });
+
+  test("PATCH drops it", () => {
+    const r = validateAnnotationPatch("plan", { text: "edited", questionAnswer });
+    if ("error" in r) throw new Error(r.error);
+    expect(r.fields).toEqual({ text: "edited" });
   });
 });

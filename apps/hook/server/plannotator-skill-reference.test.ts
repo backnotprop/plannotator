@@ -28,6 +28,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_CONFIG } from "@plannotator/shared/agents";
+import { QUESTION_AUTHORING_GUIDE } from "@plannotator/shared/question-block";
 import {
   formatTopLevelHelp,
   SUBCOMMAND_HELP,
@@ -225,6 +226,50 @@ describe("plannotator knowledge skill freshness", () => {
         documentedSubcommands.has(sub),
         `CLI subcommand \`plannotator ${sub}\` is not documented in apps/skills/core/plannotator/SKILL.md — add it (a fenced \`plannotator ${sub}\` usage line)`,
       ).toBe(true);
+    }
+  });
+});
+
+/**
+ * The "Asking the reviewer questions" section is a copy of
+ * QUESTION_AUTHORING_GUIDE (packages/core/question-block.ts), the one source
+ * hosts put in their own agent prompts. What regresses: the grammar, the
+ * `[x]` = settled rule, or the soft cap changes in core (or someone edits
+ * the skill by hand) and agents reading the skill write question blocks the
+ * renderer no longer parses the way the skill says. Exact, not fuzzy: the
+ * section must equal the guide byte for byte, so the fix is always "paste
+ * the guide again".
+ */
+describe("plannotator skill: question authoring section", () => {
+  const heading = QUESTION_AUTHORING_GUIDE.split("\n", 1)[0]!;
+
+  function skillSection(doc: string): string | null {
+    const start = doc.indexOf(`\n${heading}\n`);
+    if (start < 0) return null;
+    const lines = doc.slice(start + 1).split("\n");
+    // The next level-2 heading outside a code fence ends the section.
+    let inFence = false;
+    for (let i = 1; i < lines.length; i++) {
+      if (/^(```|~~~)/.test(lines[i]!)) inFence = !inFence;
+      if (!inFence && /^## /.test(lines[i]!)) return lines.slice(0, i).join("\n");
+    }
+    return lines.join("\n");
+  }
+
+  test("the section exists and equals QUESTION_AUTHORING_GUIDE", () => {
+    const section = skillSection(skillDoc);
+    expect(
+      section,
+      `apps/skills/core/plannotator/SKILL.md has no "${heading}" section — paste QUESTION_AUTHORING_GUIDE from packages/core/question-block.ts`,
+    ).not.toBeNull();
+    expect(section!.trim()).toBe(QUESTION_AUTHORING_GUIDE.trim());
+  });
+
+  test("the guide covers the rules agents need", () => {
+    // Facts, not prose: the three kinds, the settled and recommendation
+    // markers, the soft cap, and where answers come back.
+    for (const fact of [":::question", ":::question-multi", ":::question-text", "- [x]", "Recommended:", "about 8", "Answers to your questions", "Unanswered"]) {
+      expect(QUESTION_AUTHORING_GUIDE).toContain(fact);
     }
   });
 });

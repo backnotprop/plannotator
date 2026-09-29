@@ -65,23 +65,19 @@ export const isAnswersOnlyFeedback = (input: {
 export const SEND_ANSWERS_LABEL = 'Send answers';
 
 /**
- * What the agent reads above the Answers section when the reviewer only
- * answered questions. The plan server still delivers it on the deny path
- * (its own `plan.answered` prompt is a later change), so this paragraph is
- * what tells the agent the reviewer is answering, not rejecting.
+ * The feedback fields of a plan `/api/deny` body. An answers-only deny adds
+ * `answersOnly: true`, and the server answers the agent with its own
+ * `plan.answered` prompt (`composePlanDeniedMessage`) instead of "your plan
+ * was not approved". The export goes out unframed: the prompt carries the
+ * framing, so a paragraph here would say it twice. A server that predates
+ * the flag ignores it and wraps the same export in its denied prompt, which
+ * still reads as "revise the plan with these answers".
  */
-export const ANSWERS_ONLY_FRAMING =
-  'The reviewer answered the questions in your plan and asked for no other changes. '
-  + 'Update the plan so each answered question becomes a decision: remove its `:::question` block and write the decision into the prose, '
-  + 'or keep the block with the chosen choice marked `- [x]`. Keep any question listed under "Unanswered" as it is. Then resubmit the plan.';
-
-/** Put the answers-only framing under the export's `# …` title (or first,
- *  when the payload has no title). */
-export const frameAnswersOnlyFeedback = (payload: string): string => {
-  const match = payload.match(/^# [^\n]*\n\n/);
-  if (!match) return `${ANSWERS_ONLY_FRAMING}\n\n${payload}`;
-  return `${match[0]}${ANSWERS_ONLY_FRAMING}\n\n${payload.slice(match[0].length)}`;
-};
+export const planDenyFeedbackFields = (
+  payload: string,
+  answersOnly: boolean,
+): { feedback: string; answersOnly?: true } =>
+  answersOnly ? { feedback: payload, answersOnly: true } : { feedback: payload };
 
 /**
  * What a decision that drops feedback would lose, for the "Feedback won't

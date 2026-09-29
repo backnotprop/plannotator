@@ -14,13 +14,15 @@ There is no tool that approves a plan, requests changes, sends feedback, closes 
 
 The agent may edit or remove only the comments it created in the current session. Your comments, and comments posted by other tools, answer `forbidden`.
 
+Your answers to the document's questions are yours too. The agent can read them but cannot answer a question, change an answer, or remove one: no tool writes an answer, a comment the agent creates is never an answer (a reply to an answer is an ordinary comment threaded under it), and your answers answer `forbidden` to `update_comment` and `remove_comments` like any other comment of yours.
+
 ## What is registered
 
 All tools are registered under the `plannotator.` prefix.
 
 | Tool | What it does |
 |---|---|
-| `read_document` | The whole situation in one call: the session (mode, whether you are editing, whether you already decided), the document text (windowed at 16,000 characters, cut at a block boundary, with `nextOffset` to continue), an outline with per-section comment counts, every comment with its quote, surrounding context and whether it is new since the agent last read, the other documents you are active on in a folder session, and nudges. Marked read-only and untrusted-content. |
+| `read_document` | The whole situation in one call: the session (mode, whether you are editing, whether you already decided), the document text (windowed at 16,000 characters, cut at a block boundary, with `nextOffset` to continue), an outline with per-section comment counts, every comment with its quote, surrounding context and whether it is new since the agent last read, the document's [questions](/docs/guides/questions/) with your answers (see below), the other documents you are active on in a folder session, and nudges. Marked read-only and untrusted-content. |
 | `add_comments` | One to twenty comments in one call. Each anchors on an exact quote from the text (with a section id to disambiguate), on a section heading, as a reply to an existing comment, or as a document-level note. Returns the created comments with their resolved anchors. Idempotent by `requestId`. |
 | `update_comment` | Reword a comment the agent created. |
 | `remove_comments` | Withdraw comments the agent created, in batch. |
@@ -29,6 +31,8 @@ All tools are registered under the `plannotator.` prefix.
 | `list_documents` | Folder sessions only: the document tree with per-document comment counts and what changed since the agent last read each one. |
 
 Every response carries `nudges`: short machine-readable notices computed from state the page already holds, such as `annotations_new` (you added or edited comments since the last read), `replies_new`, `annotations_removed` (you deleted one of the agent's comments, which the agent should treat as resolved), `composer_open` (you are typing right now), `source_stale`, `document_edited`, `comment_only_surface` (an HTML or live app page, where comments anchor on a text quote or the whole document and nothing can be marked for deletion), `page_changed`, `other_document_active`, `truncated`, `pending_unsent`, and `session_decided`.
+
+When the document has question blocks, `read_document` also returns `questions`, one entry per block in document order: `q` (its number), `key`, `kind` (`single`, `multi` or `text`), `prompt`, `context`, `section`, `options` (each with `label`, `description`, `recommended` and `settled`), `recommended`, `suggested`, `status` (`open`, `answered`, `skipped` or `settled`), and your `answer` when there is one (`selected`, `other`, `text`, `note`, `skipped`, and the `annotationId` of the comment that carries it). An answer whose question was reworded or removed is listed with `q: null` and `orphaned: true`. The same answers also appear in `annotations`, each marked `answersQuestion` with the question's key. A document without questions has no `questions` key, and `include` can leave it out.
 
 Comments the agent creates appear in the annotations panel like any other external-tool comment, labeled `browser-agent`. A reply threads under the comment it answers and is exported nested under it, so the coding agent reads the exchange in order.
 

@@ -6,6 +6,7 @@ import path from "node:path";
 import { executeSubmitPlan } from "./submit-plan-executor";
 import { getPlanBackingPath } from "./plan-edits";
 import { normalizeWorkflowOptions } from "./workflow";
+import { DEFAULT_PLAN_ANSWERED_PROMPT } from "@plannotator/shared/prompts";
 
 const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
 const tempDirs: string[] = [];
@@ -48,6 +49,41 @@ describe("executeSubmitPlan", () => {
       planContent: "# Plan\n\nShip it",
       abortSignal: undefined,
     });
+  });
+
+  test("an answers-only deny uses the plan.answered prompt, not the denied one", async () => {
+    // What regresses: the agent is told its plan "was not approved" when the
+    // reviewer only answered its questions.
+    prepareDataDir();
+    const run = (answersOnly?: boolean) => executeSubmitPlan({
+      edits: [{ start: 1, content: "# Plan\n\nShip it" }],
+      invokingAgent: "plan",
+      sessionId: "session-answers",
+      directory: "/workspace/example",
+      workflowOptions: normalizeWorkflowOptions(undefined),
+    }, {
+      reviewPlan: async () => ({
+        approved: false,
+        feedback: "## Answers to your questions",
+        ...(answersOnly === undefined ? {} : { answersOnly }),
+      }),
+      resolveTargetAgent: async () => undefined,
+      sendApprovalHandoff: async () => {},
+    });
+
+    const answered = await run(true);
+    const answeredOpening = DEFAULT_PLAN_ANSWERED_PROMPT.slice(0, DEFAULT_PLAN_ANSWERED_PROMPT.indexOf("\n"));
+    expect(answered.startsWith(answeredOpening)).toBe(true);
+    expect(answered).not.toContain("YOUR PLAN WAS NOT APPROVED");
+    expect(answered).toContain("submit_plan");
+    expect(answered).toContain("## Answers to your questions");
+    // The line-numbered plan still follows, for the targeted-edit resubmit.
+    expect(answered).toContain("1| # Plan");
+
+    for (const flag of [undefined, false]) {
+      const denied = await run(flag);
+      expect(denied.startsWith("YOUR PLAN WAS NOT APPROVED.")).toBe(true);
+    }
   });
 
   test("cleans up approved plans and sends implementation handoff", async () => {

@@ -6,6 +6,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { PFM_REMINDER, composeImproveContext } from "./pfm-reminder";
+import { parseQuestionBlock } from "./question-block";
 
 describe("PFM_REMINDER", () => {
   test("identifies itself with a recognizable header", () => {
@@ -26,6 +27,31 @@ describe("PFM_REMINDER", () => {
     expect(PFM_REMINDER).toContain("mermaid");
     expect(PFM_REMINDER).toContain("Wiki-links");
     expect(PFM_REMINDER).toContain("Hex color swatches");
+  });
+
+  test("its question block example parses as the renderer parses it", () => {
+    // What regresses: the question grammar changes and the reminder keeps
+    // teaching agents a block the renderer shows as a plain callout.
+    const lines = PFM_REMINDER.split("\n");
+    const start = lines.indexOf("  :::question");
+    expect(start).toBeGreaterThan(-1);
+    const end = lines.indexOf("  :::", start + 1);
+    expect(end).toBeGreaterThan(start);
+    const body = lines.slice(start + 1, end).map((l) => l.replace(/^ {2}/, "")).join("\n");
+    const parsed = parseQuestionBlock("question", body);
+    expect(parsed?.kind).toBe("single");
+    expect(parsed?.choices.length).toBe(2);
+    expect(parsed?.choices.filter((c) => c.recommended).map((c) => c.label)).toEqual(["Redis"]);
+    expect(PFM_REMINDER).toContain("- [x]");
+  });
+
+  test("is static, so a prompt cache prefix never varies between requests", () => {
+    // The reminder is injected on every EnterPlanMode / system transform;
+    // any per-request text (a date, a path, a counter) would break caching.
+    const a = composeImproveContext({ pfmEnabled: true, improvementHookContent: null });
+    const b = composeImproveContext({ pfmEnabled: true, improvementHookContent: null });
+    expect(a).toBe(b);
+    expect(PFM_REMINDER).not.toMatch(/\{\{|\$\{/);
   });
 
   test("stays small enough to inject on every EnterPlanMode call", () => {

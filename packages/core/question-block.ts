@@ -696,4 +696,5 @@ Recommended: Local only, purged after 30 days
 - \`- [x]\` means the choice is already settled. Use it when you resubmit: keep an answered question with the chosen choice checked, or remove the block and write the decision into the prose.
 - Leave blank lines between the parts so the block also reads well on GitHub.
 - Ask only what you cannot decide alone, and keep a round short (about 8 questions at most). Do not ask rhetorical questions or questions the codebase answers.
+- Each answer comes back under its question (\`### Q2. <question> (line N)\`) as \`Answer: <choice>\`, marked \`(your recommendation)\` when the reviewer took yours, or as \`Other: …\`, free text in a quote, or \`Skipped\`, plus any \`Note:\`. A question you marked \`- [x]\` is settled and only comes back if the reviewer changed it or added a note.
 `;

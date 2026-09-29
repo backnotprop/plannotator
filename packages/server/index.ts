@@ -112,6 +112,10 @@ export interface ServerResult {
     savedPath?: string;
     agentSwitch?: string;
     permissionMode?: string;
+    /** The reviewer's only feedback was answers to the plan's questions
+     *  (`answersOnly: true` on /api/deny). Consumers pick the
+     *  `plan.answered` prompt through `composePlanDeniedMessage`. */
+    answersOnly?: boolean;
   }>;
   /** Wait for user to close (archive mode only) */
   waitForDone?: () => Promise<void>;
@@ -177,6 +181,7 @@ export async function startPlannotatorServer(
     savedPath?: string;
     agentSwitch?: string;
     permissionMode?: string;
+    answersOnly?: boolean;
   }) => void;
   let decisionPromise: Promise<{
     approved: boolean;
@@ -184,6 +189,7 @@ export async function startPlannotatorServer(
     savedPath?: string;
     agentSwitch?: string;
     permissionMode?: string;
+    answersOnly?: boolean;
   }>;
 
   if (mode !== "archive") {
@@ -610,14 +616,17 @@ export async function startPlannotatorServer(
             let planSaveEnabled = true; // default to enabled for backwards compat
             let planSaveCustomPath: string | undefined;
             let draftGeneration: number | undefined;
+            let answersOnly = false;
             try {
               const body = (await req.json()) as {
                 feedback?: string;
                 planSave?: { enabled: boolean; customPath?: string };
                 draftGeneration?: number;
+                answersOnly?: unknown;
               };
               draftGeneration = readDraftGenerationFromBody(body);
               feedback = body.feedback || feedback;
+              answersOnly = body.answersOnly === true;
 
               // Capture plan save settings
               if (body.planSave !== undefined) {
@@ -638,7 +647,7 @@ export async function startPlannotatorServer(
             archivePlanDecision("denied", feedback);
 
             deleteDraft(draftKey, draftGeneration);
-            resolveDecision({ approved: false, feedback, savedPath });
+            resolveDecision({ approved: false, feedback, savedPath, ...(answersOnly ? { answersOnly: true } : {}) });
             return Response.json({ ok: true, savedPath });
           }
 

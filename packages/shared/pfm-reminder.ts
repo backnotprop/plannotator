@@ -71,6 +71,17 @@ Use \`- [ ]\` and \`- [x]\` for actionable steps the reviewer (or a follow-up ag
 Diagrams
 Code fences with \`mermaid\` or \`graphviz\` render as live diagrams. Useful for flow, state, sequence, or architecture sketches.
 
+Questions for the reviewer
+When a decision needs the reviewer, ask it as a question block. They answer in place, and the answers come back at the top of their feedback. Ask only what you cannot decide alone, about 8 at most per round. \`:::question-multi\` picks any number, \`:::question-text\` asks for free text. \`- [x]\` marks a choice as settled: use it when you resubmit with an answered question.
+  :::question
+  Which cache backend?
+
+  - [ ] Redis — shared across instances
+  - [ ] In-memory — simplest, lost on restart
+
+  Recommended: Redis
+  :::
+
 Other extras
   - Wiki-links: [[architecture]] auto-resolves to .md docs in the workspace
   - Hex color swatches: #1a2bcc renders as a small color chip

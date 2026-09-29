@@ -55,6 +55,8 @@ export interface OpenCodePlanReviewResult {
   feedback?: string;
   savedPath?: string;
   agentSwitch?: string;
+  /** The reviewer only answered the plan's questions (absent from older binaries). */
+  answersOnly?: boolean;
 }
 
 export interface OpenCodeBridgeAgent {

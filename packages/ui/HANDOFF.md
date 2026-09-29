@@ -1582,7 +1582,7 @@ Recommended: Local only, purged after 30 days
 - `questionKey(kind, prompt)` = `q-` + an 8-hex FNV-1a hash of the kind and the normalized prompt. It is stable across versions while the prompt is unchanged. A reworded prompt is a new question.
 - `QuestionAnswer` (`{ v: 1, key, kind, prompt, selected: labels[], other?, text?, note?, skipped?, sourceLine? }`), `parseQuestionAnswer` (fail-closed: wrong types return null, strings are truncated to the caps), `isQuestionAnswered`, `isQuestionAnswerEmpty`, `recommendedQuestionAnswer`, `buildQuestionAnswerAnnotation` (structural record, `type: 'COMMENT'`).
 - `formatQuestionAnswersSection(items, answers, { headingLevel })`, `questionExportItems(index)`, `formatQuestionAnswerLines`, `formatQuestionAnswerText`.
-- `QUESTION_AUTHORING_GUIDE`: the syntax reference as one markdown string. Put it in your own agent prompts. Plannotator's skill text will be written from the same source.
+- `QUESTION_AUTHORING_GUIDE`: the syntax reference as one markdown string. Put it in your own agent prompts. Plannotator's `plannotator` skill carries the same text byte for byte (a test keeps them equal).
 
 **`@plannotator/ui`:**
 

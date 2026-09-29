@@ -48,6 +48,7 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { parseDiagramAnchor, type DiagramAnchor } from "@plannotator/core/diagram-anchor";
+import { parseQuestionAnswer, type QuestionAnswer } from "@plannotator/core/question-block";
 import { getPlannotatorDataDir } from "./data-dir";
 import { extractDirName, extractRepoName, sanitizeTag } from "./project";
 
@@ -187,6 +188,14 @@ export interface FeedbackAnnotationRecord {
    *  same parser the ui codec runs. Additive per the field contract above;
    *  absent for every other annotation kind. */
   diagramAnchor?: DiagramAnchor;
+  /** The reviewer's answer to a `:::question` block (the annotation's
+   *  `questionAnswer`): picked choice labels, "Other" or free text, note,
+   *  skipped, plus the question's key and prompt. Validated and capped by
+   *  the same `parseQuestionAnswer` the ui runs; a malformed value is left
+   *  out. Additive per the field contract above; absent for every other
+   *  annotation kind. This is the "how I answer things" record: the text
+   *  also rides `feedback`, this is the structured copy. */
+  questionAnswer?: QuestionAnswer;
   images?: number;
 }
 
@@ -334,6 +343,8 @@ function normalizeAnnotation(raw: unknown): FeedbackAnnotationRecord {
   if (pageUrl) record.pageUrl = pageUrl;
   const diagramAnchor = a.diagramAnchor === undefined ? null : parseDiagramAnchor(a.diagramAnchor);
   if (diagramAnchor !== null) record.diagramAnchor = diagramAnchor;
+  const questionAnswer = a.questionAnswer === undefined ? null : parseQuestionAnswer(a.questionAnswer);
+  if (questionAnswer !== null) record.questionAnswer = questionAnswer;
   return record;
 }
 

@@ -181,7 +181,7 @@ import { useQuestionAnswers } from './hooks/useQuestionAnswers';
 import {
   countQuestionAnswers,
   describeFeedbackLoss,
-  frameAnswersOnlyFeedback,
+  planDenyFeedbackFields,
   isAnswersOnlyFeedback,
   isQuestionAnswerRow,
   questionAnswerRemapper,
@@ -4042,11 +4042,9 @@ const App: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           draftGeneration: getDraftGeneration(),
-          // Answers only: the agent is told the reviewer answered its
-          // questions, not that the plan was rejected. `answersOnly` is
-          // additive; today's servers ignore it.
-          feedback: answersOnlyFeedback ? frameAnswersOnlyFeedback(payload) : payload,
-          ...(answersOnlyFeedback ? { answersOnly: true } : {}),
+          // Answers only: `answersOnly` makes the server answer the agent
+          // with its plan.answered prompt instead of "not approved".
+          ...planDenyFeedbackFields(payload, answersOnlyFeedback),
           planSave: {
             enabled: planSaveSettings.enabled,
             ...(planSaveSettings.customPath && { customPath: planSaveSettings.customPath }),

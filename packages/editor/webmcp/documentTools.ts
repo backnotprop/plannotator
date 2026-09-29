@@ -3,6 +3,11 @@
  * `read_document`, `add_comments`, `update_comment`, `remove_comments`,
  * `reveal`, `nudge_user`, plus `list_documents` in folder sessions.
  *
+ * `:::question` blocks and the human's answers are READABLE through
+ * `read_document` (`questions`) and never writable: no tool answers a
+ * question, and a comment an agent creates never carries `questionAnswer`
+ * (owner decision 5: answers are the human's voice).
+ *
  * The agent reads, comments and points; the human decides. No tool here
  * approves, denies, submits, closes, stages or marks anything, and the
  * catalog test pins that by name. The catalog takes an ADAPTER (getters and
@@ -12,6 +17,14 @@
  */
 import { AnnotationType, type Annotation, type Block } from '@plannotator/ui/types';
 import { generateId } from '@plannotator/ui/utils/generateId';
+import { collectQuestionAnswers } from '@plannotator/ui/utils/questionAnswers';
+import {
+  indexQuestionBlocks,
+  questionAnswerAnnotationId,
+  questionStatus,
+  type QuestionKind,
+  type QuestionStatus,
+} from '@plannotator/shared/question-block';
 import {
   AnnotationChangeTracker,
   BROWSER_AGENT_SOURCE,
@@ -129,6 +142,39 @@ export interface AnnotationView {
   inReplyTo: string | null;
   replies: string[];
   pageUrl?: string;
+  /** Set on the human's answer to a question: that question's `key` (see `questions`). */
+  answersQuestion?: string;
+}
+
+/**
+ * One `:::question` block of the document, with the human's answer when
+ * there is one. Read-only: no tool writes an answer. An answer whose
+ * question is no longer in the document (the prompt was edited) is listed
+ * with `q: null` and `orphaned: true`; it still goes out with the feedback.
+ */
+export interface QuestionView {
+  /** "Question N" in document order; null for an orphaned answer. */
+  q: number | null;
+  key: string;
+  kind: QuestionKind;
+  prompt: string;
+  context?: string;
+  section: { id: string; title: string } | null;
+  options: Array<{ label: string; description?: string; recommended: boolean; settled: boolean }>;
+  /** Recommended choice labels (the `Recommended:` line). */
+  recommended: string[];
+  /** A `Recommended:` text that names no choice: the suggested answer. */
+  suggested?: string;
+  status: QuestionStatus;
+  answer?: {
+    annotationId: string;
+    selected: string[];
+    other?: string;
+    text?: string;
+    note?: string;
+    skipped?: boolean;
+  };
+  orphaned?: true;
 }
 
 export type AnchoredBy = 'quote' | 'section' | 'reply' | 'document';
@@ -255,7 +301,69 @@ function viewOf(
   };
   if (capped.truncated) view.truncated = true;
   if (annotation.pageUrl) view.pageUrl = annotation.pageUrl;
+  if (annotation.questionAnswer != null) {
+    const answerKey = collectQuestionAnswers([annotation]).keys().next().value;
+    if (answerKey) view.answersQuestion = answerKey;
+  }
   return view;
+}
+
+/** The document's questions and answers, in document order, then orphaned answers. */
+export function questionViews(blocks: readonly Block[], annotations: readonly Annotation[], outline: readonly OutlineEntry[]): QuestionView[] {
+  const indexed = indexQuestionBlocks(blocks);
+  const answers = collectQuestionAnswers(annotations);
+  const seen = new Set<string>();
+  const answerView = (key: string): QuestionView['answer'] | undefined => {
+    const a = answers.get(key);
+    if (!a) return undefined;
+    return {
+      annotationId: questionAnswerAnnotationId(key),
+      selected: [...a.selected],
+      ...(a.other ? { other: a.other } : {}),
+      ...(a.text ? { text: a.text } : {}),
+      ...(a.note ? { note: a.note } : {}),
+      ...(a.skipped ? { skipped: true } : {}),
+    };
+  };
+  const out: QuestionView[] = indexed.map(({ blockId, number, question }) => {
+    seen.add(question.key);
+    const section = sectionForBlock(blocks, outline, blockId);
+    const answer = answerView(question.key);
+    return {
+      q: number,
+      key: question.key,
+      kind: question.kind,
+      prompt: question.prompt,
+      ...(question.context.trim() ? { context: question.context } : {}),
+      section: section ? { id: section.id, title: section.title } : null,
+      options: question.choices.map((c) => ({
+        label: c.label,
+        ...(c.description ? { description: c.description } : {}),
+        recommended: c.recommended,
+        settled: c.settled,
+      })),
+      recommended: question.choices.filter((c) => c.recommended).map((c) => c.label),
+      ...(question.suggestedText ? { suggested: question.suggestedText } : {}),
+      status: questionStatus(question, answers.get(question.key)),
+      ...(answer ? { answer } : {}),
+    };
+  });
+  for (const a of answers.values()) {
+    if (seen.has(a.key)) continue;
+    out.push({
+      q: null,
+      key: a.key,
+      kind: a.kind,
+      prompt: a.prompt,
+      section: null,
+      options: [],
+      recommended: [],
+      status: questionStatus({ choices: [] }, a),
+      answer: answerView(a.key),
+      orphaned: true,
+    });
+  }
+  return out;
 }
 
 function surfaceOf(session: DocumentSessionView): DocumentSurface {
@@ -354,7 +462,7 @@ type ReadInput = {
   offset?: number;
   maxChars?: number;
   since?: string | number;
-  include?: Array<'text' | 'annotations' | 'outline'>;
+  include?: Array<'text' | 'annotations' | 'outline' | 'questions'>;
 };
 
 const PATH_PARAM = {
@@ -387,7 +495,7 @@ export function buildDocumentTools(adapter: DocumentToolAdapter, state: Document
     name: 'read_document',
     title: 'Read the document under review',
     description:
-      'Everything about the page in one call: the session (mode, whether the human is editing, whether they already decided), the document text, its outline with per-section comment counts, every comment with its quoted text, surrounding context and whether it is new since your last read, the other documents the human is active on, and nudges. Use it to learn what is going on; call it with no arguments first. Do not use it just to look up a comment id that a previous response already gave you.',
+      'Everything about the page in one call: the session (mode, editing, whether the human decided), the document text, its outline with per-section comment counts, every comment with its quote, context and whether it is new since your last read, the document questions with the human answers (read-only), other active documents, and nudges. Call it with no arguments first. Do not use it just to look up a comment id a previous response gave you.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -397,7 +505,7 @@ export function buildDocumentTools(adapter: DocumentToolAdapter, state: Document
         offset: { type: 'integer', minimum: 0, description: 'Character offset into the (section) text for large documents. Default 0.' },
         maxChars: { type: 'integer', minimum: 200, maximum: 200000, description: 'Text budget; cut at a block boundary, nextOffset continues. Default 16000.' },
         since: { type: 'string', maxLength: 64, description: 'A cursor from an earlier response; marks comments newer than it as isNew instead of the per-tab watermark.' },
-        include: { type: 'array', maxItems: 3, items: { type: 'string', enum: ['text', 'annotations', 'outline'] }, description: 'Subset to return. Default: all three.' },
+        include: { type: 'array', maxItems: 4, items: { type: 'string', enum: ['text', 'annotations', 'outline', 'questions'] }, description: 'Subset to return. Default: all. questions appears only when the document has question blocks or answers.' },
       },
     },
     annotations: { readOnlyHint: true, untrustedContentHint: true },
@@ -407,7 +515,7 @@ export function buildDocumentTools(adapter: DocumentToolAdapter, state: Document
       if ('ok' in target) return target;
       const { snapshot, tracker, isOpen } = target;
       const session = adapter.getSession();
-      const include = new Set(input.include && input.include.length > 0 ? input.include : ['text', 'annotations', 'outline']);
+      const include = new Set(input.include && input.include.length > 0 ? input.include : ['text', 'annotations', 'outline', 'questions']);
       const explicitSince = AnnotationChangeTracker.parseSince(input.since);
       const since = explicitSince ?? (isOpen ? state.main.watermark : (state.siblingRead.get(target.path ?? '') ?? 0));
       if (isOpen && explicitSince !== null) state.current.since = explicitSince;
@@ -442,6 +550,10 @@ export function buildDocumentTools(adapter: DocumentToolAdapter, state: Document
         ? listed.map((a) => viewOf(a, snapshot.annotations, snapshot.blocks, outline, tracker, since, now()))
         : undefined;
 
+      // Read-only view of the question blocks and the human's answers. A
+      // document without questions gets no `questions` key at all.
+      const questions = include.has('questions') ? questionViews(snapshot.blocks, snapshot.annotations, outline) : undefined;
+
       const agentComments = snapshot.annotations.filter(isAgentAnnotation).length;
       const others = otherDocumentActivity(adapter, state).slice(0, MAX_OTHER_DOCUMENTS).map((doc) => ({
         path: doc.path,
@@ -475,6 +587,7 @@ export function buildDocumentTools(adapter: DocumentToolAdapter, state: Document
         ...(include.has('text') ? { text, textRange } : {}),
         ...(include.has('outline') ? { outline: outline.map(({ blockId: _blockId, ...entry }) => entry) } : {}),
         ...(annotations ? { annotations } : {}),
+        ...(questions && questions.length > 0 ? { questions } : {}),
         otherDocuments: others,
       };
       return ok(data, state.main.cursor());

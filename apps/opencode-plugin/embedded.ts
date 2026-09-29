@@ -26,6 +26,7 @@ export interface EmbeddedPlanReviewResult {
   feedback?: string;
   savedPath?: string;
   agentSwitch?: string;
+  answersOnly?: boolean;
 }
 
 async function loadPlanServer() {

@@ -69,6 +69,8 @@ Body:
 }
 ```
 
+Optional: `"answersOnly": true` when the only feedback is answers to the plan's [questions](/docs/guides/questions/). The agent then receives the `plan.answered` message instead of the denied message. Any value other than the boolean `true` is ignored.
+
 ## Review server
 
 Used during code review (`/plannotator-review`).

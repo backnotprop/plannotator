@@ -3,8 +3,9 @@
  *
  * What regresses if this fails: the plan-review primary reads "Send answers"
  * while comments or edits are also going out (or stops reading it when only
- * answers are), the answers-only deny loses its framing or lands it inside
- * the Answers section, the "Feedback won't be sent" warning stops naming the
+ * answers are), the answers-only deny stops flagging
+ * `answersOnly` (the server's plan.answered prompt) or starts framing the
+ * export a second time, the "Feedback won't be sent" warning stops naming the
  * answers (or changes wording for documents without questions), or Edit Mode
  * leaves an answer pointing at a stale block id.
  */
@@ -14,11 +15,10 @@ import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { questionAnswerToAnnotation } from '@plannotator/ui/utils/questionAnswers';
 import { AnnotationType, type Annotation } from '@plannotator/ui/types';
 import {
-  ANSWERS_ONLY_FRAMING,
   countQuestionAnswers,
   describeFeedbackLoss,
-  frameAnswersOnlyFeedback,
   isAnswersOnlyFeedback,
+  planDenyFeedbackFields,
   questionAnswerRemapper,
 } from './questionDecision';
 
@@ -37,15 +37,17 @@ describe('isAnswersOnlyFeedback', () => {
   });
 });
 
-describe('frameAnswersOnlyFeedback', () => {
-  test('the framing sits under the title, above the Answers section', () => {
-    const payload = '# Plan Feedback\n\n## Answers to your questions\n\n1 of 1 question answered.\n';
-    const framed = frameAnswersOnlyFeedback(payload);
-    expect(framed.startsWith(`# Plan Feedback\n\n${ANSWERS_ONLY_FRAMING}\n\n## Answers to your questions`)).toBe(true);
-    expect(framed.endsWith('1 of 1 question answered.\n')).toBe(true);
+describe('planDenyFeedbackFields', () => {
+  const payload = '# Plan Feedback\n\n## Answers to your questions\n\n1 of 1 question answered.\n';
+  test('answers only: the flag rides the body and the export goes out unframed', () => {
+    // The server's plan.answered prompt carries the framing; a paragraph in
+    // the body as well would say it twice.
+    expect(planDenyFeedbackFields(payload, true)).toEqual({ feedback: payload, answersOnly: true });
   });
-  test('a payload without a title gets the framing first', () => {
-    expect(frameAnswersOnlyFeedback('body')).toBe(`${ANSWERS_ONLY_FRAMING}\n\nbody`);
+  test('ordinary feedback: no flag, the body is unchanged', () => {
+    const body = planDenyFeedbackFields(payload, false);
+    expect(body).toEqual({ feedback: payload });
+    expect('answersOnly' in body).toBe(false);
   });
 });
 

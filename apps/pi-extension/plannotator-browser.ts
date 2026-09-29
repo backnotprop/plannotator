@@ -61,6 +61,8 @@ export interface PlanReviewDecision {
 	savedPath?: string;
 	agentSwitch?: string;
 	permissionMode?: string;
+	/** The reviewer only answered the plan's questions (`answersOnly: true` on /api/deny). */
+	answersOnly?: boolean;
 }
 
 export interface BrowserDecisionSession<T> {

@@ -187,6 +187,33 @@ plannotator improve-context
 
 A running plan-review session exposes a small HTTP API on its base URL for external annotations: `POST /api/external-annotations` adds inline annotations the reviewer sees immediately, with PATCH/DELETE for updates and an SSE stream at `/api/external-annotations/stream`. The UI's "copy agent instructions" action puts the full API contract for the current session, with the correct base URL, on the clipboard for handing to an agent or script. If the user pastes such instructions, follow them; do not invent endpoints beyond that contract.
 
+## Asking the reviewer questions
+
+When a decision needs the reviewer (a trade-off you cannot settle from the code or the conversation), write it as a question block. The reviewer answers in place, and the answers come back to you in an "Answers to your questions" section at the top of their feedback, with the questions they left open listed under "Unanswered".
+
+```markdown
+:::question
+Where should losing conflict versions be kept?
+
+Last-write-wins silently drops the loser unless we keep it somewhere.
+
+- [ ] Local only, purged after 30 days — cheap, no server change
+- [ ] Server-side per user — survives reinstall, needs a retention policy
+- [ ] Nowhere — accept silent loss for v1
+
+Recommended: Local only, purged after 30 days
+:::
+```
+
+- `:::question` picks one choice, `:::question-multi` picks any number, `:::question-text` asks for free text (a block with no choices is free text too).
+- The first line is the question. Other prose lines are context.
+- Choices are task-list items: `- [ ] label`, optionally `- [ ] label — why`. The reviewer can always answer "Other", add a note, or skip.
+- `Recommended: <label>` marks your recommendation. Text that matches no choice is offered as a suggested answer.
+- `- [x]` means the choice is already settled. Use it when you resubmit: keep an answered question with the chosen choice checked, or remove the block and write the decision into the prose.
+- Leave blank lines between the parts so the block also reads well on GitHub.
+- Ask only what you cannot decide alone, and keep a round short (about 8 questions at most). Do not ask rhetorical questions or questions the codebase answers.
+- Each answer comes back under its question (`### Q2. <question> (line N)`) as `Answer: <choice>`, marked `(your recommendation)` when the reviewer took yours, or as `Other: …`, free text in a quote, or `Skipped`, plus any `Note:`. A question you marked `- [x]` is settled and only comes back if the reviewer changed it or added a note.
+
 ## Do not
 
 - Do not parse or scrape the browser UI's HTML; the CLI's stdout (and the documented HTTP API above) is the whole contract.

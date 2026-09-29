@@ -66,6 +66,8 @@ export interface PlanReviewDecision {
 	savedPath?: string;
 	agentSwitch?: string;
 	permissionMode?: string;
+	/** The reviewer only answered the plan's questions (`answersOnly: true` on /api/deny). */
+	answersOnly?: boolean;
 }
 
 export interface PlanServerResult {
@@ -474,10 +476,12 @@ export async function startPlanReviewServer(options: {
 			let planSaveEnabled = true;
 			let planSaveCustomPath: string | undefined;
 			let draftGeneration: number | undefined;
+			let answersOnly = false;
 			try {
 				const body = await parseBody(req);
 				draftGeneration = readDraftGenerationFromBody(body);
 				feedback = (body.feedback as string) || feedback;
+				answersOnly = body.answersOnly === true;
 				if (body.planSave !== undefined) {
 					const ps = body.planSave as { enabled: boolean; customPath?: string };
 					planSaveEnabled = ps.enabled;
@@ -499,7 +503,7 @@ export async function startPlanReviewServer(options: {
 			}
 			archivePlanDecision("denied", feedback);
 			deleteDraft(draftKey, draftGeneration);
-			publishDecision({ approved: false, feedback, savedPath });
+			publishDecision({ approved: false, feedback, savedPath, ...(answersOnly ? { answersOnly: true } : {}) });
 			json(res, { ok: true, savedPath });
 		} else if (url.pathname.startsWith("/api/")) {
 			handleApiNotFound(res, url.pathname);
