@@ -852,7 +852,24 @@ if "!VERIFY_ATTESTATION!"=="1" (
 
 REM Install binary
 set "INSTALL_PATH=!INSTALL_DIR!\plannotator.exe"
+REM A running plannotator.exe cannot be overwritten, but it can be renamed.
+REM Move the current binary aside to plannotator.exe.old first (a running
+REM session keeps working from it), then move the new one in. The .old file
+REM from an earlier run is deleted when nothing holds it any more; if it is
+REM still locked the rename-aside is skipped and the move behaves as before.
+if exist "!INSTALL_PATH!.old" del /f /q "!INSTALL_PATH!.old" >nul 2>&1
+set "ASIDE_DONE=0"
+if exist "!INSTALL_PATH!" if not exist "!INSTALL_PATH!.old" (
+    move /y "!INSTALL_PATH!" "!INSTALL_PATH!.old" >nul 2>&1 && set "ASIDE_DONE=1"
+)
 move /y "!TEMP_FILE!" "!INSTALL_PATH!" >nul
+if errorlevel 1 (
+    if "!ASIDE_DONE!"=="1" if not exist "!INSTALL_PATH!" move /y "!INSTALL_PATH!.old" "!INSTALL_PATH!" >nul 2>&1
+    if exist "!TEMP_FILE!" del "!TEMP_FILE!" >nul 2>&1
+    echo Could not install !INSTALL_PATH!. >&2
+    exit /b 1
+)
+if "!ASIDE_DONE!"=="1" del /f /q "!INSTALL_PATH!.old" >nul 2>&1
 
 echo.
 echo plannotator !TAG! installed to !INSTALL_PATH!
@@ -860,8 +877,10 @@ echo plannotator !TAG! installed to !INSTALL_PATH!
 REM Binary-only mode stops here (see the MINIMAL resolution after :args_done):
 REM the binary is installed, so print PATH advice and exit before any sidecar
 REM download, agent integration, skill checkout, or config write runs. No
-REM persistent state is written outside !INSTALL_DIR!.
+REM persistent state is written outside !INSTALL_DIR! except install-flags.json
+REM (:WriteInstallFlags), which lets a later auto-update stay binary-only.
 if "!MINIMAL!"=="1" (
+    call :WriteInstallFlags
     call :PrintPathAdvice
     echo.
     echo Minimal install complete - only the plannotator binary was installed.
@@ -1661,8 +1680,43 @@ if exist "!PLUGIN_HOOKS!" if exist "!CLAUDE_SETTINGS!" (
     )
 )
 
+REM The full install completed: remember its command-line flags for auto-update.
+call :WriteInstallFlags
+
 echo.
 exit /b 0
+
+REM ======================================================================
+REM Remember the install-affecting choices this run took from COMMAND-LINE
+REM flags (#1634), so a background auto-update re-runs the installer with the
+REM same ones. Only the known flag set is written, as neutral ids shared with
+REM install.sh / install.ps1 (never raw arguments, paths, or secrets); env vars
+REM and config.json survive on their own and are not recorded. A run with none
+REM of these flags writes an empty set, which is how a manual re-run with no
+REM flags goes back to defaults. Best effort: a failed write never fails the
+REM install.
+REM ======================================================================
+:WriteInstallFlags
+set "IFL="
+if "!MINIMAL_FLAG!"=="1" call :AddInstallFlag minimal
+if "!MINIMAL_FLAG!"=="0" call :AddInstallFlag no-minimal
+if "!VERIFY_ATTESTATION_FLAG!"=="1" call :AddInstallFlag verify-attestation
+if "!VERIFY_ATTESTATION_FLAG!"=="0" call :AddInstallFlag skip-attestation
+if "!WITH_CALL_FLOW_FLAG!"=="1" call :AddInstallFlag with-call-flow
+if "!SKIP_CODEX_FLAG!"=="1" call :AddInstallFlag skip-codex
+if "!SKIP_GEMINI_FLAG!"=="1" call :AddInstallFlag skip-gemini
+if "!SKIP_KIRO_FLAG!"=="1" call :AddInstallFlag skip-kiro
+if "!SKIP_VIBE_FLAG!"=="1" call :AddInstallFlag skip-vibe
+if "!SKIP_OPENCODE_FLAG!"=="1" call :AddInstallFlag skip-opencode
+if "!SKIP_SKILLS_FLAG!"=="1" call :AddInstallFlag skip-skills
+if not exist "!_CONFIG_DIR!" mkdir "!_CONFIG_DIR!" >nul 2>&1
+>"!_CONFIG_DIR!\install-flags.json.tmp" echo {"v":1,"flags":[!IFL!]}
+if exist "!_CONFIG_DIR!\install-flags.json.tmp" move /y "!_CONFIG_DIR!\install-flags.json.tmp" "!_CONFIG_DIR!\install-flags.json" >nul 2>&1
+goto :eof
+
+:AddInstallFlag
+if defined IFL (set "IFL=!IFL!,"%~1"") else (set "IFL="%~1"")
+goto :eof
 
 REM ======================================================================
 REM Print the PATH-setup hint if INSTALL_DIR isn't already on PATH. Called by

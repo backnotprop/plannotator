@@ -3461,12 +3461,13 @@ export async function startReviewServer(options: {
 			}
 		} else if (url.pathname === "/api/config" && req.method === "POST") {
 			try {
-				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; reviewAnalysis?: Record<string, unknown>; conventionalComments?: boolean };
+				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; reviewAnalysis?: Record<string, unknown>; conventionalComments?: boolean };
 				const toSave: Record<string, unknown> = {};
 				if (body.displayName !== undefined) toSave.displayName = body.displayName;
 				if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
 				if (body.theme !== undefined) toSave.theme = body.theme;
 				if (isFaviconStyle(body.favicon)) toSave.favicon = body.favicon;
+				if (typeof body.autoUpdate === "boolean") toSave.autoUpdate = body.autoUpdate;
 				if (body.reviewAnalysis !== undefined) {
 					const reviewAnalysis = parseReviewAnalysisConfig(body.reviewAnalysis);
 					if (!reviewAnalysis) return json(res, { error: "Invalid analysis settings" }, 400);

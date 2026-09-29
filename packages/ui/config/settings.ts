@@ -599,6 +599,23 @@ export const SETTINGS = {
     },
     toServer: (value: boolean) => ({ reviewAnalysis: { callFlow: value } }),
   },
+  /**
+   * Opt-in background auto-update of the compiled CLI (#1634). The server
+   * always sends the config-file value (default false), so the cookie is only
+   * a mirror and can never turn this on by itself.
+   */
+  autoUpdate: {
+    defaultValue: false as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-auto-update');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) => storage.setItem('plannotator-auto-update', String(v)),
+    serverKey: 'autoUpdate',
+    fromServer: (sc: Record<string, unknown>) =>
+      typeof sc.autoUpdate === 'boolean' ? sc.autoUpdate : undefined,
+    toServer: (v: boolean) => ({ autoUpdate: v }),
+  },
   conventionalComments: {
     defaultValue: false as boolean,
     fromCookie: () => {

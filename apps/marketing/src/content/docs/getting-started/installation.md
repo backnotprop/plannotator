@@ -132,6 +132,24 @@ Same precedence: flag over environment variable over config file. The installer 
 
 </details>
 
+## Updating
+
+To update, run the install command again. It installs the latest release over the old one, and a Plannotator session that is open while it runs keeps working.
+
+### Automatic updates (opt-in)
+
+Plannotator can do this for you. Turn on **Settings → General → Keep Plannotator up to date**, or set it yourself:
+
+```json
+{ "autoUpdate": true }
+```
+
+in `~/.plannotator/config.json`, or `PLANNOTATOR_AUTO_UPDATE=1` in your environment (the environment variable wins). It is off by default.
+
+When it is on, the `plannotator` binary checks GitHub for a newer stable release at most once a day, after a review session has started. It never downgrades. If a newer release exists and no other Plannotator session is open, it runs the same install script shown above for that exact version, in the background, with your saved install choices: the `skipInstall` keys in `config.json`, the answers from your first install, and the install flags you last ran the script with. Each install records its flags (`--minimal`, `--no-minimal`, `--skip-codex`, `--skip-gemini`, `--skip-kiro`, `--skip-vibe`, `--skip-opencode`, `--skip-skills`, `--with-call-flow`, `--verify-attestation`, `--skip-attestation`, or the PowerShell equivalents such as `-SkipSkills`) in `~/.plannotator/install-flags.json`, and auto-update passes the same ones again. Running the install script by hand with none of those flags records an empty set, so later updates go back to the defaults. Nothing waits for it: the check adds no time to a review, and a failed check or install only writes a line to `~/.plannotator/update.log`. The next time Plannotator opens you see "Updated to vX", or "Auto-update failed" with the path to that log.
+
+Auto-update only applies to the binary the install script manages (`~/.local/bin/plannotator`, or `%LOCALAPPDATA%\plannotator\plannotator.exe` on Windows). A development build, a binary installed some other way, and the OpenCode and Pi plugins are never updated by it.
+
 ## Uninstall
 
 `plannotator uninstall` removes recognized installed components while

@@ -118,6 +118,11 @@ const PURGE_OWNED_TOP_LEVEL = [
   "codex-review-schema.json",
   "tour-schema.json",
   "guide-schema.json",
+  "update-state.json",
+  "update-result.json",
+  "update.lock",
+  "update.log",
+  "install-flags.json",
 ] as const;
 
 /**

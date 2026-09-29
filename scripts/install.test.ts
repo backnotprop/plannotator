@@ -372,7 +372,7 @@ describe("install.sh", () => {
     // the sidecar downloads, agent integrations, skill checkout, and config
     // writes — that ordering is the whole point of #977.
     const binaryInstalled = script.indexOf(
-      'mv "$tmp_file" "$INSTALL_DIR/plannotator"',
+      'mv -f "$staged_file" "$INSTALL_DIR/plannotator"',
     );
     const minimalExit = script.indexOf('if [ "$minimal" -eq 1 ]; then');
     const semInstall = script.indexOf("install_sem_sidecar\n");
@@ -2546,6 +2546,77 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
 );
 
 // ---------------------------------------------------------------------------
+// install-flags.json (#1634): each successful run records the install-affecting
+// flags it was given, so a background auto-update re-runs with the same ones.
+// ---------------------------------------------------------------------------
+describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
+  "install.sh remembers its command-line flags",
+  () => {
+    const readFlags = (home: string) =>
+      JSON.parse(readFileSync(join(home, ".plannotator", "install-flags.json"), "utf-8"));
+
+    test("a full install records its opt-out flags as neutral ids", () => {
+      const { code, home } = runSummaryInstall(["codex"], ["--skip-codex", "--skip-skills"]);
+      expect(code).toBe(0);
+      expect(readFlags(home)).toEqual({ v: 1, flags: ["skip-codex", "skip-skills"] });
+    });
+
+    test("a minimal install records --minimal (the binary-only early exit writes it too)", () => {
+      const { code, home } = runSummaryInstall([], ["--minimal", "--skip-gemini"]);
+      expect(code).toBe(0);
+      expect(readFlags(home)).toEqual({ v: 1, flags: ["minimal", "skip-gemini"] });
+    });
+
+    test("a run with no flags records an empty set; non-install flags are never recorded", () => {
+      const { code, home } = runSummaryInstall([]);
+      expect(code).toBe(0);
+      // runSummaryInstall passes --version, --non-interactive and --no-extras.
+      expect(readFlags(home)).toEqual({ v: 1, flags: [] });
+    });
+
+    test("the file lands in PLANNOTATOR_DATA_DIR when it is set", () => {
+      const sandbox = setupInstallSandbox({ gh: "pass-all" });
+      const dataDir = join(sandbox.home, "custom-data");
+      const r = Bun.spawnSync(
+        ["bash", join(scriptsDir, "install.sh"), "--version", "v99.9.9", "--minimal", "--skip-attestation", "--non-interactive"],
+        {
+          env: {
+            HOME: sandbox.home,
+            TMPDIR: join(sandbox.home, "tmp"),
+            PATH: `${sandbox.stub}:/usr/bin:/bin`,
+            STUB_CHECKSUM: FAKE_BINARY_SHA256,
+            STUB_ATT_JSON: ATTESTATION_FIXTURE,
+            PLANNOTATOR_DATA_DIR: dataDir,
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      expect(r.exitCode).toBe(0);
+      expect(JSON.parse(readFileSync(join(dataDir, "install-flags.json"), "utf-8"))).toEqual({
+        v: 1,
+        flags: ["minimal", "skip-attestation"],
+      });
+      expect(existsSync(join(sandbox.home, ".plannotator", "install-flags.json"))).toBe(false);
+    });
+  },
+);
+
+describe("install-flags.json is written by every installer", () => {
+  test("install.ps1 and install.cmd record the same neutral ids after both exits", () => {
+    const ps = readScript("install.ps1");
+    const cmd = readScript("install.cmd");
+    for (const id of ["minimal", "no-minimal", "verify-attestation", "skip-attestation", "with-call-flow", "skip-codex", "skip-gemini", "skip-kiro", "skip-vibe", "skip-opencode", "skip-skills"]) {
+      expect(ps).toContain(`$ids += "${id}"`);
+      expect(cmd).toContain(`call :AddInstallFlag ${id}`);
+    }
+    // Called in the minimal gate and once at the end of the full install.
+    expect(ps.split("\n").filter((l) => l.trim() === "Write-InstallFlags")).toHaveLength(2);
+    expect(cmd.split("\n").filter((l) => l.trim() === "call :WriteInstallFlags")).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // M7: the Windows installers' bundle extraction, exercised under PowerShell
 // against the captured REAL attestations response (scripts/fixtures/). The
 // scanner must emit each attestations[].bundle as a byte-exact substring of
@@ -2904,3 +2975,34 @@ describe.skipIf(!pwshBin || process.platform === "win32")(
     }, PWSH_SCANNER_TIMEOUT_MS);
   },
 );
+
+// Auto-update (#1634) runs these scripts in the background while other
+// plannotator processes may be running, so the binary swap must never leave
+// the path missing (sh) and must never try to overwrite a running .exe
+// (ps1/cmd, where Windows refuses; renaming a running exe is allowed).
+describe("binary replacement is safe while plannotator is running", () => {
+  test("install.sh stages next to the target and renames over it, with no rm first", () => {
+    const script = readScript("install.sh");
+    const stage = script.indexOf('staged_file="$INSTALL_DIR/.plannotator.new.$$"');
+    const swap = script.indexOf('mv -f "$staged_file" "$INSTALL_DIR/plannotator"');
+    expect(stage).toBeGreaterThan(0);
+    expect(swap).toBeGreaterThan(stage);
+    expect(script).not.toContain('rm -f "$INSTALL_DIR/plannotator" "$INSTALL_DIR/plannotator.exe"');
+  });
+
+  test("install.ps1 renames the running exe aside before moving the new one in", () => {
+    const script = readScript("install.ps1");
+    const aside = script.indexOf("Move-Item -Force $targetExe $asideExe -ErrorAction Stop");
+    const place = script.indexOf('Move-Item -Force $tmpFile "$installDir\\plannotator.exe"');
+    expect(aside).toBeGreaterThan(0);
+    expect(place).toBeGreaterThan(aside);
+  });
+
+  test("install.cmd renames the running exe aside before moving the new one in", () => {
+    const script = readScript("install.cmd");
+    const aside = script.indexOf('move /y "!INSTALL_PATH!" "!INSTALL_PATH!.old"');
+    const place = script.indexOf('move /y "!TEMP_FILE!" "!INSTALL_PATH!"');
+    expect(aside).toBeGreaterThan(0);
+    expect(place).toBeGreaterThan(aside);
+  });
+});

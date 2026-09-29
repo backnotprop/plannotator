@@ -938,12 +938,13 @@ export async function startAnnotateServer(options: {
 			handleShareHtml(res, url);
 		} else if (url.pathname === "/api/config" && req.method === "POST") {
 			try {
-				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; conventionalComments?: boolean; agentTerminalSide?: unknown; agentTerminalDefaultAgent?: unknown };
+				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; conventionalComments?: boolean; agentTerminalSide?: unknown; agentTerminalDefaultAgent?: unknown };
 				const toSave: Record<string, unknown> = {};
 				if (body.displayName !== undefined) toSave.displayName = body.displayName;
 				if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
 				if (body.theme !== undefined) toSave.theme = body.theme;
 				if (isFaviconStyle(body.favicon)) toSave.favicon = body.favicon;
+				if (typeof body.autoUpdate === "boolean") toSave.autoUpdate = body.autoUpdate;
 				if (body.conventionalComments !== undefined) toSave.conventionalComments = body.conventionalComments;
 				if (isAgentTerminalSide(body.agentTerminalSide)) toSave.agentTerminalSide = body.agentTerminalSide;
 				if (typeof body.agentTerminalDefaultAgent === "string") toSave.agentTerminalDefaultAgent = body.agentTerminalDefaultAgent;

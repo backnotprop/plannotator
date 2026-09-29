@@ -24,6 +24,7 @@
     "./tailscale-serve": "./tailscale-serve.ts",
     "./qr": "./qr.ts",
     "./sessions": "./sessions.ts",
+    "./auto-update": "./auto-update.ts",
     "./project": "./project.ts",
     "./pr": "./pr.ts",
     "./html-assets": "./html-assets.ts",
