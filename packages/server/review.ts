@@ -612,7 +612,9 @@ export async function startReviewServer(
     prScope: currentPRDiffScope,
     workspaceRoot: workspace?.root,
   }, gitRuntime.runGit);
-  let progressSnapshot = captureProgress();
+  // Captured once at startup: either by the initial fingerprint capture below
+  // or, when the caller already supplied a fingerprint, right after it.
+  let progressSnapshot: ReturnType<typeof captureProgress> = Promise.resolve(null);
   const captureDiffFingerprint = (knownFingerprint?: string): void => {
     progressSnapshot = captureProgress();
     // A fingerprint capture marks a committed review-view change. Stop work
@@ -639,6 +641,7 @@ export async function startReviewServer(
     });
   };
   if (currentFingerprint === null) captureDiffFingerprint();
+  else progressSnapshot = captureProgress();
 
   const resolveReviewBase = (
     requestedBase?: string,

@@ -634,7 +634,9 @@ export async function startReviewServer(options: {
 		prScope: currentPRDiffScope,
 		workspaceRoot: workspace?.root,
 	}, reviewRuntime.runGit);
-	let progressSnapshot = captureProgress();
+	// Captured once at startup: either by the initial fingerprint capture below
+	// or, when the caller already supplied a fingerprint, right after it.
+	let progressSnapshot: ReturnType<typeof captureProgress> = Promise.resolve(null);
 	const captureDiffFingerprint = (knownFingerprint?: string): void => {
 		progressSnapshot = captureProgress();
 		// A fingerprint capture marks a committed review-view change. Stop work
@@ -660,6 +662,7 @@ export async function startReviewServer(options: {
 		});
 	};
 	if (currentFingerprint === null) captureDiffFingerprint();
+	else progressSnapshot = captureProgress();
 
 	// --- Base staleness vs the remote (mirrors Bun review.ts) -----------------
 	// `origin/<default>` is GitHub's state as of the last fetch. The startup
