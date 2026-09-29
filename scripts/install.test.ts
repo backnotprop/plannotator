@@ -372,7 +372,7 @@ describe("install.sh", () => {
     // the sidecar downloads, agent integrations, skill checkout, and config
     // writes — that ordering is the whole point of #977.
     const binaryInstalled = script.indexOf(
-      'mv "$tmp_file" "$INSTALL_DIR/plannotator"',
+      'mv -f "$staged_file" "$INSTALL_DIR/plannotator"',
     );
     const minimalExit = script.indexOf('if [ "$minimal" -eq 1 ]; then');
     const semInstall = script.indexOf("install_sem_sidecar\n");
@@ -2904,3 +2904,34 @@ describe.skipIf(!pwshBin || process.platform === "win32")(
     }, PWSH_SCANNER_TIMEOUT_MS);
   },
 );
+
+// Auto-update (#1634) runs these scripts in the background while other
+// plannotator processes may be running, so the binary swap must never leave
+// the path missing (sh) and must never try to overwrite a running .exe
+// (ps1/cmd, where Windows refuses; renaming a running exe is allowed).
+describe("binary replacement is safe while plannotator is running", () => {
+  test("install.sh stages next to the target and renames over it, with no rm first", () => {
+    const script = readScript("install.sh");
+    const stage = script.indexOf('staged_file="$INSTALL_DIR/.plannotator.new.$$"');
+    const swap = script.indexOf('mv -f "$staged_file" "$INSTALL_DIR/plannotator"');
+    expect(stage).toBeGreaterThan(0);
+    expect(swap).toBeGreaterThan(stage);
+    expect(script).not.toContain('rm -f "$INSTALL_DIR/plannotator" "$INSTALL_DIR/plannotator.exe"');
+  });
+
+  test("install.ps1 renames the running exe aside before moving the new one in", () => {
+    const script = readScript("install.ps1");
+    const aside = script.indexOf("Move-Item -Force $targetExe $asideExe -ErrorAction Stop");
+    const place = script.indexOf('Move-Item -Force $tmpFile "$installDir\\plannotator.exe"');
+    expect(aside).toBeGreaterThan(0);
+    expect(place).toBeGreaterThan(aside);
+  });
+
+  test("install.cmd renames the running exe aside before moving the new one in", () => {
+    const script = readScript("install.cmd");
+    const aside = script.indexOf('move /y "!INSTALL_PATH!" "!INSTALL_PATH!.old"');
+    const place = script.indexOf('move /y "!TEMP_FILE!" "!INSTALL_PATH!"');
+    expect(aside).toBeGreaterThan(0);
+    expect(place).toBeGreaterThan(aside);
+  });
+});

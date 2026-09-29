@@ -102,6 +102,10 @@ interface SettingsProps {
   aiProviders?: Array<{ id: string; name: string; capabilities: Record<string, boolean>; models?: Array<{ id: string; label: string; default?: boolean }> }>;
   /** Git user name from `git config user.name`, for quick identity set */
   gitUser?: string;
+  /** Present when the server advertises the auto-update setting (#1634);
+   *  `env` is PLANNOTATOR_AUTO_UPDATE when it overrides the config file.
+   *  Hosts that omit it get no toggle. */
+  autoUpdateSetting?: { env?: boolean };
   /** Current session is a local git review where since-base ISN'T offered
    *  (base ref unresolvable) — the Git tab shows a note that the Git-status
    *  preference can't take effect in THIS repo. */
@@ -937,8 +941,9 @@ const CommentsTab: React.FC = () => {
   );
 };
 
-export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [], gitUser, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false }) => {
+export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false }) => {
   const webmcpTools = useWebMcpToolsEnabled();
+  const autoUpdate = useConfigValue('autoUpdate');
   const [showDialog, setShowDialog] = useState(false);
   const settingsWasOpenRef = useRef(false);
   const [themePreview, setThemePreview] = useState(false);
@@ -1378,6 +1383,25 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         )}
                       </div>
                     </div>
+
+                    {/* Auto-update (#1634): opt-in, default off. Writes
+                        autoUpdate to ~/.plannotator/config.json. */}
+                    {autoUpdateSetting && (
+                      <>
+                        <div className="border-t border-border" />
+                        <ToggleSwitch
+                          checked={autoUpdateSetting.env ?? autoUpdate}
+                          onChange={(v) => configStore.set('autoUpdate', v)}
+                          disabled={autoUpdateSetting.env !== undefined}
+                          label="Keep Plannotator up to date"
+                          description={
+                            autoUpdateSetting.env !== undefined
+                              ? 'Set by PLANNOTATOR_AUTO_UPDATE in your environment.'
+                              : 'Installs new releases in the background, at most once a day, never while another review is open.'
+                          }
+                        />
+                      </>
+                    )}
 
                     {/* Agent tools (WebMCP). Shown only when the browser
                         exposes document.modelContext; off unregisters the

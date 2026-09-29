@@ -26,6 +26,7 @@ import {
   resolveReviewDecisionAction,
 } from './reviewDecision';
 import { useUpdateCheck } from '@plannotator/ui/hooks/useUpdateCheck';
+import { claimAutoUpdateNotice, describeAutoUpdateNotice, parseAutoUpdateNotice, type AutoUpdateNotice } from '@plannotator/ui/utils/autoUpdateNotice';
 import { storage } from '@plannotator/ui/utils/storage';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { GitHubIcon } from '@plannotator/ui/components/GitHubIcon';
@@ -808,6 +809,24 @@ const ReviewApp: React.FC = () => {
       return () => clearTimeout(t);
     }
   }, [updateInfo?.updateAvailable, updateInfo?.dismissed]);
+  // One-time notice after a background auto-update (#1634); the compiled
+  // CLI's server attaches it to the initial payload.
+  const [autoUpdateNotice, setAutoUpdateNotice] = useState<AutoUpdateNotice | undefined>();
+  const [autoUpdateSetting, setAutoUpdateSetting] = useState<{ env?: boolean } | undefined>();
+  useEffect(() => {
+    if (!autoUpdateNotice || !claimAutoUpdateNotice(autoUpdateNotice)) return;
+    const { title, description } = describeAutoUpdateNotice(autoUpdateNotice);
+    const t = setTimeout(() => {
+      toast(title, {
+        description,
+        duration: autoUpdateNotice.kind === 'failed' ? 10000 : 6000,
+        position: 'top-right',
+        action: { label: 'Release notes', onClick: () => window.open(autoUpdateNotice.releaseUrl, '_blank', 'noopener,noreferrer') },
+        classNames: { toast: '!w-auto', description: '!text-foreground/70' },
+      });
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [autoUpdateNotice]);
 
   const identity = useConfigValue('displayName');
 
@@ -2140,13 +2159,16 @@ const ReviewApp: React.FC = () => {
         baseBehindRemote?: boolean;
         openStatePinned?: boolean;
         snapshotId?: string;
-        serverConfig?: Record<string, unknown> & { displayName?: string; gitUser?: string };
+        serverConfig?: Record<string, unknown> & { displayName?: string; gitUser?: string; autoUpdate?: boolean; autoUpdateEnv?: boolean };
+        autoUpdateNotice?: unknown;
       }) => {
         apiModeRef.current = true;
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
         // gitUser drives the "Use git name" button in Settings; stays undefined (button hidden) when unavailable
         setGitUser(data.serverConfig?.gitUser);
+        setAutoUpdateSetting(typeof data.serverConfig?.autoUpdate === 'boolean' ? { env: data.serverConfig.autoUpdateEnv } : undefined);
+        setAutoUpdateNotice(parseAutoUpdateNotice(data.autoUpdateNotice));
         setSnapshotId(data.snapshotId);
         setAiEnabled(data.aiEnabled !== false);
         const apiFiles = orderFilesBySections(parseDiffToFiles(data.rawPatch), data.sections);
@@ -5601,6 +5623,7 @@ const ReviewApp: React.FC = () => {
             mode="review"
             aiProviders={aiProviders}
             gitUser={gitUser}
+            autoUpdateSetting={autoUpdateSetting}
             externalOpen={openSettingsMenu}
             onExternalClose={() => setOpenSettingsMenu(false)}
             // Local git session where since-base isn't offered (base ref

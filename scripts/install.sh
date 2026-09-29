@@ -907,11 +907,26 @@ else
     echo "https://docs.plannotator.ai/open-source/start/installation#pin-or-verify-a-release"
 fi
 
-# Remove old binary first (handles Windows .exe and locked file issues)
-rm -f "$INSTALL_DIR/plannotator" "$INSTALL_DIR/plannotator.exe" 2>/dev/null || true
-
-mv "$tmp_file" "$INSTALL_DIR/plannotator"
-chmod +x "$INSTALL_DIR/plannotator"
+# Replace the binary atomically: stage the new file next to the target (same
+# directory, so the final mv is a rename(2), never a copy), then rename it over
+# the old one. A plannotator process that is running right now keeps its open
+# inode and finishes normally, and there is no moment where the path is missing
+# or half-written — which is what makes a background auto-update run (#1634)
+# safe while other sessions are live. A stale .exe from a Windows-style layout
+# is still removed as before.
+staged_file="$INSTALL_DIR/.plannotator.new.$$"
+if ! mv -f "$tmp_file" "$staged_file"; then
+    rm -f "$tmp_file" "$staged_file" 2>/dev/null || true
+    echo "Could not stage the new binary in ${INSTALL_DIR}." >&2
+    exit 1
+fi
+chmod +x "$staged_file"
+if ! mv -f "$staged_file" "$INSTALL_DIR/plannotator"; then
+    rm -f "$staged_file" 2>/dev/null || true
+    echo "Could not replace ${INSTALL_DIR}/plannotator." >&2
+    exit 1
+fi
+rm -f "$INSTALL_DIR/plannotator.exe" 2>/dev/null || true
 
 echo ""
 echo "plannotator ${latest_tag} installed to ${INSTALL_DIR}/plannotator"

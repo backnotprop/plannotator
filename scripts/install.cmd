@@ -852,7 +852,24 @@ if "!VERIFY_ATTESTATION!"=="1" (
 
 REM Install binary
 set "INSTALL_PATH=!INSTALL_DIR!\plannotator.exe"
+REM A running plannotator.exe cannot be overwritten, but it can be renamed.
+REM Move the current binary aside to plannotator.exe.old first (a running
+REM session keeps working from it), then move the new one in. The .old file
+REM from an earlier run is deleted when nothing holds it any more; if it is
+REM still locked the rename-aside is skipped and the move behaves as before.
+if exist "!INSTALL_PATH!.old" del /f /q "!INSTALL_PATH!.old" >nul 2>&1
+set "ASIDE_DONE=0"
+if exist "!INSTALL_PATH!" if not exist "!INSTALL_PATH!.old" (
+    move /y "!INSTALL_PATH!" "!INSTALL_PATH!.old" >nul 2>&1 && set "ASIDE_DONE=1"
+)
 move /y "!TEMP_FILE!" "!INSTALL_PATH!" >nul
+if errorlevel 1 (
+    if "!ASIDE_DONE!"=="1" if not exist "!INSTALL_PATH!" move /y "!INSTALL_PATH!.old" "!INSTALL_PATH!" >nul 2>&1
+    if exist "!TEMP_FILE!" del "!TEMP_FILE!" >nul 2>&1
+    echo Could not install !INSTALL_PATH!. >&2
+    exit /b 1
+)
+if "!ASIDE_DONE!"=="1" del /f /q "!INSTALL_PATH!.old" >nul 2>&1
 
 echo.
 echo plannotator !TAG! installed to !INSTALL_PATH!

@@ -124,6 +124,11 @@ export function isVersionInvocation(args: string[]): boolean {
 
 declare const __CLI_VERSION__: string;
 
+/** The release version baked in at compile time; undefined for dev/source runs. */
+export function getCliVersion(): string | undefined {
+  return typeof __CLI_VERSION__ !== "undefined" ? __CLI_VERSION__ : undefined;
+}
+
 export function formatVersion(): string {
   return `plannotator ${typeof __CLI_VERSION__ !== "undefined" ? __CLI_VERSION__ : "dev"}`;
 }

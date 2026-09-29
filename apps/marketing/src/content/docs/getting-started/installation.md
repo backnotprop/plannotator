@@ -132,6 +132,24 @@ Same precedence: flag over environment variable over config file. The installer 
 
 </details>
 
+## Updating
+
+To update, run the install command again. It installs the latest release over the old one, and a Plannotator session that is open while it runs keeps working.
+
+### Automatic updates (opt-in)
+
+Plannotator can do this for you. Turn on **Settings → General → Keep Plannotator up to date**, or set it yourself:
+
+```json
+{ "autoUpdate": true }
+```
+
+in `~/.plannotator/config.json`, or `PLANNOTATOR_AUTO_UPDATE=1` in your environment (the environment variable wins). It is off by default.
+
+When it is on, the `plannotator` binary checks GitHub for a newer stable release at most once a day, after a review session has started. It never downgrades. If a newer release exists and no other Plannotator session is open, it runs the same install script shown above for that exact version, in the background, with your saved install choices (the `skipInstall` keys in `config.json` and the answers from your first install). A `--minimal` install is not remembered, so set `PLANNOTATOR_MINIMAL=1` in your environment if you want updates to stay binary-only. Nothing waits for it: the check adds no time to a review, and a failed check or install only writes a line to `~/.plannotator/update.log`. The next time Plannotator opens you see "Updated to vX", or "Auto-update failed" with the path to that log.
+
+Auto-update only applies to the binary the install script manages (`~/.local/bin/plannotator`, or `%LOCALAPPDATA%\plannotator\plannotator.exe` on Windows). A development build, a binary installed some other way, and the OpenCode and Pi plugins are never updated by it.
+
 ## Uninstall
 
 `plannotator uninstall` removes recognized installed components while

@@ -649,7 +649,35 @@ if ($verifyAttestationResolved) {
     Write-Host "https://docs.plannotator.ai/open-source/start/installation#pin-or-verify-a-release"
 }
 
-Move-Item -Force $tmpFile "$installDir\plannotator.exe"
+# Windows cannot overwrite or delete a running .exe, but it can RENAME one.
+# Move any current binary aside to plannotator.exe.old (a running plannotator
+# keeps working from the renamed file), then move the new one into place. The
+# .old file from an earlier run is removed first when nothing still holds it;
+# one that is still locked is left under a unique name and swept next time.
+# This is what lets a background auto-update (#1634) run while a session is open.
+$targetExe = "$installDir\plannotator.exe"
+Get-ChildItem -Path $installDir -Filter "plannotator.exe.old*" -ErrorAction SilentlyContinue |
+    ForEach-Object { Remove-Item -Force $_.FullName -ErrorAction SilentlyContinue }
+$asideExe = $null
+if (Test-Path $targetExe) {
+    $asideExe = "$targetExe.old"
+    if (Test-Path $asideExe) { $asideExe = "$targetExe.old-$([System.Guid]::NewGuid().ToString('N'))" }
+    try {
+        Move-Item -Force $targetExe $asideExe -ErrorAction Stop
+    } catch {
+        $asideExe = $null
+    }
+}
+try {
+    Move-Item -Force $tmpFile "$installDir\plannotator.exe" -ErrorAction Stop
+} catch {
+    if ($asideExe -and -not (Test-Path $targetExe)) {
+        Move-Item -Force $asideExe $targetExe -ErrorAction SilentlyContinue
+    }
+    Remove-Item -Force $tmpFile -ErrorAction SilentlyContinue
+    throw
+}
+if ($asideExe) { Remove-Item -Force $asideExe -ErrorAction SilentlyContinue }
 
 Write-Host ""
 Write-Host "plannotator $latestTag installed to $installDir\plannotator.exe"

@@ -220,6 +220,15 @@ export interface PlannotatorConfig {
    */
   reviewProgress?: boolean;
   /**
+   * Opt-in background auto-update for the compiled `plannotator` binary.
+   * When true, a session started by the CLI checks GitHub for a newer stable
+   * release at most once per 24h and, when no other review session is open,
+   * runs the normal install script for that exact tag in a detached process
+   * (output in update.log in the data dir). PLANNOTATOR_AUTO_UPDATE wins over
+   * this key. Default: false.
+   */
+  autoUpdate?: boolean;
+  /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
    * callouts, tables, diagrams, task lists, and the other PFM extensions.
@@ -594,8 +603,11 @@ export function getServerConfig(gitUser: string | null): {
   conventionalLabels?: CCLabelConfig[] | null;
   agentTerminalSide?: PlannotatorConfig["agentTerminalSide"];
   agentTerminalDefaultAgent?: string;
+  autoUpdate: boolean;
+  autoUpdateEnv?: boolean;
 } {
   const cfg = loadConfig();
+  const autoUpdateEnv = parseAutoUpdateEnv();
   return {
     displayName: cfg.displayName,
     diffOptions: cfg.diffOptions,
@@ -616,6 +628,11 @@ export function getServerConfig(gitUser: string | null): {
       cfg.agentTerminalDefaultAgent !== "" && {
         agentTerminalDefaultAgent: cfg.agentTerminalDefaultAgent,
       }),
+    // Always explicit (the config-file value, default false) so a stale
+    // cookie can never show the toggle on while the config says off.
+    // autoUpdateEnv carries PLANNOTATOR_AUTO_UPDATE when it overrides the file.
+    autoUpdate: coerceConfigBoolean(cfg.autoUpdate, false),
+    ...(autoUpdateEnv !== undefined && { autoUpdateEnv }),
   };
 }
 
@@ -750,6 +767,32 @@ export function resolveReviewProgress(
   if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
   if (v === "1" || v === "true" || v === "on") return true;
   return coerceConfigBoolean(config.reviewProgress, true);
+}
+
+/**
+ * Resolve whether the compiled CLI keeps itself up to date in the background.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_AUTO_UPDATE env var  →  config.autoUpdate  →  default false
+ *
+ * Env `1` / `true` / `on` turn it on and `0` / `false` / `off` / `disabled`
+ * turn it off; an empty or unrecognized value counts as unset.
+ */
+export function resolveAutoUpdate(
+  config: PlannotatorConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const fromEnv = parseAutoUpdateEnv(env);
+  if (fromEnv !== undefined) return fromEnv;
+  return coerceConfigBoolean(config.autoUpdate, false);
+}
+
+/** The PLANNOTATOR_AUTO_UPDATE override, or undefined when it does not decide. */
+export function parseAutoUpdateEnv(env: NodeJS.ProcessEnv = process.env): boolean | undefined {
+  const v = env.PLANNOTATOR_AUTO_UPDATE?.trim().toLowerCase();
+  if (v === "1" || v === "true" || v === "on") return true;
+  if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
+  return undefined;
 }
 
 export function resolveUseJina(cliNoJina: boolean, config: PlannotatorConfig): boolean {

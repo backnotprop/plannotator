@@ -48,6 +48,7 @@ import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { configStore, useConfigValue } from '@plannotator/ui/config';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { useUpdateCheck } from '@plannotator/ui/hooks/useUpdateCheck';
+import { claimAutoUpdateNotice, describeAutoUpdateNotice, parseAutoUpdateNotice, type AutoUpdateNotice } from '@plannotator/ui/utils/autoUpdateNotice';
 import { LookAndFeelAnnouncementDialog } from '@plannotator/ui/components/LookAndFeelAnnouncementDialog';
 import { getObsidianSettings, getEffectiveVaultPath, isObsidianConfigured, CUSTOM_PATH_SENTINEL } from '@plannotator/ui/utils/obsidian';
 import { getBearSettings } from '@plannotator/ui/utils/bear';
@@ -571,6 +572,23 @@ const App: React.FC = () => {
       return () => clearTimeout(t);
     }
   }, [updateInfo?.updateAvailable, updateInfo?.dismissed]);
+  // One-time notice after a background auto-update (#1634); the compiled
+  // CLI's server attaches it to the initial payload.
+  const [autoUpdateNotice, setAutoUpdateNotice] = useState<AutoUpdateNotice | undefined>();
+  const [autoUpdateSetting, setAutoUpdateSetting] = useState<{ env?: boolean } | undefined>();
+  useEffect(() => {
+    if (!autoUpdateNotice || !claimAutoUpdateNotice(autoUpdateNotice)) return;
+    const { title, description } = describeAutoUpdateNotice(autoUpdateNotice);
+    const t = setTimeout(() => {
+      toast(title, {
+        description,
+        duration: autoUpdateNotice.kind === 'failed' ? 10000 : 6000,
+        action: { label: 'Release notes', onClick: () => window.open(autoUpdateNotice.releaseUrl, '_blank', 'noopener,noreferrer') },
+        classNames: { toast: '!w-auto', description: '!text-foreground/70' },
+      });
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [autoUpdateNotice]);
   // Markdown edit mode (prototype): CM6 live-preview editor over the raw plan
   // text. originalMarkdownRef is the as-submitted baseline for the edit diff —
   // set once at plan load, never by linked-doc navigation or edit commits.
@@ -3392,7 +3410,7 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'annotate-app' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; appUrl?: string; targetUrl?: string; liveToken?: string; sourceInfo?: string; sourceConverted?: boolean; sourceSave?: SourceSaveCapability; gate?: boolean; approvalNotesSupported?: boolean; clientLease?: AnnotateClientLeaseConfig; renderAs?: DocumentRenderAs; rawHtml?: string; shareHtml?: string; diffHtml?: string; convertHtml?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; planDir?: string; isWSL?: boolean; markdownExtensions?: string[]; serverConfig?: { displayName?: string; gitUser?: string }; recentMessages?: PickerMessage[]; agentTerminal?: AgentTerminalCapability; feedbackTemplates?: AnnotateFeedbackTemplates }) => {
+      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'annotate-app' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; appUrl?: string; targetUrl?: string; liveToken?: string; sourceInfo?: string; sourceConverted?: boolean; sourceSave?: SourceSaveCapability; gate?: boolean; approvalNotesSupported?: boolean; clientLease?: AnnotateClientLeaseConfig; renderAs?: DocumentRenderAs; rawHtml?: string; shareHtml?: string; diffHtml?: string; convertHtml?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; planDir?: string; isWSL?: boolean; markdownExtensions?: string[]; serverConfig?: { displayName?: string; gitUser?: string; autoUpdate?: boolean; autoUpdateEnv?: boolean }; autoUpdateNotice?: unknown; recentMessages?: PickerMessage[]; agentTerminal?: AgentTerminalCapability; feedbackTemplates?: AnnotateFeedbackTemplates }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
         // Extra extensions the user registered as markdown (#1307) — the
@@ -3405,6 +3423,8 @@ const App: React.FC = () => {
         setAISessionEnabled(data.mode !== 'archive' && data.mode !== 'goal-setup');
         // gitUser drives the "Use git name" button in Settings; stays undefined (button hidden) when unavailable
         setGitUser(data.serverConfig?.gitUser);
+        setAutoUpdateSetting(typeof data.serverConfig?.autoUpdate === 'boolean' ? { env: data.serverConfig.autoUpdateEnv } : undefined);
+        setAutoUpdateNotice(parseAutoUpdateNotice(data.autoUpdateNotice));
         if (data.mode === 'goal-setup' && data.goalSetup) {
           setGoalSetupBundle(data.goalSetup);
           setMarkdown('');
@@ -6269,6 +6289,7 @@ const App: React.FC = () => {
           taterMode={taterMode}
           mobileSettingsOpen={mobileSettingsOpen}
           gitUser={gitUser}
+          autoUpdateSetting={autoUpdateSetting}
           agentTerminalAvailable={showAgentTerminalControls}
           webmcpAvailable={webmcp.available}
           agentConnected={webmcpActivity.calls > 0}
