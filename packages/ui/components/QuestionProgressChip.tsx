@@ -49,7 +49,7 @@ export const QuestionProgressChip: React.FC<QuestionProgressChipProps> = ({ done
       data-question-progress="true"
       onClick={onJump}
       aria-label={label}
-      title={hasOpen ? 'Go to the next open question' : 'All questions answered'}
+      title={hasOpen ? 'Go to the next open question' : done >= total ? 'All questions answered' : 'No open questions'}
       className={cn(
         'inline-flex h-7 shrink-0 items-center gap-[7px] whitespace-nowrap rounded-full border border-border bg-card pl-[7px] pr-2.5 text-xs text-muted-foreground transition-colors',
         'hover:border-primary/50 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',

@@ -3104,9 +3104,11 @@ const App: React.FC = () => {
     }
   }, [closeCompactPlanSurface, isCompactAnnotationsOpen, isPlanDiffActive]);
   const handleQuestionChipJump = useCallback(() => {
-    const key = nextOpenQuestionKey(questionRows, lastQuestionJumpRef.current)
-      // Nothing open: step through the skipped ones instead.
-      ?? questionRows.find((row) => !row.orphaned && row.status === 'skipped')?.key
+    const last = lastQuestionJumpRef.current;
+    const skipped = questionRows.filter((row) => !row.orphaned && row.status === 'skipped');
+    const key = nextOpenQuestionKey(questionRows, last)
+      // Nothing open: step through the skipped ones instead, wrapping.
+      ?? skipped[(skipped.findIndex((row) => row.key === last) + 1) % Math.max(skipped.length, 1)]?.key
       ?? null;
     if (key) jumpToQuestion(key);
   }, [jumpToQuestion, questionRows]);
