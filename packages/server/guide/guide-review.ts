@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { mkdir, writeFile, readFile, unlink } from "node:fs/promises";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { loadConfig, resolveClaudeSandbox, resolveCursorSandbox } from "../config";
-import { claudeJobIsolationArgs, claudeJobToolArgs, type ClaudeJobCommandOptions } from "../claude-review";
+import { claudeJobIsolationArgs, claudeJobToolArgs, findClaudeStructuredOutput, type ClaudeJobCommandOptions } from "../claude-review";
 import {
   GUIDE_NO_SECTIONS_ERROR,
   GUIDE_REVIEW_PROMPT,
@@ -433,39 +433,24 @@ export function parseGuideMarkerOutput(stdout: string, engine: MarkerEngine, non
 }
 
 export function parseGuideStreamOutput(stdout: string): CodeGuideOutput | null {
-  if (!stdout.trim()) return null;
-
-  const lines = stdout.trim().split('\n');
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim();
-    if (!line) continue;
-
-    try {
-      const event = JSON.parse(line);
-      if (event.type === 'result') {
-        if (event.is_error) return null;
-        const output = event.structured_output;
-        // A guide with no sections isn't a guide — treat as invalid so the UI
-        // error state fires instead of rendering an empty screen.
-        if (!output || !Array.isArray(output.sections) || output.sections.length === 0) return null;
-        return output as CodeGuideOutput;
-      }
-    } catch {
+  return findClaudeStructuredOutput(
+    stdout,
+    (output) => {
+      // A guide with no sections isn't a guide — treat as invalid so the UI
+      // error state fires instead of rendering an empty screen.
+      const sections = output && typeof output === 'object' ? (output as { sections?: unknown }).sections : undefined;
+      return Array.isArray(sections) && sections.length > 0 ? (output as CodeGuideOutput) : null;
+    },
+    (line) => {
       // Not valid JSON as a whole line — this can happen when the final
       // NDJSON line (the schema-constrained result event) is truncated
       // mid-stream. If it still carries the structured_output key, try
-      // mechanically repairing just that embedded value before giving up on
-      // this line.
+      // mechanically repairing just that embedded value before moving on.
       const marker = '"structured_output":';
       const idx = line.indexOf(marker);
-      if (idx !== -1) {
-        const repaired = repairGuideJsonText(line.slice(idx + marker.length));
-        if (repaired) return repaired;
-      }
-    }
-  }
-
-  return null;
+      return idx === -1 ? null : repairGuideJsonText(line.slice(idx + marker.length));
+    },
+  );
 }
 
 /** Reads and deletes a Codex `--output-file` JSON payload. Deletion happens
@@ -659,10 +644,13 @@ function extractMarkerFailedPayload(engine: MarkerEngine, stdout: string, nonce:
   return stdout;
 }
 
-/** Finds the last NDJSON `result` event in Claude stream-json stdout,
- *  regardless of whether it carries a valid structured_output — used only
- *  for failed-payload capture, never for the trusted parse path. */
-function findLastClaudeResultEvent(stdout: string): Record<string, unknown> | null {
+/** Finds the newest NDJSON `result` event in Claude stream-json stdout that
+ *  carries a `structured_output` key, regardless of whether that value is
+ *  valid — used only for failed-payload capture, never for the trusted parse
+ *  path. A run with background subagents emits several result events and the
+ *  trailing ones often carry no output, so "the last result event" would
+ *  usually hand the repair UI nothing. */
+function findLastClaudeResultWithOutput(stdout: string): Record<string, unknown> | null {
   if (!stdout.trim()) return null;
   const lines = stdout.trim().split('\n');
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -670,7 +658,8 @@ function findLastClaudeResultEvent(stdout: string): Record<string, unknown> | nu
     if (!line) continue;
     try {
       const event = JSON.parse(line);
-      if (event && typeof event === "object" && (event as Record<string, unknown>).type === "result") {
+      if (event && typeof event === "object" && (event as Record<string, unknown>).type === "result"
+        && (event as Record<string, unknown>).structured_output !== undefined) {
         return event as Record<string, unknown>;
       }
     } catch {
@@ -681,11 +670,11 @@ function findLastClaudeResultEvent(stdout: string): Record<string, unknown> | nu
 }
 
 /** Best-effort raw-candidate extraction for a failed Claude-engine job: the
- *  structured_output value if the last result event carried one (even if it
- *  failed shape validation), else the raw stdout tail. */
+ *  structured_output value of the newest result event that carried one (even
+ *  if it failed shape validation), else the raw stdout tail. */
 function extractClaudeFailedPayload(stdout: string): string {
-  const event = findLastClaudeResultEvent(stdout);
-  if (event && event.structured_output !== undefined) {
+  const event = findLastClaudeResultWithOutput(stdout);
+  if (event) {
     try {
       return JSON.stringify(event.structured_output);
     } catch {

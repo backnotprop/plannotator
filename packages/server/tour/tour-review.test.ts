@@ -52,6 +52,24 @@ describe("parseTourStreamOutput", () => {
     expect(parseTourStreamOutput(stdout)).toBeNull();
   });
 
+  // Multiple result events: see findClaudeStructuredOutput in claude-review.ts.
+  test("reads an earlier result's tour when trailing results are empty or errors", () => {
+    const stdout = [
+      JSON.stringify({ type: "result", is_error: false, result_index: 0, structured_output: validOutput }),
+      JSON.stringify({ type: "result", is_error: false, num_turns: 0, result_index: 1 }),
+      JSON.stringify({ type: "result", is_error: true, num_turns: 0, result_index: 2 }),
+    ].join("\n");
+    expect(parseTourStreamOutput(stdout)).toEqual(validOutput);
+  });
+
+  test("returns null when no result event carries a tour with stops", () => {
+    const stdout = [
+      JSON.stringify({ type: "result", is_error: false, structured_output: { stops: [] } }),
+      JSON.stringify({ type: "result", is_error: false, num_turns: 0 }),
+    ].join("\n");
+    expect(parseTourStreamOutput(stdout)).toBeNull();
+  });
+
   test("returns null on empty input", () => {
     expect(parseTourStreamOutput("")).toBeNull();
     expect(parseTourStreamOutput("   \n  ")).toBeNull();

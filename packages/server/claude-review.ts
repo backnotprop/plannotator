@@ -377,10 +377,29 @@ export function buildClaudeCommand(
 // ---------------------------------------------------------------------------
 
 /**
- * Parse Claude Code's stream-json output (JSONL).
- * Extracts structured_output from the final type:"result" event.
+ * Scan Claude Code stream-json stdout for the most recent `result` event whose
+ * `structured_output` passes `accept`, newest first.
+ *
+ * One run can emit SEVERAL result events: when the main agent launches
+ * background `Agent` subagents, Claude Code 2.1.x prints a result per settled
+ * turn (`result_index` 0..n), and the trailing ones can carry `num_turns: 0`,
+ * `is_error: true`, or no `structured_output` at all. The job's answer is the
+ * newest NON-ERROR result that carries a valid structured output; every other
+ * result is skipped rather than failing the run, so a trailing empty or error
+ * result can no longer hide output an earlier result delivered. An
+ * `is_error: true` result is never used, even with output attached (the
+ * single-result behavior this always had), so a failed run whose partial
+ * output happens to validate still reads as failed.
+ *
+ * `onUnparsedLine` sees each line that is not valid JSON, in the same
+ * newest-first order, and may return a value (the guide parser uses it to
+ * repair a truncated result line); a non-null return ends the scan.
  */
-export function parseClaudeStreamOutput(stdout: string): ClaudeReviewOutput | null {
+export function findClaudeStructuredOutput<T>(
+  stdout: string,
+  accept: (output: unknown) => T | null,
+  onUnparsedLine?: (line: string) => T | null,
+): T | null {
   if (!stdout.trim()) return null;
 
   const lines = stdout.trim().split('\n');
@@ -388,23 +407,35 @@ export function parseClaudeStreamOutput(stdout: string): ClaudeReviewOutput | nu
     const line = lines[i].trim();
     if (!line) continue;
 
+    let event: unknown;
     try {
-      const event = JSON.parse(line);
-
-      if (event.type === 'result') {
-        if (event.is_error) return null;
-
-        const output = event.structured_output;
-        if (!output || !Array.isArray(output.findings)) return null;
-
-        return output as ClaudeReviewOutput;
-      }
+      event = JSON.parse(line);
     } catch {
-      // Not valid JSON — skip
+      const recovered = onUnparsedLine?.(line) ?? null;
+      if (recovered !== null) return recovered;
+      continue;
     }
+    if (!event || typeof event !== 'object') continue;
+    const record = event as Record<string, unknown>;
+    if (record.type !== 'result' || record.is_error || record.structured_output == null) continue;
+    const output = accept(record.structured_output);
+    if (output !== null) return output;
   }
 
   return null;
+}
+
+/**
+ * Parse Claude Code's stream-json output (JSONL).
+ * Extracts structured_output from the newest type:"result" event that carries
+ * a valid one (see findClaudeStructuredOutput).
+ */
+export function parseClaudeStreamOutput(stdout: string): ClaudeReviewOutput | null {
+  return findClaudeStructuredOutput(stdout, (output) =>
+    output && typeof output === 'object' && Array.isArray((output as { findings?: unknown }).findings)
+      ? (output as ClaudeReviewOutput)
+      : null,
+  );
 }
 
 // ---------------------------------------------------------------------------

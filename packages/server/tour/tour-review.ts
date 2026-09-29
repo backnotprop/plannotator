@@ -5,7 +5,7 @@ import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import type { DiffType } from "../vcs";
 import type { PRMetadata } from "../pr";
 import { buildWorkspacePromptContextLines, getLocalDiffInstruction, type WorkspaceReviewPromptContext } from "../agent-review-message";
-import { claudeJobIsolationArgs, claudeJobToolArgs, type ClaudeJobCommandOptions } from "../claude-review";
+import { claudeJobIsolationArgs, claudeJobToolArgs, findClaudeStructuredOutput, type ClaudeJobCommandOptions } from "../claude-review";
 import { loadConfig, resolveClaudeSandbox } from "../config";
 import type {
   CodeTourOutput,
@@ -447,29 +447,12 @@ export async function buildTourCodexCommand(options: {
 }
 
 export function parseTourStreamOutput(stdout: string): CodeTourOutput | null {
-  if (!stdout.trim()) return null;
-
-  const lines = stdout.trim().split('\n');
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim();
-    if (!line) continue;
-
-    try {
-      const event = JSON.parse(line);
-      if (event.type === 'result') {
-        if (event.is_error) return null;
-        const output = event.structured_output;
-        // A tour with no stops isn't a tour — treat as invalid so the UI
-        // error state fires instead of rendering an empty walkthrough.
-        if (!output || !Array.isArray(output.stops) || output.stops.length === 0) return null;
-        return output as CodeTourOutput;
-      }
-    } catch {
-      // Not valid JSON — skip
-    }
-  }
-
-  return null;
+  // A tour with no stops isn't a tour — treat as invalid so the UI error state
+  // fires instead of rendering an empty walkthrough.
+  return findClaudeStructuredOutput(stdout, (output) => {
+    const stops = output && typeof output === 'object' ? (output as { stops?: unknown }).stops : undefined;
+    return Array.isArray(stops) && stops.length > 0 ? (output as CodeTourOutput) : null;
+  });
 }
 
 export async function parseTourFileOutput(outputPath: string): Promise<CodeTourOutput | null> {

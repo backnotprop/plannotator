@@ -100,6 +100,33 @@ describe("parseGuideStreamOutput", () => {
     expect(Array.isArray(out?.sections)).toBe(true);
   });
 
+  // Multiple result events: see findClaudeStructuredOutput in claude-review.ts.
+  it("reads an earlier result's guide when trailing results are empty or errors", () => {
+    const guide = JSON.parse(guideJson([{ title: "Early", overview: "o", diffs: [{ file: "f" }] }]));
+    const stream = [
+      JSON.stringify({ type: "result", is_error: false, result_index: 0, structured_output: guide }),
+      JSON.stringify({ type: "result", is_error: false, num_turns: 0, result_index: 1 }),
+      JSON.stringify({ type: "result", is_error: true, num_turns: 0, result_index: 2 }),
+    ].join("\n");
+    expect(parseGuideStreamOutput(stream)?.sections?.[0]?.title).toBe("Early");
+  });
+
+  it("still repairs a truncated result line followed by an empty trailing result", () => {
+    const guide = guideJson([{ title: "S", overview: "o", diffs: [{ file: "f" }] }]);
+    const stream = [
+      `{"type":"result","structured_output":${guide.slice(0, guide.length - 20)}`,
+      JSON.stringify({ type: "result", is_error: false, num_turns: 0 }),
+    ].join("\n");
+    expect(Array.isArray(parseGuideStreamOutput(stream)?.sections)).toBe(true);
+  });
+
+  it("returns null when no result event carries a guide with sections", () => {
+    const stream = [
+      JSON.stringify({ type: "result", is_error: false, structured_output: { sections: [] } }),
+      JSON.stringify({ type: "result", is_error: false, num_turns: 0 }),
+    ].join("\n");
+    expect(parseGuideStreamOutput(stream)).toBeNull();
+  });
   it("returns null on empty stdout", () => {
     expect(parseGuideStreamOutput("")).toBeNull();
   });
@@ -192,6 +219,36 @@ describe("guide extra instructions (#1265)", () => {
     expect(built.label).toBe("Guide Repair");
     expect(built.prompt).not.toContain("## Additional reviewer instructions");
     expect(built.prompt).not.toContain("Use product names.");
+  });
+});
+
+describe("createGuideSession Claude completion with several result events", () => {
+  it("captures the newest result's structured_output for repair, not a trailing empty result", async () => {
+    const jobId = "claude-invalid-then-empty";
+    // An output the parse rejects (no sections), then a trailing empty result:
+    // the repair UI must still get the rejected output to start from.
+    const rejected = { title: "T", intent: "I", sections: [] };
+    const stdout = [
+      JSON.stringify({ type: "result", is_error: false, result_index: 0, structured_output: rejected }),
+      JSON.stringify({ type: "result", is_error: false, num_turns: 0, result_index: 1 }),
+    ].join("\n");
+    const session = createGuideSession();
+    const result = await session.onJobComplete({ job: { id: jobId, engine: "claude" }, meta: { stdout }, changedFiles: FILES });
+    expect(result.summary).toBeNull();
+    expect(JSON.parse(session.getFailedPayload(jobId) ?? "null")).toEqual(rejected);
+  });
+
+  it("completes a guide delivered by an earlier result event", async () => {
+    const jobId = "claude-valid-then-empty";
+    const guide = JSON.parse(guideJson([{ title: "Early", overview: "o", diffs: [{ file: "src/a.ts", summary: "A." }] }]));
+    const stdout = [
+      JSON.stringify({ type: "result", is_error: false, result_index: 0, structured_output: guide }),
+      JSON.stringify({ type: "result", is_error: true, num_turns: 0, result_index: 1 }),
+    ].join("\n");
+    const session = createGuideSession();
+    const result = await session.onJobComplete({ job: { id: jobId, engine: "claude" }, meta: { stdout }, changedFiles: FILES });
+    expect(result.summary?.correctness).toBe("Guide Generated");
+    expect(session.getGuide(jobId)?.sections[0].title).toBe("Early");
   });
 });
 
