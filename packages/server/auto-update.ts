@@ -52,8 +52,17 @@ const INSTALL_SH_URL = "https://plannotator.ai/install.sh";
 const INSTALL_PS1_URL = "https://plannotator.ai/install.ps1";
 
 export interface AutoUpdateState {
-  /** Epoch ms of the last check that reached the network step. */
+  /** Epoch ms of the last check that got past the gates (the 24h install window). */
   lastCheckAt?: number;
+  /**
+   * The last answer GitHub gave for the latest stable release, cached for 24h
+   * independently of the install window, so a check that is skipped because
+   * other sessions are open does not re-query GitHub on every session start.
+   */
+  latestRelease?: {
+    tag: string;
+    fetchedAt: number;
+  };
   /** The install this process (or an earlier one) started. */
   pending?: {
     version: string;
@@ -92,7 +101,7 @@ export function autoUpdatePaths(dataDir: string = getPlannotatorDataDir()) {
 /** Parse a stable `X.Y.Z` / `vX.Y.Z`; anything else (pre-release, junk) is null. */
 export function parseStableVersion(value: unknown): [number, number, number] | null {
   if (typeof value !== "string") return null;
-  const m = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(value.trim());
+  const m = /^v?(\d{1,9})\.(\d{1,9})\.(\d{1,9})$/.exec(value.trim());
   if (!m) return null;
   return [Number(m[1]), Number(m[2]), Number(m[3])];
 }
@@ -111,6 +120,22 @@ export function compareStableVersions(a: string, b: string): number | null {
 /** True only for a strictly newer stable release: never a downgrade or re-install. */
 export function isNewerStableVersion(latest: string, current: string): boolean {
   return compareStableVersions(latest, current) === 1;
+}
+
+/** The canonical `X.Y.Z` for a stable version string, or null. */
+export function normalizeStableVersion(value: unknown): string | null {
+  const parsed = parseStableVersion(value);
+  return parsed ? parsed.join(".") : null;
+}
+
+/** The cached latest-release tag when it is still fresh, else null. */
+export function cachedLatestTag(state: AutoUpdateState, now: number): string | null {
+  const cached = state.latestRelease;
+  if (!cached || typeof cached !== "object") return null;
+  const at = cached.fetchedAt;
+  if (typeof at !== "number" || !Number.isFinite(at) || at > now) return null;
+  if (now - at >= AUTO_UPDATE_INTERVAL_MS) return null;
+  return normalizeStableVersion(cached.tag);
 }
 
 export function isCheckDue(state: AutoUpdateState, now: number): boolean {
@@ -298,17 +323,27 @@ export async function runAutoUpdateCheck(deps: AutoUpdateDeps): Promise<AutoUpda
   // not all query GitHub.
   writeAutoUpdateState({ ...state, lastCheckAt: now }, deps.dataDir);
 
-  const latest = await deps.fetchLatestTag();
-  if (!latest || !parseStableVersion(latest)) {
-    log(`could not read the latest release (${latest ?? "no response"})`, deps.dataDir);
-    return "no-release";
+  // The tag is untrusted input (it ends up as an installer argument), so it is
+  // reduced to a canonical X.Y.Z before anything else sees it.
+  let latest = cachedLatestTag(state, now);
+  let base: AutoUpdateState = state;
+  if (!latest) {
+    const fetched = await deps.fetchLatestTag();
+    latest = normalizeStableVersion(fetched);
+    if (!latest) {
+      log(`could not read the latest release (${fetched ?? "no response"})`, deps.dataDir);
+      return "no-release";
+    }
+    base = { ...state, latestRelease: { tag: latest, fetchedAt: now } };
+    writeAutoUpdateState({ ...base, lastCheckAt: now }, deps.dataDir);
   }
   if (!isNewerStableVersion(latest, current)) return "up-to-date";
 
   const others = otherOpenSessions(deps.listSessions(), deps.pid);
   if (others.length > 0) {
-    // Do not spend the 24h window: the next session start retries.
-    writeAutoUpdateState({ ...state }, deps.dataDir);
+    // Do not spend the 24h install window: the next session start retries,
+    // answering from the cached release instead of querying GitHub again.
+    writeAutoUpdateState({ ...base }, deps.dataDir);
     log(
       `${latest} is available; skipped because ${others.length} other Plannotator session(s) are open`,
       deps.dataDir,
@@ -321,13 +356,13 @@ export async function runAutoUpdateCheck(deps: AutoUpdateDeps): Promise<AutoUpda
     return "locked";
   }
 
-  const version = latest.replace(/^v/, "");
+  const version = latest;
   try {
     try {
       unlinkSync(paths.result);
     } catch {}
     writeAutoUpdateState(
-      { lastCheckAt: now, pending: { version, fromVersion: current, startedAt: now } },
+      { ...base, lastCheckAt: now, pending: { version, fromVersion: current, startedAt: now } },
       deps.dataDir,
     );
     log(`installing v${version} (from v${current})`, deps.dataDir);
@@ -472,6 +507,44 @@ export function scheduleAutoUpdateCheck(currentVersion: string | undefined): voi
 /** The compiled CLI turns the post-update notice on for its servers. */
 export function enableAutoUpdateNotice(currentVersion: string | undefined): void {
   if (currentVersion && parseStableVersion(currentVersion)) noticeVersion = currentVersion;
+}
+
+/**
+ * True when this compiled CLI will update itself: auto-update is on and the
+ * running binary is the one the install script manages. The UI then drops the
+ * redundant "new version available" toast.
+ */
+export function isAutoUpdateActive(): boolean {
+  if (!noticeVersion) return false;
+  try {
+    return resolveAutoUpdate(loadConfig()) && isManagedBinary(process.execPath);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The fields the compiled CLI's servers add to their initial payload
+ * (/api/plan, /api/diff). Empty for OpenCode, Pi, dev runs and binaries the
+ * install script does not manage, so those surfaces show no toggle and no
+ * notice.
+ */
+export function getAutoUpdateAdvert(): {
+  autoUpdateSupported?: true;
+  autoUpdateActive?: true;
+  autoUpdateNotice?: AutoUpdateNotice;
+} {
+  if (!noticeVersion) return {};
+  let managed = false;
+  try {
+    managed = isManagedBinary(process.execPath);
+  } catch {}
+  const notice = getAutoUpdateNotice();
+  return {
+    ...(managed && { autoUpdateSupported: true as const }),
+    ...(managed && isAutoUpdateActive() && { autoUpdateActive: true as const }),
+    ...(notice && { autoUpdateNotice: notice }),
+  };
 }
 
 /** The notice for the UI, or undefined (always undefined outside the compiled CLI). */

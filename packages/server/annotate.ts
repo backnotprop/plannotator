@@ -45,7 +45,7 @@ import {
 } from "@plannotator/shared/annotate-client-lease";
 import { createAnnotateDecisionSettler } from "@plannotator/shared/annotate-decision";
 import { saveConfig, detectGitUser, getServerConfig, isAgentTerminalSide, loadConfig, resolveAIEnabled, resolveAnnotateHistory, resolveFeedbackHistory } from "./config";
-import { getAutoUpdateNotice } from "./auto-update";
+import { getAutoUpdateAdvert } from "./auto-update";
 import { appendFeedbackRecord, type FeedbackDecision, type FeedbackSurface } from "@plannotator/shared/feedback-archive";
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { existsSync } from "fs";
@@ -742,7 +742,7 @@ export async function startAnnotateServer(
               projectRoot: process.cwd(),
               isWSL: wslFlag,
               serverConfig: getServerConfig(gitUser),
-              autoUpdateNotice: getAutoUpdateNotice(),
+              ...getAutoUpdateAdvert(),
               agentTerminal: agentTerminal.capability,
               feedbackTemplates: {
                 fileFeedback: getAnnotateFileFeedbackTemplate(origin),
@@ -811,7 +811,7 @@ export async function startAnnotateServer(
               // sibling docs the same way it linkifies .md ones.
               markdownExtensions: getExtraMarkdownExtensions(),
               serverConfig: getServerConfig(gitUser),
-              autoUpdateNotice: getAutoUpdateNotice(),
+              ...getAutoUpdateAdvert(),
               agentTerminal: agentTerminal.capability,
               ...(recentMessages ? { recentMessages } : {}),
               // Resolved copy-wrapper templates (config-aware, placeholders

@@ -795,7 +795,13 @@ const ReviewApp: React.FC = () => {
   const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0';
   const updateInfo = useUpdateCheck();
   const updateToastShown = useRef(false);
+  // True when the compiled CLI will install new releases itself (#1634); the
+  // "new version available" toast is then redundant and stays hidden. The
+  // payload lands long before the GitHub answer plus the toast delay, and a
+  // late flip still cancels the pending toast through the effect cleanup.
+  const [autoUpdateActive, setAutoUpdateActive] = useState(false);
   useEffect(() => {
+    if (autoUpdateActive) return;
     if (updateInfo?.updateAvailable && !updateInfo.dismissed && !updateToastShown.current) {
       updateToastShown.current = true;
       const t = setTimeout(() => {
@@ -808,7 +814,7 @@ const ReviewApp: React.FC = () => {
       }, 1500);
       return () => clearTimeout(t);
     }
-  }, [updateInfo?.updateAvailable, updateInfo?.dismissed]);
+  }, [updateInfo?.updateAvailable, updateInfo?.dismissed, autoUpdateActive]);
   // One-time notice after a background auto-update (#1634); the compiled
   // CLI's server attaches it to the initial payload.
   const [autoUpdateNotice, setAutoUpdateNotice] = useState<AutoUpdateNotice | undefined>();
@@ -2161,13 +2167,18 @@ const ReviewApp: React.FC = () => {
         snapshotId?: string;
         serverConfig?: Record<string, unknown> & { displayName?: string; gitUser?: string; autoUpdate?: boolean; autoUpdateEnv?: boolean };
         autoUpdateNotice?: unknown;
+        autoUpdateSupported?: boolean;
+        autoUpdateActive?: boolean;
       }) => {
         apiModeRef.current = true;
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
         // gitUser drives the "Use git name" button in Settings; stays undefined (button hidden) when unavailable
         setGitUser(data.serverConfig?.gitUser);
-        setAutoUpdateSetting(typeof data.serverConfig?.autoUpdate === 'boolean' ? { env: data.serverConfig.autoUpdateEnv } : undefined);
+        // Only the compiled CLI running the installer-managed binary offers the
+        // toggle; OpenCode, Pi and dev runs send no autoUpdateSupported.
+        setAutoUpdateSetting(data.autoUpdateSupported === true && typeof data.serverConfig?.autoUpdate === 'boolean' ? { env: data.serverConfig.autoUpdateEnv } : undefined);
+        setAutoUpdateActive(data.autoUpdateActive === true);
         setAutoUpdateNotice(parseAutoUpdateNotice(data.autoUpdateNotice));
         setSnapshotId(data.snapshotId);
         setAiEnabled(data.aiEnabled !== false);

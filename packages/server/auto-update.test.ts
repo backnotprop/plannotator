@@ -126,6 +126,35 @@ describe("runAutoUpdateCheck gates", () => {
     expect(await runAutoUpdateCheck(deps())).toBe("launched");
   });
 
+  test("a skip for open sessions answers later starts from the cached release, not GitHub", async () => {
+    const busy = deps({ listSessions: () => [session(100), session(200)] });
+    expect(await runAutoUpdateCheck(busy)).toBe("sessions-open");
+    expect(await runAutoUpdateCheck(deps({ ...busy, now: () => NOW + 60_000 }))).toBe("sessions-open");
+    expect(await runAutoUpdateCheck(deps({ now: () => NOW + 120_000 }))).toBe("launched");
+    expect(fetches).toBe(1);
+    expect(launches[0].version).toBe("v0.28.0");
+    // A day later the cached answer is stale and GitHub is asked again.
+    rmSync(autoUpdatePaths(dataDir).lock);
+    expect(
+      await runAutoUpdateCheck(deps({ ...busy, now: () => NOW + 120_000 + AUTO_UPDATE_INTERVAL_MS })),
+    ).toBe("sessions-open");
+    expect(fetches).toBe(2);
+  });
+
+  test("the tag is reduced to a canonical X.Y.Z before it reaches the installer", async () => {
+    expect(await runAutoUpdateCheck(deps({ fetchLatestTag: async () => " v0.28.0\n" }))).toBe("launched");
+    expect(launches[0].version).toBe("v0.28.0");
+    expect(readAutoUpdateState(dataDir).pending?.version).toBe("0.28.0");
+  });
+
+  test("tags that are not a plain stable version are refused", async () => {
+    for (const tag of ["v0.28.0-rc.1", "v0.28.0; rm -rf ~", "v0.28", "$(id)", "v1.2.3\nv9.9.9"]) {
+      rmSync(autoUpdatePaths(dataDir).state, { force: true });
+      expect(await runAutoUpdateCheck(deps({ fetchLatestTag: async () => tag }))).toBe("no-release");
+    }
+    expect(launches).toHaveLength(0);
+  });
+
   test("launches the installer for exactly the latest tag and records the attempt", async () => {
     expect(await runAutoUpdateCheck(deps())).toBe("launched");
     expect(launches).toEqual([

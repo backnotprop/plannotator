@@ -43,7 +43,7 @@ import {
 import { getRepoInfo } from "./repo";
 import { detectProjectName } from "./project";
 import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveFeedbackHistory } from "./config";
-import { getAutoUpdateNotice } from "./auto-update";
+import { getAutoUpdateAdvert } from "./auto-update";
 import { appendFeedbackRecord, type FeedbackDecision } from "@plannotator/shared/feedback-archive";
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { readImprovementHook, getImprovementHookExpectedPath } from "@plannotator/shared/improvement-hooks";
@@ -335,10 +335,10 @@ export async function startPlannotatorServer(
                 shareBaseUrl,
                 isWSL: wslFlag,
                 serverConfig: getServerConfig(gitUser),
-                autoUpdateNotice: getAutoUpdateNotice(),
+                ...getAutoUpdateAdvert(),
               });
             }
-            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, projectRoot: process.cwd(), planDir: planFile?.dir, isWSL: wslFlag, serverConfig: getServerConfig(gitUser), autoUpdateNotice: getAutoUpdateNotice() });
+            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, projectRoot: process.cwd(), planDir: planFile?.dir, isWSL: wslFlag, serverConfig: getServerConfig(gitUser), ...getAutoUpdateAdvert() });
           }
 
           // API: Serve a linked markdown document
