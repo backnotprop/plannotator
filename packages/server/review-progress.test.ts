@@ -239,7 +239,7 @@ test("oversized untracked files stay bounded and cannot restore viewed marks", a
 
 test("an edit between diff rendering and worktree identity capture cannot restore a newer version", async () => {
   const runtime = { ...gitRuntime, runGit: async (...args: Parameters<typeof gitRuntime.runGit>) => {
-    if (args[0][0] === "hash-object" && args[0].includes("--path=a.txt")) {
+    if (args[0][0] === "hash-object" && args[0].includes("--stdin-paths")) {
       writeFileSync(join(cwd, "a.txt"), "edited after rendering\n");
     }
     return gitRuntime.runGit(...args);
@@ -248,6 +248,39 @@ test("an edit between diff rendering and worktree identity capture cannot restor
   expect(result.patch).toContain("+after");
   expect(result.fileIdentities!["a.txt"]).toBeUndefined();
   expect(result.fileIdentities!["b.txt"]).toBeDefined();
+});
+
+// Guards the batched identity capture (one `hash-object --stdin-paths` per
+// snapshot): unusual paths, symlinks and clean filters must still produce the
+// identity the displayed patch's index line names, and a path the line-based
+// protocol cannot carry must be left out rather than mis-hashed.
+test("worktree identities are hashed in one batch and match the displayed index lines", async () => {
+  if (process.platform === "win32") return;
+  writeFileSync(join(cwd, ".gitattributes"), "*.crlf text eol=crlf\n");
+  writeFileSync(join(cwd, "with space.txt"), "x\n");
+  writeFileSync(join(cwd, "ünïcode.txt"), "x\n");
+  writeFileSync(join(cwd, "tab\there.txt"), "x\n");
+  writeFileSync(join(cwd, "line.crlf"), "one\r\ntwo\r\n");
+  writeFileSync(join(cwd, "new\nline.txt"), "x\n");
+  spawnSync("ln", ["-s", "a.txt", "link"], { cwd });
+  const calls: string[][] = [];
+  const runtime = { ...gitRuntime, runGit: async (...args: Parameters<typeof gitRuntime.runGit>) => {
+    if (args[0][0] === "hash-object" || args[0][0] === "rev-parse") calls.push(args[0]);
+    return gitRuntime.runGit(...args);
+  } };
+  const result = await runGitDiff(runtime, "uncommitted", "main", cwd, { captureFileIdentities: true });
+  const ids = result.fileIdentities!;
+  for (const path of ["a.txt", "b.txt", ".gitattributes", "with space.txt", "ünïcode.txt", "tab\there.txt", "line.crlf", "link"]) {
+    expect(ids[path]).toBeDefined();
+  }
+  // Same identity a plain `git hash-object` (filters applied) gives the file.
+  const crlfId = git("hash-object", "line.crlf");
+  expect(JSON.parse(ids["line.crlf"])[5]).toBe(crlfId);
+  expect(ids["new\nline.txt"]).toBeUndefined();
+  expect(result.patch).toContain("new\\nline.txt");
+  expect(calls.filter(args => args.includes("--stdin-paths"))).toHaveLength(2); // tracked + untracked
+  expect(calls.filter(args => args.includes("--stdin"))).toHaveLength(1); // the symlink
+  expect(calls.filter(args => args[0] === "rev-parse" && args.includes("--show-toplevel")).length).toBeLessThanOrEqual(3);
 });
 
 test("workspace and non-Git reviews retain legacy draft persistence", async () => {

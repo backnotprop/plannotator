@@ -1243,45 +1243,126 @@ export async function runBoundedTrackedDiff(
  * configured index abbreviation. Raw metadata supplies full identities even
  * for mode-only changes and pure renames, whose patches have no index line.
  */
+interface ReviewPatchOutput {
+  patch: string;
+  entries: RawDiffEntry[];
+}
+
+function splitReviewPatchOutput(output: string): ReviewPatchOutput {
+  const separator = output.indexOf("\0\0");
+  if (separator === -1) return { patch: output.startsWith(":") ? "" : output, entries: [] };
+  return {
+    patch: output.slice(separator + 2),
+    entries: parseRawDiffEntries(output.slice(0, separator)),
+  };
+}
+
 async function extractReviewPatch(
   runtime: ReviewGitRuntime,
   output: string,
   identities: Record<string, string>,
   cwd?: string,
 ): Promise<string> {
-  const separator = output.indexOf("\0\0");
-  if (separator === -1) return output.startsWith(":") ? "" : output;
-  const entries = parseRawDiffEntries(output.slice(0, separator));
-  const patch = output.slice(separator + 2);
-  const files = new Map(parseDiffToFiles(patch).map(file => [file.path, file]));
-  const root = await resolveRepoToplevel(runtime, cwd);
-  for (const entry of entries) {
-    const path = entry.newPath ?? entry.oldPath!;
-    const file = files.get(path);
-    if (!file || isGitlink(entry)) continue;
-    let newId = entry.newObjectId;
-    if (entry.newPath && isNullObjectId(newId)) {
-      // Git leaves worktree raw IDs zero. Resolve only bounded files now, and
-      // verify against the displayed index line so an intervening edit cannot
-      // mark a newer version reviewed. Symlinks hash their link, not the target.
-      const info = await getWorkingTreeFileInfo(runtime, root, path);
-      if (!info || info.size > MAX_REVIEW_FILE_CONTENT_BYTES) continue;
-      const link = info.isSymbolicLink ? await runtime.readLink(info.path) : null;
-      if (info.isSymbolicLink && link === null) continue;
-      const result = await runtime.runGit(
-        info.isSymbolicLink ? ["hash-object", "--stdin"] : ["hash-object", `--path=${path}`, "--", info.path],
-        { cwd: root, ...(link !== null ? { stdin: link } : {}) },
-      );
-      newId = result.stdout.trim();
-      if (result.exitCode !== 0 || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(newId)) continue;
-      const index = file.patch.match(/^index [a-f0-9]+\.\.([a-f0-9]+)/m);
-      if (index ? !newId.startsWith(index[1]) : newId !== entry.oldObjectId) continue;
-    }
+  const parsed = splitReviewPatchOutput(output);
+  if (parsed.entries.length > 0) {
+    await resolveReviewFileIdentities(runtime, await resolveRepoToplevel(runtime, cwd), [parsed], identities);
+  }
+  return parsed.patch;
+}
+
+const OBJECT_ID_RE = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
+
+/**
+ * `--stdin-paths` reads one path per line and C-unquotes a line that starts
+ * with a double quote, so a path with a line break, a carriage return (which
+ * Git's line reader strips), or a leading quote cannot be passed through it
+ * verbatim. Those files are simply left without an identity: they stay
+ * reviewable, they just do not restore as viewed in a later session.
+ */
+function isStdinPathSafe(path: string): boolean {
+  return !/[\n\r]/.test(path) && !path.startsWith('"');
+}
+
+/**
+ * Record every file's identity for one snapshot. Git leaves worktree raw IDs
+ * zero, so those are hashed here — in ONE `git hash-object --stdin-paths`
+ * call for the whole snapshot (symlinks, which hash their link text rather
+ * than their target, each take a `--stdin` call). Each hash is verified
+ * against the displayed patch's index line, so an edit between the diff and
+ * the hash cannot mark a newer version reviewed.
+ */
+async function resolveReviewFileIdentities(
+  runtime: ReviewGitRuntime,
+  root: string | undefined,
+  outputs: ReviewPatchOutput[],
+  identities: Record<string, string>,
+): Promise<void> {
+  const record = (entry: RawDiffEntry, path: string, newId: string) => {
     identities[path] = JSON.stringify([
       entry.oldPath, entry.newPath, entry.oldMode, entry.newMode, entry.oldObjectId, newId,
     ]);
+  };
+  const pending: { entry: RawDiffEntry; path: string; patch: string }[] = [];
+  for (const output of outputs) {
+    if (output.entries.length === 0) continue;
+    const files = new Map(parseDiffToFiles(output.patch).map(file => [file.path, file]));
+    for (const entry of output.entries) {
+      const path = entry.newPath ?? entry.oldPath!;
+      const file = files.get(path);
+      if (!file || isGitlink(entry)) continue;
+      if (entry.newPath && isNullObjectId(entry.newObjectId)) {
+        pending.push({ entry, path, patch: file.patch });
+      } else {
+        record(entry, path, entry.newObjectId);
+      }
+    }
   }
-  return patch;
+  if (pending.length === 0) return;
+
+  const infos = await Promise.all(pending.map(item => getWorkingTreeFileInfo(runtime, root, item.path)));
+  const hashes = new Map<(typeof pending)[number], string>();
+  const regular: (typeof pending)[number][] = [];
+  const symlinks: { item: (typeof pending)[number]; info: ReviewFileInfo }[] = [];
+  pending.forEach((item, index) => {
+    const info = infos[index];
+    if (!info || info.size > MAX_REVIEW_FILE_CONTENT_BYTES) return;
+    if (info.isSymbolicLink) symlinks.push({ item, info });
+    else if (isStdinPathSafe(item.path)) regular.push(item);
+  });
+
+  if (regular.length > 0) {
+    // Paths are root-relative with cwd at the root, so clean filters and
+    // attributes resolve exactly as they do for the diff itself.
+    const result = await runtime.runGit(["hash-object", "--stdin-paths"], {
+      cwd: root,
+      stdin: `${regular.map(item => item.path).join("\n")}\n`,
+    });
+    // One line per input path, in order. A path that vanished mid-snapshot
+    // makes Git stop there: the lines it printed are still a correct prefix,
+    // and every later file simply goes without an identity.
+    const lines = result.stdout.split("\n");
+    regular.forEach((item, index) => {
+      const line = lines[index]?.trim();
+      if (line && OBJECT_ID_RE.test(line) && (result.exitCode === 0 || index < lines.length - 1)) {
+        hashes.set(item, line);
+      }
+    });
+  }
+  for (const { item, info } of symlinks) {
+    const link = await runtime.readLink(info.path);
+    if (link === null) continue;
+    const result = await runtime.runGit(["hash-object", "--stdin"], { cwd: root, stdin: link });
+    const id = result.stdout.trim();
+    if (result.exitCode === 0 && OBJECT_ID_RE.test(id)) hashes.set(item, id);
+  }
+
+  for (const item of pending) {
+    const newId = hashes.get(item);
+    if (!newId) continue;
+    const index = item.patch.match(/^index [a-f0-9]+\.\.([a-f0-9]+)/m);
+    if (index ? !newId.startsWith(index[1]) : newId !== item.entry.oldObjectId) continue;
+    record(item.entry, item.path, newId);
+  }
 }
 
 async function getUntrackedFileDiffs(
@@ -1404,13 +1485,16 @@ async function getUntrackedFileDiffs(
             : `git diff --no-index failed for ${JSON.stringify(file)} with exit code ${diffResult.exitCode}`,
         );
       }
-      return fileIdentities
-        ? extractReviewPatch(runtime, diffResult.stdout, fileIdentities, rootCwd)
-        : diffResult.stdout;
+      return diffResult.stdout;
     },
   );
 
-  return { diff: diffs.join(""), paths: files };
+  if (!fileIdentities) return { diff: diffs.join(""), paths: files };
+  // Identities are resolved once for every untracked file together: one
+  // hash-object process for the snapshot, not one (plus a rev-parse) per file.
+  const outputs = diffs.map(splitReviewPatchOutput);
+  await resolveReviewFileIdentities(runtime, rootCwd, outputs, fileIdentities);
+  return { diff: outputs.map(output => output.patch).join(""), paths: files };
 }
 
 /** How a working-tree diff handles failures while reading untracked files. */
