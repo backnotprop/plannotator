@@ -7,6 +7,7 @@ import {
   autoUpdatePaths,
   compareStableVersions,
   deriveAutoUpdateNotice,
+  installerCommand,
   isCheckDue,
   isManagedBinary,
   isNewerStableVersion,
@@ -219,5 +220,22 @@ describe("managed binary", () => {
     expect(isManagedBinary("/home/u/.local/bin/plannotator", "linux", env, "/home/u")).toBe(true);
     expect(isManagedBinary("/opt/homebrew/bin/plannotator", "darwin", env, "/home/u")).toBe(false);
     expect(managedBinaryPath("win32", env, "C:\\Users\\u")).toContain(join("plannotator", "plannotator.exe"));
+  });
+});
+
+describe("installer command", () => {
+  test("Windows passes the wrapper encoded, so it survives command-line quoting intact", () => {
+    const { file, args } = installerCommand("win32");
+    expect(file).toBe("powershell.exe");
+    const encoded = args[args.indexOf("-EncodedCommand") + 1];
+    const script = Buffer.from(encoded, "base64").toString("utf16le");
+    expect(script).toContain("$env:PLANNOTATOR_UPDATE_VERSION");
+    expect(script).toContain('\'{"version":"\'');
+  });
+
+  test("POSIX runs the wrapper through /bin/sh with inputs only in the environment", () => {
+    const { file, args } = installerCommand("darwin");
+    expect(file).toBe("/bin/sh");
+    expect(args[1]).toContain('--version "$PLANNOTATOR_UPDATE_VERSION"');
   });
 });

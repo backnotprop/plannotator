@@ -440,6 +440,28 @@ Write-Output ("[" + (Get-Date).ToUniversalTime().ToString('o') + "] auto-update:
 Remove-Item -Force -ErrorAction SilentlyContinue $env:PLANNOTATOR_UPDATE_LOCK
 `;
 
+/**
+ * The detached process to spawn. Windows gets the wrapper as
+ * -EncodedCommand (base64 UTF-16LE), so its quotes and newlines never go
+ * through command-line quoting at all.
+ */
+export function installerCommand(platform: NodeJS.Platform): { file: string; args: string[] } {
+  if (platform === "win32") {
+    return {
+      file: "powershell.exe",
+      args: [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-EncodedCommand",
+        Buffer.from(POWERSHELL_WRAPPER, "utf16le").toString("base64"),
+      ],
+    };
+  }
+  return { file: "/bin/sh", args: ["-c", POSIX_WRAPPER] };
+}
+
 export function launchInstaller(launch: InstallerLaunch): void {
   const isWindows = launch.platform === "win32";
   const logFd = openSync(launch.logPath, "a");
@@ -451,17 +473,13 @@ export function launchInstaller(launch: InstallerLaunch): void {
       PLANNOTATOR_UPDATE_LOCK: launch.lockPath,
       PLANNOTATOR_UPDATE_SCRIPT_URL: isWindows ? INSTALL_PS1_URL : INSTALL_SH_URL,
     };
-    const child = isWindows
-      ? spawn(
-          "powershell.exe",
-          ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", POWERSHELL_WRAPPER],
-          { detached: true, stdio: ["ignore", logFd, logFd], env, windowsHide: true },
-        )
-      : spawn("/bin/sh", ["-c", POSIX_WRAPPER], {
-          detached: true,
-          stdio: ["ignore", logFd, logFd],
-          env,
-        });
+    const { file, args } = installerCommand(launch.platform);
+    const child = spawn(file, args, {
+      detached: true,
+      stdio: ["ignore", logFd, logFd],
+      env,
+      windowsHide: true,
+    });
     child.on("error", () => {});
     child.unref();
   } finally {
