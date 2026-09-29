@@ -71,6 +71,7 @@
     "./code-nav": "./code-nav.ts",
     "./token-hover": "./token-hover.ts",
     "./goal-setup": "./goal-setup.ts",
+    "./question-block": "./question-block.ts",
     "./semantic-diff": "./semantic-diff.ts",
     "./semantic-diff-types": "./semantic-diff-types.ts",
     "./call-flow-types": "./call-flow-types.ts",

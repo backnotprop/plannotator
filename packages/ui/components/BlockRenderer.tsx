@@ -8,6 +8,20 @@ import { Callout } from "./blocks/Callout";
 import { AlertBlock } from "./blocks/AlertBlock";
 import { TableBlock } from "./blocks/TableBlock";
 import { MathBlock } from "./blocks/MathBlock";
+import { QuestionBlock } from "./blocks/QuestionBlock";
+import {
+  indexQuestionBlocks,
+  isQuestionDirectiveKind,
+  type IndexedQuestion,
+  type QuestionAnswer,
+} from "@plannotator/core/question-block";
+
+/** A question block rendered outside a Viewer's document index (plan diff,
+ *  other markdown surfaces): parsed alone, unnumbered. */
+const standaloneQuestion = (block: Block): IndexedQuestion | undefined => {
+  const [indexed] = indexQuestionBlocks([block]);
+  return indexed ? { ...indexed, number: 0 } : undefined;
+};
 
 export const BlockRenderer: React.FC<{
   block: Block;
@@ -22,7 +36,16 @@ export const BlockRenderer: React.FC<{
   repoHost?: string;
   headingAnchorId?: string;
   onNavigateAnchor?: (hash: string) => void;
-}> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, repoHost, headingAnchorId, onNavigateAnchor }) => {
+  /** `:::question` blocks: this block's entry in the document's question
+   *  index (numbering, key, prompt line) and the document's question count.
+   *  Absent, a question block is parsed on its own and shows no "N of M". */
+  question?: IndexedQuestion;
+  questionTotal?: number;
+  /** The answer to draw (from the annotation carrying `questionAnswer`). */
+  questionAnswer?: QuestionAnswer;
+  /** Absent: question blocks render read-only. */
+  onAnswerQuestion?: (blockId: string, answer: QuestionAnswer | null, key: string) => void;
+}> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, repoHost, headingAnchorId, onNavigateAnchor, question, questionTotal, questionAnswer, onAnswerQuestion }) => {
   switch (block.type) {
     case 'heading': {
       const Tag = `h${block.level || 1}` as React.ElementType;
@@ -135,6 +158,28 @@ export const BlockRenderer: React.FC<{
 
     case 'directive': {
       const kind = block.directiveKind || 'note';
+      if (isQuestionDirectiveKind(kind)) {
+        // An unparseable question (no prompt) falls through to the callout.
+        const indexed = question ?? standaloneQuestion(block);
+        if (indexed) {
+          return (
+            <QuestionBlock
+              blockId={block.id}
+              indexed={indexed}
+              total={questionTotal ?? 0}
+              answer={questionAnswer}
+              onAnswer={onAnswerQuestion}
+              onOpenLinkedDoc={onOpenLinkedDoc}
+              onOpenCodeFile={onOpenCodeFile}
+              imageBaseDir={imageBaseDir}
+              onImageClick={onImageClick}
+              githubRepo={githubRepo}
+              repoHost={repoHost}
+              onNavigateAnchor={onNavigateAnchor}
+            />
+          );
+        }
+      }
       return (
         <Callout
           blockId={block.id}

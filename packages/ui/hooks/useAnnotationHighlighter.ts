@@ -1105,6 +1105,10 @@ export function useAnnotationHighlighter({
       // verdict, so it is neither attempted nor unanchored here (the same
       // rule the raw-HTML pinpoints follow on their surface).
       if (ann.diagramAnchor) return;
+      // An answer to a `:::question` block quotes the prompt but is not a
+      // selection: the question block draws it from the annotation, so it is
+      // never painted as a highlight (and never reported as unanchored here).
+      if (ann.questionAnswer) return;
       // #881: a row whose quote is only whitespace has nothing to anchor to.
       // Older drafts carry such rows (a double-click at a block boundary used
       // to create one), and the stored positions still resolve, so restoring

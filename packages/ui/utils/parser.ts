@@ -2,6 +2,15 @@ import type { Block, Annotation, CodeAnnotation, EditorAnnotation, ImageAttachme
 import { planDenyFeedback } from '@plannotator/core/feedback-templates';
 import { resolveReplyParents } from '@plannotator/core/annotation-threads';
 import { diagramAnchorLocationLine, parseDiagramAnchor } from '@plannotator/core/diagram-anchor';
+import {
+  formatQuestionAnswerLines,
+  formatQuestionAnswersSection,
+  indexQuestionBlocks,
+  parseQuestionAnswer,
+  questionExportItems,
+  type QuestionAnswer,
+  type QuestionExportItem,
+} from '@plannotator/core/question-block';
 import { skillReferenceExportBlock } from './skillReferences';
 
 /**
@@ -1380,6 +1389,11 @@ const additionalTargetsExportBlock = (ann: any): string => {
  * panel chrome does not use it.
  */
 export const exportAnnotationEntry = (ann: any, opts: ElementContextExportOptions = { includeRoute: true }): string => {
+  // An answer to a `:::question` block: the question and the answer lines.
+  const answer = ann?.questionAnswer == null ? null : parseQuestionAnswer(ann.questionAnswer);
+  if (answer) {
+    return `Answer to the question "${safeInline(answer.prompt, 400)}"\n${formatQuestionAnswerLines(answer)}`;
+  }
   let output = '';
   switch (ann?.type) {
     case 'DELETION':
@@ -1431,15 +1445,47 @@ const lineLabelForAnnotation = (blocks: Block[], ann: any): string | null => {
   return `lines ${block.startLine}–${end}`;
 };
 
+/** Separate valid question answers from ordinary feedback. A row whose
+ *  `questionAnswer` fails validation stays ordinary feedback (its one-line
+ *  text still reads), so nothing is ever dropped. */
+const splitQuestionAnswers = (list: any[]): { answers: QuestionAnswer[]; annotations: any[] } => {
+  const answers: QuestionAnswer[] = [];
+  const annotations: any[] = [];
+  for (const ann of list) {
+    const answer = ann?.questionAnswer == null ? null : parseQuestionAnswer(ann.questionAnswer);
+    if (answer) answers.push(answer);
+    else annotations.push(ann);
+  }
+  return { answers, annotations };
+};
+
+/** Export items when a document's blocks are unknown: the answers' own
+ *  prompts and lines, numbered in answer order. */
+const questionItemsFromAnswers = (answers: QuestionAnswer[]): QuestionExportItem[] =>
+  answers.map((a, i) => ({
+    key: a.key,
+    number: i + 1,
+    prompt: a.prompt,
+    ...(a.sourceLine ? { line: a.sourceLine } : {}),
+    recommendedLabels: [],
+    settled: false,
+  }));
+
 export const exportAnnotations = (
   blocks: Block[],
-  annotations: any[],
+  allAnnotations: any[],
   globalAttachments: ImageAttachment[] = [],
   title: string = 'Plan Feedback',
   subject: string = 'plan',
   opts: ExportAnnotationsOptions = {},
 ): string => {
-  if (annotations.length === 0 && globalAttachments.length === 0) {
+  // Answers to `:::question` blocks are printed first, in their own section,
+  // and never counted as numbered feedback.
+  const { answers, annotations } = splitQuestionAnswers(allAnnotations);
+  const answersSection = answers.length > 0
+    ? formatQuestionAnswersSection(questionExportItems(indexQuestionBlocks(blocks)), answers, { headingLevel: 2 })
+    : '';
+  if (annotations.length === 0 && globalAttachments.length === 0 && !answersSection) {
     return 'No changes detected.';
   }
 
@@ -1460,6 +1506,8 @@ export const exportAnnotations = (
   if (opts.sourceConverted) {
     output += `> Note: Line numbers below refer to the converted markdown, not the original HTML/URL source.\n\n`;
   }
+
+  output += answersSection;
 
   // Add global reference images section if any
   if (globalAttachments.length > 0) {
@@ -1673,10 +1721,19 @@ export const exportLinkedDocAnnotations = (
   // One injection per export, across all linked documents.
   const injectedSkills = new Set<string>();
 
-  for (const [filepath, { annotations, globalAttachments, blocks: docBlocks, isConverted }] of docAnnotations) {
-    if (annotations.length === 0 && globalAttachments.length === 0) continue;
+  for (const [filepath, { annotations: docAnnotationList, globalAttachments, blocks: docBlocks, markdown: docMarkdown, isConverted }] of docAnnotations) {
+    if (docAnnotationList.length === 0 && globalAttachments.length === 0) continue;
+    const { answers, annotations } = splitQuestionAnswers(docAnnotationList);
 
     output += `## ${filepath}${isConverted ? ' (converted from HTML — line numbers refer to converted markdown)' : ''}\n\n`;
+
+    if (answers.length > 0) {
+      const questionBlocks = docBlocks ?? (docMarkdown !== undefined ? parseMarkdownToBlocks(docMarkdown) : null);
+      const items = questionBlocks
+        ? questionExportItems(indexQuestionBlocks(questionBlocks))
+        : questionItemsFromAnswers(answers);
+      output += formatQuestionAnswersSection(items, answers, { headingLevel: 3 });
+    }
 
     if (globalAttachments.length > 0) {
       output += `### Reference Images\n`;
@@ -1693,7 +1750,9 @@ export const exportLinkedDocAnnotations = (
       return a.startOffset - b.startOffset;
     });
 
-    output += `I've reviewed this document and have ${annotations.length} piece${annotations.length !== 1 ? 's' : ''} of feedback:\n\n`;
+    if (annotations.length > 0 || answers.length === 0) {
+      output += `I've reviewed this document and have ${annotations.length} piece${annotations.length !== 1 ? 's' : ''} of feedback:\n\n`;
+    }
 
     sortedAnns.forEach((ann, index) => {
       output += `### ${index + 1}. `;

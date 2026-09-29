@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/core",
-  "version": "0.25.7",
+  "version": "0.25.8",
   "type": "module",
   "exports": {
     "./agents": "./agents.ts",
@@ -26,6 +26,7 @@
     "./forge-refs": "./forge-refs.ts",
     "./feedback-templates": "./feedback-templates.ts",
     "./goal-setup": "./goal-setup.ts",
+    "./question-block": "./question-block.ts",
     "./html-anchor": "./html-anchor.ts",
     "./diagram-anchor": "./diagram-anchor.ts",
     "./open-in-apps": "./open-in-apps.ts",

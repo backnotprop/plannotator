@@ -189,6 +189,7 @@ We deliberately did **not** restructure the exports map in this PR (move-don't-r
 | `theme` / `styles.css` | Theme tokens + precompiled stylesheet. **Prefer `styles.css`.** The raw `theme` export still `@import`s KaTeX (re-acquiring the fonts `styles.css` deliberately excludes, as separate lazy files) and contains Tailwind v4 `@theme` at-rules, so it's inert without Tailwind processing. |
 | `types` | `Annotation`, `Block`, `AnnotationType`, etc. |
 | `utils/parser` (`parseMarkdownToBlocks`, `exportAnnotations`) | Pure — no backend. |
+| `utils/questionAnswers` (`upsertQuestionAnswerAnnotation`, `collectQuestionAnswers`, `questionAnswerToAnnotation`) | Pure. Applies `Viewer`'s `onAnswerQuestion` to your annotation list (0.48.0; see "Questions in documents"). |
 | `components/BlockRenderer` + the block components it renders (`TableBlock`, `HtmlBlock`, `Callout`, `MermaidBlock`, `MathBlock`, …) | Pure rendering. |
 | `components/InlineMarkdown` | Code-file hover previews route through the `docPreviewFetcher` seam. Wiki-link rendering takes the sync `resolveLinkedDoc` prop (live labels + deleted-doc treatment; see "Wiki-link seams (0.27.0)"). |
 | `components/Viewer` | The full annotatable document. Required props: `markdown` and `taterMode` (pass `false`). **Pass `disableCodePathValidation` unless you implement `/api/doc/exists`** — code-path validation is a prop-level opt-out, not a `configure` seam. `annotationHeader={{ onInputMethodChange, onModeChange, hideQuickLabel? }}` opts into one Viewer-owned, in-flow header containing the compact annotation controls and existing document actions. It reserves its measured responsive height, preserves all document badges, and follows `stickyActions` as one unit; omit it for the legacy action bar. Compact mode contains no help link. `hideQuickLabel` still requires the host to clamp restored mode state away from `'quickLabel'`. A host-owned scroll element must be supplied through `ScrollViewportProvider` (`hooks/useScrollViewport`) so stuck chrome and anchor clearance use the real scroller. |
@@ -1556,8 +1557,50 @@ Required by ui 0.47.0 (`components/ModelSourceHint` and `hooks/useModelCatalogs`
 
 Minor rather than patch because of the new exports (`cliVersionFrom`, `ModelsSource`).
 
+## Questions in documents (0.48.0, core 0.25.8)
+
+Additive. An agent can ask the reviewer questions inside a markdown document with a `:::question` directive, and the reviewer answers in place. The approved design is the "Card" variant: an eyebrow ("Question 2 of 4", "· pick any" on multi), a status tag (Open / ✓ Answered / Skipped / ✓ Settled), the prompt, its context, the choices, and a footer with Add note · Skip · a right-aligned **Accept recommended**.
+
+```markdown
+:::question
+Where should losing conflict versions be kept?
+
+Last-write-wins silently drops the loser unless we keep it somewhere.
+
+- [ ] Local only, purged after 30 days — cheap, no server change
+- [ ] Server-side per user — survives reinstall, needs a retention policy
+
+Recommended: Local only, purged after 30 days
+:::
+```
+
+**`@plannotator/core/question-block` (new subpath, pure):**
+
+- `parseQuestionBlock(directiveKind, body)` returns a `ParsedQuestion` or **null** when the block is not a question (no prompt, wrong kind, over `MAX_QUESTION_BODY_CHARS`). It never throws. It is tolerant: tight or spaced markdown, `-`/`*`/`+`/`1.` markers, plain bullets as choices when there are no task-list items, indented continuation lines, `Recommended:` / `**Recommended:**` / `Recommendation:` / `➡️` / `->` / `=>` / `→`, a `label — reason` recommendation, and a `,` / `;` / `and` list on multi questions. `- [x]` means **settled** (already decided), not recommended.
+- `indexQuestionBlocks(blocks)` numbers the document's question blocks, gives the prompt's document line, and de-duplicates keys (`-2`, `-3`…). It takes a structural block shape, so it works on your own block list.
+- `questionKey(kind, prompt)` = `q-` + an 8-hex FNV-1a hash of the kind and the normalized prompt. It is stable across versions while the prompt is unchanged. A reworded prompt is a new question.
+- `QuestionAnswer` (`{ v: 1, key, kind, prompt, selected: labels[], other?, text?, note?, skipped?, sourceLine? }`), `parseQuestionAnswer` (fail-closed: wrong types return null, strings are truncated to the caps), `isQuestionAnswered`, `isQuestionAnswerEmpty`, `recommendedQuestionAnswer`, `buildQuestionAnswerAnnotation` (structural record, `type: 'COMMENT'`).
+- `formatQuestionAnswersSection(items, answers, { headingLevel })`, `questionExportItems(index)`, `formatQuestionAnswerLines`, `formatQuestionAnswerText`.
+- `QUESTION_AUTHORING_GUIDE`: the syntax reference as one markdown string. Put it in your own agent prompts. Plannotator's skill text will be written from the same source.
+
+**`@plannotator/ui`:**
+
+- `Annotation.questionAnswer?: QuestionAnswer`. An answer is ONE annotation, id `ann-question-<key>`, `blockId` = the question block, `originalText` = the prompt, `text` = a one-line answer (`Answer: Local only — note: …`), offsets 0. A consumer that does not know the field still reads it as a comment. Your annotation store and `draftTransport` carry it as opaque JSON. Nothing new to persist.
+- `Viewer` `onAnswerQuestion?(blockId, answer | null, key)`: the only new prop. The Viewer derives every card's state from its `annotations` prop (matched by key, so an answer follows its question across re-parses). On a change it calls the handler with the next answer, or `null` when the answer became empty. Apply it with `upsertQuestionAnswerAnnotation(annotations, blockId, answer, key)` (`utils/questionAnswers`; replaces in place and keeps `createdA`, appends when new, removes on null/empty). With no handler, or `readOnly`, the cards render disabled and still show stored answers.
+- `BlockRenderer` takes optional `question` / `questionTotal` / `questionAnswer` / `onAnswerQuestion`. Without them (plan diff, `RenderedMarkdown`) a question block is parsed alone and renders read-only and unnumbered.
+- `components/blocks/QuestionBlock` is exported for a host that renders blocks itself.
+- The highlighter skips rows carrying `questionAnswer` (neither painted nor attempted nor unanchored), the same rule `diagramAnchor` rows follow.
+- Exporters: `exportAnnotations` prints `## Answers to your questions` right after the title (before reference images and the numbered feedback): `N of M questions answered.`, one `### Q<n>. <prompt> (line L)` entry per answered, skipped or noted question (`Answer: X (your recommendation)`, a bullet list for several picks, a blockquote for free text, `Skipped`, `Note: …`), an `### Unanswered` list, and answers whose question is no longer in the document. Answers are not counted in "I've reviewed this plan and have N pieces of feedback". Questions the agent settled with `[x]` and the reviewer left alone are neither counted nor listed as unanswered. `exportLinkedDocAnnotations` prints the same section per document one level deeper; `exportAnnotationEntry` prints one answer. A row whose `questionAnswer` fails validation exports as an ordinary comment. A document with questions but no answers and no feedback still exports `No changes detected.`
+- Interaction: native `<input type=radio|checkbox>` inside a `<label>`. A click on a row picks only when the pointer moved less than 4 px (10 px touch) and no text is selected, so a drag across option text is an annotation, never a pick. The eyebrow, tags and footer are `annotation-exclude` / `select-none` / `data-pinpoint-ignore`; the prompt, context and choice text are not. "Other…" is always offered. There are no required questions and no new keyboard shortcuts.
+- Fallback: an unparseable block renders through the existing directive `Callout`; a ui older than 0.48.0 renders every `:::question` that way (the prompt and the task list as text).
+
+**No `configurePlannotatorUI` seam** is involved. Plannotator's server does not change.
+
+**guides.show:** the viewer JS is unchanged, but the shared stylesheet gained the card's utility classes, so `guide-viewer-manifest.ts` pins a new CSS hash. Deploy guides.show before a release that ships this manifest.
+
 ## Publishing & versioning
 
+- **core 0.25.8 / ui 0.48.0 (questions in documents): both change. Publish `core` 0.25.8 first, then `ui` 0.48.0**, which pins core `0.25.8` exactly and imports the new `@plannotator/core/question-block` subpath. Core is a patch bump because its change is additive and pre-1.0 caret ranges would not accept a minor. See "Questions in documents (0.48.0, core 0.25.8)".
 - **core 0.25.7 / ui 0.47.0 (host link widgets + model source hint + `persistViewedFiles`): both packages change, and both need unpublished upstream packages first.** Order: `@plannotator/atomic-editor` 0.9.0, then `@plannotator/markdown-editor` 0.5.0, then `bun install` here to refresh `bun.lock`, then publish `core` 0.25.7, then `ui` 0.47.0. ui pins core `0.25.7` exactly, `@plannotator/atomic-editor` `^0.9.0` and `@plannotator/markdown-editor` `^0.5.0`. See "Host link widgets (0.47.0, core 0.25.7)".
 - **ui 0.46.1 (fix, ui only, core pin unchanged at `0.25.6`):** `useVimSelection` (mounted by every `Viewer`) now only clears a page selection whose anchor or focus lies inside the viewer's own container; with vim off it used to clear the WHOLE page's selection on every mount and `contentVersion` change, so a selection in another host panel vanished whenever the document behind it loaded or changed.
 - **ui 0.45.0 (annotation card header slot + mentions on the card's edit box): `@plannotator/ui` only — `@plannotator/core` is UNCHANGED at `0.25.5`, so this publishes alone** (core 0.25.5 must already be published). Purely additive over 0.44.0, both props on `AnnotationPanel`: `renderCardHeader` (the header-row twin of `renderCardFooter`, wrapper `[data-annotation-card-header]`, renders under `readOnly`, open-document cards only in the All-files view) and `mentionSource` (the 0.43.0 type, applied to the card's EDIT box, saving `onEdit(id, { text, mentions })` only when a source was supplied and a pick survived). Nothing is removed, no new supported imports (`components/MentionAutocomplete` is internal glue), no export-, share- or archive-visible change, and Plannotator passes neither — `packages/editor` and `packages/review-editor` have zero source diff, and the panel is byte-identical to 0.44.0. Known difference from `CommentPopover`: no chips in the card's edit box (follow-up named in the section). See "Annotation card header slot and mentions on the edit box (0.45.0)".

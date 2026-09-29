@@ -1,7 +1,9 @@
 import type { DiagramAnchor } from '@plannotator/core/diagram-anchor';
 import type { DiagramRenderKind } from '@plannotator/core/annotatable';
+import type { QuestionAnswer } from '@plannotator/core/question-block';
 
 export type { DiagramAnchor } from '@plannotator/core/diagram-anchor';
+export type { QuestionAnswer } from '@plannotator/core/question-block';
 export type { DiagramRenderKind } from '@plannotator/core/annotatable';
 
 /**
@@ -100,6 +102,7 @@ export interface Annotation {
   elementContext?: HtmlElementContext; // raw-HTML / live-app pinpoint: bounded agent-facing description of the primary element (never used by restore)
   htmlAdditionalTargets?: HtmlAnnotationTarget[]; // raw-HTML shift-click multi-select: extra elements this one comment covers (primary stays htmlAnchor/originalText)
   diagramAnchor?: DiagramAnchor; // a comment on a rendered diagram part (Mermaid / Graphviz fence): the part's own id, label and document source line; the highlighter skips it and the diagram overlay restores it (see @plannotator/core/diagram-anchor)
+  questionAnswer?: QuestionAnswer; // the reviewer's answer to a `:::question` block (id `ann-question-<key>`): the Viewer draws the answer from it, the highlighter skips it, and the export prints it in the "Answers to your questions" section instead of as a numbered comment (see @plannotator/core/question-block)
   // web-highlighter metadata for cross-element selections
   startMeta?: AnnotationTextMeta;
   endMeta?: AnnotationTextMeta;

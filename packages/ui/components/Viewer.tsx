@@ -9,6 +9,8 @@ import { computeListIndices, groupBlocks, type Frontmatter, type FrontmatterValu
 import { buildHeadingSlugMap } from '../utils/slugify';
 import { copyTextToClipboard } from '../utils/clipboard';
 import { BlockRenderer } from './BlockRenderer';
+import { indexQuestionBlocks, type QuestionAnswer } from '@plannotator/core/question-block';
+import { collectQuestionAnswers } from '../utils/questionAnswers';
 import { CodeBlock } from './blocks/CodeBlock';
 import { TableBlock } from './blocks/TableBlock';
 import { TableToolbar } from './blocks/TableToolbar';
@@ -187,6 +189,13 @@ export interface ViewerProps {
   // Checkbox toggle props
   onToggleCheckbox?: (blockId: string, checked: boolean) => void;
   checkboxOverrides?: Map<string, boolean>;
+  /** Answer handler for `:::question` blocks. The Viewer draws each answer
+   *  from the `annotations` row carrying `questionAnswer` for that question's
+   *  key; a change calls this with the next answer, or null when it became
+   *  empty, and the host upserts or removes that annotation (see
+   *  `upsertQuestionAnswerAnnotation` in `utils/questionAnswers`). Absent (or
+   *  `readOnly`), question blocks render read-only. */
+  onAnswerQuestion?: (blockId: string, answer: QuestionAnswer | null, key: string) => void;
   onAskAI?: CommentAskAIHandler;
   /** Whether comment popovers offer image attachments. Hosts without an
    *  uploadTransport pass false so the attach affordance never dead-ends.
@@ -473,6 +482,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   messagePickerInfo,
   onToggleCheckbox,
   checkboxOverrides,
+  onAnswerQuestion,
   onAskAI,
   allowImages = true,
   readOnly = false,
@@ -535,6 +545,14 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // anchor ids stay stable across re-renders and duplicate heading texts get
   // `-1`/`-2`/... suffixes rather than colliding on the same id.
   const headingSlugMap = useMemo(() => buildHeadingSlugMap(blocks), [blocks]);
+  // `:::question` blocks: numbered in document order, answers drawn from the
+  // annotations that carry `questionAnswer` (matched by question key, so an
+  // answer follows its question across re-parses).
+  const questionIndex = useMemo(() => {
+    const list = indexQuestionBlocks(blocks);
+    return { byBlock: new Map(list.map((q) => [q.blockId, q])), total: list.length };
+  }, [blocks]);
+  const questionAnswers = useMemo(() => collectQuestionAnswers(annotations), [annotations]);
   const isTouchDevice = useMemo(() => window.matchMedia('(pointer: coarse)').matches, []);
   const [codeBlockToolbar, setCodeBlockToolbar] =
     useState<CodeBlockToolbarTarget | null>(null);
@@ -1385,7 +1403,29 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               }
             />
           ) : (
-            <BlockRenderer imageBaseDir={imageBaseDir} onImageClick={(src, alt) => setLightbox({ src, alt })} key={group.block.id} block={group.block} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} onNavigateAnchor={scrollToAnchor} onToggleCheckbox={readOnly ? undefined : onToggleCheckbox} checkboxOverrides={checkboxOverrides} githubRepo={repoInfo?.display} repoHost={repoInfo?.host} headingAnchorId={headingSlugMap.get(group.block.id)} />
+            (() => {
+              const question = questionIndex.byBlock.get(group.block.id);
+              return (
+                <BlockRenderer
+                  imageBaseDir={imageBaseDir}
+                  onImageClick={(src, alt) => setLightbox({ src, alt })}
+                  key={group.block.id}
+                  block={group.block}
+                  onOpenLinkedDoc={onOpenLinkedDoc}
+                  onOpenCodeFile={onOpenCodeFile}
+                  onNavigateAnchor={scrollToAnchor}
+                  onToggleCheckbox={readOnly ? undefined : onToggleCheckbox}
+                  checkboxOverrides={checkboxOverrides}
+                  githubRepo={repoInfo?.display}
+                  repoHost={repoInfo?.host}
+                  headingAnchorId={headingSlugMap.get(group.block.id)}
+                  question={question}
+                  questionTotal={questionIndex.total}
+                  questionAnswer={question ? questionAnswers.get(question.question.key) : undefined}
+                  onAnswerQuestion={readOnly ? undefined : onAnswerQuestion}
+                />
+              );
+            })()
           )
         )}
 
