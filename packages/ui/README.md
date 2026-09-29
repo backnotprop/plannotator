@@ -75,9 +75,16 @@ Plannotator's own entries import the eager math and identity modules (`math-eage
   <MarkdownEditor markdown={md} documentId={docId} editorHandleRef={ref} extensions={editorExtensions} />
   ```
 - **`embedPicker(config)` and `embedSlashItem()` are re-exported from the same surface.** Compose the static item into `slashCommands({ items: [...] })` and pass the picker beside it in the stable `extensions` array. `getTargets`, `buildInsertLine`, optional `uploadTarget`, and optional `getNotice` stay live through callbacks. Optional `labels` (`upload`, `empty`, `noMatch(query)`) reword the three rows that say "HTML"; absent keys keep the built-in text. The host owns embed grammar and upload error UI; the package owns filtering, async anchor mapping, single-flight upload state, and paragraph-safe insertion through the re-exported `planEmbedInsert()`.
+- **`linkWidgets(...specs)` and `refreshLinkWidgets` are re-exported from the same surface** (since 0.47.0, engine `@plannotator/atomic-editor` ^0.9.0), with the types `LinkWidgetSpec` and `LinkWidgetLink`. A spec's `match(link)` gets `{ url, text, title?, from, to }` for a single-line `[text](url)` link whose syntax the engine would hide, and returns a CM6 `WidgetType` to draw in the link's place (first non-null spec wins) or `null` for the engine's normal link. The reveal rule (caret, focus, pointer-press freeze, diff ranges) stays the engine's, so the widget comes and goes exactly when the hidden syntax would; `match` is never asked about table-cell links or links wrapping an image. `match` runs on every rebuild: keep it synchronous and side-effect free and implement `eq` on the widget. When the answer changes without a document edit (data arrived after mount), dispatch `view.dispatch({ effects: refreshLinkWidgets.of(null) })`; it changes no text and adds no history entry.
+  ```tsx
+  import { linkWidgets, refreshLinkWidgets, type LinkWidgetSpec } from "@plannotator/ui/components/MarkdownEditor";
+
+  const spec: LinkWidgetSpec = { match: (link) => (isMine(link.url) ? new MyChip(link) : null) };
+  const editorExtensions = [linkWidgets(spec)]; // stable reference!
+  ```
 - **The viewer resolves wiki-links synchronously.** `InlineMarkdown` takes `resolveLinkedDoc?: (target) => { label?; status?: 'active' | 'deleted' } | null` — called with the raw stored target (opaque ids like `doc_01XYZ`, no `.md` normalization). Return a `label` to display live titles (stored label is the fallback, target the last resort); return `status: 'deleted'` for a muted non-link ("Document deleted") instead of a live link. Absent or `null` → rendering is unchanged. Sync-only by design: back it with an in-memory cache.
 
-Requires `@plannotator/markdown-editor ^0.3.2` and `@plannotator/atomic-editor ^0.7.0`. See HANDOFF.md § "Wiki-link seams (0.27.0)".
+Wiki links require `@plannotator/markdown-editor ^0.3.2` and `@plannotator/atomic-editor ^0.7.0` (see HANDOFF.md § "Wiki-link seams (0.27.0)"); link widgets require `@plannotator/markdown-editor ^0.5.0` and `@plannotator/atomic-editor ^0.9.0`, which is what 0.47.0 declares (see HANDOFF.md § "Host link widgets (0.47.0)").
 
 ### Frozen markdown diff (`MarkdownDiff`)
 
@@ -367,7 +374,7 @@ npm install @plannotator/ui @plannotator/core
 - `@plannotator/core` — pure utils + types, zero deps, browser-safe (CI enforces no `node:` imports). Published.
 - `@plannotator/ui` — React components/hooks + theme + `configure()`. Depends on an exact published `@plannotator/core` version. Published.
 - `@plannotator/shared`, `@plannotator/ai` — stay private to the monorepo; `shared` re-exports `core`'s modules via shims so Plannotator's internals are untouched.
-- Currently `@plannotator/ui` 0.46.1 depends exactly on `@plannotator/core` 0.25.6. `core` is bumped only when something under `packages/core` changes, so `ui` can advance alone. Keep the published core version exact in `packages/ui/package.json`; do not use a `workspace:` protocol there, because a directly published manifest must remain installable outside this monorepo. Bun still links the matching local workspace during development. When both packages change, publish `core` first, then build and publish the UI tarball. See HANDOFF.md "Publishing & versioning" for the verification command.
+- Currently `@plannotator/ui` 0.47.0 depends exactly on `@plannotator/core` 0.26.0. `core` is bumped only when something under `packages/core` changes, so `ui` can advance alone. Keep the published core version exact in `packages/ui/package.json`; do not use a `workspace:` protocol there, because a directly published manifest must remain installable outside this monorepo. Bun still links the matching local workspace during development. When both packages change, publish `core` first, then build and publish the UI tarball. See HANDOFF.md "Publishing & versioning" for the verification command.
 
 ## The one rule
 
