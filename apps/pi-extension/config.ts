@@ -7,6 +7,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 export type PhaseName = "planning" | "executing" | "reviewing";
 export type RuntimePhase = PhaseName | "idle";
 export type ExecutionMode = "automatic" | "external";
+export type RendererName = "browser" | "tui";
 
 export interface PhaseModelRef {
   provider: string;
@@ -35,6 +36,8 @@ export interface PhaseProfile {
 
 export interface PlannotatorConfig {
   executionMode?: ExecutionMode | null;
+  /** Plan-review UI. Env PLANNOTATOR_RENDERER overrides this per session. */
+  renderer?: RendererName | null;
   defaults?: PhaseProfile | null;
   phases?: Partial<Record<PhaseName, PhaseProfile | null>>;
 }
@@ -222,6 +225,7 @@ function mergeConfig(base: PlannotatorConfig, override: PlannotatorConfig): Plan
 
   return {
     executionMode: override.executionMode !== undefined ? override.executionMode : base.executionMode,
+    renderer: override.renderer !== undefined ? override.renderer : base.renderer,
     defaults: mergeProfile(base.defaults, override.defaults),
     phases: Object.keys(phases).length > 0 ? phases : undefined,
   };
@@ -245,6 +249,13 @@ function loadConfigSource(path: string): { config: PlannotatorConfig; warnings: 
     // "automatic"), so say so instead of silently ignoring the key.
     warnings.push(
       `Ignoring unknown executionMode ${JSON.stringify(raw.executionMode)} in ${path}: expected "automatic" or "external". Falling back to automatic.`,
+    );
+  }
+  if (raw.renderer === null || raw.renderer === "browser" || raw.renderer === "tui") {
+    config.renderer = raw.renderer;
+  } else if (raw.renderer !== undefined) {
+    warnings.push(
+      `Ignoring unknown renderer ${JSON.stringify(raw.renderer)} in ${path}: expected "browser" or "tui". Falling back to the inherited value.`,
     );
   }
   if ("defaults" in raw) config.defaults = normalizeProfile(raw.defaults, { path, scope: "defaults", warnings });
@@ -312,6 +323,10 @@ export function loadPlannotatorConfig(
 
 export function resolveExecutionMode(config: PlannotatorConfig): ExecutionMode {
   return config.executionMode ?? "automatic";
+}
+
+export function resolveRenderer(config: PlannotatorConfig): RendererName {
+  return config.renderer ?? "browser";
 }
 
 export function resolvePhaseProfile(config: PlannotatorConfig, phase: PhaseName): ResolvedPhaseProfile {

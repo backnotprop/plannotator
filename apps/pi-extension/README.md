@@ -124,6 +124,7 @@ Later layers overwrite earlier ones. If a field is omitted, it inherits the valu
 ```json
 {
   "executionMode": "automatic",
+  "renderer": "browser",
   "defaults": {
     "model": { "provider": "anthropic", "id": "claude-sonnet-4-5" },
     "thinking": "medium",
@@ -158,6 +159,7 @@ Later layers overwrite earlier ones. If a field is omitted, it inherits the valu
 | Option | Type | Meaning |
 |--------|------|---------|
 | `executionMode` | `automatic` \| `external` | `automatic` executes approved plans in the current Pi session; `external` emits a handoff event and returns to idle |
+| `renderer` | `browser` \| `tui` \| `null` | UI used for plan review. `browser` (default) opens the annotation web UI; `tui` reviews the plan in [plannotator-tui](https://github.com/plannotator/plannotator-tui) running in a Herdr pane next to Pi. `PLANNOTATOR_RENDERER` overrides this per session; `null` clears an inherited value |
 | `defaults` | object | Base values applied to every phase before phase-specific overrides |
 | `phases` | object | Phase-specific overrides |
 | `phases.planning` | object | Settings for planning mode |
