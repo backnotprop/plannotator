@@ -298,7 +298,10 @@ jobs:
         # zizmor: ignore[adhoc-packages] This integration test requires the exact
         # globally installed CLI. Owner: maintainers; reassess a locked fixture
         # by 2027-08-11.
-        run: npm install --global @opencode-ai/cli@0.0.0-next-16775
+        # OpenCode 2 publishes as @opencode/cli since upstream moved to the
+        # opencode npm scope (@opencode-ai/cli stopped at 0.0.0-*-192xx). The
+        # package still ships the `opencode2` bin the smoke step resolves.
+        run: npm install --global @opencode/cli@2.0.19
 
       - name: Build OpenCode plugin assets
         run: bun run build:review && bun run build:hook && bun run build:opencode
@@ -317,6 +320,10 @@ jobs:
       - name: Run installed-package smoke
         # Glob the tarball so this job survives version bumps; npm pack wrote
         # exactly one plannotator-opencode-*.tgz into RUNNER_TEMP above.
+        # The pinned host has the native command API, so a markdown stub
+        # still owning a /plannotator-* name is a real shadowing bug: fail on it.
+        env:
+          PLANNOTATOR_SMOKE_EXPECT_NATIVE: "1"
         run: >-
           bun run --cwd apps/opencode-plugin smoke:v2 --
           "$(command -v opencode2)"
