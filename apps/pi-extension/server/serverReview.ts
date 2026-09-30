@@ -22,6 +22,7 @@ import {
 	getDisplayRepo,
 	getMRLabel,
 	getMRNumberLabel,
+	getPRNumber,
 	isSameProject,
 	type PRMetadata,
 	type PRListItem,
@@ -1013,11 +1014,8 @@ export async function startReviewServer(options: {
 		if (prMeta) {
 			target.pr = {
 				provider: prMeta.platform,
-				repo:
-					prMeta.platform === "github"
-						? `${prMeta.owner}/${prMeta.repo}`
-						: prMeta.projectPath,
-				number: prMeta.platform === "github" ? prMeta.number : prMeta.iid,
+				repo: getDisplayRepo(prMeta),
+				number: getPRNumber(prMeta),
 			};
 		}
 		return target;
@@ -1532,9 +1530,13 @@ export async function startReviewServer(options: {
 								headSha: launchPrMeta.headSha,
 								pr: {
 									url: launchPrMeta.url,
-									number: launchPrMeta.platform === "github" ? launchPrMeta.number : launchPrMeta.iid,
+									number: getPRNumber(launchPrMeta),
 									title: launchPrMeta.title,
-									platform: launchPrMeta.platform,
+									// The portable guide format names only github/gitlab; other
+									// platforms omit the optional field rather than widen it.
+									...(launchPrMeta.platform === "github" || launchPrMeta.platform === "gitlab"
+										? { platform: launchPrMeta.platform }
+										: {}),
 								},
 							}
 						: {
@@ -1627,7 +1629,7 @@ export async function startReviewServer(options: {
 			const jobPrMeta = jobPrUrl ? prSwitchCache.get(jobPrUrl)?.metadata : undefined;
 			const jobPrContext = jobPrMeta ? {
 				prUrl: jobPrUrl,
-				prNumber: jobPrMeta.platform === "github" ? jobPrMeta.number : jobPrMeta.iid,
+				prNumber: getPRNumber(jobPrMeta),
 				prTitle: jobPrMeta.title,
 				prRepo: getDisplayRepo(jobPrMeta),
 			} : jobPrUrl ? { prUrl: jobPrUrl } : {};

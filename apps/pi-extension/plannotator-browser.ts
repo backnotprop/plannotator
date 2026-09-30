@@ -32,6 +32,10 @@ import {
 	getDisplayRepo,
 	getCliName,
 	getCliInstallUrl,
+	getPlatformLabel,
+	getPRNumber,
+	getPRHeadFetchSpec,
+	getPRCloneCommand,
 } from "./generated/pr-provider.ts";
 import { parseRemoteUrl } from "./generated/repo.ts";
 import { fetchRef, createWorktree, removeWorktree, ensureObjectAvailable } from "./generated/worktree.ts";
@@ -441,7 +445,8 @@ async function createCodeReviewBrowserSession(
 				`Invalid PR/MR URL: ${urlArg}\n` +
 				"Supported formats:\n" +
 				"  GitHub: https://github.com/owner/repo/pull/123\n" +
-				"  GitLab: https://gitlab.com/group/project/-/merge_requests/42",
+				"  GitLab: https://gitlab.com/group/project/-/merge_requests/42\n" +
+				"  Bitbucket Cloud: https://bitbucket.org/workspace/repo/pull-requests/7",
 			);
 		}
 
@@ -452,8 +457,10 @@ async function createCodeReviewBrowserSession(
 			await checkPRAuth(prRef);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			if (msg.includes("not found") || msg.includes("ENOENT")) {
-				throw new Error(`${cliName === "gh" ? "GitHub" : "GitLab"} CLI (${cliName}) is not installed. Install it from ${cliUrl}`);
+			// REST-only platforms (Bitbucket) have no CLI to be missing; their auth
+			// error already names the env vars and token scopes to set.
+			if (cliName && (msg.includes("not found") || msg.includes("ENOENT"))) {
+				throw new Error(`${getPlatformLabel(prRef)} CLI (${cliName}) is not installed. Install it from ${cliUrl}`);
 			}
 			throw err;
 		}
@@ -474,16 +481,22 @@ async function createCodeReviewBrowserSession(
 			let sessionDir: string | undefined;
 			try {
 				const repoDir = options.cwd ?? ctx.cwd;
-				const identifier = prMetadata.platform === "github"
-					? `${prMetadata.owner}-${prMetadata.repo}-${prMetadata.number}`
-					: `${prMetadata.projectPath.replace(/\//g, "-")}-${prMetadata.iid}`;
+				const identifier = `${getDisplayRepo(prMetadata).replace(/\//g, "-")}-${getPRNumber(prMetadata)}`;
 				const suffix = Math.random().toString(36).slice(2, 8);
-				const prNumber = prMetadata.platform === "github" ? prMetadata.number : prMetadata.iid;
+				const prNumber = getPRNumber(prMetadata);
 				sessionDir = join(realpathSync(tmpdir()), `plannotator-pr-${identifier}-${suffix}`);
 				localPath = join(sessionDir, "pool", `pr-${prNumber}`);
-				const fetchRefStr = prMetadata.platform === "github"
-					? `refs/pull/${prMetadata.number}/head`
-					: `refs/merge-requests/${prMetadata.iid}/head`;
+				// GitHub/GitLab: the PR head ref on origin. Bitbucket: the source
+				// branch, from the fork's URL when the PR comes from one.
+				const headFetch = getPRHeadFetchSpec(prMetadata);
+				const fetchRefStr = headFetch.ref;
+				const headRemote = headFetch.remote ?? "origin";
+				// A fork URL fetch must never stop to prompt for credentials.
+				const fetchHead = async (args: string[], cwd: string) => {
+					if (!headFetch.remote) return reviewRuntime.runGit(args, { cwd });
+					const r = spawnSync("git", args, { cwd, encoding: "utf-8", env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+					return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", exitCode: r.status ?? 1 };
+				};
 
 				// Validate inputs from platform API to prevent git flag/path injection
 				if (prMetadata.baseBranch.includes('..') || prMetadata.baseBranch.startsWith('-')) throw new Error(`Invalid base branch: ${prMetadata.baseBranch}`);
@@ -496,9 +509,7 @@ async function createCodeReviewBrowserSession(
 					if (remoteResult.exitCode === 0) {
 						const remoteUrl = remoteResult.stdout.trim();
 						const currentRepo = parseRemoteUrl(remoteUrl);
-						const prRepo = prMetadata.platform === "github"
-							? `${prMetadata.owner}/${prMetadata.repo}`
-							: prMetadata.projectPath;
+						const prRepo = getDisplayRepo(prMetadata);
 						const repoMatches = !!currentRepo && currentRepo.toLowerCase() === prRepo.toLowerCase();
 						const sshHost = remoteUrl.match(/^[^@]+@([^:]+):/)?.[1];
 						const httpsHost = (() => { try { return new URL(remoteUrl).hostname; } catch { return null; } })();
@@ -513,7 +524,12 @@ async function createCodeReviewBrowserSession(
 					setCodeReviewProgress(ctx, `Preparing local ${getMRLabel(prRef)} checkout...`);
 					await fetchRef(reviewRuntime, prMetadata.baseBranch, { cwd: repoDir });
 					await ensureObjectAvailable(reviewRuntime, prMetadata.baseSha, { cwd: repoDir });
-					await fetchRef(reviewRuntime, fetchRefStr, { cwd: repoDir });
+					if (headFetch.remote) {
+						const res = await fetchHead(["fetch", headRemote, "--", fetchRefStr], repoDir);
+						if (res.exitCode !== 0) throw new Error(`git fetch ${headRemote} ${fetchRefStr} failed: ${res.stderr.trim()}`);
+					} else {
+						await fetchRef(reviewRuntime, fetchRefStr, { cwd: repoDir });
+					}
 
 					await createWorktree(reviewRuntime, {
 						ref: "FETCH_HEAD",
@@ -539,27 +555,22 @@ async function createCodeReviewBrowserSession(
 					process.once("exit", exitHandler);
 				} else {
 					// ── Cross-repo: shallow clone + fetch PR head ──
-					const prRepo = prMetadata.platform === "github"
-						? `${prMetadata.owner}/${prMetadata.repo}`
-						: prMetadata.projectPath;
+					const prRepo = getDisplayRepo(prMetadata);
 					if (/^-/.test(prRepo)) throw new Error(`Invalid repository identifier: ${prRepo}`);
-					const cli = prMetadata.platform === "github" ? "gh" : "glab";
-					const host = prMetadata.host;
-					// gh/glab repo clone doesn't accept --hostname; set GH_HOST/GITLAB_HOST env instead
-					const isDefaultHost = host === "github.com" || host === "gitlab.com";
-					const cloneEnv = isDefaultHost ? undefined : {
-						...process.env,
-						...(prMetadata.platform === "github" ? { GH_HOST: host } : { GITLAB_HOST: host }),
-					};
+					// gh/glab repo clone doesn't accept --hostname, so the clone
+					// command carries GH_HOST/GITLAB_HOST env overrides instead.
+					const cloneCommand = getPRCloneCommand(prMetadata, localPath);
+					const cloneEnv = cloneCommand.env ? { ...process.env, ...cloneCommand.env } : undefined;
+					const [cloneCmd, ...cloneArgs] = cloneCommand.argv;
 
 					setCodeReviewProgress(ctx, `Cloning ${prRepo}...`);
-					const cloneResult = spawnSync(cli, ["repo", "clone", prRepo, localPath, "--", "--depth=1", "--no-checkout"], { encoding: "utf-8", env: cloneEnv });
+					const cloneResult = spawnSync(cloneCmd, cloneArgs, { encoding: "utf-8", env: cloneEnv });
 					if ((cloneResult.status ?? 1) !== 0) {
-						throw new Error(`${cli} repo clone failed: ${(cloneResult.stderr ?? "").trim()}`);
+						throw new Error(`${cloneCmd === "git" ? "git clone" : `${cloneCmd} repo clone`} failed: ${(cloneResult.stderr ?? "").trim()}`);
 					}
 
 					setCodeReviewProgress(ctx, `Fetching ${getMRLabel(prRef)} branch...`);
-					const fetchResult = await reviewRuntime.runGit(["fetch", "--depth=200", "origin", fetchRefStr], { cwd: localPath });
+					const fetchResult = await fetchHead(["fetch", "--depth=200", headRemote, fetchRefStr], localPath);
 					if (fetchResult.exitCode !== 0) throw new Error(`Failed to fetch PR head ref: ${fetchResult.stderr.trim()}`);
 
 					const checkoutResult = await reviewRuntime.runGit(["checkout", "FETCH_HEAD"], { cwd: localPath });

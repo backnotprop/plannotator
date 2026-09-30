@@ -1,0 +1,97 @@
+{
+  "type": "commit",
+  "hash": "6155635443f4e180e6eb5a4b3b9d219e3bd9cfb2",
+  "date": "2026-09-30T06:58:38+00:00",
+  "author": {
+    "type": "author",
+    "raw": "Ada Reviewer <ada@example.invalid>",
+    "user": {
+      "display_name": "Ada Reviewer",
+      "links": {
+        "self": {
+          "href": "https://api.bitbucket.org/2.0/users/%7B00000000-0000-4000-8000-00000000a0a0%7D"
+        },
+        "avatar": {
+          "href": "https://secure.gravatar.com/avatar/00000000000000000000000000000000?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FAR-2.png"
+        },
+        "html": {
+          "href": "https://bitbucket.org/%7B00000000-0000-4000-8000-00000000a0a0%7D/"
+        }
+      },
+      "type": "user",
+      "uuid": "{00000000-0000-4000-8000-00000000a0a0}",
+      "account_id": "557058:00000000-0000-4000-8000-00000000a0a0",
+      "nickname": "Ada Reviewer"
+    }
+  },
+  "message": "Initial commit\n",
+  "summary": {
+    "type": "rendered",
+    "raw": "Initial commit\n",
+    "markup": "markdown",
+    "html": "<p>Initial commit</p>"
+  },
+  "links": {
+    "self": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/commit/6155635443f4e180e6eb5a4b3b9d219e3bd9cfb2"
+    },
+    "html": {
+      "href": "https://bitbucket.org/ws/repo/commits/6155635443f4e180e6eb5a4b3b9d219e3bd9cfb2"
+    },
+    "diff": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/diff/6155635443f4e180e6eb5a4b3b9d219e3bd9cfb2"
+    },
+    "approve": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/commit/6155635443f4e180e6eb5a4b3b9d219e3bd9cfb2/approve"
+    },
+    "comments": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/commit/6155635443f4e180e6eb5a4b3b9d219e3bd9cfb2/comments"
+    },
+    "statuses": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/commit/6155635443f4e180e6eb5a4b3b9d219e3bd9cfb2/statuses"
+    },
+    "patch": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/patch/6155635443f4e180e6eb5a4b3b9d219e3bd9cfb2"
+    }
+  },
+  "parents": [
+    {
+      "hash": "88db1dc5cbbac876cd1de9f82404414c531bff27",
+      "links": {
+        "self": {
+          "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/commit/88db1dc5cbbac876cd1de9f82404414c531bff27"
+        },
+        "html": {
+          "href": "https://bitbucket.org/ws/repo/commits/88db1dc5cbbac876cd1de9f82404414c531bff27"
+        }
+      },
+      "type": "commit"
+    }
+  ],
+  "rendered": {
+    "message": {
+      "type": "rendered",
+      "raw": "Initial commit\n",
+      "markup": "markdown",
+      "html": "<p>Initial commit</p>"
+    }
+  },
+  "repository": {
+    "type": "repository",
+    "full_name": "ws/repo",
+    "links": {
+      "self": {
+        "href": "https://api.bitbucket.org/2.0/repositories/ws/repo"
+      },
+      "html": {
+        "href": "https://bitbucket.org/ws/repo"
+      },
+      "avatar": {
+        "href": "https://bytebucket.org/ravatar/%7B00000000-0000-4000-8000-0000000000bb%7D?ts=default"
+      }
+    },
+    "name": "repo",
+    "uuid": "{00000000-0000-4000-8000-0000000000bb}"
+  },
+  "participants": []
+}

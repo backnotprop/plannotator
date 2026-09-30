@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import type { CodeAnnotation } from '@plannotator/ui/types';
-import type { PRReviewAction, PRReviewFileLevelComment, PRReviewSubmissionPartial } from '@plannotator/shared/pr-types';
+import { getPRPlatformCapabilities, type Platform, type PRReviewAction, type PRReviewFileLevelComment, type PRReviewSubmissionPartial } from '@plannotator/shared/pr-types';
 import { CopyButton } from './CopyButton';
 import {
   exportReviewFeedback,
@@ -65,7 +65,7 @@ export interface PRActionRequest {
   targetPrUrl?: string;
 }
 
-type ReviewPlatform = 'github' | 'gitlab';
+type ReviewPlatform = Platform;
 
 interface ReviewSubmissionDialogProps {
   isOpen: boolean;
@@ -201,7 +201,7 @@ export function buildPlatformReviewBody(
   if (parts.length > 0) return parts.join('\n\n');
   const threadCount = target.fileComments.length + (target.fileLevelComments?.length ?? 0);
   // GitHub requires a body on COMMENT and REQUEST_CHANGES reviews alike.
-  if (action !== 'approve' && platform === 'github' && threadCount > 0) {
+  if (action !== 'approve' && getPRPlatformCapabilities({ platform }).reviewBodyRequired && threadCount > 0) {
     return 'See inline comments.';
   }
   return '';
@@ -242,11 +242,12 @@ export function buildReviewSubmission(
    *  `anchorSnapshot` equals that snapshot; anything else (outdated, or
    *  coordinates from a diff we cannot vouch for) goes in the review body. */
   knownSnapshots?: ReadonlyMap<string, string>,
-  /** Target platform. Only GitHub posts file-scoped comments as file-level
+  /** Target platform. Only platforms with the `fileLevelComments` capability
+   *  (GitHub) post file-scoped comments as file-level
    *  threads (#1599); anything else folds them into the review body. */
   platform?: ReviewPlatform,
 ): ReviewSubmission {
-  const fileLevel = platform === 'github';
+  const fileLevel = platform !== undefined && getPRPlatformCapabilities({ platform }).fileLevelComments;
   const targets: SubmissionTarget[] = [];
   const orphanAnnotations: { reason: 'full-stack' | 'unmapped'; ann: CodeAnnotation }[] = [];
 

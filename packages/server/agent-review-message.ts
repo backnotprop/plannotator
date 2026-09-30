@@ -1,5 +1,5 @@
 import type { DiffType } from "./vcs";
-import type { PRMetadata } from "./pr";
+import { getPRPlatformCapabilities, type PRMetadata } from "./pr";
 import type { WorkspaceReviewPromptContext } from "@plannotator/shared/review-workspace";
 import {
   buildWorkspacePromptContextLines,
@@ -100,6 +100,20 @@ export function buildAgentReviewUserMessage(
     // prepared and pulls the PR files on demand — tell the agent to verify the
     // files exist before relying on them, give it the same diff command, and
     // fall back to the PR URL if the checkout isn't ready.
+    if (!getPRPlatformCapabilities(prMetadata).agentCliAccess) {
+      // No CLI the job may run can read this platform's PR (Bitbucket), so
+      // the URL alone is not enough: carry the diff inline.
+      return [
+        prMetadata.url,
+        "",
+        "You are reviewing this PR. A local worktree checked out at the PR head may still be warming up; verify the PR files exist before relying on them.",
+        ...(contextOnly ? [] : ["The PR diff is below; review it for issues."]),
+        "",
+        "```diff",
+        patch,
+        "```",
+      ].join("\n");
+    }
     return [
       prMetadata.url,
       "",

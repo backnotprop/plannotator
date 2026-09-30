@@ -110,7 +110,7 @@ import {
   selectAnnotateTokenTarget,
 } from "@plannotator/shared/annotate-target";
 import { createWorktreePool, type WorktreePool, type PoolEntry } from "@plannotator/shared/worktree-pool";
-import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getCliInstallUrl, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
+import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getCliInstallUrl, getMRLabel, getMRNumberLabel, getDisplayRepo, getPlatformLabel, getPRNumber, getPRHeadFetchSpec, getPRCloneCommand } from "@plannotator/server/pr";
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
 import { enableTailscaleServe } from "@plannotator/server/tailscale-serve";
 import { writeUrlQr } from "@plannotator/server/qr";
@@ -899,6 +899,7 @@ if (args[0] === "sessions") {
       console.error("Supported formats:");
       console.error("  GitHub: https://github.com/owner/repo/pull/123");
       console.error("  GitLab: https://gitlab.com/group/project/-/merge_requests/42");
+      console.error("  Bitbucket Cloud: https://bitbucket.org/workspace/repo/pull-requests/7");
       process.exit(1);
     }
 
@@ -909,8 +910,10 @@ if (args[0] === "sessions") {
       await checkPRAuth(prRef);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("not found") || msg.includes("ENOENT")) {
-        console.error(`${cliName === "gh" ? "GitHub" : "GitLab"} CLI (${cliName}) is not installed.`);
+      // REST-only platforms (Bitbucket) have no CLI to be missing; their auth
+      // error already names the env vars and token scopes to set.
+      if (cliName && (msg.includes("not found") || msg.includes("ENOENT"))) {
+        console.error(`${getPlatformLabel(prRef)} CLI (${cliName}) is not installed.`);
         console.error(`Install it from ${cliUrl}`);
       } else {
         console.error(msg);
@@ -942,18 +945,18 @@ if (args[0] === "sessions") {
       let sessionDir: string | undefined;
       try {
         const repoDir = process.cwd();
-        const identifier = prMetadata.platform === "github"
-          ? `${prMetadata.owner}-${prMetadata.repo}-${prMetadata.number}`
-          : `${prMetadata.projectPath.replace(/\//g, "-")}-${prMetadata.iid}`;
+        const identifier = `${getDisplayRepo(prMetadata).replace(/\//g, "-")}-${getPRNumber(prMetadata)}`;
         const suffix = Math.random().toString(36).slice(2, 8);
         // Resolve tmpdir to its real path — on macOS, tmpdir() returns /var/folders/...
         // but processes report /private/var/folders/... which breaks path stripping.
         sessionDir = path.join(realpathSync(tmpdir()), `plannotator-pr-${identifier}-${suffix}`);
-        const prNumber = prMetadata.platform === "github" ? prMetadata.number : prMetadata.iid;
+        const prNumber = getPRNumber(prMetadata);
         localPath = path.join(sessionDir, "pool", `pr-${prNumber}`);
-        const fetchRefStr = prMetadata.platform === "github"
-          ? `refs/pull/${prMetadata.number}/head`
-          : `refs/merge-requests/${prMetadata.iid}/head`;
+        // GitHub/GitLab: the PR head ref on origin. Bitbucket: the source
+        // branch, from the fork's URL when the PR comes from one.
+        const headFetch = getPRHeadFetchSpec(prMetadata);
+        const fetchRefStr = headFetch.ref;
+        const headRemote = headFetch.remote ?? "origin";
 
         // Validate inputs from platform API to prevent git flag/path injection
         if (prMetadata.baseBranch.includes('..') || prMetadata.baseBranch.startsWith('-')) throw new Error(`Invalid base branch: ${prMetadata.baseBranch}`);
@@ -966,9 +969,7 @@ if (args[0] === "sessions") {
           if (remoteResult.exitCode === 0) {
             const remoteUrl = remoteResult.stdout.trim();
             const currentRepo = parseRemoteUrl(remoteUrl);
-            const prRepo = prMetadata.platform === "github"
-              ? `${prMetadata.owner}/${prMetadata.repo}`
-              : prMetadata.projectPath;
+            const prRepo = getDisplayRepo(prMetadata);
             const repoMatches = !!currentRepo && currentRepo.toLowerCase() === prRepo.toLowerCase();
             // Extract host from remote URL to avoid cross-instance false positives (GHE)
             const sshHost = remoteUrl.match(/^[^@]+@([^:]+):/)?.[1];
@@ -983,11 +984,8 @@ if (args[0] === "sessions") {
         const warmupPath = localPath;
         const warmupSessionDir = sessionDir;
         const { baseBranch, baseSha, url: prUrl } = prMetadata;
-        const platform = prMetadata.platform;
-        const host = prMetadata.host;
-        const prRepo = platform === "github"
-          ? `${prMetadata.owner}/${prMetadata.repo}`
-          : prMetadata.projectPath;
+        const prRepo = getDisplayRepo(prMetadata);
+        const cloneCommand = getPRCloneCommand(prMetadata, localPath);
         // Validate repo identifier to prevent flag injection via crafted URLs
         if (/^-/.test(prRepo)) throw new Error(`Invalid repository identifier: ${prRepo}`);
 
@@ -1031,8 +1029,12 @@ if (args[0] === "sessions") {
               // Best-effort baseSha availability — mirrors ensureObjectAvailable
               const catRes = await runStep(["git", "cat-file", "-t", baseSha], { cwd: repoDir });
               if (catRes.exitCode !== 0) await runStep(["git", "fetch", "origin", "--", baseSha], { cwd: repoDir });
-              const headFetchRes = await runStep(["git", "fetch", "origin", "--", fetchRefStr], { cwd: repoDir });
-              if (headFetchRes.exitCode !== 0) throw new Error(`git fetch origin ${fetchRefStr} failed: ${headFetchRes.stderr.trim()}`);
+              const headFetchRes = await runStep(["git", "fetch", headRemote, "--", fetchRefStr], {
+                cwd: repoDir,
+                // A fork URL fetch runs in the background: never prompt for credentials.
+                ...(headFetch.remote ? { env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } as Record<string, string> } : {}),
+              });
+              if (headFetchRes.exitCode !== 0) throw new Error(`git fetch ${headRemote} ${fetchRefStr} failed: ${headFetchRes.stderr.trim()}`);
 
               const addRes = await runStep(["git", "worktree", "add", "--detach", warmupPath, "FETCH_HEAD"], { cwd: repoDir });
               if (addRes.exitCode !== 0) throw new Error(`git worktree add failed: ${addRes.stderr.trim()}`);
@@ -1040,27 +1042,22 @@ if (args[0] === "sessions") {
             })()
           : (async () => {
               // ── Cross-repo: shallow clone + fetch PR head ──
-              const cli = platform === "github" ? "gh" : "glab";
-              // gh/glab repo clone doesn't accept --hostname; set GH_HOST/GITLAB_HOST env instead
-              const isDefaultHost = host === "github.com" || host === "gitlab.com";
-              const cloneEnv = isDefaultHost ? undefined : {
-                ...process.env,
-                ...(platform === "github" ? { GH_HOST: host } : { GITLAB_HOST: host }),
-              } as Record<string, string>;
+              // gh/glab repo clone doesn't accept --hostname, so the clone
+              // command carries GH_HOST/GITLAB_HOST env overrides instead.
+              const cloneEnv = cloneCommand.env
+                ? { ...process.env, ...cloneCommand.env } as Record<string, string>
+                : undefined;
 
               // Step 1: Fast skeleton clone (no checkout, depth 1 — minimal data transfer)
-              const cloneResult = await runStep(
-                [cli, "repo", "clone", prRepo, warmupPath, "--", "--depth=1", "--no-checkout"],
-                { env: cloneEnv },
-              );
+              const cloneResult = await runStep(cloneCommand.argv, { env: cloneEnv });
               if (cloneResult.exitCode !== 0) {
-                throw new Error(`${cli} repo clone failed: ${cloneResult.stderr.trim()}`);
+                throw new Error(`${cloneCommand.argv[0] === "git" ? "git clone" : `${cloneCommand.argv[0]} repo clone`} failed: ${cloneResult.stderr.trim()}`);
               }
 
               // Step 2: Fetch only the PR head ref (targeted, much faster than full fetch)
               const fetchResult = await runStep(
-                ["git", "fetch", "--depth=200", "origin", fetchRefStr],
-                { cwd: warmupPath },
+                ["git", "fetch", "--depth=200", headRemote, fetchRefStr],
+                { cwd: warmupPath, ...(cloneCommand.env ? { env: cloneEnv } : {}) },
               );
               if (fetchResult.exitCode !== 0) throw new Error(`Failed to fetch PR head ref: ${fetchResult.stderr.trim()}`);
 

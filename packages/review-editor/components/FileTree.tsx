@@ -19,7 +19,7 @@ import { PanelViewToggle, type ReviewPanelView } from './PanelViewToggle';
 import { getReviewSearchSideLabel, type ReviewSearchFileGroup, type ReviewSearchMatch } from '../utils/reviewSearch';
 import type { DiffFile } from '../types';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
-import { GitHubIcon } from '@plannotator/ui/components/GitHubIcon';
+import { PRPlatformIcon } from '@plannotator/ui/components/PRPlatformIcon';
 import { Paperclip } from 'lucide-react';
 
 import { SidebarActionRow, SemanticDiffRow, CallFlowRow, AllFilesRow } from './PanelNavRows';
@@ -87,6 +87,8 @@ interface FileTreeProps {
   isPROverviewActive?: boolean;
   /** PR number label (e.g. "#123") for the PR overview row; omit in non-PR reviews. */
   prOverviewNumber?: string;
+  /** Platform of the PR, for the overview row's icon ("github" when omitted). */
+  prOverviewPlatform?: string;
   /** PR title for the PR overview row. */
   prOverviewTitle?: string;
   /** Opens the hosted PR/MR attachment gallery; omitted for local reviews. */
@@ -178,6 +180,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   onSelectPROverview,
   isPROverviewActive = false,
   prOverviewNumber,
+  prOverviewPlatform,
   prOverviewTitle,
   onSelectPRArtifacts,
   isPRArtifactsActive = false,
@@ -495,7 +498,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
               onClick={onSelectPROverview}
               title={`${prOverviewNumber} · ${prOverviewTitle}`}
             >
-              <GitHubIcon className="w-3.5 h-3.5 flex-shrink-0" />
+              <PRPlatformIcon platform={prOverviewPlatform ?? 'github'} className="w-3.5 h-3.5 flex-shrink-0" />
               <span className="font-mono flex-shrink-0">{prOverviewNumber}</span>
               <span className="truncate text-muted-foreground/80">{prOverviewTitle}</span>
             </SidebarActionRow>

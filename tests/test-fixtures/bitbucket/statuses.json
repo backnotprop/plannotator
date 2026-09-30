@@ -1,0 +1,103 @@
+{
+  "values": [
+    {
+      "key": "unit",
+      "type": "build",
+      "state": "SUCCESSFUL",
+      "name": "Unit tests",
+      "refname": null,
+      "commit": {
+        "hash": "c0a227ce2c516b48f1093561a903bf89f2b4282a",
+        "links": {
+          "self": {
+            "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/commit/c0a227ce2c516b48f1093561a903bf89f2b4282a"
+          },
+          "html": {
+            "href": "https://bitbucket.org/ws/repo/commits/c0a227ce2c516b48f1093561a903bf89f2b4282a"
+          }
+        },
+        "type": "commit"
+      },
+      "url": "https://ci.example.invalid/build/1",
+      "repository": {
+        "type": "repository",
+        "full_name": "ws/repo",
+        "links": {
+          "self": {
+            "href": "https://api.bitbucket.org/2.0/repositories/ws/repo"
+          },
+          "html": {
+            "href": "https://bitbucket.org/ws/repo"
+          },
+          "avatar": {
+            "href": "https://bytebucket.org/ravatar/%7B00000000-0000-4000-8000-0000000000bb%7D?ts=default"
+          }
+        },
+        "name": "repo",
+        "uuid": "{00000000-0000-4000-8000-0000000000bb}"
+      },
+      "description": "",
+      "created_on": "2026-09-30T07:01:13.520877+00:00",
+      "updated_on": "2026-09-30T07:01:13.520892+00:00",
+      "links": {
+        "self": {
+          "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/commit/c0a227ce2c516b48f1093561a903bf89f2b4282a/statuses/build/unit"
+        },
+        "commit": {
+          "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/commit/c0a227ce2c516b48f1093561a903bf89f2b4282a"
+        }
+      }
+    },
+    {
+      "key": "lint",
+      "type": "build",
+      "state": "INPROGRESS",
+      "name": "Lint",
+      "refname": null,
+      "commit": {
+        "hash": "c0a227ce2c516b48f1093561a903bf89f2b4282a",
+        "links": {
+          "self": {
+            "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/commit/c0a227ce2c516b48f1093561a903bf89f2b4282a"
+          },
+          "html": {
+            "href": "https://bitbucket.org/ws/repo/commits/c0a227ce2c516b48f1093561a903bf89f2b4282a"
+          }
+        },
+        "type": "commit"
+      },
+      "url": "https://ci.example.invalid/build/2",
+      "repository": {
+        "type": "repository",
+        "full_name": "ws/repo",
+        "links": {
+          "self": {
+            "href": "https://api.bitbucket.org/2.0/repositories/ws/repo"
+          },
+          "html": {
+            "href": "https://bitbucket.org/ws/repo"
+          },
+          "avatar": {
+            "href": "https://bytebucket.org/ravatar/%7B00000000-0000-4000-8000-0000000000bb%7D?ts=default"
+          }
+        },
+        "name": "repo",
+        "uuid": "{00000000-0000-4000-8000-0000000000bb}"
+      },
+      "description": "",
+      "created_on": "2026-09-30T07:01:13.954968+00:00",
+      "updated_on": "2026-09-30T07:01:13.954983+00:00",
+      "links": {
+        "self": {
+          "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/commit/c0a227ce2c516b48f1093561a903bf89f2b4282a/statuses/build/lint"
+        },
+        "commit": {
+          "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/commit/c0a227ce2c516b48f1093561a903bf89f2b4282a"
+        }
+      }
+    }
+  ],
+  "pagelen": 30,
+  "size": 2,
+  "page": 1
+}

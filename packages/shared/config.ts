@@ -261,6 +261,19 @@ export interface PlannotatorConfig {
    */
   guideShareUrl?: string;
   /**
+   * Atlassian account email for Bitbucket Cloud PR review (basic auth with
+   * `bitbucketToken`). Mirrors PLANNOTATOR_BITBUCKET_EMAIL, which takes
+   * precedence. Omit it to send the token as a Bearer token instead.
+   */
+  bitbucketEmail?: string;
+  /**
+   * Atlassian API token (with Bitbucket scopes) for Bitbucket Cloud PR review.
+   * Mirrors PLANNOTATOR_BITBUCKET_TOKEN, which takes precedence. Stored in
+   * plain text in config.json, so prefer the env var. Never sent to the
+   * browser: getServerConfig() allowlists its keys.
+   */
+  bitbucketToken?: string;
+  /**
    * Pass `--sandbox enabled` when launching Cursor's `agent` CLI for review
    * jobs. When true (default), review jobs run with Cursor's sandbox forced
    * on as part of their read-only posture. Set to false on systems where
@@ -1024,3 +1037,69 @@ export function resolveTodoProviderEnabled(config: PlannotatorConfig): boolean {
   if (config.todoProvider !== undefined) return config.todoProvider !== "off";
   return true;
 }
+
+/** Default Bitbucket Cloud REST API base. */
+export const DEFAULT_BITBUCKET_API_URL = "https://api.bitbucket.org/2.0";
+
+/** Resolved Bitbucket Cloud credentials. Never log `token`. */
+export interface BitbucketCredentials {
+  /** Atlassian account email for basic auth; absent means Bearer auth. */
+  email?: string;
+  token: string;
+}
+
+/**
+ * Resolve Bitbucket Cloud API credentials.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_BITBUCKET_TOKEN / _EMAIL env vars  →  config.bitbucketToken / bitbucketEmail
+ *
+ * The token and email are resolved together from one source: an env token
+ * never pairs with a config-file email (a stale email would turn a valid
+ * Bearer token into failing basic auth). Empty values count as unset.
+ * Returns null when no token is configured.
+ */
+export function resolveBitbucketCredentials(
+  config: PlannotatorConfig,
+  env: Record<string, string | undefined> = process.env,
+): BitbucketCredentials | null {
+  const clean = (v: unknown): string | undefined =>
+    typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
+  const envToken = clean(env.PLANNOTATOR_BITBUCKET_TOKEN);
+  if (envToken) {
+    const email = clean(env.PLANNOTATOR_BITBUCKET_EMAIL);
+    return { token: envToken, ...(email ? { email } : {}) };
+  }
+  const cfgToken = clean(config.bitbucketToken);
+  if (cfgToken) {
+    const email = clean(config.bitbucketEmail);
+    return { token: cfgToken, ...(email ? { email } : {}) };
+  }
+  return null;
+}
+
+/**
+ * Resolve the Bitbucket Cloud REST API base URL. PLANNOTATOR_BITBUCKET_API_URL
+ * overrides the default for tests (a local fake API) and proxies. Credentials
+ * are sent to this URL, so anything that is not `https:` — or `http:` on a
+ * loopback host — is refused with a warning and the default is used.
+ */
+export function resolveBitbucketApiUrl(env: Record<string, string | undefined> = process.env): string {
+  const raw = env.PLANNOTATOR_BITBUCKET_API_URL?.trim();
+  if (!raw) return DEFAULT_BITBUCKET_API_URL;
+  try {
+    const u = new URL(raw);
+    const loopback = u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "[::1]";
+    if ((u.protocol === "https:" || (u.protocol === "http:" && loopback)) && !u.username && !u.password) {
+      return `${u.origin}${u.pathname.replace(/\/+$/, "")}`;
+    }
+  } catch { /* fall through */ }
+  if (!warnedBitbucketApiUrls.has(raw)) {
+    warnedBitbucketApiUrls.add(raw);
+    console.error(
+      `[plannotator] Ignoring PLANNOTATOR_BITBUCKET_API_URL: must be an https URL (or http on localhost). Using ${DEFAULT_BITBUCKET_API_URL}.`,
+    );
+  }
+  return DEFAULT_BITBUCKET_API_URL;
+}
+const warnedBitbucketApiUrls = new Set<string>();

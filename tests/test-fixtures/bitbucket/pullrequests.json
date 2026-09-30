@@ -1,0 +1,158 @@
+{
+  "values": [
+    {
+      "comment_count": 0,
+      "task_count": 0,
+      "type": "pullrequest",
+      "id": 1,
+      "title": "Add mul and greet",
+      "description": "Smoke-test PR for **Plannotator** Bitbucket review.",
+      "state": "OPEN",
+      "draft": false,
+      "merge_commit": null,
+      "close_source_branch": false,
+      "closed_by": null,
+      "author": {
+        "display_name": "Ada Reviewer",
+        "links": {
+          "self": {
+            "href": "https://api.bitbucket.org/2.0/users/%7B00000000-0000-4000-8000-00000000a0a0%7D"
+          },
+          "avatar": {
+            "href": "https://secure.gravatar.com/avatar/00000000000000000000000000000000?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FAR-2.png"
+          },
+          "html": {
+            "href": "https://bitbucket.org/%7B00000000-0000-4000-8000-00000000a0a0%7D/"
+          }
+        },
+        "type": "user",
+        "uuid": "{00000000-0000-4000-8000-00000000a0a0}",
+        "account_id": "557058:00000000-0000-4000-8000-00000000a0a0",
+        "nickname": "Ada Reviewer"
+      },
+      "reason": "",
+      "created_on": "2026-09-30T06:58:47.487132+00:00",
+      "updated_on": "2026-09-30T06:58:47.895859+00:00",
+      "destination": {
+        "branch": {
+          "name": "main"
+        },
+        "commit": {
+          "hash": "6155635443f4",
+          "links": {
+            "self": {
+              "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/commit/6155635443f4"
+            },
+            "html": {
+              "href": "https://bitbucket.org/ws/repo/commits/6155635443f4"
+            }
+          },
+          "type": "commit"
+        },
+        "repository": {
+          "type": "repository",
+          "full_name": "ws/repo",
+          "links": {
+            "self": {
+              "href": "https://api.bitbucket.org/2.0/repositories/ws/repo"
+            },
+            "html": {
+              "href": "https://bitbucket.org/ws/repo"
+            },
+            "avatar": {
+              "href": "https://bytebucket.org/ravatar/%7B00000000-0000-4000-8000-0000000000bb%7D?ts=default"
+            }
+          },
+          "name": "repo",
+          "uuid": "{00000000-0000-4000-8000-0000000000bb}"
+        }
+      },
+      "source": {
+        "branch": {
+          "name": "feature/smoke",
+          "links": {}
+        },
+        "commit": {
+          "hash": "c0a227ce2c51",
+          "links": {
+            "self": {
+              "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/commit/c0a227ce2c51"
+            },
+            "html": {
+              "href": "https://bitbucket.org/ws/repo/commits/c0a227ce2c51"
+            }
+          },
+          "type": "commit"
+        },
+        "repository": {
+          "type": "repository",
+          "full_name": "ws/repo",
+          "links": {
+            "self": {
+              "href": "https://api.bitbucket.org/2.0/repositories/ws/repo"
+            },
+            "html": {
+              "href": "https://bitbucket.org/ws/repo"
+            },
+            "avatar": {
+              "href": "https://bytebucket.org/ravatar/%7B00000000-0000-4000-8000-0000000000bb%7D?ts=default"
+            }
+          },
+          "name": "repo",
+          "uuid": "{00000000-0000-4000-8000-0000000000bb}"
+        }
+      },
+      "links": {
+        "self": {
+          "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/pullrequests/1"
+        },
+        "html": {
+          "href": "https://bitbucket.org/ws/repo/pull-requests/1"
+        },
+        "commits": {
+          "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/pullrequests/1/commits"
+        },
+        "approve": {
+          "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/pullrequests/1/approve"
+        },
+        "request-changes": {
+          "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/pullrequests/1/request-changes"
+        },
+        "diff": {
+          "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/diff/ws/repo:c0a227ce2c51%0D6155635443f4?from_pullrequest_id=1&topic=true"
+        },
+        "diffstat": {
+          "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/diffstat/ws/repo:c0a227ce2c51%0D6155635443f4?from_pullrequest_id=1&topic=true"
+        },
+        "comments": {
+          "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/pullrequests/1/comments"
+        },
+        "activity": {
+          "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/pullrequests/1/activity"
+        },
+        "merge": {
+          "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/pullrequests/1/merge"
+        },
+        "decline": {
+          "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/pullrequests/1/decline"
+        },
+        "statuses": {
+          "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/pullrequests/1/statuses"
+        },
+        "mergeability_checks": {
+          "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/pullrequests/1/mergeability/checks"
+        }
+      },
+      "summary": {
+        "type": "rendered",
+        "raw": "Smoke-test PR for **Plannotator** Bitbucket review.",
+        "markup": "markdown",
+        "html": "<p>Smoke-test PR for <strong>Plannotator</strong> Bitbucket review.</p>"
+      },
+      "queued": false
+    }
+  ],
+  "pagelen": 30,
+  "size": 1,
+  "page": 1
+}

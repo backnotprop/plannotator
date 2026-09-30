@@ -4,6 +4,7 @@ import {
   type ReviewGitRuntime,
 } from "./review-core";
 import { ensureObjectAvailable } from "./worktree";
+import { getPRHeadFetchSpec, getPRNumber } from "./pr-types";
 import type {
   PRDiffScopeOption,
   PRMetadata,
@@ -265,11 +266,14 @@ export async function checkoutPRHead(
   metadata: PRMetadata,
   cwd: string,
 ): Promise<boolean> {
-  const refSpec = metadata.platform === "github"
-    ? `refs/pull/${metadata.number}/head`
-    : `refs/merge-requests/${metadata.iid}/head`;
+  let head: { remote: string | null; ref: string };
+  try {
+    head = getPRHeadFetchSpec(metadata);
+  } catch {
+    return false;
+  }
 
-  const fetch = await runtime.runGit(["fetch", "origin", refSpec], { cwd });
+  const fetch = await runtime.runGit(["fetch", head.remote ?? "origin", head.ref], { cwd });
   if (fetch.exitCode !== 0) return false;
 
   const checkout = await runtime.runGit(["checkout", "FETCH_HEAD"], { cwd });
@@ -304,7 +308,7 @@ export function buildMinimalStackTree(
 
   nodes.push({
     branch: metadata.headBranch,
-    number: metadata.platform === "github" ? metadata.number : metadata.iid,
+    number: getPRNumber(metadata),
     title: metadata.title,
     url: metadata.url,
     isCurrent: true,

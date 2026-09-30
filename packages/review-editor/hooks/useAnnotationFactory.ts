@@ -1,5 +1,5 @@
 import { useMemo, useCallback } from 'react';
-import { getDisplayRepo } from '@plannotator/shared/pr-types';
+import { getDisplayRepo, getPRNumber } from '@plannotator/shared/pr-types';
 import type { PRMetadata } from '@plannotator/shared/pr-types';
 import type { PRDiffScope } from '@plannotator/shared/pr-stack';
 import type { CodeAnnotation } from '@plannotator/ui/types';
@@ -39,7 +39,7 @@ export function useAnnotationFactory(
   const prContext = useMemo(() => ({
     ...(prMetadata ? {
       prUrl: prMetadata.url,
-      prNumber: prMetadata.platform === 'github' ? prMetadata.number : prMetadata.iid,
+      prNumber: getPRNumber(prMetadata),
       prTitle: prMetadata.title,
       prRepo: getDisplayRepo(prMetadata),
       ...(diffScope ? { diffScope } : {}),

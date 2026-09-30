@@ -50,14 +50,16 @@ export type ReviewDraftLoadResult =
 
 /**
  * Stable draft key for a PR/MR review target. Host, owner and repo are
- * lower-cased (both platforms treat them case-insensitively). The diff scope
+ * lower-cased (every platform treats them case-insensitively). The diff scope
  * is part of the identity because a layer diff and a full-stack diff are
  * different patches with different line coordinates for the same PR.
  */
 export function prDraftTargetKey(meta: PRMetadata, scope: PRDiffScope): string {
   const identity = meta.platform === "github"
     ? `github|${meta.host.toLowerCase()}|${meta.owner.toLowerCase()}/${meta.repo.toLowerCase()}|${meta.number}`
-    : `gitlab|${meta.host.toLowerCase()}|${meta.projectPath.toLowerCase()}|${meta.iid}`;
+    : meta.platform === "bitbucket"
+      ? `bitbucket|${meta.host.toLowerCase()}|${meta.workspace.toLowerCase()}/${meta.repo.toLowerCase()}|${meta.number}`
+      : `gitlab|${meta.host.toLowerCase()}|${meta.projectPath.toLowerCase()}|${meta.iid}`;
   return `pr-${contentHash(`v1|${identity}|${scope}`)}`;
 }
 

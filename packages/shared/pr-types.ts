@@ -26,11 +26,16 @@ export interface PRRuntime {
     args: string[],
     input: string,
   ) => Promise<CommandResult>;
+  /**
+   * HTTP client for platforms reached over REST rather than a CLI
+   * (Bitbucket Cloud). Defaults to the global `fetch`; tests inject one.
+   */
+  fetch?: typeof fetch;
 }
 
 // --- Platform Types ---
 
-export type Platform = "github" | "gitlab";
+export type Platform = "github" | "gitlab" | "bitbucket";
 
 /** GitHub PR reference */
 export interface GithubPRRef {
@@ -49,8 +54,17 @@ export interface GitlabMRRef {
   iid: number;
 }
 
+/** Bitbucket Cloud PR reference (`bitbucket.org/{workspace}/{repo}/pull-requests/{id}`) */
+export interface BitbucketPRRef {
+  platform: "bitbucket";
+  host: string;
+  workspace: string;
+  repo: string;
+  number: number;
+}
+
 /** Discriminated union — auto-detected from URL */
-export type PRRef = GithubPRRef | GitlabMRRef;
+export type PRRef = GithubPRRef | GitlabMRRef | BitbucketPRRef;
 
 /** GitHub PR metadata */
 export interface GithubPRMetadata {
@@ -93,8 +107,36 @@ export interface GitlabMRMetadata {
   url: string;
 }
 
+/** Bitbucket Cloud PR metadata */
+export interface BitbucketPRMetadata {
+  platform: "bitbucket";
+  host: string;
+  workspace: string;
+  repo: string;
+  number: number;
+  title: string;
+  author: string;
+  baseBranch: string;
+  headBranch: string;
+  /** Repository main branch, used to infer whether this PR targets another PR branch. */
+  defaultBranch?: string;
+  /** Full destination-branch tip SHA (the API's short hash, resolved). */
+  baseSha: string;
+  /** Full source-branch tip SHA (the API's short hash, resolved). */
+  headSha: string;
+  /** Merge-base SHA — Bitbucket's PR diff is a three-dot diff from here. */
+  mergeBaseSha?: string;
+  /**
+   * `workspace/repo` of the source repository when the PR comes from a fork.
+   * Absent for same-repository PRs. Bitbucket has no `refs/pull/N/head`, so a
+   * local checkout fetches the source branch from this repository.
+   */
+  sourceRepo?: string;
+  url: string;
+}
+
 /** Discriminated union — downstream gets type narrowing for free */
-export type PRMetadata = GithubPRMetadata | GitlabMRMetadata;
+export type PRMetadata = GithubPRMetadata | GitlabMRMetadata | BitbucketPRMetadata;
 
 // --- PR Context Types (platform-agnostic) ---
 
@@ -234,7 +276,12 @@ export interface PRReviewCommentFailure {
  * The review body is intentionally absent because it may already be posted.
  */
 export interface PRReviewRetry {
-  action: "approve" | "comment";
+  /**
+   * `approve` / `request_changes` when the decision mutation itself failed
+   * (GitLab approve, Bitbucket approve or request-changes); `comment` when only
+   * inline comments remain to post.
+   */
+  action: PRReviewAction;
   fileComments: PRReviewFileComment[];
 }
 
@@ -252,6 +299,7 @@ export interface PRReviewSubmissionPartial {
   postedFileCommentCount: number;
   failedFileComments: PRReviewCommentFailure[];
   reviewBodyPosted: boolean;
+  /** Outcome of the decision mutation (approve, or Bitbucket's request-changes). */
   approval: "not-requested" | "succeeded" | "failed";
   approvalError?: string;
   recoveryFile?: string;
@@ -304,30 +352,121 @@ export interface PRListItem {
   state: 'open' | 'closed' | 'merged';
 }
 
+// --- Platform Capabilities ---
+
+/**
+ * What one PR platform supports. The review UI reads this instead of
+ * branching on platform names, so a platform that lacks a feature has it
+ * hidden rather than failing (#1583). Server dispatch lives in pr-provider.ts.
+ */
+export interface PRPlatformCapabilities {
+  /** Human label: "GitHub", "GitLab", "Bitbucket". */
+  label: string;
+  /** "PR" or "MR". */
+  changeLabel: "PR" | "MR";
+  /** Prefix of the change number in labels: "#" or "!". */
+  numberPrefix: "#" | "!";
+  /**
+   * The platform records a real request-changes decision (#1611). GitHub:
+   * REQUEST_CHANGES review; Bitbucket: `POST /request-changes`. GitLab has
+   * none, so `request_changes` posts exactly like `comment` there.
+   */
+  requestChanges: boolean;
+  /** The platform refuses approve / request-changes from the PR author. */
+  selfReviewBlocked: boolean;
+  /** File-scoped comments post as file-level threads (else folded into the body). */
+  fileLevelComments: boolean;
+  /** Per-file "viewed" state syncs to the platform. */
+  viewedSync: boolean;
+  /** A COMMENT / REQUEST_CHANGES review needs a non-empty body (GitHub). */
+  reviewBodyRequired: boolean;
+  /**
+   * Agent jobs can read the PR through a CLI they are allowed to run (gh /
+   * glab). When false, agent prompts carry the diff inline instead of relying
+   * on the PR URL.
+   */
+  agentCliAccess: boolean;
+  /** CLI the platform is reached through, or null for a REST-only platform. */
+  cli: { name: string; installUrl: string } | null;
+}
+
+const PLATFORM_CAPABILITIES: Record<Platform, PRPlatformCapabilities> = {
+  github: {
+    label: "GitHub",
+    changeLabel: "PR",
+    numberPrefix: "#",
+    requestChanges: true,
+    selfReviewBlocked: true,
+    fileLevelComments: true,
+    viewedSync: true,
+    reviewBodyRequired: true,
+    agentCliAccess: true,
+    cli: { name: "gh", installUrl: "https://cli.github.com" },
+  },
+  gitlab: {
+    label: "GitLab",
+    changeLabel: "MR",
+    numberPrefix: "!",
+    requestChanges: false,
+    selfReviewBlocked: true,
+    fileLevelComments: false,
+    viewedSync: false,
+    reviewBodyRequired: false,
+    agentCliAccess: true,
+    cli: { name: "glab", installUrl: "https://gitlab.com/gitlab-org/cli" },
+  },
+  bitbucket: {
+    label: "Bitbucket",
+    changeLabel: "PR",
+    numberPrefix: "#",
+    requestChanges: true,
+    // Bitbucket Cloud lets an author approve their own PR (the approval just
+    // does not count toward merge checks), so nothing is muted.
+    selfReviewBlocked: false,
+    // Bitbucket supports file comments, but posting them one by one outside the
+    // partial-retry contract is not worth the risk yet: they fold into the body.
+    fileLevelComments: false,
+    viewedSync: false,
+    reviewBodyRequired: false,
+    agentCliAccess: false,
+    cli: null,
+  },
+};
+
 // --- Label Helpers ---
 // Accept either PRRef or PRMetadata (both have `platform` discriminant)
 
-type HasPlatform = PRRef | PRMetadata;
+type HasPlatform = PRRef | PRMetadata | { platform: Platform };
 
-/** "GitHub" or "GitLab" */
+/** Capabilities of the platform a ref or metadata belongs to. */
+export function getPRPlatformCapabilities(m: HasPlatform): PRPlatformCapabilities {
+  return PLATFORM_CAPABILITIES[m.platform] ?? PLATFORM_CAPABILITIES.github;
+}
+
+/** "GitHub", "GitLab" or "Bitbucket" */
 export function getPlatformLabel(m: HasPlatform): string {
-  return m.platform === "github" ? "GitHub" : "GitLab";
+  return getPRPlatformCapabilities(m).label;
 }
 
 /** "PR" or "MR" */
 export function getMRLabel(m: HasPlatform): string {
-  return m.platform === "github" ? "PR" : "MR";
+  return getPRPlatformCapabilities(m).changeLabel;
+}
+
+/** The PR/MR number (GitLab's `iid`). */
+export function getPRNumber(m: PRRef | PRMetadata): number {
+  return m.platform === "gitlab" ? m.iid : m.number;
 }
 
 /** "#123" or "!42" */
-export function getMRNumberLabel(m: HasPlatform): string {
-  if (m.platform === "github") return `#${m.number}`;
-  return `!${m.iid}`;
+export function getMRNumberLabel(m: PRRef | PRMetadata): string {
+  return `${getPRPlatformCapabilities(m).numberPrefix}${getPRNumber(m)}`;
 }
 
-/** "owner/repo" or "group/project" */
-export function getDisplayRepo(m: HasPlatform): string {
+/** "owner/repo", "group/project" or "workspace/repo" */
+export function getDisplayRepo(m: PRRef | PRMetadata): string {
   if (m.platform === "github") return `${m.owner}/${m.repo}`;
+  if (m.platform === "bitbucket") return `${m.workspace}/${m.repo}`;
   return m.projectPath;
 }
 
@@ -335,6 +474,9 @@ export function getDisplayRepo(m: HasPlatform): string {
 export function prRefFromMetadata(m: PRMetadata): PRRef {
   if (m.platform === "github") {
     return { platform: "github", host: m.host, owner: m.owner, repo: m.repo, number: m.number };
+  }
+  if (m.platform === "bitbucket") {
+    return { platform: "bitbucket", host: m.host, workspace: m.workspace, repo: m.repo, number: m.number };
   }
   return { platform: "gitlab", host: m.host, projectPath: m.projectPath, iid: m.iid };
 }
@@ -347,19 +489,70 @@ export function isSameProject(a: PRRef, b: PRRef): boolean {
   if (a.platform === "gitlab" && b.platform === "gitlab") {
     return a.host === b.host && a.projectPath === b.projectPath;
   }
+  if (a.platform === "bitbucket" && b.platform === "bitbucket") {
+    // Bitbucket workspace and repository slugs are case-insensitive.
+    return a.host === b.host
+      && a.workspace.toLowerCase() === b.workspace.toLowerCase()
+      && a.repo.toLowerCase() === b.repo.toLowerCase();
+  }
   return false;
 }
 
-/** CLI tool name for the platform */
+/** CLI tool name for the platform ("" for a REST-only platform such as Bitbucket). */
 export function getCliName(ref: PRRef): string {
-  return ref.platform === "github" ? "gh" : "glab";
+  return getPRPlatformCapabilities(ref).cli?.name ?? "";
 }
 
-/** Install URL for the platform CLI */
+/** Install URL for the platform CLI ("" for a REST-only platform). */
 export function getCliInstallUrl(ref: PRRef): string {
-  return ref.platform === "github"
-    ? "https://cli.github.com"
-    : "https://gitlab.com/gitlab-org/cli";
+  return getPRPlatformCapabilities(ref).cli?.installUrl ?? "";
+}
+
+/**
+ * Where a local checkout fetches the PR head from. GitHub and GitLab publish
+ * the head as a ref on the base repository; Bitbucket has no such ref, so the
+ * source branch is fetched — from the fork when the PR comes from one.
+ * `remote` null means the base repository's `origin`.
+ */
+export function getPRHeadFetchSpec(m: PRMetadata): { remote: string | null; ref: string } {
+  if (m.platform === "github") return { remote: null, ref: `refs/pull/${m.number}/head` };
+  if (m.platform === "gitlab") return { remote: null, ref: `refs/merge-requests/${m.iid}/head` };
+  if (m.headBranch.startsWith("-") || m.headBranch.includes("..")) {
+    throw new Error(`Invalid source branch: ${m.headBranch}`);
+  }
+  const ref = `refs/heads/${m.headBranch}`;
+  if (m.sourceRepo && m.sourceRepo.toLowerCase() !== `${m.workspace}/${m.repo}`.toLowerCase()) {
+    return { remote: `https://${m.host}/${m.sourceRepo}.git`, ref };
+  }
+  return { remote: null, ref };
+}
+
+/**
+ * Command that clones the PR's base repository shallowly without a checkout
+ * (the cross-repo `--local` path). `env` holds overrides to merge over the
+ * process environment, or is absent when none are needed.
+ */
+export function getPRCloneCommand(
+  m: PRMetadata,
+  dest: string,
+): { argv: string[]; env?: Record<string, string> } {
+  if (m.platform === "bitbucket") {
+    // Plain git: Bitbucket has no gh-like CLI. The user's own git credentials
+    // (credential helper) authenticate private repositories; the API token is
+    // never put on a command line. No terminal prompt: this runs in the
+    // background.
+    return {
+      argv: ["git", "clone", "--depth=1", "--no-checkout", "--", `https://${m.host}/${m.workspace}/${m.repo}.git`, dest],
+      env: { GIT_TERMINAL_PROMPT: "0" },
+    };
+  }
+  const cli = m.platform === "github" ? "gh" : "glab";
+  // gh/glab repo clone doesn't accept --hostname; set GH_HOST/GITLAB_HOST env instead
+  const isDefaultHost = m.host === "github.com" || m.host === "gitlab.com";
+  return {
+    argv: [cli, "repo", "clone", getDisplayRepo(m), dest, "--", "--depth=1", "--no-checkout"],
+    ...(isDefaultHost ? {} : { env: m.platform === "github" ? { GH_HOST: m.host } : { GITLAB_HOST: m.host } }),
+  };
 }
 
 /**
@@ -405,11 +598,29 @@ export function encodeApiFilePath(filePath: string): string {
  * - GitLab: https://gitlab.com/group/subgroup/project/-/merge_requests/42[/diffs]
  * - Self-hosted GitLab: https://gitlab.mycompany.com/group/project/-/merge_requests/42
  *
+ * - Bitbucket Cloud: https://bitbucket.org/workspace/repo/pull-requests/7[/diff|/overview]
+ *
  * GitLab is checked first because `/-/merge_requests/` is unambiguous,
- * while `/pull/` could theoretically appear on any host.
+ * while `/pull/` could theoretically appear on any host. Bitbucket is matched
+ * only on bitbucket.org (Bitbucket Data Center uses a different URL shape
+ * and API, and is not supported).
  */
 export function parsePRUrl(url: string): PRRef | null {
   if (!url) return null;
+
+  // Bitbucket Cloud: https://bitbucket.org/{workspace}/{repo}/pull-requests/{id}[/...]
+  const bbMatch = url.match(
+    /^https?:\/\/(?:www\.)?bitbucket\.org\/([^/?#]+)\/([^/?#]+)\/pull-requests\/(\d+)(?:[/?#]|$)/i,
+  );
+  if (bbMatch) {
+    return {
+      platform: "bitbucket",
+      host: "bitbucket.org",
+      workspace: bbMatch[1],
+      repo: bbMatch[2],
+      number: parseInt(bbMatch[3], 10),
+    };
+  }
 
   // GitLab: https://{host}/{projectPath}/-/merge_requests/{iid}[/...]
   // Checked first — `/-/merge_requests/` is the most specific pattern.

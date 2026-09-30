@@ -91,4 +91,22 @@ describe('parsePRActionSuccess', () => {
       },
     })).toBeNull();
   });
+
+  test('accepts a failed Bitbucket request-changes decision as its own retry, not as approve', () => {
+    const submission = {
+      status: 'partial',
+      postedFileCommentCount: 0,
+      failedFileComments: [],
+      reviewBodyPosted: true,
+      approval: 'failed',
+      approvalError: 'Failed to request changes on the PR: Bitbucket HTTP 400',
+      retry: { action: 'request_changes', fileComments: [] },
+    };
+    expect(parsePRActionSuccess({ ok: true, submission })).toEqual({ submission });
+    // A failed decision can never be "retried" as a plain comment.
+    expect(parsePRActionSuccess({
+      ok: true,
+      submission: { ...submission, retry: { action: 'comment', fileComments: [] } },
+    })).toBeNull();
+  });
 });

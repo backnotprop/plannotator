@@ -29,11 +29,10 @@ import { useUpdateCheck } from '@plannotator/ui/hooks/useUpdateCheck';
 import { claimAutoUpdateNotice, describeAutoUpdateNotice, parseAutoUpdateNotice, type AutoUpdateNotice } from '@plannotator/ui/utils/autoUpdateNotice';
 import { storage } from '@plannotator/ui/utils/storage';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
-import { GitHubIcon } from '@plannotator/ui/components/GitHubIcon';
-import { GitLabIcon } from '@plannotator/ui/components/GitLabIcon';
+import { PRPlatformIcon } from '@plannotator/ui/components/PRPlatformIcon';
 import { RepoIcon } from '@plannotator/ui/components/RepoIcon';
 import { PullRequestIcon } from '@plannotator/ui/components/PullRequestIcon';
-import { getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo } from '@plannotator/shared/pr-types';
+import { getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo, getPRNumber, getPRPlatformCapabilities } from '@plannotator/shared/pr-types';
 import type { SemanticDiffAdvert } from '@plannotator/shared/semantic-diff-types';
 import type { CallFlowAdvert, CallFlowNode } from '@plannotator/shared/call-flow-types';
 import { configStore, useConfigValue, setReviewPanelView } from '@plannotator/ui/config';
@@ -777,7 +776,10 @@ const ReviewApp: React.FC = () => {
   const platformMode = reviewDestination === 'platform' && !!prMetadata;
   // The viewer authored this PR/MR — forges refuse self-approval, so every
   // platform approve path mutes (never disappears) on this flag.
-  const isOwnPR = !!platformUser && prMetadata?.author === platformUser;
+  const prCapabilities = prMetadata ? getPRPlatformCapabilities(prMetadata) : null;
+  // Only platforms that refuse a self-review mute approve / request changes
+  // (Bitbucket Cloud lets an author approve their own PR).
+  const isOwnPR = !!platformUser && prMetadata?.author === platformUser && prCapabilities?.selfReviewBlocked !== false;
 
   // Platform-aware labels
   const platformLabel = prMetadata ? getPlatformLabel(prMetadata) : 'GitHub';
@@ -785,8 +787,9 @@ const ReviewApp: React.FC = () => {
   const mrNumberLabel = prMetadata ? getMRNumberLabel(prMetadata) : '';
   const displayRepo = prMetadata ? getDisplayRepo(prMetadata) : '';
   // #1611: GitHub has a REQUEST_CHANGES review (refused on your own PR, like
-  // approve); GitLab has none, so Request changes posts as a comment there.
-  const requestChangesSupported = prMetadata?.platform === 'github';
+  // approve) and Bitbucket a request-changes decision; GitLab has none, so
+  // Request changes posts as a comment there.
+  const requestChangesSupported = prCapabilities?.requestChanges === true;
   const requestChangesUnavailableReason = !requestChangesSupported
     ? `${platformLabel} has no request-changes review; this posts as a comment.`
     : isOwnPR
@@ -1829,7 +1832,7 @@ const ReviewApp: React.FC = () => {
     api.addPanel({
       id: REVIEW_PR_ARTIFACTS_PANEL_ID,
       component: REVIEW_PANEL_TYPES.PR_ARTIFACTS,
-      title: prMetadata.platform === 'gitlab' ? 'MR Artifacts' : 'PR Artifacts',
+      title: `${getMRLabel(prMetadata)} Artifacts`,
     });
   }, [dockApi, prMetadata]);
 
@@ -2571,9 +2574,9 @@ const ReviewApp: React.FC = () => {
 
   // Best-effort GitHub viewed sync, shared by the manual toggle and the
   // batched auto-view marks (`/api/pr-viewed` already takes an array).
-  const platformViewedSyncAvailable = !!prMetadata && prMetadata.platform === 'github';
+  const platformViewedSyncAvailable = !!prMetadata && getPRPlatformCapabilities(prMetadata).viewedSync;
   const syncPlatformViewed = useCallback((filePaths: string[], viewed: boolean) => {
-    if (!prMetadata || prMetadata.platform !== 'github' || filePaths.length === 0) return;
+    if (!prMetadata || !getPRPlatformCapabilities(prMetadata).viewedSync || filePaths.length === 0) return;
     fetch('/api/pr-viewed', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -4167,7 +4170,7 @@ const ReviewApp: React.FC = () => {
         const currentTarget = plan.targets.find(t => t.prUrl === prMetadata?.url);
         targets = currentTarget ? [currentTarget] : [{
           prUrl: prMetadata?.url ?? '',
-          prNumber: prMetadata ? (prMetadata.platform === 'github' ? prMetadata.number : prMetadata.iid) : 0,
+          prNumber: prMetadata ? getPRNumber(prMetadata) : 0,
           prTitle: prMetadata?.title ?? '',
           prRepo: prMetadata ? getDisplayRepo(prMetadata) : '',
           fileComments: [], fileLevelComments: [], fileScopedBody: '',
@@ -4218,7 +4221,7 @@ const ReviewApp: React.FC = () => {
       const prLinks = openUrls.join(', ');
       const statusMessage = action === 'approve'
         ? `${mrLabel === 'MR' ? 'Merge request' : 'Pull request'} approved on ${platformLabel}${prLinks ? ': ' + prLinks : ''}`
-        : action === 'request_changes' && prMetadata.platform === 'github'
+        : action === 'request_changes' && getPRPlatformCapabilities(prMetadata).requestChanges
           ? `Changes requested on ${platformLabel}${prLinks ? ': ' + prLinks : ''}`
           : `${mrLabel === 'MR' ? 'Merge request' : 'Pull request'} reviewed on ${platformLabel}${prLinks ? ': ' + prLinks : ''}`;
       await flushReviewProgress();
@@ -4246,7 +4249,7 @@ const ReviewApp: React.FC = () => {
   const openPlatformDialog = useCallback((action: PRReviewAction, chooseEvent = false) => {
     const diffPaths = new Set(files.map(f => f.path));
     const prMeta = prMetadata ? {
-      number: prMetadata.platform === 'github' ? prMetadata.number : prMetadata.iid,
+      number: getPRNumber(prMetadata),
       title: prMetadata.title,
       repo: getDisplayRepo(prMetadata),
     } : undefined;
@@ -4719,7 +4722,7 @@ const ReviewApp: React.FC = () => {
                 <PRSelector
                   mrNumberLabel={mrNumberLabel}
                   prTitle={prMetadata.title}
-                  currentNumber={prMetadata.platform === 'github' ? prMetadata.number : prMetadata.iid}
+                  currentNumber={getPRNumber(prMetadata)}
                   onSelect={handlePRSwitch}
                   disabled={isSwitchingPRScope}
                 />
@@ -4809,7 +4812,7 @@ const ReviewApp: React.FC = () => {
                     >
                       {reviewDestination === 'platform' ? (
                         <>
-                          {prMetadata?.platform === 'gitlab' ? <GitLabIcon className="w-3.5 h-3.5" /> : <GitHubIcon className="w-3.5 h-3.5" />}
+                          <PRPlatformIcon platform={prMetadata?.platform ?? 'github'} className="w-3.5 h-3.5" />
                           <span className="hidden lg:inline">{platformLabel}</span>
                         </>
                       ) : 'Agent'}
@@ -4896,7 +4899,7 @@ const ReviewApp: React.FC = () => {
                     working with the partial diff meanwhile. */}
                 {!isCompactTouchLayout && prPatchIncomplete && prDiffScope === 'layer' && !isSwitchingPRScope && (
                   <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 px-2 py-1 bg-amber-500/10 rounded border border-amber-500/25">
-                    <span className="hidden md:inline" title={`${prMetadata?.platform === 'gitlab' ? 'GitLab' : 'GitHub'} omitted diff content for some files because this PR is too large`}>
+                    <span className="hidden md:inline" title={`${platformLabel} omitted diff content for some files because this PR is too large`}>
                       Partial diff
                     </span>
                     <span className="md:hidden">Partial</span>
@@ -5317,6 +5320,7 @@ const ReviewApp: React.FC = () => {
                 onSelectPROverview={() => completeNavigatorSelection(openPROverviewPanel)}
                 isPROverviewActive={isPROverviewActive}
                 prOverviewNumber={prMetadata ? mrNumberLabel : undefined}
+                prOverviewPlatform={prMetadata?.platform}
                 prOverviewTitle={prMetadata?.title}
                 onSelectPRArtifacts={prMetadata ? () => completeNavigatorSelection(openPRArtifactsPanel) : undefined}
                 isPRArtifactsActive={isPRArtifactsActive}

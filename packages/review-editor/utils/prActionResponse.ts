@@ -58,7 +58,7 @@ function parseFileComment(value: unknown): PRReviewFileComment | null {
 function parseRetry(value: unknown): PRReviewRetry | null {
   if (
     !isRecord(value) ||
-    (value.action !== 'approve' && value.action !== 'comment') ||
+    (value.action !== 'approve' && value.action !== 'comment' && value.action !== 'request_changes') ||
     !Array.isArray(value.fileComments)
   ) {
     return null;
@@ -126,9 +126,11 @@ export function parsePRReviewSubmissionPartial(
     retry.fileComments.every((comment, index) =>
       sameFileComment(comment, failures[index].comment)
     );
+  // A failed decision retries that decision: GitLab's approve, or Bitbucket's
+  // approve / request-changes. Otherwise only inline comments remain.
   const retryActionMatchesApproval =
     value.approval === 'failed'
-      ? retry.action === 'approve' && approvalError !== undefined
+      ? retry.action !== 'comment' && approvalError !== undefined
       : retry.action === 'comment' && approvalError === undefined;
   if (
     !retryMatchesFailures ||

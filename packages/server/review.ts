@@ -138,7 +138,7 @@ import { loadConfig, saveConfig, detectGitUser, getServerConfig, parseReviewAnal
 import { getAutoUpdateAdvert } from "./auto-update";
 import { appendFeedbackRecord, countChangedFiles, deriveFeedbackProject, type FeedbackDecision, type FeedbackReviewTarget } from "@plannotator/shared/feedback-archive";
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
-import { type PRMetadata, type PRRef, type PRReviewFileComment, type PRStackTree, type PRListItem, fetchPR, fetchPRFileContent, fetchPRFileBytes, fetchPRContext, submitPRReview, parseFileLevelComments, parsePRReviewAction, fetchPRViewedFiles, markPRFilesViewed, fetchPRStack, fetchPRList, getPRUser, parsePRUrl, prRefFromMetadata, isSameProject, getDisplayRepo, getMRLabel, getMRNumberLabel, prCommandRuntime } from "./pr";
+import { type PRMetadata, type PRRef, type PRReviewFileComment, type PRStackTree, type PRListItem, fetchPR, fetchPRFileContent, fetchPRFileBytes, fetchPRContext, submitPRReview, parseFileLevelComments, parsePRReviewAction, fetchPRViewedFiles, markPRFilesViewed, fetchPRStack, fetchPRList, getPRUser, parsePRUrl, prRefFromMetadata, isSameProject, getDisplayRepo, getMRLabel, getMRNumberLabel, getPRNumber, prCommandRuntime } from "./pr";
 import {
   PR_CONTEXT_HEARTBEAT_COMMENT,
   PR_CONTEXT_HEARTBEAT_INTERVAL_MS,
@@ -1034,11 +1034,8 @@ export async function startReviewServer(
     if (prMetadata) {
       target.pr = {
         provider: prMetadata.platform,
-        repo:
-          prMetadata.platform === "github"
-            ? `${prMetadata.owner}/${prMetadata.repo}`
-            : prMetadata.projectPath,
-        number: prMetadata.platform === "github" ? prMetadata.number : prMetadata.iid,
+        repo: getDisplayRepo(prMetadata),
+        number: getPRNumber(prMetadata),
       };
     }
     return target;
@@ -1518,9 +1515,13 @@ export async function startReviewServer(
                 headSha: launchMetadata.headSha,
                 pr: {
                   url: launchMetadata.url,
-                  number: launchMetadata.platform === "github" ? launchMetadata.number : launchMetadata.iid,
+                  number: getPRNumber(launchMetadata),
                   title: launchMetadata.title,
-                  platform: launchMetadata.platform,
+                  // The portable guide format names only github/gitlab; other
+                  // platforms omit the optional field rather than widen it.
+                  ...(launchMetadata.platform === "github" || launchMetadata.platform === "gitlab"
+                    ? { platform: launchMetadata.platform }
+                    : {}),
                 },
               }
             : {
@@ -1613,7 +1614,7 @@ export async function startReviewServer(
       const jobPrMeta = jobPrUrl ? prSwitchCache.get(jobPrUrl)?.metadata : undefined;
       const jobPrContext = jobPrMeta ? {
         prUrl: jobPrUrl,
-        prNumber: jobPrMeta.platform === "github" ? jobPrMeta.number : jobPrMeta.iid,
+        prNumber: getPRNumber(jobPrMeta),
         prTitle: jobPrMeta.title,
         prRepo: getDisplayRepo(jobPrMeta),
       } : jobPrUrl ? { prUrl: jobPrUrl } : {};

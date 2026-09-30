@@ -1,0 +1,33 @@
+{
+  "display_name": "Ada Reviewer",
+  "links": {
+    "self": {
+      "href": "https://api.bitbucket.org/2.0/users/%7B00000000-0000-4000-8000-00000000a0a0%7D"
+    },
+    "avatar": {
+      "href": "https://secure.gravatar.com/avatar/00000000000000000000000000000000?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FAR-2.png"
+    },
+    "repositories": {
+      "href": "https://api.bitbucket.org/2.0/repositories/%7B00000000-0000-4000-8000-00000000a0a0%7D"
+    },
+    "snippets": {
+      "href": "https://api.bitbucket.org/2.0/snippets/%7B00000000-0000-4000-8000-00000000a0a0%7D"
+    },
+    "html": {
+      "href": "https://bitbucket.org/%7B00000000-0000-4000-8000-00000000a0a0%7D/"
+    },
+    "hooks": {
+      "href": "https://api.bitbucket.org/2.0/workspaces/{00000000-0000-4000-8000-00000000a0a0}/hooks"
+    }
+  },
+  "created_on": "2026-09-14T22:01:00.570758+00:00",
+  "type": "user",
+  "uuid": "{00000000-0000-4000-8000-00000000a0a0}",
+  "has_2fa_enabled": null,
+  "username": "ada-reviewer",
+  "is_staff": false,
+  "account_id": "557058:00000000-0000-4000-8000-00000000a0a0",
+  "nickname": "Ada Reviewer",
+  "account_status": "active",
+  "location": null
+}

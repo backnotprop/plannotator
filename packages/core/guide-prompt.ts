@@ -22,6 +22,10 @@ import {
 export interface GuidePromptPRMetadata {
   url: string;
   baseBranch: string;
+  /** Carry the diff inline when there is no local checkout: set for platforms
+   *  no agent-allowed CLI can read (Bitbucket), where the URL alone is not
+   *  enough. Absent keeps the URL-only message. */
+  inlineDiff?: boolean;
 }
 
 /** Generic structural validation failure (no sections / blank overviews).
@@ -335,6 +339,18 @@ export function buildGuideUserMessage(
         "",
         "Organize this PR's changeset into a guided review.",
         ...changedFilesBlock,
+      ].join("\n");
+    }
+    if (prMetadata.inlineDiff) {
+      return [
+        prMetadata.url,
+        "",
+        "Organize this PR's changeset into a guided review. The PR diff is below.",
+        ...changedFilesBlock,
+        "",
+        "```diff",
+        patch,
+        "```",
       ].join("\n");
     }
     return [

@@ -44,7 +44,7 @@ import {
 } from "@plannotator/shared/pr-provider";
 
 export type { PRRef, PRMetadata, PRContext, PRReviewFileComment, PRReviewFileLevelComment, PRReviewSubmissionResult, PRStackTree, PRListItem } from "@plannotator/shared/pr-types";
-export { prRefFromMetadata, isSameProject, getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo, getCliName, getCliInstallUrl } from "@plannotator/shared/pr-types";
+export { prRefFromMetadata, isSameProject, getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo, getCliName, getCliInstallUrl, getPRNumber, getPRPlatformCapabilities, getPRHeadFetchSpec, getPRCloneCommand } from "@plannotator/shared/pr-types";
 export type { GithubPRMetadata } from "@plannotator/shared/pr-types";
 
 const runtime: PRRuntime = {

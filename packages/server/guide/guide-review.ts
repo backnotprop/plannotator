@@ -14,7 +14,7 @@ import {
   type GuideChangedFile,
 } from "@plannotator/shared/guide-prompt";
 import type { DiffType } from "../vcs";
-import type { PRMetadata } from "../pr";
+import { getPRPlatformCapabilities, type PRMetadata } from "../pr";
 import type { WorkspaceReviewPromptContext } from "../agent-review-message";
 import {
   MARKER_ENGINES,
@@ -746,7 +746,10 @@ export function createGuideSession(): GuideSession {
           ? config.instructions
           : undefined;
 
-      const userMessage = buildGuideUserMessage(patch, diffType, options, prMetadata, changedFiles);
+      const promptPRMetadata = prMetadata && !getPRPlatformCapabilities(prMetadata).agentCliAccess
+        ? { ...prMetadata, inlineDiff: true }
+        : prMetadata;
+      const userMessage = buildGuideUserMessage(patch, diffType, options, promptPRMetadata, changedFiles);
 
       // Marker engines (Cursor, OpenCode, Pi) — none has a schema flag, so the
       // guide contract's marker-delimited JSON block (composeGuideMarkerPrompt)

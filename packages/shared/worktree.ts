@@ -44,11 +44,12 @@ export interface RemoveWorktreeOptions {
 export async function fetchRef(
   runtime: ReviewGitRuntime,
   ref: string,
-  options?: { cwd?: string },
+  options?: { cwd?: string; remote?: string },
 ): Promise<void> {
-  const result = await runtime.runGit(["fetch", "origin", "--", ref], { cwd: options?.cwd });
+  const remote = options?.remote ?? "origin";
+  const result = await runtime.runGit(["fetch", remote, "--", ref], { cwd: options?.cwd });
   if (result.exitCode !== 0) {
-    throw new Error(`git fetch origin ${ref} failed: ${result.stderr.trim() || `exit code ${result.exitCode}`}`);
+    throw new Error(`git fetch ${remote} ${ref} failed: ${result.stderr.trim() || `exit code ${result.exitCode}`}`);
   }
 }
 

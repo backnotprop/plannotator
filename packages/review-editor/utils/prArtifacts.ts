@@ -233,7 +233,7 @@ function artifactDedupeKey(url: URL, metadata: PRMetadata): string {
   const pathKey = `${url.origin.toLowerCase()}${url.pathname}`;
   const isPlatformUpload = metadata.platform === 'github'
     ? isKnownGitHubAssetUrl(url, metadata.host)
-    : isKnownGitLabAssetUrl(url, metadata);
+    : metadata.platform === 'gitlab' && isKnownGitLabAssetUrl(url, metadata);
   if (isPlatformUpload) return pathKey;
 
   const semanticQuery = new URLSearchParams();
