@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { mkdir, writeFile, readFile, unlink } from "node:fs/promises";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import type { DiffType } from "../vcs";
-import type { PRMetadata } from "../pr";
+import { getPRPlatformCapabilities, type PRMetadata } from "../pr";
 import { buildWorkspacePromptContextLines, getLocalDiffInstruction, type WorkspaceReviewPromptContext } from "../agent-review-message";
 import { claudeJobIsolationArgs, claudeJobToolArgs, findClaudeStructuredOutput, type ClaudeJobCommandOptions } from "../claude-review";
 import { loadConfig, resolveClaudeSandbox } from "../config";
@@ -330,6 +330,19 @@ export function buildTourUserMessage(
         "Do NOT diff against the local `main` branch; it may be stale. Always use origin/.",
         "",
         "Walk the reviewer through this changeset as a guided tour.",
+      ].join("\n");
+    }
+    if (!getPRPlatformCapabilities(prMetadata).agentCliAccess) {
+      // No CLI the job may run can read this platform's PR (Bitbucket), so
+      // the URL alone is not enough: carry the diff inline.
+      return [
+        prMetadata.url,
+        "",
+        "Walk the reviewer through this PR as a guided tour. The PR diff is below.",
+        "",
+        "```diff",
+        patch,
+        "```",
       ].join("\n");
     }
     return [prMetadata.url, "", "Walk the reviewer through this PR as a guided tour."].join("\n");

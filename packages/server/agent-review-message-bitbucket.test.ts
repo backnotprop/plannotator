@@ -6,6 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { buildAgentReviewUserMessage } from "./agent-review-message";
 import { buildGuideUserMessage } from "@plannotator/shared/guide-prompt";
+import { buildTourUserMessage } from "./tour/tour-review";
 import type { PRMetadata } from "./pr";
 
 const patch = "diff --git a/src/a.ts b/src/a.ts\n+const a = 1;\n";
@@ -30,5 +31,10 @@ describe("PR prompts without a local checkout", () => {
   test("guided review: the inlineDiff flag is what adds the diff", () => {
     expect(buildGuideUserMessage(patch, "uncommitted", {}, github)).not.toContain(patch);
     expect(buildGuideUserMessage(patch, "uncommitted", {}, { ...bitbucket, inlineDiff: true })).toContain(patch);
+  });
+
+  test("code tour: GitHub stays URL-only, Bitbucket carries the diff", () => {
+    expect(buildTourUserMessage(patch, "uncommitted", {}, github)).not.toContain(patch);
+    expect(buildTourUserMessage(patch, "uncommitted", {}, bitbucket)).toContain(patch);
   });
 });
