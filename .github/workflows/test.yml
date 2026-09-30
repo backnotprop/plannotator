@@ -257,6 +257,7 @@ jobs:
           packages/ui/hooks/useViewportEnvironment.test.tsx
           packages/ui/hooks/useIsMobile.test.tsx
           packages/ui/hooks/useVimDocumentFocus.test.tsx
+          packages/ui/hooks/useScrollKeyRouting.test.tsx
           packages/ui/hooks/useScrollViewport.test.ts
           packages/review-editor/components/ExpandedCommentDialog.mobile.test.tsx
           packages/review-editor/components/DiffTypePicker.openState.test.tsx

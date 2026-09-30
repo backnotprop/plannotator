@@ -89,6 +89,7 @@ import {
   getDocumentScrollViewport,
   ScrollViewportProvider,
 } from '@plannotator/ui/hooks/useScrollViewport';
+import { useScrollKeyRouting } from '@plannotator/ui/hooks/useScrollKeyRouting';
 import { useOverlayViewport } from '@plannotator/ui/hooks/useOverlayViewport';
 import { useCompactTouchLayout, useIsMobile } from '@plannotator/ui/hooks/useIsMobile';
 import { useViewportEnvironment } from '@plannotator/ui/hooks/useViewportEnvironment';
@@ -926,6 +927,16 @@ const App: React.FC = () => {
       ? getDocumentScrollViewport()
       : mainViewportRef.current);
   }, [handleViewportReady, usesDocumentScroll]);
+
+  // #1647: Down/PageDown/Space do nothing on load because <main> scrolls, not
+  // the window, and nothing has focus yet. Route those keys to the document
+  // only while the browser has no scroll target of its own. HTML/live-app
+  // surfaces are excluded (the framed page owns its keys), and vim owns
+  // keyboard focus when enabled.
+  useScrollKeyRouting({
+    viewport: scrollViewport,
+    enabled: !isHtmlSurface && !liveApp && !vimModeEnabled,
+  });
 
   usePrintMode();
 
