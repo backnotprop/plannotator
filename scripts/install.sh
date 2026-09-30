@@ -2006,8 +2006,11 @@ if [ "$skip_skills" -eq 0 ] && [ -n "$invocable_choice" ] && [ "$invocable_choic
     done
 fi
 
-# Update Pi extension if pi is installed. The pi-extension no longer bundles
-# skills; Pi keeps its extension commands and the plannotator_submit_plan tool.
+# Update Pi extension if pi is installed. The extension bundles only the
+# plannotator knowledge skill, and offers it to Pi only when no other copy is
+# loaded, so it yields to the ~/.agents/skills copy installed above instead of
+# colliding with it (#1642). Updating is also what clears that collision for
+# anyone on an older extension that declared the skill in its manifest.
 update_pi_extension_if_present
 
 # --- Gemini CLI support (only if Gemini is installed) ---

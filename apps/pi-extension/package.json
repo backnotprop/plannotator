@@ -21,17 +21,15 @@
     "ai-agent",
     "coding-agent"
   ],
-  "//pi": "skills/ is vendored by vendor.sh from apps/skills/core/plannotator and is gitignored, so the shipped copy cannot drift from the single source.",
+  "//pi": "skills/ is vendored by vendor.sh from apps/skills/core/plannotator and is gitignored. It is deliberately NOT listed under pi.skills: bundled-skill.ts offers it from resources_discover only when no other plannotator skill is loaded, so it cannot collide with the CLI installer's ~/.agents/skills copy (#1642).",
   "pi": {
     "extensions": [
       "./"
-    ],
-    "skills": [
-      "skills/plannotator/SKILL.md"
     ]
   },
   "files": [
     "index.ts",
+    "bundled-skill.ts",
     "annotate-outcome.ts",
     "assistant-message.ts",
     "browser-session-error.ts",
