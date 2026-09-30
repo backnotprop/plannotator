@@ -28,8 +28,14 @@ import { isDocumentScrollViewport } from './useScrollViewport';
  */
 
 const LINE_STEP_PX = 40;
-/** Chrome's paging fraction (kMinFractionToStepWhenPaging). */
+/**
+ * Page step as Chromium and WebKit compute it: the larger of 87.5% of the
+ * viewport (kMinFractionToStepWhenPaging) and the viewport minus a 40px
+ * overlap (kMaxOverlapBetweenPages). On a normal window the overlap rule wins,
+ * so a routed PageDown matches the native one taken after a click.
+ */
 const PAGE_FRACTION = 0.875;
+const PAGE_OVERLAP_PX = 40;
 
 const OPEN_POPUP_SELECTOR = '[role="menu"], [role="listbox"]';
 
@@ -101,7 +107,8 @@ function applyScroll(viewport: HTMLElement, action: ScrollKeyAction): void {
     viewport.scrollTo({ top: action.edge === 'start' ? 0 : viewport.scrollHeight, behavior });
     return;
   }
-  const page = Math.max(1, Math.round(viewport.clientHeight * PAGE_FRACTION));
+  const height = viewport.clientHeight;
+  const page = Math.max(1, Math.round(Math.max(height * PAGE_FRACTION, height - PAGE_OVERLAP_PX)));
   viewport.scrollBy({ top: action.direction * page, behavior });
 }
 
