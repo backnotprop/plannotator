@@ -74,7 +74,7 @@ If Bitbucket accepts only part of a review, Plannotator shows what was posted an
 
 - Comments on a whole file are added to the review body instead of posted as file comments.
 - Viewed files are not synced to Bitbucket. Plannotator still remembers them locally.
-- Stacked pull request discovery and PR artifact previews are not available.
+- Stacked pull request discovery is not available, and the PR Artifacts panel is not shown.
 - Only Bitbucket Cloud (`bitbucket.org`) is supported. Bitbucket Data Center uses a different API.
 
 ## Testing against a fake API
