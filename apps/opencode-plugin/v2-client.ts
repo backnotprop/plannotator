@@ -305,7 +305,7 @@ const CO_PROMOTED_DELIVERY = "steer";
  *
  * Two vocabularies are live at once, and this adapter has to speak both:
  *
- *  - `0.0.0-next-*` (the version this package pins, and what CI installs)
+ *  - `0.0.0-next-*` (older V2 hosts, before the inbox-event rename)
  *    publishes `session.input.promoted` with `data.inputID`
  *    (`SessionInputPromoted` in `@opencode-ai/client`'s generated types).
  *  - v2.0.x and `dev` renamed the inbox events: `session.inbox.delivered` and
