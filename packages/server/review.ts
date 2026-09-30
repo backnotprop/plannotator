@@ -88,7 +88,7 @@ import { detectGeneratedFiles, detectGeneratedFilesByName } from "@plannotator/s
 import { getRepoInfo } from "./repo";
 import { handleImage, handleUpload, handleAgents, handleServerReady, handleApiNotFound, handleFavicon, readDraftGenerationFromBody, readDraftGenerationFromUrl, type OpencodeClient } from "./shared-handlers";
 import { contentHash } from "./draft";
-import { createReviewDraftSession, prDraftTargetKey, type ReviewDraftKeys } from "@plannotator/shared/review-draft";
+import { createReviewDraftSession, localGitDraftTargetKey, localReviewDraftKeys, prDraftTargetKey, type ReviewDraftKeys } from "@plannotator/shared/review-draft";
 import { captureReviewProgress, handleReviewProgress } from "@plannotator/shared/review-progress";
 import { createEditorAnnotationHandler } from "./editor-annotations";
 import { createExternalAnnotationHandler } from "./external-annotations";
@@ -424,15 +424,17 @@ export async function startReviewServer(
   let originalPRGitRef = options.gitRef;
   let originalPRError = options.error;
   let currentPRDiffScope: PRDiffScope = "layer";
-  // Draft keys for the diff on screen (#1590). Outside PR mode only the patch
-  // key exists and every draft call behaves exactly as before; in PR mode the
-  // draft is also reachable by the PR's stable target identity. Read late:
-  // an in-place PR switch or a scope change moves both keys.
+  // Draft keys for the displayed snapshot (#1590). PR and local Git reviews
+  // have stable targets; local identity is captured with the snapshot so a
+  // subsequent checkout cannot silently redirect draft writes.
   const reviewDrafts = createReviewDraftSession();
-  const currentDraftKeys = (): ReviewDraftKeys => ({
-    patchKey: draftKey,
-    targetKey: isPRMode && prMetadata ? prDraftTargetKey(prMetadata, currentPRDiffScope) : null,
-  });
+  let localDraftTarget: Promise<string | null> = Promise.resolve(null);
+  const currentDraftKeys = (): Promise<ReviewDraftKeys> => {
+    const patchKey = draftKey;
+    return isPRMode && prMetadata
+      ? Promise.resolve({ patchKey, targetKey: prDraftTargetKey(prMetadata, currentPRDiffScope) })
+      : localDraftTarget.then(target => localReviewDraftKeys(patchKey, target));
+  };
   // Monotonic guard for PR scope/switch state writes. Scope requests now park
   // on long awaits (checkout warmup, full recompute) — a request that resumed
   // after a NEWER scope select or pr-switch must not overwrite their state.
@@ -487,6 +489,9 @@ export async function startReviewServer(
   // different commits. A caller-pinned base (`--base` via
   // initialBaseExplicit) seeds it for the same reason.
   let baseExplicitlyChosen = options.initialBaseExplicit === true;
+  // Session-wide opt-out: resolves once, before draft identity capture as well
+  // as the startup network probes.
+  const remoteCheckEnabled = resolveGitRemoteCheck(options.gitRemoteCheck === false, loadConfig());
 
   // --- PR local checkout resolution -----------------------------------------
   // The pool's initial entry may still be warming up: the checkout is built in
@@ -619,8 +624,17 @@ export async function startReviewServer(
   // Captured once at startup: either by the initial fingerprint capture below
   // or, when the caller already supplied a fingerprint, right after it.
   let progressSnapshot: ReturnType<typeof captureProgress> = Promise.resolve(null);
-  const captureDiffFingerprint = (knownFingerprint?: string): void => {
+  const captureDraftTarget = () => isPRMode || isStaticPatchMode ? Promise.resolve(null) : localGitDraftTargetKey({
+    diffType: currentDiffType,
+    base: currentBase,
+    defaultBase: remoteCheckEnabled && !baseExplicitlyChosen ? detectedCompareTarget() : undefined,
+    cwd: gitContext ? gitContext.cwd ?? process.cwd() : undefined,
+    vcsType: sessionVcsType,
+    workspaceRoot: workspace?.root,
+  }, gitRuntime.runGit);
+  const captureDiffFingerprint = (knownFingerprint?: string, knownDraftTarget?: string | null): void => {
     progressSnapshot = captureProgress();
+    localDraftTarget = knownDraftTarget === undefined ? captureDraftTarget() : Promise.resolve(knownDraftTarget);
     // A fingerprint capture marks a committed review-view change. Stop work
     // for the prior snapshot even when the new view cannot run CallDiff.
     callFlowService.cancelAll();
@@ -645,7 +659,10 @@ export async function startReviewServer(
     });
   };
   if (currentFingerprint === null) captureDiffFingerprint();
-  else progressSnapshot = captureProgress();
+  else {
+    progressSnapshot = captureProgress();
+    localDraftTarget = captureDraftTarget();
+  }
 
   const resolveReviewBase = (
     requestedBase?: string,
@@ -696,10 +713,6 @@ export async function startReviewServer(
   // Interval policy (base cadence + failure backoff) is shared with the Pi
   // runtime in review-core so the two cannot drift.
   let remoteBaseCheckIntervalMs = REMOTE_BASE_CHECK_INTERVAL_MS;
-  // Session-wide opt-out (#1553): `--no-git-remote-check`, PLANNOTATOR_GIT_REMOTE_CHECK,
-  // or `{ "gitRemoteCheck": false }`. Resolved ONCE so a config edit mid-session
-  // cannot start network traffic the user opted out of at launch.
-  const remoteCheckEnabled = resolveGitRemoteCheck(options.gitRemoteCheck === false, loadConfig());
   // Session shape: a plain local git review, so a remote base exists to talk
   // about at all. Kept separate from the opt-out because an EXPLICIT Fetch is
   // the user asking for the network — the opt-out is about the automatic
@@ -2185,6 +2198,7 @@ export async function startReviewServer(
             const servedPRDiffScope = currentPRDiffScope;
             const servedSnapshotId = currentSnapshotId();
             const servedGitContext = clientGitContext;
+            const servedDraftTarget = localDraftTarget;
             const sections = await buildSectionsSidecar(servedBase, servedDiffType as string);
             const commitInfo = await buildCommitInfoSidecar(servedDiffType as string);
             const generatedFiles = await buildGeneratedFilesSidecar(servedPatch, servedDiffType as string);
@@ -2194,6 +2208,7 @@ export async function startReviewServer(
               aiEnabled,
               gitRef: servedGitRef,
               snapshotId: servedSnapshotId,
+              localDraftTarget: await servedDraftTarget,
               origin,
               mode: isWorkspaceMode ? "workspace" : undefined,
               diffType: hasLocalAccess || isWorkspaceMode || isStaticPatchMode ? servedDiffType : undefined,
@@ -2737,6 +2752,11 @@ export async function startReviewServer(
                 getSemanticDiffAdvert(newDiffType as DiffType),
                 getCallFlowAdvert(newDiffType as DiffType),
               ]);
+              const nextDraftTarget = isPRMode ? null : await localGitDraftTargetKey({
+                diffType: newDiffType, base: nextBase, cwd: gitContext?.cwd ?? process.cwd(),
+                defaultBase: remoteCheckEnabled && !nextBaseExplicitlyChosen ? detectedCompareTarget() : undefined,
+                vcsType: sessionVcsType,
+              }, gitRuntime.runGit);
               // Final guard: if a newer switch took over during the trailing
               // awaits, don't emit — the client would misapply our stale body
               // over the newer one (which has its own response inbound).
@@ -2784,7 +2804,7 @@ export async function startReviewServer(
               if (updatedContext && sessionVcsType === "gitbutler") {
                 currentContextRevision = updatedContextRevision ?? "";
               }
-              captureDiffFingerprint(result.fingerprint);
+              captureDiffFingerprint(result.fingerprint, nextDraftTarget);
               return Response.json({
                 rawPatch: currentPatch,
                 // Snapshot args: robust against a future await sneaking in
@@ -2792,6 +2812,8 @@ export async function startReviewServer(
                 aiReviewContext: buildCurrentAiReviewContext(result.patch, currentBase),
                 gitRef: currentGitRef,
                 snapshotId: currentSnapshotId(),
+                localDraftTarget: nextDraftTarget,
+                ...(nextDraftTarget && { draftState: reviewDrafts.state(localReviewDraftKeys(draftKey, nextDraftTarget)) }),
                 approvalNotesSupported,
                 imagePreviewSupported,
                 ...sourceKindAdvert,
@@ -2859,7 +2881,7 @@ export async function startReviewServer(
                   aiReviewContext: buildCurrentAiReviewContext(),
                   gitRef: currentGitRef,
                   snapshotId: currentSnapshotId(),
-                  draftState: reviewDrafts.state(currentDraftKeys()),
+                  draftState: reviewDrafts.state(await currentDraftKeys()),
                   approvalNotesSupported,
                   imagePreviewSupported,
                   ...sourceKindAdvert,
@@ -2920,7 +2942,7 @@ export async function startReviewServer(
                   aiReviewContext: buildCurrentAiReviewContext(),
                   gitRef: currentGitRef,
                   snapshotId: currentSnapshotId(),
-                  draftState: reviewDrafts.state(currentDraftKeys()),
+                  draftState: reviewDrafts.state(await currentDraftKeys()),
                   approvalNotesSupported,
                   imagePreviewSupported,
                   ...sourceKindAdvert,
@@ -2972,7 +2994,7 @@ export async function startReviewServer(
                 aiReviewContext: buildCurrentAiReviewContext(),
                 gitRef: currentGitRef,
                 snapshotId: currentSnapshotId(),
-                draftState: reviewDrafts.state(currentDraftKeys()),
+                draftState: reviewDrafts.state(await currentDraftKeys()),
                 approvalNotesSupported,
                 imagePreviewSupported,
                 ...sourceKindAdvert,
@@ -3105,7 +3127,7 @@ export async function startReviewServer(
                 aiReviewContext: buildCurrentAiReviewContext(),
                 gitRef: currentGitRef,
                 snapshotId: currentSnapshotId(),
-                draftState: reviewDrafts.state(currentDraftKeys()),
+                draftState: reviewDrafts.state(await currentDraftKeys()),
                 approvalNotesSupported,
                 imagePreviewSupported,
                 ...sourceKindAdvert,
@@ -3713,12 +3735,15 @@ export async function startReviewServer(
 
           // API: Annotation draft persistence
           if (url.pathname === "/api/draft") {
+            const keys = await currentDraftKeys();
+            if (url.searchParams.has("target") && url.searchParams.get("target") !== keys.targetKey) {
+              return Response.json({ code: "draft_target_changed", error: "Review draft target changed" }, { status: 409 });
+            }
             if (req.method === "POST") {
               try {
-                const keys = currentDraftKeys();
-                const saved = reviewDrafts.save(keys, await req.json());
-                // PR mode reports a rejected (stale-generation) save instead of
-                // swallowing it; local reviews keep the historical always-ok.
+                const saved = reviewDrafts.save(keys, await req.json(), url.searchParams.get("client"));
+                // Target-backed drafts report stale saves; unsupported surfaces
+                // retain the historical always-ok response.
                 if (!saved && keys.targetKey) {
                   return Response.json(
                     { ok: false, error: "stale draft generation", ...reviewDrafts.state(keys) },
@@ -3733,10 +3758,10 @@ export async function startReviewServer(
               }
             }
             if (req.method === "DELETE") {
-              reviewDrafts.remove(currentDraftKeys(), readDraftGenerationFromUrl(req));
+              reviewDrafts.remove(keys, readDraftGenerationFromUrl(req), url.searchParams.get("client"));
               return Response.json({ ok: true });
             }
-            const loaded = reviewDrafts.load(currentDraftKeys());
+            const loaded = reviewDrafts.load(keys, url.searchParams.get("client"));
             if (loaded.found) return Response.json(loaded.draft);
             return Response.json(
               { found: false, ...(loaded.draftGeneration !== null ? { draftGeneration: loaded.draftGeneration } : {}) },
@@ -3826,7 +3851,7 @@ export async function startReviewServer(
             // often reviews are closed without feedback is exactly the
             // behavior data the archive exists to answer.
             archiveReviewSubmission("", [], "dismissed");
-            reviewDrafts.settle(currentDraftKeys(), readDraftGenerationFromUrl(req));
+            reviewDrafts.settle(await currentDraftKeys(), readDraftGenerationFromUrl(req), url.searchParams.get("client"));
             resolveDecision({ approved: false, feedback: "", annotations: [], exit: true });
             return Response.json({ ok: true });
           }
@@ -3857,7 +3882,7 @@ export async function startReviewServer(
                 annotationsValue,
                 approved ? (hasContent ? "approved-with-notes" : "lgtm") : "feedback",
               );
-              if (durable) reviewDrafts.settle(currentDraftKeys(), readDraftGenerationFromBody(body));
+              if (durable) reviewDrafts.settle(await currentDraftKeys(), readDraftGenerationFromBody(body), url.searchParams.get("client"));
               resolveDecision({
                 approved,
                 feedback: feedbackValue,

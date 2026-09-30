@@ -63,35 +63,46 @@ export async function captureReviewProgress(
   runGit: ReviewGitRuntime["runGit"],
 ): Promise<ReviewProgressSnapshot | null> {
   const fingerprints = reviewFileFingerprints(input.patch, input.fileIdentities);
-  const worktree = parseWorktreeDiffType(input.diffType);
-  const diffType = worktree?.subType ?? input.diffType;
-  const scope = [diffType, ["since-base", "branch", "merge-base"].includes(diffType) ? input.base : null];
   let identity: unknown;
   if (input.prUrl) {
     identity = ["pr", input.prUrl, input.prScope ?? "layer"];
   } else if (input.cwd && !input.workspaceRoot && (!input.vcsType || input.vcsType === "git")) {
     // Local reviews without generation-time identities retain the draft path.
     if (!input.fileIdentities) return null;
-    const cwd = worktree?.path ?? input.cwd;
-    try {
-      const [root, branch] = await Promise.all([
-        runGit(["rev-parse", "--show-toplevel"], { cwd }),
-        runGit(["symbolic-ref", "--quiet", "HEAD"], { cwd }),
-      ]);
-      if (root.exitCode !== 0) return null;
-      // Detached checkouts have no durable branch identity. Keep separate
-      // histories per detached commit rather than borrowing a branch's marks.
-      const head = branch.exitCode === 0 ? branch : await runGit(["rev-parse", "HEAD"], { cwd });
-      if (head.exitCode !== 0) return null;
-      identity = [input.vcsType ?? "git", canonicalPath(root.stdout.trim()), head.stdout.trim(), scope];
-    } catch {
-      return null;
-    }
+    identity = await localGitReviewIdentity(input, runGit);
+    if (!identity) return null;
   } else {
     // Piped patches and other VCS/workspace modes keep their existing draft UX.
     return null;
   }
   return { key: hash(JSON.stringify(identity)), fingerprints };
+}
+
+/** Shared identity for local drafts and viewed progress, independent of either
+ * feature's settings. Capture alongside the patch, never on a draft write:
+ * the working directory may have changed branches since the review opened. */
+export async function localGitReviewIdentity(
+  input: Pick<ReviewProgressInput, "cwd" | "vcsType" | "workspaceRoot" | "prUrl" | "diffType" | "base">,
+  runGit: ReviewGitRuntime["runGit"],
+): Promise<unknown[] | null> {
+  if (!input.cwd || input.prUrl || input.workspaceRoot || (input.vcsType && input.vcsType !== "git")) return null;
+  const worktree = parseWorktreeDiffType(input.diffType);
+  const diffType = worktree?.subType ?? input.diffType;
+  const cwd = worktree?.path ?? input.cwd;
+  const scope = [diffType, ["since-base", "branch", "merge-base"].includes(diffType) ? input.base : null];
+  try {
+    const [root, branch] = await Promise.all([
+      runGit(["rev-parse", "--show-toplevel"], { cwd }),
+      runGit(["symbolic-ref", "--quiet", "HEAD"], { cwd }),
+    ]);
+    if (root.exitCode !== 0 || !root.stdout.trim()) return null;
+    // Detached checkouts have no durable branch identity.
+    const head = branch.exitCode === 0 ? branch : await runGit(["rev-parse", "HEAD"], { cwd });
+    if (head.exitCode !== 0 || !head.stdout.trim()) return null;
+    return ["git", canonicalPath(root.stdout.trim()), head.stdout.trim(), scope];
+  } catch {
+    return null;
+  }
 }
 
 function canonicalPath(path: string): string {

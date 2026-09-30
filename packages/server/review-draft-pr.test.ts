@@ -1,6 +1,6 @@
 /**
  * /api/draft in PR mode survives a changed PR diff (#1590), and every
- * decision clears it under both keys. Local reviews keep the content-hash key.
+ * decision clears it under both keys. Reviews without a Git identity keep the content-hash key.
  *
  * Temp PLANNOTATOR_DATA_DIR per test; PATH emptied so no platform CLI runs.
  */
@@ -162,8 +162,8 @@ describe('PR review drafts across a push', () => {
   });
 });
 
-describe('local reviews are unchanged', () => {
-  test('a changed local diff still misses the draft, and only the content-hash file is written', async () => {
+describe('reviews without a Git identity', () => {
+  test('a changed static diff still misses the draft, and only the content-hash file is written', async () => {
     const dataDir = sandbox();
     await withSession(PATCH_BEFORE_PUSH, undefined, (url) => saveDraft(url, 3));
     const files = readdirSync(join(dataDir, 'drafts'));
