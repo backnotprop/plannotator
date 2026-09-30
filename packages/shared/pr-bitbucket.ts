@@ -141,6 +141,14 @@ async function failure(res: Response, what: string): Promise<BitbucketApiError> 
       403,
     );
   }
+  if (res.status === 429) {
+    const retryAfter = Number(res.headers.get("retry-after"));
+    const wait = Number.isFinite(retryAfter) && retryAfter > 0 ? `in ${Math.ceil(retryAfter)}s` : "in a minute";
+    return new BitbucketApiError(
+      `Bitbucket rate-limited the request to ${what} (HTTP 429). Try again ${wait}.`,
+      429,
+    );
+  }
   return new BitbucketApiError(
     `Failed to ${what}: Bitbucket HTTP ${res.status}${detail ? `: ${detail}` : ""}`,
     res.status,

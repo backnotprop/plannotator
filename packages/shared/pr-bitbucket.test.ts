@@ -140,6 +140,17 @@ describe("auth errors", () => {
     expect(message).not.toContain(TOKEN);
   });
 
+  test("a rate limit (HTTP 429) says to retry, with the Retry-After wait", async () => {
+    process.env.PLANNOTATOR_BITBUCKET_TOKEN = TOKEN;
+    const limited: PRRuntime = {
+      ...runtime,
+      fetch: (async () => new Response("", { status: 429, headers: { "retry-after": "42" } })) as unknown as typeof fetch,
+    };
+    const message = ((await checkBbAuth(limited).catch((e: Error) => e)) as Error).message;
+    expect(message).toContain("HTTP 429");
+    expect(message).toContain("42s");
+  });
+
   test("getBbUser returns the account nickname", async () => {
     useFake();
     expect(await getBbUser(runtime)).toBe("Ada Reviewer");
