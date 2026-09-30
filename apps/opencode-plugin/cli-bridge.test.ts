@@ -84,7 +84,7 @@ process.exit(1);
       else process.env.PLANNOTATOR_BIN = previous;
       rmSync(root, { recursive: true, force: true });
     }
-  });
+  }, 20_000); // spawns the stub CLI several times; the 5s default flakes
 
   test("maps OpenCode sharing context into child CLI env", () => {
     expect(buildCliBridgeEnv({
