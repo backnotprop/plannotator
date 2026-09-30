@@ -8,7 +8,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { scrollKeyAction, useScrollKeyRouting } from './useScrollKeyRouting';
+import { scrollKeyAction, useScrollKeyRouting, type ScrollKeyInput } from './useScrollKeyRouting';
 
 const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
@@ -54,9 +54,13 @@ function pointerDown(target: EventTarget): void {
   target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
 }
 
+// Plain objects, not `new KeyboardEvent`: this block runs in the non-DOM job too.
+const k = (init: Partial<ScrollKeyInput> & { key: string }) => scrollKeyAction({
+  isComposing: false, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...init,
+});
+
 describe('scrollKeyAction', () => {
   test('maps the plain scroll keys and Shift+Space', () => {
-    const k = (init: KeyboardEventInit) => scrollKeyAction(new KeyboardEvent('keydown', init));
     expect(k({ key: 'ArrowDown' })).toEqual({ kind: 'line', direction: 1 });
     expect(k({ key: 'ArrowUp' })).toEqual({ kind: 'line', direction: -1 });
     expect(k({ key: 'PageDown' })).toEqual({ kind: 'page', direction: 1 });
@@ -68,7 +72,6 @@ describe('scrollKeyAction', () => {
   });
 
   test('leaves chords, selection-extending keys and IME composition alone', () => {
-    const k = (init: KeyboardEventInit) => scrollKeyAction(new KeyboardEvent('keydown', init));
     expect(k({ key: 'ArrowDown', metaKey: true })).toBeNull();
     expect(k({ key: 'ArrowDown', ctrlKey: true })).toBeNull();
     expect(k({ key: 'ArrowDown', altKey: true })).toBeNull();

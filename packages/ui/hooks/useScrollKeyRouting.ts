@@ -44,8 +44,14 @@ export type ScrollKeyAction =
   | { readonly kind: 'page'; readonly direction: 1 | -1 }
   | { readonly kind: 'edge'; readonly edge: 'start' | 'end' };
 
+/** The keydown fields the mapping reads (pure, so it runs without a DOM). */
+export type ScrollKeyInput = Pick<
+  KeyboardEvent,
+  'key' | 'isComposing' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'
+>;
+
 /** Map a keydown to the scroll it asks for, or null when it is not a plain scroll key. */
-export function scrollKeyAction(event: KeyboardEvent): ScrollKeyAction | null {
+export function scrollKeyAction(event: ScrollKeyInput): ScrollKeyAction | null {
   if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return null;
   const isSpace = event.key === ' ' || event.key === 'Spacebar';
   if (isSpace) return { kind: 'page', direction: event.shiftKey ? -1 : 1 };
