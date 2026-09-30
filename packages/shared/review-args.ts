@@ -1,6 +1,7 @@
 import type { VcsSelection } from "./vcs-core";
 import type { DiffType } from "./review-core";
-import { stripWrappingQuotes } from "./resolve-file";
+import { statSync } from "node:fs";
+import { resolveUserPath, stripWrappingQuotes } from "./resolve-file";
 
 /**
  * The flat git diff ids `review --diff-type` accepts — exactly GIT_DIFF_TYPES
@@ -26,6 +27,8 @@ export type ReviewOpenDiffType = (typeof REVIEW_OPEN_DIFF_TYPES)[number];
 
 export interface ParsedReviewArgs {
   prUrl?: string;
+  /** Local review directory, resolved against the invoking session by the host. */
+  directory?: string;
   patchFile?: string;
   vcsType?: VcsSelection;
   useLocal: boolean;
@@ -155,8 +158,6 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
           // dashed token in positional[0] could even shadow a PR URL.
           errors.push(`Unknown review option: ${token}`);
         } else {
-          // Plain words stay tolerated: slash-command hosts forward raw user
-          // prose verbatim, and only positional[0] is ever inspected (as a URL).
           positional.push(token);
         }
         break;
@@ -164,6 +165,10 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
   }
 
   const target = positional[0];
+  if (positional.length > 1) {
+    errors.push("Review accepts only one directory or PR/MR URL. Omit prose; quote paths containing spaces.");
+  }
+  const directory = target && !isReviewUrl(target) ? target : undefined;
   // Static patch mode wins over VCS detection entirely, so every VCS/PR
   // selector combined with it is a usage error — fail loudly in one place
   // rather than silently ignoring the flag in each runtime.
@@ -171,6 +176,7 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
     if (target && isReviewUrl(target)) {
       errors.push("--patch-file cannot be combined with a PR/MR URL");
     }
+    if (directory) errors.push("--patch-file cannot be combined with a review directory");
     if (base) errors.push("--patch-file cannot be combined with --base");
     if (diffType) errors.push("--patch-file cannot be combined with --diff-type");
     if (vcsType) errors.push("--patch-file cannot be combined with --git/--gitbutler");
@@ -178,6 +184,7 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
   }
   return {
     prUrl: target && isReviewUrl(target) ? target : undefined,
+    ...(directory === undefined ? {} : { directory }),
     patchFile,
     vcsType,
     useLocal,
@@ -186,6 +193,27 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
     ...(gitRemoteCheck === undefined ? {} : { gitRemoteCheck }),
     errors,
   };
+}
+
+/** Validate before VCS discovery so a typo can never review the caller's repo. */
+export function resolveReviewDirectory(directory: string | undefined, cwd: string): string {
+  if (directory === undefined) return cwd;
+  const resolved = resolveUserPath(directory, cwd);
+  let isDirectory: boolean;
+  try {
+    isDirectory = statSync(resolved).isDirectory();
+  } catch {
+    throw new Error(`Review directory does not exist or is not accessible: ${resolved}`);
+  }
+  if (!isDirectory) throw new Error(`Review target is not a directory: ${resolved}`);
+  return resolved;
+}
+
+/** Feedback returns to the invoking agent, whose cwd may be a different repo. */
+export function withReviewDirectory(feedback: string, directory?: string): string {
+  return directory && feedback.trim()
+    ? `Review directory: ${directory}\n\n${feedback}`
+    : feedback;
 }
 
 function isReviewUrl(value: string): boolean {

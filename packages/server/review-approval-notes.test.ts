@@ -117,6 +117,46 @@ for (const [runtime, startServer] of [
   ["Pi", startPiReviewServer],
 ] as const) {
   describe(`review approval-notes advert (${runtime})`, () => {
+    test("cross-directory approvals report the worktree active at submission", async () => {
+      // A host must not prefix feedback with the opening target after a
+      // worktree switch. Exercise both transports, without changing host cwd.
+      useTempDataDir();
+      saveEnv("PLANNOTATOR_AI");
+      process.env.PLANNOTATOR_AI = "disabled";
+      await reservePiPort();
+      const cwd = process.cwd();
+      const repo = initRepo();
+      git(repo, ["remote", "add", "origin", "https://github.com/example/selected.git"]);
+      git(repo, ["config", "user.name", "Selected author"]);
+      const worktree = join(makeTempDir("plannotator-approval-worktree-"), "feature");
+      git(repo, ["worktree", "add", "-qb", "feature", worktree]);
+      writeFileSync(join(worktree, "README.md"), "# switched\n");
+      const server = await startServer({
+        rawPatch: PATCH, gitRef: "HEAD", htmlContent: MINIMAL_HTML,
+        gitContext: await getVcsContext(repo, "git"), diffType: "uncommitted",
+        includeReviewDirectory: true, gitRemoteCheck: false,
+      });
+      try {
+        const diff = await (await fetch(`${server.url}/api/diff`)).json();
+        expect(diff.repoInfo).toMatchObject({ display: "example/selected", branch: "main" });
+        expect(diff.serverConfig.gitUser).toBe("Selected author");
+        const switched = await fetch(`${server.url}/api/diff/switch`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ diffType: `worktree:${worktree}:uncommitted` }),
+        });
+        expect(switched.status).toBe(200);
+        expect((await switched.json()).rawPatch).toContain("+# switched");
+        await fetch(`${server.url}/api/feedback`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ approved: true, feedback: NOTE_TEXT, annotations: [] }),
+        });
+        expect(await server.waitForDecision()).toMatchObject({ approved: true, feedback: NOTE_TEXT, reviewDirectory: worktree });
+        expect(process.cwd()).toBe(cwd);
+      } finally {
+        server.stop();
+      }
+    }, 15_000);
+
     test("absent option advertises false; passed option advertises true and survives /api/diff/switch", async () => {
       useTempDataDir();
 

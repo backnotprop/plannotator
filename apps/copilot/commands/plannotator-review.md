@@ -1,5 +1,5 @@
 ---
-description: Open interactive code review for current changes or a PR URL; --base <ref> / --diff-type <type> pin the session's opening diff (session-only, git-only)
+description: Open interactive code review for current changes, another directory, or a PR URL; --base <ref> / --diff-type <type> pin the session's opening diff (session-only, git-only)
 allowed-tools: shell(plannotator:*)
 ---
 

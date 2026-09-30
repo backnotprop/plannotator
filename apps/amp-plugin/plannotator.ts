@@ -78,12 +78,12 @@ export default function plannotatorAmpPlugin(amp: PluginAPI) {
     {
       title: "Review changes or PR",
       category: CATEGORY,
-      description: "Open Plannotator code review for local changes, a PR/MR URL, or review arguments.",
+      description: "Open Plannotator code review for local changes, another directory, or a PR/MR URL.",
     },
     async (ctx) => {
       const target = await ctx.ui.input({
         title: "Review changes or PR",
-        helpText: "Leave blank for local git changes, or enter a GitHub PR/GitLab MR URL or review arguments such as --git or --base <ref> (open against a specific base, session-only).",
+        helpText: "Leave blank for local git changes, or enter one directory (quote paths with spaces), a PR/MR URL, or review arguments such as --git or --base <ref> (open against a specific base, session-only).",
         submitButtonText: "Review",
       });
 

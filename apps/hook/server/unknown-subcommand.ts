@@ -4,6 +4,7 @@ const INTERNAL_SUBCOMMANDS = [
   "install-runtime",
   "opencode-plan",
   "opencode-review",
+  "opencode-review-directory",
   "opencode-annotate-last",
   "copilot-plan",
 ] as const;

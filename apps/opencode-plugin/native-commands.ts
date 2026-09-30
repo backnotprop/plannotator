@@ -36,7 +36,7 @@ export const NATIVE_COMMANDS: ReadonlyArray<{ name: string; description: string 
   {
     name: "plannotator-review",
     description:
-      "Open the Plannotator code review UI for current changes or a PR URL; pass --git or --gitbutler to force that provider",
+      "Open the Plannotator code review UI for current changes, a directory, or a PR URL; pass --git or --gitbutler to force that provider",
   },
   {
     name: "plannotator-annotate",

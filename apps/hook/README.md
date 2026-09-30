@@ -110,7 +110,7 @@ Plannotator's slash commands are installed as Claude Code skills in `~/.claude/s
 
 | Command | Description |
 |---------|-------------|
-| `/plannotator-review [--git \| --gitbutler]` | Open code review UI for current changes or a GitHub PR; optionally force the Git or GitButler provider |
+| `/plannotator-review [--git \| --gitbutler] [DIRECTORY \| PR_URL]` | Open code review UI for current changes, another repository/worktree, or a PR; optionally force the Git or GitButler provider |
 | `/plannotator-annotate <file.md \| file.html \| https://... \| folder/>` | Annotate a file, URL, or folder |
 | `/plannotator-last` | Annotate the agent's last message |
 

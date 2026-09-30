@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { REVIEW_OPEN_DIFF_TYPES, parseReviewArgs } from "./review-args";
+import { REVIEW_OPEN_DIFF_TYPES, parseReviewArgs, resolveReviewDirectory, withReviewDirectory } from "./review-args";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir, homedir } from "node:os";
+import { join } from "node:path";
 import { GIT_DIFF_TYPES } from "./vcs-core";
 
 describe("parseReviewArgs", () => {
@@ -96,12 +99,10 @@ describe("parseReviewArgs", () => {
       .toBe("https://github.com/acme/repo/pull/12");
   });
 
-  test("keeps non-url positional input as local review mode", () => {
-    // Positional word tolerance is load-bearing: slash-command hosts forward
-    // raw user prose to `plannotator review` verbatim. Over-tightening this
-    // would break every /plannotator-review invocation that carries words.
+  test("treats a non-URL target as a directory rather than ignoring it", () => {
     expect(parseReviewArgs("--git not-a-url")).toEqual({
       prUrl: undefined,
+      directory: "not-a-url",
       vcsType: "git",
       useLocal: true,
       errors: [],
@@ -114,7 +115,7 @@ describe("parseReviewArgs", () => {
     // on every host. A typo'd flag must fail loudly, exactly as on annotate.
     const parsed = parseReviewArgs("--bse main");
     expect(parsed.errors).toEqual(["Unknown review option: --bse"]);
-    // The stray value token stays a tolerated positional word.
+    // The stray value is a directory candidate, but the option error prevents launch.
     expect(parsed.prUrl).toBeUndefined();
   });
 
@@ -247,5 +248,51 @@ describe("parseReviewArgs", () => {
     // when / then
     expect(parseReviewArgs(missingPath).errors).toEqual(["--patch-file requires a path or -"]);
     expect(parseReviewArgs(duplicatePath).errors).toEqual(["--patch-file may only be specified once"]);
+  });
+});
+
+describe("review directory targets", () => {
+  test("keeps quoted paths intact and consumes flag values separately", () => {
+    for (const input of [
+      '--base main "../feature worktree" --diff-type last-commit',
+      ["--base", "main", "../feature worktree", "--diff-type", "last-commit"],
+    ]) {
+      expect(parseReviewArgs(input)).toMatchObject({
+        directory: "../feature worktree", base: "main", diffType: "last-commit", errors: [],
+      });
+    }
+  });
+
+  test("refuses ambiguous or conflicting targets before opening a review", () => {
+    for (const input of ["one two", "one https://github.com/a/b/pull/1", "https://github.com/a/b/pull/1 one"]) {
+      expect(parseReviewArgs(input).errors).toHaveLength(1);
+    }
+    expect(parseReviewArgs("one --patch-file change.patch").errors).toContain("--patch-file cannot be combined with a review directory");
+  });
+
+  test("resolves against the caller, accepts symlinked directories, and refuses files/missing paths", () => {
+    const root = mkdtempSync(join(tmpdir(), "review-directory-"));
+    const originalCwd = process.cwd();
+    try {
+      mkdirSync(join(root, "repo with spaces"));
+      writeFileSync(join(root, "file"), "not a directory");
+      symlinkSync(join(root, "repo with spaces"), join(root, "link"), "dir");
+      expect(resolveReviewDirectory("repo with spaces", root)).toBe(join(root, "repo with spaces"));
+      expect(resolveReviewDirectory(join(root, "repo with spaces"), "/elsewhere")).toBe(join(root, "repo with spaces"));
+      expect(resolveReviewDirectory("link", root)).toBe(join(root, "link"));
+      expect(resolveReviewDirectory("~", root)).toBe(homedir());
+      expect(resolveReviewDirectory(undefined, root)).toBe(root);
+      expect(() => resolveReviewDirectory("file", root)).toThrow("not a directory");
+      expect(() => resolveReviewDirectory("missing", root)).toThrow("does not exist");
+      expect(process.cwd()).toBe(originalCwd);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("labels targeted feedback without turning a bare approval into approval-with-notes", () => {
+    expect(withReviewDirectory("Fix this", "/other/repo")).toContain("/other/repo\n\nFix this");
+    expect(withReviewDirectory("", "/other/repo")).toBe("");
+    expect(withReviewDirectory("Fix this")).toBe("Fix this");
   });
 });

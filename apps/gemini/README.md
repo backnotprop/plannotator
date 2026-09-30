@@ -41,7 +41,7 @@ When you use `/plan` in Gemini CLI:
 
 | Command | Description |
 |---------|-------------|
-| `/plannotator-review` | Open interactive code review for current changes or a PR URL |
+| `/plannotator-review [DIRECTORY \| PR_URL]` | Open interactive code review for current changes, another repository/worktree, or a PR URL |
 | `/plannotator-review <pr-url>` | Review a GitHub pull request |
 | `/plannotator-annotate <file>` | Open interactive annotation UI for a markdown file |
 

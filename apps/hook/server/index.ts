@@ -96,7 +96,7 @@ import {
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
 import { loadConfig, resolveDefaultDiffType, resolveSharingEnabled } from "@plannotator/shared/config";
-import { parseReviewArgs, type ParsedReviewArgs } from "@plannotator/shared/review-args";
+import { parseReviewArgs, resolveReviewDirectory, withReviewDirectory, type ParsedReviewArgs } from "@plannotator/shared/review-args";
 import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
 import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
 import {
@@ -365,6 +365,15 @@ const emitAnnotateOutcome = createAnnotateOutcomeEmitter({
   hook: hookFlag,
   json: jsonFlag,
 });
+
+function resolveCliReviewDirectory(directory: string | undefined, cwd: string): string {
+  try {
+    return resolveReviewDirectory(directory, cwd);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+}
 
 /**
  * Resolve the `--base` / `--diff-type` open-state seed for a review
@@ -857,6 +866,8 @@ if (args[0] === "sessions") {
     process.exit(1);
   }
   const urlArg = reviewArgs.prUrl;
+  let reviewCwd = resolveCliReviewDirectory(reviewArgs.directory,
+    reviewArgs.directory ? process.env.PLANNOTATOR_CWD || process.cwd() : process.cwd());
   const isPRMode = urlArg !== undefined;
   const useLocal = isPRMode && reviewArgs.useLocal;
   // Caller-pinned open state: `--base` / `--diff-type` seed this session only
@@ -1133,7 +1144,8 @@ if (args[0] === "sessions") {
   } else {
     // --- Local Review Mode ---
     const config = loadConfig();
-    const managedVcs = await detectManagedVcs(process.cwd(), reviewArgs.vcsType);
+    const managedVcs = await detectManagedVcs(reviewCwd, reviewArgs.vcsType);
+    if (reviewArgs.directory) reviewCwd = await managedVcs?.getRoot?.(reviewCwd) ?? reviewCwd;
     const forcedVcs = !!reviewArgs.vcsType && reviewArgs.vcsType !== "auto";
 
     if (managedVcs || forcedVcs) {
@@ -1148,8 +1160,10 @@ if (args[0] === "sessions") {
         isWorkspace: false,
         providerId,
         resolvedDefaultDiffType: resolveDefaultDiffType(config),
+        cwd: reviewCwd,
       });
       const diffResult = await prepareLocalReviewDiff({
+        cwd: reviewCwd,
         vcsType: reviewArgs.vcsType,
         requestedDiffType: openState.requestedDiffType,
         requestedBase: openState.requestedBase,
@@ -1175,7 +1189,7 @@ if (args[0] === "sessions") {
         isWorkspace: true,
         resolvedDefaultDiffType: resolveDefaultDiffType(config),
       });
-      workspace = await buildLocalWorkspaceReview(process.cwd(), {
+      workspace = await buildLocalWorkspaceReview(reviewCwd, {
         configuredDiffType: resolveDefaultDiffType(config),
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
       });
@@ -1191,7 +1205,7 @@ if (args[0] === "sessions") {
     }
   }
 
-  const reviewProject = (await detectProjectName()) ?? "_unknown";
+  const reviewProject = (await detectProjectName(reviewCwd)) ?? "_unknown";
 
   // Start review server (even if empty - user can switch diff types in local mode)
   const server = await startReviewServer({
@@ -1200,6 +1214,7 @@ if (args[0] === "sessions") {
     error: diffError,
     origin: detectedOrigin,
     project: reviewProject,
+    includeReviewDirectory: !!reviewArgs.directory,
     diffType: workspace ? (initialDiffType ?? workspace.diffType) : gitContext ? (initialDiffType ?? "unstaged") : initialDiffType,
     gitContext,
     initialBase: initialBaseFromFlags,
@@ -1256,6 +1271,7 @@ if (args[0] === "sessions") {
   server.stop();
 
   // Output feedback (captured by slash command)
+  result.feedback = withReviewDirectory(result.feedback, result.reviewDirectory);
   const output = buildReviewOutput(result, detectedOrigin);
   console.log(jsonFlag ? JSON.stringify(output) : output.message);
   process.exit(0);
@@ -1882,7 +1898,7 @@ if (args[0] === "sessions") {
   }));
   process.exit(0);
 
-} else if (args[0] === "opencode-review") {
+} else if (args[0] === "opencode-review" || args[0] === "opencode-review-directory") {
   // ============================================
   // OPENCODE PLUGIN CODE REVIEW MODE
   // ============================================
@@ -1904,6 +1920,7 @@ if (args[0] === "sessions") {
     process.exit(1);
   }
   const urlArg = reviewArgs.prUrl;
+  let reviewCwd = resolveCliReviewDirectory(reviewArgs.directory, process.env.PLANNOTATOR_CWD || process.cwd());
   const isPRMode = urlArg !== undefined;
   // Caller-pinned open state (--base/--diff-type through the plugin's
   // verbatim rawArgs forward) — session-only seed, mirrors the direct
@@ -1970,8 +1987,9 @@ if (args[0] === "sessions") {
     console.error("Opening code review UI...");
 
     const config = loadConfig();
-    const cwd = process.env.PLANNOTATOR_CWD || process.cwd();
-    const managedVcs = await detectManagedVcs(cwd, reviewArgs.vcsType);
+    const managedVcs = await detectManagedVcs(reviewCwd, reviewArgs.vcsType);
+    if (reviewArgs.directory) reviewCwd = await managedVcs?.getRoot?.(reviewCwd) ?? reviewCwd;
+    const cwd = reviewCwd;
     const forcedVcs = !!reviewArgs.vcsType && reviewArgs.vcsType !== "auto";
 
     if (managedVcs || forcedVcs) {
@@ -2029,7 +2047,7 @@ if (args[0] === "sessions") {
 
   const bridgeSharingEnabled = getBridgeSharingEnabled(input);
   const bridgeShareBaseUrl = getBridgeShareBaseUrl(input);
-  const reviewProject = (await detectProjectName()) ?? "_unknown";
+  const reviewProject = (await detectProjectName(reviewArgs.directory ? reviewCwd : undefined)) ?? "_unknown";
 
   const server = await startReviewServer({
     rawPatch,
@@ -2037,6 +2055,7 @@ if (args[0] === "sessions") {
     error: diffError,
     origin: "opencode",
     project: reviewProject,
+    includeReviewDirectory: !!reviewArgs.directory,
     diffType: isPRMode ? undefined : userDiffType,
     gitContext,
     initialBase: initialBaseFromFlags,
@@ -2093,7 +2112,7 @@ if (args[0] === "sessions") {
         : "annotated",
     approved: result.approved,
     isPRMode,
-    ...(result.feedback && { feedback: result.feedback }),
+    ...(result.feedback && { feedback: withReviewDirectory(result.feedback, result.reviewDirectory) }),
     ...(result.agentSwitch && { agentSwitch: result.agentSwitch }),
   }));
   process.exit(0);

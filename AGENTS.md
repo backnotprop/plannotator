@@ -282,6 +282,24 @@ Send Feedback → feedback sent to agent session
 Approve → approved prompt sent to agent session (with the note/annotations when approving with notes)
 ```
 
+### Review directory targets
+
+`plannotator review [DIRECTORY | PR_URL]` (and `/plannotator-review` on OpenCode
+and Pi) accepts one local repository/worktree or multi-repo workspace directory.
+The shared `parseReviewArgs` + `resolveReviewDirectory` resolve it against the
+invoking terminal/session cwd, validate it before discovery, and reject multiple
+targets or a directory combined with `--patch-file`. Plain positional words are
+now directory targets rather than ignored prose. Hosts pass the resolved cwd
+through existing VCS/workspace discovery and project detection; never use
+`process.chdir()` in a plugin host. Explicit targets inside a repository normalize
+to its detected VCS root. OpenCode uses the internal `opencode-review-directory`
+command for these targets so an older CLI rejects them rather than silently
+reviewing the caller's repo; ordinary reviews keep `opencode-review`.
+Feedback still goes to the invoking agent
+session, with `withReviewDirectory` naming the active directory at submission when feedback has content
+(a bare approval stays bare). File operations, AI jobs and persistence continue
+using the resulting `gitContext.cwd` / workspace root.
+
 ### Review header decision control (agent mode)
 
 The agent-destination review header uses the same adaptive split control the annotate surfaces

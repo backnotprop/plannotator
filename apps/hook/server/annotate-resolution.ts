@@ -303,7 +303,7 @@ export async function resolveAnnotateTarget(options: {
         message:
           `File type not supported: ${ext}\n` +
           `Supported types: ${buildAnnotatableExtensionsHint(extraMarkdownExtensions)}\n` +
-          `For code review, use: plannotator review [file]`,
+          `For code review, use: plannotator review [DIRECTORY]`,
       };
     }
     return {

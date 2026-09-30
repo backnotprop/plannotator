@@ -12,8 +12,11 @@ Run:
 PLANNOTATOR_ORIGIN=mistral-vibe plannotator review
 ```
 
-You may append an optional PR URL:
+You may append one directory or PR URL:
 
 ```bash
 PLANNOTATOR_ORIGIN=mistral-vibe plannotator review <pr-url>
+PLANNOTATOR_ORIGIN=mistral-vibe plannotator review ../feature-worktree
 ```
+
+Directory paths are relative to the current session or absolute. Quote paths containing spaces. Feedback names the directory where changes belong.

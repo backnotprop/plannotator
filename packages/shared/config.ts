@@ -594,9 +594,9 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): void {
  * Detect the git user name from `git config user.name`.
  * Returns null if git is unavailable, not in a repo, or user.name is not set.
  */
-export function detectGitUser(): string | null {
+export function detectGitUser(cwd?: string): string | null {
   try {
-    const name = execSync("git config user.name", { encoding: "utf-8", timeout: 3000 }).trim();
+    const name = execSync("git config user.name", { cwd, encoding: "utf-8", timeout: 3000 }).trim();
     return name || null;
   } catch {
     return null;

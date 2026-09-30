@@ -77,6 +77,7 @@ export interface BrowserDecisionSession<T> {
 
 type CodeReviewOptions = {
 	cwd?: string;
+	includeReviewDirectory?: boolean;
 	defaultBranch?: string;
 	diffType?: DiffType;
 	prUrl?: string;
@@ -109,6 +110,7 @@ type CodeReviewOptions = {
 type CodeReviewDecision = {
 	approved: boolean;
 	feedback?: string;
+	reviewDirectory?: string;
 	annotations?: unknown[];
 	agentSwitch?: string;
 	exit?: boolean;
@@ -636,9 +638,10 @@ async function createCodeReviewBrowserSession(
 		diffType = "static-patch";
 	} else {
 		// --- Local Review Mode ---
-		const cwd = options.cwd ?? ctx.cwd;
+		let cwd = options.cwd ?? ctx.cwd;
 		const config = loadConfig();
 		const managedVcs = await detectManagedVcs(cwd, options.vcsType);
+		if (options.includeReviewDirectory) cwd = await managedVcs?.getRoot?.(cwd) ?? cwd;
 		const forcedVcs = !!options.vcsType && options.vcsType !== "auto";
 		// Flag-sourced open state: validate strictly before any diff work, and
 		// resolve the effective requested base/diff type (promotion included).
@@ -732,7 +735,8 @@ async function createCodeReviewBrowserSession(
 		gitRef,
 		error: diffError,
 		origin: "pi",
-		project: detectProjectName(),
+		project: detectProjectName(options.includeReviewDirectory ? gitCtx?.cwd ?? workspace?.root ?? options.cwd : options.cwd),
+		includeReviewDirectory: options.includeReviewDirectory,
 		diffType,
 		gitContext: gitCtx,
 		initialBase,

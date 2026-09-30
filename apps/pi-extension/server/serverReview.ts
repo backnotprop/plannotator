@@ -302,6 +302,7 @@ export interface ReviewServerResult {
 	waitForDecision: () => Promise<{
 		approved: boolean;
 		feedback: string;
+		reviewDirectory?: string;
 		annotations: unknown[];
 		agentSwitch?: string;
 		exit?: boolean;
@@ -310,6 +311,8 @@ export interface ReviewServerResult {
 }
 
 export async function startReviewServer(options: {
+	/** Return the active local directory with the decision for cross-directory feedback. */
+	includeReviewDirectory?: boolean;
 	rawPatch: string;
 	gitRef: string;
 	htmlContent: string;
@@ -391,7 +394,7 @@ export async function startReviewServer(options: {
 	/** Called when server starts with the URL, remote status, and port */
 	onReady?: (url: string, isRemote: boolean, port: number) => void;
 }): Promise<ReviewServerResult> {
-	const gitUser = detectGitUser();
+	const gitUser = detectGitUser(options.workspace?.root ?? options.gitContext?.cwd);
 	const aiEnabled = resolveAIEnabled();
 	const submitPlatformReview = options.prReviewSubmitter ?? submitPRReview;
 	let draftKey = contentHash(options.rawPatch);
@@ -479,7 +482,7 @@ export async function startReviewServer(options: {
 			}
 		: workspace
 			? { display: basename(workspace.root), branch: "Workspace" }
-		: getRepoInfo();
+		: getRepoInfo(options.gitContext?.cwd);
 	const editorAnnotations = createEditorAnnotationHandler();
 	const externalAnnotations = createExternalAnnotationHandler("review");
 
@@ -1844,6 +1847,7 @@ export async function startReviewServer(options: {
 	let resolveDecision!: (result: {
 		approved: boolean;
 		feedback: string;
+		reviewDirectory?: string;
 		annotations: unknown[];
 		agentSwitch?: string;
 		exit?: boolean;
@@ -1851,6 +1855,7 @@ export async function startReviewServer(options: {
 	const decisionPromise = new Promise<{
 		approved: boolean;
 		feedback: string;
+		reviewDirectory?: string;
 		annotations: unknown[];
 		agentSwitch?: string;
 		exit?: boolean;
@@ -3792,6 +3797,8 @@ export async function startReviewServer(options: {
 				resolveDecision({
 					approved,
 					feedback: feedbackText,
+					...(options.includeReviewDirectory && !prMeta && options.diffType !== STATIC_PATCH_DIFF_TYPE
+						? { reviewDirectory: resolveAgentCwd() } : {}),
 					annotations: annotationList,
 					agentSwitch: body.agentSwitch as string | undefined,
 				});

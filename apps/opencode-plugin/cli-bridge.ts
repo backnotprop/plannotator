@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { parseAnnotateArgs, type ParsedAnnotateArgs } from "@plannotator/shared/annotate-args";
+import { parseReviewArgs } from "@plannotator/shared/review-args";
 import {
   composeReviewApprovedMessage,
   getAnnotateApprovedWithNotesPrompt,
@@ -687,9 +688,14 @@ export async function handleCliCommand(input: {
 
   try {
     if (input.command === "plannotator-review") {
+      const parsed = parseReviewArgs(input.rawArgs);
+      if (parsed.errors.length) throw new Error(parsed.errors.join("\n"));
+      // Older binaries ignore positional paths. A distinct internal command
+      // makes version skew fail before opening a review of the wrong repo.
+      const command = parsed.directory ? "opencode-review-directory" : "opencode-review";
       const result = await runPlannotatorCli({
         client: input.client,
-        args: ["opencode-review"],
+        args: [command],
         cwd,
         input: JSON.stringify({
           arguments: input.rawArgs,
@@ -711,6 +717,9 @@ export async function handleCliCommand(input: {
       });
       if (result.exitCode !== 0) {
         log(input.client, "error", result.stderr.trim() || `Plannotator CLI exited with code ${result.exitCode}`);
+        if (parsed.directory && /unknown (?:subcommand|command)/i.test(result.stderr)) {
+          log(input.client, "error", "Update the Plannotator CLI to review a directory from OpenCode.");
+        }
         return;
       }
 

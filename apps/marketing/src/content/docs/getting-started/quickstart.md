@@ -65,6 +65,6 @@ After approval, the agent continues through its native implementation workflow. 
 
 Beyond plan review, Plannotator provides slash commands you can use anytime during a session:
 
-- **`/plannotator-review`** — Review uncommitted code changes, or pass a GitHub PR URL to review a pull request. See [Code Review](/docs/commands/code-review/).
+- **`/plannotator-review`** — Review local code changes, pass a directory to review another repository/worktree, or pass a PR URL to review a pull request. See [Code Review](/docs/commands/code-review/).
 - **`/plannotator-annotate <file.md>`** — Annotate any markdown file. See [Annotate](/docs/commands/annotate/).
 - **`/plannotator-last`** — Annotate the agent's last message. See [Annotate Last](/docs/commands/annotate-last/).

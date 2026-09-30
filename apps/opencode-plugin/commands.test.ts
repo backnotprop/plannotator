@@ -62,8 +62,10 @@ function git(cwd: string, args: string[]): void {
   }
 }
 
-function initGitRepo(): string {
-  const repoDir = makeTempDir();
+function initGitRepo(name?: string): string {
+  const root = makeTempDir();
+  const repoDir = name ? path.join(root, name) : root;
+  if (name) mkdirSync(repoDir);
   git(repoDir, ["init", "-q"]);
   git(repoDir, ["branch", "-M", "main"]);
   git(repoDir, ["config", "user.email", "test@example.com"]);
@@ -140,6 +142,42 @@ describe("handleReviewCommand open state (--base / --diff-type)", () => {
     expect(startReviewServerMock).not.toHaveBeenCalled();
     const logged = deps.client.app.log.mock.calls.map((c: any[]) => c[0]?.message ?? "").join("\n");
     expect(logged).toContain("Base ref not found: nope-missing");
+  });
+
+  test("a directory selects another repo while feedback stays in the invoking session", async () => {
+    // Catch cwd leakage on the embedded path and delivery into the wrong session.
+    process.env.PLANNOTATOR_DATA_DIR = makeTempDir();
+    const caller = initGitRepo("caller");
+    const target = initGitRepo("target");
+    mkdirSync(path.join(target, "src"));
+    const hostCwd = process.cwd();
+    writeFileSync(path.join(caller, "caller.ts"), "caller-only\n");
+    writeFileSync(path.join(target, "target.ts"), "target-only\n");
+    const deps = {
+      ...makeDeps(),
+      directory: caller,
+      startReviewServer: mock(async (_options: any) => ({
+        port: 0, url: "http://localhost", isRemote: false,
+        waitForDecision: async () => ({ feedback: "Please check target.ts.", annotations: [], reviewDirectory: path.join(target, "switched-worktree") }),
+        stop: () => {},
+      })),
+    };
+    await handleReviewCommand({ properties: { arguments: JSON.stringify(path.relative(caller, path.join(target, "src"))), sessionID: "original-session" } }, deps as any);
+    const options = deps.startReviewServer.mock.calls[0]?.[0];
+    expect(options.rawPatch).toContain("target-only");
+    expect(options.rawPatch).not.toContain("caller-only");
+    expect(options.gitContext.cwd).toBe(target);
+    expect(options.project).toBe(path.basename(target));
+    expect(options.includeReviewDirectory).toBe(true);
+    const prompt = deps.client.session.prompt.mock.calls[0]?.[0] as any;
+    expect(prompt.path.id).toBe("original-session");
+    expect(prompt.body.parts[0].text).toContain(`Review directory: ${path.join(target, "switched-worktree")}`);
+    expect(process.cwd()).toBe(hostCwd);
+
+    deps.startReviewServer.mockClear();
+    await handleReviewCommand({ properties: { arguments: "missing-directory", sessionID: "original-session" } }, deps as any);
+    expect(deps.startReviewServer).not.toHaveBeenCalled();
+    expect(deps.client.app.log.mock.calls.map((call: any[]) => call[0].message).join("\n")).toContain("does not exist");
   });
 });
 

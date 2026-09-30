@@ -1,6 +1,6 @@
 ---
 name: plannotator-review
-description: Open Plannotator's browser-based code review UI for the current worktree or a pull request URL, then act on the feedback that comes back.
+description: Open Plannotator's browser-based code review UI for the current worktree, another directory, or a pull request URL, then act on the feedback that comes back.
 disable-model-invocation: true
 ---
 
@@ -11,10 +11,12 @@ Use this skill when the user wants to review current code changes in Plannotator
 Run:
 
 ```bash
-plannotator review [--base <ref>] [--diff-type <type>] [optional-pr-url]
+plannotator review [--base <ref>] [--diff-type <type>] [directory-or-pr-url]
 ```
 
 Reviewing one layer of a stacked branch? Pass `--base <the branch immediately below yours>` so the review shows only what this layer adds, instead of everything since `main`. Both flags are session-only (the reviewer can change either in the UI; nothing is persisted) and git-only.
+
+To review another repository or worktree, pass its directory (relative to the current session or absolute), e.g. `plannotator review ../feature-worktree`. Quote paths containing spaces. Feedback names the selected directory; apply changes there.
 
 Behavior:
 

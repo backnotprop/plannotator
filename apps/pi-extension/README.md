@@ -294,7 +294,7 @@ During execution, the agent marks completed steps with `[DONE:n]` markers. Progr
 | Command | Description |
 |---------|-------------|
 | `/plannotator-plan-mode` | Toggle plan mode. The agent writes a markdown plan file anywhere in the working directory and submits its path |
-| `/plannotator-review` | Open code review UI for current changes |
+| `/plannotator-review [DIRECTORY \| PR_URL]` | Open code review UI for current changes, another repository/worktree, or a PR |
 | `/plannotator-annotate <file>` | Open markdown file in annotation UI |
 | `/plannotator-last` | Annotate the last assistant message |
 

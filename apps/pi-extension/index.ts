@@ -668,7 +668,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("plannotator-review", {
-		description: "Open interactive code review for current changes or a PR URL; pass --git or --gitbutler to force that provider, --base <ref> / --diff-type <type> to pin the session's opening diff",
+		description: "Open interactive code review for current changes, a directory, or a PR URL; pass --git or --gitbutler to force that provider, --base <ref> / --diff-type <type> to pin the session's opening diff",
 		handler: async (args, ctx) => {
 			if (!hasReviewBrowserHtml()) {
 				ctx.ui.notify(
@@ -682,7 +682,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			const origin = getPiSessionIdentity(ctx);
 
 			try {
-				const { parseReviewArgs } = await import("./generated/review-args.ts");
+				const { parseReviewArgs, resolveReviewDirectory, withReviewDirectory } = await import("./generated/review-args.ts");
 				const reviewArgs = parseReviewArgs(args ?? "");
 				// Argument-shape failures refuse to start a session (same contract
 				// as the CLI's exit 1), surfaced through Pi's notifier.
@@ -690,7 +690,10 @@ export default function plannotator(pi: ExtensionAPI): void {
 					ctx.ui.notify(`Plannotator: ${reviewArgs.errors.join("; ")}`, "error");
 					return;
 				}
+				const reviewCwd = resolveReviewDirectory(reviewArgs.directory, ctx.cwd);
 				const session = await startCodeReviewBrowserSession(ctx, {
+					cwd: reviewArgs.directory ? reviewCwd : undefined,
+					includeReviewDirectory: !!reviewArgs.directory,
 					prUrl: reviewArgs.prUrl,
 					patchFile: reviewArgs.patchFile,
 					vcsType: reviewArgs.vcsType,
@@ -712,6 +715,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 					.waitForDecision()
 					.then(async (result) => {
 						try {
+							if (result.feedback) result.feedback = withReviewDirectory(result.feedback, result.reviewDirectory);
 							if (result.exit) {
 								safeNotify(ctx, "Code review session closed.", "info", origin);
 								return;

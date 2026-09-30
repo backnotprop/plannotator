@@ -266,6 +266,8 @@ export interface ReviewServerOptions {
    * `pool/pr-<n>` checkout, so records would bucket under `pr-123`).
    */
   project?: string;
+  /** Return the active local directory with the decision for cross-directory feedback. */
+  includeReviewDirectory?: boolean;
   /** Working directory for agent processes (e.g., --local worktree). Independent of diff pipeline. */
   agentCwd?: string;
   /** Per-PR worktree pool. When set, pr-switch creates worktrees instead of checking out. */
@@ -291,6 +293,7 @@ export interface ReviewServerResult {
   waitForDecision: () => Promise<{
     approved: boolean;
     feedback: string;
+    reviewDirectory?: string;
     annotations: unknown[];
     agentSwitch?: string;
     exit?: boolean;
@@ -1820,7 +1823,7 @@ export async function startReviewServer(
   // device: remote mode or --tailscale (#1617). Local sessions are unchanged.
   const compressAppHtml = isRemote || options.tailnetPublished === true;
   const wslFlag = await isWSL();
-  const gitUser = detectGitUser();
+  const gitUser = detectGitUser(workspace?.root ?? gitContext?.cwd);
 
   // Detect repo info (cached for this session)
   // In PR mode, derive from metadata instead of local git
@@ -1833,7 +1836,7 @@ export async function startReviewServer(
     ? { display: getDisplayRepo(prMetadata), branch: `${getMRLabel(prMetadata)} ${getMRNumberLabel(prMetadata)}` }
     : workspace
       ? { display: basename(workspace.root), branch: "Workspace" }
-    : await getRepoInfo();
+    : await getRepoInfo(gitContext?.cwd);
   if (!isStaticPatchMode && gitContext?.repository?.displayFallback) {
     repoInfo = {
       ...repoInfo,
@@ -1886,6 +1889,7 @@ export async function startReviewServer(
   let resolveDecision: (result: {
     approved: boolean;
     feedback: string;
+    reviewDirectory?: string;
     annotations: unknown[];
     agentSwitch?: string;
     exit?: boolean;
@@ -1893,6 +1897,7 @@ export async function startReviewServer(
   const decisionPromise = new Promise<{
     approved: boolean;
     feedback: string;
+    reviewDirectory?: string;
     annotations: unknown[];
     agentSwitch?: string;
     exit?: boolean;
@@ -3856,6 +3861,8 @@ export async function startReviewServer(
               resolveDecision({
                 approved,
                 feedback: feedbackValue,
+                ...(options.includeReviewDirectory && !isPRMode && !isStaticPatchMode
+                  ? { reviewDirectory: resolveAgentCwd() } : {}),
                 annotations: annotationsValue,
                 agentSwitch: body.agentSwitch,
               });
