@@ -38,6 +38,9 @@ function makeDeps() {
         prompt: mock(async (_input: unknown) => {}),
         messages: mock(async (_input: unknown) => ({ data: [] })),
       },
+      tui: {
+        showToast: mock((_input: any) => {}),
+      },
     },
     htmlContent: "<html></html>",
     reviewHtmlContent: "<html></html>",
@@ -179,6 +182,8 @@ describe("handleReviewCommand open state (--base / --diff-type)", () => {
     await handleReviewCommand({ properties: { arguments: "./missing-directory", sessionID: "original-session" } }, deps as any);
     expect(deps.startReviewServer).not.toHaveBeenCalled();
     expect(deps.client.app.log.mock.calls.map((call: any[]) => call[0].message).join("\n")).toContain("does not exist");
+    // app.log never reaches the TUI, so the refusal must also be toasted.
+    expect(deps.client.tui.showToast.mock.calls.map((call: any[]) => call[0].body.message).join("\n")).toContain("does not exist");
 
     // Prose that names no directory keeps the pre-directory behavior (#1483):
     // the invoking repo is reviewed and the ignored words are reported.
@@ -187,6 +192,26 @@ describe("handleReviewCommand open state (--base / --diff-type)", () => {
     expect(proseOptions.rawPatch).toContain("caller-only");
     expect(proseOptions.includeReviewDirectory).toBe(false);
     expect(deps.client.app.log.mock.calls.map((call: any[]) => call[0].message).join("\n")).toContain("please review my changes");
+  });
+
+  test("path-shaped prose among several words reviews the invoking repo (v0.27.23 regression)", async () => {
+    process.env.PLANNOTATOR_DATA_DIR = makeTempDir();
+    const caller = initGitRepo("caller");
+    writeFileSync(path.join(caller, "caller.ts"), "caller-only\n");
+    const deps = {
+      ...makeDeps(),
+      directory: caller,
+      startReviewServer: mock(async (_options: any) => ({
+        port: 0, url: "http://localhost", isRemote: false,
+        waitForDecision: async () => ({ feedback: "", annotations: [] }),
+        stop: () => {},
+      })),
+    };
+    await handleReviewCommand({ properties: { arguments: "look at the api/users code", sessionID: "s" } }, deps as any);
+    const options = deps.startReviewServer.mock.calls[0]?.[0];
+    expect(options.rawPatch).toContain("caller-only");
+    expect(options.includeReviewDirectory).toBe(false);
+    expect(deps.client.tui.showToast).not.toHaveBeenCalled();
   });
 });
 

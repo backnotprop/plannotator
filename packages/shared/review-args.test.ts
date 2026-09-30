@@ -300,11 +300,33 @@ describe("review directory targets", () => {
     });
   });
 
-  test("a path-shaped typo fails loudly instead of reviewing the caller's repo", () => {
+  test("a sole path-shaped typo fails loudly instead of reviewing the caller's repo", () => {
     withTree((root) => {
-      for (const input of ["./missing", "../missing", "missing/sub", "please review ./missing"]) {
+      for (const input of ["./missing", "../missing", "missing/sub", "~/plannotator-missing-dir-xyz"]) {
         expect(() => target(input, root)).toThrow("does not exist");
       }
+      expect(() => target("./file", root)).toThrow("not a directory");
+    });
+  });
+
+  test("path-shaped prose among several words is ignored, not fatal (v0.27.23 regression)", () => {
+    withTree((root) => {
+      expect(target("review the frontend/backend split", root)).toEqual({
+        ignored: ["review", "the", "frontend/backend", "split"],
+      });
+      expect(target("look at the api/users code", root)).toEqual({
+        ignored: ["look", "at", "the", "api/users", "code"],
+      });
+      // A path-shaped word naming a file is prose too.
+      expect(target("look at ./file please", root)).toEqual({ ignored: ["look", "at", "./file", "please"] });
+      // An existing directory among the words still selects it.
+      expect(target("look at ./backend please", root)).toEqual({
+        directory: join(root, "backend"),
+        ignored: ["look", "at", "please"],
+      });
+      expect(target("./missing ./backend", root)).toEqual({ directory: join(root, "backend"), ignored: ["./missing"] });
+      // A path word next to a PR URL is not a sole target either.
+      expect(target("https://github.com/a/b/pull/1 ./missing", root)).toEqual({ ignored: ["./missing"] });
     });
   });
 

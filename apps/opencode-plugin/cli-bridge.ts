@@ -175,6 +175,21 @@ function toastPlannotatorUrl(client: OpenCodeClient, message: string, toastedUrl
   }
 }
 
+// A refused review target must be SEEN: `log` alone never reaches the TUI, so
+// the command would appear to do nothing. Same best-effort toast surface as
+// `toastPlannotatorUrl` (OpenCode 2 has no `tui` domain and keeps the log).
+function logAndToastError(client: OpenCodeClient, message: string): void {
+  log(client, "error", message);
+  try {
+    const result = client.tui?.showToast?.({
+      body: { title: "Plannotator", message, variant: "error" },
+    }) as { catch?: (onRejected: () => void) => unknown } | undefined;
+    if (result && typeof result.catch === "function") result.catch(() => {});
+  } catch {
+    // Toast delivery is best-effort.
+  }
+}
+
 function getWindowsPathCandidates(bin: string, env: NodeJS.ProcessEnv): string[] {
   if (path.extname(bin)) return [bin];
 
@@ -694,7 +709,13 @@ export async function handleCliCommand(input: {
       // makes version skew fail before opening a review of the wrong repo.
       // Prose that names no directory keeps the old command, so it still
       // works against an old binary exactly as before.
-      const directoryTarget = resolveReviewTarget(parsed, cwd).directory;
+      let directoryTarget: string | undefined;
+      try {
+        directoryTarget = resolveReviewTarget(parsed, cwd).directory;
+      } catch (error) {
+        logAndToastError(input.client, `[Plannotator] ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
       const command = directoryTarget ? "opencode-review-directory" : "opencode-review";
       const result = await runPlannotatorCli({
         client: input.client,
@@ -723,7 +744,7 @@ export async function handleCliCommand(input: {
         // >= 0.27.11 answers "Unknown command"; older binaries fall into the
         // plan hook path and answer "No plan content in hook event".
         if (directoryTarget && /unknown (?:subcommand|command)|no plan content in hook event/i.test(result.stderr)) {
-          log(input.client, "error", "Update the Plannotator CLI to review a directory from OpenCode.");
+          logAndToastError(input.client, "Update the Plannotator CLI to review a directory from OpenCode.");
         }
         return;
       }

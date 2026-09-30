@@ -30,12 +30,13 @@ repositories together. The target selects the review workspace, not a file filte
 Feedback returns to the invoking session and names the directory active at submission,
 including after switching worktrees.
 
-Supply one directory or PR URL. A sole word, or any path-shaped word (containing
-`/`, or starting with `.` or `~`), is a directory target: a missing path-shaped
-directory, a file, two targets, or a directory combined with `--patch-file` is an
-error. Other words are ignored as prose with a notice, so
-`/plannotator-review please review my changes` still reviews the current workspace;
-write `./backend` rather than a bare `backend` inside a sentence. OpenCode directory
+Supply one directory or PR URL. A sole word is a directory target: a file, or a
+missing path-shaped word (containing `/`, or starting with `.` or `~`), is an error.
+Inside a sentence, a path-shaped word that names an existing directory is the target;
+one that names nothing or a file is prose. Two directories, or a directory combined
+with `--patch-file`, is an error. Other words are ignored as prose with a notice, so
+`/plannotator-review review the frontend/backend split` still reviews the current
+workspace; write `./backend` rather than a bare `backend` inside a sentence. OpenCode directory
 targets require an updated Plannotator CLI; an older binary is rejected instead of
 opening the wrong repo.
 

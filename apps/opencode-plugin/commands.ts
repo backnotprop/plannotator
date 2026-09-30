@@ -92,7 +92,15 @@ export async function handleReviewCommand(
     const notice = formatIgnoredReviewWords(target);
     if (notice) client.app.log({ level: "info", message: `[Plannotator] ${notice}` });
   } catch (err) {
-    client.app.log({ level: "error", message: err instanceof Error ? err.message : String(err) });
+    const message = err instanceof Error ? err.message : String(err);
+    client.app.log({ level: "error", message });
+    // app.log never reaches the TUI; toast so a refused target is visible.
+    try {
+      const result = client.tui?.showToast?.({ body: { title: "Plannotator", message, variant: "error" } });
+      if (result && typeof result.catch === "function") result.catch(() => {});
+    } catch {
+      // Toast delivery is best-effort.
+    }
     return;
   }
   let reviewCwd = reviewDirectory ?? directory ?? process.cwd();

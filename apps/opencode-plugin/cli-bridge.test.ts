@@ -40,13 +40,16 @@ console.log(JSON.stringify({ decision: "annotated", feedback: "caller feedback" 
     const client = {
       app: { log: mock((_entry: { message: string }) => {}) },
       session: { prompt: mock(async (_input: unknown) => ({})) },
+      tui: { showToast: mock((_input: any) => {}) },
     };
+    const toasts = () => client.tui.showToast.mock.calls.map(([entry]) => entry.body.message).join("\n");
     try {
       process.env.PLANNOTATOR_BIN = binary;
       await handleCliCommand({ command: "plannotator-review", client, sessionId: "caller", cwd: path.join(root, "caller"), rawArgs: "../target" });
       expect(existsSync(opened)).toBe(false);
       expect(client.session.prompt).not.toHaveBeenCalled();
       expect(client.app.log.mock.calls.map(([entry]) => entry.message).join("\n")).toContain("Update the Plannotator CLI");
+      expect(toasts()).toContain("Update the Plannotator CLI");
       // Binaries older than 0.27.11 have no unknown-command guard: the stdin
       // JSON reaches the plan hook path, which fails with its own message.
       const ancient = path.join(root, "ancient-cli.ts");
@@ -65,6 +68,17 @@ process.exit(1);
       await handleCliCommand({ command: "plannotator-review", client, sessionId: "caller", cwd: path.join(root, "caller"), rawArgs: "please review my changes" });
       expect(existsSync(opened)).toBe(true);
       expect(client.session.prompt).toHaveBeenCalledTimes(1);
+      // Path-shaped prose among several words is ignored, not refused, and
+      // still takes the old command (v0.27.23 regression).
+      rmSync(opened);
+      await handleCliCommand({ command: "plannotator-review", client, sessionId: "caller", cwd: path.join(root, "caller"), rawArgs: "look at the api/users code" });
+      expect(existsSync(opened)).toBe(true);
+      // A sole path-shaped typo is refused before the CLI runs, visibly.
+      rmSync(opened);
+      client.tui.showToast.mockClear();
+      await handleCliCommand({ command: "plannotator-review", client, sessionId: "caller", cwd: path.join(root, "caller"), rawArgs: "./backnd" });
+      expect(existsSync(opened)).toBe(false);
+      expect(toasts()).toContain("does not exist");
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_BIN;
       else process.env.PLANNOTATOR_BIN = previous;
