@@ -62,8 +62,8 @@ for (const entry of readdirSync(stubSource)) {
   if (entry.endsWith(".md")) copyFileSync(path.join(stubSource, entry), path.join(stubsDir, entry));
 }
 
-// Set when the host is known to ship the post-#44765 command API (the `beta` /
-// `dev` channels). CI runs a `next` build, where the stubs legitimately win.
+// Set when the host is known to ship the post-#44765 command API, including the
+// stable @opencode/cli used in CI. Older V2 hosts can still exercise the fallback.
 const expectNativeCommands = process.env.PLANNOTATOR_SMOKE_EXPECT_NATIVE === "1";
 
 const env = {

@@ -648,10 +648,9 @@ describe("V2 feedback delivery", () => {
     expect(prompt.mock.calls[0]![0]).toMatchObject({ delivery: "queue" });
   });
 
-  // The CI-pinned host (`@opencode-ai/plugin@0.0.0-next-16775`) predates the
-  // inbox-event rename and reports the same fact as `session.input.promoted`
-  // with `data.inputID`. Reading only the v2.0.x spelling would leave the
-  // mis-steer live on exactly the host this package pins.
+  // Older V2 hosts predate the inbox-event rename and report the same fact as
+  // `session.input.promoted` with `data.inputID`. Reading only the v2.0.x
+  // spelling would leave feedback mis-steered on those hosts.
   test("the pre-rename session.input.promoted event settles the notice too", async () => {
     const stream = createTestEventStream();
     const { client, prompt } = makeNoticeBridge({ stream });

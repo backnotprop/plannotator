@@ -1,4 +1,4 @@
-import type { Plugin } from "@opencode-ai/plugin";
+import type { Plugin } from "@opencode/plugin";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -66,8 +66,8 @@ type EmbeddedRuntimeModule = {
   }) => Promise<OpenCodePlanReviewResult>;
 };
 
-// `Plugin.define` is an identity function in @opencode-ai/plugin; keeping the import
-// type-only avoids shipping a runtime dependency on an exact prerelease nightly.
+// `Plugin.define` is an identity function in @opencode/plugin; keeping the import
+// type-only lets the host provide the runtime without shipping a second SDK.
 const serverPlugin = {
   id: "plannotator",
   setup: async (ctx) => {
@@ -89,9 +89,8 @@ const serverPlugin = {
       return cachedAgents;
     };
 
-    // The pinned `@opencode-ai/plugin` types predate the command-execution API
-    // (PR #44765), so the context is re-viewed through a duck-typed shape. Every
-    // capability behind it is probed before use.
+    // Keep the capability probes for older V2 hosts, even though the stable
+    // SDK now types native command execution and agent switching.
     const v2 = ctx as unknown as V2ContextLike;
 
     // Native slash commands are registered before the submit_plan early return

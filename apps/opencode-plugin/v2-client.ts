@@ -1,11 +1,10 @@
 /**
  * Duck-typed adapters over the OpenCode 2 plugin context.
  *
- * The V2 plugin API is still pre-release: the published `next` and `latest`
- * dist-tags of `@opencode-ai/plugin` carry an older context shape than the
- * `beta` / `dev` nightlies. Nothing here may import the plugin package at
- * runtime or assume a domain exists: every capability is probed before use so
- * the adapter degrades to today's behavior on an older host.
+ * The build uses the stable @opencode/plugin types, but installed V2 hosts may
+ * predate native commands, agent switching or transcript notices. Nothing here
+ * imports the plugin package at runtime: optional capabilities are probed so
+ * older hosts retain their fallback behavior.
  */
 
 import type { OpenCodeBridgeAgent } from "./cli-bridge";
@@ -306,7 +305,7 @@ const CO_PROMOTED_DELIVERY = "steer";
  *
  * Two vocabularies are live at once, and this adapter has to speak both:
  *
- *  - `0.0.0-next-*` (the version this package pins, and what CI installs)
+ *  - `0.0.0-next-*` (older V2 hosts, before the inbox-event rename)
  *    publishes `session.input.promoted` with `data.inputID`
  *    (`SessionInputPromoted` in `@opencode-ai/client`'s generated types).
  *  - v2.0.x and `dev` renamed the inbox events: `session.inbox.delivered` and
