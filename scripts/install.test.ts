@@ -308,7 +308,9 @@ describe("install.sh", () => {
   });
 
   test("Pi extension update keeps no settings.json package-skills filter", () => {
-    // Pi no longer bundles skills, so the settings.json filter machinery is gone.
+    // The extension resolves its skill overlap with ~/.agents/skills itself
+    // (apps/pi-extension/bundled-skill.ts, #1642), so the installer never
+    // edits Pi's settings.json.
     expect(script).toContain("update_pi_extension_if_present");
     expect(script).toContain("npm:@plannotator/pi-extension");
     expect(script).not.toContain("configure_pi_plannotator_package_filter");

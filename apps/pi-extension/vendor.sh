@@ -162,9 +162,11 @@ find generated -name '*.ts' | while read -r f; do
 done
 
 # ---------------------------------------------------------------------------
-# Vendor the plannotator knowledge skill so Pi installs it declaratively via
-# the `pi.skills` manifest entry in package.json. Without this, a Pi user gets
-# the extension but none of the CLI reference the other hosts ship as a skill.
+# Vendor the plannotator knowledge skill. Without this, a Pi user gets the
+# extension but none of the CLI reference the other hosts ship as a skill.
+# bundled-skill.ts offers it to Pi from `resources_discover`, and only when no
+# other plannotator skill is loaded (the CLI installer's ~/.agents/skills copy
+# wins), so the two install paths never collide (#1642).
 #
 # Deliberately NOT given the `// @generated` header the .ts files above carry:
 # a SKILL.md must open with its YAML frontmatter on line 1, and any prepended
