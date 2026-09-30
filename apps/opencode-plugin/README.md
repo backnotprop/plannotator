@@ -19,9 +19,9 @@ Obsidian users can auto-save approved plans to Obsidian as well. [See details](#
 
 ## Install
 
-### OpenCode 2 beta
+### OpenCode 2
 
-Install OpenCode 2 from npm's `next` tag, then add Plannotator to the V2 `plugins` field:
+Install stable OpenCode 2 with `npm install -g @opencode/cli`, then add Plannotator to the V2 `plugins` field:
 
 ```json
 {
@@ -40,12 +40,12 @@ Install OpenCode 2 from npm's `next` tag, then add Plannotator to the V2 `plugin
 
 Restart OpenCode 2 and verify that `plannotator` appears in `opencode2 plugin list`.
 
-OpenCode 2 support is experimental while its plugin API is in beta. The core `submit_plan` review flow works everywhere. Two newer capabilities depend on which plugin API your OpenCode build ships with, and Plannotator detects both at runtime rather than requiring a particular channel:
+Plannotator builds against the stable `@opencode/plugin` API and checks its installed package against a real stable OpenCode 2 host in CI. The core `submit_plan` review flow and native slash commands are supported. Capability checks preserve fallbacks for older V2 builds:
 
-- **Slash commands.** Native command execution landed upstream in `@opencode-ai/plugin` (anomalyco/opencode issue #2185, PR #44765) and currently ships on the `beta` and `dev` dist-tags; the `next` and `latest` tags still carry the older API. Capability is detected from the command draft OpenCode hands the plugin, not from the plugin API's shape: `ctx.command.transform` exists on both generations, and only the newer draft has `add`. On a host that has it, Plannotator registers `/plannotator-review`, `/plannotator-annotate`, and `/plannotator-last` itself and runs the same machinery OpenCode 1 uses, so your raw arguments reach the CLI unchanged and nothing is routed through the model. On an older host it registers nothing and the commands run from their markdown definitions, which ask the agent to run the `plannotator` CLI and relay its output; that path works but costs a model turn and depends on the agent following the instruction.
+- **Slash commands.** Stable OpenCode 2 supports native command execution (anomalyco/opencode issue #2185, PR #44765). Capability is detected from the command draft OpenCode hands the plugin: `ctx.command.transform` exists on both generations, and only the newer draft has `add`. On a host that has it, Plannotator registers `/plannotator-review`, `/plannotator-annotate`, and `/plannotator-last` itself and runs the same machinery OpenCode 1 uses, so your raw arguments reach the CLI unchanged and nothing is routed through the model. On an older host it registers nothing and the commands run from their markdown definitions, which ask the agent to run the `plannotator` CLI and relay its output; that path works but costs a model turn and depends on the agent following the instruction.
 - **Command precedence.** OpenCode activates its own config-command loader after package plugins, and the last definition to claim a name wins, so the markdown stubs the installer writes to `~/.config/opencode/commands` would otherwise shadow the native definitions on every normal install. Plannotator re-registers the three names shortly after startup so its own definitions are the ones that run. If that reclaim cannot run, the stubs keep the names and the commands still work through the model-mediated fallback.
 - **Agent switching.** `ctx.session.switchAgent` arrived with the same plugin API generation. On a host that exposes it, an agent switch chosen in the review UI is applied to the session. On an older host the plan is still approved and a warning is written to the server log; switch to `build` manually before implementation.
-- **Abort signal.** V2 tool execution still exposes no abort signal. Cancelling a turn cannot stop a running review server or CLI child immediately.
+- **Cancellation.** Stable V2 tool execution exposes an abort signal, but Plannotator's V2 adapter does not yet forward it to the review server or CLI child. Cancelling a turn cannot stop that review immediately.
 - **Session URLs.** OpenCode 2 has a TUI plugin entry point, but it is separate from the server plugin Plannotator registers, so there is no toast to show and the plugin's own console output is discarded by the host unless you start it with `OPENCODE_PRINT_LOGS=1`. Instead, on a host whose plugin API exposes `session.synthetic`, Plannotator posts the URL into the session transcript as a `Plannotator session ready: <url>` notice, injected with `resume: false` so it appears without waking a model turn. This covers every way a session opens: the three slash commands and the `submit_plan` plan review, whether the review runs on the embedded runtime or the CLI. That is the link to open for a remote session, which gets no browser opened for it. On an older host without `session.synthetic` the URL only reaches that discarded console output, so run with `OPENCODE_PRINT_LOGS=1` there.
 
 ### OpenCode 1

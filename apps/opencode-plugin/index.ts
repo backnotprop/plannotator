@@ -15,7 +15,7 @@
  * @packageDocumentation
  */
 
-import { type Plugin, tool } from "@opencode-ai/plugin/v1";
+import { type Plugin, tool } from "@opencode-ai/plugin";
 import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";

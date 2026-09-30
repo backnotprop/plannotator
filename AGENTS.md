@@ -17,7 +17,7 @@ plannotator/
 │   ├── opencode-plugin/          # OpenCode plugin
 │   │   ├── commands/             # Slash command stubs (review, annotate, last — plugin intercepts execution)
 │   │   ├── index.ts              # OpenCode 1 entry with submit_plan tool + review/annotate event handlers
-│   │   ├── server.ts             # OpenCode 2 adapter (experimental V2 plugin API)
+│   │   ├── server.ts             # OpenCode 2 adapter (stable @opencode/plugin types; older-host capability fallbacks)
 │   │   ├── plannotator.html      # Built plan review app
 │   │   └── review-editor.html    # Built code review app
 │   ├── amp-plugin/               # Amp plugin
