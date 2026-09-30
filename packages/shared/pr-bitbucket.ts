@@ -421,12 +421,58 @@ const CHECK_CONCLUSION: Record<string, string> = {
 };
 
 /**
+ * The diff context a comment sits on, in GitHub's `diff_hunk` shape: the
+ * enclosing hunk's header plus its lines up to and including the commented
+ * line. Bitbucket comments carry no hunk, so it is cut from the PR diff.
+ * Returns undefined when the line is not in the diff. Exported for tests.
+ */
+export function bitbucketDiffHunk(
+  patch: string,
+  path: string,
+  side: "LEFT" | "RIGHT",
+  line: number,
+): string | undefined {
+  const files = patch.split(/^(?=diff --git )/m);
+  for (const file of files) {
+    const header = file.slice(0, file.indexOf("\n@@") === -1 ? file.length : file.indexOf("\n@@"));
+    const names = [...header.matchAll(/^(?:---|\+\+\+) (?:a\/|b\/)?(.+)$/gm)].map((m) => m[1]);
+    if (!names.includes(path)) continue;
+    const lines = file.split("\n");
+    let hunkStart = -1;
+    let oldLine = 0;
+    let newLine = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const text = lines[i];
+      const h = text.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (h) {
+        hunkStart = i;
+        oldLine = Number(h[1]);
+        newLine = Number(h[2]);
+        continue;
+      }
+      if (hunkStart < 0 || text.startsWith("\\")) continue;
+      const kind = text[0];
+      if (kind !== " " && kind !== "+" && kind !== "-") continue;
+      const onOld = kind !== "+";
+      const onNew = kind !== "-";
+      if ((side === "LEFT" && onOld && oldLine === line) || (side === "RIGHT" && onNew && newLine === line)) {
+        return lines.slice(hunkStart, i + 1).join("\n");
+      }
+      if (onOld) oldLine++;
+      if (onNew) newLine++;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Map a PR's comments into Plannotator's read-only model: inline comments
  * become review threads (a root plus its replies), everything else a
  * conversation comment. Deleted comments and unpublished (pending) drafts
- * are dropped. Exported for unit tests.
+ * are dropped. With the PR diff, each thread's first comment carries the
+ * `diffHunk` it sits on. Exported for unit tests.
  */
-export function mapBitbucketComments(raw: BbComment[]): Pick<PRContext, "comments" | "reviewThreads"> {
+export function mapBitbucketComments(raw: BbComment[], patch?: string): Pick<PRContext, "comments" | "reviewThreads"> {
   const visible = raw.filter((c) => c && typeof c.id === "number" && c.deleted !== true && c.pending !== true);
   const byId = new Map(visible.map((c) => [c.id, c]));
   const rootOf = (c: BbComment): BbComment => {
@@ -478,6 +524,11 @@ export function mapBitbucketComments(raw: BbComment[]): Pick<PRContext, "comment
         comments: [],
       };
       threads.set(root.id, thread);
+      const diffHunk = patch && thread.line !== null && thread.diffSide
+        ? bitbucketDiffHunk(patch, thread.path, thread.diffSide, thread.line)
+        : undefined;
+      thread.comments.push({ ...toThreadComment(c), ...(diffHunk ? { diffHunk } : {}) });
+      continue;
     }
     thread.comments.push(toThreadComment(c));
   }
@@ -487,15 +538,19 @@ export function mapBitbucketComments(raw: BbComment[]): Pick<PRContext, "comment
 export async function fetchBbPRContext(runtime: PRRuntime, ref: BitbucketPRRef): Promise<PRContext> {
   const ctx = context(runtime);
   const prPath = `${refRepoPath(ref)}/pullrequests/${ref.number}`;
-  const [pr, rawComments, statuses] = await Promise.all([
+  const [pr, rawComments, statuses, patch] = await Promise.all([
     bbJson<BbPullRequest>(ctx, prPath, "fetch PR context"),
     bbPaginate<BbComment>(ctx, `${prPath}/comments?pagelen=100`, "fetch PR comments").catch(() => []),
     bbPaginate<{ state?: string; name?: string; key?: string; url?: string }>(
       ctx, `${prPath}/statuses?pagelen=100`, "fetch PR statuses", 2,
     ).catch(() => []),
+    // Best effort: only used to show each inline thread's code context.
+    bbRequest(ctx, `${prPath}/diff`, { accept: "text/plain" })
+      .then((res) => (res.ok ? res.text() : undefined))
+      .catch(() => undefined),
   ]);
 
-  const { comments, reviewThreads } = mapBitbucketComments(rawComments);
+  const { comments, reviewThreads } = mapBitbucketComments(rawComments, patch);
 
   const reviews: PRContext["reviews"] = [];
   let anyApproved = false;

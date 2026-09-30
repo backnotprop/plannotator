@@ -168,6 +168,12 @@ describe("fetchBbPRContext", () => {
     expect(byId.get("873432749")).toMatchObject({ line: 11, startLine: 9, diffSide: "RIGHT" });
     // File-level comment: a thread with no line.
     expect(byId.get("873432757")).toMatchObject({ path: "src/greet.ts", line: null, diffSide: null });
+    // Code context cut from the PR diff, in GitHub's diff_hunk shape.
+    expect(byId.get("873432728")!.comments[0].diffHunk).toBe(
+      "@@ -5,3 +5,7 @@ export function add(a: number, b: number): number {\n export function sub(a: number, b: number): number {\n   return a - b;\n }\n+\n+export function mul(a: number, b: number): number {",
+    );
+    expect(byId.get("873432736")!.comments[0].diffHunk).toBe("@@ -1 +0,0 @@\n-old notes");
+    expect(byId.get("873432728")!.comments[1].diffHunk).toBeUndefined();
     expect(byId.get("873432728")!.comments[0].url).toBe(
       "https://bitbucket.org/ws/repo/pull-requests/1/_/diff#comment-873432728",
     );

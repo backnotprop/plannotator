@@ -360,7 +360,7 @@ GitHub/GitLab outputs of all of these are pinned byte-for-byte (`pr-platforms.te
 draft target keys). Bitbucket specifics: REST API 2.0 over `fetch` (`packages/shared/pr-bitbucket.ts`,
 vendored to Pi), credentials per the `PLANNOTATOR_BITBUCKET_*` rows above; the PR object's 12-char
 hashes are resolved to full SHAs and the merge base comes from `/merge-base` (the PR diff is
-three-dot); a review posts the body as one comment, each line comment as an inline comment
+three-dot); existing inline threads get a GitHub-shaped `diffHunk` cut from the PR diff (`bitbucketDiffHunk`), since Bitbucket comments carry none; a review posts the body as one comment, each line comment as an inline comment
 (`inline: { path, to | from, start_to | start_from }`), then `POST /approve` or
 `POST /request-changes` (so `requestChangesSupported` is true, and an author may approve their own PR,
 so nothing is muted); it follows GitLab's partial contract, with `retry.action` naming the failed
