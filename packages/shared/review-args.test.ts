@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { REVIEW_OPEN_DIFF_TYPES, parseReviewArgs, resolveReviewDirectory, withReviewDirectory } from "./review-args";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
+import { REVIEW_OPEN_DIFF_TYPES, formatIgnoredReviewWords, parseReviewArgs, resolveReviewTarget, withReviewDirectory } from "./review-args";
+import { mkdtempSync, mkdirSync, realpathSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { GIT_DIFF_TYPES } from "./vcs-core";
@@ -99,10 +99,12 @@ describe("parseReviewArgs", () => {
       .toBe("https://github.com/acme/repo/pull/12");
   });
 
-  test("treats a non-URL target as a directory rather than ignoring it", () => {
+  test("keeps non-URL positional words for the host's directory resolution", () => {
+    // Slash-command hosts forward raw user prose verbatim, so the parser never
+    // rejects words; resolveReviewTarget decides what they name.
     expect(parseReviewArgs("--git not-a-url")).toEqual({
       prUrl: undefined,
-      directory: "not-a-url",
+      words: ["not-a-url"],
       vcsType: "git",
       useLocal: true,
       errors: [],
@@ -258,36 +260,76 @@ describe("review directory targets", () => {
       ["--base", "main", "../feature worktree", "--diff-type", "last-commit"],
     ]) {
       expect(parseReviewArgs(input)).toMatchObject({
-        directory: "../feature worktree", base: "main", diffType: "last-commit", errors: [],
+        words: ["../feature worktree"], base: "main", diffType: "last-commit", errors: [],
       });
     }
   });
 
-  test("refuses ambiguous or conflicting targets before opening a review", () => {
-    for (const input of ["one two", "one https://github.com/a/b/pull/1", "https://github.com/a/b/pull/1 one"]) {
-      expect(parseReviewArgs(input).errors).toHaveLength(1);
-    }
-    expect(parseReviewArgs("one --patch-file change.patch").errors).toContain("--patch-file cannot be combined with a review directory");
+  test("finds a PR/MR URL anywhere among the words and refuses two", () => {
+    expect(parseReviewArgs("please review https://github.com/a/b/pull/1")).toMatchObject({
+      prUrl: "https://github.com/a/b/pull/1", words: ["please", "review"], errors: [],
+    });
+    expect(parseReviewArgs("https://github.com/a/b/pull/1 https://github.com/a/b/pull/2").errors).toHaveLength(1);
   });
 
-  test("resolves against the caller, accepts symlinked directories, and refuses files/missing paths", () => {
-    const root = mkdtempSync(join(tmpdir(), "review-directory-"));
+  function withTree(run: (root: string) => void) {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "review-directory-")));
     const originalCwd = process.cwd();
     try {
       mkdirSync(join(root, "repo with spaces"));
+      mkdirSync(join(root, "backend"));
       writeFileSync(join(root, "file"), "not a directory");
       symlinkSync(join(root, "repo with spaces"), join(root, "link"), "dir");
-      expect(resolveReviewDirectory("repo with spaces", root)).toBe(join(root, "repo with spaces"));
-      expect(resolveReviewDirectory(join(root, "repo with spaces"), "/elsewhere")).toBe(join(root, "repo with spaces"));
-      expect(resolveReviewDirectory("link", root)).toBe(join(root, "link"));
-      expect(resolveReviewDirectory("~", root)).toBe(homedir());
-      expect(resolveReviewDirectory(undefined, root)).toBe(root);
-      expect(() => resolveReviewDirectory("file", root)).toThrow("not a directory");
-      expect(() => resolveReviewDirectory("missing", root)).toThrow("does not exist");
+      run(root);
       expect(process.cwd()).toBe(originalCwd);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  }
+  const target = (input: string, cwd: string) => resolveReviewTarget(parseReviewArgs(input), cwd);
+
+  test("resolves against the caller, accepts symlinked directories, and refuses files", () => {
+    withTree((root) => {
+      expect(target('"repo with spaces"', root).directory).toBe(join(root, "repo with spaces"));
+      expect(target(`"${join(root, "repo with spaces")}"`, "/elsewhere").directory).toBe(join(root, "repo with spaces"));
+      expect(target("link", root).directory).toBe(join(root, "link"));
+      expect(target("backend", root).directory).toBe(join(root, "backend"));
+      expect(target("~", root).directory).toBe(homedir());
+      expect(target("", root)).toEqual({ ignored: [] });
+      expect(() => target("file", root)).toThrow("not a directory");
+    });
+  });
+
+  test("a path-shaped typo fails loudly instead of reviewing the caller's repo", () => {
+    withTree((root) => {
+      for (const input of ["./missing", "../missing", "missing/sub", "please review ./missing"]) {
+        expect(() => target(input, root)).toThrow("does not exist");
+      }
+    });
+  });
+
+  test("prose that names no directory falls back to the invoking cwd (#1483)", () => {
+    withTree((root) => {
+      expect(target("please review my changes", root)).toEqual({ ignored: ["please", "review", "my", "changes"] });
+      expect(target("focus", root)).toEqual({ ignored: ["focus"] });
+      // In prose a bare word that happens to match a directory never hijacks
+      // the review; a path-shaped word is the target.
+      expect(target("please review backend", root)).toEqual({ ignored: ["please", "review", "backend"] });
+      expect(target("please review ./backend", root)).toEqual({ directory: join(root, "backend"), ignored: ["please", "review"] });
+      expect(target("review https://github.com/a/b/pull/1 now", root)).toEqual({ ignored: ["review", "now"] });
+      expect(formatIgnoredReviewWords(target("please review", root))).toContain("please review");
+      expect(formatIgnoredReviewWords(target("backend", root))).toBeUndefined();
+    });
+  });
+
+  test("refuses two targets and a directory combined with --patch-file", () => {
+    withTree((root) => {
+      expect(() => target("./backend ./link", root)).toThrow("only one directory");
+      expect(() => target("./backend https://github.com/a/b/pull/1", root)).toThrow("only one directory");
+      expect(() => target("backend --patch-file change.patch", root)).toThrow("--patch-file cannot be combined with a review directory");
+      // Prose alongside --patch-file stays tolerated.
+      expect(target("please --patch-file change.patch", root)).toEqual({ ignored: ["please"] });
+    });
   });
 
   test("labels targeted feedback without turning a bare approval into approval-with-notes", () => {

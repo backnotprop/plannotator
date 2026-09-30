@@ -35,7 +35,7 @@ import {
   probeAnnotateToken,
   selectAnnotateTokenTarget,
 } from "@plannotator/shared/annotate-target";
-import { parseReviewArgs, resolveReviewDirectory, withReviewDirectory } from "@plannotator/shared/review-args";
+import { formatIgnoredReviewWords, parseReviewArgs, resolveReviewTarget, withReviewDirectory } from "@plannotator/shared/review-args";
 import { urlToMarkdown, isConvertedSource } from "@plannotator/shared/url-to-markdown";
 import { buildLocalWorkspaceReview, type WorkspaceDiffType } from "@plannotator/server/review-workspace";
 import { statSync } from "fs";
@@ -85,13 +85,17 @@ export async function handleReviewCommand(
     return;
   }
   const urlArg = reviewArgs.prUrl;
-  let reviewCwd: string;
+  let reviewDirectory: string | undefined;
   try {
-    reviewCwd = resolveReviewDirectory(reviewArgs.directory, directory ?? process.cwd());
+    const target = resolveReviewTarget(reviewArgs, directory ?? process.cwd());
+    reviewDirectory = target.directory;
+    const notice = formatIgnoredReviewWords(target);
+    if (notice) client.app.log({ level: "info", message: `[Plannotator] ${notice}` });
   } catch (err) {
     client.app.log({ level: "error", message: err instanceof Error ? err.message : String(err) });
     return;
   }
+  let reviewCwd = reviewDirectory ?? directory ?? process.cwd();
   const isPRMode = urlArg !== undefined;
   // Caller-pinned open state (--base/--diff-type): session-only seed, same
   // contract as the CLI. Fatal validation failures surface through the
@@ -153,7 +157,7 @@ export async function handleReviewCommand(
 
     const config = loadConfig();
     const managedVcs = await detectManagedVcs(reviewCwd, reviewArgs.vcsType);
-    if (reviewArgs.directory) reviewCwd = await managedVcs?.getRoot?.(reviewCwd) ?? reviewCwd;
+    if (reviewDirectory) reviewCwd = await managedVcs?.getRoot?.(reviewCwd) ?? reviewCwd;
     const cwd = reviewCwd;
     const forcedVcs = !!reviewArgs.vcsType && reviewArgs.vcsType !== "auto";
     if (managedVcs || forcedVcs) {
@@ -250,8 +254,8 @@ export async function handleReviewCommand(
     gitRef,
     error: diffError,
     origin: "opencode",
-    project: (await detectProjectName(reviewArgs.directory ? reviewCwd : undefined)) ?? undefined,
-    includeReviewDirectory: !!reviewArgs.directory,
+    project: (await detectProjectName(reviewDirectory ? reviewCwd : undefined)) ?? undefined,
+    includeReviewDirectory: !!reviewDirectory,
     diffType: isPRMode ? undefined : userDiffType,
     gitContext,
     initialBase: initialBaseFromFlags,

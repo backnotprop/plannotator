@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
 import { spawnSync } from "child_process";
@@ -22,7 +22,8 @@ const startAnnotateServerMock = mock(async (_options: any) => ({
 const tempDirs: string[] = [];
 
 function makeTempDir(): string {
-  const dir = mkdtempSync(path.join(tmpdir(), "plannotator-opencode-commands-"));
+  // realpath: macOS tmpdir is a symlink, and git reports the resolved toplevel.
+  const dir = realpathSync(mkdtempSync(path.join(tmpdir(), "plannotator-opencode-commands-")));
   tempDirs.push(dir);
   return dir;
 }
@@ -175,9 +176,17 @@ describe("handleReviewCommand open state (--base / --diff-type)", () => {
     expect(process.cwd()).toBe(hostCwd);
 
     deps.startReviewServer.mockClear();
-    await handleReviewCommand({ properties: { arguments: "missing-directory", sessionID: "original-session" } }, deps as any);
+    await handleReviewCommand({ properties: { arguments: "./missing-directory", sessionID: "original-session" } }, deps as any);
     expect(deps.startReviewServer).not.toHaveBeenCalled();
     expect(deps.client.app.log.mock.calls.map((call: any[]) => call[0].message).join("\n")).toContain("does not exist");
+
+    // Prose that names no directory keeps the pre-directory behavior (#1483):
+    // the invoking repo is reviewed and the ignored words are reported.
+    await handleReviewCommand({ properties: { arguments: "please review my changes", sessionID: "original-session" } }, deps as any);
+    const proseOptions = deps.startReviewServer.mock.calls[0]?.[0];
+    expect(proseOptions.rawPatch).toContain("caller-only");
+    expect(proseOptions.includeReviewDirectory).toBe(false);
+    expect(deps.client.app.log.mock.calls.map((call: any[]) => call[0].message).join("\n")).toContain("please review my changes");
   });
 });
 

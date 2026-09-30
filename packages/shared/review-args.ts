@@ -27,8 +27,12 @@ export type ReviewOpenDiffType = (typeof REVIEW_OPEN_DIFF_TYPES)[number];
 
 export interface ParsedReviewArgs {
   prUrl?: string;
-  /** Local review directory, resolved against the invoking session by the host. */
-  directory?: string;
+  /**
+   * Non-URL positional words, in order. Hosts turn them into a review
+   * directory with `resolveReviewTarget` (which needs the filesystem and the
+   * invoking cwd); words that name no directory are tolerated as prose.
+   */
+  words?: string[];
   patchFile?: string;
   vcsType?: VcsSelection;
   useLocal: boolean;
@@ -164,27 +168,28 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
     }
   }
 
-  const target = positional[0];
-  if (positional.length > 1) {
-    errors.push("Review accepts only one directory or PR/MR URL. Omit prose; quote paths containing spaces.");
+  const urls = positional.filter(isReviewUrl);
+  const words = positional.filter((token) => !isReviewUrl(token));
+  if (urls.length > 1) {
+    errors.push("Review accepts only one PR/MR URL");
   }
-  const directory = target && !isReviewUrl(target) ? target : undefined;
+  const prUrl = urls[0];
   // Static patch mode wins over VCS detection entirely, so every VCS/PR
   // selector combined with it is a usage error — fail loudly in one place
-  // rather than silently ignoring the flag in each runtime.
+  // rather than silently ignoring the flag in each runtime. (A directory
+  // target is refused by resolveReviewTarget, which knows what the words name.)
   if (patchFile !== undefined) {
-    if (target && isReviewUrl(target)) {
+    if (prUrl) {
       errors.push("--patch-file cannot be combined with a PR/MR URL");
     }
-    if (directory) errors.push("--patch-file cannot be combined with a review directory");
     if (base) errors.push("--patch-file cannot be combined with --base");
     if (diffType) errors.push("--patch-file cannot be combined with --diff-type");
     if (vcsType) errors.push("--patch-file cannot be combined with --git/--gitbutler");
     if (localFlagSeen) errors.push("--patch-file cannot be combined with --local/--no-local");
   }
   return {
-    prUrl: target && isReviewUrl(target) ? target : undefined,
-    ...(directory === undefined ? {} : { directory }),
+    prUrl,
+    ...(words.length === 0 ? {} : { words }),
     patchFile,
     vcsType,
     useLocal,
@@ -195,18 +200,75 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
   };
 }
 
-/** Validate before VCS discovery so a typo can never review the caller's repo. */
-export function resolveReviewDirectory(directory: string | undefined, cwd: string): string {
-  if (directory === undefined) return cwd;
-  const resolved = resolveUserPath(directory, cwd);
-  let isDirectory: boolean;
-  try {
-    isDirectory = statSync(resolved).isDirectory();
-  } catch {
-    throw new Error(`Review directory does not exist or is not accessible: ${resolved}`);
+export interface ReviewTarget {
+  /** Absolute directory the review opens in; undefined means the invoking cwd. */
+  directory?: string;
+  /** Words that named no target and were ignored as prose (#1483 tolerance). */
+  ignored: string[];
+}
+
+/** Path-shaped words are always directory intent, so a typo in one fails loudly. */
+function looksLikePath(word: string): boolean {
+  return /[\\/]/.test(word) || word.startsWith(".") || word.startsWith("~");
+}
+
+/**
+ * Turn the parser's positional words into a review directory, before any VCS
+ * discovery. Slash-command hosts forward raw user words verbatim, so prose
+ * stays tolerated (the annotate tolerant-args precedent, annotate-target.ts):
+ *
+ * - A sole word is a directory candidate; a path-shaped word always is (in
+ *   prose, a bare word that happens to match a directory never hijacks).
+ * - A candidate that is an existing directory is the target. One that exists
+ *   but is not a directory, or a path-shaped one that does not exist, throws:
+ *   that is a typo'd target and must never review the caller's repo.
+ * - Every other word is returned in `ignored`, and the review opens in the
+ *   invoking cwd exactly as before directory targets existed.
+ * - Two targets (two directories, or a directory and a PR/MR URL) throw.
+ */
+export function resolveReviewTarget(
+  parsed: Pick<ParsedReviewArgs, "prUrl" | "words" | "patchFile">,
+  cwd: string,
+): ReviewTarget {
+  const words = parsed.words ?? [];
+  const sole = words.length === 1 && parsed.prUrl === undefined;
+  const directories: string[] = [];
+  const ignored: string[] = [];
+  for (const word of words) {
+    const pathLike = looksLikePath(word);
+    if (!sole && !pathLike) {
+      ignored.push(word);
+      continue;
+    }
+    const resolved = resolveUserPath(word, cwd);
+    let isDirectory: boolean | undefined;
+    try {
+      isDirectory = statSync(resolved).isDirectory();
+    } catch {
+      isDirectory = undefined;
+    }
+    if (isDirectory === undefined) {
+      if (pathLike) throw new Error(`Review directory does not exist or is not accessible: ${resolved}`);
+      ignored.push(word);
+      continue;
+    }
+    if (!isDirectory) throw new Error(`Review target is not a directory: ${resolved}`);
+    directories.push(resolved);
   }
-  if (!isDirectory) throw new Error(`Review target is not a directory: ${resolved}`);
-  return resolved;
+  if (directories.length + (parsed.prUrl ? 1 : 0) > 1) {
+    throw new Error("Review accepts only one directory or PR/MR URL. Quote paths containing spaces.");
+  }
+  if (directories.length > 0 && parsed.patchFile !== undefined) {
+    throw new Error("--patch-file cannot be combined with a review directory");
+  }
+  return { ...(directories[0] === undefined ? {} : { directory: directories[0] }), ignored };
+}
+
+/** One-line notice for words `resolveReviewTarget` ignored, or undefined. */
+export function formatIgnoredReviewWords(target: ReviewTarget): string | undefined {
+  return target.ignored.length > 0
+    ? `Ignoring words that name no directory or PR/MR URL: ${target.ignored.join(" ")}`
+    : undefined;
 }
 
 /** Feedback returns to the invoking agent, whose cwd may be a different repo. */

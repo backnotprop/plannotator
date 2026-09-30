@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { parseAnnotateArgs, type ParsedAnnotateArgs } from "@plannotator/shared/annotate-args";
-import { parseReviewArgs } from "@plannotator/shared/review-args";
+import { parseReviewArgs, resolveReviewTarget } from "@plannotator/shared/review-args";
 import {
   composeReviewApprovedMessage,
   getAnnotateApprovedWithNotesPrompt,
@@ -692,7 +692,10 @@ export async function handleCliCommand(input: {
       if (parsed.errors.length) throw new Error(parsed.errors.join("\n"));
       // Older binaries ignore positional paths. A distinct internal command
       // makes version skew fail before opening a review of the wrong repo.
-      const command = parsed.directory ? "opencode-review-directory" : "opencode-review";
+      // Prose that names no directory keeps the old command, so it still
+      // works against an old binary exactly as before.
+      const directoryTarget = resolveReviewTarget(parsed, cwd).directory;
+      const command = directoryTarget ? "opencode-review-directory" : "opencode-review";
       const result = await runPlannotatorCli({
         client: input.client,
         args: [command],
@@ -717,7 +720,9 @@ export async function handleCliCommand(input: {
       });
       if (result.exitCode !== 0) {
         log(input.client, "error", result.stderr.trim() || `Plannotator CLI exited with code ${result.exitCode}`);
-        if (parsed.directory && /unknown (?:subcommand|command)/i.test(result.stderr)) {
+        // >= 0.27.11 answers "Unknown command"; older binaries fall into the
+        // plan hook path and answer "No plan content in hook event".
+        if (directoryTarget && /unknown (?:subcommand|command)|no plan content in hook event/i.test(result.stderr)) {
           log(input.client, "error", "Update the Plannotator CLI to review a directory from OpenCode.");
         }
         return;

@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -20,6 +20,8 @@ import { OpenCodePromptDeliveryError } from "./prompt-delivery-error";
 describe("OpenCode CLI bridge helpers", () => {
   test.skipIf(process.platform === "win32")("an older CLI refuses directory reviews before opening the caller repo", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "plannotator-review-skew-"));
+    mkdirSync(path.join(root, "caller"));
+    mkdirSync(path.join(root, "target"));
     const binary = path.join(root, "old-cli.ts");
     const opened = path.join(root, "review-opened");
     const previous = process.env.PLANNOTATOR_BIN;
@@ -41,11 +43,26 @@ console.log(JSON.stringify({ decision: "annotated", feedback: "caller feedback" 
     };
     try {
       process.env.PLANNOTATOR_BIN = binary;
-      await handleCliCommand({ command: "plannotator-review", client, sessionId: "caller", cwd: root, rawArgs: "../target" });
+      await handleCliCommand({ command: "plannotator-review", client, sessionId: "caller", cwd: path.join(root, "caller"), rawArgs: "../target" });
       expect(existsSync(opened)).toBe(false);
       expect(client.session.prompt).not.toHaveBeenCalled();
       expect(client.app.log.mock.calls.map(([entry]) => entry.message).join("\n")).toContain("Update the Plannotator CLI");
-      await handleCliCommand({ command: "plannotator-review", client, sessionId: "caller", cwd: root, rawArgs: "" });
+      // Binaries older than 0.27.11 have no unknown-command guard: the stdin
+      // JSON reaches the plan hook path, which fails with its own message.
+      const ancient = path.join(root, "ancient-cli.ts");
+      writeFileSync(ancient, `#!/usr/bin/env bun
+await Bun.stdin.text();
+console.error("No plan content in hook event");
+process.exit(1);
+`, { mode: 0o755 });
+      process.env.PLANNOTATOR_BIN = ancient;
+      client.app.log.mockClear();
+      await handleCliCommand({ command: "plannotator-review", client, sessionId: "caller", cwd: path.join(root, "caller"), rawArgs: "../target" });
+      expect(client.app.log.mock.calls.map(([entry]) => entry.message).join("\n")).toContain("Update the Plannotator CLI");
+      process.env.PLANNOTATOR_BIN = binary;
+      // Prose names no directory, so it keeps the old command and still works
+      // against an old binary exactly as before (#1483 tolerance).
+      await handleCliCommand({ command: "plannotator-review", client, sessionId: "caller", cwd: path.join(root, "caller"), rawArgs: "please review my changes" });
       expect(existsSync(opened)).toBe(true);
       expect(client.session.prompt).toHaveBeenCalledTimes(1);
     } finally {

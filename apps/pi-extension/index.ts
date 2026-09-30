@@ -691,7 +691,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			const origin = getPiSessionIdentity(ctx);
 
 			try {
-				const { parseReviewArgs, resolveReviewDirectory, withReviewDirectory } = await import("./generated/review-args.ts");
+				const { formatIgnoredReviewWords, parseReviewArgs, resolveReviewTarget, withReviewDirectory } = await import("./generated/review-args.ts");
 				const reviewArgs = parseReviewArgs(args ?? "");
 				// Argument-shape failures refuse to start a session (same contract
 				// as the CLI's exit 1), surfaced through Pi's notifier.
@@ -699,10 +699,12 @@ export default function plannotator(pi: ExtensionAPI): void {
 					ctx.ui.notify(`Plannotator: ${reviewArgs.errors.join("; ")}`, "error");
 					return;
 				}
-				const reviewCwd = resolveReviewDirectory(reviewArgs.directory, ctx.cwd);
+				const reviewTarget = resolveReviewTarget(reviewArgs, ctx.cwd);
+				const ignoredNotice = formatIgnoredReviewWords(reviewTarget);
+				if (ignoredNotice) ctx.ui.notify(`Plannotator: ${ignoredNotice}`, "info");
 				const session = await startCodeReviewBrowserSession(ctx, {
-					cwd: reviewArgs.directory ? reviewCwd : undefined,
-					includeReviewDirectory: !!reviewArgs.directory,
+					cwd: reviewTarget.directory,
+					includeReviewDirectory: !!reviewTarget.directory,
 					prUrl: reviewArgs.prUrl,
 					patchFile: reviewArgs.patchFile,
 					vcsType: reviewArgs.vcsType,

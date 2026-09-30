@@ -96,7 +96,7 @@ import {
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
 import { loadConfig, resolveDefaultDiffType, resolveSharingEnabled } from "@plannotator/shared/config";
-import { parseReviewArgs, resolveReviewDirectory, withReviewDirectory, type ParsedReviewArgs } from "@plannotator/shared/review-args";
+import { formatIgnoredReviewWords, parseReviewArgs, resolveReviewTarget, withReviewDirectory, type ParsedReviewArgs } from "@plannotator/shared/review-args";
 import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
 import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
 import {
@@ -366,9 +366,13 @@ const emitAnnotateOutcome = createAnnotateOutcomeEmitter({
   json: jsonFlag,
 });
 
-function resolveCliReviewDirectory(directory: string | undefined, cwd: string): string {
+/** Directory target (absolute) or undefined; exits 1 on a typo'd/ambiguous target. */
+function resolveCliReviewDirectory(reviewArgs: ParsedReviewArgs, cwd: string): string | undefined {
   try {
-    return resolveReviewDirectory(directory, cwd);
+    const target = resolveReviewTarget(reviewArgs, cwd);
+    const notice = formatIgnoredReviewWords(target);
+    if (notice) console.error(notice);
+    return target.directory;
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
@@ -866,8 +870,8 @@ if (args[0] === "sessions") {
     process.exit(1);
   }
   const urlArg = reviewArgs.prUrl;
-  let reviewCwd = resolveCliReviewDirectory(reviewArgs.directory,
-    reviewArgs.directory ? process.env.PLANNOTATOR_CWD || process.cwd() : process.cwd());
+  const reviewDirectory = resolveCliReviewDirectory(reviewArgs, process.env.PLANNOTATOR_CWD || process.cwd());
+  let reviewCwd = reviewDirectory ?? process.cwd();
   const isPRMode = urlArg !== undefined;
   const useLocal = isPRMode && reviewArgs.useLocal;
   // Caller-pinned open state: `--base` / `--diff-type` seed this session only
@@ -1145,7 +1149,7 @@ if (args[0] === "sessions") {
     // --- Local Review Mode ---
     const config = loadConfig();
     const managedVcs = await detectManagedVcs(reviewCwd, reviewArgs.vcsType);
-    if (reviewArgs.directory) reviewCwd = await managedVcs?.getRoot?.(reviewCwd) ?? reviewCwd;
+    if (reviewDirectory) reviewCwd = await managedVcs?.getRoot?.(reviewCwd) ?? reviewCwd;
     const forcedVcs = !!reviewArgs.vcsType && reviewArgs.vcsType !== "auto";
 
     if (managedVcs || forcedVcs) {
@@ -1214,7 +1218,7 @@ if (args[0] === "sessions") {
     error: diffError,
     origin: detectedOrigin,
     project: reviewProject,
-    includeReviewDirectory: !!reviewArgs.directory,
+    includeReviewDirectory: !!reviewDirectory,
     diffType: workspace ? (initialDiffType ?? workspace.diffType) : gitContext ? (initialDiffType ?? "unstaged") : initialDiffType,
     gitContext,
     initialBase: initialBaseFromFlags,
@@ -1920,7 +1924,8 @@ if (args[0] === "sessions") {
     process.exit(1);
   }
   const urlArg = reviewArgs.prUrl;
-  let reviewCwd = resolveCliReviewDirectory(reviewArgs.directory, process.env.PLANNOTATOR_CWD || process.cwd());
+  const reviewDirectory = resolveCliReviewDirectory(reviewArgs, process.env.PLANNOTATOR_CWD || process.cwd());
+  let reviewCwd = reviewDirectory ?? (process.env.PLANNOTATOR_CWD || process.cwd());
   const isPRMode = urlArg !== undefined;
   // Caller-pinned open state (--base/--diff-type through the plugin's
   // verbatim rawArgs forward) — session-only seed, mirrors the direct
@@ -1988,7 +1993,7 @@ if (args[0] === "sessions") {
 
     const config = loadConfig();
     const managedVcs = await detectManagedVcs(reviewCwd, reviewArgs.vcsType);
-    if (reviewArgs.directory) reviewCwd = await managedVcs?.getRoot?.(reviewCwd) ?? reviewCwd;
+    if (reviewDirectory) reviewCwd = await managedVcs?.getRoot?.(reviewCwd) ?? reviewCwd;
     const cwd = reviewCwd;
     const forcedVcs = !!reviewArgs.vcsType && reviewArgs.vcsType !== "auto";
 
@@ -2047,7 +2052,7 @@ if (args[0] === "sessions") {
 
   const bridgeSharingEnabled = getBridgeSharingEnabled(input);
   const bridgeShareBaseUrl = getBridgeShareBaseUrl(input);
-  const reviewProject = (await detectProjectName(reviewArgs.directory ? reviewCwd : undefined)) ?? "_unknown";
+  const reviewProject = (await detectProjectName(reviewDirectory ? reviewCwd : undefined)) ?? "_unknown";
 
   const server = await startReviewServer({
     rawPatch,
@@ -2055,7 +2060,7 @@ if (args[0] === "sessions") {
     error: diffError,
     origin: "opencode",
     project: reviewProject,
-    includeReviewDirectory: !!reviewArgs.directory,
+    includeReviewDirectory: !!reviewDirectory,
     diffType: isPRMode ? undefined : userDiffType,
     gitContext,
     initialBase: initialBaseFromFlags,

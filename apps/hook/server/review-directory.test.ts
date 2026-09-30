@@ -1,7 +1,7 @@
 /** A directory must own the whole review, including writes, not just its first diff. */
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 
@@ -39,7 +39,8 @@ function initRepo(path: string, label: string) {
 }
 
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), "plannotator-review-directory-"));
+  // realpath: macOS tmpdir is a symlink, and git reports the resolved toplevel.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-review-directory-")));
   roots.push(root);
   const caller = join(root, "caller");
   const target = join(root, "selected repo");
@@ -224,7 +225,7 @@ test("a selected linked worktree and a multi-repo parent use existing discovery"
 test("invalid targets exit before opening the invoking repository", async () => {
   const { caller, dataDir } = fixture();
   const ready = join(dataDir, "unexpected-ready.json");
-  for (const args of [["missing-directory"], ["app.ts"], [".", "../selected repo"]]) {
+  for (const args of [["./missing-directory"], ["app.ts"], [".", "../selected repo"]]) {
     const proc = Bun.spawn([process.execPath, "run", entry, "review", ...args], {
       cwd: caller,
       env: {
