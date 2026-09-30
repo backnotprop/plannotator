@@ -401,7 +401,6 @@ export function useCodeAnnotationDraft({
 
   const adoptDraftTarget = useCallback((state: CodeDraftTargetState | undefined, nextTransport?: DraftTransport) => {
     if (!isApiMode) return;
-    hasMountedRef.current = true;
     // undefined also resumes a FAILED switch, which has not repaired a
     // target mismatch. Only an applied server response may clear the notice.
     if (state) {
@@ -415,6 +414,12 @@ export function useCodeAnnotationDraft({
     // A failed/superseded request did not adopt another target. Its current
     // draft may still be loading (or unreadable); retain that write protection.
     if (!state) return;
+    // An applied switch supersedes the page-load read (its seq guard drops
+    // the result), so it must open autosave itself. A failed/superseded
+    // switch must not: the page-load read may still be in flight, and
+    // saving before it settles could overwrite a draft the banner has not
+    // offered yet.
+    hasMountedRef.current = true;
     const targetTransport = nextTransport ?? transportRef.current;
     // Every switch starts clean: a previous switch's load (if still in
     // flight) is superseded, an unreadable-target block is lifted, and any
