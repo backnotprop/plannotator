@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type {
   GithubPRMetadata,
+  BitbucketPRMetadata,
   GitlabMRMetadata,
   PRContext,
 } from '@plannotator/shared/pr-types';
@@ -53,6 +54,33 @@ const emptyContext: PRContext = {
 };
 
 describe('buildPRArtifacts', () => {
+  it('collects nothing on a platform without the artifacts capability (Bitbucket)', () => {
+    const bitbucketMetadata: BitbucketPRMetadata = {
+      platform: 'bitbucket',
+      host: 'bitbucket.org',
+      workspace: 'acme',
+      repo: 'widgets',
+      number: 42,
+      title: 'Improve widgets',
+      author: 'bb-user',
+      baseBranch: 'main',
+      headBranch: 'better-widgets',
+      baseSha: 'base',
+      headSha: 'head',
+      url: 'https://bitbucket.org/acme/widgets/pull-requests/42',
+    };
+    const context: PRContext = {
+      ...emptyContext,
+      body: [
+        '![hosted](https://bitbucket.org/repo/abc123/images/1234-shot.png)',
+        `![shot](${SHOT_URL})`,
+      ].join('\n\n'),
+    };
+    // Control: the same description yields an artifact on GitHub.
+    expect(buildPRArtifacts(githubMetadata, context).length).toBeGreaterThan(0);
+    expect(buildPRArtifacts(bitbucketMetadata, context)).toEqual([]);
+  });
+
   it('harvests supported markdown and raw HTML attachments but ignores ordinary links and code', () => {
     const context: PRContext = {
       ...emptyContext,

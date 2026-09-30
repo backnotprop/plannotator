@@ -82,11 +82,11 @@ describe("helpers", () => {
   test("capabilities: what the UI hides or maps per platform", () => {
     const pick = (platform: PRMetadata["platform"]) => {
       const c = getPRPlatformCapabilities({ platform });
-      return [c.requestChanges, c.selfReviewBlocked, c.viewedSync, c.fileLevelComments, c.agentCliAccess];
+      return [c.requestChanges, c.selfReviewBlocked, c.viewedSync, c.fileLevelComments, c.agentCliAccess, c.artifacts];
     };
-    expect(pick("github")).toEqual([true, true, true, true, true]);
-    expect(pick("gitlab")).toEqual([false, true, false, false, true]);
-    expect(pick("bitbucket")).toEqual([true, false, false, false, false]);
+    expect(pick("github")).toEqual([true, true, true, true, true, true]);
+    expect(pick("gitlab")).toEqual([false, true, false, false, true, true]);
+    expect(pick("bitbucket")).toEqual([true, false, false, false, false, false]);
   });
 });
 

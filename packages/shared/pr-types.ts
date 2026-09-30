@@ -378,6 +378,11 @@ export interface PRPlatformCapabilities {
   fileLevelComments: boolean;
   /** Per-file "viewed" state syncs to the platform. */
   viewedSync: boolean;
+  /**
+   * The PR Artifacts panel (attachments from the PR description and
+   * comments) is offered. Off where hosted attachments cannot be fetched.
+   */
+  artifacts: boolean;
   /** A COMMENT / REQUEST_CHANGES review needs a non-empty body (GitHub). */
   reviewBodyRequired: boolean;
   /**
@@ -399,6 +404,7 @@ const PLATFORM_CAPABILITIES: Record<Platform, PRPlatformCapabilities> = {
     selfReviewBlocked: true,
     fileLevelComments: true,
     viewedSync: true,
+    artifacts: true,
     reviewBodyRequired: true,
     agentCliAccess: true,
     cli: { name: "gh", installUrl: "https://cli.github.com" },
@@ -411,6 +417,7 @@ const PLATFORM_CAPABILITIES: Record<Platform, PRPlatformCapabilities> = {
     selfReviewBlocked: true,
     fileLevelComments: false,
     viewedSync: false,
+    artifacts: true,
     reviewBodyRequired: false,
     agentCliAccess: true,
     cli: { name: "glab", installUrl: "https://gitlab.com/gitlab-org/cli" },
@@ -427,6 +434,9 @@ const PLATFORM_CAPABILITIES: Record<Platform, PRPlatformCapabilities> = {
     // partial-retry contract is not worth the risk yet: they fold into the body.
     fileLevelComments: false,
     viewedSync: false,
+    // Bitbucket-hosted attachments need the API token, which the artifact
+    // fetch path does not carry: no artifacts panel yet.
+    artifacts: false,
     reviewBodyRequired: false,
     agentCliAccess: false,
     cli: null,

@@ -1823,7 +1823,7 @@ const ReviewApp: React.FC = () => {
   // Open the hosted PR/MR attachment gallery as a center dock panel.
   const openPRArtifactsPanel = useCallback(() => {
     const api = dockApi;
-    if (!api || !prMetadata) return;
+    if (!api || !prMetadata || !getPRPlatformCapabilities(prMetadata).artifacts) return;
     const existing = api.getPanel(REVIEW_PR_ARTIFACTS_PANEL_ID);
     if (existing) {
       existing.api.setActive();
@@ -5322,9 +5322,9 @@ const ReviewApp: React.FC = () => {
                 prOverviewNumber={prMetadata ? mrNumberLabel : undefined}
                 prOverviewPlatform={prMetadata?.platform}
                 prOverviewTitle={prMetadata?.title}
-                onSelectPRArtifacts={prMetadata ? () => completeNavigatorSelection(openPRArtifactsPanel) : undefined}
+                onSelectPRArtifacts={prCapabilities?.artifacts ? () => completeNavigatorSelection(openPRArtifactsPanel) : undefined}
                 isPRArtifactsActive={isPRArtifactsActive}
-                prArtifactCount={prMetadata ? prArtifacts.length : undefined}
+                prArtifactCount={prCapabilities?.artifacts ? prArtifacts.length : undefined}
                 onSelectSemanticDiff={() => completeNavigatorSelection(openSemanticDiffPanel)}
                 isSemanticDiffActive={isSemanticDiffActive}
                 semanticDiffAvailable={semanticDiffUsable}
