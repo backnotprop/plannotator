@@ -18,3 +18,5 @@ For another repository or worktree, pass its path relative to this session or an
 ## Your task
 
 If the review above contains feedback or annotations, address them in the same conversation. If no changes were requested (an approval/LGTM-style result), acknowledge that review passed and continue.
+
+If the review was moved to the background, wait for it to finish. If Claude Code stopped it at its background time limit before the user decided, tell the user, and only when they ask, run `plannotator review $ARGUMENTS` again with `run_in_background` and `timeout: 7200000`: their annotations are restored from the saved draft.

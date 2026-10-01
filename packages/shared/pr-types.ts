@@ -273,16 +273,20 @@ export interface PRReviewCommentFailure {
 /**
  * Exact mutation that is safe after a partial platform submission.
  *
- * The review body is intentionally absent because it may already be posted.
+ * The review body is absent unless the platform reports it was NOT posted
+ * (`body`, Bitbucket only: the general comment goes after the inline ones, so
+ * inline comments can land while the general comment fails).
  */
 export interface PRReviewRetry {
   /**
    * `approve` / `request_changes` when the decision mutation itself failed
    * (GitLab approve, Bitbucket approve or request-changes); `comment` when only
-   * inline comments remain to post.
+   * inline comments (and possibly the unposted general comment) remain.
    */
   action: PRReviewAction;
   fileComments: PRReviewFileComment[];
+  /** The general comment that still has to be posted (never one already posted). */
+  body?: string;
 }
 
 /** A platform review for which every requested mutation completed. */
@@ -302,6 +306,8 @@ export interface PRReviewSubmissionPartial {
   /** Outcome of the decision mutation (approve, or Bitbucket's request-changes). */
   approval: "not-requested" | "succeeded" | "failed";
   approvalError?: string;
+  /** Why the general comment failed (Bitbucket; `retry.body` then carries it). */
+  reviewBodyError?: string;
   recoveryFile?: string;
   retry: PRReviewRetry;
 }

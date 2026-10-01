@@ -137,9 +137,10 @@ describe("plannotator review <bitbucket PR>", () => {
     const posted = fake.requests
       .filter((r) => r.method === "POST")
       .map((r) => [r.path.replace("/2.0/repositories/ws/repo/pullrequests/1", ""), r.body]);
+    // Inline comments before the general comment (#1583: newest-first feed).
     expect(posted).toEqual([
-      ["/comments", { content: { raw: "LGTM with one nit." } }],
       ["/comments", { content: { raw: "nit: `product`?" }, inline: { path: "src/math.ts", to: 9 } }],
+      ["/comments", { content: { raw: "LGTM with one nit." } }],
       ["/approve", undefined],
       ["/comments", { content: { raw: "Please add tests." } }],
       ["/request-changes", undefined],

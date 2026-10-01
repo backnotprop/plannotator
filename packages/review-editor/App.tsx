@@ -29,6 +29,13 @@ import { useUpdateCheck } from '@plannotator/ui/hooks/useUpdateCheck';
 import { claimAutoUpdateNotice, describeAutoUpdateNotice, parseAutoUpdateNotice, type AutoUpdateNotice } from '@plannotator/ui/utils/autoUpdateNotice';
 import { storage } from '@plannotator/ui/utils/storage';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
+import {
+  closePendingTab,
+  openPendingTab,
+  settlePendingTab,
+  type PendingTabWindow,
+  type TabOpener,
+} from './utils/pendingExternalTab';
 import { PRPlatformIcon } from '@plannotator/ui/components/PRPlatformIcon';
 import { RepoIcon } from '@plannotator/ui/components/RepoIcon';
 import { PullRequestIcon } from '@plannotator/ui/components/PullRequestIcon';
@@ -754,6 +761,9 @@ const ReviewApp: React.FC = () => {
   // `chooseEvent` (#1611): the dialog offers Comment / Request changes.
   const [platformCommentDialog, setPlatformCommentDialog] = useState<{ action: PRReviewAction; plan: ReviewSubmission; chooseEvent: boolean } | null>(null);
   const [platformGeneralComment, setPlatformGeneralComment] = useState('');
+  // PR/MR pages a completed platform submission posted to; the completion
+  // screen links them so the reviewer can always get there with a real click.
+  const [platformPostedUrls, setPlatformPostedUrls] = useState<string[]>([]);
   const [platformReviewRecovery, setPlatformReviewRecovery] = useState<{
     rootPrUrl: string;
     recovery: ReviewSubmissionRecovery;
@@ -4146,7 +4156,14 @@ const ReviewApp: React.FC = () => {
   }, [compactComposerItem, compactConfirmItem, compactDecisionComposer, compactDecisionConfirm]);
 
   // Submit reviews to one or more PRs via /api/pr-action
-  const handlePlatformAction = useCallback(async (action: PRReviewAction, plan: ReviewSubmission, generalComment?: string) => {
+  const handlePlatformAction = useCallback(async (
+    action: PRReviewAction,
+    plan: ReviewSubmission,
+    generalComment?: string,
+    // "View on <platform> after submitting" placeholder, opened synchronously
+    // in the submit gesture (#1583); null when unchecked or refused.
+    pendingTab: PendingTabWindow | null = null,
+  ) => {
     setIsPlatformActioning(true);
     setPlatformActionError(null);
 
@@ -4202,6 +4219,7 @@ const ReviewApp: React.FC = () => {
       setPlatformRecoveryPersistsRefresh(recovery !== null && persistsRefresh);
 
       if (!allOk) {
+        closePendingTab(pendingTab);
         setPlatformCommentDialog(prev => prev ? {
           ...prev,
           plan: { ...plan, targets: updatedTargets },
@@ -4210,10 +4228,13 @@ const ReviewApp: React.FC = () => {
       }
 
       setPlatformCommentDialog(null);
+      setPlatformPostedUrls(openUrls);
       setSubmitted(action === 'approve' ? 'approved' : 'feedback');
 
       if (platformOpenPR) {
-        for (const url of openUrls) window.open(url, '_blank');
+        settlePendingTab(pendingTab, openUrls, window as unknown as TabOpener);
+      } else {
+        closePendingTab(pendingTab);
       }
 
       const agentSwitchSettings = getAgentSwitchSettings('review');
@@ -4240,11 +4261,22 @@ const ReviewApp: React.FC = () => {
         }),
       }).catch(() => {});
     } catch (err) {
+      closePendingTab(pendingTab);
       setPlatformActionError(err instanceof Error ? err.message : 'Failed to submit review');
     } finally {
       setIsPlatformActioning(false);
     }
   }, [platformOpenPR, platformLabel, mrLabel, prMetadata, getDraftGeneration, flushReviewProgress]);
+
+  // Entry point for the submit gestures (dialog button, Mod+Enter). Must stay
+  // synchronous up to openPendingTab: browsers only allow the tab while the
+  // click's transient activation is live (#1583).
+  const submitPlatformDialog = useCallback((action: PRReviewAction, plan: ReviewSubmission, generalComment: string) => {
+    const pendingTab = platformOpenPR
+      ? openPendingTab(window as unknown as TabOpener, platformLabel)
+      : null;
+    void handlePlatformAction(action, plan, generalComment, pendingTab);
+  }, [platformOpenPR, platformLabel, handlePlatformAction]);
 
   const openPlatformDialog = useCallback((action: PRReviewAction, chooseEvent = false) => {
     const diffPaths = new Set(files.map(f => f.path));
@@ -4441,7 +4473,7 @@ const ReviewApp: React.FC = () => {
         const canSubmit = isApproveAction || hasTargets || platformGeneralComment.trim();
         if (!canSubmit || retryBlocked) return;
         e.preventDefault();
-        handlePlatformAction(platformCommentDialog.action, platformCommentDialog.plan, platformGeneralComment);
+        submitPlatformDialog(platformCommentDialog.action, platformCommentDialog.plan, platformGeneralComment);
         return;
       }
 
@@ -4472,7 +4504,7 @@ const ReviewApp: React.FC = () => {
     platformCommentDialog, platformGeneralComment,
     submitted, isSendingFeedback, isApproving, isExiting, isPlatformActioning,
     origin, platformMode, runPlatformDecisionAction,
-    submitPrimaryDecision, handlePlatformAction
+    submitPrimaryDecision, submitPlatformDialog
   ]);
 
   // Cmd/Ctrl+Shift+Y keyboard shortcut to copy feedback, mirroring the
@@ -5831,6 +5863,14 @@ const ReviewApp: React.FC = () => {
                   : `${getAgentName(origin)} will address your review feedback.`
           }
           agentLabel={getAgentName(origin)}
+          links={platformMode && submitted !== 'exited'
+            ? platformPostedUrls.map((href) => ({
+              href,
+              label: platformPostedUrls.length > 1
+                ? `View ${href.replace(/^https?:\/\//, '')}`
+                : `View on ${platformLabel}`,
+            }))
+            : undefined}
         />
 
         {/* GitHub general comment dialog */}
@@ -5851,7 +5891,7 @@ const ReviewApp: React.FC = () => {
           }}
           onConfirm={() => {
             if (!platformCommentDialog) return;
-            handlePlatformAction(platformCommentDialog.action, platformCommentDialog.plan, platformGeneralComment);
+            submitPlatformDialog(platformCommentDialog.action, platformCommentDialog.plan, platformGeneralComment);
           }}
           onCancel={() => setPlatformCommentDialog(null)}
           isSubmitting={isPlatformActioning}

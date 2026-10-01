@@ -222,6 +222,11 @@ try {
   check("inline new-side anchor", byBody("Smoke inline (new side).")?.inline?.to === 10 && byBody("Smoke inline (new side).")?.inline?.path === "src/math.ts", byBody("Smoke inline (new side).")?.inline);
   check("inline old-side anchor", byBody("Smoke inline (old side).")?.inline?.from === 1, byBody("Smoke inline (old side).")?.inline);
   check("multi-line anchor", byBody("Smoke multi-line.")?.inline?.start_to === 1 && byBody("Smoke multi-line.")?.inline?.to === 3, byBody("Smoke multi-line.")?.inline);
+  // #1583: Activity lists newest first, so the general comment must be the
+  // newest of the review's comments to show above its inline comments.
+  const reviewIds = ["Smoke inline (new side).", "Smoke inline (old side).", "Smoke multi-line.", "Smoke review: general comment."]
+    .map((raw) => byBody(raw)?.id ?? 0);
+  check("general comment posted after the inline comments", reviewIds[3] > Math.max(...reviewIds.slice(0, 3)), reviewIds);
   const me = await bb("GET", "/user");
   const p1 = (await bb("GET", prPath)).participants.find((p: any) => p.user?.account_id === me.account_id);
   check("PR approved by the token's user", p1?.state === "approved" && p1?.approved === true, p1 && { state: p1.state, approved: p1.approved });

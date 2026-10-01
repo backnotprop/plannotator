@@ -60,7 +60,7 @@ If the checkout cannot be made, the review still opens on the pull request diff.
 
 ## Posting a review
 
-Switch the review destination to the pull request in the header. Your general comment is posted as one pull request comment and each line comment as an inline comment. Then:
+Switch the review destination to the pull request in the header. Each line comment is posted as an inline comment, then your general comment as one pull request comment, so it appears above the inline comments in the pull request's Activity feed (newest first). Then:
 
 - **Approve** approves the pull request.
 - **Request changes** sets Bitbucket's "Request changes" state on the pull request.

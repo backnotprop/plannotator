@@ -28,7 +28,7 @@ This skill is the knowledge layer. The `plannotator-review`, `plannotator-annota
 
 ## Session model
 
-Every review or annotate command starts a local web server, opens the browser, and blocks until the human decides. That can take minutes. Launch it with a long (or no) command timeout, or in the background, then read stdout when the process exits. Do not kill the process to "finish" a review; a session that ends without a decision reads as no feedback.
+Every review or annotate command starts a local web server, opens the browser, and blocks until the human decides. That can take minutes, or more than an hour for a large pull request. Launch it with a long (or no) command timeout, or in the background, then read stdout when the process exits. In Claude Code, a background command is stopped after 30 minutes unless you pass `run_in_background` with a longer `timeout` (up to `7200000` ms). Do not kill the process to "finish" a review; a session that ends without a decision reads as no feedback. If a session was stopped by a time limit, run the same command again: annotation drafts are restored.
 
 Stdout is the interface, but its contract is command-specific. For `annotate` and its last-message variants:
 

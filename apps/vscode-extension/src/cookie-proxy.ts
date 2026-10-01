@@ -300,6 +300,22 @@ function injectScript(html: string, savedCookies: string): string {
         writeText:function(t){bridgeWrite(t);return Promise.resolve();},
         readText:function(){return bridgeRead();}
       }});}catch(err){}
+      // External-link bridge (#1583): the webview sandbox has no allow-popups,
+      // so window.open and target=_blank links do nothing in this frame. Route
+      // absolute http(s) URLs to the extension host (vscode.env.openExternal);
+      // anything else keeps the native behavior.
+      function externalHref(u){try{var r=new URL(String(u),location.href);if((r.protocol==="http:"||r.protocol==="https:")&&r.origin!==location.origin)return r.href;}catch(err){}return null;}
+      function openExternal(href){window.parent.postMessage({type:"plannotator-open-external",url:href},"*");}
+      var nativeOpen=window.open;
+      window.open=function(u,t,f){var href=u?externalHref(u):null;if(href){openExternal(href);return null;}return nativeOpen.apply(window,arguments);};
+      document.addEventListener("click",function(e){
+        if(e.defaultPrevented||e.button!==0)return;
+        var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;
+        if(!a||a.target!=="_blank")return;
+        var href=externalHref(a.getAttribute("href"));
+        if(!href)return;
+        e.preventDefault();openExternal(href);
+      },false);
       function fieldSelection(el){
         if(el&&(el.tagName==="INPUT"||el.tagName==="TEXTAREA")&&el.selectionStart!=null&&el.selectionEnd>el.selectionStart){
           return el.value.slice(el.selectionStart,el.selectionEnd);

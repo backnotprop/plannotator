@@ -81,6 +81,18 @@ Opens a code review UI for your uncommitted `git diff`. Also supports reviewing 
 
 See the [code review docs](/docs/commands/code-review/) for details.
 
+#### Long reviews
+
+Claude Code runs the command behind a slash command with its Bash tool. After 2 minutes it moves the command to the background, and it stops a background command 30 minutes later. A review that stays open longer than about 32 minutes is therefore closed by Claude Code, not by Plannotator. Your annotations are saved as a draft and come back when you run the command again, and a finished Guided Review is listed under **Previous guides**. A Guided Review that was still generating is lost and must be started again.
+
+To allow longer sessions, raise Claude Code's background time limit in `~/.claude/settings.json`:
+
+```json
+{ "env": { "BASH_DEFAULT_TIMEOUT_MS": "14400000" } }
+```
+
+This example allows 4 hours. The value is in milliseconds and only takes effect above `1800000` (30 minutes). It is also the default timeout for every other command Claude runs without its own timeout, so a stuck command can wait that long too. See [Claude Code's Bash tool reference](https://code.claude.com/docs/en/tools-reference#time-limit-for-background-commands).
+
 ### `/plannotator-annotate <file.md>`
 
 Opens any markdown file in the annotation UI. See the [annotate docs](/docs/commands/annotate/) for details.

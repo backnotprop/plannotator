@@ -103,6 +103,31 @@ describe('buildPRActionRequest', () => {
     });
   });
 
+  // #1583: Bitbucket posts the general comment after the inline ones, so it
+  // can be the piece that failed. The retry must resend THAT text (from the
+  // server), never the dialog's current textarea.
+  test('a retry that carries an unposted general comment resends exactly it', () => {
+    const partialTarget: SubmissionTarget = {
+      ...target,
+      status: 'partial',
+      partial: {
+        status: 'partial',
+        postedFileCommentCount: 2,
+        failedFileComments: [],
+        reviewBodyPosted: false,
+        approval: 'succeeded',
+        retry: { action: 'comment', fileComments: [], body: 'Server copy of the summary.' },
+      },
+    };
+
+    expect(buildPRActionRequest('request_changes', 'Edited in the dialog since', partialTarget)).toEqual({
+      action: 'comment',
+      body: 'Server copy of the summary.',
+      fileComments: [],
+      targetPrUrl: target.prUrl,
+    });
+  });
+
   test('refuses a partial target without a server-authorized retry', () => {
     expect(() => buildPRActionRequest('comment', 'Do not post', {
       ...target,

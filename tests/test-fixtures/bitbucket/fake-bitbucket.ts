@@ -40,6 +40,8 @@ export interface FakeBitbucketOptions {
   port?: number;
   /** Paths (inline comment `path`) whose comment POSTs fail with 400. */
   failInlinePaths?: string[];
+  /** Fail every general (non-inline, non-reply) comment POST with 400. */
+  failGeneralComments?: boolean;
   /** Answer POST /approve and /request-changes with this status. */
   decisionStatus?: number;
   /** Drop every file after the first N from the served diff (diffstat keeps them). */
@@ -181,6 +183,9 @@ export function startFakeBitbucket(options: FakeBitbucketOptions): FakeBitbucket
         if (!b?.content?.raw) return error("content: This field is required.", 400);
         if (b.inline && options.failInlinePaths?.includes(String(b.inline.path))) {
           return error("Invalid inline comment anchor", 400);
+        }
+        if (!b.inline && !b.parent && options.failGeneralComments) {
+          return error("Comment rejected", 400);
         }
         const id = nextCommentId++;
         const created = {
