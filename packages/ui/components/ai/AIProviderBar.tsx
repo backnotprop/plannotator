@@ -49,7 +49,7 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
       <select
         value={effectiveProviderId ?? ''}
         onChange={(event) => onProviderChange(event.target.value)}
-        className="min-w-0 max-w-[8rem] bg-transparent text-[11px] text-foreground focus:outline-none"
+        className="min-w-0 max-w-[8rem] bg-transparent text-[11px] text-foreground focus:outline-none [&>option]:bg-card [&>option]:text-foreground"
         aria-label="AI provider"
       >
         {providers.map(provider => {
@@ -66,7 +66,7 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
         <select
           value={effectiveModel}
           onChange={(event) => onModelChange(event.target.value)}
-          className="min-w-0 flex-1 bg-transparent text-[11px] text-foreground focus:outline-none"
+          className="min-w-0 flex-1 bg-transparent text-[11px] text-foreground focus:outline-none [&>option]:bg-card [&>option]:text-foreground"
           aria-label="AI model"
         >
           {models.map(model => (
@@ -81,7 +81,7 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
         <select
           value={selectedReasoningEffort ?? ''}
           onChange={(event) => onReasoningEffortChange?.(event.target.value || null)}
-          className="w-16 bg-transparent text-[11px] text-foreground focus:outline-none"
+          className="w-16 bg-transparent text-[11px] text-foreground focus:outline-none [&>option]:bg-card [&>option]:text-foreground"
           aria-label="Reasoning effort"
         >
           <option value="">Auto</option>
