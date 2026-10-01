@@ -65,11 +65,18 @@ function parseRetry(value: unknown): PRReviewRetry | null {
   }
   const fileComments = value.fileComments.map(parseFileComment);
   if (fileComments.some((comment) => comment === null)) return null;
+  if (
+    value.body !== undefined &&
+    (typeof value.body !== 'string' || value.body.trim() === '')
+  ) {
+    return null;
+  }
   return {
     action: value.action,
     fileComments: fileComments.filter(
       (comment): comment is PRReviewFileComment => comment !== null,
     ),
+    ...(typeof value.body === 'string' ? { body: value.body } : {}),
   };
 }
 
@@ -116,8 +123,9 @@ export function parsePRReviewSubmissionPartial(
   if (failedFileComments.some((failure) => failure === null)) return null;
   const retry = parseRetry(value.retry);
   const approvalError = optionalString(value.approvalError);
+  const reviewBodyError = optionalString(value.reviewBodyError);
   const recoveryFile = optionalString(value.recoveryFile);
-  if (!retry || approvalError === null || recoveryFile === null) return null;
+  if (!retry || approvalError === null || reviewBodyError === null || recoveryFile === null) return null;
   const failures = failedFileComments.filter(
     (failure): failure is PRReviewCommentFailure => failure !== null,
   );
@@ -132,10 +140,13 @@ export function parsePRReviewSubmissionPartial(
     value.approval === 'failed'
       ? retry.action !== 'comment' && approvalError !== undefined
       : retry.action === 'comment' && approvalError === undefined;
+  // A body to retry is only coherent when the platform says it was not posted.
+  const retryBodyMatches = retry.body === undefined || value.reviewBodyPosted === false;
   if (
     !retryMatchesFailures ||
     !retryActionMatchesApproval ||
-    (failures.length === 0 && value.approval !== 'failed')
+    !retryBodyMatches ||
+    (failures.length === 0 && value.approval !== 'failed' && retry.body === undefined)
   ) {
     return null;
   }
@@ -147,6 +158,7 @@ export function parsePRReviewSubmissionPartial(
     reviewBodyPosted: value.reviewBodyPosted,
     approval: value.approval,
     ...(approvalError !== undefined ? { approvalError } : {}),
+    ...(reviewBodyError !== undefined ? { reviewBodyError } : {}),
     ...(recoveryFile !== undefined ? { recoveryFile } : {}),
     retry,
   };

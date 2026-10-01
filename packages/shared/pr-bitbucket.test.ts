@@ -233,15 +233,18 @@ describe("submitBbPRReview", () => {
     return f.requests.filter((r) => r.method === "POST").map((r) => ({ path: r.path.replace("/2.0/repositories/ws/repo/pullrequests/1", ""), body: r.body }));
   }
 
-  test("approve: general comment, inline anchors, then /approve", async () => {
+  // Order is the fix for #1583: Bitbucket's Activity feed lists newest first,
+  // so the general comment must be posted AFTER the inline comments to render
+  // above them (verified against bitbucket.org; see the PR).
+  test("approve: inline anchors, then the general comment, then /approve", async () => {
     const f = useFake();
     const result = await submitBbPRReview(runtime, REF, HEAD, "approve", "Looks good overall.", inline);
     expect(result).toEqual({ status: "complete" });
     expect(posts(f)).toEqual([
-      { path: "/comments", body: { content: { raw: "Looks good overall." } } },
       { path: "/comments", body: { content: { raw: "Name this `product`?" }, inline: { path: "src/math.ts", to: 9 } } },
       { path: "/comments", body: { content: { raw: "Why drop this?" }, inline: { path: "notes.txt", from: 1 } } },
       { path: "/comments", body: { content: { raw: "Whole function." }, inline: { path: "src/math.ts", to: 11, start_to: 9 } } },
+      { path: "/comments", body: { content: { raw: "Looks good overall." } } },
       { path: "/approve", body: undefined },
     ]);
   });
@@ -268,10 +271,31 @@ describe("submitBbPRReview", () => {
     expect(result.recoveryFile).toStartWith(join(dataDir, "failed-comments"));
   });
 
-  test("nothing posted: every inline comment failing throws so a replay is safe", async () => {
+  test("nothing posted: every inline comment failing throws before the body or decision goes out", async () => {
     const f = useFake({ failInlinePaths: ["src/math.ts", "notes.txt"] });
-    await expect(submitBbPRReview(runtime, REF, HEAD, "approve", "", inline)).rejects.toThrow("Failed to post inline comments");
+    await expect(submitBbPRReview(runtime, REF, HEAD, "approve", "Body.", inline)).rejects.toThrow("Failed to post inline comments");
     expect(posts(f).some((p) => p.path === "/approve")).toBe(false);
+    expect(posts(f).some((p) => p.body && !(p.body as any).inline)).toBe(false);
+  });
+
+  test("a general comment failing after inline comments landed is carried in the retry", async () => {
+    useFake({ failGeneralComments: true });
+    const result = await submitBbPRReview(runtime, REF, HEAD, "request_changes", "  Overall: please add tests.  ", inline.slice(0, 1));
+    expect(result).toMatchObject({
+      status: "partial",
+      postedFileCommentCount: 1,
+      failedFileComments: [],
+      reviewBodyPosted: false,
+      approval: "succeeded",
+      retry: { action: "comment", fileComments: [], body: "Overall: please add tests." },
+    });
+    if (result.status === "partial") expect(result.reviewBodyError).toContain("400");
+  });
+
+  test("a general comment failing with nothing else posted throws (replay is safe)", async () => {
+    const f = useFake({ failGeneralComments: true });
+    await expect(submitBbPRReview(runtime, REF, HEAD, "request_changes", "Body.", [])).rejects.toThrow();
+    expect(posts(f).some((p) => p.path === "/request-changes")).toBe(false);
   });
 
   test("a failed decision after comments posted retries that decision", async () => {

@@ -675,12 +675,20 @@ export function bitbucketInlineAnchor(comment: PRReviewFileComment): Record<stri
 }
 
 /**
- * Post a review to a Bitbucket Cloud PR: the body as one general comment,
- * each line comment as an inline comment, then the decision — `approve` →
- * `POST /approve`, `request_changes` → `POST /request-changes`, `comment` →
- * nothing more. Bitbucket has no atomic review, so this follows the GitLab
- * contract: throws only while nothing was mutated (a replay is safe), and
- * otherwise returns a partial result carrying the exact safe retry.
+ * Post a review to a Bitbucket Cloud PR: each line comment as an inline
+ * comment, then the body as one general comment, then the decision —
+ * `approve` → `POST /approve`, `request_changes` → `POST /request-changes`,
+ * `comment` → nothing more.
+ *
+ * Order matters (#1583): Bitbucket's PR Activity feed lists newest first, so
+ * the mutation posted LAST renders on top. Posting the general comment after
+ * the inline ones puts the review's summary above its inline comments (and
+ * just under the decision badge), the way a GitHub review reads.
+ *
+ * Bitbucket has no atomic review, so this follows the GitLab contract: throws
+ * only while nothing was mutated (a replay is safe), and otherwise returns a
+ * partial result carrying the exact safe retry — including the general
+ * comment when that one failed after inline comments landed.
  */
 export async function submitBbPRReview(
   runtime: PRRuntime,
@@ -692,21 +700,13 @@ export async function submitBbPRReview(
 ): Promise<PRReviewSubmissionResult> {
   const ctx = context(runtime);
   const prPath = `${refRepoPath(ref)}/pullrequests/${ref.number}`;
+  const generalBody = body.trim();
   let reviewBodyPosted = false;
-  let failedFileComments: PRReviewCommentFailure[] = [];
+  let reviewBodyError: string | undefined;
+  const failedFileComments: PRReviewCommentFailure[] = [];
   let recoveryFile: string | undefined;
 
-  // 1. General comment.
-  if (body && body.trim()) {
-    const res = await bbRequest(ctx, `${prPath}/comments`, {
-      method: "POST",
-      body: { content: { raw: body.trim() } },
-    });
-    if (!res.ok) throw await failure(res, "post the PR comment");
-    reviewBodyPosted = true;
-  }
-
-  // 2. Inline comments. Sequential: Bitbucket rate-limits bursts, and order
+  // 1. Inline comments. Sequential: Bitbucket rate-limits bursts, and order
   //    keeps the thread list readable on the PR.
   for (const comment of fileComments) {
     try {
@@ -723,6 +723,7 @@ export async function submitBbPRReview(
       failedFileComments.push({ comment, error: `${comment.path}:${comment.line}: ${message}` });
     }
   }
+  const postedFileCommentCount = fileComments.length - failedFileComments.length;
 
   if (failedFileComments.length > 0) {
     const errors = failedFileComments.map((f) => f.error);
@@ -741,13 +742,36 @@ export async function submitBbPRReview(
     }
     recoveryFile = savedTo ?? undefined;
     const suffix = savedTo ? ` (unposted bodies saved to ${savedTo})` : "";
-    if (failedFileComments.length === fileComments.length && !reviewBodyPosted) {
-      // Nothing reached the PR: replaying the original request is safe.
+    if (postedFileCommentCount === 0) {
+      // Nothing reached the PR (the general comment and the decision come
+      // after): replaying the original request is safe.
       throw new Error(`Failed to post inline comments${suffix}:\n${errors.join("\n")}`);
     }
     console.error(
       `[plannotator] ${failedFileComments.length}/${fileComments.length} inline comments failed${suffix}:\n${errors.join("\n")}`,
     );
+  }
+
+  // 2. General comment.
+  if (generalBody) {
+    try {
+      const res = await bbRequest(ctx, `${prPath}/comments`, {
+        method: "POST",
+        body: { content: { raw: generalBody } },
+      });
+      if (res.ok) {
+        reviewBodyPosted = true;
+      } else {
+        reviewBodyError = (await failure(res, "post the PR comment")).message;
+      }
+    } catch (error) {
+      reviewBodyError = `Failed to post the PR comment: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    if (reviewBodyError) {
+      // Nothing reached the PR yet: surface it as an error (replay is safe).
+      if (postedFileCommentCount === 0) throw new Error(reviewBodyError);
+      console.error(`[plannotator] ${reviewBodyError}`);
+    }
   }
 
   // 3. Decision.
@@ -769,24 +793,28 @@ export async function submitBbPRReview(
       approval = "failed";
       approvalError = `Failed to ${what}: ${error instanceof Error ? error.message : String(error)}`;
     }
-    if (approval === "failed" && !reviewBodyPosted && fileComments.length === 0) {
-      // A bare decision that failed mutated nothing: surface it as an error.
+    if (approval === "failed" && !reviewBodyPosted && postedFileCommentCount === 0) {
+      // A decision that failed after nothing else landed mutated nothing:
+      // surface it as an error.
       throw new Error(approvalError);
     }
   }
 
-  if (failedFileComments.length > 0 || approval === "failed") {
+  const bodyStillOwed = generalBody !== "" && !reviewBodyPosted;
+  if (failedFileComments.length > 0 || approval === "failed" || bodyStillOwed) {
     return {
       status: "partial",
-      postedFileCommentCount: fileComments.length - failedFileComments.length,
+      postedFileCommentCount,
       failedFileComments,
       reviewBodyPosted,
       approval,
       ...(approvalError ? { approvalError } : {}),
+      ...(reviewBodyError ? { reviewBodyError } : {}),
       ...(recoveryFile ? { recoveryFile } : {}),
       retry: {
         action: approval === "failed" ? action : "comment",
         fileComments: failedFileComments.map((f) => f.comment),
+        ...(bodyStillOwed ? { body: generalBody } : {}),
       },
     };
   }

@@ -3008,3 +3008,51 @@ describe("binary replacement is safe while plannotator is running", () => {
     expect(place).toBeGreaterThan(aside);
   });
 });
+
+describe("latest tag is parsed by key, not by line (#1655)", () => {
+  // GitHub can serve releases/latest compact on a single line. The old
+  // `grep '"tag_name"' | cut -d'"' -f4` then returned the first quoted value
+  // on that line ("url"), so installs tried to download from the API URL.
+  const script = readScript("install.sh");
+  const parseLine = script
+    .split("\n")
+    .find((line) => line.includes('latest_tag=$(printf') && line.includes("tag_name"));
+
+  const release = {
+    url: "https://api.github.com/repos/backnotprop/plannotator/releases/400625228",
+    html_url: "https://github.com/backnotprop/plannotator/releases/tag/v0.27.24",
+    id: 400625228,
+    tag_name: "v0.27.24",
+    body: 'Notes mention \\"tag_name\\": \\"v9.9.9\\" in text',
+  };
+
+  function runParse(apiBody: string): string {
+    const cmd = `_api_body="$1"\n${parseLine!.trim()}\ncase "$latest_tag" in v[0-9]*.[0-9]*.[0-9]*) ;; *) latest_tag="" ;; esac\nprintf '%s' "$latest_tag"`;
+    const proc = Bun.spawnSync(["bash", "-c", cmd, "bash", apiBody]);
+    return proc.stdout.toString();
+  }
+
+  test("the parse line exists in install.sh", () => {
+    expect(parseLine).toBeDefined();
+    expect(script).not.toContain(`grep '"tag_name"' | cut -d'"' -f4`);
+  });
+
+  test("pretty-printed response", () => {
+    expect(runParse(JSON.stringify(release, null, 2) + "\n200")).toBe("v0.27.24");
+  });
+
+  test("compact single-line response", () => {
+    expect(runParse(JSON.stringify(release) + "\n200")).toBe("v0.27.24");
+  });
+
+  test("a response without a valid tag yields nothing", () => {
+    expect(runParse(JSON.stringify({ url: release.url }) + "\n200")).toBe("");
+    expect(runParse(JSON.stringify({ tag_name: "latest" }) + "\n200")).toBe("");
+  });
+
+  test("install.cmd parses the JSON with PowerShell, not findstr", () => {
+    const cmdScript = readScript("install.cmd");
+    expect(cmdScript).toContain("ConvertFrom-Json).tag_name");
+    expect(cmdScript).not.toContain('findstr /c:"\\"tag_name\\""');
+  });
+});
