@@ -397,12 +397,16 @@ if /i "!VERSION!"=="latest" (
     set "GH_TOKEN_VAL="
     set "GH_AUTH_HEADER="
 
-    REM Extract tag_name from JSON
-    for /f "tokens=2 delims=:," %%i in ('findstr /c:"\"tag_name\"" "!RELEASE_JSON!"') do (
+    REM Extract tag_name by parsing the real JSON with PowerShell. A
+    REM line-based findstr breaks when GitHub serves the response compact on
+    REM one line, picking up the "url" value instead (#1655). Only a plain
+    REM vX.Y.Z-style tag is accepted.
+    set "TAG="
+    set "PLN_RELEASE_JSON=!RELEASE_JSON!"
+    for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "try { $t = (Get-Content $env:PLN_RELEASE_JSON -Raw | ConvertFrom-Json).tag_name } catch { exit 0 }; if ($t -match '^v[0-9]+\.[0-9]+\.[0-9]+') { $t }"`) do (
         set "TAG=%%i"
-        set "TAG=!TAG: =!"
-        set "TAG=!TAG:"=!"
     )
+    set "PLN_RELEASE_JSON="
     del "!RELEASE_JSON!"
 
     if "!TAG!"=="" (
