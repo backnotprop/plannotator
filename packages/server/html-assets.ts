@@ -1,4 +1,4 @@
-import { dirname, resolve as resolvePath } from "path";
+import { resolve as resolvePath } from "path";
 import {
   HTML_ASSET_ERROR_CSP,
   HTML_ASSET_DOCUMENT_CSP,
@@ -13,6 +13,7 @@ import {
 } from "@plannotator/shared/html-assets";
 import {
   inlineHtmlLocalAssets,
+  htmlAssetContext,
   isWithinDirectory,
   MAX_HTML_ASSET_BYTES,
 } from "@plannotator/shared/html-assets-node";
@@ -58,7 +59,7 @@ export function framedDocumentNotFound(req: Request, url: URL): Response | null 
   });
 }
 
-export function createHtmlAssetRegistry() {
+export function createHtmlAssetRegistry(folderPath?: string) {
   const rootsByToken = new Map<string, string>();
   const tokensByRoot = new Map<string, string>();
 
@@ -75,7 +76,8 @@ export function createHtmlAssetRegistry() {
   function rewriteHtml(html: string, htmlFilePath: string): string {
     if (/^https?:\/\//i.test(htmlFilePath)) return html;
     try {
-      const token = register(dirname(resolvePath(htmlFilePath)));
+      const { root, basePath } = htmlAssetContext(htmlFilePath, folderPath);
+      const token = register(root);
       return rewriteHtmlAssetReferences(
         html,
         (assetPath) => `${HTML_ASSET_ROUTE_PREFIX}/${token}/${encodeHtmlAssetPath(assetPath)}`,
@@ -83,7 +85,7 @@ export function createHtmlAssetRegistry() {
         // own <base href> against the PARENT's URL, which is this server, so
         // `/api/html-assets/<token>/` lands on the right origin without the
         // rewrite needing to know the port.
-        { baseHref: htmlAssetBaseHref(token) },
+        { baseHref: htmlAssetBaseHref(token) + (basePath ? `${encodeHtmlAssetPath(basePath)}/` : ""), assetBasePath: basePath },
       );
     } catch {
       return html;
@@ -91,7 +93,7 @@ export function createHtmlAssetRegistry() {
   }
 
   function inlineHtml(html: string, htmlFilePath: string): string {
-    return inlineHtmlLocalAssets(html, htmlFilePath);
+    return inlineHtmlLocalAssets(html, htmlFilePath, folderPath);
   }
 
   async function handle(req: Request, url: URL): Promise<Response | null> {
