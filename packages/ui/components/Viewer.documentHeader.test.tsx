@@ -231,6 +231,34 @@ describe.if(hasDom)('Viewer annotationHeader', () => {
     expect(legacyActions?.classList.contains('mt-6')).toBe(true);
   });
 
+  // Firefox lays float-avoiding siblings (the overflow-x-auto table wrapper)
+  // out around a sticky float's stuck position, collapsing long tables while
+  // annotating them. Guards against re-floating the sticky legacy bar.
+  test('pins the sticky legacy action bar without making a sticky float', async () => {
+    await mount(
+      <Viewer
+        blocks={blocks}
+        markdown="# Document title"
+        annotations={[]}
+        onAddAnnotation={() => {}}
+        onSelectAnnotation={() => {}}
+        selectedAnnotationId={null}
+        mode="selection"
+        taterMode={false}
+        stickyActions
+        disableCodePathValidation
+      />,
+    );
+
+    const actions = host?.querySelector<HTMLElement>('[data-sticky-actions]');
+    const lane = actions?.closest<HTMLElement>('[data-sticky-actions-lane]');
+    expect(lane?.classList.contains('sticky')).toBe(true);
+    expect(actions?.classList.contains('mt-6')).toBe(true);
+    const stickyFloats = [...(host?.querySelectorAll<HTMLElement>('.sticky') ?? [])]
+      .filter((el) => el.classList.contains('float-right') || el.classList.contains('float-left'));
+    expect(stickyFloats).toHaveLength(0);
+  });
+
   test('owns one in-flow, printable-safe header and preserves operative controls', async () => {
     await mount(<ControlledViewer />);
 
