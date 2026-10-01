@@ -1,5 +1,5 @@
 import { generateId } from '../utils/generateId';
-import React, { useRef, useState, useEffect, useMemo, forwardRef, useImperativeHandle, useCallback, lazy, Suspense } from 'react';
+import React, { useRef, useState, useEffect, useLayoutEffect, useMemo, forwardRef, useImperativeHandle, useCallback, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { AnnotationType, type Block, type Annotation, type EditorMode, type InputMethod, type ImageAttachment, type ActionsLabelMode } from '../types';
 import { applyHighlight, codeBlockClassName, onCodeHighlightSwap } from '../utils/codeHighlight';
@@ -316,6 +316,87 @@ const FrontmatterCard: React.FC<{ frontmatter: Frontmatter }> = ({ frontmatter }
         ))}
       </div>
     </div>
+  );
+};
+
+/** Viewport offset (px) the legacy action cluster pins to while stuck (`top-3`). */
+const STICKY_ACTIONS_TOP_PX = 12;
+
+interface StickyActionsBox {
+  readonly width: number;
+  readonly height: number;
+  readonly marginTop: number;
+  readonly marginRight: number;
+}
+
+/**
+ * Legacy top-right action cluster, pinned while the document scrolls.
+ *
+ * The cluster must not be a sticky float: when float-avoiding siblings (the
+ * `overflow-x-auto` table and code wrappers) reflow, Firefox lays them out
+ * around the float's *stuck* position, so annotating a long table while
+ * scrolled squeezed it to a sliver. A static float spacer reserves the title's
+ * wrap space instead, and the cluster sticks inside a zero-height lane. Both
+ * copy the cluster's measured box and margins, so host CSS that restyles
+ * `[data-sticky-actions]` keeps its effect.
+ */
+const StickyActionsLane: React.FC<{ className: string; children: React.ReactNode }> = ({ className, children }) => {
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState<StickyActionsBox | null>(null);
+
+  useLayoutEffect(() => {
+    const el = actionsRef.current;
+    if (!el) return;
+    const measure = () => {
+      const style = window.getComputedStyle(el);
+      const next: StickyActionsBox = {
+        width: el.offsetWidth,
+        height: el.offsetHeight,
+        marginTop: Number.parseFloat(style.marginTop) || 0,
+        marginRight: Number.parseFloat(style.marginRight) || 0,
+      };
+      setBox((prev) =>
+        prev
+        && prev.width === next.width
+        && prev.height === next.height
+        && prev.marginTop === next.marginTop
+        && prev.marginRight === next.marginRight
+          ? prev
+          : next);
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(el);
+    // Breakpoint-only margin changes (lg/xl) don't resize the cluster.
+    window.addEventListener('resize', measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, []);
+
+  return (
+    <>
+      <div
+        data-print-hide
+        data-sticky-actions-lane
+        className="sticky z-30 flex h-0 items-start justify-end"
+        // The lane carries no margin, so offset it by the cluster's own top
+        // margin to pin the cluster's border box exactly where the float did.
+        style={{ top: STICKY_ACTIONS_TOP_PX - (box?.marginTop ?? 0) }}
+      >
+        <div ref={actionsRef} data-print-hide data-sticky-actions className={className}>
+          {children}
+        </div>
+      </div>
+      {/* After the lane: the lane is a flex box, so a float placed before it would narrow it. */}
+      <div
+        data-print-hide
+        aria-hidden="true"
+        className="float-right"
+        style={box ? { width: box.width, height: box.height, marginTop: box.marginTop, marginRight: box.marginRight } : undefined}
+      />
+    </>
   );
 };
 
@@ -929,8 +1010,11 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       ? container.querySelector<HTMLElement>('[data-viewer-document-header]')
         ?? container.querySelector<HTMLElement>('[data-sticky-actions]')
       : null;
+    // The legacy cluster sticks via its lane, so its own `top` is `auto`.
     const stickyTop = documentHeader
-      ? Number.parseFloat(window.getComputedStyle(documentHeader).top || '0') || 0
+      ? documentHeader.hasAttribute('data-viewer-document-header')
+        ? Number.parseFloat(window.getComputedStyle(documentHeader).top || '0') || 0
+        : STICKY_ACTIONS_TOP_PX
       : 0;
     const headerOffset = documentHeader
       ? documentHeader.getBoundingClientRect().height + stickyTop
@@ -1270,9 +1354,15 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           <>
             {badgeClearance > 0 && <div data-print-hide style={{ height: badgeClearance }} aria-hidden="true" />}
             {stickyActions && <div ref={stickySentinelRef} className="h-0 w-0 float-right" aria-hidden="true" />}
-            <div data-print-hide data-sticky-actions className={`${stickyActions ? 'sticky top-3' : ''} z-30 float-right flex items-start gap-1 md:gap-2 rounded-lg p-1 md:p-2 transition-colors duration-150 ${isStuck ? 'bg-card/95 backdrop-blur-sm shadow-sm' : ''} ${gridEnabled ? '-mr-3 md:-mr-5 lg:-mr-7 xl:-mr-9' : '-mr-1 md:-mr-2'} mt-6 md:-mt-5 lg:-mt-7 xl:-mt-9`}>
-              {documentActions}
-            </div>
+            {stickyActions ? (
+              <StickyActionsLane className={`flex items-start gap-1 md:gap-2 rounded-lg p-1 md:p-2 transition-colors duration-150 ${isStuck ? 'bg-card/95 backdrop-blur-sm shadow-sm' : ''} ${gridEnabled ? '-mr-3 md:-mr-5 lg:-mr-7 xl:-mr-9' : '-mr-1 md:-mr-2'} mt-6 md:-mt-5 lg:-mt-7 xl:-mt-9`}>
+                {documentActions}
+              </StickyActionsLane>
+            ) : (
+              <div data-print-hide data-sticky-actions className={`z-30 float-right flex items-start gap-1 md:gap-2 rounded-lg p-1 md:p-2 transition-colors duration-150 ${gridEnabled ? '-mr-3 md:-mr-5 lg:-mr-7 xl:-mr-9' : '-mr-1 md:-mr-2'} mt-6 md:-mt-5 lg:-mt-7 xl:-mt-9`}>
+                {documentActions}
+              </div>
+            )}
           </>
         )}
         {frontmatter && <><div className="clear-right md:hidden" /><FrontmatterCard frontmatter={frontmatter} /></>}
