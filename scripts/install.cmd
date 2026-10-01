@@ -403,7 +403,7 @@ if /i "!VERSION!"=="latest" (
     REM vX.Y.Z-style tag is accepted.
     set "TAG="
     set "PLN_RELEASE_JSON=!RELEASE_JSON!"
-    for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "try { $t = (Get-Content $env:PLN_RELEASE_JSON -Raw | ConvertFrom-Json).tag_name } catch { exit 0 }; if ($t -match '^v[0-9]+\.[0-9]+\.[0-9]+') { $t }"`) do (
+    for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "try { $t = (Get-Content $env:PLN_RELEASE_JSON -Raw -Encoding UTF8 | ConvertFrom-Json).tag_name } catch { exit 0 }; if ($t -match '^v[0-9]+\.[0-9]+\.[0-9]+') { $t }"`) do (
         set "TAG=%%i"
     )
     set "PLN_RELEASE_JSON="
