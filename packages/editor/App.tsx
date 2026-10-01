@@ -46,6 +46,7 @@ import { storage } from '@plannotator/ui/utils/storage';
 import { getIdentity } from '@plannotator/ui/utils/identity';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { configStore, useConfigValue } from '@plannotator/ui/config';
+import { documentTypographyStyle } from '@plannotator/ui/utils/documentTypography';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { useUpdateCheck } from '@plannotator/ui/hooks/useUpdateCheck';
 import { claimAutoUpdateNotice, describeAutoUpdateNotice, parseAutoUpdateNotice, type AutoUpdateNotice } from '@plannotator/ui/utils/autoUpdateNotice';
@@ -537,6 +538,8 @@ const App: React.FC = () => {
     return stored === 'true';
   });
   const gridEnabled = useConfigValue('gridEnabled');
+  const documentFontFamily = useConfigValue('documentFontFamily');
+  const documentFontSize = useConfigValue('documentFontSize');
   const vimModeEnabled = useConfigValue('vimModeEnabled');
   const vimHudEnabled = useConfigValue('vimHudEnabled');
   const vimHudKeyPanelEnabled = useConfigValue('vimHudKeyPanelEnabled');
@@ -6330,6 +6333,7 @@ const App: React.FC = () => {
   // Mobile Safari paints the browser-controls backdrop from the document/app
   // canvas, not from the nested document scroller. Keep that canvas continuous
   // with the active surface so a card-backed plan does not end in a dark band.
+  const documentTypography = documentTypographyStyle(annotateMode && renderAs === 'markdown' && !isEditingMarkdown && !liveApp, documentFontFamily, documentFontSize);
   const browserCanvas = isHtmlSurface || gridEnabled ? 'background' : 'card';
   if (isLoading && !isSharedSession) {
     return (
@@ -6697,7 +6701,7 @@ const App: React.FC = () => {
                 />
               )}
               {/* Normal Plan View — always mounted, hidden during diff mode */}
-              <div className={`w-full relative ${isHtmlSurface ? 'flex-1 flex flex-col' : `${isCompactTouchLayout && isEditingMarkdown ? 'flex flex-col items-center' : 'flex justify-center'}${isEditingMarkdown ? ' flex-1 min-h-0' : ''}`}`} style={{ display: goalSetupMode || (isPlanDiffActive && planDiff.diffBlocks) || (annotateSource === 'folder' && !markdown && !linkedDocHook.isActive) ? 'none' : undefined }}>
+              <div className={`w-full relative ${documentTypography?.['--plannotator-document-font-family'] ? 'document-font-custom' : ''} ${documentTypography?.['--plannotator-document-font-scale'] ? 'document-size-custom' : ''} ${isHtmlSurface ? 'flex-1 flex flex-col' : `${isCompactTouchLayout && isEditingMarkdown ? 'flex flex-col items-center' : 'flex justify-center'}${isEditingMarkdown ? ' flex-1 min-h-0' : ''}`}`} style={{ ...documentTypography, display: goalSetupMode || (isPlanDiffActive && planDiff.diffBlocks) || (annotateSource === 'folder' && !markdown && !linkedDocHook.isActive) ? 'none' : undefined }}>
                 {!isCompactTouchLayout && (canUseWideMode || canEditMarkdown) && !isPlanDiffActive && !archive.archiveMode && !isHtmlSurface && (
                   <div
                     data-print-hide

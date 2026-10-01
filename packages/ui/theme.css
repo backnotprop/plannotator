@@ -670,6 +670,34 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* Document overrides are opt-in and never replace print typography. */
+@media screen {
+  .document-font-custom .document-prose {
+    font-family: var(--plannotator-document-font-family);
+  }
+
+  .document-size-custom .document-scaled {
+    --document-prose-size: 15px;
+    font-size: calc(var(--document-prose-size) * var(--plannotator-document-font-scale));
+  }
+
+  .document-size-custom .document-scaled.text-2xl { --document-prose-size: var(--text-2xl); }
+  .document-size-custom .document-scaled.text-xl { --document-prose-size: var(--text-xl); }
+  .document-size-custom .document-scaled.text-base,
+  .document-size-custom .document-scaled.document-prose-base { --document-prose-size: var(--text-base); }
+  .document-size-custom .document-scaled.text-sm { --document-prose-size: var(--text-sm); }
+  .document-size-custom .document-scaled.text-xs { --document-prose-size: var(--text-xs, 0.75rem); }
+  .document-size-custom .document-scaled.document-size-13 { --document-prose-size: 13px; }
+  .document-size-custom .document-scaled.document-size-13-5 { --document-prose-size: 13.5px; }
+  .document-size-custom .document-scaled.document-size-12-5 { --document-prose-size: 12.5px; }
+
+  .document-size-custom .document-task-checkbox {
+    width: calc(16px * var(--plannotator-document-font-scale));
+    height: calc(16px * var(--plannotator-document-font-scale));
+    margin-top: calc(3px * var(--plannotator-document-font-scale));
+  }
+}
+
 /* Type scale — fonts excluded on purpose (themes own --font-sans/--font-mono) */
 @theme {
   --text-sm: 0.875rem; --text-sm--line-height: 1.45;

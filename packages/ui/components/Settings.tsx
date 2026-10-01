@@ -775,6 +775,36 @@ function parseCCLabels(json: string | null): CCLabelConfig[] {
   }
 }
 
+const DocumentTypographyControls: React.FC = () => {
+  const family = useConfigValue('documentFontFamily');
+  const size = useConfigValue('documentFontSize');
+  return (
+    <div className="space-y-3">
+      <label className="block text-sm font-medium">
+        Document Font
+        <input aria-label="Document Font" type="text" placeholder="Theme default" value={family} onChange={event => configStore.set('documentFontFamily', event.target.value)} className="mt-2 w-full bg-background border border-border rounded-md px-3 py-2 text-sm" />
+      </label>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <label htmlFor="document-font-size" className="block text-sm font-medium">
+            Document Font Size
+          </label>
+          <div className="text-xs tabular-nums text-muted-foreground min-w-[4ch] text-right">
+            {size ?? 15}px
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <input id="document-font-size" aria-label="Document Font Size" type="range" min="12" max="24" step="1" value={size ?? 15} onChange={event => configStore.set('documentFontSize', Number(event.target.value))} className="flex-1 min-w-0 h-1.5 accent-primary cursor-pointer" />
+          <button className="text-xs text-muted-foreground hover:text-foreground shrink-0" onClick={() => {
+            configStore.set('documentFontFamily', '');
+            configStore.set('documentFontSize', null);
+          }}>Reset</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const CommentsTab: React.FC = () => {
   const conventionalComments = useConfigValue('conventionalComments');
   const labelsJson = useConfigValue('conventionalLabels');
@@ -1629,6 +1659,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 
                 {activeTab === 'display' && mode !== 'review' && (
                   <>
+                    {mode === 'annotate' && <DocumentTypographyControls />}
                     {/* Auto-open Sidebar */}
                     <div className="flex items-center justify-between">
                       <div>

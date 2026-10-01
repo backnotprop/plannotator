@@ -261,15 +261,15 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
         </span>
       </div>
 
-      <p id={promptId} className="m-0 text-[15px] font-semibold leading-[1.45] text-foreground">
+      <p id={promptId} className="document-prose document-scaled m-0 text-[15px] font-semibold leading-[1.45] text-foreground">
         {inline(question.prompt)}
       </p>
       {question.context && (
         <div id={contextId} className="mt-1 text-[13px] leading-normal text-muted-foreground">
           {renderProseBody({
             body: question.context,
-            paragraphClassName: 'text-[13px] leading-normal',
-            listClassName: 'text-[13px] leading-normal',
+            paragraphClassName: 'document-size-13 text-[13px] leading-normal',
+            listClassName: 'document-size-13 text-[13px] leading-normal',
             imageBaseDir,
             onImageClick,
             onOpenLinkedDoc,
@@ -286,7 +286,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           {question.suggestedText && !answered && (
             <div id={suggestId} className="mt-2 flex items-start gap-2 text-[12.5px] text-muted-foreground">
               <span className="min-w-0 flex-1">
-                <Tag tone="rec">Suggested</Tag> {inline(question.suggestedText)}
+                <Tag tone="rec">Suggested</Tag>{' '}
+                <span className="document-prose document-scaled document-size-12-5">{inline(question.suggestedText)}</span>
               </span>
               {!readOnly && (
                 <button
@@ -303,7 +304,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
             className={cx(
               // annotation-exclude: typed text is not document text, so a
               // text-search restore of another annotation never lands in it.
-              'annotation-exclude mt-2.5 block min-h-[74px] w-full resize-y rounded-[7px] border border-border bg-background px-2.5 py-2 text-[13.5px] leading-normal text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring focus:ring-1 focus:ring-ring disabled:cursor-default',
+              'document-prose document-scaled document-size-13-5 annotation-exclude mt-2.5 block min-h-[74px] w-full resize-y rounded-[7px] border border-border bg-background px-2.5 py-2 text-[13.5px] leading-normal text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring focus:ring-1 focus:ring-ring disabled:cursor-default',
               skipped && 'opacity-55',
             )}
             aria-labelledby={promptId}
@@ -340,10 +341,12 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                   className="mt-[3px] h-[15px] w-[15px] shrink-0 cursor-pointer accent-primary disabled:cursor-default"
                 />
                 <span className="min-w-0 flex-1 select-text text-[13.5px] leading-[1.45] text-foreground">
-                  <span className="font-[550]">{inline(choice.label)}</span>
-                  {choice.description && (
-                    <span className="text-muted-foreground"> — {inline(choice.description)}</span>
-                  )}
+                  <span className="document-prose document-scaled document-size-13-5">
+                    <span className="font-[550]">{inline(choice.label)}</span>
+                    {choice.description && (
+                      <span className="text-muted-foreground"> — {inline(choice.description)}</span>
+                    )}
+                  </span>
                   {choice.recommended && <> <Tag tone="rec">Recommended</Tag></>}
                 </span>
               </label>
@@ -366,7 +369,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
               onChange={(e) => setOther(e.target.value)}
               placeholder={readOnly ? '' : 'Other…'}
               aria-label={number > 0 ? `Other answer to question ${number}` : 'Other answer'}
-              className="annotation-exclude min-w-0 flex-1 border-0 border-b border-transparent bg-transparent py-[3px] text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring"
+              className="document-prose document-scaled document-size-13-5 annotation-exclude min-w-0 flex-1 border-0 border-b border-transparent bg-transparent py-[3px] text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring"
             />
           </div>
         </div>
@@ -379,7 +382,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           </p>
           <textarea
             ref={noteRef}
-            className="annotation-exclude block min-h-[54px] w-full resize-y rounded-[7px] border border-border bg-background px-2.5 py-2 text-[13.5px] leading-normal text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring focus:ring-1 focus:ring-ring"
+            className="document-prose document-scaled document-size-13-5 annotation-exclude block min-h-[54px] w-full resize-y rounded-[7px] border border-border bg-background px-2.5 py-2 text-[13.5px] leading-normal text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring focus:ring-1 focus:ring-ring"
             aria-labelledby={noteLabelId}
             placeholder="Context for the agent…"
             value={answer?.note ?? ''}

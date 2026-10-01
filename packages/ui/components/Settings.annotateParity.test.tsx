@@ -9,6 +9,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Settings } from './Settings';
+import { configStore } from '../config';
 
 const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
@@ -77,6 +78,31 @@ describe('Settings annotate/plan parity', () => {
     }
     // ...and the agent-switch row it always showed.
     expect(Array.from(document.querySelectorAll('option')).some((o) => o.value === 'disabled')).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('annotate Display offers separate document typography and reset', async () => {
+    await mountSettings('annotate');
+    await openTab('Display');
+    const family = document.querySelector<HTMLInputElement>('input[aria-label="Document Font"]');
+    const size = document.querySelector<HTMLInputElement>('[aria-label="Document Font Size"]');
+    expect(family).not.toBeNull();
+    expect(family?.placeholder).toBe('Theme default');
+    expect(size?.min).toBe('12');
+    expect(size?.max).toBe('24');
+    expect(size?.value).toBe('15');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(family, 'Georgia');
+      family!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(configStore.get('documentFontFamily')).toBe('Georgia');
+    await act(async () => configStore.set('documentFontSize', 24));
+    expect(size?.value).toBe('24');
+    const reset = Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Reset');
+    expect(reset).toBeDefined();
+    await act(async () => reset!.click());
+    expect(family?.value).toBe('');
+    expect(size?.value).toBe('15');
+    expect(configStore.get('documentFontSize')).toBeNull();
   });
 
   test.skipIf(!hasDom)('plan keeps every tab it had, Hooks included', async () => {
