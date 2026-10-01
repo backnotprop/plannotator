@@ -420,7 +420,15 @@ if [ "$VERSION" = "latest" ]; then
         _api_code="${_api_body##*$'\n'}"
     fi
     if [ "$_api_code" = "200" ]; then
-        latest_tag=$(printf '%s' "$_api_body" | grep '"tag_name"' | cut -d'"' -f4)
+        # Pull "tag_name" out of the JSON by key, not by line: GitHub can serve
+        # the response compact (one line), where a line-based grep+cut picks up
+        # the first quoted value on that line ("url") instead (#1655). Only a
+        # plain vX.Y.Z-style tag is accepted; anything else counts as a failure.
+        latest_tag=$(printf '%s' "$_api_body" | tr -d '\n\r' | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+        case "$latest_tag" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) latest_tag="" ;;
+        esac
     else
         latest_tag=""
     fi
