@@ -213,6 +213,14 @@ common case) applies inside the header too and pulls the action cluster out of
 its row. Scope such rules away from the header, e.g.
 `[data-viewer-document-header] [data-sticky-actions] { margin-top: 0; margin-right: 0; }`.
 
+With `stickyActions` on, the legacy bar's `[data-sticky-actions]` cluster is no
+longer the sticky element or a float: it pins inside a zero-height
+`[data-sticky-actions-lane]`, beside a static float that reserves the title's
+wrap space. Both copy the cluster's measured size and margins, so margin
+overrides on `[data-sticky-actions]` still apply. Do not give the cluster
+`position: sticky` and a float together: Firefox narrows float-avoiding blocks
+such as table and code wrappers around a sticky float's stuck position.
+
 The config is intentionally typed rather than a React-node slot. Viewer reuses
 its existing `mode`, `inputMethod`, and `taterMode`; the config supplies only
 the state-change callbacks and optional `hideQuickLabel`. Compact toolstrips
