@@ -105,7 +105,7 @@ export const TableBlock: React.FC<TableBlockProps> = ({
       onMouseEnter={handleMouseEnter}
       onMouseLeave={onLeave}
     >
-      <table className="min-w-full border-collapse text-sm">
+      <table className="document-prose document-scaled min-w-full border-collapse text-sm">
         <thead>
           <tr className="border-b border-border">
             {headers.map((header, i) => (

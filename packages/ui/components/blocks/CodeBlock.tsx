@@ -16,12 +16,13 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ block, onHover, onLeave })
   const containerRef = useRef<HTMLDivElement>(null);
   const codeRef = useRef<HTMLElement>(null);
   const fenceTheme = useFenceTheme();
+  const codeClassName = `${codeBlockClassName(block.language)} document-scaled document-size-13`;
 
   // Highlight on mount, on content/language change, and whenever the palette
   // changes. Language-less fences stay plain text (#1212) — nothing is guessed.
   useEffect(() => {
     if (codeRef.current) {
-      codeRef.current.className = codeBlockClassName(block.language);
+      codeRef.current.className = codeClassName;
       applyHighlight(codeRef.current, block.content, block.language, fenceTheme);
     }
   }, [block.content, block.language, fenceTheme]);
@@ -40,9 +41,6 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ block, onHover, onLeave })
       onHover(containerRef.current);
     }
   };
-
-  // Build className for code element
-  const codeClassName = codeBlockClassName(block.language);
 
   return (
     <div
@@ -67,7 +65,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ block, onHover, onLeave })
           </svg>
         )}
       </button>
-      <pre className="rounded-lg text-[13px] overflow-x-auto bg-muted/50 border border-border/30">
+      <pre className="document-scaled document-size-13 rounded-lg text-[13px] overflow-x-auto bg-muted/50 border border-border/30">
         <code
           ref={codeRef}
           className={codeClassName}

@@ -57,7 +57,7 @@ export const BlockRenderer: React.FC<{
       return (
         <Tag
           id={headingAnchorId}
-          className={styles}
+          className={`document-prose document-scaled ${styles}`}
           data-block-id={block.id}
           data-block-type="heading"
         >
@@ -92,7 +92,7 @@ export const BlockRenderer: React.FC<{
           data-block-id={block.id}
         >
           {paragraphs.map((para, i) => (
-            <p key={i} className={i > 0 ? 'mt-2' : ''}>
+            <p key={i} className={`document-prose document-scaled document-prose-base ${i > 0 ? 'mt-2' : ''}`}>
               <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={para} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} githubRepo={githubRepo} repoHost={repoHost} onNavigateAnchor={onNavigateAnchor} />
             </p>
           ))}
@@ -107,7 +107,7 @@ export const BlockRenderer: React.FC<{
         ? checkboxOverrides.get(block.id)!
         : block.checked;
       const isInteractive = isCheckbox && !!onToggleCheckbox;
-      const textClass = `text-sm leading-relaxed ${isCheckbox && isChecked ? 'text-muted-foreground line-through' : 'text-foreground/90'}`;
+      const textClass = `document-prose document-scaled text-sm leading-relaxed ${isCheckbox && isChecked ? 'text-muted-foreground line-through' : 'text-foreground/90'}`;
       const inlineProps = { imageBaseDir, onImageClick, onOpenLinkedDoc, onOpenCodeFile, githubRepo, repoHost, onNavigateAnchor };
       return (
         <div
@@ -202,7 +202,7 @@ export const BlockRenderer: React.FC<{
     default:
       return (
         <p
-          className="mb-4 leading-relaxed text-foreground/90 text-[15px]"
+          className="document-prose document-scaled mb-4 leading-relaxed text-foreground/90 text-[15px]"
           data-block-id={block.id}
         >
           <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} githubRepo={githubRepo} repoHost={repoHost} onNavigateAnchor={onNavigateAnchor} />

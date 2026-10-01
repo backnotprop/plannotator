@@ -86,7 +86,7 @@ export const AlertBlock: React.FC<AlertBlockProps> = ({
     >
       <div className="alert-title flex items-center gap-2 font-semibold mb-1">
         {icon}
-        <span>
+        <span className="document-prose document-scaled document-prose-base">
           {titleLine?.title
             ? (
               <>

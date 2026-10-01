@@ -58,7 +58,7 @@ export function renderProseBody(args: {
     const text = paraLines.join('\n');
     if (text.trim()) {
       out.push(
-        <p key={`p-${key++}`} className={`${paragraphClassName} ${out.length > 0 ? 'mt-2' : ''}`}>
+        <p key={`p-${key++}`} className={`document-prose document-scaled ${paragraphClassName} ${out.length > 0 ? 'mt-2' : ''}`}>
           {inline(text)}
         </p>,
       );
@@ -68,7 +68,7 @@ export function renderProseBody(args: {
   const flushList = () => {
     if (!list) return;
     const Tag = list.ordered ? 'ol' : 'ul';
-    const className = `${list.ordered ? 'list-decimal' : 'list-disc'} pl-5 ${listClassName} ${out.length > 0 ? 'mt-2' : ''}`;
+    const className = `document-prose document-scaled ${list.ordered ? 'list-decimal' : 'list-disc'} pl-5 ${listClassName} ${out.length > 0 ? 'mt-2' : ''}`;
     out.push(
       <Tag key={`l-${key++}`} className={className}>
         {list.items.map((item, i) => (
