@@ -282,6 +282,24 @@ Send Feedback → feedback sent to agent session
 Approve → approved prompt sent to agent session (with the note/annotations when approving with notes)
 ```
 
+### Color-free VCS output (#1661)
+
+Every git command the review servers parse goes through `prepareGitCommand`
+(`packages/shared/review-core.ts`, both runtimes), which prepends
+`GIT_COLOR_FREE_ARGS`: `--no-pager` plus `-c color.<key>=never` for `ui`,
+`diff`, `status`, `branch`, `grep`, `showBranch` and `interactive`.
+`color.ui=never` alone is not enough, because an explicit `color.diff = always`
+in the user's config wins over it and colors a piped diff, which used to parse
+to 0 files and 0 viewed-file identities. jj gets `JJ_COLOR_FREE_ARGS`
+(`--color=never --no-pager`, `packages/shared/jj-core.ts`) in both runtimes'
+`runJj`, `gh pr diff` gets `--color=never`, and agent jobs inherit the same git
+settings as `GIT_CONFIG_*` variables (`gitColorFreeEnvironment`). As a backstop,
+`parseDiffToFiles` strips ANSI codes from a patch whose `diff --git` headers are
+colored (`stripPatchColor`, `packages/core/diff-files.ts`); a normal patch is
+returned byte for byte. A new git/jj spawn that bypasses these runners must add
+the same options. `packages/server/review-git-color-config.test.ts` runs both
+servers against a sandboxed config that forces color on.
+
 ### Review directory targets
 
 `plannotator review [DIRECTORY | PR_URL]` (and `/plannotator-review` on OpenCode

@@ -1,6 +1,42 @@
 import { describe, expect, it } from "bun:test";
 
-import { parseDiffToFiles } from "./diff-files";
+import { parseDiffToFiles, stripPatchColor } from "./diff-files";
+
+// #1661: `color.diff = always` (git) or `ui.color = "always"` (jj) wraps every
+// patch line in ANSI escapes, which used to parse to 0 files with no error.
+describe("colorized patches", () => {
+  const ESC = "\x1b";
+  // Shape of real `git -c color.diff=always diff` output (git 2.50).
+  const colorized = [
+    `${ESC}[1mdiff --git a/a.txt b/a.txt${ESC}[m`,
+    `${ESC}[1mindex 7898192..422c2b7 100644${ESC}[m`,
+    `${ESC}[1m--- a/a.txt${ESC}[m`,
+    `${ESC}[1m+++ b/a.txt${ESC}[m`,
+    `${ESC}[36m@@ -1 +1,2 @@${ESC}[m`,
+    " a",
+    `${ESC}[32m+${ESC}[m${ESC}[32mb${ESC}[m`,
+    "",
+  ].join("\n");
+
+  it("still yields the files and their line counts", () => {
+    const files = parseDiffToFiles(colorized);
+    expect(files.map((f) => [f.path, f.additions, f.deletions])).toEqual([["a.txt", 1, 0]]);
+    expect(files[0].patch).not.toContain(ESC);
+  });
+
+  it("leaves a plain patch whose content contains escape bytes untouched", () => {
+    const plain = [
+      "diff --git a/colors.sh b/colors.sh",
+      "--- a/colors.sh",
+      "+++ b/colors.sh",
+      "@@ -0,0 +1 @@",
+      `+echo "${ESC}[31mred${ESC}[0m"`,
+      "",
+    ].join("\n");
+    expect(stripPatchColor(plain)).toBe(plain);
+    expect(parseDiffToFiles(plain)[0].patch).toBe(plain);
+  });
+});
 
 describe("parseDiffToFiles", () => {
   it("uses file header lines so paths containing separator text stay intact", () => {

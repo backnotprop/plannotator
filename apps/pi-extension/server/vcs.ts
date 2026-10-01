@@ -17,6 +17,7 @@ import {
 	runGitDiff as runGitDiffCore,
 } from "../generated/review-core.ts";
 import {
+	JJ_COLOR_FREE_ARGS,
 	type ReviewJjRuntime,
 } from "../generated/jj-core.ts";
 import {
@@ -272,13 +273,13 @@ export const jjRuntime: ReviewJjRuntime = {
 		args: string[],
 		options?: { cwd?: string; timeoutMs?: number },
 	): Promise<GitCommandResult> {
-		return runCommand("jj", args, "jj not found", options);
+		return runCommand("jj", [...JJ_COLOR_FREE_ARGS, ...args], "jj not found", options);
 	},
 	runJjBytes(
 		args: string[],
 		options?: { cwd?: string; timeoutMs?: number; maxOutputBytes?: number },
 	): Promise<GitBytesCommandResult> {
-		return runCommandBytes("jj", args, "jj not found", options);
+		return runCommandBytes("jj", [...JJ_COLOR_FREE_ARGS, ...args], "jj not found", options);
 	},
 };
 

@@ -359,6 +359,46 @@ function gitConfigEnvironment(
 }
 
 /**
+ * Global options that keep color and pagers out of every Git command
+ * Plannotator parses, whatever the user's git config says (#1661).
+ *
+ * `color.ui=never` alone is NOT enough: a more specific key such as an
+ * explicit `color.diff = always` wins over `color.ui`. With it, every line of
+ * a patch arrived wrapped in ANSI escapes, so the parser found 0 files and
+ * viewed-file identity capture found 0 identities. Each command-specific color
+ * key that Plannotator's output could hit is set too. `-c` on argv is the
+ * highest-precedence config scope. `--no-pager` rules out a `pager.<cmd>`
+ * setting (a pager only starts on a TTY, which these pipes never are).
+ */
+const GIT_COLOR_FREE_CONFIG: Readonly<Record<string, string>> = Object.freeze({
+  "color.ui": "never",
+  "color.diff": "never",
+  "color.status": "never",
+  "color.branch": "never",
+  "color.grep": "never",
+  "color.showBranch": "never",
+  "color.interactive": "never",
+});
+
+export const GIT_COLOR_FREE_ARGS: readonly string[] = Object.freeze([
+  "--no-pager",
+  ...Object.entries(GIT_COLOR_FREE_CONFIG).flatMap(([key, value]) => ["-c", `${key}=${value}`]),
+]);
+
+/**
+ * The same color-off settings as `GIT_CONFIG_*` environment variables, for
+ * processes Plannotator spawns that run git themselves (review, tour and
+ * guide agent jobs). Inherited `GIT_CONFIG_*` entries are kept. Git 2.31+
+ * reads these; an older git ignores them, which only costs color in the
+ * agent's own tool output.
+ */
+export function gitColorFreeEnvironment(
+  environment: Readonly<Record<string, string | undefined>>,
+): Record<string, string> {
+  return gitConfigEnvironment({ ...GIT_COLOR_FREE_CONFIG }, environment) ?? {};
+}
+
+/**
  * Prepare one Git subprocess without mutating the parent environment.
  *
  * Commands that forbid interaction disable Git credential prompts, request SSH
@@ -376,7 +416,7 @@ export function prepareGitCommand(
   const interaction = options?.interaction ?? "allow";
   if (interaction === "allow") {
     return {
-      args: ["-c", "core.quotePath=false", ...args],
+      args: [...GIT_COLOR_FREE_ARGS, "-c", "core.quotePath=false", ...args],
       ...(configEnv ? { env: { ...environment, ...configEnv } } : {}),
       isolateProcessGroup: false,
     };
@@ -390,6 +430,7 @@ export function prepareGitCommand(
 
   return {
     args: [
+      ...GIT_COLOR_FREE_ARGS,
       "-c",
       "core.quotePath=false",
       "-c",

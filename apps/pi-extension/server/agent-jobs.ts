@@ -25,6 +25,7 @@ import {
 	AGENT_HEARTBEAT_INTERVAL_MS,
 } from "../generated/agent-jobs.ts";
 import { resolveGuideLaunchInstructions } from "../generated/guide-instructions-store.ts";
+import { gitColorFreeEnvironment } from "../generated/review-core.ts";
 import type { GuideLaunchReview } from "../generated/guide-format.ts";
 import { allowedToolsOf, CLAUDE_SHELL_BLOCKED_WARNING, detectClaudeShellBlocked, disallowedToolsOf, formatClaudeLogEvent } from "../generated/claude-review.ts";
 import {
@@ -278,6 +279,10 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 				],
 				env: {
 					...process.env,
+					// The agent runs `git diff` / `git log` itself through a pipe; keep a
+					// user's `color.diff = always` from filling its context with ANSI
+					// escapes (#1661).
+					...gitColorFreeEnvironment(process.env),
 					// PWD must name the spawn cwd, not the server's own directory (#1609):
 					// OpenCode 1.x resolves its session directory as `process.env.PWD ??
 					// process.cwd()`, so an inherited PWD would silently run the agent in

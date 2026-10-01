@@ -162,6 +162,9 @@ export async function fetchGhPR(
     runtime.runCommand("gh", [
       "pr", "diff", String(ref.number),
       "--repo", repo,
+      // `auto` is the default, but CLICOLOR_FORCE / GH_FORCE_TTY in the
+      // user's environment would still color it (#1661).
+      "--color=never",
     ]),
     runtime.runCommand("gh", [
       "pr", "view", String(ref.number),

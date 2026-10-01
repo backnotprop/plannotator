@@ -26,6 +26,31 @@ export interface DiffFile {
   status: DiffFileStatus;
 }
 
+/** ANSI CSI sequences (SGR color/bold `\x1b[1;31m`, the bare reset `\x1b[m`, …). */
+const ANSI_CSI = /\x1b\[[0-9;:?]*[A-Za-z]/g;
+/** A file header line that a terminal color code was wrapped around. */
+const COLORED_DIFF_HEADER = /^(?:\x1b\[[0-9;:?]*[A-Za-z])+diff --git /m;
+
+/**
+ * True when the patch's own headers carry ANSI color codes, the shape a VCS
+ * produces when the user's config forces color into a pipe (`color.diff =
+ * always`, jj `ui.color = "always"`; #1661). A normal patch never matches:
+ * its `diff --git` headers are plain, and escape bytes inside a changed file's
+ * content sit after a `+`/`-`/space prefix, never at the start of a header.
+ */
+export function isColorizedPatch(rawPatch: string): boolean {
+  return rawPatch.includes("\x1b[") && !/^diff --git /m.test(rawPatch) && COLORED_DIFF_HEADER.test(rawPatch);
+}
+
+/**
+ * Remove terminal color codes from a colorized patch so it still parses.
+ * Returns any other patch unchanged, byte for byte, so content that really
+ * contains escape bytes is never altered.
+ */
+export function stripPatchColor(rawPatch: string): string {
+  return isColorizedPatch(rawPatch) ? rawPatch.replace(ANSI_CSI, "") : rawPatch;
+}
+
 function splitDiffChunks(rawPatch: string): string[] {
   const matches = [...rawPatch.matchAll(/^diff --git /gm)];
   return matches.map((match, index) => {
@@ -54,7 +79,10 @@ function deriveStatus(lines: string[], oldPath: string, newPath: string): DiffFi
 export function parseDiffToFiles(rawPatch: string): DiffFile[] {
   const files: DiffFile[] = [];
 
-  for (const chunk of splitDiffChunks(rawPatch)) {
+  // A patch that arrived colorized would otherwise parse to 0 files and look
+  // exactly like "no changes" (#1661). The VCS runners turn color off; this
+  // covers patches from anywhere else (piped patch files, older servers).
+  for (const chunk of splitDiffChunks(stripPatchColor(rawPatch))) {
     const lines = chunk.split("\n");
     const fromFileLines = parseDiffFilePathLines(lines);
     const fromMetadata = parseDiffMetadataPathLines(lines);
