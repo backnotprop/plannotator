@@ -23,12 +23,18 @@ export interface CommentHunkTarget {
 }
 
 export function focusCommentHunk(hunk: string, target: CommentHunkTarget, leading = 3): string {
+  // CRLF hunks (GitHub keeps a file's line endings): match on the line
+  // without its \r, and write the rewritten header back with one.
   const lines = hunk.split('\n');
-  const headerIdx = lines.findIndex((l) => HUNK_HEADER.test(l));
+  const bare = (l: string) => (l.endsWith('\r') ? l.slice(0, -1) : l);
+  const headerIdx = lines.findIndex((l) => HUNK_HEADER.test(bare(l)));
   if (headerIdx < 0) return hunk;
-  const header = lines[headerIdx].match(HUNK_HEADER)!;
+  const header = bare(lines[headerIdx]).match(HUNK_HEADER)!;
+  const eol = lines[headerIdx].endsWith('\r') ? '\r' : '';
   const prefix = lines.slice(0, headerIdx);
   const body = lines.slice(headerIdx + 1);
+  // One hunk only: numbering does not restart at a second header.
+  if (body.some((l) => HUNK_HEADER.test(bare(l)))) return hunk;
 
   // Old/new line number of every body line (null when not on that side).
   let oldNo = Number(header[1]);
@@ -51,7 +57,7 @@ export function focusCommentHunk(hunk: string, target: CommentHunkTarget, leadin
   let firstIdx: number;
   let lead = leading;
   let lastIdx = numbered.length - 1;
-  while (lastIdx >= 0 && numbered[lastIdx].text === '') lastIdx--;
+  while (lastIdx >= 0 && bare(numbered[lastIdx].text) === '') lastIdx--;
   if (lastIdx < 0) return hunk;
 
   if (target.side && target.line != null) {
@@ -76,6 +82,6 @@ export function focusCommentHunk(hunk: string, target: CommentHunkTarget, leadin
   // Unified-diff convention: an empty side names the line before it.
   const oldStart = oldCount === 0 ? Math.max(0, kept[0].oldAt - 1) : kept[0].oldAt;
   const newStart = newCount === 0 ? Math.max(0, kept[0].newAt - 1) : kept[0].newAt;
-  const newHeader = `@@ -${oldStart},${oldCount} +${newStart},${newCount} @@${header[5]}`;
+  const newHeader = `@@ -${oldStart},${oldCount} +${newStart},${newCount} @@${header[5]}${eol}`;
   return [...prefix, newHeader, ...kept.map((e) => e.text)].join('\n');
 }

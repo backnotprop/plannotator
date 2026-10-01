@@ -81,3 +81,17 @@ describe('focusCommentHunk', () => {
     expect(focusCommentHunk(hunk, { side: 'RIGHT', line: 99 })).toBe(hunk);
   });
 });
+
+describe('focusCommentHunk edge shapes', () => {
+  test('CRLF hunks are focused and keep their line endings', () => {
+    const hunk = ['@@ -0,0 +1,8 @@', ...Array.from({ length: 8 }, (_, i) => `+l${i + 1}`)].join('\r\n');
+    expect(focusCommentHunk(hunk, { side: 'RIGHT', line: 8 })).toBe(
+      ['@@ -0,0 +5,4 @@', '+l5', '+l6', '+l7', '+l8'].join('\r\n'),
+    );
+  });
+
+  test('a string with more than one hunk is left whole (numbering would not restart)', () => {
+    const hunk = '@@ -1,2 +1,2 @@\n a\n b\n@@ -3,2 +3,2 @@\n x\n+y\n z\n w';
+    expect(focusCommentHunk(hunk, { side: 'RIGHT', line: 4 })).toBe(hunk);
+  });
+});
