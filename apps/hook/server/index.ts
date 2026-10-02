@@ -175,6 +175,7 @@ import {
 } from "./codex-session";
 import { findCopilotPlanContent, findCopilotSessionByAncestorPids, findCopilotSessionForCwd, getRecentCopilotMessages } from "./copilot-session";
 import { resolveLatestVibePlan } from "./vibe-plan";
+import { resolveClaudePlan } from "./claude-plan";
 import {
   formatInteractiveNoArgClarification,
   formatSubcommandHelp,
@@ -2616,7 +2617,7 @@ if (args[0] === "sessions") {
     const planFilePath = path.join(projectTempDir, event.session_id, "plans", planFilename);
     planContent = await Bun.file(planFilePath).text();
   } else {
-    planContent = event.tool_input?.plan || "";
+    planContent = resolveClaudePlan(event.tool_input);
   }
 
   permissionMode = event.permission_mode || "default";
@@ -2704,8 +2705,10 @@ if (args[0] === "sessions") {
               // Echo the original tool_input as updatedInput. Claude Code
               // >= 2.1.199 silently drops an allow decision for ExitPlanMode
               // (a tool requiring user interaction) when updatedInput is
-              // absent, falling back to the built-in approval dialog.
-              updatedInput: event.tool_input,
+              // absent, falling back to the built-in approval dialog. Carry
+              // the reviewed plan so the approval names the version the user
+              // saw, not a stale inline snapshot.
+              updatedInput: { ...event.tool_input, plan: planContent },
               ...(updatedPermissions.length > 0 && { updatedPermissions }),
             },
           },
