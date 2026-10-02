@@ -145,21 +145,26 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   const dirty = saveMode && !!draft && !sameAnswer(draft.answer, savedAnswer);
   // Every edit goes through here: straight to the host in live mode, into the
   // draft in save mode.
+  // A draft edited back to the saved answer is dropped, so a later host
+  // update to `answer` shows instead of a stale copy.
   const onAnswer = onSaveAnswer
-    ? (_blockId: string, next: QuestionAnswer | null) => setDraft({ answer: next })
+    ? (_blockId: string, next: QuestionAnswer | null) =>
+        setDraft(sameAnswer(next, savedAnswer) ? null : { answer: next })
     : onLiveAnswer;
   const readOnly = !onAnswer;
 
   const save = () => {
     if (!onSaveAnswer || !draft || saving) return;
     const next = draft.answer && !isQuestionAnswerEmpty(draft.answer) ? draft.answer : null;
+    const submitted = draft;
     const result = onSaveAnswer(question.key, next);
     if (result && typeof (result as Promise<unknown>).then === 'function') {
       setSaving(true);
       (result as Promise<unknown>).then(
         () => {
           setSaving(false);
-          setDraft(null);
+          // An edit made while the save was in flight stays a draft.
+          setDraft((current) => (current === submitted ? null : current));
         },
         // A failed save keeps the draft; the host reports the error.
         () => setSaving(false),

@@ -248,4 +248,16 @@ describe('QuestionBlock explicit save mode', () => {
     await click(saveButton!);
     expect(saves).toHaveLength(1);
   });
+
+  test.skipIf(!hasDom)('an edit made while a save is in flight survives the save', async () => {
+    let resolveSave: () => void = () => {};
+    const el = await mount(<Harness save={() => new Promise<void>((r) => { resolveSave = r; })} />);
+    await click(radio(cards(el)[2], 'Yes'));
+    await click(button(cards(el)[2], 'Save answer')!);
+    await click(radio(cards(el)[2], 'No'));
+    await act(async () => resolveSave());
+    // The host now holds Yes; the newer No is still an unsaved draft.
+    expect(checkedLabel(cards(el)[2])).toContain('No');
+    expect(button(cards(el)[2], 'Save answer')).toBeDefined();
+  });
 });
