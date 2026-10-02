@@ -376,6 +376,7 @@ See HANDOFF.md § "Questions in documents (0.48.0, core 0.25.8)".
 
 - `questionAnswers` (Map or object keyed by the de-duplicated question key): the cards read answers from here instead of from `annotations`.
 - `onSaveQuestionAnswer(key, answer | null)`: explicit save mode. Edits stay a draft in the card, which shows Save answer and Cancel (no Skip); return a promise to hold the draft until the save settles.
+- `saveQuestionAnswerLabel` (string, or `(question) => string`): the Save button's label in explicit save mode. Default "Save answer"; never derived from `Decision: when answered`, since only the host knows whether its save records a decision.
 - `renderQuestionFooter(question, savedAnswer)`: host actions at the right of the card's footer (e.g. "Mark as decision"), live in read-only cards too.
 - Core reads a `Decision: when answered` line after the prompt as `ParsedQuestion.decisionOnAnswer` and a `Decision: [statement](https://…)` line as `ParsedQuestion.decision`; the card shows either. Neither changes the key.
 - `findQuestionBlocks(markdown)` (core) locates each question block by key, line range and exact text, without the UI parser; it shares the block splitter's rules through the new `@plannotator/core/markdown-structure` subpath, so it agrees with what renders.

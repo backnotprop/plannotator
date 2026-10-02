@@ -47,9 +47,11 @@ export const BlockRenderer: React.FC<{
   onAnswerQuestion?: (blockId: string, answer: QuestionAnswer | null, key: string) => void;
   /** Explicit save mode for question cards (see `QuestionBlock`). */
   onSaveQuestionAnswer?: QuestionBlockProps['onSaveAnswer'];
+  /** Label of the explicit-save-mode Save button (see `QuestionBlock`). */
+  saveQuestionAnswerLabel?: QuestionBlockProps['saveLabel'];
   /** Host actions in a question card's footer (see `QuestionBlock`). */
   renderQuestionFooter?: QuestionBlockProps['renderFooter'];
-}> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, repoHost, headingAnchorId, onNavigateAnchor, question, questionTotal, questionAnswer, onAnswerQuestion, onSaveQuestionAnswer, renderQuestionFooter }) => {
+}> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, repoHost, headingAnchorId, onNavigateAnchor, question, questionTotal, questionAnswer, onAnswerQuestion, onSaveQuestionAnswer, saveQuestionAnswerLabel, renderQuestionFooter }) => {
   switch (block.type) {
     case 'heading': {
       const Tag = `h${block.level || 1}` as React.ElementType;
@@ -174,6 +176,7 @@ export const BlockRenderer: React.FC<{
               answer={questionAnswer}
               onAnswer={onAnswerQuestion}
               onSaveAnswer={onSaveQuestionAnswer}
+              saveLabel={saveQuestionAnswerLabel}
               renderFooter={renderQuestionFooter}
               onOpenLinkedDoc={onOpenLinkedDoc}
               onOpenCodeFile={onOpenCodeFile}

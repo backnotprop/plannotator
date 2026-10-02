@@ -58,7 +58,9 @@ function Harness({
   save,
   footer,
   initial = {},
+  saveLabel,
 }: {
+  saveLabel?: React.ComponentProps<typeof BlockRenderer>['saveQuestionAnswerLabel'];
   readOnly?: boolean;
   save?: SaveFn;
   footer?: (q: IndexedQuestion, a: QuestionAnswer | undefined) => React.ReactNode;
@@ -95,6 +97,7 @@ function Harness({
             questionTotal={index.length}
             questionAnswer={question ? answers[question.question.key] : undefined}
             onSaveQuestionAnswer={readOnly ? undefined : onSave}
+            saveQuestionAnswerLabel={saveLabel}
             renderQuestionFooter={footer}
           />
         );
@@ -225,5 +228,24 @@ describe('QuestionBlock explicit save mode', () => {
     expect(saves).toHaveLength(2);
     expect(button(cards(el)[2], 'Save answer')).toBeUndefined();
     expect(checkedLabel(cards(el)[2])).toContain('Yes');
+  });
+
+  test.skipIf(!hasDom)('a host label function gets the question and labels the Save button', async () => {
+    const asked: string[] = [];
+    // Sentinel label: the host decides the wording, only the plumbing is under test.
+    const saveLabel = (q: { key: string; prompt: string }) => {
+      asked.push(q.key);
+      return `host-save:${q.prompt}`;
+    };
+    const el = await mount(<Harness save={() => {}} saveLabel={saveLabel} />);
+    const card = cards(el)[2];
+    await click(radio(card, 'No'));
+    const prompt = indexQuestionBlocks(parseMarkdownToBlocks(DOC))[2].question.prompt;
+    const saveButton = button(cards(el)[2], `host-save:${prompt}`);
+    expect(saveButton).toBeDefined();
+    expect(button(cards(el)[2], 'Save answer')).toBeUndefined();
+    expect(asked).toContain(card.dataset.questionKey!);
+    await click(saveButton!);
+    expect(saves).toHaveLength(1);
   });
 });

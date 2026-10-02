@@ -9,7 +9,7 @@ import { computeListIndices, groupBlocks, type Frontmatter, type FrontmatterValu
 import { buildHeadingSlugMap } from '../utils/slugify';
 import { copyTextToClipboard } from '../utils/clipboard';
 import { BlockRenderer } from './BlockRenderer';
-import { indexQuestionBlocks, type IndexedQuestion, type QuestionAnswer } from '@plannotator/core/question-block';
+import { indexQuestionBlocks, type IndexedQuestion, type ParsedQuestion, type QuestionAnswer } from '@plannotator/core/question-block';
 import { resolveQuestionAnswers } from '../utils/questionAnswers';
 import { CodeBlock } from './blocks/CodeBlock';
 import { TableBlock } from './blocks/TableBlock';
@@ -209,6 +209,10 @@ export interface ViewerProps {
    *  retry). Takes precedence over `onAnswerQuestion`. Ignored when
    *  `readOnly`. */
   onSaveQuestionAnswer?: (key: string, answer: QuestionAnswer | null) => void | Promise<unknown>;
+  /** Label of the explicit-save-mode Save button, or a function of the
+   *  question returning it. Default "Save answer"; never derived from
+   *  `decisionOnAnswer` (only the host knows whether saving records one). */
+  saveQuestionAnswerLabel?: string | ((question: ParsedQuestion) => string);
   /** Host actions at the right of a question card's footer (e.g. "Mark as
    *  decision"), given the indexed question and its saved answer. Rendered in
    *  read-only cards too; return null for none. */
@@ -583,6 +587,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   onAnswerQuestion,
   questionAnswers: hostQuestionAnswers,
   onSaveQuestionAnswer,
+  saveQuestionAnswerLabel,
   renderQuestionFooter,
   onAskAI,
   allowImages = true,
@@ -1539,6 +1544,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   questionAnswer={question ? answersByKey.get(question.question.key) : undefined}
                   onAnswerQuestion={readOnly ? undefined : onAnswerQuestion}
                   onSaveQuestionAnswer={readOnly ? undefined : onSaveQuestionAnswer}
+                  saveQuestionAnswerLabel={saveQuestionAnswerLabel}
                   renderQuestionFooter={renderQuestionFooter}
                 />
               );

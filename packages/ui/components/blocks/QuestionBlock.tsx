@@ -5,6 +5,7 @@ import {
   questionStatus,
   recommendedQuestionAnswer,
   type IndexedQuestion,
+  type ParsedQuestion,
   type QuestionAnswer,
 } from '@plannotator/core/question-block';
 import { InlineMarkdown } from '../InlineMarkdown';
@@ -101,6 +102,9 @@ export interface QuestionBlockProps {
    *  and the answer (null when the draft is empty). The host stores it and
    *  passes it back as `answer`. */
   onSaveAnswer?: (key: string, answer: QuestionAnswer | null) => QuestionSaveResult;
+  /** Label of the explicit-save-mode Save button (default "Save answer"),
+   *  or a function of the question that returns it. */
+  saveLabel?: string | ((question: ParsedQuestion) => string);
   /** Host actions at the right end of the footer, given the question and its
    *  saved answer (never the unsaved draft). Rendered in read-only cards too;
    *  return null for nothing. */
@@ -121,6 +125,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   answer: savedAnswer,
   onAnswer: onLiveAnswer,
   onSaveAnswer,
+  saveLabel,
   renderFooter,
   onOpenLinkedDoc,
   onOpenCodeFile,
@@ -568,7 +573,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                     aria-busy={saving || undefined}
                     className="rounded-md bg-primary px-2.5 py-[3px] text-[12.5px] font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-60"
                   >
-                    Save answer
+                    {(typeof saveLabel === 'function' ? saveLabel(question) : saveLabel) || 'Save answer'}
                   </button>
                 </>
               )}
