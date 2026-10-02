@@ -14,6 +14,7 @@ import {
   nextOpenQuestionKey,
   questionAnswerToAnnotation,
   questionProgress,
+  resolveQuestionAnswers,
   upsertQuestionAnswerAnnotation,
 } from './questionAnswers';
 
@@ -125,5 +126,29 @@ Fourth?
 
   test('a document without questions or answers has no rows', () => {
     expect(buildQuestionPanelRows(parseMarkdownToBlocks('# Plan\n\nText.\n'), [other])).toEqual([]);
+  });
+});
+
+describe("resolveQuestionAnswers", () => {
+  const stored = questionAnswerToAnnotation("block-1", answer({ selected: ["From annotation"] }));
+
+  test("without host answers the cards read the annotation list", () => {
+    expect(resolveQuestionAnswers([other, stored]).get(KEY)?.selected).toEqual(["From annotation"]);
+  });
+
+  test("host answers replace the annotation path, from a Map or a plain object", () => {
+    const hostAnswer = answer({ selected: ["From host"] });
+    for (const hostAnswers of [new Map([[KEY, hostAnswer]]), { [KEY]: hostAnswer }]) {
+      const out = resolveQuestionAnswers([stored], hostAnswers);
+      expect(out.get(KEY)?.selected).toEqual(["From host"]);
+      expect(out.size).toBe(1);
+    }
+    // An empty host map is still the host speaking: no answers, not the annotation.
+    expect(resolveQuestionAnswers([stored], {}).size).toBe(0);
+  });
+
+  test("a malformed host entry is dropped, not thrown on", () => {
+    const out = resolveQuestionAnswers([], { [KEY]: { v: 2 } as unknown as QuestionAnswer, "q-0000000b": answer({ key: "q-0000000b", selected: ["B"] }) });
+    expect([...out.keys()]).toEqual(["q-0000000b"]);
   });
 });

@@ -44,7 +44,27 @@
  *   case-insensitive; a `label — reason` tail is allowed) marks that choice
  *   recommended; on a multi question a `,` / `;` / `and` list may name
  *   several. Anything else is a suggested free-text answer.
+ * - Decision: a `Decision:` line after the prompt, at the start of a line,
+ *   says what answering means for the asker's project. `Decision: when
+ *   answered` (case-insensitive, optional trailing period) flags the question:
+ *   its answer should become a recorded decision (`decisionOnAnswer`).
+ *   `Decision: [statement](https://…)` (exactly one markdown link, http(s)
+ *   only) says the decision exists (`decision`); it replaces the flag, and
+ *   when both are present the link wins. Each form is read once per block;
+ *   any other `Decision:` value is context prose. A `Decision:` line BEFORE
+ *   the prompt is the prompt. Neither form changes the question key.
  */
+
+import {
+  DIRECTIVE_OPEN_RE,
+  codeFenceCloseIndex,
+  directiveCloseIndex,
+  htmlBlockEndAt,
+  resolveReferenceLinks,
+  scanDisplayMath,
+  splitFrontmatter,
+  type TagCloseIndex,
+} from './markdown-structure';
 
 export const QUESTION_DIRECTIVE_KINDS = ['question', 'question-multi', 'question-text'] as const;
 export type QuestionDirectiveKind = (typeof QUESTION_DIRECTIVE_KINDS)[number];
@@ -81,6 +101,20 @@ export interface ParsedQuestion {
   suggestedText?: string;
   /** Stable identity: `q-` + hash8(kind + prompt). See questionKey. */
   key: string;
+  /** `Decision: when answered`: the asker flagged that answering this
+   *  question records a decision. Absent when not flagged, and absent when a
+   *  `decision` link is present (the link wins). */
+  decisionOnAnswer?: true;
+  /** `Decision: [statement](url)`: the decision this question became. */
+  decision?: QuestionDecisionLink;
+}
+
+/** A recorded decision a question links to (`Decision: [statement](url)`). */
+export interface QuestionDecisionLink {
+  /** The link text as written (inline markdown). */
+  statement: string;
+  /** An absolute http(s) URL. */
+  url: string;
 }
 
 /** Caps. Parsing is bounded; answers are truncated to these on validation. */
@@ -97,6 +131,28 @@ const PLAIN_BULLET_RE = /^\s*[-*+]\s+(.*)$/;
 const RECOMMENDED_RE = /^\s*(?:[*_]{1,2})?(?:recommended|recommendation)(?:[*_]{1,2})?\s*:\s*(?:[*_]{1,2})?\s*(.*)$/i;
 const ARROW_RE = /^\s*(?:➡️|➡|->|=>|→)\s*(.*)$/;
 const LABEL_DESC_SEP_RE = /\s+(?:—|–|-)\s+/;
+// At the start of the line (no indentation), so an indented line under a
+// choice stays that choice's continuation.
+const DECISION_RE = /^decision\s*:\s*(.*?)\s*$/i;
+const DECISION_FLAG_RE = /^when answered\.?$/i;
+const DECISION_LINK_RE = /^\[([^\]]+)\]\((\S+)\)\.?$/;
+
+/** The decision link a `Decision:` value names, or null when the value is not
+ *  exactly one markdown link to an absolute http(s) URL. */
+const parseDecisionLink = (value: string): QuestionDecisionLink | null => {
+  const m = value.match(DECISION_LINK_RE);
+  if (!m) return null;
+  const statement = m[1].trim();
+  if (!statement) return null;
+  let url: URL;
+  try {
+    url = new URL(m[2]);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+  return { statement, url: m[2] };
+};
 
 const splitLabel = (raw: string): { label: string; description?: string } => {
   const idx = raw.search(LABEL_DESC_SEP_RE);
@@ -184,6 +240,8 @@ export const parseQuestionBlock = (directiveKind: string | undefined, body: stri
   const plainBullets: { text: string; contextIndex: number }[] = [];
   let recommendation: string | undefined;
   let lastChoice = -1;
+  let decisionFlag = false;
+  let decision: QuestionDecisionLink | undefined;
 
   const pushContext = (line: string) => {
     contextLines.push(line);
@@ -224,6 +282,20 @@ export const parseQuestionBlock = (directiveKind: string | undefined, body: stri
       prompt = line.trim().replace(/^#{1,6}\s+/, '');
       promptLine = i;
       continue;
+    }
+    const decisionLine = line.match(DECISION_RE);
+    if (decisionLine) {
+      if (!decisionFlag && DECISION_FLAG_RE.test(decisionLine[1])) {
+        decisionFlag = true;
+        lastChoice = -1;
+        continue;
+      }
+      const link = decision ? null : parseDecisionLink(decisionLine[1]);
+      if (link) {
+        decision = link;
+        lastChoice = -1;
+        continue;
+      }
     }
     // An indented line right under a choice continues that choice.
     if (lastChoice !== -1 && /^\s+\S/.test(line)) {
@@ -283,6 +355,7 @@ export const parseQuestionBlock = (directiveKind: string | undefined, body: stri
     ...(recommendation ? { recommendation } : {}),
     ...(suggestedText ? { suggestedText } : {}),
     key: questionKey(kind, prompt),
+    ...(decision ? { decision } : decisionFlag ? { decisionOnAnswer: true as const } : {}),
   };
 };
 
@@ -305,6 +378,18 @@ export interface IndexedQuestion {
   question: ParsedQuestion;
 }
 
+/** The one de-duplication rule for keys within a document: the first block
+ *  with a key keeps it, later ones get `-2`, `-3`… in document order. Shared
+ *  by `indexQuestionBlocks` and `findQuestionBlocks` so they cannot differ. */
+const questionKeyDeduper = (): ((key: string) => string) => {
+  const seen = new Map<string, number>();
+  return (key) => {
+    const count = (seen.get(key) ?? 0) + 1;
+    seen.set(key, count);
+    return count === 1 ? key : `${key}-${count}`;
+  };
+};
+
 /**
  * Every parseable question block of a document, in document order, numbered
  * from 1. Keys are de-duplicated with a `-2`, `-3`… suffix so two identical
@@ -312,14 +397,12 @@ export interface IndexedQuestion {
  */
 export const indexQuestionBlocks = (blocks: ReadonlyArray<QuestionSourceBlock>): IndexedQuestion[] => {
   const out: IndexedQuestion[] = [];
-  const seen = new Map<string, number>();
+  const dedupe = questionKeyDeduper();
   for (const block of blocks) {
     if (block.type !== 'directive' || !isQuestionDirectiveKind(block.directiveKind)) continue;
     const parsed = parseQuestionBlock(block.directiveKind, block.content);
     if (!parsed) continue;
-    const count = (seen.get(parsed.key) ?? 0) + 1;
-    seen.set(parsed.key, count);
-    const key = count === 1 ? parsed.key : `${parsed.key}-${count}`;
+    const key = dedupe(parsed.key);
     out.push({
       blockId: block.id,
       number: out.length + 1,
@@ -327,6 +410,98 @@ export const indexQuestionBlocks = (blocks: ReadonlyArray<QuestionSourceBlock>):
       line: block.startLine + 1 + parsed.promptLine,
       question: { ...parsed, key },
     });
+  }
+  return out;
+};
+
+/** Where one question block sits in a markdown document (see
+ *  `findQuestionBlocks`). */
+export interface QuestionBlockLocation {
+  /** The block's key, de-duplicated exactly as `indexQuestionBlocks` does it
+   *  (`-2`, `-3`… for repeated prompts). Address a block by this key. */
+  key: string;
+  directiveKind: QuestionDirectiveKind;
+  /** 1-based line of the opening `:::question…`. */
+  startLine: number;
+  /** 1-based line of the closing `:::`, or the document's last line when the
+   *  block is never closed (it then runs to the end, as it renders). */
+  endLine: number;
+  /** The exact source text of lines `startLine`..`endLine`, joined with `\n`
+   *  (a `\r` before each newline is kept). */
+  text: string;
+}
+
+/**
+ * Every parseable question block of a markdown document, in document order,
+ * located by line. For a server that has to find or verify a question without
+ * the UI parser: the keys and block boundaries are the ones `@plannotator/ui`
+ * renders, because both split the document with the same
+ * `./markdown-structure` helpers (frontmatter, backtick code fences, display
+ * math, directives, raw HTML blocks, link reference resolution). A
+ * `:::question` inside a code fence, inside an HTML block, inside another
+ * directive's body, or behind a blockquote marker is not a block.
+ *
+ * `frontmatter: false` matches `parseMarkdownToBlocks(markdown, { frontmatter:
+ * false })`; the default strips a leading `--- … ---` block like it does.
+ */
+export const findQuestionBlocks = (
+  markdown: string,
+  options: { frontmatter?: boolean } = {},
+): QuestionBlockLocation[] => {
+  if (typeof markdown !== 'string') return [];
+  const { content, contentStartLine } = options.frontmatter === false
+    ? { content: markdown, contentStartLine: 1 }
+    : splitFrontmatter(markdown);
+  const source = markdown.split('\n');
+  const lines = resolveReferenceLinks(content).split('\n');
+  const closeCache = new Map<string, TagCloseIndex>();
+  const dedupe = questionKeyDeduper();
+  const out: QuestionBlockLocation[] = [];
+
+  // The block splitter's multi-line constructs, in its order. Every other
+  // construct it knows (headings, rules, list items, quotes, tables,
+  // paragraphs) is one line here and cannot hide a `:::` opener: those lines
+  // start with a different character, and the splitter tests them first.
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (trimmed.startsWith('```')) {
+      i = codeFenceCloseIndex(lines, i);
+      continue;
+    }
+    const mathDelimiter = trimmed.startsWith('$$') ? '$$' : trimmed.startsWith('\\[') ? '\\[' : null;
+    const math = mathDelimiter ? scanDisplayMath(lines, i, mathDelimiter) : null;
+    if (math) {
+      i = math.closeLine;
+      // Text after the close is read again as its own line, as the splitter does.
+      if (math.remainder) {
+        lines[i] = math.remainder;
+        i--;
+      }
+      continue;
+    }
+    const directiveOpen = trimmed.match(DIRECTIVE_OPEN_RE);
+    if (directiveOpen) {
+      const close = directiveCloseIndex(lines, i);
+      const kind = directiveOpen[1].toLowerCase();
+      if (isQuestionDirectiveKind(kind)) {
+        const parsed = parseQuestionBlock(kind, lines.slice(i + 1, close).join('\n'));
+        if (parsed) {
+          const startLine = i + contentStartLine;
+          const endLine = Math.min(close, lines.length - 1) + contentStartLine;
+          out.push({
+            key: dedupe(parsed.key),
+            directiveKind: kind,
+            startLine,
+            endLine,
+            text: source.slice(startLine - 1, endLine).join('\n'),
+          });
+        }
+      }
+      i = close;
+      continue;
+    }
+    const htmlEnd = htmlBlockEndAt(lines, i, closeCache);
+    if (htmlEnd !== -1) i = htmlEnd;
   }
   return out;
 };

@@ -283,7 +283,10 @@ describe('QuestionBlock', () => {
     }, q.question.key);
     const el = await mount(<Harness markdown={DOC} readOnly initial={stored} />);
     const card = cards(el)[0];
-    expect(card.disabled).toBe(true);
+    // Each control is disabled (not the fieldset, so host footer actions stay live).
+    const controls = card.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea');
+    expect(controls.length).toBeGreaterThan(0);
+    for (const control of controls) expect(control.disabled).toBe(true);
     expect(button(card, 'Skip')).toBeUndefined();
     expect(card.querySelector<HTMLInputElement>('input:checked')!.closest('label')!.textContent).toContain('Nowhere');
     expect(card.querySelector('textarea')!.value).toBe('keep it simple');

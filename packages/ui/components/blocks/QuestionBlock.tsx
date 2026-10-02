@@ -23,10 +23,18 @@ import { renderProseBody } from './proseBody';
  * the pointer barely moved and no text is selected, so a drag across option
  * text makes an annotation, never a pick.
  *
- * State is derived: `answer` comes from the document's annotations (the one
- * carrying `questionAnswer` for this key). Every change calls `onAnswer` with
- * the next answer, or null when it became empty; the host upserts or removes
- * the annotation. Without `onAnswer` the block is read-only.
+ * State is derived: `answer` comes from the host (Plannotator: the document's
+ * annotation carrying `questionAnswer` for this key). Two ways to write:
+ * - live (`onAnswer`): every change calls it with the next answer, or null
+ *   when it became empty; the host upserts or removes the annotation.
+ * - explicit save (`onSaveAnswer`): changes stay a local draft; the footer
+ *   shows Save answer and Cancel (and no Skip), Save calls `onSaveAnswer`
+ *   once, Cancel returns to the host's answer.
+ * With neither the block is read-only.
+ *
+ * A host can add its own actions at the right of the footer
+ * (`renderFooter`), and a question carrying `Decision: when answered` or a
+ * `Decision: [statement](url)` link shows that beside the prompt.
  */
 
 /** Pointer travel (px) above which a press on a choice row is a drag. */
@@ -62,6 +70,25 @@ const CheckGlyph = () => (
   </svg>
 );
 
+const DiamondGlyph = () => (
+  <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className="shrink-0">
+    <path d="M2.7 10.3a2.41 2.41 0 0 0 0 3.41l7.59 7.59a2.41 2.41 0 0 0 3.41 0l7.59-7.59a2.41 2.41 0 0 0 0-3.41l-7.59-7.59a2.41 2.41 0 0 0-3.41 0Z" strokeLinejoin="round" />
+  </svg>
+);
+
+/** Two answers say the same thing (identity and line ignored). */
+const sameAnswer = (a: QuestionAnswer | null | undefined, b: QuestionAnswer | null | undefined): boolean => {
+  const norm = (x: QuestionAnswer | null | undefined) =>
+    !x || isQuestionAnswerEmpty(x)
+      ? ''
+      : JSON.stringify([x.selected, x.other ?? '', x.text ?? '', x.note ?? '', !!x.skipped]);
+  return norm(a) === norm(b);
+};
+
+/** What `onSaveAnswer` may return: nothing (the save is done), or a promise
+ *  the card waits on (rejecting keeps the draft so the reviewer can retry). */
+export type QuestionSaveResult = void | Promise<unknown>;
+
 export interface QuestionBlockProps {
   blockId: string;
   indexed: IndexedQuestion;
@@ -69,6 +96,15 @@ export interface QuestionBlockProps {
   total: number;
   answer?: QuestionAnswer;
   onAnswer?: (blockId: string, answer: QuestionAnswer | null, key: string) => void;
+  /** Explicit save mode (takes precedence over `onAnswer`): edits stay a
+   *  draft in the card until Save, which calls this with the question's key
+   *  and the answer (null when the draft is empty). The host stores it and
+   *  passes it back as `answer`. */
+  onSaveAnswer?: (key: string, answer: QuestionAnswer | null) => QuestionSaveResult;
+  /** Host actions at the right end of the footer, given the question and its
+   *  saved answer (never the unsaved draft). Rendered in read-only cards too;
+   *  return null for nothing. */
+  renderFooter?: (question: IndexedQuestion, answer: QuestionAnswer | undefined) => React.ReactNode;
   onOpenLinkedDoc?: (path: string) => void;
   onOpenCodeFile?: (path: string) => void;
   imageBaseDir?: string;
@@ -82,8 +118,10 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   blockId,
   indexed,
   total,
-  answer,
-  onAnswer,
+  answer: savedAnswer,
+  onAnswer: onLiveAnswer,
+  onSaveAnswer,
+  renderFooter,
   onOpenLinkedDoc,
   onOpenCodeFile,
   imageBaseDir,
@@ -93,7 +131,44 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   onNavigateAnchor,
 }) => {
   const { question, number } = indexed;
+  const saveMode = !!onSaveAnswer;
+  // Save mode: the unsaved draft (null = the reviewer emptied it). Absent
+  // means the card shows the host's answer.
+  const [draft, setDraft] = useState<{ answer: QuestionAnswer | null } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const answer: QuestionAnswer | undefined = saveMode && draft ? draft.answer ?? undefined : savedAnswer;
+  const dirty = saveMode && !!draft && !sameAnswer(draft.answer, savedAnswer);
+  // Every edit goes through here: straight to the host in live mode, into the
+  // draft in save mode.
+  const onAnswer = onSaveAnswer
+    ? (_blockId: string, next: QuestionAnswer | null) => setDraft({ answer: next })
+    : onLiveAnswer;
   const readOnly = !onAnswer;
+
+  const save = () => {
+    if (!onSaveAnswer || !draft || saving) return;
+    const next = draft.answer && !isQuestionAnswerEmpty(draft.answer) ? draft.answer : null;
+    const result = onSaveAnswer(question.key, next);
+    if (result && typeof (result as Promise<unknown>).then === 'function') {
+      setSaving(true);
+      (result as Promise<unknown>).then(
+        () => {
+          setSaving(false);
+          setDraft(null);
+        },
+        // A failed save keeps the draft; the host reports the error.
+        () => setSaving(false),
+      );
+    } else {
+      setDraft(null);
+    }
+  };
+  const cancel = () => {
+    setDraft(null);
+    setNotePinned(null);
+  };
+  const hostFooter = renderFooter?.(indexed, savedAnswer);
+  const hasHostFooter = hostFooter !== null && hostFooter !== undefined && hostFooter !== false;
   const uid = useId().replace(/:/g, '');
   const promptId = `q-prompt-${uid}`;
   const contextId = `q-context-${uid}`;
@@ -249,11 +324,14 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       data-question-status={status}
       aria-labelledby={promptId}
       aria-describedby={describedBy}
-      disabled={readOnly}
+      aria-disabled={readOnly || undefined}
+      data-question-decision={question.decision ? 'recorded' : question.decisionOnAnswer ? 'on-answer' : undefined}
     >
       <div className="annotation-exclude select-none mb-1.5 flex items-center gap-2" data-pinpoint-ignore="">
         <span className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{eyebrow}</span>
         <span className="ml-auto">
+          {question.decision && <><Tag tone="rec"><DiamondGlyph />Decision</Tag>{' '}</>}
+          {!question.decision && question.decisionOnAnswer && <><Tag tone="rec"><DiamondGlyph />Records a decision</Tag>{' '}</>}
           {status === 'answered' && <Tag tone="ok"><CheckGlyph />Answered</Tag>}
           {status === 'settled' && <Tag tone="ok"><CheckGlyph />Settled</Tag>}
           {status === 'skipped' && <Tag tone="skip">Skipped</Tag>}
@@ -264,6 +342,31 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       <p id={promptId} className="m-0 text-[15px] font-semibold leading-[1.45] text-foreground">
         {inline(question.prompt)}
       </p>
+      {(question.decision || question.decisionOnAnswer) && (
+        <div
+          className="annotation-exclude mt-2 mb-0.5 flex items-center gap-2 rounded-lg bg-primary/8 px-[9px] py-1.5 text-[12.5px] leading-[18px] text-foreground [&>svg]:text-primary"
+          data-pinpoint-ignore=""
+          data-question-decision-row=""
+        >
+          <DiamondGlyph />
+          {question.decision ? (
+            <span className="min-w-0">
+              <span className="select-none text-muted-foreground">Decision: </span>
+              <a
+                href={question.decision.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary underline underline-offset-2 hover:text-primary/80"
+              >
+                {/* Plain text: inline markdown here could nest an autolink in the link. */}
+                {question.decision.statement}
+              </a>
+            </span>
+          ) : (
+            <span className="select-none">Answering this records a decision</span>
+          )}
+        </div>
+      )}
       {question.context && (
         <div id={contextId} className="mt-1 text-[13px] leading-normal text-muted-foreground">
           {renderProseBody({
@@ -310,6 +413,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
             placeholder={readOnly ? '' : 'Type your answer…'}
             value={answer?.text ?? ''}
             onChange={(e) => setText(e.target.value)}
+            disabled={readOnly}
           />
         </>
       ) : (
@@ -338,6 +442,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                   checked={checked}
                   onChange={(e) => pick(choice.label, e.target.checked)}
                   className="mt-[3px] h-[15px] w-[15px] shrink-0 cursor-pointer accent-primary disabled:cursor-default"
+                  disabled={readOnly}
                 />
                 <span className="min-w-0 flex-1 select-text text-[13.5px] leading-[1.45] text-foreground">
                   <span className="font-[550]">{inline(choice.label)}</span>
@@ -364,6 +469,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
               type="text"
               value={other}
               onChange={(e) => setOther(e.target.value)}
+              disabled={readOnly}
               placeholder={readOnly ? '' : 'Other…'}
               aria-label={number > 0 ? `Other answer to question ${number}` : 'Other answer'}
               className="annotation-exclude min-w-0 flex-1 border-0 border-b border-transparent bg-transparent py-[3px] text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring"
@@ -384,45 +490,89 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
             placeholder="Context for the agent…"
             value={answer?.note ?? ''}
             onChange={(e) => setNote(e.target.value)}
+            disabled={readOnly}
           />
         </div>
       )}
 
-      {!readOnly && (
+      {(!readOnly || hasHostFooter) && (
         <div
           className="annotation-exclude select-none mt-2 flex items-center gap-1 border-t border-border/55 pt-1.5"
           data-pinpoint-ignore=""
         >
-          <button
-            type="button"
-            onClick={toggleNote}
-            aria-expanded={noteOpen}
-            className={cx(
-              'rounded-[5px] px-[7px] py-[3px] text-xs hover:bg-muted hover:text-foreground',
-              noteOpen ? 'text-foreground' : 'text-muted-foreground',
-            )}
-          >
-            {noteOpen ? 'Hide note' : 'Add note'}
-          </button>
-          <button
-            type="button"
-            onClick={toggleSkip}
-            aria-pressed={skipped}
-            className={cx(
-              'rounded-[5px] px-[7px] py-[3px] text-xs hover:bg-muted hover:text-foreground',
-              skipped ? 'text-foreground' : 'text-muted-foreground',
-            )}
-          >
-            {skipped ? 'Unskip' : 'Skip'}
-          </button>
-          {!answered && !settled && hasRecommendation && (
+          {!readOnly && (
             <button
               type="button"
-              onClick={acceptRecommended}
-              className="ml-auto rounded-md border border-primary/45 bg-primary/10 px-2.5 py-[3px] text-[12.5px] font-medium text-primary hover:bg-primary/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              onClick={toggleNote}
+              aria-expanded={noteOpen}
+              className={cx(
+                'rounded-[5px] px-[7px] py-[3px] text-xs hover:bg-muted hover:text-foreground',
+                noteOpen ? 'text-foreground' : 'text-muted-foreground',
+              )}
             >
-              Accept recommended
+              {noteOpen ? 'Hide note' : 'Add note'}
             </button>
+          )}
+          {/* Skip is a live-mode draft state; an explicit save never writes it. */}
+          {!readOnly && !saveMode && (
+            <button
+              type="button"
+              onClick={toggleSkip}
+              aria-pressed={skipped}
+              className={cx(
+                'rounded-[5px] px-[7px] py-[3px] text-xs hover:bg-muted hover:text-foreground',
+                skipped ? 'text-foreground' : 'text-muted-foreground',
+              )}
+            >
+              {skipped ? 'Unskip' : 'Skip'}
+            </button>
+          )}
+          {/* Plannotator's own footer (no host actions, no save bar) keeps the
+              Accept button as the one right-aligned item. */}
+          {!hasHostFooter && !dirty ? (
+            !readOnly && !answered && !settled && hasRecommendation && (
+              <button
+                type="button"
+                onClick={acceptRecommended}
+                className="ml-auto rounded-md border border-primary/45 bg-primary/10 px-2.5 py-[3px] text-[12.5px] font-medium text-primary hover:bg-primary/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              >
+                Accept recommended
+              </button>
+            )
+          ) : (
+            <div className="ml-auto flex items-center gap-1">
+              {!readOnly && !answered && !settled && hasRecommendation && (
+                <button
+                  type="button"
+                  onClick={acceptRecommended}
+                  className="rounded-md border border-primary/45 bg-primary/10 px-2.5 py-[3px] text-[12.5px] font-medium text-primary hover:bg-primary/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                >
+                  Accept recommended
+                </button>
+              )}
+              {hasHostFooter && <span className="inline-flex items-center gap-1" data-question-host-footer="">{hostFooter}</span>}
+              {dirty && (
+                <>
+                  <button
+                    type="button"
+                    onClick={cancel}
+                    disabled={saving}
+                    className="rounded-[5px] px-[7px] py-[3px] text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-60"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={save}
+                    disabled={saving}
+                    aria-busy={saving || undefined}
+                    className="rounded-md bg-primary px-2.5 py-[3px] text-[12.5px] font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-60"
+                  >
+                    Save answer
+                  </button>
+                </>
+              )}
+            </div>
           )}
         </div>
       )}

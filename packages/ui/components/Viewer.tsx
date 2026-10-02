@@ -9,8 +9,8 @@ import { computeListIndices, groupBlocks, type Frontmatter, type FrontmatterValu
 import { buildHeadingSlugMap } from '../utils/slugify';
 import { copyTextToClipboard } from '../utils/clipboard';
 import { BlockRenderer } from './BlockRenderer';
-import { indexQuestionBlocks, type QuestionAnswer } from '@plannotator/core/question-block';
-import { collectQuestionAnswers } from '../utils/questionAnswers';
+import { indexQuestionBlocks, type IndexedQuestion, type QuestionAnswer } from '@plannotator/core/question-block';
+import { resolveQuestionAnswers } from '../utils/questionAnswers';
 import { CodeBlock } from './blocks/CodeBlock';
 import { TableBlock } from './blocks/TableBlock';
 import { TableToolbar } from './blocks/TableToolbar';
@@ -196,6 +196,23 @@ export interface ViewerProps {
    *  `upsertQuestionAnswerAnnotation` in `utils/questionAnswers`). Absent (or
    *  `readOnly`), question blocks render read-only. */
   onAnswerQuestion?: (blockId: string, answer: QuestionAnswer | null, key: string) => void;
+  /** Host-kept answers, keyed by the question's (de-duplicated) key from
+   *  `indexQuestionBlocks` / `findQuestionBlocks`. When given, the cards read
+   *  their answers from here and never from `annotations`; entries that fail
+   *  `parseQuestionAnswer` are ignored. Absent: answers come from the
+   *  annotations carrying `questionAnswer` (Plannotator's own path). */
+  questionAnswers?: ReadonlyMap<string, QuestionAnswer> | Readonly<Record<string, QuestionAnswer>>;
+  /** Explicit save mode for question cards: edits stay a draft in the card,
+   *  which shows Save answer and Cancel (and no Skip); Save calls this with
+   *  the question's key and the answer, or null when the draft is empty. Return
+   *  a promise to keep the draft until it settles (a rejection keeps it for a
+   *  retry). Takes precedence over `onAnswerQuestion`. Ignored when
+   *  `readOnly`. */
+  onSaveQuestionAnswer?: (key: string, answer: QuestionAnswer | null) => void | Promise<unknown>;
+  /** Host actions at the right of a question card's footer (e.g. "Mark as
+   *  decision"), given the indexed question and its saved answer. Rendered in
+   *  read-only cards too; return null for none. */
+  renderQuestionFooter?: (question: IndexedQuestion, answer: QuestionAnswer | undefined) => React.ReactNode;
   onAskAI?: CommentAskAIHandler;
   /** Whether comment popovers offer image attachments. Hosts without an
    *  uploadTransport pass false so the attach affordance never dead-ends.
@@ -564,6 +581,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   onToggleCheckbox,
   checkboxOverrides,
   onAnswerQuestion,
+  questionAnswers: hostQuestionAnswers,
+  onSaveQuestionAnswer,
+  renderQuestionFooter,
   onAskAI,
   allowImages = true,
   readOnly = false,
@@ -633,7 +653,12 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     const list = indexQuestionBlocks(blocks);
     return { byBlock: new Map(list.map((q) => [q.blockId, q])), total: list.length };
   }, [blocks]);
-  const questionAnswers = useMemo(() => collectQuestionAnswers(annotations), [annotations]);
+  // A host that keeps answers itself (`questionAnswers`) replaces the
+  // annotation-derived map; each entry is validated like any other reader.
+  const answersByKey = useMemo(
+    () => resolveQuestionAnswers(annotations, hostQuestionAnswers),
+    [annotations, hostQuestionAnswers],
+  );
   const isTouchDevice = useMemo(() => window.matchMedia('(pointer: coarse)').matches, []);
   const [codeBlockToolbar, setCodeBlockToolbar] =
     useState<CodeBlockToolbarTarget | null>(null);
@@ -1511,8 +1536,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   headingAnchorId={headingSlugMap.get(group.block.id)}
                   question={question}
                   questionTotal={questionIndex.total}
-                  questionAnswer={question ? questionAnswers.get(question.question.key) : undefined}
+                  questionAnswer={question ? answersByKey.get(question.question.key) : undefined}
                   onAnswerQuestion={readOnly ? undefined : onAnswerQuestion}
+                  onSaveQuestionAnswer={readOnly ? undefined : onSaveQuestionAnswer}
+                  renderQuestionFooter={renderQuestionFooter}
                 />
               );
             })()

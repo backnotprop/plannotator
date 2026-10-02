@@ -8,7 +8,7 @@ import { Callout } from "./blocks/Callout";
 import { AlertBlock } from "./blocks/AlertBlock";
 import { TableBlock } from "./blocks/TableBlock";
 import { MathBlock } from "./blocks/MathBlock";
-import { QuestionBlock } from "./blocks/QuestionBlock";
+import { QuestionBlock, type QuestionBlockProps } from "./blocks/QuestionBlock";
 import {
   indexQuestionBlocks,
   isQuestionDirectiveKind,
@@ -45,7 +45,11 @@ export const BlockRenderer: React.FC<{
   questionAnswer?: QuestionAnswer;
   /** Absent: question blocks render read-only. */
   onAnswerQuestion?: (blockId: string, answer: QuestionAnswer | null, key: string) => void;
-}> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, repoHost, headingAnchorId, onNavigateAnchor, question, questionTotal, questionAnswer, onAnswerQuestion }) => {
+  /** Explicit save mode for question cards (see `QuestionBlock`). */
+  onSaveQuestionAnswer?: QuestionBlockProps['onSaveAnswer'];
+  /** Host actions in a question card's footer (see `QuestionBlock`). */
+  renderQuestionFooter?: QuestionBlockProps['renderFooter'];
+}> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, repoHost, headingAnchorId, onNavigateAnchor, question, questionTotal, questionAnswer, onAnswerQuestion, onSaveQuestionAnswer, renderQuestionFooter }) => {
   switch (block.type) {
     case 'heading': {
       const Tag = `h${block.level || 1}` as React.ElementType;
@@ -169,6 +173,8 @@ export const BlockRenderer: React.FC<{
               total={questionTotal ?? 0}
               answer={questionAnswer}
               onAnswer={onAnswerQuestion}
+              onSaveAnswer={onSaveQuestionAnswer}
+              renderFooter={renderQuestionFooter}
               onOpenLinkedDoc={onOpenLinkedDoc}
               onOpenCodeFile={onOpenCodeFile}
               imageBaseDir={imageBaseDir}

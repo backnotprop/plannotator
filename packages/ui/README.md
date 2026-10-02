@@ -372,6 +372,16 @@ An agent writes `:::question` (pick one), `:::question-multi` (pick any) or `:::
 
 See HANDOFF.md § "Questions in documents (0.48.0, core 0.25.8)".
 
+**A host that keeps answers itself (ui 0.49.0, core 0.25.9; unpublished).** All optional on `Viewer`; Plannotator passes none of them:
+
+- `questionAnswers` (Map or object keyed by the de-duplicated question key): the cards read answers from here instead of from `annotations`.
+- `onSaveQuestionAnswer(key, answer | null)`: explicit save mode. Edits stay a draft in the card, which shows Save answer and Cancel (no Skip); return a promise to hold the draft until the save settles.
+- `renderQuestionFooter(question, savedAnswer)`: host actions at the right of the card's footer (e.g. "Mark as decision"), live in read-only cards too.
+- Core reads a `Decision: when answered` line after the prompt as `ParsedQuestion.decisionOnAnswer` and a `Decision: [statement](https://…)` line as `ParsedQuestion.decision`; the card shows either. Neither changes the key.
+- `findQuestionBlocks(markdown)` (core) locates each question block by key, line range and exact text, without the UI parser; it shares the block splitter's rules through the new `@plannotator/core/markdown-structure` subpath, so it agrees with what renders.
+
+See HANDOFF.md § "Question host seams (ui 0.49.0, core 0.25.9; unpublished)".
+
 ## Consuming it (e.g. from Workspaces)
 
 ```bash

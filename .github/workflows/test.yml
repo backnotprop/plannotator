@@ -117,6 +117,7 @@ jobs:
           packages/ui/components/MermaidBlock.theme.test.tsx
           packages/ui/components/DiagramBlock.anchor.test.tsx
           packages/ui/components/blocks/QuestionBlock.test.tsx
+          packages/ui/components/blocks/QuestionBlock.host.test.tsx
           packages/ui/hooks/useAnnotationHighlighter.questionSkip.test.tsx
           packages/ui/hooks/usePinpoint.question.test.tsx
           packages/ui/components/AnnotationPanel.questions.test.tsx
