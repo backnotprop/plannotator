@@ -23,6 +23,7 @@ import {
 } from "./call-flow-languages";
 import type { CallFlowLanguageDefinition, CallFlowLanguageId } from "./call-flow-languages";
 import { getPlannotatorDataDir } from "./data-dir";
+import { gitColorFreeEnvironment } from "./review-core";
 import { indexCallFlowImpacts, parseCallDiffWorkerResult } from "./call-flow-types";
 import type {
   CallFlowAdvert,
@@ -656,6 +657,9 @@ for (const file of request.files) mod.extractFunctions(file, "");
       maxOutputBytes: 1024 * 1024,
       env: {
         ...process.env,
+        // CallDiff runs git itself; keep a user's `color.diff = always` from
+        // wrapping its diff in ANSI escapes (#1661).
+        ...gitColorFreeEnvironment(process.env),
         PATH: `${npmBlocker.path}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
         CALLDIFF_GRAMMAR_CACHE: grammarCacheDir,
         npm_config_offline: "true",
@@ -1119,6 +1123,9 @@ async function executeWorker(
       signal,
       env: {
         ...process.env,
+        // CallDiff runs git itself; keep a user's `color.diff = always` from
+        // wrapping its diff in ANSI escapes (#1661).
+        ...gitColorFreeEnvironment(process.env),
         PATH: `${npmBlocker.path}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
         CALLDIFF_GRAMMAR_CACHE: runtime.grammarCacheDir,
         npm_config_offline: "true",
