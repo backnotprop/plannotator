@@ -1633,6 +1633,16 @@ Additive. What a host that keeps question answers ITSELF needs (Workspaces store
 
 Not here (dropped with the owner's Q2 answer): record lines inside the block (`Other:`, `Answer:`, `Note:`, `Answered:`) and a `writeQuestionAnswer` byte rewriter.
 
+## Ask this session (unreleased)
+
+Additive. Ask AI can be answered by the agent session that opened Plannotator ("Ask this session"), when the server registers a `session-bridge` provider (Pi review/annotate/last today). A host whose backend never advertises one sees the same provider list, default selection, requests and DOM as before, and has nothing to pass.
+
+- **`utils/aiProvider`:** `AIProviderOption` gains optional `label` and `sessionBridge` (`{ host, status, modes }`), read from `/api/ai/capabilities`. `resolveAIProviderSelection` prefers a usable bridge (present, not `gone`, not `blocked` without a transient mode) after an explicit saved pick and before the origin's SDK provider; with no bridge in the list the order is unchanged. New exports: `SESSION_BRIDGE_PROVIDER_NAME`, `SESSION_ASK_ERROR_CODES`, `isSessionBridgeProvider`, `findUsableSessionBridge`, `resolveSessionBridgeFallback`.
+- **`hooks/useAIChat`:** `AskAIParams.busyPolicy?: 'wait' | 'interrupt'` (sent on `/api/ai/query` only when set), `retry(questionId, AIRetryOptions)`, and `AIResponse.errorCode` / `status` (`'waiting' | 'interrupting'`).
+- **`hooks/useAIProviderConfig`:** `applyConfigChange(config, { persist: false })` selects a provider for this page without writing the cookie.
+- **`components/ai/SessionAskNotice`** (new): `SessionAskStatus`, `SessionAskActions`, `sessionAskErrorTone`. `DocumentAIChatPanel` takes optional `onSessionAskAction` and `sessionAskFallbackLabel`; without them it renders as before.
+- **`components/ProviderIcons`:** `getProviderMeta(name, label?)`; a server-sent label overrides the name lookup.
+
 ## Publishing & versioning
 
 - **guides.show before a core publish that moves the viewer pin.** guides.show deploys on Plannotator release tags only. When a core publish carries a new `guide-viewer-manifest` hash (any change to the shared CSS or the guide chain) and no release tag has shipped it yet, run the deploy by hand first (`gh workflow run guides-show-deploy.yml --ref main`), then check that `curl -I https://guides.show/v1/<css>` and `<js>` from the manifest answer 200. Otherwise every host's guide pages load without that asset (core 0.25.9 hit this; fixed by a manual deploy). The deploy is add-only.
