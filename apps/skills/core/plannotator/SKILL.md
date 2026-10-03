@@ -9,6 +9,8 @@ Plannotator is a local, browser-based review layer for agent workflows: it opens
 
 This skill is the knowledge layer. The `plannotator-review`, `plannotator-annotate`, and `plannotator-last` skills are thin launchers for the three most common actions; use this reference when you need to pick the right command or flags yourself.
 
+If your agent has a `plannotator` tool, use it to open Plannotator instead of running the CLI: it returns at once, and the reviewer's feedback arrives later as a message, so end your turn after calling it and wait.
+
 ## Choose the command
 
 | The user wants | Run |

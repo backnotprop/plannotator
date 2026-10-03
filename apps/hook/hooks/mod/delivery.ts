@@ -79,6 +79,8 @@ export interface DeliveryContext {
   /** Where the full text is written when it is over the inline limit. */
   overflowPath: string
   inlineLimitBytes?: number
+  /** Deliver an approval even when it carries nothing (a gate the `plannotator` tool opened). */
+  deliverApproval?: boolean
 }
 
 function byteLength(text: string): number {
@@ -103,7 +105,10 @@ export function deliveryFor(record: HostResultRecord, context: DeliveryContext):
     }
   }
 
-  if (record.noop) {
+  // A gated session Claude opened itself (the `plannotator` tool): Claude was
+  // told to wait for the sign-off, so a bare approval still starts a turn.
+  const approvalAwaited = context.deliverApproval === true && record.decision === 'approved'
+  if (record.noop && !approvalAwaited) {
     const what = record.decision === 'approved' ? 'approved with no notes' : 'closed with no annotations'
     return { action: 'log', text: `${subject} ${what}. Nothing was sent to Claude.` }
   }
@@ -111,7 +116,7 @@ export function deliveryFor(record: HostResultRecord, context: DeliveryContext):
   const prefix = `Plannotator: ${subject} — ${outcomeOf(record)}.`
   const nextStep = record.surface === 'plan' && record.decision === 'approved' ? `\n\n${PLAN_APPROVAL_NEXT_STEP}` : ''
   const body = record.message.trim()
-  const inline = `${prefix}\n\n${body}${nextStep}`
+  const inline = body ? `${prefix}\n\n${body}${nextStep}` : `${prefix}${nextStep}`
   const limit = context.inlineLimitBytes ?? INLINE_LIMIT_BYTES
 
   if (byteLength(body) <= limit) return { action: 'submit', text: inline }

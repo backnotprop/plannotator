@@ -8,6 +8,10 @@ tier('user')
 
 const SESSION = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
 
+/** What the engine names a plugin's registered tool (the mock answers with this). */
+const TOOL_PREFIX = 'mcp__plugin_plannotator_tools__'
+const TOOL = `${TOOL_PREFIX}plannotator`
+
 /** The world beneath the mod: a session, a file map, and a CLI that comes up at once. */
 function world(on: any, options: { files?: Map<string, string>; enabled?: boolean } = {}) {
   const files = options.files ?? new Map<string, string>()
@@ -21,6 +25,11 @@ function world(on: any, options: { files?: Map<string, string>; enabled?: boolea
   on('command.register', ($: any, e: any) => {
     registered.push(e.name)
     return { value: { command: e.name } }
+  })
+  const tools: { name: string; inputSchema: any }[] = []
+  on('tool.register', ($: any, e: any) => {
+    tools.push({ name: e.name, inputSchema: e.inputSchema })
+    return { value: { tool: `${TOOL_PREFIX}${e.name}` } }
   })
   // The mod is opt-in; most tests turn it on through the env knob.
   mock.env(on, options.enabled === false ? { HOME: '/home/me' } : { HOME: '/home/me', PLANNOTATOR_CLAUDE_MOD: '1' })
@@ -57,7 +66,7 @@ function world(on: any, options: { files?: Map<string, string>; enabled?: boolea
   })
   // The bridge: no server answers (an older binary), so the loop stops.
   on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
-  return { files, runs, submits, logs, clock, env, registered }
+  return { files, runs, submits, logs, clock, env, registered, tools }
 }
 
 describe('register', () => {
@@ -113,7 +122,46 @@ describe('register', () => {
     expect(text).toBe('the skill ran')
     expect(w.runs).toEqual([])
     expect(w.registered).toEqual([])
+    expect(w.tools).toEqual([])
     expect(w.env.size).toBe(0)
+  })
+
+  test('the plannotator tool is registered and a call opens the session detached and returns at once', async ($: any, on: any) => {
+    const w = world(on)
+    await $.session.start(SESSION)
+
+    expect(w.tools.map((tool) => tool.name)).toEqual(['plannotator'])
+    expect(w.tools[0]?.inputSchema.required).toEqual(['action'])
+
+    const answer = await $.tool.call({ tool: TOOL, action: 'annotate', target: 'notes.md', gate: true })
+
+    expect(answer.result).toContain('http://localhost:4321')
+    expect(answer.result).toContain('End your turn')
+    const launch = w.runs.find((argv) => argv[3] === 'plannotator-launch')
+    expect(launch?.slice(5)).toEqual(['plannotator', 'annotate', 'notes.md', '--gate'])
+  })
+
+  test('a bad tool call is an error result and launches nothing', async ($: any, on: any) => {
+    const w = world(on)
+    await $.session.start(SESSION)
+
+    const answer = await $.tool.call({ tool: TOOL, action: 'annotate' })
+
+    expect(answer.deny).toContain('needs a target')
+    expect(w.runs.some((argv) => argv[3] === 'plannotator-launch')).toBe(false)
+  })
+
+  test('the tool-opened review delivers its feedback later as a plugin turn', async ($: any, on: any) => {
+    const w = world(on)
+    await $.session.start(SESSION)
+    await $.tool.call({ tool: TOOL, action: 'annotate', target: 'notes.md' })
+    const dir = w.runs.find((argv) => argv[3] === 'plannotator-launch')?.[4]
+    w.files.set(`${dir}/result.json`, JSON.stringify({ v: 1, surface: 'annotate', decision: 'annotated', message: 'fix line 3', noop: false, annotationCount: 1 }))
+
+    await w.clock.advance(1_000)
+
+    expect(w.submits).toHaveLength(1)
+    expect(w.submits[0]).toContain('fix line 3')
   })
 
   test('knob on through config.json in the data dir', async ($: any, on: any) => {

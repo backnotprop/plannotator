@@ -27,6 +27,9 @@
  *   (`command.run`): the user's skills keep their names; the mod answers the
  *   command itself, starting the CLI detached with the same arguments, and
  *   returns the "Opened …" line. It registers a name only where no skill holds it.
+ * - The `plannotator` tool (`$.tool.register`, tool.ts): when Claude itself is
+ *   asked to open something in Plannotator it calls this tool instead of the
+ *   CLI; the call goes through the same detached launch and returns at once.
  * - "Ask this session": each launched server gets a pull-bridge token; the
  *   mod polls it and runs the reviewer's questions as turns (bridge.ts).
  * - `PLANNOTATOR_SESSION_TAG=claude-code:<session id>` in the environment
@@ -42,6 +45,7 @@ import { resolveClaudeModEnabled } from './enabled'
 import type { Host } from './host'
 import { COMMANDS, dataDirOf, isModCommand, waitArgv } from './launch'
 import { PLAN_TOOL } from './plan'
+import { PLANNOTATOR_TOOL_DESCRIPTION, PLANNOTATOR_TOOL_INPUT_SCHEMA, PLANNOTATOR_TOOL_NAME } from './tool'
 
 // Minimal local types: the engine's declarations are written by `/plugin-types`
 // and not vendored here.
@@ -182,6 +186,36 @@ async function registerCommands($: Engine): Promise<void> {
   }
 }
 
+/**
+ * The `plannotator` tool's full name as the engine registered it
+ * (`mcp__<plugin server>__plannotator`); null until registered, and never set
+ * while the mod is off.
+ */
+let toolName: string | null = null
+
+/** Register Claude's `plannotator` tool (tool.ts): agent-initiated opens get the slash commands' launch. */
+async function registerTool($: Engine): Promise<void> {
+  try {
+    const registered = await $.tool.register({
+      name: PLANNOTATOR_TOOL_NAME,
+      description: PLANNOTATOR_TOOL_DESCRIPTION,
+      inputSchema: PLANNOTATOR_TOOL_INPUT_SCHEMA,
+    })
+    toolName = registered && typeof registered.tool === 'string' ? registered.tool : null
+  } catch (error) {
+    // A session with no built-in tools, --bare, or a host without a tool
+    // registrar: Claude keeps the CLI through the plannotator skill.
+    toolName = null
+    $.ui.log(`Plannotator: the plannotator tool is not available in this session (${error instanceof Error ? error.message : String(error)}).`)
+  }
+}
+
+/** A tool call's arguments: the event minus the keys the engine reserves. */
+function toolArgsOf(e: Record<string, unknown>): Record<string, unknown> {
+  const { tool: _tool, tool_use_id: _id, agentId: _agent, consent: _consent, ...args } = e
+  return args
+}
+
 export function register(on: On) {
   on('session.start', async ($: Engine, e: any, next: Next) => {
     const result = await next(e)
@@ -191,6 +225,7 @@ export function register(on: On) {
     const instance = await currentMod($)
     if (!instance) return result
     await registerCommands($)
+    await registerTool($)
     return result
   })
 
@@ -212,6 +247,14 @@ export function register(on: On) {
   })
 
   on('tool.call', async ($: Engine, e: any, next: Next) => {
+    // Claude's `plannotator` tool: answered here, with the same detached
+    // launch the slash commands use. No other hook or core runs for it.
+    if (allowed && toolName && e.tool === toolName) {
+      const instance = await currentMod($)
+      if (!instance) return { deny: 'Plannotator is not available in this session; run the plannotator CLI instead.' }
+      const answer = await instance.runTool(toolArgsOf(e))
+      return 'deny' in answer ? { deny: answer.deny } : { result: answer.text }
+    }
     // Only the main loop's ExitPlanMode: a subagent's keeps the classic flow.
     if (!allowed || e.tool !== PLAN_TOOL || e.agentId) return next(e)
     const instance = await currentMod($)

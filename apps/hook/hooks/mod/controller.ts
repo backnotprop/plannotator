@@ -39,6 +39,7 @@ import {
   type OpenPlanReview,
   type PendingApproval,
 } from './plan'
+import { parsePlannotatorToolInput, plannotatorToolArgs, plannotatorToolOpenedText } from './tool'
 import { TurnTracker } from './turns'
 
 /** Persisted in `$.store` so open reviews reattach after a restart or `--resume`. */
@@ -57,6 +58,12 @@ export interface LaunchRecord {
   revisionSeq?: number
   /** The pull-bridge token this launch's server was started with. */
   bridgeToken?: string
+  /**
+   * Opened by Claude's `plannotator` tool with `gate: true`: Claude was told
+   * to wait for the sign-off, so a bare approval is delivered as a turn (the
+   * slash command's bare approval only logs).
+   */
+  deliverApproval?: boolean
 }
 
 export const STORE_LAUNCHES = 'launches'
@@ -268,23 +275,67 @@ export class PlannotatorMod {
 
   /** `/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`: open and return at once. */
   async runCommand(kind: Exclude<SessionKind, 'plan'>, rawArgs: string): Promise<string> {
+    const opened = await this.open(kind, rawArgs, subjectFor(kind, rawArgs))
+    switch (opened.state) {
+      case 'error':
+        return opened.text
+      case 'starting':
+        return `Starting Plannotator for ${opened.subject}… it opens in your browser when ready, and your feedback comes back here as a message.`
+      case 'ready':
+        return openedText(kind, opened.subject, opened.url, opened.extra)
+    }
+  }
+
+  /**
+   * Claude's `plannotator` tool: the same launch as the slash command, with
+   * the call's validated arguments (never re-split). `{ deny }` is an error
+   * result for Claude (a bad call, or the CLI's startup error); `{ text }`
+   * tells Claude the page is open and to end its turn and wait.
+   */
+  async runTool(input: unknown): Promise<{ text: string } | { deny: string }> {
+    const parsed = parsePlannotatorToolInput(input)
+    if (!parsed.ok) return { deny: parsed.error }
+    const call = parsed.input
+    const gate = call.gate === true
+    const subject = subjectFor(call.action, call.target ? [call.target] : [])
+    const opened = await this.open(call.action, plannotatorToolArgs(call), subject, gate ? { deliverApproval: true } : {})
+    switch (opened.state) {
+      case 'error':
+        return { deny: opened.text }
+      case 'starting':
+        return { text: plannotatorToolOpenedText(opened.subject, undefined, gate) }
+      case 'ready':
+        return { text: plannotatorToolOpenedText(opened.subject, opened.url, gate) }
+    }
+  }
+
+  /** The launch both entry points share: detached CLI, result later as a plugin turn, bridge, cleanup. */
+  private async open(
+    kind: Exclude<SessionKind, 'plan'>,
+    args: string | readonly string[],
+    subject: string,
+    record: Partial<LaunchRecord> = {},
+  ): Promise<
+    | { state: 'error'; text: string }
+    | { state: 'starting'; subject: string }
+    | { state: 'ready'; subject: string; url: string; extra?: string }
+  > {
     let stdin = ''
     let extra: string | undefined
     if (kind === 'last') {
       const text = lastAssistantText(await this.host.messages())
-      if (!text) return 'There is no assistant message to annotate yet.'
+      if (!text) return { state: 'error', text: 'There is no assistant message to annotate yet.' }
       stdin = text
       const words = text.trim().split(/\s+/).length
       extra = `${words} ${words === 1 ? 'word' : 'words'}`
     }
-    const subject = subjectFor(kind, rawArgs)
-    const started = await this.launch(kind, cliArgvFor(kind, rawArgs), subject, stdin)
-    if ('error' in started) return `Plannotator could not start: ${started.error}`
+    const started = await this.launch(kind, cliArgvFor(kind, args), subject, stdin, record)
+    if ('error' in started) return { state: 'error', text: `Plannotator could not start: ${started.error}` }
 
     const outcome = await this.awaitReady(started, kind === 'review' ? READY_WAIT_MS.review : READY_WAIT_MS.other)
-    if (outcome === 'exited') return this.startupFailure(started)
-    if (outcome === 'timeout') return `Starting Plannotator for ${subject}… it opens in your browser when ready, and your feedback comes back here as a message.`
-    return openedText(kind, subject, started.url as string, extra)
+    if (outcome === 'exited') return { state: 'error', text: await this.startupFailure(started) }
+    if (outcome === 'timeout') return { state: 'starting', subject }
+    return { state: 'ready', subject, url: started.url as string, ...(extra ? { extra } : {}) }
   }
 
   // --- Plan review -------------------------------------------------------------
@@ -490,7 +541,11 @@ export class PlannotatorMod {
       await this.persistApproval()
     }
     await this.forget(launch)
-    const delivery = deliveryFor(record, { subject: launch.subject, overflowPath: fileIn(launch.dir, 'overflow') })
+    const delivery = deliveryFor(record, {
+      subject: launch.subject,
+      overflowPath: fileIn(launch.dir, 'overflow'),
+      deliverApproval: launch.deliverApproval === true,
+    })
     // Several decisions are delivered one by one, in the order they arrived.
     this.delivering = this.delivering.then(async () => {
       if (delivery.action === 'log') {

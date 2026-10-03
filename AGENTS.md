@@ -148,7 +148,7 @@ claude --plugin-dir ./apps/hook
 | `PLANNOTATOR_SHARE` | Set to `disabled` to turn off URL sharing entirely, including Guided Review share links (the review UI hides "Create share link", `POST /api/guide/:jobId/share` answers `403 { error: "sharing disabled" }`, and `plannotator guide share` refuses with exit 1). Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "share": "disabled" }`); the env var takes precedence. |
 | `PLANNOTATOR_SHARE_URL` | Custom base URL for share links (self-hosted portal). Default: `https://share.plannotator.ai`. |
 | `PLANNOTATOR_PASTE_URL` | Base URL of the paste service API for short URL sharing. Default: `https://plannotator-paste.plannotator.workers.dev`. |
-| `PLANNOTATOR_CLAUDE_MOD` | Opt-in switch for the Claude Code mod (non-blocking plan review, annotate, code review and annotate-last, plus Ask this session; see "Claude Code mod"). Set to `1` / `true` / `on` to enable, `0` / `false` / `off` / `disabled` to force off; empty or unrecognized counts as unset. **Default: off**: a Claude Code that runs hooks modules (2.1.287+) loads the plugin's module for everyone, so until the owner makes it the default the module stays inert (every hook passes through, no command is registered, no environment is set) and the classic PermissionRequest hook and `/plannotator-*` skills run exactly as before. Can also be set via `~/.plannotator/config.json` (`{ "claudeCodeMod": true }`, read from the data dir); the env var takes precedence (`resolveClaudeCodeMod` in `packages/shared/config.ts`, mirrored by `apps/hook/hooks/mod/enabled.ts` because a hooks module can import only its own files; `enabled.test.ts` keeps them in step). Read once when Claude Code starts, so a change applies to the next session start. Set it in the shell that starts Claude Code or in Claude Code's `settings.json` `env`. |
+| `PLANNOTATOR_CLAUDE_MOD` | Opt-in switch for the Claude Code mod (non-blocking plan review, annotate, code review and annotate-last, plus Ask this session; see "Claude Code mod"). Set to `1` / `true` / `on` to enable, `0` / `false` / `off` / `disabled` to force off; empty or unrecognized counts as unset. **Default: off**: a Claude Code that runs hooks modules (2.1.287+) loads the plugin's module for everyone, so until the owner makes it the default the module stays inert (every hook passes through, no command or tool is registered, no environment is set) and the classic PermissionRequest hook and `/plannotator-*` skills run exactly as before. Can also be set via `~/.plannotator/config.json` (`{ "claudeCodeMod": true }`, read from the data dir); the env var takes precedence (`resolveClaudeCodeMod` in `packages/shared/config.ts`, mirrored by `apps/hook/hooks/mod/enabled.ts` because a hooks module can import only its own files; `enabled.test.ts` keeps them in step). Read once when Claude Code starts, so a change applies to the next session start. Set it in the shell that starts Claude Code or in Claude Code's `settings.json` `env`. |
 | `PLANNOTATOR_HOST_RESULT_FILE` | Set by a host that starts the CLI detached (the Claude Code mod): when a review, annotate, annotate-last or `claude-mod-plan` session settles, the CLI writes one JSON decision record there atomically (mode 0600), with the agent message composed from the configured prompts. Only a path named `result.json` inside `<data dir>/claude-code-mod/` is accepted (`isAllowedHostResultPath`); anything else is ignored with a stderr warning, so the variable cannot make the CLI create or replace an arbitrary file. Taken at startup and removed from the environment. Stdout is unchanged. See "Claude Code mod". |
 | `PLANNOTATOR_SESSION_TAG` | Set by the Claude Code mod in its session's environment (`claude-code:<session id>`), so processes the session starts can be matched to it; recorded as `hostSession` in the `sessions/` registry. Not meant to be set by hand. |
 | `PLANNOTATOR_MOD_DEBUG` | Set to `1` before starting Claude Code to have the Claude Code mod write `claude-code-mod/debug.log` in the data dir (launches, results, turns, bridge commands). Default: off. |
@@ -296,7 +296,7 @@ ones taken).
 current Claude Code hooks modules load even with `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS`
 unset, so shipping the module would otherwise switch every 2.1.287+ user to the
 non-blocking flows on the next release. With the knob off (the default)
-`session.start` stops before doing anything (no `$.command.register`, no
+`session.start` stops before doing anything (no `$.command.register` or `$.tool.register`, no
 `$.env.set`, no `$.store`, no process) and every other hook passes straight
 through with `next(e)`, so the classic PermissionRequest hook and the
 `/plannotator-*` skills run as they do without mods. See the env table row.
@@ -318,7 +318,7 @@ closures; `controller.ts` (`PlannotatorMod`) is the per-session state machine;
 `launch.ts` (detached launcher, launch-directory layout, command table, copy),
 `delivery.ts` (turn vs log, 12 KB inline limit), `plan.ts` (ExitPlanMode
 decisions and deny copy), `turns.ts` and `bridge.ts` (Ask this session),
-`shell-words.ts` (argument splitting). The mod is self-contained: a plugin
+`shell-words.ts` (argument splitting), `tool.ts` (the `plannotator` tool contract, a copy of `packages/shared/plannotator-tool.ts`). The mod is self-contained: a plugin
 installed from the marketplace is only `apps/hook/`, and a hooks module may
 import only its own files.
 
@@ -384,6 +384,45 @@ runs `annotate-last --stdin` with the last assistant text from
 the CLI's own startup error. Under the mod the CLI's tolerant annotate handoff
 (several unresolvable words) is shown to the user as that error, not handed to
 Claude.
+
+**The `plannotator` tool (agent-initiated opens).** When the user tells Claude
+"open this in plannotator", Claude used to run the CLI through Bash, which
+blocks and gives Ask AI a separate AI. The mod registers a real tool instead:
+`$.tool.register({ name: "plannotator", description, inputSchema })` at
+`session.start`, right after the commands, and only when the mod is on (the
+opt-in knob, an interactive session, `/bin/sh` present); with the switch off,
+in `-p`/SDK runs and on Windows nothing is registered and Claude keeps the CLI
+through the `plannotator` skill. The engine names it `mcp__plannotator__plannotator`
+(the register call returns the full name, which `register.ts` keeps) and serves
+it through a loopback MCP server; the mod's `tool.call` hook answers every call
+itself (`{ result }` / `{ deny }`), so no other hook or permission prompt runs
+for it. Input: `{ action: "annotate" | "review" | "last", target?, gate?
+(annotate only), options?: { base? (review --base), markdown? (annotate
+--markdown) } }`, validated strictly (unknown keys, a target or base that would
+read as a flag, control characters, a field the action does not take; a `false`
+default is tolerated). The call becomes the words the slash command would carry
+(`plannotatorToolArgs`, one argument per element, never re-split) and goes
+through the SAME launch as the commands (`PlannotatorMod.open`: detached CLI,
+result file, bridge token, session tag, cleanup), so Ask this session works and
+the decision arrives later as a plugin turn. The tool result returns at once
+("Opened <subject> in Plannotator: <url> … End your turn now and wait"); a bad
+call or a CLI startup error is an error result. A gated tool session
+(`gate: true`) is the one delivery difference: a bare Approve is submitted as a
+turn (`deliverApproval` on the launch record), because Claude was told to wait
+for the sign-off; the slash command's bare gated approval still only logs. Done
+and Close send nothing, as for the commands. The contract (name, schema,
+description, validation, argument mapping, result text) lives once in
+`packages/shared/plannotator-tool.ts` for every host; the mod keeps a byte-for-byte
+copy of its CONTRACT section in `hooks/mod/tool.ts` and `tool.test.ts` fails
+when they differ (edit the shared file, then paste). The core `plannotator`
+skill carries one host-neutral line: use a `plannotator` tool when the agent has
+one. Direct CLI runs are unchanged, including gated `--json` runs an agent
+makes on purpose (nothing intercepts Bash `plannotator` commands); plan review
+stays on ExitPlanMode. Checked live on 2.1.288: the tool is DEFERRED behind tool
+search (no `alwaysLoad` is possible through `$.tool.register`), so Claude sees
+only its name until it searches; with the updated skill it searched and called
+the tool for "open notes.md in plannotator", while a profile still holding the
+older installed skill text loaded that skill and ran the CLI instead.
 
 **Plan review.** The `tool.call` hook on the main loop's ExitPlanMode resolves
 the plan (the plan file when it is an absolute `.md` regular file within the

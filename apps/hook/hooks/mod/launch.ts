@@ -185,9 +185,14 @@ export function isModCommand(name: string): name is CommandName {
   return Object.prototype.hasOwnProperty.call(COMMANDS, name)
 }
 
+/** A slash command's typed arguments split like its shell line, or words that are already split (a tool call). */
+export function wordsOf(args: string | readonly string[]): string[] {
+  return typeof args === 'string' ? splitShellWords(args) : [...args]
+}
+
 /** The CLI argv for a command, with the user's words passed through unchanged. */
-export function cliArgvFor(kind: Exclude<SessionKind, 'plan'>, rawArgs: string): string[] {
-  const words = splitShellWords(rawArgs)
+export function cliArgvFor(kind: Exclude<SessionKind, 'plan'>, args: string | readonly string[]): string[] {
+  const words = wordsOf(args)
   switch (kind) {
     case 'review':
       return ['plannotator', 'review', ...words]
@@ -206,8 +211,8 @@ function baseName(path: string): string {
 }
 
 /** How the status line, the command output and the plugin turn name a session. */
-export function subjectFor(kind: SessionKind, rawArgs: string, version?: number): string {
-  const words = splitShellWords(rawArgs).filter((word) => !word.startsWith('-'))
+export function subjectFor(kind: SessionKind, args: string | readonly string[], version?: number): string {
+  const words = wordsOf(args).filter((word) => !word.startsWith('-'))
   switch (kind) {
     case 'plan':
       return `Plan v${version ?? 1}`

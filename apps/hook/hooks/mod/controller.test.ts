@@ -247,6 +247,90 @@ describe('commands', () => {
   })
 })
 
+describe('the plannotator tool', () => {
+  // The failure: the tool forks the launch (different argv, no result file,
+  // no bridge token) or tells Claude something other than "end your turn".
+  test('a call launches exactly what the slash command launches and returns at once', async () => {
+    const host = fakeHost()
+    serveOnLaunch(host, 6060)
+    const mod = new PlannotatorMod(host, SESSION)
+
+    const answer = await mod.runTool({ action: 'annotate', target: 'docs/my notes.md', gate: true })
+    await mod.runCommand('annotate', '"docs/my notes.md" --gate')
+
+    const [byTool, byCommand] = launches(host)
+    expect(byTool?.argv.slice(5)).toEqual(['plannotator', 'annotate', 'docs/my notes.md', '--gate'])
+    expect(byTool?.argv.slice(5)).toEqual(byCommand?.argv.slice(5))
+    expect(Object.keys(byTool?.env ?? {}).sort()).toEqual(Object.keys(byCommand?.env ?? {}).sort())
+    expect('text' in answer && answer.text).toContain('http://localhost:6060')
+    expect('text' in answer && answer.text).toContain('End your turn')
+  })
+
+  test('review maps the target and base; last reads the transcript', async () => {
+    const host = fakeHost()
+    serveOnLaunch(host)
+    host.transcript = [{ role: 'assistant', text: 'Here is the design.' }]
+    const mod = new PlannotatorMod(host, SESSION)
+
+    await mod.runTool({ action: 'review', target: '../wt', options: { base: 'feature/part-1' } })
+    await mod.runTool({ action: 'last' })
+
+    const [review, last] = launches(host)
+    expect(review?.argv.slice(5)).toEqual(['plannotator', 'review', '--base', 'feature/part-1', '../wt'])
+    expect(last?.argv.slice(5)).toEqual(['plannotator', 'annotate-last', '--stdin'])
+    expect(host.files.get(`${launchDirOf(last!)}/stdin`)).toBe('Here is the design.')
+  })
+
+  test('a bad call and a startup failure are error results, and nothing stays open', async () => {
+    const host = fakeHost()
+    host.onRun = (call) => {
+      if (isLaunch(call)) {
+        host.files.set(`${launchDirOf(call)}/stderr`, 'File not found: nope.md')
+        host.files.set(`${launchDirOf(call)}/exit`, '1')
+      }
+    }
+    const mod = new PlannotatorMod(host, SESSION)
+
+    const bad = await mod.runTool({ action: 'annotate', target: '--hook' })
+    expect(launches(host)).toHaveLength(0)
+    expect('deny' in bad && bad.deny).toContain('Invalid plannotator call')
+
+    const failed = await mod.runTool({ action: 'annotate', target: 'nope.md' })
+    expect('deny' in failed && failed.deny).toContain('File not found: nope.md')
+    expect(host.store.get(STORE_LAUNCHES)).toEqual([])
+  })
+
+  test('a gated approval reaches Claude; an ungated Done does not', async () => {
+    const host = fakeHost()
+    serveOnLaunch(host)
+    const mod = new PlannotatorMod(host, SESSION)
+    await mod.runTool({ action: 'annotate', target: 'spec.md', gate: true })
+    await mod.runTool({ action: 'annotate', target: 'notes.md' })
+    const [gated, plain] = launches(host)
+
+    decide(host, gated!, { surface: 'annotate', decision: 'approved', message: 'The user approved.', noop: true, annotationCount: 0 })
+    decide(host, plain!, { surface: 'annotate', decision: 'annotated', message: '', noop: true, annotationCount: 0 })
+    await host.tick()
+
+    expect(host.submits).toHaveLength(1)
+    expect(host.submits[0]).toStartWith('Plannotator: spec.md — Approved.')
+    expect(host.submits[0]).toContain('The user approved.')
+    expect(host.logs.some((line) => line.includes('notes.md closed with no annotations'))).toBe(true)
+  })
+
+  test('the slash command keeps a bare gated approval as a log line', async () => {
+    const host = fakeHost()
+    serveOnLaunch(host)
+    const mod = new PlannotatorMod(host, SESSION)
+    await mod.runCommand('annotate', 'spec.md --gate')
+
+    decide(host, launches(host)[0]!, { surface: 'annotate', decision: 'approved', message: 'The user approved.', noop: true })
+    await host.tick()
+
+    expect(host.submits).toEqual([])
+  })
+})
+
 describe('a CLI older than the host result file', () => {
   test('its printed feedback is still delivered, and an empty close is not', async () => {
     const host = fakeHost()
