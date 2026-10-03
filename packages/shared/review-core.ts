@@ -13,7 +13,9 @@ import {
   parseDiffFilePathLines,
   parseDiffGitHeader,
   parseDiffMetadataPathLines,
+  parseLfsPointerPatch,
   OVERSIZED_REVIEW_STUB_MARKER,
+  type LfsPointerPatch,
 } from "./diff-paths";
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
 
@@ -2724,6 +2726,8 @@ export interface PatchFileEntry {
   hasHunks: boolean;
   isBinary: boolean;
   isOversizedStub: boolean;
+  /** Set when the chunk's only change is a Git LFS pointer (#1665): the pointer on each present side. */
+  lfs?: LfsPointerPatch;
 }
 
 /**
@@ -2770,6 +2774,7 @@ export function findPatchFileEntry(patch: string, filePath: string): PatchFileEn
         : oldPath && newPath && oldPath !== newPath
           ? "renamed"
           : "modified";
+    const lfs = hunkIndex === -1 ? null : parseLfsPointerPatch(lines.join("\n"));
     return {
       path,
       ...(oldPath ? { oldPath } : {}),
@@ -2778,6 +2783,7 @@ export function findPatchFileEntry(patch: string, filePath: string): PatchFileEn
       hasHunks: hunkIndex !== -1,
       isBinary: binaryLine !== undefined,
       isOversizedStub: headerLines.includes(OVERSIZED_REVIEW_STUB_MARKER),
+      ...(lfs ? { lfs } : {}),
     };
   }
   return null;

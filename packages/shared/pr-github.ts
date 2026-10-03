@@ -560,6 +560,139 @@ export async function fetchGhPRFileBytes(
   return { kind: "ok", bytes: decodeBase64Bytes(body.content), ...(etag ? { etag } : {}) };
 }
 
+// --- Git LFS bytes (#1665) ---
+
+/**
+ * Hosts a GitHub LFS download may be served from. github.com answers the
+ * contents API with a `download_url` on media.githubusercontent.com (a
+ * short-lived token in its query on a private repo); GitHub Enterprise serves
+ * media from its own host or a subdomain of it. Anything else is refused, at
+ * the first URL and at every redirect.
+ */
+export function isAllowedGhLfsDownloadUrl(url: URL, host: string): boolean {
+  if (url.protocol !== "https:" || url.username || url.password) return false;
+  const hostname = url.hostname.toLowerCase();
+  const apiHost = host.toLowerCase();
+  if (apiHost === "github.com") return hostname === "githubusercontent.com" || hostname.endsWith(".githubusercontent.com");
+  return hostname === apiHost || hostname.endsWith(`.${apiHost}`);
+}
+
+const MAX_LFS_DOWNLOAD_REDIRECTS = 3;
+
+/**
+ * Download `start` with at most `maxBytes` read, following redirects only to
+ * allowed hosts. Error messages never carry the URL: a private repo's
+ * download URL embeds a token.
+ */
+async function downloadGhLfsObject(
+  fetchImpl: typeof fetch,
+  start: URL,
+  host: string,
+  maxBytes: number,
+  signal?: AbortSignal,
+): Promise<PRFileBytesResult> {
+  let url = start;
+  for (let hop = 0; ; hop++) {
+    const response = await fetchImpl(url, { redirect: "manual", signal, headers: { accept: "application/octet-stream" } });
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel().catch(() => {});
+      const location = response.headers.get("location");
+      if (!location || hop >= MAX_LFS_DOWNLOAD_REDIRECTS) {
+        throw new Error("GitHub LFS download failed: too many redirects");
+      }
+      let next: URL;
+      try {
+        next = new URL(location, url);
+      } catch {
+        throw new Error("GitHub LFS download redirected to an invalid location");
+      }
+      if (!isAllowedGhLfsDownloadUrl(next, host)) {
+        throw new Error("GitHub LFS download redirected to an unexpected host");
+      }
+      url = next;
+      continue;
+    }
+    if (response.status === 404) {
+      await response.body?.cancel().catch(() => {});
+      return { kind: "missing" };
+    }
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      throw new Error(`GitHub LFS download failed (HTTP ${response.status})`);
+    }
+    const declared = Number(response.headers.get("content-length"));
+    if (Number.isFinite(declared) && declared > maxBytes) {
+      await response.body?.cancel().catch(() => {});
+      return { kind: "too-large", size: declared };
+    }
+    if (!response.body) return { kind: "ok", bytes: new Uint8Array(await response.arrayBuffer()) };
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => {});
+        return { kind: "too-large", size: total };
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return { kind: "ok", bytes };
+  }
+}
+
+/**
+ * The real bytes of an LFS-tracked file. The contents API (through `gh`, the
+ * same authenticated path `fetchGhPRFileBytes` uses) answers an LFS file with
+ * its real `size` and a `download_url` that serves the real file; its `content`
+ * is the pointer and is not requested. The size is checked before anything is
+ * downloaded.
+ */
+export async function fetchGhPRLfsFileBytes(
+  runtime: PRRuntime,
+  ref: GhPRRef,
+  sha: string,
+  filePath: string,
+  maxBytes: number,
+  signal?: AbortSignal,
+): Promise<PRFileBytesResult> {
+  const contents = await runtime.runCommand("gh", hostnameArgs(ref.host, [
+    "api",
+    `repos/${ref.owner}/${ref.repo}/contents/${encodeApiFilePath(filePath)}?ref=${sha}`,
+    "--jq", "{type,size,download_url}",
+  ]));
+  if (contents.exitCode !== 0) {
+    if (isNotFoundCommandFailure(contents.stderr)) return { kind: "missing" };
+    throw new Error(`GitHub contents API failed: ${contents.stderr.trim() || `exit ${contents.exitCode}`}`);
+  }
+  const meta = JSON.parse(contents.stdout) as { type?: string; size?: number; download_url?: string | null };
+  if (meta.type !== "file" || typeof meta.download_url !== "string") return { kind: "missing" };
+  if (typeof meta.size === "number" && meta.size > maxBytes) return { kind: "too-large", size: meta.size };
+  let url: URL;
+  try {
+    url = new URL(meta.download_url);
+  } catch {
+    return { kind: "missing" };
+  }
+  if (!isAllowedGhLfsDownloadUrl(url, ref.host)) {
+    throw new Error("GitHub returned an LFS download on an unexpected host");
+  }
+  if (signal?.aborted) {
+    const error = new Error("The request was aborted");
+    error.name = "AbortError";
+    throw error;
+  }
+  return downloadGhLfsObject(runtime.fetch ?? fetch, url, ref.host, maxBytes, signal);
+}
+
 // --- Viewed Files ---
 
 /**

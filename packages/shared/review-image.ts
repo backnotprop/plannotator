@@ -9,10 +9,13 @@
  * supply one thing each: how to read a side's bytes in their current mode.
  */
 
+import { createHash } from "node:crypto";
 import {
   MAX_REVIEW_IMAGE_PREVIEW_BYTES,
   MAX_REVIEW_IMAGE_PREVIEW_PIXELS,
   isReviewImagePath,
+  parseLfsPointerText,
+  type LfsPointer,
 } from "./diff-paths";
 import {
   type DiffSide,
@@ -39,6 +42,7 @@ export type ReviewImageErrorReason =
   | "too-large"
   | "not-image"
   | "lfs-pointer"
+  | "lfs-mismatch"
   | "fetch-failed"
   | "aborted";
 
@@ -346,6 +350,178 @@ export async function readPRImageSide(options: {
   return options.fetchBytes(sha, path, options.maxBytes);
 }
 
+// --- Git LFS (#1665) ---------------------------------------------------------------
+//
+// An LFS-tracked image's diff side is a pointer (`version …`, `oid sha256:…`,
+// `size …`), not the image. The pointer names the real file by its sha256 and
+// byte size, so a side resolves from wherever those bytes already are — the
+// repository's LFS object cache, a smudged working-tree file — and only then
+// from the platform. Every candidate is checked against the oid, so a stale
+// worktree file or a corrupt cache entry can never be shown as the image.
+
+/** Lower-case hex sha256 of `bytes`. */
+export function sha256Hex(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+/** True when `bytes` are exactly the file `pointer` names (size and sha256). */
+export function matchesLfsPointer(bytes: Uint8Array, pointer: LfsPointer): boolean {
+  return bytes.byteLength === pointer.size && sha256Hex(bytes) === pointer.oid;
+}
+
+/** The pointer `bytes` hold, when they are an LFS pointer file. */
+export function lfsPointerFromBytes(bytes: Uint8Array): LfsPointer | null {
+  if (bytes.byteLength > 1024 || !isLfsPointer(bytes)) return null;
+  return parseLfsPointerText(new TextDecoder("utf-8", { fatal: false }).decode(bytes));
+}
+
+const isAbsolutePath = (path: string) => /^(?:[a-zA-Z]:)?[\\/]/.test(path);
+
+/** `<git-common-dir>/lfs/objects`, honoring `lfs.storage`; null outside a git repository. */
+async function lfsObjectsDir(runtime: ReviewGitRuntime, cwd?: string): Promise<string | null> {
+  let common: string | null = null;
+  const absolute = await runtime.runGit(["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd });
+  if (absolute.exitCode === 0 && absolute.stdout.trim()) {
+    common = absolute.stdout.trim();
+  } else {
+    // git < 2.31 has no --path-format; the plain answer is relative to cwd.
+    const plain = await runtime.runGit(["rev-parse", "--git-common-dir"], { cwd });
+    if (plain.exitCode !== 0 || !plain.stdout.trim()) return null;
+    common = plain.stdout.trim();
+    if (!isAbsolutePath(common) && cwd) common = `${cwd.replace(/[\\/]+$/, "")}/${common}`;
+  }
+  let lfsRoot = `${common}/lfs`;
+  const storage = await runtime.runGit(["config", "--get", "lfs.storage"], { cwd });
+  const configured = storage.exitCode === 0 ? storage.stdout.trim() : "";
+  if (configured) lfsRoot = isAbsolutePath(configured) ? configured : `${common}/${configured}`;
+  return `${lfsRoot}/objects`;
+}
+
+/**
+ * Resolve a pointer from the local repository at `cwd`: its LFS object cache
+ * first, then each working-tree path (repo-root relative) whose bytes hash to
+ * the oid. `missing` when neither holds it.
+ */
+export async function readLfsObjectLocally(
+  runtime: ReviewGitRuntime,
+  cwd: string | undefined,
+  pointer: LfsPointer,
+  worktreePaths: string[],
+  maxBytes: number,
+): Promise<FileBytesRead> {
+  if (pointer.size > maxBytes) return { kind: "too-large", size: pointer.size };
+  if (!runtime.readFileBytes) return { kind: "unavailable" };
+  const etag = `"lfs-${pointer.oid}"`;
+  const objects = await lfsObjectsDir(runtime, cwd);
+  if (objects) {
+    const file = `${objects}/${pointer.oid.slice(0, 2)}/${pointer.oid.slice(2, 4)}/${pointer.oid}`;
+    const info = await runtime.getFileInfo(undefined, file);
+    if (info?.isFile && !info.isSymbolicLink && info.size === pointer.size) {
+      const bytes = await runtime.readFileBytes(info.path, maxBytes);
+      if (bytes && matchesLfsPointer(bytes, pointer)) return { kind: "ok", bytes, etag };
+    }
+  }
+  for (const path of worktreePaths) {
+    const read = await readDiffSideBytes(runtime, { kind: "worktree", path }, maxBytes, cwd);
+    if (read.kind === "ok" && matchesLfsPointer(read.bytes, pointer)) return { kind: "ok", bytes: read.bytes, etag };
+  }
+  return { kind: "missing" };
+}
+
+/**
+ * PR layer mode: the PR checkout (its LFS cache, and its working tree, which
+ * git-lfs smudged at head) first; the platform only for a side neither has.
+ * `fetchLfs` absent means the platform has no route, and the side answers
+ * `missing` (the existing `lfs-pointer` error).
+ */
+export async function readPRLfsSide(options: {
+  gitRuntime: ReviewGitRuntime;
+  poolCwd?: string;
+  oldSha: string;
+  headSha: string;
+  side: DiffSide;
+  filePath: string;
+  oldPath?: string;
+  pointer: LfsPointer;
+  maxBytes: number;
+  fetchLfs?: (sha: string, path: string, maxBytes: number, signal?: AbortSignal) => Promise<FileBytesRead>;
+  signal?: AbortSignal;
+}): Promise<FileBytesRead> {
+  const sha = options.side === "old" ? options.oldSha : options.headSha;
+  const path = options.side === "old" ? options.oldPath ?? options.filePath : options.filePath;
+  if (options.poolCwd) {
+    const local = await readLfsObjectLocally(options.gitRuntime, options.poolCwd, options.pointer, [path], options.maxBytes);
+    if (local.kind === "ok" || local.kind === "too-large") return local;
+  }
+  throwIfReviewImageAborted(options.signal);
+  if (!options.fetchLfs) return { kind: "missing" };
+  return options.fetchLfs(sha, path, options.maxBytes, options.signal);
+}
+
+type LfsResolution = FileBytesRead | { kind: "mismatch" };
+
+const isAbortLike = (error: unknown) =>
+  error instanceof ReviewImageAbortError || (error instanceof Error && error.name === "AbortError");
+
+/**
+ * Verified LFS objects by oid, per server session. Content-addressed and only
+ * ever filled with bytes that hashed to their oid, so an entry is valid in any
+ * mode. Concurrent requests for one oid share one resolution: the two sides of
+ * a rename whose pointers name the same object download it once.
+ */
+export function createLfsObjectCache(options: { maxEntries?: number; maxBytes?: number } = {}) {
+  const maxEntries = options.maxEntries ?? 8;
+  const maxBytes = options.maxBytes ?? 32 * 1024 * 1024;
+  const done = new Map<string, Uint8Array>();
+  const inflight = new Map<string, Promise<LfsResolution>>();
+  let total = 0;
+  const remember = (oid: string, bytes: Uint8Array) => {
+    if (bytes.byteLength > maxBytes || done.has(oid)) return;
+    done.set(oid, bytes);
+    total += bytes.byteLength;
+    for (const [key, value] of done) {
+      if (done.size <= maxEntries && total <= maxBytes) break;
+      done.delete(key);
+      total -= value.byteLength;
+    }
+  };
+  return {
+    async resolve(oid: string, run: () => Promise<LfsResolution>, signal?: AbortSignal): Promise<LfsResolution> {
+      const hit = done.get(oid);
+      if (hit) {
+        done.delete(oid);
+        done.set(oid, hit);
+        return { kind: "ok", bytes: hit, etag: `"lfs-${oid}"` };
+      }
+      const pending = inflight.get(oid);
+      if (pending) {
+        try {
+          const shared = await pending;
+          // Only a verified object is content-addressed. `missing` and the
+          // other misses depend on the side and path that asked (the old path
+          // of a rename may be absent from the worktree while the new one is
+          // there), so a different caller resolves its own.
+          if (shared.kind === "ok") return shared;
+        } catch (error) {
+          // The request that started it went away; ours did not, so run our own.
+          if (!isAbortLike(error) || signal?.aborted) throw error;
+        }
+      }
+      const own = run();
+      inflight.set(oid, own);
+      try {
+        const result = await own;
+        if (result.kind === "ok") remember(oid, result.bytes);
+        return result;
+      } finally {
+        if (inflight.get(oid) === own) inflight.delete(oid);
+      }
+    },
+  };
+}
+
+export type LfsObjectCache = ReturnType<typeof createLfsObjectCache>;
+
 // --- The request -------------------------------------------------------------------
 
 export interface ReviewImageRequest {
@@ -372,6 +548,22 @@ export interface ReviewImageRequest {
     maxBytes: number,
     signal?: AbortSignal,
   ) => Promise<FileBytesRead>;
+  /**
+   * Resolve a Git LFS pointer to the real file (#1665), in the server's
+   * current mode. Absent: LFS pointer chunks are not previewable and a side
+   * that reads as a pointer answers `lfs-pointer`, exactly as before. The
+   * bytes it returns are verified against the pointer here, never trusted.
+   */
+  resolveLfs?: (
+    side: DiffSide,
+    filePath: string,
+    oldPath: string | undefined,
+    pointer: LfsPointer,
+    maxBytes: number,
+    signal?: AbortSignal,
+  ) => Promise<FileBytesRead>;
+  /** The session's verified-object cache (see `createLfsObjectCache`). */
+  lfsObjects?: LfsObjectCache;
 }
 
 const IMAGE_RESPONSE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'";
@@ -392,8 +584,28 @@ function formatMegabytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function isEligibleEntry(entry: PatchFileEntry): boolean {
-  return !entry.hasHunks && (isReviewImagePath(entry.newPath) || isReviewImagePath(entry.oldPath));
+function isEligibleEntry(entry: PatchFileEntry, lfs: boolean): boolean {
+  if (!isReviewImagePath(entry.newPath) && !isReviewImagePath(entry.oldPath)) return false;
+  return !entry.hasHunks || (lfs && entry.lfs !== undefined);
+}
+
+const LFS_POINTER_ERROR: ReviewImageErrorBody = { reason: "lfs-pointer", error: "The file is stored in Git LFS" };
+
+/** Resolve one pointer through the server, verify it, and share it through the cache. */
+function resolveVerifiedLfs(
+  request: ReviewImageRequest,
+  side: DiffSide,
+  filePath: string,
+  oldPath: string | undefined,
+  pointer: LfsPointer,
+): Promise<LfsResolution> {
+  const run = async (): Promise<LfsResolution> => {
+    const read = await request.resolveLfs!(side, filePath, oldPath, pointer, MAX_REVIEW_IMAGE_PREVIEW_BYTES, request.signal);
+    if (read.kind !== "ok") return read;
+    if (!matchesLfsPointer(read.bytes, pointer)) return { kind: "mismatch" };
+    return { kind: "ok", bytes: read.bytes, etag: `"lfs-${pointer.oid}"` };
+  };
+  return request.lfsObjects ? request.lfsObjects.resolve(pointer.oid, run, request.signal) : run();
 }
 
 /** Resolve one `GET /api/review-image` request to a transport-neutral response. */
@@ -412,7 +624,7 @@ export async function handleReviewImageRequest(request: ReviewImageRequest): Pro
   }
 
   const entry = findPatchFileEntry(request.patch, path);
-  if (!entry || !isEligibleEntry(entry)) {
+  if (!entry || !isEligibleEntry(entry, request.resolveLfs !== undefined)) {
     return errorResponse(404, { reason: "not-in-diff", error: "No previewable image by that path in this diff" });
   }
   const sidePath = side === "old" ? entry.oldPath : entry.newPath;
@@ -426,16 +638,41 @@ export async function handleReviewImageRequest(request: ReviewImageRequest): Pro
     return errorResponse(404, { reason: "not-in-diff", error: "Invalid file path" });
   }
 
-  let read: FileBytesRead;
+  // A pointer chunk names the pointer in the patch itself (#1665).
+  let pointer: LfsPointer | null = request.resolveLfs ? entry.lfs?.[side] ?? null : null;
+  if (entry.hasHunks && !pointer) {
+    return errorResponse(404, { reason: "absent", error: `This file has no ${side === "old" ? "before" : "after"} version` });
+  }
+
+  let read: FileBytesRead = { kind: "missing" };
   try {
     // The display path keys the new side; a deleted file's only path is its old one.
-    read = await request.readSide(
-      side,
-      entry.newPath ?? sidePath,
-      entry.oldPath,
-      MAX_REVIEW_IMAGE_PREVIEW_BYTES,
-      request.signal,
-    );
+    const filePath = entry.newPath ?? sidePath;
+    if (!pointer) {
+      read = await request.readSide(side, filePath, entry.oldPath, MAX_REVIEW_IMAGE_PREVIEW_BYTES, request.signal);
+      // A hunkless chunk (a pure rename, a mode change) whose side is a pointer.
+      if (read.kind === "ok" && request.resolveLfs) pointer = lfsPointerFromBytes(read.bytes);
+    }
+    if (pointer) {
+      // The pointer carries the real size: the cap applies before any read or download.
+      if (pointer.size > MAX_REVIEW_IMAGE_PREVIEW_BYTES) {
+        return errorResponse(413, {
+          reason: "too-large",
+          error: `The file is larger than ${formatMegabytes(MAX_REVIEW_IMAGE_PREVIEW_BYTES)}`,
+          bytes: pointer.size,
+        });
+      }
+      const resolved = await resolveVerifiedLfs(request, side, filePath, entry.oldPath, pointer);
+      if (resolved.kind === "mismatch") {
+        return errorResponse(502, {
+          reason: "lfs-mismatch",
+          error: "The Git LFS object does not match its pointer",
+        });
+      }
+      // Nowhere to resolve it from: the pre-#1665 answer.
+      if (resolved.kind === "missing" || resolved.kind === "unavailable") return errorResponse(415, LFS_POINTER_ERROR);
+      read = resolved;
+    }
   } catch (error) {
     if (error instanceof ReviewImageAbortError || request.signal?.aborted) {
       // Nobody is listening; the status only matters to logs.

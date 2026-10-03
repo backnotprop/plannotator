@@ -20,7 +20,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
   const renderImagePreview = useMemo(
     () =>
       state.imagePreviewAvailable
-        ? ({ file, fallback, tooLargeFallback, onHeightChange }: Parameters<NonNullable<React.ComponentProps<typeof AllFilesCodeView>['renderImagePreview']>>[0]) => (
+        ? ({ file, fallback, tooLargeFallback, onHeightChange, lfsPointerChunk }:Parameters<NonNullable<React.ComponentProps<typeof AllFilesCodeView>['renderImagePreview']>>[0]) => (
             <ImageDiffPreview
               key={`${snapshotId ?? ''}:${file.path}`}
               filePath={file.path}
@@ -31,6 +31,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
               fallback={fallback}
               tooLargeFallback={tooLargeFallback}
               onHeightChange={onHeightChange}
+              lfsPointerChunk={lfsPointerChunk}
             />
           )
         : undefined,
@@ -65,6 +66,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       reviewSnapshotId={state.feedbackDiffContext?.snapshotId}
       contextExpansionAvailable={state.contextExpansionAvailable}
       renderImagePreview={renderImagePreview}
+      lfsImagePreview={state.lfsImagePreviewAvailable === true}
       compactTouchLayout={state.isCompactTouchLayout}
       onLineSelection={state.onLineSelection}
       onAddAnnotationForFile={state.onAddAnnotationForFile}

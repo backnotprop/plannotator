@@ -57,6 +57,20 @@ const ADDED = [
   '',
 ].join('\n');
 
+const LFS_POINTERS = [
+  'diff --git a/shots/home.png b/shots/home.png',
+  'index 1111111111aa..2222222222bb 100644',
+  '--- a/shots/home.png',
+  '+++ b/shots/home.png',
+  '@@ -1,3 +1,3 @@',
+  ' version https://git-lfs.github.com/spec/v1',
+  `-oid sha256:${'a'.repeat(64)}`,
+  '-size 78138',
+  `+oid sha256:${'b'.repeat(64)}`,
+  '+size 74804',
+  '',
+].join('\n');
+
 const PNG_A = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
 const PNG_B = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 4, 5, 6]);
 
@@ -105,7 +119,7 @@ describe.if(hasDom)('image preview in the single-file view (DOM)', () => {
   const image = (bytes: Uint8Array) =>
     new Response(bytes, { headers: { 'content-type': 'image/png', 'x-image-width': '4', 'x-image-height': '3' } });
 
-  async function render(patch: string, filePath: string, available: boolean) {
+  async function render(patch: string, filePath: string, available: boolean, lfs = false) {
     host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
@@ -117,6 +131,7 @@ describe.if(hasDom)('image preview in the single-file view (DOM)', () => {
           status={patch === ADDED ? 'added' : 'modified'}
           reviewSnapshotId="snap-1"
           imagePreviewAvailable={available}
+          lfsImagePreviewAvailable={lfs}
           diffStyle="unified"
           annotations={[]}
           selectedAnnotationId={null}
@@ -215,5 +230,35 @@ describe.if(hasDom)('image preview in the single-file view (DOM)', () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
     expect(imageRequests).toHaveLength(2);
+  });
+
+  // Git LFS (#1665): the pointer text diff gives way to the preview only when
+  // the server advertised it can resolve pointers, and comes back when it can't.
+  test('an LFS pointer chunk previews in place of the pointer diff when LFS is advertised', async () => {
+    installFetch((side) => image(side === 'old' ? PNG_A : PNG_B));
+    const el = await render(LFS_POINTERS, 'shots/home.png', true, true);
+    expect(el.querySelectorAll('[data-image-side] img').length).toBe(2);
+    expect(el.querySelector('[data-lfs-pointer-diff]')?.getAttribute('data-lfs-pointer-diff')).toBe('hidden');
+  });
+
+  test('without the LFS advert an LFS pointer chunk stays a text diff and requests nothing', async () => {
+    installFetch((side) => image(side === 'old' ? PNG_A : PNG_B));
+    const el = await render(LFS_POINTERS, 'shots/home.png', true, false);
+    expect(imageRequests).toHaveLength(0);
+    expect(el.querySelector('[data-image-diff-preview]')).toBeNull();
+    expect(el.querySelector('[data-lfs-pointer-diff]')).toBeNull();
+  });
+
+  test('when no side can be resolved the pointer diff comes back', async () => {
+    installFetch(() =>
+      new Response(JSON.stringify({ reason: 'lfs-pointer', error: 'x' }), {
+        status: 415,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const el = await render(LFS_POINTERS, 'shots/home.png', true, true);
+    expect(imageRequests).toHaveLength(2);
+    expect(el.querySelector('[data-image-diff-preview]')).toBeNull();
+    expect(el.querySelector('[data-lfs-pointer-diff]')?.getAttribute('data-lfs-pointer-diff')).toBe('shown');
   });
 });
