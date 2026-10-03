@@ -99,6 +99,7 @@ export {
   SESSION_BRIDGE_PROVIDER_NAME,
   SESSION_BRIDGE_ERROR,
   SESSION_ASK_HEADER,
+  SESSION_ASK_TRANSIENT_NOTE,
   formatSessionAskText,
   sessionBridgeLabel,
 } from "./session-bridge.ts";
@@ -113,6 +114,26 @@ export type {
   SessionBridgeStatus,
 } from "./session-bridge.ts";
 
+// "Ask this session" pull bridge (hosts that run the server as a separate process)
+export {
+  createPullSessionBridge,
+  takePullSessionBridgeConfig,
+  parseSessionBridgeModes,
+  SESSION_BRIDGE_POLL_PATH,
+  SESSION_BRIDGE_EVENT_PATH,
+  SESSION_BRIDGE_TOKEN_ENV,
+  SESSION_BRIDGE_HOST_ENV,
+  SESSION_BRIDGE_MODES_ENV,
+  SESSION_BRIDGE_MAX_POLL_MS,
+} from "./session-bridge-pull.ts";
+export type {
+  BridgeCommand,
+  BridgeHostEvent,
+  PullSessionBridge,
+  PullSessionBridgeConfig,
+  PullSessionBridgeOptions,
+} from "./session-bridge-pull.ts";
+
 // Session manager
 export { SessionManager } from "./session-manager.ts";
 export type { SessionEntry, SessionManagerOptions } from "./session-manager.ts";
@@ -123,6 +144,7 @@ export {
   createBestEffortOnce,
   createDeferredModelDiscovery,
   isAIEndpointPath,
+  isLongLivedAIEndpointPath,
   SESSION_BRIDGE_FORBIDDEN_HOST,
 } from "./endpoints.ts";
 export type {

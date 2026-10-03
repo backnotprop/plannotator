@@ -12,7 +12,20 @@ import type { OpenCodeBridgeAgent } from "./cli-bridge";
 /** The subset of the V2 session domain this plugin touches. */
 export interface V2SessionDomain {
   get?: (input: { sessionID: string }) => Promise<{ location?: { directory?: string } }>;
-  prompt?: (input: { sessionID: string; text: string; delivery?: unknown }) => Promise<unknown>;
+  prompt?: (input: {
+    sessionID: string;
+    text: string;
+    delivery?: unknown;
+    /** Our own inbox/message id (`msg_…`), so its delivery event can be matched. */
+    id?: string;
+    metadata?: Record<string, unknown>;
+  }) => Promise<unknown>;
+  /** "Ask this session" only: answer from the session's context without a turn. */
+  generate?: (input: { sessionID: string; prompt: string }) => Promise<unknown>;
+  /** Stops the session's whole current execution. */
+  interrupt?: (input: { sessionID: string; resume?: boolean }) => Promise<unknown>;
+  /** Resolves once the session is idle (at once when it already is). */
+  wait?: (input: { sessionID: string }) => Promise<unknown>;
   switchAgent?: (input: { sessionID: string; agent: string }) => Promise<unknown>;
   switchModel?: (input: {
     sessionID: string;

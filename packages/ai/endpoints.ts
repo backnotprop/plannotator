@@ -11,6 +11,8 @@
  *   POST /api/ai/abort         — Abort the current query
  *   GET  /api/ai/sessions      — List active sessions
  *   GET  /api/ai/capabilities  — Check if AI features are available
+ *   POST /api/ai/bridge/poll   — "Ask this session" pull bridge: host long-poll (session-bridge-pull.ts)
+ *   POST /api/ai/bridge/event  — "Ask this session" pull bridge: host progress events
  */
 
 import { resolveModelChoice } from "@plannotator/core/model-catalog";
@@ -18,6 +20,7 @@ import type { AIContext, AIMessage, AIProvider, CreateSessionOptions } from "./t
 import type { ProviderRegistry } from "./provider.ts";
 import type { SessionManager } from "./session-manager.ts";
 import { SessionBridgeProvider, SessionBridgeSession } from "./session-bridge.ts";
+import { SESSION_BRIDGE_EVENT_PATH, SESSION_BRIDGE_POLL_PATH } from "./session-bridge-pull.ts";
 
 /** Canonical paths handled by the shared AI endpoint runtime. */
 export const AI_ENDPOINT_PATHS = [
@@ -27,7 +30,17 @@ export const AI_ENDPOINT_PATHS = [
   "/api/ai/abort",
   "/api/ai/permission",
   "/api/ai/sessions",
+  "/api/ai/bridge/poll",
+  "/api/ai/bridge/event",
 ] as const;
+
+/**
+ * Endpoints whose requests legitimately stay open (SSE answers, the bridge
+ * long-poll): servers with a per-request idle timeout lift it for these.
+ */
+export function isLongLivedAIEndpointPath(path: string): boolean {
+  return path === "/api/ai/query" || path === SESSION_BRIDGE_POLL_PATH;
+}
 
 /** A path handled by the shared AI endpoint runtime. */
 export type AIEndpointPath = (typeof AI_ENDPOINT_PATHS)[number];
@@ -105,6 +118,13 @@ export interface AIEndpointDeps {
    * answers without a guard. Other providers never consult it.
    */
   authorizeSessionBridgeRequest?: (req: Request) => boolean;
+  /**
+   * "Ask this session" pull bridge (session-bridge-pull.ts), present when a
+   * host that runs this server as a separate process handed it a bridge
+   * token. Its two endpoints answer 404 without it, and are also gated by
+   * `authorizeSessionBridgeRequest` (loopback Host) before the token check.
+   */
+  pullBridge?: { handle(req: Request): Promise<Response> | null };
 }
 
 /** Error code for a bridge request refused by `authorizeSessionBridgeRequest`. */
@@ -221,7 +241,16 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
     beforeCapabilities,
     beforeProviderSession,
     authorizeSessionBridgeRequest,
+    pullBridge,
   } = deps;
+
+  const handlePullBridge = async (req: Request): Promise<Response> => {
+    if (!pullBridge) {
+      return Response.json({ error: "No session bridge on this server.", code: "session_bridge_unavailable" }, { status: 404 });
+    }
+    if (!authorizeSessionBridgeRequest?.(req)) return sessionBridgeForbidden();
+    return (await pullBridge.handle(req)) ?? Response.json({ error: "Not found" }, { status: 404 });
+  };
 
   return {
     "/api/ai/capabilities": async (req: Request) => {
@@ -498,6 +527,9 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
         }))
       );
     },
+
+    [SESSION_BRIDGE_POLL_PATH]: handlePullBridge,
+    [SESSION_BRIDGE_EVENT_PATH]: handlePullBridge,
   } as const;
 }
 

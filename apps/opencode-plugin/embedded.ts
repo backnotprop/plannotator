@@ -8,6 +8,7 @@ import {
   getAnnotateMessageFeedbackPrompt,
 } from "@plannotator/shared/prompts";
 import { deliverOpenCodePrompt } from "./prompt-delivery-error";
+import type { SessionBridge } from "@plannotator/ai/session-bridge";
 
 export interface EmbeddedPlanReviewInput {
   client: any;
@@ -19,6 +20,8 @@ export interface EmbeddedPlanReviewInput {
   timeoutSeconds: number | null;
   abortSignal?: AbortSignal;
   logReady: (url: string, isRemote: boolean, port: number) => void;
+  /** "Ask this session": in-process bridge to the session (quick answers while the plan waits). */
+  sessionBridge?: SessionBridge;
 }
 
 export interface EmbeddedPlanReviewResult {
@@ -83,6 +86,7 @@ export async function runEmbeddedPlanReview(
     pasteApiUrl: input.pasteApiUrl,
     htmlContent: input.htmlContent,
     opencodeClient: input.client,
+    sessionBridge: input.sessionBridge,
     onReady: async (url, isRemote, port) => {
       await handleServerReady(url, isRemote, port);
       input.logReady(url, isRemote, port);

@@ -31,6 +31,8 @@ import {
   type V2ContextLike,
 } from "./v2-client";
 import { executeSubmitPlan } from "./submit-plan-executor";
+import type { SessionBridge } from "@plannotator/ai/session-bridge";
+import { createOpenCodeSessionBridge, markPlanReviewPending } from "./opencode-session-bridge";
 import type { PlanEdit } from "./plan-edits";
 import { getPlanningPrompt } from "./planning-prompt";
 
@@ -63,6 +65,7 @@ type EmbeddedRuntimeModule = {
     timeoutSeconds: number | null;
     abortSignal?: AbortSignal;
     logReady: (url: string, isRemote: boolean, port: number) => void;
+    sessionBridge?: SessionBridge;
   }) => Promise<OpenCodePlanReviewResult>;
 };
 
@@ -215,6 +218,18 @@ const serverPlugin = {
             getAgents,
             sessionID: toolContext.sessionID,
           });
+          // While the plan waits, the session is inside this tool call: a real
+          // turn cannot run (and interrupting would kill the review), so every
+          // bridge on this session reports `blocked`, and the plan review's own
+          // bridge answers from context only ("Quick answer", session.generate).
+          const releasePlanPending = markPlanReviewPending(toolContext.sessionID);
+          const planBridge = typeof v2.session?.generate === "function"
+            ? createOpenCodeSessionBridge({
+              ctx: v2,
+              sessionID: toolContext.sessionID,
+              modes: { turn: false, transient: true },
+            })
+            : undefined;
           try {
             const result = await executeSubmitPlan({
               edits: getPlanEdits(input),
@@ -233,6 +248,7 @@ const serverPlugin = {
                 timeoutSeconds: getPlanTimeoutSeconds(),
                 directory,
                 bridge,
+                sessionBridge: planBridge,
               }),
               resolveTargetAgent: async ({ requestedAgent }) => await switchV2SessionAgent({
                 ctx: v2,
@@ -249,6 +265,8 @@ const serverPlugin = {
 
             return { content: result };
           } finally {
+            planBridge?.dispose();
+            releasePlanPending();
             // Same call as `runNativeCommand`: closes the session-URL notice
             // watch for a review that delivered no prompt of its own.
             client.dispose();
@@ -357,6 +375,8 @@ async function runPlanReview(input: {
   abortSignal?: AbortSignal;
   directory: string;
   bridge: OpenCodeBridgeContext;
+  /** "Ask this session" while the plan waits (transient answers only). */
+  sessionBridge?: SessionBridge;
 }): Promise<OpenCodePlanReviewResult> {
   if (input.runtime === "embedded" && !hasEmbeddedRuntime()) {
     throw new Error('runtime "embedded" requires a Bun-hosted OpenCode plugin runtime. Use runtime "auto" or "cli" with this OpenCode host.');
@@ -375,6 +395,7 @@ async function runPlanReview(input: {
         timeoutSeconds: input.timeoutSeconds,
         abortSignal: input.abortSignal,
         logReady: createPlanReadyNotifier(input.client),
+        sessionBridge: input.sessionBridge,
       });
     } catch (error) {
       if (input.runtime === "embedded") throw error;
@@ -389,6 +410,7 @@ async function runPlanReview(input: {
     timeoutSeconds: input.timeoutSeconds,
     abortSignal: input.abortSignal,
     bridge: input.bridge,
+    sessionBridge: input.sessionBridge,
   });
 }
 

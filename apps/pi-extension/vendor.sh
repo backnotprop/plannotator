@@ -124,7 +124,7 @@ for f in ai-context model-catalog; do
     | cat - "../../packages/core/$f.ts" > "generated/ai/$f.ts"
 done
 
-for f in index types provider session-manager endpoints context base-session session-bridge; do
+for f in index types provider session-manager endpoints context base-session session-bridge session-bridge-pull; do
   src="../../packages/ai/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/ai/%s.ts\n' "$f" | cat - "$src" \
     | sed -e "s|from ['\"]@plannotator/core/ai-context['\"]|from './ai-context.ts'|g" \

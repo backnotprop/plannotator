@@ -5,6 +5,7 @@ import { Readable } from "node:stream";
 import { isAIEndpointPath } from "../generated/ai/endpoints.ts";
 import { resolveCommandFromWhichOutput } from "../generated/ai/providers/command-path.ts";
 import type { SessionBridge } from "../generated/ai/session-bridge.ts";
+import type { PullSessionBridgeConfig } from "../generated/ai/session-bridge-pull.ts";
 import { isLoopbackHostHeader } from "../generated/loopback-host.ts";
 import { handleApiNotFound, json, toWebRequest } from "./helpers.ts";
 
@@ -24,6 +25,13 @@ export interface CreatePiAIRuntimeOptions {
 	 * (DNS-rebinding guard). Undefined (not bound yet) refuses bridge requests.
 	 */
 	getServerPort?: () => number | undefined;
+	/**
+	 * "Ask this session" over HTTP (session-bridge-pull.ts) for a host that
+	 * cannot call this process directly. Pi itself always passes an in-process
+	 * `sessionBridge`; this exists so both runtimes serve the same protocol.
+	 * Ignored when `sessionBridge` is given. Callers keep it off in remote mode.
+	 */
+	pullSessionBridge?: PullSessionBridgeConfig;
 }
 
 function whichCmd(cmd: string): string | null {
@@ -128,7 +136,11 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 		}
 
 		// Registered last so the server default is unchanged; the client prefers it.
-		const bridgeProvider = options.sessionBridge ? new ai.SessionBridgeProvider(options.sessionBridge) : null;
+		const pullBridge = !options.sessionBridge && options.pullSessionBridge
+			? ai.createPullSessionBridge(options.pullSessionBridge)
+			: null;
+		const sessionBridge = options.sessionBridge ?? pullBridge?.bridge;
+		const bridgeProvider = sessionBridge ? new ai.SessionBridgeProvider(sessionBridge) : null;
 		if (bridgeProvider) registry.register(bridgeProvider, ai.SESSION_BRIDGE_PROVIDER_NAME);
 
 		return {
@@ -142,6 +154,7 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 				beforeProviderSession: discovery.beforeProviderSession,
 				authorizeSessionBridgeRequest: (req: Request) =>
 					isLoopbackHostHeader(req.headers.get("host"), options.getServerPort?.()),
+				...(pullBridge ? { pullBridge } : {}),
 			}),
 			dispose: () => {
 				// Detach first: tearing the sessions down must not stop a turn the
@@ -149,6 +162,7 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 				bridgeProvider?.detach();
 				sessionManager.disposeAll();
 				registry.disposeAll();
+				pullBridge?.dispose();
 			},
 		};
 	} catch {

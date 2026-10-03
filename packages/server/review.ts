@@ -150,8 +150,8 @@ import {
   fetchPRArtifactDocument,
   PRArtifactDocumentError,
 } from "@plannotator/shared/pr-artifact-document";
-import { AI_QUERY_ENDPOINT, createAIRuntime } from "./ai-runtime";
-import { isAIEndpointPath, type AIEndpoints, type SessionBridge } from "@plannotator/ai";
+import { createAIRuntime } from "./ai-runtime";
+import { isAIEndpointPath, isLongLivedAIEndpointPath, type AIEndpoints, type SessionBridge } from "@plannotator/ai";
 import { isWSL } from "./browser";
 import { handleOpenInApps, handleOpenIn } from "./open-in";
 import type { LocalWorkspaceReview, WorkspaceDiffType } from "./review-workspace";
@@ -3999,7 +3999,7 @@ export async function startReviewServer(
                   );
                 }
               }
-              if (url.pathname === AI_QUERY_ENDPOINT) {
+              if (isLongLivedAIEndpointPath(url.pathname)) {
                 server.timeout(req, 0);
               }
               return handler(req);

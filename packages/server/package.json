@@ -22,6 +22,7 @@
     "./uninstall": "./uninstall.ts",
     "./share-url": "./share-url.ts",
     "./tailscale-serve": "./tailscale-serve.ts",
+    "./ai-runtime": "./ai-runtime.ts",
     "./qr": "./qr.ts",
     "./sessions": "./sessions.ts",
     "./auto-update": "./auto-update.ts",

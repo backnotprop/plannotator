@@ -2,7 +2,14 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
+import type { SessionBridge } from "@plannotator/ai/session-bridge";
+import {
+  SESSION_BRIDGE_HOST_ENV,
+  SESSION_BRIDGE_MODES_ENV,
+  SESSION_BRIDGE_TOKEN_ENV,
+} from "@plannotator/ai/session-bridge-pull";
+import { runPullSessionBridgeClient } from "@plannotator/ai/session-bridge-pull-client";
 import { parseAnnotateArgs, type ParsedAnnotateArgs } from "@plannotator/shared/annotate-args";
 import { parseReviewArgs, resolveReviewTarget } from "@plannotator/shared/review-args";
 import {
@@ -85,6 +92,12 @@ interface RunCliOptions {
   extraEnv?: Record<string, string | undefined>;
   bridge?: OpenCodeBridgeContext;
   abortSignal?: AbortSignal;
+  /**
+   * "Ask this session": a bridge to the OpenCode session that ran the command.
+   * The CLI server reaches it through the pull protocol: it gets a fresh token
+   * in its environment, and once it is listening this process long-polls it.
+   */
+  sessionBridge?: SessionBridge;
 }
 
 interface RunCliResult {
@@ -328,15 +341,25 @@ export function createCliStderrForwarder(client: OpenCodeClient, toastedUrls: Se
   };
 }
 
-function logReadyFile(client: OpenCodeClient, readyFile: string, readyLabel: string, loggedUrls: Set<string>, toastedUrls: Set<string>): void {
+function logReadyFile(
+  client: OpenCodeClient,
+  readyFile: string,
+  readyLabel: string,
+  loggedUrls: Set<string>,
+  toastedUrls: Set<string>,
+  onServer?: (metadata: { port: number; isRemote: boolean }) => void,
+): void {
   if (!existsSync(readyFile)) return;
 
   const contents = readFileSync(readyFile, "utf-8");
   for (const line of contents.split(/\r?\n/)) {
     if (!line.trim()) continue;
     try {
-      const metadata = JSON.parse(line) as { url?: string };
+      const metadata = JSON.parse(line) as { url?: string; port?: unknown; isRemote?: unknown };
       if (!metadata.url || loggedUrls.has(metadata.url)) continue;
+      if (typeof metadata.port === "number") {
+        onServer?.({ port: metadata.port, isRemote: metadata.isRemote === true });
+      }
       loggedUrls.add(metadata.url);
       log(client, "info", `[Plannotator] Open ${readyLabel}: ${metadata.url}`);
       toastPlannotatorUrl(client, `Open ${readyLabel}: ${metadata.url}`, toastedUrls);
@@ -381,6 +404,25 @@ async function runPlannotatorCli(options: RunCliOptions): Promise<RunCliResult> 
   const loggedUrls = new Set<string>();
   const toastedUrls = new Set<string>();
   const cwd = options.cwd ?? process.cwd();
+  const sessionBridge = options.sessionBridge;
+  const bridgeToken = sessionBridge ? randomBytes(32).toString("base64url") : undefined;
+  const bridgeClient = new AbortController();
+  let bridgeClientStarted = false;
+  // The server is up: start answering its "Ask this session" questions.
+  const onServer = ({ port, isRemote }: { port: number; isRemote: boolean }) => {
+    // The server keeps the bridge off in remote mode; nothing to poll there.
+    if (!sessionBridge || !bridgeToken || bridgeClientStarted || isRemote) return;
+    bridgeClientStarted = true;
+    void runPullSessionBridgeClient({
+      baseUrl: `http://127.0.0.1:${port}`,
+      token: bridgeToken,
+      bridge: sessionBridge,
+      signal: bridgeClient.signal,
+      log: (message) => log(options.client, "info", message),
+    }).catch((error) => {
+      log(options.client, "info", `[Plannotator] Session bridge stopped: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  };
   const env = {
     ...process.env,
     ...options.extraEnv,
@@ -389,6 +431,16 @@ async function runPlannotatorCli(options: RunCliOptions): Promise<RunCliResult> 
     PLANNOTATOR_ORIGIN: "opencode",
     PLANNOTATOR_CWD: cwd,
     PLANNOTATOR_READY_FILE: readyFile,
+    ...(sessionBridge && bridgeToken
+      ? {
+          [SESSION_BRIDGE_TOKEN_ENV]: bridgeToken,
+          [SESSION_BRIDGE_HOST_ENV]: "opencode",
+          [SESSION_BRIDGE_MODES_ENV]: [
+            sessionBridge.modes.turn ? "turn" : "",
+            sessionBridge.modes.transient ? "transient" : "",
+          ].filter(Boolean).join(","),
+        }
+      : {}),
   };
 
   const bin = getPlannotatorBin();
@@ -437,7 +489,7 @@ async function runPlannotatorCli(options: RunCliOptions): Promise<RunCliResult> 
       });
       stderrForwarder = createCliStderrForwarder(options.client, toastedUrls);
       interval = setInterval(
-        () => logReadyFile(options.client, readyFile, options.readyLabel, loggedUrls, toastedUrls),
+        () => logReadyFile(options.client, readyFile, options.readyLabel, loggedUrls, toastedUrls, onServer),
         250,
       );
 
@@ -491,6 +543,7 @@ async function runPlannotatorCli(options: RunCliOptions): Promise<RunCliResult> 
       }
     });
   } finally {
+    bridgeClient.abort();
     if (interval !== undefined) clearInterval(interval);
     if (forceKillTimer !== undefined) clearTimeout(forceKillTimer);
     if (abortSignal && abortListener) abortSignal.removeEventListener("abort", abortListener);
@@ -527,10 +580,13 @@ export async function runCliPlanReview(input: {
   timeoutSeconds: number | null;
   abortSignal?: AbortSignal;
   bridge?: OpenCodeBridgeContext;
+  /** "Ask this session" (quick answers while the plan waits). */
+  sessionBridge?: SessionBridge;
 }): Promise<OpenCodePlanReviewResult> {
   const result = await runPlannotatorCli({
     client: input.client,
     args: ["opencode-plan"],
+    sessionBridge: input.sessionBridge,
     cwd: input.cwd,
     input: JSON.stringify({
       plan: input.planContent,
@@ -691,6 +747,9 @@ export function buildAnnotatePromptFromBridgeOutcome(
       });
 }
 
+/** A session bridge the command owns for the lifetime of its CLI run. */
+export type DisposableSessionBridge = SessionBridge & { dispose?: () => void };
+
 export async function handleCliCommand(input: {
   command: string;
   client: OpenCodeClient;
@@ -698,8 +757,24 @@ export async function handleCliCommand(input: {
   rawArgs: string;
   cwd?: string;
   bridge?: OpenCodeBridgeContext;
+  /**
+   * "Ask this session": builds the bridge to the invoking session. Called only
+   * once the command is about to open a Plannotator UI; disposed when it ends.
+   */
+  createSessionBridge?: () => DisposableSessionBridge | undefined;
 }): Promise<void> {
   const cwd = input.cwd ?? process.cwd();
+  let ownedBridge: DisposableSessionBridge | undefined;
+  const sessionBridge = (): SessionBridge | undefined => {
+    if (!ownedBridge) {
+      try {
+        ownedBridge = input.createSessionBridge?.();
+      } catch {
+        ownedBridge = undefined;
+      }
+    }
+    return ownedBridge;
+  };
 
   try {
     if (input.command === "plannotator-review") {
@@ -738,6 +813,7 @@ export async function handleCliCommand(input: {
         }),
         readyLabel: "code review",
         bridge: input.bridge,
+        sessionBridge: sessionBridge(),
       });
       if (result.exitCode !== 0) {
         log(input.client, "error", result.stderr.trim() || `Plannotator CLI exited with code ${result.exitCode}`);
@@ -782,6 +858,7 @@ export async function handleCliCommand(input: {
         cwd,
         readyLabel: "annotation UI",
         bridge: input.bridge,
+        sessionBridge: sessionBridge(),
       });
       if (result.exitCode !== 0) {
         log(input.client, "error", result.stderr.trim() || `Plannotator CLI exited with code ${result.exitCode}`);
@@ -837,6 +914,7 @@ export async function handleCliCommand(input: {
         }),
         readyLabel: "annotation UI",
         bridge: input.bridge,
+        sessionBridge: sessionBridge(),
       });
       if (result.exitCode !== 0) {
         log(input.client, "error", result.stderr.trim() || `Plannotator CLI exited with code ${result.exitCode}`);
@@ -869,5 +947,7 @@ export async function handleCliCommand(input: {
   } catch (error) {
     log(input.client, "error", `[Plannotator] ${error instanceof Error ? error.message : String(error)}`);
     if (isOpenCodePromptDeliveryError(error)) throw error;
+  } finally {
+    ownedBridge?.dispose?.();
   }
 }

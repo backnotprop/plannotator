@@ -109,4 +109,77 @@ describe("createAIRuntime (Bun) with a session bridge", () => {
       asksFromRebound: 1,
     });
   }, 15_000);
+
+  // A host that launched this server as a separate process (OpenCode plugin,
+  // Claude Code mod) hands it a bridge token through the environment.
+  async function runPullRunner(extraEnv: Record<string, string>) {
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-pull-runtime-"));
+    tempDirs.push(dir);
+    const runner = join(dir, "runner.ts");
+    const runtimeUrl = pathToFileURL(join(import.meta.dir, "ai-runtime.ts")).href;
+    writeFileSync(runner, `
+      import { createAIRuntime } from ${JSON.stringify(runtimeUrl)};
+      const runtime = await createAIRuntime({ cwd: ${JSON.stringify(dir)}, getServerPort: () => 4321 });
+      const caps = await (await runtime.endpoints["/api/ai/capabilities"](new Request("http://localhost/api/ai/capabilities"))).json();
+      const poll = (headers) => runtime.endpoints["/api/ai/bridge/poll"](new Request("http://localhost/api/ai/bridge/poll", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ status: "busy", waitMs: 0 }),
+      }));
+      const token = ${JSON.stringify("k".repeat(43))};
+      const statuses = {
+        ok: (await poll({ host: "127.0.0.1:4321", authorization: "Bearer " + token })).status,
+        rebinding: (await poll({ host: "evil.example:4321", authorization: "Bearer " + token })).status,
+        badToken: (await poll({ host: "127.0.0.1:4321", authorization: "Bearer " + "x".repeat(43) })).status,
+      };
+      const after = await (await runtime.endpoints["/api/ai/capabilities"](new Request("http://localhost/api/ai/capabilities"))).json();
+      runtime.dispose();
+      const bridge = caps.providers.find((p) => p.id === "session-bridge");
+      console.log(JSON.stringify({
+        bridge: bridge ? { label: bridge.label, status: bridge.sessionBridge.status } : null,
+        statusAfterPoll: after.providers.find((p) => p.id === "session-bridge")?.sessionBridge.status ?? null,
+        statuses,
+        tokenLeftInEnv: process.env.PLANNOTATOR_SESSION_BRIDGE_TOKEN ?? null,
+      }));
+    `);
+    const proc = Bun.spawn([process.execPath, runner], {
+      cwd: import.meta.dir,
+      env: {
+        ...process.env,
+        PATH: `${dir}:/usr/bin:/bin`,
+        PLANNOTATOR_REMOTE: "0",
+        PLANNOTATOR_SESSION_BRIDGE_TOKEN: "k".repeat(43),
+        PLANNOTATOR_SESSION_BRIDGE_HOST: "opencode",
+        PLANNOTATOR_SESSION_BRIDGE_MODES: "turn,transient",
+        ...extraEnv,
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    expect(exitCode, stderr).toBe(0);
+    return JSON.parse(stdout.trim().split("\n").at(-1)!);
+  }
+
+  test("takes a pull bridge from the host's environment, scrubs the token, and guards the endpoints", async () => {
+    if (process.platform === "win32") return;
+    expect(await runPullRunner({})).toEqual({
+      bridge: { label: "Ask this session · OpenCode", status: "ready" },
+      statusAfterPoll: "busy",
+      statuses: { ok: 200, rebinding: 403, badToken: 401 },
+      tokenLeftInEnv: null,
+    });
+  }, 15_000);
+
+  test("stays off in remote mode, and still scrubs the token", async () => {
+    if (process.platform === "win32") return;
+    const result = await runPullRunner({ PLANNOTATOR_REMOTE: "1" });
+    expect(result.bridge).toBeNull();
+    expect(result.statuses.ok).toBe(404);
+    expect(result.tokenLeftInEnv).toBeNull();
+  }, 15_000);
 });

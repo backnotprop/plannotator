@@ -56,8 +56,8 @@ import { warmFileListCache } from "@plannotator/shared/resolve-file";
 import { createEditorAnnotationHandler } from "./editor-annotations";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { isWSL } from "./browser";
-import { AI_QUERY_ENDPOINT, createAIRuntime } from "./ai-runtime";
-import { isAIEndpointPath, type AIEndpoints, type SessionBridge } from "@plannotator/ai";
+import { createAIRuntime } from "./ai-runtime";
+import { isAIEndpointPath, isLongLivedAIEndpointPath, type AIEndpoints, type SessionBridge } from "@plannotator/ai";
 import { isArchiveDocumentMutation } from "@plannotator/shared/archive-mode";
 import { readPlanFile } from "@plannotator/shared/doc-resolve";
 
@@ -508,7 +508,7 @@ export async function startPlannotatorServer(
             }
             const handler = aiRuntime.endpoints[url.pathname as keyof AIEndpoints];
             if (handler) {
-              if (url.pathname === AI_QUERY_ENDPOINT) {
+              if (isLongLivedAIEndpointPath(url.pathname)) {
                 server.timeout(req, 0);
               }
               return handler(req);

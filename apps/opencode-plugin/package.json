@@ -46,6 +46,7 @@
   "devDependencies": {
     "@opencode-ai/plugin": "1.18.32",
     "@opencode/plugin": "2.0.14",
+    "@plannotator/ai": "workspace:*",
     "@plannotator/server": "workspace:*",
     "@plannotator/shared": "workspace:*"
   },

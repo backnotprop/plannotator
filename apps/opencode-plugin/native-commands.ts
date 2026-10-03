@@ -17,7 +17,13 @@
  * translation client, so the two hosts cannot drift.
  */
 
-import { handleCliCommand, type OpenCodeBridgeAgent, type OpenCodeBridgeContext } from "./cli-bridge";
+import {
+  handleCliCommand,
+  type DisposableSessionBridge,
+  type OpenCodeBridgeAgent,
+  type OpenCodeBridgeContext,
+} from "./cli-bridge";
+import { createOpenCodeSessionBridge } from "./opencode-session-bridge";
 import {
   createV2BridgeClient,
   readListPayload,
@@ -66,6 +72,19 @@ export interface CliCommandRequest {
   rawArgs: string;
   cwd?: string;
   bridge?: OpenCodeBridgeContext;
+  createSessionBridge?: () => DisposableSessionBridge | undefined;
+}
+
+/**
+ * "Ask this session" for a native command: a bridge to the invoking session,
+ * or undefined on a host whose plugin API cannot prompt the session.
+ */
+export function createNativeCommandSessionBridge(
+  ctx: V2ContextLike,
+  sessionID: string,
+): DisposableSessionBridge | undefined {
+  if (!sessionID || typeof ctx.session?.prompt !== "function") return undefined;
+  return createOpenCodeSessionBridge({ ctx, sessionID });
 }
 
 export interface NativeCommandDeps {
@@ -118,6 +137,7 @@ export async function runNativeCommand(
       rawArgs,
       cwd: await resolveDirectory(deps.ctx, sessionID),
       bridge: await deps.getBridgeContext(),
+      createSessionBridge: () => createNativeCommandSessionBridge(deps.ctx, sessionID),
     });
   } finally {
     // The client may be watching the host's event stream for its session-URL

@@ -11,6 +11,8 @@
     "./session-manager": "./session-manager.ts",
     "./endpoints": "./endpoints.ts",
     "./session-bridge": "./session-bridge.ts",
+    "./session-bridge-pull": "./session-bridge-pull.ts",
+    "./session-bridge-pull-client": "./session-bridge-pull-client.ts",
     "./providers/claude-agent-sdk": "./providers/claude-agent-sdk.ts",
     "./providers/codex-app-server": "./providers/codex-app-server.ts",
     "./providers/command-path": "./providers/command-path.ts",

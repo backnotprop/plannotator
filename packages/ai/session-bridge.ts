@@ -77,6 +77,12 @@ export interface SessionBridge {
 	 * refuses an interrupt request.
 	 */
 	interrupt?(): void | Promise<void>;
+	/**
+	 * The server is about to deliver the reviewer's decision (or shut down):
+	 * drop any question that has not reached the session yet, and leave a turn
+	 * that is already running alone. Optional; in-process hosts deliver at once.
+	 */
+	detach?(): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -100,8 +106,14 @@ const HOST_LABELS: Record<SessionBridgeHost, string> = {
 	"claude-code": "Claude Code",
 };
 
-export function sessionBridgeLabel(host: SessionBridgeHost): string {
-	return `Ask this session · ${HOST_LABELS[host] ?? host}`;
+export function sessionBridgeLabel(
+	host: SessionBridgeHost,
+	modes: { turn: boolean; transient: boolean } = { turn: true, transient: false },
+): string {
+	const name = HOST_LABELS[host] ?? host;
+	// A transient-only bridge (e.g. OpenCode plan review) answers from context,
+	// with no tools and nothing written to the transcript: say so.
+	return !modes.turn && modes.transient ? `Quick answer from this session · ${name}` : `Ask this session · ${name}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -110,6 +122,14 @@ export function sessionBridgeLabel(host: SessionBridgeHost): string {
 
 export const SESSION_ASK_HEADER =
 	"[Plannotator Ask AI] A question from the reviewer in Plannotator. Answer it briefly, here in the session. Do not edit files or start new work unless the question asks you to.";
+
+/**
+ * Added to a transient (quick-answer) question. The host answers from the
+ * session's context in one completion: a tool call there yields no answer at
+ * all, and a tool call the session is waiting on may still look unfinished.
+ */
+export const SESSION_ASK_TRANSIENT_NOTE =
+	"Answer in plain text only. Tools are not available for this reply, so do not call any. If a tool call of yours looks unfinished, it is still waiting on this review.";
 
 function describeSurface(context: AIContext): string | null {
 	switch (context.mode) {
@@ -132,9 +152,10 @@ function describeSurface(context: AIContext): string | null {
  * The message the session receives. There is no system prompt: the host's own
  * prompt is in effect, so the header carries the framing.
  */
-export function formatSessionAskText(context: AIContext, prompt: string): string {
+export function formatSessionAskText(context: AIContext, prompt: string, mode: SessionBridgeAskMode = "turn"): string {
 	const surface = describeSurface(context);
-	return [SESSION_ASK_HEADER, surface, "", prompt.trim()].filter((line) => line !== null).join("\n");
+	const note = mode === "transient" ? SESSION_ASK_TRANSIENT_NOTE : null;
+	return [SESSION_ASK_HEADER, note, surface, "", prompt.trim()].filter((line) => line !== null).join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -170,7 +191,7 @@ export class SessionBridgeProvider implements AIProvider {
 	constructor(bridge: SessionBridge, options: SessionBridgeProviderOptions = {}) {
 		this.bridge = bridge;
 		this.capabilities = { fork: false, resume: false, streaming: true, tools: bridge.modes.turn };
-		this.label = sessionBridgeLabel(bridge.host);
+		this.label = sessionBridgeLabel(bridge.host, bridge.modes);
 		this.pollIntervalMs = options.pollIntervalMs ?? 250;
 	}
 
@@ -210,6 +231,11 @@ export class SessionBridgeProvider implements AIProvider {
 	 */
 	detach(): void {
 		this.closing = true;
+		try {
+			this.bridge.detach?.();
+		} catch {
+			// Best effort: the decision must go out regardless.
+		}
 	}
 
 	async createSession(options: CreateSessionOptions): Promise<AISession> {
@@ -447,7 +473,7 @@ export class SessionBridgeSession extends BaseSession {
 			);
 
 			try {
-				bridge.ask({ askId: `${this.id}:${gen}`, text: formatSessionAskText(this.context, prompt), mode }, sink, hostAbort.signal);
+				bridge.ask({ askId: `${this.id}:${gen}`, text: formatSessionAskText(this.context, prompt, mode), mode }, sink, hostAbort.signal);
 			} catch (err) {
 				sink.error("failed", err instanceof Error ? err.message : String(err));
 			}

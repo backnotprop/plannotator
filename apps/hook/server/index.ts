@@ -113,6 +113,7 @@ import { createWorktreePool, type WorktreePool, type PoolEntry } from "@plannota
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getCliInstallUrl, getMRLabel, getMRNumberLabel, getDisplayRepo, getPlatformLabel, getPRNumber, getPRHeadFetchSpec, getPRCloneCommand } from "@plannotator/server/pr";
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
 import { enableTailscaleServe } from "@plannotator/server/tailscale-serve";
+import { takeEnvPullSessionBridgeConfig } from "@plannotator/server/ai-runtime";
 import { writeUrlQr } from "@plannotator/server/qr";
 import { resolveAnnotateTarget } from "./annotate-resolution";
 import { LIVE_APP_REMOTE_MESSAGE } from "@plannotator/shared/live-probe";
@@ -276,6 +277,10 @@ if (tailscaleFlag) {
   // suppresses a config-file urlHost, avoiding the misleading
   // "set PLANNOTATOR_REMOTE=1" local-session warning mid --tailscale run.
   process.env.PLANNOTATOR_URL_HOST = "";
+  // "Ask this session" stays off in a tailnet-published session, as it is in
+  // remote mode: the session is reachable from other devices. Taking the
+  // host's bridge config here discards it (and scrubs the token from env).
+  takeEnvPullSessionBridgeConfig();
 }
 
 /**

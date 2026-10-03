@@ -53,8 +53,8 @@ import { dirname, resolve as resolvePath } from "path";
 import { isWithinDirectory } from "@plannotator/shared/html-assets-node";
 import { isWSL } from "./browser";
 import { handleOpenInApps, handleOpenIn } from "./open-in";
-import { AI_QUERY_ENDPOINT, createAIRuntime } from "./ai-runtime";
-import { isAIEndpointPath, type AIEndpoints, type SessionBridge } from "@plannotator/ai";
+import { createAIRuntime } from "./ai-runtime";
+import { isAIEndpointPath, isLongLivedAIEndpointPath, type AIEndpoints, type SessionBridge } from "@plannotator/ai";
 import { createHtmlAssetRegistry, framedDocumentNotFound } from "./html-assets";
 import { createBunAgentTerminalBridge } from "./agent-terminal";
 import { startLiveAppProxy, type LiveAppProxy } from "./live-proxy";
@@ -1155,7 +1155,7 @@ export async function startAnnotateServer(
             }
             const handler = aiRuntime.endpoints[url.pathname as keyof AIEndpoints];
             if (handler) {
-              if (url.pathname === AI_QUERY_ENDPOINT) {
+              if (isLongLivedAIEndpointPath(url.pathname)) {
                 server.timeout(req, 0);
               }
               return handler(req);

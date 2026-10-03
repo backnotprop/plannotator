@@ -1,5 +1,7 @@
 import {
   createAIEndpoints,
+  createPullSessionBridge,
+  takePullSessionBridgeConfig,
   createDeferredModelDiscovery,
   createProvider,
   ProviderRegistry,
@@ -8,10 +10,12 @@ import {
   SessionManager,
   type AIEndpoints,
   type PiSDKConfig,
+  type PullSessionBridgeConfig,
   type SessionBridge,
 } from "@plannotator/ai";
 import { resolveWindowsCommandShim } from "@plannotator/ai/providers/command-path";
 import { isLoopbackHostHeader } from "@plannotator/shared/loopback-host";
+import { isRemoteSession } from "./remote";
 
 export interface AIRuntime {
   endpoints: AIEndpoints;
@@ -35,6 +39,31 @@ interface CreateAIRuntimeOptions {
    * (DNS-rebinding guard). Undefined (not bound yet) refuses bridge requests.
    */
   getServerPort?: () => number | undefined;
+  /**
+   * "Ask this session" for a host that launched this server as a SEPARATE
+   * process (the OpenCode plugin, the Claude Code mod): the host long-polls
+   * `/api/ai/bridge/poll` with this token (session-bridge-pull.ts). Defaults to
+   * the config the host put in the environment (`PLANNOTATOR_SESSION_BRIDGE_*`),
+   * taken once per process and removed from `process.env`. Ignored when an
+   * in-process `sessionBridge` is given, and off in remote mode.
+   */
+  pullSessionBridge?: PullSessionBridgeConfig | null;
+}
+
+let envPullBridgeTaken = false;
+let envPullBridge: PullSessionBridgeConfig | undefined;
+
+/**
+ * The pull-bridge config from the environment, read once per process. Taking
+ * it also deletes the variables, so agent jobs and terminals spawned later
+ * never inherit the token.
+ */
+export function takeEnvPullSessionBridgeConfig(): PullSessionBridgeConfig | undefined {
+  if (!envPullBridgeTaken) {
+    envPullBridgeTaken = true;
+    envPullBridge = takePullSessionBridgeConfig(process.env);
+  }
+  return envPullBridge;
 }
 
 export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Promise<AIRuntime> {
@@ -119,7 +148,16 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
     // OpenCode not available.
   }
 
-  const bridgeProvider = options.sessionBridge ? new SessionBridgeProvider(options.sessionBridge) : null;
+  // Off in remote mode, in-process or pulled: anyone who can reach the session
+  // URL could otherwise type into the agent session (same reasoning as the
+  // agent terminal).
+  const remote = isRemoteSession();
+  const inProcessBridge = remote ? undefined : options.sessionBridge;
+  const envPull = options.pullSessionBridge === undefined ? takeEnvPullSessionBridgeConfig() : undefined;
+  const pullConfig = remote || inProcessBridge ? undefined : (options.pullSessionBridge ?? envPull);
+  const pullBridge = pullConfig ? createPullSessionBridge(pullConfig) : null;
+  const sessionBridge = inProcessBridge ?? pullBridge?.bridge;
+  const bridgeProvider = sessionBridge ? new SessionBridgeProvider(sessionBridge) : null;
   if (bridgeProvider) registry.register(bridgeProvider, SESSION_BRIDGE_PROVIDER_NAME);
 
   const endpoints = createAIEndpoints({
@@ -132,6 +170,7 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
     beforeProviderSession: discovery.beforeProviderSession,
     authorizeSessionBridgeRequest: (req) =>
       isLoopbackHostHeader(req.headers.get("host"), options.getServerPort?.()),
+    ...(pullBridge ? { pullBridge } : {}),
   });
 
   return {
@@ -142,6 +181,7 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
       bridgeProvider?.detach();
       sessionManager.disposeAll();
       registry.disposeAll();
+      pullBridge?.dispose();
     },
   };
 }
