@@ -11,7 +11,9 @@ plannotator/
 ├── apps/
 │   ├── hook/                     # Claude Code plugin (no commands/ — core skills installed to ~/.claude/skills act as slash commands)
 │   │   ├── .claude-plugin/plugin.json
-│   │   ├── hooks/hooks.json      # PermissionRequest hook config
+│   │   ├── hooks/hooks.json      # PermissionRequest hook config + "modules" (the Claude Code mod)
+│   │   ├── hooks/mod/            # The Claude Code mod: non-blocking plan review/annotate/review/last + Ask this session (see "Claude Code mod")
+│   │   ├── tests/                # `claude plugin test` harness tests (scripts/test-claude-code-mod.sh; bun skips them)
 │   │   ├── server/index.ts       # Entry point (plan + review + annotate + archive subcommands)
 │   │   └── dist/                 # Built single-file apps (index.html, review.html)
 │   ├── opencode-plugin/          # OpenCode plugin
@@ -146,6 +148,9 @@ claude --plugin-dir ./apps/hook
 | `PLANNOTATOR_SHARE` | Set to `disabled` to turn off URL sharing entirely, including Guided Review share links (the review UI hides "Create share link", `POST /api/guide/:jobId/share` answers `403 { error: "sharing disabled" }`, and `plannotator guide share` refuses with exit 1). Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "share": "disabled" }`); the env var takes precedence. |
 | `PLANNOTATOR_SHARE_URL` | Custom base URL for share links (self-hosted portal). Default: `https://share.plannotator.ai`. |
 | `PLANNOTATOR_PASTE_URL` | Base URL of the paste service API for short URL sharing. Default: `https://plannotator-paste.plannotator.workers.dev`. |
+| `PLANNOTATOR_HOST_RESULT_FILE` | Set by a host that starts the CLI detached (the Claude Code mod): when a review, annotate, annotate-last or `claude-mod-plan` session settles, the CLI writes one JSON decision record there atomically, with the agent message composed from the configured prompts. Taken at startup and removed from the environment. Stdout is unchanged. See "Claude Code mod". |
+| `PLANNOTATOR_SESSION_TAG` | Set by the Claude Code mod in its session's environment (`claude-code:<session id>`), so processes the session starts can be matched to it; recorded as `hostSession` in the `sessions/` registry. Not meant to be set by hand. |
+| `PLANNOTATOR_MOD_DEBUG` | Set to `1` before starting Claude Code to have the Claude Code mod write `claude-code-mod/debug.log` in the data dir (launches, results, turns, bridge commands). Default: off. |
 | `PLANNOTATOR_ORIGIN` | Explicit agent-origin override at the top of the detection chain. Valid values: `claude-code`, `amp`, `droid`, `opencode`, `codex`, `copilot-cli`, `gemini-cli`, `kiro-cli`, `mistral-vibe`, `pi`, `oh-my-pi`. Invalid values silently fall through to env-based detection. Unset by default. |
 | `PLANNOTATOR_JINA` | Set to `0` / `false` to disable Jina Reader for URL annotation, or `1` / `true` to enable. Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "jina": false }`) or per-invocation via `--no-jina`. |
 | `PLANNOTATOR_ANNOTATE_HISTORY` | Set to `0` / `false` to disable ALL annotate-session writes to the data dir: per-file version history (no copies of annotated files are written; the annotate version diff is unavailable) AND the durable submitted-feedback records (#678) that single-local-file annotate sessions otherwise write to `history/{project}/{slug}/submissions/` before deleting the draft on submit. Disabling it keeps annotate sessions fully stateless but also gives up that submit crash-recovery record. URL and annotate-last sessions never write either kind of data regardless of this flag. Folder sessions write no submitted-feedback records, but they do participate in per-file version history: the first time a session serves a file through /api/doc it snapshots that file (lazily, memoized per resolved path for the life of the server), which is what powers the per-file version diff when a folder file is reopened later; setting this flag to 0 disables those folder snapshots too. Setting it to 0 additionally suppresses **feedback archive** records for every annotate surface (single file, folder, URL, live app, annotate-last), so "fully stateless annotate session" stays literally true regardless of `PLANNOTATOR_FEEDBACK_HISTORY`. Raw-HTML and live-app pinpoints write their element context (selector, ancestor path, allowlisted attributes, visible text, a collapsed HTML skeleton, and the live route) into the submission records and drafts too; form values and inline handlers are never captured. Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "annotateHistory": false }`); the env var takes precedence. |
@@ -252,8 +257,9 @@ one, so a reviewer cannot approve text the agent replaced; the tab then loads
 the revision and the reviewer decides again. Both plan servers implement it (`updatePlan` on the
 server result, `/api/plan/revision`, the 409) but advertise `planRevision` only
 when the caller passes `planRevisions: true`; today only Pi's
-`plannotator_submit_plan` does, so Claude Code, OpenCode and the Pi event-API
-`plan-review` action keep a tab that never polls and sends unchanged bodies.
+`plannotator_submit_plan` and the Claude Code mod's `claude-mod-plan` do, so
+classic Claude Code, OpenCode and the Pi event-API `plan-review` action keep a
+tab that never polls and sends unchanged bodies.
 A decision claims the review right after the revision check (before the note
 integrations are awaited), so `updatePlan` refuses from then on; a Pi
 resubmission that hits that refusal tells the agent to wait for the decision
@@ -272,6 +278,166 @@ approved text at approval, the message says so and tells the agent not to
 execute the unreviewed edits (to keep them, the user returns to plan mode and
 the agent resubmits). Auto-approved plans (no UI) keep the file as their
 source.
+
+### Claude Code mod: non-blocking plan review, annotate, review and last
+
+Where Claude Code runs hooks modules ("Claude Mods": function hooks, CLI only,
+2.1.287+), the plugin's `hooks/hooks.json` also loads `apps/hook/hooks/mod/register.ts`
+(`"modules": ["./mod/register.ts"]`). No Plannotator session then holds a tool
+call open: the mod starts the CLI detached, returns at once, and delivers the
+reviewer's decision later as a plugin turn (`$.prompt.submit`, read by Claude
+as a message from the `plannotator` plugin). UX spec:
+`.product/drafts/claude-code-mod/UX-SPEC.md` (owner-reviewed draft; its open
+questions are not answered yet, and the conservative choices below are the
+ones taken).
+
+**Inert without mods.** Checked live: Claude Code 2.1.150 (no hooks modules)
+validates and loads the plugin with the `modules` key, ignores it, and runs the
+classic PermissionRequest command hook (the blocking review) exactly as before;
+2.1.288 with modules on runs the mod and never reaches that command hook. The mod
+also stands down by itself (every hook passes through) in `-p` / SDK sessions
+(`isInteractive` false: a later plugin turn would have no session to land in)
+and where `/bin/sh` is missing (Windows), leaving the classic hook and the
+`/plannotator-*` skills in charge. A mods-capable Claude Code whose rollout
+switch is off could not be reproduced locally; the engine only inserts modules
+into the hook chain when they load, so it should behave like 2.1.150.
+
+**Files.** `register.ts` holds every `$` call (`claude plugin validate` follows
+`$` only through top-level functions and inline hooks) and builds a `Host` of
+closures; `controller.ts` (`PlannotatorMod`) is the per-session state machine;
+`launch.ts` (detached launcher, launch-directory layout, command table, copy),
+`delivery.ts` (turn vs log, 12 KB inline limit), `plan.ts` (ExitPlanMode
+decisions and deny copy), `turns.ts` and `bridge.ts` (Ask this session),
+`shell-words.ts` (argument splitting). The mod is self-contained: a plugin
+installed from the marketplace is only `apps/hook/`, and a hooks module may
+import only its own files.
+
+**Detached launch.** `$.process.run` is one-shot (10 minutes at most) and a hook
+has a 10 s budget of its own time, so the mod runs a tiny `/bin/sh` wrapper
+(`LAUNCH_SCRIPT`) that starts `plannotator <subcommand> <args>` in the
+background with stdin/stdout/stderr on files and returns in milliseconds. The
+launch directory is `${PLANNOTATOR_DATA_DIR or ~/.plannotator}/claude-code-mod/<session id>/<launch id>/`:
+`stdin`, `ready` (`PLANNOTATOR_READY_FILE`), `result.json`
+(`PLANNOTATOR_HOST_RESULT_FILE`), `stdout`, `stderr`, `pid`, `exit` (written
+after the CLI exits), `revision.json` + `.ack` (plan revisions) and
+`feedback.md` (oversized feedback). Waiting inside a hook (for the ready file, a
+revision ack) happens in a `$.process.run` shell loop (`waitForAny`), never a
+`$.clock` wait, which would spend the hook's budget and let the engine run the
+call on without the mod. Once a review is open, a 1 s `$.clock.every` timer
+(the mod has no listener) reads `result.json`, notices an `exit` with no result
+("the review server stopped … your draft is saved"), and every 15 s checks the
+pid with `kill -0`. Open launches and a pending plan approval persist in
+`$.store` and reattach on `session.start` for the same session id
+(`--resume`, `--continue`, a restart). Servers outlive Claude Code on purpose:
+the wrapper ignores SIGHUP and starts the CLI under `nohup` (a closing terminal
+otherwise took the server with it), so closing the terminal does not lose a
+review; verified live, `claude --continue` reattached and delivered it.
+
+**Host result file (`PLANNOTATOR_HOST_RESULT_FILE`).** New CLI side channel
+(`apps/hook/server/host-result.ts`), taken from the env at startup and scrubbed
+like the bridge token: when a review, annotate, annotate-last or
+`claude-mod-plan` session settles, the CLI writes ONE JSON record there
+atomically (temp + rename): `{ v: 1, surface, decision, message, noop,
+annotationCount?, platform?, withNotes?, approvedPlan?, permissionMode? }`.
+`message` is composed from the configured prompts exactly as other hosts do
+(review: the CLI's own output; annotate: the file/message feedback and
+approved-with-notes prompts OpenCode and Pi use; plan: `composePlanDeniedMessage`
+/ the approved prompts), so the mod never re-implements prompts. Stdout is
+unchanged for every caller. `noop` marks what never starts a turn: Done with
+nothing to send, review LGTM, Close, and a review posted straight to the PR
+platform (`platform: true`, logged plus a `$.prompt.suggest` to address the
+comments).
+
+**Commands.** `/plannotator-review`, `/plannotator-annotate` and
+`/plannotator-last` keep their names (spec open question 7, conservative): when
+the user's core skills hold the names (Claude Code refuses
+`$.command.register` for a user skill's name), the mod's `command.run` hook
+answers the skill's command itself, so the skill's blocking bang line never
+runs; a name nobody holds is registered (`immediate: true`). Arguments are split
+like the skill's shell line (`splitShellWords`: quotes and backslashes, no
+expansion) and passed to the same CLI parsers (`review`, `annotate`; `last`
+runs `annotate-last --stdin` with the last assistant text from
+`$.session.messages()`). The command returns "Opened <subject> in Plannotator ·
+<url>" once the ready file appears (up to 45 s for review, 15 s otherwise), or
+the CLI's own startup error. Under the mod the CLI's tolerant annotate handoff
+(several unresolvable words) is shown to the user as that error, not handed to
+Claude.
+
+**Plan review.** The `tool.call` hook on the main loop's ExitPlanMode resolves
+the plan (the plan file when it is an absolute `.md` regular file within the
+2 MB cap, else the inline `plan`: the #1667 rule), then:
+1. no review open: starts `plannotator claude-mod-plan` (internal subcommand,
+   `apps/hook/server/claude-mod-plan.ts`; stdin `{ plan, planFilePath,
+   revisionFile }`; the plan server with `planRevisions: true`) and answers
+   `{ deny }` with the waiting text (`waitingDenyText`). ExitPlanMode never runs,
+   so plan mode stays on.
+2. a review open: writes `revision.json` `{ seq, plan }`; the subcommand polls it
+   every 500 ms, pushes it with `updatePlan` and acks; the deny text says
+   "Plan vN replaced vN-1" (or, when a decision is already being recorded,
+   to wait for it). Spec open question 2 resolved like Pi: revisions go into the
+   same tab.
+3. the plan's SHA-256 (trailing whitespace ignored) equals an approval's: the
+   call passes (`next(e)`), and `classic.PermissionRequest` answers `allow`
+   with `updatedInput.plan` = the approved text (#1670's "execute what was
+   approved") and `setMode` to the reviewer's permission mode. Modules sit above
+   the settings hooks in that chain, so the plugin's own PermissionRequest
+   command hook never runs: no second review. A different plan opens a new
+   review instead.
+Decisions: deny and answers-only submit the denied / answered prompt; approval
+submits the approved (or approved-with-notes) prompt plus
+`PLAN_APPROVAL_NEXT_STEP` ("Call ExitPlanMode once more …"), the two-hop
+approval of spec open question 1 (the one-hop `$.tool.call` path is untested).
+The claim the subcommand records (`currentPlan` after each accepted revision) is
+what `approvedPlan` carries. If the plan server cannot start, the call falls
+back to Claude Code's own flow (and the classic hook). A subagent's
+ExitPlanMode keeps the classic flow. Not built: the edit guard (spec: deny
+Edit/Write while a plan is in review after the user leaves plan mode), the
+`AbovePrompt` band with Send now / Hold, the `/plannotator` sessions pane, the
+`UserMessage` / `ToolUse` render hooks, and `tab-closed` detection; a decision
+is always sent (`$.prompt.submit` waits for idle; draft text in the composer
+is left alone).
+
+**Delivery.** Each decision is one plugin turn, in arrival order, prefixed
+`Plannotator: <subject> — <outcome>.`; a message over 12 KB is written in full
+to the launch's `feedback.md` and Claude is told to Read it (the feedback
+archive may be off, so the mod writes its own copy). Status line
+(`$.ui.status`): `<subject> · waiting for you` / `N open · …`; toasts for a plan
+waiting or replaced and for feedback received; `$.ui.log` for no-op decisions,
+stopped servers and reattachment.
+
+**Session tag.** `session.start` sets `PLANNOTATOR_SESSION_TAG=claude-code:<session id>`
+with `$.env.set`, so every process the session starts (Bash calls, hooks, the
+detached servers) inherits it; `registerCliSession` records it as
+`hostSession` in the `sessions/` registry.
+
+**Ask this session.** Every launched server gets a 32-byte hex token
+(`PLANNOTATOR_SESSION_BRIDGE_TOKEN`, `_HOST=claude-code`, `_MODES=turn`). Once
+the ready file names the port, the timer starts `createBridge` (`bridge.ts`, the
+pull-bridge client over `$.http.fetch` to `http://127.0.0.1:<port>`, no Origin):
+an `ask` is submitted as a real turn (`$.prompt.submit`), identified at
+`turn.start` by its header and last line (Claude Code frames a plugin prompt as
+"The plannotator plugin sent a message: …", seen live), streamed back from
+`turn.step` text/tool chunks, and finished from `turn.complete`'s `answer`.
+`busy` = a turn is running (pushed on `turn.start` / `turn.complete`, not only
+at the next poll); `interrupt` aborts the running turn (`$.turn.abort`);
+cancel aborts our own turn, or, while it is still queued, confirms at once and
+aborts its turn the moment it starts. Plan review does not block the session
+under the mod, so the status is never `blocked` and plan review gets real turns
+too (verified live). Polls ask for 15 s (750 ms while our question streams, so
+deltas flush), and stop on 401/403/404/405/503 (`404` = an older CLI without
+the bridge), `closing`, or once the review settles.
+
+**Tests.** Bun: `apps/hook/hooks/mod/*.test.ts` (controller flows over an
+in-memory `Host`, delivery, shell words, and `bridge.test.ts` against the REAL
+server half `createPullSessionBridge`), `apps/hook/server/host-result.test.ts`,
+`apps/hook/server/claude-mod-plan.test.ts` (the subcommand as a process:
+revision → tab → approval carries the revised text; answers-only). Engine
+harness: `apps/hook/tests/register.test.ts` via `scripts/test-claude-code-mod.sh`
+(stages the plugin without the CLI, whose bun tests `claude plugin test` would
+otherwise try to load; bun skips `apps/hook/tests/` through `pathIgnorePatterns`).
+Typecheck: `apps/hook/hooks/mod/tsconfig.json` (no DOM, no Node; `globals.d.ts`
+declares the few web APIs a hooks module has). `PLANNOTATOR_MOD_DEBUG=1` writes
+`claude-code-mod/debug.log` in the data dir.
 
 ### Codex Stop hook: which turn the plan belongs to
 
@@ -659,9 +825,9 @@ Ask AI providers are detected independently from installed/authenticated local C
 
 Automatic resolution is session-only and never writes a preference. Explicit per-origin choices are persisted in cookies, so a user can override the automatic match for one agent without changing the default for another.
 
-**"Ask this session" (session bridge).** A host can let Ask AI be answered by the agent session that opened Plannotator instead of a separate SDK agent. The host implements the small `SessionBridge` interface (`packages/ai/session-bridge.ts`, vendored to Pi: `host`, `status()` = `ready | busy | blocked | gone`, `modes { turn, transient }`, `ask(req, sink, signal)`, optional `interrupt()`) and passes it as `sessionBridge` to the server (`startReviewServer` / `startAnnotateServer` / plan `ServerOptions` on Bun; review, annotate and plan review on Pi), which registers `SessionBridgeProvider` LAST under id `session-bridge` (server default unchanged) behind the unchanged `/api/ai/*` endpoints. `/api/ai/capabilities` adds `label` ("Ask this session · Pi") and live `sessionBridge { host, status, modes }` for it, `models: []` (no model picker). The provider, not the host, enforces one question at a time across threads (`ask_in_flight`), sends no system prompt (the question carries the `SESSION_ASK_HEADER` line plus the surface), and never interrupts implicitly: a busy session answers `agent_busy`, and the client re-asks with `/api/ai/query` `busyPolicy: "wait"` ("Ask when it finishes", streams `status: waiting` until idle) or `"interrupt"` ("Interrupt and ask now", host `interrupt()` then ask). `session_gone` / `session_blocked` offer "Ask a separate AI instead", which moves THIS page (never the cookie: `applyConfigChange(..., { persist: false })`) to `resolveSessionBridgeFallback` and re-asks. Abort cancels only our question; the runtime `detach()`es the bridge before teardown so a decision/exit never stops a turn already running. Client default (`resolveAIProviderSelection`): an explicit saved pick wins (per-origin for origins with their own provider, else the global one), then a usable bridge (not gone; blocked only with a transient mode), then the old order — byte-identical without a bridge. Code review sends the diff's identity (`buildSessionReviewIdentity`), never the patch. **Pi** (`apps/pi-extension/pi-session-bridge.ts`): review, annotate, last and plan review (plan review no longer blocks the session, see "Pi plan review does not block" below), off in remote mode; the question is a `pi.sendMessage({ customType: "plannotator-ask", display: true, details: { askId } }, { triggerTurn: true })` turn read back from `message_start` / `message_update` text deltas / `tool_execution_start` / `agent_end`; listeners register once at load because `pi.on` returns no unsubscribe before Pi 1.0. **OpenCode 2** (`apps/opencode-plugin/opencode-session-bridge.ts`): review, annotate and last ask a real turn — `ctx.session.prompt({ id, text, delivery: "steer", metadata: { source: "plannotator-ask" } })` under a message id generated in OpenCode's own ascending `msg_` format, streamed back from `ctx.event.subscribe()` (`session.inbox.delivered` with our id starts the answer, then `session.text.delta` / `text.ended` / `tool.input.started`, ended by `session.execution.succeeded|failed|interrupted`), with `session.wait` + `session.context` as the fallback when the event stream is missing (upstream #44788). Delivery is "steer", not "queue", on purpose: every V2 command leaves its session-URL notice as a pending steer row, and a queued question would wake the session with that notice promoted alone as its own model turn (seen live on 2.0.22). Busy comes from the execution events cross-checked by a single outstanding `session.wait` probe; abort and "Interrupt and ask now" use `session.interrupt` (whole execution), only on a turn that is ours or on the reviewer's explicit choice. Plan review answers from context only ("Quick answer from this session · OpenCode", `modes { turn: false, transient: true }`): `submit_plan` is a pending tool call, so a real turn cannot run until the decision (a prompt sent then waits for the tool result, verified live), and `markPlanReviewPending` makes EVERY bridge on that session report `blocked` so nothing can interrupt the review. The quick answer is `session.generate` (no transcript write; verified live on 2.0.22 with OpenAI during a pending `submit_plan`, and `@opencode/ai`'s `normalizeToolHistory` fills the unfinished call with an error result for every provider); it still offers the model its tools, so the question carries `SESSION_ASK_TRANSIENT_NOTE` and an empty answer (a tool call) is reported as a failure. The embedded plan server takes the bridge in-process; review/annotate/last and the CLI plan fallback run the `plannotator` CLI as a child and use the pull bridge below. **OpenCode 1** has no bridge (a second adapter over V1's different message/event model, not a small lift). Claude Code has no bridge yet; its mod will use the pull bridge.
+**"Ask this session" (session bridge).** A host can let Ask AI be answered by the agent session that opened Plannotator instead of a separate SDK agent. The host implements the small `SessionBridge` interface (`packages/ai/session-bridge.ts`, vendored to Pi: `host`, `status()` = `ready | busy | blocked | gone`, `modes { turn, transient }`, `ask(req, sink, signal)`, optional `interrupt()`) and passes it as `sessionBridge` to the server (`startReviewServer` / `startAnnotateServer` / plan `ServerOptions` on Bun; review, annotate and plan review on Pi), which registers `SessionBridgeProvider` LAST under id `session-bridge` (server default unchanged) behind the unchanged `/api/ai/*` endpoints. `/api/ai/capabilities` adds `label` ("Ask this session · Pi") and live `sessionBridge { host, status, modes }` for it, `models: []` (no model picker). The provider, not the host, enforces one question at a time across threads (`ask_in_flight`), sends no system prompt (the question carries the `SESSION_ASK_HEADER` line plus the surface), and never interrupts implicitly: a busy session answers `agent_busy`, and the client re-asks with `/api/ai/query` `busyPolicy: "wait"` ("Ask when it finishes", streams `status: waiting` until idle) or `"interrupt"` ("Interrupt and ask now", host `interrupt()` then ask). `session_gone` / `session_blocked` offer "Ask a separate AI instead", which moves THIS page (never the cookie: `applyConfigChange(..., { persist: false })`) to `resolveSessionBridgeFallback` and re-asks. Abort cancels only our question; the runtime `detach()`es the bridge before teardown so a decision/exit never stops a turn already running. Client default (`resolveAIProviderSelection`): an explicit saved pick wins (per-origin for origins with their own provider, else the global one), then a usable bridge (not gone; blocked only with a transient mode), then the old order — byte-identical without a bridge. Code review sends the diff's identity (`buildSessionReviewIdentity`), never the patch. **Pi** (`apps/pi-extension/pi-session-bridge.ts`): review, annotate, last and plan review (plan review no longer blocks the session, see "Pi plan review does not block" below), off in remote mode; the question is a `pi.sendMessage({ customType: "plannotator-ask", display: true, details: { askId } }, { triggerTurn: true })` turn read back from `message_start` / `message_update` text deltas / `tool_execution_start` / `agent_end`; listeners register once at load because `pi.on` returns no unsubscribe before Pi 1.0. **OpenCode 2** (`apps/opencode-plugin/opencode-session-bridge.ts`): review, annotate and last ask a real turn — `ctx.session.prompt({ id, text, delivery: "steer", metadata: { source: "plannotator-ask" } })` under a message id generated in OpenCode's own ascending `msg_` format, streamed back from `ctx.event.subscribe()` (`session.inbox.delivered` with our id starts the answer, then `session.text.delta` / `text.ended` / `tool.input.started`, ended by `session.execution.succeeded|failed|interrupted`), with `session.wait` + `session.context` as the fallback when the event stream is missing (upstream #44788). Delivery is "steer", not "queue", on purpose: every V2 command leaves its session-URL notice as a pending steer row, and a queued question would wake the session with that notice promoted alone as its own model turn (seen live on 2.0.22). Busy comes from the execution events cross-checked by a single outstanding `session.wait` probe; abort and "Interrupt and ask now" use `session.interrupt` (whole execution), only on a turn that is ours or on the reviewer's explicit choice. Plan review answers from context only ("Quick answer from this session · OpenCode", `modes { turn: false, transient: true }`): `submit_plan` is a pending tool call, so a real turn cannot run until the decision (a prompt sent then waits for the tool result, verified live), and `markPlanReviewPending` makes EVERY bridge on that session report `blocked` so nothing can interrupt the review. The quick answer is `session.generate` (no transcript write; verified live on 2.0.22 with OpenAI during a pending `submit_plan`, and `@opencode/ai`'s `normalizeToolHistory` fills the unfinished call with an error result for every provider); it still offers the model its tools, so the question carries `SESSION_ASK_TRANSIENT_NOTE` and an empty answer (a tool call) is reported as a failure. The embedded plan server takes the bridge in-process; review/annotate/last and the CLI plan fallback run the `plannotator` CLI as a child and use the pull bridge below. **OpenCode 1** has no bridge (a second adapter over V1's different message/event model, not a small lift). **Claude Code** answers through its mod over the pull bridge below (review, annotate, last and plan review, all real turns; see "Claude Code mod"); without the mod Claude Code has no bridge.
 
-**Pull bridge (host-neutral, `packages/ai/session-bridge-pull.ts` server half, vendored to Pi; `session-bridge-pull-client.ts` host half).** For a host that runs the Plannotator server as a SEPARATE process and must not open a listener of its own (the OpenCode plugin's CLI child today, the Claude Code mod next). The host generates a per-launch secret and starts the server with `PLANNOTATOR_SESSION_BRIDGE_TOKEN` (>= 32 chars), `PLANNOTATOR_SESSION_BRIDGE_HOST` (`opencode` / `claude-code` / `pi`) and optional `PLANNOTATOR_SESSION_BRIDGE_MODES` (`turn,transient`; default `turn`). The Bun CLI takes that config at its very first line (`takeEnvPullSessionBridgeConfig`, cached once per process; `createAIRuntime` reads the cache) and deletes the three variables, so nothing it spawns (git/gh before the server starts, agent jobs, terminals, the auto-update wrapper) inherits the token; `--tailscale` discards it outright (`discardEnvPullSessionBridgeConfig`). The runtime registers the same `SessionBridgeProvider` over it; it is off in remote mode and under `--tailscale` (and an in-process bridge wins). Pi's `createPiAIRuntime` accepts the same config as its `pullSessionBridge` option (no env takeover: Pi itself always bridges in-process). The host learns the port (OpenCode: `PLANNOTATOR_READY_FILE`) and then talks to two endpoints on `http://127.0.0.1:<port>`, both `POST` + JSON with `Authorization: Bearer <token>`: `/api/ai/bridge/poll` `{ status?, modes?, waitMs? }` long-polls (clamped to 25s; answers early when there is work) and returns `{ commands, closing?, superseded? }`, commands being `{ type: "ask", askId, text, mode }`, `{ type: "cancel", askId }` and `{ type: "interrupt", interruptId }`; `/api/ai/bridge/event` takes one event or `{ events: [...] }` — `started`, `delta`, `tool`, `done`, `error` (per question, `code` one of `busy|blocked|gone|aborted|failed`), `status`, and `interrupted { interruptId, ok, message? }` — and answers `409 { code: "ask_not_active" }` for a question that is no longer running, which tells the host to stop it. Commands are re-sent every ~5s until acknowledged (any event for that question; `interrupted` for an interrupt), so hosts dedupe by id. Guards, in order: a loopback Host with the server's own port (the runtime's `authorizeSessionBridgeRequest`, `403 session_bridge_forbidden_host`), no `Origin` header (`403`, a browser is never the host), the bearer token (`401`); without a pull bridge both paths answer `404`, which an older-binary-aware host treats as "no bridge". Liveness: until the host's first request the bridge reports `ready` (a question waits for the first poll); no first request within 30s, or 30s with no open poll after that, is `gone`, and a running question then fails `session_gone`. The newest poll supersedes an open one. A reviewer's Stop drops a question the host never confirmed, else queues `cancel` and frees the slot when the host confirms (or after 15s); `detach()` (decision / shutdown) drops only unconfirmed questions, and `dispose()` answers the open poll `closing`. Both runtimes route the two paths through `createAIEndpoints` (`pullBridge` dep), and Bun lifts the idle timeout for the poll (`isLongLivedAIEndpointPath`). Tests: `packages/ai/session-bridge-pull.test.ts` (fake host over the real client: streaming, early question, busy wait / interrupt, abort before and after pickup, host disappears, never connects, transient, bad token / Origin / rebinding Host, supersede, dispose, detach), `packages/server/ai-runtime.sessionBridge.test.ts` (env takeover, scrub, remote-off), `apps/opencode-plugin/session-bridge-cli.test.ts` (plugin ↔ CLI child end to end).
+**Pull bridge (host-neutral, `packages/ai/session-bridge-pull.ts` server half, vendored to Pi; `session-bridge-pull-client.ts` host half).** For a host that runs the Plannotator server as a SEPARATE process and must not open a listener of its own (the OpenCode plugin's CLI child and the Claude Code mod). The host generates a per-launch secret and starts the server with `PLANNOTATOR_SESSION_BRIDGE_TOKEN` (>= 32 chars), `PLANNOTATOR_SESSION_BRIDGE_HOST` (`opencode` / `claude-code` / `pi`) and optional `PLANNOTATOR_SESSION_BRIDGE_MODES` (`turn,transient`; default `turn`). The Bun CLI takes that config at its very first line (`takeEnvPullSessionBridgeConfig`, cached once per process; `createAIRuntime` reads the cache) and deletes the three variables, so nothing it spawns (git/gh before the server starts, agent jobs, terminals, the auto-update wrapper) inherits the token; `--tailscale` discards it outright (`discardEnvPullSessionBridgeConfig`). The runtime registers the same `SessionBridgeProvider` over it; it is off in remote mode and under `--tailscale` (and an in-process bridge wins). Pi's `createPiAIRuntime` accepts the same config as its `pullSessionBridge` option (no env takeover: Pi itself always bridges in-process). The host learns the port (OpenCode: `PLANNOTATOR_READY_FILE`) and then talks to two endpoints on `http://127.0.0.1:<port>`, both `POST` + JSON with `Authorization: Bearer <token>`: `/api/ai/bridge/poll` `{ status?, modes?, waitMs? }` long-polls (clamped to 25s; answers early when there is work) and returns `{ commands, closing?, superseded? }`, commands being `{ type: "ask", askId, text, mode }`, `{ type: "cancel", askId }` and `{ type: "interrupt", interruptId }`; `/api/ai/bridge/event` takes one event or `{ events: [...] }` — `started`, `delta`, `tool`, `done`, `error` (per question, `code` one of `busy|blocked|gone|aborted|failed`), `status`, and `interrupted { interruptId, ok, message? }` — and answers `409 { code: "ask_not_active" }` for a question that is no longer running, which tells the host to stop it. Commands are re-sent every ~5s until acknowledged (any event for that question; `interrupted` for an interrupt), so hosts dedupe by id. Guards, in order: a loopback Host with the server's own port (the runtime's `authorizeSessionBridgeRequest`, `403 session_bridge_forbidden_host`), no `Origin` header (`403`, a browser is never the host), the bearer token (`401`); without a pull bridge both paths answer `404`, which an older-binary-aware host treats as "no bridge". Liveness: until the host's first request the bridge reports `ready` (a question waits for the first poll); no first request within 30s, or 30s with no open poll after that, is `gone`, and a running question then fails `session_gone`. The newest poll supersedes an open one. A reviewer's Stop drops a question the host never confirmed, else queues `cancel` and frees the slot when the host confirms (or after 15s); `detach()` (decision / shutdown) drops only unconfirmed questions, and `dispose()` answers the open poll `closing`. Both runtimes route the two paths through `createAIEndpoints` (`pullBridge` dep), and Bun lifts the idle timeout for the poll (`isLongLivedAIEndpointPath`). Tests: `packages/ai/session-bridge-pull.test.ts` (fake host over the real client: streaming, early question, busy wait / interrupt, abort before and after pickup, host disappears, never connects, transient, bad token / Origin / rebinding Host, supersede, dispose, detach), `packages/server/ai-runtime.sessionBridge.test.ts` (env takeover, scrub, remote-off), `apps/opencode-plugin/session-bridge-cli.test.ts` (plugin ↔ CLI child end to end).
 
 **Model lists come from the installed tools, not hand lists.** Claude's list is the SDK's `supportedModels()` against the installed `claude` (a throwaway process with no prompt, `settingSources: []` so no user hooks run, no MCP servers, 10s cap, ~0.5s measured); Codex's is the app-server `model/list`. Both run lazily behind the provider initializer (`?activate=` or the first session), never at startup; a success is kept for the process, a failure may be retried after 60s (`createBestEffortOnce`), and the capabilities answer marks each such provider's list `modelsSource: 'fallback' | 'discovered'` so the client forgets a fallback answer and retries on its next load. The same discovery captures the tool version once (`claude --version` run alongside it; codex from the app-server initialize `userAgent`, via `cliVersionFrom`), kept even when discovery fails, and the answer carries it as an optional `toolVersion`; every Claude/Codex model picker (Agents tab launchers, Guided Review, Ask AI bars, Settings) shows a muted `ModelSourceHint` line ("From your installed Codex 0.155.1", or the built-in-list variant on `fallback`) only when `toolVersion` is present, so a host that omits it gets no hint. Both runtimes share `createDeferredModelDiscovery`: an `?activate=` probe waits for discovery, and so does a session for every provider except Claude, whose sessions resolve the model against the current list while discovery finishes in the background, so the first Ask AI answer does not wait on it — except when that list is still the fallback and lacks the requested pick (e.g. `opus[1m]`), where the session waits for discovery rather than silently running a different model once. One shape, `CatalogModel` in `packages/core/model-catalog.ts` (id, label, efforts + default effort, fast mode, `resolvedId`), serves Ask AI AND the review / Code Tour / Guided Review launchers: `useModelCatalogs` (`packages/ui/hooks/`) fetches the same `/api/ai/capabilities?activate=` answer for the ONE engine a launcher is set to, and `useAgentSettings` resolves saved picks against it at read time (the cookie is never rewritten). ONE resolver, `resolveModelChoice`, is used by the launchers, Ask AI's client (`aiProvider.ts`) and the AI session endpoint: exact id → the alias whose `resolvedId` covers it → the same family's alias (`claude-opus-5` → `opus`) → the surface default (Claude `opus` for review, `sonnet` for tour/guide; Codex `''` = the model the Codex list marks default, except Guided Review, which prefers `gpt-6-luna` when offered: `PREFERRED_GUIDE_CODEX_MODEL`) → the catalog default; it never moves a pick onto a `[1m]` id unless the pick was one. Efforts clamp to the model's own levels, launches wait until the catalog settles, and a loading row shows meanwhile. The Claude catalog drops the SDK's `default` pointer row and adds a bare latest alias per family offered, and always offers `opus` / `sonnet` / `haiku` (some CLIs, e.g. Claude Code 2.1.141, name Opus only through the `default` row, whose description then supplies the version); alias labels carry the version parsed from the row's `resolvedModel` (`claudeModelVersion`: "Opus 5.5 (latest)"), since the SDK's `displayName` has none. Codex fast mode is dropped when resolution replaces a saved model with a different one; changing Fast or reasoning then re-keys the section to the model shown. Codex fast support is read from `serviceTiers` (a `priority`/`fast` tier) as well as the deprecated `additionalSpeedTiers`. The only static lists are the small `CLAUDE_FALLBACK_MODELS` / `CODEX_FALLBACK_MODELS`, used when discovery fails.
 

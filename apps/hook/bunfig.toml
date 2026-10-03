@@ -4,3 +4,5 @@
 # tests/package-bunfig.test.ts).
 [test]
 preload = ["../../tests/setup/feedback-archive-off.ts", "../../packages/ui/test-setup/happy-dom.ts"]
+# The mod's `claude plugin test` harness tests (see the root bunfig.toml).
+pathIgnorePatterns = ["tests/**"]

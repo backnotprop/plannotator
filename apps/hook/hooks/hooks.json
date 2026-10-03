@@ -1,4 +1,6 @@
 {
+  "description": "Plannotator: plan review on ExitPlanMode's permission request. Where Claude Code runs hooks modules, the mod (mod/register.ts) makes plan review, annotate, code review and annotate-last non-blocking; elsewhere the module entry is ignored.",
+  "modules": ["./mod/register.ts"],
   "hooks": {
     "PreToolUse": [
       {

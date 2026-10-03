@@ -24,6 +24,8 @@ export interface SessionInfo {
   project: string;
   startedAt: string;
   label: string;
+  /** The agent session that started this one, when the host tagged it (`claude-code:<session id>`). */
+  hostSession?: string;
 }
 
 function getSessionsDir(): string {

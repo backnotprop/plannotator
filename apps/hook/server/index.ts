@@ -116,6 +116,14 @@ import { enableTailscaleServe } from "@plannotator/server/tailscale-serve";
 import { discardEnvPullSessionBridgeConfig, takeEnvPullSessionBridgeConfig } from "@plannotator/server/ai-runtime";
 import { writeUrlQr } from "@plannotator/server/qr";
 import { resolveAnnotateTarget } from "./annotate-resolution";
+import {
+  annotateHostResult,
+  planHostResult,
+  publishHostResult,
+  reviewHostResult,
+  takeHostResultPath,
+} from "./host-result";
+import { parseModPlanInput, readModPlanRevision, writeModPlanRevisionAck } from "./claude-mod-plan";
 import { LIVE_APP_REMOTE_MESSAGE } from "@plannotator/shared/live-probe";
 // Bridge sources for live app sessions: the CLI supplies them so
 // @plannotator/server never imports @plannotator/ui (mirrors the existing
@@ -225,6 +233,9 @@ const reviewHtmlContent = reviewHtml as unknown as string;
 // wrapper, agent terminals when Ask AI is disabled, archive mode), so no child
 // inherits it. The config stays cached for createAIRuntime.
 takeEnvPullSessionBridgeConfig();
+// Detached-host result side channel (the Claude Code mod): same treatment, so
+// nothing the server spawns inherits the path.
+takeHostResultPath();
 
 const rawArgs = process.argv.slice(2);
 let parsedStrictAnnotateOptions;
@@ -602,7 +613,11 @@ process.on("exit", () => unregisterSession());
 // (no __CLI_VERSION__), and the check itself is scheduled, never awaited.
 enableAutoUpdateNotice(getCliVersion());
 function registerCliSession(info: SessionInfo): void {
-  registerSession(info);
+  // The Claude Code mod tags its session (`claude-code:<session id>`) in the
+  // environment every process it starts inherits, so a session it launched can
+  // be matched back to it.
+  const hostSession = process.env.PLANNOTATOR_SESSION_TAG;
+  registerSession(hostSession ? { ...info, hostSession } : info);
   scheduleAutoUpdateCheck(getCliVersion());
 }
 
@@ -1290,6 +1305,7 @@ if (args[0] === "sessions") {
   // Output feedback (captured by slash command)
   result.feedback = withReviewDirectory(result.feedback, result.reviewDirectory);
   const output = buildReviewOutput(result, detectedOrigin);
+  publishHostResult(reviewHostResult(result, output));
   console.log(jsonFlag ? JSON.stringify(output) : output.message);
   process.exit(0);
 
@@ -1538,7 +1554,14 @@ if (args[0] === "sessions") {
     stopServer: server.stop,
     requireApproval: requireApprovalFlag,
     resultFile,
-    emitLegacyOutcome: emitAnnotateOutcome,
+    emitLegacyOutcome: (outcome) => {
+      publishHostResult(annotateHostResult(outcome, {
+        kind: folderPath ? "folder" : isUrl ? "url" : "file",
+        target: folderPath ?? absolutePath,
+        origin: detectedOrigin,
+      }));
+      emitAnnotateOutcome(outcome);
+    },
   });
 
 } else if (args[0] === "annotate-last" || args[0] === "last") {
@@ -1784,6 +1807,7 @@ if (args[0] === "sessions") {
 
   server.stop();
 
+  publishHostResult(annotateHostResult(result, { kind: "last", origin: detectedOrigin }));
   emitAnnotateOutcome(result);
   process.exit(0);
 
@@ -2428,6 +2452,80 @@ if (args[0] === "sessions") {
     },
   }));
 
+  process.exit(0);
+
+} else if (args[0] === "claude-mod-plan") {
+  // ============================================
+  // CLAUDE CODE MOD PLAN REVIEW (internal)
+  // ============================================
+  //
+  // Started DETACHED by the Claude Code mod (apps/hook/hooks/mod/) after it
+  // answered ExitPlanMode without blocking. Reads { plan, planFilePath?,
+  // permissionMode?, revisionFile? } on stdin, accepts revisions through
+  // `revisionFile` while the review is open, and publishes the decision
+  // through the host result file (PLANNOTATOR_HOST_RESULT_FILE).
+
+  const input = parseModPlanInput(await Bun.stdin.text());
+  if (!input) {
+    console.error("claude-mod-plan: expected { plan, planFilePath?, permissionMode?, revisionFile? } JSON on stdin");
+    process.exit(1);
+  }
+
+  const planProject = (await detectProjectName()) ?? "_unknown";
+  let currentPlan = input.plan;
+  const server = await startPlannotatorServer({
+    plan: input.plan,
+    origin: "claude-code",
+    planFilePath: input.planFilePath,
+    permissionMode: input.permissionMode,
+    planRevisions: true,
+    sharingEnabled,
+    shareBaseUrl,
+    pasteApiUrl,
+    htmlContent: planHtmlContent,
+    onReady: async (url, isRemote, port) => {
+      handleServerReady(url, isRemote, port);
+      if (isRemote && sharingEnabled) {
+        await writeRemoteShareLink(input.plan, shareBaseUrl, "review the plan", "plan only").catch(() => {});
+      }
+    },
+  });
+
+  registerCliSession({
+    pid: process.pid,
+    port: server.port,
+    url: server.url,
+    mode: "plan",
+    project: planProject,
+    startedAt: new Date().toISOString(),
+    label: `plan-${planProject}`,
+  });
+
+  let lastRevisionSeq = 0;
+  const revisionFile = input.revisionFile;
+  const revisionTimer = revisionFile
+    ? setInterval(() => {
+        const revision = readModPlanRevision(revisionFile, lastRevisionSeq);
+        if (!revision) return;
+        lastRevisionSeq = revision.seq;
+        const pushed = server.updatePlan(revision.plan);
+        if (pushed) currentPlan = revision.plan;
+        writeModPlanRevisionAck(revisionFile, pushed
+          ? { seq: revision.seq, accepted: true, revision: pushed.revision, version: pushed.version, unchanged: pushed.unchanged }
+          : { seq: revision.seq, accepted: false });
+      }, 500)
+    : null;
+
+  const result = await server.waitForDecision();
+  if (revisionTimer) clearInterval(revisionTimer);
+  await Bun.sleep(1500);
+  server.stop();
+
+  // updatePlan refuses once a decision is claimed, so `currentPlan` is the
+  // exact text the reviewer decided on.
+  const record = planHostResult(result, { approvedPlan: currentPlan, planFilePath: input.planFilePath });
+  publishHostResult(record);
+  console.log(JSON.stringify(record));
   process.exit(0);
 
 } else {

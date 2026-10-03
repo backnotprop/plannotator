@@ -5,3 +5,6 @@ minimumReleaseAgeExcludes = ["@pierre/diffs", "@pierre/theme", "@pierre/theming"
 
 [test]
 preload = ["./tests/setup/feedback-archive-off.ts", "./packages/ui/test-setup/happy-dom.ts"]
+# The Claude Code mod's engine-harness tests run under `claude plugin test`
+# (scripts/test-claude-code-mod.sh), not bun: they import 'claude-code/testing'.
+pathIgnorePatterns = ["apps/hook/tests/**"]
