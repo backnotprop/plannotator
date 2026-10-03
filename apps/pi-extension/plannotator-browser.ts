@@ -69,6 +69,8 @@ export interface PlanReviewDecision {
 	permissionMode?: string;
 	/** The reviewer only answered the plan's questions (`answersOnly: true` on /api/deny). */
 	answersOnly?: boolean;
+	/** The exact plan text an approval was made on (the revision on screen). */
+	plan?: string;
 }
 
 export interface BrowserDecisionSession<T> {

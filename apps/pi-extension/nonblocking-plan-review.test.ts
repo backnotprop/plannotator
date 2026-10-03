@@ -16,7 +16,7 @@
  *    the session back into execution.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import plannotator, { type PlannotatorExtensionDeps } from "./index.ts";
@@ -157,6 +157,14 @@ function createHarness(cwd: string) {
 		submit(filePath: string) {
 			return tools.get("plannotator_submit_plan")!.execute("call-1", { filePath }, undefined, undefined, ctx);
 		},
+		markDone(step: number) {
+			return tools.get("plannotator_mark_done")!.execute("call-2", { step }, undefined, undefined, ctx);
+		},
+		async beforeAgentStart() {
+			const results = [];
+			for (const handler of handlers.get("before_agent_start") ?? []) results.push(await handler({}, ctx));
+			return results as Array<{ message?: { content?: string } } | undefined>;
+		},
 		async writeAttempt(path: string) {
 			for (const handler of handlers.get("tool_call") ?? []) {
 				const result = await handler({ toolName: "write", input: { path } }, ctx);
@@ -208,7 +216,9 @@ describe("non-blocking plan review", () => {
 		expect(harness.sentUserMessages[0]!.text).toContain("PLAN.md");
 		expect(harness.sentUserMessages[0]!.options).toEqual({ deliverAs: "followUp" });
 		expect(harness.lastPhase()).toBe("executing");
-		expect(harness.entries).toContainEqual({ type: "plannotator-execute", data: { lastSubmittedPath: "PLAN.md" } });
+		expect(harness.entries).toContainEqual({ type: "plannotator-execute", data: { lastSubmittedPath: "PLAN.md", approvedPlan: PLAN } });
+		// The file still holds the approved text: no unreviewed-edit warning.
+		expect(harness.sentUserMessages[0]!.text).not.toContain("has changed since the reviewer saw it");
 		expect(await harness.writeAttempt("src/app.ts")).toBeUndefined();
 	});
 
@@ -267,6 +277,45 @@ describe("non-blocking plan review", () => {
 		await harness.settle(() => harness.sentUserMessages.length > 0);
 		expect(harness.sentUserMessages[0]!.text).toContain("Split step one.");
 		expect(harness.lastPhase()).toBe("planning");
+	});
+
+	test("approval carries the approved text; unreviewed file edits are flagged and never executed", async () => {
+		const { cwd, harness } = await plannedSession();
+		await harness.submit("PLAN.md");
+		// The agent edits the file after submitting; the reviewer approves the
+		// version on screen (the server names it on the decision).
+		const unreviewed = `${PLAN}- [ ] Drop the production database\n`;
+		writeFileSync(join(cwd, "PLAN.md"), unreviewed);
+		harness.reviews[0]!.decide({ approved: true, plan: PLAN });
+		await harness.settle(() => harness.sentUserMessages.length > 0);
+
+		const message = harness.sentUserMessages[0]!.text;
+		expect(message).toContain("## Approved plan");
+		expect(message).toContain("- [ ] Implement the change");
+		expect(message).toContain("PLAN.md has changed since the reviewer saw it");
+		expect(message).not.toContain("Drop the production database");
+		expect(harness.entries).toContainEqual({ type: "plannotator-execute", data: { lastSubmittedPath: "PLAN.md", approvedPlan: PLAN } });
+
+		// The execution turn's framing lists the approved steps, not the file's.
+		const framing = (await harness.beforeAgentStart()).map((result) => result?.message?.content ?? "").join("\n");
+		expect(framing).toContain("Implement the change");
+		expect(framing).not.toContain("Drop the production database");
+
+		// Progress is never written onto the unreviewed file's boxes.
+		const done = await harness.markDone(1);
+		expect(done.details).toMatchObject({ completed: true, step: 1 });
+		expect(readFileSync(join(cwd, "PLAN.md"), "utf-8")).toBe(unreviewed);
+	});
+
+	test("approval falls back to the open review's text when the decision names none", async () => {
+		const { harness } = await plannedSession();
+		await harness.submit("PLAN.md");
+		harness.reviews[0]!.decide({ approved: true });
+		await harness.settle(() => harness.sentUserMessages.length > 0);
+		expect(harness.sentUserMessages[0]!.text).toContain("- [ ] Implement the change");
+		// Progress persists into the file while it still holds the approved checklist.
+		await harness.markDone(1);
+		expect(readFileSync(join(harness.ctx.cwd, "PLAN.md"), "utf-8")).toContain("- [x] Implement the change");
 	});
 
 	test("leaving plan mode closes the open review and its decision is dropped", async () => {

@@ -329,6 +329,25 @@ function planSubmittedForReviewText(filePath: string, version: number | undefine
 	return `${opening} The reviewer's decision will arrive later as a new message in this session. Do not start implementing: end your turn now and wait for that message. If you revise the plan before then, call ${PLAN_SUBMIT_TOOL} again with the same path and the open review updates.`;
 }
 
+/** Same steps in the same order (checkmarks aside): the file still holds the approved checklist. */
+function sameChecklistSteps(a: ReturnType<typeof parseChecklist>, b: ReturnType<typeof parseChecklist>): boolean {
+	return a.length === b.length && a.every((item, index) => item.text === b[index]!.text);
+}
+
+/**
+ * The approved plan text appended to the approval message. Execution works
+ * from this snapshot; when the file changed after the reviewer's version was
+ * submitted, the message says those edits were not reviewed.
+ */
+export function approvedPlanSection(filePath: string, approvedPlan: string, fileDiffers: boolean): string {
+	const longestRun = Math.max(2, ...[...approvedPlan.matchAll(/`+/g)].map((match) => match[0].length));
+	const fence = "`".repeat(longestRun + 1);
+	const drift = fileDiffers
+		? `\n\n**${filePath} has changed since the reviewer saw it.** Those edits were NOT reviewed: do not execute them, and do not re-read ${filePath} for the plan. If you still want those changes, stop and tell the user so they can return to plan mode and you can resubmit the plan for review.`
+		: "";
+	return `## Approved plan\n\nThis is the exact plan text the reviewer approved. Execute it as written here, not from the file.${drift}\n\n${fence}markdown\n${approvedPlan.replace(/\n$/, "")}\n${fence}`;
+}
+
 export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtensionDeps = {}): void {
 	const startPlanReview = deps.startPlanReview ?? startPlanReviewBrowserSession;
 	const planBrowserHtmlAvailable = deps.hasPlanBrowserHtml ?? hasPlanBrowserHtml;
@@ -357,6 +376,13 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 		},
 	});
 	let lastSubmittedPath: string | null = null;
+	/**
+	 * The exact plan text the reviewer approved, when execution started from a
+	 * browser approval. Execution works from this snapshot, never re-reading
+	 * the plan file (which may hold edits the reviewer never saw). Null for
+	 * auto-approved plans, which keep the file as their source.
+	 */
+	let approvedPlanContent: string | null = null;
 	let checklistItems: ChecklistItem[] = [];
 	let savedState: SavedPhaseState | null = null;
 	let phaseAddedTools: string[] = [];
@@ -509,6 +535,10 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 	function persistCompletedChecklist(fullPath: string): void {
 		try {
 			const content = readFileSync(fullPath, "utf-8");
+			// Executing an approved snapshot: write progress into the file only
+			// while its checklist is still the approved one, so steps never land
+			// on boxes of an unreviewed edit.
+			if (approvedPlanContent !== null && !sameChecklistSteps(parseChecklist(content), checklistItems)) return;
 			// One-turn ordinal-desync window: checklistItems were parsed at turn
 			// start, so an agent that edits the plan's checkboxes mid-turn can land
 			// a step number on a neighboring box until the next turn re-parses from
@@ -690,6 +720,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 		idleNoticePending = true;
 		checklistItems = [];
 		lastSubmittedPath = null;
+		approvedPlanContent = null;
 		// Re-detect for the next plan: a provider that appeared (or a transient
 		// write failure) should not be decided once for the whole session.
 		todoProvider = undefined;
@@ -1433,6 +1464,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 					};
 				}
 
+				approvedPlanContent = null;
 				phase = "executing";
 				framingDelivered = false;
 				await applyPhaseConfig(ctx, { restoreSavedState: true });
@@ -1595,7 +1627,9 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 		// torn-down session, or one that left plan mode, gets nothing.
 		if (!sessionAlive || !isCtxAlive(ctx) || phase !== "planning") return;
 		const inputPath = review.filePath;
-		const planContent = review.planContent;
+		// The text the reviewer decided on: the server names it, the open
+		// review's own copy is the fallback (the same text after any push).
+		const planContent = result.plan ?? review.planContent;
 
 		const send = (text: string) => {
 			try {
@@ -1622,11 +1656,20 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 			}
 
 			lastSubmittedPath = inputPath;
+			approvedPlanContent = planContent;
 			checklistItems = parseChecklist(planContent);
+			// Edits made to the file after the reviewer's version was submitted
+			// were never reviewed; the message says so and execution ignores them.
+			let fileDiffers = true;
+			try {
+				fileDiffers = readFileSync(resolve(ctx.cwd, inputPath), "utf-8") !== planContent;
+			} catch {
+				fileDiffers = true;
+			}
 			phase = "executing";
 			framingDelivered = false;
 			await applyPhaseConfig(ctx, { restoreSavedState: true });
-			pi.appendEntry("plannotator-execute", { lastSubmittedPath });
+			pi.appendEntry("plannotator-execute", { lastSubmittedPath, approvedPlan: planContent });
 			persistState();
 
 			// Keep this aligned with the executing-phase framing delivered on the
@@ -1636,11 +1679,10 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 					? `Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the next step. [DONE:n] markers remain a fallback for interrupted executions.`
 					: "";
 			const { getPlanApprovedPrompt, getPlanApprovedWithNotesPrompt } = await loadPlannotatorPrompts();
-			send(
-				result.feedback
-					? getPlanApprovedWithNotesPrompt("pi", loadConfig(), { planFilePath: inputPath, doneMsg, feedback: result.feedback })
-					: getPlanApprovedPrompt("pi", loadConfig(), { planFilePath: inputPath, doneMsg }),
-			);
+			const approvedPrompt = result.feedback
+				? getPlanApprovedWithNotesPrompt("pi", loadConfig(), { planFilePath: inputPath, doneMsg, feedback: result.feedback })
+				: getPlanApprovedPrompt("pi", loadConfig(), { planFilePath: inputPath, doneMsg });
+			send(`${approvedPrompt}\n\n${approvedPlanSection(inputPath, planContent, fileDiffers)}`);
 			safeNotify(ctx, "Plannotator: plan approved.");
 			return;
 		}
@@ -1706,10 +1748,15 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 		}
 
 		const profile = getPhaseProfile();
-		const planRef = lastSubmittedPath ?? "your plan file";
+		// An approved snapshot is the plan: point at it, not at the file, which
+		// may hold edits the reviewer never saw.
+		const planRef = lastSubmittedPath && approvedPlanContent !== null
+			? `the approved plan in the approval message (${lastSubmittedPath} as the reviewer approved it)`
+			: lastSubmittedPath ?? "your plan file";
 
-		if (phase === "executing" && lastSubmittedPath) {
-			// Re-read from disk each turn to stay current
+		if (phase === "executing" && lastSubmittedPath && approvedPlanContent === null) {
+			// Re-read from disk each turn to stay current (auto-approved plans
+			// only: an approved snapshot is the plan, the file is not re-read)
 			const fullPath = resolve(ctx.cwd, lastSubmittedPath);
 			try {
 				const planContent = readFileSync(fullPath, "utf-8");
@@ -1946,7 +1993,47 @@ Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the
 
 		// Rebuild execution state from disk + session messages
 		if (phase === "executing") {
-			if (lastSubmittedPath) {
+			// An approval from the browser recorded the exact text it approved on
+			// its plannotator-execute entry: that snapshot is the plan, and the
+			// file only contributes checkmarks while its checklist still matches.
+			const executeEntry = entries
+				.filter((e: { type: string; customType?: string }) => e.type === "custom" && e.customType === "plannotator-execute")
+				.pop() as { data?: { approvedPlan?: unknown } } | undefined;
+			const snapshot = typeof executeEntry?.data?.approvedPlan === "string" ? executeEntry.data.approvedPlan : null;
+			approvedPlanContent = snapshot;
+			if (snapshot !== null && lastSubmittedPath) {
+				checklistItems = parseChecklist(snapshot);
+				const fullPath = resolve(ctx.cwd, lastSubmittedPath);
+				try {
+					const fileItems = parseChecklist(readFileSync(fullPath, "utf-8"));
+					if (sameChecklistSteps(fileItems, checklistItems)) {
+						fileItems.forEach((item, index) => {
+							if (item.completed) checklistItems[index]!.completed = true;
+						});
+					}
+				} catch {
+					// The snapshot does not need the file.
+				}
+				let executeIndex = -1;
+				for (let i = entries.length - 1; i >= 0; i--) {
+					if ((entries[i] as { customType?: string }).customType === "plannotator-execute") {
+						executeIndex = i;
+						break;
+					}
+				}
+				for (let i = executeIndex + 1; i < entries.length; i++) {
+					const entry = entries[i];
+					if (entry.type !== "message" || !("message" in entry)) continue;
+					const text = getAssistantMessageText(entry.message);
+					if (text) markCompletedSteps(text, checklistItems);
+					const message = entry.message as { role?: string; toolName?: string; details?: { completed?: unknown; step?: unknown } };
+					if (message.role === "toolResult" && message.toolName === PLAN_MARK_DONE_TOOL && message.details?.completed === true) {
+						const item = checklistItems.find((candidate) => candidate.step === message.details?.step);
+						if (item) item.completed = true;
+					}
+				}
+				persistCompletedChecklist(fullPath);
+			} else if (lastSubmittedPath) {
 				const fullPath = resolve(ctx.cwd, lastSubmittedPath);
 				if (existsSync(fullPath)) {
 					const content = readFileSync(fullPath, "utf-8");

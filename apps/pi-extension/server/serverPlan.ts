@@ -69,6 +69,12 @@ export interface PlanReviewDecision {
 	permissionMode?: string;
 	/** The reviewer only answered the plan's questions (`answersOnly: true` on /api/deny). */
 	answersOnly?: boolean;
+	/**
+	 * The exact plan text the decision was made on (the revision on screen;
+	 * revisions pushed by `updatePlan` change it). Execution works from this
+	 * snapshot, never from the plan file, which may hold unreviewed edits.
+	 */
+	plan?: string;
 }
 
 /** What `updatePlan` did with a revised plan pushed into the open review. */
@@ -534,6 +540,7 @@ export async function startPlanReviewServer(options: {
 			const effectivePermissionMode = requestedPermissionMode || options.permissionMode;
 			publishDecision({
 				approved: true,
+				plan: currentPlan,
 				feedback,
 				savedPath,
 				agentSwitch,
