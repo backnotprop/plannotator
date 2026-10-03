@@ -47,6 +47,13 @@ import { loadDiffFont } from '@plannotator/ui/utils/diffFonts';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
 import { useAIProviderActivation } from '@plannotator/ui/hooks/useAIProviderActivation';
+import {
+  isSessionBridgeProvider,
+  resolveSessionBridgeFallback,
+  type AIProviderOption,
+} from '@plannotator/ui/utils/aiProvider';
+import { getProviderMeta } from '@plannotator/ui/components/ProviderIcons';
+import type { SessionAskAction } from '@plannotator/ui/components/ai/SessionAskNotice';
 import { LookAndFeelAnnouncementDialog } from '@plannotator/ui/components/LookAndFeelAnnouncementDialog';
 import { markLookAndFeelChoiceResolved, needsLookAndFeelAnnouncement } from '@plannotator/ui/utils/lookAndFeelAnnouncement';
 import { TerminalToolsAnnouncementDialog } from '@plannotator/ui/components/TerminalToolsAnnouncementDialog';
@@ -1245,6 +1252,7 @@ const ReviewApp: React.FC = () => {
     providerId: aiConfig.providerId,
     model: aiConfig.model,
     reasoningEffort: aiConfig.reasoningEffort,
+    sessionBridge: isSessionBridgeProvider(aiProviders.find(p => p.id === aiConfig.providerId)),
   });
   const {
     messages: aiMessages,
@@ -1369,6 +1377,33 @@ const ReviewApp: React.FC = () => {
     applyConfigChange(config);
     resetAISession();
   }, [activateAIProvider, applyConfigChange, resetAISession]);
+
+  // "Ask this session": the busy choice re-asks with a busy policy; the
+  // gone/blocked fallback moves this page (never the saved preference) to the
+  // provider the app would pick without the bridge and re-asks there. Only
+  // wired when the server offers a bridge, so other hosts render as before.
+  const retryAI = aiChat.retry;
+  const hasSessionBridge = useMemo(() => aiProviders.some(isSessionBridgeProvider), [aiProviders]);
+  const sessionAskFallback = useMemo(() => {
+    if (!hasSessionBridge) return null;
+    const { providerId } = resolveSessionBridgeFallback({
+      providers: aiProviders,
+      origin,
+      serverDefaultProvider: aiDefaultProvider,
+    });
+    const provider = providerId ? aiProviders.find(p => p.id === providerId) : undefined;
+    return provider ? { id: provider.id, label: getProviderMeta(provider.name, (provider as AIProviderOption).label).label } : null;
+  }, [aiProviders, aiDefaultProvider, hasSessionBridge, origin]);
+  const handleSessionAskAction = useCallback((questionId: string, action: SessionAskAction) => {
+    if (action === 'fallback') {
+      if (!sessionAskFallback) return;
+      activateAIProvider(sessionAskFallback.id);
+      applyConfigChange({ providerId: sessionAskFallback.id }, { persist: false });
+      void retryAI(questionId, { providerId: sessionAskFallback.id });
+      return;
+    }
+    void retryAI(questionId, { busyPolicy: action });
+  }, [activateAIProvider, applyConfigChange, retryAI, sessionAskFallback]);
 
   // Opening the Ask AI sidebar tab with a provider selected is the other
   // explicit gesture that should surface the provider's real model list.
@@ -5609,6 +5644,10 @@ const ReviewApp: React.FC = () => {
                 aiConfig={aiConfig}
                 onAIConfigChange={handleAIConfigChange}
                 hasAISession={!!aiSessionId}
+                {...(hasSessionBridge && {
+                  onSessionAskAction: handleSessionAskAction,
+                  sessionAskFallbackLabel: sessionAskFallback?.label ?? null,
+                })}
                 agentJobs={agentJobs.jobs}
                 agentCapabilities={agentJobs.capabilities}
                 onAgentLaunch={agentJobs.launchJob}

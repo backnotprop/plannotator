@@ -4,6 +4,7 @@ import { Readable } from "node:stream";
 
 import { isAIEndpointPath } from "../generated/ai/endpoints.ts";
 import { resolveCommandFromWhichOutput } from "../generated/ai/providers/command-path.ts";
+import type { SessionBridge } from "../generated/ai/session-bridge.ts";
 import { handleApiNotFound, json, toWebRequest } from "./helpers.ts";
 
 export interface PiAIRuntime {
@@ -11,9 +12,11 @@ export interface PiAIRuntime {
 	dispose: () => void;
 }
 
-interface CreatePiAIRuntimeOptions {
+export interface CreatePiAIRuntimeOptions {
 	cwd?: string;
 	getCwd?: () => string;
+	/** "Ask this session": the in-process bridge to the Pi session that opened this server. */
+	sessionBridge?: SessionBridge;
 }
 
 function whichCmd(cmd: string): string | null {
@@ -117,6 +120,10 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 			// OpenCode not available.
 		}
 
+		// Registered last so the server default is unchanged; the client prefers it.
+		const bridgeProvider = options.sessionBridge ? new ai.SessionBridgeProvider(options.sessionBridge) : null;
+		if (bridgeProvider) registry.register(bridgeProvider, ai.SESSION_BRIDGE_PROVIDER_NAME);
+
 		return {
 			endpoints: ai.createAIEndpoints({
 				registry,
@@ -128,6 +135,9 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 				beforeProviderSession: discovery.beforeProviderSession,
 			}),
 			dispose: () => {
+				// Detach first: tearing the sessions down must not stop a turn the
+				// Pi session is already running for us (the decision goes there next).
+				bridgeProvider?.detach();
 				sessionManager.disposeAll();
 				registry.disposeAll();
 			},
@@ -156,7 +166,16 @@ export async function handlePiAIRequest(
 			});
 			res.writeHead(webRes.status, headers);
 			if (webRes.body) {
-				Readable.fromWeb(webRes.body as any).pipe(res);
+				const body = Readable.fromWeb(webRes.body as any);
+				// A client that goes away (Stop, a superseding question, tab close)
+				// must cancel the web stream so the endpoint's cancel() aborts the
+				// in-flight turn, as it does on the Bun server. `pipe` alone only
+				// unpipes and leaves the turn running; destroying the Node stream
+				// cancels the web stream under it.
+				res.on("close", () => {
+					if (!body.destroyed) body.destroy();
+				});
+				body.pipe(res);
 			} else {
 				res.end();
 			}

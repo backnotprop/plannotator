@@ -76,7 +76,7 @@ export const AISettingsTab: React.FC<AISettingsTabProps> = ({
 
       <div className="space-y-2">
         {providers.map((p) => {
-          const meta = getProviderMeta(p.name);
+          const meta = getProviderMeta(p.name, p.label);
           const Icon = meta.icon;
           const isSelected = effectiveSelection === p.id;
           const models = p.models ?? [];

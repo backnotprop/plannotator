@@ -56,7 +56,13 @@ import { getOctarineSettings, isOctarineConfigured } from '@plannotator/ui/utils
 import { getDefaultNotesApp } from '@plannotator/ui/utils/defaultNotesApp';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { getPlanSaveSettings } from '@plannotator/ui/utils/planSave';
-import { type AIProviderOption } from '@plannotator/ui/utils/aiProvider';
+import {
+  isSessionBridgeProvider,
+  resolveSessionBridgeFallback,
+  type AIProviderOption,
+} from '@plannotator/ui/utils/aiProvider';
+import { getProviderMeta } from '@plannotator/ui/components/ProviderIcons';
+import type { SessionAskAction } from '@plannotator/ui/components/ai/SessionAskNotice';
 import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
 import { useAIProviderActivation } from '@plannotator/ui/hooks/useAIProviderActivation';
 import { markLookAndFeelChoiceResolved, needsLookAndFeelAnnouncement } from '@plannotator/ui/utils/lookAndFeelAnnouncement';
@@ -5030,6 +5036,34 @@ const App: React.FC = () => {
     resetAISession();
   }, [activateAIProvider, applyConfigChange, resetAISession]);
 
+  // "Ask this session": the busy choice re-asks the same question with a busy
+  // policy; the gone/blocked fallback moves this page (not the saved
+  // preference) to the provider the app would pick without the bridge and
+  // re-asks there. Undefined unless the server offers a bridge, so hosts
+  // without one render exactly what they did before.
+  const retryAI = aiChat.retry;
+  const sessionAskFallback = useMemo(() => {
+    if (!aiProviders.some(isSessionBridgeProvider)) return null;
+    const { providerId } = resolveSessionBridgeFallback({
+      providers: aiProviders,
+      origin,
+      serverDefaultProvider: aiDefaultProvider,
+    });
+    const provider = providerId ? aiProviders.find(p => p.id === providerId) : undefined;
+    return provider ? { id: provider.id, label: getProviderMeta(provider.name, (provider as AIProviderOption).label).label } : null;
+  }, [aiProviders, aiDefaultProvider, origin]);
+  const hasSessionBridge = useMemo(() => aiProviders.some(isSessionBridgeProvider), [aiProviders]);
+  const handleSessionAskAction = useCallback((questionId: string, action: SessionAskAction) => {
+    if (action === 'fallback') {
+      if (!sessionAskFallback) return;
+      activateAIProvider(sessionAskFallback.id);
+      applyConfigChange({ providerId: sessionAskFallback.id }, { persist: false });
+      void retryAI(questionId, { providerId: sessionAskFallback.id });
+      return;
+    }
+    void retryAI(questionId, { busyPolicy: action });
+  }, [activateAIProvider, applyConfigChange, retryAI, sessionAskFallback]);
+
   // Opening the Ask AI surface with a provider selected is the other explicit
   // gesture that should surface the provider's real model list.
   // isRightPanelVisible, not effectivePanelOpen: a right-docked Agent TUI
@@ -6315,6 +6349,10 @@ const App: React.FC = () => {
       aiProviders={visibleAIProviders}
       aiConfig={visibleAIConfig}
       onAIConfigChange={isAgentTerminalReady ? undefined : handleAIConfigChange}
+      {...(hasSessionBridge && !isAgentTerminalReady && {
+        onSessionAskAction: handleSessionAskAction,
+        sessionAskFallbackLabel: sessionAskFallback?.label ?? null,
+      })}
     />
   );
 

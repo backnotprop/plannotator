@@ -37,7 +37,7 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
   const effectiveModel = selectedModel ?? defaultModel?.id ?? '';
   const currentModel = models.find(m => m.id === effectiveModel) ?? defaultModel;
   const reasoningEfforts = currentModel?.reasoningEfforts ?? [];
-  const meta = getProviderMeta(currentProvider?.name ?? 'AI');
+  const meta = getProviderMeta(currentProvider?.name ?? 'AI', currentProvider?.label);
   const Icon = meta.icon;
   // Show only when the selected model actually reports reasoning efforts.
   const showReasoningEffort = !!onReasoningEffortChange && reasoningEfforts.length > 0;
@@ -53,7 +53,7 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
         aria-label="AI provider"
       >
         {providers.map(provider => {
-          const providerMeta = getProviderMeta(provider.name);
+          const providerMeta = getProviderMeta(provider.name, provider.label);
           return (
             <option key={provider.id} value={provider.id}>
               {providerMeta.label}

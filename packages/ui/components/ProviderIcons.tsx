@@ -37,15 +37,27 @@ const GenericProviderIcon: React.FC<{ className?: string }> = ({ className = 'w-
   </svg>
 );
 
+/** "Ask this session": a speech bubble, since the answer comes from the agent session itself. */
+const SessionIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h8M8 14h5m-7 6 2.5-3H18a3 3 0 0 0 3-3V7a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v7a3 3 0 0 0 3 3z" />
+  </svg>
+);
+
 /** Provider metadata: maps provider type name to display label and icon component. */
 export const PROVIDER_META: Record<string, { label: string; icon: React.FC<{ className?: string }> }> = {
   'claude-agent-sdk': { label: 'Claude', icon: ClaudeIcon },
   'codex-sdk': { label: 'Codex', icon: CodexIcon },
   'pi-sdk': { label: 'Pi', icon: PiIcon },
   'opencode-sdk': { label: 'OpenCode', icon: OpenCodeIcon },
+  'session-bridge': { label: 'Ask this session', icon: SessionIcon },
 };
 
-/** Get provider metadata, with fallback for unknown providers. */
-export function getProviderMeta(providerName: string): { label: string; icon: React.FC<{ className?: string }> } {
-  return PROVIDER_META[providerName] ?? { label: providerName, icon: GenericProviderIcon };
+/**
+ * Get provider metadata, with fallback for unknown providers. A server-sent
+ * `label` (e.g. "Ask this session · Pi") overrides the name lookup.
+ */
+export function getProviderMeta(providerName: string, label?: string): { label: string; icon: React.FC<{ className?: string }> } {
+  const meta = PROVIDER_META[providerName] ?? { label: providerName, icon: GenericProviderIcon };
+  return label ? { ...meta, label } : meta;
 }

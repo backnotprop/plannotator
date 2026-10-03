@@ -47,6 +47,7 @@ import {
 } from "./handlers.ts";
 import { handleApiNotFound, html, json, parseBody, requestUrl } from "./helpers.ts";
 import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.ts";
+import type { SessionBridge } from "../generated/ai/session-bridge.ts";
 
 import { buildAdvertisedUrl, isRemoteSession, listenOnPort } from "./network.ts";
 import { getAvailableOpenInApps, openFileInApp } from "./open-in-apps.ts";
@@ -237,6 +238,8 @@ function createHtmlAssetRegistry() {
 }
 
 export async function startAnnotateServer(options: {
+	/** "Ask this session": the in-process bridge to the Pi session that opened this annotation. */
+	sessionBridge?: SessionBridge;
 	markdown: string;
 	filePath: string;
 	htmlContent: string;
@@ -518,7 +521,7 @@ export async function startAnnotateServer(options: {
 	const repoInfo = getRepoInfo();
 
 	const externalAnnotations = createExternalAnnotationHandler("plan");
-	const aiRuntime = resolveAIEnabled() ? await createPiAIRuntime() : null;
+	const aiRuntime = resolveAIEnabled() ? await createPiAIRuntime({ sessionBridge: options.sessionBridge }) : null;
 	const htmlAssets = createHtmlAssetRegistry();
 	let agentTerminalCapability: AgentTerminalCapability = {
 		enabled: false,

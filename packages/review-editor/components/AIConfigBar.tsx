@@ -64,7 +64,7 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
   if (!currentProvider) return null;
   const effectiveProviderId = currentProvider.id;
 
-  const meta = getProviderMeta(currentProvider.name);
+  const meta = getProviderMeta(currentProvider.name, currentProvider.label);
   const Icon = meta.icon;
   const models = currentProvider.models ?? [];
   const defaultModel = models.find(m => m.default) ?? models[0];
@@ -119,7 +119,7 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
           {openMenu === 'provider' && (
             <div className="ai-config-menu">
               {providers.map(p => {
-                const m = getProviderMeta(p.name);
+                const m = getProviderMeta(p.name, p.label);
                 const ProvIcon = m.icon;
                 const isActive = p.id === effectiveProviderId;
                 return (

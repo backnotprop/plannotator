@@ -5,7 +5,7 @@
  * Concrete providers extend this and implement query().
  */
 
-import type { AIMessage, AISession } from "./types.ts";
+import type { AIMessage, AIQueryOptions, AISession } from "./types.ts";
 
 export abstract class BaseSession implements AISession {
 	readonly parentSessionId: string | null;
@@ -90,5 +90,5 @@ export abstract class BaseSession implements AISession {
 		}
 	}
 
-	abstract query(prompt: string): AsyncIterable<AIMessage>;
+	abstract query(prompt: string, options?: AIQueryOptions): AsyncIterable<AIMessage>;
 }

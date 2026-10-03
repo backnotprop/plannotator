@@ -17,6 +17,7 @@ import { AgentsTab, type AgentLaunchParams, type AgentLaunchResult } from '@plan
 import type { PRMetadata } from '@plannotator/shared/pr-types';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import type { AIChatEntry, PendingPermission } from '../hooks/useAIChat';
+import type { SessionAskAction } from '@plannotator/ui/components/ai/SessionAskNotice';
 import type { AgentJobInfo, AgentCapabilities } from '@plannotator/ui/types';
 import type { DiffFile } from '../types';
 import type { AIProviderOption } from '@plannotator/ui/utils/aiProvider';
@@ -78,6 +79,9 @@ interface ReviewSidebarProps {
   aiConfig?: { providerId: string | null; model: string | null; reasoningEffort?: string | null };
   onAIConfigChange?: (config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => void;
   hasAISession?: boolean;
+  /** "Ask this session": the reviewer's choice on a busy/gone/blocked answer. */
+  onSessionAskAction?: (questionId: string, action: SessionAskAction) => void;
+  sessionAskFallbackLabel?: string | null;
   // Agent props
   agentJobs?: AgentJobInfo[];
   agentCapabilities?: AgentCapabilities | null;
@@ -278,6 +282,8 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   aiConfig,
   onAIConfigChange,
   hasAISession,
+  onSessionAskAction,
+  sessionAskFallbackLabel,
   agentJobs,
   agentCapabilities,
   onAgentLaunch,
@@ -788,6 +794,8 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
               aiConfig={aiConfig}
               onAIConfigChange={onAIConfigChange}
               hasAISession={hasAISession}
+              onSessionAskAction={onSessionAskAction}
+              sessionAskFallbackLabel={sessionAskFallbackLabel}
             />
           )}
 

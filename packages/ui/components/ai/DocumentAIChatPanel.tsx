@@ -5,6 +5,7 @@ import { formatRelativeTime, renderChatMarkdown } from '../../utils/aiChatFormat
 import { OverlayScrollArea } from '../OverlayScrollArea';
 import { SparklesIcon } from '../SparklesIcon';
 import { AIProviderBar } from './AIProviderBar';
+import { SessionAskActions, SessionAskStatus, sessionAskErrorTone, type SessionAskAction } from './SessionAskNotice';
 import { submitHint } from '../../utils/platform';
 
 interface DocumentAIChatPanelProps {
@@ -19,6 +20,10 @@ interface DocumentAIChatPanelProps {
   aiProviders?: AIProviderOption[];
   aiConfig?: { providerId: string | null; model: string | null; reasoningEffort?: string | null };
   onAIConfigChange?: (config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => void;
+  /** "Ask this session": the reviewer's choice on a busy/gone/blocked answer. */
+  onSessionAskAction?: (questionId: string, action: SessionAskAction) => void;
+  /** Label of the provider "Ask a separate AI instead" would use; null hides it. */
+  sessionAskFallbackLabel?: string | null;
 }
 
 function truncate(text: string, max = 180): string {
@@ -64,6 +69,8 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
   aiProviders = [],
   aiConfig,
   onAIConfigChange,
+  onSessionAskAction,
+  sessionAskFallbackLabel,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [generalInput, setGeneralInput] = useState('');
@@ -109,7 +116,12 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
           )}
 
           {messages.map(entry => (
-            <DocumentQAPair key={entry.question.id} entry={entry} />
+            <DocumentQAPair
+              key={entry.question.id}
+              entry={entry}
+              onSessionAskAction={onSessionAskAction}
+              sessionAskFallbackLabel={sessionAskFallbackLabel}
+            />
           ))}
         </div>
       </OverlayScrollArea>
@@ -152,7 +164,11 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
   );
 };
 
-const DocumentQAPair = memo<{ entry: AIChatEntry }>(({ entry }) => {
+const DocumentQAPair = memo<{
+  entry: AIChatEntry;
+  onSessionAskAction?: (questionId: string, action: SessionAskAction) => void;
+  sessionAskFallbackLabel?: string | null;
+}>(({ entry, onSessionAskAction, sessionAskFallbackLabel }) => {
   const { question, response } = entry;
   const renderedResponse = useMemo(
     () => response.text ? renderChatMarkdown(response.text) : null,
@@ -190,12 +206,21 @@ const DocumentQAPair = memo<{ entry: AIChatEntry }>(({ entry }) => {
 
       <div className="group relative p-2.5 rounded-lg border border-border/50 bg-popover/50 hover:bg-muted/30 transition-colors">
         {response.error ? (
-          <p className="text-xs text-destructive">{response.error}</p>
+          <>
+            <p className={`text-xs ${sessionAskErrorTone(response)}`}>{response.error}</p>
+            <SessionAskActions
+              response={response}
+              fallbackLabel={sessionAskFallbackLabel}
+              onAction={onSessionAskAction ? (action) => onSessionAskAction(question.id, action) : undefined}
+            />
+          </>
         ) : response.text ? (
           <div className="text-xs">
             {renderedResponse}
             {response.isStreaming && <span className="ai-streaming-cursor inline-block ml-0.5" />}
           </div>
+        ) : response.status ? (
+          <SessionAskStatus response={response} />
         ) : response.isStreaming ? (
           <span className="text-xs text-muted-foreground">
             <span className="ai-streaming-cursor" /> Thinking...

@@ -79,6 +79,7 @@ import {
 import { isRemoteSession, isUrlHostOverridden } from "./server/network.ts";
 import { isBrowserSessionStoppedError } from "./browser-session-error.ts";
 import { classifyAnnotateOutcome } from "./annotate-outcome.ts";
+import { createPiSessionBridgeHub } from "./pi-session-bridge.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -299,6 +300,13 @@ export const PROJECT_TRUST_CAPABILITY_WARNING =
 
 export default function plannotator(pi: ExtensionAPI): void {
 	const currentPiSession = registerCurrentPiSession(pi);
+	// "Ask this session": Ask AI answered by this Pi session (review, annotate,
+	// last). Listeners register once here; each command binds a bridge to its ctx.
+	const sessionBridgeHub = createPiSessionBridgeHub(pi);
+	// Off in remote mode: anyone who can reach the session URL could otherwise
+	// type into this agent session (same reasoning as the agent terminal).
+	const sessionBridgeFor = (ctx: ExtensionContext, origin: PiSessionIdentity) =>
+		isRemoteSession() ? undefined : sessionBridgeHub.createBridge(ctx, origin);
 	let phase: Phase = "idle";
 	void registerPlannotatorEventListeners(pi, {
 		handlePlanMode: async (mode, ctx) => {
@@ -703,6 +711,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				const ignoredNotice = formatIgnoredReviewWords(reviewTarget);
 				if (ignoredNotice) ctx.ui.notify(`Plannotator: ${ignoredNotice}`, "info");
 				const session = await startCodeReviewBrowserSession(ctx, {
+					sessionBridge: sessionBridgeFor(ctx, origin),
 					cwd: reviewTarget.directory,
 					includeReviewDirectory: !!reviewTarget.directory,
 					prUrl: reviewArgs.prUrl,
@@ -1023,6 +1032,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 					renderMarkdownFlag,
 					undefined,
 					liveTargetUrl,
+					sessionBridgeFor(ctx, origin),
 				);
 				ctx.ui.notify(sessionOpenedMessage("Annotation opened", session.url), "info");
 				void session
@@ -1113,7 +1123,13 @@ export default function plannotator(pi: ExtensionAPI): void {
 			ctx.ui.notify("Opening annotation UI for last message...", "info");
 
 			try {
-				const session = await startLastMessageAnnotationSession(ctx, snapshot.text, gate, pickerMessages);
+				const session = await startLastMessageAnnotationSession(
+					ctx,
+					snapshot.text,
+					gate,
+					pickerMessages,
+					sessionBridgeFor(ctx, origin),
+				);
 				ctx.ui.notify(sessionOpenedMessage("Last-message annotation opened", session.url), "info");
 				void session
 					.waitForDecision()

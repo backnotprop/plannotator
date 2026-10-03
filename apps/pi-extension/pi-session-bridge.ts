@@ -1,0 +1,237 @@
+/**
+ * "Ask this session" for Pi: answers Plannotator's Ask AI from the Pi session
+ * that opened the review / annotate / last-message browser, as a real turn in
+ * that session (streamed, with tools, kept in the transcript).
+ *
+ * The question goes in as a custom message (`customType: "plannotator-ask"`)
+ * so Pi shows it in its own labelled box and the model receives it as a user
+ * message whose first line says it comes from the Plannotator reviewer. The
+ * answer is read back from the session's own events.
+ *
+ * Pi API notes (checked against Pi 0.84 / 0.85 and the 1.0 source):
+ * - `pi.on(...)` returns void before 1.0, so listeners cannot be removed. The
+ *   hub therefore registers ONE set of listeners at extension load and routes
+ *   events to the single active question.
+ * - `pi.sendMessage(..., { triggerTurn: true })` starts a turn when the agent
+ *   is idle and steers it into the running turn otherwise. The bridge only
+ *   sends when idle (the provider holds the question until then), so steering
+ *   happens only when the user types into Pi in the same instant.
+ * - `pi.sendMessage` returns void and reports async failures to Pi's own error
+ *   channel, so a question that never starts is failed by a watchdog.
+ *
+ * Only type imports here: this module is loaded eagerly by index.ts.
+ */
+
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { SessionBridge, SessionBridgeSink, SessionBridgeStatus } from "./generated/ai/session-bridge.ts";
+import {
+	isCtxAlive,
+	isCurrentPiSessionDifferentFrom,
+	type PiSessionIdentity,
+} from "./current-pi-session.ts";
+
+export const PLANNOTATOR_ASK_CUSTOM_TYPE = "plannotator-ask";
+
+/** How long a sent question may take to show up in the session before it is reported as failed. */
+const START_WATCHDOG_MS = 15_000;
+
+type BridgeCtx = Pick<ExtensionContext, "mode" | "isIdle" | "hasPendingMessages" | "abort">;
+
+type HubPi = {
+	on(event: string, handler: (event: any, ctx?: unknown) => unknown): unknown;
+	sendMessage: ExtensionAPI["sendMessage"];
+};
+
+interface ActiveAsk {
+	askId: string;
+	sink: SessionBridgeSink;
+	/** Our custom message has been delivered into the session. */
+	started: boolean;
+	/** The reviewer stopped this question. */
+	cancelled: boolean;
+	answer: string;
+	/** A new assistant message began after some answer text: separate with a blank line. */
+	needsSeparator: boolean;
+	watchdog: ReturnType<typeof setTimeout> | null;
+}
+
+export interface PiSessionBridgeHub {
+	/** Build a bridge bound to the session that ran a command. */
+	createBridge(ctx: BridgeCtx, origin: PiSessionIdentity): SessionBridge;
+	/** @internal test hook */
+	readonly hasActiveAsk: boolean;
+}
+
+function clearWatchdog(ask: ActiveAsk): void {
+	if (ask.watchdog) clearTimeout(ask.watchdog);
+	ask.watchdog = null;
+}
+
+function lastAssistant(messages: unknown): { stopReason?: string; errorMessage?: string } | undefined {
+	if (!Array.isArray(messages)) return undefined;
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i] as { role?: string } | null;
+		if (message?.role === "assistant") return message as { stopReason?: string; errorMessage?: string };
+	}
+	return undefined;
+}
+
+export function createPiSessionBridgeHub(pi: HubPi): PiSessionBridgeHub {
+	let active: ActiveAsk | null = null;
+
+	const finish = (ask: ActiveAsk) => {
+		clearWatchdog(ask);
+		if (active === ask) active = null;
+	};
+
+	pi.on("message_start", (event) => {
+		const ask = active;
+		if (!ask) return;
+		const message = event?.message as { role?: string; customType?: string; details?: { askId?: unknown } } | undefined;
+		if (!message) return;
+		if (message.role === "custom" && message.customType === PLANNOTATOR_ASK_CUSTOM_TYPE) {
+			if (message.details?.askId === ask.askId) {
+				ask.started = true;
+				clearWatchdog(ask);
+			}
+			return;
+		}
+		if (ask.started && message.role === "assistant" && ask.answer.length > 0) ask.needsSeparator = true;
+	});
+
+	pi.on("message_update", (event) => {
+		const ask = active;
+		if (!ask?.started || ask.cancelled) return;
+		const update = event?.assistantMessageEvent as { type?: string; delta?: unknown } | undefined;
+		if (update?.type !== "text_delta" || typeof update.delta !== "string" || !update.delta) return;
+		let delta = update.delta;
+		if (ask.needsSeparator) {
+			delta = `\n\n${delta}`;
+			ask.needsSeparator = false;
+		}
+		ask.answer += delta;
+		ask.sink.delta(delta);
+	});
+
+	pi.on("tool_execution_start", (event) => {
+		const ask = active;
+		if (!ask?.started || ask.cancelled) return;
+		if (typeof event?.toolName === "string") ask.sink.tool?.(event.toolName);
+	});
+
+	pi.on("agent_end", (event) => {
+		const ask = active;
+		if (!ask?.started) return;
+		finish(ask);
+		if (ask.cancelled) {
+			ask.sink.error("aborted");
+			return;
+		}
+		const last = lastAssistant(event?.messages);
+		if (last?.stopReason === "error") {
+			ask.sink.error("failed", last.errorMessage || "The session hit an error while answering.");
+		} else if (last?.stopReason === "aborted") {
+			ask.sink.error("failed", "The turn was stopped in the session before it finished answering.");
+		} else {
+			ask.sink.done(ask.answer);
+		}
+	});
+
+	pi.on("session_shutdown", () => {
+		const ask = active;
+		if (!ask) return;
+		finish(ask);
+		ask.sink.error("gone");
+	});
+
+	return {
+		get hasActiveAsk() {
+			return active !== null;
+		},
+		createBridge(ctx, origin) {
+			const status = (): SessionBridgeStatus => {
+				if (!isCtxAlive(ctx) || isCurrentPiSessionDifferentFrom(origin)) return "gone";
+				try {
+					return ctx.isIdle() && !ctx.hasPendingMessages() ? "ready" : "busy";
+				} catch {
+					return "gone";
+				}
+			};
+
+			return {
+				host: "pi",
+				modes: { turn: true, transient: false },
+				status,
+				ask(req, sink, signal) {
+					if (active) {
+						sink.error("busy", "Another Plannotator question is still running in this session.");
+						return;
+					}
+					const ask: ActiveAsk = {
+						askId: req.askId,
+						sink,
+						started: false,
+						cancelled: false,
+						answer: "",
+						needsSeparator: false,
+						watchdog: null,
+					};
+					active = ask;
+
+					signal.addEventListener(
+						"abort",
+						() => {
+							if (active !== ask) return;
+							ask.cancelled = true;
+							if (!ask.started) {
+								// Not in the session yet: nothing of ours is running.
+								finish(ask);
+								return;
+							}
+							// Our turn is running: stop it. agent_end then clears `active`.
+							try {
+								if (!ctx.isIdle()) ctx.abort();
+								else finish(ask);
+							} catch {
+								finish(ask);
+							}
+						},
+						{ once: true },
+					);
+
+					ask.watchdog = setTimeout(() => {
+						if (active !== ask || ask.started) return;
+						let idle = true;
+						try {
+							idle = ctx.isIdle();
+						} catch {
+							idle = true;
+						}
+						// Steered into a running turn: it will start when Pi reads it.
+						if (!idle) return;
+						finish(ask);
+						sink.error("failed", "The question did not reach the session.");
+					}, START_WATCHDOG_MS);
+
+					try {
+						pi.sendMessage(
+							{
+								customType: PLANNOTATOR_ASK_CUSTOM_TYPE,
+								content: req.text,
+								display: true,
+								details: { askId: req.askId, source: "plannotator" },
+							},
+							{ triggerTurn: true },
+						);
+					} catch (err) {
+						finish(ask);
+						sink.error(status() === "gone" ? "gone" : "failed", err instanceof Error ? err.message : String(err));
+					}
+				},
+				interrupt() {
+					ctx.abort();
+				},
+			};
+		},
+	};
+}

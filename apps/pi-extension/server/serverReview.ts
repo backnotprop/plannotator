@@ -116,6 +116,7 @@ import {
 import { handleApiNotFound, html, json, parseBody, parseJsonBody, readBody, requestUrl, send } from "./helpers.ts";
 import { captureReviewProgress, handleReviewProgress } from "../generated/review-progress.ts";
 import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.ts";
+import type { SessionBridge } from "../generated/ai/session-bridge.ts";
 
 import { buildAdvertisedUrl, isRemoteSession, listenOnPort } from "./network.ts";
 import { getAvailableOpenInApps, openFileInApp } from "./open-in-apps.ts";
@@ -311,6 +312,8 @@ export interface ReviewServerResult {
 }
 
 export async function startReviewServer(options: {
+	/** "Ask this session": the in-process bridge to the Pi session that opened this review. */
+	sessionBridge?: SessionBridge;
 	/** Return the active local directory with the decision for cross-directory feedback. */
 	includeReviewDirectory?: boolean;
 	rawPatch: string;
@@ -1863,7 +1866,7 @@ export async function startReviewServer(options: {
 		resolveDecision = r;
 	});
 
-	const aiRuntime = aiEnabled ? await createPiAIRuntime({ getCwd: resolveAgentCwd }) : null;
+	const aiRuntime = aiEnabled ? await createPiAIRuntime({ getCwd: resolveAgentCwd, sessionBridge: options.sessionBridge }) : null;
 
 	const server = createServer(async (req, res) => {
 		const url = requestUrl(req);

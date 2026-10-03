@@ -57,7 +57,7 @@ import { createEditorAnnotationHandler } from "./editor-annotations";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { isWSL } from "./browser";
 import { AI_QUERY_ENDPOINT, createAIRuntime } from "./ai-runtime";
-import { isAIEndpointPath, type AIEndpoints } from "@plannotator/ai";
+import { isAIEndpointPath, type AIEndpoints, type SessionBridge } from "@plannotator/ai";
 import { isArchiveDocumentMutation } from "@plannotator/shared/archive-mode";
 import { readPlanFile } from "@plannotator/shared/doc-resolve";
 
@@ -72,6 +72,8 @@ export { type VaultNode, buildFileTree } from "@plannotator/shared/reference-com
 // --- Types ---
 
 export interface ServerOptions {
+  /** "Ask this session": the host bridge to the agent session (see packages/ai/session-bridge.ts). A host whose plan flow blocks the session must report `blocked`. */
+  sessionBridge?: SessionBridge;
   /** The plan markdown content */
   plan: string;
   /** Origin identifier (e.g., "claude-code", "opencode") */
@@ -162,7 +164,7 @@ export async function startPlannotatorServer(
   const draftKey = mode !== "archive" ? contentHash(plan) : "";
   const editorAnnotations = mode !== "archive" ? createEditorAnnotationHandler() : null;
   const externalAnnotations = mode !== "archive" ? createExternalAnnotationHandler("plan") : null;
-  const aiRuntime = mode !== "archive" && resolveAIEnabled() ? await createAIRuntime() : null;
+  const aiRuntime = mode !== "archive" && resolveAIEnabled() ? await createAIRuntime({ sessionBridge: options.sessionBridge }) : null;
   const slug = mode !== "archive" ? generateSlug(plan) : "";
 
   // Lazy cache for in-session archive browsing (plan review sidebar tab)

@@ -42,6 +42,18 @@ export interface AskAIParams {
   /** Context block prepended to the message (e.g. the "changes under review"
    *  description). Rides with each question so it reflects the live view. */
   contextPreamble?: string;
+  /** "Ask this session" only: what to do when the host session is busy
+   *  ("wait" = ask when it finishes, "interrupt" = stop its turn and ask now). */
+  busyPolicy?: 'wait' | 'interrupt';
+}
+
+/** Overrides for re-asking a question that ended in a busy/gone/blocked answer. */
+export interface AIRetryOptions {
+  busyPolicy?: 'wait' | 'interrupt';
+  /** Ask a different provider instead (a fresh session is created for it). */
+  providerId?: string;
+  /** Replace parts of the original question (e.g. a provider-specific preamble). */
+  params?: Partial<AskAIParams>;
 }
 
 interface UseAIChatOptions {
@@ -228,7 +240,7 @@ export function useAIChat({
     setThread(prev => ({ ...prev, sessionId }));
   }, []);
 
-  const createSession = useCallback(async (signal: AbortSignal, epoch: number): Promise<string> => {
+  const createSession = useCallback(async (signal: AbortSignal, epoch: number, providerOverride?: string): Promise<string> => {
     if (!context) {
       throw new Error('AI context is unavailable');
     }
@@ -236,7 +248,10 @@ export function useAIChat({
     const requestId = ++createRequestRef.current;
     setIsCreatingSession(true);
     try {
-      const res = await aiTransport.session({
+      const res = await aiTransport.session(providerOverride ? {
+        context,
+        providerId: providerOverride,
+      } : {
         context,
         ...(providerId && { providerId }),
         ...(model && { model }),
@@ -274,7 +289,11 @@ export function useAIChat({
     return safeAbort(sessionId);
   }, []);
 
-  const ask = useCallback(async (params: AskAIParams) => {
+  // The params each question was asked with, so a busy/gone answer can be
+  // re-asked ("Ask when it finishes", "Ask a separate AI instead").
+  const paramsByQuestionRef = useRef(new Map<string, AskAIParams>());
+
+  const ask = useCallback(async (params: AskAIParams, askOptions?: { providerId?: string }) => {
     if (abortRef.current) {
       abortRef.current.abort();
       // Supersede: stop the server-side turn (not just the browser fetch).
@@ -295,6 +314,7 @@ export function useAIChat({
     setError(null);
 
     const questionId = generateId('ai-question');
+    paramsByQuestionRef.current.set(questionId, params);
     const question: AIQuestion = {
       id: questionId,
       prompt: params.prompt,
@@ -319,7 +339,9 @@ export function useAIChat({
 
     try {
       let sid = sessionIdRef.current;
-      if (!sid) {
+      if (askOptions?.providerId) {
+        sid = await createSession(controller.signal, epoch, askOptions.providerId);
+      } else if (!sid) {
         sid = await createSession(controller.signal, epoch);
       }
 
@@ -332,6 +354,7 @@ export function useAIChat({
         sessionId: sid,
         prompt: fullPrompt,
         ...(params.contextUpdate && { contextUpdate: params.contextUpdate }),
+        ...(params.busyPolicy && { busyPolicy: params.busyPolicy }),
       }, controller.signal);
 
       if (!res.ok || !res.body) {
@@ -363,7 +386,19 @@ export function useAIChat({
               updateMessages(prev =>
                 prev.map(m =>
                   m.question.id === questionId
-                    ? { ...m, response: { ...m.response, text: m.response.text + msg.delta } }
+                    ? { ...m, response: m.response.status
+                        ? { ...m.response, text: m.response.text + msg.delta, status: undefined }
+                        : { ...m.response, text: m.response.text + msg.delta } }
+                    : m
+                )
+              );
+            } else if (msg.type === 'status') {
+              // "Ask this session": waiting on / interrupting a busy session.
+              const status = msg.status === 'waiting' || msg.status === 'interrupting' ? msg.status : undefined;
+              updateMessages(prev =>
+                prev.map(m =>
+                  m.question.id === questionId
+                    ? { ...m, response: { ...m.response, status } }
                     : m
                 )
               );
@@ -389,7 +424,16 @@ export function useAIChat({
               updateMessages(prev =>
                 prev.map(m =>
                   m.question.id === questionId
-                    ? { ...m, response: { ...m.response, error: msg.error, isStreaming: false } }
+                    ? {
+                        ...m,
+                        response: {
+                          ...m.response,
+                          error: msg.error,
+                          ...(typeof msg.code === 'string' && { errorCode: msg.code }),
+                          ...(m.response.status && { status: undefined }),
+                          isStreaming: false,
+                        },
+                      }
                     : m
                 )
               );
@@ -418,8 +462,8 @@ export function useAIChat({
 
       updateMessages(prev =>
         prev.map(m =>
-          m.question.id === questionId && m.response.isStreaming
-            ? { ...m, response: { ...m.response, isStreaming: false } }
+          m.question.id === questionId && (m.response.isStreaming || m.response.status)
+            ? { ...m, response: { ...m.response, isStreaming: false, ...(m.response.status && { status: undefined }) } }
             : m
         )
       );
@@ -428,7 +472,7 @@ export function useAIChat({
         updateMessages(prev =>
           prev.map(m =>
             m.question.id === questionId
-              ? { ...m, response: { ...m.response, isStreaming: false } }
+              ? { ...m, response: { ...m.response, isStreaming: false, ...(m.response.status && { status: undefined }) } }
               : m
           )
         );
@@ -451,6 +495,25 @@ export function useAIChat({
       }
     }
   }, [buildPrompt, createSession, updateMessages, updatePermissions, postServerAbort]);
+
+  /**
+   * Re-ask an earlier question in place of its answer: the busy-session choice
+   * ("Ask when it finishes" / "Interrupt and ask now") and the fallback to a
+   * separate AI after "Ask this session" reports the session gone or blocked.
+   */
+  const retry = useCallback((questionId: string, options: AIRetryOptions = {}) => {
+    const original = paramsByQuestionRef.current.get(questionId);
+    if (!original) return;
+    paramsByQuestionRef.current.delete(questionId);
+    updateMessages(prev => prev.filter(m => m.question.id !== questionId));
+    const { busyPolicy: _previousPolicy, ...base } = original;
+    const params: AskAIParams = {
+      ...base,
+      ...options.params,
+      ...(options.busyPolicy && { busyPolicy: options.busyPolicy }),
+    };
+    return ask(params, options.providerId ? { providerId: options.providerId } : undefined);
+  }, [ask, updateMessages]);
 
   const abort = useCallback(() => {
     if (abortRef.current) {
@@ -502,6 +565,7 @@ export function useAIChat({
       abortRef.current = null;
       pendingAbortRef.current = postServerAbort();
     }
+    paramsByQuestionRef.current.clear();
     setThread(createThread(threadTitle));
     setIsCreatingSession(false);
     setIsStreaming(false);
@@ -527,6 +591,7 @@ export function useAIChat({
     permissionRequests: thread.permissionRequests,
     respondToPermission,
     ask,
+    retry,
     abort,
     resetSession,
     resetThread,

@@ -23,6 +23,7 @@ import {
 	unstageFile,
 } from "./server.ts";
 import { BROWSER_SESSION_STOPPED } from "./browser-session-error.ts";
+import type { SessionBridge } from "./generated/ai/session-bridge.ts";
 import { openBrowser, isRemoteSession } from "./server/network.ts";
 import { detectProjectName } from "./server/project.ts";
 import { parsePRUrl, checkPRAuth, fetchPR } from "./server/pr.ts";
@@ -76,6 +77,8 @@ export interface BrowserDecisionSession<T> {
 }
 
 type CodeReviewOptions = {
+	/** "Ask this session": the bridge to the Pi session that opened this review. */
+	sessionBridge?: SessionBridge;
 	cwd?: string;
 	includeReviewDirectory?: boolean;
 	defaultBranch?: string;
@@ -731,6 +734,7 @@ async function createCodeReviewBrowserSession(
 	}
 
 	const server = await startServerWithSelfPreemption(() => startReviewServer({
+		sessionBridge: options.sessionBridge,
 		rawPatch,
 		gitRef,
 		error: diffError,
@@ -804,6 +808,8 @@ export async function startMarkdownAnnotationSession(
 	 * proxy. The bridge sources are loaded here from the vendored
 	 * bridge-script module, mirroring how the Bun CLI supplies them. */
 	liveTargetUrl?: string,
+	/** "Ask this session": the bridge to the Pi session that opened this annotation. */
+	sessionBridge?: SessionBridge,
 ): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>> {
 	if (!ctx.hasUI) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
@@ -842,6 +848,7 @@ export async function startMarkdownAnnotationSession(
 	}
 
 	const server = await startServerWithSelfPreemption(() => startAnnotateServer({
+		sessionBridge,
 		markdown: resolvedMarkdown,
 		filePath,
 		origin: "pi",
@@ -883,6 +890,7 @@ export async function startLastMessageAnnotationSession(
 	lastText: string,
 	gate?: boolean,
 	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
+	sessionBridge?: SessionBridge,
 ): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>> {
 	return startMarkdownAnnotationSession(
 		ctx,
@@ -897,6 +905,8 @@ export async function startLastMessageAnnotationSession(
 		undefined,
 		undefined,
 		recentMessages,
+		undefined,
+		sessionBridge,
 	);
 }
 

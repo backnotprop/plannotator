@@ -34,6 +34,7 @@
     "assistant-message.ts",
     "browser-session-error.ts",
     "current-pi-session.ts",
+    "pi-session-bridge.ts",
     "plannotator-browser.ts",
     "plannotator-browser-runtime.ts",
     "plannotator-events.ts",

@@ -3,9 +3,12 @@ import {
   createDeferredModelDiscovery,
   createProvider,
   ProviderRegistry,
+  SESSION_BRIDGE_PROVIDER_NAME,
+  SessionBridgeProvider,
   SessionManager,
   type AIEndpoints,
   type PiSDKConfig,
+  type SessionBridge,
 } from "@plannotator/ai";
 import { resolveWindowsCommandShim } from "@plannotator/ai/providers/command-path";
 
@@ -19,6 +22,12 @@ export const AI_QUERY_ENDPOINT = "/api/ai/query";
 interface CreateAIRuntimeOptions {
   cwd?: string;
   getCwd?: () => string;
+  /**
+   * "Ask this session": a host that can answer Ask AI from the agent session
+   * that opened Plannotator passes its bridge here. It is registered after the
+   * SDK providers, so the server default is unchanged; the client prefers it.
+   */
+  sessionBridge?: SessionBridge;
 }
 
 export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Promise<AIRuntime> {
@@ -103,6 +112,9 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
     // OpenCode not available.
   }
 
+  const bridgeProvider = options.sessionBridge ? new SessionBridgeProvider(options.sessionBridge) : null;
+  if (bridgeProvider) registry.register(bridgeProvider, SESSION_BRIDGE_PROVIDER_NAME);
+
   const endpoints = createAIEndpoints({
     registry,
     sessionManager,
@@ -116,6 +128,9 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
   return {
     endpoints,
     dispose: () => {
+      // Detach first: tearing the sessions down must not stop a turn the
+      // session is already running for us (the decision goes to that session).
+      bridgeProvider?.detach();
       sessionManager.disposeAll();
       registry.disposeAll();
     },

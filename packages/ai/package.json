@@ -10,6 +10,7 @@
     "./provider": "./provider.ts",
     "./session-manager": "./session-manager.ts",
     "./endpoints": "./endpoints.ts",
+    "./session-bridge": "./session-bridge.ts",
     "./providers/claude-agent-sdk": "./providers/claude-agent-sdk.ts",
     "./providers/codex-app-server": "./providers/codex-app-server.ts",
     "./providers/command-path": "./providers/command-path.ts",

@@ -64,6 +64,8 @@ export type {
   AIResultMessage,
   AIPermissionRequestMessage,
   AIUnknownMessage,
+  AIStatusMessage,
+  AIQueryOptions,
   AIContext,
   AIContextMode,
   PlanContext,
@@ -89,6 +91,27 @@ export { buildSystemPrompt, buildForkPreamble, buildEffectivePrompt } from "./co
 
 // Base session
 export { BaseSession } from "./base-session.ts";
+
+// "Ask this session" bridge
+export {
+  SessionBridgeProvider,
+  SessionBridgeSession,
+  SESSION_BRIDGE_PROVIDER_NAME,
+  SESSION_BRIDGE_ERROR,
+  SESSION_ASK_HEADER,
+  formatSessionAskText,
+  sessionBridgeLabel,
+} from "./session-bridge.ts";
+export type {
+  SessionBridge,
+  SessionBridgeAskMode,
+  SessionBridgeAskRequest,
+  SessionBridgeErrorCode,
+  SessionBridgeHost,
+  SessionBridgeInfo,
+  SessionBridgeSink,
+  SessionBridgeStatus,
+} from "./session-bridge.ts";
 
 // Session manager
 export { SessionManager } from "./session-manager.ts";

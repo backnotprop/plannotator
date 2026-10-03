@@ -1,0 +1,460 @@
+/**
+ * "Ask this session": an Ask AI provider answered by the agent session that
+ * opened Plannotator, instead of a separate SDK agent.
+ *
+ * The host (Pi today; OpenCode and Claude Code mods later) implements the
+ * small, host-neutral `SessionBridge` interface below. `SessionBridgeProvider`
+ * wraps it as an ordinary `AIProvider`, so it rides the existing
+ * `/api/ai/session` + `/api/ai/query` endpoints unchanged.
+ *
+ * Rules the provider enforces (not the host):
+ * - one question at a time across every Ask AI thread of the server;
+ * - a busy agent is never interrupted implicitly: the first attempt answers
+ *   `agent_busy`, and the client re-asks with an explicit `busyPolicy`
+ *   ("wait" holds the question until the session is idle, "interrupt" asks the
+ *   host to stop the session's current work first);
+ * - abort cancels only our own question (the host decides how).
+ */
+
+import { BaseSession } from "./base-session.ts";
+import type {
+	AIContext,
+	AIMessage,
+	AIProvider,
+	AIProviderCapabilities,
+	AIQueryOptions,
+	AISession,
+	CreateSessionOptions,
+} from "./types.ts";
+
+// ---------------------------------------------------------------------------
+// Host interface
+// ---------------------------------------------------------------------------
+
+/**
+ * - `ready`: idle, a question can run now.
+ * - `busy`: the agent is mid-turn on something else; a question waits or interrupts.
+ * - `blocked`: the session is waiting on THIS Plannotator decision, so a real
+ *   turn can never run (only a transient answer could).
+ * - `gone`: the session ended or was replaced.
+ */
+export type SessionBridgeStatus = "ready" | "busy" | "blocked" | "gone";
+
+export type SessionBridgeHost = "pi" | "opencode" | "claude-code";
+
+export type SessionBridgeAskMode = "turn" | "transient";
+
+export type SessionBridgeErrorCode = "busy" | "blocked" | "gone" | "aborted" | "failed";
+
+export interface SessionBridgeSink {
+	delta(text: string): void;
+	tool?(name: string): void;
+	done(answer: string): void;
+	error(code: SessionBridgeErrorCode, message?: string): void;
+}
+
+export interface SessionBridgeAskRequest {
+	askId: string;
+	/** The full message to put in the session, header included. */
+	text: string;
+	mode: SessionBridgeAskMode;
+}
+
+export interface SessionBridge {
+	host: SessionBridgeHost;
+	status(): SessionBridgeStatus;
+	/** `turn` = a real message with tools, kept in the transcript; `transient` = an answer from context, no tools, no transcript. */
+	modes: { turn: boolean; transient: boolean };
+	/**
+	 * Send one question. The host reports through `sink` exactly once with
+	 * `done` or `error`. Aborting `signal` cancels OUR question only: drop it if
+	 * it was not delivered yet, stop the turn only if the running turn is ours.
+	 */
+	ask(req: SessionBridgeAskRequest, sink: SessionBridgeSink, signal: AbortSignal): void;
+	/**
+	 * Stop the session's current work so a question can run now ("Interrupt
+	 * and ask now"). Hosts that cannot interrupt omit it; the provider then
+	 * refuses an interrupt request.
+	 */
+	interrupt?(): void | Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// Wire constants shared with the client
+// ---------------------------------------------------------------------------
+
+export const SESSION_BRIDGE_PROVIDER_NAME = "session-bridge";
+
+/** Error codes the client turns into actions (busy choice, fallback). */
+export const SESSION_BRIDGE_ERROR = {
+	agentBusy: "agent_busy",
+	blocked: "session_blocked",
+	gone: "session_gone",
+	inFlight: "ask_in_flight",
+	failed: "session_ask_failed",
+} as const;
+
+const HOST_LABELS: Record<SessionBridgeHost, string> = {
+	pi: "Pi",
+	opencode: "OpenCode",
+	"claude-code": "Claude Code",
+};
+
+export function sessionBridgeLabel(host: SessionBridgeHost): string {
+	return `Ask this session · ${HOST_LABELS[host] ?? host}`;
+}
+
+// ---------------------------------------------------------------------------
+// Message shape
+// ---------------------------------------------------------------------------
+
+export const SESSION_ASK_HEADER =
+	"[Plannotator Ask AI] A question from the reviewer in Plannotator. Answer it briefly, here in the session. Do not edit files or start new work unless the question asks you to.";
+
+function describeSurface(context: AIContext): string | null {
+	switch (context.mode) {
+		case "code-review":
+			return "Surface: code review";
+		case "plan-review":
+			return "Surface: plan review";
+		case "annotate": {
+			const { filePath, sourceInfo } = context.annotate;
+			if (filePath === "last-message") return "Surface: annotating your last message";
+			const where = sourceInfo && /^https?:\/\//i.test(sourceInfo) ? sourceInfo : filePath;
+			return where ? `Surface: annotating ${where}` : "Surface: annotating a document";
+		}
+		default:
+			return null;
+	}
+}
+
+/**
+ * The message the session receives. There is no system prompt: the host's own
+ * prompt is in effect, so the header carries the framing.
+ */
+export function formatSessionAskText(context: AIContext, prompt: string): string {
+	const surface = describeSurface(context);
+	return [SESSION_ASK_HEADER, surface, "", prompt.trim()].filter((line) => line !== null).join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Provider
+// ---------------------------------------------------------------------------
+
+export interface SessionBridgeProviderOptions {
+	/** How often to re-check `status()` while a question waits. Default 250ms. */
+	pollIntervalMs?: number;
+}
+
+export interface SessionBridgeInfo {
+	host: SessionBridgeHost;
+	status: SessionBridgeStatus;
+	modes: { turn: boolean; transient: boolean };
+}
+
+export class SessionBridgeProvider implements AIProvider {
+	readonly name = SESSION_BRIDGE_PROVIDER_NAME;
+	readonly models = [] as const;
+	readonly capabilities: AIProviderCapabilities;
+	readonly label: string;
+	readonly pollIntervalMs: number;
+
+	private inFlight: SessionBridgeSession | null = null;
+	private closing = false;
+
+	constructor(
+		readonly bridge: SessionBridge,
+		options: SessionBridgeProviderOptions = {},
+	) {
+		this.capabilities = { fork: false, resume: false, streaming: true, tools: bridge.modes.turn };
+		this.label = sessionBridgeLabel(bridge.host);
+		this.pollIntervalMs = options.pollIntervalMs ?? 250;
+	}
+
+	/** Live status for `/api/ai/capabilities`. */
+	get sessionBridge(): SessionBridgeInfo {
+		let status: SessionBridgeStatus;
+		try {
+			status = this.bridge.status();
+		} catch {
+			status = "gone";
+		}
+		return { host: this.bridge.host, status, modes: { ...this.bridge.modes } };
+	}
+
+	/** @internal one question at a time across every session of this provider. */
+	claim(session: SessionBridgeSession): boolean {
+		if (this.inFlight && this.inFlight !== session) return false;
+		this.inFlight = session;
+		return true;
+	}
+
+	/** @internal */
+	release(session: SessionBridgeSession): void {
+		if (this.inFlight === session) this.inFlight = null;
+	}
+
+	/** @internal */
+	get isClosing(): boolean {
+		return this.closing;
+	}
+
+	/**
+	 * Called by the server runtime before its sessions are torn down (decision,
+	 * exit, shutdown). From here on an abort still drops a question that has
+	 * not reached the session, but never stops a turn already running: the
+	 * reviewer's decision is about to be delivered to that same session.
+	 */
+	detach(): void {
+		this.closing = true;
+	}
+
+	async createSession(options: CreateSessionOptions): Promise<AISession> {
+		return new SessionBridgeSession(this, options.context);
+	}
+
+	async forkSession(): Promise<AISession> {
+		throw new Error("Ask this session does not fork; it already is the session.");
+	}
+
+	async resumeSession(): Promise<AISession> {
+		throw new Error("Ask this session does not resume threads.");
+	}
+
+	dispose(): void {
+		this.closing = true;
+		this.inFlight = null;
+	}
+}
+
+type WaitOutcome = "ready" | "gone" | "blocked" | "aborted";
+
+function readStatus(bridge: SessionBridge): SessionBridgeStatus {
+	try {
+		return bridge.status();
+	} catch {
+		return "gone";
+	}
+}
+
+function waitUntilReady(bridge: SessionBridge, signal: AbortSignal, pollMs: number): Promise<WaitOutcome> {
+	return new Promise((resolve) => {
+		let timer: ReturnType<typeof setInterval> | null = null;
+		const finish = (outcome: WaitOutcome) => {
+			if (timer) clearInterval(timer);
+			signal.removeEventListener("abort", onAbort);
+			resolve(outcome);
+		};
+		const onAbort = () => finish("aborted");
+		const check = (): boolean => {
+			if (signal.aborted) {
+				finish("aborted");
+				return true;
+			}
+			const status = readStatus(bridge);
+			if (status === "busy") return false;
+			finish(status);
+			return true;
+		};
+		if (check()) return;
+		signal.addEventListener("abort", onAbort, { once: true });
+		timer = setInterval(check, pollMs);
+	});
+}
+
+/** A tiny single-consumer async queue that also closes on abort. */
+class MessageQueue {
+	private items: AIMessage[] = [];
+	private waiter: (() => void) | null = null;
+	private closed = false;
+
+	push(message: AIMessage): void {
+		if (this.closed) return;
+		this.items.push(message);
+		this.wake();
+	}
+
+	close(): void {
+		this.closed = true;
+		this.wake();
+	}
+
+	private wake(): void {
+		const waiter = this.waiter;
+		this.waiter = null;
+		waiter?.();
+	}
+
+	async *drain(): AsyncGenerator<AIMessage> {
+		while (true) {
+			if (this.items.length > 0) {
+				yield this.items.shift()!;
+				continue;
+			}
+			if (this.closed) return;
+			await new Promise<void>((resolve) => {
+				this.waiter = resolve;
+			});
+		}
+	}
+}
+
+function errorMessage(code: string, error: string): AIMessage {
+	return { type: "error", code, error };
+}
+
+const GONE_TEXT = "This session is no longer available (it was closed, replaced, or resumed elsewhere).";
+const BLOCKED_TEXT = "This session is waiting on this Plannotator decision, so it cannot answer right now.";
+const BUSY_TEXT = "The session is busy with another turn.";
+
+export class SessionBridgeSession extends BaseSession {
+	constructor(
+		private readonly provider: SessionBridgeProvider,
+		private readonly context: AIContext,
+	) {
+		super({ parentSessionId: null });
+	}
+
+	async *query(prompt: string, options?: AIQueryOptions): AsyncIterable<AIMessage> {
+		const started = this.startQuery();
+		if (!started) {
+			yield BaseSession.BUSY_ERROR;
+			return;
+		}
+		const { gen, signal } = started;
+		const { provider } = this;
+		const bridge = provider.bridge;
+
+		if (!provider.claim(this)) {
+			this.endQuery(gen);
+			yield errorMessage(
+				SESSION_BRIDGE_ERROR.inFlight,
+				"Another question to this session is still running. Wait for it, or stop it first.",
+			);
+			return;
+		}
+
+		try {
+			let status = readStatus(bridge);
+			if (status === "gone") {
+				yield errorMessage(SESSION_BRIDGE_ERROR.gone, GONE_TEXT);
+				return;
+			}
+
+			let mode: SessionBridgeAskMode;
+			if (bridge.modes.turn && status !== "blocked") {
+				mode = "turn";
+			} else if (bridge.modes.transient) {
+				mode = "transient";
+			} else {
+				yield errorMessage(SESSION_BRIDGE_ERROR.blocked, BLOCKED_TEXT);
+				return;
+			}
+
+			if (mode === "turn" && status === "busy") {
+				const policy = options?.busyPolicy;
+				if (!policy || (policy === "interrupt" && !bridge.interrupt)) {
+					yield errorMessage(SESSION_BRIDGE_ERROR.agentBusy, BUSY_TEXT);
+					return;
+				}
+				if (policy === "interrupt") {
+					yield { type: "status", status: "interrupting" };
+					try {
+						await bridge.interrupt!();
+					} catch (err) {
+						yield errorMessage(
+							SESSION_BRIDGE_ERROR.failed,
+							`Could not interrupt the session: ${err instanceof Error ? err.message : String(err)}`,
+						);
+						return;
+					}
+				} else {
+					yield { type: "status", status: "waiting" };
+				}
+				const outcome = await waitUntilReady(bridge, signal, provider.pollIntervalMs);
+				if (outcome === "aborted") return;
+				if (outcome === "gone") {
+					yield errorMessage(SESSION_BRIDGE_ERROR.gone, GONE_TEXT);
+					return;
+				}
+				if (outcome === "blocked") {
+					yield errorMessage(SESSION_BRIDGE_ERROR.blocked, BLOCKED_TEXT);
+					return;
+				}
+				yield { type: "status", status: "running" };
+				status = "ready";
+			}
+
+			if (signal.aborted) return;
+
+			const queue = new MessageQueue();
+			let settled = false;
+			let toolCount = 0;
+			const settle = (message: AIMessage) => {
+				if (settled) return;
+				settled = true;
+				queue.push(message);
+				queue.close();
+			};
+			const sink: SessionBridgeSink = {
+				delta: (text) => {
+					if (!settled && text) queue.push({ type: "text_delta", delta: text });
+				},
+				tool: (name) => {
+					if (settled) return;
+					toolCount += 1;
+					queue.push({ type: "tool_use", toolName: name, toolInput: {}, toolUseId: `${this.id}:${gen}-tool-${toolCount}` });
+				},
+				done: (answer) => settle({ type: "result", sessionId: this.id, success: true, result: answer }),
+				error: (code, message) => {
+					if (code === "aborted") {
+						settled = true;
+						queue.close();
+						return;
+					}
+					const mapped =
+						code === "gone"
+							? errorMessage(SESSION_BRIDGE_ERROR.gone, message || GONE_TEXT)
+							: code === "blocked"
+								? errorMessage(SESSION_BRIDGE_ERROR.blocked, message || BLOCKED_TEXT)
+								: code === "busy"
+									? errorMessage(SESSION_BRIDGE_ERROR.agentBusy, message || BUSY_TEXT)
+									: errorMessage(SESSION_BRIDGE_ERROR.failed, message || "The session could not answer.");
+					settle(mapped);
+				},
+			};
+			const onAbort = () => {
+				settled = true;
+				queue.close();
+			};
+			signal.addEventListener("abort", onAbort, { once: true });
+
+			// The host sees an abort only when the reviewer stopped THIS question.
+			// After the runtime detached (decision / shutdown) a running turn is
+			// left alone; only an undelivered question is dropped.
+			const hostAbort = new AbortController();
+			signal.addEventListener(
+				"abort",
+				() => {
+					if (!provider.isClosing) hostAbort.abort();
+				},
+				{ once: true },
+			);
+
+			try {
+				bridge.ask({ askId: `${this.id}:${gen}`, text: formatSessionAskText(this.context, prompt), mode }, sink, hostAbort.signal);
+			} catch (err) {
+				sink.error("failed", err instanceof Error ? err.message : String(err));
+			}
+
+			try {
+				for await (const message of queue.drain()) yield message;
+			} finally {
+				signal.removeEventListener("abort", onAbort);
+			}
+		} finally {
+			provider.release(this);
+			this.endQuery(gen);
+		}
+	}
+}

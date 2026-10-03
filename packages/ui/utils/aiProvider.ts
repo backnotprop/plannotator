@@ -25,6 +25,45 @@ export interface AIProviderOption {
   modelsSource?: 'fallback' | 'discovered';
   /** The installed CLI's version, when the server reports it. */
   toolVersion?: string;
+  /** Display label overriding the name lookup (e.g. "Ask this session · Pi"). */
+  label?: string;
+  /** Present only on the "Ask this session" provider: the host session's live status. */
+  sessionBridge?: SessionBridgeInfo;
+}
+
+/** "Ask this session": Ask AI answered by the agent session that opened Plannotator. */
+export const SESSION_BRIDGE_PROVIDER_NAME = 'session-bridge';
+
+export interface SessionBridgeInfo {
+  host: string;
+  status: 'ready' | 'busy' | 'blocked' | 'gone';
+  modes: { turn: boolean; transient: boolean };
+}
+
+/** Error codes "Ask this session" answers with that the panel turns into actions. */
+export const SESSION_ASK_ERROR_CODES = {
+  agentBusy: 'agent_busy',
+  blocked: 'session_blocked',
+  gone: 'session_gone',
+} as const;
+
+export function isSessionBridgeProvider(provider: Pick<AIProviderOption, 'name' | 'sessionBridge'> | null | undefined): boolean {
+  return !!provider && (provider.name === SESSION_BRIDGE_PROVIDER_NAME || !!provider.sessionBridge);
+}
+
+/**
+ * The "Ask this session" provider when it can answer here: present, the
+ * session not gone, and not blocked unless it offers a transient answer.
+ */
+export function findUsableSessionBridge(providers: AIProviderOption[]): AIProviderOption | null {
+  for (const provider of providers) {
+    const bridge = provider.sessionBridge;
+    if (!bridge) continue;
+    if (bridge.status === 'gone') continue;
+    if (bridge.status === 'blocked' && !bridge.modes.transient) continue;
+    return provider;
+  }
+  return null;
 }
 
 export interface AIProviderSettings {
@@ -153,8 +192,20 @@ export function resolveAIProviderSelection(options: {
   const byId = (id: string | null | undefined) =>
     id ? providers.find(provider => provider.id === id) ?? null : null;
 
+  // An explicit saved pick wins, then "Ask this session" whenever the host
+  // session can answer, then the origin's own SDK provider and the older
+  // fallbacks. Without a usable bridge this is exactly the previous order.
+  const sessionBridge = findUsableSessionBridge(providers);
+  const explicitPick = sessionBridge
+    ? byId(originHasDedicatedAIProvider(origin)
+        ? (origin ? settings.providerByOrigin[origin] : null)
+        : settings.providerId)
+    : null;
+
   const provider =
+    explicitPick ??
     byId(origin ? settings.providerByOrigin[origin] : null) ??
+    sessionBridge ??
     findOriginAIProvider(providers, origin) ??
     byId(settings.providerId) ??
     byId(serverDefaultProvider) ??
@@ -165,6 +216,23 @@ export function resolveAIProviderSelection(options: {
     providerId: provider?.id ?? null,
     model: resolveAIModelForProvider(provider, settings.preferredModels),
   };
+}
+
+/**
+ * Where "Ask a separate AI instead" goes when "Ask this session" cannot
+ * answer: the selection the app would make if the bridge were not there.
+ */
+export function resolveSessionBridgeFallback(options: {
+  providers: AIProviderOption[];
+  origin?: Origin | null;
+  settings?: AIProviderSettings;
+  serverDefaultProvider?: string | null;
+}): AIProviderSelection {
+  const providers = options.providers.filter(provider => !isSessionBridgeProvider(provider));
+  const serverDefaultProvider = providers.some(provider => provider.id === options.serverDefaultProvider)
+    ? options.serverDefaultProvider
+    : null;
+  return resolveAIProviderSelection({ ...options, providers, serverDefaultProvider });
 }
 
 export function saveAIProviderSelection(options: {

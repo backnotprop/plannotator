@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Origin } from '@plannotator/core/agents';
 import {
   getAIProviderSettings,
@@ -56,16 +56,26 @@ export function useAIProviderConfig({
     };
   });
 
+  // A provider picked for this page only (the "Ask a separate AI instead"
+  // fallback from "Ask this session"): never written to the cookie, but kept
+  // across capability refreshes so the resolver does not flip back.
+  const sessionPickRef = useRef<string | null>(null);
+
   // Auto-resolve provider/model once capabilities are known.
   useEffect(() => {
     if (!available || providers.length === 0) return;
     const saved = getAIProviderSettings();
-    const selection = resolveAIProviderSelection({
-      providers,
-      origin,
-      settings: saved,
-      serverDefaultProvider: defaultProvider,
-    });
+    const sessionPick = sessionPickRef.current
+      ? providers.find(p => p.id === sessionPickRef.current) ?? null
+      : null;
+    const selection = sessionPick
+      ? { providerId: sessionPick.id, model: resolveAIModelForProvider(sessionPick, saved.preferredModels) }
+      : resolveAIProviderSelection({
+          providers,
+          origin,
+          settings: saved,
+          serverDefaultProvider: defaultProvider,
+        });
 
     setAiConfig(prev => {
       if (prev.providerId === selection.providerId && prev.model === selection.model) return prev;
@@ -81,7 +91,13 @@ export function useAIProviderConfig({
   // Update the selection (provider/model/effort). Does NOT reset the session —
   // the caller composes that (see the cycle note above).
   const applyConfigChange = useCallback(
-    (config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => {
+    (
+      config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null },
+      options?: { persist?: boolean },
+    ) => {
+      const persist = options?.persist !== false;
+      if (!persist && config.providerId) sessionPickRef.current = config.providerId;
+      else if (persist && config.providerId !== undefined) sessionPickRef.current = null;
       setAiConfig(prev => {
         const saved = getAIProviderSettings();
         const providerId = config.providerId !== undefined ? config.providerId : prev.providerId;
@@ -104,12 +120,14 @@ export function useAIProviderConfig({
         // (e.g. the static fallback a lazily-discovered provider advertises
         // before activation) must never overwrite the user's saved preference
         // — the session request may fall back, the cookie may not.
-        saveAIProviderSelection({
-          providerId: next.providerId,
-          model: config.model !== undefined ? next.model : null,
-          origin,
-          settings: saved,
-        });
+        if (persist) {
+          saveAIProviderSelection({
+            providerId: next.providerId,
+            model: config.model !== undefined ? next.model : null,
+            origin,
+            settings: saved,
+          });
+        }
         return next;
       });
     },

@@ -462,6 +462,10 @@ export interface AIResponse {
   text: string;
   isStreaming: boolean;
   error?: string;
+  /** Server error code with `error` (e.g. `agent_busy`, `session_gone` from "Ask this session"). */
+  errorCode?: string;
+  /** "Ask this session": the question is waiting for a busy session, or interrupting it. */
+  status?: 'waiting' | 'interrupting';
   createdAt: number;
 }
 

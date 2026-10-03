@@ -64,6 +64,8 @@ export interface QueryRequest {
   prompt: string;
   /** Optional context update (e.g., new annotations since session was created). */
   contextUpdate?: string;
+  /** "Ask this session" only: what to do when the host session is busy. */
+  busyPolicy?: "wait" | "interrupt";
 }
 
 export interface AbortRequest {
@@ -221,6 +223,8 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
           models: p.models ?? [],
           ...(p.modelsSource ? { modelsSource: p.modelsSource } : {}),
           ...(p.toolVersion ? { toolVersion: p.toolVersion } : {}),
+          ...(p.label ? { label: p.label } : {}),
+          ...(p.sessionBridge ? { sessionBridge: p.sessionBridge } : {}),
         };
       });
       return Response.json({
@@ -319,6 +323,8 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
 
       const body = (await req.json()) as QueryRequest;
       const { sessionId, prompt, contextUpdate } = body;
+      const busyPolicy =
+        body.busyPolicy === "wait" || body.busyPolicy === "interrupt" ? body.busyPolicy : undefined;
 
       if (!sessionId || !prompt) {
         return Response.json(
@@ -352,7 +358,10 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
       const stream = new ReadableStream({
         async start(controller) {
           try {
-            for await (const message of entry.session.query(effectivePrompt)) {
+            const messages = busyPolicy
+              ? entry.session.query(effectivePrompt, { busyPolicy })
+              : entry.session.query(effectivePrompt);
+            for await (const message of messages) {
               const data = JSON.stringify(message);
               controller.enqueue(
                 encoder.encode(`data: ${data}\n\n`)
