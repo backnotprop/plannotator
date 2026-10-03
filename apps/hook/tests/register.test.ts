@@ -151,6 +151,16 @@ describe('register', () => {
     expect(w.runs.some((argv) => argv[3] === 'plannotator-launch')).toBe(false)
   })
 
+  test('a subagent cannot annotate the main session\'s last message through the tool', async ($: any, on: any) => {
+    const w = world(on)
+    await $.session.start(SESSION)
+
+    const answer = await $.tool.call({ tool: TOOL, agentId: 'sub-1', action: 'last' })
+
+    expect(answer.deny).toContain('subagent')
+    expect(w.runs.some((argv) => argv[3] === 'plannotator-launch')).toBe(false)
+  })
+
   test('the tool-opened review delivers its feedback later as a plugin turn', async ($: any, on: any) => {
     const w = world(on)
     await $.session.start(SESSION)
@@ -176,12 +186,14 @@ describe('register', () => {
   })
 
   test('a -p session keeps the classic flow: ExitPlanMode is not touched', async ($: any, on: any) => {
-    world(on)
+    const w = world(on)
     on('tool.call', () => ({ result: 'the classic flow ran' }))
     await $.session.start({ ...SESSION, surface: null, isInteractive: false })
 
     const answer = await $.tool.call({ tool: 'ExitPlanMode', plan: '# Plan\n' })
 
     expect(answer.result).toBe('the classic flow ran')
+    // No plannotator tool either: a later plugin turn would have nowhere to land.
+    expect(w.tools).toEqual([])
   })
 })

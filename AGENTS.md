@@ -410,7 +410,9 @@ call or a CLI startup error is an error result. A gated tool session
 (`gate: true`) is the one delivery difference: a bare Approve is submitted as a
 turn (`deliverApproval` on the launch record), because Claude was told to wait
 for the sign-off; the slash command's bare gated approval still only logs. Done
-and Close send nothing, as for the commands. The contract (name, schema,
+and Close send nothing, as for the commands. A subagent may call the tool (its
+decision lands in the main session as a plugin turn), except `action: "last"`,
+which is refused there because it reads the main session's transcript. The contract (name, schema,
 description, validation, argument mapping, result text) lives once in
 `packages/shared/plannotator-tool.ts` for every host; the mod keeps a byte-for-byte
 copy of its CONTRACT section in `hooks/mod/tool.ts` and `tool.test.ts` fails

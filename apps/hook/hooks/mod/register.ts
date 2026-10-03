@@ -252,6 +252,11 @@ export function register(on: On) {
     if (allowed && toolName && e.tool === toolName) {
       const instance = await currentMod($)
       if (!instance) return { deny: 'Plannotator is not available in this session; run the plannotator CLI instead.' }
+      // `last` reads the main session's transcript, so from a subagent it
+      // would annotate a message the subagent never wrote.
+      if (e.agentId && e.action === 'last') {
+        return { deny: 'Invalid plannotator call: action "last" annotates the main session\'s last message and is not available to a subagent.' }
+      }
       const answer = await instance.runTool(toolArgsOf(e))
       return 'deny' in answer ? { deny: answer.deny } : { result: answer.text }
     }
