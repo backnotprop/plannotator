@@ -247,6 +247,27 @@ describe('commands', () => {
   })
 })
 
+describe('a CLI older than the host result file', () => {
+  test('its printed feedback is still delivered, and an empty close is not', async () => {
+    const host = fakeHost()
+    serveOnLaunch(host)
+    const mod = new PlannotatorMod(host, SESSION)
+    await mod.runCommand('annotate', 'a.md')
+    await mod.runCommand('annotate', 'b.md')
+    const [first, second] = launches(host)
+    host.files.set(`${launchDirOf(first!)}/stdout`, 'Line 3: wrong date\n')
+    host.files.set(`${launchDirOf(first!)}/exit`, '0')
+    host.files.set(`${launchDirOf(second!)}/stdout`, '')
+    host.files.set(`${launchDirOf(second!)}/exit`, '0')
+
+    await host.tick()
+
+    expect(host.submits).toHaveLength(1)
+    expect(host.submits[0]).toContain('Line 3: wrong date')
+    expect(host.logs.some((line) => line.includes('b.md closed with no annotations'))).toBe(true)
+  })
+})
+
 describe('restore', () => {
   test('open reviews of this session reattach and still deliver', async () => {
     const host = fakeHost()

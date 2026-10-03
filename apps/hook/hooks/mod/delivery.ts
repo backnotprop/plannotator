@@ -126,3 +126,18 @@ export function deliveryFor(record: HostResultRecord, context: DeliveryContext):
     overflow: { path: context.overflowPath, text: `${body}\n` },
   }
 }
+
+/**
+ * A CLI that predates the host result file (the plugin and the binary update
+ * separately): what it printed on stdout, the text the skill would have shown
+ * Claude. Empty output, or the legacy close/approve lines, carry nothing.
+ */
+export function legacyResult(kind: SessionKind, printed: string): HostResultRecord {
+  const surface = kind === 'review' ? 'review' : kind === 'last' ? 'annotate-last' : 'annotate'
+  const text = printed.trim()
+  if (!text || text === 'Review session closed without feedback.') {
+    return { v: 1, surface, decision: 'dismissed', message: '', noop: true }
+  }
+  if (text === 'The user approved.') return { v: 1, surface, decision: 'approved', message: '', noop: true }
+  return { v: 1, surface, decision: 'annotated', message: text, noop: false }
+}

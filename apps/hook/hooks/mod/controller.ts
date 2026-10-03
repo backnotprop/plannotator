@@ -8,7 +8,7 @@
  */
 
 import { BRIDGE_HOST, BRIDGE_MODES, bridgeBaseUrl, createBridge, type BridgeHandle } from './bridge'
-import { deliveryFor, parseHostResult, type HostResultRecord, type SessionKind } from './delivery'
+import { deliveryFor, legacyResult, parseHostResult, type HostResultRecord, type SessionKind } from './delivery'
 import type { Host } from './host'
 import {
   cliArgvFor,
@@ -418,9 +418,17 @@ export class PlannotatorMod {
       }
     }
     if (await this.host.exists(fileIn(launch.dir, 'exit'))) {
-      // Exited without a decision: a crash, a kill, or a startup failure we did not wait for.
       launch.settling = true
       const code = (await this.host.readFile(fileIn(launch.dir, 'exit')).catch(() => '')).trim()
+      // A CLI older than the host result file still prints the decision the
+      // skill would have shown Claude; a plan never gets here (an old CLI has
+      // no claude-mod-plan and the call fell back to the classic flow).
+      if (code === '0' && launch.kind !== 'plan') {
+        const printed = (await this.host.readFile(fileIn(launch.dir, 'stdout')).catch(() => '')).trim()
+        await this.settle(launch, legacyResult(launch.kind, printed))
+        return
+      }
+      // Exited without a decision: a crash, a kill, or a startup failure we did not wait for.
       this.host.log(`The review server for ${launch.subject} stopped${code ? ` (exit ${code})` : ''} without a decision. Your draft is saved.`)
       await this.forget(launch)
       return

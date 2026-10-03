@@ -346,7 +346,11 @@ approved-with-notes prompts OpenCode and Pi use; plan: `composePlanDeniedMessage
 unchanged for every caller. `noop` marks what never starts a turn: Done with
 nothing to send, review LGTM, Close, and a review posted straight to the PR
 platform (`platform: true`, logged plus a `$.prompt.suggest` to address the
-comments).
+comments). The plugin and the binary update separately, so the mod copes with
+a CLI that predates both: an old CLI has no `claude-mod-plan` (the ExitPlanMode
+call falls back to the classic flow) and writes no result record (a review or
+annotate that exits 0 is delivered from its stdout, the text the skill would
+have shown Claude; `legacyResult` in `delivery.ts`).
 
 **Commands.** `/plannotator-review`, `/plannotator-annotate` and
 `/plannotator-last` keep their names (spec open question 7, conservative): when
