@@ -288,6 +288,21 @@ describe("resolveHtmlLinkIntent — local images open in the lightbox", () => {
 		).toMatchObject({ kind: "unsupported", reason: "outside-asset-root" });
 	});
 
+	test("encoded dots and backslashes cannot climb out of the folder", () => {
+		for (const href of ["%2e%2e/x.png", "%2e%2e%2fx.png", "..\\x.png", "a\\..\\..\\x.png"]) {
+			expect(resolveHtmlLinkIntent(href, IMG_CTX)).toMatchObject({
+				kind: "unsupported",
+				path: "/site/x.png",
+				reason: "outside-asset-root",
+			});
+		}
+		// Characters that would end the path in a URL are re-encoded, not trusted.
+		expect(resolveHtmlLinkIntent("a%23b%3F.png", IMG_CTX)).toMatchObject({
+			kind: "image",
+			url: "/api/html-assets/abc123/a%23b%3F.png",
+		});
+	});
+
 	test("a root-relative image inside the root page's folder opens", () => {
 		const rootCtx = { ...CTX, baseDir: "/site", assetRoot: { dir: "/site", url: "/api/html-assets/t/" } };
 		expect(resolveHtmlLinkIntent("/renders/x.png", rootCtx)).toMatchObject({
@@ -328,6 +343,22 @@ describe("htmlAssetRouteFromDocument", () => {
 		expect(htmlAssetRouteFromDocument("")).toBeNull();
 		// The route named in body text is not a base.
 		expect(htmlAssetRouteFromDocument("<p>/api/html-assets/abc/</p>")).toBeNull();
+	});
+
+	test("only the first real <base> counts, so a page cannot name another token", () => {
+		const served = '<base href="/api/html-assets/real/"><title>x</title>';
+		// A token named in a comment ahead of the served base is ignored.
+		expect(
+			htmlAssetRouteFromDocument(`<!-- <base href="/api/html-assets/other/"> -->${served}`),
+		).toBe("/api/html-assets/real/");
+		// A second base tag later in the page has no effect in the browser either.
+		expect(
+			htmlAssetRouteFromDocument(`${served}<body><base href="/api/html-assets/other/">`),
+		).toBe("/api/html-assets/real/");
+		// An author's absolute base wins in the browser, so there is no asset route.
+		expect(
+			htmlAssetRouteFromDocument('<base href="https://cdn.example/"><base href="/api/html-assets/other/">'),
+		).toBeNull();
 	});
 
 	test("the browser-side route prefix matches the servers'", () => {

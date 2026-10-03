@@ -200,10 +200,17 @@ function resolveImage(
  * `<base href="/api/html-assets/<token>/">` first in `<head>` (re-anchoring a
  * relative author base under the same token). Returns that token's route, or
  * null when the page carries none (share links, an author's absolute base).
+ *
+ * Only the FIRST `<base>` element counts, as in the browser, and comments are
+ * skipped: a page cannot name a different token in a comment or a later base
+ * tag and have the lightbox read through it.
  */
 export function htmlAssetRouteFromDocument(rawHtml: string | null | undefined): string | null {
 	if (!rawHtml) return null;
-	const match = /<base\b[^>]*?\bhref\s*=\s*["']?\/api\/html-assets\/([A-Za-z0-9_-]+)\//i.exec(rawHtml);
+	const withoutComments = rawHtml.replace(/<!--[\s\S]*?(?:-->|$)/g, "");
+	const baseTag = /<base\b[^>]*>/i.exec(withoutComments);
+	if (!baseTag) return null;
+	const match = /\bhref\s*=\s*["']?\/api\/html-assets\/([A-Za-z0-9_-]+)\//i.exec(baseTag[0]);
 	return match ? `${HTML_ASSET_ROUTE_PREFIX}/${match[1]}/` : null;
 }
 
