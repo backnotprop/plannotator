@@ -443,10 +443,11 @@ an `ask` is submitted as a real turn (`$.prompt.submit`), identified at
 `busy` = a turn is running (pushed on `turn.start` / `turn.complete`, not only
 at the next poll); `interrupt` aborts the running turn (`$.turn.abort`);
 cancel aborts our own turn, or, while it is still queued, confirms at once and
-aborts its turn the moment it starts. A turn is the question's only when the
-prompt that started it entered with origin plugin `plannotator` (the
-`prompt.submit` hook arms the next `turn.start`); the text match alone never
-claims a turn, so a prompt the user typed can neither be streamed to
+aborts its turn the moment it starts. Claude Code never raises a plugin's own hooks
+for a prompt its code submitted (the debug log says "skipped: re-entry"), so the
+mod's `prompt.submit` hook sees every OTHER prompt (the user's Enter, a
+notification, another plugin); a turn whose text is exactly one of those is
+never claimed, so a prompt the user typed can neither be streamed to
 Plannotator nor aborted by a cancel, whatever it says. Plan review does not block the session
 under the mod, so the status is never `blocked` and plan review gets real turns
 too (verified live). Polls ask for 15 s (750 ms while our question streams, so

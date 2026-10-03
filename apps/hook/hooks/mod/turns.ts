@@ -33,29 +33,33 @@ export class TurnTracker {
   /** A question cancelled while still queued: its turn is aborted when it starts. */
   private dropText: string | null = null
   /**
-   * Set when THIS plugin's own `$.prompt.submit` of the question (or of a
-   * cancelled one) enters the session (`prompt.submit` with origin plugin
-   * `plannotator`); the next `turn.start` is that prompt's turn. Text alone
-   * never claims a turn, so a prompt the user typed can neither be streamed to
-   * Plannotator nor aborted as "ours", whatever it says.
+   * Prompts that entered the session from anyone but this plugin (the user's
+   * Enter, a notification, another plugin), as `prompt.submit` saw them. The
+   * engine never raises our own hooks for a prompt our code submitted, so the
+   * hook only ever reports these; and when it does see one of ours (origin
+   * plugin `plannotator`) it is not recorded. A turn whose text IS one of these
+   * prompts is that prompt's turn, never the question's, whatever it says: a
+   * prompt the user typed can neither be streamed to Plannotator nor aborted
+   * by a cancel.
    */
-  private armed: 'ask' | 'drop' | null = null
+  private foreign: string[] = []
 
-  /**
-   * A prompt entered the session. `fromUs`: its origin is this plugin. Arms
-   * the next turn when it is the question in flight (or a cancelled one).
-   */
+  /** A prompt entered. `fromUs`: its origin is this plugin. */
   onPromptEntered(text: string, fromUs: boolean): void {
-    if (!fromUs) {
-      this.armed = null
-      return
-    }
-    if (this.dropText !== null && sameQuestion(text, this.dropText)) {
-      this.armed = 'drop'
-      return
-    }
-    const ask = this.ask
-    this.armed = ask && !ask.finished && ask.turnId === null && sameQuestion(text, ask.text) ? 'ask' : null
+    if (fromUs) return
+    const value = text.trim()
+    if (!value) return
+    this.foreign.push(value)
+    if (this.foreign.length > 16) this.foreign.shift()
+  }
+
+  /** Whether the turn is a prompt someone else submitted (consumed). */
+  private takeForeign(turnText: string): boolean {
+    const value = turnText.trim()
+    const index = this.foreign.lastIndexOf(value)
+    if (index < 0) return false
+    this.foreign.splice(index, 1)
+    return true
   }
 
   get busy(): boolean {
@@ -78,16 +82,15 @@ export class TurnTracker {
   }
 
   /** A turn started. Returns the turn to abort at once (a cancelled question's). */
-  onTurnStart(turnId: string, _text: string): string | null {
+  onTurnStart(turnId: string, text: string): string | null {
     this.runningTurnId = turnId
-    const armed = this.armed
-    this.armed = null
-    if (armed === 'drop') {
+    if (this.takeForeign(text)) return null
+    if (this.dropText !== null && sameQuestion(text, this.dropText)) {
       this.dropText = null
       return turnId
     }
     const ask = this.ask
-    if (armed === 'ask' && ask && !ask.finished && ask.turnId === null) {
+    if (ask && !ask.finished && ask.turnId === null && sameQuestion(text, ask.text)) {
       ask.turnId = turnId
     }
     return null

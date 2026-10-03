@@ -29,14 +29,16 @@ describe('TurnTracker claims only its own prompt', () => {
     turns.onPromptEntered('why?', false)
     expect(turns.onTurnStart('user-turn', 'why?')).toBeNull()
     // Our own submission still gets dropped when it arrives.
-    turns.onPromptEntered('why?', true)
-    expect(turns.onTurnStart('our-turn', 'why?')).toBe('our-turn')
+    // Our own submission never reaches our prompt.submit hook (the engine
+    // skips a plugin's hooks for events its own code raised).
+    expect(turns.onTurnStart('our-turn', 'The plannotator plugin sent a message:\nwhy?')).toBe('our-turn')
   })
 
-  test('our own submission claims the next turn', () => {
+  test('our own submission claims its turn (the engine never shows it to our prompt.submit hook)', () => {
     const turns = new TurnTracker()
     const s = sink()
     turns.beginAsk('a1', 'why?', s)
+    // If an engine ever does show it, with our origin, it is still ours.
     turns.onPromptEntered('why?', true)
     turns.onTurnStart('t1', 'The plannotator plugin sent a message:\nwhy?')
     turns.onText('t1', 'because')

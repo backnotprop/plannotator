@@ -532,6 +532,12 @@ export class PlannotatorMod {
     void bridge.run()
   }
 
+  /** A prompt entered the session (prompt.submit), from register.ts. */
+  onPromptEntered(text: string, fromUs: boolean): void {
+    this.host.debug(`prompt.submit${fromUs ? ' (ours)' : ''}: ${JSON.stringify(text.slice(0, 160))}`)
+    this.turns.onPromptEntered(text, fromUs)
+  }
+
   /** Turn events, from register.ts. */
   async onTurnStart(turnId: string, text: string): Promise<void> {
     this.host.debug(`turn.start ${turnId}: ${JSON.stringify(text.slice(0, 160))}`)

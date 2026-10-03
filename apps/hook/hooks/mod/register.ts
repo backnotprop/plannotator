@@ -239,10 +239,11 @@ export function register(on: On) {
     const result = await next(e)
     const instance = allowed ? mod : null
     if (instance && !instance.isDisposed && result && typeof result.text === 'string') {
-      // Only this plugin's own submissions can be an "Ask this session" turn.
+      // Every prompt seen here is someone else's (the engine skips our hooks
+      // for prompts our own code submitted): its turn is never a question's.
       const origin = result.origin ?? e.origin
       const fromUs = !!origin && origin.kind === 'plugin' && origin.name === PLUGIN_NAME
-      instance.turns.onPromptEntered(result.text, fromUs)
+      instance.onPromptEntered(result.text, fromUs)
     }
     return result
   })

@@ -76,9 +76,7 @@ describe('Ask this session over the pull bridge', () => {
     await until(() => host.submits.length === 1)
     expect(host.submits[0]).toBe('[Plannotator Ask AI] Why step 2?')
 
-    // Our own submission enters (origin: this plugin), then its turn starts,
-    // framed as Claude Code frames a plugin's prompt (seen live).
-    turns.onPromptEntered('[Plannotator Ask AI] Why step 2?', true)
+    // Its turn starts, framed as Claude Code frames a plugin's prompt (seen live).
     turns.onTurnStart('turn-1', 'The plannotator plugin sent a message:\n[Plannotator Ask AI] Why step 2?\nThis is how Claude Code surfaces a prompt a plugin submits between turns.')
     turns.onText('turn-1', 'Because ')
     turns.onText('turn-1', 'it is needed.')
@@ -130,7 +128,6 @@ describe('Ask this session over the pull bridge', () => {
     controller.abort()
 
     await until(() => seen.error !== null)
-    turns.onPromptEntered('[Plannotator Ask AI] Q', true)
     expect(turns.onTurnStart('late-turn', '[Plannotator Ask AI] Q')).toBe('late-turn')
 
     live = false
