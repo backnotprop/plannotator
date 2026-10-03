@@ -205,9 +205,12 @@ function resolveImage(
  * skipped: a page cannot name a different token in a comment or a later base
  * tag and have the lightbox read through it.
  */
+const HTML_COMMENT_PATTERN = new RegExp("<!--[\\s\\S]*?(?:-->|$)", "g");
+
 export function htmlAssetRouteFromDocument(rawHtml: string | null | undefined): string | null {
 	if (!rawHtml) return null;
-	const withoutComments = rawHtml.replace(/<!--[\s\S]*?(?:-->|$)/g, "");
+	// RegExp constructor, not a literal: Semgrep's TS parser chokes on `<!--` in a regex literal.
+	const withoutComments = rawHtml.replace(HTML_COMMENT_PATTERN, "");
 	const baseTag = /<base\b[^>]*>/i.exec(withoutComments);
 	if (!baseTag) return null;
 	const match = /\bhref\s*=\s*["']?\/api\/html-assets\/([A-Za-z0-9_-]+)\//i.exec(baseTag[0]);
