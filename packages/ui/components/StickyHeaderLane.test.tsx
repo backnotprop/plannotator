@@ -112,11 +112,7 @@ let host: HTMLElement | null = null;
 let viewport: HTMLElement | null = null;
 let actions: HTMLElement | null = null;
 
-type TestLaneProps = {
-  visibility?: StickyHeaderLaneVisibility;
-  sticky?: boolean;
-  hideQuickLabel?: boolean;
-};
+type TestLaneProps = Partial<StickyHeaderLaneProps>;
 
 function ControlledLane(props: TestLaneProps) {
   const [inputMethod, setInputMethod] = useState<InputMethod>('drag');
@@ -230,16 +226,24 @@ describe.if(hasDom)('StickyHeaderLane host seams', () => {
       'sticky z-[60] w-full self-center pointer-events-none top-3',
     );
     expect(laneBar().className).toBe(
-      'absolute left-3 md:left-5 top-0 inline-flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0 overflow-hidden rounded-lg py-1 md:py-1.5 bg-card/95 backdrop-blur-sm shadow-sm border border-border/30 motion-reduce:transform-none opacity-0 -translate-y-1 pointer-events-none',
+      'absolute left-3 md:left-5 top-0 inline-flex flex-wrap items-center gap-y-1 min-w-0 overflow-hidden rounded-lg py-1 md:py-1.5 bg-card/95 backdrop-blur-sm shadow-sm border border-border/30 motion-reduce:transform-none opacity-0 -translate-y-1 pointer-events-none',
     );
     expect(laneBar().hasAttribute('inert')).toBe(true);
     expect(laneBar().style.paddingLeft).toBe('12px');
     expect(laneBar().style.paddingRight).toBe('12px');
     expect(laneBar().style.transition).toBe(
-      'opacity 180ms cubic-bezier(0.2, 0, 0, 1), transform 180ms cubic-bezier(0.2, 0, 0, 1)',
+      'opacity 180ms cubic-bezier(0.2, 0, 0, 1), transform 180ms cubic-bezier(0.2, 0, 0, 1), background-color 150ms ease, box-shadow 150ms ease',
     );
     expect(FakeIntersectionObserver.instances).toHaveLength(1);
     expectChrome(laneBar());
+  });
+
+  test('gridEnabled false drops the card left inset for clean mode', async () => {
+    await mount({ gridEnabled: false });
+
+    expect(laneBar().classList.contains('left-0')).toBe(true);
+    expect(laneBar().classList.contains('left-3')).toBe(false);
+    expect(laneBar().classList.contains('md:left-5')).toBe(false);
   });
 
   test('always is visible and interactive at rest without sticky chrome', async () => {
@@ -264,15 +268,36 @@ describe.if(hasDom)('StickyHeaderLane host seams', () => {
 
     await act(async () => observer.emit(false));
     expect(laneBar().classList.contains('opacity-100')).toBe(true);
-    expect(laneBar().classList.contains('bg-card/95')).toBe(true);
-    expect(laneBar().classList.contains('backdrop-blur-sm')).toBe(true);
-    expect(laneBar().classList.contains('shadow-sm')).toBe(true);
-    expect(laneBar().classList.contains('border')).toBe(true);
+    expectChrome(laneBar());
 
     await act(async () => observer.emit(true));
     expect(laneBar().classList.contains('opacity-100')).toBe(true);
     expect(laneBar().hasAttribute('inert')).toBe(false);
     expectNoChrome(laneBar());
+  });
+
+  test('badge compartment expands and collapses smoothly using CSS grid transition', async () => {
+    await mount({
+      visibility: 'always',
+      hasPreviousVersion: true,
+      planDiffStats: { additions: 3, deletions: 1, modifications: 0 },
+    });
+    const observer = FakeIntersectionObserver.instances[0];
+    if (!observer) throw new Error('Expected sticky observer to be active');
+
+    const compartment = laneBar().querySelector<HTMLElement>('[data-sticky-badges-compartment]');
+    if (!compartment) throw new Error('Expected badge compartment');
+
+    expect(compartment.style.gridTemplateColumns).toBe('0fr');
+    expect(compartment.classList.contains('opacity-0')).toBe(true);
+
+    await act(async () => observer.emit(false));
+    expect(compartment.style.gridTemplateColumns).toBe('1fr');
+    expect(compartment.classList.contains('opacity-100')).toBe(true);
+
+    await act(async () => observer.emit(true));
+    expect(compartment.style.gridTemplateColumns).toBe('0fr');
+    expect(compartment.classList.contains('opacity-0')).toBe(true);
   });
 
   test('sticky false creates no intersection observer and scrolls in normal flow', async () => {

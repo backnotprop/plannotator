@@ -1,4 +1,5 @@
 import React, { useState, useRef, useLayoutEffect, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import type { EditorMode, InputMethod } from '../types';
 import { TaterSpritePullup } from './TaterSpritePullup';
 
@@ -180,7 +181,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
       </div>
 
       {/* Help Video Dialog */}
-      {showHelp && (
+      {showHelp && typeof document !== 'undefined' && createPortal(
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm p-4"
           onClick={() => setShowHelp(false)}
@@ -238,7 +239,8 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
               />
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
@@ -295,7 +297,16 @@ const ToolstripButton: React.FC<{
   mounted: boolean;
   compact?: boolean;
   iconOnly?: boolean;
-}> = ({ active, onClick, icon, label, color, mounted, compact = false, iconOnly = false }) => {
+}> = ({
+  active,
+  onClick,
+  icon,
+  label,
+  color,
+  mounted,
+  compact = false,
+  iconOnly = false,
+}) => {
   const [hovered, setHovered] = useState(false);
   const [labelWidth, setLabelWidth] = useState(0);
   const measureRef = useRef<HTMLSpanElement>(null);
@@ -310,12 +321,12 @@ const ToolstripButton: React.FC<{
   }, [label]);
 
   // iconOnly: never expand (mobile sticky lane).
-  // compact: only active expands (sm+ sticky lane — shows current mode).
+  // compact: active or hovered expands (sm+ sticky lane).
   // default: active or hovered expands (top-of-doc full toolstrip).
   const expanded = iconOnly
     ? false
     : compact
-      ? active
+      ? (active || hovered)
       : (active || hovered || isTouchDevice);
   const expandedWidth = H_PAD + ICON_INNER + GAP + labelWidth + H_PAD;
   const currentWidth = expanded ? expandedWidth : ICON_SIZE;
