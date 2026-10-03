@@ -19,6 +19,7 @@ import {
 	startPlanReviewServer,
 	startReviewServer,
 	type DiffType,
+	type PlanServerResult,
 	type VcsSelection,
 	unstageFile,
 } from "./server.ts";
@@ -68,6 +69,8 @@ export interface PlanReviewDecision {
 	permissionMode?: string;
 	/** The reviewer only answered the plan's questions (`answersOnly: true` on /api/deny). */
 	answersOnly?: boolean;
+	/** The exact plan text an approval was made on (the revision on screen). */
+	plan?: string;
 }
 
 export interface BrowserDecisionSession<T> {
@@ -168,6 +171,8 @@ function setCodeReviewProgress(ctx: ExtensionContext, message?: string): void {
 export interface PlanReviewBrowserSession extends BrowserDecisionSession<PlanReviewDecision> {
 	reviewId: string;
 	onDecision: (listener: (result: PlanReviewDecision) => void | Promise<void>) => () => void;
+	/** Push a revised plan into the open tab; null once decided (open a new review). */
+	updatePlan: PlanServerResult["updatePlan"];
 }
 
 function delay(ms: number): Promise<void> {
@@ -333,6 +338,7 @@ export async function startPlanReviewBrowserSession(
 	ctx: ExtensionContext,
 	planContent: string,
 	signal?: AbortSignal,
+	options: { sessionBridge?: SessionBridge; planRevisions?: boolean } = {},
 ): Promise<PlanReviewBrowserSession> {
 	if (!ctx.hasUI) {
 		throw new Error("Plannotator browser review is unavailable in this session.");
@@ -349,6 +355,8 @@ export async function startPlanReviewBrowserSession(
 		sharingEnabled: resolveSharingEnabled(loadConfig()),
 		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
 		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
+		sessionBridge: options.sessionBridge,
+		planRevisions: options.planRevisions,
 	}));
 
 	const session = startBrowserDecisionSession(server, ctx, server.waitForDecision, signal);
@@ -360,6 +368,7 @@ export async function startPlanReviewBrowserSession(
 		...session,
 		reviewId: server.reviewId,
 		onDecision: server.onDecision,
+		updatePlan: server.updatePlan,
 	};
 }
 

@@ -98,6 +98,23 @@ export interface ServerOptions {
   customPlanPath?: string | null;
   /** The plan's file on disk as the harness reported it, trusted only when it holds `plan` */
   planFilePath?: string;
+  /**
+   * The host may push revised plans into this open review (`updatePlan`), as
+   * Pi's non-blocking plan review does. Advertised to the tab as `planRevision`
+   * on /api/plan, which makes it poll /api/plan/revision. Off by default: a
+   * host that never revises keeps a tab that never polls.
+   */
+  planRevisions?: boolean;
+}
+
+/** What `updatePlan` did with a revised plan pushed into the open review. */
+export interface PlanRevisionResult {
+  /** Revision counter the tab compares against (0 = the plan the server started with). */
+  revision: number;
+  /** History version number of the plan now under review. */
+  version: number;
+  /** The pushed plan matched the one already under review: nothing changed. */
+  unchanged: boolean;
 }
 
 export interface ServerResult {
@@ -121,6 +138,13 @@ export interface ServerResult {
   }>;
   /** Wait for user to close (archive mode only) */
   waitForDone?: () => Promise<void>;
+  /**
+   * Push a revised plan into this still-open review. Saved to version history
+   * like a resubmission; the tab picks it up through /api/plan/revision when
+   * `planRevisions` is on. Null once a decision settled (or in archive mode):
+   * the caller opens a new review instead.
+   */
+  updatePlan: (plan: string) => PlanRevisionResult | null;
   /** Stop the server and close active browser connections. */
   stop: () => Promise<void>;
 }
@@ -139,8 +163,19 @@ export interface ServerResult {
 export async function startPlannotatorServer(
   options: ServerOptions
 ): Promise<ServerResult> {
-  const { plan, origin, htmlContent, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, onReady, mode, customPlanPath, planFilePath } = options;
-  const planFile = mode === "archive" ? null : readPlanFile(planFilePath, plan);
+  const { origin, htmlContent, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, onReady, mode, customPlanPath, planFilePath } = options;
+  // `plan`, its slug, file trust and version diff are `let`: a host with
+  // `planRevisions` pushes revised plans into the open review (updatePlan).
+  let plan = options.plan;
+  let planFile = mode === "archive" ? null : readPlanFile(planFilePath, plan);
+  // Bumped by every accepted updatePlan; decisions echo the revision the tab
+  // shows and a stale one is refused (409), so nobody approves unseen text.
+  let planRevision = 0;
+  let decisionSettled = false;
+  // Set the moment a decision passes the revision check, before its awaits
+  // (note integrations): updatePlan then refuses, so the plan a decision
+  // names cannot be swapped while that decision is still being recorded.
+  let decisionClaimed = false;
 
   const isRemote = isRemoteSession();
   const wslFlag = await isWSL();
@@ -167,7 +202,7 @@ export async function startPlannotatorServer(
   // Set once bound: "Ask this session" answers only a loopback Host with this port.
   let boundPort: number | undefined;
   const aiRuntime = mode !== "archive" && resolveAIEnabled() ? await createAIRuntime({ sessionBridge: options.sessionBridge, getServerPort: () => boundPort }) : null;
-  const slug = mode !== "archive" ? generateSlug(plan) : "";
+  let slug = mode !== "archive" ? generateSlug(plan) : "";
 
   // Lazy cache for in-session archive browsing (plan review sidebar tab)
   let cachedArchivePlans: ReturnType<typeof listArchivedPlans> | null = null;
@@ -264,6 +299,22 @@ export async function startPlannotatorServer(
     });
   };
 
+  /**
+   * A decision body names the revision the tab was showing; a number that
+   * differs from the live one means the plan was revised after the tab loaded
+   * it. A body without the field (an older client) passes.
+   */
+  const isStaleRevision = (body: unknown): boolean =>
+    !!body && typeof body === "object" &&
+    typeof (body as { planRevision?: unknown }).planRevision === "number" &&
+    (body as { planRevision: number }).planRevision !== planRevision;
+  const staleRevisionResponse = () =>
+    Response.json({
+      error: "The plan was revised while you were reviewing it. Review the new version, then decide again.",
+      code: "plan_revised",
+      planRevision,
+    }, { status: 409 });
+
   const server = await startBunServerOnAvailablePort((port) =>
     Bun.serve({
         hostname: getServerHostname(),
@@ -348,7 +399,12 @@ export async function startPlannotatorServer(
                 ...getAutoUpdateAdvert(),
               });
             }
-            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, projectRoot: process.cwd(), planDir: planFile?.dir, isWSL: wslFlag, serverConfig: getServerConfig(gitUser), ...getAutoUpdateAdvert() });
+            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, ...(options.planRevisions ? { planRevision } : {}), projectRoot: process.cwd(), planDir: planFile?.dir, isWSL: wslFlag, serverConfig: getServerConfig(gitUser), ...getAutoUpdateAdvert() });
+          }
+
+          // API: The live plan revision (open reviews that receive revised plans)
+          if (url.pathname === "/api/plan/revision" && req.method === "GET" && mode !== "archive") {
+            return Response.json({ revision: planRevision, decided: decisionSettled });
           }
 
           // API: Serve a linked markdown document
@@ -530,8 +586,11 @@ export async function startPlannotatorServer(
             let planSaveEnabled = true; // default to enabled for backwards compat
             let planSaveCustomPath: string | undefined;
             let draftGeneration: number | undefined;
+            const rawApproveBody = (await req.json().catch(() => ({}))) as Record<string, unknown> | null;
+            if (isStaleRevision(rawApproveBody)) return staleRevisionResponse();
+            decisionClaimed = true;
             try {
-              const body = (await req.json().catch(() => ({}))) as {
+              const body = (rawApproveBody ?? {}) as {
                 obsidian?: ObsidianConfig;
                 bear?: BearConfig;
                 octarine?: OctarineConfig;
@@ -610,6 +669,7 @@ export async function startPlannotatorServer(
 
             // Use permission mode from client request if provided, otherwise fall back to hook input
             const effectivePermissionMode = requestedPermissionMode || permissionMode;
+            decisionSettled = true;
             resolveDecision({ approved: true, feedback, savedPath, agentSwitch, permissionMode: effectivePermissionMode });
             return Response.json({ ok: true, savedPath });
           }
@@ -621,8 +681,12 @@ export async function startPlannotatorServer(
             let planSaveCustomPath: string | undefined;
             let draftGeneration: number | undefined;
             let answersOnly = false;
+            const rawDenyBody = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+            if (isStaleRevision(rawDenyBody)) return staleRevisionResponse();
+            decisionClaimed = true;
             try {
-              const body = (await req.json()) as {
+              if (!rawDenyBody || typeof rawDenyBody !== "object") throw new Error("no body");
+              const body = rawDenyBody as {
                 feedback?: string;
                 planSave?: { enabled: boolean; customPath?: string };
                 draftGeneration?: number;
@@ -651,6 +715,7 @@ export async function startPlannotatorServer(
             archivePlanDecision("denied", feedback);
 
             deleteDraft(draftKey, draftGeneration);
+            decisionSettled = true;
             resolveDecision({ approved: false, feedback, savedPath, ...(answersOnly ? { answersOnly: true } : {}) });
             return Response.json({ ok: true, savedPath });
           }
@@ -717,6 +782,20 @@ export async function startPlannotatorServer(
     isRemote,
     waitForDecision: () => decisionPromise,
     ...(donePromise && { waitForDone: () => donePromise }),
+    updatePlan: (next) => {
+      if (mode === "archive" || decisionSettled || decisionClaimed) return null;
+      if (next === plan) return { revision: planRevision, version: versionInfo.version, unchanged: true };
+      // Same bookkeeping a resubmission gets from a fresh server.
+      slug = generateSlug(next);
+      const historyResult = saveToHistory(project, slug, next);
+      currentPlanPath = historyResult.path;
+      previousPlan = historyResult.version > 1 ? getPlanVersion(project, slug, historyResult.version - 1) : null;
+      versionInfo = { version: historyResult.version, totalVersions: getVersionCount(project, slug), project };
+      plan = next;
+      planFile = readPlanFile(planFilePath, plan);
+      planRevision += 1;
+      return { revision: planRevision, version: historyResult.version, unchanged: false };
+    },
     stop,
   };
 }

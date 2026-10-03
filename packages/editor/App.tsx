@@ -208,6 +208,7 @@ import {
 import { AppHeader } from './components/AppHeader';
 import { useHtmlRefresh, type HtmlRefreshedDocument } from './hooks/useHtmlRefresh';
 import { useAnnotationJump } from './hooks/useAnnotationJump';
+import { planRevisionBlocker, usePlanRevisions, type PlanRevisionSnapshot } from './hooks/usePlanRevisions';
 import { AgentNudgeBanner } from './components/AgentNudgeBanner';
 import { useDocumentWebMcp } from './webmcp/useDocumentWebMcp';
 import { useWebMcpActivity } from '@plannotator/ui/webmcp';
@@ -745,6 +746,11 @@ const App: React.FC = () => {
   const [planDiffMode, setPlanDiffMode] = useState<PlanDiffMode>('classic');
   const [previousPlan, setPreviousPlan] = useState<string | null>(null);
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
+  // Plan review on a host that pushes revised plans into the open tab (Pi):
+  // `planRevision` from /api/plan, null when the server never revises.
+  const [initialPlanRevision, setInitialPlanRevision] = useState<number | null>(null);
+  // The last revision loaded in place; keys the diff base so it re-seeds.
+  const [appliedPlanRevision, setAppliedPlanRevision] = useState<number | null>(null);
   const [aiSessionEnabled, setAISessionEnabled] = useState(false);
   const [aiAvailable, setAiAvailable] = useState(false);
   const [aiProviders, setAiProviders] = useState<Array<{ id: string; name: string; capabilities?: Record<string, boolean>; models?: Array<{ id: string; label: string; default?: boolean }> }>>([]);
@@ -1416,7 +1422,9 @@ const App: React.FC = () => {
     isHtmlSurface ? null : activeDiffPreviousPlan,
     isHtmlSurface ? null : activeDiffVersionInfo,
     activeDocDiffFetchers,
-    activeDocFilepath,
+    // A revision loaded in place is a new root identity: the diff base
+    // re-seeds from the revision's own previous version.
+    activeDocFilepath ?? (appliedPlanRevision !== null ? `plan-revision:${appliedPlanRevision}` : null),
   );
   // Exit diff view when the active document switches to one with no diff
   // baseline (e.g. a history-less folder file) — otherwise the stale active
@@ -3497,7 +3505,7 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'annotate-app' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; appUrl?: string; targetUrl?: string; liveToken?: string; sourceInfo?: string; sourceConverted?: boolean; sourceSave?: SourceSaveCapability; gate?: boolean; approvalNotesSupported?: boolean; clientLease?: AnnotateClientLeaseConfig; renderAs?: DocumentRenderAs; rawHtml?: string; shareHtml?: string; diffHtml?: string; convertHtml?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; planDir?: string; isWSL?: boolean; markdownExtensions?: string[]; serverConfig?: { displayName?: string; gitUser?: string; autoUpdate?: boolean; autoUpdateEnv?: boolean }; autoUpdateNotice?: unknown; autoUpdateSupported?: boolean; autoUpdateActive?: boolean; recentMessages?: PickerMessage[]; agentTerminal?: AgentTerminalCapability; feedbackTemplates?: AnnotateFeedbackTemplates }) => {
+      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'annotate-app' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; appUrl?: string; targetUrl?: string; liveToken?: string; sourceInfo?: string; sourceConverted?: boolean; sourceSave?: SourceSaveCapability; gate?: boolean; approvalNotesSupported?: boolean; clientLease?: AnnotateClientLeaseConfig; renderAs?: DocumentRenderAs; rawHtml?: string; shareHtml?: string; diffHtml?: string; convertHtml?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; planRevision?: number; archivePlans?: ArchivedPlan[]; projectRoot?: string; planDir?: string; isWSL?: boolean; markdownExtensions?: string[]; serverConfig?: { displayName?: string; gitUser?: string; autoUpdate?: boolean; autoUpdateEnv?: boolean }; autoUpdateNotice?: unknown; autoUpdateSupported?: boolean; autoUpdateActive?: boolean; recentMessages?: PickerMessage[]; agentTerminal?: AgentTerminalCapability; feedbackTemplates?: AnnotateFeedbackTemplates }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
         // Extra extensions the user registered as markdown (#1307) — the
@@ -3623,6 +3631,10 @@ const App: React.FC = () => {
         }
         if (data.versionInfo) {
           setVersionInfo(data.versionInfo);
+        }
+        // Plan review only (the plan server names no mode for it).
+        if (data.mode === undefined && typeof data.planRevision === 'number') {
+          setInitialPlanRevision(data.planRevision);
         }
         if (data.origin) {
           setOrigin(data.origin);
@@ -3949,6 +3961,56 @@ const App: React.FC = () => {
     hasFeedbackContent &&
     !isCurrentFeedbackDeliveredToAgent;
 
+  // Revised plans the agent pushes into this open review (Pi). Loaded in
+  // place: annotations re-anchor by text like an Edit Mode change, and the
+  // version diff now compares against the revision's previous version.
+  const applyPlanRevision = useCallback((snapshot: PlanRevisionSnapshot) => {
+    const normalized = snapshot.plan.replace(/\r\n?/g, '\n');
+    originalMarkdownRef.current = normalized;
+    setPreviousPlan(snapshot.previousPlan);
+    setVersionInfo(snapshot.versionInfo);
+    setAppliedPlanRevision(snapshot.planRevision);
+    setIsPlanDiffActive(false);
+    const remapped = applyEditedDocument(normalized);
+    repaintHighlights(remapped);
+    const version = snapshot.versionInfo?.version;
+    toast(version ? `Plan updated to version ${version}` : 'Plan updated', {
+      description: 'The agent sent a revised plan. Your comments were kept.',
+    });
+  }, [applyEditedDocument, repaintHighlights]);
+  const planRevisions = usePlanRevisions({
+    initialRevision: initialPlanRevision,
+    active: !submitted && !archive.archiveMode,
+    blocker: planRevisionBlocker({
+      isEditing: isEditingMarkdown,
+      hasDirectEdits,
+      linkedDocActive: linkedDocHook.isActive,
+    }),
+    onApply: applyPlanRevision,
+    onBlocked: (_revision, blocker) => {
+      toast('The agent sent a revised plan', {
+        description: blocker === 'edits'
+          ? 'It loads when you finish or discard your edits.'
+          : blocker === 'composer'
+            ? 'It loads when you finish or close your comment.'
+            : 'It loads when you return to the plan.',
+      });
+    },
+  });
+  // The decision body names the revision on screen; the server refuses (409)
+  // a decision on a plan the agent has since replaced.
+  const planRevisionBodyField = (): { planRevision?: number } => {
+    const revision = planRevisions.currentRevision();
+    return revision === null ? {} : { planRevision: revision };
+  };
+  const handleStaleRevisionRefusal = () => {
+    setIsSubmitting(false);
+    toast('The agent revised the plan', {
+      description: 'Review the new version, then decide again.',
+    });
+    planRevisions.refreshNow();
+  };
+
   // API mode handlers
   const handleApprove = async () => {
     setIsSubmitting(true);
@@ -3967,8 +4029,9 @@ const App: React.FC = () => {
         : autoSaveResultsRef.current;
 
       // Build request body - include integrations if enabled
-      const body: { draftGeneration: number; obsidian?: object; bear?: object; octarine?: object; feedback?: string; agentSwitch?: string; planSave?: { enabled: boolean; customPath?: string }; permissionMode?: string } = {
+      const body: { draftGeneration: number; planRevision?: number; obsidian?: object; bear?: object; octarine?: object; feedback?: string; agentSwitch?: string; planSave?: { enabled: boolean; customPath?: string }; permissionMode?: string } = {
         draftGeneration: getDraftGeneration(),
+        ...planRevisionBodyField(),
       };
 
       // Include permission mode for Claude Code
@@ -4033,11 +4096,15 @@ const App: React.FC = () => {
         body.feedback = getCurrentFeedbackPayload(checkedSavedFileChanges);
       }
 
-      await fetch('/api/approve', {
+      const res = await fetch('/api/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+      if (res.status === 409) {
+        handleStaleRevisionRefusal();
+        return;
+      }
       setSubmitted('approved');
     } catch {
       setIsSubmitting(false);
@@ -4054,11 +4121,12 @@ const App: React.FC = () => {
       }
       const planSaveSettings = getPlanSaveSettings();
       const payload = getCurrentFeedbackPayload(checkedSavedFileChanges);
-      await fetch('/api/deny', {
+      const res = await fetch('/api/deny', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           draftGeneration: getDraftGeneration(),
+          ...planRevisionBodyField(),
           // Answers only: `answersOnly` makes the server answer the agent
           // with its plan.answered prompt instead of "not approved".
           ...planDenyFeedbackFields(payload, answersOnlyFeedback),
@@ -4068,6 +4136,10 @@ const App: React.FC = () => {
           },
         })
       });
+      if (res.status === 409) {
+        handleStaleRevisionRefusal();
+        return;
+      }
       setSubmitted('denied');
     } catch {
       setIsSubmitting(false);

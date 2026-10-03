@@ -43,7 +43,7 @@ import {
 	startCodeReviewBrowserSession,
 	startLastMessageAnnotationSession,
 	startMarkdownAnnotationSession,
-	openPlanReviewBrowser,
+	startPlanReviewBrowserSession,
 	PLANNOTATOR_PLAN_APPROVED_CHANNEL,
 	type PlannotatorPlanApprovedEvent,
 	registerPlannotatorEventListeners,
@@ -80,6 +80,7 @@ import { isRemoteSession, isUrlHostOverridden } from "./server/network.ts";
 import { isBrowserSessionStoppedError } from "./browser-session-error.ts";
 import { classifyAnnotateOutcome } from "./annotate-outcome.ts";
 import { createPiSessionBridgeHub } from "./pi-session-bridge.ts";
+import type { PlanReviewBrowserSession, PlanReviewDecision } from "./plannotator-browser.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -298,10 +299,61 @@ function sendUserMessageWithCurrentSessionFallback(
 export const PROJECT_TRUST_CAPABILITY_WARNING =
 	"This host does not expose project trust (ctx.isProjectTrusted, Pi 0.79.1+). Project-local config (.pi/plannotator.json) is disabled; bundled and global config still load.";
 
-export default function plannotator(pi: ExtensionAPI): void {
+/**
+ * A plan review the agent submitted and is waiting on. Plan review does not
+ * hold the tool call open: `plannotator_submit_plan` returns once the review
+ * server is up and the decision arrives later as a message in the session.
+ */
+interface PendingPlanReview {
+	session: PlanReviewBrowserSession;
+	/** The plan file the open review shows (a revision may name another file). */
+	filePath: string;
+	/** The plan text the open review shows. */
+	planContent: string;
+	/** Set once a decision or a stop has been observed: no further pushes. */
+	settled: boolean;
+}
+
+/** Host seams for tests. Production passes nothing. */
+export interface PlannotatorExtensionDeps {
+	startPlanReview?: typeof startPlanReviewBrowserSession;
+	hasPlanBrowserHtml?: () => boolean;
+}
+
+/** The tool result while a plan waits for the reviewer. Kept in one place so the wording cannot drift. */
+function planSubmittedForReviewText(filePath: string, version: number | undefined, revised: boolean): string {
+	const label = version && version > 0 ? ` as version ${version}` : "";
+	const opening = revised
+		? `Revised plan ${filePath} pushed into the open Plannotator review${label}.`
+		: `Plan ${filePath} submitted for review in Plannotator${label}.`;
+	return `${opening} The reviewer's decision will arrive later as a new message in this session. Do not start implementing: end your turn now and wait for that message. If you revise the plan before then, call ${PLAN_SUBMIT_TOOL} again with the same path and the open review updates.`;
+}
+
+/** Same steps in the same order (checkmarks aside): the file still holds the approved checklist. */
+function sameChecklistSteps(a: ReturnType<typeof parseChecklist>, b: ReturnType<typeof parseChecklist>): boolean {
+	return a.length === b.length && a.every((item, index) => item.text === b[index]!.text);
+}
+
+/**
+ * The approved plan text appended to the approval message. Execution works
+ * from this snapshot; when the file changed after the reviewer's version was
+ * submitted, the message says those edits were not reviewed.
+ */
+export function approvedPlanSection(filePath: string, approvedPlan: string, fileDiffers: boolean): string {
+	const longestRun = Math.max(2, ...[...approvedPlan.matchAll(/`+/g)].map((match) => match[0].length));
+	const fence = "`".repeat(longestRun + 1);
+	const drift = fileDiffers
+		? `\n\n**${filePath} has changed since the reviewer saw it.** Those edits were NOT reviewed: do not execute them, and do not re-read ${filePath} for the plan. If you still want those changes, stop and tell the user so they can return to plan mode and you can resubmit the plan for review.`
+		: "";
+	return `## Approved plan\n\nThis is the exact plan text the reviewer approved. Execute it as written here, not from the file.${drift}\n\n${fence}markdown\n${approvedPlan.replace(/\n$/, "")}\n${fence}`;
+}
+
+export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtensionDeps = {}): void {
+	const startPlanReview = deps.startPlanReview ?? startPlanReviewBrowserSession;
+	const planBrowserHtmlAvailable = deps.hasPlanBrowserHtml ?? hasPlanBrowserHtml;
 	const currentPiSession = registerCurrentPiSession(pi);
 	// "Ask this session": Ask AI answered by this Pi session (review, annotate,
-	// last). Listeners register once here; each command binds a bridge to its ctx.
+	// last, plan review). Listeners register once here; each command binds a bridge to its ctx.
 	const sessionBridgeHub = createPiSessionBridgeHub(pi);
 	// Off in remote mode: anyone who can reach the session URL could otherwise
 	// type into this agent session (same reasoning as the agent terminal).
@@ -324,6 +376,13 @@ export default function plannotator(pi: ExtensionAPI): void {
 		},
 	});
 	let lastSubmittedPath: string | null = null;
+	/**
+	 * The exact plan text the reviewer approved, when execution started from a
+	 * browser approval. Execution works from this snapshot, never re-reading
+	 * the plan file (which may hold edits the reviewer never saw). Null for
+	 * auto-approved plans, which keep the file as their source.
+	 */
+	let approvedPlanContent: string | null = null;
 	let checklistItems: ChecklistItem[] = [];
 	let savedState: SavedPhaseState | null = null;
 	let phaseAddedTools: string[] = [];
@@ -348,6 +407,8 @@ export default function plannotator(pi: ExtensionAPI): void {
 	 * never reach our `session_shutdown` handler.
 	 */
 	let sessionAlive = true;
+	/** The plan review waiting on the reviewer, if any (see PendingPlanReview). */
+	let pendingPlanReview: PendingPlanReview | null = null;
 	/** Resolved once per execution phase; undefined means widget-only. */
 	let todoProvider: TodoProvider | undefined;
 	/** Latch: no provider found, or one sync failed. Cleared on return to idle. */
@@ -369,6 +430,10 @@ export default function plannotator(pi: ExtensionAPI): void {
 	pi.on("session_shutdown", () => {
 		sessionAlive = false;
 		currentPiSession.clear();
+		// A plan decision belongs to the session that is planning: unlike review
+		// and annotate feedback it is not re-targeted to a replacement session,
+		// so an open plan review closes with its session.
+		stopPendingPlanReview();
 		// Browser sessions deliberately outlive in-process session replacement so
 		// a tab opened before /new can still deliver feedback to the replacement
 		// session (withCurrentPiSessionFallbackHeader). On real process teardown
@@ -470,6 +535,10 @@ export default function plannotator(pi: ExtensionAPI): void {
 	function persistCompletedChecklist(fullPath: string): void {
 		try {
 			const content = readFileSync(fullPath, "utf-8");
+			// Executing an approved snapshot: write progress into the file only
+			// while its checklist is still the approved one, so steps never land
+			// on boxes of an unreviewed edit.
+			if (approvedPlanContent !== null && !sameChecklistSteps(parseChecklist(content), checklistItems)) return;
 			// One-turn ordinal-desync window: checklistItems were parsed at turn
 			// start, so an agent that edits the plan's checkboxes mid-turn can land
 			// a step number on a neighboring box until the next turn re-parses from
@@ -611,7 +680,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 		ctx.ui.notify(
 			"Plannotator: planning mode enabled.",
 		);
-		const warning = getPlanReviewAvailabilityWarning({ hasUI: ctx.hasUI, hasPlanHtml: hasPlanBrowserHtml() });
+		const warning = getPlanReviewAvailabilityWarning({ hasUI: ctx.hasUI, hasPlanHtml: planBrowserHtmlAvailable() });
 		if (warning) {
 			ctx.ui.notify(warning, "warning");
 		}
@@ -623,7 +692,26 @@ export default function plannotator(pi: ExtensionAPI): void {
 	 * level, then refresh the UI and persist. Callers add their own messaging,
 	 * session entries, and events around it.
 	 */
+	/**
+	 * Close the open plan review, if any, without delivering anything. Its
+	 * decision handler sees `settled` and stays silent.
+	 */
+	function stopPendingPlanReview(): void {
+		const review = pendingPlanReview;
+		if (!review) return;
+		pendingPlanReview = null;
+		review.settled = true;
+		try {
+			review.session.stop();
+		} catch (err) {
+			console.error(`Plannotator: failed to close the plan review: ${err instanceof Error ? err.message : String(err)}`);
+		}
+	}
+
 	async function returnToIdle(ctx: ExtensionContext): Promise<void> {
+		// Leaving plan mode abandons a plan still in review: its decision would
+		// arrive in a session that is no longer planning.
+		stopPendingPlanReview();
 		phase = "idle";
 		framingDelivered = false;
 		// Every caller reaches here FROM planning or executing, so this is the
@@ -632,6 +720,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 		idleNoticePending = true;
 		checklistItems = [];
 		lastSubmittedPath = null;
+		approvedPlanContent = null;
 		// Re-detect for the next plan: a provider that appeared (or a transient
 		// write failure) should not be decided once for the whole session.
 		todoProvider = undefined;
@@ -1258,7 +1347,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 			"Submit your Plannotator plan for user review. " +
 			"Call this only while Plannotator planning mode is active, after writing your plan as a markdown file anywhere inside the working directory. " +
 			"Pass the path to the plan file (e.g. PLAN.md or plans/auth.md). " +
-			"The user will review the plan in a visual browser UI and can approve, deny with feedback, or annotate it. " +
+			"The user reviews the plan in a visual browser UI and can approve, deny with feedback, or annotate it. " +
+			"This tool returns as soon as the review is open; the decision arrives later as a new message, so end your turn and wait for it, and do not implement before approval. " +
+			"If you revise the plan while the review is open, call this again with the same path to update the open review. " +
 			"If denied, edit the same file in place, then call this again with the same path.",
 		parameters: Type.Object({
 			filePath: Type.String({
@@ -1267,7 +1358,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			}),
 		}) as any,
 
-		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			// Guard: must be in planning phase
 			if (phase !== "planning") {
 				return {
@@ -1363,7 +1454,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			checklistItems = parseChecklist(planContent);
 
 			// Non-interactive or no HTML: auto-approve
-			if (!ctx.hasUI || !hasPlanBrowserHtml()) {
+			if (!ctx.hasUI || !planBrowserHtmlAvailable()) {
 				if (resolveExecutionMode(plannotatorConfig) === "external") {
 					await handoffApprovedPlan(ctx, inputPath, planContent);
 					return {
@@ -1373,6 +1464,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 					};
 				}
 
+				approvedPlanContent = null;
 				phase = "executing";
 				framingDelivered = false;
 				await applyPhaseConfig(ctx, { restoreSavedState: true });
@@ -1392,24 +1484,68 @@ export default function plannotator(pi: ExtensionAPI): void {
 				};
 			}
 
-			let result: Awaited<ReturnType<typeof openPlanReviewBrowser>>;
-			try {
-				result = await openPlanReviewBrowser(ctx, planContent, signal);
-			} catch (err) {
-				// A stopped session is an outcome, not a startup failure: the review
-				// was closed (cancellation or port self-preemption) before a decision.
-				if (isBrowserSessionStoppedError(err)) {
-					ctx.ui.notify("Plan review session was closed before a decision.", "info");
+			// A plan already in review: push the revision into the open tab
+			// instead of opening a second one. The tab keeps the reviewer's
+			// comments and shows the version diff.
+			const open = pendingPlanReview;
+			if (open && !open.settled) {
+				let revision: ReturnType<PlanReviewBrowserSession["updatePlan"]> = null;
+				let updateFailed = false;
+				try {
+					revision = open.session.updatePlan(planContent);
+				} catch (err) {
+					updateFailed = true;
+					console.error(`Plannotator: could not update the open plan review: ${err instanceof Error ? err.message : String(err)}`);
+				}
+				if (revision) {
+					open.filePath = inputPath;
+					open.planContent = planContent;
+					if (revision.unchanged) {
+						return {
+							content: [
+								{
+									type: "text",
+									text: `${inputPath} is unchanged from the plan already open for review. Do not start implementing: end your turn now and wait for the reviewer's decision, which arrives as a new message in this session.`,
+								},
+							],
+							details: { approved: false, pending: true, unchanged: true },
+							terminate: true,
+						};
+					}
+					safeNotify(ctx, `Plannotator: revised plan sent to the open review (version ${revision.version}).`);
+					return {
+						content: [{ type: "text", text: planSubmittedForReviewText(inputPath, revision.version, true) }],
+						details: { approved: false, pending: true, revised: true, version: revision.version },
+						terminate: true,
+					};
+				}
+				// The reviewer decided on the version on screen while this revision
+				// was being written: that decision is being recorded and is on its
+				// way. Opening a fresh review here would stop the old one and drop
+				// the decision (a deny's feedback would be lost), so wait for it.
+				if (!updateFailed && !open.settled) {
 					return {
 						content: [
 							{
 								type: "text",
-								text: "The plan review browser session was closed before a decision was made. The plan was neither approved nor rejected; resubmit to reopen review.",
+								text: `The reviewer has just decided on the version of the plan that was open for review, so this revision was not sent. Do not start implementing: end your turn now and wait for the reviewer's decision, which arrives as a new message in this session. If it asks for changes, call ${PLAN_SUBMIT_TOOL} again afterwards.`,
 							},
 						],
-						details: { approved: false },
+						details: { approved: false, pending: true, decisionInFlight: true },
+						terminate: true,
 					};
 				}
+			}
+
+			currentPiSession.update(ctx);
+			const origin = getPiSessionIdentity(ctx);
+			let session: PlanReviewBrowserSession;
+			try {
+				session = await startPlanReview(ctx, planContent, undefined, {
+					sessionBridge: sessionBridgeFor(ctx, origin),
+					planRevisions: true,
+				});
+			} catch (err) {
 				const message = `Failed to start plan review UI: ${getStartupErrorMessage(err)}`;
 				ctx.ui.notify(message, "error");
 				return {
@@ -1418,87 +1554,151 @@ export default function plannotator(pi: ExtensionAPI): void {
 				};
 			}
 
-			if (result.approved) {
-				if (resolveExecutionMode(plannotatorConfig) === "external") {
-					await handoffApprovedPlan(ctx, inputPath, planContent, result.feedback);
-					return {
-						content: [{ type: "text", text: "Plan approved and handed off for external execution." }],
-						details: {
-							approved: true,
-							handedOff: true,
-							...(result.feedback ? { feedback: result.feedback } : {}),
-						},
-						terminate: true,
-					};
+			// Planning ended while this review was starting (an earlier review's
+			// approval settling during the await, or plan mode turned off): this
+			// review would be an orphan whose decision nobody delivers.
+			if (phase !== "planning") {
+				try {
+					session.stop();
+				} catch {
+					// Best effort: nothing was delivered through it.
 				}
-
-				phase = "executing";
-				framingDelivered = false;
-				await applyPhaseConfig(ctx, { restoreSavedState: true });
-				pi.appendEntry("plannotator-execute", { lastSubmittedPath });
-				persistState();
-				justApprovedPlan = true;
-
-				// Keep this aligned with the executing-phase framing delivered on the
-				// same turn: the tool is the primary mechanism, markers the fallback.
-				const doneMsg =
-					checklistItems.length > 0
-						? `Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the next step. [DONE:n] markers remain a fallback for interrupted executions.`
-						: "";
-
-				if (result.feedback) {
-					const { getPlanApprovedWithNotesPrompt } = await loadPlannotatorPrompts();
-					return {
-						content: [
-							{
-								type: "text",
-								text: getPlanApprovedWithNotesPrompt("pi", loadConfig(), {
-									planFilePath: inputPath,
-									doneMsg,
-									feedback: result.feedback,
-								}),
-							},
-						],
-						details: { approved: true, feedback: result.feedback },
-						terminate: true,
-					};
-				}
-
-				const { getPlanApprovedPrompt } = await loadPlannotatorPrompts();
 				return {
 					content: [
 						{
 							type: "text",
-							text: getPlanApprovedPrompt("pi", loadConfig(), {
-								planFilePath: inputPath,
-								doneMsg,
-							}),
+							text: "Planning ended while this review was opening (the plan was approved, or plan mode was turned off), so no review was opened. Follow the latest message in this session.",
 						},
 					],
-					details: { approved: true },
+					details: { approved: false },
 					terminate: true,
 				};
 			}
 
-			// Denied
+			const review: PendingPlanReview = { session, filePath: inputPath, planContent, settled: false };
+			// A previous review that is somehow still tracked loses to the new one.
+			if (pendingPlanReview && pendingPlanReview !== review) stopPendingPlanReview();
+			pendingPlanReview = review;
 			persistState();
-			const feedbackText = result.feedback || "Plan rejected. Please revise.";
-			const { buildPlanFileRule, composePlanDeniedMessage, getPlanToolName } = await loadPlannotatorPrompts();
+
+			void session
+				.waitForDecision()
+				.then(async (result) => {
+					if (review.settled) return;
+					review.settled = true;
+					if (pendingPlanReview === review) pendingPlanReview = null;
+					await deliverPlanDecision(ctx, review, result);
+				})
+				.catch((err: unknown) => {
+					const wasSettled = review.settled;
+					review.settled = true;
+					if (pendingPlanReview === review) pendingPlanReview = null;
+					// Stopped on purpose (plan mode left, session replaced): silent.
+					if (wasSettled) return;
+					if (isBrowserSessionStoppedError(err)) {
+						safeNotify(ctx, "Plan review session was closed before a decision. Ask the agent to resubmit the plan to reopen it.", "info", origin);
+						return;
+					}
+					reportBackgroundError(ctx, "Plannotator plan review failed", err, origin);
+				});
+
+			safeNotify(ctx, sessionOpenedMessage("Plannotator: plan review opened", session.url), "info", origin);
 			return {
-				content: [
-					{
-						type: "text",
-						text: composePlanDeniedMessage("pi", loadConfig(), {
-							toolName: getPlanToolName("pi"),
-							planFileRule: buildPlanFileRule(getPlanToolName("pi"), inputPath),
-							feedback: feedbackText,
-						}, { answersOnly: result.answersOnly }),
-					},
-				],
-				details: { approved: false, feedback: feedbackText },
+				content: [{ type: "text", text: planSubmittedForReviewText(inputPath, undefined, false) }],
+				details: { approved: false, pending: true, reviewId: session.reviewId },
+				terminate: true,
 			};
 		},
 	});
+
+	/**
+	 * Deliver a plan decision that arrived after `plannotator_submit_plan`
+	 * returned. The message starts a turn when the agent is idle and waits
+	 * behind the current turn otherwise, the same delivery review and annotate
+	 * feedback use. Approval switches to the executing phase first, so the
+	 * turn it starts gets the executing framing and tools.
+	 */
+	async function deliverPlanDecision(
+		ctx: ExtensionContext,
+		review: PendingPlanReview,
+		result: PlanReviewDecision,
+	): Promise<void> {
+		// The decision belongs to this session's planning phase. A replaced or
+		// torn-down session, or one that left plan mode, gets nothing.
+		if (!sessionAlive || !isCtxAlive(ctx) || phase !== "planning") return;
+		const inputPath = review.filePath;
+		// The text the reviewer decided on: the server names it, the open
+		// review's own copy is the fallback (the same text after any push).
+		const planContent = result.plan ?? review.planContent;
+
+		const send = (text: string) => {
+			try {
+				pi.sendUserMessage(text, { deliverAs: "followUp" });
+			} catch (err) {
+				reportBackgroundError(ctx, "Plannotator could not deliver the plan decision", err);
+			}
+		};
+
+		if (result.approved) {
+			if (resolveExecutionMode(plannotatorConfig) === "external") {
+				await handoffApprovedPlan(ctx, inputPath, planContent, result.feedback);
+				// Recorded in the transcript without starting a turn: the plan runs elsewhere.
+				pi.sendMessage(
+					{
+						customType: "plannotator-handoff",
+						content: "Plan approved and handed off for external execution.",
+						display: true,
+						details: { planFilePath: inputPath },
+					},
+					{ triggerTurn: false },
+				);
+				return;
+			}
+
+			lastSubmittedPath = inputPath;
+			approvedPlanContent = planContent;
+			checklistItems = parseChecklist(planContent);
+			// Edits made to the file after the reviewer's version was submitted
+			// were never reviewed; the message says so and execution ignores them.
+			let fileDiffers = true;
+			try {
+				fileDiffers = readFileSync(resolve(ctx.cwd, inputPath), "utf-8") !== planContent;
+			} catch {
+				fileDiffers = true;
+			}
+			phase = "executing";
+			framingDelivered = false;
+			await applyPhaseConfig(ctx, { restoreSavedState: true });
+			pi.appendEntry("plannotator-execute", { lastSubmittedPath, approvedPlan: planContent });
+			persistState();
+
+			// Keep this aligned with the executing-phase framing delivered on the
+			// same turn: the tool is the primary mechanism, markers the fallback.
+			const doneMsg =
+				checklistItems.length > 0
+					? `Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the next step. [DONE:n] markers remain a fallback for interrupted executions.`
+					: "";
+			const { getPlanApprovedPrompt, getPlanApprovedWithNotesPrompt } = await loadPlannotatorPrompts();
+			const approvedPrompt = result.feedback
+				? getPlanApprovedWithNotesPrompt("pi", loadConfig(), { planFilePath: inputPath, doneMsg, feedback: result.feedback })
+				: getPlanApprovedPrompt("pi", loadConfig(), { planFilePath: inputPath, doneMsg });
+			send(`${approvedPrompt}\n\n${approvedPlanSection(inputPath, planContent, fileDiffers)}`);
+			safeNotify(ctx, "Plannotator: plan approved.");
+			return;
+		}
+
+		// Denied, or only questions answered: stay in planning and ask for a revision.
+		persistState();
+		const feedbackText = result.feedback || "Plan rejected. Please revise.";
+		const { buildPlanFileRule, composePlanDeniedMessage, getPlanToolName } = await loadPlannotatorPrompts();
+		send(
+			composePlanDeniedMessage("pi", loadConfig(), {
+				toolName: getPlanToolName("pi"),
+				planFileRule: buildPlanFileRule(getPlanToolName("pi"), inputPath),
+				feedback: feedbackText,
+			}, { answersOnly: result.answersOnly }),
+		);
+	}
 
 	// ── Event Handlers ───────────────────────────────────────────────────
 
@@ -1548,10 +1748,15 @@ export default function plannotator(pi: ExtensionAPI): void {
 		}
 
 		const profile = getPhaseProfile();
-		const planRef = lastSubmittedPath ?? "your plan file";
+		// An approved snapshot is the plan: point at it, not at the file, which
+		// may hold edits the reviewer never saw.
+		const planRef = lastSubmittedPath && approvedPlanContent !== null
+			? `the approved plan in the approval message (${lastSubmittedPath} as the reviewer approved it)`
+			: lastSubmittedPath ?? "your plan file";
 
-		if (phase === "executing" && lastSubmittedPath) {
-			// Re-read from disk each turn to stay current
+		if (phase === "executing" && lastSubmittedPath && approvedPlanContent === null) {
+			// Re-read from disk each turn to stay current (auto-approved plans
+			// only: an approved snapshot is the plan, the file is not re-read)
 			const fullPath = resolve(ctx.cwd, lastSubmittedPath);
 			try {
 				const planContent = readFileSync(fullPath, "utf-8");
@@ -1788,7 +1993,47 @@ Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the
 
 		// Rebuild execution state from disk + session messages
 		if (phase === "executing") {
-			if (lastSubmittedPath) {
+			// An approval from the browser recorded the exact text it approved on
+			// its plannotator-execute entry: that snapshot is the plan, and the
+			// file only contributes checkmarks while its checklist still matches.
+			const executeEntry = entries
+				.filter((e: { type: string; customType?: string }) => e.type === "custom" && e.customType === "plannotator-execute")
+				.pop() as { data?: { approvedPlan?: unknown } } | undefined;
+			const snapshot = typeof executeEntry?.data?.approvedPlan === "string" ? executeEntry.data.approvedPlan : null;
+			approvedPlanContent = snapshot;
+			if (snapshot !== null && lastSubmittedPath) {
+				checklistItems = parseChecklist(snapshot);
+				const fullPath = resolve(ctx.cwd, lastSubmittedPath);
+				try {
+					const fileItems = parseChecklist(readFileSync(fullPath, "utf-8"));
+					if (sameChecklistSteps(fileItems, checklistItems)) {
+						fileItems.forEach((item, index) => {
+							if (item.completed) checklistItems[index]!.completed = true;
+						});
+					}
+				} catch {
+					// The snapshot does not need the file.
+				}
+				let executeIndex = -1;
+				for (let i = entries.length - 1; i >= 0; i--) {
+					if ((entries[i] as { customType?: string }).customType === "plannotator-execute") {
+						executeIndex = i;
+						break;
+					}
+				}
+				for (let i = executeIndex + 1; i < entries.length; i++) {
+					const entry = entries[i];
+					if (entry.type !== "message" || !("message" in entry)) continue;
+					const text = getAssistantMessageText(entry.message);
+					if (text) markCompletedSteps(text, checklistItems);
+					const message = entry.message as { role?: string; toolName?: string; details?: { completed?: unknown; step?: unknown } };
+					if (message.role === "toolResult" && message.toolName === PLAN_MARK_DONE_TOOL && message.details?.completed === true) {
+						const item = checklistItems.find((candidate) => candidate.step === message.details?.step);
+						if (item) item.completed = true;
+					}
+				}
+				persistCompletedChecklist(fullPath);
+			} else if (lastSubmittedPath) {
 				const fullPath = resolve(ctx.cwd, lastSubmittedPath);
 				if (existsSync(fullPath)) {
 					const content = readFileSync(fullPath, "utf-8");
@@ -1833,12 +2078,15 @@ Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the
 		if (phase === "planning") {
 			checklistItems = [];
 			if (options.warnOnPlanning) {
-				const warning = getPlanReviewAvailabilityWarning({ hasUI: ctx.hasUI, hasPlanHtml: hasPlanBrowserHtml() });
+				const warning = getPlanReviewAvailabilityWarning({ hasUI: ctx.hasUI, hasPlanHtml: planBrowserHtmlAvailable() });
 				if (warning) {
 					ctx.ui.notify(warning, "warning");
 				}
 			}
 		}
+
+		// A branch whose path is not planning has no plan waiting on review.
+		if (phase !== "planning") stopPendingPlanReview();
 
 		if (phase === "idle") {
 			releaseAddedPhaseTools();

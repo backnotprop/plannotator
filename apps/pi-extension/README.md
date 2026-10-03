@@ -90,6 +90,8 @@ When the agent calls `plannotator_submit_plan`, the Plannotator UI opens in your
 
 The agent iterates on the plan until you approve, then executes with full tool access. On resubmission, Plan Diff highlights what changed since the previous version.
 
+The submit tool does not wait for you: it returns as soon as the review opens, the agent ends its turn, and your decision reaches it later as a new message. While the review is open you can keep chatting with the agent in Pi, or ask it questions from the review's Ask AI panel ("Ask this session"). It still cannot change code: planning restrictions stay on until you approve. If the agent revises the plan while the review is open, the open tab updates to the new version and keeps your comments. Leaving plan mode closes an open review.
+
 ### Programmatic plan-mode control
 
 Other Pi extensions can enter, exit, toggle, or query Plannotator plan mode through the shared Pi event bus without invoking the `/plannotator-plan-mode` slash command:

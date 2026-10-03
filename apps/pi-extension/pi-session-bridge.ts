@@ -1,6 +1,6 @@
 /**
  * "Ask this session" for Pi: answers Plannotator's Ask AI from the Pi session
- * that opened the review / annotate / last-message browser, as a real turn in
+ * that opened the review / annotate / last-message / plan review browser, as a real turn in
  * that session (streamed, with tools, kept in the transcript).
  *
  * The question goes in as a custom message (`customType: "plannotator-ask"`)
