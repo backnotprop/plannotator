@@ -199,6 +199,18 @@ describe("OpenCode session bridge", () => {
     await waitFor(() => bridge.status() === "gone");
   });
 
+  test("a turn question never steers into a run the session started since its last status report", async () => {
+    const host = fakeHost();
+    const bridge = bridgeFor(host);
+    await waitFor(() => bridge.status() === "ready");
+    host.emit("session.execution.started");
+    await waitFor(() => bridge.status() === "busy");
+    const sink = recordingSink();
+    bridge.ask({ askId: "a1", text: "q", mode: "turn" }, sink.sink, new AbortController().signal);
+    expect(sink.error?.code).toBe("busy");
+    expect(host.prompts.length).toBe(0);
+  });
+
   test("a session already running when the bridge starts reads busy until it goes idle", async () => {
     const host = fakeHost({ idle: false });
     const bridge = bridgeFor(host);

@@ -513,6 +513,15 @@ export function createOpenCodeSessionBridge(options: OpenCodeSessionBridgeOption
 				sink.error("blocked");
 				return;
 			}
+			// "steer" lands INSIDE a running execution. The server only asks when
+			// the host last reported ready, but that report can be up to one status
+			// tick old: if the session started a run since (the user typed), our
+			// question must not be steered into it (and a later Stop would then
+			// interrupt the user's own run). Report busy; the reviewer can wait.
+			if (running) {
+				sink.error("busy");
+				return;
+			}
 			askTurn(req.text, sink, signal);
 		},
 		async interrupt() {
