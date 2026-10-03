@@ -113,7 +113,7 @@ import { createWorktreePool, type WorktreePool, type PoolEntry } from "@plannota
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getCliInstallUrl, getMRLabel, getMRNumberLabel, getDisplayRepo, getPlatformLabel, getPRNumber, getPRHeadFetchSpec, getPRCloneCommand } from "@plannotator/server/pr";
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
 import { enableTailscaleServe } from "@plannotator/server/tailscale-serve";
-import { takeEnvPullSessionBridgeConfig } from "@plannotator/server/ai-runtime";
+import { discardEnvPullSessionBridgeConfig, takeEnvPullSessionBridgeConfig } from "@plannotator/server/ai-runtime";
 import { writeUrlQr } from "@plannotator/server/qr";
 import { resolveAnnotateTarget } from "./annotate-resolution";
 import { LIVE_APP_REMOTE_MESSAGE } from "@plannotator/shared/live-probe";
@@ -220,6 +220,12 @@ import reviewHtml from "../dist/review.html" with { type: "text" };
 const reviewHtmlContent = reviewHtml as unknown as string;
 
 // Check for subcommand
+// "Ask this session" pull-bridge secret: take it out of process.env before
+// ANYTHING spawns (git/gh/sem before the server starts, the auto-update
+// wrapper, agent terminals when Ask AI is disabled, archive mode), so no child
+// inherits it. The config stays cached for createAIRuntime.
+takeEnvPullSessionBridgeConfig();
+
 const rawArgs = process.argv.slice(2);
 let parsedStrictAnnotateOptions;
 try {
@@ -279,8 +285,9 @@ if (tailscaleFlag) {
   process.env.PLANNOTATOR_URL_HOST = "";
   // "Ask this session" stays off in a tailnet-published session, as it is in
   // remote mode: the session is reachable from other devices. Taking the
-  // host's bridge config here discards it (and scrubs the token from env).
-  takeEnvPullSessionBridgeConfig();
+  // host's bridge config here discards it for the whole process (a plain
+  // take would only cache it for createAIRuntime to serve anyway).
+  discardEnvPullSessionBridgeConfig();
 }
 
 /**

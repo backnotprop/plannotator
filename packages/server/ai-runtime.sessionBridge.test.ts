@@ -112,13 +112,14 @@ describe("createAIRuntime (Bun) with a session bridge", () => {
 
   // A host that launched this server as a separate process (OpenCode plugin,
   // Claude Code mod) hands it a bridge token through the environment.
-  async function runPullRunner(extraEnv: Record<string, string>) {
+  async function runPullRunner(extraEnv: Record<string, string>, options: { discardFirst?: boolean } = {}) {
     const dir = mkdtempSync(join(tmpdir(), "plannotator-pull-runtime-"));
     tempDirs.push(dir);
     const runner = join(dir, "runner.ts");
     const runtimeUrl = pathToFileURL(join(import.meta.dir, "ai-runtime.ts")).href;
     writeFileSync(runner, `
-      import { createAIRuntime } from ${JSON.stringify(runtimeUrl)};
+      import { createAIRuntime, discardEnvPullSessionBridgeConfig } from ${JSON.stringify(runtimeUrl)};
+      ${options.discardFirst ? "discardEnvPullSessionBridgeConfig();" : ""}
       const runtime = await createAIRuntime({ cwd: ${JSON.stringify(dir)}, getServerPort: () => 4321 });
       const caps = await (await runtime.endpoints["/api/ai/capabilities"](new Request("http://localhost/api/ai/capabilities"))).json();
       const poll = (headers) => runtime.endpoints["/api/ai/bridge/poll"](new Request("http://localhost/api/ai/bridge/poll", {
@@ -178,6 +179,16 @@ describe("createAIRuntime (Bun) with a session bridge", () => {
   test("stays off in remote mode, and still scrubs the token", async () => {
     if (process.platform === "win32") return;
     const result = await runPullRunner({ PLANNOTATOR_REMOTE: "1" });
+    expect(result.bridge).toBeNull();
+    expect(result.statuses.ok).toBe(404);
+    expect(result.tokenLeftInEnv).toBeNull();
+  }, 15_000);
+
+  // The CLI's --tailscale path: the session is reachable from the tailnet, so
+  // the host's config is thrown away for the process (not merely cached).
+  test("a discarded env config is never served later in the process", async () => {
+    if (process.platform === "win32") return;
+    const result = await runPullRunner({}, { discardFirst: true });
     expect(result.bridge).toBeNull();
     expect(result.statuses.ok).toBe(404);
     expect(result.tokenLeftInEnv).toBeNull();

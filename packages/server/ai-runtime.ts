@@ -66,6 +66,16 @@ export function takeEnvPullSessionBridgeConfig(): PullSessionBridgeConfig | unde
   return envPullBridge;
 }
 
+/**
+ * Take the pull-bridge config from the environment and throw it away, so no
+ * later `createAIRuntime` in this process serves it (a `--tailscale` session
+ * is reachable from other devices, like remote mode). Also scrubs the env.
+ */
+export function discardEnvPullSessionBridgeConfig(): void {
+  takeEnvPullSessionBridgeConfig();
+  envPullBridge = undefined;
+}
+
 export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Promise<AIRuntime> {
   const cwd = options.cwd ?? process.cwd();
   const registry = new ProviderRegistry();
