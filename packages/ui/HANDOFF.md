@@ -1635,7 +1635,7 @@ Not here (dropped with the owner's Q2 answer): record lines inside the block (`O
 
 ## Ask this session (unreleased)
 
-Additive. Ask AI can be answered by the agent session that opened Plannotator ("Ask this session"), when the server registers a `session-bridge` provider (Pi review/annotate/last today). A host whose backend never advertises one sees the same provider list, default selection, requests and DOM as before, and has nothing to pass.
+Additive. Ask AI can be answered by the agent session that opened Plannotator ("Ask this session"), when the server registers a `session-bridge` provider (Pi review/annotate/last and plan review today). A host whose backend never advertises one sees the same provider list, default selection, requests and DOM as before, and has nothing to pass.
 
 - **`utils/aiProvider`:** `AIProviderOption` gains optional `label` and `sessionBridge` (`{ host, status, modes }`), read from `/api/ai/capabilities`. `resolveAIProviderSelection` prefers a usable bridge (present, not `gone`, not `blocked` without a transient mode) after an explicit saved pick and before the origin's SDK provider; with no bridge in the list the order is unchanged. New exports: `SESSION_BRIDGE_PROVIDER_NAME`, `SESSION_ASK_ERROR_CODES`, `isSessionBridgeProvider`, `findUsableSessionBridge`, `resolveSessionBridgeFallback`.
 - **`hooks/useAIChat`:** `AskAIParams.busyPolicy?: 'wait' | 'interrupt'` (sent on `/api/ai/query` only when set), `retry(questionId, AIRetryOptions)`, and `AIResponse.errorCode` / `status` (`'waiting' | 'interrupting'`).
