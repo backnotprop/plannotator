@@ -1458,9 +1458,11 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 			const open = pendingPlanReview;
 			if (open && !open.settled) {
 				let revision: ReturnType<PlanReviewBrowserSession["updatePlan"]> = null;
+				let updateFailed = false;
 				try {
 					revision = open.session.updatePlan(planContent);
 				} catch (err) {
+					updateFailed = true;
 					console.error(`Plannotator: could not update the open plan review: ${err instanceof Error ? err.message : String(err)}`);
 				}
 				if (revision) {
@@ -1485,8 +1487,22 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 						terminate: true,
 					};
 				}
-				// The reviewer decided in the meantime: that decision is on its way,
-				// and this submission opens a fresh review below.
+				// The reviewer decided on the version on screen while this revision
+				// was being written: that decision is being recorded and is on its
+				// way. Opening a fresh review here would stop the old one and drop
+				// the decision (a deny's feedback would be lost), so wait for it.
+				if (!updateFailed && !open.settled) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `The reviewer has just decided on the version of the plan that was open for review, so this revision was not sent. Do not start implementing: end your turn now and wait for the reviewer's decision, which arrives as a new message in this session. If it asks for changes, call ${PLAN_SUBMIT_TOOL} again afterwards.`,
+							},
+						],
+						details: { approved: false, pending: true, decisionInFlight: true },
+						terminate: true,
+					};
+				}
 			}
 
 			currentPiSession.update(ctx);
@@ -1503,6 +1519,27 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 				return {
 					content: [{ type: "text", text: message }],
 					details: { approved: false },
+				};
+			}
+
+			// Planning ended while this review was starting (an earlier review's
+			// approval settling during the await, or plan mode turned off): this
+			// review would be an orphan whose decision nobody delivers.
+			if (phase !== "planning") {
+				try {
+					session.stop();
+				} catch {
+					// Best effort: nothing was delivered through it.
+				}
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Planning ended while this review was opening (the plan was approved, or plan mode was turned off), so no review was opened. Follow the latest message in this session.",
+						},
+					],
+					details: { approved: false },
+					terminate: true,
 				};
 			}
 

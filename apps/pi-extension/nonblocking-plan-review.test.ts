@@ -39,6 +39,8 @@ interface FakeReview {
 	stopped: boolean;
 	pushes: string[];
 	decided: boolean;
+	/** The server accepted a decision and is still recording it (updatePlan refuses). */
+	claimed: boolean;
 }
 
 function createHarness(cwd: string) {
@@ -108,6 +110,7 @@ function createHarness(cwd: string) {
 			stopped: false,
 			pushes: [],
 			decided: false,
+			claimed: false,
 			decide: (result) => {
 				review.decided = true;
 				resolve(result);
@@ -127,7 +130,7 @@ function createHarness(cwd: string) {
 				reject(err);
 			},
 			updatePlan: (plan: string) => {
-				if (review.decided || review.stopped) return null;
+				if (review.decided || review.claimed || review.stopped) return null;
 				if (plan === review.plan) return { revision: review.pushes.length, version: review.pushes.length + 1, unchanged: true };
 				review.plan = plan;
 				review.pushes.push(plan);
@@ -244,6 +247,26 @@ describe("non-blocking plan review", () => {
 		await harness.settle(() => harness.sentUserMessages.length > 0);
 		expect(harness.sentUserMessages[0]!.text).toContain("plannotator_mark_done");
 		expect(harness.lastPhase()).toBe("executing");
+	});
+
+	test("a revision submitted while a decision is being recorded keeps that decision", async () => {
+		const { cwd, harness } = await plannedSession();
+		await harness.submit("PLAN.md");
+		// The reviewer denied; the server is still recording it (note integrations).
+		harness.reviews[0]!.claimed = true;
+		writeFileSync(join(cwd, "PLAN.md"), `${PLAN}- [ ] Add a test\n`);
+
+		const result = await harness.submit("PLAN.md");
+		expect(result.details).toMatchObject({ pending: true, decisionInFlight: true });
+		expect(result.terminate).toBe(true);
+		// No second review, and the first one is not stopped (that would drop the deny).
+		expect(harness.reviews).toHaveLength(1);
+		expect(harness.reviews[0]!.stopped).toBe(false);
+
+		harness.reviews[0]!.decide({ approved: false, feedback: "Split step one." });
+		await harness.settle(() => harness.sentUserMessages.length > 0);
+		expect(harness.sentUserMessages[0]!.text).toContain("Split step one.");
+		expect(harness.lastPhase()).toBe("planning");
 	});
 
 	test("leaving plan mode closes the open review and its decision is dropped", async () => {
