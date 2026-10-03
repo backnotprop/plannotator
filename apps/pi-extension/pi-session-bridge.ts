@@ -18,6 +18,11 @@
  *   happens only when the user types into Pi in the same instant.
  * - `pi.sendMessage` returns void and reports async failures to Pi's own error
  *   channel, so a question that never starts is failed by a watchdog.
+ * - `agent_end` fires once per agent run, and Pi may run again inside the same
+ *   prompt: an auto-retry after a retryable error (overloaded, rate limited) or
+ *   a continuation after an overflow compaction. An error end therefore waits
+ *   for `agent_settled` (Pi >= 0.80.4), or for the session to go idle on older
+ *   Pi, before it is reported; a retry that starts answering clears it.
  *
  * Only type imports here: this module is loaded eagerly by index.ts.
  */
@@ -53,6 +58,11 @@ interface ActiveAsk {
 	/** A new assistant message began after some answer text: separate with a blank line. */
 	needsSeparator: boolean;
 	watchdog: ReturnType<typeof setTimeout> | null;
+	/** An agent run ended in an error that Pi may still retry: reported once the session settles. */
+	pendingError: string | null;
+	/** Fallback for Pi without `agent_settled`: polls idleness while an error is pending. */
+	settlePoll: ReturnType<typeof setInterval> | null;
+	isIdle: () => boolean;
 }
 
 export interface PiSessionBridgeHub {
@@ -67,6 +77,14 @@ function clearWatchdog(ask: ActiveAsk): void {
 	ask.watchdog = null;
 }
 
+function clearSettlePoll(ask: ActiveAsk): void {
+	if (ask.settlePoll) clearInterval(ask.settlePoll);
+	ask.settlePoll = null;
+}
+
+/** How often an older Pi (no `agent_settled`) is checked for idleness after an error end. */
+const SETTLE_POLL_MS = 250;
+
 function lastAssistant(messages: unknown): { stopReason?: string; errorMessage?: string } | undefined {
 	if (!Array.isArray(messages)) return undefined;
 	for (let i = messages.length - 1; i >= 0; i--) {
@@ -76,12 +94,24 @@ function lastAssistant(messages: unknown): { stopReason?: string; errorMessage?:
 	return undefined;
 }
 
-export function createPiSessionBridgeHub(pi: HubPi): PiSessionBridgeHub {
+export function createPiSessionBridgeHub(
+	pi: HubPi,
+	options: { startWatchdogMs?: number } = {},
+): PiSessionBridgeHub {
+	const startWatchdogMs = options.startWatchdogMs ?? START_WATCHDOG_MS;
 	let active: ActiveAsk | null = null;
 
 	const finish = (ask: ActiveAsk) => {
 		clearWatchdog(ask);
+		clearSettlePoll(ask);
 		if (active === ask) active = null;
+	};
+
+	const reportPendingError = (ask: ActiveAsk) => {
+		if (active !== ask || ask.pendingError === null) return;
+		const message = ask.pendingError;
+		finish(ask);
+		ask.sink.error("failed", message);
 	};
 
 	pi.on("message_start", (event) => {
@@ -96,7 +126,12 @@ export function createPiSessionBridgeHub(pi: HubPi): PiSessionBridgeHub {
 			}
 			return;
 		}
-		if (ask.started && message.role === "assistant" && ask.answer.length > 0) ask.needsSeparator = true;
+		if (ask.started && message.role === "assistant") {
+			// Pi retried (or continued after compaction): the run is still answering.
+			ask.pendingError = null;
+			clearSettlePoll(ask);
+			if (ask.answer.length > 0) ask.needsSeparator = true;
+		}
 	});
 
 	pi.on("message_update", (event) => {
@@ -122,19 +157,38 @@ export function createPiSessionBridgeHub(pi: HubPi): PiSessionBridgeHub {
 	pi.on("agent_end", (event) => {
 		const ask = active;
 		if (!ask?.started) return;
-		finish(ask);
 		if (ask.cancelled) {
+			finish(ask);
 			ask.sink.error("aborted");
 			return;
 		}
 		const last = lastAssistant(event?.messages);
 		if (last?.stopReason === "error") {
-			ask.sink.error("failed", last.errorMessage || "The session hit an error while answering.");
-		} else if (last?.stopReason === "aborted") {
+			// Pi may retry this run: report the error only once the session settles.
+			ask.pendingError = last.errorMessage || "The session hit an error while answering.";
+			clearSettlePoll(ask);
+			ask.settlePoll = setInterval(() => {
+				let idle = true;
+				try {
+					idle = ask.isIdle();
+				} catch {
+					idle = true;
+				}
+				if (idle) reportPendingError(ask);
+			}, SETTLE_POLL_MS);
+			return;
+		}
+		finish(ask);
+		if (last?.stopReason === "aborted") {
 			ask.sink.error("failed", "The turn was stopped in the session before it finished answering.");
 		} else {
 			ask.sink.done(ask.answer);
 		}
+	});
+
+	pi.on("agent_settled", () => {
+		const ask = active;
+		if (ask) reportPendingError(ask);
 	});
 
 	pi.on("session_shutdown", () => {
@@ -175,6 +229,9 @@ export function createPiSessionBridgeHub(pi: HubPi): PiSessionBridgeHub {
 						answer: "",
 						needsSeparator: false,
 						watchdog: null,
+						pendingError: null,
+						settlePoll: null,
+						isIdle: () => ctx.isIdle(),
 					};
 					active = ask;
 
@@ -199,7 +256,8 @@ export function createPiSessionBridgeHub(pi: HubPi): PiSessionBridgeHub {
 						{ once: true },
 					);
 
-					ask.watchdog = setTimeout(() => {
+					const watchdog = () => {
+						ask.watchdog = null;
 						if (active !== ask || ask.started) return;
 						let idle = true;
 						try {
@@ -207,11 +265,18 @@ export function createPiSessionBridgeHub(pi: HubPi): PiSessionBridgeHub {
 						} catch {
 							idle = true;
 						}
-						// Steered into a running turn: it will start when Pi reads it.
-						if (!idle) return;
+						// Busy (steered into a running turn, or Pi still preparing the run):
+						// check again later, so a question Pi drops without ever starting it
+						// (e.g. the user aborts the turn it was steered into) still fails
+						// instead of waiting forever.
+						if (!idle) {
+							ask.watchdog = setTimeout(watchdog, startWatchdogMs);
+							return;
+						}
 						finish(ask);
 						sink.error("failed", "The question did not reach the session.");
-					}, START_WATCHDOG_MS);
+					};
+					ask.watchdog = setTimeout(watchdog, startWatchdogMs);
 
 					try {
 						pi.sendMessage(

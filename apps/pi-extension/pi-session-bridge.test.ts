@@ -77,9 +77,17 @@ function fakePi() {
 				});
 			}
 		},
-		endTurn(stopReason = "stop", errorMessage?: string) {
-			idle = true;
+		/** One agent run ends; Pi may still retry it before the prompt settles. */
+		endRun(stopReason = "stop", errorMessage?: string) {
 			emit("agent_end", { type: "agent_end", messages: [{ role: "assistant", stopReason, errorMessage, content: [] }] });
+		},
+		settle() {
+			idle = true;
+			emit("agent_settled", { type: "agent_settled" });
+		},
+		endTurn(stopReason = "stop", errorMessage?: string) {
+			this.endRun(stopReason, errorMessage);
+			this.settle();
 		},
 	};
 }
@@ -174,6 +182,59 @@ describe("Pi session bridge", () => {
 		host.startTurn("b");
 		host.endTurn("error", "rate limited");
 		expect(failed.calls.at(-1)).toEqual(["error", "failed", "rate limited"]);
+	});
+
+	test("an error that Pi retries is not reported: the retried answer streams", () => {
+		const host = fakePi();
+		const hub = createPiSessionBridgeHub(host.pi);
+		const bridge = hub.createBridge(host.ctx as never, {});
+		const out = sink();
+		bridge.ask({ askId: "a", text: "t", mode: "turn" }, out.sink, new AbortController().signal);
+		host.startTurn("a");
+		// The first attempt fails (overloaded) and Pi auto-retries inside the same prompt.
+		host.assistantText();
+		host.endRun("error", "overloaded");
+		expect(out.calls).toEqual([]);
+		host.assistantText("Retried answer.");
+		host.endTurn();
+		expect(out.calls).toEqual([
+			["delta", "Retried answer."],
+			["done", "Retried answer."],
+		]);
+		expect(hub.hasActiveAsk).toBe(false);
+	});
+
+	test("an error end on a Pi without agent_settled is reported once the session goes idle", async () => {
+		const host = fakePi();
+		const hub = createPiSessionBridgeHub(host.pi);
+		const bridge = hub.createBridge(host.ctx as never, {});
+		const out = sink();
+		bridge.ask({ askId: "a", text: "t", mode: "turn" }, out.sink, new AbortController().signal);
+		host.startTurn("a");
+		host.endRun("error", "bad request");
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		expect(out.calls).toEqual([]);
+		host.setIdle(true);
+		for (let i = 0; i < 40 && out.calls.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 25));
+		expect(out.calls).toEqual([["error", "failed", "bad request"]]);
+		expect(hub.hasActiveAsk).toBe(false);
+	});
+
+	test("a question Pi never starts fails once the session is idle, however long it was busy", async () => {
+		const host = fakePi();
+		const hub = createPiSessionBridgeHub(host.pi, { startWatchdogMs: 20 });
+		const bridge = hub.createBridge(host.ctx as never, {});
+		const out = sink();
+		// Pi is busy (the question was steered into a running turn) past the first check.
+		host.setIdle(false);
+		bridge.ask({ askId: "a", text: "t", mode: "turn" }, out.sink, new AbortController().signal);
+		await new Promise((resolve) => setTimeout(resolve, 60));
+		expect(out.calls).toEqual([]);
+		// The turn ends without ever reading it (e.g. the user aborted it in Pi).
+		host.setIdle(true);
+		for (let i = 0; i < 40 && out.calls.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+		expect(out.calls.map((call) => call.slice(0, 2))).toEqual([["error", "failed"]]);
+		expect(hub.hasActiveAsk).toBe(false);
 	});
 
 	test("session shutdown mid-answer reports gone, and a second question while one runs is refused", () => {
