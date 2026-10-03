@@ -238,8 +238,7 @@ not planning, and on `session_shutdown`; a plan decision is never re-targeted to
 a replacement session. The Esc-aborts-the-review behavior of the old blocking
 tool is gone: leaving plan mode is how to abandon a review.
 
-**Revisions while a review is open update the same tab** (the Claude mod
-UX-SPEC's choice): a resubmission while a review is pending calls the Pi plan
+**Revisions while a review is open update the same tab**: a resubmission while a review is pending calls the Pi plan
 server's `updatePlan`, which saves a new history version (slug from the revised
 heading, `previousPlan` from that slug's prior version) and bumps a revision
 counter. `/api/plan` carries `planRevision`; the plan editor polls
@@ -254,8 +253,25 @@ the revision and the reviewer decides again. Both plan servers implement it (`up
 server result, `/api/plan/revision`, the 409) but advertise `planRevision` only
 when the caller passes `planRevisions: true`; today only Pi's
 `plannotator_submit_plan` does, so Claude Code, OpenCode and the Pi event-API
-`plan-review` action keep a tab that never polls and sends unchanged bodies
-(the Claude Code mod is the expected next caller).
+`plan-review` action keep a tab that never polls and sends unchanged bodies.
+A decision claims the review right after the revision check (before the note
+integrations are awaited), so `updatePlan` refuses from then on; a Pi
+resubmission that hits that refusal tells the agent to wait for the decision
+instead of opening a second review. The tab also holds a revision while a
+comment composer or annotation popover is open.
+
+**Execution works from the approved text, not the file.** The Pi plan
+server's approve decision carries `plan`, the exact text on screen when the
+reviewer approved. `deliverPlanDecision` appends it to the approval message
+under "## Approved plan", records it on the `plannotator-execute` entry
+(`approvedPlan`), and executes from it: the checklist, the per-turn framing
+and resume (`resyncPhaseFromSession`) read the snapshot instead of re-reading
+the plan file, and checkmarks are written back to the file only while its
+checklist still matches the approved one. If the file differs from the
+approved text at approval, the message says so and tells the agent not to
+execute the unreviewed edits (to keep them, the user returns to plan mode and
+the agent resubmits). Auto-approved plans (no UI) keep the file as their
+source.
 
 ### Codex Stop hook: which turn the plan belongs to
 

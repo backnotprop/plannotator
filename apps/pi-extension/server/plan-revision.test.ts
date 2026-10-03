@@ -13,7 +13,7 @@
  *  - a push after the decision silently mutates a settled review instead of
  *    telling the caller to open a new one.
  */
-import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,44 +23,36 @@ import { generateSlug, getPlanVersionPath } from "../generated/storage.ts";
 
 const MINIMAL_HTML = "<html><body>Plannotator</body></html>";
 const ENV_KEYS = ["PLANNOTATOR_DATA_DIR", "PLANNOTATOR_AI", "PLANNOTATOR_PORT", "PLANNOTATOR_REMOTE", "PLANNOTATOR_FEEDBACK_HISTORY"] as const;
-const saved: Record<string, string | undefined> = {};
-const tempDirs: string[] = [];
-const createdPlans: string[] = [];
 
-beforeEach(() => {
+/**
+ * Run one test against a temp PLANNOTATOR_DATA_DIR (version history, drafts
+ * and plan snapshots all land there), restoring the environment in finally.
+ * Never touches the real data dir (Testing Rules).
+ */
+async function sandboxed(run: (dataDir: string) => Promise<void>): Promise<void> {
+	const saved: Record<string, string | undefined> = {};
 	for (const key of ENV_KEYS) saved[key] = process.env[key];
-	const dir = mkdtempSync(join(tmpdir(), "plannotator-pi-plan-revision-"));
-	tempDirs.push(dir);
-	process.env.PLANNOTATOR_DATA_DIR = dir;
-	process.env.PLANNOTATOR_AI = "disabled";
-	process.env.PLANNOTATOR_REMOTE = "0";
-	process.env.PLANNOTATOR_FEEDBACK_HISTORY = "0";
-	delete process.env.PLANNOTATOR_PORT;
-});
-
-afterEach(() => {
-	for (const key of ENV_KEYS) {
-		if (saved[key] === undefined) delete process.env[key];
-		else process.env[key] = saved[key]!;
+	const dataDir = mkdtempSync(join(tmpdir(), "plannotator-pi-plan-revision-"));
+	try {
+		process.env.PLANNOTATOR_DATA_DIR = dataDir;
+		process.env.PLANNOTATOR_AI = "disabled";
+		process.env.PLANNOTATOR_REMOTE = "0";
+		process.env.PLANNOTATOR_FEEDBACK_HISTORY = "0";
+		delete process.env.PLANNOTATOR_PORT;
+		await run(dataDir);
+	} finally {
+		for (const key of ENV_KEYS) {
+			if (saved[key] === undefined) delete process.env[key];
+			else process.env[key] = saved[key]!;
+		}
+		rmSync(dataDir, { recursive: true, force: true });
 	}
-	for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
-});
-
-afterAll(() => {
-	// Version history goes through generated/storage.ts, whose data dir is fixed
-	// at import time; remove the slugs these tests created there.
-	const project = detectProjectName();
-	for (const plan of createdPlans) {
-		const versionPath = getPlanVersionPath(project, generateSlug(plan), 1);
-		if (versionPath) rmSync(join(versionPath, ".."), { recursive: true, force: true });
-	}
-});
+}
 
 function planPair() {
 	const title = `# Pi plan revision test ${Math.random().toString(36).slice(2, 10)}`;
 	const v1 = `${title}\n\n- [ ] First step.\n`;
 	const v2 = `${title}\n\n- [ ] First step, revised.\n- [ ] Second step.\n`;
-	createdPlans.push(v1);
 	return { v1, v2 };
 }
 
@@ -78,7 +70,7 @@ async function post(url: string, body: Record<string, unknown>) {
 }
 
 describe("pi plan server revisions", () => {
-	test("a pushed revision is served with its version diff and a bumped revision", async () => {
+	test("a pushed revision is served with its version diff and a bumped revision", async () => sandboxed(async (dataDir) => {
 		const { v1, v2 } = planPair();
 		const server = await startPlanReviewServer({ plan: v1, htmlContent: MINIMAL_HTML, origin: "pi", planRevisions: true });
 		try {
@@ -95,12 +87,14 @@ describe("pi plan server revisions", () => {
 			expect(after.planRevision).toBe(1);
 			expect(after.previousPlan).toBe(v1);
 			expect(after.versionInfo.version).toBe(2);
+			// History went to the sandbox, never the real data dir.
+			expect(getPlanVersionPath(detectProjectName(), generateSlug(v2), 2)?.startsWith(dataDir)).toBe(true);
 		} finally {
 			server.stop();
 		}
-	});
+	}));
 
-	test("an identical push changes nothing", async () => {
+	test("an identical push changes nothing", async () => sandboxed(async (dataDir) => {
 		const { v1 } = planPair();
 		const server = await startPlanReviewServer({ plan: v1, htmlContent: MINIMAL_HTML, origin: "pi", planRevisions: true });
 		try {
@@ -109,12 +103,11 @@ describe("pi plan server revisions", () => {
 		} finally {
 			server.stop();
 		}
-	});
+	}));
 
-	test("a decision on an older revision is refused; one on the current revision settles with the current plan", async () => {
+	test("a decision on an older revision is refused; one on the current revision settles with the current plan", async () => sandboxed(async (dataDir) => {
 		const { v1, v2 } = planPair();
-		const dir = mkdtempSync(join(tmpdir(), "plannotator-pi-plan-revision-save-"));
-		tempDirs.push(dir);
+		const dir = join(dataDir, "custom-plans");
 		const server = await startPlanReviewServer({ plan: v1, htmlContent: MINIMAL_HTML, origin: "pi", planRevisions: true });
 		try {
 			server.updatePlan(v2);
@@ -131,16 +124,17 @@ describe("pi plan server revisions", () => {
 			const { savedPath } = (await ok.json()) as { savedPath?: string };
 			expect(savedPath).toBeTruthy();
 			expect(readFileSync(savedPath!, "utf-8")).toContain("Second step.");
-			expect((await server.waitForDecision()).approved).toBe(true);
+			// The decision names the text approved: the revision on screen.
+			expect(await server.waitForDecision()).toMatchObject({ approved: true, plan: v2 });
 
 			// Settled: a later push is the caller's cue to open a new review.
 			expect(server.updatePlan(`${v2}\nMore.\n`)).toBeNull();
 		} finally {
 			server.stop();
 		}
-	});
+	}));
 
-	test("a decision body without planRevision (older client) is accepted", async () => {
+	test("a decision body without planRevision (older client) is accepted", async () => sandboxed(async (dataDir) => {
 		const { v1, v2 } = planPair();
 		const server = await startPlanReviewServer({ plan: v1, htmlContent: MINIMAL_HTML, origin: "pi", planRevisions: true });
 		try {
@@ -151,5 +145,5 @@ describe("pi plan server revisions", () => {
 		} finally {
 			server.stop();
 		}
-	});
+	}));
 });

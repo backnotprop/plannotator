@@ -7,20 +7,16 @@
  * or a host that does NOT opt in (Claude Code today) starts advertising
  * `planRevision` and its tab polls for nothing.
  */
-import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startPlannotatorServer } from "./index";
-import { getPlanVersionPath } from "./storage";
-import { detectProjectName } from "./project";
-import { generateSlug } from "@plannotator/shared/storage";
 
 const MINIMAL_HTML = "<html><body>Plannotator</body></html>";
 const ENV_KEYS = ["PLANNOTATOR_DATA_DIR", "PLANNOTATOR_AI", "PLANNOTATOR_PORT", "PLANNOTATOR_REMOTE", "PLANNOTATOR_FEEDBACK_HISTORY"] as const;
 const saved: Record<string, string | undefined> = {};
 const tempDirs: string[] = [];
-const createdPlans: string[] = [];
 
 beforeEach(() => {
   for (const key of ENV_KEYS) saved[key] = process.env[key];
@@ -41,19 +37,10 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-afterAll(async () => {
-  const project = (await detectProjectName()) ?? "_unknown";
-  for (const plan of createdPlans) {
-    const versionPath = getPlanVersionPath(project, generateSlug(plan), 1);
-    if (versionPath) rmSync(join(versionPath, ".."), { recursive: true, force: true });
-  }
-});
-
 function planPair() {
   const title = `# Bun plan revision test ${Math.random().toString(36).slice(2, 10)}`;
   const v1 = `${title}\n\n- [ ] First step.\n`;
   const v2 = `${title}\n\n- [ ] First step, revised.\n`;
-  createdPlans.push(v1);
   return { v1, v2 };
 }
 
