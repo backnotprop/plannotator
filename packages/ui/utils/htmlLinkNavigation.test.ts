@@ -9,8 +9,11 @@
  * inside the frame or starts fetching paths the session never authorized.
  */
 import { describe, expect, test } from "bun:test";
+import { HTML_ASSET_ROUTE_PREFIX as SERVER_HTML_ASSET_ROUTE_PREFIX } from "../../shared/html-assets";
 import {
 	documentRendersHtml,
+	HTML_ASSET_ROUTE_PREFIX,
+	htmlAssetRouteFromDocument,
 	MAX_HTML_LINK_HREF_LENGTH,
 	resolveHtmlLinkIntent,
 } from "./htmlLinkNavigation";
@@ -140,6 +143,7 @@ describe("resolveHtmlLinkIntent — refused", () => {
 			kind: "unsupported",
 			path: "/site/sub/report.pdf",
 			label: "report.pdf",
+			reason: "type",
 		});
 		expect(resolveHtmlLinkIntent("../bundle.zip", CTX)).toMatchObject({
 			kind: "unsupported",
@@ -228,5 +232,105 @@ describe("resolveHtmlLinkIntent — which surface the target opens on", () => {
 			if (intent.kind !== "document") throw new Error(`expected a document intent for ${link}`);
 			expect(documentRendersHtml(intent.path)).toBe(intent.rendersHtml);
 		}
+	});
+});
+
+describe("resolveHtmlLinkIntent — local images open in the lightbox", () => {
+	// The failure: a thumbnail linking to its full-size render toasted
+	// "Can't open", or (worse) the lightbox read a path the page's own asset
+	// route would never serve.
+	const IMG_CTX = {
+		...CTX,
+		assetRoot: { dir: "/site/sub", url: "/api/html-assets/abc123/" },
+	};
+
+	test("a relative image link resolves to the page's own asset route", () => {
+		expect(resolveHtmlLinkIntent("renders/home-1440.png", IMG_CTX)).toEqual({
+			kind: "image",
+			path: "/site/sub/renders/home-1440.png",
+			url: "/api/html-assets/abc123/renders/home-1440.png",
+			label: "home-1440.png",
+		});
+	});
+
+	test("every previewable image extension is an image, case-insensitively", () => {
+		for (const ext of ["png", "JPG", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico", "apng"]) {
+			expect(resolveHtmlLinkIntent(`a.${ext}`, IMG_CTX)).toMatchObject({ kind: "image" });
+		}
+	});
+
+	test("path segments are re-encoded, and query and fragment are dropped", () => {
+		expect(resolveHtmlLinkIntent("shots/my%20shot.png?v=2#x", IMG_CTX)).toMatchObject({
+			kind: "image",
+			url: "/api/html-assets/abc123/shots/my%20shot.png",
+			label: "my shot.png",
+		});
+	});
+
+	test("an image outside the page's folder is refused, never routed", () => {
+		// The asset route refuses `..`; containment is the rule that keeps the
+		// lightbox from asking for anything the page could not load itself.
+		expect(resolveHtmlLinkIntent("../cover.png", IMG_CTX)).toEqual({
+			kind: "unsupported",
+			path: "/site/cover.png",
+			label: "cover.png",
+			reason: "outside-asset-root",
+		});
+		// A root-relative link resolves against the session root (/site), which
+		// is outside this linked page's folder.
+		expect(resolveHtmlLinkIntent("/cover.png", IMG_CTX)).toMatchObject({
+			kind: "unsupported",
+			reason: "outside-asset-root",
+		});
+		// A sibling directory sharing the folder's name as a prefix is outside too.
+		expect(
+			resolveHtmlLinkIntent("../sub-other/x.png", IMG_CTX),
+		).toMatchObject({ kind: "unsupported", reason: "outside-asset-root" });
+	});
+
+	test("a root-relative image inside the root page's folder opens", () => {
+		const rootCtx = { ...CTX, baseDir: "/site", assetRoot: { dir: "/site", url: "/api/html-assets/t/" } };
+		expect(resolveHtmlLinkIntent("/renders/x.png", rootCtx)).toMatchObject({
+			kind: "image",
+			url: "/api/html-assets/t/renders/x.png",
+		});
+	});
+
+	test("without an asset route an image link is reported, not fetched", () => {
+		expect(resolveHtmlLinkIntent("renders/x.png", CTX)).toMatchObject({
+			kind: "unsupported",
+			reason: "no-asset-root",
+		});
+	});
+
+	test("an image on another origin still opens in a new tab", () => {
+		expect(resolveHtmlLinkIntent("https://cdn.example.com/x.png", IMG_CTX)).toEqual({
+			kind: "external",
+			url: "https://cdn.example.com/x.png",
+		});
+	});
+});
+
+describe("htmlAssetRouteFromDocument", () => {
+	test("reads the token route from the base the server installs", () => {
+		expect(
+			htmlAssetRouteFromDocument('<html><head><base href="/api/html-assets/0f1e2d3c4b5a6978/"><title>x</title>'),
+		).toBe("/api/html-assets/0f1e2d3c4b5a6978/");
+		// A relative author base re-anchored under the token keeps the token root.
+		expect(
+			htmlAssetRouteFromDocument('<base href="/api/html-assets/abc/assets/">'),
+		).toBe("/api/html-assets/abc/");
+	});
+
+	test("a page without the server's base has no asset route", () => {
+		expect(htmlAssetRouteFromDocument('<base href="https://example.com/">')).toBeNull();
+		expect(htmlAssetRouteFromDocument('<base href="about:blank">')).toBeNull();
+		expect(htmlAssetRouteFromDocument("")).toBeNull();
+		// The route named in body text is not a base.
+		expect(htmlAssetRouteFromDocument("<p>/api/html-assets/abc/</p>")).toBeNull();
+	});
+
+	test("the browser-side route prefix matches the servers'", () => {
+		expect(HTML_ASSET_ROUTE_PREFIX).toBe(SERVER_HTML_ASSET_ROUTE_PREFIX);
 	});
 });

@@ -12,7 +12,15 @@
  * server origin and the directories, so every branch is unit-testable.
  */
 
+import { isReviewImagePath } from "@plannotator/core/diff-paths";
 import { hasLinkedDocExtension } from "./markdownExtensions";
+
+/**
+ * Route the servers serve a raw-HTML page's support assets from. Spelled here
+ * rather than imported because `@plannotator/shared/html-assets` is node-side
+ * (parse5, `path`); `htmlLinkNavigation.test.ts` pins the two together.
+ */
+export const HTML_ASSET_ROUTE_PREFIX = "/api/html-assets";
 
 /** Longest href the parent will look at. Matches the bridge's own cap. */
 export const MAX_HTML_LINK_HREF_LENGTH = 2048;
@@ -27,10 +35,28 @@ export type HtmlLinkIntent =
 	| { kind: "document"; path: string; hash: string; rendersHtml: boolean }
 	/** Another origin. Opens in a new tab; the frame never navigates. */
 	| { kind: "external"; url: string }
-	/** A local file Plannotator cannot render as a document (`.pdf`, `.zip`, …). */
-	| { kind: "unsupported"; path: string; label: string }
+	/**
+	 * A local image inside the page's asset root, shown in the image lightbox.
+	 * `url` is the page's own `/api/html-assets/<token>/…` route, so the
+	 * lightbox reads exactly what the page itself can already load.
+	 */
+	| { kind: "image"; path: string; url: string; label: string }
+	/**
+	 * A local file Plannotator will not open. `type`: not a document or image
+	 * (`.pdf`, `.zip`, …). `outside-asset-root`: an image outside the page's
+	 * own folder, which the asset route refuses. `no-asset-root`: an image on
+	 * a page served without an asset route (share links, converted pages).
+	 */
+	| {
+			kind: "unsupported";
+			path: string;
+			label: string;
+			reason: HtmlLinkUnsupportedReason;
+	  }
 	/** Nothing to do: empty, fragment-only, or a scheme we do not follow. */
 	| { kind: "ignored"; reason: HtmlLinkIgnoreReason };
+
+export type HtmlLinkUnsupportedReason = "type" | "outside-asset-root" | "no-asset-root";
 
 export type HtmlLinkIgnoreReason =
 	| "empty"
@@ -55,6 +81,12 @@ export interface HtmlLinkContext {
 	/** The session's `--markdown` preference: HTML is Turndowned by `/api/doc`,
 	 *  so an `.html` target renders as markdown rather than as an HTML surface. */
 	convertHtml?: boolean;
+	/**
+	 * The current page's asset root: the directory its `/api/html-assets`
+	 * token was minted for, and that token's route (`/api/html-assets/<t>/`).
+	 * Image links open in the lightbox only from inside `dir`.
+	 */
+	assetRoot?: { dir: string; url: string } | null;
 }
 
 /** Control characters never appear in a real href; they are how structure gets smuggled. */
@@ -119,11 +151,13 @@ function resolveRelative(
 	if (!baseDir) return { kind: "ignored", reason: "no-base" };
 	const resolved = joinPath(baseDir, decoded);
 	if (!resolved) return { kind: "ignored", reason: "invalid" };
+	const label = basename(resolved);
+	if (isReviewImagePath(resolved)) return resolveImage(resolved, label, context.assetRoot);
 	// Containment is the server's call (`/api/doc` answers 403 for an escaping
 	// path). The extension gate is ours: a `.pdf` would be a pointless fetch
 	// and a confusing server error, so it is reported as unsupported here.
 	if (!hasLinkedDocExtension(resolved)) {
-		return { kind: "unsupported", path: resolved, label: basename(resolved) };
+		return { kind: "unsupported", path: resolved, label, reason: "type" };
 	}
 	return {
 		kind: "document",
@@ -131,6 +165,46 @@ function resolveRelative(
 		hash,
 		rendersHtml: documentRendersHtml(resolved, context.convertHtml),
 	};
+}
+
+/**
+ * An image link opens in the lightbox, read through the page's own asset
+ * route. That route serves only files below the token's directory (it refuses
+ * `..` and checks the realpath), so an image outside it is reported here
+ * instead of becoming a request the server would refuse. This check is
+ * lexical and only decides the UI; the server's check is the one that holds.
+ */
+function resolveImage(
+	path: string,
+	label: string,
+	assetRoot: HtmlLinkContext["assetRoot"],
+): HtmlLinkIntent {
+	if (!assetRoot?.dir || !assetRoot.url) {
+		return { kind: "unsupported", path, label, reason: "no-asset-root" };
+	}
+	const dir = assetRoot.dir.replace(/\\/g, "/").replace(/\/+$/, "");
+	if (!path.startsWith(`${dir}/`)) {
+		return { kind: "unsupported", path, label, reason: "outside-asset-root" };
+	}
+	const relative = path
+		.slice(dir.length + 1)
+		.split("/")
+		.map(encodeURIComponent)
+		.join("/");
+	const base = assetRoot.url.endsWith("/") ? assetRoot.url : `${assetRoot.url}/`;
+	return { kind: "image", path, url: `${base}${relative}`, label };
+}
+
+/**
+ * The asset route a served raw-HTML page is anchored at. Both servers install
+ * `<base href="/api/html-assets/<token>/">` first in `<head>` (re-anchoring a
+ * relative author base under the same token). Returns that token's route, or
+ * null when the page carries none (share links, an author's absolute base).
+ */
+export function htmlAssetRouteFromDocument(rawHtml: string | null | undefined): string | null {
+	if (!rawHtml) return null;
+	const match = /<base\b[^>]*?\bhref\s*=\s*["']?\/api\/html-assets\/([A-Za-z0-9_-]+)\//i.exec(rawHtml);
+	return match ? `${HTML_ASSET_ROUTE_PREFIX}/${match[1]}/` : null;
 }
 
 /**

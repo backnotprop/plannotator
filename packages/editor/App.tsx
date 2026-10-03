@@ -16,7 +16,9 @@ import { toast, Toaster } from 'sonner';
 import { type Origin, getAgentName } from '@plannotator/shared/agents';
 import { diagramRenderKindForPath, isDiagramRenderKind, shouldStripFrontmatter } from '@plannotator/shared/annotatable';
 import { setExtraMarkdownExtensions } from '@plannotator/ui/utils/markdownExtensions';
-import { documentRendersHtml, resolveHtmlLinkIntent } from '@plannotator/ui/utils/htmlLinkNavigation';
+import { documentRendersHtml, htmlAssetRouteFromDocument, resolveHtmlLinkIntent } from '@plannotator/ui/utils/htmlLinkNavigation';
+import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
+import { createPortal } from 'react-dom';
 import { annotateFileFeedback, annotateMessageFeedback, wrapFeedbackForClipboard, type AnnotateFeedbackTemplates } from '@plannotator/shared/feedback-templates';
 import { diagramDocumentBlocks, parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, exportCodeFileAnnotations, exportMessageAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter, type LinkedDocAnnotationEntry, type MessageAnnotationEntry } from '@plannotator/ui/utils/parser';
 import { primeSkillCatalog, primeSkillContentsForExport } from '@plannotator/ui/utils/skillCatalog';
@@ -1972,7 +1974,13 @@ const App: React.FC = () => {
   // A link click inside a raw-HTML document (the bridge swallowed the
   // navigation; see resolveHtmlLinkIntent for what the href means).
   const [htmlLinkFragment, setHtmlLinkFragment] = useState<{ path: string; hash: string } | null>(null);
+  // A link to a local image inside the page opens in the image lightbox.
+  const [htmlImageLightbox, setHtmlImageLightbox] = useState<{ src: string; alt: string } | null>(null);
   const handleHtmlLinkClick = React.useCallback((href: string) => {
+    // The page's own asset route (the `<base href>` the server installed) and
+    // the directory it serves: an image link is shown through that route, so
+    // the lightbox reads only what the page itself can already load.
+    const assetRouteUrl = htmlAssetRouteFromDocument(rawHtml);
     const intent = resolveHtmlLinkIntent(href, {
       baseDir: activeDocBaseDir,
       // Server-absolute links (`/x.html`, or the same spelled with this
@@ -1980,14 +1988,23 @@ const App: React.FC = () => {
       rootDir: imageBaseDir?.includes('/') ? imageBaseDir : activeDocBaseDir,
       serverOrigin: window.location.origin,
       convertHtml,
+      assetRoot: assetRouteUrl && activeDocBaseDir ? { dir: activeDocBaseDir, url: assetRouteUrl } : null,
     });
     if (intent.kind === 'external') {
       window.open(intent.url, '_blank', 'noopener,noreferrer');
       return;
     }
+    if (intent.kind === 'image') {
+      setHtmlImageLightbox({ src: intent.url, alt: intent.label });
+      return;
+    }
     if (intent.kind === 'unsupported') {
       toast(`Can't open ${intent.label}`, {
-        description: 'Only markdown, text and HTML documents open in Plannotator.',
+        description: intent.reason === 'outside-asset-root'
+          ? "Images open only from this page's own folder."
+          : intent.reason === 'no-asset-root'
+            ? "This page's local images aren't available here."
+            : 'Only markdown, text and HTML documents open in Plannotator.',
       });
       return;
     }
@@ -2011,6 +2028,7 @@ const App: React.FC = () => {
   }, [
     activeDocBaseDir,
     convertHtml,
+    rawHtml,
     imageBaseDir,
     fileBrowser.dirs,
     fileBrowser.activeDirPath,
@@ -7345,6 +7363,16 @@ const App: React.FC = () => {
           subMessage="You are viewing a demo plan. This is sample content — it is not your data or anyone else's."
           variant="warning"
         />
+
+        {/* An image link inside a raw-HTML page (see handleHtmlLinkClick) */}
+        {htmlImageLightbox && createPortal(
+          <ImageLightbox
+            src={htmlImageLightbox.src}
+            alt={htmlImageLightbox.alt}
+            onClose={() => setHtmlImageLightbox(null)}
+          />,
+          document.body,
+        )}
 
         <Toaster
           position="top-right"

@@ -1,6 +1,7 @@
 import { generateId } from '../utils/generateId';
 import React, { useRef, useState, useEffect, useLayoutEffect, useMemo, forwardRef, useImperativeHandle, useCallback, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
+import { ImageLightbox } from './ImageLightbox';
 import { AnnotationType, type Block, type Annotation, type EditorMode, type InputMethod, type ImageAttachment, type ActionsLabelMode } from '../types';
 import { applyHighlight, codeBlockClassName, onCodeHighlightSwap } from '../utils/codeHighlight';
 import { paintCodeBlockMark } from '../utils/codeBlockMark';
@@ -1780,31 +1781,3 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     </CodePathValidationContext.Provider>
   );
 });
-
-/** Simple lightbox overlay for enlarged image viewing. */
-const ImageLightbox: React.FC<{ src: string; alt: string; onClose: () => void }> = ({ src, alt, onClose }) => {
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm cursor-zoom-out"
-      onClick={onClose}
-    >
-      <img
-        src={src}
-        alt={alt}
-        className="max-w-[90vw] max-h-[85vh] object-contain rounded-lg shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      />
-      {alt && (
-        <div className="mt-3 text-sm text-white/70 max-w-[90vw] text-center truncate">{alt}</div>
-      )}
-    </div>
-  );
-};
