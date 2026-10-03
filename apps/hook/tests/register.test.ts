@@ -9,7 +9,7 @@ tier('user')
 const SESSION = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
 
 /** The world beneath the mod: a session, a file map, and a CLI that comes up at once. */
-function world(on: any, options: { files?: Map<string, string> } = {}) {
+function world(on: any, options: { files?: Map<string, string>; enabled?: boolean } = {}) {
   const files = options.files ?? new Map<string, string>()
   const runs: string[][] = []
   const submits: string[] = []
@@ -17,8 +17,13 @@ function world(on: any, options: { files?: Map<string, string> } = {}) {
   on('session.start', ($: any, e: any) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: 'session-1' }))
   on('command.list', () => ({ value: [{ name: 'plannotator-review', description: 'skill', source: 'user' }] }))
-  on('command.register', ($: any, e: any) => ({ value: { command: e.name } }))
-  mock.env(on, { HOME: '/home/me' })
+  const registered: string[] = []
+  on('command.register', ($: any, e: any) => {
+    registered.push(e.name)
+    return { value: { command: e.name } }
+  })
+  // The mod is opt-in; most tests turn it on through the env knob.
+  mock.env(on, options.enabled === false ? { HOME: '/home/me' } : { HOME: '/home/me', PLANNOTATOR_CLAUDE_MOD: '1' })
   const env = new Map<string, string | undefined>()
   on('env.set', ($: any, e: any) => {
     env.set(e.name, e.value)
@@ -52,7 +57,7 @@ function world(on: any, options: { files?: Map<string, string> } = {}) {
   })
   // The bridge: no server answers (an older binary), so the loop stops.
   on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
-  return { files, runs, submits, logs, clock, env }
+  return { files, runs, submits, logs, clock, env, registered }
 }
 
 describe('register', () => {
@@ -93,6 +98,33 @@ describe('register', () => {
 
     expect(text).toContain('http://localhost:4321')
     expect(w.runs.some((argv) => argv.includes('review'))).toBe(true)
+  })
+
+  test('knob off: inert. ExitPlanMode and the skills reach the classic flow; nothing is registered or set', async ($: any, on: any) => {
+    const w = world(on, { enabled: false })
+    on('tool.call', () => ({ result: 'the classic flow ran' }))
+    on('command.run', () => ({ text: 'the skill ran' }))
+    await $.session.start(SESSION)
+
+    const answer = await $.tool.call({ tool: 'ExitPlanMode', plan: '# Plan\n' })
+    const { text } = await $.command.run({ command: 'plannotator-review', args: '', origin: { kind: 'composer' } })
+
+    expect(answer.result).toBe('the classic flow ran')
+    expect(text).toBe('the skill ran')
+    expect(w.runs).toEqual([])
+    expect(w.registered).toEqual([])
+    expect(w.env.size).toBe(0)
+  })
+
+  test('knob on through config.json in the data dir', async ($: any, on: any) => {
+    const files = new Map<string, string>([['/home/me/.plannotator', ''], ['/home/me/.plannotator/config.json', '{"claudeCodeMod": true}']])
+    const w = world(on, { enabled: false, files })
+    await $.session.start(SESSION)
+
+    const answer = await $.tool.call({ tool: 'ExitPlanMode', plan: '# Plan\n\n1. Ship.\n' })
+
+    expect(answer.deny).toContain('NOT approved')
+    expect(w.runs.some((argv) => argv[3] === 'plannotator-launch')).toBe(true)
   })
 
   test('a -p session keeps the classic flow: ExitPlanMode is not touched', async ($: any, on: any) => {

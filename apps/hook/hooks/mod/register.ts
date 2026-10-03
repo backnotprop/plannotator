@@ -2,6 +2,11 @@
  * The Plannotator mod: non-blocking plan review, annotate, code review and
  * annotate-last for Claude Code, plus "Ask this session".
  *
+ * OPT-IN (enabled.ts): with neither `PLANNOTATOR_CLAUDE_MOD=1` nor
+ * `{ "claudeCodeMod": true }` in config.json, every hook below passes straight
+ * through and nothing is registered or set, so the classic hook and skills
+ * run exactly as they do without mods.
+ *
  * Loaded from `hooks/hooks.json` ("modules") only where Claude Code runs
  * hooks modules (function hooks, 2.1.287+, CLI). Elsewhere the same plugin's
  * classic command hooks and the `/plannotator-*` skills behave exactly as
@@ -33,6 +38,7 @@
  */
 
 import { PlannotatorMod } from './controller'
+import { resolveClaudeModEnabled } from './enabled'
 import type { Host } from './host'
 import { COMMANDS, dataDirOf, isModCommand, waitArgv } from './launch'
 import { PLAN_TOOL } from './plan'
@@ -50,6 +56,9 @@ function hexOf(bytes: Uint8Array): string {
 }
 
 const debugLines: string[] = []
+
+/** This plugin's name: what `$.prompt.submit` stamps as the origin of our prompts. */
+const PLUGIN_NAME = 'plannotator'
 
 /** Every closure over `$` the logic uses. `debugPath` set: lines go to that file. */
 function hostOf($: Engine, debugPath: string | null): Host {
@@ -99,54 +108,114 @@ function hostOf($: Engine, debugPath: string | null): Host {
   }
 }
 
-export function register(on: On) {
-  let mod: PlannotatorMod | null = null
+/** What session.start found: the mod may run in this process. Null: inert. */
+interface Allowed {
+  dataDir: string
+  debugPath: string | null
+}
 
-  on('session.start', async ($: Engine, e: any, next: Next) => {
-    mod = null
-    const result = await next(e)
-    // A person at the prompt is what makes a later plugin turn mean anything;
-    // `-p` and SDK runs keep the classic, blocking flows.
-    if (!e.isInteractive) return result
-    if (!(await $.fs.exists('/bin/sh'))) return result
-    const home = await $.env.get('HOME')
-    const dataDir = dataDirOf({ home, dataDir: await $.env.get('PLANNOTATOR_DATA_DIR') })
-    if (!dataDir) return result
-    const sessionId = await $.session.id()
+// One plugin instance per Claude Code process.
+let allowed: Allowed | null = null
+let mod: PlannotatorMod | null = null
+let switching: Promise<PlannotatorMod | null> | null = null
+
+/**
+ * The instance for the session the process is in NOW. `session.start` does
+ * not fire for `/clear` or an in-process resume (the process goes on under
+ * another session id), so the id is checked here and a new instance is made
+ * (restoring that session's open reviews) when it changed. The old one was
+ * disposed at `session.end`, so its decisions never land in another session.
+ */
+async function currentMod($: Engine): Promise<PlannotatorMod | null> {
+  const settings = allowed
+  if (!settings) return null
+  const sessionId = await $.session.id()
+  if (mod && !mod.isDisposed && mod.session.sessionId === sessionId) return mod
+  if (switching) return switching
+  switching = (async () => {
+    mod?.dispose()
     await $.env.set('PLANNOTATOR_SESSION_TAG', `claude-code:${sessionId}`)
-
-    const debug = await $.env.get('PLANNOTATOR_MOD_DEBUG')
-    const debugPath = debug && debug !== '0' ? `${dataDir}/claude-code-mod/debug.log` : null
-    const instance = new PlannotatorMod(hostOf($, debugPath), { sessionId, dataDir, interactive: true })
+    const instance = new PlannotatorMod(hostOf($, settings.debugPath), { sessionId, dataDir: settings.dataDir, interactive: true })
     mod = instance
-
-    // Commands: answer the user's own skills by name; register only names no one holds.
-    const listed = await $.command.list().catch(() => [])
-    const taken = new Set((Array.isArray(listed) ? listed : []).map((command: { name: string }) => command.name))
-    for (const [name, spec] of Object.entries(COMMANDS)) {
-      if (taken.has(name)) continue
-      await $.command
-        .register({ name, description: spec.description, ...(spec.argumentHint ? { argumentHint: spec.argumentHint } : {}), immediate: true })
-        .catch(() => undefined)
-    }
-
     await instance.restore().catch(() => undefined)
+    return instance
+  })()
+  try {
+    return await switching
+  } finally {
+    switching = null
+  }
+}
+
+/** Whether the user turned the mod on (opt-in) and where its data dir is; null: stay inert. */
+async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promise<Allowed | null> {
+  // A person at the prompt is what makes a later plugin turn mean anything;
+  // `-p` and SDK runs keep the classic, blocking flows.
+  if (!e.isInteractive) return null
+  if (!(await $.fs.exists('/bin/sh'))) return null
+  const home = await $.env.get('HOME')
+  const dataDir = dataDirOf({
+    home,
+    dataDir: await $.env.get('PLANNOTATOR_DATA_DIR'),
+    xdgDataHome: await $.env.get('XDG_DATA_HOME'),
+    legacyExists: home ? await $.fs.exists(`${String(home).replace(/\/+$/, '')}/.plannotator`) : false,
+  })
+  if (!dataDir) return null
+  // Opt-in: nothing happens unless the user turned the mod on.
+  const configText = await $.fs.read(`${dataDir}/config.json`).catch(() => null)
+  if (!resolveClaudeModEnabled(await $.env.get('PLANNOTATOR_CLAUDE_MOD'), typeof configText === 'string' ? configText : null)) {
+    return null
+  }
+  const debug = await $.env.get('PLANNOTATOR_MOD_DEBUG')
+  return { dataDir, debugPath: debug && debug !== '0' ? `${dataDir}/claude-code-mod/debug.log` : null }
+}
+
+/** Register the slash commands no one holds (the user's own skills keep theirs; command.run answers them). */
+async function registerCommands($: Engine): Promise<void> {
+  const listed = await $.command.list().catch(() => [])
+  const taken = new Set((Array.isArray(listed) ? listed : []).map((command: { name: string }) => command.name))
+  for (const [name, spec] of Object.entries(COMMANDS)) {
+    if (taken.has(name)) continue
+    await $.command
+      .register({ name, description: spec.description, ...(spec.argumentHint ? { argumentHint: spec.argumentHint } : {}), immediate: true })
+      .catch(() => undefined)
+  }
+}
+
+export function register(on: On) {
+  on('session.start', async ($: Engine, e: any, next: Next) => {
+    const result = await next(e)
+    if (allowed) return result
+    allowed = await resolveAllowed($, e)
+    if (!allowed) return result
+    const instance = await currentMod($)
+    if (!instance) return result
+    await registerCommands($)
     return result
   })
 
+  on('session.end', async ($: Engine, e: any, next: Next) => {
+    // Stop delivering for the session that ended; its open reviews stay in
+    // the store and reattach if it is resumed.
+    mod?.dispose()
+    return next(e)
+  })
+
   on('command.run', async ($: Engine, e: any, next: Next) => {
-    const instance = mod
     const name: string = typeof e.command === 'string' ? e.command : ''
-    if (!instance || !isModCommand(name)) return next(e)
+    if (!allowed || !isModCommand(name)) return next(e)
+    const instance = await currentMod($)
+    if (!instance) return next(e)
     const spec = COMMANDS[name]
     const text = await instance.runCommand(spec.kind, typeof e.args === 'string' ? e.args : '')
     return { text }
   })
 
   on('tool.call', async ($: Engine, e: any, next: Next) => {
-    const instance = mod
     // Only the main loop's ExitPlanMode: a subagent's keeps the classic flow.
-    if (!instance || e.tool !== PLAN_TOOL || e.agentId) return next(e)
+    if (!allowed || e.tool !== PLAN_TOOL || e.agentId) return next(e)
+    const instance = await currentMod($)
+    if (!instance) return next(e)
     const answer = await instance.onPlanCall({ tool_use_id: e.tool_use_id, plan: e.plan, planFilePath: e.planFilePath })
     if ('deny' in answer) return { deny: answer.deny }
     try {
@@ -158,20 +227,36 @@ export function register(on: On) {
 
   on('classic.PermissionRequest', async ($: Engine, e: any, next: Next) => {
     const instance = mod
-    if (!instance || e.tool_name !== PLAN_TOOL) return next(e)
+    // A subagent's ExitPlanMode keeps the classic hook (its tool.call was not ours).
+    if (!instance || instance.isDisposed || e.tool_name !== PLAN_TOOL || e.agent_id) return next(e)
     const decision = instance.onPlanPermission(typeof e.tool_use_id === 'string' ? e.tool_use_id : undefined, e.tool_input)
     // Answered here, without next(e): the plugin's own classic command hook
     // below never runs for this call, so it cannot open a second review.
     return decision ? { decision } : next(e)
   })
 
+  on('prompt.submit', async ($: Engine, e: any, next: Next) => {
+    const result = await next(e)
+    const instance = allowed ? mod : null
+    if (instance && !instance.isDisposed && result && typeof result.text === 'string') {
+      // Only this plugin's own submissions can be an "Ask this session" turn.
+      const origin = result.origin ?? e.origin
+      const fromUs = !!origin && origin.kind === 'plugin' && origin.name === PLUGIN_NAME
+      instance.turns.onPromptEntered(result.text, fromUs)
+    }
+    return result
+  })
+
   on('turn.start', async ($: Engine, e: any, next: Next) => {
-    if (mod && typeof e.turnId === 'string') await mod.onTurnStart(e.turnId, typeof e.text === 'string' ? e.text : '')
+    if (allowed && typeof e.turnId === 'string') {
+      const instance = await currentMod($).catch(() => null)
+      if (instance) await instance.onTurnStart(e.turnId, typeof e.text === 'string' ? e.text : '')
+    }
     return next(e)
   })
 
   on('turn.step', async function* ($: Engine, e: any, next: Next) {
-    const instance = mod
+    const instance = allowed ? mod : null
     if (!instance || !instance.turns.ownsTurn(e.turnId)) return yield* next(e)
     const stream = next(e)
     let step = await stream.next()
@@ -186,7 +271,7 @@ export function register(on: On) {
   })
 
   on('turn.complete', async ($: Engine, e: any, next: Next) => {
-    if (mod && !e.agentId && typeof e.turnId === 'string') {
+    if (allowed && mod && !mod.isDisposed && !e.agentId && typeof e.turnId === 'string') {
       mod.onTurnComplete(e.turnId, typeof e.answer === 'string' ? e.answer : '', e.isAborted === true)
     }
     return next(e)

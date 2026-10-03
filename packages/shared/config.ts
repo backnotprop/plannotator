@@ -231,6 +231,14 @@ export interface PlannotatorConfig {
    */
   autoUpdate?: boolean;
   /**
+   * Turn on the Claude Code mod (apps/hook/hooks/mod/): non-blocking plan
+   * review, annotate, code review and annotate-last, plus "Ask this session",
+   * where Claude Code runs hooks modules. Opt-in while the owner decides
+   * whether it becomes the default; PLANNOTATOR_CLAUDE_MOD wins over this key.
+   * Default: false.
+   */
+  claudeCodeMod?: boolean;
+  /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
    * callouts, tables, diagrams, task lists, and the other PFM extensions.
@@ -800,6 +808,27 @@ export function resolveAutoUpdate(
   const fromEnv = parseAutoUpdateEnv(env);
   if (fromEnv !== undefined) return fromEnv;
   return coerceConfigBoolean(config.autoUpdate, false);
+}
+
+/**
+ * Resolve whether the Claude Code mod is on (opt-in).
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_CLAUDE_MOD env var  →  config.claudeCodeMod  →  default false
+ *
+ * Env `1` / `true` / `on` turn it on and `0` / `false` / `off` / `disabled`
+ * turn it off; an empty or unrecognized value counts as unset. The mod is a
+ * hooks module that cannot import this file, so it carries a mirror
+ * (`apps/hook/hooks/mod/enabled.ts`) that `enabled.test.ts` keeps in step.
+ */
+export function resolveClaudeCodeMod(
+  config: PlannotatorConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const v = env.PLANNOTATOR_CLAUDE_MOD?.trim().toLowerCase();
+  if (v === "1" || v === "true" || v === "on") return true;
+  if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
+  return coerceConfigBoolean(config.claudeCodeMod, false);
 }
 
 /** The PLANNOTATOR_AUTO_UPDATE override, or undefined when it does not decide. */

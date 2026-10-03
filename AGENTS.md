@@ -148,7 +148,8 @@ claude --plugin-dir ./apps/hook
 | `PLANNOTATOR_SHARE` | Set to `disabled` to turn off URL sharing entirely, including Guided Review share links (the review UI hides "Create share link", `POST /api/guide/:jobId/share` answers `403 { error: "sharing disabled" }`, and `plannotator guide share` refuses with exit 1). Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "share": "disabled" }`); the env var takes precedence. |
 | `PLANNOTATOR_SHARE_URL` | Custom base URL for share links (self-hosted portal). Default: `https://share.plannotator.ai`. |
 | `PLANNOTATOR_PASTE_URL` | Base URL of the paste service API for short URL sharing. Default: `https://plannotator-paste.plannotator.workers.dev`. |
-| `PLANNOTATOR_HOST_RESULT_FILE` | Set by a host that starts the CLI detached (the Claude Code mod): when a review, annotate, annotate-last or `claude-mod-plan` session settles, the CLI writes one JSON decision record there atomically, with the agent message composed from the configured prompts. Taken at startup and removed from the environment. Stdout is unchanged. See "Claude Code mod". |
+| `PLANNOTATOR_CLAUDE_MOD` | Opt-in switch for the Claude Code mod (non-blocking plan review, annotate, code review and annotate-last, plus Ask this session; see "Claude Code mod"). Set to `1` / `true` / `on` to enable, `0` / `false` / `off` / `disabled` to force off; empty or unrecognized counts as unset. **Default: off**: a Claude Code that runs hooks modules (2.1.287+) loads the plugin's module for everyone, so until the owner makes it the default the module stays inert (every hook passes through, no command is registered, no environment is set) and the classic PermissionRequest hook and `/plannotator-*` skills run exactly as before. Can also be set via `~/.plannotator/config.json` (`{ "claudeCodeMod": true }`, read from the data dir); the env var takes precedence (`resolveClaudeCodeMod` in `packages/shared/config.ts`, mirrored by `apps/hook/hooks/mod/enabled.ts` because a hooks module can import only its own files; `enabled.test.ts` keeps them in step). Read once when Claude Code starts, so a change applies to the next session start. Set it in the shell that starts Claude Code or in Claude Code's `settings.json` `env`. |
+| `PLANNOTATOR_HOST_RESULT_FILE` | Set by a host that starts the CLI detached (the Claude Code mod): when a review, annotate, annotate-last or `claude-mod-plan` session settles, the CLI writes one JSON decision record there atomically (mode 0600), with the agent message composed from the configured prompts. Only a path named `result.json` inside `<data dir>/claude-code-mod/` is accepted (`isAllowedHostResultPath`); anything else is ignored with a stderr warning, so the variable cannot make the CLI create or replace an arbitrary file. Taken at startup and removed from the environment. Stdout is unchanged. See "Claude Code mod". |
 | `PLANNOTATOR_SESSION_TAG` | Set by the Claude Code mod in its session's environment (`claude-code:<session id>`), so processes the session starts can be matched to it; recorded as `hostSession` in the `sessions/` registry. Not meant to be set by hand. |
 | `PLANNOTATOR_MOD_DEBUG` | Set to `1` before starting Claude Code to have the Claude Code mod write `claude-code-mod/debug.log` in the data dir (launches, results, turns, bridge commands). Default: off. |
 | `PLANNOTATOR_ORIGIN` | Explicit agent-origin override at the top of the detection chain. Valid values: `claude-code`, `amp`, `droid`, `opencode`, `codex`, `copilot-cli`, `gemini-cli`, `kiro-cli`, `mistral-vibe`, `pi`, `oh-my-pi`. Invalid values silently fall through to env-based detection. Unset by default. |
@@ -291,6 +292,15 @@ as a message from the `plannotator` plugin). UX spec:
 questions are not answered yet, and the conservative choices below are the
 ones taken).
 
+**Opt-in (`PLANNOTATOR_CLAUDE_MOD=1` or `{ "claudeCodeMod": true }`).** On
+current Claude Code hooks modules load even with `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS`
+unset, so shipping the module would otherwise switch every 2.1.287+ user to the
+non-blocking flows on the next release. With the knob off (the default)
+`session.start` stops before doing anything (no `$.command.register`, no
+`$.env.set`, no `$.store`, no process) and every other hook passes straight
+through with `next(e)`, so the classic PermissionRequest hook and the
+`/plannotator-*` skills run as they do without mods. See the env table row.
+
 **Inert without mods.** Checked live: Claude Code 2.1.150 (no hooks modules)
 validates and loads the plugin with the `modules` key, ignores it, and runs the
 classic PermissionRequest command hook (the blocking review) exactly as before;
@@ -328,7 +338,15 @@ call on without the mod. Once a review is open, a 1 s `$.clock.every` timer
 ("the review server stopped … your draft is saved"), and every 15 s checks the
 pid with `kill -0`. Open launches and a pending plan approval persist in
 `$.store` and reattach on `session.start` for the same session id
-(`--resume`, `--continue`, a restart). Servers outlive Claude Code on purpose:
+(`--resume`, `--continue`, a restart). `session.start` does not fire for
+`/clear` or an in-process resume (the process goes on under another session
+id), so `session.end` disposes the instance (timer and bridges stop; nothing is
+delivered into the next session) and the next hook that needs the mod makes a
+new one for the current id, restoring that session's open reviews. The launch
+directory is created owner-only (`umask 077`, `chmod 700`) before `stdin` is
+written; once a decision is delivered its files are removed (`cleanupArgv`),
+except `feedback.md`, which Claude reads afterwards. A launch whose server
+crashed keeps its directory (its `stderr` explains why). Servers outlive Claude Code on purpose:
 the wrapper ignores SIGHUP and starts the CLI under `nohup` (a closing terminal
 otherwise took the server with it), so closing the terminal does not lose a
 review; verified live, `claude --continue` reattached and delivered it.
@@ -425,7 +443,11 @@ an `ask` is submitted as a real turn (`$.prompt.submit`), identified at
 `busy` = a turn is running (pushed on `turn.start` / `turn.complete`, not only
 at the next poll); `interrupt` aborts the running turn (`$.turn.abort`);
 cancel aborts our own turn, or, while it is still queued, confirms at once and
-aborts its turn the moment it starts. Plan review does not block the session
+aborts its turn the moment it starts. A turn is the question's only when the
+prompt that started it entered with origin plugin `plannotator` (the
+`prompt.submit` hook arms the next `turn.start`); the text match alone never
+claims a turn, so a prompt the user typed can neither be streamed to
+Plannotator nor aborted by a cancel, whatever it says. Plan review does not block the session
 under the mod, so the status is never `blocked` and plan review gets real turns
 too (verified live). Polls ask for 15 s (750 ms while our question streams, so
 deltas flush), and stop on 401/403/404/405/503 (`404` = an older CLI without
