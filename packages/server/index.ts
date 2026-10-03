@@ -172,6 +172,10 @@ export async function startPlannotatorServer(
   // shows and a stale one is refused (409), so nobody approves unseen text.
   let planRevision = 0;
   let decisionSettled = false;
+  // Set the moment a decision passes the revision check, before its awaits
+  // (note integrations): updatePlan then refuses, so the plan a decision
+  // names cannot be swapped while that decision is still being recorded.
+  let decisionClaimed = false;
 
   const isRemote = isRemoteSession();
   const wslFlag = await isWSL();
@@ -584,6 +588,7 @@ export async function startPlannotatorServer(
             let draftGeneration: number | undefined;
             const rawApproveBody = (await req.json().catch(() => ({}))) as Record<string, unknown> | null;
             if (isStaleRevision(rawApproveBody)) return staleRevisionResponse();
+            decisionClaimed = true;
             try {
               const body = (rawApproveBody ?? {}) as {
                 obsidian?: ObsidianConfig;
@@ -678,6 +683,7 @@ export async function startPlannotatorServer(
             let answersOnly = false;
             const rawDenyBody = (await req.json().catch(() => null)) as Record<string, unknown> | null;
             if (isStaleRevision(rawDenyBody)) return staleRevisionResponse();
+            decisionClaimed = true;
             try {
               if (!rawDenyBody || typeof rawDenyBody !== "object") throw new Error("no body");
               const body = rawDenyBody as {
@@ -777,7 +783,7 @@ export async function startPlannotatorServer(
     waitForDecision: () => decisionPromise,
     ...(donePromise && { waitForDone: () => donePromise }),
     updatePlan: (next) => {
-      if (mode === "archive" || decisionSettled) return null;
+      if (mode === "archive" || decisionSettled || decisionClaimed) return null;
       if (next === plan) return { revision: planRevision, version: versionInfo.version, unchanged: true };
       // Same bookkeeping a resubmission gets from a fresh server.
       slug = generateSlug(next);

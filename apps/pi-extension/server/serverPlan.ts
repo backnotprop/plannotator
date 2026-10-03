@@ -212,6 +212,10 @@ export async function startPlanReviewServer(options: {
 	let resolveDecision!: (result: PlanReviewDecision) => void;
 	const decisionListeners = new Set<(result: PlanReviewDecision) => void | Promise<void>>();
 	let decisionSettled = false;
+	// Set the moment a decision passes the revision check, before its awaits
+	// (note integrations): updatePlan then refuses, so the plan a decision
+	// names cannot be swapped while that decision is still being recorded.
+	let decisionClaimed = false;
 	const decisionPromise = new Promise<PlanReviewDecision>((r) => {
 		resolveDecision = r;
 	});
@@ -461,6 +465,7 @@ export async function startPlanReviewServer(options: {
 				refuseStaleRevision(res);
 				return;
 			}
+			decisionClaimed = true;
 			try {
 				draftGeneration = readDraftGenerationFromBody(body);
 				if (body.feedback) feedback = body.feedback as string;
@@ -555,6 +560,7 @@ export async function startPlanReviewServer(options: {
 				refuseStaleRevision(res);
 				return;
 			}
+			decisionClaimed = true;
 			try {
 				draftGeneration = readDraftGenerationFromBody(body);
 				feedback = (body.feedback as string) || feedback;
@@ -611,7 +617,7 @@ export async function startPlanReviewServer(options: {
 			};
 		},
 		updatePlan: (plan) => {
-			if (options.mode === "archive" || decisionSettled) return null;
+			if (options.mode === "archive" || decisionSettled || decisionClaimed) return null;
 			if (plan === currentPlan) {
 				return { revision: planRevision, version: versionInfo?.version ?? 0, unchanged: true };
 			}
