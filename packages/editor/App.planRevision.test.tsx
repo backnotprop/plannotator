@@ -9,6 +9,9 @@
  *  - A 409 (stale revision) must NOT mark the review decided: the tab has to
  *    load the revised plan in place and let the reviewer decide again, with
  *    the next decision naming the new revision.
+ *  - A revision must not load while a comment composer is open: applying it
+ *    re-renders the document under the composer and the half-written comment
+ *    is lost. It must load once the composer closes.
  *  - A server that never revises (no `planRevision` on /api/plan, e.g. the
  *    Claude Code plan server) must keep sending the legacy body and never
  *    poll the revision endpoint.
@@ -124,6 +127,17 @@ async function waitUntil(check: () => boolean, attempts = 40): Promise<void> {
   if (!check()) throw new Error("condition not reached");
 }
 
+/** Real-time wait for the 2s revision poll (settle() alone runs no timers). */
+async function waitFor(check: () => boolean, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error("condition not reached");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+  }
+}
+
 function approveButton(): HTMLButtonElement | undefined {
   return Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
     // The header button renders a compact "OK" label beside "Approve".
@@ -186,6 +200,42 @@ describe.if(hasDom)("plan revisions pushed into an open review", () => {
     await waitUntil(() => server.decisions.length === 2);
     expect(server.decisions[1]).toMatchObject({ endpoint: "/api/approve", body: { planRevision: 1 } });
   });
+
+  test("a revision waits while a comment composer is open and loads once it closes", async () => {
+    await mountPlan();
+    const globalButton = document.querySelector<HTMLButtonElement>('button[title="Add global comment"]');
+    expect(globalButton).not.toBeNull();
+    await act(async () => globalButton!.click());
+    await waitUntil(() => !!document.querySelector('[data-comment-popover="true"] textarea'));
+    const textarea = document.querySelector<HTMLTextAreaElement>('[data-comment-popover="true"] textarea')!;
+    await act(async () => {
+      const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      setValue.call(textarea, "Half-written sentinel charlie");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    // The agent revises while the reviewer is typing.
+    server.revision = 1;
+    server.plan = V2;
+    const pollsBefore = server.revisionPolls;
+    await waitFor(() => server.revisionPolls > pollsBefore, 4000);
+    await waitFor(() => false, 600).catch(() => undefined);
+
+    // Held: v1 still on screen, the composer and its text intact.
+    expect(document.body.textContent).toContain("sentinel alpha");
+    expect(document.body.textContent).not.toContain("sentinel bravo");
+    expect(document.querySelector<HTMLTextAreaElement>('[data-comment-popover="true"] textarea')?.value).toBe("Half-written sentinel charlie");
+
+    // Finishing the comment closes the composer; the revision then loads.
+    const add = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-comment-popover="true"] button'))
+      .find((button) => button.textContent?.trim() === "Add");
+    expect(add).toBeDefined();
+    await act(async () => add!.click());
+    await waitFor(() => document.body.textContent!.includes("sentinel bravo"), 4000);
+    expect(document.querySelector('[data-comment-popover="true"]')).toBeNull();
+    // The finished comment survives the revision.
+    expect(document.body.textContent).toContain("Half-written sentinel charlie");
+  }, 15000);
 
   test("a server that never revises gets the legacy body and no polling", async () => {
     server.revision = undefined;

@@ -3991,7 +3991,9 @@ const App: React.FC = () => {
       toast('The agent sent a revised plan', {
         description: blocker === 'edits'
           ? 'It loads when you finish or discard your edits.'
-          : 'It loads when you return to the plan.',
+          : blocker === 'composer'
+            ? 'It loads when you finish or close your comment.'
+            : 'It loads when you return to the plan.',
       });
     },
   });
