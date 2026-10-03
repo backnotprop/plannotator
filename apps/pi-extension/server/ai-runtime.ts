@@ -5,6 +5,7 @@ import { Readable } from "node:stream";
 import { isAIEndpointPath } from "../generated/ai/endpoints.ts";
 import { resolveCommandFromWhichOutput } from "../generated/ai/providers/command-path.ts";
 import type { SessionBridge } from "../generated/ai/session-bridge.ts";
+import { isLoopbackHostHeader } from "../generated/loopback-host.ts";
 import { handleApiNotFound, json, toWebRequest } from "./helpers.ts";
 
 export interface PiAIRuntime {
@@ -17,6 +18,12 @@ export interface CreatePiAIRuntimeOptions {
 	getCwd?: () => string;
 	/** "Ask this session": the in-process bridge to the Pi session that opened this server. */
 	sessionBridge?: SessionBridge;
+	/**
+	 * The port this server listens on, once bound. Required for the bridge to
+	 * answer: its requests must carry a loopback Host with exactly this port
+	 * (DNS-rebinding guard). Undefined (not bound yet) refuses bridge requests.
+	 */
+	getServerPort?: () => number | undefined;
 }
 
 function whichCmd(cmd: string): string | null {
@@ -133,6 +140,8 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 					await Promise.allSettled(modelDiscovery);
 				},
 				beforeProviderSession: discovery.beforeProviderSession,
+				authorizeSessionBridgeRequest: (req: Request) =>
+					isLoopbackHostHeader(req.headers.get("host"), options.getServerPort?.()),
 			}),
 			dispose: () => {
 				// Detach first: tearing the sessions down must not stop a turn the

@@ -1818,7 +1818,9 @@ export async function startReviewServer(
   });
 
   // AI provider setup (graceful — capabilities report unavailable if no provider is registered)
-  const aiRuntime = aiEnabled ? await createAIRuntime({ getCwd: resolveAgentCwd, sessionBridge: options.sessionBridge }) : null;
+  // Set once bound: "Ask this session" answers only a loopback Host with this port.
+  let boundPort: number | undefined;
+  const aiRuntime = aiEnabled ? await createAIRuntime({ getCwd: resolveAgentCwd, sessionBridge: options.sessionBridge, getServerPort: () => boundPort }) : null;
 
   const isRemote = isRemoteSession();
   // The app page is served compressed only to sessions reachable from another
@@ -4028,6 +4030,7 @@ export async function startReviewServer(
   );
 
   const port = server.port!;
+  boundPort = port;
   serverUrl = buildAdvertisedUrl(port);
   agentApiUrl = `http://127.0.0.1:${port}`;
   const exitHandler = () => agentJobs.killAll();

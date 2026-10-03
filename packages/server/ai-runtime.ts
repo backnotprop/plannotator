@@ -11,6 +11,7 @@ import {
   type SessionBridge,
 } from "@plannotator/ai";
 import { resolveWindowsCommandShim } from "@plannotator/ai/providers/command-path";
+import { isLoopbackHostHeader } from "@plannotator/shared/loopback-host";
 
 export interface AIRuntime {
   endpoints: AIEndpoints;
@@ -28,6 +29,12 @@ interface CreateAIRuntimeOptions {
    * SDK providers, so the server default is unchanged; the client prefers it.
    */
   sessionBridge?: SessionBridge;
+  /**
+   * The port this server listens on, once bound. Required for the bridge to
+   * answer: its requests must carry a loopback Host with exactly this port
+   * (DNS-rebinding guard). Undefined (not bound yet) refuses bridge requests.
+   */
+  getServerPort?: () => number | undefined;
 }
 
 export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Promise<AIRuntime> {
@@ -123,6 +130,8 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
       await Promise.allSettled(modelDiscovery);
     },
     beforeProviderSession: discovery.beforeProviderSession,
+    authorizeSessionBridgeRequest: (req) =>
+      isLoopbackHostHeader(req.headers.get("host"), options.getServerPort?.()),
   });
 
   return {

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { request as httpRequest } from "node:http";
 import { createPiSessionBridgeHub, PLANNOTATOR_ASK_CUSTOM_TYPE } from "./pi-session-bridge.ts";
 import { SESSION_ASK_HEADER, SessionBridgeProvider } from "./generated/ai/session-bridge.ts";
 import type { AIMessage } from "./generated/ai/types.ts";
@@ -336,6 +337,25 @@ describe("Pi annotate server with Ask this session", () => {
 					context: { mode: "annotate", annotate: { content: "# Notes\n", filePath: file } },
 				}),
 			})).json() as { sessionId: string };
+
+			// DNS rebinding: same socket, foreign Host header. Refused before the
+			// question reaches the session.
+			const port = Number(new URL(server.url).port);
+			const rebound = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+				const req = httpRequest(
+					{ host: "127.0.0.1", port, method: "POST", path: "/api/ai/query", headers: { host: `evil.example:${port}`, "content-type": "application/json" } },
+					(res) => {
+						let body = "";
+						res.on("data", (chunk) => { body += chunk; });
+						res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+					},
+				);
+				req.on("error", reject);
+				req.end(JSON.stringify({ sessionId, prompt: "injected" }));
+			});
+			expect(rebound.status).toBe(403);
+			expect(rebound.body).toContain("session_bridge_forbidden_host");
+			expect(host.sent).toHaveLength(0);
 
 			// Node flushes SSE headers with the first chunk, so drive the turn before awaiting.
 			const response = fetch(`${server.url}/api/ai/query`, {

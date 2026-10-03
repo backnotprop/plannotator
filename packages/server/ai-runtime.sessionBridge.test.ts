@@ -28,16 +28,33 @@ describe("createAIRuntime (Bun) with a session bridge", () => {
         status: () => "ready",
         ask: (req, sink, signal) => asks.push({ req, sink, signal }),
       };
-      const runtime = await createAIRuntime({ cwd: ${JSON.stringify(dir)}, sessionBridge: bridge });
+      const runtime = await createAIRuntime({ cwd: ${JSON.stringify(dir)}, sessionBridge: bridge, getServerPort: () => 4321 });
       const caps = await (await runtime.endpoints["/api/ai/capabilities"](
         new Request("http://localhost/api/ai/capabilities"),
       )).json();
+      const createWithHost = (host) => runtime.endpoints["/api/ai/session"](new Request("http://localhost/api/ai/session", {
+        method: "POST",
+        headers: { host },
+        body: JSON.stringify({ providerId: "session-bridge", context: { mode: "code-review", review: { patch: "" } } }),
+      }));
+      const hostStatus = {};
+      for (const host of ["localhost:4321", "127.0.0.1:4321", "127.9.8.7:4321", "[::1]:4321", "evil.example:4321", "localhost:9999", "localhost", "127.0.0.1.evil.example:4321"]) {
+        hostStatus[host] = (await createWithHost(host)).status;
+      }
       const created = await (await runtime.endpoints["/api/ai/session"](new Request("http://localhost/api/ai/session", {
         method: "POST",
+        headers: { host: "localhost:4321" },
         body: JSON.stringify({ providerId: "session-bridge", context: { mode: "code-review", review: { patch: "" } } }),
       }))).json();
+      const rebound = await runtime.endpoints["/api/ai/query"](new Request("http://localhost/api/ai/query", {
+        method: "POST",
+        headers: { host: "evil.example:4321" },
+        body: JSON.stringify({ sessionId: created.sessionId, prompt: "q" }),
+      }));
+      const reboundStatus = rebound.status;
       const query = runtime.endpoints["/api/ai/query"](new Request("http://localhost/api/ai/query", {
         method: "POST",
+        headers: { host: "localhost:4321" },
         body: JSON.stringify({ sessionId: created.sessionId, prompt: "q" }),
       }));
       const response = await query;
@@ -53,6 +70,9 @@ describe("createAIRuntime (Bun) with a session bridge", () => {
         label: bridgeEntry.label,
         status: bridgeEntry.sessionBridge.status,
         hostSignalAborted: asks[0].signal.aborted,
+        hostStatus,
+        reboundStatus,
+        asksFromRebound: asks.length,
       }));
     `);
     const proc = Bun.spawn([process.execPath, runner], {
@@ -74,6 +94,19 @@ describe("createAIRuntime (Bun) with a session bridge", () => {
       status: "ready",
       // Teardown (a decision or exit) must not stop a turn the session runs for us.
       hostSignalAborted: false,
+      // DNS-rebinding guard: only a loopback name with the server's own port.
+      hostStatus: {
+        "localhost:4321": 200,
+        "127.0.0.1:4321": 200,
+        "127.9.8.7:4321": 200,
+        "[::1]:4321": 200,
+        "evil.example:4321": 403,
+        "localhost:9999": 403,
+        localhost: 403,
+        "127.0.0.1.evil.example:4321": 403,
+      },
+      reboundStatus: 403,
+      asksFromRebound: 1,
     });
   }, 15_000);
 });

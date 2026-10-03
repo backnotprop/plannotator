@@ -123,6 +123,7 @@ export {
   createBestEffortOnce,
   createDeferredModelDiscovery,
   isAIEndpointPath,
+  SESSION_BRIDGE_FORBIDDEN_HOST,
 } from "./endpoints.ts";
 export type {
   AIEndpoints,

@@ -164,7 +164,9 @@ export async function startPlannotatorServer(
   const draftKey = mode !== "archive" ? contentHash(plan) : "";
   const editorAnnotations = mode !== "archive" ? createEditorAnnotationHandler() : null;
   const externalAnnotations = mode !== "archive" ? createExternalAnnotationHandler("plan") : null;
-  const aiRuntime = mode !== "archive" && resolveAIEnabled() ? await createAIRuntime({ sessionBridge: options.sessionBridge }) : null;
+  // Set once bound: "Ask this session" answers only a loopback Host with this port.
+  let boundPort: number | undefined;
+  const aiRuntime = mode !== "archive" && resolveAIEnabled() ? await createAIRuntime({ sessionBridge: options.sessionBridge, getServerPort: () => boundPort }) : null;
   const slug = mode !== "archive" ? generateSlug(plan) : "";
 
   // Lazy cache for in-session archive browsing (plan review sidebar tab)
@@ -676,6 +678,7 @@ export async function startPlannotatorServer(
   );
 
   const port = server.port!;
+  boundPort = port;
   const serverUrl = buildAdvertisedUrl(port);
   let stopPromise: Promise<void> | undefined;
   const stop = () => {

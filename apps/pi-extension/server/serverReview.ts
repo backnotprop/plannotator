@@ -1866,7 +1866,9 @@ export async function startReviewServer(options: {
 		resolveDecision = r;
 	});
 
-	const aiRuntime = aiEnabled ? await createPiAIRuntime({ getCwd: resolveAgentCwd, sessionBridge: options.sessionBridge }) : null;
+	// Set once bound: "Ask this session" answers only a loopback Host with this port.
+	let boundPort: number | undefined;
+	const aiRuntime = aiEnabled ? await createPiAIRuntime({ getCwd: resolveAgentCwd, sessionBridge: options.sessionBridge, getServerPort: () => boundPort }) : null;
 
 	const server = createServer(async (req, res) => {
 		const url = requestUrl(req);
@@ -3818,6 +3820,7 @@ export async function startReviewServer(options: {
 	});
 
 	const { port, portSource } = await listenOnPort(server);
+	boundPort = port;
 	// Remote sessions serve the app page compressed (#1617); start gzip (what
 	// browsers ask for over plain http) now so the first load does not wait.
 	if (isRemoteSession()) prewarmAppHtml(options.htmlContent, likelyAppHtmlEncoding(false));

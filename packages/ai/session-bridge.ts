@@ -162,10 +162,13 @@ export class SessionBridgeProvider implements AIProvider {
 	private inFlight: SessionBridgeSession | null = null;
 	private closing = false;
 
-	constructor(
-		readonly bridge: SessionBridge,
-		options: SessionBridgeProviderOptions = {},
-	) {
+	// Explicit fields, not parameter properties: Pi's AI runtime (which
+	// imports this through endpoints.ts) must also load under Node's
+	// strip-only TypeScript.
+	readonly bridge: SessionBridge;
+
+	constructor(bridge: SessionBridge, options: SessionBridgeProviderOptions = {}) {
+		this.bridge = bridge;
 		this.capabilities = { fork: false, resume: false, streaming: true, tools: bridge.modes.turn };
 		this.label = sessionBridgeLabel(bridge.host);
 		this.pollIntervalMs = options.pollIntervalMs ?? 250;
@@ -308,11 +311,13 @@ const BLOCKED_TEXT = "This session is waiting on this Plannotator decision, so i
 const BUSY_TEXT = "The session is busy with another turn.";
 
 export class SessionBridgeSession extends BaseSession {
-	constructor(
-		private readonly provider: SessionBridgeProvider,
-		private readonly context: AIContext,
-	) {
+	private readonly provider: SessionBridgeProvider;
+	private readonly context: AIContext;
+
+	constructor(provider: SessionBridgeProvider, context: AIContext) {
 		super({ parentSessionId: null });
+		this.provider = provider;
+		this.context = context;
 	}
 
 	async *query(prompt: string, options?: AIQueryOptions): AsyncIterable<AIMessage> {

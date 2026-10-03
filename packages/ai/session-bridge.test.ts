@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { createAIEndpoints } from "./endpoints.ts";
+import { createAIEndpoints, SESSION_BRIDGE_FORBIDDEN_HOST, type AIEndpointDeps } from "./endpoints.ts";
 import { ProviderRegistry } from "./provider.ts";
+import { BaseSession } from "./base-session.ts";
 import { SessionManager } from "./session-manager.ts";
 import {
   SESSION_ASK_HEADER,
@@ -262,21 +263,29 @@ describe("SessionBridgeProvider", () => {
 });
 
 describe("Ask this session over the shared /api/ai endpoints", () => {
-  function setup(host: ReturnType<typeof fakeBridge>, other = true) {
+  function setup(
+    host: ReturnType<typeof fakeBridge>,
+    other = true,
+    authorizeSessionBridgeRequest: AIEndpointDeps["authorizeSessionBridgeRequest"] = () => true,
+  ) {
     const registry = new ProviderRegistry();
     if (other) {
       registry.register({
         name: "claude-agent-sdk",
         capabilities: { fork: false, resume: false, streaming: true, tools: true },
         models: [],
-        createSession: async () => { throw new Error("unused"); },
+        createSession: async () => new (class extends BaseSession {
+          async *query(): AsyncIterable<AIMessage> {
+            yield { type: "result", sessionId: this.id, success: true, result: "sdk" };
+          }
+        })({ parentSessionId: null }),
         forkSession: async () => { throw new Error("unused"); },
         resumeSession: async () => { throw new Error("unused"); },
         dispose() {},
       });
     }
     registry.register(new SessionBridgeProvider(host.bridge, { pollIntervalMs: 5 }), SESSION_BRIDGE_PROVIDER_NAME);
-    return createAIEndpoints({ registry, sessionManager: new SessionManager() });
+    return createAIEndpoints({ registry, sessionManager: new SessionManager(), authorizeSessionBridgeRequest });
   }
 
   test("capabilities report the bridge's label and live status without changing the server default", async () => {
@@ -320,5 +329,54 @@ describe("Ask this session over the shared /api/ai endpoints", () => {
     expect(text).toContain('"status":"waiting"');
     expect(text).toContain('"delta":"hi"');
     expect(text).toContain("[DONE]");
+  });
+  test("the bridge refuses requests the runtime's host guard rejects; other providers never ask it", async () => {
+    const host = fakeBridge("ready");
+    let allow = true;
+    const consulted: string[] = [];
+    const endpoints = setup(host, true, (req) => {
+      consulted.push(new URL(req.url).pathname);
+      return allow;
+    });
+    const create = (providerId: string) => endpoints["/api/ai/session"](new Request("http://x/api/ai/session", {
+      method: "POST",
+      body: JSON.stringify({ context: CONTEXT, providerId }),
+    }));
+
+    // A session created while allowed cannot be queried once the guard refuses
+    // (a rebinding page that learned the id from /api/ai/sessions).
+    const { sessionId } = await (await create(SESSION_BRIDGE_PROVIDER_NAME)).json();
+    allow = false;
+    const refusedQuery = await endpoints["/api/ai/query"](new Request("http://x/api/ai/query", {
+      method: "POST",
+      body: JSON.stringify({ sessionId, prompt: "q" }),
+    }));
+    expect(refusedQuery.status).toBe(403);
+    expect((await refusedQuery.json()).code).toBe(SESSION_BRIDGE_FORBIDDEN_HOST);
+    const refusedCreate = await create(SESSION_BRIDGE_PROVIDER_NAME);
+    expect(refusedCreate.status).toBe(403);
+    expect(host.asks).toHaveLength(0);
+
+    consulted.length = 0;
+    const sdk = await create("claude-agent-sdk");
+    expect(sdk.status).toBe(200);
+    const sdkQuery = await endpoints["/api/ai/query"](new Request("http://x/api/ai/query", {
+      method: "POST",
+      body: JSON.stringify({ sessionId: (await sdk.json()).sessionId, prompt: "q" }),
+    }));
+    expect(await sdkQuery.text()).toContain('"result":"sdk"');
+    expect(consulted).toEqual([]);
+  });
+
+  test("without a host guard the bridge never answers", async () => {
+    const host = fakeBridge("ready");
+    const registry = new ProviderRegistry();
+    registry.register(new SessionBridgeProvider(host.bridge), SESSION_BRIDGE_PROVIDER_NAME);
+    const endpoints = createAIEndpoints({ registry, sessionManager: new SessionManager() });
+    const res = await endpoints["/api/ai/session"](new Request("http://x/api/ai/session", {
+      method: "POST",
+      body: JSON.stringify({ context: CONTEXT, providerId: SESSION_BRIDGE_PROVIDER_NAME }),
+    }));
+    expect(res.status).toBe(403);
   });
 });

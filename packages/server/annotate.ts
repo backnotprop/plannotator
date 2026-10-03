@@ -478,7 +478,9 @@ export async function startAnnotateServer(
     return legacyDurable && (archived || !hasContent);
   };
   const externalAnnotations = createExternalAnnotationHandler("plan");
-  const aiRuntime = resolveAIEnabled() ? await createAIRuntime({ sessionBridge: options.sessionBridge }) : null;
+  // Set once bound: "Ask this session" answers only a loopback Host with this port.
+  let boundPort: number | undefined;
+  const aiRuntime = resolveAIEnabled() ? await createAIRuntime({ sessionBridge: options.sessionBridge, getServerPort: () => boundPort }) : null;
   const htmlAssets = createHtmlAssetRegistry();
   const agentTerminal = await createBunAgentTerminalBridge({
     enabled: supportsAnnotateAgentTerminalMode(mode),
@@ -1306,6 +1308,7 @@ export async function startAnnotateServer(
   );
 
   const port = server.port!;
+  boundPort = port;
   const serverUrl = buildAdvertisedUrl(port);
 
   if (liveApp) {

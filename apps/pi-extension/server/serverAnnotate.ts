@@ -521,7 +521,9 @@ export async function startAnnotateServer(options: {
 	const repoInfo = getRepoInfo();
 
 	const externalAnnotations = createExternalAnnotationHandler("plan");
-	const aiRuntime = resolveAIEnabled() ? await createPiAIRuntime({ sessionBridge: options.sessionBridge }) : null;
+	// Set once bound: "Ask this session" answers only a loopback Host with this port.
+	let boundPort: number | undefined;
+	const aiRuntime = resolveAIEnabled() ? await createPiAIRuntime({ sessionBridge: options.sessionBridge, getServerPort: () => boundPort }) : null;
 	const htmlAssets = createHtmlAssetRegistry();
 	let agentTerminalCapability: AgentTerminalCapability = {
 		enabled: false,
@@ -1204,6 +1206,7 @@ export async function startAnnotateServer(options: {
 	agentTerminalCapability = agentTerminal.capability;
 
 	const { port, portSource } = await listenOnPort(server);
+	boundPort = port;
 	// Remote sessions serve the app page compressed (#1617); start gzip (what
 	// browsers ask for over plain http) now so the first load does not wait.
 	if (isRemoteSession()) prewarmAppHtml(options.htmlContent, likelyAppHtmlEncoding(false));
