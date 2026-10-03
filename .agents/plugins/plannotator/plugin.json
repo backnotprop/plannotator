@@ -1,0 +1,6 @@
+{
+  "name": "plannotator",
+  "displayName": "Plannotator for Antigravity CLI",
+  "description": "Interactive browser-based plan review, git code review diffs, and document annotation for Antigravity CLI (agy).",
+  "version": "0.1.0"
+}

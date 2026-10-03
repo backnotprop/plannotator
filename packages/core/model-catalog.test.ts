@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+  ANTIGRAVITY_FALLBACK_MODELS,
   CLAUDE_FALLBACK_MODELS,
   CODEX_FALLBACK_MODELS,
+  antigravityCatalogFromModels,
   claudeCatalogFromSdk,
   claudeModelVersion,
   cliVersionFrom,
@@ -194,7 +196,7 @@ test("a current pick the catalog lacks stays visible in the picker", () => {
 });
 
 test("fallbacks: one default each, and every default effort is one the model lists", () => {
-  for (const list of [CLAUDE_FALLBACK_MODELS, CODEX_FALLBACK_MODELS]) {
+  for (const list of [CLAUDE_FALLBACK_MODELS, CODEX_FALLBACK_MODELS, ANTIGRAVITY_FALLBACK_MODELS]) {
     expect(list.filter((m) => m.default)).toHaveLength(1);
     for (const m of list) {
       if (m.defaultReasoningEffort) expect(m.reasoningEfforts?.map((e) => e.id)).toContain(m.defaultReasoningEffort);
@@ -202,6 +204,28 @@ test("fallbacks: one default each, and every default effort is one the model lis
   }
   // The launchers' Claude surface defaults must exist even without discovery.
   for (const alias of ["opus", "sonnet"]) expect(CLAUDE_FALLBACK_MODELS.some((m) => m.id === alias)).toBe(true);
+});
+
+test("antigravityCatalogFromModels parses agy models tab-separated output", () => {
+  const sample = `Fetching available models...
+gemini-3.8-flash-high\tGemini 3.8 Flash (High)
+gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)
+gemini-3.8-flash-low\tGemini 3.8 Flash (Low)
+gemini-3.1-pro-high\tGemini 3.1 Pro (High)
+gemini-3.1-pro-low\tGemini 3.1 Pro (Low)
+claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)
+gpt-oss-120b-medium\tGPT-OSS 120B (Medium)
+`;
+  const catalog = antigravityCatalogFromModels(sample);
+  expect(catalog).toHaveLength(4);
+  expect(catalog[0]).toMatchObject({ id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", default: true });
+  expect(catalog[0].reasoningEfforts?.map((e) => e.id)).toEqual(["high", "medium", "low"]);
+  expect(catalog[1]).toMatchObject({ id: "gemini-3.1-pro", label: "Gemini 3.1 Pro" });
+  expect(catalog[1].reasoningEfforts?.map((e) => e.id)).toEqual(["high", "low"]);
+  expect(catalog[2]).toMatchObject({ id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 (Thinking)" });
+  expect(catalog[2].reasoningEfforts).toBeUndefined();
+  expect(catalog[3]).toMatchObject({ id: "gpt-oss-120b-medium", label: "GPT-OSS 120B (Medium)" });
+  expect(catalog[3].reasoningEfforts).toBeUndefined();
 });
 
 test("claudeModelVersion reads major.minor and ignores date and [1m] suffixes", () => {

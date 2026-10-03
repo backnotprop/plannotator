@@ -28,6 +28,7 @@ export const AGENT_CONFIG = {
   'gemini-cli':  { name: 'Gemini CLI', badge: 'bg-sky-500/15 text-sky-400' },
   'oh-my-pi':    { name: 'Oh My Pi',    badge: 'bg-fuchsia-500/15 text-fuchsia-400' },
   'mistral-vibe': { name: 'Mistral Vibe', badge: 'bg-rose-500/15 text-rose-400' },
+  'antigravity': { name: 'Antigravity', badge: 'bg-indigo-500/15 text-indigo-400', aiProviderTypes: ['antigravity-ls'] },
 } as const satisfies Record<string, AgentConfigEntry>;
 
 /** All recognized origin values. */

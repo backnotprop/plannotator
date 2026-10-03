@@ -158,6 +158,23 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
     // OpenCode not available.
   }
 
+  try {
+    await import("@plannotator/ai/providers/antigravity-ls");
+    const rawAgyPath = process.env.ANTIGRAVITY_AGENTAPI_EXE || Bun.which("agy");
+    if (rawAgyPath || process.env.ANTIGRAVITY_LS_ADDRESS) {
+      const agyPath = rawAgyPath ? resolveWindowsCommandShim(rawAgyPath) : undefined;
+      const provider = await createProvider({
+        type: "antigravity-ls",
+        cwd,
+        ...(agyPath ? { executablePath: agyPath } : {}),
+      });
+      const providerId = registry.register(provider);
+      deferModelDiscovery(providerId, provider, { blockSession: false });
+    }
+  } catch {
+    // Antigravity not available.
+  }
+
   // Off in remote mode, in-process or pulled: anyone who can reach the session
   // URL could otherwise type into the agent session (same reasoning as the
   // agent terminal).

@@ -20,6 +20,7 @@ param(
     [switch]$SkipKiro,
     [switch]$SkipVibe,
     [switch]$SkipOpencode,
+    [switch]$SkipAntigravity,
     # Same shape as the per-agent switches, but scoped to the skills/slash
     # command sparse checkout rather than one agent's home: -SkipSkills turns
     # the whole fetch into a no-op for every scope it writes (Claude,
@@ -228,6 +229,7 @@ function Write-InstallFlags {
     if ($SkipKiro) { $ids += "skip-kiro" }
     if ($SkipVibe) { $ids += "skip-vibe" }
     if ($SkipOpencode) { $ids += "skip-opencode" }
+    if ($SkipAntigravity) { $ids += "skip-antigravity" }
     if ($SkipSkills) { $ids += "skip-skills" }
     $quoted = ($ids | ForEach-Object { '"' + $_ + '"' }) -join ","
     $path = Join-Path $configDir "install-flags.json"
@@ -401,6 +403,7 @@ $skipGeminiResolved = $false; $skipGeminiSource = ""
 $skipKiroResolved = $false;   $skipKiroSource = ""
 $skipVibeResolved = $false;   $skipVibeSource = ""
 $skipOpencodeResolved = $false; $skipOpencodeSource = ""
+$skipAntigravityResolved = $false; $skipAntigravitySource = ""
 # skipInstall.skills is not an agent - it opts out of the skills/slash-command
 # checkout for every scope at once - but it shares the same three layers.
 $skipSkillsResolved = $false; $skipSkillsSource = ""
@@ -419,6 +422,9 @@ if ($cfg -and $cfg.skipInstall) {
     }
     if ($cfg.skipInstall.opencode -is [bool] -and $cfg.skipInstall.opencode) {
         $skipOpencodeResolved = $true; $skipOpencodeSource = "config skipInstall.opencode"
+    }
+    if ($cfg.skipInstall.antigravity -is [bool] -and $cfg.skipInstall.antigravity) {
+        $skipAntigravityResolved = $true; $skipAntigravitySource = "config skipInstall.antigravity"
     }
     if ($cfg.skipInstall.skills -is [bool] -and $cfg.skipInstall.skills) {
         $skipSkillsResolved = $true; $skipSkillsSource = "config skipInstall.skills"
@@ -449,6 +455,11 @@ if ($env:PLANNOTATOR_SKIP_OPENCODE_INSTALL -match '^(1|true|yes)$') {
 } elseif ($env:PLANNOTATOR_SKIP_OPENCODE_INSTALL -match '^(0|false|no)$') {
     $skipOpencodeResolved = $false; $skipOpencodeSource = ""
 }
+if ($env:PLANNOTATOR_SKIP_ANTIGRAVITY_INSTALL -match '^(1|true|yes)$') {
+    $skipAntigravityResolved = $true; $skipAntigravitySource = "PLANNOTATOR_SKIP_ANTIGRAVITY_INSTALL"
+} elseif ($env:PLANNOTATOR_SKIP_ANTIGRAVITY_INSTALL -match '^(0|false|no)$') {
+    $skipAntigravityResolved = $false; $skipAntigravitySource = ""
+}
 if ($env:PLANNOTATOR_SKIP_SKILLS_INSTALL -match '^(1|true|yes)$') {
     $skipSkillsResolved = $true; $skipSkillsSource = "PLANNOTATOR_SKIP_SKILLS_INSTALL"
 } elseif ($env:PLANNOTATOR_SKIP_SKILLS_INSTALL -match '^(0|false|no)$') {
@@ -459,6 +470,7 @@ if ($SkipGemini) { $skipGeminiResolved = $true; $skipGeminiSource = "-SkipGemini
 if ($SkipKiro)   { $skipKiroResolved = $true;   $skipKiroSource = "-SkipKiro" }
 if ($SkipVibe)   { $skipVibeResolved = $true;   $skipVibeSource = "-SkipVibe" }
 if ($SkipOpencode) { $skipOpencodeResolved = $true; $skipOpencodeSource = "-SkipOpencode" }
+if ($SkipAntigravity) { $skipAntigravityResolved = $true; $skipAntigravitySource = "-SkipAntigravity" }
 if ($SkipSkills) { $skipSkillsResolved = $true; $skipSkillsSource = "-SkipSkills" }
 
 # Pre-flight: if verification is requested, reject tags older than the first
@@ -1583,6 +1595,139 @@ fs.writeFileSync('$($geminiSettings.Replace('\','/'))', JSON.stringify(settings,
     # (apps/gemini/commands) in the git-gated skills/commands install above.
 }
 
+# --- Google Antigravity CLI support ---
+$antigravityDir = "$env:USERPROFILE\.gemini\antigravity-cli"
+$antigravityConfigDir = "$env:USERPROFILE\.gemini\config"
+$antigravityAvailable = (Test-Path $antigravityDir) -or (Test-Path $antigravityConfigDir) -or [bool](Get-Command agy -ErrorAction SilentlyContinue)
+
+if ($antigravityAvailable -and $skipAntigravityResolved) {
+    Write-Host ""
+    Write-Host "Antigravity: detected, skipped ($skipAntigravitySource)."
+} elseif ($antigravityAvailable) {
+    $antigravityPluginsDir = "$antigravityConfigDir\plugins\plannotator"
+    New-Item -ItemType Directory -Force -Path $antigravityPluginsDir | Out-Null
+    New-Item -ItemType Directory -Force -Path "$antigravityPluginsDir\rules" | Out-Null
+    New-Item -ItemType Directory -Force -Path "$antigravityPluginsDir\skills\plan" | Out-Null
+
+    @'
+{
+  "name": "plannotator"
+}
+'@ | Set-Content -Path "$antigravityPluginsDir\plugin.json"
+
+    @'
+{
+  "plannotator": {
+    "enabled": true,
+    "PreToolUse": [
+      {
+        "matcher": "^(write_to_file|replace_file_content|multi_replace_file_content|submit_plan)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "plannotator",
+            "timeout": 345600
+          }
+        ]
+      }
+    ]
+  }
+}
+'@ | Set-Content -Path "$antigravityPluginsDir\hooks.json"
+
+    @'
+# Plannotator Agent Protocol & Architecture (Google Antigravity CLI)
+
+Plannotator is an interactive, browser-based plan review and annotation interface for AI coding agents. It provides a visual feedback loop before modifying repository code.
+
+---
+
+## 1. Core Capabilities & Architecture
+
+- **Interactive Plan Review**: When a plan file is written, Plannotator launches a browser review UI featuring visual GitHub-flavored markdown, Mermaid diagrams, clean vs. raw diff viewers against previous plan iterations, and line-by-line comment annotations.
+- **Deterministic Planning Lock**: When a plan is under review or rejected with user annotations, Plannotator enforces a workspace safety lock (`~/.plannotator/planning-locks/`). The agent is strictly prevented from editing source/code files until the user explicitly approves the plan in the browser.
+- **Inline Ask AI**: Reviewers can ask questions directly inside the plan browser. Plannotator queries the local `agy` CLI headlessly using the active Gemini model with zero external API keys.
+- **Single-Click Approval & Automation Tiers**: Reviewers approve plans with one click, restoring the desired automation level directly into Antigravity CLI via hook `permissionOverrides`.
+
+---
+
+## 2. Planning Protocol Workflow
+
+When the user asks to plan, architect, or design any multi-step task or refactor:
+
+1. **Artifact Destination**: Write the full technical implementation plan to `.agents/plans/<plan-name>.md` (or `plans/<plan-name>.md`, `<artifactDirectoryPath>/implementation_plan.md`) using `write_to_file`.
+2. **Full File Submissions**: Always write the complete plan using `write_to_file` with `Overwrite: true`. Do not use incremental string replacement (`replace_file_content`) on plan files.
+3. **Interactive Review**: Writing to the plan file triggers the `PreToolUse` hook, launching Plannotator in the user's browser and pausing tool execution.
+4. **Handling User Decisions**:
+   - **If Approved**: The planning lock is released, and granted permission overrides take effect. Proceed immediately with implementation.
+   - **If Changes Requested**: The hook denies the write with the user's line annotations and notes. You remain in planning mode. Read the feedback, address all concerns in the plan document, and resubmit the complete revised plan with `write_to_file`.
+5. **Preserve Plan Title**: Keep the top-level `# Plan Title` heading identical across revision rounds unless explicitly requested by the user, ensuring Plannotator tracks version diffs and history accurately against previous iterations.
+
+---
+
+## 3. Automation & Permission Modes
+
+Configured by the user in Plannotator Settings under **Permission Mode**:
+
+- **Auto-accept Edits (`acceptEdits` -- Default)**: Plannotator returns `"permissionOverrides": ["write_to_file", "replace_file_content", "multi_replace_file_content"]`. File writes during implementation proceed autonomously without prompts, while terminal commands (`run_command`) remain gated for safety.
+- **Bypass Permissions (`bypassPermissions`)**: Plannotator returns `"permissionOverrides": ["*"]`. All tools (file edits, bash commands, MCP tools, subagents) run uninterrupted (equivalent to `--dangerously-skip-permissions`).
+- **Manual Approval (`default`)**: No overrides returned; Antigravity prompts in the terminal for every tool execution.
+
+---
+
+## 4. Troubleshooting & Agent FAQs
+
+- **"Why was my file edit denied with a Deterministic Planning Lock error?"**:
+  You attempted to edit a project source file while a plan is pending review or was rejected with feedback. You must address the reviewer's feedback in the plan file and obtain approval before editing project source files.
+- **"How does the user unlock manually?"**:
+  If a session gets orphaned, running `plannotator unlock` in the terminal clears all active workspace locks.
+- **"Where are settings and snapshots stored?"**:
+  - Configuration: `~/.plannotator/config.json` (or UI Settings gear icon).
+  - Approved plans & feedback archive: `~/.plannotator/plans/` and `~/.plannotator/feedback/`.
+'@ | Set-Content -Path "$antigravityPluginsDir\rules\AGENTS.md"
+
+    @'
+---
+name: plan
+description: Use this skill whenever the user asks to plan, architect, design, outline, or review any non-trivial coding task, refactor, feature, or bugfix before editing code. Trigger proactively on prompts like "plan this", "create an implementation plan", "architect this refactor", "design a roadmap", or "map out the steps first"--even if Plannotator or /plan is not mentioned. Researches the codebase, formulates a technical implementation plan in .agents/plans/<plan-name>.md, and opens Plannotator for user review.
+---
+
+# Plannotator Plan
+
+Research codebase architecture, formulate a structured technical implementation plan, and obtain interactive user approval in Plannotator before modifying code.
+
+## When to Activate
+Activate this skill automatically whenever:
+- The user requests a plan, architecture design, roadmap, or technical specification.
+- The task involves multi-file refactoring, architectural tradeoffs, or potential breaking changes.
+- The user says "plan this", "how should we build X", "let's map out the steps", or "create an implementation plan".
+
+## Workflow
+
+### 1. Research & Explore
+- Read the relevant codebase files, interfaces, and caller spines to verify technical assumptions.
+- Identify edge cases, dependencies, and blast radius.
+
+### 2. Formulate the Plan
+Draft a structured plan containing:
+- **Goal Description**: Objective and architectural rationale.
+- **User Review Required**: Breaking changes, tradeoffs, or key decisions.
+- **Proposed Changes**: Specific files to modify or create with concrete diff sketches.
+- **Verification Plan**: Exact test commands and manual verification checks.
+
+### 3. Submit for Review
+- Write the complete plan to `.agents/plans/<plan-name>.md` using `write_to_file` with `Overwrite: true`.
+- Plannotator automatically opens the interactive review UI in the user's browser.
+
+### 4. Iterate on Feedback
+- If the write is denied, review the user's line annotations and notes returned by the hook.
+- Address all feedback directly inside the plan and resubmit the complete file using `write_to_file`.
+- Only proceed to implement code changes once the plan write succeeds (approval granted).
+'@ | Set-Content -Path "$antigravityPluginsDir\skills\plan\SKILL.md"
+
+    Write-Host "Installed Antigravity plugin to $antigravityPluginsDir"
+}
+
 Write-Host ""
 Write-Host "=========================================="
 Write-Host "  OPENCODE USERS"
@@ -1662,6 +1807,20 @@ if ($vibeAvailable) {
         Write-Host "plan-review hook is macOS/Linux-only; see the manual setup instructions"
         Write-Host "printed above to wire plan review on a macOS/Linux box."
         Write-Host "Note: improve-context (plan-mode enrichment) is not wired for Vibe."
+    }
+}
+if ($antigravityAvailable) {
+    Write-Host ""
+    Write-Host "=========================================="
+    Write-Host "  ANTIGRAVITY USERS"
+    Write-Host "=========================================="
+    Write-Host ""
+    if ($skipAntigravityResolved) {
+        Write-Host "Antigravity was detected, but the integration was skipped ($skipAntigravitySource)."
+        Write-Host "No files under $antigravityConfigDir\plugins\plannotator were written or removed."
+    } else {
+        Write-Host "Plannotator plugin is installed to $antigravityConfigDir\plugins\plannotator\"
+        Write-Host "Plan creation in Antigravity will automatically open the interactive review UI in browser."
     }
 }
 Write-Host ""

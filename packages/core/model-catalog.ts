@@ -80,6 +80,115 @@ export const CODEX_FALLBACK_MODELS: CatalogModel[] = [
   codex('gpt-5.5', 'GPT-5.5', ['low', 'medium', 'high', 'xhigh'], 'medium'),
 ];
 
+const antigravityFlashEfforts = effortList(['low', 'medium', 'high']);
+const antigravityProEfforts = effortList(['low', 'high']);
+
+export const ANTIGRAVITY_FALLBACK_MODELS: CatalogModel[] = [
+  {
+    id: 'gemini-3.8-flash',
+    label: 'Gemini 3.8 Flash',
+    reasoningEfforts: antigravityFlashEfforts,
+    defaultReasoningEffort: 'medium',
+    default: true,
+  },
+  {
+    id: 'gemini-3.7-flash',
+    label: 'Gemini 3.7 Flash',
+    reasoningEfforts: antigravityFlashEfforts,
+    defaultReasoningEffort: 'medium',
+  },
+  {
+    id: 'gemini-3.6-flash',
+    label: 'Gemini 3.6 Flash',
+    reasoningEfforts: antigravityFlashEfforts,
+    defaultReasoningEffort: 'medium',
+  },
+  {
+    id: 'gemini-3.1-pro',
+    label: 'Gemini 3.1 Pro',
+    reasoningEfforts: antigravityProEfforts,
+    defaultReasoningEffort: 'high',
+  },
+  {
+    id: 'claude-sonnet-4-6',
+    label: 'Claude Sonnet 4.6 (Thinking)',
+  },
+  {
+    id: 'claude-opus-4-6-thinking',
+    label: 'Claude Opus 4.6 (Thinking)',
+  },
+  {
+    id: 'gpt-oss-120b-medium',
+    label: 'GPT-OSS 120B (Medium)',
+  },
+];
+
+export function antigravityCatalogFromModels(text: string): CatalogModel[] {
+  const lines = (text ?? '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const groups = new Map<string, { label: string; efforts: string[] }>();
+
+  for (const line of lines) {
+    if (line.startsWith('Fetching') || line.startsWith('Use /model') || line.startsWith('Run agy')) {
+      continue;
+    }
+    const parts = line.split(/\t+/);
+    if (parts.length < 2) continue;
+    const rawId = parts[0].trim();
+    const rawLabel = parts[1].trim();
+    if (!rawId || !rawLabel) continue;
+
+    // Only Gemini models have effort variants (flash has low/medium/high, pro has low/high).
+    // Suffix format from `agy models`: e.g. gemini-3.8-flash-high / Gemini 3.8 Flash (High)
+    const effortMatch = /^(gemini-.+)-(low|medium|high|max)$/i.exec(rawId);
+    if (effortMatch) {
+      const baseId = effortMatch[1];
+      const effort = effortMatch[2].toLowerCase();
+      const baseLabel = rawLabel.replace(/\s*\((Low|Medium|High|Max)\)\s*$/i, '').trim();
+
+      const existing = groups.get(baseId);
+      if (existing) {
+        if (!existing.efforts.includes(effort)) {
+          existing.efforts.push(effort);
+        }
+      } else {
+        groups.set(baseId, { label: baseLabel || rawLabel, efforts: [effort] });
+      }
+    } else {
+      // Non-gemini model or model without effort option
+      if (!groups.has(rawId)) {
+        groups.set(rawId, { label: rawLabel, efforts: [] });
+      }
+    }
+  }
+
+  if (groups.size === 0) {
+    return ANTIGRAVITY_FALLBACK_MODELS;
+  }
+
+  const rows: CatalogModel[] = [];
+  let isFirst = true;
+
+  for (const [id, info] of groups) {
+    const supportedEfforts = info.efforts.length > 0 ? effortList(info.efforts) : undefined;
+    const defaultEffort = info.efforts.includes('medium')
+      ? 'medium'
+      : info.efforts.includes('high')
+        ? 'high'
+        : info.efforts[0];
+
+    rows.push({
+      id,
+      label: info.label,
+      ...(supportedEfforts ? { reasoningEfforts: supportedEfforts } : {}),
+      ...(defaultEffort ? { defaultReasoningEffort: defaultEffort } : {}),
+      ...(isFirst ? { default: true } : {}),
+    });
+    isFirst = false;
+  }
+
+  return rows;
+}
+
 /** Where a provider's model list came from: the installed tool, or the static fallback. */
 export type ModelsSource = 'fallback' | 'discovered';
 
