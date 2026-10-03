@@ -38,10 +38,14 @@ async function waitFor<T>(read: () => T | null | undefined, ms = 20_000): Promis
 function start(plan: string) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-claude-mod-plan-")));
   roots.push(root);
+  // The launch layout the mod uses: result.json must sit under the data dir's
+  // claude-code-mod/ folder or the CLI refuses the path.
+  const launch = join(root, "data", "claude-code-mod", "session-1", "launch-1");
+  mkdirSync(launch, { recursive: true });
   const files = {
-    ready: join(root, "ready"),
-    result: join(root, "result.json"),
-    revision: join(root, "revision.json"),
+    ready: join(launch, "ready"),
+    result: join(launch, "result.json"),
+    revision: join(launch, "revision.json"),
   };
   const proc = Bun.spawn([process.execPath, "run", entry, "claude-mod-plan"], {
     cwd: root,

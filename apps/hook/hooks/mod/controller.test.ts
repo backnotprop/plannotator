@@ -300,3 +300,55 @@ describe('restore', () => {
     expect(host.logs.some((line) => line.includes('Reattached'))).toBe(false)
   })
 })
+
+describe('session boundaries and launch hygiene', () => {
+  // The failure: after /clear (session.start does not fire, the process goes
+  // on under another session id) the old instance's timer delivered a review
+  // decision into the new, unrelated session.
+  test('a disposed instance delivers nothing; the session reattaches it when resumed', async () => {
+    const host = fakeHost()
+    serveOnLaunch(host)
+    const old = new PlannotatorMod(host, SESSION)
+    await old.runCommand('annotate', 'notes.md')
+    const call = launches(host)[0]!
+
+    old.dispose()
+    decide(host, call, { surface: 'annotate', decision: 'annotated', message: 'please fix', noop: false })
+    await host.tick()
+    expect(host.submits).toEqual([])
+
+    const resumed = new PlannotatorMod(host, SESSION)
+    await resumed.restore()
+    await host.tick()
+    expect(host.submits.filter((text) => text.includes('please fix'))).toHaveLength(1)
+  })
+
+  test('the launch directory is made owner-only before stdin is written, and cleaned after delivery', async () => {
+    const host = fakeHost()
+    serveOnLaunch(host)
+    const order: string[] = []
+    const write = host.writeFile
+    host.writeFile = async (path, text) => {
+      order.push(`write ${path.slice(path.lastIndexOf('/') + 1)}`)
+      return write(path, text)
+    }
+    const onRun = host.onRun
+    host.onRun = (call) => {
+      order.push(String(call.argv[3]))
+      return onRun(call)
+    }
+    const mod = new PlannotatorMod(host, SESSION)
+    await mod.runCommand('annotate', 'notes.md')
+    expect(order.slice(0, 3)).toEqual(['plannotator-mkdir', 'write stdin', 'plannotator-launch'])
+    expect(host.runs[0]?.argv[2]).toContain('umask 077')
+
+    decide(host, launches(host)[0]!, { surface: 'annotate', decision: 'annotated', message: 'x'.repeat(13 * 1024), noop: false })
+    await host.tick()
+    const cleanup = host.runs.find((call) => call.argv[3] === 'plannotator-cleanup')
+    expect(cleanup?.argv).toContain('stdin')
+    expect(cleanup?.argv).toContain('result.json')
+    // Oversized feedback stays for Claude to Read.
+    expect(cleanup?.argv).not.toContain('feedback.md')
+    expect(order.indexOf('plannotator-cleanup')).toBeGreaterThan(order.indexOf('write feedback.md'))
+  })
+})

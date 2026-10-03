@@ -32,6 +32,31 @@ export class TurnTracker {
   private ask: ActiveAsk | null = null
   /** A question cancelled while still queued: its turn is aborted when it starts. */
   private dropText: string | null = null
+  /**
+   * Set when THIS plugin's own `$.prompt.submit` of the question (or of a
+   * cancelled one) enters the session (`prompt.submit` with origin plugin
+   * `plannotator`); the next `turn.start` is that prompt's turn. Text alone
+   * never claims a turn, so a prompt the user typed can neither be streamed to
+   * Plannotator nor aborted as "ours", whatever it says.
+   */
+  private armed: 'ask' | 'drop' | null = null
+
+  /**
+   * A prompt entered the session. `fromUs`: its origin is this plugin. Arms
+   * the next turn when it is the question in flight (or a cancelled one).
+   */
+  onPromptEntered(text: string, fromUs: boolean): void {
+    if (!fromUs) {
+      this.armed = null
+      return
+    }
+    if (this.dropText !== null && sameQuestion(text, this.dropText)) {
+      this.armed = 'drop'
+      return
+    }
+    const ask = this.ask
+    this.armed = ask && !ask.finished && ask.turnId === null && sameQuestion(text, ask.text) ? 'ask' : null
+  }
 
   get busy(): boolean {
     return this.runningTurnId !== null || (this.ask !== null && !this.ask.finished)
@@ -53,14 +78,16 @@ export class TurnTracker {
   }
 
   /** A turn started. Returns the turn to abort at once (a cancelled question's). */
-  onTurnStart(turnId: string, text: string): string | null {
+  onTurnStart(turnId: string, _text: string): string | null {
     this.runningTurnId = turnId
-    if (this.dropText !== null && sameQuestion(text, this.dropText)) {
+    const armed = this.armed
+    this.armed = null
+    if (armed === 'drop') {
       this.dropText = null
       return turnId
     }
     const ask = this.ask
-    if (ask && !ask.finished && ask.turnId === null && sameQuestion(text, ask.text)) {
+    if (armed === 'ask' && ask && !ask.finished && ask.turnId === null) {
       ask.turnId = turnId
     }
     return null

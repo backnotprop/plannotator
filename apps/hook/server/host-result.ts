@@ -14,7 +14,8 @@
  */
 
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { basename, dirname, isAbsolute, resolve, sep } from "node:path";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import type { Origin } from "@plannotator/shared/agents";
 import type { PlannotatorConfig } from "@plannotator/shared/config";
 import {
@@ -59,13 +60,31 @@ export interface HostResultRecord {
 let takenPath: string | undefined;
 let taken = false;
 
+/**
+ * The only place a result record may be written: a `result.json` inside the
+ * mod's launch area of the data dir (`<data dir>/claude-code-mod/…`). Anything
+ * else is refused, so the variable can never be used to make the CLI create
+ * or replace an arbitrary file.
+ */
+export function isAllowedHostResultPath(path: string, dataDir: string = getPlannotatorDataDir()): boolean {
+  if (!isAbsolute(path) || basename(path) !== "result.json") return false;
+  const root = resolve(dataDir, "claude-code-mod") + sep;
+  return resolve(path).startsWith(root);
+}
+
 /** Read the side-channel path once and scrub it from the environment. */
 export function takeHostResultPath(env: NodeJS.ProcessEnv = process.env): string | undefined {
   if (!taken) {
     taken = true;
     const value = env[HOST_RESULT_FILE_ENV];
     delete env[HOST_RESULT_FILE_ENV];
-    takenPath = value && value.trim() ? value : undefined;
+    const path = value && value.trim() ? value : undefined;
+    if (path && !isAllowedHostResultPath(path)) {
+      console.error(`Plannotator: ignoring ${HOST_RESULT_FILE_ENV}: not a result.json under the data dir's claude-code-mod/ folder.`);
+      takenPath = undefined;
+    } else {
+      takenPath = path;
+    }
   }
   return takenPath;
 }

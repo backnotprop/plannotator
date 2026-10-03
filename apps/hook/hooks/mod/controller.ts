@@ -11,6 +11,8 @@ import { BRIDGE_HOST, BRIDGE_MODES, bridgeBaseUrl, createBridge, type BridgeHand
 import { deliveryFor, legacyResult, parseHostResult, type HostResultRecord, type SessionKind } from './delivery'
 import type { Host } from './host'
 import {
+  aliveArgv,
+  cleanupArgv,
   cliArgvFor,
   failedText,
   fileIn,
@@ -19,6 +21,7 @@ import {
   launchDirOf,
   openedText,
   parseReadyFile,
+  privateDirArgv,
   subjectFor,
 } from './launch'
 import {
@@ -89,6 +92,7 @@ export class PlannotatorMod {
   private timer: { cancel: () => void } | null = null
   private delivering: Promise<void> = Promise.resolve()
   private sequence = 0
+  private disposed = false
 
   constructor(
     private readonly host: Host,
@@ -117,6 +121,23 @@ export class PlannotatorMod {
     }
   }
 
+  /**
+   * The session this instance serves ended (`/clear`, an in-process resume,
+   * exit). Stop watching and polling so nothing is delivered into whatever
+   * session the process goes on with; open reviews stay in the store under
+   * this session id and reattach when it is resumed.
+   */
+  dispose(): void {
+    this.disposed = true
+    this.timer?.cancel()
+    this.timer = null
+    this.host.status(undefined)
+  }
+
+  get isDisposed(): boolean {
+    return this.disposed
+  }
+
   private adopt(record: LaunchRecord): LiveLaunch {
     const live: LiveLaunch = { ...record, pidMisses: 0, ticks: 0, settling: false, bridge: null }
     this.launches.set(record.id, live)
@@ -143,7 +164,7 @@ export class PlannotatorMod {
   }
 
   private ensureTimer(): void {
-    if (this.timer || this.launches.size === 0) return
+    if (this.disposed || this.timer || this.launches.size === 0) return
     this.timer = this.host.every(TICK_MS, () => {
       void this.tick()
     })
@@ -174,6 +195,9 @@ export class PlannotatorMod {
     const dir = launchDirOf(this.session.dataDir, this.session.sessionId, id)
     const bridgeToken = this.host.randomHex(32)
     try {
+      // Owner-only before anything lands in it (stdin holds the plan or message).
+      const made = await this.host.run(privateDirArgv(dir), { timeoutMs: 5_000 })
+      if (made.exitCode !== 0) return { error: made.stderr.trim() || `could not create ${dir}` }
       await this.host.writeFile(fileIn(dir, 'stdin'), typeof stdin === 'function' ? stdin(dir) : stdin)
       const result = await this.host.run(launchArgv(dir, cliArgv), {
         env: {
@@ -391,6 +415,7 @@ export class PlannotatorMod {
   // --- Watching and delivery -------------------------------------------------
 
   private async tick(): Promise<void> {
+    if (this.disposed) return
     for (const launch of [...this.launches.values()]) {
       if (launch.settling) continue
       launch.ticks += 1
@@ -439,7 +464,7 @@ export class PlannotatorMod {
   private async checkAlive(launch: LiveLaunch): Promise<void> {
     const pid = (await this.host.readFile(fileIn(launch.dir, 'pid')).catch(() => '')).trim()
     if (!/^\d+$/.test(pid)) return
-    const probe = await this.host.run(['/bin/kill', '-0', pid], { timeoutMs: 5_000 }).catch(() => null)
+    const probe = await this.host.run(aliveArgv(pid), { timeoutMs: 5_000 }).catch(() => null)
     if (!probe) return
     if (probe.exitCode === 0) {
       launch.pidMisses = 0
@@ -478,8 +503,11 @@ export class PlannotatorMod {
       await this.host.submit(delivery.text).catch((error: unknown) => {
         this.host.log(`Could not send the ${launch.subject} decision to Claude (${error instanceof Error ? error.message : String(error)}).`)
       })
-    })
+    }).catch(() => undefined)
     await this.delivering
+    // The launch's copies of the plan/message and feedback are not kept once
+    // delivered (feedback.md stays: Claude reads it after this turn).
+    await this.host.run(cleanupArgv(launch.dir), { timeoutMs: 5_000 }).catch(() => undefined)
   }
 
   private async forget(launch: LiveLaunch): Promise<void> {
@@ -498,7 +526,7 @@ export class PlannotatorMod {
       baseUrl: bridgeBaseUrl(launch.port),
       token: launch.bridgeToken,
       turns: this.turns,
-      isLive: () => this.launches.get(launch.id) === launch && !launch.settling,
+      isLive: () => !this.disposed && this.launches.get(launch.id) === launch && !launch.settling,
     })
     launch.bridge = bridge
     void bridge.run()

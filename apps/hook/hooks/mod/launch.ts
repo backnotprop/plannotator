@@ -73,18 +73,62 @@ export function launchArgv(dir: string, cliArgv: readonly string[]): string[] {
 }
 
 /**
- * The data directory, as the CLI resolves it in the common cases:
- * `PLANNOTATOR_DATA_DIR` (with `~` expanded) or `~/.plannotator`.
+ * The data directory, as the CLI resolves it (`getPlannotatorDataDir`):
+ * `PLANNOTATOR_DATA_DIR` (with `~` expanded); else `~/.plannotator` when it
+ * exists; else `$XDG_DATA_HOME/plannotator` when that is absolute; else
+ * `~/.plannotator`. A relative `PLANNOTATOR_DATA_DIR` (resolved against the
+ * CLI's cwd) is refused: the mod could not name the same directory.
  */
-export function dataDirOf(env: { home?: string; dataDir?: string }): string | null {
+export function dataDirOf(env: { home?: string; dataDir?: string; xdgDataHome?: string; legacyExists?: boolean }): string | null {
   const home = env.home?.replace(/\/+$/, '')
   const custom = env.dataDir?.trim()
   if (custom) {
     if (custom === '~') return home ?? null
     if (custom.startsWith('~/')) return home ? `${home}/${custom.slice(2)}` : null
-    if (custom.startsWith('/')) return custom.replace(/\/+$/, '')
+    if (custom.startsWith('/')) return custom.replace(/\/+$/, '') || '/'
+    return null
   }
-  return home ? `${home}/.plannotator` : null
+  if (!home) return null
+  const legacy = `${home}/.plannotator`
+  if (env.legacyExists) return legacy
+  const xdg = env.xdgDataHome?.trim()
+  if (xdg && xdg.startsWith('/')) return `${xdg.replace(/\/+$/, '')}/plannotator`
+  return legacy
+}
+
+/**
+ * Creates a launch directory owner-only (0700, and any parent it has to
+ * create) before anything is written into it: it holds the plan or message on
+ * stdin and the reviewer's feedback in stdout and result.json.
+ */
+export function privateDirArgv(dir: string): string[] {
+  return ['/bin/sh', '-c', 'umask 077 && mkdir -p "$1" && chmod 700 "$1"', 'plannotator-mkdir', dir]
+}
+
+/**
+ * Removes a settled launch's files, keeping `feedback.md` (Claude reads it
+ * later) and the directory when that file is there. Only names this module
+ * wrote; never a glob.
+ */
+export function cleanupArgv(dir: string): string[] {
+  const names = Object.entries(LAUNCH_FILES)
+    .filter(([key]) => key !== 'overflow')
+    .map(([, name]) => name)
+  return [
+    '/bin/sh',
+    '-c',
+    'dir=$1; shift; for f in "$@"; do rm -f "$dir/$f"; done; rmdir "$dir" 2>/dev/null; exit 0',
+    'plannotator-cleanup',
+    dir,
+    ...names,
+    'revision.json.ack',
+    'exit.tmp',
+  ]
+}
+
+/** Liveness probe through the shell's own `kill` (no /bin/kill on every system). */
+export function aliveArgv(pid: string): string[] {
+  return ['/bin/sh', '-c', 'kill -0 "$1" 2>/dev/null', 'plannotator-alive', pid]
 }
 
 export function launchDirOf(dataDir: string, sessionId: string, launchId: string): string {

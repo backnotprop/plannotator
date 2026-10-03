@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { annotateHostResult, reviewHostResult, takeHostResultPath, HOST_RESULT_FILE_ENV } from "./host-result";
+import { annotateHostResult, isAllowedHostResultPath, reviewHostResult, takeHostResultPath, HOST_RESULT_FILE_ENV } from "./host-result";
 import { buildReviewOutput } from "./review-output";
 
 describe("reviewHostResult", () => {
@@ -55,5 +55,20 @@ describe("takeHostResultPath", () => {
     expect(env[HOST_RESULT_FILE_ENV]).toBeUndefined();
     // The first call in this process decides; later calls return the same value.
     expect(takeHostResultPath({})).toBe(before);
+  });
+});
+
+// The failure: any process that could set the variable made the CLI create
+// or replace an arbitrary file (rename onto ~/.bashrc, mkdir -p anywhere).
+describe("isAllowedHostResultPath", () => {
+  test("only a result.json inside <data dir>/claude-code-mod/", () => {
+    const data = "/home/me/.plannotator";
+    expect(isAllowedHostResultPath(`${data}/claude-code-mod/s/l/result.json`, data)).toBe(true);
+    expect(isAllowedHostResultPath("/home/me/.bashrc", data)).toBe(false);
+    expect(isAllowedHostResultPath(`${data}/claude-code-mod/s/l/other.json`, data)).toBe(false);
+    expect(isAllowedHostResultPath(`${data}/claude-code-mod/../config.json`, data)).toBe(false);
+    expect(isAllowedHostResultPath(`${data}/claude-code-mod/../../x/result.json`, data)).toBe(false);
+    expect(isAllowedHostResultPath("claude-code-mod/s/result.json", data)).toBe(false);
+    expect(isAllowedHostResultPath(`${data}/claude-code-mod-evil/result.json`, data)).toBe(false);
   });
 });
