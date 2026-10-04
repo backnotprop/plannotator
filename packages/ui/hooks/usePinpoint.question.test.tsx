@@ -4,7 +4,10 @@
  * What regresses if this fails: a pinpoint click on option text both pins
  * the text (opening the comment composer) AND picks the option, because the
  * row is a <label> that forwards the click to its radio; or a click on the
- * radio itself pins the whole card instead of only answering.
+ * radio itself pins the whole card instead of only answering; or a click
+ * anywhere in the card pins the PROMPT instead of what was clicked (the card
+ * starts with a select-none eyebrow, so the semantic graph mistook it for a
+ * list item and made its second child, the prompt, the whole card's target).
  *
  * DOM-gated (DOM_TESTS=1).
  */
@@ -24,6 +27,9 @@ const usePinpoint = mod?.usePinpoint as typeof import('./usePinpoint')['usePinpo
 
 const DOC = `:::question
 Where should conflicts live?
+
+What each changes:
+- **Local only** (the spec): no network needed.
 
 - [ ] Local only
 - [ ] Server-side
@@ -98,9 +104,32 @@ describe('usePinpoint over a question card', () => {
     await act(async () => {
       text.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
     });
-    expect(pinned.length).toBe(1);
+    expect(pinned).toEqual(['Server-side']);
     expect(latest).toEqual([]);
     expect(el.querySelectorAll('input:checked')).toHaveLength(0);
+  });
+
+  test.skipIf(!hasDom)('a click on the first choice pins that choice, not the prompt', async () => {
+    const el = await mount();
+    const text = row(el, 'Local only').querySelector('span')!;
+    await act(async () => {
+      text.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
+    });
+    expect(pinned).toEqual(['Local only']);
+  });
+
+  test.skipIf(!hasDom)('the prompt and the context each pin themselves', async () => {
+    const el = await mount();
+    const prompt = el.querySelector<HTMLElement>('[data-question-part="prompt"]')!;
+    const context = el.querySelector<HTMLElement>('[data-question-part="context"] p')!;
+    await act(async () => {
+      prompt.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
+      context.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
+    });
+    expect(pinned[0]).toBe('Where should conflicts live?');
+    // The context pins as one part (its own list included), never the prompt.
+    expect(pinned[1]).toStartWith('What each changes:');
+    expect(pinned[1]).not.toContain('Where should conflicts live?');
   });
 
   test.skipIf(!hasDom)('a click on the radio answers and does not pin', async () => {

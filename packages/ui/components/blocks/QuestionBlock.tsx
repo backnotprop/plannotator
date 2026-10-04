@@ -349,7 +349,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
         </span>
       </div>
 
-      <p id={promptId} className="m-0 text-[15px] font-semibold leading-[1.45] text-foreground">
+      <p id={promptId} className="m-0 text-[15px] font-semibold leading-[1.45] text-foreground" data-question-part="prompt">
         {inline(question.prompt)}
       </p>
       {(question.decision || question.decisionOnAnswer) && (
@@ -378,7 +378,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
         </div>
       )}
       {question.context && (
-        <div id={contextId} className="mt-1 text-[13px] leading-normal text-muted-foreground">
+        <div id={contextId} className="mt-1 text-[13px] leading-normal text-muted-foreground" data-question-part="context">
           {renderProseBody({
             body: question.context,
             paragraphClassName: 'text-[13px] leading-normal',
@@ -454,7 +454,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                   className="mt-[3px] h-[15px] w-[15px] shrink-0 cursor-pointer accent-primary disabled:cursor-default"
                   disabled={readOnly}
                 />
-                <span className="min-w-0 flex-1 select-text text-[13.5px] leading-[1.45] text-foreground">
+                <span className="min-w-0 flex-1 select-text text-[13.5px] leading-[1.45] text-foreground" data-question-part="choice">
                   <span className="font-[550]">{inline(choice.label)}</span>
                   {choice.description && (
                     <span className="text-muted-foreground"> — {inline(choice.description)}</span>
