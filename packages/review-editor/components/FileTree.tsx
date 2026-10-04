@@ -9,7 +9,8 @@ import type {
   SinceBaseSections,
   WorktreeInfo,
 } from '@plannotator/shared/types';
-import { buildFileTree, getAncestorPaths, getAllFolderPaths, getVisualFileOrder } from '../utils/buildFileTree';
+import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
+import { useDiffFileTreeExpansion } from '@plannotator/ui/hooks/useDiffFileTreeExpansion';
 import { FileTreeNodeItem } from './FileTreeNode';
 import { BaseBranchPicker } from './BaseBranchPicker';
 import { EvoLogPicker } from './EvoLogPicker';
@@ -215,7 +216,6 @@ export const FileTree: React.FC<FileTreeProps> = ({
     if (!sinceBaseSections) return undefined;
     return (filePath: string) => sinceBaseSections.files[filePath];
   }, [sinceBaseSections]);
-  const allFolderPaths = useMemo(() => getAllFolderPaths(tree), [tree]);
   const visualOrder = useMemo(() => getVisualFileOrder(tree), [tree]);
 
   // Keyboard navigation: j/k or arrow keys
@@ -287,46 +287,16 @@ export const FileTree: React.FC<FileTreeProps> = ({
     [annotationCountMap],
   );
 
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set(allFolderPaths));
-  const [prevTree, setPrevTree] = useState(tree);
-
-  // Expand all folders when tree changes (initial render + diff switch)
-  if (tree !== prevTree) {
-    setPrevTree(tree);
-    setExpandedFolders(new Set(allFolderPaths));
-  }
-
-  // Auto-expand ancestors of the active file so j/k nav always reveals the target
-  useEffect(() => {
-    if (files[activeFileIndex]) {
-      const ancestors = getAncestorPaths(files[activeFileIndex].path);
-      setExpandedFolders((prev) => {
-        const missing = ancestors.filter((p) => !prev.has(p));
-        if (missing.length === 0) return prev;
-        const next = new Set(prev);
-        for (const p of missing) next.add(p);
-        return next;
-      });
-    }
-  }, [activeFileIndex, files]);
-
-  const handleToggleFolder = useCallback((path: string) => {
-    setExpandedFolders((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
-      }
-      return next;
-    });
-  }, []);
-
-  const areAllFoldersExpanded = allFolderPaths.length > 0 && allFolderPaths.every((path) => expandedFolders.has(path));
-
-  const handleToggleAllFolders = useCallback(() => {
-    setExpandedFolders(areAllFoldersExpanded ? new Set() : new Set(allFolderPaths));
-  }, [allFolderPaths, areAllFoldersExpanded]);
+  // Folder open/closed state is the shared diff-file-tree hook (expand all on a
+  // new tree, keep the active file's ancestors open), the same one the
+  // embeddable @plannotator/ui DiffFileTree uses.
+  const {
+    expandedFolders,
+    allFolderPaths,
+    areAllFoldersExpanded,
+    toggleFolder: handleToggleFolder,
+    toggleAllFolders: handleToggleAllFolders,
+  } = useDiffFileTreeExpansion(tree, files[activeFileIndex]?.path);
 
   const panelControls = (
     <PanelControlsRow

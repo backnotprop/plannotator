@@ -383,6 +383,28 @@ See HANDOFF.md § "Questions in documents (0.48.0, core 0.25.8)".
 
 See HANDOFF.md § "Question host seams (ui 0.49.0, core 0.25.9)".
 
+### Diff file tree (`components/DiffFileTree`; next ui release)
+
+A read-only file tree for a list of changed files, to sit beside a host's own per-file diff list. It is Plannotator's code-review tree, not a lookalike: the builder (`utils/diffFileTree`), the folder open/closed hook (`hooks/useDiffFileTreeExpansion`) and the row atoms moved here from `packages/review-editor`, and the review now renders from them.
+
+```tsx
+import { DiffFileTree } from "@plannotator/ui/components/DiffFileTree";
+
+<DiffFileTree
+  files={files}            // { path, oldPath?, status, additions, deletions }[]
+  selectedPath={selected}  // string | null (controlled)
+  onSelect={setSelected}   // (path) => void
+/>
+```
+
+- `status`: `'added' | 'modified' | 'deleted' | 'renamed' | 'binary'` (letters A, M, D, R, B; R's tooltip names `oldPath`).
+- Optional: `defaultExpanded` (`'all'` default, `'none'`, or folder paths; re-applied when the set of files changes, not when an equal array is passed again), `label` (accessible name, default "Changed files"), `className`.
+- Same shape rules as the review: folders first, single-child folder chains merged (`packages/app/src`), a lone root folder holding only files unwrapped, folder +/- summed.
+- `role="tree"` with `treeitem` rows (`aria-level`, `aria-expanded`, `aria-selected`) and one tab stop. While focus is in the tree: ArrowDown/`j`, ArrowUp/`k`, Home, End select files in tree order (the review's keys, opening folders as needed); ArrowRight/ArrowLeft open/close a focused folder, ArrowLeft from a file focuses its folder. Unlike the review, nothing listens on `window`.
+- Styling is the `file-tree-item` rules in `styles.css` plus ThemeProvider tokens; no fetches, no seams.
+
+For a custom row, use the atoms (`DiffFileTreeFolderRow`, `DiffFileTreeFileRowContent`, `ChangeTypeLetter`, `DiffCounts`, `diffFileTreeIndent`) with `buildDiffFileTree` and `useDiffFileTreeExpansion`, as the review does. See HANDOFF.md § "Diff file tree".
+
 ## Consuming it (e.g. from Workspaces)
 
 ```bash

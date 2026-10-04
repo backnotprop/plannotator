@@ -200,6 +200,8 @@ We deliberately did **not** restructure the exports map in this PR (move-don't-r
 | `components/AnnotationPanel` | Renders from your annotation state; no fetches of its own. |
 | `components/AnnotationToolstrip` | The annotation mode toolstrip (Select / Pinpoint / Markup / Comment / Redline / Label). **Pass `showHelpLink={false}` in a host** — the default help modal embeds Plannotator's own YouTube walkthroughs. `hideQuickLabel` omits only the Label button (`StickyHeaderLane` forwards it, so the pinned scroll header matches); it hides the control, it does **not** clamp the mode — keep host mode state out of `'quickLabel'` (including preferences restored through `utils/editorMode`, which accepts it from storage) or text selection silently opens the quick-label picker with no visible cause. `hideInputMethodSwitch` likewise omits the pinpoint/drag switch. *(Blessed in 0.35.0.)* |
 | `components/StickyHeaderLane` | The backward-compatible standalone ghost lane used by Plannotator beside Viewer's legacy action bar. Defaults remain hidden/inert at rest and visible only while stuck, including the incumbent hidden chrome during its fade. Its `visibility="always"` mode remains a zero-height overlay and therefore requires host-owned clearance. New hosts that need a visible in-flow header should use `Viewer.annotationHeader` instead; it owns both clusters and their clearance. **The `visibility="always"` / `sticky={false}` pair is soft-deprecated as of 0.37.0**: it shipped in 0.36.0, its one intended consumer moved to `Viewer.annotationHeader` before adopting it, and it has no known consumers. It is retained for compatibility and still tested, but do not build new integrations on it. `sticky={false}` uses normal-flow positioning, creates no intersection observer, and must be paired with `visibility="always"`. Wide active-label, tight icon-only, and narrow stacked fallbacks remain measurement-driven, and `hideQuickLabel` still forwards to the compact toolstrip. |
+| `components/DiffFileTree` (`DiffFileTree`, plus the row atoms `DiffFileTreeFolderRow`, `DiffFileTreeFileRowContent`, `ChangeTypeLetter`, `DiffCounts`, `diffFileTreeIndent`) | Read-only diff file tree: required `files` / `selectedPath` / `onSelect`. Pure React; no backend. See "Diff file tree". |
+| `utils/diffFileTree` (`buildDiffFileTree`, `getAncestorPaths`, `getVisualFileOrder`, `getAllFolderPaths`) + `hooks/useDiffFileTreeExpansion` | The tree builder and folder open/closed state behind it. Pure. |
 | `components/ThemeProvider` | Color-mode context. |
 | `theme-modes` (`THEME_MODES`, `Mode`) | The supported Light/Dark/System catalog and mode type. `Mode` also remains exported from `components/ThemeProvider` for compatibility with existing consumers. |
 | `components/ImageThumbnail` / `getImageSrc` | Routes through `imageSrcResolver`. |
@@ -1687,6 +1689,53 @@ enable switches are the SAME cookies plan review reads on approve, so turning
 one on from annotate also makes plan review save every approved plan there;
 the annotate description says so. `mode="plan"` and `mode="review"` are
 unaffected by the prop. Purely additive: no export, share or archive change.
+
+---
+
+## Diff file tree (next ui release; no core change)
+
+Asked for by a host that shows a read-only per-file diff list (one Pierre
+`FileDiff` per file) and wants Plannotator's file tree beside it. The tree used
+to live only in `packages/review-editor`, tied to the review's pickers, search,
+worktrees and annotations. Its shared parts moved into this package; nothing
+was rebuilt.
+
+**What moved, and where.**
+
+| From `packages/review-editor` | To `@plannotator/ui` |
+|---|---|
+| `utils/buildFileTree.ts` (trie, folders-first sort, single-child merge, root unwrap, counts, `getAncestorPaths` / `getVisualFileOrder` / `getAllFolderPaths`) | `utils/diffFileTree.ts`, generic over the file type (`buildDiffFileTree<F>`). The review file is now a re-export shim keeping its old names, with `FileTreeNode = DiffFileTreeNode<DiffFile>`. |
+| `FileTree.tsx`'s expanded-folder state (expand all on a new tree, keep the active file's ancestors open, toggle, toggle all) | `hooks/useDiffFileTreeExpansion.ts` |
+| `FileTreeNode.tsx`'s folder button and the file row's letter / name / counts layout, the `4 + depth * 8` indent | `components/DiffFileTree.tsx`: `DiffFileTreeFolderRow`, `DiffFileTreeFileRowContent`, `diffFileTreeIndent` |
+| `FileRowBits.tsx`'s `ChangeTypeLetter`, `DiffCounts` | `components/DiffFileTree.tsx` (re-exported from `FileRowBits` so `SectionsPanel` is untouched). `ChangeTypeLetter` gained a `'binary'` status (B); the review never produces it. |
+
+The `file-tree-item` CSS was already in `theme.css`. The new pieces are the
+`DiffFileTree` component itself and its ARIA/keyboard handling.
+
+**Review-only, and why.** The review's `FileTree` keeps its own wrapper and
+renders its rows from the shared atoms, adding: the viewed checkbox and the
+hide-viewed filter, stage controls and the staged/committed/untracked marks,
+the annotation badge and `has-annotations` tint, the scroll-highlight row, the
+"Copy path" context menu, the double-click handler, the panel header, view toggle,
+diff-type / base / worktree / evolog pickers, search results, the nav rows
+(PR overview, artifacts, call flow, semantic diff, all files), and its
+**window-wide** j/k/arrow/Home/End shortcut (an app shortcut, gated on inputs,
+menus and dialogs). None of those is a host concern, so `DiffFileTree` takes no
+props for them; a host that needs any of them builds its own row from the atoms,
+as the review does. The review rows also keep their current DOM: no ARIA tree
+roles were added there (that would be a behavior change to Plannotator's app,
+out of scope here).
+
+**Keyboard in `DiffFileTree`.** Handled on the tree element only. The file keys
+match the review (ArrowDown/`j`, ArrowUp/`k`, Home, End select files in tree
+order; nothing selected + Down picks the first file); focus follows the
+selection, opening folders as needed. ArrowRight/ArrowLeft follow the WAI-ARIA
+tree pattern for folders. Modifier chords pass through.
+
+**Parity evidence.** Plannotator's code review was screenshotted on main and on
+this branch with the same static patch (merged chains, A/D/R/M marks, nested
+folders), at rest, after two `j` presses and after collapsing a folder: the
+sidebar screenshots and its `outerHTML` were byte-identical.
 
 ---
 
