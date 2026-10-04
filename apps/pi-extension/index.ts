@@ -63,6 +63,7 @@ import {
 	notifyCurrentPiSession,
 	type PiSessionIdentity,
 	registerCurrentPiSession,
+	resolveIdleDeliveryOptions,
 	sendUserMessageToCurrentPiSession,
 	withCurrentPiSessionFallbackHeader,
 } from "./current-pi-session.ts";
@@ -274,11 +275,12 @@ function sendUserMessageWithCurrentSessionFallback(
 	options: Parameters<ExtensionAPI["sendUserMessage"]>[1],
 	errorMessage: string,
 	origin: PiSessionIdentity,
+	ctx?: ExtensionContext,
 ): void {
 	if (trySendUserMessageToDifferentCurrentSession(content, options, errorMessage, origin)) return;
 
 	try {
-		pi.sendUserMessage(content, options);
+		pi.sendUserMessage(content, resolveIdleDeliveryOptions(ctx ?? {}, options));
 		return;
 	} catch (err) {
 		if (trySendUserMessageToDifferentCurrentSession(content, options, errorMessage, origin)) return;
@@ -840,6 +842,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 									{ deliverAs: "followUp" },
 									"Plannotator code review feedback could not be sent",
 									origin,
+									ctx,
 								);
 								return;
 							}
@@ -863,6 +866,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 								{ deliverAs: "followUp" },
 								"Plannotator code review feedback could not be sent",
 								origin,
+								ctx,
 							);
 						} catch (err) {
 							reportBackgroundError(ctx, "Plannotator code review feedback could not be sent", err, origin);
@@ -1162,6 +1166,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 								{ deliverAs: "followUp" },
 								"Plannotator annotation feedback could not be sent",
 								origin,
+								ctx,
 							);
 							if (outcome.notification === "approved") {
 								safeNotify(ctx, "Annotation approved.", "info", origin);
@@ -1262,6 +1267,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 								{ deliverAs: "followUp" },
 								"Plannotator message annotation feedback could not be sent",
 								origin,
+								ctx,
 							);
 							if (outcome.notification === "approved") {
 								safeNotify(ctx, "Message approved.", "info", origin);
