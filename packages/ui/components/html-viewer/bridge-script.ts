@@ -382,17 +382,39 @@ export const BRIDGE_SCRIPT = `(function() {
     return Math.max(0, Math.ceil(bottom));
   }
 
-  var lastHeight = 0;
+  // Feedback guard. Content sized by the frame itself (html,body{height:100%},
+  // min-height:100vh, a 100vh section) plus anything around it (a collapsed
+  // margin, body's own margin) always measures taller than the frame, so every
+  // grow would ask for another: the frame would grow forever. The first
+  // measure after the parent applied a GROW we asked for decides: if the page
+  // still overflows by at least as much as it did before the grow, it grew
+  // with the frame, and the frame stays where it is. Later content changes
+  // post as usual (and re-run the check on their own grow). Pure, so the
+  // test can drive it: returns the height to post, or null for none.
+  function nextResizeHeight(state, h, viewport) {
+    var applied = state.awaiting && Math.abs(viewport - state.last) <= 1;
+    if (applied) state.awaiting = false;
+    if (h === state.last) return null;
+    if (applied && state.excess > 0 && h > viewport && h - viewport >= state.excess - 1) {
+      state.last = h; // held: report nothing until the content measures differently
+      return null;
+    }
+    state.excess = h - viewport;
+    state.awaiting = true;
+    state.last = h;
+    return h;
+  }
+
+  var resizeState = { last: 0, excess: 0, awaiting: false };
   function postResize() {
     if (LIVE) return; // live surfaces render full-viewport; the parent ignores height
     if (!document.body) return;
-    var h = measureContentHeight();
-    if (h !== lastHeight) {
-      lastHeight = h;
-      postToParent({ type: PREFIX + 'resize', height: h });
-    }
+    var h = nextResizeHeight(resizeState, measureContentHeight(), window.innerHeight);
+    if (h !== null) postToParent({ type: PREFIX + 'resize', height: h });
   }
   window.addEventListener('load', postResize);
+  // The frame resizing is what tells the guard its last grow was applied.
+  window.addEventListener('resize', postResize, { passive: true });
 
   // --- Selection ---
   var pendingSelection = null;

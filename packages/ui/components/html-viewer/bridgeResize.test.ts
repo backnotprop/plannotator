@@ -148,3 +148,48 @@ describe('measureContentHeight (bridge frame auto-height)', () => {
     expect(measure({ top: -50, bottom: 50, scrollHeight: 900 }, { scrollY: 50 })).toBe(900);
   });
 });
+
+/**
+ * Feedback guard (`nextResizeHeight`). Regression: content sized by the frame
+ * (html,body{height:100%}, min-height:100vh, a 100vh child) plus a collapsed
+ * or body margin always measures taller than the frame, and the frame grew
+ * forever (measured in Chromium: 600 -> 2600+ in under a second). The page is
+ * simulated as `measure = viewport + excess` for frame-coupled content.
+ */
+describe('nextResizeHeight (feedback guard)', () => {
+  const next = new Function(
+    `${extractFunction(BRIDGE_SCRIPT, 'nextResizeHeight')}
+     return nextResizeHeight;`,
+  )() as (state: object, h: number, viewport: number) => number | null;
+
+  /** Drive the bridge/parent loop until the parent stops being asked to resize. */
+  function settle(measureAt: (viewport: number) => number, startViewport = 600) {
+    const state = { last: 0, excess: 0, awaiting: false };
+    let viewport = startViewport;
+    const posted: number[] = [];
+    for (let i = 0; i < 50; i += 1) {
+      const h = next(state, measureAt(viewport), viewport);
+      if (h === null) break;
+      posted.push(h);
+      viewport = h; // the parent applies the height
+    }
+    return { posted, viewport, state };
+  }
+
+  test('frame-coupled content stops growing after one grow', () => {
+    const { posted } = settle((viewport) => viewport + 16);
+    expect(posted).toEqual([616]);
+    // Even content that grows faster than the frame (two 100vh sections).
+    expect(settle((viewport) => viewport * 2).posted).toEqual([1200]);
+  });
+
+  test('ordinary content grows, shrinks, and grows again after a hold', () => {
+    expect(settle(() => 760).posted).toEqual([760]);
+    expect(settle(() => 110).posted).toEqual([110]);
+
+    const coupled = settle((viewport) => viewport + 16);
+    // Later content change on the held page still posts (and re-checks).
+    const h = next(coupled.state, 2000, coupled.viewport);
+    expect(h).toBe(2000);
+  });
+});
