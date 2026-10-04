@@ -359,6 +359,33 @@ Resolution order:
 
 Runtime keys use Plannotator's runtime identifiers. For code review, the current values are `claude-code`, `opencode`, `copilot-cli`, `pi`, and `codex`.
 
+## Recovering unfinished reviews
+
+Unsubmitted comments in local Git and PR reviews survive changes to the diff.
+Reopen the review and use the draft restore prompt to recover them. Local drafts
+belong to the worktree, branch, and comparison you selected; changing branches,
+worktrees, diff modes, or base references opens a separate draft. On detached
+HEAD, drafts are scoped to that commit.
+
+Restored line comments stay inline only when their text and surrounding context
+still match at the same lines. Comments on changed, moved, or missing code remain
+in the sidebar and exported feedback, labelled **Outdated**, with their original
+code excerpt. File and general comments are retained. Refreshing an open review
+uses the same checks.
+
+Submitting or explicitly closing the review clears its draft. Closing just the
+browser tab keeps it for later. Draft recovery is independent of viewed-file
+progress and works with `PLANNOTATOR_REVIEW_PROGRESS=0`.
+
+If another tab changes the active review target, a notice explains that draft
+saving is paused. Use **Refresh review** to resume in place; your comments stay
+in the tab throughout the refresh.
+
+Drafts from older versions can still be recovered on their unchanged patch;
+already-orphaned drafts cannot be associated with a branch retroactively.
+Workspace, non-Git, and piped-patch reviews still require an unchanged diff to
+restore a draft.
+
 ## Server API
 
 | Endpoint | Method | Purpose |

@@ -1,15 +1,15 @@
 /**
  * Code-review draft storage keyed by review TARGET as well as patch content
- * (#1590, PR mode only).
+ * (#1590, PR and local Git reviews).
  *
  * Review drafts have always been keyed by `contentHash(rawPatch)`, so any
- * change to the diff made unsent comments unreachable. In PR mode the draft is
- * now ALSO stored under a stable target key derived from the PR's identity
- * (platform + host + repo + number + diff scope), so a draft saved before a
- * teammate pushed is still found after the push.
+ * change to the diff made unsent comments unreachable. A stable target key
+ * now finds the draft after edits/pushes: PR identity + scope, or canonical
+ * Git worktree + branch (detached HEAD: commit) + comparison. Local patch keys
+ * are scoped too, so identical patches cannot share comments or tombstones.
  *
  * Contract:
- *  - Without a target key (every non-PR review) every function delegates to
+ *  - Without a target key (unsupported surfaces) every function delegates to
  *    the plain draft.ts functions with the patch key: byte-identical to before.
  *  - The patch-key lookup stays the first path. It wins whenever its draft is
  *    at least as new (by `draftGeneration`) as the target copy, so an
@@ -36,12 +36,42 @@ import {
   saveDraft,
 } from "./draft";
 import type { PRDiffScope, PRMetadata } from "./pr-types";
+import { localGitReviewIdentity } from "./review-progress";
 
 export interface ReviewDraftKeys {
   /** contentHash of the patch on screen — the historical draft key. */
   patchKey: string;
-  /** Stable PR target key; null/undefined outside PR mode. */
+  /** Stable review target key; absent on unsupported surfaces. */
   targetKey?: string | null;
+  /** Pre-target local drafts can still be restored on their unchanged patch. */
+  legacyPatchKey?: string;
+}
+
+export async function localGitDraftTargetKey(
+  input: Parameters<typeof localGitReviewIdentity>[0] & {
+    /** Locally discovered default, only when automatic base upgrades are allowed. */
+    defaultBase?: string;
+  },
+  runGit: Parameters<typeof localGitReviewIdentity>[1],
+): Promise<string | null> {
+  // An unpinned forwarded `main` can upgrade asynchronously to `origin/main`.
+  // Use the already-discovered tracking ref from the first snapshot, so that
+  // transition never strands an early draft. Explicit bases and remote-check
+  // opt-outs omit defaultBase; their exact local/remote choices stay distinct.
+  // This relies on local default discovery naming the network probe's tracking ref.
+  const base = input.defaultBase?.startsWith("origin/") && input.base === input.defaultBase.slice("origin/".length)
+    ? input.defaultBase : input.base;
+  const identity = await localGitReviewIdentity({ ...input, base }, runGit);
+  return identity ? `local-${contentHash(JSON.stringify(identity))}` : null;
+}
+
+/** Scope BOTH keys: identical patches on two branches/worktrees must not share
+ * comments or tombstones. Legacy drafts have no identity; only an exact patch
+ * can find them, and new saves migrate them into the scoped store. */
+export function localReviewDraftKeys(patchKey: string, targetKey: string | null): ReviewDraftKeys {
+  return targetKey
+    ? { patchKey: contentHash(`${targetKey}|${patchKey}`), targetKey, legacyPatchKey: patchKey }
+    : { patchKey };
 }
 
 export type ReviewDraftLoadResult =
@@ -86,6 +116,11 @@ export function loadReviewDraft(keys: ReviewDraftKeys): ReviewDraftLoadResult {
   if (patchDraft && killedByTombstone(generationOf(patchDraft), tombstone)) patchDraft = null;
   const targetDraft = loadDraft(targetKey) as Record<string, unknown> | null;
 
+  if (!patchDraft && !targetDraft && tombstone === null && keys.legacyPatchKey) {
+    const legacy = loadDraft(keys.legacyPatchKey) as Record<string, unknown> | null;
+    if (legacy) return { found: true, draft: legacy };
+  }
+
   if (patchDraft) {
     const patchGen = generationOf(patchDraft);
     const targetGen = generationOf(targetDraft);
@@ -128,12 +163,21 @@ export function saveReviewDraft(keys: ReviewDraftKeys, body: object): boolean {
   if (killedByTombstone(generationOf(body), getDraftTombstoneGeneration(targetKey))) return false;
   // Never let a client-supplied field masquerade as the server's stamps.
   const { patchChanged: _changed, patchKey: _key, patchKeys: _keys, ...clean } = body as Record<string, unknown>;
+  if (keys.legacyPatchKey && Array.isArray(clean.codeAnnotations)) {
+    // A local session can visit several comparisons/worktrees. Its sidebar
+    // keeps the session's comments, but each target persists only its own.
+    clean.codeAnnotations = clean.codeAnnotations
+      .filter((a) => !a.localReviewTarget || a.localReviewTarget === targetKey)
+      .map((a) => ({ ...a, localReviewTarget: targetKey }));
+  }
   // The target copy remembers every patch it was ever saved on, so a delete
   // can reach the patch-key copies of pushes long past, not only the last one.
-  const patchKeys = [...new Set([...rememberedPatchKeys(loadDraft(targetKey) as Record<string, unknown> | null), patchKey])]
+  const legacyKey = keys.legacyPatchKey && loadDraft(keys.legacyPatchKey) ? keys.legacyPatchKey : undefined;
+  const patchKeys = [...new Set([...rememberedPatchKeys(loadDraft(targetKey) as Record<string, unknown> | null), ...(legacyKey ? [legacyKey] : []), patchKey])]
     .slice(-MAX_REMEMBERED_PATCH_KEYS);
   const savedPatch = saveDraft(patchKey, clean);
   const savedTarget = saveDraft(targetKey, { ...clean, patchKey, patchKeys });
+  if (savedTarget && legacyKey) deleteDraft(legacyKey);
   return savedPatch || savedTarget;
 }
 
@@ -147,6 +191,7 @@ export function deleteReviewDraft(keys: ReviewDraftKeys, draftGeneration?: numbe
   // logical draft, so they all go, even when no generation (and so no
   // tombstone) accompanies the delete.
   const previous = rememberedPatchKeys(loadDraft(targetKey) as Record<string, unknown> | null);
+  if (keys.legacyPatchKey && loadDraft(keys.legacyPatchKey)) previous.push(keys.legacyPatchKey);
   deleteDraft(patchKey, draftGeneration);
   deleteDraft(targetKey, draftGeneration);
   for (const key of previous) if (key !== patchKey) deleteDraft(key, draftGeneration);
@@ -171,41 +216,101 @@ export function reviewDraftState(keys: ReviewDraftKeys): ReviewDraftState {
 }
 
 /**
- * Per-server-session draft bookkeeping. A PR session can move between draft
- * targets in place (/api/pr-switch, /api/pr-diff-scope) and saves one blob
- * under whichever target is on screen, so a decision must clear every PR
+ * Per-server-session draft bookkeeping. A session can move between draft
+ * targets in place, so a decision must clear every
  * target this session wrote or restored from, not only the current one —
  * otherwise the earlier target's copy survives the submit and comes back
- * after the next push. Outside PR mode nothing is remembered and every call
- * is the plain draft.ts call.
+ * after the next edit. Without a target key nothing is remembered.
  */
 export function createReviewDraftSession() {
-  const touched = new Map<string, ReviewDraftKeys>();
-  const remember = (keys: ReviewDraftKeys) => {
-    if (keys.targetKey) touched.set(`${keys.patchKey}|${keys.targetKey}`, { ...keys });
+  // A local sidebar lives for ONE page load, not for the server's lifetime.
+  // Reloads/tabs restore only the active target: their missing comments are
+  // not deletions from the earlier page's other targets. PRs keep the existing
+  // server-session bookkeeping. A local caller without a page id touches only
+  // the active target (older clients cannot prove ownership of another one).
+  const clients = new Map<string, {
+    touched: Map<string, ReviewDraftKeys>;
+    savedLocalTargets: Map<string, ReviewDraftKeys>;
+  }>();
+  const bookkeeping = (keys: ReviewDraftKeys, clientId?: string | null) => {
+    if (!keys.targetKey) return;
+    if (keys.legacyPatchKey && (!clientId || !/^[a-zA-Z0-9_-]{1,128}$/.test(clientId))) return;
+    const id = keys.legacyPatchKey ? `local:${clientId}` : 'pr';
+    let state = clients.get(id);
+    if (!state) {
+      state = { touched: new Map(), savedLocalTargets: new Map() };
+      clients.set(id, state);
+    }
+    return state;
+  };
+  const remember = (keys: ReviewDraftKeys, clientId?: string | null) => {
+    const state = bookkeeping(keys, clientId);
+    state?.touched.set(`${keys.patchKey}|${keys.targetKey}`, { ...keys });
+    return state;
   };
   return {
-    load(keys: ReviewDraftKeys): ReviewDraftLoadResult {
+    load(keys: ReviewDraftKeys, clientId?: string | null): ReviewDraftLoadResult {
       const result = loadReviewDraft(keys);
-      if (result.found) remember(keys);
+      if (result.found) remember(keys, clientId);
       return result;
     },
-    save(keys: ReviewDraftKeys, body: object): boolean {
-      remember(keys);
-      return saveReviewDraft(keys, body);
+    save(keys: ReviewDraftKeys, body: object, clientId?: string | null): boolean {
+      const state = remember(keys, clientId);
+      const saved = saveReviewDraft(keys, body);
+      if (saved && keys.legacyPatchKey && keys.targetKey && state) {
+        const { savedLocalTargets } = state;
+        savedLocalTargets.set(keys.targetKey, { ...keys });
+        const payload = body as Record<string, unknown>;
+        if (Array.isArray(payload.codeAnnotations)) {
+          // The sidebar retains comments from targets visited in this session.
+          // Persist edits/deletions to those comments back to their own target.
+          // Never write a target merely loaded for an unaccepted restore banner.
+          // Work is bounded by the targets saved during this page load.
+          for (const other of savedLocalTargets.values()) {
+            if (other.targetKey === keys.targetKey) continue;
+            const stored = loadReviewDraft(other);
+            if (!stored.found) continue; // another tab may have discarded it
+            saveReviewDraft(other, {
+              // Only comments changed here. Keep that target's viewed state
+              // (the fallback when independent progress is unavailable).
+              ...stored.draft,
+              draftGeneration: payload.draftGeneration,
+              ts: payload.ts,
+              // Unstamped legacy comments belong only to the active target.
+              codeAnnotations: payload.codeAnnotations.filter(a => a.localReviewTarget === other.targetKey),
+            });
+          }
+        }
+      }
+      return saved;
     },
-    /** Remove only the draft on screen (client clear-all / dismiss). */
-    remove(keys: ReviewDraftKeys, draftGeneration?: number): void {
+    /** Client clear-all / dismiss; local saved targets share the session list. */
+    remove(keys: ReviewDraftKeys, draftGeneration?: number, clientId?: string | null): void {
       deleteReviewDraft(keys, draftGeneration);
+      const state = bookkeeping(keys, clientId);
+      if (keys.legacyPatchKey && state) {
+        const { savedLocalTargets } = state;
+        // Clear-all empties the local session's whole annotation list. Earlier
+        // saved targets must not bring those deleted comments back on reopen.
+        // An unaccepted restore banner has no saved targets and stays isolated.
+        for (const other of savedLocalTargets.values()) {
+          if (other.targetKey !== keys.targetKey) deleteReviewDraft(other, draftGeneration);
+        }
+        savedLocalTargets.clear();
+      }
     },
     /** A decision (feedback / exit): remove every target this session used. */
-    settle(keys: ReviewDraftKeys, draftGeneration?: number): void {
+    settle(keys: ReviewDraftKeys, draftGeneration?: number, clientId?: string | null): void {
       deleteReviewDraft(keys, draftGeneration);
+      const state = bookkeeping(keys, clientId);
+      if (!state) return;
+      const { touched, savedLocalTargets } = state;
       for (const other of touched.values()) {
         if (other.patchKey === keys.patchKey && other.targetKey === keys.targetKey) continue;
         deleteReviewDraft(other, draftGeneration);
       }
       touched.clear();
+      savedLocalTargets.clear();
     },
     state: reviewDraftState,
   };
