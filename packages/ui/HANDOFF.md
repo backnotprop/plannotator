@@ -95,6 +95,7 @@ Pass any subset of these to `configurePlannotatorUI({ ... })`. Anything omitted 
 | `mathRendererLoader` | `() => Promise<MathRenderer>` | How KaTeX is loaded when no renderer is registered before the first math node renders (see "Lazy renderers and eager entries"). Once registered, the package default is never called, not even as a fallback after a rejected load, and `resetMathRenderer()` keeps the registration (0.34.0); a default load already in flight at registration still fills the slot (pre-existing, see `setMathRendererLoader`), so register before the first math render | `utils/math-default-loader`'s `import('katex')`, JS only; CSS stays yours |
 | `identityGenerator` | `() => string` | The synchronous generator behind the default "tater" display name when no `identityProvider` is installed | A built-in 16 x 16 word pool of the same `adjective-noun-tater` shape; Plannotator registers the full dictionary via `utils/identity-tater` |
 | `alertIconRenderer` | `(name: string) => ReactNode | null` | The icon rendered for a GitHub alert whose title line carries `<!-- icon: name -->` (0.38.0; grammar in `utils/alertTitle`). Called only for a title line with an icon comment and no leading emoji; a null return falls back to the type icon | `null` for every name: the type's own icon, the package bundles no icon set |
+| `fenceTheme` | `(colorTheme: string, mode: 'light' \| 'dark') => string \| undefined` | The Shiki theme every fence-style surface renders in (Viewer fences, `CodeBlock`, the code-file hover preview, the plan diff view, code review suggestion snippets: everything that reads `useFenceTheme` / `resolveFenceTheme`). Return a theme name to use it, `undefined` to keep the default for that (palette, mode); a throw or an empty string also falls through, and a name Shiki does not know renders the block as plain text. Install it before the first render; it is read on every render, so a later change applies the next time a fence re-renders. The code-review diff pane's dark/light pair (`resolveSyntaxTheme`) is not affected. Also `setFenceThemeResolver` / `resetFenceThemeResolver` on `utils/syntaxTheme` (unreleased) | The palette's `SHIKI_THEME_MAP` entry, else `pierre-dark` / `pierre-light`. Replaces mutating the exported `SHIKI_THEME_MAP`, which keeps working but is not a supported seam |
 
 ### Interface details worth knowing
 
@@ -1632,6 +1633,13 @@ Additive. What a host that keeps question answers ITSELF needs (Workspaces store
 **guides.show:** the viewer JS is unchanged, but the shared stylesheet gained the decision row's utility classes, so `guide-viewer-manifest.ts` pins a new CSS hash. Deploy guides.show before a release that ships this manifest.
 
 Not here (dropped with the owner's Q2 answer): record lines inside the block (`Other:`, `Answer:`, `Note:`, `Answered:`) and a `writeQuestionAnswer` byte rewriter.
+
+## Fence theme seam and srcdoc frame height (unreleased)
+
+Additive; Plannotator passes nothing, so its output is unchanged.
+
+- **`fenceTheme` on `configurePlannotatorUI`** (row in the seam catalog above; `FenceThemeResolver` type exported from `configure` and `utils/syntaxTheme`). Hosts that mutated `SHIKI_THEME_MAP` to pick their own code colors should move to it.
+- **`HtmlViewer` frame height.** The bridge measured `document.body.scrollHeight`, which leaves out a first child's top margin (and a last child's bottom margin) that collapses through a margin-less body, so a page like `body{margin:0}` + a card with `margin-top` was cut short by its margins. It now measures body's box in document coordinates plus the bottom margins that can collapse through it (`measureContentHeight` in `bridge-script.ts`). It deliberately does not use `documentElement.scrollHeight`: that never drops below the frame's own viewport (and an `html{height:100%}` root is the frame's height), so the frame could grow but never shrink. Pages whose body is itself viewport-sized (`html,body{height:100%}`, `min-height:100vh`) behave as before. No `BRIDGE_PROTOCOL_VERSION` bump: the `resize` message shape is unchanged, only the value is more accurate, so a cached older asset keeps the old measure and nothing misreads.
 
 ## Ask this session (unreleased)
 

@@ -233,6 +233,7 @@ jobs:
           packages/editor/App.markdownUnanchored.test.tsx
           packages/ui/components/blocks/AlertBlock.title.test.tsx
           packages/ui/components/blocks/AlertBlock.seam.test.tsx
+          packages/ui/hooks/useFenceTheme.seam.test.tsx
           packages/ui/components/blocks/AlertBlock.annotation.test.tsx
           packages/ui/components/Viewer.driftedRestore.test.tsx
           packages/ui/components/Viewer.crossBlockRestore.test.tsx

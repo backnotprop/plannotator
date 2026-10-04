@@ -332,11 +332,61 @@ export const BRIDGE_SCRIPT = `(function() {
   });
 
   // --- Resize ---
+  // The last child of el whose bottom margin could collapse through el's
+  // bottom edge: out-of-flow children (display:none, absolute/fixed, floats)
+  // never do, which also skips the bridge's own fixed overlay elements and a
+  // trailing script element.
+  function lastInFlowChild(el) {
+    for (var child = el.lastElementChild; child; child = child.previousElementSibling) {
+      var cs = window.getComputedStyle(child);
+      if (cs.display === 'none' || cs.display === 'contents') continue;
+      if (cs.position === 'absolute' || cs.position === 'fixed') continue;
+      if (cs.float && cs.float !== 'none') continue;
+      return child;
+    }
+    return null;
+  }
+
+  // Height the auto-sized frame needs to show the whole document.
+  // Not body.scrollHeight alone: when body has no top padding or border, a
+  // first child's top margin collapses THROUGH body and moves body's box down
+  // without making it taller (the same holds at the bottom), so the page was
+  // cut short by those margins. Not documentElement.scrollHeight either: it
+  // never reports less than the frame's own viewport, so the frame could grow
+  // but never shrink back, and an html{height:100%} page would pin it at
+  // whatever height it had. Instead body's box is placed in document
+  // coordinates (its top already includes a collapsed top margin), and the
+  // bottom margins that can collapse through body's bottom edge are added by
+  // walking the last in-flow child chain. Nothing here reads the frame's own
+  // height, so the measure cannot feed back on itself.
+  function measureContentHeight() {
+    var body = document.body;
+    var scrollY = window.pageYOffset || 0;
+    var bodyRect = body.getBoundingClientRect();
+    var bottom = Math.max(bodyRect.bottom, bodyRect.top + (body.clientTop || 0) + body.scrollHeight) + scrollY;
+    var el = body;
+    for (var depth = 0; el && depth < 64; depth++) {
+      var cs = window.getComputedStyle(el);
+      var marginBottom = parseFloat(cs.marginBottom) || 0;
+      if (marginBottom > 0) bottom = Math.max(bottom, el.getBoundingClientRect().bottom + scrollY + marginBottom);
+      // A child's bottom margin only collapses through a plain block parent
+      // with no bottom padding or border that does not clip (flex/grid
+      // containers, flow-root and scroll containers keep it inside).
+      if (cs.display !== 'block' && cs.display !== 'list-item') break;
+      if (cs.overflowY && cs.overflowY !== 'visible') break;
+      if ((parseFloat(cs.paddingBottom) || 0) > 0 || (parseFloat(cs.borderBottomWidth) || 0) > 0) break;
+      el = lastInFlowChild(el);
+    }
+    var rootStyle = window.getComputedStyle(document.documentElement);
+    bottom += (parseFloat(rootStyle.paddingBottom) || 0) + (parseFloat(rootStyle.borderBottomWidth) || 0);
+    return Math.max(0, Math.ceil(bottom));
+  }
+
   var lastHeight = 0;
   function postResize() {
     if (LIVE) return; // live surfaces render full-viewport; the parent ignores height
     if (!document.body) return;
-    var h = document.body.scrollHeight;
+    var h = measureContentHeight();
     if (h !== lastHeight) {
       lastHeight = h;
       postToParent({ type: PREFIX + 'resize', height: h });
@@ -5134,11 +5184,16 @@ export const BRIDGE_SCRIPT = `(function() {
 
   function onReady() {
     if (typeof ResizeObserver !== 'undefined' && document.body) {
-      new ResizeObserver(function() {
+      var resizeObserver = new ResizeObserver(function() {
         postResize();
         scheduleVimUiUpdate();
         schedulePinpointReconcile();
-      }).observe(document.body);
+      });
+      resizeObserver.observe(document.body);
+      // A collapsed margin changing moves body without resizing it; the root
+      // box does resize then. (An html{height:100%} root resizes with the
+      // frame instead, which re-measures the same height and posts nothing.)
+      resizeObserver.observe(document.documentElement);
     }
     watchPageMutations();
     // Armed is the default on both surfaces, and live sessions default to

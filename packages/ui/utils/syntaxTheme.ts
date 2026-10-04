@@ -74,10 +74,43 @@ export function resolveSyntaxTheme(colorTheme: string, mode: 'dark' | 'light'): 
 }
 
 /**
+ * Host override for the fence theme (`configurePlannotatorUI({ fenceTheme })`).
+ * Return a Shiki theme name to use it, or `undefined` to fall through to the
+ * default resolution below. A name Shiki does not know renders the block as
+ * plain text, exactly like an unknown fence language.
+ */
+export type FenceThemeResolver = (colorTheme: string, mode: 'light' | 'dark') => string | undefined;
+
+let fenceThemeResolver: FenceThemeResolver | null = null;
+
+/** Install (or with `null`, remove) the host's fence theme override. */
+export function setFenceThemeResolver(resolver: FenceThemeResolver | null): void {
+  fenceThemeResolver = resolver;
+}
+
+export function resetFenceThemeResolver(): void {
+  fenceThemeResolver = null;
+}
+
+/**
  * The single concrete Shiki theme name for the palette currently on screen.
  * Markdown fences render one mode at a time, so unlike the diff pane (which
  * hands Pierre a dark/light pair and lets CSS pick) they want a resolved name.
+ *
+ * Every fence-style consumer resolves through here (`useFenceTheme`: Viewer
+ * fences, `CodeBlock`, the code-file hover preview, the plan diff view, code
+ * review's suggestion snippets), so a host override applies to all of them.
+ * The diff pane's dark/light pair (`resolveSyntaxTheme`) is not affected.
  */
 export function resolveFenceTheme(colorTheme: string, mode: 'dark' | 'light'): string {
+  if (fenceThemeResolver) {
+    let override: string | undefined;
+    try {
+      override = fenceThemeResolver(colorTheme, mode);
+    } catch {
+      override = undefined; // a throwing host resolver must not break rendering
+    }
+    if (typeof override === 'string' && override) return override;
+  }
   return resolveSyntaxTheme(colorTheme, mode)?.[mode] ?? DEFAULT_SYNTAX_THEME[mode];
 }
