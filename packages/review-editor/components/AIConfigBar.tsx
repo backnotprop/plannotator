@@ -76,8 +76,11 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
   const currentModel = models.find(m => m.id === effectiveModel) ?? defaultModel;
   const currentModelLabel = currentModel?.label;
   const reasoningEfforts = currentModel?.reasoningEfforts ?? [];
-  const effortFallback = currentModel?.defaultReasoningEffort ?? reasoningEfforts[0]?.id ?? '';
-  const activeEffort = selectedReasoningEffort ?? effortFallback;
+  // With nothing picked the bar shows the model's own default effort, or
+  // "Auto" when the provider reports none (Pi: its default level is the user's
+  // own setting) — never the first listed level, which nothing would send.
+  const defaultEffort = currentModel?.defaultReasoningEffort;
+  const activeEffort = selectedReasoningEffort ?? defaultEffort ?? '';
 
   const handleProviderSelect = (id: string) => {
     if (hasSession) setShowSessionNote(true);
@@ -92,7 +95,7 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
     setModelSearch('');
   };
 
-  const handleEffortSelect = (id: string) => {
+  const handleEffortSelect = (id: string | null) => {
     if (hasSession) setShowSessionNote(true);
     onReasoningEffortChange(id);
     setOpenMenu(null);
@@ -231,6 +234,20 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
 
             {openMenu === 'effort' && (
               <div className="ai-config-menu">
+                {!defaultEffort && (
+                  <button
+                    type="button"
+                    onClick={() => handleEffortSelect(null)}
+                    className={`ai-config-menu-item ${activeEffort === '' ? 'ai-config-menu-item-active' : ''}`}
+                  >
+                    <span>Auto</span>
+                    {activeEffort === '' && (
+                      <svg className="w-3 h-3 ml-auto text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    )}
+                  </button>
+                )}
                 {reasoningEfforts.map(e => {
                   const isActive = e.id === activeEffort;
                   return (

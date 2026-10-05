@@ -31,6 +31,7 @@ import {
   effortSelectOptions,
   modelLabel,
   modelSelectOptions,
+  PI_THINKING_LEVELS,
   type CatalogModel,
 } from '@plannotator/core/model-catalog';
 import { useModelCatalogs, type ModelCatalogs } from '../hooks/useModelCatalogs';
@@ -75,15 +76,14 @@ const COPILOT_MODELS: Array<{ value: string; label: string }> = [
 ];
 
 // Pi's unified reasoning knob (`--thinking`), applied to whichever model is
-// selected. xhigh is accepted only by codex-max models.
-export const PI_THINKING: Array<{ value: string; label: string }> = [
-  { value: 'off', label: 'Off' },
-  { value: 'minimal', label: 'Min' },
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Med' },
-  { value: 'high', label: 'High' },
-  { value: 'xhigh', label: 'XHigh' },
-];
+// selected; pi clamps a level the model does not support. Pi's own level
+// vocabulary minus `max`, which pi only accepts on `--thinking` since 0.80.6
+// (an older pi would reject the whole job). Short labels fit the segmented
+// picker.
+const PI_THINKING_SHORT_LABELS: Record<string, string> = { minimal: 'Min', medium: 'Med' };
+export const PI_THINKING: Array<{ value: string; label: string }> = PI_THINKING_LEVELS
+  .filter((level) => level !== 'max')
+  .map((level) => ({ value: level, label: PI_THINKING_SHORT_LABELS[level] ?? EFFORT_LABELS[level] ?? level }));
 
 const MODE_LABEL: Record<AgentMode, string> = {
   review: 'Code Review',
