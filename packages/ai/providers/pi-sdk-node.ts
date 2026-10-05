@@ -11,7 +11,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import {
 	effortList,
-	piSupportedThinkingLevels,
+	PI_THINKING_LEVELS,
 	type CatalogModel,
 } from "@plannotator/core/model-catalog";
 import { BaseSession } from "../base-session.ts";
@@ -314,25 +314,18 @@ export class PiSDKNodeProvider implements AIProvider {
 						id: string;
 						name?: string;
 						reasoning?: boolean;
-						thinkingLevelMap?: Record<string, string | null>;
 					}>;
 				}
 			).models;
 			if (rawModels && rawModels.length > 0) {
-				this.models = rawModels.map((m, i) => {
-					const levels = piSupportedThinkingLevels(m.reasoning, m.thinkingLevelMap);
-					return {
-						id: `${m.provider}/${m.id}`,
-						label: `${m.provider}/${m.id}`,
-						...(i === 0 && { default: true }),
-						...(levels.length
-							? {
-									reasoningEfforts: effortList(levels),
-									...(levels.includes("medium") && { defaultReasoningEffort: "medium" }),
-								}
-							: {}),
-					};
-				});
+				this.models = rawModels.map((m, i) => ({
+					id: `${m.provider}/${m.id}`,
+					label: `${m.provider}/${m.id}`,
+					...(i === 0 && { default: true }),
+					...(m.reasoning
+						? { reasoningEfforts: effortList(PI_THINKING_LEVELS), defaultReasoningEffort: "medium" }
+						: {}),
+				}));
 			}
 		} catch {
 			// Pi not configured or no models available

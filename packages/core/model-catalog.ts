@@ -84,33 +84,16 @@ export const CODEX_FALLBACK_MODELS: CatalogModel[] = [
 /** Where a provider's model list came from: the installed tool, or the static fallback. */
 export type ModelsSource = 'fallback' | 'discovered';
 
-/** The levels Pi names, in the runtime's own order (`off` first). */
-export const PI_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
-
 /**
- * The thinking levels one Pi model accepts, from the `get_available_models`
- * row's `reasoning` and `thinkingLevelMap`. Mirrors the runtime's own rule
- * (pi-ai `getSupportedThinkingLevels`): `off` through `high` are available to
- * every reasoning model unless the map marks the level `null`, while `xhigh`
- * and `max` are offered only when the map names them. A model without
- * `reasoning` takes no level at all.
- *
- * Applying the runtime's rule here — rather than listing every level and
- * letting `set_thinking_level` clamp — is what keeps the picker honest: it
- * never offers a level Pi would silently replace.
+ * Pi's unified reasoning knob — the levels `--thinking` and the runtime's
+ * `set_thinking_level` accept, in Pi's own order. Deliberately
+ * model-independent, exactly like the review/guide launcher's picker
+ * (`PI_THINKING` in AgentsTab): Pi clamps a level the selected model does not
+ * support, so the picker offers the knob's full range and the runtime resolves
+ * it. `max` is absent here for the same reason it is absent there — the CLI
+ * documents `off|minimal|low|medium|high|xhigh`.
  */
-export function piSupportedThinkingLevels(
-  reasoning: boolean | undefined,
-  thinkingLevelMap?: Readonly<Record<string, string | null>>,
-): string[] {
-  if (!reasoning) return [];
-  return PI_THINKING_LEVELS.filter((level) => {
-    const mapped = thinkingLevelMap?.[level];
-    if (mapped === null) return false;
-    if (level === 'xhigh' || level === 'max') return mapped !== undefined;
-    return true;
-  });
-}
+export const PI_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const;
 
 /**
  * The version in a CLI's own output: `claude --version` ("2.1.282 (Claude
