@@ -9,6 +9,11 @@
 
 import { BaseSession } from "../base-session.ts";
 import { buildEffectivePrompt, buildSystemPrompt } from "../context.ts";
+import {
+	effortList,
+	piSupportedThinkingLevels,
+	type CatalogModel,
+} from "@plannotator/core/model-catalog";
 import type {
 	AIMessage,
 	AIProvider,
@@ -253,7 +258,7 @@ export class PiSDKProvider implements AIProvider {
 		streaming: true,
 		tools: true,
 	};
-	models?: Array<{ id: string; label: string; default?: boolean }>;
+	models?: CatalogModel[];
 
 	private config: PiSDKConfig;
 	private sessions = new Map<string, PiSDKSession>();
@@ -269,6 +274,7 @@ export class PiSDKProvider implements AIProvider {
 			parentSessionId: null,
 			piExecutablePath: this.config.piExecutablePath ?? "pi",
 			model: options.model ?? this.config.model,
+			reasoningEffort: options.reasoningEffort,
 		});
 		this.sessions.set(session.id, session);
 		return session;
@@ -311,15 +317,30 @@ export class PiSDKProvider implements AIProvider {
 
 			const rawModels = (
 				data as {
-					models?: Array<{ provider: string; id: string; name?: string }>;
+					models?: Array<{
+						provider: string;
+						id: string;
+						name?: string;
+						reasoning?: boolean;
+						thinkingLevelMap?: Record<string, string | null>;
+					}>;
 				}
 			).models;
 			if (rawModels && rawModels.length > 0) {
-				this.models = rawModels.map((m, i) => ({
-					id: `${m.provider}/${m.id}`,
-					label: m.name ?? m.id,
-					...(i === 0 && { default: true }),
-				}));
+				this.models = rawModels.map((m, i) => {
+					const levels = piSupportedThinkingLevels(m.reasoning, m.thinkingLevelMap);
+					return {
+						id: `${m.provider}/${m.id}`,
+						label: `${m.provider}/${m.id}`,
+						...(i === 0 && { default: true }),
+						...(levels.length
+							? {
+									reasoningEfforts: effortList(levels),
+									...(levels.includes("medium") && { defaultReasoningEffort: "medium" }),
+								}
+							: {}),
+					};
+				});
 			}
 		} catch {
 			// Pi not configured or no models available
@@ -340,6 +361,8 @@ interface SessionConfig {
 	piExecutablePath: string;
 	/** Model in "provider/modelId" format, e.g. "anthropic/claude-haiku-4-5". */
 	model?: string;
+	/** One of the selected model's thinking levels (see piSupportedThinkingLevels). */
+	reasoningEffort?: string;
 }
 
 class PiSDKSession extends BaseSession {
@@ -379,6 +402,19 @@ class PiSDKSession extends BaseSession {
 						} catch {
 							// Continue with Pi's default model
 						}
+					}
+				}
+
+				// Set the thinking level after the model: the levels a model
+				// accepts depend on which model is selected.
+				if (this.config.reasoningEffort) {
+					try {
+						await this.process.sendAndWait({
+							type: "set_thinking_level",
+							level: this.config.reasoningEffort,
+						});
+					} catch {
+						// Continue with Pi's own default thinking level
 					}
 				}
 
