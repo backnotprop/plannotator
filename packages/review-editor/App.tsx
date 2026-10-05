@@ -669,6 +669,9 @@ const ReviewApp: React.FC = () => {
   // bytes of changed images? Absent (old server, demo) reads as false, so no
   // preview renders and no /api/review-image request is ever issued.
   const [imagePreviewSupported, setImagePreviewSupported] = useState(false);
+  // Git LFS image pointers (#1665) preview only when the server says it can
+  // resolve them; absent (an older server) keeps the pointer text diff.
+  const [lfsImagePreviewSupported, setLfsImagePreviewSupported] = useState(false);
   // Session-constant capability advert from `/api/diff`: 'patch' means the
   // diff is caller-supplied bytes (`plannotator review --patch-file`) with no
   // repository behind it. ABSENT reads as 'vcs', so an old server keeps every
@@ -2214,6 +2217,7 @@ const ReviewApp: React.FC = () => {
         sharingEnabled?: boolean;
         approvalNotesSupported?: boolean;
         imagePreviewSupported?: boolean;
+        lfsImagePreviewSupported?: boolean;
         sourceKind?: ReviewSourceKind;
         repoInfo?: { display: string; branch?: string };
         prMetadata?: PRMetadata;
@@ -2284,6 +2288,7 @@ const ReviewApp: React.FC = () => {
         if (data.sharingEnabled !== undefined) setSharingEnabled(data.sharingEnabled);
         setApprovalNotesSupported(readApprovalNotesAdvert(data.approvalNotesSupported));
         setImagePreviewSupported(data.imagePreviewSupported === true);
+        setLfsImagePreviewSupported(data.lfsImagePreviewSupported === true);
         // Session-constant: a static patch session has no diff-type switch to
         // re-advertise it on, so `/api/diff` is the only place it can arrive.
         setSourceKind(data.sourceKind === 'patch' ? 'patch' : 'vcs');
@@ -2868,6 +2873,7 @@ const ReviewApp: React.FC = () => {
     agentCwd?: string | null;
     approvalNotesSupported?: boolean;
     imagePreviewSupported?: boolean;
+    lfsImagePreviewSupported?: boolean;
     draftState?: CodeDraftTargetState;
   }) {
     const isPRSwitch = !!data.prMetadata;
@@ -2881,6 +2887,7 @@ const ReviewApp: React.FC = () => {
       setApprovalNotesSupported(readApprovalNotesAdvert(data.approvalNotesSupported));
     }
     if (data.imagePreviewSupported !== undefined) setImagePreviewSupported(data.imagePreviewSupported === true);
+    if (data.lfsImagePreviewSupported !== undefined) setLfsImagePreviewSupported(data.lfsImagePreviewSupported === true);
     const nextFiles = parseDiffToFiles(data.rawPatch);
     dockApi?.getPanel(REVIEW_DIFF_PANEL_ID)?.api.close();
     needsInitialDiffPanel.current = true;
@@ -2990,6 +2997,7 @@ const ReviewApp: React.FC = () => {
         baseBehindRemote?: boolean;
         approvalNotesSupported?: boolean;
         imagePreviewSupported?: boolean;
+        lfsImagePreviewSupported?: boolean;
         superseded?: boolean;
       };
 
@@ -3012,6 +3020,7 @@ const ReviewApp: React.FC = () => {
         setApprovalNotesSupported(readApprovalNotesAdvert(data.approvalNotesSupported));
       }
       if (data.imagePreviewSupported !== undefined) setImagePreviewSupported(data.imagePreviewSupported === true);
+      if (data.lfsImagePreviewSupported !== undefined) setLfsImagePreviewSupported(data.lfsImagePreviewSupported === true);
 
       const nextFiles = orderFilesBySections(parseDiffToFiles(data.rawPatch), data.sections);
       // Durable progress reconciles every new snapshot independently of the
@@ -3750,6 +3759,7 @@ const ReviewApp: React.FC = () => {
     canUseLiveWorkspaceActions,
     contextExpansionAvailable: !isStaticPatch,
     imagePreviewAvailable: imagePreviewSupported && !isStaticPatch,
+    lfsImagePreviewAvailable: lfsImagePreviewSupported && imagePreviewSupported && !isStaticPatch,
     snapshotId,
     // Outdated comments (#1590) carry line numbers from an earlier version of
     // the PR: they stay in the sidebar and the export, never on the diff.
@@ -3863,7 +3873,7 @@ const ReviewApp: React.FC = () => {
   }), [
     files, diffData?.rawPatch, activeFileIndex, guideOpen, effectiveDiffStyle, handleDiffStyleChange, isCompactTouchLayout, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
-    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions, isStaticPatch, imagePreviewSupported, snapshotId,
+    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions, isStaticPatch, imagePreviewSupported, lfsImagePreviewSupported, snapshotId,
     diffAnnotations, externalAnnotations,
     visibleDescriptionAnnotations, selectedDescriptionAnnotationId, handleAddDescriptionAnnotation,
     handleSelectDescriptionAnnotation, handleDeleteDescriptionAnnotation, handleAskAIForDescription,

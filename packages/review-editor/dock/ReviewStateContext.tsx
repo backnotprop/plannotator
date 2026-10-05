@@ -73,6 +73,9 @@ export interface ReviewState {
    *  render as Before/After previews through `/api/review-image`. Absent or
    *  false keeps the plain binary notice and issues no image requests. */
   imagePreviewAvailable?: boolean;
+  /** True when the server also advertised `lfsImagePreviewSupported` (#1665):
+   *  a chunk whose only change is a Git LFS pointer previews as an image. */
+  lfsImagePreviewAvailable?: boolean;
   /** The snapshot the server is serving (every mode, PR included); image
    *  preview requests are bound to it. */
   snapshotId?: string;

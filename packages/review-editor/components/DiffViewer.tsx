@@ -17,7 +17,7 @@ import { BinaryFileNotice } from './BinaryFileNotice';
 import { FileCommentBanner } from './FileCommentBanner';
 import { DiffHScrollbar } from './DiffHScrollbar';
 import { OversizedFileNotice } from './OversizedFileNotice';
-import { isContentlessBinaryPatch, isImagePreviewCandidate, isOversizedReviewStubPatch } from '@plannotator/shared/diff-paths';
+import { isContentlessBinaryPatch, isImagePreviewCandidate, isOversizedReviewStubPatch, parseLfsPointerPatch } from '@plannotator/shared/diff-paths';
 import { ImageDiffPreview } from './ImageDiffPreview';
 import { isFileScopedAnnotation, lineRangeForAnnotation } from '../utils/annotationScope';
 import { lineAnnotationMetadata } from '../utils/annotationDisplay';
@@ -173,6 +173,10 @@ interface DiffViewerProps {
   /** Server advertised `imagePreviewSupported`: a hunkless image chunk renders
    *  as a Before/After preview instead of the binary notice. Absent = off. */
   imagePreviewAvailable?: boolean;
+  /** Server advertised `lfsImagePreviewSupported` (#1665): an image chunk whose
+   *  only change is its Git LFS pointer previews too, in place of the pointer
+   *  text diff. Absent = off. */
+  lfsImagePreviewAvailable?: boolean;
   /** Snapshot the image preview binds its requests to (set in PR mode too,
    *  where `reviewSnapshotId` is not). Falls back to `reviewSnapshotId`. */
   imageSnapshotId?: string;
@@ -253,6 +257,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   reviewBase,
   reviewSnapshotId,
   imagePreviewAvailable = false,
+  lfsImagePreviewAvailable = false,
   imageSnapshotId,
   contextExpansionAvailable = true,
   prUrl,
@@ -796,9 +801,18 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   // A hunkless chunk for an image path previews the images instead (#1598);
   // the notices above stay its fallback.
   const isImagePreview = useMemo(
-    () => imagePreviewAvailable && isImagePreviewCandidate(patch, filePath, oldPath),
-    [imagePreviewAvailable, patch, filePath, oldPath],
+    () => imagePreviewAvailable && isImagePreviewCandidate(patch, filePath, oldPath, { lfs: lfsImagePreviewAvailable }),
+    [imagePreviewAvailable, lfsImagePreviewAvailable, patch, filePath, oldPath],
   );
+  // A Git LFS image (#1665): the preview replaces the pointer text diff, which
+  // comes back only if the preview falls back (nothing could be resolved).
+  const isLfsPointerPreview = useMemo(
+    () => isImagePreview && parseLfsPointerPatch(patch) !== null,
+    [isImagePreview, patch],
+  );
+  const [imagePreviewFellBack, setImagePreviewFellBack] = useState(false);
+  useEffect(() => setImagePreviewFellBack(false), [patch, filePath]);
+  const hidePointerDiff = isLfsPointerPreview && !imagePreviewFellBack;
 
   // Replay a selected line/range comment's anchor as the controlled highlight so
   // clicking it (inline card or sidebar) lights up its lines. A live compose
@@ -867,6 +881,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
             compact={compactTouchLayout}
             fallback={isOversizedStub ? <OversizedFileNotice /> : isContentlessBinary ? <BinaryFileNotice /> : null}
             tooLargeFallback={isOversizedStub ? <OversizedFileNotice /> : undefined}
+            onFallbackChange={isLfsPointerPreview ? setImagePreviewFellBack : undefined}
+            lfsPointerChunk={isLfsPointerPreview}
           />
         ) : (
           <>
@@ -881,7 +897,11 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           onEdit={onEditAnnotation}
           onDelete={onDeleteAnnotation}
         />
-        <div className="p-4" ref={diffContentRef}>
+        <div
+          className={hidePointerDiff ? 'hidden' : 'p-4'}
+          ref={diffContentRef}
+          data-lfs-pointer-diff={isLfsPointerPreview ? (hidePointerDiff ? 'hidden' : 'shown') : undefined}
+        >
           <div ref={splitSurfaceRef} className="relative min-w-0" style={splitGridStyle}>
             {isSplitLayout && diffOverflow !== 'wrap' && (
               <div

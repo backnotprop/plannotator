@@ -41,6 +41,12 @@ export interface ImageDiffPreviewProps {
   tooLargeFallback?: React.ReactNode;
   /** Re-measure hook for the virtualized all-files host. */
   onHeightChange?: () => void;
+  /** Told whether the card is showing `fallback` (a Git LFS chunk shows its
+   *  pointer diff again when nothing could be resolved, #1665). */
+  onFallbackChange?: (fallback: boolean) => void;
+  /** The chunk is a Git LFS pointer change (#1665): its pointer diff is the
+   *  fallback, so `lfs-pointer` on every side falls back instead of erroring. */
+  lfsPointerChunk?: boolean;
 }
 
 const sidesFor = (status: DiffFileStatus): ReviewImageSide[] =>
@@ -55,6 +61,8 @@ function describeError(error: ReviewImageError): string {
   switch (error.reason) {
     case 'lfs-pointer':
       return 'the file is stored in Git LFS';
+    case 'lfs-mismatch':
+      return 'the Git LFS object does not match its pointer';
     case 'not-image':
       return 'not a recognized image format';
     case 'decode':
@@ -95,6 +103,8 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
   fallback,
   tooLargeFallback,
   onHeightChange,
+  onFallbackChange,
+  lfsPointerChunk = false,
 }) => {
   const sides = sidesFor(status);
   const [states, setStates] = useState<Record<ReviewImageSide, SideState>>(() => ({
@@ -191,7 +201,12 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
   // a row of error lines would (a `.png` that is really a zip, say).
   let mode: 'preview' | 'fallback' | 'too-large' = snapshotId ? 'preview' : 'fallback';
   if (mode === 'preview' && errors.length === sides.length) {
-    if (errors.every((e) => e.error.reason === 'not-image')) mode = 'fallback';
+    // An LFS pointer chunk answering `lfs-pointer` on every side has no route
+    // to the real file (GitLab, Bitbucket, no local copy): its pointer diff is
+    // all there is to show (#1665).
+    if (errors.every((e) => e.error.reason === 'not-image' || (lfsPointerChunk && e.error.reason === 'lfs-pointer'))) {
+      mode = 'fallback';
+    }
     else if (tooLargeFallback && errors.every((e) => e.error.reason === 'too-large' && !e.error.width)) {
       mode = 'too-large';
     }
@@ -218,6 +233,11 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
     return () => observer.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
+
+  const fellBack = mode === 'fallback';
+  useEffect(() => {
+    onFallbackChange?.(fellBack);
+  }, [fellBack, onFallbackChange]);
 
   if (mode === 'fallback') return <>{fallback}</>;
   if (mode === 'too-large') return <>{tooLargeFallback}</>;

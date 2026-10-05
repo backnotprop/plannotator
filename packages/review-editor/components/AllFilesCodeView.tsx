@@ -35,7 +35,7 @@ import {
   resolveLineSelectionBehavior,
   type LineSelectionSource,
 } from '../utils/lineSelectionBehavior';
-import { isContentlessBinaryPatch, isImagePreviewCandidate, isOversizedReviewStubPatch } from '@plannotator/shared/diff-paths';
+import { isContentlessBinaryPatch, isImagePreviewCandidate, isOversizedReviewStubPatch, parseLfsPointerPatch } from '@plannotator/shared/diff-paths';
 import { OversizedFileNotice } from './OversizedFileNotice';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import { FileHeader } from './FileHeader';
@@ -204,7 +204,13 @@ export interface AllFilesCodeViewProps {
     /** The notice to show when every side is over the byte cap. */
     tooLargeFallback?: React.ReactNode;
     onHeightChange: () => void;
+    /** The chunk is a Git LFS pointer change (#1665); its pointer diff stays below. */
+    lfsPointerChunk?: boolean;
   }) => React.ReactNode;
+  /** The server can resolve Git LFS pointers (#1665): a chunk whose only change
+   *  is an image's LFS pointer also gets `renderImagePreview` (in the header,
+   *  above the small pointer diff). */
+  lfsImagePreview?: boolean;
   /** Compact coarse-pointer shell. Adjusts custom-header chrome and Pierre's
    * matching virtualization metric without changing desktop geometry. */
   compactTouchLayout?: boolean;
@@ -588,6 +594,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   reviewSnapshotId,
   contextExpansionAvailable = true,
   renderImagePreview,
+  lfsImagePreview = false,
   compactTouchLayout,
   onLineSelection,
   onAddAnnotationForFile,
@@ -821,10 +828,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const ids = new Set<string>();
     if (!renderImagePreview) return ids;
     for (const [id, file] of itemIdToFile) {
-      if (isImagePreviewCandidate(file.patch, file.path, file.oldPath)) ids.add(id);
+      if (isImagePreviewCandidate(file.patch, file.path, file.oldPath, { lfs: lfsImagePreview })) ids.add(id);
     }
     return ids;
-  }, [itemIdToFile, renderImagePreview]);
+  }, [itemIdToFile, renderImagePreview, lfsImagePreview]);
   const imagePreviewItemIdsRef = useRef(imagePreviewItemIds);
   imagePreviewItemIdsRef.current = imagePreviewItemIds;
 
@@ -2505,7 +2512,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const isOversizedStub = isOversizedReviewStubPatch(file.patch);
     const isBinaryNotice = !isOversizedStub && isContentlessBinaryPatch(file.patch);
     const remeasure = () => refreshItem(item.id);
-    const imagePreview = !collapsed && renderImagePreview && isImagePreviewCandidate(file.patch, file.path, file.oldPath)
+    const imagePreview = !collapsed && renderImagePreview && isImagePreviewCandidate(file.patch, file.path, file.oldPath, { lfs: lfsImagePreview })
       ? renderImagePreview({
           file,
           fallback: isOversizedStub
@@ -2513,6 +2520,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
             : isBinaryNotice ? <BinaryFileNotice onHeightChange={remeasure} /> : null,
           tooLargeFallback: isOversizedStub ? <OversizedFileNotice onHeightChange={remeasure} /> : undefined,
           onHeightChange: remeasure,
+          lfsPointerChunk: lfsImagePreview && parseLfsPointerPatch(file.patch) !== null,
         })
       : null;
     // Edit-to-suggestion affordance (flag-gated). Slot portals republish on

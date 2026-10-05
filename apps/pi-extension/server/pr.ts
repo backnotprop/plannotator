@@ -25,6 +25,7 @@ import {
 	fetchPR as fetchPRCore,
 	fetchPRFileContent as fetchPRFileContentCore,
 	fetchPRFileBytes as fetchPRFileBytesCore,
+	fetchPRLfsFileBytes as fetchPRLfsFileBytesCore,
 	fetchPRViewedFiles as fetchPRViewedFilesCore,
 	fetchPRStack as fetchPRStackCore,
 	fetchPRList as fetchPRListCore,
@@ -95,6 +96,10 @@ export function fetchPRFileContent(ref: PRRef, sha: string, filePath: string) {
 }
 export function fetchPRFileBytes(ref: PRRef, sha: string, filePath: string, maxBytes: number) {
 	return fetchPRFileBytesCore(prRuntime, ref, sha, filePath, maxBytes);
+}
+/** A Git LFS file's real bytes (#1665); null when the platform has no LFS route. */
+export function fetchPRLfsFileBytes(ref: PRRef, sha: string, filePath: string, maxBytes: number, signal?: AbortSignal) {
+	return fetchPRLfsFileBytesCore(prRuntime, ref, sha, filePath, maxBytes, signal);
 }
 /** Submit a review through the Pi Node.js command runtime. */
 export function submitPRReview(

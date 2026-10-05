@@ -16,7 +16,7 @@
  * browser-safe.
  */
 
-import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhPRFileContent, fetchGhPRFileBytes, submitGhPRReview, foldFileLevelComments, fetchGhPRViewedFiles, markGhFilesViewed, fetchGhPRStack, fetchGhPRList } from "./pr-github";
+import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhPRFileContent, fetchGhPRFileBytes, fetchGhPRLfsFileBytes, submitGhPRReview, foldFileLevelComments, fetchGhPRViewedFiles, markGhFilesViewed, fetchGhPRStack, fetchGhPRList } from "./pr-github";
 import { checkGlAuth, getGlUser, fetchGlMR, fetchGlMRContext, fetchGlFileContent, fetchGlFileBytes, submitGlMRReview } from "./pr-gitlab";
 import { checkBbAuth, getBbUser, fetchBbPR, fetchBbPRContext, fetchBbFileContent, fetchBbFileBytes, submitBbPRReview, fetchBbPRList } from "./pr-bitbucket";
 import type { BitbucketPRRef, GithubPRRef, GitlabMRRef, Platform, PRFileBytesResult, PRRuntime, PRRef, PRMetadata, PRContext, PRReviewFileComment, PRReviewFileLevelComment, PRReviewAction, PRReviewSubmissionResult, PRStackTree, PRListItem } from "./pr-types";
@@ -52,6 +52,19 @@ export interface PRProvider<R extends PRRef = PRRef> {
   fetchStack?(runtime: PRRuntime, ref: R, metadata: PRMetadata): Promise<PRStackTree | null>;
   /** Recent PRs for the switcher. Absent: an empty list. */
   fetchList?(runtime: PRRuntime, ref: R): Promise<PRListItem[]>;
+  /**
+   * The real bytes of a Git LFS file at one commit (#1665), capped at
+   * `maxBytes`. Absent: the platform has no LFS route and LFS images keep the
+   * `lfs-pointer` answer. The caller verifies the bytes against the pointer.
+   */
+  fetchLfsFileBytes?(
+    runtime: PRRuntime,
+    ref: R,
+    sha: string,
+    filePath: string,
+    maxBytes: number,
+    signal?: AbortSignal,
+  ): Promise<PRFileBytesResult>;
 }
 
 const githubProvider: PRProvider<GithubPRRef> = {
@@ -61,6 +74,7 @@ const githubProvider: PRProvider<GithubPRRef> = {
   fetchContext: fetchGhPRContext,
   fetchFileContent: fetchGhPRFileContent,
   fetchFileBytes: fetchGhPRFileBytes,
+  fetchLfsFileBytes: fetchGhPRLfsFileBytes,
   submitReview: submitGhPRReview,
   fetchViewedFiles: fetchGhPRViewedFiles,
   markFilesViewed: markGhFilesViewed,
@@ -148,6 +162,22 @@ export async function fetchPRFileBytes(
   maxBytes: number,
 ): Promise<PRFileBytesResult> {
   return getPRProvider(ref).fetchFileBytes(runtime, ref, sha, filePath, maxBytes);
+}
+
+/**
+ * One Git LFS file at one commit as its real bytes (#1665). Null when the
+ * platform has no LFS route (GitLab, Bitbucket).
+ */
+export async function fetchPRLfsFileBytes(
+  runtime: PRRuntime,
+  ref: PRRef,
+  sha: string,
+  filePath: string,
+  maxBytes: number,
+  signal?: AbortSignal,
+): Promise<PRFileBytesResult | null> {
+  const provider = getPRProvider(ref);
+  return provider.fetchLfsFileBytes ? provider.fetchLfsFileBytes(runtime, ref, sha, filePath, maxBytes, signal) : null;
 }
 
 /** Submit a platform review and preserve any provider-specific partial result. */

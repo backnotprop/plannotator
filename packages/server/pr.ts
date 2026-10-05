@@ -36,6 +36,7 @@ import {
   fetchPRContext as fetchPRContextCore,
   fetchPRFileContent as fetchPRFileContentCore,
   fetchPRFileBytes as fetchPRFileBytesCore,
+  fetchPRLfsFileBytes as fetchPRLfsFileBytesCore,
   submitPRReview as submitPRReviewCore,
   fetchPRViewedFiles as fetchPRViewedFilesCore,
   markPRFilesViewed as markPRFilesViewedCore,
@@ -120,6 +121,11 @@ export function fetchPRFileContent(
 
 export function fetchPRFileBytes(ref: PRRef, sha: string, filePath: string, maxBytes: number) {
   return fetchPRFileBytesCore(runtime, ref, sha, filePath, maxBytes);
+}
+
+/** A Git LFS file's real bytes (#1665); null when the platform has no LFS route. */
+export function fetchPRLfsFileBytes(ref: PRRef, sha: string, filePath: string, maxBytes: number, signal?: AbortSignal) {
+  return fetchPRLfsFileBytesCore(runtime, ref, sha, filePath, maxBytes, signal);
 }
 
 /** Submit a review through the Bun command runtime. */

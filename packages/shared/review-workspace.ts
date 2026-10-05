@@ -494,6 +494,15 @@ export class WorkspaceReviewSession implements WorkspaceReviewState {
     );
   }
 
+  /**
+   * Where one side of a workspace file lives on disk, for resolving a Git LFS
+   * pointer (#1665): the child repository and the side's repo-relative path.
+   */
+  getLfsLocation(filePath: string, oldPath: string | undefined, side: DiffSide): { cwd: string; path: string } {
+    const target = this.resolveFileTarget(filePath, oldPath);
+    return { cwd: target.cwd, path: side === "old" ? target.oldPath ?? target.filePath : target.filePath };
+  }
+
   async getFileBytes(
     filePath: string,
     oldPath: string | undefined,

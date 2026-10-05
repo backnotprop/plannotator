@@ -274,9 +274,96 @@ export function isImagePreviewCandidate(
   patch: string,
   path: string,
   oldPath?: string,
+  options?: { lfs?: boolean },
 ): boolean {
   if (!isReviewImagePath(path) && !isReviewImagePath(oldPath)) return false;
-  return !patch.split("\n").some((line) => line.startsWith("@@ "));
+  if (!patch.split("\n").some((line) => line.startsWith("@@ "))) return true;
+  // A Git LFS image's patch is the pointer text changing (#1665). Only when
+  // the server advertised it can resolve pointers; an older server would
+  // answer `not-in-diff`, so the pointer diff stays the view there.
+  return options?.lfs === true && parseLfsPointerPatch(patch) !== null;
+}
+
+// --- Git LFS pointers (#1665) -------------------------------------------------
+
+/** First line of every Git LFS pointer file. */
+export const LFS_POINTER_VERSION_LINE = "version https://git-lfs.github.com/spec/v1";
+
+/** A parsed Git LFS pointer: the sha256 and byte size of the real file. */
+export interface LfsPointer {
+  /** Lower-case hex sha256 of the real file. */
+  oid: string;
+  size: number;
+}
+
+/**
+ * Parse Git LFS pointer text (spec v1): exactly the `version`, `oid sha256:`
+ * and `size` lines, in that order. Pointers with extension lines (`ext-…`)
+ * are not accepted: their oid names content a smudge extension transforms.
+ */
+export function parseLfsPointerText(text: string): LfsPointer | null {
+  if (text.length > 1024) return null;
+  const lines = text.replace(/\r?\n$/, "").split(/\r?\n/);
+  if (lines.length !== 3 || lines[0] !== LFS_POINTER_VERSION_LINE) return null;
+  const oid = /^oid sha256:([0-9a-f]{64})$/.exec(lines[1]);
+  const size = /^size (0|[1-9][0-9]{0,15})$/.exec(lines[2]);
+  if (!oid || !size) return null;
+  const bytes = Number(size[1]);
+  if (!Number.isSafeInteger(bytes)) return null;
+  return { oid: oid[1], size: bytes };
+}
+
+/** The pointers on each side of an LFS pointer chunk. A side is absent for an added or deleted file. */
+export interface LfsPointerPatch {
+  old?: LfsPointer;
+  new?: LfsPointer;
+}
+
+/**
+ * When a single file's patch chunk is ONLY a Git LFS pointer changing, the
+ * pointer on each side; otherwise null. The chunk must have exactly one hunk
+ * starting at the top of the file, and every side it carries must parse as a
+ * complete pointer, so an ordinary text file that merely mentions the LFS
+ * version line never qualifies.
+ */
+export function parseLfsPointerPatch(patch: string): LfsPointerPatch | null {
+  const lines = patch.split("\n");
+  const hunkIndex = lines.findIndex((line) => line.startsWith("@@ "));
+  if (hunkIndex === -1) return null;
+  const header = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(lines[hunkIndex]);
+  if (!header || Number(header[1]) > 1 || Number(header[2]) > 1) return null;
+  const oldLines: string[] = [];
+  const newLines: string[] = [];
+  for (let i = hunkIndex + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (line === "" && i === lines.length - 1) break;
+    if (line.startsWith("\\")) continue; // "\ No newline at end of file"
+    const marker = line[0];
+    const content = line.slice(1);
+    if (marker === " ") {
+      oldLines.push(content);
+      newLines.push(content);
+    } else if (marker === "-") {
+      oldLines.push(content);
+    } else if (marker === "+") {
+      newLines.push(content);
+    } else {
+      return null; // a second hunk, or anything else
+    }
+  }
+  if (oldLines.length === 0 && newLines.length === 0) return null;
+  const result: LfsPointerPatch = {};
+  if (oldLines.length > 0) {
+    const pointer = parseLfsPointerText(oldLines.join("\n"));
+    if (!pointer) return null;
+    result.old = pointer;
+  }
+  if (newLines.length > 0) {
+    const pointer = parseLfsPointerText(newLines.join("\n"));
+    if (!pointer) return null;
+    result.new = pointer;
+  }
+  return result;
 }
 
 export function parseDiffMetadataPathLines(lines: string[]): DiffPathPair {
