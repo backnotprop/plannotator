@@ -6,6 +6,8 @@ import {
   claudeModelVersion,
   cliVersionFrom,
   modelSelectOptions,
+  piCatalogFromRpc,
+  piThinkingLevelsSupported,
   resolveEffortChoice,
   resolveModelChoice,
   type CatalogModel,
@@ -237,4 +239,57 @@ test("cliVersionFrom prefers the line naming the tool, else the first line", () 
 test("cliVersionFrom refuses an unbounded prerelease suffix", () => {
   expect(cliVersionFrom(`0.156.0-${"a".repeat(200)}`)).toBeUndefined();
   expect(cliVersionFrom("0.156.0-alpha.2")).toBe("0.156.0-alpha.2");
+});
+
+describe("piCatalogFromRpc", () => {
+  // get_available_models rows shaped like pi 0.85's (fields not read omitted).
+  const ROWS = [
+    // A map that nulls `off` and names xhigh and max: no Off, both extras offered.
+    { provider: "anthropic", id: "claude-opus-5-5", name: "Claude Opus 5.5", reasoning: true,
+      thinkingLevelMap: { off: null, minimal: "low", xhigh: "xhigh", max: "max" } },
+    // No map: pi's rule gives off..high and never xhigh/max.
+    { provider: "openrouter", id: "anthropic/claude-opus-5-5", name: "Claude Opus 5.5", reasoning: true },
+    // xhigh mapped, max nulled.
+    { provider: "openai", id: "gpt-6-sol", name: "GPT-6-Sol", reasoning: true,
+      thinkingLevelMap: { xhigh: "xhigh", max: null } },
+    // Not a reasoning model: no picker at all.
+    { provider: "groq", id: "llama", name: "Llama", reasoning: false },
+  ];
+  const levelsOf = (models: CatalogModel[], id: string) =>
+    models.find((m) => m.id === id)?.reasoningEfforts?.map((e) => e.id);
+
+  test("levels follow each model's thinkingLevelMap the way pi's getSupportedThinkingLevels does", () => {
+    const models = piCatalogFromRpc(ROWS, "0.85.1");
+    expect(levelsOf(models, "anthropic/claude-opus-5-5")).toEqual(["minimal", "low", "medium", "high", "xhigh", "max"]);
+    expect(levelsOf(models, "openrouter/anthropic/claude-opus-5-5")).toEqual(["off", "minimal", "low", "medium", "high"]);
+    expect(levelsOf(models, "openai/gpt-6-sol")).toEqual(["off", "minimal", "low", "medium", "high", "xhigh"]);
+    expect(levelsOf(models, "groq/llama")).toBeUndefined();
+    // pi reports no default level, so nothing claims one (the bar reads Auto).
+    expect(models.some((m) => m.defaultReasoningEffort)).toBe(false);
+    expect(models.filter((m) => m.default).map((m) => m.id)).toEqual(["anthropic/claude-opus-5-5"]);
+  });
+
+  test("labels name the provider, falling back to provider/id only where they would still collide", () => {
+    const models = piCatalogFromRpc(
+      [...ROWS, { provider: "openai", id: "gpt-6-sol-2", name: "GPT-6-Sol" }],
+      "0.85.1",
+    );
+    expect(models.map((m) => m.label)).toEqual([
+      "Claude Opus 5.5 (anthropic)",
+      "Claude Opus 5.5 (openrouter)",
+      "openai/gpt-6-sol",
+      "Llama (groq)",
+      "openai/gpt-6-sol-2",
+    ]);
+  });
+
+  test("a pi that would persist set_thinking_level globally, or an unknown version, is offered no levels", () => {
+    for (const version of ["0.84.2", "0.79.1", undefined]) {
+      expect(piCatalogFromRpc(ROWS, version).some((m) => m.reasoningEfforts)).toBe(false);
+    }
+    expect(piThinkingLevelsSupported("0.84.3")).toBe(true);
+    expect(piThinkingLevelsSupported("1.0.0")).toBe(true);
+    expect(piThinkingLevelsSupported("0.84.2")).toBe(false);
+    expect(piThinkingLevelsSupported("garbage")).toBe(false);
+  });
 });

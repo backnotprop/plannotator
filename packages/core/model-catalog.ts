@@ -85,15 +85,99 @@ export const CODEX_FALLBACK_MODELS: CatalogModel[] = [
 export type ModelsSource = 'fallback' | 'discovered';
 
 /**
- * Pi's unified reasoning knob — the levels `--thinking` and the runtime's
- * `set_thinking_level` accept, in Pi's own order. Deliberately
- * model-independent, exactly like the review/guide launcher's picker
- * (`PI_THINKING` in AgentsTab): Pi clamps a level the selected model does not
- * support, so the picker offers the knob's full range and the runtime resolves
- * it. `max` is absent here for the same reason it is absent there — the CLI
- * documents `off|minimal|low|medium|high|xhigh`.
+ * Every thinking level Pi names, in its own order (pi-ai's
+ * `EXTENDED_THINKING_LEVELS`). The vocabulary only: which of them one model
+ * accepts comes from that model's `get_available_models` row
+ * (`piSupportedThinkingLevels`).
  */
-export const PI_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+export const PI_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+
+/**
+ * The first pi whose RPC `set_thinking_level` (and `set_model`) change only
+ * the running session. Before it (pi commit 2ff8ba622, released in 0.84.3)
+ * both commands also rewrote the user's global defaults in
+ * `~/.pi/agent/settings.json`, so an Ask AI pick would have changed the
+ * thinking level of every later `pi` the user starts.
+ */
+export const PI_SESSION_SCOPED_THINKING_VERSION = '0.84.3';
+
+function parseVersionTriple(version: string): [number, number, number] | undefined {
+  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version.trim());
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : undefined;
+}
+
+/**
+ * Whether Plannotator may set a thinking level on a pi of this version (see
+ * `PI_SESSION_SCOPED_THINKING_VERSION`). An unknown version is refused: the
+ * cost of guessing wrong is a silently changed user default.
+ */
+export function piThinkingLevelsSupported(version: string | undefined): boolean {
+  const actual = version ? parseVersionTriple(version) : undefined;
+  const minimum = parseVersionTriple(PI_SESSION_SCOPED_THINKING_VERSION)!;
+  if (!actual) return false;
+  for (let i = 0; i < 3; i++) {
+    if (actual[i] !== minimum[i]) return actual[i] > minimum[i];
+  }
+  return true;
+}
+
+/**
+ * The thinking levels one Pi model accepts, from its `get_available_models`
+ * row. Mirrors pi-ai's `getSupportedThinkingLevels`: `off` through `high` are
+ * available to every reasoning model unless the map marks the level `null`,
+ * while `xhigh` and `max` are offered only when the map names them. A model
+ * without `reasoning` gets none (pi answers `["off"]` for it, which is not a
+ * choice worth a picker).
+ */
+export function piSupportedThinkingLevels(
+  reasoning: boolean | undefined,
+  thinkingLevelMap?: Readonly<Record<string, string | null | undefined>> | null,
+): string[] {
+  if (!reasoning) return [];
+  return PI_THINKING_LEVELS.filter((level) => {
+    const mapped = thinkingLevelMap?.[level];
+    if (mapped === null) return false;
+    if (level === 'xhigh' || level === 'max') return mapped !== undefined;
+    return true;
+  });
+}
+
+/** The subset of a pi `get_available_models` row the catalog reads. */
+export interface PiRpcModel {
+  provider: string;
+  id: string;
+  name?: string;
+  reasoning?: boolean;
+  thinkingLevelMap?: Record<string, string | null | undefined> | null;
+}
+
+/**
+ * Build the Pi catalog from `get_available_models`. Labels read
+ * "Name (provider)" like OpenCode's, so two providers serving the same model
+ * stay distinguishable; rows that would still collide fall back to
+ * "provider/id". Thinking levels are listed per model, and only when the
+ * installed pi takes them session-scoped (`piThinkingLevelsSupported`).
+ * No `defaultReasoningEffort`: pi's default level is the user's own setting,
+ * which the RPC does not report, so an unpicked level reads "Auto" and nothing
+ * is sent.
+ */
+export function piCatalogFromRpc(rows: readonly PiRpcModel[], toolVersion: string | undefined): CatalogModel[] {
+  const valid = rows.filter((m) => m && typeof m.provider === 'string' && m.provider && typeof m.id === 'string' && m.id);
+  const withLevels = piThinkingLevelsSupported(toolVersion);
+  const labelOf = (m: PiRpcModel) => `${(typeof m.name === 'string' && m.name.trim()) || m.id} (${m.provider})`;
+  const counts = new Map<string, number>();
+  for (const m of valid) counts.set(labelOf(m), (counts.get(labelOf(m)) ?? 0) + 1);
+  return valid.map((m, i) => {
+    const label = labelOf(m);
+    const levels = withLevels ? piSupportedThinkingLevels(m.reasoning, m.thinkingLevelMap) : [];
+    return {
+      id: `${m.provider}/${m.id}`,
+      label: (counts.get(label) ?? 0) > 1 ? `${m.provider}/${m.id}` : label,
+      ...(i === 0 ? { default: true } : {}),
+      ...(levels.length ? { reasoningEfforts: effortList(levels) } : {}),
+    };
+  });
+}
 
 /**
  * The version in a CLI's own output: `claude --version` ("2.1.282 (Claude

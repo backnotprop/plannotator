@@ -132,7 +132,7 @@ for f in index types provider session-manager endpoints context base-session ses
     > "generated/ai/$f.ts"
 done
 
-for f in claude-agent-sdk codex-app-server opencode-sdk command-path child-io pi-sdk pi-sdk-node pi-events; do
+for f in claude-agent-sdk codex-app-server opencode-sdk command-path child-io pi-sdk pi-sdk-node pi-events pi-version; do
   src="../../packages/ai/providers/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/ai/providers/%s.ts\n' "$f" | cat - "$src" \
     | sed "s|from ['\"]@plannotator/core/model-catalog['\"]|from '../model-catalog.ts'|g" \
