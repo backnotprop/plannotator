@@ -20,17 +20,17 @@
   "files": ["**/*.ts", "**/*.tsx", "!**/*.test.ts", "!**/*.test.tsx"],
   "dependencies": {
     "@plannotator/core": "workspace:*",
-    "lucide-react": "^1.38.0"
+    "lucide-react": "^1.48.0"
   },
   "peerDependencies": {
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
   },
   "devDependencies": {
-    "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.5",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "typescript": "~5.8.2"
   }
 }

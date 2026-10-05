@@ -44,8 +44,8 @@
     "prepublishOnly": "bun run build"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "1.18.32",
-    "@opencode/plugin": "2.0.14",
+    "@opencode-ai/plugin": "1.18.33",
+    "@opencode/plugin": "2.0.18",
     "@plannotator/ai": "workspace:*",
     "@plannotator/server": "workspace:*",
     "@plannotator/shared": "workspace:*"
