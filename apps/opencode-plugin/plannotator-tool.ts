@@ -43,6 +43,7 @@ import {
   plannotatorToolOpenedText,
   plannotatorDecisionHeading,
   plannotatorBundleSubject,
+  plannotatorTargetSubject,
   looksLikeFilePath,
   plannotatorToolTargets,
   plannotatorUnknownSessionText,
@@ -63,8 +64,8 @@ export interface TrackedLaunch {
   readonly kind: LaunchKind;
   /** How it is named: `baseSubject`, told apart from the owner's same-named open launches. */
   subject: string;
-  /** The subject it was opened under. */
-  readonly baseSubject: string;
+  /** The subject before same-named launches were told apart: from the typed words, then from what the server opened. */
+  baseSubject: string;
   /** What it shows, in full, once its server named it (the ready file). */
   target?: string | string[];
   readonly startedAt: number;
@@ -159,6 +160,10 @@ export class OpenCodeLaunchRegistry {
         launch.isRemote = isRemote;
         if (target !== undefined) {
           launch.target = target;
+          // Named by what the CLI opened, not the typed words: it drops a
+          // stray `.` or prose beside a file (`annotate . a.md` opens a.md).
+          const named = subjectFromServerTarget(kind, launch.baseSubject, target);
+          if (named !== null) launch.baseSubject = named;
           this.relabel(owner);
         }
         settle({ state: "ready", url });
@@ -221,7 +226,23 @@ function reviewSubject(words: readonly string[]): string {
     if (match) return /merge_requests/i.test(word) ? `MR !${match[1]}` : `PR #${match[1]}`;
   }
   const directory = words[words.length - 1];
-  return directory ? `changes in ${baseName(directory)}` : "local changes";
+  return directory ? `changes in ${baseName(directory)}` : LOCAL_CHANGES_SUBJECT;
+}
+
+/** A review of the session's own working tree, opened with no target words. */
+const LOCAL_CHANGES_SUBJECT = "local changes";
+
+/**
+ * The subject a launch takes once its server names the target it opened, or
+ * null to keep `typed` (from the typed words; all an older CLI leaves).
+ * Annotate and review are named from the target; plan and last keep theirs,
+ * and a review typed with no target stays "local changes". The Claude Code
+ * mod's rule (apps/hook/hooks/mod/launch.ts).
+ */
+export function subjectFromServerTarget(kind: LaunchKind, typed: string, target: string | readonly string[]): string | null {
+  if (kind === "plan" || kind === "last") return null;
+  if (kind === "review" && typed === LOCAL_CHANGES_SUBJECT) return null;
+  return plannotatorTargetSubject(kind, target);
 }
 
 /** What an annotate session shows, from its target words. */

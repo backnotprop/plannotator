@@ -488,6 +488,40 @@ export function plannotatorBundleSubject(paths: readonly string[]): string {
 }
 
 /**
+ * A subject from the target the CLI reports it opened (the ready line, the
+ * result record), for the kinds whose subject names what was opened:
+ * annotate (the file name, a URL's host, or a bundle's file names) and
+ * review (`PR #12` / `MR !12`, or `changes in <directory>`). Null when the
+ * target names nothing usable; the host then keeps the subject it built from
+ * the typed words, as it must for an older CLI that reports no target. Typed
+ * words are not trusted for this when a target is known: the CLI ignores a
+ * stray `.` or prose words beside a file, so `annotate . a.md` opens a.md.
+ */
+export function plannotatorTargetSubject(kind: 'annotate' | 'review', target: PlannotatorTarget | undefined): string | null {
+  if (target === undefined) return null
+  const entries = (typeof target === 'string' ? [target] : [...target]).filter((entry) => entry.trim() !== '')
+  if (entries.length === 0) return null
+  if (kind === 'annotate' && entries.length > 1) return plannotatorBundleSubject(entries)
+  if (entries.length !== 1) return null
+  const only = entries[0] as string
+  if (kind === 'review') {
+    const pr = plannotatorPrSubject(only)
+    if (pr) return pr
+    if (/^https?:\/\//i.test(only)) return null
+    const name = fileNameOf(only)
+    return name ? `changes in ${name}` : null
+  }
+  if (/^https?:\/\//i.test(only)) {
+    try {
+      return new URL(only).host || only
+    } catch {
+      return only
+    }
+  }
+  return fileNameOf(only) || null
+}
+
+/**
  * Whether a shell word reads as a file path rather than prose: it has a path
  * separator, starts with `~`, `.` or `@`, or ends in a file extension. A URL
  * is not a path. Pure: nothing is looked up on disk.

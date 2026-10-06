@@ -7,6 +7,7 @@ import {
   plannotatorDecisionHeading,
   plannotatorDistinctSubjects,
   plannotatorSameTarget,
+  plannotatorTargetSubject,
   plannotatorToolArgs,
   plannotatorToolCloseText,
   plannotatorToolListText,
@@ -227,5 +228,30 @@ describe('plannotator tool v2: texts name the session id', () => {
     expect(text).toContain('pn-aaaaaa')
     expect(text).toContain('3 unsent comments')
     expect(text).toMatch(/Not closed: Plan v2 \(pn-bbbbbb\)/)
+  })
+})
+
+describe('plannotator tool: subjects from the target the CLI opened', () => {
+  // The failure: a subject naming words the CLI dropped ("2 files: ., a.md")
+  // or a full path where one line should carry only names.
+  test('annotate: a file name, a URL host, or a bundle of file names', () => {
+    expect(plannotatorTargetSubject('annotate', '/work/a.md')).toBe('a.md')
+    expect(plannotatorTargetSubject('annotate', '/work/docs/')).toBe('docs')
+    expect(plannotatorTargetSubject('annotate', 'https://example.com/page?q=1')).toBe('example.com')
+    expect(plannotatorTargetSubject('annotate', ['/work/spec.md', '/work/ui/mock.html'])).toBe('2 files: spec.md, mock.html')
+    expect(plannotatorTargetSubject('annotate', ['/work/only.md'])).toBe('only.md')
+  })
+
+  test('review: a pull request, or the reviewed directory', () => {
+    expect(plannotatorTargetSubject('review', 'https://github.com/o/r/pull/12')).toBe('PR #12')
+    expect(plannotatorTargetSubject('review', 'https://gitlab.com/g/r/-/merge_requests/7')).toBe('MR !7')
+    expect(plannotatorTargetSubject('review', '/work/repo')).toBe('changes in repo')
+  })
+
+  test('nothing usable: null, so the host keeps its own subject', () => {
+    expect(plannotatorTargetSubject('annotate', undefined)).toBeNull()
+    expect(plannotatorTargetSubject('annotate', '  ')).toBeNull()
+    expect(plannotatorTargetSubject('annotate', [])).toBeNull()
+    expect(plannotatorTargetSubject('review', ['/a', '/b'])).toBeNull()
   })
 })

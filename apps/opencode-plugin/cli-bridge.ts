@@ -1152,8 +1152,12 @@ export async function handleCliCommand(input: {
       // the plugin passed it: a bare name may have resolved anywhere.
       const resolvedTarget = cliTargetOf(outcome.target);
       const filePath = typeof resolvedTarget === "string" ? resolvedTarget : parsed.filePath;
-      let prompt = buildAnnotatePromptFromBridgeOutcome(outcome, bundlePaths
-        ? { kind: "file", fileHeader: "Files", filePath: annotateBundleTargetText(bundlePaths) }
+      // A bundle's `Files:` line names the CLI's resolved (absolute) paths
+      // too, as the slash command's did: the tool passes the words it was
+      // given, which may be bare names.
+      const bundleTargets = Array.isArray(resolvedTarget) ? resolvedTarget : bundlePaths;
+      let prompt = buildAnnotatePromptFromBridgeOutcome(outcome, bundleTargets
+        ? { kind: "file", fileHeader: "Files", filePath: annotateBundleTargetText(bundleTargets) }
         : {
             kind: "file",
             fileHeader: getAnnotateFileHeader(filePath, input.cwd),

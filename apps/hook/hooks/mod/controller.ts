@@ -34,6 +34,7 @@ import {
   SETTLED_BY,
   SETTLED_DIR,
   subjectFor,
+  subjectFromServerTarget,
   wordsOf,
 } from './launch'
 import {
@@ -726,6 +727,10 @@ export class PlannotatorMod {
       }
       launch.target = ready.target
       launch.targetFromServer = true
+      // Named by what the CLI opened, not the typed words: it drops a stray
+      // `.` or prose beside a file (`annotate . a.md` opens a.md alone).
+      const named = subjectFromServerTarget(launch.kind, launch.baseSubject ?? launch.subject, ready.target)
+      if (named !== null) launch.baseSubject = named
       this.refreshSubjects()
     }
     await this.persist()

@@ -89,9 +89,21 @@ const server = Bun.serve({
     return Response.json({ error: "Not found" }, { status: 404 });
   },
 });
-// "targets": a CLI that names what it opened, in full, as the real one does.
+// "targets": a CLI that names what it opened, in full, as the real one does:
+// several path arguments are a bundle, and a stray "." beside a file is
+// dropped, as the shared selection drops it.
 const readyTarget = ${JSON.stringify(behavior)} === "targets" && process.argv[2] === "annotate"
-  ? (await import("node:path")).resolve(process.env.PLANNOTATOR_CWD ?? process.cwd(), process.argv[3])
+  ? await (async () => {
+      const { resolve } = await import("node:path");
+      const { existsSync } = await import("node:fs");
+      const base = process.env.PLANNOTATOR_CWD ?? process.cwd();
+      const words = process.argv.slice(3).filter((word) => !word.startsWith("-"));
+      if (words.length > 1) return words.map((word) => resolve(base, word));
+      const only = words[0] ?? "";
+      if (existsSync(resolve(base, only))) return resolve(base, only);
+      const tokens = only.split(/\\s+/).filter((token) => token && token !== ".");
+      return tokens.length === 1 ? resolve(base, tokens[0]) : resolve(base, only);
+    })()
   : undefined;
 appendFileSync(process.env.PLANNOTATOR_READY_FILE, JSON.stringify({ url: "http://localhost:" + server.port, port: server.port, isRemote: ${JSON.stringify(behavior)} === "disabled-remote", ...(readyTarget ? { target: readyTarget } : {}) }) + "\\n");
 const outcome = await decision;
@@ -604,6 +616,40 @@ describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", (
     await running;
     expect(host.prompts[0]!.text.split("\n")[0]).toBe(`Plannotator: notes.md (${launch.id}) — Feedback.`);
     expect(host.registry.openFor("ses_a")).toHaveLength(0);
+  }, 30_000);
+
+  // Failure caught: `. notes.md` opens notes.md alone (the CLI drops the
+  // stray "."), but the subject came from the typed words: "2 files: ., notes.md".
+  test("a slash command is named by what the CLI opened, not the typed words", async () => {
+    process.env.PLANNOTATOR_BIN = writeStub(root, "targets");
+    const host = makeHost(root);
+    const running = runNativeCommand("plannotator-annotate", { sessionID: "ses_a", prompt: { text: ". notes.md" } }, host.nativeDeps);
+    const launch = await waitFor(() => host.registry.openFor("ses_a").find((entry) => entry.port));
+    expect(launch.subject).toBe("notes.md");
+    expect(await runPlannotatorTool({ action: "list" }, { sessionID: "ses_a" }, host.toolDeps)).toContain(`${launch.id} · annotate · notes.md`);
+    await decide(launch.port!, { decision: "annotated", feedback: "One note." });
+    await running;
+    expect(host.prompts[0]!.text.split("\n").slice(0, 2)).toEqual([
+      `Plannotator: notes.md (${launch.id}) — Feedback.`,
+      `Target: ${path.join(root, "notes.md")}`,
+    ]);
+  }, 30_000);
+
+  // Failure caught: the tool's bundle `Files:` line naming the words it was
+  // given (bare names) while the slash command's names absolute paths.
+  test("a tool bundle names files in its subject and full paths in its Files and Target lines", async () => {
+    process.env.PLANNOTATOR_BIN = writeStub(root, "targets");
+    const host = makeHost(root);
+    const text = await runPlannotatorTool({ action: "annotate", target: ["notes.md", "my notes.md"] }, { sessionID: "ses_a" }, host.toolDeps);
+    const id = sessionIdOf(text);
+    const files = [path.join(root, "notes.md"), path.join(root, "my notes.md")];
+    expect(text).toContain("Opened 2 files: notes.md, my notes.md in Plannotator: http://localhost:");
+    expect(text).toContain(`Targets:\n- ${files[0]}\n- ${files[1]}`);
+
+    await decide(portOf(text), { decision: "annotated", feedback: "Both need work.", annotationCount: 3, target: files });
+    const delivered = await waitFor(() => host.prompts[0]);
+    expect(delivered.text.split("\n")[0]).toBe(`Plannotator: 2 files: notes.md, my notes.md (${id}) — Feedback · 3 comments.`);
+    expect(delivered.text).toContain(`Files: ${files.join(", ")}`);
   }, 30_000);
 });
 

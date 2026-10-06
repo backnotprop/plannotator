@@ -20,7 +20,7 @@ function dirOf(call: RunCall): string {
 }
 
 /** The CLI comes up for each launch on its own port, naming `targets[i]` (or nothing: an older CLI). */
-function serve(host: FakeHost, targets: (string | undefined)[], cwd = '/work') {
+function serve(host: FakeHost, targets: (string | string[] | undefined)[], cwd = '/work') {
   let index = 0
   host.onRun = (call) => {
     if (call.argv[3] === 'plannotator-mkdir') return { exitCode: 0, stdout: `${cwd}\n`, stderr: '' }
@@ -189,5 +189,64 @@ describe('decision targets (two files named QUESTIONS.md)', () => {
     const id = /Session: (pn-[0-9a-f]{6})/.exec('text' in opened ? opened.text : '')?.[1]
     expect(id).toBeDefined()
     expect(launches(host)[0]?.env?.PLANNOTATOR_HOST_REVIEW_ID).toBe(id)
+  })
+})
+
+// `/plannotator-annotate . a.md` opens a.md alone (the CLI's shared selection
+// drops the stray `.`), but the subject used to come from the typed words:
+// "2 files: ., a.md" in the command reply, status line and decision heading.
+describe('subjects come from what the CLI opened', () => {
+  test('a stray `.` beside a file: the subject is the file the CLI opened', async () => {
+    const host = fakeHost()
+    serve(host, ['/work/a.md'])
+    const mod = new PlannotatorMod(host, SESSION)
+
+    const reply = await mod.runCommand('annotate', '. a.md')
+    expect(reply).toContain('Opened a.md in Plannotator')
+    expect(reply).not.toContain('2 files')
+    expect(host.statuses.at(-1)).toBe('a.md · waiting for you')
+
+    decide(host, launches(host)[0]!, { surface: 'annotate', decision: 'annotated', message: 'fix it', noop: false, target: '/work/a.md' })
+    await host.tick()
+    expect(host.submits[0]?.split('\n').slice(0, 2)).toEqual([expect.stringMatching(/^Plannotator: a\.md \(pn-[0-9a-f]{6}\) — /), 'Target: /work/a.md'])
+  })
+
+  test('a bundle typed with prose words names only the files the CLI opened', async () => {
+    const host = fakeHost()
+    serve(host, [['/work/docs/spec.md', '/work/mock.html']])
+    const mod = new PlannotatorMod(host, SESSION)
+
+    const reply = await mod.runCommand('annotate', 'docs/spec.md and mock.html please')
+    expect(reply).toContain('Opened 2 files: spec.md, mock.html in Plannotator')
+    expect(host.statuses.at(-1)).toBe('2 files: spec.md, mock.html · waiting for you')
+  })
+
+  test('the tool: a bundle is named by the resolved files, the full paths only in the Target lines', async () => {
+    const host = fakeHost()
+    serve(host, [['/work/docs/spec.md', '/work/mock.html']])
+    const mod = new PlannotatorMod(host, SESSION)
+
+    const opened = await mod.runTool({ action: 'annotate', target: ['spec.md', 'mock.html'] })
+    const text = 'text' in opened ? opened.text : ''
+    expect(text).toContain('Opened 2 files: spec.md, mock.html in Plannotator')
+    expect(text).toContain('Targets:\n- /work/docs/spec.md\n- /work/mock.html')
+  })
+
+  test('review prose: named by the directory the CLI reviewed; no words stays "local changes"', async () => {
+    const host = fakeHost()
+    serve(host, ['/work/repo', '/work/repo'])
+    const mod = new PlannotatorMod(host, SESSION)
+
+    expect(await mod.runCommand('review', 'please look at this')).toContain('Opened changes in repo in Plannotator')
+    expect(await mod.runCommand('review', '')).toContain('Opened local changes in Plannotator')
+  })
+
+  test('an older CLI that reports no target keeps the subject from the typed words', async () => {
+    const host = fakeHost()
+    serve(host, [undefined])
+    const mod = new PlannotatorMod(host, SESSION)
+
+    expect(await mod.runCommand('annotate', 'docs/spec.md mock.html')).toContain('Opened 2 files: spec.md, mock.html in Plannotator')
+    expect(host.statuses.at(-1)).toBe('2 files: spec.md, mock.html · waiting for you')
   })
 })

@@ -22,7 +22,7 @@
 
 import type { SessionKind } from './delivery'
 import { splitShellWords } from './shell-words'
-import { looksLikeFilePath, plannotatorBundleSubject } from './tool'
+import { looksLikeFilePath, plannotatorBundleSubject, plannotatorTargetSubject, type PlannotatorTarget } from './tool'
 
 /** The wrapper. `$1` is the launch directory; the CLI argv follows. */
 export const LAUNCH_SCRIPT = [
@@ -461,6 +461,22 @@ export function isSeveralFilePaths(words: readonly string[]): boolean {
   return targets.length > 1 && targets.every(looksLikeFilePath)
 }
 
+/** A review of the session's own working tree, opened with no target words. */
+export const LOCAL_CHANGES_SUBJECT = 'local changes'
+
+/**
+ * The subject a launch takes once its CLI reports the target it opened (the
+ * ready line), or null to keep `typed` (the subject from the typed words).
+ * Annotate and review are named from the target, since the CLI may have
+ * dropped words (a stray `.`, prose beside a file); plan and last keep theirs.
+ * A review typed with no target stays "local changes".
+ */
+export function subjectFromServerTarget(kind: SessionKind, typed: string, target: PlannotatorTarget | undefined): string | null {
+  if (kind === 'plan' || kind === 'last') return null
+  if (kind === 'review' && typed === LOCAL_CHANGES_SUBJECT) return null
+  return plannotatorTargetSubject(kind, target)
+}
+
 /** How the status line, the command output and the plugin turn name a session. */
 export function subjectFor(kind: SessionKind, args: string | readonly string[], version?: number): string {
   const words = wordsOf(args).filter((word) => !word.startsWith('-'))
@@ -475,7 +491,7 @@ export function subjectFor(kind: SessionKind, args: string | readonly string[], 
         if (match) return /merge_requests/i.test(word) ? `MR !${match[1]}` : `PR #${match[1]}`
       }
       const directory = words[words.length - 1]
-      return directory ? `changes in ${baseName(directory)}` : 'local changes'
+      return directory ? `changes in ${baseName(directory)}` : LOCAL_CHANGES_SUBJECT
     }
     case 'annotate': {
       // Several file paths open as one review: name it as a bundle.
