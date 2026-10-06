@@ -26,11 +26,9 @@ describe("OpenCode package entrypoints", () => {
     );
     // The build must actually run that step, not merely define it.
     expect(packageJson.scripts.build).toContain("bun run build:skill");
-    expect(packageJson.scripts.postinstall).toContain(
-      "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills/plannotator",
-    );
-    expect(packageJson.scripts.postinstall).toContain(
-      "./skills/plannotator/SKILL.md",
-    );
+    // postinstall is a Node script (see postinstall.test.ts for what it
+    // writes); the published package has to carry it or every install fails.
+    expect(packageJson.scripts.postinstall).toBe("node scripts/postinstall.cjs");
+    expect(packageJson.files).toContain("scripts/postinstall.cjs");
   });
 });
