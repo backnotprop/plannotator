@@ -215,6 +215,9 @@ process.exit(1);
       expect(targets('"my notes.md" please --gate')).toEqual(["my notes.md", "please"]);
       expect(targets("my notes.md")).toEqual(["my notes.md"]);
       expect(targets("nothere.md")).toEqual(["nothere.md"]);
+      // A URL with prose after it once went to the CLI as one "URL".
+      expect(targets("https://example.com/page the pricing part")).toEqual(["https://example.com/page", "the", "pricing", "part"]);
+      expect(targets("https://example.com/page")).toEqual(["https://example.com/page"]);
       expect(targets("notes.md --require-approval")).toEqual(["notes.md --require-approval"]);
       expect(buildAnnotateCliArgs(parseAnnotateArgs(". notes.md --gate"), targets(". notes.md --gate")))
         .toEqual(["annotate", ".", "notes.md", "--json", "--gate"]);

@@ -542,6 +542,9 @@ describe("annotateTargetWords", () => {
   // into one word, or a Windows path losing its separators.
   test("an unterminated quote is prose, and backslashes are kept", () => {
     expect(annotateTargetWords("notes.md it's the spec")).toEqual(["notes.md", "it's", "the", "spec"]);
+    // Two apostrophes once grouped "s notes.md don" into one word, hiding the file.
+    expect(annotateTargetWords("it's notes.md don't touch it")).toEqual(["it's", "notes.md", "don't", "touch", "it"]);
+    expect(annotateTargetWords("'my notes.md' it's fine")).toEqual(["my notes.md", "it's", "fine"]);
     expect(annotateTargetWords("C:\\docs\\a.md please")).toEqual(["C:\\docs\\a.md", "please"]);
   });
 

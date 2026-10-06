@@ -720,7 +720,11 @@ async function runPlannotatorCli(options: RunCliOptions): Promise<RunCliResult> 
  * (`--require-approval` typed as prose).
  */
 export function annotateCliTargets(parsed: ParsedAnnotateArgs, rawArgs: string, cwd: string): string[] {
-  if (!parsed.rawFilePath || annotateInputNamesExistingTarget(parsed.rawFilePath, cwd)) return [parsed.rawFilePath];
+  // A URL holds no whitespace, so a URL followed by prose (`https://x.com/p
+  // the pricing part`) names no target as a whole, though the URL probe says
+  // it does (it matches on the scheme alone).
+  const urlWithProse = /^@?https?:\/\//i.test(parsed.rawFilePath) && /\s/.test(parsed.rawFilePath);
+  if (!parsed.rawFilePath || (!urlWithProse && annotateInputNamesExistingTarget(parsed.rawFilePath, cwd))) return [parsed.rawFilePath];
   const words = annotateTargetWords(rawArgs);
   if (words.length < 2 || words.some((word) => word.startsWith("-"))) return [parsed.rawFilePath];
   return words;
