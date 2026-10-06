@@ -166,8 +166,10 @@ export const QuickLabelsTab: React.FC = () => {
               className="rounded-lg overflow-hidden"
               style={{ backgroundColor: colors.bg }}
             >
-              {/* Main row */}
-              <div className="flex items-center gap-2 p-2">
+              {/* Main row. On a narrow dialog the controls after the text
+                  field wrap onto a second line instead of being clipped by
+                  the row's overflow-hidden. */}
+              <div className="flex flex-wrap items-center gap-2 p-2">
                 <input
                   type="text"
                   data-quick-label-emoji
@@ -210,86 +212,92 @@ export const QuickLabelsTab: React.FC = () => {
                       id: e.target.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
                     });
                   }}
-                  className="flex-1 px-2 py-1 bg-background/80 rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
+                  className="flex-1 min-w-0 px-2 py-1 bg-background/80 rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
+                  // The basis is what makes the controls wrap: a row that
+                  // cannot give the text this much room moves them below.
+                  style={{ flexBasis: '8rem' }}
                 />
-                {/* Tip indicator button */}
-                <button
-                  data-quick-label-tip-toggle
-                  onClick={() => {
-                    if (isEditingTip) {
-                      setEditingTipKey(null);
-                    } else {
-                      setEditingTipKey(key);
-                      setEditingTipValue(label.tip || '');
-                    }
-                  }}
-                  className={`relative p-1 rounded transition-all flex-shrink-0 ${
-                    hasTip
-                      ? 'bg-foreground/10 text-foreground/70 hover:text-foreground border border-foreground/15'
-                      : 'text-muted-foreground/30 hover:text-muted-foreground/60 border border-dashed border-muted-foreground/20 hover:border-muted-foreground/40'
-                  }`}
-                  title={hasTip ? `Tip: ${label.tip}` : 'Add AI instruction tip'}
-                >
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                  </svg>
-                  {hasTip && (
-                    <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-foreground/50" />
-                  )}
-                </button>
-                <select
-                  value={label.color}
-                  aria-label={`Colour for ${name}`}
-                  onChange={(e) => updateLabel(key, { color: e.target.value })}
-                  className="px-1.5 py-1 bg-background/80 rounded text-[10px] focus:outline-none focus:ring-1 focus:ring-primary/50"
-                >
-                  {Object.keys(LABEL_COLOR_MAP).map(c => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-                <span
-                  data-quick-label-shortcut
-                  className="text-[10px] text-muted-foreground/50 font-mono w-8 text-center flex-shrink-0"
-                >
-                  {digit ? shortcutHint(digit) : ''}
-                </span>
-                {/* Reorder: position decides which Alt/⌥ digit applies the label. */}
-                <button
-                  type="button"
-                  data-quick-label-move="up"
-                  disabled={index === 0}
-                  onClick={() => move(index, -1)}
-                  aria-label={`Move ${name} up`}
-                  title="Move up"
-                  className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors flex-shrink-0 disabled:opacity-30 disabled:pointer-events-none"
-                >
-                  <ChevronIcon up />
-                </button>
-                <button
-                  type="button"
-                  data-quick-label-move="down"
-                  disabled={index === rows.length - 1}
-                  onClick={() => move(index, 1)}
-                  aria-label={`Move ${name} down`}
-                  title="Move down"
-                  className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors flex-shrink-0 disabled:opacity-30 disabled:pointer-events-none"
-                >
-                  <ChevronIcon up={false} />
-                </button>
-                <button
-                  onClick={() => {
-                    commit(rows.filter((r) => r.key !== key));
-                    setEmojiDraft(key, null);
-                    if (editingTipKey === key) setEditingTipKey(null);
-                  }}
-                  aria-label={`Remove ${name}`}
-                  className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors flex-shrink-0"
-                  title="Remove label"
-                >
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
+                <div className="flex items-center gap-2 ml-auto">
+                  {/* Tip indicator button */}
+                  <button
+                    data-quick-label-tip-toggle
+                    onClick={() => {
+                      if (isEditingTip) {
+                        setEditingTipKey(null);
+                      } else {
+                        setEditingTipKey(key);
+                        setEditingTipValue(label.tip || '');
+                      }
+                    }}
+                    className={`relative p-1 rounded transition-all flex-shrink-0 ${
+                      hasTip
+                        ? 'bg-foreground/10 text-foreground/70 hover:text-foreground border border-foreground/15'
+                        : 'text-muted-foreground/30 hover:text-muted-foreground/60 border border-dashed border-muted-foreground/20 hover:border-muted-foreground/40'
+                    }`}
+                    title={hasTip ? `Tip: ${label.tip}` : 'Add AI instruction tip'}
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                    </svg>
+                    {hasTip && (
+                      <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-foreground/50" />
+                    )}
+                  </button>
+                  <select
+                    value={label.color}
+                    aria-label={`Colour for ${name}`}
+                    onChange={(e) => updateLabel(key, { color: e.target.value })}
+                    className="px-1.5 py-1 bg-background/80 rounded text-[10px] focus:outline-none focus:ring-1 focus:ring-primary/50"
+                  >
+                    {Object.keys(LABEL_COLOR_MAP).map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                  <span
+                    data-quick-label-shortcut
+                    // Hidden below sm: touch devices that narrow rarely have an Alt key.
+                    className="hidden sm:block text-[10px] text-muted-foreground/50 font-mono w-8 text-center flex-shrink-0"
+                  >
+                    {digit ? shortcutHint(digit) : ''}
+                  </span>
+                  {/* Reorder: position decides which Alt/⌥ digit applies the label. */}
+                  <button
+                    type="button"
+                    data-quick-label-move="up"
+                    disabled={index === 0}
+                    onClick={() => move(index, -1)}
+                    aria-label={`Move ${name} up`}
+                    title="Move up"
+                    className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors flex-shrink-0 disabled:opacity-30 disabled:pointer-events-none"
+                  >
+                    <ChevronIcon up />
+                  </button>
+                  <button
+                    type="button"
+                    data-quick-label-move="down"
+                    disabled={index === rows.length - 1}
+                    onClick={() => move(index, 1)}
+                    aria-label={`Move ${name} down`}
+                    title="Move down"
+                    className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors flex-shrink-0 disabled:opacity-30 disabled:pointer-events-none"
+                  >
+                    <ChevronIcon up={false} />
+                  </button>
+                  <button
+                    onClick={() => {
+                      commit(rows.filter((r) => r.key !== key));
+                      setEmojiDraft(key, null);
+                      if (editingTipKey === key) setEditingTipKey(null);
+                    }}
+                    aria-label={`Remove ${name}`}
+                    className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors flex-shrink-0"
+                    title="Remove label"
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
               </div>
               {emojiInvalid && (
                 <div id={emojiErrorId} className="px-2 pb-2 text-[10px] text-destructive">
