@@ -25,7 +25,10 @@ const ChatBubbleIcon = () => (
 // ---------------------------------------------------------------------------
 
 interface CompletionOverlayProps {
-  submitted: 'approved' | 'denied' | 'feedback' | 'exited' | null | false;
+  /** `done`: the session finished with nothing sent (an annotate Done with
+   *  no feedback). Neutral styling. `done` and `exited` (Close) send nothing,
+   *  so neither shows the "response has been sent" line. */
+  submitted: 'approved' | 'denied' | 'feedback' | 'done' | 'exited' | null | false;
   title: string;
   subtitle: string;
   agentLabel: string;
@@ -43,16 +46,20 @@ export function CompletionOverlay({ submitted, title, subtitle, agentLabel, link
   if (!submitted) return null;
 
   const isApproved = submitted === 'approved';
+  const isDone = submitted === 'done';
+  const sentNothing = isDone || submitted === 'exited';
 
   return (
-    <div className="fixed inset-0 z-[100] bg-background flex items-center justify-center">
+    <div className="fixed inset-0 z-[100] bg-background flex items-center justify-center" data-completion-state={submitted}>
       <div className="text-center space-y-6 max-w-md px-8">
         <div
           className={`mx-auto w-16 h-16 rounded-full flex items-center justify-center ${
-            isApproved ? 'bg-success/20 text-success' : 'bg-accent/20 text-accent'
+            isApproved ? 'bg-success/20 text-success'
+            : isDone ? 'bg-muted text-muted-foreground'
+            : 'bg-accent/20 text-accent'
           }`}
         >
-          {isApproved ? <CheckIcon /> : <ChatBubbleIcon />}
+          {isApproved || isDone ? <CheckIcon /> : <ChatBubbleIcon />}
         </div>
 
         <div className="space-y-2">
@@ -109,7 +116,7 @@ export function CompletionOverlay({ submitted, title, subtitle, agentLabel, link
                   </label>
                   <p className="text-xs text-muted-foreground/60">You can change the delay in Settings.</p>
                 </>
-              ) : (
+              ) : sentNothing ? null : (
                 <p className="text-xs text-muted-foreground/60">Your response has been sent.</p>
               )}
             </>

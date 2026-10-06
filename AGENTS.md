@@ -438,7 +438,8 @@ launch directory is `${PLANNOTATOR_DATA_DIR or ~/.plannotator}/claude-code-mod/<
 `stdin`, `ready` (`PLANNOTATOR_READY_FILE`), `result.json`
 (`PLANNOTATOR_HOST_RESULT_FILE`), `stdout`, `stderr`, `pid`, `exit` (written
 after the CLI exits), `revision.json` + `.ack` (plan revisions),
-`messages.json` (`PLANNOTATOR_HOST_MESSAGES_FILE`, `last`'s picker list) and
+`messages.json` (`PLANNOTATOR_HOST_MESSAGES_FILE`, `last`'s picker list),
+`watcher.json` and `settled/by` (see "Two processes on one session" below) and
 `feedback.md` (oversized feedback). Waiting inside a hook (for the ready file, a
 revision ack) happens in a `$.process.run` shell loop (`waitForAny`), never a
 `$.clock` wait, which would spend the hook's budget and let the engine run the
@@ -447,7 +448,11 @@ call on without the mod. Once a review is open, a 1 s `$.clock.every` timer
 ("the review server stopped … your draft is saved"), and every 15 s checks the
 pid with `kill -0`. Open launches and a pending plan approval persist in
 `$.store` and reattach on `session.start` for the same session id
-(`--resume`, `--continue`, a restart). `session.start` does not fire for
+(`--resume`, `--continue`, a restart; on 2.1.290 `--continue` keeps the session
+id). The fork paths do NOT reattach: `--fork-session` and `/clear` start a new
+session id, so the reviews stay with the old id and come back only when that
+session is resumed (re-adopting them across a fork is a follow-up).
+`session.start` does not fire for
 `/clear` or an in-process resume (the process goes on under another session
 id), so `session.end` disposes the instance (timer and bridges stop; nothing is
 delivered into the next session) and the next hook that needs the mod makes a
@@ -459,6 +464,68 @@ crashed keeps its directory (its `stderr` explains why). Servers outlive Claude 
 the wrapper ignores SIGHUP and starts the CLI under `nohup` (a closing terminal
 otherwise took the server with it), so closing the terminal does not lose a
 review; verified live, `claude --continue` reattached and delivered it.
+
+*Two processes on one session.* `claude --continue` while the first process
+still runs gives two Claude Code processes the same session id, and both
+reattach the same launches. One of them watches each launch: `watcher.json` in
+the launch directory is a lease (`{ owner, at, touchedAt }`, the owner a random
+id per mod instance) renewed every 5 s. The process the person works in wins
+it: restoring a launch, a prompt typed in that process (origin `composer`), a
+slash command, Claude's `plannotator` tool and ExitPlanMode all touch that
+process's launches and take the lease at once; a live holder keeps it against
+an older or equal touch, and anyone takes it once it is 20 s old
+(`LEASE_STALE_MS`: the holder exited, slept or hung). A disposed instance
+(`session.end`) releases it at once. Only the watcher runs the bridge (so the
+two never supersede each other) and delivers, re-reading the lease right
+before it settles, so a decision follows the person within a tick. Plan
+approvals live in `$.store` and every ExitPlanMode re-reads them, so an
+approval received (or already used) by the other process is honored once;
+ExitPlanMode and the tool also adopt this session's launches the other process
+started, so a revision goes into the open review instead of opening a new one.
+Delivery is claimed once per launch, whichever file settles it (`result.json`,
+`exit` with an older CLI's stdout, or a dead `pid`): `claimArgv` makes the
+launch's `settled/` directory (mkdir has exactly one winner) and writes the
+claimant's id to `settled/by`, so a claimant whose process call timed out wins
+again on the next tick, while every other process loses. A process that loses,
+or finds a `settled/` claim naming someone else or the launch's `stdin` gone
+(cleaned up after the other delivered), forgets the launch quietly, so its
+status line no longer says "waiting for you". A per-launch in-flight flag keeps
+the 1 s timer, which never waits for a slow check, from checking one launch
+twice at once. Residual window: `$.prompt.submit` resolves only once Claude
+is idle, so a claimed decision can wait for the whole of Claude's current turn,
+and a process that quits or dies in that time takes the delivery with it
+(nobody else delivers a claimed launch: the claimant may still be waiting to
+deliver it, so a second delivery could never be ruled out). It is not lost
+silently: the claimant keeps the launch's record in the store and renews its
+lease while it waits, writes `settled/delivered` once `$.prompt.submit`
+returns, and releases the lease at `session.end`. A restore of the session
+(and any process that watched the launch and saw the claim) checks a claimed,
+undelivered launch whose decision is still on disk: while its claimant's lease
+is fresh it waits; once the lease is released or 60 s stale
+(`UNDELIVERED_AFTER_MS`) it logs once, with a toast, "A decision for <subject>
+arrived but wasn't delivered — it's saved in <dir>/result.json" (`stdout` for an
+older CLI) and writes `settled/reported`, so it is said once.
+`cleanupArgv` removes `stdin` first and keeps `settled/` while `feedback.md`
+keeps the directory, so a claim made after cleanup started loses.
+`persist` keeps this session's records it does not know (the other process
+launched them) unless it settled them. After restore, off the session-start
+path (5 s cap), the stored launch records older than a minute are pruned
+(`pruneArgv`): any cleaned up (no `stdin`) or settled for good (`settled/`
+marked delivered or reported, or with no decision on disk; a claimed,
+undelivered decision stays for its session to report); for other
+sessions, any whose server died without a decision (`kill -0` fails, no
+`result.json`, no `exit`); and for other sessions older than 14 days
+(`LAUNCH_EXPIRED_MS`, a session nobody resumed), any whose server is gone, decision
+or not. A live server always keeps its record; this session's dead servers are
+left to the timer, which reports them. The store is read again before the
+write, so a record another process added meanwhile is kept.
+The debug log (`PLANNOTATOR_MOD_DEBUG=1`) is appended (`debugAppendArgv`,
+O_APPEND) with a per-process tag on every line, because rewriting the whole
+file from each process's own buffer clobbered the other's lines and left NUL
+bytes. Past 1 MiB it is rotated to `debug.log.1` under a lock
+(`debug.log.rotating`, mkdir; one older than a minute is a dead writer's) with
+the size checked again inside it, so two writers never rotate twice and move a
+fresh log over the old one.
 
 **Host result file (`PLANNOTATOR_HOST_RESULT_FILE`).** New CLI side channel
 (`apps/hook/server/host-result.ts`), taken from the env at startup and scrubbed
@@ -893,8 +960,17 @@ otherwise. From the take-over on, a cancel closes only the question and an
 interrupt answers `ok: false`; Plannotator never aborts that turn. Plan review does not block the session
 under the mod, so the status is never `blocked` and plan review gets real turns
 too (verified live). Polls ask for 15 s (750 ms while our question streams, so
-deltas flush), and stop on 401/403/404/405/503 (`404` = an older CLI without
-the bridge), `closing`, or once the review settles.
+deltas flush), and stop for good on 401/403/404/405/503 (`404` = an older CLI
+without the bridge), `closing`, or once the review settles. A loop that stops
+because the server stopped answering (six failures in a row; `$.http.fetch`
+gives up after 30 s, so a sleeping laptop or a paused server gets there in
+about three minutes) is not the end: `run()` reports why it ended
+(`BridgeEnd`), the controller clears the handle, and the timer starts a new
+loop with the same token after 5 s, doubling to 60 s while the server stays
+silent (`BRIDGE_RETRY_MS`), so Ask AI comes back once the server answers again.
+A poll answered `superseded: true` (another client polled the server after us)
+waits 10-15 s before polling again, instead of taking the server back at once
+and starting a busy loop with the other client.
 
 **Tests.** Bun: `apps/hook/hooks/mod/*.test.ts` (controller flows over an
 in-memory `Host`, delivery, shell words, and `bridge.test.ts` against the REAL

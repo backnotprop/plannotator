@@ -29,6 +29,15 @@ export const BRIDGE_MODES = 'turn'
 /** Long-poll wait we ask for; below the server's 25 s cap and any fetch timeout. */
 export const BRIDGE_POLL_WAIT_MS = 15_000
 /**
+ * How long to stay away after the server answered `superseded` (another
+ * client, e.g. a second Claude Code process on the same session, polled
+ * after us): 10 s plus up to 5 s of jitter. Polling again at once made the
+ * two clients supersede each other in a busy loop.
+ */
+export const BRIDGE_SUPERSEDED_WAIT_MS = { min: 10_000, jitter: 5_000 } as const
+/** Statuses that mean the server will never take this client: stop for good. */
+export const BRIDGE_REFUSED_STATUSES: readonly number[] = [401, 403, 404, 405, 503]
+/**
  * Why "Interrupt and ask now" refuses a turn another message took over. Same
  * text as `SESSION_ASK_TAKEN_OVER_INTERRUPT_TEXT` (packages/ai/session-bridge.ts).
  */
@@ -80,23 +89,41 @@ export function bridgeBaseUrl(port: number): string {
   return `http://127.0.0.1:${port}`
 }
 
-export function parseBridgeCommands(text: string): { commands: BridgeCommand[]; closing: boolean; features: string[] } {
+export function parseBridgeCommands(text: string): { commands: BridgeCommand[]; closing: boolean; superseded: boolean; features: string[] } {
   try {
-    const body = JSON.parse(text) as { commands?: unknown; closing?: unknown; features?: unknown }
+    const body = JSON.parse(text) as { commands?: unknown; closing?: unknown; superseded?: unknown; features?: unknown }
     const commands = Array.isArray(body.commands)
       ? body.commands.filter((command): command is BridgeCommand =>
           !!command && typeof command === 'object' && typeof (command as { type?: unknown }).type === 'string')
       : []
     const features = Array.isArray(body.features) ? body.features.filter((feature): feature is string => typeof feature === 'string') : []
-    return { commands, closing: body.closing === true, features }
+    return { commands, closing: body.closing === true, superseded: body.superseded === true, features }
   } catch {
-    return { commands: [], closing: false, features: [] }
+    return { commands: [], closing: false, superseded: false, features: [] }
   }
+}
+
+/**
+ * Why a bridge loop ended, so the controller knows whether to start another:
+ * - `failures`: the server stopped answering (`maxFailures` in a row; each
+ *   `$.http.fetch` gives up after 30 s, so a sleeping laptop or a paused
+ *   server gets here in about three minutes). Worth a new loop later.
+ * - `refused`: 401/403 (token, not loopback), 404/405 (a CLI without the
+ *   bridge), 503 (AI off). Never retried.
+ * - `closing`: the server is shutting down. Not retried.
+ * - `ended`: the launch is no longer live for this client (settled, closed,
+ *   the session ended, or another Claude Code process watches it now).
+ */
+export interface BridgeEnd {
+  reason: 'failures' | 'refused' | 'closing' | 'ended'
+  status?: number
+  /** At least one poll was answered with 200 during this loop. */
+  connected: boolean
 }
 
 export interface BridgeHandle {
   /** Runs until the server closes, refuses, stops answering, or the review is no longer live. Never throws. */
-  run(): Promise<void>
+  run(): Promise<BridgeEnd>
   /** Push a busy/ready change now (from `turn.start` / `turn.complete`), not at the next poll. */
   pushStatus(): void
 }
@@ -230,8 +257,14 @@ export function createBridge(options: BridgeOptions): BridgeHandle {
     emit({ type: 'status', status })
   }
 
-  const run = async (): Promise<void> => {
+  const supersededWait = () => {
+    const jitter = Number.parseInt(host.randomHex(1), 16) / 255
+    return BRIDGE_SUPERSEDED_WAIT_MS.min + Math.round(jitter * BRIDGE_SUPERSEDED_WAIT_MS.jitter)
+  }
+
+  const loop = async (): Promise<BridgeEnd> => {
     let failures = 0
+    let connected = false
     while (options.isLive()) {
       // Deltas are batched per poll round.
       if (outbox.length > 0) await flush()
@@ -246,27 +279,45 @@ export function createBridge(options: BridgeOptions): BridgeHandle {
         })
       } catch {
         failures += 1
-        if (failures >= maxFailures) break
+        if (failures >= maxFailures) return { reason: 'failures', connected }
         await host.sleep(Math.min(4_000, 500 * 2 ** (failures - 1)))
         continue
       }
-      if ([401, 403, 404, 405, 503].includes(response.status)) break
+      if (BRIDGE_REFUSED_STATUSES.includes(response.status)) return { reason: 'refused', status: response.status, connected }
       if (!response.ok) {
         failures += 1
-        if (failures >= maxFailures) break
+        if (failures >= maxFailures) return { reason: 'failures', status: response.status, connected }
         await host.sleep(Math.min(4_000, 500 * 2 ** (failures - 1)))
         continue
       }
       failures = 0
-      const { commands, closing, features } = parseBridgeCommands(response.text)
+      connected = true
+      const { commands, closing, superseded, features } = parseBridgeCommands(response.text)
       serverTakesTakenOver = features.includes('taken_over')
       for (const command of commands) {
         host.debug(`bridge ${base}: ${command.type}`)
         handle(command)
       }
-      if (closing) break
+      if (closing) return { reason: 'closing', connected }
+      if (superseded) {
+        // Someone else polls this server now. Stay away a while instead of
+        // taking it back at once, which only starts a ping-pong.
+        const wait = supersededWait()
+        host.debug(`bridge ${base}: superseded, polling again in ${wait} ms`)
+        await host.sleep(wait)
+      }
     }
-    await flush()
+    return { reason: 'ended', connected }
+  }
+
+  const run = async (): Promise<BridgeEnd> => {
+    try {
+      return await loop()
+    } catch {
+      return { reason: 'failures', connected: false }
+    } finally {
+      await flush()
+    }
   }
 
   return { run, pushStatus }

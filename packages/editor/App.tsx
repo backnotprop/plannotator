@@ -14,6 +14,7 @@ import '@plannotator/ui/utils/identity-tater';
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { toast, Toaster } from 'sonner';
 import { type Origin, getAgentName } from '@plannotator/shared/agents';
+import { isNothingToSendFeedbackBody } from '@plannotator/shared/annotate-decision';
 import { isDiagramRenderKind, shouldStripFrontmatter } from '@plannotator/shared/annotatable';
 import {
   annotateBundleBaseName,
@@ -732,7 +733,8 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
-  const [submitted, setSubmitted] = useState<'approved' | 'denied' | 'exited' | null>(null);
+  // 'done': an annotate Done with nothing to send (no feedback went out).
+  const [submitted, setSubmitted] = useState<'approved' | 'denied' | 'done' | 'exited' | null>(null);
   // The agent that opened this review closed it (POST /api/host/close); the
   // reviewer's unsent comments stay in the draft for a reopen.
   const [agentClosed, setAgentClosed] = useState<{ unsentAnnotations: number } | null>(null);
@@ -4479,20 +4481,21 @@ const App: React.FC = () => {
         toast.error('Agent terminal is not ready. Sending through the original session.');
       }
 
+      const body = {
+        draftGeneration: getDraftGeneration(),
+        feedback,
+        annotations: discard ? [] : getSubmittedAnnotations(),
+        codeAnnotations: discard ? [] : codeAnnotations,
+        ...getFeedbackMessageScope(),
+        // Done with nothing to send: `feedback` stays the legacy zero-state
+        // sentence (CLI stdout and --json print it), and this marks it so a
+        // host that must not start an agent turn for it can tell (#1701).
+        ...(isEmptyFeedbackSentinel(feedback) ? { nothingToSend: true } : {}),
+      };
       const res = await fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(withServerSession({
-          draftGeneration: getDraftGeneration(),
-          feedback,
-          annotations: discard ? [] : getSubmittedAnnotations(),
-          codeAnnotations: discard ? [] : codeAnnotations,
-          ...getFeedbackMessageScope(),
-          // Done with nothing to send: `feedback` stays the legacy zero-state
-          // sentence (CLI stdout and --json print it), and this marks it so a
-          // host that must not start an agent turn for it can tell (#1701).
-          ...(isEmptyFeedbackSentinel(feedback) ? { nothingToSend: true } : {}),
-        })),
+        body: JSON.stringify(withServerSession(body)),
       });
       if (await noteServerSessionMismatch(res)) {
         // Another session owns this address now: nothing was submitted, and
@@ -4502,7 +4505,10 @@ const App: React.FC = () => {
       }
       if (!res.ok) throw new Error('Failed to send feedback');
       dismissDraft();
-      setSubmitted('denied'); // reuse 'denied' state for "feedback sent" overlay
+      // The completion screen must not claim feedback went out when nothing
+      // did: the same predicate the servers use to make this a no-op decision.
+      // 'denied' doubles as the "feedback sent" overlay state.
+      setSubmitted(isNothingToSendFeedbackBody(body) ? 'done' : 'denied');
       return true;
     } catch {
       setIsSubmitting(false);
@@ -7776,6 +7782,7 @@ const App: React.FC = () => {
             : goalSetupMode ? 'Answers Submitted'
             : submitted === 'approved'
               ? (annotateMode ? 'Approved' : 'Plan Approved')
+              : submitted === 'done' ? 'Done'
               : annotateMode ? 'Feedback Sent'
             : 'Feedback Sent'
           }
@@ -7799,6 +7806,8 @@ const App: React.FC = () => {
                   ? (annotateMode
                       ? `${agentName} will proceed.`
                       : `${agentName} will proceed with the implementation.`)
+                  : submitted === 'done'
+                    ? `Nothing was sent to ${agentName}.`
                   : annotateMode
                     ? `${agentName} will address your feedback on the ${annotateSource === 'message' ? 'message' : annotateSource === 'folder' ? 'files' : 'file'}.`
                     : `${agentName} will revise the plan based on your feedback.`

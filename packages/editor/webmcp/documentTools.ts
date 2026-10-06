@@ -64,7 +64,8 @@ import {
 // ---------------------------------------------------------------------------
 
 export type SessionMode = 'plan' | 'annotate' | 'annotate-last' | 'annotate-folder' | 'annotate-app' | 'archive' | 'shared';
-export type SessionDecision = 'pending' | 'approved' | 'feedback-sent' | 'exited';
+/** `done`: the human finished with nothing to send (annotate Done). */
+export type SessionDecision = 'pending' | 'approved' | 'feedback-sent' | 'done' | 'exited';
 
 export interface DocumentSessionView {
   mode: SessionMode;

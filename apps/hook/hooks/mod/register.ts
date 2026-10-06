@@ -50,7 +50,7 @@
 import { PlannotatorMod } from './controller'
 import { resolveAgentToolEnabled, resolveClaudeModEnabled } from './enabled'
 import type { Host } from './host'
-import { COMMANDS, dataDirOf, isModCommand, waitArgv } from './launch'
+import { COMMANDS, dataDirOf, debugAppendArgv, isModCommand, waitArgv } from './launch'
 import { PLAN_TOOL } from './plan'
 import { answerShellCall, SHELL_TOOL, shellTakeOver } from './take-over'
 import { PLANNOTATOR_TOOL_DESCRIPTION, PLANNOTATOR_TOOL_INPUT_SCHEMA, PLANNOTATOR_TOOL_NAME } from './tool'
@@ -67,7 +67,12 @@ function hexOf(bytes: Uint8Array): string {
   return out
 }
 
-const debugLines: string[] = []
+/** Debug lines waiting to be appended; at most this many are kept while an append runs. */
+const DEBUG_PENDING_MAX = 500
+let debugPending: string[] = []
+let debugAppending = false
+/** Tells this process's lines apart from another's in the shared log. */
+let debugTag: string | null = null
 
 /** This plugin's name: what `$.prompt.submit` stamps as the origin of our prompts. */
 const PLUGIN_NAME = 'plannotator'
@@ -112,9 +117,25 @@ function hostOf($: Engine, debugPath: string | null): Host {
     randomHex: (bytes) => hexOf(crypto.getRandomValues(new Uint8Array(bytes))),
     debug: (text) => {
       if (!debugPath) return
-      debugLines.push(`${new Date().toISOString()} ${text}`)
-      if (debugLines.length > 500) debugLines.splice(0, debugLines.length - 500)
-      void $.fs.write(debugPath, `${debugLines.join('\n')}\n`).catch(() => undefined)
+      debugTag ??= hexOf(crypto.getRandomValues(new Uint8Array(3)))
+      debugPending.push(`${new Date().toISOString()} [${debugTag}] ${text}`)
+      if (debugPending.length > DEBUG_PENDING_MAX) debugPending.splice(0, debugPending.length - DEBUG_PENDING_MAX)
+      if (debugAppending) return
+      // Appended (O_APPEND, launch.ts DEBUG_APPEND_SCRIPT), one batch at a
+      // time: several Claude Code processes share this log, and rewriting the
+      // whole file from each one's buffer clobbered the other's lines.
+      debugAppending = true
+      void (async () => {
+        try {
+          while (debugPending.length > 0) {
+            const batch = debugPending
+            debugPending = []
+            await $.process.run(debugAppendArgv(debugPath), { stdin: `${batch.join('\n')}\n`, timeoutMs: 5_000 }).catch(() => undefined)
+          }
+        } finally {
+          debugAppending = false
+        }
+      })()
     },
     sha256: async (text) => hexOf(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))),
   }

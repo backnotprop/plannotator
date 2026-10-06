@@ -1880,6 +1880,25 @@ Pinned by `components/DiagramBlock.askAI.test.tsx` and
 
 ---
 
+## `CompletionOverlay` `done` state (unreleased; additive)
+
+`submitted` accepts a new value, `'done'`: the session finished with nothing
+sent (Plannotator uses it for an annotate Done with nothing to send). It
+renders a neutral check icon; the host still supplies the title and subtitle.
+`ComponentProps<typeof CompletionOverlay>['submitted']` therefore now includes
+`'done'`, so a host that switches exhaustively over that type gets one more
+case to handle.
+
+Neither `'done'` nor `'exited'` (Close) renders the footer's "Your response
+has been sent." line any more, since neither sends anything. That line only
+appears in the auto-close `closed` phase (an immediate auto-close whose close
+request went to a host window such as Glimpse or the VS Code panel's parent),
+so this is a visible change for `'exited'` only there. Every other value
+renders exactly as before. The overlay root now carries
+`data-completion-state={submitted}`.
+
+---
+
 ## The law (guardrails for anyone editing `@plannotator/ui`)
 
 These are enforced socially and, where possible, by CI. They exist because a prior from-scratch reimplementation of this UI broke the app and was reverted.

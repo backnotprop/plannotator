@@ -221,7 +221,70 @@ describe('Ask this session over the pull bridge', () => {
     const host = fakeHost()
     wire(host, server)
     const client = createBridge({ host, baseUrl: 'http://127.0.0.1:4321', token: TOKEN, turns: new TurnTracker(), isLive: () => live })
-    await client.run()
+    expect(await client.run()).toMatchObject({ reason: 'refused', status: 401 })
     expect(host.submits).toEqual([])
+  })
+})
+
+// The controller decides from these whether to start the loop again, so each
+// way a loop ends has to say which it was.
+describe('how a bridge loop ends', () => {
+  const POLL = 'http://127.0.0.1:4321/api/ai/bridge/poll'
+
+  function client(host: FakeHost, isLive = () => true) {
+    return createBridge({ host, baseUrl: 'http://127.0.0.1:4321', token: TOKEN, turns: new TurnTracker(), isLive, maxFailures: 3 })
+  }
+
+  test('a server that stops answering ends it as failures, saying whether a poll got through first', async () => {
+    const host = fakeHost()
+    let polls = 0
+    host.onFetch = (url) => {
+      if (url !== POLL) return { status: 200, ok: true, text: '{}' }
+      polls += 1
+      // The first poll is answered; then the server goes silent ($.http.fetch gives up).
+      if (polls === 1) return { status: 200, ok: true, text: JSON.stringify({ commands: [] }) }
+      throw new Error('The operation timed out.')
+    }
+    expect(await client(host).run()).toEqual({ reason: 'failures', connected: true })
+
+    const never = fakeHost()
+    never.onFetch = () => {
+      throw new Error('connection refused')
+    }
+    expect(await client(never).run()).toEqual({ reason: 'failures', connected: false })
+  })
+
+  test('a CLI without the bridge (404) ends it as refused', async () => {
+    const host = fakeHost()
+    expect(await client(host).run()).toMatchObject({ reason: 'refused', status: 404 })
+  })
+
+  test('superseded: the next poll waits 10-15 s instead of taking the server back at once', async () => {
+    const host = fakeHost()
+    const pollTimes: number[] = []
+    host.onFetch = (url) => {
+      if (url !== POLL) return { status: 200, ok: true, text: '{}' }
+      pollTimes.push(host.clock)
+      // Superseded twice (another client polls this server), then the server closes.
+      const body = pollTimes.length <= 2 ? { commands: [], superseded: true } : { commands: [], closing: true }
+      return { status: 200, ok: true, text: JSON.stringify(body) }
+    }
+    expect(await client(host).run()).toEqual({ reason: 'closing', connected: true })
+    expect(pollTimes).toHaveLength(3)
+    for (const [index, time] of pollTimes.slice(1).entries()) {
+      const gap = time - (pollTimes[index] as number)
+      expect(gap).toBeGreaterThanOrEqual(10_000)
+      expect(gap).toBeLessThanOrEqual(15_000)
+    }
+  })
+
+  test('a review that is no longer live ends it as ended', async () => {
+    const host = fakeHost()
+    let live = true
+    host.onFetch = () => {
+      live = false
+      return { status: 200, ok: true, text: JSON.stringify({ commands: [] }) }
+    }
+    expect(await client(host, () => live).run()).toEqual({ reason: 'ended', connected: true })
   })
 })
