@@ -719,11 +719,20 @@ export function createV2BridgeClient(input: {
   warn?: (message: string) => void;
   /**
    * Deliver feedback with `FEEDBACK_DELIVERY` ("queue") even while a notice of
-   * ours is still pending. For the `plannotator` tool, whose session is
+   * ours is still pending. For the `plannotator` tool, whose calling session is
    * mid-turn when the notice is posted, so the notice is promoted inside that
    * turn and a steer would push a late decision into a running turn instead.
    */
   alwaysQueue?: boolean;
+  /**
+   * Post the session-URL notice into `notice.sessionID` instead of
+   * `sessionID`, and only while `notice.open()` answers true; once it answers
+   * false the URL goes to the log alone. The `plannotator` tool's launches:
+   * the notice goes to the calling session while its tool call is open (see
+   * `runNativeCommand`), the decision to `sessionID`. Without it every notice
+   * goes to `sessionID`, which is what the slash commands need (#1515).
+   */
+  notice?: { sessionID: string; open: () => boolean };
 }): V2BridgeClient {
   const warn = input.warn ?? ((message: string) => console.error(message));
   const loggedUrls = new Set<string>();
@@ -736,12 +745,18 @@ export function createV2BridgeClient(input: {
   // 27aaa9ce0e — even though the server itself routes `session.inbox.cancel`),
   // so the feedback joins its promotion instead. The tracker is what keeps that
   // "still waiting" honest once something else promotes the row.
-  const notice = createNoticePendingTracker(input.ctx, input.sessionID);
-  const notifyUrl = createSessionUrlNotifier(input.ctx, input.sessionID, {
+  const noticeSessionID = input.notice?.sessionID ?? input.sessionID;
+  const notice = createNoticePendingTracker(input.ctx, noticeSessionID);
+  const postNotice = createSessionUrlNotifier(input.ctx, noticeSessionID, {
     posting: notice.posting,
     admitted: notice.admitted,
     rejected: notice.rejected,
   });
+  const noticeOpen = input.notice?.open;
+  const notifyUrl = postNotice && noticeOpen
+    // Checked synchronously at the call, before anything is posted.
+    ? async (url: { url: string; message: string }) => (noticeOpen() ? postNotice(url) : undefined)
+    : postNotice;
   return {
     ...(notifyUrl && { notifyUrl }),
     dispose: notice.dispose,
@@ -788,7 +803,10 @@ export function createV2BridgeClient(input: {
         const delivered = await prompt({
           sessionID,
           text: joinTextParts(Array.isArray(body.parts) ? body.parts : []),
-          delivery: notice.pending() && !input.alwaysQueue ? CO_PROMOTED_DELIVERY : FEEDBACK_DELIVERY,
+          // Co-promotion only helps a notice in THIS session's inbox.
+          delivery: notice.pending() && !input.alwaysQueue && sessionID === noticeSessionID
+            ? CO_PROMOTED_DELIVERY
+            : FEEDBACK_DELIVERY,
         });
         // Admitted: the notice is no longer the row ahead of us, so any later
         // delivery on this client is a plain late arrival again.

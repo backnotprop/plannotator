@@ -133,7 +133,13 @@ export async function runNativeCommand(
   invocation: V2CommandInvocation,
   deps: NativeCommandDeps,
   /** The `plannotator` tool's launch: its own record and pre-split arguments. */
-  tool?: { launch: CliLaunch; annotateArgs?: ParsedAnnotateArgs; annotateBundle?: readonly string[] },
+  tool?: {
+    launch: CliLaunch;
+    annotateArgs?: ParsedAnnotateArgs;
+    annotateBundle?: readonly string[];
+    /** Where and while the tool's session-URL notice may be posted. */
+    notice?: { sessionID: string; open: () => boolean };
+  },
 ): Promise<void> {
   const sessionID = invocation.sessionID;
   // The raw argument tail, exactly as OpenCode 1 forwards it. The CLI's own
@@ -143,15 +149,19 @@ export async function runNativeCommand(
   // `sessionID` is what lets the bridge put the session URL where the user can
   // actually see it. Without it (and on a host with no `session.synthetic`) a
   // remote review would only print its URL into a stream OpenCode discards.
-  // A tool launch always queues its decision: its session is mid-turn when
-  // the URL notice is posted (the tool call itself, or the root waiting on a
-  // subagent), so the notice is promoted inside that turn and never needs the
-  // co-promoting steer, which would push a late decision into a running turn.
+  // A tool launch posts its URL notice into the CALLING session, and only
+  // while the tool call is open, so the notice is always promoted inside the
+  // caller's running turn. Its decision therefore never needs the
+  // co-promoting steer (which would push a late decision into a running
+  // turn) and is always queued. Never the root while a subagent calls: a
+  // background subagent's root is idle, and a notice left pending there was
+  // promoted alone as a model turn the next time the root woke.
   const client = createV2BridgeClient({
     ctx: deps.ctx,
     getAgents: deps.getAgents,
     sessionID,
     ...(tool ? { alwaysQueue: true } : {}),
+    ...(tool?.notice ? { notice: tool.notice } : {}),
   });
 
   // A slash command's own review is recorded like a tool launch, so the

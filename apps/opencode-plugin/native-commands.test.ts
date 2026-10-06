@@ -562,7 +562,7 @@ describe("V2 feedback delivery", () => {
   });
 
   // The `plannotator` tool's launches: the session is mid-turn when their
-  // notice is posted (the tool call, or the root waiting on a subagent), so a
+  // notice is posted (only while their own tool call is open), so a
   // still-pending notice must not turn a late decision into a steer that lands
   // inside a running turn.
   test("a tool launch's decision is queued even while its notice is pending", async () => {
@@ -582,6 +582,41 @@ describe("V2 feedback delivery", () => {
     });
 
     expect(prompt.mock.calls[0]![0]).toMatchObject({ delivery: "queue" });
+  });
+
+  // A notice posted into ANOTHER session (a subagent tool call's own session)
+  // is not in the decision session's inbox, so it can never be co-promoted
+  // there: steering the decision would only push it into a running turn.
+  test("a notice in another session never steers the decision", async () => {
+    const synthetic = mock(async (_input: unknown) => ({}));
+    const prompt = mock(async (_input: unknown) => ({}));
+    const client = createV2BridgeClient({
+      ctx: { session: { synthetic, prompt } } as never,
+      getAgents: async () => [],
+      sessionID: "root",
+      notice: { sessionID: "child", open: () => true },
+    });
+
+    await client.notifyUrl!({ url: "http://127.0.0.1:19432", message: "ready" });
+    await client.session.prompt({ path: { id: "root" }, body: { parts: [{ type: "text", text: "fix it" }] } });
+
+    expect(synthetic.mock.calls[0]![0]).toMatchObject({ sessionID: "child" });
+    expect(prompt.mock.calls[0]![0]).toMatchObject({ sessionID: "root", delivery: "queue" });
+  });
+
+  test("a closed notice window posts nothing", async () => {
+    const synthetic = mock(async (_input: unknown) => ({}));
+    let open = true;
+    const client = createV2BridgeClient({
+      ctx: { session: { synthetic, prompt: async () => ({}) } } as never,
+      getAgents: async () => [],
+      sessionID: "root",
+      notice: { sessionID: "child", open: () => open },
+    });
+
+    open = false;
+    await client.notifyUrl!({ url: "http://127.0.0.1:19432", message: "ready" });
+    expect(synthetic).not.toHaveBeenCalled();
   });
 
   /**

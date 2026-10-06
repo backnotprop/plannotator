@@ -1047,12 +1047,22 @@ review, gets its decision and lists or closes it; only `last` is refused from a
 subagent (`PLANNOTATOR_TOOL_SUBAGENT_LAST_TEXT`, the mod's wording), since it
 reads the main session's messages. Ask this session for such a review asks the
 root session. Not verified live: delivery to the root while it still waits on
-the subagent relies on `queue` delivery. Tool launches always queue their
-decision (`createV2BridgeClient`'s `alwaysQueue`), even while their session-URL
-notice is still a pending steer: the session is mid-turn when a tool launch
-posts that notice (the tool call itself, or the root waiting on a subagent), so
-the notice is promoted inside that turn, and the slash commands' co-promoting
-steer (#1515) would instead push a late decision into a running turn. No
+the subagent relies on `queue` delivery. A tool launch posts its session-URL
+notice into the CALLING session (a subagent's own session, never the root that
+receives the decision) and only while the tool call is still open
+(`createV2BridgeClient`'s `notice: { sessionID, open }`, closed the moment
+`runPlannotatorTool` answers), so the notice is always promoted inside the
+caller's running turn; the tool's answer already carries the URL, and a server
+that comes up after a "starting" answer posts no notice (the URL is in `list`
+and the log). Posting it into the root was a leak (0.28.5 smoke, live on
+2.0.22): a background subagent's root, or the parent of an API-created child
+session, is idle, so the pending steer sat there and was promoted ALONE as a
+model turn when the root next woke (the queued decision promotes one row at a
+time), and the model answered "Plannotator session ready: <url>". With the
+notice always inside a running turn, tool launches always queue their decision
+(`alwaysQueue`; co-promotion is also only attempted for a notice in the
+decision's own session), since the slash commands' co-promoting steer (#1515)
+would push a late decision into a running turn. No
 shell take-over: nothing in the OpenCode 2 plugin API can answer a shell call.
 
 **Session ids, list and close.** `OpenCodeLaunchRegistry` (one per plugin

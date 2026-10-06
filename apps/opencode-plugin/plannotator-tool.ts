@@ -384,6 +384,16 @@ export interface PlannotatorToolDeps {
     /** A list target: the files opened as one review (a bundle), in order. */
     annotateBundle?: readonly string[];
     launch: CliLaunch;
+    /**
+     * Where the session-URL notice may go, and for how long. The notice goes
+     * to the CALLING session (a subagent's own session, not the root that
+     * receives the decision) and only while the tool call is still open, when
+     * that session is certainly mid-turn and promotes the notice inside the
+     * turn. A notice posted into an idle session (the root of a background
+     * subagent, or any session after a "starting" answer) waits there and is
+     * later promoted alone as a model turn. The tool's answer carries the URL.
+     */
+    notice: { sessionID: string; open: () => boolean };
   }) => Promise<void>;
   /**
    * The root session of `sessionID` (a subagent's session has a parent). A
@@ -448,6 +458,9 @@ export async function runPlannotatorTool(
   const gate = call.gate === true;
   const subject = toolSubject(call);
   const handle = deps.registry.begin(owner.root, call.action, subject, { deliverApproval: gate });
+  // Set the moment this call answers: from then on no session-URL notice is
+  // posted (see `notice` on `PlannotatorToolDeps.launch`).
+  let answered = false;
   void deps
     .launch({
       // The root session: a subagent's decision lands where the person is.
@@ -457,6 +470,7 @@ export async function runPlannotatorTool(
       ...(request.annotateArgs ? { annotateArgs: request.annotateArgs } : {}),
       ...(request.annotateBundle ? { annotateBundle: request.annotateBundle } : {}),
       launch: handle.observer,
+      notice: { sessionID: context.sessionID, open: () => !answered },
     })
     .catch((error) => {
       handle.observer.onFailure?.(error instanceof Error ? error.message : String(error));
@@ -471,6 +485,7 @@ export async function runPlannotatorTool(
   });
   const start = await Promise.race([handle.started, timeout]);
   if (timer !== undefined) clearTimeout(timer);
+  answered = true;
 
   if (start === "timeout") {
     // The agent is told to wait. If the CLI then fails before the page opens,

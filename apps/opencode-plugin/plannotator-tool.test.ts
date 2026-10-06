@@ -32,7 +32,7 @@ const isWindows = process.platform === "win32";
 // the host-control paths answer: a current CLI, an older one without them, or
 // a current one with host control turned off (remote mode).
 // ---------------------------------------------------------------------------
-type StubBehavior = "current" | "older" | "disabled" | "disabled-remote" | "fail" | "slowfail" | "nobundle" | "targets";
+type StubBehavior = "current" | "older" | "disabled" | "disabled-remote" | "fail" | "slowfail" | "slowready" | "nobundle" | "targets";
 
 function writeStub(root: string, behavior: StubBehavior): string {
   const binary = path.join(root, `cli-${behavior}.ts`);
@@ -52,6 +52,8 @@ if (${JSON.stringify(behavior)} === "fail" || ${JSON.stringify(behavior)} === "s
   console.error("File not found: missing.md");
   process.exit(1);
 }
+// "slowready": a server that comes up after the tool already answered "starting".
+if (${JSON.stringify(behavior)} === "slowready") await Bun.sleep(600);
 const token = process.env.PLANNOTATOR_SESSION_BRIDGE_TOKEN;
 let decide;
 const decision = new Promise((resolve) => { decide = resolve; });
@@ -127,6 +129,12 @@ function makeHost(root: string, options: { parents?: Record<string, string> } = 
     prompts.push({ sessionID: input.sessionID, text: input.text, delivery: input.delivery });
     return {};
   });
+  // Session-URL notices (`session.synthetic`), as an OpenCode 2 host takes them.
+  const notices: Array<{ sessionID: string; text: string }> = [];
+  const synthetic = mock(async (input: { sessionID: string; text: string }) => {
+    notices.push({ sessionID: input.sessionID, text: input.text });
+    return {};
+  });
   const ctx: any = {
     session: {
       get: async ({ sessionID }: { sessionID: string }) => ({
@@ -134,6 +142,7 @@ function makeHost(root: string, options: { parents?: Record<string, string> } = 
         ...(options.parents?.[sessionID] ? { parentID: options.parents[sessionID] } : {}),
       }),
       prompt,
+      synthetic,
       context: async () => [],
     },
     location: { directory: root },
@@ -151,7 +160,7 @@ function makeHost(root: string, options: { parents?: Record<string, string> } = 
       request.command,
       { sessionID: request.sessionID, prompt: { text: request.rawArgs } },
       nativeDeps,
-      { launch: request.launch, annotateArgs: request.annotateArgs, annotateBundle: request.annotateBundle },
+      { launch: request.launch, annotateArgs: request.annotateArgs, annotateBundle: request.annotateBundle, notice: request.notice },
     ),
     resolveOwner: (sessionID) => resolveRootSession(ctx, sessionID),
     reportLateFailure: async ({ sessionID, text }) => {
@@ -159,7 +168,7 @@ function makeHost(root: string, options: { parents?: Record<string, string> } = 
     },
     readyWaitMs: { review: 8_000, other: 8_000 },
   };
-  return { ctx, prompts, prompt, registry, nativeDeps, toolDeps };
+  return { ctx, prompts, prompt, notices, registry, nativeDeps, toolDeps };
 }
 
 const SESSION_ID_LINE = /^Session: (pn-[0-9a-f]{6})$/m;
@@ -499,6 +508,55 @@ describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", (
     const delivered = await waitFor(() => host.prompts[0]);
     expect(delivered.sessionID).toBe("ses_a");
     expect(delivered.text.split("\n")[0]).toBe(`Plannotator: local changes (${id}) — Changes requested · 1 comment.`);
+  }, 30_000);
+
+  // Failure caught (0.28.5 smoke, live on OpenCode 2.0.22): a BACKGROUND
+  // subagent's review posted its session-URL notice into the root session,
+  // which was idle. The pending row was then promoted ALONE as a model turn
+  // when the root next woke, and the model answered "Plannotator session
+  // ready: <url>". The notice belongs to the calling session, mid-turn in its
+  // own tool call; the root receives only the decision.
+  test("a subagent's notice goes to its own session, never the root that gets the decision", async () => {
+    process.env.PLANNOTATOR_BIN = writeStub(root, "current");
+    const host = makeHost(root, { parents: { ses_child: "ses_a" } });
+    const text = await runPlannotatorTool({ action: "annotate", target: "notes.md" }, { sessionID: "ses_child" }, host.toolDeps);
+    const url = `http://localhost:${portOf(text)}`;
+    expect(host.notices).toEqual([{ sessionID: "ses_child", text: `Plannotator session ready: ${url}` }]);
+
+    await decide(portOf(text), { decision: "annotated", feedback: "Tighten the intro.", annotationCount: 1 });
+    const delivered = await waitFor(() => host.prompts[0]);
+    expect(delivered.sessionID).toBe("ses_a");
+    expect(delivered.delivery).toBe("queue");
+    expect(host.notices.some((notice) => notice.sessionID === "ses_a")).toBe(false);
+  }, 30_000);
+
+  // Unchanged for the main session: its own tool call is the open turn the
+  // notice is promoted in.
+  test("a main-session tool call posts its notice into that session", async () => {
+    process.env.PLANNOTATOR_BIN = writeStub(root, "current");
+    const host = makeHost(root);
+    const text = await runPlannotatorTool({ action: "annotate", target: "notes.md" }, { sessionID: "ses_a" }, host.toolDeps);
+    expect(host.notices).toEqual([{ sessionID: "ses_a", text: `Plannotator session ready: http://localhost:${portOf(text)}` }]);
+    await decide(portOf(text), { decision: "dismissed" });
+  }, 30_000);
+
+  // Failure caught: a URL that arrives after the tool answered "starting"
+  // lands in a session whose turn may be over: the same idle-session leak.
+  test("a server that comes up after the starting answer posts no notice", async () => {
+    process.env.PLANNOTATOR_BIN = writeStub(root, "slowready");
+    const host = makeHost(root);
+    const text = await runPlannotatorTool(
+      { action: "annotate", target: "notes.md" },
+      { sessionID: "ses_a" },
+      { ...host.toolDeps, readyWaitMs: { review: 100, other: 100 } },
+    );
+    expect(text).toContain("Plannotator is starting for notes.md");
+    const id = sessionIdOf(text);
+    const launch = await waitFor(() => host.registry.openFor("ses_a").find((open) => open.id === id && open.port));
+    // The URL is known (the tool's list shows it), but nothing was posted.
+    await Bun.sleep(100);
+    expect(host.notices).toEqual([]);
+    await decide(launch.port!, { decision: "dismissed" });
   }, 30_000);
 
   // Failure caught: the agent told "starting, wait" and then never told the
