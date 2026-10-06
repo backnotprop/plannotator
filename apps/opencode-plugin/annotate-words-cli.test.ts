@@ -160,9 +160,9 @@ describe.skipIf(process.platform === "win32")("OpenCode 2 /plannotator-annotate 
     const notice = host.notices[0]!;
     expect(notice.sessionID).toBe("ses_a");
     expect(notice.resume).toBe(false);
-    expect(notice.description).toBe(notice.text);
-    expect(notice.text.startsWith("Plannotator /plannotator-annotate failed: ")).toBe(true);
-    expect(notice.text).toContain("nothere.md");
+    expect(notice.description!.startsWith("Plannotator /plannotator-annotate failed: ")).toBe(true);
+    expect(notice.description).toContain("nothere.md");
+    expect(notice.text.startsWith(notice.description!)).toBe(true);
   }, 30_000);
 
   // `./` is an explicit path to a folder, so beside a file it is a second
@@ -172,7 +172,7 @@ describe.skipIf(process.platform === "win32")("OpenCode 2 /plannotator-annotate 
     await runNativeCommand("plannotator-annotate", { sessionID: "ses_a", prompt: { text: "./ notes.md" } }, host.deps);
     expect(host.prompts).toHaveLength(0);
     expect(host.notices).toHaveLength(1);
-    expect(host.notices[0]!.text).toContain("Ambiguous annotate arguments");
-    expect(host.notices[0]!.text).toContain(path.join(root, "notes.md"));
+    expect(host.notices[0]!.description).toContain("Ambiguous annotate arguments");
+    expect(host.notices[0]!.description).toContain(path.join(root, "notes.md"));
   }, 30_000);
 });

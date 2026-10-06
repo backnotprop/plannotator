@@ -534,7 +534,22 @@ export function formatCommandFailureNotice(command: string, message: string): st
   return `Plannotator /${command} failed: ${message.trim()}`;
 }
 
-const COMMAND_FAILURE_NOTICE_RE = /^Plannotator \/plannotator-(?:review|annotate|last) failed: \S/;
+/**
+ * The marker that ends a failure notice's `text` (never its `description`,
+ * which is what the person sees and can copy). The context filter matches
+ * only text that ends with it, so a message the person TYPES or pastes, such
+ * as the failure line followed by "why?", is never dropped from what the
+ * model reads. In the one request where the notice is kept (see
+ * `dropSessionUrlNotices`), it also tells the model there is nothing to do.
+ */
+const COMMAND_FAILURE_NOTICE_MARKER = "\n\n(Plannotator notice for the person; not a request.)";
+
+/** The `text` of a failure notice: the visible line plus the marker. */
+export function commandFailureNoticeText(command: string, message: string): string {
+  return `${formatCommandFailureNotice(command, message)}${COMMAND_FAILURE_NOTICE_MARKER}`;
+}
+
+const COMMAND_FAILURE_NOTICE_RE = /^Plannotator \/plannotator-(?:review|annotate|last) failed: \S[\s\S]*\n\n\(Plannotator notice for the person; not a request\.\)$/;
 
 /** Is this model-context message one of our transcript notices (session URL or command failure)? */
 function isSessionUrlNoticeMessage(message: unknown): boolean {
@@ -743,8 +758,9 @@ export function createCommandFailureNotifier(
   const synthetic = ctx.session?.synthetic;
   if (typeof synthetic !== "function" || !sessionID) return undefined;
   return async ({ command, message }) => {
-    const text = formatCommandFailureNotice(command, message);
-    return await synthetic({ sessionID, text, description: text, resume: false, delivery: CO_PROMOTED_DELIVERY });
+    const description = formatCommandFailureNotice(command, message);
+    const text = commandFailureNoticeText(command, message);
+    return await synthetic({ sessionID, text, description, resume: false, delivery: CO_PROMOTED_DELIVERY });
   };
 }
 
