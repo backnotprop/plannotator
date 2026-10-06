@@ -453,6 +453,12 @@ export interface AIQuestion {
     /** Agent-facing identity of the selected element(s) (raw-HTML / live-app
      *  pinpoints): sent with the question, never shown in the chat. */
     detail?: string;
+    /** 1-based source lines of a text selection in a markdown document (the
+     *  enclosing block's span, or first to last block for a selection over
+     *  several). `buildDefaultPrompt` appends them to the `Source:` line
+     *  (`, line 41` / `, lines 41–44`). Optional: absent prints no lines. */
+    lineStart?: number;
+    lineEnd?: number;
   };
   /** undefined = general question (no file scope) */
   filePath?: string;

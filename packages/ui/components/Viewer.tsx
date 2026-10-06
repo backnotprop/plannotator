@@ -6,7 +6,7 @@ import { AnnotationType, type Block, type Annotation, type EditorMode, type Inpu
 import { applyHighlight, codeBlockClassName, onCodeHighlightSwap } from '../utils/codeHighlight';
 import { paintCodeBlockMark } from '../utils/codeBlockMark';
 import { useFenceTheme } from '../hooks/useFenceTheme';
-import { computeListIndices, groupBlocks, type Frontmatter, type FrontmatterValue } from '../utils/parser';
+import { computeListIndices, groupBlocks, selectionSourceLines, type Frontmatter, type FrontmatterValue } from '../utils/parser';
 import { buildHeadingSlugMap } from '../utils/slugify';
 import { copyTextToClipboard } from '../utils/clipboard';
 import { BlockRenderer } from './BlockRenderer';
@@ -1715,6 +1715,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                 label: 'Selected text',
                 text: hookCommentPopover.selectedText ?? hookCommentPopover.contextText,
                 sourcePath: linkedDocInfo?.filepath ?? sourceInfo,
+                ...selectionSourceLines(blocks, hookCommentPopover.blockIds ?? []),
               }}
             />
           )}
@@ -1740,6 +1741,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               label: viewerCommentPopover.isGlobal ? 'Document' : 'Code block',
               text: viewerCommentPopover.selectedText,
               sourcePath: linkedDocInfo?.filepath ?? sourceInfo,
+              ...(!viewerCommentPopover.isGlobal && viewerCommentPopover.codeBlock
+                ? selectionSourceLines(blocks, [viewerCommentPopover.codeBlock.block.id])
+                : null),
             }}
           />
         )}

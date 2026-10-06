@@ -42,7 +42,7 @@ import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
 import { ExportModal } from '@plannotator/ui/components/ExportModal';
 import { ImportModal } from '@plannotator/ui/components/ImportModal';
 import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
-import { Annotation, AnnotationType, Block, EditorMode, type CodeAnnotation, type DocumentRenderAs, type InputMethod, type ImageAttachment, type ActionsLabelMode } from '@plannotator/ui/types';
+import { Annotation, AnnotationType, Block, EditorMode, type CodeAnnotation, type DocumentRenderAs, type InputMethod, type ImageAttachment, type ActionsLabelMode, type AIQuestion } from '@plannotator/ui/types';
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { Tooltip, TooltipProvider } from '@plannotator/ui/components/Tooltip';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
@@ -5368,17 +5368,28 @@ const App: React.FC = () => {
     return null;
   }, [fileBrowser.activeFile, linkedDocHook.filepath, linkedDocHook.isActive, sourceFilePath]);
 
-  const buildAgentAskPrompt = useCallback((question: string, context?: CommentAskAIContext) => {
-    const scope = context ? {
+  // One mapping for both Ask AI paths (agent terminal and side chat / Ask this
+  // session). A selection's source lines ride only when they name lines of the
+  // file the agent reads: a converted HTML/URL source renders converted
+  // markdown, whose lines do not exist in the original.
+  const askScopeFromContext = useCallback((context?: CommentAskAIContext): AIQuestion['scope'] => {
+    if (!context) return undefined;
+    return {
       kind: context.kind,
       label: context.label,
       text: context.text,
       sourcePath: context.sourcePath ?? aiDocumentPath,
       ...(context.detail ? { detail: context.detail } : {}),
-    } : undefined;
+      ...(context.lineStart != null && !aiSourceConverted
+        ? { lineStart: context.lineStart, lineEnd: context.lineEnd ?? context.lineStart }
+        : {}),
+    };
+  }, [aiDocumentPath, aiSourceConverted]);
+
+  const buildAgentAskPrompt = useCallback((question: string, context?: CommentAskAIContext) => {
     const scopedQuestion = buildDefaultPrompt({
       prompt: question,
-      scope,
+      scope: askScopeFromContext(context),
     });
     return buildTerminalAskPrompt({
       scopedQuestion,
@@ -5392,7 +5403,7 @@ const App: React.FC = () => {
             content: aiRenderAs === 'html' && rawHtml ? rawHtml : displayedMarkdown,
           },
     });
-  }, [aiAnnotationsContext, aiDocumentPath, aiRenderAs, displayedMarkdown, rawHtml, terminalAskReadableFilePath]);
+  }, [aiAnnotationsContext, aiDocumentPath, aiRenderAs, askScopeFromContext, displayedMarkdown, rawHtml, terminalAskReadableFilePath]);
 
   const aiDocumentKey = aiContext
     ? `${aiDocumentMode ? 'document' : 'plan'}:${aiRenderAs}:${aiDocumentPath}:${versionInfo?.version ?? 'current'}`
@@ -5472,21 +5483,15 @@ const App: React.FC = () => {
     openAIChat();
     askAI({
       prompt: question,
-      scope: context ? {
-        kind: context.kind,
-        label: context.label,
-        text: context.text,
-        sourcePath: context.sourcePath ?? aiDocumentPath,
-        ...(context.detail ? { detail: context.detail } : {}),
-      } : undefined,
+      scope: askScopeFromContext(context),
       contextUpdate: aiSessionId ? aiAnnotationsContext : undefined,
     });
     return true;
   }, [
     aiAnnotationsContext,
-    aiDocumentPath,
     aiSessionId,
     askAI,
+    askScopeFromContext,
     buildAgentAskPrompt,
     canUseAI,
     handleAgentTerminalReadyChange,

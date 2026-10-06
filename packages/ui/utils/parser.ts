@@ -1031,6 +1031,29 @@ const lineLabelForAnnotation = (blocks: Block[], ann: any): string | null => {
   return `lines ${block.startLine}–${end}`;
 };
 
+/** The source lines a text selection covers, for an Ask AI question
+ *  (`AIQuestion.scope.lineStart` / `lineEnd`). `blockIds` are the blocks the
+ *  selection touches; the range runs from the first block's start line to
+ *  the last block's end line, so a selection inside one block names exactly
+ *  the span its annotation would export (`(line 41)` / `(lines 41–44)`).
+ *  Blocks without a line (diff blocks, unknown ids) are skipped; `null` when
+ *  none is left. */
+export const selectionSourceLines = (
+  blocks: readonly Block[],
+  blockIds: readonly string[],
+): { lineStart: number; lineEnd: number } | null => {
+  let lineStart = Infinity;
+  let lineEnd = -Infinity;
+  for (const id of blockIds) {
+    if (id.startsWith('diff-block-')) continue;
+    const block = blocks.find(b => b.id === id);
+    if (!block || typeof block.startLine !== 'number' || block.startLine < 1) continue;
+    lineStart = Math.min(lineStart, block.startLine);
+    lineEnd = Math.max(lineEnd, blockEndLine(block), block.startLine);
+  }
+  return Number.isFinite(lineStart) ? { lineStart, lineEnd } : null;
+};
+
 /** Separate valid question answers from ordinary feedback. A row whose
  *  `questionAnswer` fails validation stays ordinary feedback (its one-line
  *  text still reads), so nothing is ever dropped. */

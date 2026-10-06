@@ -141,3 +141,33 @@ describe("buildDefaultPrompt — pinpointed element identity", () => {
     );
   });
 });
+
+// Failure to catch (#1731): a text selection whose phrase appears more than
+// once in the document reaching the agent as a bare path, so it cannot tell
+// which occurrence the question is about.
+describe("buildDefaultPrompt — source lines of a text selection", () => {
+  const scope = { kind: "selection" as const, label: "Selected text", text: "retry the job", sourcePath: "/docs/plan.md" };
+
+  test("the Source line names the selection's line", () => {
+    const out = buildDefaultPrompt({ prompt: "why?", scope: { ...scope, lineStart: 41, lineEnd: 41 } });
+    expect(out).toContain("\nSource: /docs/plan.md, line 41\n");
+  });
+
+  test("a selection over several lines names the range", () => {
+    const out = buildDefaultPrompt({ prompt: "why?", scope: { ...scope, lineStart: 41, lineEnd: 44 } });
+    expect(out).toContain("\nSource: /docs/plan.md, lines 41–44\n");
+  });
+
+  test("lines without a path still name the location", () => {
+    const { sourcePath: _omit, ...noPath } = scope;
+    const out = buildDefaultPrompt({ prompt: "why?", scope: { ...noPath, lineStart: 7 } });
+    expect(out).toContain("\nSource: line 7\n");
+  });
+
+  test("a scope without lines (or with an invalid one) asks exactly what it asked before", () => {
+    const before = buildDefaultPrompt({ prompt: "q", scope });
+    expect(before).toContain("\nSource: /docs/plan.md\n");
+    expect(buildDefaultPrompt({ prompt: "q", scope: { ...scope, lineStart: 0 } })).toBe(before);
+    expect(buildDefaultPrompt({ prompt: "q", scope: { ...scope, lineStart: Number.NaN } })).toBe(before);
+  });
+});

@@ -29,6 +29,9 @@ export interface CommentPopoverState {
   initialText?: string;
   source?: any;
   draftKey: string;
+  /** `data-block-id`s of the blocks the pending selection covers, in
+   *  document order (a host maps them to source lines for Ask AI). */
+  blockIds?: string[];
 }
 
 export interface QuickLabelPickerState {
@@ -61,6 +64,27 @@ function commentDraftTargetKey(source: any, selectedText: string): string {
     ? `${end.parentTagName}:${end.parentIndex}:${end.textOffset}`
     : 'unknown';
   return `selection:${startKey}:${endKey}:${selectedText}`;
+}
+
+/** The blocks a pending selection covers: a math source names its own block;
+ *  a text selection is read off the highlighter's pending marks, each mapped
+ *  to its nearest `[data-block-id]` (the block its annotation would carry). */
+function selectionBlockIds(highlighter: any, source: any): string[] {
+  if (isMathAnnotationSource(source)) return [source.blockId];
+  if (!highlighter || !source?.id) return [];
+  let doms: unknown[] = [];
+  try {
+    doms = highlighter.getDoms(source.id) ?? [];
+  } catch {
+    return [];
+  }
+  const ids: string[] = [];
+  for (const dom of doms) {
+    if (!(dom instanceof HTMLElement)) continue;
+    const id = dom.closest<HTMLElement>('[data-block-id]')?.dataset.blockId;
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
 }
 
 type MathAnnotationTarget = {
@@ -1490,6 +1514,7 @@ export function useAnnotationHighlighter({
               selectedText: source.text,
               source,
               draftKey: commentDraftTargetKey(source, source.text),
+              blockIds: selectionBlockIds(highlighter, source),
             });
           } else if (effectiveMode === 'quickLabel') {
             pendingSourceRef.current = source;
@@ -1621,6 +1646,7 @@ export function useAnnotationHighlighter({
           selectedText: source.text,
           source,
           draftKey: commentDraftTargetKey(source, source.text),
+          blockIds: [source.blockId],
         });
         return;
       }
@@ -1767,6 +1793,7 @@ export function useAnnotationHighlighter({
         selectedText: source.text,
         source,
         draftKey: commentDraftTargetKey(source, source.text),
+        blockIds: [source.blockId],
       });
       return;
     }
@@ -1911,6 +1938,7 @@ export function useAnnotationHighlighter({
       initialText: initialChar,
       source: toolbarState.source,
       draftKey: commentDraftTargetKey(toolbarState.source, toolbarState.selectionText),
+      blockIds: selectionBlockIds(highlighterRef.current, toolbarState.source),
     });
     setToolbarState(null);
   };

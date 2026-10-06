@@ -66,6 +66,16 @@ interface UseAIChatOptions {
   threadTitle?: string;
 }
 
+/** `line 41` / `lines 41–44` (the export's spelling) for a selection's
+ *  source lines; `null` when the scope carries no valid line. */
+function selectionLinesLabel(lineStart: unknown, lineEnd: unknown): string | null {
+  if (typeof lineStart !== 'number' || !Number.isInteger(lineStart) || lineStart < 1) return null;
+  const end = typeof lineEnd === 'number' && Number.isInteger(lineEnd) && lineEnd > lineStart
+    ? lineEnd
+    : lineStart;
+  return end === lineStart ? `line ${lineStart}` : `lines ${lineStart}–${end}`;
+}
+
 export function buildDefaultPrompt(params: AskAIParams): string {
   // The "changes under review" context (and any other preamble) leads the
   // message, so the agent is oriented to the live view before the question and
@@ -90,7 +100,9 @@ export function buildDefaultPrompt(params: AskAIParams): string {
 
     if (params.scope?.kind === 'selection') {
       const label = params.scope.label ? `Re: ${params.scope.label}` : 'Re: selected text';
-      const source = params.scope.sourcePath ? `\nSource: ${params.scope.sourcePath}` : '';
+      const lines = selectionLinesLabel(params.scope.lineStart, params.scope.lineEnd);
+      const sourceParts = [params.scope.sourcePath, lines].filter(Boolean);
+      const source = sourceParts.length > 0 ? `\nSource: ${sourceParts.join(', ')}` : '';
       const selection = params.scope.text ? `\n\nSelected text:\n\`\`\`\n${params.scope.text}\n\`\`\`` : '';
       const detail = params.scope.detail?.trim() ? `\n\nSelected element:\n${params.scope.detail.trim()}` : '';
       return `${label}${source}${selection}${detail}\n\n${params.prompt}`;
