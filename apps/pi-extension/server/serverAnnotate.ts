@@ -1371,15 +1371,57 @@ export async function startAnnotateServer(options: {
 			await html(req, res, options.htmlContent, isRemoteSession());
 		}
 	});
-	const agentTerminal = await createNodeAgentTerminalBridge({
-		enabled: supportsAnnotateAgentTerminalMode(options.mode || "annotate"),
-		cwd: options.agentCwd ?? process.cwd(),
-		server,
-	});
-	agentTerminalCapability = agentTerminal.capability;
+	// Startup failures must not leave anything behind in the long-lived Pi
+	// process: every step guarded so the original error is what propagates.
+	// File browser watchers are process-wide (other open sessions own some),
+	// so only a failure after this server may have served requests closes them.
+	const disposeFailedStart = (extra: Array<() => void> = []) => {
+		for (const dispose of [
+			() => {
+				clientLease.cancel();
+				clientLease.closeSessions();
+			},
+			() => aiRuntime?.dispose(),
+			...extra,
+		]) {
+			try {
+				dispose();
+			} catch {
+				// startup failure cleanup: best effort
+			}
+		}
+		server.close();
+		(server as { closeAllConnections?: () => void }).closeAllConnections?.();
+	};
 
-	const { port, portSource } = await listenOnPort(server);
+	let listened: Awaited<ReturnType<typeof listenOnPort>>;
+	try {
+		listened = await listenOnPort(server);
+	} catch (error) {
+		disposeFailedStart();
+		throw error;
+	}
+	const { port, portSource } = listened;
 	boundPort = port;
+
+	// Attach the agent terminal only once the port is ours. Its WebSocket
+	// server re-emits every http server "error" as its own and has no handler
+	// for it, so attached before listen, a busy fixed port (PLANNOTATOR_PORT in
+	// a local session) turned the first EADDRINUSE into an unhandled "error"
+	// that killed the whole Pi process before the port-in-use retry and the
+	// self-preemption that takes the port over could run.
+	let agentTerminal: Awaited<ReturnType<typeof createNodeAgentTerminalBridge>>;
+	try {
+		agentTerminal = await createNodeAgentTerminalBridge({
+			enabled: supportsAnnotateAgentTerminalMode(options.mode || "annotate"),
+			cwd: options.agentCwd ?? process.cwd(),
+			server,
+		});
+	} catch (error) {
+		disposeFailedStart();
+		throw error;
+	}
+	agentTerminalCapability = agentTerminal.capability;
 	// Remote sessions serve the app page compressed (#1617); start gzip (what
 	// browsers ask for over plain http) now so the first load does not wait.
 	if (isRemoteSession()) prewarmAppHtml(options.htmlContent, likelyAppHtmlEncoding(false));
@@ -1412,23 +1454,7 @@ export async function startAnnotateServer(options: {
 		} catch (error) {
 			// Same disposal set the normal stop() runs, each step guarded so
 			// the original startup error is what propagates.
-			for (const dispose of [
-				() => closeAllFileBrowserWatchers(),
-				() => {
-					clientLease.cancel();
-					clientLease.closeSessions();
-				},
-				() => aiRuntime?.dispose(),
-				() => agentTerminal.dispose(),
-			]) {
-				try {
-					dispose();
-				} catch {
-					// startup failure cleanup: best effort
-				}
-			}
-			server.close();
-			(server as { closeAllConnections?: () => void }).closeAllConnections?.();
+			disposeFailedStart([() => closeAllFileBrowserWatchers(), () => agentTerminal.dispose()]);
 			throw error;
 		}
 	}
