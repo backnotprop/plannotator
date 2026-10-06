@@ -5,7 +5,9 @@
  * made from the same selection would name.
  */
 import { describe, expect, test } from 'bun:test';
-import { parseMarkdownToBlocks, selectionSourceLines } from './parser';
+import { exportAnnotations, parseMarkdownToBlocks, selectionSourceLines } from './parser';
+import { buildDefaultPrompt } from '../hooks/useAIChat';
+import { AnnotationType } from '../types';
 
 const DOC = [
   '---',
@@ -57,6 +59,28 @@ describe('selectionSourceLines', () => {
     const first = idOf((c, t) => t === 'paragraph' && c === 'Retry the job once.');
     const last = idOf((c) => c.startsWith('A paragraph'));
     expect(selectionSourceLines(blocks, [last, first])).toEqual({ lineStart: 6, lineEnd: 9 });
+  });
+
+  // The question and the exported annotation from the same single-block
+  // selection must name the same lines (multi-block selections are a range,
+  // while the export names only the first block).
+  test.each([
+    ['a one-line paragraph after frontmatter', (c: string, t: string) => t === 'paragraph' && c === 'Retry the job once.', 'Retry the job'],
+    ['a wrapped paragraph', (c: string) => c.startsWith('A paragraph'), 'A paragraph'],
+  ])('for %s the question names the span the export heading prints', (_name, pred, quote) => {
+    const id = idOf(pred);
+    const lines = selectionSourceLines(blocks, [id])!;
+    const prompt = buildDefaultPrompt({
+      prompt: 'q',
+      scope: { kind: 'selection', text: quote, sourcePath: '/d.md', ...lines },
+    });
+    const label = /Source: \/d\.md, (lines? [\d–]+)\n/.exec(prompt)?.[1];
+    expect(label).toBeDefined();
+    const exported = exportAnnotations(blocks, [{
+      id: 'a1', blockId: id, startOffset: 0, endOffset: quote.length, type: AnnotationType.COMMENT,
+      text: 'why?', originalText: quote, createdA: 0,
+    }]);
+    expect(exported).toContain(`(${label}) `);
   });
 
   test('unknown and diff-view block ids name no line', () => {

@@ -1890,10 +1890,12 @@ ignores the new fields keeps working.
 - **`CommentAskAIContext.lineStart?` / `lineEnd?`** and
   **`AIQuestion.scope.lineStart?` / `lineEnd?`** (1-based, additive). `Viewer`
   fills them on the context its text-selection composer and its code-block
-  composer hand to `onAskAI`: the span of the enclosing block (first block's
-  start line to last block's end line when the selection covers several), the
-  same span the exported annotation from that selection prints as
-  `(line 41)` / `(lines 41–44)`. The global composer, HTML / live-app
+  composer hand to `onAskAI`: the span of the enclosing block, which for a
+  selection within one block is the same span the exported annotation from
+  that selection prints as `(line 41)` / `(lines 41–44)`. A selection over
+  several blocks gives a range from the first block's start line to the last
+  block's end line, while the export names only the first block. The global
+  composer, HTML / live-app
   pinpoints and diagram comments carry none (diagrams already send their line
   in `detail`).
 - **`buildDefaultPrompt`** appends them to the `Source:` line:
@@ -1910,9 +1912,11 @@ ignores the new fields keeps working.
 
 Lines are document lines of the markdown the `Viewer` was given (frontmatter
 counted). Plannotator drops them for a converted HTML / URL source, whose
-converted markdown lines do not exist in the original file. Pinned by
+converted markdown lines do not exist in the original file (its mapping is
+`packages/editor/askScope.ts`, pinned by `askScope.test.ts`). Pinned by
 `components/Viewer.askAISelectionLine.test.tsx` (DOM-gated),
-`utils/parser.selectionLines.test.ts` and `utils/aiPrompt.test.ts`.
+`utils/parser.selectionLines.test.ts` (including parity with the export
+heading for single-block selections) and `utils/aiPrompt.test.ts`.
 
 ---
 

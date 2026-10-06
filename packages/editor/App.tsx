@@ -42,7 +42,7 @@ import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
 import { ExportModal } from '@plannotator/ui/components/ExportModal';
 import { ImportModal } from '@plannotator/ui/components/ImportModal';
 import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
-import { Annotation, AnnotationType, Block, EditorMode, type CodeAnnotation, type DocumentRenderAs, type InputMethod, type ImageAttachment, type ActionsLabelMode, type AIQuestion } from '@plannotator/ui/types';
+import { Annotation, AnnotationType, Block, EditorMode, type CodeAnnotation, type DocumentRenderAs, type InputMethod, type ImageAttachment, type ActionsLabelMode } from '@plannotator/ui/types';
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { Tooltip, TooltipProvider } from '@plannotator/ui/components/Tooltip';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
@@ -102,6 +102,7 @@ import {
 import { useAgentToolSetting } from '@plannotator/ui/hooks/useAgentToolSetting';
 import { useLatchedTrue } from '@plannotator/ui/hooks/useLatchedTrue';
 import { buildDefaultPrompt, useAIChat } from '@plannotator/ui/hooks/useAIChat';
+import { askScopeFromContext as askScopeFromContextFor } from './askScope';
 import { getUIPreferences, type UIPreferences, type PlanWidth } from '@plannotator/ui/utils/uiPreferences';
 import { getEditorMode, saveEditorMode } from '@plannotator/ui/utils/editorMode';
 import { getInputMethod, refreshInputMethodStamp, saveInputMethod } from '@plannotator/ui/utils/inputMethod';
@@ -5369,22 +5370,12 @@ const App: React.FC = () => {
   }, [fileBrowser.activeFile, linkedDocHook.filepath, linkedDocHook.isActive, sourceFilePath]);
 
   // One mapping for both Ask AI paths (agent terminal and side chat / Ask this
-  // session). A selection's source lines ride only when they name lines of the
-  // file the agent reads: a converted HTML/URL source renders converted
-  // markdown, whose lines do not exist in the original.
-  const askScopeFromContext = useCallback((context?: CommentAskAIContext): AIQuestion['scope'] => {
-    if (!context) return undefined;
-    return {
-      kind: context.kind,
-      label: context.label,
-      text: context.text,
-      sourcePath: context.sourcePath ?? aiDocumentPath,
-      ...(context.detail ? { detail: context.detail } : {}),
-      ...(context.lineStart != null && !aiSourceConverted
-        ? { lineStart: context.lineStart, lineEnd: context.lineEnd ?? context.lineStart }
-        : {}),
-    };
-  }, [aiDocumentPath, aiSourceConverted]);
+  // session); see `askScope.ts`.
+  const askScopeFromContext = useCallback(
+    (context?: CommentAskAIContext) =>
+      askScopeFromContextFor(context, { documentPath: aiDocumentPath, sourceConverted: aiSourceConverted }),
+    [aiDocumentPath, aiSourceConverted],
+  );
 
   const buildAgentAskPrompt = useCallback((question: string, context?: CommentAskAIContext) => {
     const scopedQuestion = buildDefaultPrompt({
