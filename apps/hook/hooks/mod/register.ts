@@ -274,7 +274,8 @@ export function register(on: On) {
     return next(e)
   })
 
-  on('command.run', async ($: Engine, e: any, next: Next) => {
+  // Matched by name: an unmatched hook makes the engine credit Plannotator on every plugin's command answer.
+  on('command.run', { command: Object.keys(COMMANDS) }, async ($: Engine, e: any, next: Next) => {
     const name: string = typeof e.command === 'string' ? e.command : ''
     if (!allowed || !isModCommand(name)) return next(e)
     const instance = await currentMod($)
