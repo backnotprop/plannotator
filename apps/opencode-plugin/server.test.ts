@@ -4,7 +4,7 @@ import serverPlugin, {
   pushComposedSystemReminder,
   replacePlanningSystemParts,
 } from "./server";
-import { createV2BridgeClient, dropSessionUrlNotices, formatSessionUrlNotice } from "./v2-client";
+import { createV2BridgeClient, dropSessionUrlNotices, formatCommandFailureNotice, formatSessionUrlNotice } from "./v2-client";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -531,6 +531,15 @@ describe("session-URL notices stay out of the model context", () => {
     const messages: unknown[] = [user("q"), assistant("a"), notice()];
     expect(dropSessionUrlNotices(messages)).toBe(0);
     expect(messages).toHaveLength(3);
+  });
+
+  // Failure caught: a slash command's failure notice (for the person) read by
+  // the model alongside the next message it answers.
+  test("a slash command's failure notice is dropped like the URL notice", () => {
+    const failure = user(formatCommandFailureNotice("plannotator-annotate", "File not found: nothere.md"));
+    const messages: unknown[] = [user("q"), assistant("a"), failure, user("annotate notes.md instead")];
+    expect(dropSessionUrlNotices(messages)).toBe(1);
+    expect(messages).toEqual([user("q"), assistant("a"), user("annotate notes.md instead")]);
   });
 
   test("text that only resembles a notice is left alone", () => {

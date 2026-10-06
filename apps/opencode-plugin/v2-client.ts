@@ -126,6 +126,12 @@ export interface V2BridgeClient {
    * `createSessionUrlNotifier` and `toastPlannotatorUrl` in `cli-bridge.ts`.
    */
   notifyUrl?: (input: { url: string; message: string }) => Promise<unknown>;
+  /**
+   * Present only for a slash command's client on a host with
+   * `session.synthetic`: shows the person that the command failed, as a
+   * transcript notice that starts no model turn (`createCommandFailureNotifier`).
+   */
+  notifyFailure?: (input: { command: string; message: string }) => Promise<unknown>;
   app: {
     log: (entry: { level: "info" | "error"; message: string }) => void;
     agents: () => Promise<{ data: OpenCodeBridgeAgent[] }>;
@@ -519,7 +525,18 @@ export function formatSessionUrlNotice(url: string): string {
 }
 
 
-/** Is this model-context message one of our session-URL notices, verbatim? */
+/**
+ * The notice a slash command posts when it fails (a refused argument, the
+ * CLI's startup error): the command and the reason, which is all the person
+ * needs to run it again.
+ */
+export function formatCommandFailureNotice(command: string, message: string): string {
+  return `Plannotator /${command} failed: ${message.trim()}`;
+}
+
+const COMMAND_FAILURE_NOTICE_RE = /^Plannotator \/plannotator-(?:review|annotate|last) failed: \S/;
+
+/** Is this model-context message one of our transcript notices (session URL or command failure)? */
 function isSessionUrlNoticeMessage(message: unknown): boolean {
   if (!isRecord(message) || message.role !== "user") return false;
   const content = message.content;
@@ -528,15 +545,17 @@ function isSessionUrlNoticeMessage(message: unknown): boolean {
     : Array.isArray(content) && content.length === 1 && isRecord(content[0]) && content[0].type === "text"
       ? content[0].text
       : undefined;
-  return typeof text === "string"
-    && text.startsWith(SESSION_URL_NOTICE_PREFIX)
+  if (typeof text !== "string") return false;
+  if (COMMAND_FAILURE_NOTICE_RE.test(text)) return true;
+  return text.startsWith(SESSION_URL_NOTICE_PREFIX)
     && /^https?:\/\/\S+$/.test(text.slice(SESSION_URL_NOTICE_PREFIX.length));
 }
 
 /**
  * Keep our session-URL notices out of what the MODEL reads. Mutates
  * `messages` in place (the `context` hook's array) and returns how many it
- * removed.
+ * removed. A slash command's failure notice (`formatCommandFailureNotice`) is
+ * the same kind of row, for the person only, and is dropped the same way.
  *
  * The notice is for the person, who sees it as the transcript row's
  * description; the model has no use for it. But it is a pending steer
@@ -698,6 +717,38 @@ function readAdmittedInboxID(response: unknown): string | undefined {
 }
 
 /**
+ * Show the person that a slash command failed, as a transcript notice.
+ *
+ * Without it a failed command showed nothing at all: the reason went to
+ * `app.log`, which OpenCode 2 discards (see `createSessionUrlNotifier`), so
+ * `/plannotator-annotate` with a typo read as a command that did nothing.
+ *
+ * Same mechanism as the session-URL notice, and the same reasons: OpenCode 2's
+ * plugin context has no toast surface, and `session.synthetic` with a
+ * `description` is a rendered row, while `resume: false` starts no model turn
+ * (a slash command never reaches the model unless it says so; the tool's
+ * `plannotatorLateFailureText` is a `session.prompt` because there the agent
+ * was told to wait). The row is a pending steer, promoted with whatever next
+ * wakes the session, and `dropSessionUrlNotices` keeps it out of the model's
+ * requests like the URL notice. The one gap is the same as the URL notice's:
+ * a row promoted alone at an idle boundary stays in that one request.
+ *
+ * Undefined on an older host with no `synthetic`, or with no session: the
+ * failure then stays in the log, as before.
+ */
+export function createCommandFailureNotifier(
+  ctx: V2ContextLike,
+  sessionID: string | undefined,
+): ((input: { command: string; message: string }) => Promise<unknown>) | undefined {
+  const synthetic = ctx.session?.synthetic;
+  if (typeof synthetic !== "function" || !sessionID) return undefined;
+  return async ({ command, message }) => {
+    const text = formatCommandFailureNotice(command, message);
+    return await synthetic({ sessionID, text, description: text, resume: false, delivery: CO_PROMOTED_DELIVERY });
+  };
+}
+
+/**
  * Build the V1-shaped client `handleCliCommand` and `resolveValidatedTargetAgent`
  * expect, backed by the V2 context. Delivering feedback goes through
  * `ctx.session.prompt`, the direct path, rather than a synthetic-event
@@ -733,6 +784,11 @@ export function createV2BridgeClient(input: {
    * goes to `sessionID`, which is what the slash commands need (#1515).
    */
   notice?: { sessionID: string; open: () => boolean };
+  /**
+   * Show a failed command in `sessionID`'s transcript (`notifyFailure`). For
+   * the slash commands; a tool launch reports its failure as the tool result.
+   */
+  failureNotices?: boolean;
 }): V2BridgeClient {
   const warn = input.warn ?? ((message: string) => console.error(message));
   const loggedUrls = new Set<string>();
@@ -757,8 +813,10 @@ export function createV2BridgeClient(input: {
     // Checked synchronously at the call, before anything is posted.
     ? async (url: { url: string; message: string }) => (noticeOpen() ? postNotice(url) : undefined)
     : postNotice;
+  const notifyFailure = input.failureNotices ? createCommandFailureNotifier(input.ctx, input.sessionID) : undefined;
   return {
     ...(notifyUrl && { notifyUrl }),
+    ...(notifyFailure && { notifyFailure }),
     dispose: notice.dispose,
     app: {
       agents: async () => ({ data: await input.getAgents() }),

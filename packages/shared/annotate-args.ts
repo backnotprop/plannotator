@@ -27,6 +27,7 @@
 
 import { stripAtPrefix } from "./at-reference";
 import { stripWrappingQuotes } from "./resolve-file";
+import { scanQuotedWords } from "./review-args";
 
 export interface ParsedAnnotateArgs {
   /**
@@ -128,4 +129,25 @@ export function parseAnnotateArgs(raw: string, opts?: ParseAnnotateArgsOptions):
   if (flags.hook) flags.gate = true;
 
   return { filePath: stripAtPrefix(rawFilePath), rawFilePath, ...flags };
+}
+
+/**
+ * The target words of a slash command's raw annotate arguments (the text
+ * `parseAnnotateArgs` takes), known flags dropped, for a host that hands them
+ * to `plannotator annotate` as separate arguments so the CLI's tolerant
+ * resolution reads them one by one (`. notes.md` opens notes.md). Quotes group
+ * a path that holds spaces (`"my notes.md" b.md`), the same rule review
+ * arguments follow (`scanQuotedWords`). A quote left open is prose, not
+ * grouping (an apostrophe: `notes.md it's the spec`), so that input splits on
+ * whitespace alone instead of running to the end as one word.
+ *
+ * Read from the raw text rather than `rawFilePath`, whose wrapping-quote strip
+ * turns `"a b.md" "c d.md"` into `a b.md" "c d.md`.
+ */
+export function annotateTargetWords(raw: string, opts?: ParseAnnotateArgsOptions): string[] {
+  const text = (raw ?? "").trim();
+  const scanned = scanQuotedWords(text);
+  const words = scanned.unterminated ? text.split(/\s+/) : scanned.words;
+  const flags = new Set<string>([...Object.keys(FLAG_MAP), ...(opts?.liveFlags ? Object.keys(LIVE_FLAG_MAP) : [])]);
+  return words.filter((word) => word && !flags.has(word));
 }

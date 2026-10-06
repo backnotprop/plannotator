@@ -10,7 +10,7 @@ import {
   SESSION_BRIDGE_TOKEN_ENV,
 } from "@plannotator/ai/session-bridge-pull";
 import { runPullSessionBridgeClient } from "@plannotator/ai/session-bridge-pull-client";
-import { parseAnnotateArgs, type ParsedAnnotateArgs } from "@plannotator/shared/annotate-args";
+import { annotateTargetWords, parseAnnotateArgs, type ParsedAnnotateArgs } from "@plannotator/shared/annotate-args";
 import {
   annotateInputNamesExistingTarget,
   annotatePathExists,
@@ -68,6 +68,12 @@ interface OpenCodeClient {
    * (see `createSessionUrlNotifier` in `v2-client.ts`).
    */
   notifyUrl?: (input: { url: string; message: string }) => unknown;
+  /**
+   * Host-provided visible report of a failed command, preferred over the
+   * error toast when present: OpenCode 2's slash-command client posts a
+   * transcript notice (`createCommandFailureNotifier` in `v2-client.ts`).
+   */
+  notifyFailure?: (input: { command: string; message: string }) => unknown;
   session?: {
     messages?: (input: unknown) => Promise<{ data?: any[] }>;
     prompt?: (input: unknown) => Promise<unknown>;
@@ -282,18 +288,26 @@ function toastPlannotatorUrl(client: OpenCodeClient, message: string, toastedUrl
   }
 }
 
-// A refused review target must be SEEN: `log` alone never reaches the TUI, so
-// the command would appear to do nothing. Same best-effort toast surface as
-// `toastPlannotatorUrl` (OpenCode 2 has no `tui` domain and keeps the log).
-function logAndToastError(client: OpenCodeClient, message: string): void {
-  log(client, "error", message);
+// A command that did not open must be SEEN, or it reads as doing nothing:
+// `log` never reaches the TUI, and OpenCode 2 discards it outright. OpenCode 2
+// slash commands post a transcript notice (`notifyFailure`); OpenCode 1 shows
+// an error toast. A tool launch's client carries neither and its failure is
+// the tool result. Best-effort, like every other notice.
+function showCommandFailure(client: OpenCodeClient, command: string, message: string): void {
   try {
-    const result = client.tui?.showToast?.({
-      body: { title: "Plannotator", message, variant: "error" },
-    }) as { catch?: (onRejected: () => void) => unknown } | undefined;
-    if (result && typeof result.catch === "function") result.catch(() => {});
+    const notify = client.notifyFailure;
+    const result = (typeof notify === "function"
+      ? notify({ command, message })
+      : client.tui?.showToast?.({
+        body: { title: "Plannotator", message: `/${command} failed: ${message}`, variant: "error" },
+      })) as { catch?: (onRejected: (error: unknown) => void) => unknown } | undefined;
+    if (result && typeof result.catch === "function") {
+      result.catch((error) => {
+        log(client, "info", `[Plannotator] Could not show the /${command} failure: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    }
   } catch {
-    // Toast delivery is best-effort.
+    // Failure display is best-effort; the log keeps the reason.
   }
 }
 
@@ -690,15 +704,39 @@ async function runPlannotatorCli(options: RunCliOptions): Promise<RunCliResult> 
 }
 
 /**
- * The files of a review of several files, when the user's annotate words are
- * several existing file paths (every word one; the shared bundle rule), as
- * absolute paths in the typed order; null otherwise. Each becomes its own CLI
- * argument, which is what makes the CLI open them as one review.
+ * The CLI arguments a slash command's annotate target becomes.
+ *
+ * Input that names nothing as a whole goes to the CLI one word per argument,
+ * as a shell would pass it (quotes group a path with spaces), so the CLI's
+ * tolerant resolution reads the words one by one: `. notes.md` opens
+ * notes.md, a list of files opens one review of them, prose gets the CLI's
+ * own error. Passed as ONE argument, the CLI read the whole string as a path
+ * and answered "File not found: . notes.md".
+ *
+ * Kept as one argument, exactly as before: input that names an existing
+ * target as a whole (a path with unquoted spaces, `my notes.md`), a single
+ * word, and input holding a dash word the parser did not recognize, which
+ * must neither be skipped nor reach the CLI as a real flag
+ * (`--require-approval` typed as prose).
  */
-export function annotateBundleCliPaths(rawFilePath: string, cwd: string): string[] | { missing: string[] } | null {
-  if (annotateInputNamesExistingTarget(rawFilePath, cwd)) return null;
+export function annotateCliTargets(parsed: ParsedAnnotateArgs, rawArgs: string, cwd: string): string[] {
+  if (!parsed.rawFilePath || annotateInputNamesExistingTarget(parsed.rawFilePath, cwd)) return [parsed.rawFilePath];
+  const words = annotateTargetWords(rawArgs);
+  if (words.length < 2 || words.some((word) => word.startsWith("-"))) return [parsed.rawFilePath];
+  return words;
+}
+
+/**
+ * The files of a review of several files, when the slash command's words
+ * (`annotateCliTargets`) are several existing file paths (every word one; the
+ * shared bundle rule), as absolute paths in the typed order; null otherwise.
+ * Each becomes its own CLI argument, which is what makes the CLI open them as
+ * one review.
+ */
+export function annotateBundleCliPaths(words: readonly string[], cwd: string): string[] | { missing: string[] } | null {
+  if (words.length < 2) return null;
   const selection = selectAnnotateTokenTarget(
-    rawFilePath,
+    [...words],
     (token) => probeAnnotateToken(token, cwd, { bareDirectories: false }),
     { bundlePath: (token) => probeAnnotateBundlePath(token, cwd), pathExists: (token) => annotatePathExists(token, cwd) },
   );
@@ -708,8 +746,13 @@ export function annotateBundleCliPaths(rawFilePath: string, cwd: string): string
   return selection.kind === "bundle" ? selection.files.map((file) => file.value) : null;
 }
 
-export function buildAnnotateCliArgs(parsed: ParsedAnnotateArgs, bundlePaths?: readonly string[] | null): string[] {
-  const args = ["annotate", ...(bundlePaths && bundlePaths.length > 1 ? bundlePaths : [parsed.rawFilePath]), "--json"];
+/**
+ * `targets`: the CLI's target arguments in order (a bundle's paths, or a
+ * slash command's words). Absent or empty means `parsed.rawFilePath` as ONE
+ * argument (the tool's single target, never re-split).
+ */
+export function buildAnnotateCliArgs(parsed: ParsedAnnotateArgs, targets?: readonly string[] | null): string[] {
+  const args = ["annotate", ...(targets && targets.length > 0 ? targets : [parsed.rawFilePath]), "--json"];
   if (parsed.gate) args.push("--gate");
   if (parsed.renderHtml) args.push("--render-html");
   if (parsed.renderMarkdown) args.push("--markdown");
@@ -1002,11 +1045,13 @@ export async function handleCliCommand(input: {
     }
     return ownedBridge;
   };
-  // The review did not open (or its CLI failed): tell a tracking host, once.
+  // The review did not open (or its CLI failed): tell a tracking host and
+  // show the person, once.
   let failureReported = false;
   const reportFailure = (message: string) => {
     if (failureReported) return;
     failureReported = true;
+    showCommandFailure(input.client, input.command, message);
     try {
       launch?.onFailure?.(message);
     } catch {
@@ -1036,7 +1081,7 @@ export async function handleCliCommand(input: {
         directoryTarget = resolveReviewTarget(parsed, cwd).directory;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        logAndToastError(input.client, `[Plannotator] ${message}`);
+        log(input.client, "error", `[Plannotator] ${message}`);
         reportFailure(message);
         return;
       }
@@ -1071,7 +1116,7 @@ export async function handleCliCommand(input: {
         if (directoryTarget && /unknown (?:subcommand|command)|no plan content in hook event/i.test(result.stderr)) {
           log(input.client, "error", result.stderr.trim() || `Plannotator CLI exited with code ${result.exitCode}`);
           const update = "Update the Plannotator CLI to review a directory from OpenCode.";
-          logAndToastError(input.client, update);
+          log(input.client, "error", update);
           reportFailure(update);
         } else {
           cliFailure(result);
@@ -1115,9 +1160,12 @@ export async function handleCliCommand(input: {
       // Several existing file paths open as one review of all of them. The
       // tool's list arrives split (each entry one argument, never re-split,
       // checked by the CLI); a single tool target is never read as several.
+      // A slash command's words go to the CLI one argument each when the
+      // input names nothing as a whole (`annotateCliTargets`).
+      const slashTargets = input.annotateArgs ? null : annotateCliTargets(parsed, input.rawArgs, cwd);
       const bundleSelection = input.annotateArgs
         ? (input.annotateBundle && input.annotateBundle.length > 1 ? [...input.annotateBundle] : null)
-        : annotateBundleCliPaths(parsed.rawFilePath, cwd);
+        : annotateBundleCliPaths(slashTargets ?? [], cwd);
       if (bundleSelection && !Array.isArray(bundleSelection)) {
         const missing = buildMissingAnnotateFilesMessage(bundleSelection.missing);
         log(input.client, "error", missing);
@@ -1127,7 +1175,7 @@ export async function handleCliCommand(input: {
       const bundlePaths = bundleSelection;
       const result = await runPlannotatorCli({
         client: input.client,
-        args: buildAnnotateCliArgs(parsed, bundlePaths),
+        args: buildAnnotateCliArgs(parsed, bundlePaths ?? slashTargets),
         cwd,
         readyLabel: "annotation UI",
         bridge: input.bridge,
@@ -1244,8 +1292,18 @@ export async function handleCliCommand(input: {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     log(input.client, "error", `[Plannotator] ${message}`);
+    // A prompt-delivery failure comes after the review opened and was
+    // decided: not a command that failed to open (the host reports it).
+    if (isOpenCodePromptDeliveryError(error)) {
+      failureReported = true;
+      try {
+        launch?.onFailure?.(message);
+      } catch {
+        // A tracking host never breaks the command.
+      }
+      throw error;
+    }
     reportFailure(message);
-    if (isOpenCodePromptDeliveryError(error)) throw error;
   } finally {
     ownedBridge?.dispose?.();
   }

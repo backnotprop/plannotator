@@ -162,6 +162,9 @@ export async function runNativeCommand(
     sessionID,
     ...(tool ? { alwaysQueue: true } : {}),
     ...(tool?.notice ? { notice: tool.notice } : {}),
+    // A slash command that fails shows why in the transcript; a tool launch
+    // answers its failure as the tool result instead.
+    ...(tool ? {} : { failureNotices: true }),
   });
 
   // A slash command's own review is recorded like a tool launch, so the

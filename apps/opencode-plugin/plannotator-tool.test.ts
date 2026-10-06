@@ -23,6 +23,7 @@ import {
 } from "./plannotator-tool";
 
 const HOST_CONTROL = path.join(import.meta.dir, "..", "..", "packages", "shared", "host-control.ts");
+const ANNOTATE_TARGET = path.join(import.meta.dir, "..", "..", "packages", "shared", "annotate-target.ts");
 const isWindows = process.platform === "win32";
 
 // ---------------------------------------------------------------------------
@@ -91,20 +92,33 @@ const server = Bun.serve({
     return Response.json({ error: "Not found" }, { status: 404 });
   },
 });
-// "targets": a CLI that names what it opened, in full, as the real one does:
-// several path arguments are a bundle, and a stray "." beside a file is
-// dropped, as the shared selection drops it.
+// "targets": a CLI that names what it opened, in full, and reads its
+// arguments as the real one does: ONE argument is one path, never split
+// (\`annotate ". notes.md"\` is "File not found"), while several arguments go
+// through the CLI's own shared selection (a stray "." beside a file is
+// dropped, several file paths are a bundle).
 const readyTarget = ${JSON.stringify(behavior)} === "targets" && process.argv[2] === "annotate"
   ? await (async () => {
       const { resolve } = await import("node:path");
       const { existsSync } = await import("node:fs");
+      const target = await import(${JSON.stringify(ANNOTATE_TARGET)});
       const base = process.env.PLANNOTATOR_CWD ?? process.cwd();
       const words = process.argv.slice(3).filter((word) => !word.startsWith("-"));
-      if (words.length > 1) return words.map((word) => resolve(base, word));
+      if (words.length > 1) {
+        const selection = target.selectAnnotateTokenTarget(
+          words,
+          (token) => target.probeAnnotateToken(token, base, { bareDirectories: false }),
+          { bundlePath: (token) => target.probeAnnotateBundlePath(token, base), pathExists: (token) => target.annotatePathExists(token, base) },
+        );
+        if (selection.kind === "bundle") return selection.files.map((file) => file.value);
+        if (selection.kind === "single") return selection.candidate.value;
+        console.error("Ambiguous annotate arguments: " + words.join(" "));
+        process.exit(1);
+      }
       const only = words[0] ?? "";
       if (existsSync(resolve(base, only))) return resolve(base, only);
-      const tokens = only.split(/\\s+/).filter((token) => token && token !== ".");
-      return tokens.length === 1 ? resolve(base, tokens[0]) : resolve(base, only);
+      console.error("File not found: " + only);
+      process.exit(1);
     })()
   : undefined;
 appendFileSync(process.env.PLANNOTATOR_READY_FILE, JSON.stringify({ url: "http://localhost:" + server.port, port: server.port, isRemote: ${JSON.stringify(behavior)} === "disabled-remote", ...(readyTarget ? { target: readyTarget } : {}) }) + "\\n");
@@ -659,6 +673,8 @@ describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", (
     const text = await runPlannotatorTool({ action: "annotate", target: "missing.md" }, { sessionID: "ses_a" }, host.toolDeps);
     expect(text).toBe("Plannotator could not start: File not found: missing.md");
     await waitFor(() => host.registry.openFor("ses_a").length === 0);
+    // The tool result reports it; no slash-command failure notice as well.
+    expect(host.notices).toHaveLength(0);
   }, 30_000);
 
   // Failure caught: slash-command reviews missing from list ("opened in this

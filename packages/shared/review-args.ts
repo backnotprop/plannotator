@@ -289,8 +289,20 @@ function isReviewUrl(value: string): boolean {
 }
 
 function tokenizeReviewArgs(input: string): string[] {
+  return scanQuotedWords(input).words.map((token) => stripWrappingQuotes(token.trim())).filter(Boolean);
+}
+
+/**
+ * Split slash-command argument text into words: whitespace separates, and a
+ * single or double quote groups until the same quote closes it (the quotes
+ * are dropped). Nothing is expanded and a backslash is an ordinary character,
+ * so a Windows path keeps its separators. `unterminated` reports a quote left
+ * open, whose text runs to the end of the input as part of the last word.
+ * Shared by review (`parseReviewArgs`) and annotate (`splitAnnotateTargetWords`).
+ */
+export function scanQuotedWords(input: string): { words: string[]; unterminated: boolean } {
   const raw = input.trim();
-  if (!raw) return [];
+  if (!raw) return { words: [], unterminated: false };
 
   const tokens: string[] = [];
   let current = "";
@@ -324,5 +336,5 @@ function tokenizeReviewArgs(input: string): string[] {
   }
 
   if (current) tokens.push(current);
-  return tokens.map((token) => stripWrappingQuotes(token.trim())).filter(Boolean);
+  return { words: tokens, unterminated: quote !== undefined };
 }
