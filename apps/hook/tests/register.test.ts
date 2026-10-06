@@ -113,6 +113,36 @@ describe('register', () => {
     expect(w.runs.some((argv) => argv.includes('review'))).toBe(true)
   })
 
+  // command.run is matched by name (#1740): every Plannotator command must
+  // still reach the mod, the skill-held one (the world's command.list gives
+  // the user a plannotator-review skill) and the two the mod registers alike;
+  // a name the matcher missed would run the user's blocking skill instead.
+  test('all three commands are answered by the mod, skill-held and registered; another plugin\'s command is not touched', async ($: any, on: any) => {
+    const w = world(on)
+    on('session.messages', () => ({ value: [{ role: 'assistant', text: 'Here is the plan I wrote.' }] }))
+    const reachedBeneath: string[] = []
+    on('command.run', ($: any, e: any) => {
+      reachedBeneath.push(e.command)
+      return { text: `${e.command} ran beneath` }
+    })
+    await $.session.start(SESSION)
+
+    expect(w.registered.sort()).toEqual(['plannotator-annotate', 'plannotator-last'])
+    for (const [command, args, subcommand] of [
+      ['plannotator-review', '', 'review'],
+      ['plannotator-annotate', 'notes.md', 'annotate'],
+      ['plannotator-last', '', 'annotate-last'],
+    ]) {
+      const { text } = await $.command.run({ command, args, origin: { kind: 'composer' } })
+      expect(text).toContain('http://localhost:4321')
+      expect(w.runs.some((argv) => argv[3] === 'plannotator-launch' && argv[6] === subcommand)).toBe(true)
+    }
+    const other = await $.command.run({ command: 'frontend-status', args: '', origin: { kind: 'composer' } })
+
+    expect(other.text).toBe('frontend-status ran beneath')
+    expect(reachedBeneath).toEqual(['frontend-status'])
+  })
+
   test('knob off (PLANNOTATOR_CLAUDE_MOD=0): inert. ExitPlanMode and the skills reach the classic flow; nothing is registered or set', async ($: any, on: any) => {
     const w = world(on, { modEnv: '0' })
     on('tool.call', () => ({ result: 'the classic flow ran' }))
