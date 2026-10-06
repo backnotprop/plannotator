@@ -365,6 +365,30 @@ export function plannotatorDecisionHeading(
   return targetLines ? `${heading}\n${targetLines}` : heading
 }
 
+const PR_URL_PATTERN = /^https?:\/\/[^\s/]+\/.+\/(?:pull|pull-requests|merge_requests)\/(\d+)\b/i
+
+/** How a pull request URL is named (`PR #12`, `MR !12`), or null when the target is not one. */
+export function plannotatorPrSubject(target: PlannotatorTarget | undefined): string | null {
+  if (typeof target !== 'string') return null
+  const match = PR_URL_PATTERN.exec(target)
+  if (!match) return null
+  return /merge_requests/i.test(target) ? `MR !${match[1]}` : `PR #${match[1]}`
+}
+
+/**
+ * The subject a decision is headed with: the launch's own, unless the
+ * decision is about a DIFFERENT pull request than the launch opened (the
+ * reviewer switched PRs in place), which is then named itself.
+ */
+export function plannotatorDecisionSubject(
+  subject: string,
+  launchTarget: PlannotatorTarget | undefined,
+  decisionTarget: PlannotatorTarget | undefined,
+): string {
+  if (decisionTarget === undefined || plannotatorSameTarget(launchTarget, decisionTarget)) return subject
+  return plannotatorPrSubject(decisionTarget) ?? subject
+}
+
 /** A target as a list of trimmed entries, trailing separators dropped. */
 function targetEntries(target: PlannotatorTarget): string[] {
   return (typeof target === 'string' ? [target] : [...target]).map((value) => value.trim().replace(/[\\/]+$/, ''))

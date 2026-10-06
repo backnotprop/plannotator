@@ -1361,7 +1361,9 @@ if (args[0] === "sessions") {
   // Output feedback (captured by slash command)
   result.feedback = withReviewDirectory(result.feedback, result.reviewDirectory);
   const output = buildReviewOutput(result, detectedOrigin);
-  publishHostResult(reviewHostResult(result, output, { target: reviewTarget }));
+  // The server names the target as it stands at decision time (an in-place
+  // PR switch or a worktree diff moves it); a static patch keeps the file.
+  publishHostResult(reviewHostResult(result, output, { target: result.target ?? reviewTarget }));
   console.log(jsonFlag ? JSON.stringify(output) : output.message);
   process.exit(0);
 
@@ -2288,8 +2290,9 @@ if (args[0] === "sessions") {
     ...(result.agentSwitch && { agentSwitch: result.agentSwitch }),
     // Additive: the plugin's decision heading names the count ("· 3 comments").
     ...(!result.exit && Array.isArray(result.annotations) && { annotationCount: result.annotations.length }),
-    // Additive: what was reviewed, in full, for the decision message's Target line.
-    ...(reviewTarget ? { target: reviewTarget } : {}),
+    // Additive: what was reviewed, in full, for the decision message's Target
+    // line, as the server shows it at decision time (after any PR switch).
+    ...((result.target ?? reviewTarget) ? { target: result.target ?? reviewTarget } : {}),
   }));
   process.exit(0);
 

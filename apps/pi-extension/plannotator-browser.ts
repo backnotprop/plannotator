@@ -146,6 +146,8 @@ export type CodeReviewDecision = {
 	exit?: boolean;
 	/** The PR-platform status post (the review went to GitHub/GitLab/Bitbucket); `feedback` is only its status line. */
 	platform?: true;
+	/** What the decision is about as the server shows it at decision time (the active PR URL or working tree). */
+	target?: string;
 } & AgentClosedFields;
 
 const CODE_REVIEW_PROGRESS_STATUS = "plannotator-review";

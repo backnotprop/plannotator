@@ -25,6 +25,7 @@ import {
   PLANNOTATOR_OUTCOME_REVIEW_POSTED,
   PLANNOTATOR_TOOL_BUNDLE_UNAVAILABLE_TEXT,
   plannotatorDecisionHeading,
+  plannotatorDecisionSubject,
 } from "@plannotator/shared/plannotator-tool";
 import { parseReviewArgs, resolveReviewTarget } from "@plannotator/shared/review-args";
 import {
@@ -931,7 +932,10 @@ export function withDecisionHeading(
   recordTarget?: string | string[],
 ): string {
   if (!launch) return message;
-  const heading = plannotatorDecisionHeading(launch.subject, launch.sessionId, outcome, cliTargetOf(recordTarget) ?? launch.target);
+  const target = cliTargetOf(recordTarget) ?? launch.target;
+  // A review switched in place to another PR is named after that PR.
+  const subject = plannotatorDecisionSubject(launch.subject, launch.target, target);
+  const heading = plannotatorDecisionHeading(subject, launch.sessionId, outcome, target);
   return message.trim() ? `${heading}\n\n${message}` : heading;
 }
 

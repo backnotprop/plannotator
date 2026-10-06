@@ -78,17 +78,91 @@ describe('decision targets (two files named QUESTIONS.md)', () => {
     expect(approval).not.toContain(OLD)
   })
 
-  test('an older CLI (no target anywhere): the mod names what it resolved against the session directory', async () => {
+  test('an older CLI (no target anywhere): an absolute path the agent named is the Target', async () => {
     const host = fakeHost()
     serve(host, [undefined])
     const mod = new PlannotatorMod(host, SESSION)
 
-    await mod.runTool({ action: 'annotate', target: 'releases-2026-10-04/QUESTIONS.md', gate: true })
+    const opened = await mod.runTool({ action: 'annotate', target: NEW, gate: true })
+    expect('text' in opened && opened.text).toContain(`Target: ${NEW}`)
     decide(host, launches(host)[0]!, APPROVED)
     await host.tick()
 
     expect(host.submits[0]).toContain(`Target: ${NEW}`)
     expect(host.logs.join('\n')).not.toContain('as recorded when it opened')
+  })
+
+  // The CLI may find a bare or relative name elsewhere in the project, so the
+  // mod must not assert a path it only guessed: no Target line beats a wrong one.
+  test('an older CLI with a relative or bare name: no guessed Target line, in the opened text or the decision', async () => {
+    for (const word of ['releases-2026-10-04/QUESTIONS.md', 'QUESTIONS.md']) {
+      const host = fakeHost()
+      serve(host, [undefined])
+      const mod = new PlannotatorMod(host, SESSION)
+
+      const opened = await mod.runTool({ action: 'annotate', target: word, gate: true })
+      expect('text' in opened && opened.text).not.toContain('Target:')
+      decide(host, launches(host)[0]!, APPROVED)
+      await host.tick()
+      expect(host.submits[0]).not.toContain('Target:')
+    }
+  })
+
+  test('review prose is never read as a directory; a review with no words names the session directory', async () => {
+    const host = fakeHost()
+    serve(host, [undefined, undefined])
+    const mod = new PlannotatorMod(host, SESSION)
+
+    await mod.runCommand('review', 'please look at the auth changes')
+    await mod.runCommand('review', '')
+    const [prose, bare] = launches(host)
+    decide(host, prose!, { surface: 'review', decision: 'annotated', message: 'fix', noop: false })
+    await host.tick()
+    decide(host, bare!, { surface: 'review', decision: 'annotated', message: 'fix', noop: false })
+    await host.tick()
+
+    expect(host.submits[0]).not.toContain('Target:')
+    expect(host.submits[1]).toContain('Target: /work\n')
+  })
+
+  test('a review switched in place to another PR is headed and targeted as that PR', async () => {
+    const host = fakeHost()
+    serve(host, ['https://github.com/o/r/pull/12'])
+    const mod = new PlannotatorMod(host, SESSION)
+
+    await mod.runTool({ action: 'review', target: 'https://github.com/o/r/pull/12' })
+    decide(host, launches(host)[0]!, {
+      surface: 'review',
+      decision: 'annotated',
+      message: 'fix the handler',
+      noop: false,
+      target: 'https://github.com/o/r/pull/13',
+    })
+    await host.tick()
+
+    expect(host.submits[0]?.split('\n').slice(0, 2)).toEqual([
+      expect.stringContaining('Plannotator: PR #13 ('),
+      'Target: https://github.com/o/r/pull/13',
+    ])
+  })
+
+  test('the target and the told-apart subject survive a restart (reattach from the store)', async () => {
+    const host = fakeHost()
+    serve(host, [OLD, NEW])
+    const first = new PlannotatorMod(host, SESSION)
+    await first.runTool({ action: 'annotate', target: 'releases-2026-09-20/QUESTIONS.md', gate: true })
+    await first.runTool({ action: 'annotate', target: 'releases-2026-10-04/QUESTIONS.md', gate: true })
+    first.dispose()
+
+    const second = new PlannotatorMod(host, SESSION)
+    await second.restore()
+    decide(host, launches(host)[1]!, APPROVED)
+    await host.tick()
+    await host.tick()
+
+    const approval = host.submits.find((text) => text.includes('Approved')) ?? ''
+    expect(approval.split('\n')[0]).toContain('releases-2026-10-04/QUESTIONS.md')
+    expect(approval).toContain(`Target: ${NEW}`)
   })
 
   test("the record's target wins over the launch's, and a difference is said", async () => {

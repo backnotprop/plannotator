@@ -92,6 +92,7 @@ import {
 	parsePlannotatorToolInput,
 	plannotatorBundleSubject,
 	plannotatorDecisionHeading,
+	plannotatorDecisionSubject,
 	plannotatorToolArgs,
 	plannotatorToolOpenedText,
 	type PlannotatorTarget,
@@ -996,6 +997,12 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 				session: "Plannotator code review session failed",
 			};
 			const review = trackReview(ctx, origin, "review", { subject, ...(target ? { target } : {}) }, session, errors, async (result, tracked) => {
+				// The server names what the decision is about NOW: an in-place PR
+				// switch or a worktree diff moves it from what was opened.
+				if (result.target) {
+					tracked.subject = plannotatorDecisionSubject(tracked.subject, tracked.target, result.target);
+					tracked.target = result.target;
+				}
 				if (result.feedback) result.feedback = withReviewDirectory(result.feedback, result.reviewDirectory);
 				const outcome = classifyReviewOutcome(result);
 				if (outcome.kind === "closed") {

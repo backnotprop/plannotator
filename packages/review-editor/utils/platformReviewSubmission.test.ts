@@ -9,6 +9,11 @@ import {
   submitPlatformReviewTargets,
 } from './platformReviewSubmission';
 import {
+  __resetServerSessionForTests,
+  adoptServerSession,
+  isServerSessionReplaced,
+} from '@plannotator/ui/utils/serverSession';
+import {
   buildReviewSubmissionRecovery,
   loadReviewSubmissionRecovery,
   restoreReviewSubmission,
@@ -313,5 +318,32 @@ describe('request_changes across a multi-PR submission', () => {
     // The succeeded target is never re-posted; the failed one retries as request_changes.
     expect(actions).toEqual([[second.prUrl, 'request_changes']]);
     expect(retried.allComplete).toBe(true);
+  });
+});
+
+// The stale-tab guard on /api/pr-action: the tab echoes its nonce, and a
+// server that took over the port refuses it; the tab then shows the reload
+// prompt instead of an ordinary failure, and nothing was posted.
+describe('platform review on a replaced server', () => {
+  test('sends the nonce, and a session_mismatch refusal marks the tab replaced', async () => {
+    __resetServerSessionForTests();
+    adoptServerSession('a'.repeat(32));
+    let sent: Record<string, unknown> = {};
+    try {
+      const result = await submitPlatformReviewTarget({
+        target: baseTarget,
+        action: 'comment',
+        body: 'x',
+        fetchReview: async (_input, init) => {
+          sent = JSON.parse(init.body as string) as Record<string, unknown>;
+          return Response.json({ error: 'replaced', code: 'session_mismatch' }, { status: 409 });
+        },
+      });
+      expect(sent.serverSession).toBe('a'.repeat(32));
+      expect(result.target.status).not.toBe('success');
+      expect(isServerSessionReplaced()).toBe(true);
+    } finally {
+      __resetServerSessionForTests();
+    }
   });
 });

@@ -274,3 +274,48 @@ describe('in-place PR switches', () => {
     });
   });
 });
+
+
+// The decision names its target as the server shows it at decision time
+// (#1729 review): feedback written after an in-place switch to PR #43 must
+// say "PR #43", never the PR the session opened on.
+describe('decision target after an in-place PR switch', () => {
+  test('the decision carries the ACTIVE PR url, not the one the session opened on', async () => {
+    sandbox();
+    const server = await startReviewServer({
+      rawPatch: PATCH_BEFORE_PUSH,
+      gitRef: 'PR',
+      htmlContent: '<!doctype html><html><body>review</body></html>',
+      prMetadata,
+      prFetcher: fakeFetcher as never,
+    });
+    try {
+      await switchTo43(server.url);
+      const res = await fetch(`${server.url}/api/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feedback: 'Fix b.ts', annotations: [] }),
+      });
+      expect(res.status).toBe(200);
+      expect((await server.waitForDecision()).target).toBe(pr43.url);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test('without a switch the decision names the PR the session opened on', async () => {
+    sandbox();
+    const server = await startReviewServer({
+      rawPatch: PATCH_BEFORE_PUSH,
+      gitRef: 'PR',
+      htmlContent: '<!doctype html><html><body>review</body></html>',
+      prMetadata,
+    });
+    try {
+      await fetch(`${server.url}/api/exit`, { method: 'POST' });
+      expect((await server.waitForDecision()).target).toBe(prMetadata.url);
+    } finally {
+      server.stop();
+    }
+  });
+});

@@ -57,6 +57,7 @@ import {
 import {
   isOlderCliBundleRefusal,
   parsePlannotatorToolInput,
+  plannotatorDecisionSubject,
   plannotatorDistinctSubjects,
   plannotatorSameTarget,
   plannotatorBundleSubject,
@@ -1416,7 +1417,8 @@ export class PlannotatorMod {
       .writeFile(fileIn(launch.dir, 'watcher'), JSON.stringify({ owner: this.instanceId, at: await this.host.now(), touchedAt: 0 }))
       .catch(() => undefined)
     const delivery = deliveryFor(record, {
-      subject: launch.subject,
+      // A review switched in place to another PR is named after that PR.
+      subject: plannotatorDecisionSubject(launch.subject, launch.target, record.target),
       sessionId: sessionIdOf(launch),
       overflowPath: fileIn(launch.dir, 'overflow'),
       deliverApproval: launch.deliverApproval === true,

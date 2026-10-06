@@ -229,3 +229,54 @@ for (const c of cases) {
     }
   });
 }
+
+// /api/pr-action posts a review to GitHub/GitLab/Bitbucket: a stale tab of an
+// earlier session on this port must not post through this one's PR.
+const PR_METADATA = {
+  platform: "github",
+  host: "github.invalid",
+  owner: "acme",
+  repo: "widgets",
+  number: 42,
+  title: "Guard",
+  author: "someone",
+  baseBranch: "main",
+  headBranch: "feature",
+  baseSha: "base",
+  headSha: "head",
+  url: "https://github.invalid/acme/widgets/pull/42",
+} as const;
+
+for (const runtime of ["bun", "pi"] as const) {
+  describe(`${runtime} review /api/pr-action`, () => {
+    test("a foreign nonce is refused before anything is posted; the matching one posts", async () => {
+      sandbox();
+      const posted: unknown[] = [];
+      const submitter = (async (...args: unknown[]) => {
+        posted.push(args);
+        return { ok: true };
+      }) as never;
+      const options = {
+        rawPatch: PATCH,
+        gitRef: "PR #42",
+        htmlContent: MINIMAL_HTML,
+        prMetadata: PR_METADATA as never,
+        prReviewSubmitter: submitter,
+      };
+      const server = runtime === "bun" ? await startBunReviewServer(options) : await startPiReviewServer(options as never);
+      try {
+        const nonce = await nonceOf(server as never, "/api/diff");
+        const body = { action: "comment", body: "Looks off.", fileComments: [] };
+        const refused = await post(`${server.url}/api/pr-action`, { ...body, serverSession: "0".repeat(32) });
+        expect(refused.status).toBe(409);
+        expect(((await refused.json()) as { code?: string }).code).toBe(SERVER_SESSION_MISMATCH_CODE);
+        expect(posted).toHaveLength(0);
+        const accepted = await post(`${server.url}/api/pr-action`, { ...body, serverSession: nonce });
+        expect(accepted.status).not.toBe(409);
+        expect(posted).toHaveLength(1);
+      } finally {
+        await server.stop();
+      }
+    });
+  });
+}

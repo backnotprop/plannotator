@@ -128,20 +128,22 @@ function normalizeAbsolute(path: string): string {
   return `/${out.join('/')}`
 }
 
-/** A word as an absolute path against `cwd`, or undefined when that cannot be known (`~`, no cwd). */
-function absoluteOf(word: string, cwd: string | undefined): string | undefined {
+/** An absolute path word (`/a/b`, `@/a/b`), normalized; anything else (relative, `~`) is undefined. */
+function absoluteWord(word: string): string | undefined {
   const path = word.replace(/^@/, '')
-  if (path.startsWith('/')) return normalizeAbsolute(path)
-  if (path.startsWith('~') || !cwd || !cwd.startsWith('/')) return undefined
-  return normalizeAbsolute(`${cwd}/${path}`)
+  return path.startsWith('/') ? normalizeAbsolute(path) : undefined
 }
 
 /**
- * The mod's own resolution of what a launch shows, from the words it passed
- * (flags dropped) and the session's working directory. Only a FALLBACK for a
- * CLI that predates naming its target in the ready file and result record:
- * the CLI may resolve a bare name somewhere else (it searches the project),
- * which is why its own answer always wins.
+ * The mod's own idea of what a launch shows, only for a CLI that predates
+ * naming its target in the ready file and result record. It never guesses:
+ * the CLI may resolve a bare or relative name somewhere else (it searches the
+ * project) and reads prose around a review directory as words to ignore, so a
+ * confidently wrong path would be worse than none. Only what the words state
+ * exactly counts: a URL or PR URL, an absolute path, and a review with no
+ * words at all (the session's directory, which the CLI reviews then). In
+ * every other case there is no fallback and the message carries no Target
+ * line from the mod.
  */
 export function modTargetFor(
   kind: SessionKind,
@@ -166,18 +168,18 @@ export function modTargetFor(
     case 'review': {
       const pr = words.find((word) => PR_URL.test(word))
       if (pr) return pr
-      const directory = words[words.length - 1]
-      return directory ? absoluteOf(directory, cwd) : cwd && cwd.startsWith('/') ? normalizeAbsolute(cwd) : undefined
+      if (words.length === 0) return cwd && cwd.startsWith('/') ? normalizeAbsolute(cwd) : undefined
+      return words.length === 1 ? absoluteWord(words[0] as string) : undefined
     }
     case 'annotate': {
       if (isSeveralFilePaths(words)) {
-        const paths = [...new Set(words)].map((word) => absoluteOf(word, cwd))
+        const paths = [...new Set(words)].map(absoluteWord)
         return paths.every((path): path is string => path !== undefined) ? paths : undefined
       }
-      const target = words.find((word) => /^https?:\/\//i.test(word) || /[./]/.test(word)) ?? words[0]
-      if (!target) return undefined
+      if (words.length !== 1) return undefined
+      const target = words[0] as string
       if (/^https?:\/\//i.test(target)) return target
-      return absoluteOf(target, cwd)
+      return absoluteWord(target)
     }
   }
 }

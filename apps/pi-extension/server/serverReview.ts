@@ -317,6 +317,12 @@ export interface ReviewServerResult {
 		unsentAnnotations?: number;
 		/** The review was posted to the PR platform (`POST /api/pr-action`); `feedback` is only its status line. */
 		platform?: true;
+		/**
+		 * What the decision is about, as the server shows it NOW: the active PR's
+		 * URL (after any in-place `/api/pr-switch`), the workspace root, or the
+		 * working tree the active diff reads. Absent for a static patch.
+		 */
+		target?: string;
 	}>;
 	stop: () => void;
 	/** Host-only status and close (packages/shared/host-control.ts), for Pi to call in-process. */
@@ -926,6 +932,17 @@ export async function startReviewServer(options: {
 	// hostname must not break local agent jobs).
 	let serverUrl = "";
 	let agentApiUrl = "";
+	/**
+	 * The review's target as it stands at decision time (named in every
+	 * decision a host delivers): the active PR's URL, the workspace root, or
+	 * the working tree the active diff reads. A static patch has none here.
+	 */
+	function activeReviewTarget(): string | undefined {
+		if (isPRMode) return prMeta?.url;
+		if (isStaticPatchMode) return undefined;
+		if (workspace) return workspace.root;
+		return resolveVcsCwd(currentDiffType as DiffType, options.gitContext?.cwd) ?? options.gitContext?.cwd ?? undefined;
+	}
 	function resolveAgentCwd(): string {
 		if (workspace) return workspace.root;
 		if (options.worktreePool && prMeta) {
@@ -1880,6 +1897,12 @@ export async function startReviewServer(options: {
 		unsentAnnotations?: number;
 		/** The review was posted to the PR platform (`POST /api/pr-action`); `feedback` is only its status line. */
 		platform?: true;
+		/**
+		 * What the decision is about, as the server shows it NOW: the active PR's
+		 * URL (after any in-place `/api/pr-switch`), the workspace root, or the
+		 * working tree the active diff reads. Absent for a static patch.
+		 */
+		target?: string;
 	}) => void;
 	const decisionPromise = new Promise<{
 		approved: boolean;
@@ -1894,10 +1917,17 @@ export async function startReviewServer(options: {
 		unsentAnnotations?: number;
 		/** The review was posted to the PR platform (`POST /api/pr-action`); `feedback` is only its status line. */
 		platform?: true;
+		/**
+		 * What the decision is about, as the server shows it NOW: the active PR's
+		 * URL (after any in-place `/api/pr-switch`), the workspace root, or the
+		 * working tree the active diff reads. Absent for a static patch.
+		 */
+		target?: string;
 	}>((r) => {
 		resolveDecision = (result) => {
 			reviewDecided = true;
-			r(result);
+			const target = result.target ?? activeReviewTarget();
+			r(target ? { ...result, target } : result);
 		};
 	});
 
@@ -3174,6 +3204,12 @@ export async function startReviewServer(options: {
 			}
 			try {
 				const body = await parseBody(req);
+				// Stale-tab guard: a tab of an earlier session on this port must
+				// not post a review to the platform as if it were this one's.
+				if (checkServerSession(body, serverSession) === "mismatch") {
+					json(res, serverSessionMismatchBody(), 409);
+					return;
+				}
 				const action = parsePRReviewAction(body.action);
 				if (!action) {
 					json(res, { error: "action must be one of approve, comment, request_changes" }, 400);
