@@ -1,5 +1,5 @@
 import React from 'react';
-import { type QuickLabel, getLabelColors } from '../utils/quickLabels';
+import { type QuickLabel, getLabelColors, quickLabelShortcutDigit } from '../utils/quickLabels';
 
 /**
  * Shared vertical label list used by both FloatingQuickLabelPicker
@@ -25,9 +25,14 @@ export const QuickLabelDropdown: React.FC<{
       )}
       {labels.map((label, index) => {
         const colors = getLabelColors(label.color);
+        const digit = quickLabelShortcutDigit(index);
         return (
           <button
-            key={label.id}
+            // Keyed by position, not label.id: ids are derived from the
+            // label text, so two labels with the same text share one (#1736).
+            // The list never reorders while open, and position is exactly
+            // what the digit key on each row names.
+            key={index}
             onClick={() => onSelect(label)}
             className="group w-full flex items-center gap-2 px-2 py-[5px] text-left transition-colors hover:bg-muted/60 active:bg-muted"
             style={animate ? {
@@ -50,9 +55,9 @@ export const QuickLabelDropdown: React.FC<{
               {label.text}
             </span>
             {/* Shortcut hint */}
-            {index < 10 && (
+            {digit && (
               <span className="text-[9px] tabular-nums text-muted-foreground/40 group-hover:text-muted-foreground/60 flex-shrink-0 font-mono">
-                {index === 9 ? '0' : index + 1}
+                {digit}
               </span>
             )}
           </button>

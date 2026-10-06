@@ -1937,6 +1937,39 @@ so this is a visible change for `'exited'` only there. Every other value
 renders exactly as before. The overlay root now carries
 `data-completion-state={submitted}`.
 
+## Quick Labels: reorder and editable emoji (unreleased; additive, no core change)
+
+Settings → Labels (#1736) lets a person move a label up or down (per-row
+buttons, `aria-label="Move <text> up|down"`, a polite live region announces
+the new position and key) and change its emoji (a one-emoji field; anything
+that is not exactly one emoji is shown invalid, never saved, and reverts on
+blur). The tab now lives in `components/settings/QuickLabelsTab` and
+`Settings` renders it; nothing about `Settings`' props changed.
+
+**The persisted shape is unchanged.** Labels are still saved as
+`QuickLabel[]` under `plannotator-quick-labels` through the storage backend,
+with the same fields; a reorder is just a different array order and an emoji
+edit a different `emoji` value. Rows get a stable identity for the editing
+session only (it is never written, so an older reader sees nothing new and the
+cookie does not grow). `QuickLabel.id` keeps its old meaning (derived from the
+text when the text is edited; `custom-<ts>` for new labels) and is still not
+unique: the list renderer `QuickLabelDropdown` now keys rows by position, so
+two labels with the same text no longer collide.
+
+What a host should know:
+
+- **Position is the key binding.** Alt/⌥1…9, 0 apply the label at positions
+  1…10 (`quickLabelShortcutDigit` / `quickLabelIndexForDigit`); moving a label
+  in Settings is what remaps its key. Lists are read once when a toolbar or
+  picker mounts, so a change applies to the next selection.
+- **An annotation keeps the emoji it was created with.** The label is copied
+  into the annotation as `${emoji} ${text}`; editing the emoji (like editing
+  the text) affects only annotations created afterwards.
+- New pure exports in `utils/quickLabels`: `quickLabelShortcutDigit`,
+  `quickLabelIndexForDigit`, `moveQuickLabel`, `parseQuickLabelEmoji` (one
+  emoji grapheme, including ZWJ sequences, flags, keycaps and skin tones, or
+  null) and `emojiFromFieldInput`. Nothing was removed or renamed.
+
 ---
 
 ## The law (guardrails for anyone editing `@plannotator/ui`)

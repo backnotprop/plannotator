@@ -70,12 +70,12 @@ import {
 } from '../utils/defaultNotesApp';
 import { useAgents } from '../hooks/useAgents';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
-import { type QuickLabel, getQuickLabels, saveQuickLabels, resetQuickLabels, DEFAULT_QUICK_LABELS, getLabelColors, LABEL_COLOR_MAP } from '../utils/quickLabels';
 import { ThemeTab } from './ThemeTab';
-import { isMac, modKey, modKeyWord, altKey } from '../utils/platform';
+import { modKey, modKeyWord } from '../utils/platform';
 import { getAIProviderSettings, resolveAIProviderSelection } from '../utils/aiProvider';
 import { AISettingsTab } from './AISettingsTab';
 import { HooksTab } from './settings/HooksTab';
+import { QuickLabelsTab } from './settings/QuickLabelsTab';
 import { OverlayScrollArea } from './OverlayScrollArea';
 import {
   getFileBrowserSettings,
@@ -1063,9 +1063,6 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const [agentWarning, setAgentWarning] = useState<string | null>(null);
   const [autoCloseDelay, setAutoCloseDelayState] = useState<AutoCloseDelay>('off');
   const [defaultNotesApp, setDefaultNotesApp] = useState<DefaultNotesApp>('ask');
-  const [quickLabelsState, setQuickLabelsState] = useState<QuickLabel[]>([]);
-  const [editingTipIndex, setEditingTipIndex] = useState<number | null>(null);
-  const [editingTipValue, setEditingTipValue] = useState('');
   const [aiProvider, setAiProvider] = useState<string | null>(null);
   const [fileBrowserSettings, setFileBrowserSettings] = useState<FileBrowserSettings>({ enabled: false, directories: [] });
   const [newDirPath, setNewDirPath] = useState('');
@@ -1134,7 +1131,6 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       setPermissionMode(getPermissionModeSettings().mode);
       setAutoCloseDelayState(getAutoCloseDelay());
       setDefaultNotesApp(getDefaultNotesApp());
-      setQuickLabelsState(getQuickLabels());
       const aiSettings = getAIProviderSettings();
       setAiProvider(resolveAIProviderSelection({ providers: aiProviders, origin, settings: aiSettings }).providerId);
       setFileBrowserSettings(getFileBrowserSettings());
@@ -2054,191 +2050,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                 )}
 
                 {/* === LABELS TAB === */}
-                {activeTab === 'labels' && (
-                  <>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="text-sm font-medium flex items-center gap-2">Quick Labels</div>
-                        <div className="text-xs text-muted-foreground">
-                          Preset annotations for one-click feedback
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => {
-                          resetQuickLabels();
-                          setQuickLabelsState(DEFAULT_QUICK_LABELS);
-                        }}
-                        className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-                      >
-                        Reset to defaults
-                      </button>
-                    </div>
-
-                    <style>{`
-                      @keyframes tip-slide-open {
-                        from { opacity: 0; transform: translateY(-4px); }
-                        to   { opacity: 1; transform: translateY(0); }
-                      }
-                    `}</style>
-                    <div className="space-y-1.5">
-                      {quickLabelsState.map((label, index) => {
-                        const colors = getLabelColors(label.color);
-                        const hasTip = !!label.tip;
-                        const isEditingTip = editingTipIndex === index;
-                        return (
-                          <div key={index} className="rounded-lg overflow-hidden" style={{ backgroundColor: colors.bg }}>
-                            {/* Main row */}
-                            <div className="flex items-center gap-2 p-2">
-                              <span className="text-sm flex-shrink-0">{label.emoji}</span>
-                              <input
-                                type="text"
-                                value={label.text}
-                                onChange={(e) => {
-                                  const updated = [...quickLabelsState];
-                                  updated[index] = {
-                                    ...label,
-                                    text: e.target.value,
-                                    id: e.target.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
-                                  };
-                                  setQuickLabelsState(updated);
-                                  saveQuickLabels(updated);
-                                }}
-                                className="flex-1 px-2 py-1 bg-background/80 rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
-                              />
-                              {/* Tip indicator button */}
-                              <button
-                                onClick={() => {
-                                  if (isEditingTip) {
-                                    setEditingTipIndex(null);
-                                  } else {
-                                    setEditingTipIndex(index);
-                                    setEditingTipValue(label.tip || '');
-                                  }
-                                }}
-                                className={`relative p-1 rounded transition-all flex-shrink-0 ${
-                                  hasTip
-                                    ? 'bg-foreground/10 text-foreground/70 hover:text-foreground border border-foreground/15'
-                                    : 'text-muted-foreground/30 hover:text-muted-foreground/60 border border-dashed border-muted-foreground/20 hover:border-muted-foreground/40'
-                                }`}
-                                title={hasTip ? `Tip: ${label.tip}` : 'Add AI instruction tip'}
-                              >
-                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                                </svg>
-                                {hasTip && (
-                                  <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-foreground/50" />
-                                )}
-                              </button>
-                              <select
-                                value={label.color}
-                                onChange={(e) => {
-                                  const updated = [...quickLabelsState];
-                                  updated[index] = { ...label, color: e.target.value };
-                                  setQuickLabelsState(updated);
-                                  saveQuickLabels(updated);
-                                }}
-                                className="px-1.5 py-1 bg-background/80 rounded text-[10px] focus:outline-none focus:ring-1 focus:ring-primary/50"
-                              >
-                                {Object.keys(LABEL_COLOR_MAP).map(c => (
-                                  <option key={c} value={c}>{c}</option>
-                                ))}
-                              </select>
-                              <span className="text-[10px] text-muted-foreground/50 font-mono w-8 text-center flex-shrink-0">
-                                {index < 10 ? `${altKey}${isMac ? '' : '+'}${index === 9 ? '0' : index + 1}` : ''}
-                              </span>
-                              <button
-                                onClick={() => {
-                                  const updated = quickLabelsState.filter((_, i) => i !== index);
-                                  setQuickLabelsState(updated);
-                                  saveQuickLabels(updated);
-                                  if (editingTipIndex === index) setEditingTipIndex(null);
-                                }}
-                                className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors flex-shrink-0"
-                                title="Remove label"
-                              >
-                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                              </button>
-                            </div>
-                            {/* Tip editor — slides open below the row */}
-                            {isEditingTip && (
-                              <div
-                                className="flex items-center gap-1.5 px-2 pb-2 pt-0"
-                                style={{ animation: 'tip-slide-open 0.15s ease-out' }}
-                              >
-                                <svg className="w-3 h-3 text-muted-foreground/40 flex-shrink-0 ml-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
-                                </svg>
-                                <input
-                                  type="text"
-                                  value={editingTipValue}
-                                  onChange={(e) => setEditingTipValue(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      const updated = [...quickLabelsState];
-                                      updated[index] = { ...label, tip: editingTipValue || undefined };
-                                      setQuickLabelsState(updated);
-                                      saveQuickLabels(updated);
-                                      setEditingTipIndex(null);
-                                    }
-                                    if (e.key === 'Escape') {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      setEditingTipIndex(null);
-                                    }
-                                  }}
-                                  placeholder="AI instruction tip..."
-                                  className="flex-1 px-2 py-1 bg-background/60 rounded text-[10px] text-muted-foreground placeholder:text-muted-foreground/30 focus:outline-none focus:ring-1 focus:ring-primary/50"
-                                  autoFocus
-                                  onFocus={(e) => { e.target.setSelectionRange(0, 0); e.target.scrollLeft = 0; }}
-                                />
-                                <button
-                                  onClick={() => {
-                                    const updated = [...quickLabelsState];
-                                    updated[index] = { ...label, tip: editingTipValue || undefined };
-                                    setQuickLabelsState(updated);
-                                    saveQuickLabels(updated);
-                                    setEditingTipIndex(null);
-                                  }}
-                                  className="p-1 rounded text-muted-foreground/50 hover:text-green-500 hover:bg-green-500/10 transition-colors flex-shrink-0"
-                                  title="Save tip"
-                                >
-                                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                  </svg>
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {quickLabelsState.length < 12 && (
-                      <button
-                        onClick={() => {
-                          const newLabel: QuickLabel = {
-                            id: `custom-${Date.now()}`,
-                            emoji: '📌',
-                            text: 'New label',
-                            color: 'blue',
-                          };
-                          const updated = [...quickLabelsState, newLabel];
-                          setQuickLabelsState(updated);
-                          saveQuickLabels(updated);
-                        }}
-                        className="w-full py-1.5 text-xs text-muted-foreground hover:text-foreground border border-dashed border-border rounded-lg hover:border-foreground/30 transition-colors"
-                      >
-                        + Add label
-                      </button>
-                    )}
-
-                    <div className="text-[10px] text-muted-foreground/70">
-                      Use {altKey}{isMac ? '' : '+'}1 through {altKey}{isMac ? '' : '+'}0 when the annotation toolbar is visible to apply a label instantly.
-                    </div>
-                  </>
-                )}
+                {activeTab === 'labels' && <QuickLabelsTab />}
 
                 {/* === VIM TAB === */}
                 {activeTab === 'vim' && mode !== 'review' && (

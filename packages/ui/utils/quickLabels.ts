@@ -76,6 +76,86 @@ export function resetQuickLabels(): void {
   storage.removeItem(STORAGE_KEY);
 }
 
+/**
+ * The Alt/⌥ digit that applies the label at list position `index`: "1".."9"
+ * for the first nine, "0" for the tenth, null past it. Position is the whole
+ * contract — the pickers, the toolbar and the Settings key hints all read it
+ * from here, so reordering the list (Settings → Labels) is what remaps keys.
+ */
+export function quickLabelShortcutDigit(index: number): string | null {
+  if (!Number.isInteger(index) || index < 0 || index > 9) return null;
+  return index === 9 ? '0' : String(index + 1);
+}
+
+/** Inverse of {@link quickLabelShortcutDigit}: list position for a digit key. */
+export function quickLabelIndexForDigit(digit: number): number {
+  return digit === 0 ? 9 : digit - 1;
+}
+
+/**
+ * Return a copy of `labels` with the entry at `from` moved to `to`. The moved
+ * label keeps every field (emoji, text, colour, tip). Out-of-range indices
+ * return an unchanged copy.
+ */
+export function moveQuickLabel<T>(labels: readonly T[], from: number, to: number): T[] {
+  const next = labels.slice();
+  if (from === to || from < 0 || to < 0 || from >= next.length || to >= next.length) return next;
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
+}
+
+/** Longest single emoji we accept (ZWJ family sequences run ~11 code points). */
+const MAX_EMOJI_LENGTH = 32;
+const PICTOGRAPHIC = /\p{Extended_Pictographic}/u;
+const FLAG = /^\p{Regional_Indicator}{2}$/u;
+const KEYCAP = /^[0-9#*]️?⃣$/u;
+const WHITESPACE_OR_CONTROL = /[\s\p{Cc}]/u;
+
+function splitGraphemes(value: string): string[] {
+  const Segmenter = (Intl as { Segmenter?: typeof Intl.Segmenter }).Segmenter;
+  if (Segmenter) {
+    return Array.from(new Segmenter(undefined, { granularity: 'grapheme' }).segment(value), (s) => s.segment);
+  }
+  // No grapheme segmentation: treat the whole string as one candidate and let
+  // the emoji check decide. Every browser Plannotator supports has it.
+  return value ? [value] : [];
+}
+
+/**
+ * Validate a quick-label emoji: exactly one emoji grapheme (pictographic
+ * symbol, ZWJ sequence, skin-tone variant, flag or keycap), surrounding
+ * whitespace ignored. Returns the emoji, or null when the input is empty,
+ * more than one character, or not an emoji.
+ */
+export function parseQuickLabelEmoji(input: string): string | null {
+  const value = input.trim();
+  if (!value || value.length > MAX_EMOJI_LENGTH) return null;
+  const graphemes = splitGraphemes(value);
+  if (graphemes.length !== 1) return null;
+  const [g] = graphemes;
+  if (WHITESPACE_OR_CONTROL.test(g)) return null;
+  if (FLAG.test(g) || KEYCAP.test(g) || PICTOGRAPHIC.test(g)) return g;
+  return null;
+}
+
+/**
+ * The emoji a person meant by editing an emoji field that held `current`.
+ * Accepts a field holding just the new emoji, and also the field after a new
+ * emoji was typed or picked BESIDE the old one (the caret was not on a
+ * selection): the old one is set aside once. Null when the field does not
+ * name exactly one emoji.
+ */
+export function emojiFromFieldInput(value: string, current: string): string | null {
+  const graphemes = splitGraphemes(value.trim()).filter((g) => !/^\s+$/u.test(g));
+  if (graphemes.length === 1) return parseQuickLabelEmoji(graphemes[0]);
+  if (graphemes.length === 2) {
+    const at = graphemes.indexOf(current);
+    if (at >= 0) return parseQuickLabelEmoji(graphemes[1 - at]);
+  }
+  return null;
+}
+
 /** Find a configured label whose "emoji text" matches an annotation's text field */
 export function findLabelByText(annotationText: string): QuickLabel | undefined {
   return getQuickLabels().find(l => `${l.emoji} ${l.text}` === annotationText);

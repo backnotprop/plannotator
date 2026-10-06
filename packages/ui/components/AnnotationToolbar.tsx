@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { AnnotationType } from "../types";
 import { createPortal } from "react-dom";
 import { useDismissOnOutsideAndEscape } from "../hooks/useDismissOnOutsideAndEscape";
-import { type QuickLabel, getQuickLabels, THUMBS_UP_LABEL } from "../utils/quickLabels";
+import { type QuickLabel, getQuickLabels, quickLabelIndexForDigit, THUMBS_UP_LABEL } from "../utils/quickLabels";
 import { copyTextToClipboard } from "../utils/clipboard";
 import { acquireTypeToCommentCapture } from "../shortcuts/plan-review/annotationMode.shortcuts";
 import { FloatingQuickLabelPicker } from "./FloatingQuickLabelPicker";
@@ -174,7 +174,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
         e.preventDefault();
         if (!commentOnly && quickLabelsEnabled) {
           const digit = parseInt(e.code.slice(5), 10);
-          const index = digit === 0 ? 9 : digit - 1;
+          const index = quickLabelIndexForDigit(digit);
           if (index < quickLabels.length) {
             onQuickLabel?.(quickLabels[index]);
           }
