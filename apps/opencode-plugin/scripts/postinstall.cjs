@@ -1,18 +1,24 @@
 "use strict";
 // Postinstall for @plannotator/opencode.
 //
-// When a user installs the package (npm, pnpm, bun, yarn, or OpenCode's own
-// plugin installer), copy the slash-command stubs into
+// When a user installs the package with a package manager that runs its
+// scripts, copy the slash-command stubs into
 // ${XDG_CONFIG_HOME:-~/.config}/opencode/commands and the knowledge skill into
-// .../opencode/skills/plannotator, where OpenCode looks for them.
+// .../opencode/skills/plannotator, where OpenCode looks for them. npm and
+// yarn 1 run it; pnpm 10 and bun block it unless builds are allowed (--trust).
+// OpenCode's own plugin installer does NOT run it: OpenCode 1.18.x and 2.0.x
+// install plugins with npm's internal installer and ignoreScripts: true, and
+// older OpenCode used `bun add`, which blocks untrusted scripts. Those users
+// get the stubs from the install scripts and the plugin's native commands.
 //
 // The same script also runs on every `bun install` inside the Plannotator
 // monorepo, where apps/opencode-plugin is a workspace package. It must not
 // write there: that would overwrite the developer's real OpenCode stubs and
 // skill with whatever branch is checked out. An installed package always sits
 // under a node_modules directory and a workspace checkout never does, so that
-// is the test. PLANNOTATOR_OPENCODE_POSTINSTALL=1 forces the copy and =0
-// skips it.
+// is the test. `npm install <path>` and `npm link` run it from the source
+// directory, so they skip the copy too. PLANNOTATOR_OPENCODE_POSTINSTALL=1
+// forces the copy and =0 skips it.
 //
 // This is plain Node (no shell syntax) so it runs the same under npm, pnpm and
 // bun on macOS, Linux and Windows. A shell `case ... esac` guard once broke
