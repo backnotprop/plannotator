@@ -330,6 +330,14 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
     expect(INBOX_MCP_INSTRUCTIONS.length).toBeLessThan(2048);
     const tools = await client.listTools();
     expect(tools.tools.map((t) => t.name).sort()).toEqual([...INBOX_MCP_TOOLS].sort());
+    // Claude Code hands a model an MCP description up to its first 2,048
+    // characters ("… [truncated]" after). The question guide is longer than
+    // that by itself, so what must survive the cut is pinned: the syntax and
+    // the rules on what to ask, through "Ask only what you cannot decide alone".
+    const sendDescription = tools.tools.find((t) => t.name === "send_message")!.description!;
+    const reachesModel = sendDescription.slice(0, 2048 - "… [truncated]".length);
+    expect(reachesModel).toContain(":::question-text");
+    expect(reachesModel).toContain("Do not ask rhetorical questions or questions the codebase answers.");
 
     const sendResult = await client.callTool({
       name: "send_message",

@@ -144,6 +144,8 @@ export class InboxStore {
   /** The seq of a message's first line: its place in the event log. */
   private readonly messageSeq = new Map<string, number>();
   private readonly questions = new Map<string, InboxQuestionRecord>();
+  /** Each message's question ids (a question's message never changes, so the index only grows). */
+  private readonly messageQuestions = new Map<string, Set<string>>();
   /**
    * Thread routing, kept from each root's first line in seq order, so a
    * replay of the log gives the same answers: the newest unnamed root an
@@ -153,7 +155,8 @@ export class InboxStore {
   private readonly sessionThreads = new Map<string, string>();
   /** Each thread's message ids in seq order. */
   private readonly threadMembers = new Map<string, string[]>();
-  private readonly namedThreads = new Map<string, string>();
+  /** Every root of each thread name in seq order (`<project>\0<name key>`). */
+  private readonly namedThreads = new Map<string, string[]>();
   private readonly tornFiles = new Set<string>();
   private readonly listeners = new Set<InboxListener>();
   private readonly now: () => Date;
@@ -247,9 +250,13 @@ export class InboxStore {
           this.indexRoot(line.record);
         }
         break;
-      case "question":
+      case "question": {
         this.questions.set(line.record.id, line.record);
+        const ids = this.messageQuestions.get(line.record.message_id);
+        if (ids) ids.add(line.record.id);
+        else this.messageQuestions.set(line.record.message_id, new Set([line.record.id]));
         break;
+      }
     }
   }
 
@@ -258,7 +265,10 @@ export class InboxStore {
     if (message.thread_id !== message.id || message.author.kind !== "agent") return;
     const name = message.thread_name ?? null;
     if (name !== null) {
-      this.namedThreads.set(`${message.project_id}\0${inboxThreadNameKey(name)}`, message.id);
+      const key = `${message.project_id}\0${inboxThreadNameKey(name)}`;
+      const roots = this.namedThreads.get(key);
+      if (roots) roots.push(message.id);
+      else this.namedThreads.set(key, [message.id]);
     } else if (message.author.session) {
       this.sessionThreads.set(`${message.project_id}\0${message.author.session}`, message.id);
     }
@@ -266,18 +276,18 @@ export class InboxStore {
 
   /**
    * The thread a message without reply_to joins, or null for a new thread:
-   * the newest thread of that name in the project when `name` is given, else
-   * the newest unnamed thread the session started there; in both cases only
-   * while it is open (resolved means done, so the next message starts anew).
-   * No session and no name: always a new thread.
+   * with a `name`, the newest OPEN thread of that name in the project (one the
+   * person reopened counts); else the newest unnamed thread the session
+   * started there, while it is open (resolved means done, so the next message
+   * starts anew). No session and no name: always a new thread.
    */
   private routeThread(projectId: string, session: string | null, name: string | null): string | null {
-    const rootId =
-      name !== null
-        ? this.namedThreads.get(`${projectId}\0${inboxThreadNameKey(name)}`)
-        : session
-          ? this.sessionThreads.get(`${projectId}\0${session}`)
-          : undefined;
+    if (name !== null) {
+      const roots = this.namedThreads.get(`${projectId}\0${inboxThreadNameKey(name)}`) ?? [];
+      for (let i = roots.length - 1; i >= 0; i--) if (!this.isResolved(roots[i]!)) return roots[i]!;
+      return null;
+    }
+    const rootId = session ? this.sessionThreads.get(`${projectId}\0${session}`) : undefined;
     if (!rootId || this.isResolved(rootId)) return null;
     return rootId;
   }
@@ -327,7 +337,7 @@ export class InboxStore {
 
   private questionRecords(messageId: string): InboxQuestionRecord[] {
     const out: InboxQuestionRecord[] = [];
-    for (const record of this.questions.values()) if (record.message_id === messageId) out.push(record);
+    for (const id of this.messageQuestions.get(messageId) ?? []) out.push(this.questions.get(id)!);
     return out.sort((a, b) => a.position - b.position);
   }
 
@@ -471,30 +481,42 @@ export class InboxStore {
   markSeen(threadId: string): InboxListRow {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
-    const members = this.threadMembers.get(threadId) ?? [];
-    const latest = Math.max(0, ...members.map((id) => this.messageSeq.get(id) ?? 0));
-    if ((root.person_seen_seq ?? 0) < latest) {
-      const at = this.stamp();
-      this.appendMessage({ ...root, person_seen_seq: latest }, at);
+    // What listRow counts as seen: the last look, or the person's own last
+    // reply. Only an agent message after both is new, so only then is a write due.
+    let seen = root.person_seen_seq ?? 0;
+    let latestAgent = 0;
+    for (const id of this.threadMembers.get(threadId) ?? []) {
+      const seq = this.messageSeq.get(id) ?? 0;
+      if (this.messages.get(id)?.author.kind === "person") seen = Math.max(seen, seq);
+      else latestAgent = Math.max(latestAgent, seq);
     }
-    return this.listRow(threadId)!;
+    if (latestAgent > seen) {
+      const at = this.stamp();
+      this.appendMessage({ ...root, person_seen_seq: latestAgent }, at);
+    }
+    const row = this.listRow(threadId);
+    if (!row) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    return row;
   }
 
   /**
-   * An agent read the person's replies in a thread (wait_for_reply returned
-   * one, or read_thread read the thread): a Sent row moves to Quiet. No
-   * write when there is no person reply it has not read.
+   * An agent read the person's replies in a thread: read_thread read the
+   * whole thread, or wait_for_reply returned one reply (`upToSeq`, that
+   * reply's seq, so a later reply it was not given still reads as unread).
+   * A Sent row moves to Quiet once its last reply is checked. No write when
+   * there is no person reply it has not read.
    */
-  markAgentChecked(threadId: string): void {
+  markAgentChecked(threadId: string, upToSeq = Number.POSITIVE_INFINITY): void {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) return;
-    let lastPersonSeq = 0;
+    let checked = 0;
     for (const id of this.threadMembers.get(threadId) ?? []) {
-      if (this.messages.get(id)?.author.kind === "person") lastPersonSeq = this.messageSeq.get(id) ?? 0;
+      const seq = this.messageSeq.get(id) ?? 0;
+      if (seq <= upToSeq && this.messages.get(id)?.author.kind === "person") checked = Math.max(checked, seq);
     }
-    if (lastPersonSeq === 0 || (root.agent_checked_seq ?? 0) >= lastPersonSeq) return;
+    if (checked === 0 || (root.agent_checked_seq ?? 0) >= checked) return;
     const at = this.stamp();
-    this.appendMessage({ ...root, agent_checked_seq: lastPersonSeq, agent_checked_at: at }, at);
+    this.appendMessage({ ...root, agent_checked_seq: checked, agent_checked_at: at }, at);
   }
 
   // ─────────────────────────── writing ───────────────────────────
@@ -631,7 +653,11 @@ export class InboxStore {
     if (key) {
       for (const message of this.messages.values()) {
         if (message.project_id !== projectId || message.idempotency_key !== key || message.author.kind !== "agent") continue;
-        if (message.body !== body || message.reply_to !== replyTo) {
+        // A retry is the same call: the same body, reply target and thread
+        // name (compared as routing compares names). The thread it joined
+        // is the first call's, whatever the routing would say now.
+        const sameName = inboxThreadNameKey(message.thread_name ?? "") === inboxThreadNameKey(threadName ?? "");
+        if (message.body !== body || message.reply_to !== replyTo || !sameName) {
           throw new InboxError(
             "idempotency_key_reused",
             "This idempotency_key was already used for a different message.",

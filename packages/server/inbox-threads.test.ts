@@ -12,6 +12,7 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -294,6 +295,188 @@ describe("the list: per-thread sections across projects", () => {
     expect(stale.status).toBe(409);
   });
 });
+
+describe("routing edges, through the real doors", () => {
+  test("look-alike names are one thread; bidi controls and invisible-only names are refused; a key reused with another name is refused", async () => {
+    const root = tempRoot();
+    const repo = gitProject(root, "api");
+    const server = await start(join(root, "data"));
+    const client = await mcpClient(server);
+    const call = (args: Record<string, unknown>) => client.callTool({ name: "send_message", arguments: { project_path: repo, ...args } });
+    const first = structured<Sent>(await call({ body: "Auth work.", thread: "auth", agent_session: "ses_A" }));
+    expect(first.new_thread).toBe(true);
+    // A zero-width space or joiner, a BOM, full-width letters, other case:
+    // they draw (or read) as "auth", so they are "auth".
+    for (const spelling of ["auth​", "​au‍th", "﻿auth", "ａｕｔｈ", "AUTH"]) {
+      expect(structured<Sent>(await call({ body: `as ${JSON.stringify(spelling)}`, thread: spelling, agent_session: "ses_B" }))).toMatchObject({
+        thread_id: first.thread_id,
+        new_thread: false,
+        thread_name: "auth",
+      });
+    }
+    // Nothing visible, or text that reorders itself on screen: refused.
+    for (const bad of ["​", "​‌⁠", "‮htua", "auth⁦x⁩", "a‏b"]) {
+      expect(errorText(await call({ body: "x", thread: bad, agent_session: "ses_A" }))).toMatch(/^validation_error: thread: /);
+    }
+    // An idempotent retry is the same call: another thread name with the key is a different message.
+    const keyed = structured<Sent>(await call({ body: "Keyed.", thread: "auth", idempotency_key: "k-auth", agent_session: "ses_A" }));
+    expect(errorText(await call({ body: "Keyed.", thread: "billing", idempotency_key: "k-auth", agent_session: "ses_A" }))).toMatch(
+      /^idempotency_key_reused: /,
+    );
+    expect(errorText(await call({ body: "Keyed.", idempotency_key: "k-auth", agent_session: "ses_A" }))).toMatch(/^idempotency_key_reused: /);
+    expect(structured<Sent>(await call({ body: "Keyed.", thread: " AUTH ", idempotency_key: "k-auth", agent_session: "ses_A" }))).toMatchObject({
+      message_id: keyed.message_id,
+      replayed: true,
+    });
+  });
+
+  test("a name joins its newest OPEN thread: one the person reopened, after a later one was resolved", async () => {
+    const root = tempRoot();
+    const repo = gitProject(root, "api");
+    const server = await start(join(root, "data"));
+    const client = await mcpClient(server);
+    const send = async (body: string) =>
+      structured<Sent>(await client.callTool({ name: "send_message", arguments: { project_path: repo, body, thread: "x", agent_session: "ses_A" } }));
+    const t1 = await send("one");
+    expect((await post(server, `/api/inbox/messages/${t1.message_id}/resolve`, { resolved: true })).status).toBe(200);
+    const t2 = await send("two");
+    expect(t2.new_thread).toBe(true);
+    expect((await post(server, `/api/inbox/messages/${t2.message_id}/resolve`, { resolved: true })).status).toBe(200);
+    expect((await post(server, `/api/inbox/messages/${t1.message_id}/resolve`, { resolved: false })).status).toBe(200);
+    expect(await send("three")).toMatchObject({ thread_id: t1.thread_id, new_thread: false });
+  });
+
+  test("sessions racing on one name, and one session's parallel sends, each land in ONE thread, and stay so after a restart", async () => {
+    const root = tempRoot();
+    const repo = gitProject(root, "api");
+    const dataDir = join(root, "data");
+    let server = await start(dataDir);
+    // Two separate MCP connections, like two agents.
+    const [c1, c2] = [await mcpClient(server), await mcpClient(server)];
+    const sendVia = (client: Client, args: Record<string, unknown>) =>
+      client.callTool({ name: "send_message", arguments: { project_path: repo, ...args } }).then((r) => structured<Sent>(r));
+    const raced = await Promise.all(
+      Array.from({ length: 12 }, (_, i) => sendVia(i % 2 ? c1 : c2, { body: `race ${i}`, thread: i % 3 ? "Race" : "race ", agent_session: `ses_${i % 4}` })),
+    );
+    expect(new Set(raced.map((r) => r.thread_id)).size).toBe(1);
+    expect(raced.filter((r) => r.new_thread)).toHaveLength(1);
+    const burst = await Promise.all(Array.from({ length: 10 }, (_, i) => sendVia(i % 2 ? c1 : c2, { body: `burst ${i}`, agent_session: "ses_P" })));
+    expect(new Set(burst.map((r) => r.thread_id)).size).toBe(1);
+    expect(burst.filter((r) => r.new_thread)).toHaveLength(1);
+
+    const before = await list(server);
+    expect(rowsOf(before)).toHaveLength(2);
+    server.stop();
+    servers.splice(servers.indexOf(server), 1);
+    server = await start(dataDir);
+    expect((await list(server)).sections).toEqual(before.sections);
+  });
+
+  test("wait_for_reply in a shared thread: another session writing after the reply does not hide it; a returned reply checks only itself", async () => {
+    const root = tempRoot();
+    const repo = gitProject(root, "api");
+    const server = await start(join(root, "data"));
+    const client = await mcpClient(server);
+    const send = async (args: Record<string, unknown>) =>
+      structured<Sent>(await client.callTool({ name: "send_message", arguments: { project_path: repo, ...args } }));
+    const wait = async (args: Record<string, unknown>) =>
+      structured<{ status: string; cursor: number; reply?: { body: string } }>(
+        await client.callTool({ name: "wait_for_reply", arguments: { timeout_seconds: 1, ...args } }),
+      );
+
+    // ses_A asks in "shared"; the person answers; ses_B then writes in the same thread.
+    const asked = await send({ body: PLAIN_Q("Use the new schema?"), thread: "shared", agent_session: "ses_A" });
+    expect((await post(server, `/api/inbox/messages/${asked.message_id}/reply`, { idempotency_key: "r-shared", words: "Yes, the new one." })).status).toBe(200);
+    await send({ body: "I am on the migration.", thread: "shared", agent_session: "ses_B" });
+    // ses_A still gets the answer at once: the threshold is ITS last message, not ses_B's.
+    expect(await wait({ thread_id: asked.thread_id, agent_session: "ses_A" })).toMatchObject({
+      status: "replied",
+      reply: { body: expect.stringContaining("Yes, the new one.") },
+    });
+
+    // Two replies before the agent looks: the first one returned leaves the row in Sent.
+    const q = await send({ body: "Ready to merge?", agent_session: "ses_C" });
+    for (const [key, words] of [["r1", "First thought."], ["r2", "Second thought."]]) {
+      expect((await post(server, `/api/inbox/messages/${q.message_id}/reply`, { idempotency_key: key, words })).status).toBe(200);
+    }
+    const rowOf = async () => rowsOf(await list(server)).find((r) => r.thread_id === q.thread_id)!;
+    expect(await rowOf()).toMatchObject({ section: "sent", sent: { checked_at: null } });
+    const got1 = await wait({ thread_id: q.thread_id, agent_session: "ses_C" });
+    expect(got1.reply?.body).toContain("First thought.");
+    expect(await rowOf()).toMatchObject({ section: "sent", sent: { checked_at: null } });
+    const got2 = await wait({ thread_id: q.thread_id, agent_session: "ses_C", cursor: got1.cursor });
+    expect(got2.reply?.body).toContain("Second thought.");
+    expect((await rowOf()).section).toBe("quiet");
+  });
+
+  test("/seen: a look with nothing new writes nothing; the window guards refuse before anything is written", async () => {
+    const root = tempRoot();
+    const repo = gitProject(root, "api");
+    const dataDir = join(root, "data");
+    const server = await start(dataDir);
+    const client = await mcpClient(server);
+    const sent = structured<Sent>(
+      await client.callTool({ name: "send_message", arguments: { project_path: repo, body: "Build is green.", agent_session: "ses_A" } }),
+    );
+    const lineCount = () =>
+      readdirSync(join(dataDir, "inbox", "projects"))
+        .map((key) => readFileSync(join(dataDir, "inbox", "projects", key, "messages.jsonl"), "utf8").split("\n").filter(Boolean).length)
+        .reduce((a, b) => a + b, 0);
+    const seenPath = `/api/inbox/threads/${sent.thread_id}/seen`;
+
+    // The first look writes once.
+    const start0 = lineCount();
+    expect((await post(server, seenPath, {})).status).toBe(200);
+    expect(lineCount()).toBe(start0 + 1);
+    await send(client, repo, "More news.");
+    const afterNews = lineCount();
+    // Refused: a cross-site page, a foreign Host (DNS rebinding), a stale tab. Nothing is written.
+    const crossSite = await fetch(`http://127.0.0.1:${server.port}${seenPath}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://evil.example" },
+      body: "{}",
+    });
+    expect(crossSite.status).toBe(403);
+    expect((await crossSite.json()).code).toBe("cross_origin");
+    const rebound = await rawPost(server.port, seenPath, [`Host: rebind.attacker.test:${server.port}`], "{}");
+    expect(rebound.status).toBe(403);
+    expect(rebound.text).toContain("host_not_allowed");
+    expect((await post(server, seenPath, { serverSession: "stale" })).status).toBe(409);
+    expect(lineCount()).toBe(afterNews);
+    expect(placed(await list(server)).new).toEqual(["Build is green."]);
+
+    // A second look writes once; a third, with nothing new, writes nothing.
+    expect((await post(server, seenPath, {})).status).toBe(200);
+    expect(lineCount()).toBe(afterNews + 1);
+    expect((await post(server, seenPath, {})).status).toBe(200);
+    expect(lineCount()).toBe(afterNews + 1);
+    // The person's own reply is a look: opening the thread after it writes nothing.
+    expect((await post(server, `/api/inbox/messages/${sent.message_id}/reply`, { idempotency_key: "p1", words: "Thanks." })).status).toBe(200);
+    const afterReply = lineCount();
+    expect((await post(server, seenPath, {})).status).toBe(200);
+    expect(lineCount()).toBe(afterReply);
+
+    expect((await post(server, "/api/inbox/threads/msg_01ARZ3NDEKTSV4RRFFQ69G5FAV/seen", {})).status).toBe(404);
+    expect((await fetch(`http://127.0.0.1:${server.port}${seenPath}`)).status).toBe(405);
+  });
+});
+
+/** A raw HTTP/1.1 POST, so the Host header is exactly what the test sends. */
+function rawPost(port: number, path: string, headers: string[], body: string): Promise<{ status: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(port, "127.0.0.1");
+    let data = "";
+    socket.on("data", (chunk) => (data += chunk.toString("utf8")));
+    socket.on("error", reject);
+    socket.on("end", () => resolve({ status: Number(/^HTTP\/1\.1 (\d{3})/.exec(data)?.[1] ?? 0), text: data }));
+    const head = [`POST ${path} HTTP/1.1`, ...headers, "Content-Type: application/json", `Content-Length: ${Buffer.byteLength(body)}`, "Connection: close", "", ""];
+    socket.write(head.join("\r\n") + body);
+  });
+}
+
+async function send(client: Client, repo: string, body: string, session = "ses_A"): Promise<Sent> {
+  return structured<Sent>(await client.callTool({ name: "send_message", arguments: { project_path: repo, body, agent_session: session } }));
+}
 
 describe("a store written by step 1", () => {
   const FIXTURE = join(import.meta.dir, "..", "..", "tests", "test-fixtures", "inbox-step1");

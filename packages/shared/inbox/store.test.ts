@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { questionKey, type QuestionAnswer } from "@plannotator/core/question-block";
 import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
+import { inboxThreadNameKey } from "@plannotator/core/inbox-types";
 import { InboxError, parseInboxLine } from "./schema";
 import { InboxStore } from "./store";
 
@@ -341,7 +342,7 @@ describe("InboxStore invariants", () => {
           op: fc.constant("send" as const),
           project: fc.nat(1),
           session: fc.constantFrom("ses_a", "ses_b", null),
-          thread: fc.constantFrom(null, null, "alpha", "Alpha ", "beta", "  BETA"),
+          thread: fc.constantFrom(null, null, "alpha", "Alpha ", "al\u200Bpha", "beta", "  BETA", "ｂｅｔａ"),
           key: fc.option(fc.constantFrom("k1", "k2"), { nil: null }),
           body: fc.constantFrom("one", "two", "three"),
         }),
@@ -403,8 +404,9 @@ describe("InboxStore invariants", () => {
         const threadOf = new Map<string, string>();
         const resolved = new Map<string, boolean>();
         const bySession = new Map<string, string>();
-        const byName = new Map<string, string>();
-        const nameKey = (name: string) => name.normalize("NFC").trim().replace(/\s+/g, " ").toLowerCase();
+        // Every root of a name, oldest first: a name joins its newest OPEN one.
+        const byName = new Map<string, string[]>();
+        const nameKey = inboxThreadNameKey;
         for (const line of lines) {
           if (line.kind !== "message") continue;
           const m = line.record;
@@ -421,7 +423,7 @@ describe("InboxStore invariants", () => {
             const name = m.thread_name ?? null;
             const candidate =
               name !== null
-                ? byName.get(`${m.project_id}\0${nameKey(name)}`)
+                ? (byName.get(`${m.project_id}\0${nameKey(name)}`) ?? []).filter((root) => !resolved.get(root)).at(-1)
                 : m.author.session
                   ? bySession.get(`${m.project_id}\0${m.author.session}`)
                   : undefined;
@@ -431,7 +433,10 @@ describe("InboxStore invariants", () => {
           threadOf.set(m.id, m.thread_id);
           if (m.id === m.thread_id) {
             resolved.set(m.id, m.resolved_at !== null);
-            if (m.thread_name != null) byName.set(`${m.project_id}\0${nameKey(m.thread_name)}`, m.id);
+            if (m.thread_name != null) {
+              const key = `${m.project_id}\0${nameKey(m.thread_name)}`;
+              byName.set(key, [...(byName.get(key) ?? []), m.id]);
+            }
             else if (m.author.kind === "agent" && m.author.session) bySession.set(`${m.project_id}\0${m.author.session}`, m.id);
           }
         }
@@ -459,7 +464,7 @@ describe("InboxStore invariants", () => {
           }
         }
       }),
-      { numRuns: 80 },
+      { numRuns: 150 },
     );
   });
 

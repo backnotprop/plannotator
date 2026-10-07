@@ -35,8 +35,14 @@ export const INBOX_MCP_INSTRUCTIONS = [
   "The reply is the person's answer to you, framed as theirs: their words, then an \"Answers to your questions\" section. There is no tool to answer or approve on the person's behalf.",
 ].join("\n");
 
-const SEND_MESSAGE_DESCRIPTION = [
-  "Send the person a markdown message in the Plannotator Inbox. It joins your session's open thread in this project (a new one the first time, or once the person resolved it; it keeps its first subject). `thread` names a thread instead: the same name in the same project is the same open thread, across sessions. reply_to answers one message and wins over both. Returns the message and thread ids; the answer comes back through wait_for_reply or read_thread.",
+/**
+ * Claude Code passes an MCP description to the model up to its first 2,048
+ * characters, and the question guide alone is longer, so the lead stays this
+ * short: the routing rules live in the server instructions and in `thread`'s
+ * own description, and the guide's rules on WHAT to ask still reach the model.
+ */
+export const SEND_MESSAGE_DESCRIPTION = [
+  "Message the person in the Plannotator Inbox (markdown), in your session's open thread (see `thread`). The answer comes back via wait_for_reply.",
   "",
   QUESTION_AUTHORING_GUIDE,
 ].join("\n");
@@ -97,20 +103,31 @@ function threadOf(store: InboxStore, input: { thread_id?: string; message_id?: s
   return null;
 }
 
-/** The seq of the last agent message in a thread: replies after it are new to the agent. */
-function lastAgentCursor(store: InboxStore, threadId: string): number {
+/**
+ * The seq of the waiting agent's last message in a thread: replies after it
+ * are new to it. A thread can hold several sessions' messages (a named thread,
+ * a reply_to into another session's thread), so it is the CALLER's last
+ * message when its session wrote in the thread; another session writing after
+ * the person replied must not hide that reply. Without a session, or when the
+ * session never wrote there, the last agent message of any session.
+ */
+function lastAgentCursor(store: InboxStore, threadId: string, session: string | null): number {
   const thread = store.thread(threadId);
-  let cursor = 0;
+  let any = 0;
+  let mine = 0;
   for (const message of thread?.messages ?? []) {
-    if (message.author.kind === "agent") cursor = Math.max(cursor, store.messageCursor(message.id) ?? 0);
+    if (message.author.kind !== "agent") continue;
+    const seq = store.messageCursor(message.id) ?? 0;
+    any = Math.max(any, seq);
+    if (session && message.author.session === session) mine = Math.max(mine, seq);
   }
-  return cursor;
+  return mine || any;
 }
 
 function replyResult(store: InboxStore, reply: InboxMessage, base: string): ToolResult {
-  // The agent now has the person's reply: a Sent row moves to Quiet.
-  store.markAgentChecked(reply.thread_id);
   const cursor = store.messageCursor(reply.id) ?? store.cursor();
+  // The agent now has this reply (not any later one): a Sent row moves to Quiet.
+  store.markAgentChecked(reply.thread_id, cursor);
   const questions = reply.reply_to ? store.questionsOf(reply.reply_to) : [];
   const root = store.message(reply.thread_id);
   return {
@@ -151,7 +168,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           thread: z
             .string()
             .optional()
-            .describe(`A short thread name (1-${INBOX_THREAD_NAME_MAX} characters, one line), compared without case. Use it to split your work into separate threads, or to join another session's thread of the same name. Ignored with reply_to.`),
+            .describe(
+              `A short thread name (1-${INBOX_THREAD_NAME_MAX} characters, one line). Without it, your messages join your session's open thread in this project (a new one the first time, or once the person resolved it; a thread keeps its first subject). With it, the same name in this project is the same open thread, across sessions (compared without case, spacing or invisible characters). Use it to split separate work, or to join another session's thread. Ignored with reply_to.`,
+            ),
           reply_to: z.string().optional().describe("A message id: post this as a reply in that message's thread."),
           idempotency_key: z.string().optional().describe("Any unique string; sending again with the same key answers the first message instead of posting twice."),
           agent_session: z.string().optional().describe(AGENT_SESSION_DESCRIPTION),
@@ -313,7 +332,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             .filter((t) => t.resolved_at === null)
             .map((t) => t.thread_id);
         }
-        const thresholds = new Map(threadIds.map((id) => [id, input.cursor ?? lastAgentCursor(store, id)]));
+        const caller = input.agent_session?.trim() || null;
+        const thresholds = new Map(threadIds.map((id) => [id, input.cursor ?? lastAgentCursor(store, id, caller)]));
 
         const findExisting = (): InboxMessage | null => {
           let best: { message: InboxMessage; seq: number } | null = null;

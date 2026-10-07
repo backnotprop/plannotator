@@ -63,24 +63,46 @@ export function isInboxId(prefix: InboxIdPrefix, value: unknown): value is strin
 export const INBOX_THREAD_NAME_MAX = 120;
 
 const THREAD_NAME_CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+/**
+ * Bidi controls (LRE..RLO, LRI..PDI, LRM, RLM, ALM) reorder the text around
+ * them, so a name holding one can draw as another name in the list.
+ */
+const THREAD_NAME_BIDI = /\p{Bidi_Control}/u;
+/** Code points that draw as nothing (zero-width space and joiners, BOM, variation selectors...). */
+const THREAD_NAME_INVISIBLE = /\p{Default_Ignorable_Code_Point}/gu;
 
-/** A `thread` name as sent: trimmed, 1..120 characters, no control characters. */
+/**
+ * A `thread` name as sent: trimmed, 1..120 characters, no control characters
+ * or line breaks, no bidi controls, and something visible in it (a name made
+ * only of zero-width characters is empty).
+ */
 export function checkInboxThreadName(value: unknown): { ok: true; name: string } | { ok: false; message: string } {
   if (typeof value !== "string") return { ok: false, message: "must be a string." };
   const name = value.trim();
   const length = [...name].length;
-  if (length === 0) return { ok: false, message: "must not be empty." };
+  if (length === 0 || inboxThreadNameKey(name) === "") return { ok: false, message: "must not be empty." };
   if (length > INBOX_THREAD_NAME_MAX) return { ok: false, message: `at most ${INBOX_THREAD_NAME_MAX} characters.` };
   if (THREAD_NAME_CONTROL.test(name)) return { ok: false, message: "must not contain control characters or line breaks." };
+  if (THREAD_NAME_BIDI.test(name)) return { ok: false, message: "must not contain bidirectional control characters." };
   return { ok: true, name };
 }
 
 /**
- * What two thread names are compared by: NFC, runs of whitespace as one
- * space, case folded. "Auth refactor" and "auth  Refactor" are one thread.
+ * What two thread names are compared by: compatibility-normalized (NFKC, so
+ * a full-width "\uff41\uff55\uff54\uff48" is "auth"), invisible code points dropped (a
+ * zero-width space cannot make a second thread that looks like the first),
+ * runs of whitespace as one space, case folded (upper then lower, so "\u00df" is
+ * "ss"). "Auth refactor" and "auth  Refactor" are one thread. The stored
+ * name keeps the first sender's spelling.
  */
 export function inboxThreadNameKey(name: string): string {
-  return name.normalize("NFC").trim().replace(/\s+/g, " ").toLowerCase();
+  return name
+    .normalize("NFKC")
+    .replace(THREAD_NAME_INVISIBLE, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase()
+    .toLowerCase();
 }
 
 // ─────────────────────────────── Records ───────────────────────────────

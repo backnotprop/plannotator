@@ -29,6 +29,7 @@ import {
   isInboxId,
   type InboxHealth,
   type InboxLine,
+  type InboxListRow,
   type InboxProject,
 } from "@plannotator/core/inbox-types";
 import { toInboxQuestion } from "@plannotator/core/inbox-questions";
@@ -39,6 +40,7 @@ import { isLoopbackHostHeader } from "@plannotator/shared/loopback-host";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { InboxStore } from "@plannotator/shared/inbox/store";
+import { inboxListSections } from "@plannotator/shared/inbox/list";
 import {
   createInboxToken,
   readInboxRegistry,
@@ -232,8 +234,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const health = (): InboxHealth => ({ ok: true, app: INBOX_APP_ID, version, serverSession, pid: process.pid, update });
 
   /** The sidebar's folders: every project, with its thread and unread counts. */
-  const projectFolders = () => {
-    const rows = store.listRows();
+  const projectFolders = (rows: readonly InboxListRow[] = store.listRows()) => {
     return store.listProjects().map((project) => {
       const mine = rows.filter((row) => row.project.id === project.id);
       return { ...project, threads: mine.length, unread: mine.filter((row) => row.unread).length };
@@ -245,16 +246,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * the project as a label and an optional filter (`?project=prj_...`), which
    * keeps the sections and drops other projects' rows.
    */
-  const listModel = (projectFilter: string | null) => ({
-    serverSession,
-    version,
-    cursor: store.cursor(),
-    update,
-    notice: portChanged ? "The Inbox moved to a new port: allow notifications again on this page." : null,
-    projects: projectFolders(),
-    project: projectFilter,
-    sections: store.listSections(projectFilter),
-  });
+  const listModel = (projectFilter: string | null) => {
+    // One pass over the store feeds both the folders' counts and the sections.
+    const rows = store.listRows();
+    return {
+      serverSession,
+      version,
+      cursor: store.cursor(),
+      update,
+      notice: portChanged ? "The Inbox moved to a new port: allow notifications again on this page." : null,
+      projects: projectFolders(rows),
+      project: projectFilter,
+      sections: inboxListSections(projectFilter ? rows.filter((row) => row.project.id === projectFilter) : rows),
+    };
+  };
 
   const projectFilterOf = (url: URL): string | null => {
     const value = url.searchParams.get("project");
