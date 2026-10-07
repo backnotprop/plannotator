@@ -607,6 +607,37 @@ describe("the window's routes: settings, restart, favicon", () => {
     }
   });
 
+  test("the two writing routes refuse a foreign Host before anything is written or stopped", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      let handedOver = false;
+      const server = await start(dataDir, { onRestartRequested: () => (handedOver = true) });
+      for (const [path, body] of [
+        ["/api/inbox/settings", { serverSession: server.serverSession, inbox_tool: { pi: true } }],
+        ["/api/inbox/restart", { serverSession: server.serverSession }],
+      ] as const) {
+        // A DNS-rebinding page: its own name for this port, a matching Origin, the right serverSession.
+        const refused = await raw(
+          server.port,
+          [`POST ${path} HTTP/1.1`, `Host: rebind.attacker.test:${server.port}`, `Origin: http://rebind.attacker.test:${server.port}`, "Content-Type: application/json"],
+          JSON.stringify(body),
+        );
+        expect(refused.status).toBe(403);
+        expect(refused.text).toContain("host_not_allowed");
+      }
+      await Bun.sleep(200);
+      expect(existsSync(join(dataDir, "config.json"))).toBe(false);
+      expect(handedOver).toBe(false);
+      expect((await fetch(`http://127.0.0.1:${server.port}/api/inbox/health`)).status).toBe(200);
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
   test("Restart stops this server and hands over to the caller; refused cross-site and when no caller can restart", async () => {
     const root = tempRoot();
     const plain = await start(join(root, "plain"));
