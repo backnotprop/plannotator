@@ -1667,6 +1667,75 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
+  // Failure to catch: a pin on an <img> with no id or data-* identity never
+  // restoring, because it got no anchor at all (every screenshot in an HTML
+  // report, every chart in a generated page). The D1 contract must survive
+  // the fix: a source two elements share, or an inline data:/blob: source,
+  // gives no anchor, and a crafted source anchor never binds an ambiguous
+  // match.
+  test("a media pin without stable identity restores by its source; shared and inline sources fail closed", async () => {
+    document.body.innerHTML = [
+      '<div class="gallery">',
+      '<img src="charts/a.png">',
+      '<img src="charts/b.png?sig=SECRET#frag">',
+      '<img src="charts/dup.png"><img src="charts/dup.png">',
+      '<img src="data:image/png;base64,iVBORw0KGgo=">',
+      "</div>",
+    ].join("");
+    postBridge({ type: "plannotator-bridge-set-vim-mode", enabled: false });
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+
+    type Anchor = { selector: string; tagName: string; text?: string };
+    const images = () => document.querySelectorAll<HTMLElement>("div.gallery > img");
+    const pin = async (el: HTMLElement, x: number): Promise<Anchor | undefined> => {
+      hoverAt(el, x, 40);
+      const { messages } = await clickAndCollectSelection(el, x, 40);
+      expect(messages.length).toBe(1);
+      postBridge({ type: "plannotator-bridge-cancel-selection" });
+      return messages[0]!.anchor as Anchor | undefined;
+    };
+    const restore = async (id: string, anchor: Anchor) => {
+      postBridge({
+        type: "plannotator-bridge-find-and-mark",
+        id,
+        originalText: "[element: Image]",
+        annotationType: "comment",
+        anchor,
+      });
+      await flushOverlay();
+      return markersFor(id).length;
+    };
+
+    // The anchor checks the image by its path; the signed query never reaches it.
+    const anchor = await pin(images()[1]!, 80);
+    expect(anchor?.text).toBe("src:charts/b.png");
+    expect(JSON.stringify(anchor)).not.toContain("SECRET");
+    expect(await restore("b", anchor!)).toBe(1);
+    postBridge({ type: "plannotator-bridge-clear-marks" });
+
+    // A sibling inserted in front moves the positional selector onto charts/a.png;
+    // the source check rejects that element and finds charts/b.png by its source.
+    const inserted = document.createElement("img");
+    inserted.setAttribute("src", "charts/new.png");
+    images()[0]!.before(inserted);
+    expect(await restore("b-moved", anchor!)).toBe(1);
+    postBridge({ type: "plannotator-bridge-clear-marks" });
+    // Once no element shows charts/b.png, nothing binds, at any position.
+    images()[2]!.setAttribute("src", "charts/c.png");
+    expect(await restore("b-gone", anchor!)).toBe(0);
+
+    // Shared and inline sources: no anchor at all.
+    expect(await pin(images()[3]!, 120)).toBeUndefined();
+    expect(await pin(images()[5]!, 160)).toBeUndefined();
+    // A crafted anchor naming the shared source binds neither copy.
+    expect(await restore("dup", { selector: "div.gallery > img:nth-of-type(9)", tagName: "img", text: "src:charts/dup.png" })).toBe(0);
+    expect(visibleMarkers().length).toBe(0);
+    expect(document.querySelector("[data-bind-id]")).toBeNull();
+
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
+    document.body.replaceChildren();
+  });
+
   // --- Element context: the agent-facing description a pinpoint carries ---
   // Failures to catch: silent regression to label-only capture; secrets or
   // handlers leaking into feedback on disk; unbounded growth on a container
