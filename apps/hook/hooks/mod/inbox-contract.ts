@@ -20,6 +20,7 @@ export const INBOX_TOOL_ACTIONS = [
   'read_thread',
   'wait_for_reply',
   'resolve_message',
+  'list_decisions',
   'record_decision',
   'submit_guide',
   'get_guide_brief',

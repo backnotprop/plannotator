@@ -12,7 +12,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { inboxAgentTool, INBOX_WAKE_INSTRUCTION, inboxWakeText } from './inbox-contract'
+import { mcpAnswerOf } from './inbox'
+import { inboxAgentTool, INBOX_TOOL_ACTIONS, INBOX_WAKE_INSTRUCTION, inboxWakeText } from './inbox-contract'
 import { ClaudeSession } from './testing/claude-session'
 
 const entry = resolve(import.meta.dir, '../../server/index.ts')
@@ -173,7 +174,7 @@ const QUESTION = [
 ].join('\n')
 
 describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () => {
-  test('no registry: no tool and nothing polls; once the Inbox ran, the tool carries exactly what its /mcp offers (an Inbox without record_decision has no such action)', async () => {
+  test('no registry: no tool and nothing polls; once the Inbox ran, the tool carries exactly what its /mcp offers', async () => {
     const w = world('01-registry-and-tool-list')
     const silent = await open(w, 'session-silent')
     expect(silent.inboxTools).toBeNull()
@@ -185,11 +186,19 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     startInbox(w)
     const session = await open(w, 'session-1')
     const names = session.inboxTools?.map((tool) => tool.name)
-    expect(names).toEqual(['send_message', 'read_thread', 'wait_for_reply', 'resolve_message'])
+    // What this Inbox's /mcp lists, asked directly: the tool carries exactly those it can (an older
+    // Inbox without record_decision gets no such action: the engine harness proves that case).
+    const listed = await fetch(`http://127.0.0.1:${registry(w).port}/mcp`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+    })
+    const offered = mcpAnswerOf(await listed.text())?.result as { tools: { name: string }[] }
+    expect(names).toEqual(INBOX_TOOL_ACTIONS.filter((action) => offered.tools.some((tool) => tool.name === action)))
+    expect(names).toContain('record_decision')
     const spec = inboxAgentTool(session.inboxTools!)!
     const actions = (spec.inputSchema.properties as { action: { enum: string[] } }).action.enum
     expect(actions).toEqual(names!)
-    expect(actions).not.toContain('record_decision')
     // The filled arguments never reach the agent's schema; the question guide rides `body`.
     const properties = Object.keys(spec.inputSchema.properties as object)
     for (const filled of ['project_path', 'agent_session', 'agent_host', 'agent_name']) expect(properties).not.toContain(filled)
@@ -396,7 +405,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     process.kill(now.pid, 'SIGKILL')
     await Bun.sleep(300)
     const later = await open(w, 'session-dead-2')
-    expect(later.inboxTools?.map((tool) => tool.name)).toEqual(['send_message', 'read_thread', 'wait_for_reply', 'resolve_message'])
+    expect(later.inboxTools?.map((tool) => tool.name)).toEqual(session.inboxTools?.map((tool) => tool.name))
     w.proof('a session starting while the Inbox is stopped registers the tool from the list the Inbox last offered')
   }, 90_000)
 })
