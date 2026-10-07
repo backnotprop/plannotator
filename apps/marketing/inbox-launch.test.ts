@@ -1,11 +1,8 @@
-// The Plannotator Inbox page, post and images ship only once the Inbox
-// launches, behind one switch, INBOX_LAUNCHED in src/lib/inbox-launch.ts. This
-// builds the real site twice: as committed (switch off) and with the switch on
-// through its INBOX_LAUNCHED=true environment override. Off: no /inbox/ page,
-// no post, no Inbox image and no reference to any of them anywhere in dist. On:
-// the page, the post and the images are built, the Nav and the Footer link the
-// page, the sitemap and the listings carry both, no comma in any h1, h2, h3 or
-// button, and every image resolves.
+// The Plannotator Inbox page, post and images ship behind one switch,
+// INBOX_LAUNCHED in src/lib/inbox-launch.ts, committed on since launch. This
+// builds the real site as committed: the page, the post and the images are
+// built, the Nav and the Footer link the page, the sitemap and the listings
+// carry both, no comma in any h1, h2, h3 or button, and every image resolves.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -17,9 +14,9 @@ const switchFile = join(marketingRoot, 'src/lib/inbox-launch.ts');
 const postPath = 'blog/the-age-of-the-inbox/index.html';
 
 let temporaryRoot = '';
-const dist = { off: '', on: '' };
+const dist = { on: '' };
 
-async function build(name: 'off' | 'on'): Promise<string> {
+async function build(name: 'on'): Promise<string> {
   const outDir = join(temporaryRoot, name);
   const configPath = join(temporaryRoot, `astro.${name}.config.mjs`);
   const configUrl = pathToFileURL(join(marketingRoot, 'astro.config.mjs')).href;
@@ -37,7 +34,6 @@ async function build(name: 'off' | 'on'): Promise<string> {
         ASTRO_TELEMETRY_DISABLED: '1',
         GITHUB_TOKEN: '',
         GH_TOKEN: '',
-        INBOX_LAUNCHED: name === 'on' ? 'true' : '',
       },
       stdout: 'pipe',
       stderr: 'pipe',
@@ -55,7 +51,6 @@ const files = (root: string) => [...new Bun.Glob('**/*').scanSync({ cwd: root })
 
 beforeAll(async () => {
   temporaryRoot = await mkdtemp(join(marketingRoot, '.astro-inbox-launch-'));
-  dist.off = await build('off');
   dist.on = await build('on');
 }, 120_000);
 
@@ -64,20 +59,8 @@ afterAll(async () => {
 });
 
 describe('Plannotator Inbox launch switch', () => {
-  test('the switch is committed off', async () => {
-    expect(await readFile(switchFile, 'utf8')).toContain('export const INBOX_LAUNCHED = false ||');
-  });
-
-  test('off: dist has no Inbox page, post, image or reference to them', async () => {
-    expect(existsSync(join(dist.off, 'inbox'))).toBe(false);
-    expect(existsSync(join(dist.off, 'blog/the-age-of-the-inbox'))).toBe(false);
-    expect(existsSync(join(dist.off, 'assets/inbox'))).toBe(false);
-    for (const file of files(dist.off).filter((f) => /\.(html|xml|txt|js|json)$/.test(f))) {
-      const body = await read(dist.off, file);
-      expect(inboxLinks(body), file).toEqual([]);
-      expect(body, file).not.toContain('the-age-of-the-inbox');
-      expect(body, file).not.toContain('/assets/inbox/');
-    }
+  test('the switch is committed on', async () => {
+    expect(await readFile(switchFile, 'utf8')).toContain('export const INBOX_LAUNCHED = true;');
   });
 
   test('on: the page, the post and the images are built and linked', async () => {
