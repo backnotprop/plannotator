@@ -13,8 +13,8 @@
     "@plannotator/server": "workspace:*",
     "@plannotator/shared": "workspace:*",
     "@plannotator/ui": "workspace:*",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "tailwindcss": "^4.1.18",
     "@tailwindcss/vite": "^4.3.3"
   },
