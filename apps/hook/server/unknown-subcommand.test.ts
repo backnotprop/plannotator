@@ -70,7 +70,7 @@ describe("unknown subcommand", () => {
       mkdirSync(distDir, { recursive: true });
       createdDir = true;
     }
-    for (const name of ["index.html", "review.html"]) {
+    for (const name of ["index.html", "review.html", "inbox.html"]) {
       const file = resolve(distDir, name);
       if (!existsSync(file)) {
         writeFileSync(file, "<!doctype html>");

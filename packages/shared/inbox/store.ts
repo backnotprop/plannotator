@@ -110,6 +110,21 @@ export interface InboxReplyResult {
   replayed: boolean;
 }
 
+export interface InboxProjectUsage {
+  id: string;
+  name: string;
+  root: string;
+  bytes: number;
+  threads: { thread_id: string; subject: string | null; bytes: number }[];
+}
+
+export interface InboxDiskUsage {
+  /** The store's folder (`${dataDir}/inbox`). */
+  dir: string;
+  bytes: number;
+  projects: InboxProjectUsage[];
+}
+
 function refusalError(refusal: InboxAnswerRefusal): InboxError {
   switch (refusal.code) {
     case "validation_error":
@@ -517,6 +532,47 @@ export class InboxStore {
     if (checked === 0 || (root.agent_checked_seq ?? 0) >= checked) return;
     const at = this.stamp();
     this.appendMessage({ ...root, agent_checked_seq: checked, agent_checked_at: at }, at);
+  }
+
+  /**
+   * What the store takes on disk, per project and per thread, read from the
+   * files themselves (Settings' "Stored on this machine"). A thread's bytes
+   * are the lines of its messages and their questions; a project's are its
+   * whole folder, so they include the project line and any torn fragment.
+   */
+  diskUsage(): InboxDiskUsage {
+    const projects: InboxProjectUsage[] = [];
+    let total = 0;
+    for (const project of this.listProjects()) {
+      const folder = this.projectFolder(project);
+      const perThread = new Map<string, number>();
+      let bytes = 0;
+      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE]) {
+        let text: string;
+        try {
+          text = readFileSync(join(folder, name), "utf8");
+        } catch {
+          continue;
+        }
+        bytes += Buffer.byteLength(text);
+        if (name === PROJECT_FILE) continue;
+        for (const raw of text.split("\n")) {
+          const line = parseInboxLine(raw);
+          if (!line) continue;
+          const messageId = line.kind === "message" ? line.record.id : line.kind === "question" ? line.record.message_id : null;
+          const threadId = messageId ? this.messages.get(messageId)?.thread_id : undefined;
+          if (!threadId) continue;
+          perThread.set(threadId, (perThread.get(threadId) ?? 0) + Buffer.byteLength(raw) + 1);
+        }
+      }
+      total += bytes;
+      const threads = [...perThread.entries()]
+        .map(([threadId, threadBytes]) => ({ thread_id: threadId, subject: this.messages.get(threadId)?.subject ?? null, bytes: threadBytes }))
+        .sort((a, b) => b.bytes - a.bytes || a.thread_id.localeCompare(b.thread_id));
+      projects.push({ id: project.id, name: project.name, root: project.root, bytes, threads });
+    }
+    projects.sort((a, b) => b.bytes - a.bytes || a.name.localeCompare(b.name));
+    return { dir: this.dir, bytes: total, projects };
   }
 
   // ─────────────────────────── writing ───────────────────────────

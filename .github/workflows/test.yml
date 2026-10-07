@@ -367,6 +367,47 @@ jobs:
           "$(command -v opencode2)"
           "$RUNNER_TEMP"/plannotator-opencode-*.tgz
 
+  inbox-window-e2e:
+    # The Plannotator Inbox window, proved in a real browser: headless Chromium
+    # (Playwright, pinned in the root devDependencies) drives the COMPILED
+    # binary under a temp data dir while agents write through
+    # `plannotator inbox mcp`. The binary is built here first, with the flags
+    # release.yml compiles with. tests/e2e/inbox.spec.ts says what it proves.
+    name: Inbox window (Playwright against the compiled binary)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Chromium for Playwright
+        run: bunx playwright install --with-deps chromium
+
+      - name: Build the apps and compile the binary
+        run: >-
+          bun run build:review && bun run build:hook &&
+          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig
+          --define '__CLI_VERSION__="0.0.0-dev"' --outfile .local/plannotator
+
+      - name: Run the Inbox window proof
+        run: bun run test:e2e:inbox
+
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: inbox-window-proof
+          path: .local/proof/
+          if-no-files-found: ignore
+
   guides-show:
     name: guides.show viewer (budgets + pinned manifest)
     runs-on: ubuntu-latest

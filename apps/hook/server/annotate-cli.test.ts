@@ -24,7 +24,7 @@ import { join } from "path";
 const serverDir = import.meta.dir;
 const cliEntry = join(serverDir, "index.ts");
 const distDir = join(serverDir, "..", "dist");
-const distFiles = ["index.html", "review.html"];
+const distFiles = ["index.html", "review.html", "inbox.html"];
 
 let fixtureDir: string;
 let dataDir: string;

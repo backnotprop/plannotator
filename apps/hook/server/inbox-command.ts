@@ -111,7 +111,7 @@ export async function ensureInboxRunning(dataDir: string): Promise<InboxRegistry
 }
 
 /** Run the Inbox server in this process until a signal or the stop route ends it. */
-async function serveInbox(dataDir: string, open: boolean): Promise<never> {
+async function serveInbox(dataDir: string, open: boolean, htmlContent: string | undefined): Promise<never> {
   // A detached Inbox runs under its starter's lock; anyone else takes it, so
   // two people (or a person and an agent) never start two writers on one store.
   const lockHeldByStarter = process.env[LOCK_HELD_ENV] === "1";
@@ -139,8 +139,18 @@ async function serveInbox(dataDir: string, open: boolean): Promise<never> {
     inbox = await startInboxServer({
       dataDir,
       version: getCliVersion() ?? "dev",
+      htmlContent,
+      selfCommand: selfCommand(),
       // The stop route (uninstall --purge) ends the process.
       onStopRequested: () => process.exit(0),
+      // The window's Restart: this server has stopped listening, so the
+      // registry reads stopped; start the binary on disk detached (its own
+      // start lock, the last port first) and end this process.
+      onRestartRequested: () => {
+        ensureInboxRunning(dataDir)
+          .catch((error) => process.stderr.write(`Restart failed: ${error instanceof Error ? error.message : String(error)}\n`))
+          .finally(() => process.exit(0));
+      },
     });
   } finally {
     release?.();
@@ -160,7 +170,12 @@ function usageError(message: string): never {
   process.exit(1);
 }
 
-export async function runInboxCommand(args: readonly string[]): Promise<never> {
+export interface InboxCommandAssets {
+  /** The built window (`apps/hook/dist/inbox.html`), embedded by the binary. */
+  htmlContent?: string;
+}
+
+export async function runInboxCommand(args: readonly string[], assets: InboxCommandAssets = {}): Promise<never> {
   const dataDir = getPlannotatorDataDir();
 
   if (args[0] === "mcp") {
@@ -205,5 +220,5 @@ export async function runInboxCommand(args: readonly string[]): Promise<never> {
     if (!noOpen) await openBrowser(entry.url);
     process.exit(0);
   }
-  return serveInbox(dataDir, !noOpen);
+  return serveInbox(dataDir, !noOpen, assets.htmlContent);
 }

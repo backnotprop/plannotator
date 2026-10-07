@@ -1,0 +1,21 @@
+{
+  "name": "@plannotator/inbox",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./inbox.css": "./inbox.css"
+  },
+  "dependencies": {
+    "@plannotator/core": "workspace:*",
+    "@plannotator/ui": "workspace:*",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "fast-check": "4.9.0"
+  }
+}

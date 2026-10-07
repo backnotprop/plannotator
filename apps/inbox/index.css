@@ -1,0 +1,13 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/geist-mono";
+@import "tailwindcss";
+
+@plugin "tailwindcss-animate";
+
+/* Tell Tailwind where to scan for classes */
+@source "../../packages/ui/components/**/*.tsx";
+@source "../../packages/ui/hooks/**/*.ts";
+@source "../../packages/inbox/**/*.tsx";
+
+@import "../../packages/ui/theme.css";
+@import "../../packages/inbox/inbox.css";

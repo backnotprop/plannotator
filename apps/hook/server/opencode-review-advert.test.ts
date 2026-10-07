@@ -28,7 +28,7 @@ let stubbedDist: string[] = [];
 const tempDirs: string[] = [];
 
 beforeAll(() => {
-  stubbedDist = ["index.html", "review.html"]
+  stubbedDist = ["index.html", "review.html", "inbox.html"]
     .map((name) => join(distDir, name))
     .filter((path) => !existsSync(path));
   if (stubbedDist.length > 0) {

@@ -1,0 +1,28 @@
+{
+  // The Inbox window (apps/inbox builds it). Strict, like a consumer of
+  // @plannotator/ui's supported surface (packages/ui/tsconfig.strict-consumer.json).
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "types": ["bun-types"],
+    "paths": {
+      "@plannotator/core": ["../core/index.ts"],
+      "@plannotator/core/*": ["../core/*"],
+      "@plannotator/ui/*": ["../ui/*"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules", "dist"]
+}

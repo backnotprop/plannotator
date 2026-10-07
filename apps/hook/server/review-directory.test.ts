@@ -12,7 +12,7 @@ let stubs: string[] = [];
 
 beforeAll(() => {
   // API-only CLI tests need the import-time HTML assets, even without a UI build.
-  stubs = ["index.html", "review.html"].map(name => join(distDir, name)).filter(path => !existsSync(path));
+  stubs = ["index.html", "review.html", "inbox.html"].map(name => join(distDir, name)).filter(path => !existsSync(path));
   mkdirSync(distDir, { recursive: true });
   for (const path of stubs) writeFileSync(path, "<!doctype html><title>test</title>");
 });

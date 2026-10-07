@@ -257,6 +257,16 @@ export interface ViewerProps {
    *  comment, attachments, checkbox toggles). Existing annotations still
    *  render and remain selectable. Default false — today's behavior. */
   readOnly?: boolean;
+  /**
+   * Opt-in host capability: the document is read, not annotated. Every
+   * annotation affordance is off exactly as under `readOnly` (selection and
+   * code-block toolbars, comment composers, pinpoint, the annotation header,
+   * global comment and attachments, Vim), the document actions (Global
+   * comment, Copy) are not drawn, but question cards and checkboxes keep their
+   * handlers. For a host that shows a message with answerable `:::question`
+   * blocks and no comments on its text. Absent → unchanged.
+   */
+  answerOnly?: boolean;
   /** Opt-in Vim-style keyboard selection. Default false for compatibility. */
   vimModeEnabled?: boolean;
   /** Replace the compact Vim badge with the live video-style key HUD. */
@@ -627,12 +637,16 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   onAskAI,
   allowImages = true,
   readOnly = false,
+  answerOnly = false,
   vimModeEnabled = false,
   vimHudEnabled = false,
   vimHudKeyPanelEnabled = true,
   onVimHudKeyPanelChange,
 }, ref) => {
-  const viewerAnnotationHeader = readOnly ? undefined : annotationHeader;
+  // Annotation authoring is off when read-only, and when the host only wants
+  // answers (`answerOnly`); question cards and checkboxes follow `readOnly`.
+  const authoringOff = readOnly || answerOnly;
+  const viewerAnnotationHeader = authoringOff ? undefined : annotationHeader;
   const hasViewerAnnotationHeader = viewerAnnotationHeader !== undefined;
   const [copied, setCopied] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
@@ -722,8 +736,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     codeBlock: { block: Block; element: HTMLElement };
   } | null>(null);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const readOnlyRef = useRef(readOnly);
-  readOnlyRef.current = readOnly;
+  const readOnlyRef = useRef(authoringOff);
+  readOnlyRef.current = authoringOff;
   const stickySentinelRef = useRef<HTMLDivElement>(null);
   const lastAutoScrolledHashRef = useRef<string | null>(null);
   const [isStuck, setIsStuck] = useState(false);
@@ -762,7 +776,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     onSelectAnnotation,
     selectedAnnotationId,
     mode,
-    enabled: !readOnly,
+    enabled: !authoringOff,
     // Markdown documents drift between the moment a draft/share is written and
     // the moment it is restored (a plan revision, a re-rendered block, a
     // renderer change that adds or drops elements — #1509 hoisted an alert's
@@ -945,7 +959,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     });
   }, [applyCodeBlockAnnotation, blocks]);
 
-  const vimModeActive = vimModeEnabled && !readOnly;
+  const vimModeActive = vimModeEnabled && !authoringOff;
   const keyboardCodeBlockToolbarOpen = codeBlockToolbar?.activation === 'keyboard';
   const vimBlocked = !!toolbarState
     || !!hookCommentPopover
@@ -977,7 +991,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   const { hoverTarget, clearHover: clearPinpointHover } = usePinpoint({
     containerRef,
     inputMethod,
-    enabled: !readOnly && !toolbarState && !hookCommentPopover && !viewerCommentPopover && !hookQuickLabelPicker && !codeBlockQuickLabelPicker && !(isPlanDiffActive ?? false) && !vim.helpOpen,
+    enabled: !authoringOff && !toolbarState && !hookCommentPopover && !viewerCommentPopover && !hookQuickLabelPicker && !codeBlockQuickLabelPicker && !(isPlanDiffActive ?? false) && !vim.helpOpen,
     onSelectRange: highlightRange,
     onCodeBlockClick: handlePinpointCodeBlockClick,
   });
@@ -998,7 +1012,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     : (inputMethod === 'pinpoint' ? hoverTarget : null) ?? legacyVimTarget;
 
   useEffect(() => {
-    if (!readOnly) return;
+    if (!authoringOff) return;
     if (hoverTimeoutRef.current) {
       clearTimeout(hoverTimeoutRef.current);
       hoverTimeoutRef.current = null;
@@ -1007,7 +1021,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     setIsCodeBlockToolbarExiting(false);
     setViewerCommentPopover(null);
     setCodeBlockQuickLabelPicker(null);
-  }, [readOnly]);
+  }, [authoringOff]);
 
   useEffect(() => {
     if (!vimOwnsDocumentNavigation) return;
@@ -1266,7 +1280,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         </button>
       )}
 
-      {!readOnly && onAddGlobalAttachment && onRemoveGlobalAttachment && (
+      {!authoringOff && onAddGlobalAttachment && onRemoveGlobalAttachment && (
         <AttachmentsButton
           images={globalAttachments}
           onAdd={onAddGlobalAttachment}
@@ -1276,7 +1290,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         />
       )}
 
-      {!readOnly && (
+      {!authoringOff && (
         <button
           ref={globalCommentButtonRef}
           onClick={() => {
@@ -1419,7 +1433,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           <>
             {badgeClearance > 0 && <div data-print-hide style={{ height: badgeClearance }} aria-hidden="true" />}
             {stickyActions && <div ref={stickySentinelRef} className="h-0 w-0 float-right" aria-hidden="true" />}
-            {stickyActions ? (
+            {answerOnly ? null : stickyActions ? (
               <StickyActionsLane className={`flex items-start gap-1 md:gap-2 rounded-lg p-1 md:p-2 transition-colors duration-150 ${isStuck ? 'bg-card/95 backdrop-blur-sm shadow-sm' : ''} ${gridEnabled ? '-mr-3 md:-mr-5 lg:-mr-7 xl:-mr-9' : '-mr-1 md:-mr-2'} mt-6 md:-mt-5 lg:-mt-7 xl:-mt-9`}>
                 {documentActions}
               </StickyActionsLane>
@@ -1465,10 +1479,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                 annotations={annotations}
                 selectedAnnotationId={selectedAnnotationId}
                 onSelectAnnotation={onSelectAnnotation}
-                onAddAnnotation={readOnly ? undefined : onAddAnnotation}
-                readOnly={readOnly}
+                onAddAnnotation={authoringOff ? undefined : onAddAnnotation}
+                readOnly={authoringOff}
                 onRestoreReport={onRestoreReport}
-                onAskAI={readOnly ? undefined : onAskAI}
+                onAskAI={authoringOff ? undefined : onAskAI}
                 askAISourcePath={linkedDocInfo?.filepath ?? sourceInfo}
               />
             </Suspense>
@@ -1479,10 +1493,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                 annotations={annotations}
                 selectedAnnotationId={selectedAnnotationId}
                 onSelectAnnotation={onSelectAnnotation}
-                onAddAnnotation={readOnly ? undefined : onAddAnnotation}
-                readOnly={readOnly}
+                onAddAnnotation={authoringOff ? undefined : onAddAnnotation}
+                readOnly={authoringOff}
                 onRestoreReport={onRestoreReport}
-                onAskAI={readOnly ? undefined : onAskAI}
+                onAskAI={authoringOff ? undefined : onAskAI}
                 askAISourcePath={linkedDocInfo?.filepath ?? sourceInfo}
               />
             </Suspense>
@@ -1521,7 +1535,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             <CodeBlock
               key={group.block.id}
               block={group.block}
-              onHover={readOnly || inputMethod === 'pinpoint' ? undefined : (element) => {
+              onHover={authoringOff || inputMethod === 'pinpoint' ? undefined : (element) => {
                 // Clear any pending leave timeout
                 if (hoverTimeoutRef.current) {
                   clearTimeout(hoverTimeoutRef.current);
@@ -1542,7 +1556,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   });
                 }
               }}
-              onLeave={readOnly || inputMethod === 'pinpoint' ? undefined : () => {
+              onLeave={authoringOff || inputMethod === 'pinpoint' ? undefined : () => {
                 if (keyboardCodeBlockToolbarOpen) return;
                 // Delay then start exit animation
                 hoverTimeoutRef.current = setTimeout(() => {
@@ -1555,7 +1569,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                 }, 100);
               }}
               isHovered={
-                !readOnly
+                !authoringOff
                 && inputMethod !== 'pinpoint'
                 && !vimOwnsDocumentNavigation
                 && codeBlockToolbar?.block.id === group.block.id
@@ -1597,7 +1611,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         )}
 
         {/* Text selection toolbar */}
-        {!readOnly && toolbarState && (
+        {!authoringOff && toolbarState && (
           <ToolbarErrorBoundary>
             <AnnotationToolbar
               element={toolbarState.element}
@@ -1651,7 +1665,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         )}
 
         {/* Code block hover toolbar */}
-        {!readOnly
+        {!authoringOff
           && codeBlockToolbar
           && !toolbarState
           && !(vimOwnsDocumentNavigation && codeBlockToolbar.activation === 'pointer')
@@ -1736,7 +1750,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         )}
 
         {/* Comment popover — hook handles text selection, Viewer handles global + code block */}
-        {!readOnly && hookCommentPopover && (
+        {!authoringOff && hookCommentPopover && (
             <CommentPopover
               anchorEl={hookCommentPopover.anchorEl}
               contextText={hookCommentPopover.contextText}
@@ -1758,7 +1772,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               }}
             />
           )}
-        {!readOnly && viewerCommentPopover && (
+        {!authoringOff && viewerCommentPopover && (
           <CommentPopover
             anchorEl={viewerCommentPopover.anchorEl}
             contextText={viewerCommentPopover.contextText}
@@ -1788,7 +1802,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         )}
 
         {/* Quick Label floating picker — hook handles text selection, Viewer handles code blocks */}
-        {!readOnly && hookQuickLabelPicker && (
+        {!authoringOff && hookQuickLabelPicker && (
           <FloatingQuickLabelPicker
             anchorEl={hookQuickLabelPicker.anchorEl}
             cursorHint={hookQuickLabelPicker.cursorHint}
@@ -1796,7 +1810,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             onDismiss={hookQuickLabelPickerDismiss}
           />
         )}
-        {!readOnly && codeBlockQuickLabelPicker && (
+        {!authoringOff && codeBlockQuickLabelPicker && (
           <FloatingQuickLabelPicker
             anchorEl={codeBlockQuickLabelPicker.anchorEl}
             onSelect={(label: QuickLabel) => {

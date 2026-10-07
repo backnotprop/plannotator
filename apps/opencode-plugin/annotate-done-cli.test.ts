@@ -17,7 +17,7 @@ let stubs: string[] = [];
 
 beforeAll(() => {
   // The CLI imports the built HTML; API-only tests need just a stub.
-  stubs = ["index.html", "review.html"].map((name) => path.join(DIST, name)).filter((p) => !existsSync(p));
+  stubs = ["index.html", "review.html", "inbox.html"].map((name) => path.join(DIST, name)).filter((p) => !existsSync(p));
   mkdirSync(DIST, { recursive: true });
   for (const p of stubs) writeFileSync(p, "<!doctype html><title>test</title>");
 });

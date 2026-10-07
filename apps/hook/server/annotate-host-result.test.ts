@@ -20,7 +20,7 @@ const NO_FEEDBACK = "User reviewed the document and has no feedback.";
 
 beforeAll(() => {
   // The CLI imports the built HTML; API-only tests need just a stub.
-  stubs = ["index.html", "review.html"].map((name) => join(distDir, name)).filter((path) => !existsSync(path));
+  stubs = ["index.html", "review.html", "inbox.html"].map((name) => join(distDir, name)).filter((path) => !existsSync(path));
   mkdirSync(distDir, { recursive: true });
   for (const path of stubs) writeFileSync(path, "<!doctype html><title>test</title>");
 });

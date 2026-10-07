@@ -6,7 +6,7 @@ const root = resolve(import.meta.dir, '..');
 const read = (path: string) => readFileSync(resolve(root, path), 'utf8');
 
 describe('review entry assets', () => {
-  test.each(['apps/portal/index.html', 'apps/hook/index.html', 'apps/review/index.html'])(
+  test.each(['apps/portal/index.html', 'apps/hook/index.html', 'apps/review/index.html', 'apps/inbox/index.html'])(
     '%s has no externally hosted startup scripts or styles',
     (path) => {
       expect(read(path)).not.toMatch(
@@ -18,7 +18,7 @@ describe('review entry assets', () => {
   // The portal mounts the same @plannotator/editor App as the hook, so it needs
   // the identical shell: without it the mobile layout's safe-area tokens are
   // inert and the document scrolls behind the app's own scroll ownership.
-  test.each(['apps/hook/index.html', 'apps/review/index.html', 'apps/portal/index.html'])(
+  test.each(['apps/hook/index.html', 'apps/review/index.html', 'apps/portal/index.html', 'apps/inbox/index.html'])(
     '%s leaves scrolling to the visible-viewport application shell',
     (path) => {
       const html = read(path);
@@ -192,6 +192,7 @@ describe('review entry assets', () => {
       'apps/review/vite.config.ts',
       'apps/hook/vite.config.ts',
       'apps/portal/vite.config.ts',
+      'apps/inbox/vite.config.ts',
     ]) {
       expect(read(config)).toContain("'shiki/wasm': path.resolve(");
     }
@@ -206,7 +207,7 @@ describe('review entry assets', () => {
   // dist/ is gitignored, so this skips cleanly on an unbuilt checkout. The CI
   // job that builds the bundles runs this file right after the build so the
   // assertion is not silently optional there.
-  const bundles = ['apps/review/dist/index.html', 'apps/hook/dist/index.html'];
+  const bundles = ['apps/review/dist/index.html', 'apps/hook/dist/index.html', 'apps/hook/dist/inbox.html'];
   for (const path of bundles) {
     test.skipIf(!existsSync(resolve(root, path)))(`${path} ships no inlined WebAssembly`, () => {
       // Asserted on a boolean, not the string: these bundles are ~20MB and a

@@ -353,7 +353,7 @@ describe("guide subcommand through the entrypoint", () => {
     const { FIXTURE_V1_PR } = await import("@plannotator/shared/guide-format-fixtures");
     const workDir = mkdtempSync(join(tmpdir(), "plannotator-guide-entry-"));
     const distDir = resolve(import.meta.dir, "../dist");
-    const stubbed = ["index.html", "review.html"].map((name) => join(distDir, name)).filter((path) => !existsSync(path));
+    const stubbed = ["index.html", "review.html", "inbox.html"].map((name) => join(distDir, name)).filter((path) => !existsSync(path));
     if (stubbed.length > 0) {
       mkdirSync(distDir, { recursive: true });
       for (const path of stubbed) writeFileSync(path, "<!doctype html><title>test stub</title>");

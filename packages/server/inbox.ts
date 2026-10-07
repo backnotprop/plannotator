@@ -21,6 +21,7 @@
 
 import { spawn } from "node:child_process";
 import { realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { createMcpHandler } from "@modelcontextprotocol/server";
@@ -35,6 +36,15 @@ import {
 import { toInboxQuestion } from "@plannotator/core/inbox-questions";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { extractDirName, extractRepoName } from "@plannotator/core/project";
+import {
+  INBOX_TOOL_HOSTS,
+  loadConfig,
+  parseInboxToolEnv,
+  resolveInboxTool,
+  saveConfig,
+  configuredInboxTool,
+  type AgentToolHost,
+} from "@plannotator/shared/config";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { isLoopbackHostHeader } from "@plannotator/shared/loopback-host";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
@@ -51,7 +61,7 @@ import { openBrowser } from "./browser";
 import { isAddressInUseError } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { createInboxMcpServer } from "./inbox-mcp";
-import { inboxStubPageHtml } from "./inbox-page";
+import { handleFavicon } from "./shared-handlers";
 
 const LOOPBACK = "127.0.0.1";
 /** Remote mode's fixed port: the Inbox never takes it. */
@@ -73,6 +83,25 @@ export interface InboxServerOptions {
   healthTickMs?: number;
   /** Called after the stop route was used, once the server has stopped. */
   onStopRequested?: () => void;
+  /**
+   * Called after the window's Restart (the "A new version is ready" line),
+   * once this server has stopped listening: the caller starts the binary on
+   * disk in its place and ends this process. Absent: Restart answers 409.
+   */
+  onRestartRequested?: () => void;
+  /**
+   * The window: the built single-file app (`apps/hook/dist/inbox.html`, which
+   * the binary embeds). Absent (a source run before `build:hook`, the server
+   * tests): `/` answers a one-line page saying so.
+   */
+  htmlContent?: string;
+  /**
+   * The argv that runs this CLI (the compiled binary's absolute path, or bun
+   * plus the entry script), so the window's connect snippets name a command
+   * that works where PATH is not the shell's. Default: the compiled binary,
+   * else `plannotator`.
+   */
+  selfCommand?: readonly string[];
 }
 
 export interface InboxServer {
@@ -107,7 +136,30 @@ const ERROR_STATUS: Record<string, number> = {
   question_already_sent: 409,
   thread_resolved: 409,
   idempotency_key_reused: 409,
+  config_not_saved: 500,
 };
+
+/**
+ * The window is a single-file build: its script and styles are inline, so the
+ * policy allows inline code from this page only and no other origin. Nothing
+ * may frame it, and it may only talk to this server.
+ */
+const WINDOW_CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "worker-src 'self' blob:",
+  "frame-ancestors 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+].join("; ");
+
+/** `/` before the window is built (a source run, the server tests). */
+const NOT_BUILT_PAGE =
+  '<!doctype html><meta charset="utf-8"><title>Plannotator Inbox</title><p data-inbox-not-built>The Inbox window is not built: run <code>bun run build:hook</code>.</p>';
 
 function errorResponse(error: unknown): Response {
   if (error instanceof InboxError) {
@@ -269,6 +321,65 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return value;
   };
 
+  const selfCommand = options.selfCommand?.length
+    ? [...options.selfCommand]
+    : version !== "dev"
+      ? [process.execPath]
+      : ["plannotator"];
+
+  /** The agent tool knob per host: the effective value, and whether the env var decides it. */
+  const inboxToolState = () => {
+    const config = loadConfig();
+    const env = parseInboxToolEnv();
+    const hosts = Object.fromEntries(INBOX_TOOL_HOSTS.map((host) => [host, resolveInboxTool(config, process.env, host)])) as Record<AgentToolHost, boolean>;
+    return { hosts, env: env ?? null };
+  };
+
+  /** What Settings and the connect snippets read. */
+  const settingsModel = () => ({
+    serverSession,
+    version,
+    port,
+    url: baseUrl,
+    mcp_url: `http://127.0.0.1:${port}/mcp`,
+    /** The stdio MCP entry as argv: `<this CLI> inbox mcp`. */
+    mcp_command: [...selfCommand, "inbox", "mcp"],
+    home: homedir(),
+    data_dir: dataDir,
+    inbox_tool: inboxToolState(),
+    store: store.diskUsage(),
+  });
+
+  /** Save the knob for the hosts named, keeping the others as they are. */
+  const saveInboxTool = (input: unknown) => {
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw new InboxError("validation_error", "inbox_tool: an object of host to boolean.", { field: "inbox_tool" });
+    }
+    const config = loadConfig();
+    const next: Partial<Record<AgentToolHost, boolean>> = {};
+    for (const host of INBOX_TOOL_HOSTS) {
+      const current = configuredInboxTool(config, host);
+      if (current !== undefined) next[host] = current;
+    }
+    for (const [host, value] of Object.entries(input as Record<string, unknown>)) {
+      if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(host)) {
+        throw new InboxError("validation_error", `inbox_tool.${host}: not a host (claude-code, pi, opencode).`, { field: `inbox_tool.${host}` });
+      }
+      if (typeof value !== "boolean") {
+        throw new InboxError("validation_error", `inbox_tool.${host}: must be a boolean.`, { field: `inbox_tool.${host}` });
+      }
+      next[host as AgentToolHost] = value;
+    }
+    saveConfig({ inboxTool: next });
+    const saved = loadConfig();
+    for (const [host, value] of Object.entries(next)) {
+      if (configuredInboxTool(saved, host as AgentToolHost) !== value) {
+        throw new InboxError("config_not_saved", "config.json could not be written; nothing changed.");
+      }
+    }
+    return inboxToolState();
+  };
+
   const eventPayload = (line: InboxLine) => {
     switch (line.kind) {
       case "project":
@@ -399,6 +510,29 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (path === "/api/inbox/threads" && req.method === "GET") return json(listModel(projectFilterOf(url)));
       if (path === "/api/inbox/projects" && req.method === "GET") return json({ serverSession, cursor: store.cursor(), projects: projectFolders() });
       if (path === "/api/inbox/events" && req.method === "GET") return eventStream(req, url);
+      if (path === "/api/inbox/restart") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(), 409);
+        if (!options.onRestartRequested) {
+          return json({ error: "This Inbox cannot restart itself; quit it and run plannotator inbox.", code: "restart_unavailable" }, 409);
+        }
+        if (!stopRequested) {
+          stopRequested = true;
+          setTimeout(() => {
+            stop();
+            options.onRestartRequested?.();
+          }, 50);
+        }
+        return json({ ok: true, restarting: true });
+      }
+      if (path === "/api/inbox/settings") {
+        if (req.method === "GET") return json(settingsModel());
+        if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(), 409);
+        return json({ inbox_tool: saveInboxTool(body.inbox_tool) });
+      }
 
       const threadMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)$/.exec(path);
       if (threadMatch && req.method === "GET") {
@@ -445,18 +579,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
 
       if (path === "/" && (req.method === "GET" || req.method === "HEAD")) {
-        const nonce = createServerSessionNonce();
-        return new Response(req.method === "HEAD" ? null : inboxStubPageHtml(nonce), {
+        const page = options.htmlContent ?? NOT_BUILT_PAGE;
+        return new Response(req.method === "HEAD" ? null : page, {
           headers: {
             "Content-Type": "text/html; charset=utf-8",
             "Cache-Control": "no-store",
             "X-Content-Type-Options": "nosniff",
             "X-Frame-Options": "DENY",
             "Referrer-Policy": "no-referrer",
-            "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
+            "Content-Security-Policy": WINDOW_CSP,
           },
         });
       }
+      if (path === "/favicon.png" && req.method === "GET") return handleFavicon();
 
       if (path.startsWith("/api/")) return json({ error: "Not found", code: "not_found" }, 404);
       return new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8", "X-Content-Type-Options": "nosniff" } });

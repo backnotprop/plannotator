@@ -37,8 +37,9 @@
     "package:vscode": "bun run --cwd apps/vscode-extension package",
     "check:release-version": "node scripts/check-release-version.mjs",
     "test": "bun test",
-    "typecheck": "bash apps/pi-extension/vendor.sh && tsc --noEmit -p packages/core/tsconfig.json && tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/ai/tsconfig.json && tsc --noEmit -p packages/server/tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.json && tsc --noEmit -p packages/guide-viewer/tsconfig.json && tsc --noEmit -p apps/guides-show/tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.strict-consumer.json && tsc --noEmit -p apps/pi-extension/tsconfig.json && tsc --noEmit -p apps/hook/hooks/mod/tsconfig.json && tsc --noEmit -p apps/hook/tsconfig.server.json",
-    "build:ui-css": "bun run --cwd packages/ui build:css"
+    "typecheck": "bash apps/pi-extension/vendor.sh && tsc --noEmit -p packages/core/tsconfig.json && tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/ai/tsconfig.json && tsc --noEmit -p packages/server/tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.json && tsc --noEmit -p packages/guide-viewer/tsconfig.json && tsc --noEmit -p apps/guides-show/tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.strict-consumer.json && tsc --noEmit -p apps/pi-extension/tsconfig.json && tsc --noEmit -p apps/hook/hooks/mod/tsconfig.json && tsc --noEmit -p apps/hook/tsconfig.server.json && tsc --noEmit -p packages/inbox/tsconfig.json && tsc --noEmit -p apps/inbox/tsconfig.json",
+    "build:ui-css": "bun run --cwd packages/ui build:css",
+    "test:e2e:inbox": "playwright test -c tests/e2e/playwright.config.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.273",
@@ -51,6 +52,8 @@
     "sonner": "^2.0.8"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "2.2.0",
+    "@playwright/test": "1.63.0",
     "@types/node": "^25.5.2",
     "@types/turndown": "^5.0.6",
     "bun-types": "^1.4.0"

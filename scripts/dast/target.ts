@@ -115,7 +115,12 @@ const scanTarget = Bun.serve({
 // The Plannotator Inbox, seeded with one thread that asks a question, behind
 // the same kind of read-only guard. It always binds loopback itself.
 // binaryPath null: no restart-to-update probe of the bun binary every minute.
-const inbox = await startInboxServer({ version: "dast", binaryPath: null });
+const inbox = await startInboxServer({
+  version: "dast",
+  binaryPath: null,
+  // The real window, built by build:hook like the plan page above.
+  htmlContent: readFileSync(resolve("apps/hook/dist/inbox.html"), "utf8"),
+});
 const inboxProject = inbox.store.ensureProject({ name: "dast-fixture", root: "/workspace" });
 const inboxThread = inbox.store.sendMessage({
   project_id: inboxProject.id,

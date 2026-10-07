@@ -399,6 +399,8 @@ See HANDOFF.md § "Question decision toggle and status tag (ui 0.52.0, unrelease
 
 See HANDOFF.md § "Decision toggle on any question, and an opener for the host's decision card (ui 0.52.1, …)".
 
+**Answers without comments (unreleased).** `Viewer` `answerOnly`: annotation authoring and the document actions (Global comment, Copy) are off as under `readOnly`, while question cards and checkboxes keep their handlers, for a host that shows a message to answer, not a document to annotate. See HANDOFF.md § "Viewer `answerOnly` (unreleased)".
+
 ### Diff file tree (`components/DiffFileTree`; next ui release)
 
 A read-only file tree for a list of changed files, to sit beside a host's own per-file diff list. It is Plannotator's code-review tree, not a lookalike: the builder (`utils/diffFileTree`), the folder open/closed hook (`hooks/useDiffFileTreeExpansion`) and the row atoms moved here from `packages/review-editor`, and the review now renders from them.

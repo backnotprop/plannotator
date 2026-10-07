@@ -248,6 +248,15 @@ export interface PlannotatorConfig {
    */
   agentTool?: boolean;
   /**
+   * The Plannotator Inbox's `plannotator_inbox` tool on the hosts that will
+   * register it (the Claude Code mod, Pi, OpenCode 2), set from the Inbox's
+   * own Settings: `true` / `false` for every host, or one boolean per host
+   * (`{ "claude-code": true, "pi": false }`). Read once when a session starts,
+   * so a change applies to the next session. PLANNOTATOR_INBOX_TOOL wins over
+   * this key. Unset (or a host left out): INBOX_TOOL_DEFAULTS.
+   */
+  inboxTool?: boolean | Partial<Record<AgentToolHost, boolean>>;
+  /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
    * callouts, tables, diagrams, task lists, and the other PFM extensions.
@@ -946,6 +955,47 @@ export function resolveAgentTool(
   host: AgentToolHost,
 ): boolean {
   return parseAgentToolEnv(env) ?? parseConfigBoolean(config.agentTool) ?? AGENT_TOOL_DEFAULTS[host];
+}
+
+/**
+ * Whether each host registers the Inbox's `plannotator_inbox` tool when
+ * nothing is set: the agent tool's rule (on for the Claude Code mod, where
+ * tools are deferred behind tool search; off on Pi and OpenCode 2, which send
+ * every tool's full definition with each request).
+ */
+export const INBOX_TOOL_DEFAULTS: Readonly<Record<AgentToolHost, boolean>> = AGENT_TOOL_DEFAULTS;
+
+export const INBOX_TOOL_HOSTS: readonly AgentToolHost[] = ["claude-code", "pi", "opencode"];
+
+/** The PLANNOTATOR_INBOX_TOOL override, or undefined when it does not decide. */
+export function parseInboxToolEnv(env: NodeJS.ProcessEnv = process.env): boolean | undefined {
+  const v = env.PLANNOTATOR_INBOX_TOOL?.trim().toLowerCase();
+  if (v === "1" || v === "true" || v === "on") return true;
+  if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
+  return undefined;
+}
+
+/** config.inboxTool for one host: the shared boolean, the host's own entry, or undefined. */
+export function configuredInboxTool(config: PlannotatorConfig, host: AgentToolHost): boolean | undefined {
+  const value = config.inboxTool;
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return parseConfigBoolean((value as Record<string, unknown>)[host]);
+  }
+  return parseConfigBoolean(value);
+}
+
+/**
+ * Resolve whether `host` registers the Inbox tool. Priority (highest wins):
+ * PLANNOTATOR_INBOX_TOOL → config.inboxTool (shared or per host) →
+ * INBOX_TOOL_DEFAULTS[host]. Hosts call it once per session start, like
+ * resolveAgentTool, so a change applies to the next session.
+ */
+export function resolveInboxTool(
+  config: PlannotatorConfig,
+  env: NodeJS.ProcessEnv,
+  host: AgentToolHost,
+): boolean {
+  return parseInboxToolEnv(env) ?? configuredInboxTool(config, host) ?? INBOX_TOOL_DEFAULTS[host];
 }
 
 /**

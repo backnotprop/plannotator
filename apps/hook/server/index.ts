@@ -243,6 +243,10 @@ const planHtmlContent = planHtml as unknown as string;
 import reviewHtml from "../dist/review.html" with { type: "text" };
 const reviewHtmlContent = reviewHtml as unknown as string;
 
+// @ts-ignore - Bun import attribute for text
+import inboxHtml from "../dist/inbox.html" with { type: "text" };
+const inboxHtmlContent = inboxHtml as unknown as string;
+
 // Check for subcommand
 // "Ask this session" pull-bridge secret: take it out of process.env before
 // ANYTHING spawns (git/gh/sem before the server starts, the auto-update
@@ -637,7 +641,7 @@ if (args[0] === "install-runtime") {
 // (inbox/inbox.json). Dispatched before the session registry and the
 // auto-update trigger below, which belong to review sessions.
 if (args[0] === "inbox") {
-  await runInboxCommand(args.slice(1));
+  await runInboxCommand(args.slice(1), { htmlContent: inboxHtmlContent });
 }
 
 if (isInteractiveNoArgInvocation(args, process.stdin.isTTY)) {

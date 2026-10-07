@@ -4,7 +4,7 @@
  * SDK client over streamable HTTP. Every test uses its own temp data dir.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -300,12 +300,16 @@ describe("security refusals, by real requests", () => {
     expect((await inboxStatus(dataDir)).state).toBe("stopped");
   });
 
-  test("the page ships a nonce CSP and no CORS anywhere", async () => {
-    const server = await start(join(tempRoot(), "data"));
+  test("the window ships its CSP (no framing, no other origin) and no CORS anywhere", async () => {
+    const server = await start(join(tempRoot(), "data"), { htmlContent: "<!doctype html><div data-window-sentinel></div>" });
     const page = await fetch(`http://127.0.0.1:${server.port}/`, { headers: { Origin: "https://evil.example" } });
-    expect(page.headers.get("content-security-policy")).toMatch(/script-src 'nonce-[0-9a-f]+'/);
+    const csp = page.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).toContain("connect-src 'self'");
+    expect(csp).toContain("default-src 'self'");
     expect(page.headers.get("access-control-allow-origin")).toBeNull();
-    expect(await page.text()).toContain("data-inbox-stub");
+    // A sentinel string: the embedded window is what `/` serves.
+    expect(await page.text()).toContain("data-window-sentinel");
     const api = await fetch(`http://127.0.0.1:${server.port}/api/inbox/projects`, { headers: { Origin: "https://evil.example" } });
     expect(api.headers.get("access-control-allow-origin")).toBeNull();
   });
@@ -537,4 +541,105 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
     expect(elapsed).toBeGreaterThanOrEqual(45_000);
     expect(elapsed).toBeLessThan(55_000);
   }, 70_000);
+});
+
+describe("the window's routes: settings, restart, favicon", () => {
+  test("settings answer the stdio entry with this CLI's path, the port, the knob and the store on disk", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    const previousEnv = process.env.PLANNOTATOR_INBOX_TOOL;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    delete process.env.PLANNOTATOR_INBOX_TOOL;
+    try {
+      const server = await start(dataDir, { selfCommand: ["/opt/tools dir/plannotator"] });
+      const client = await mcpClient(server);
+      const sent = structured<{ thread_id: string }>(
+        await client.callTool({ name: "send_message", arguments: { body: QUESTION_MESSAGE, project_path: gitProject(root) } }),
+      );
+      const settings = await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json();
+      expect(settings.mcp_command).toEqual(["/opt/tools dir/plannotator", "inbox", "mcp"]);
+      expect(settings.mcp_url).toBe(`http://127.0.0.1:${server.port}/mcp`);
+      expect(settings.port).toBe(server.port);
+      // Nothing set: the defaults, on for the Claude Code mod, off on Pi and OpenCode.
+      expect(settings.inbox_tool).toEqual({ hosts: { "claude-code": true, pi: false, opencode: false }, env: null });
+      const project = settings.store.projects[0];
+      expect(project.name).toBe("api");
+      expect(project.threads.map((t: { thread_id: string }) => t.thread_id)).toEqual([sent.thread_id]);
+      // Sizes are read from the files themselves.
+      const folder = join(dataDir, "inbox", "projects", readdirSync(join(dataDir, "inbox", "projects"))[0]!);
+      const onDisk = ["project.json", "messages.jsonl", "questions.jsonl"].reduce((n, f) => n + statSync(join(folder, f)).size, 0);
+      expect(project.bytes).toBe(onDisk);
+      expect(settings.store.bytes).toBe(onDisk);
+      expect(project.threads[0].bytes).toBe(onDisk - statSync(join(folder, "project.json")).size);
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+      if (previousEnv !== undefined) process.env.PLANNOTATOR_INBOX_TOOL = previousEnv;
+    }
+  });
+
+  test("the knob saves per host into config.json, behind the same-origin and serverSession guards", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      const server = await start(dataDir);
+      const cross = await post(server, "/api/inbox/settings", { inbox_tool: { pi: true } }, { Origin: "https://evil.example" });
+      expect(cross.status).toBe(403);
+      expect((await cross.json()).code).toBe("cross_origin");
+      const stale = await post(server, "/api/inbox/settings", { serverSession: "not-this-one", inbox_tool: { pi: true } });
+      expect(stale.status).toBe(409);
+      const bad = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, inbox_tool: { cursor: true } });
+      expect(bad.status).toBe(422);
+      expect(existsSync(join(dataDir, "config.json"))).toBe(false);
+
+      const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, inbox_tool: { pi: true } });
+      expect(saved.status).toBe(200);
+      expect((await saved.json()).inbox_tool.hosts).toEqual({ "claude-code": true, pi: true, opencode: false });
+      await post(server, "/api/inbox/settings", { serverSession: server.serverSession, inbox_tool: { "claude-code": false } });
+      // Each host keeps its own choice; an unset host keeps its default.
+      expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxTool).toEqual({ pi: true, "claude-code": false });
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
+  test("Restart stops this server and hands over to the caller; refused cross-site and when no caller can restart", async () => {
+    const root = tempRoot();
+    const plain = await start(join(root, "plain"));
+    const unavailable = await post(plain, "/api/inbox/restart", { serverSession: plain.serverSession });
+    expect(unavailable.status).toBe(409);
+    expect((await unavailable.json()).code).toBe("restart_unavailable");
+
+    let handedOver = false;
+    const server = await start(join(root, "data"), { onRestartRequested: () => (handedOver = true) });
+    expect((await post(server, "/api/inbox/restart", { serverSession: server.serverSession }, { Origin: "https://evil.example" })).status).toBe(403);
+    expect((await post(server, "/api/inbox/restart", { serverSession: "stale" })).status).toBe(409);
+    expect(handedOver).toBe(false);
+    const ok = await post(server, "/api/inbox/restart", { serverSession: server.serverSession });
+    expect(ok.status).toBe(200);
+    await Bun.sleep(300);
+    expect(handedOver).toBe(true);
+    // This server no longer listens, so the registry reads stopped and the caller can start the new binary.
+    await expect(fetch(`http://127.0.0.1:${server.port}/api/inbox/health`)).rejects.toThrow();
+  });
+
+  test("the favicon is served for the window's link", async () => {
+    const dataDir = join(tempRoot(), "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    // The favicon style is read from config.json: the temp one, never the real one.
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      const server = await start(dataDir);
+      const icon = await fetch(`http://127.0.0.1:${server.port}/favicon.png`);
+      expect(icon.status).toBe(200);
+      expect(icon.headers.get("content-type")).toMatch(/^image\//);
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
 });

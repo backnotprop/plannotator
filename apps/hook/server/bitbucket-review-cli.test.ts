@@ -43,7 +43,7 @@ async function waitForReady(readyFile: string): Promise<string> {
 
 beforeAll(async () => {
   if (!existsSync(distDir)) { mkdirSync(distDir, { recursive: true }); createdDistDir = true; }
-  for (const file of ["index.html", "review.html"]) {
+  for (const file of ["index.html", "review.html", "inbox.html"]) {
     const p = join(distDir, file);
     if (!existsSync(p)) { writeFileSync(p, "<!-- test placeholder -->"); createdDist.push(p); }
   }
