@@ -41,6 +41,15 @@ describe("unknown subcommand", () => {
     expect(findClosestSubcommand("x".repeat(10_000))).toBeNull();
   });
 
+  test("an unreleased subcommand runs but is never suggested", () => {
+    // `inbox` is in HIDDEN_SUBCOMMANDS: a typo must not advertise it, while
+    // the real command still dispatches (it is not "Unknown command").
+    expect(findUnknownSubcommand(["inbox", "--background"])).toBeNull();
+    expect(findClosestSubcommand("inbo")).toBeNull();
+    expect(findClosestSubcommand("inbx")).toBeNull();
+    expect(formatUnknownSubcommandError("inbo")).not.toContain("inbox");
+  });
+
   test("error text names the typo and points at --help", () => {
     const message = formatUnknownSubcommandError("annotatte");
     expect(message).toContain("Unknown command: annotatte");

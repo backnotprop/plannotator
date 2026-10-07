@@ -33,7 +33,6 @@ Use the CLI only when you have no such tool, or for what the tool does not do: `
 | Browse past plan decisions | `plannotator archive` |
 | Export or share a Guided Review | `plannotator guide export` / `plannotator guide share` |
 | Reopen or list live sessions | `plannotator sessions` |
-| Leave the person a message or question without blocking | The Inbox MCP tools (from `plannotator inbox mcp`); see below |
 
 ## Session model
 
@@ -168,19 +167,6 @@ plannotator sessions [--open [N]] [--clean] [--json]
 ```
 
 Lists active Plannotator server sessions, each with its full target (absolute path, URL, PR URL or reviewed directory) and, for a review a host opened, its `pn-` id. `--open` reopens session N (default 1) in the browser, useful when a tab was closed mid-review. `--clean` drops stale entries. `--json` prints the list as a JSON array on stdout.
-
-## plannotator inbox
-
-```bash
-plannotator inbox [--background | --no-open]
-plannotator inbox mcp
-```
-
-The Plannotator Inbox: one long-lived local window per machine where agents leave messages and `:::question` blocks for the person, who answers when they can. Unlike review and annotate it never blocks you on a decision.
-
-- To message the person, use the Inbox's MCP tools (`send_message`, `wait_for_reply`, `read_thread`, `resolve_message`) when your host has them; they come from the stdio entry `plannotator inbox mcp`, which starts a stopped Inbox itself without opening a browser tab.
-- `plannotator inbox --background` starts it detached, prints its URL and exits 0; it never opens a tab. Run it, not bare `plannotator inbox`, when you need the Inbox up: bare `plannotator inbox` is the person's command (it opens the browser and keeps running in the foreground).
-- It binds 127.0.0.1 only and keeps its data under the data dir's `inbox/` folder.
 
 ## Other subcommands
 

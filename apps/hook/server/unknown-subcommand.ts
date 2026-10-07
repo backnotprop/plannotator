@@ -1,4 +1,8 @@
-import { SUBCOMMAND_HELP, SUBCOMMAND_HELP_ALIASES } from "./cli";
+import {
+  HIDDEN_SUBCOMMANDS,
+  SUBCOMMAND_HELP,
+  SUBCOMMAND_HELP_ALIASES,
+} from "./cli";
 
 const INTERNAL_SUBCOMMANDS = [
   "install-runtime",
@@ -10,13 +14,18 @@ const INTERNAL_SUBCOMMANDS = [
   "claude-mod-plan",
 ] as const;
 
-const SUGGESTABLE_SUBCOMMANDS = [
+const PUBLISHED_SUBCOMMANDS = [
   ...Object.keys(SUBCOMMAND_HELP),
   ...Object.keys(SUBCOMMAND_HELP_ALIASES),
 ];
 
+// Unreleased subcommands still run, but are never suggested to a user.
+const SUGGESTABLE_SUBCOMMANDS = PUBLISHED_SUBCOMMANDS.filter(
+  (sub) => !HIDDEN_SUBCOMMANDS.has(sub),
+);
+
 export const KNOWN_SUBCOMMANDS: ReadonlySet<string> = new Set([
-  ...SUGGESTABLE_SUBCOMMANDS,
+  ...PUBLISHED_SUBCOMMANDS,
   ...INTERNAL_SUBCOMMANDS,
 ]);
 

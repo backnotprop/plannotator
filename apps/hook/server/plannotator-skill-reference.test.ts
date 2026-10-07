@@ -9,6 +9,9 @@
  *   - Subcommands: BIDIRECTIONAL. Every subcommand the skill documents must
  *     exist in the CLI, and every user-facing CLI subcommand must appear in
  *     the skill. A renamed, removed, or newly added subcommand fails here.
+ *     Unreleased subcommands (HIDDEN_SUBCOMMANDS in cli.ts) are the one
+ *     exception, and the rule flips for them: they must NOT be in the skill
+ *     or the top-level help until they are taken out of that set.
  *   - Flags: ONE-DIRECTIONAL. Every flag the skill mentions must be accepted
  *     somewhere in the CLI, so a renamed or deleted flag fails. The reverse
  *     is NOT asserted: a new CLI flag that the skill never mentions passes.
@@ -31,6 +34,7 @@ import { AGENT_CONFIG } from "@plannotator/shared/agents";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/shared/question-block";
 import {
   formatTopLevelHelp,
+  HIDDEN_SUBCOMMANDS,
   SUBCOMMAND_HELP,
   SUBCOMMAND_HELP_ALIASES,
 } from "./cli";
@@ -211,7 +215,8 @@ describe("plannotator knowledge skill freshness", () => {
   test("no user-facing CLI subcommand is missing from the skill", () => {
     // The user-facing surface is what cli.ts publishes help for (plus its
     // aliases and the top-level usage lines). Internal dispatch-only
-    // subcommands (opencode-*, copilot-plan, install-runtime) are exempt.
+    // subcommands (opencode-*, copilot-plan, install-runtime) are exempt, and
+    // so are unreleased ones (HIDDEN_SUBCOMMANDS; see the next test).
     const userFacing = new Set<string>([
       ...Object.keys(SUBCOMMAND_HELP),
       ...Object.keys(SUBCOMMAND_HELP_ALIASES),
@@ -221,11 +226,34 @@ describe("plannotator knowledge skill freshness", () => {
     )) {
       userFacing.add(m[1]);
     }
+    for (const sub of HIDDEN_SUBCOMMANDS) userFacing.delete(sub);
+    expect(userFacing.size).toBeGreaterThanOrEqual(8);
     for (const sub of userFacing) {
       expect(
         documentedSubcommands.has(sub),
         `CLI subcommand \`plannotator ${sub}\` is not documented in apps/skills/core/plannotator/SKILL.md — add it (a fenced \`plannotator ${sub}\` usage line)`,
       ).toBe(true);
+    }
+  });
+
+  test("unreleased subcommands stay out of the skill and the top-level help", () => {
+    // What regresses: someone documents a hidden subcommand (the Inbox before
+    // its window ships) and agents start running it, or it leaks into
+    // `plannotator --help`. A hidden entry must also still be a real
+    // subcommand, so a stale name in the set cannot make this pass vacuously.
+    const topLevel = formatTopLevelHelp();
+    const skillText = skillDoc.toLowerCase();
+    for (const sub of HIDDEN_SUBCOMMANDS) {
+      expect(
+        sub in SUBCOMMAND_HELP,
+        `HIDDEN_SUBCOMMANDS names \`${sub}\`, which has no SUBCOMMAND_HELP entry — remove it from the set`,
+      ).toBe(true);
+      expect(
+        documentedSubcommands.has(sub),
+        `\`plannotator ${sub}\` is unreleased (HIDDEN_SUBCOMMANDS in cli.ts) but apps/skills/core/plannotator/SKILL.md documents it`,
+      ).toBe(false);
+      expect(skillText).not.toContain(`plannotator ${sub}`);
+      expect(topLevel).not.toContain(`plannotator ${sub}`);
     }
   });
 });

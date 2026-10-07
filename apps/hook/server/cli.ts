@@ -158,8 +158,6 @@ export function formatTopLevelHelp(): string {
     "  plannotator guide share --id <savedGuideId> | --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--public] [--ttl <7d>] [--json]",
     "  plannotator guide unshare <id> --token <deleteToken>",
     "  plannotator sessions",
-    "  plannotator inbox [--background | --no-open]",
-    "  plannotator inbox mcp",
     "  plannotator uninstall [--purge] [--yes] [--dry-run]",
     "  plannotator improve-context",
     "",
@@ -169,6 +167,20 @@ export function formatTopLevelHelp(): string {
     "  running 'plannotator' without arguments is for hook integration and expects JSON on stdin",
   ].join("\n");
 }
+
+/**
+ * Subcommands that work but are not released yet. They keep their
+ * `<sub> --help` text and stay known to the dispatcher (so they never read as
+ * "Unknown command"), but they are left out of everything that advertises the
+ * CLI: the top-level help, the "Did you mean" suggestions, and the plannotator
+ * knowledge skill (plannotator-skill-reference.test.ts requires a hidden
+ * subcommand to be ABSENT from the skill and every other one to be present).
+ * To launch one, delete it from this set, add its usage lines to
+ * formatTopLevelHelp() and document it in apps/skills/core/plannotator/SKILL.md.
+ *
+ * `inbox`: the Plannotator Inbox, hidden until its window ships.
+ */
+export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set(["inbox"]);
 
 // Per-subcommand usage text. Keyed by the canonical subcommand token; aliases
 // (e.g. `last` → `annotate-last`) are resolved in formatSubcommandHelp().
