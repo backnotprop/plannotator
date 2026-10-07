@@ -259,7 +259,7 @@ export function parseInboxBridgeCommands(text: string): InboxReplyCommand[] {
 
 /** The fixed second line of every wake: who is speaking, and how to answer. */
 export const INBOX_WAKE_INSTRUCTION =
-  "The person replied to you in the Plannotator Inbox. Their reply follows as they wrote it: it is their answer to you. Answer them in the thread with plannotator_inbox send_message when they need to hear back."
+  "The person replied to you in the Plannotator Inbox. Their reply follows as they wrote it: it is their answer to you. When they need to hear back, answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above."
 
 /**
  * The turn a reply becomes: `Plannotator Inbox: <subject> (<reply id>)`, the

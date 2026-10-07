@@ -493,7 +493,7 @@ describe('register', () => {
     for (let second = 0; second < 6; second++) await w.clock.advance(1_000)
 
     expect(w.submits).toEqual([
-      'Plannotator Inbox: Ship it? (msg_reply)\nThe person replied to you in the Plannotator Inbox. Their reply follows as they wrote it: it is their answer to you. Answer them in the thread with plannotator_inbox send_message when they need to hear back.\n\nYes.\n\nAfter the 3pm freeze.',
+      'Plannotator Inbox: Ship it? (msg_reply)\nThe person replied to you in the Plannotator Inbox. Their reply follows as they wrote it: it is their answer to you. When they need to hear back, answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above.\n\nYes.\n\nAfter the 3pm freeze.',
     ])
     expect(delivered).toBe(true)
     const polls = calls.filter((c) => c.url.endsWith('/api/inbox/bridge/poll'))

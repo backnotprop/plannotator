@@ -339,6 +339,36 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     w.proof(`reply ${nextReply} after the person moved to the second process: first ${first.host.submits.length}, second ${second.host.submits.length}`)
   }, 90_000)
 
+  test("the agent's answer to a wake lands in the same thread: send_message with reply_to set to the id the wake's first line names (a named thread too)", async () => {
+    const w = world('08-answer-after-wake')
+    startInbox(w)
+    const session = await open(w, 'session-answer')
+    const asked = await session.callInbox({ action: 'send_message', body: QUESTION, thread: 'refund-webhooks' }, w.project)
+    if ('deny' in asked) throw new Error(asked.deny)
+    const sent = JSON.parse(asked.text.slice(asked.text.indexOf('{'))) as { message_id: string; thread_id: string }
+    w.proof(`> plannotator_inbox send_message thread "refund-webhooks"\n${asked.text}\n`)
+    const replyId = await personSends(w, sent.message_id, 'Retry with the same key.')
+    await waitFor('the wake turn', () => session.host.submits.length === 1)
+    const wake = session.host.submits[0]!
+    // What the fixed line tells the agent to do, read from the turn as the agent reads it.
+    const header = /^Plannotator Inbox: .* \((msg_[0-9A-Z]+)\)$/.exec(wake.split('\n')[0]!)
+    expect(header?.[1]).toBe(replyId)
+    expect(wake.split('\n')[1]).toContain('reply_to set to the id in parentheses on the line above')
+    const answer = await session.callInbox({ action: 'send_message', reply_to: header![1], body: 'Done: retries reuse the key.' }, w.project)
+    if ('deny' in answer) throw new Error(answer.deny)
+    const answered = JSON.parse(answer.text.slice(answer.text.indexOf('{'))) as { thread_id: string; new_thread: boolean }
+    expect(answered.thread_id).toBe(sent.thread_id)
+    expect(answered.new_thread).toBe(false)
+    const t = await thread(w, sent.thread_id)
+    expect(t.messages.map((m) => m.author.kind)).toEqual(['agent', 'person', 'agent'])
+    w.proof(`wake line 1: ${wake.split('\n')[0]}\n> plannotator_inbox send_message reply_to ${header![1]}\nlanded in ${answered.thread_id} (the asked thread ${sent.thread_id}), new_thread ${answered.new_thread}`)
+    // Why the line says reply_to: without it the answer would start another thread.
+    const loose = await session.callInbox({ action: 'send_message', body: 'An answer without reply_to.' }, w.project)
+    if ('deny' in loose) throw new Error(loose.deny)
+    expect((JSON.parse(loose.text.slice(loose.text.indexOf('{'))) as { thread_id: string }).thread_id).not.toBe(sent.thread_id)
+    w.proof('the same answer without reply_to lands in a different thread')
+  }, 90_000)
+
   test('a dead Inbox is started detached by the first tool call, with no browser tab, and the message lands', async () => {
     const w = world('07-dead-inbox-started')
     const first = startInbox(w)
