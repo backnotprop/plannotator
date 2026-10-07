@@ -200,10 +200,14 @@ export const SESSION_ASK_DRAFTS_CLEARED =
 /** Upper bound on the draft list in one question; a longer one is cut. */
 export const MAX_SESSION_ASK_DRAFTS_CHARS = 16_000;
 
+/** Text inside a draft list that reads like the end marker. */
+const DRAFTS_END_LOOKALIKE = /\[\s*end\s+of\s+(?:the\s+)?draft\s+annotations?\b[^\]\n]*\]/gi;
+
 function formatDraftBlock(draftAnnotations: string | undefined): string | null {
 	if (draftAnnotations === undefined) return null;
-	// The list's own text cannot close the frame early.
-	let list = draftAnnotations.split(SESSION_ASK_DRAFTS_END).join("[End of draft annotations (quoted)]").trim();
+	// The list's own text cannot close the frame early, in any spelling a
+	// reader would take for the end marker (case, spacing, a suffix).
+	let list = draftAnnotations.replace(DRAFTS_END_LOOKALIKE, "(quoted: end of draft annotations)").trim();
 	if (!list) return SESSION_ASK_DRAFTS_CLEARED;
 	if (list.length > MAX_SESSION_ASK_DRAFTS_CHARS) {
 		list = `${list.slice(0, MAX_SESSION_ASK_DRAFTS_CHARS)}\n… (the rest of the draft list was cut)`;

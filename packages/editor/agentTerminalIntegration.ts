@@ -73,9 +73,13 @@ export const ASK_DRAFTS_END = "[End of draft annotations]";
 export const ASK_DRAFTS_CLEARED =
   "[The reviewer has no draft annotations now. Disregard any draft list sent earlier.]";
 
+/** Text inside a draft list that reads like the end marker (same rule as
+ *  the bridge's frame). */
+const ASK_DRAFTS_END_LOOKALIKE = /\[\s*end\s+of\s+(?:the\s+)?draft\s+annotations?\b[^\]\n]*\]/gi;
+
 function terminalDraftBlock(draftAnnotations: string | undefined): string {
   if (draftAnnotations === undefined) return "";
-  const list = draftAnnotations.split(ASK_DRAFTS_END).join("[End of draft annotations (quoted)]").trim();
+  const list = draftAnnotations.replace(ASK_DRAFTS_END_LOOKALIKE, "(quoted: end of draft annotations)").trim();
   return list ? [ASK_DRAFTS_LABEL, list, ASK_DRAFTS_END].join("\n") : ASK_DRAFTS_CLEARED;
 }
 

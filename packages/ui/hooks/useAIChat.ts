@@ -67,6 +67,9 @@ export function draftAnnotationsToSend(
   return current === seen ? undefined : current;
 }
 
+/** `draftAnnotationsToSend` key for "Ask this session": one host session per page. */
+const BRIDGE_DRAFTS_KEY = 'session-bridge';
+
 /** Stream messages that show the session received the question. */
 const DELIVERED_MESSAGE_TYPES = new Set(['text_delta', 'text', 'tool_use', 'tool_result', 'result']);
 
@@ -328,8 +331,13 @@ export function useAIChat({
   // The params each question was asked with, so a busy answer can be
   // re-asked ("Ask when it finishes", "Interrupt and ask now").
   const paramsByQuestionRef = useRef(new Map<string, AskAIParams>());
-  // The draft list the current session last RECEIVED, so an unchanged list is
-  // not pasted into it again on every question.
+  // The draft list the agent session last RECEIVED, so an unchanged list is
+  // not pasted into it again on every question. Kept for the page, not per
+  // Plannotator AI session: every Ask AI session (a new thread, a document
+  // switch in a folder or bundle) reaches the SAME host agent session through
+  // the bridge, which keeps what it already read. Per AI session, a new thread
+  // re-sent the whole list, and drafts cleared after one never reached the
+  // session as cleared.
   const deliveredDraftsRef = useRef<{ sessionId: string; text: string } | null>(null);
 
   const ask = useCallback(async (params: AskAIParams, askOptions?: { providerId?: string }) => {
@@ -389,14 +397,14 @@ export function useAIChat({
       }
 
       const fullPrompt = buildPrompt(params);
-      const drafts = draftAnnotationsToSend(deliveredDraftsRef.current, sid, params.draftAnnotations);
+      const drafts = draftAnnotationsToSend(deliveredDraftsRef.current, BRIDGE_DRAFTS_KEY, params.draftAnnotations);
       // Recorded once the session shows it received the question, so a busy,
       // gone or failed ask sends the list again next time.
       const markDraftsDelivered = (msg: { type?: unknown; code?: unknown }) => {
         if (drafts === undefined) return;
         const received = DELIVERED_MESSAGE_TYPES.has(String(msg.type))
           || (msg.type === 'error' && msg.code === SESSION_ASK_ERROR_CODES.takenOver);
-        if (received) deliveredDraftsRef.current = { sessionId: sid, text: drafts };
+        if (received) deliveredDraftsRef.current = { sessionId: BRIDGE_DRAFTS_KEY, text: drafts };
       };
       const res = await aiTransport.query({
         sessionId: sid,

@@ -228,6 +228,37 @@ describe.if(hasDom)('Ask this session: unsubmitted annotations (#1748)', () => {
     expect(received).toHaveLength(5);
   });
 
+  // A new thread (the App starts one on every document switch: folder and
+  // bundle files, linked documents) is a new Ask AI session but the SAME agent
+  // session, which already read the list. The failure this guards: the whole
+  // list pasted again per thread, and drafts removed after a thread switch
+  // never reported as cleared, so the agent kept a stale list.
+  test('a new thread does not resend the list, and still reports it cleared', async () => {
+    const { received } = serverWithSession();
+    const chat = await mountChat();
+    const ask = async (prompt: string, drafts: Annotation[]) => {
+      await act(async () => {
+        await chat.current!.ask({ prompt, ...askParams(chat.current!, drafts, true) });
+      });
+    };
+    const newThread = async () => {
+      await act(async () => { chat.current!.resetThread(); });
+    };
+
+    await ask('first', DRAFTS);
+    expect(received[0]).toContain(SESSION_ASK_DRAFTS_LABEL);
+    const firstSession = chat.current!.sessionId;
+
+    await newThread();
+    await ask('second', DRAFTS);
+    expect(chat.current!.sessionId).not.toBe(firstSession);
+    expect(received[1]).toBe([SESSION_ASK_HEADER, 'Surface: annotating your last message', '', 'second'].join('\n'));
+
+    await newThread();
+    await ask('third', []);
+    expect(received[2]).toBe([SESSION_ASK_HEADER, 'Surface: annotating your last message', '', SESSION_ASK_DRAFTS_CLEARED, '', 'third'].join('\n'));
+  });
+
   // The 0.28.6 wire: a client that still sends the feedback export as
   // contextUpdate. The server keeps it out of the session.
   test('a feedback-export contextUpdate never reaches the session', async () => {

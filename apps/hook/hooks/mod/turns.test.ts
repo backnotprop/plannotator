@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  formatSessionAskText,
   SESSION_ASK_TAKEN_OVER_BY_PERSON_TEXT,
   SESSION_ASK_TAKEN_OVER_INTERRUPT_TEXT,
   SESSION_ASK_TAKEN_OVER_TEXT,
@@ -63,6 +64,39 @@ describe('TurnTracker claims only its own prompt', () => {
     turns.onTurnStart('t1', 'The plannotator plugin sent a message:\nwhy?')
     turns.onText('t1', 'because')
     expect(s.deltas).toEqual(['because'])
+  })
+})
+
+// #1748 put the reviewer's draft list between the surface line and the
+// question. The failure this guards: the mod no longer recognizing its own
+// question turn, so the answer never streams back to Plannotator. The turn is
+// matched by the question's first and last line, so it must still be claimed
+// when the engine frames it, and even when it rewrites the middle.
+describe('TurnTracker claims a question carrying a draft list', () => {
+  const text = formatSessionAskText(
+    { mode: 'annotate', annotate: { content: '', filePath: 'last-message' } },
+    'Is draft 1 right?',
+    'turn',
+    'Draft 1 (line 3): comment on "Open issues" — create these\nDraft 2 (line 6): suggests removing "Update the docs"',
+  )
+
+  test('framed by the engine', () => {
+    const turns = new TurnTracker()
+    const s = sink()
+    turns.beginAsk('a1', text, s)
+    turns.onTurnStart('t1', `The plannotator plugin sent a message: ${text}`)
+    expect(turns.ownsTurn('t1')).toBe(true)
+    turns.onText('t1', 'yes')
+    expect(s.deltas).toEqual(['yes'])
+  })
+
+  test('with the draft lines rewritten', () => {
+    const turns = new TurnTracker()
+    turns.beginAsk('a1', text, sink())
+    const lines = text.split('\n')
+    const collapsed = [lines[0], '[Pasted text #1 +6 lines]', lines[lines.length - 1]].join('\n')
+    turns.onTurnStart('t1', collapsed)
+    expect(turns.ownsTurn('t1')).toBe(true)
   })
 })
 
