@@ -1,6 +1,7 @@
 import { defineCollection } from 'astro:content';
 import { glob } from 'astro/loaders';
 import { z } from 'astro/zod';
+import { INBOX_LAUNCHED, INBOX_POST_ID } from './lib/inbox-launch';
 
 const docs = defineCollection({
   loader: glob({ pattern: '**/*.md', base: './src/content/docs' }),
@@ -16,7 +17,11 @@ const docs = defineCollection({
 });
 
 const blog = defineCollection({
-  loader: glob({ pattern: '**/*.md', base: './src/content/blog' }),
+  // The Inbox post is not in the collection until launch (src/lib/inbox-launch.ts).
+  loader: glob({
+    pattern: INBOX_LAUNCHED ? '**/*.md' : ['**/*.md', `!${INBOX_POST_ID}.md`],
+    base: './src/content/blog',
+  }),
   schema: z.object({
     title: z.string(),
     description: z.string(),

@@ -9,18 +9,17 @@ interface Props {
   date: Date;
   author: string;
   tags: string[];
-  noindex?: boolean;
   ogImage?: string;
 }
 
-const { title, description, date, author, tags, noindex = false, ogImage } = Astro.props;
+const { title, description, date, author, tags, ogImage } = Astro.props;
 const formattedDate = date.toLocaleDateString('en-US', {
   year: 'numeric',
   month: 'long',
   day: 'numeric',
 });
 ---
-<Base title={`${title} - Plannotator Blog`} description={description} noindex={noindex} ogImage={ogImage}>
+<Base title={`${title} - Plannotator Blog`} description={description} ogImage={ogImage}>
   <div class="min-h-screen bg-background text-foreground">
     <Nav />
     <div class="max-w-3xl mx-auto px-8 pt-20 pb-16">

@@ -4,7 +4,6 @@ interface Props {
   description?: string;
   ogImage?: string;
   canonicalUrl?: string;
-  noindex?: boolean;
 }
 
 const {
@@ -12,7 +11,6 @@ const {
   description = 'Interactive Plan Review: Mark up and refine coding-agent plans in a browser UI, share with your team, and integrate with Claude Code, Codex, OpenCode, and more.',
   ogImage = 'https://plannotator.ai/assets/plannotator-generic-og-v1.jpg',
   canonicalUrl,
-  noindex = false,
 } = Astro.props;
 
 const canonical = canonicalUrl || Astro.url.href;
@@ -39,7 +37,7 @@ import '../styles/global.css';
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImage} />
 
-    <meta name="robots" content={noindex ? 'noindex, nofollow' : 'index, follow'} />
+    <meta name="robots" content="index, follow" />
     <link rel="canonical" href={canonical} />
     <link rel="alternate" type="application/rss+xml" title="Plannotator Blog" href="/rss.xml" />
 

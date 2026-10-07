@@ -1,12 +1,10 @@
-// Plannotator Inbox is hidden until launch. While this is false the Nav and
-// the Footer carry no Inbox link, and /inbox/ and the post stay routable by URL
-// for review but are noindex and left out of the sitemap, the blog index and
-// the RSS feed.
+// Plannotator Inbox is hidden until launch. While this is false the deployed
+// site has none of it: /inbox/ and the post are not generated, the post is not
+// in the blog collection, the screens and the OG image (inbox-assets/) are not
+// copied into dist, and the Nav and the Footer carry no Inbox link.
 // Flip at launch (and set the post's `date` to the release day).
-export const INBOX_LAUNCHED = false;
+// For review before launch, build it locally with the switch on:
+//   INBOX_LAUNCHED=true bun run --cwd apps/marketing build
+export const INBOX_LAUNCHED = false || process.env.INBOX_LAUNCHED === 'true';
 
 export const INBOX_POST_ID = 'the-age-of-the-inbox';
-
-/** A post that is built but kept out of listings and search until its launch. */
-export const isUnlaunchedPost = (postId: string): boolean =>
-  !INBOX_LAUNCHED && postId === INBOX_POST_ID;

@@ -5,6 +5,12 @@ import Footer from '../components/Footer.astro';
 import InboxShot from '../components/inbox/InboxShot.astro';
 import { INBOX_LAUNCHED, INBOX_POST_ID } from '../lib/inbox-launch';
 
+// /inbox/ is generated only once the Inbox launches: until then the deployed
+// site has no such page (src/lib/inbox-launch.ts).
+export function getStaticPaths() {
+  return INBOX_LAUNCHED ? [{ params: { inbox: 'inbox' } }] : [];
+}
+
 // Words of record: research/design/plannotator-inbox-marketing-2026-10-07
 // (LANDING-v5.md, with LANDING-v4.md sections 3 to 8). Visual spec: that
 // folder's landing/index.html. No motion on this page (owner, round 2).
@@ -34,7 +40,6 @@ const steps = [
   title={title}
   description={description}
   ogImage="https://plannotator.ai/assets/inbox/inbox-og.jpg"
-  noindex={!INBOX_LAUNCHED}
 >
   <div class="min-h-screen bg-background text-foreground">
     <Nav />
