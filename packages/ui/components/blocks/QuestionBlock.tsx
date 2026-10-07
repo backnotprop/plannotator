@@ -36,7 +36,10 @@ import { QuestionContext } from './QuestionContext';
  *
  * A host can add its own actions at the right of the footer
  * (`renderFooter`), and a question carrying `Decision: when answered` or a
- * `Decision: [statement](url)` link shows that beside the prompt.
+ * `Decision: [statement](url)` link shows that beside the prompt. A host can
+ * also let the reviewer switch a `Decision: when answered` question's
+ * recording off and on (`decisionRecording` + `onToggleDecisionRecording`),
+ * and hide the card's own status tag to draw its own (`statusTag: 'none'`).
  */
 
 /** Pointer travel (px) above which a press on a choice row is a drag. */
@@ -50,7 +53,7 @@ const now = (): number => (typeof performance !== 'undefined' ? performance.now(
 
 const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(' ');
 
-const Tag: React.FC<{ tone: 'rec' | 'ok' | 'skip' | 'open'; children: React.ReactNode; className?: string }> = ({ tone, children, className }) => (
+const Tag: React.FC<{ tone: 'rec' | 'ok' | 'skip' | 'open'; children: React.ReactNode; className?: string; style?: React.CSSProperties }> = ({ tone, children, className, style }) => (
   <span
     className={cx(
       'annotation-exclude select-none inline-flex items-center gap-1 whitespace-nowrap rounded px-1.5 py-px align-[1px] text-[10.5px] font-semibold tracking-[0.03em]',
@@ -60,6 +63,7 @@ const Tag: React.FC<{ tone: 'rec' | 'ok' | 'skip' | 'open'; children: React.Reac
       tone === 'open' && 'border border-dashed border-border text-muted-foreground',
       className,
     )}
+    style={style}
     data-pinpoint-ignore=""
   >
     {children}
@@ -77,6 +81,16 @@ const DiamondGlyph = () => (
     <path d="M2.7 10.3a2.41 2.41 0 0 0 0 3.41l7.59 7.59a2.41 2.41 0 0 0 3.41 0l7.59-7.59a2.41 2.41 0 0 0 0-3.41l-7.59-7.59a2.41 2.41 0 0 0-3.41 0Z" strokeLinejoin="round" />
   </svg>
 );
+
+/** Draws a decision tag in its "off" state: the same words, dimmed, with a
+ *  dotted outline instead of the tinted fill. Inline so it adds no utility
+ *  classes to the shared stylesheet. */
+const DECISION_OFF_STYLE: React.CSSProperties = {
+  background: 'transparent',
+  opacity: 0.6,
+  outline: '1px dotted currentColor',
+  outlineOffset: '-1px',
+};
 
 /** Two answers say the same thing (identity and line ignored). */
 const sameAnswer = (a: QuestionAnswer | null | undefined, b: QuestionAnswer | null | undefined): boolean => {
@@ -110,6 +124,21 @@ export interface QuestionBlockProps {
    *  saved answer (never the unsaved draft). Rendered in read-only cards too;
    *  return null for nothing. */
   renderFooter?: (question: IndexedQuestion, answer: QuestionAnswer | undefined) => React.ReactNode;
+  /** Whether answering a `Decision: when answered` question records a
+   *  decision (default true). False draws the "Records a decision" tag dimmed
+   *  with a dotted outline and hides the "Answering this records a decision"
+   *  row. Has no effect on a question whose decision is already recorded
+   *  (`Decision: [statement](url)`) or that carries no decision line. */
+  decisionRecording?: boolean;
+  /** Makes the "Records a decision" tag a toggle button (`aria-pressed`):
+   *  a click calls this with the question's key and the next state. The host
+   *  stores it and passes it back as `decisionRecording`. Not offered in a
+   *  read-only card (no answer handler), which draws the tag as it stands. */
+  onToggleDecisionRecording?: (key: string, next: boolean) => void;
+  /** `'none'` hides the card's own status tag (Open / Answered / Settled /
+   *  Skipped) so the host can draw its own; the decision tags stay. Default
+   *  `'card'`. */
+  statusTag?: 'card' | 'none';
   onOpenLinkedDoc?: (path: string) => void;
   onOpenCodeFile?: (path: string) => void;
   imageBaseDir?: string;
@@ -128,6 +157,9 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   onSaveAnswer,
   saveLabel,
   renderFooter,
+  decisionRecording,
+  onToggleDecisionRecording,
+  statusTag = 'card',
   onOpenLinkedDoc,
   onOpenCodeFile,
   imageBaseDir,
@@ -320,6 +352,17 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   const other = answer?.other ?? '';
   const otherOn = other.trim() !== '';
 
+  // A `Decision: when answered` question the host may switch off. A recorded
+  // decision (`question.decision`) is never affected.
+  const decisionCapable = !question.decision && !!question.decisionOnAnswer;
+  const recordingOn = decisionRecording ?? true;
+  const decisionToggleable = decisionCapable && !readOnly && !!onToggleDecisionRecording;
+  // Present only when the host speaks to recording, so a card without these
+  // props carries exactly the attributes it always did.
+  const recordingAttr = decisionCapable && (decisionRecording !== undefined || !!onToggleDecisionRecording)
+    ? (recordingOn ? 'on' : 'off')
+    : undefined;
+
   const describedBy = [question.context ? contextId : null, question.kind === 'text' && question.suggestedText && !answered ? suggestId : null]
     .filter(Boolean)
     .join(' ') || undefined;
@@ -344,23 +387,44 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       aria-describedby={describedBy}
       aria-disabled={readOnly || undefined}
       data-question-decision={question.decision ? 'recorded' : question.decisionOnAnswer ? 'on-answer' : undefined}
+      data-question-decision-recording={recordingAttr}
     >
       <div className="annotation-exclude select-none mb-1.5 flex items-center gap-2" data-pinpoint-ignore="">
         <span className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{eyebrow}</span>
         <span className="ml-auto">
           {question.decision && <><Tag tone="rec"><DiamondGlyph />Decision</Tag>{' '}</>}
-          {!question.decision && question.decisionOnAnswer && <><Tag tone="rec"><DiamondGlyph />Records a decision</Tag>{' '}</>}
-          {status === 'answered' && <Tag tone="ok"><CheckGlyph />Answered</Tag>}
-          {status === 'settled' && <Tag tone="ok"><CheckGlyph />Settled</Tag>}
-          {status === 'skipped' && <Tag tone="skip">Skipped</Tag>}
-          {status === 'open' && <Tag tone="open">Open</Tag>}
+          {decisionCapable && (decisionToggleable ? (
+            // Focus shows as a ring, not an outline: the dotted outline is
+            // what draws the off state.
+            <><button
+              type="button"
+              aria-pressed={recordingOn}
+              onClick={() => onToggleDecisionRecording!(question.key, !recordingOn)}
+              className="annotation-exclude select-none inline-flex cursor-pointer items-center gap-1 whitespace-nowrap rounded px-1.5 py-px align-[1px] text-[10.5px] font-semibold tracking-[0.03em] bg-primary/15 text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              style={recordingOn ? undefined : DECISION_OFF_STYLE}
+              data-pinpoint-ignore=""
+              data-question-decision-toggle=""
+            ><DiamondGlyph />Records a decision</button>{' '}</>
+          ) : recordingOn ? (
+            <><Tag tone="rec"><DiamondGlyph />Records a decision</Tag>{' '}</>
+          ) : (
+            <><Tag tone="rec" style={DECISION_OFF_STYLE}><DiamondGlyph />Records a decision</Tag>{' '}</>
+          ))}
+          {statusTag !== 'none' && (
+            <>
+              {status === 'answered' && <Tag tone="ok"><CheckGlyph />Answered</Tag>}
+              {status === 'settled' && <Tag tone="ok"><CheckGlyph />Settled</Tag>}
+              {status === 'skipped' && <Tag tone="skip">Skipped</Tag>}
+              {status === 'open' && <Tag tone="open">Open</Tag>}
+            </>
+          )}
         </span>
       </div>
 
       <p id={promptId} className="m-0 text-[15px] font-semibold leading-[1.45] text-foreground" data-question-part="prompt">
         {inline(question.prompt)}
       </p>
-      {(question.decision || question.decisionOnAnswer) && (
+      {(question.decision || (question.decisionOnAnswer && recordingOn)) && (
         <div
           className="annotation-exclude mt-2 mb-0.5 flex items-center gap-2 rounded-lg bg-primary/8 px-[9px] py-1.5 text-[12.5px] leading-[18px] text-foreground [&>svg]:text-primary"
           data-pinpoint-ignore=""

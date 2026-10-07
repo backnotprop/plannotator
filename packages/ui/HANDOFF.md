@@ -1970,6 +1970,63 @@ What a host should know:
   emoji grapheme, including ZWJ sequences, flags, keycaps and skin tones, or
   null) and `emojiFromFieldInput`. Nothing was removed or renamed.
 
+## Question decision toggle and status tag (ui 0.52.0, unreleased; additive, no core change)
+
+What Workspaces asked for: the reviewer can switch a `Decision: when answered`
+question's recording off and on from the card itself, and the host can draw
+its own status tag. Three optional props on `Viewer`, forwarded through
+`BlockRenderer` to `QuestionBlock` the way `renderQuestionFooter` is.
+Plannotator passes none of them, so its cards render exactly as before.
+
+| `Viewer` | `BlockRenderer` | `QuestionBlock` |
+| --- | --- | --- |
+| `questionDecisionRecording?: (question: IndexedQuestion) => boolean \| undefined` | `questionDecisionRecording?: boolean` | `decisionRecording?: boolean` |
+| `onToggleQuestionDecisionRecording?: (key, next) => void` | same | `onToggleDecisionRecording?: (key, next) => void` |
+| `questionStatusTag?: 'card' \| 'none'` | same | `statusTag?: 'card' \| 'none'` |
+
+- **Recording state** (`decisionRecording`, default `true`; on `Viewer` a
+  function of the question, called per question card, so it can read your
+  store by `question.question.key`). It applies only to a question carrying
+  `Decision: when answered` (`decisionOnAnswer`) whose decision is not
+  already recorded. Off draws the same "Records a decision" tag dimmed with a
+  dotted outline (never different words) and hides the "Answering this
+  records a decision" row (`[data-question-decision-row]`). A recorded
+  decision (`Decision: [statement](url)`) and a question with no decision line
+  are never affected.
+- **The toggle** (`onToggleDecisionRecording`): the tag becomes
+  `<button type="button" aria-pressed>` with `[data-question-decision-toggle]`,
+  keyboard operable, a focus ring (a ring, not an outline: the dotted outline
+  draws the off state). A click calls the handler with the question's key and
+  the NEXT state; the card does not keep the state itself, so pass it back
+  through `decisionRecording` / `questionDecisionRecording`.
+- **Read-only cards never offer the toggle.** A card is read-only when it has
+  no answer handler (`Viewer`: `readOnly`, or neither `onAnswerQuestion` nor
+  `onSaveQuestionAnswer`); it draws the tag in its current state as a plain
+  tag. `Viewer` also drops `onToggleQuestionDecisionRecording` under
+  `readOnly`, like the answer handlers.
+- **`decisionRecording: false` without a handler** is honored: the static tag
+  is drawn off and the row is hidden. Use it to show a state the reviewer may
+  not change.
+- **Attributes.** `data-question-decision` keeps its values (`on-answer`,
+  `recorded`) whatever the toggle says, so a selector keyed on the question's
+  kind does not move. A separate `data-question-decision-recording="on" | "off"`
+  appears on the card only for a `decisionOnAnswer` question when the host
+  passed `decisionRecording` or the handler; a card with neither carries no
+  new attribute.
+- **`statusTag: 'none'`** hides the card's own Open / Answered / Settled /
+  Skipped tag; the decision tags ("Decision", "Records a decision") stay, and
+  `data-question-status` still carries the status for your own tag.
+- **No stylesheet change.** The toggle reuses utility classes the package
+  already ships, and the off state is an inline style, so `styles.css` and
+  the guides.show viewer manifest are unchanged (no guides.show deploy needed
+  for this).
+
+Pinned by `components/blocks/QuestionBlock.decisionToggle.test.tsx`
+(DOM-gated): the toggle's button, `aria-pressed` and handler arguments, the
+row hidden when off, recorded and plain questions untouched, read-only cards
+static, `statusTag: 'none'`, the `Viewer` threading, and a card with none of
+the props rendering the same markup.
+
 ---
 
 ## The law (guardrails for anyone editing `@plannotator/ui`)

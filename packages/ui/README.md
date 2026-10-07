@@ -384,6 +384,14 @@ See HANDOFF.md § "Questions in documents (0.48.0, core 0.25.8)".
 
 See HANDOFF.md § "Question host seams (ui 0.49.0, core 0.25.9)".
 
+**Decision recording toggle and status tag (ui 0.52.0, unreleased).** Also optional on `Viewer`, also unused by Plannotator:
+
+- `questionDecisionRecording(question) => boolean | undefined`: false draws a `Decision: when answered` question's "Records a decision" tag dimmed with a dotted outline and hides its "Answering this records a decision" row. A recorded decision is never affected.
+- `onToggleQuestionDecisionRecording(key, next)`: makes that tag an `aria-pressed` toggle button; store `next` and return it from `questionDecisionRecording`. Not offered under `readOnly` or in a card without an answer handler.
+- `questionStatusTag: 'none'`: hides the card's own Open / Answered / Settled / Skipped tag so you can draw your own; the decision tags stay.
+
+See HANDOFF.md § "Question decision toggle and status tag (ui 0.52.0, unreleased; …)".
+
 ### Diff file tree (`components/DiffFileTree`; next ui release)
 
 A read-only file tree for a list of changed files, to sit beside a host's own per-file diff list. It is Plannotator's code-review tree, not a lookalike: the builder (`utils/diffFileTree`), the folder open/closed hook (`hooks/useDiffFileTreeExpansion`) and the row atoms moved here from `packages/review-editor`, and the review now renders from them.

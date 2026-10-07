@@ -218,6 +218,21 @@ export interface ViewerProps {
    *  decision"), given the indexed question and its saved answer. Rendered in
    *  read-only cards too; return null for none. */
   renderQuestionFooter?: (question: IndexedQuestion, answer: QuestionAnswer | undefined) => React.ReactNode;
+  /** Whether answering a `Decision: when answered` question records a
+   *  decision, per question: return false to draw its "Records a decision"
+   *  tag dimmed with a dotted outline and hide the "Answering this records a
+   *  decision" row; true or undefined keeps today's card. Not consulted for a
+   *  question whose decision is already recorded. */
+  questionDecisionRecording?: (question: IndexedQuestion) => boolean | undefined;
+  /** Makes a `Decision: when answered` question's "Records a decision" tag a
+   *  toggle button (`aria-pressed`); a click calls this with the question's
+   *  key and the next state, which the host stores and returns from
+   *  `questionDecisionRecording`. Ignored when `readOnly`. */
+  onToggleQuestionDecisionRecording?: (key: string, next: boolean) => void;
+  /** `'none'` hides each question card's own status tag (Open / Answered /
+   *  Settled / Skipped) so the host can draw its own; the decision tags stay.
+   *  Default `'card'`. */
+  questionStatusTag?: 'card' | 'none';
   onAskAI?: CommentAskAIHandler;
   /** Whether comment popovers offer image attachments. Hosts without an
    *  uploadTransport pass false so the attach affordance never dead-ends.
@@ -590,6 +605,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   onSaveQuestionAnswer,
   saveQuestionAnswerLabel,
   renderQuestionFooter,
+  questionDecisionRecording,
+  onToggleQuestionDecisionRecording,
+  questionStatusTag,
   onAskAI,
   allowImages = true,
   readOnly = false,
@@ -1551,6 +1569,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   onSaveQuestionAnswer={readOnly ? undefined : onSaveQuestionAnswer}
                   saveQuestionAnswerLabel={saveQuestionAnswerLabel}
                   renderQuestionFooter={renderQuestionFooter}
+                  questionDecisionRecording={question ? questionDecisionRecording?.(question) : undefined}
+                  onToggleQuestionDecisionRecording={readOnly ? undefined : onToggleQuestionDecisionRecording}
+                  questionStatusTag={questionStatusTag}
                 />
               );
             })()

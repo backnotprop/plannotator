@@ -51,7 +51,13 @@ export const BlockRenderer: React.FC<{
   saveQuestionAnswerLabel?: QuestionBlockProps['saveLabel'];
   /** Host actions in a question card's footer (see `QuestionBlock`). */
   renderQuestionFooter?: QuestionBlockProps['renderFooter'];
-}> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, repoHost, headingAnchorId, onNavigateAnchor, question, questionTotal, questionAnswer, onAnswerQuestion, onSaveQuestionAnswer, saveQuestionAnswerLabel, renderQuestionFooter }) => {
+  /** Whether answering this question records a decision (see `QuestionBlock`). */
+  questionDecisionRecording?: QuestionBlockProps['decisionRecording'];
+  /** Makes the "Records a decision" tag a toggle (see `QuestionBlock`). */
+  onToggleQuestionDecisionRecording?: QuestionBlockProps['onToggleDecisionRecording'];
+  /** `'none'` hides the card's own status tag (see `QuestionBlock`). */
+  questionStatusTag?: QuestionBlockProps['statusTag'];
+}> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, repoHost, headingAnchorId, onNavigateAnchor, question, questionTotal, questionAnswer, onAnswerQuestion, onSaveQuestionAnswer, saveQuestionAnswerLabel, renderQuestionFooter, questionDecisionRecording, onToggleQuestionDecisionRecording, questionStatusTag }) => {
   switch (block.type) {
     case 'heading': {
       const Tag = `h${block.level || 1}` as React.ElementType;
@@ -178,6 +184,9 @@ export const BlockRenderer: React.FC<{
               onSaveAnswer={onSaveQuestionAnswer}
               saveLabel={saveQuestionAnswerLabel}
               renderFooter={renderQuestionFooter}
+              decisionRecording={questionDecisionRecording}
+              onToggleDecisionRecording={onToggleQuestionDecisionRecording}
+              statusTag={questionStatusTag}
               onOpenLinkedDoc={onOpenLinkedDoc}
               onOpenCodeFile={onOpenCodeFile}
               imageBaseDir={imageBaseDir}
