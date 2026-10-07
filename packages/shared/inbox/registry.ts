@@ -10,9 +10,12 @@
  *  - Read on every call: callers never cache the port or token.
  *  - The token rotates on every start; it guards the connection routes only.
  *  - Running: the health answer on that port carries this entry's
- *    `serverSession`. Stopped: a dead pid with no health answer, or an answer
- *    from a different `serverSession` (the port was reused), or no answer at
- *    all. A stopped Inbox is started with `plannotator inbox --background`.
+ *    `serverSession`. Stopped: a dead pid with no health answer, an answer
+ *    from a different `serverSession` (the port was reused), or a live pid
+ *    with nothing listening (a reused pid). A stopped Inbox is started with
+ *    `plannotator inbox --background`. Busy: a live pid whose port takes the
+ *    request but does not answer in time; callers wait, never start a second
+ *    writer on the store.
  *
  * The Inbox never registers in `sessions/`, so it never holds auto-update back
  * (auto-update skips while another live pid is registered there).
@@ -105,33 +108,58 @@ export function isPidAlive(pid: number): boolean {
   }
 }
 
-/** `GET /api/inbox/health` on the entry's loopback port, or null when nothing answers as an Inbox. */
-export async function fetchInboxHealth(port: number, timeoutMs = 2000): Promise<InboxHealth | null> {
+type HealthProbe =
+  | { kind: "health"; health: InboxHealth }
+  /** Something accepted the request but did not answer in time. */
+  | { kind: "timeout" }
+  /** Refused, or an answer that is not an Inbox's. */
+  | { kind: "none" };
+
+async function probeInboxHealth(port: number, timeoutMs: number): Promise<HealthProbe> {
   try {
     const response = await fetch(`http://127.0.0.1:${port}/api/inbox/health`, {
       signal: AbortSignal.timeout(timeoutMs),
     });
-    if (!response.ok) return null;
+    if (!response.ok) return { kind: "none" };
     const body: unknown = await response.json();
-    return isInboxHealth(body) ? body : null;
-  } catch {
-    return null;
+    return isInboxHealth(body) ? { kind: "health", health: body } : { kind: "none" };
+  } catch (error) {
+    const name = (error as { name?: string } | null)?.name;
+    return name === "TimeoutError" || name === "AbortError" ? { kind: "timeout" } : { kind: "none" };
   }
+}
+
+/** `GET /api/inbox/health` on the entry's loopback port, or null when nothing answers as an Inbox. */
+export async function fetchInboxHealth(port: number, timeoutMs = 2000): Promise<InboxHealth | null> {
+  const probe = await probeInboxHealth(port, timeoutMs);
+  return probe.kind === "health" ? probe.health : null;
 }
 
 export type InboxStatus =
   | { state: "missing" }
   | { state: "stopped"; entry: InboxRegistryEntry; reason: "dead_pid" | "no_answer" | "other_session" }
+  /**
+   * The registry's pid is alive and its port accepted the health request but
+   * did not answer in time: an Inbox that is busy or paused, not a stopped
+   * one. Starting another would put a second writer on the store, so callers
+   * wait for it instead.
+   */
+  | { state: "busy"; entry: InboxRegistryEntry }
   | { state: "running"; entry: InboxRegistryEntry; health: InboxHealth };
 
 /** Read the registry and check it against the process and the port. */
-export async function inboxStatus(dataDir: string, timeoutMs?: number): Promise<InboxStatus> {
+export async function inboxStatus(dataDir: string, timeoutMs = 2000): Promise<InboxStatus> {
   const entry = readInboxRegistry(dataDir);
   if (!entry) return { state: "missing" };
-  const health = await fetchInboxHealth(entry.port, timeoutMs);
-  if (health && health.serverSession === entry.serverSession) return { state: "running", entry, health };
-  if (health) return { state: "stopped", entry, reason: "other_session" };
-  return { state: "stopped", entry, reason: isPidAlive(entry.pid) ? "no_answer" : "dead_pid" };
+  const probe = await probeInboxHealth(entry.port, timeoutMs);
+  if (probe.kind === "health") {
+    if (probe.health.serverSession === entry.serverSession) return { state: "running", entry, health: probe.health };
+    return { state: "stopped", entry, reason: "other_session" };
+  }
+  if (!isPidAlive(entry.pid)) return { state: "stopped", entry, reason: "dead_pid" };
+  // A live pid whose port takes the connection but never answers is a busy or
+  // paused Inbox; a live pid with nothing listening is a reused pid.
+  return probe.kind === "timeout" ? { state: "busy", entry } : { state: "stopped", entry, reason: "no_answer" };
 }
 
 /**
@@ -181,10 +209,20 @@ export async function stopInbox(
   dataDir: string,
   options: { timeoutMs?: number } = {},
 ): Promise<{ state: "not_running" } | { state: "stopped"; pid: number } | { state: "still_running"; pid: number }> {
-  const status = await inboxStatus(dataDir);
+  const timeoutMs = options.timeoutMs ?? 5000;
+  let status = await inboxStatus(dataDir);
+  if (status.state === "busy") {
+    // Give a busy Inbox the stop window to answer; never purge under a live writer.
+    const busy = status;
+    const answered = await waitForInbox(async () => {
+      const next = await inboxStatus(dataDir, 1000);
+      return next.state === "busy" ? null : next;
+    }, timeoutMs);
+    if (!answered) return { state: "still_running", pid: busy.entry.pid };
+    status = answered;
+  }
   if (status.state !== "running") return { state: "not_running" };
   const { entry } = status;
-  const timeoutMs = options.timeoutMs ?? 5000;
   try {
     await fetch(`http://127.0.0.1:${entry.port}/api/inbox/control/stop`, {
       method: "POST",

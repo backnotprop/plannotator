@@ -4,7 +4,7 @@
  * SDK client over streamable HTTP. Every test uses its own temp data dir.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -202,12 +202,15 @@ describe("startup, registry and health", () => {
   test("restart to update: the health tick compares the binary on disk with the running version", async () => {
     const root = tempRoot();
     const binary = join(root, "plannotator");
-    writeFileSync(binary, "#!/bin/sh\necho 'plannotator 1.0.0'\n");
+    const runs = join(root, "runs");
+    writeFileSync(binary, `#!/bin/sh\necho run >> '${runs}'\necho 'plannotator 1.0.0'\n`);
     chmodSync(binary, 0o755);
     const server = await start(join(root, "data"), { version: "1.0.0", binaryPath: binary, healthTickMs: 50 });
     const health = () => fetch(`http://127.0.0.1:${server.port}/api/inbox/health`).then((r) => r.json());
     await Bun.sleep(300);
     expect((await health()).update).toBeNull();
+    // Several ticks went by: an unchanged binary was run once, not every tick.
+    expect(readFileSync(runs, "utf8").trim().split("\n")).toHaveLength(1);
 
     // install.sh renames a new binary over the running one.
     const next = join(root, "plannotator.new");
@@ -305,6 +308,14 @@ describe("security refusals, by real requests", () => {
     expect(await page.text()).toContain("data-inbox-stub");
     const api = await fetch(`http://127.0.0.1:${server.port}/api/inbox/projects`, { headers: { Origin: "https://evil.example" } });
     expect(api.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  test("an HTTP/1.0 request with no Host (allowed by the guard) is answered, not a 500", async () => {
+    const server = await start(join(tempRoot(), "data"));
+    const health = await raw(server.port, ["GET /api/inbox/health HTTP/1.0"]);
+    expect(health.status).toBe(200);
+    expect(health.text).toContain("plannotator-inbox");
+    expect((await raw(server.port, ["GET /nowhere HTTP/1.0"])).status).toBe(404);
   });
 });
 
@@ -428,6 +439,20 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
     const late = await post(server, `/api/inbox/messages/${sent.message_id}/reply`, { idempotency_key: "late", words: "one more" });
     expect(late.status).toBe(409);
     expect((await late.json()).code).toBe("thread_resolved");
+  });
+
+  test("wait_for_reply on a thread already resolved answers at once instead of holding the call", async () => {
+    const root = tempRoot();
+    const server = await start(join(root, "data"));
+    const client = await mcpClient(server);
+    const sent = structured<{ thread_id: string }>(
+      await client.callTool({ name: "send_message", arguments: { body: "Never mind", project_path: gitProject(root) } }),
+    );
+    await client.callTool({ name: "resolve_message", arguments: { message_id: sent.thread_id } });
+    const started = Date.now();
+    const result = structured<{ status: string }>(await client.callTool({ name: "wait_for_reply", arguments: { thread_id: sent.thread_id } }));
+    expect(result.status).toBe("resolved");
+    expect(Date.now() - started).toBeLessThan(5000);
   });
 
   test("a refusal reads as isError with <snake_code>: <message>", async () => {

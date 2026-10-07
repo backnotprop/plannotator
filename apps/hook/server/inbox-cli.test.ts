@@ -189,6 +189,30 @@ describe("plannotator inbox --background", () => {
     expect(restarted.registry!.serverSession).not.toBe(other.serverSession);
   }, 60_000);
 
+  test("a busy Inbox (paused: the port takes the request, no answer) is waited for, never replaced by a second writer", async () => {
+    const box = sandbox();
+    const first = (await background(box)).registry!;
+    process.kill(first.pid, "SIGSTOP");
+    let resumed = false;
+    try {
+      expect(await inboxStatus(box.dataDir, 500)).toMatchObject({ state: "busy" });
+      const starting = background(box);
+      await Bun.sleep(3000);
+      process.kill(first.pid, "SIGCONT");
+      resumed = true;
+      const again = await starting;
+      expect(again.code).toBe(0);
+      expect(again.stdout.trim()).toBe(first.url);
+      expect(again.registry!.pid).toBe(first.pid);
+      expect(again.registry!.token).toBe(first.token);
+      // One Inbox ever started on this store: one ready line in its log.
+      const log = readFileSync(join(box.dataDir, "inbox", "inbox.log"), "utf8");
+      expect(log.split("\n").filter((line) => line.startsWith("Plannotator Inbox: "))).toHaveLength(1);
+    } finally {
+      if (!resumed) process.kill(first.pid, "SIGCONT");
+    }
+  }, 60_000);
+
   test("a live pid with nothing on the port reads as stopped", async () => {
     const box = sandbox();
     const probe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("") });

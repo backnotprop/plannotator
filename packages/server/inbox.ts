@@ -317,7 +317,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const fetch = async (req: Request): Promise<Response> => {
     const refused = hostGuard.check(req);
     if (refused) return refused;
-    const url = new URL(req.url);
+    // An HTTP/1.0 request with no Host passes the guard (a non-browser client)
+    // but leaves Bun a relative req.url; read it against this server.
+    let url: URL;
+    try {
+      url = new URL(req.url, `http://127.0.0.1:${port}`);
+    } catch {
+      return json({ error: "Bad request.", code: "bad_request" }, 400);
+    }
     const path = url.pathname;
     const origin = req.headers.get("origin");
 
@@ -439,9 +446,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   const binaryPath = options.binaryPath !== undefined ? options.binaryPath : version !== "dev" ? process.execPath : null;
   let tick: ReturnType<typeof setInterval> | null = null;
+  // Running the compiled binary costs ~0.2 s of CPU and a ~440 MB peak RSS
+  // (it parses the embedded apps), so it runs only when the file on disk
+  // changed since the last probe; an unchanged file keeps its last answer.
+  let probedSignature: string | null = null;
   const checkUpdate = async () => {
     if (!binaryPath) return;
+    let signature: string;
+    try {
+      const stat = statSync(binaryPath);
+      signature = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`;
+    } catch {
+      return;
+    }
+    if (signature === probedSignature) return;
+    probedSignature = signature;
     const onDisk = await probeBinaryVersion(binaryPath);
+    if (onDisk === null) probedSignature = null;
     const next = onDisk && onDisk !== version ? { available: true as const, version: onDisk } : null;
     if (JSON.stringify(next) !== JSON.stringify(update)) {
       update = next;

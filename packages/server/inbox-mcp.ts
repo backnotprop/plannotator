@@ -325,6 +325,10 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
 
         const existing = findExisting();
         if (existing) return replyResult(store, existing, context.baseUrl());
+        // A resolved thread takes no reply: say so now instead of holding the call.
+        if (single && store.message(single)?.resolved_at != null) {
+          return ok(`Thread ${single} is resolved; no reply will come.`, { status: "resolved", thread_id: single, cursor: store.cursor() });
+        }
 
         const waitMs = input.timeout_seconds ? input.timeout_seconds * 1000 : (context.waitDefaultMs ?? INBOX_WAIT_DEFAULT_MS);
         const signal: AbortSignal | undefined = ctx?.mcpReq?.signal;

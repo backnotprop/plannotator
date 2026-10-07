@@ -50,11 +50,36 @@ function spawnDetachedInbox(dataDir: string): void {
   const [command, ...rest] = selfCommand();
   const child = spawn(command!, [...rest, "inbox", "--no-open"], {
     detached: true,
+    // Never the starter's folder: a long-lived process would hold the agent's
+    // project as its working directory (on Windows that blocks deleting or
+    // renaming it). Everything the Inbox reads is an absolute path.
+    cwd: dir,
+    windowsHide: true,
     stdio: ["ignore", log, log],
     env: { ...process.env, PLANNOTATOR_DATA_DIR: dataDir, [LOCK_HELD_ENV]: "1" },
   });
   child.unref();
   closeSync(log);
+}
+
+/** Wait for the Inbox to answer as running; null on timeout. */
+function waitUntilRunning(dataDir: string): Promise<InboxRegistryEntry | null> {
+  return waitForInbox(async () => {
+    const next = await inboxStatus(dataDir, 1000);
+    return next.state === "running" ? next.entry : null;
+  }, START_TIMEOUT_MS);
+}
+
+/**
+ * A busy Inbox (live pid, port taking the request, no answer yet) is waited
+ * for, never replaced: a second process would be a second writer on the store.
+ */
+async function waitForBusyInbox(dataDir: string, pid: number): Promise<InboxRegistryEntry> {
+  const running = await waitUntilRunning(dataDir);
+  if (!running) {
+    throw new Error(`The Plannotator Inbox (pid ${pid}) is running but not answering; quit it and try again.`);
+  }
+  return running;
 }
 
 /**
@@ -64,6 +89,7 @@ function spawnDetachedInbox(dataDir: string): void {
 export async function ensureInboxRunning(dataDir: string): Promise<InboxRegistryEntry> {
   const status = await inboxStatus(dataDir);
   if (status.state === "running") return status.entry;
+  if (status.state === "busy") return waitForBusyInbox(dataDir, status.entry.pid);
   const release = acquireInboxStartLock(dataDir);
   if (release) {
     try {
@@ -74,10 +100,7 @@ export async function ensureInboxRunning(dataDir: string): Promise<InboxRegistry
     }
   }
   try {
-    const running = await waitForInbox(async () => {
-      const next = await inboxStatus(dataDir, 1000);
-      return next.state === "running" ? next.entry : null;
-    }, START_TIMEOUT_MS);
+    const running = await waitUntilRunning(dataDir);
     if (!running) {
       throw new Error(`The Plannotator Inbox did not start; see ${join(inboxDir(dataDir), INBOX_LOG_FILE)}.`);
     }
@@ -95,10 +118,7 @@ async function serveInbox(dataDir: string, open: boolean): Promise<never> {
   delete process.env[LOCK_HELD_ENV];
   const release = lockHeldByStarter ? null : acquireInboxStartLock(dataDir);
   if (!lockHeldByStarter && !release) {
-    const running = await waitForInbox(async () => {
-      const next = await inboxStatus(dataDir, 1000);
-      return next.state === "running" ? next.entry : null;
-    }, START_TIMEOUT_MS);
+    const running = await waitUntilRunning(dataDir);
     if (!running) {
       process.stderr.write("Another Plannotator Inbox is starting and did not come up; try again.\n");
       process.exit(1);
@@ -110,9 +130,10 @@ async function serveInbox(dataDir: string, open: boolean): Promise<never> {
   let inbox: Awaited<ReturnType<typeof startInboxServer>>;
   try {
     const status = await inboxStatus(dataDir);
-    if (status.state === "running") {
-      process.stderr.write(`Plannotator Inbox: ${status.entry.url}\n`);
-      if (open) await openBrowser(status.entry.url);
+    if (status.state === "running" || status.state === "busy") {
+      const entry = status.state === "running" ? status.entry : await waitForBusyInbox(dataDir, status.entry.pid);
+      process.stderr.write(`Plannotator Inbox: ${entry.url}\n`);
+      if (open) await openBrowser(entry.url);
       process.exit(0);
     }
     inbox = await startInboxServer({
@@ -172,9 +193,16 @@ export async function runInboxCommand(args: readonly string[]): Promise<never> {
   }
 
   const status = await inboxStatus(dataDir);
-  if (status.state === "running") {
-    process.stderr.write(`Plannotator Inbox: ${status.entry.url}\n`);
-    if (!noOpen) await openBrowser(status.entry.url);
+  if (status.state === "running" || status.state === "busy") {
+    let entry: InboxRegistryEntry;
+    try {
+      entry = status.state === "running" ? status.entry : await waitForBusyInbox(dataDir, status.entry.pid);
+    } catch (error) {
+      process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      process.exit(1);
+    }
+    process.stderr.write(`Plannotator Inbox: ${entry.url}\n`);
+    if (!noOpen) await openBrowser(entry.url);
     process.exit(0);
   }
   return serveInbox(dataDir, !noOpen);
