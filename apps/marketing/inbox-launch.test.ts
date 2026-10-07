@@ -3,7 +3,8 @@
 // twice: as committed (switch off) and with the switch flipped on by a Vite
 // transform of that one line. Off: no Inbox link anywhere, the page and the
 // post noindex and out of the sitemap, the RSS feed and the blog index. On: the
-// Nav and the Footer link the page, the page is indexable, the post is listed.
+// Nav and the Footer link the page, the page is indexable, both are in the
+// sitemap and the post is listed.
 // Both: no comma in any h1, h2, h3 or button, and every image resolves.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
@@ -22,7 +23,22 @@ const dist = { off: '', on: '' };
 async function build(name: 'off' | 'on'): Promise<string> {
   const outDir = join(temporaryRoot, name);
   const configPath = join(temporaryRoot, `astro.${name}.config.mjs`);
-  const configUrl = pathToFileURL(join(marketingRoot, 'astro.config.mjs')).href;
+  let configUrl = pathToFileURL(join(marketingRoot, 'astro.config.mjs')).href;
+  if (name === 'on') {
+    // astro.config.mjs reads the switch before any Vite plugin runs (the
+    // sitemap filter), so the flipped build loads a copy of the config that
+    // imports a flipped copy of the switch file.
+    const flippedSwitch = join(temporaryRoot, 'inbox-launch.on.ts');
+    const source = await readFile(switchFile, 'utf8');
+    expect(source).toContain(switchOff);
+    await writeFile(flippedSwitch, source.replace(switchOff, 'export const INBOX_LAUNCHED = true;'));
+    const configSource = await readFile(join(marketingRoot, 'astro.config.mjs'), 'utf8');
+    const switchImport = "'./src/lib/inbox-launch.ts'";
+    expect(configSource).toContain(switchImport);
+    const flippedConfig = join(temporaryRoot, 'astro.on.base.mjs');
+    await writeFile(flippedConfig, configSource.replace(switchImport, JSON.stringify(flippedSwitch)));
+    configUrl = pathToFileURL(flippedConfig).href;
+  }
   const flip =
     name === 'on'
       ? `vite: { ...config.vite, plugins: [...config.vite.plugins, {
@@ -98,6 +114,9 @@ describe('Plannotator Inbox launch switch', () => {
     expect(robots(await read(dist.on, postPath))).toBe('index, follow');
     expect(await read(dist.on, 'rss.xml')).toContain('/blog/the-age-of-the-inbox/');
     expect(await read(dist.on, 'blog/index.html')).toContain('/blog/the-age-of-the-inbox/');
+    const sitemap = await read(dist.on, 'sitemap-0.xml');
+    expect(sitemap).toContain('<loc>https://plannotator.ai/inbox/</loc>');
+    expect(sitemap).toContain('<loc>https://plannotator.ai/blog/the-age-of-the-inbox/</loc>');
   });
 
   for (const state of ['off', 'on'] as const) {

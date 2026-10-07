@@ -509,7 +509,8 @@ const steps = [
     color: var(--ib-subtle);
   }
 
-  :global(.ib-after) {
+  /* main raises this over the frame's own margin: 0 (InboxShot's scoped .ib-shot). */
+  main :global(.ib-after) {
     margin-top: 2rem;
   }
 
