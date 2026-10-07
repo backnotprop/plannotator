@@ -676,7 +676,7 @@ export function createShotsHub(options: ShotsHubOptions): ShotsHub {
         return json({ ok: true, undoMs: 10_000 });
       }
       if (sub === "markdown" && method === "POST") {
-        return json({ text: composeShotsMessage(composeInput(collection).input) });
+        return json({ text: composeShotsMessage(composeInput(collection).input), files: filesOf(collection) });
       }
       if (sub === "copy" && method === "POST") {
         const text = seal(collection, { sendId: `hs-${randomBytes(6).toString("hex")}`, state: "copied", at: new Date().toISOString(), label: "Copied" });

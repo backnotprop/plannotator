@@ -206,6 +206,13 @@ export function App() {
     return () => cancelAnimationFrame(frame);
   }, [landing, hub?.shots, mode]);
 
+  // A flight that never reports back never keeps a thumbnail hidden.
+  useEffect(() => {
+    if (!landing) return;
+    const timer = setTimeout(() => setLanding((current) => (current === landing ? null : current)), 1500);
+    return () => clearTimeout(timer);
+  }, [landing]);
+
   useEffect(() => {
     if (!window.shotsHud) return;
     (window.shotsHud as unknown as { flightDone: (captureId: string) => void }).flightDone = (captureId: string) => {
@@ -325,9 +332,8 @@ export function App() {
     if (!collection) return;
     setMenu(null);
     await prepareShots(collection.shots);
-    const fresh = await api.state();
-    const files = fresh.shots.map((shot) => shot.agent?.file ?? shot.original.file);
-    if (isNative) postNative({ type: 'clipboard', shotFiles: fresh.shots.map((shot, i) => ({ shotId: shot.id, file: files[i] })) });
+    const { files } = await api.markdown(collection.id);
+    if (isNative) postNative({ type: 'clipboard', files });
     setToast({ text: isNative ? `Copied ${files.length} image${files.length === 1 ? '' : 's'}.` : 'Copying images needs the native app; use Reveal in Finder.' });
   };
 
@@ -776,7 +782,7 @@ export function App() {
                       setExplainer(false);
                       setOpen(hasShots);
                       void api.settings({ explainerSeen: true, appShots: true });
-                      postNative({ type: 'capture', kind: 'app' });
+                      postNative({ type: 'capture', kind: 'app', explained: true });
                     }}
                   >
                     Turn on App shots

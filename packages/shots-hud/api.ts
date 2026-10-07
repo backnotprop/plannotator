@@ -75,7 +75,7 @@ export const api = {
     call<{ sendId: string; text: string }>('POST', `/api/shots/collection/${id}/send`, destination ? { destination } : {}),
   retarget: (id: string, destination: { host: string; sessionId: string }) => call('POST', `/api/shots/collection/${id}/retarget`, { destination }),
   copy: (id: string) => call<{ text: string; files: string[] }>('POST', `/api/shots/collection/${id}/copy`, {}),
-  markdown: (id: string) => call<{ text: string }>('POST', `/api/shots/collection/${id}/markdown`, {}),
+  markdown: (id: string) => call<{ text: string; files: string[] }>('POST', `/api/shots/collection/${id}/markdown`, {}),
   reveal: (id: string) => call('POST', `/api/shots/collection/${id}/reveal`, {}),
   discard: (id: string) => call('DELETE', `/api/shots/collection/${id}`),
   restore: (id: string) => call('POST', `/api/shots/collection/${id}/restore`, {}),

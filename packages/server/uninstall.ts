@@ -29,6 +29,7 @@ import {
 } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { inboxStatus, stopInbox } from "@plannotator/shared/inbox/registry";
+import { runningShotsHub } from "@plannotator/shared/shots/registry";
 import {
   applyEdits,
   createScanner,
@@ -111,6 +112,8 @@ const PURGE_OWNED_TOP_LEVEL = [
   "guides",
   "failed-comments",
   "semantic-diff",
+  // Plannotator Shots: the hub's registry, sent and open collections, settings, logs.
+  "shots",
   "migrations",
   "config.json",
   "install-prefs",
@@ -400,6 +403,15 @@ export async function runPlannotatorUninstall(
           `The Plannotator Inbox (pid ${stopped.pid}) is still running; quit it and run uninstall --purge again.`,
         );
       }
+    }
+  }
+
+  // Plannotator Shots: a running hub writes into shots/ until it exits.
+  if (request.purge && !dataDirSafetyIssue && !request.dryRun) {
+    const hub = await runningShotsHub(state.dataDir).catch(() => null);
+    if (hub) {
+      await fetch(`${hub.url}/api/shots/stop`, { method: "POST", headers: { authorization: `Bearer ${hub.token}` }, signal: AbortSignal.timeout(2000) }).catch(() => undefined);
+      state.removed.push(`Stopped the Plannotator Shots hub (pid ${hub.pid})`);
     }
   }
 
@@ -721,6 +733,11 @@ function removeInstalledFiles(
   paths: ReturnType<typeof resolveOwnedPaths>,
   state: MutableUninstallResult,
 ): void {
+  // Plannotator Shots.app, which `plannotator screenshot` installs from the darwin binary.
+  if (environment.platform === "darwin") {
+    removePath(join(environment.homeDir, "Applications", "Plannotator Shots.app"), request, state);
+  }
+
   for (const skill of [...CORE_SKILLS, ...KNOWLEDGE_SKILLS]) {
     removePath(
       join(paths.claudeDir, "skills", skill),

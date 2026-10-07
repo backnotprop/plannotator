@@ -26,7 +26,6 @@ import { basename, join, resolve } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import {
   acquireShotsStartLock,
-  readShotsRegistry,
   runningShotsHub,
   shotsDir,
   waitFor,
@@ -180,8 +179,10 @@ export function installEmbeddedApp(): string | null {
     if (!existsSync(staged)) throw new Error(`The embedded ${SHOTS_APP_NAME} archive has no app.`);
     mkdirSync(join(homedir(), "Applications"), { recursive: true });
     if (existsSync(target)) {
-      // A running app is asked to quit first; the old bundle is moved aside, never half-replaced.
-      spawnSync("/usr/bin/open", ["-g", "plannotator-shots://quit"], { stdio: "ignore" });
+      // A running app is asked to quit first (never launched just to be told so);
+      // the old bundle is moved aside, never half-replaced.
+      const running = spawnSync("/usr/bin/pgrep", ["-f", join(target, "Contents", "MacOS")], { encoding: "utf8" });
+      if (running.status === 0) spawnSync("/usr/bin/open", ["-g", "-a", target, "plannotator-shots://quit"], { stdio: "ignore" });
       const aside = `${target}.old-${process.pid}`;
       renameSync(target, aside);
       renameSync(staged, target);
@@ -420,4 +421,3 @@ export async function runShotsCommand(args: string[]): Promise<never> {
   process.exit(0);
 }
 
-export { readShotsRegistry };

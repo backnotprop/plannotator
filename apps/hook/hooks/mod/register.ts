@@ -307,22 +307,21 @@ export function register(on: On) {
   })
 
   // Matched by name: an unmatched hook makes the engine credit Plannotator on every plugin's command answer.
-  on('command.run', { command: Object.keys(COMMANDS) }, async ($: Engine, e: any, next: Next) => {
+  on('command.run', { command: [...Object.keys(COMMANDS), SHOTS_COMMAND] }, async ($: Engine, e: any, next: Next) => {
     const name: string = typeof e.command === 'string' ? e.command : ''
+    // Plannotator Shots: `/plannotator-screenshot` opens the capture overlay and latches this session.
+    if (name === SHOTS_COMMAND) {
+      if (!allowed?.shots) return next(e)
+      const instance = await currentMod($)
+      if (!instance?.shots) return next(e)
+      return { text: await instance.shots.summon(typeof e.args === 'string' ? e.args : '') }
+    }
     if (!allowed || !isModCommand(name)) return next(e)
     const instance = await currentMod($)
     if (!instance) return next(e)
     const spec = COMMANDS[name]
     const text = await instance.runCommand(spec.kind, typeof e.args === 'string' ? e.args : '')
     return { text }
-  })
-
-  // Plannotator Shots: `/plannotator-screenshot` opens the capture overlay and latches this session.
-  on('command.run', { command: [SHOTS_COMMAND] }, async ($: Engine, e: any, next: Next) => {
-    if (!allowed?.shots || e.command !== SHOTS_COMMAND) return next(e)
-    const instance = await currentMod($)
-    if (!instance?.shots) return next(e)
-    return { text: await instance.shots.summon(typeof e.args === 'string' ? e.args : '') }
   })
 
   on('tool.call', async ($: Engine, e: any, next: Next) => {
