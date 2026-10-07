@@ -468,6 +468,9 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
         body: JSON.stringify({ serverSession: health.serverSession, session, body, idempotency_key: key }),
       })
     const words = 'While you are in there, add a header row to the CSV export.'
+    // The writer waits on the thread while the person picks the other session (review blocker B1, PR 1764).
+    const writerWait = writer.callInbox({ action: 'wait_for_reply', thread_id: asked.thread_id, timeout_seconds: 8 }, w.project)
+    await Bun.sleep(500)
     const response = await post('session-other', words, 'nm-1')
     expect(response.status).toBe(200)
     const message = ((await response.json()) as { message: { id: string; to: unknown; reply_to: unknown } }).message
@@ -483,6 +486,9 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     expect(lines[1]).toBe(INBOX_MESSAGE_INSTRUCTION)
     expect(other.host.submits[0]!.endsWith(`\n\n${words}`)).toBe(true)
     expect(writer.host.submits).toEqual([])
+    const waited = await writerWait
+    expect('text' in waited && waited.text).toContain('"status": "waiting"')
+    w.proof(`session-writer's wait_for_reply on the same thread kept waiting: ${('text' in waited ? waited.text : waited.deny).split('\n')[0]}`)
     w.proof(`turn.start ${turn.id} in session-other:\n${turn.text}\n\nsession-writer submits: ${writer.host.submits.length}`)
 
     const delivered = await waitFor('the delivery record', async () => (await thread(w, asked.thread_id)).messages.find((m) => m.id === message.id)?.delivery)

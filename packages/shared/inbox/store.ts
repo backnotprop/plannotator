@@ -1332,7 +1332,7 @@ export class InboxStore {
   /**
    * The person's replies waiting for an agent connection's `session`: replies
    * to a message that session sent, and New messages addressed to it (step
-   * 8), not yet delivered, and not yet read by an
+   * 8; settled only by their delivery), not yet delivered, and not yet read by an
    * agent (wait_for_reply or read_thread; any agent's read counts, as for the
    * Sent band). Derived from the log, so a reply waits for its session across
    * Inbox restarts and is handed out again until it is delivered. Oldest first.
@@ -1342,7 +1342,9 @@ export class InboxStore {
     for (const message of this.messages.values()) {
       if (message.author.kind !== "person" || message.delivery || !this.isFor(message, session)) continue;
       const seq = this.messageSeq.get(message.id) ?? 0;
-      if ((this.messages.get(message.thread_id)?.agent_checked_seq ?? 0) >= seq) continue;
+      // A New message is settled only by its delivery to the session it names
+      // (its own wait_for_reply records one), never by another agent's read.
+      if (!message.to && (this.messages.get(message.thread_id)?.agent_checked_seq ?? 0) >= seq) continue;
       out.push({ message, seq });
     }
     return out.sort((a, b) => a.seq - b.seq).map((entry) => entry.message);

@@ -159,6 +159,9 @@ function lastAgentCursor(store: InboxStore, threadId: string, session: string | 
 
 function replyResult(store: InboxStore, reply: InboxMessage, base: string): ToolResult {
   const cursor = store.messageCursor(reply.id) ?? store.cursor();
+  // A New message reached the session it was addressed to (only that session's
+  // wait returns it): delivered, so its connection does not wake it again.
+  if (reply.to) store.recordDelivery(reply.id, { host: reply.to.host, session: reply.to.session });
   // The agent now has this reply (not any later one): a Sent row moves to Quiet.
   store.markAgentChecked(reply.thread_id, cursor);
   const questions = reply.reply_to ? store.questionsOf(reply.reply_to) : [];
@@ -405,12 +408,15 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         }
         const caller = input.agent_session?.trim() || null;
         const thresholds = new Map(threadIds.map((id) => [id, input.cursor ?? lastAgentCursor(store, id, caller)]));
+        // A New message (step 8) belongs to the session the person picked: it
+        // never answers another session's wait.
+        const forCaller = (message: InboxMessage) => !message.to || message.to.session === caller;
 
         const findExisting = (): InboxMessage | null => {
           let best: { message: InboxMessage; seq: number } | null = null;
           for (const [threadId, threshold] of thresholds) {
             for (const message of store.thread(threadId)?.messages ?? []) {
-              if (message.author.kind !== "person") continue;
+              if (message.author.kind !== "person" || !forCaller(message)) continue;
               const seq = store.messageCursor(message.id) ?? 0;
               if (seq > threshold && (!best || seq < best.seq)) best = { message, seq };
             }
@@ -445,7 +451,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
               const message = line.record;
               const threshold = thresholds.get(message.thread_id);
               if (threshold === undefined) return;
-              if (message.author.kind === "person" && line.seq > threshold && store.messageCursor(message.id) === line.seq) {
+              if (message.author.kind === "person" && forCaller(message) && line.seq > threshold && store.messageCursor(message.id) === line.seq) {
                 finish({ kind: "reply", message });
               } else if (message.id === message.thread_id && message.resolved_at !== null && threadIds.length === 1) {
                 finish({ kind: "resolved", threadId: message.id });

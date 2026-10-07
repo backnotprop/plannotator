@@ -238,4 +238,30 @@ describe("Inbox connection bridge", () => {
     });
     expect(await poll(server, "session-b")).toEqual([]);
   });
+  // Review blocker B1 (PR 1764). The failure this guards: another session's
+  // wait_for_reply or read_thread on the same thread took the person's message
+  // to the session they picked, which then never got it.
+  test("New message: a message to one session never answers another session's wait or read; only the addressee gets it", async () => {
+    const { server, client, project } = await setup();
+    const asked = await agentSends(client, project, "session-two", "Run finished.");
+    await bridge(server, INBOX_BRIDGE_POLL_PATH, { session: "session-one", host: "claude-code", waitMs: 0, project_path: project, busy: false });
+    const waiting = client.callTool({ name: "wait_for_reply", arguments: { thread_id: asked.thread_id, agent_session: "session-two", timeout_seconds: 3 } });
+    await Bun.sleep(300);
+    const sent = await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads/${asked.thread_id}/message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serverSession: server.serverSession, session: "session-one", body: "For the first session only.", idempotency_key: "nm-b1" }),
+    });
+    const message = ((await sent.json()) as { message: { id: string } }).message;
+    // session-two's wait keeps waiting and times out; a read of the thread by it settles nothing.
+    expect(((await waiting).structuredContent as { status: string }).status).toBe("waiting");
+    await client.callTool({ name: "read_thread", arguments: { thread_id: asked.thread_id, agent_session: "session-two" } });
+    expect(await poll(server, "session-two")).toEqual([]);
+    expect((await poll(server, "session-one")).map((c) => c.id)).toEqual([message.id]);
+    // The addressee's own wait returns it, and that is its delivery: no turn after it.
+    const own = await client.callTool({ name: "wait_for_reply", arguments: { thread_id: asked.thread_id, agent_session: "session-one", cursor: 0, timeout_seconds: 1 } });
+    expect((own.structuredContent as { status: string; reply: { message_id: string } })).toMatchObject({ status: "replied", reply: { message_id: message.id } });
+    expect(await poll(server, "session-one")).toEqual([]);
+    expect((await thread(server, asked.thread_id)).messages.at(-1)?.delivery).toMatchObject({ host: "claude-code", session: "session-one" });
+  });
 });
