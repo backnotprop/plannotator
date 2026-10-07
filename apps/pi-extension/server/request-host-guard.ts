@@ -14,6 +14,7 @@ import os from "node:os";
 import { loadConfig, resolveUrlHost } from "../generated/config.ts";
 import {
 	ALLOWED_HOSTS_ENV,
+	forwardedPortHostPatterns,
 	HOST_NOT_ALLOWED_CODE,
 	hostNotAllowedMessage,
 	isAllowedRequestHost,
@@ -52,12 +53,14 @@ export interface PiRequestHostGuard {
 export function createRequestHostGuard(): PiRequestHostGuard {
 	const remote = isRemoteSession();
 	const allowed = parseAllowedHosts(process.env[ALLOWED_HOSTS_ENV]);
+	// A browser IDE's port proxy (code-server, Coder) forwards its own Host.
+	const portHostPatterns = forwardedPortHostPatterns(process.env.VSCODE_PROXY_URI);
 	// Remote-mode names are resolved on the first request that needs them, so
 	// loopback and IP-literal requests never read config or ask Tailscale.
 	let remoteHosts: string[] | null = null;
 	const allows = (req: IncomingMessage): boolean => {
 		const host = hostHeader(req);
-		const policy: RequestHostPolicy = { remote, allowed };
+		const policy: RequestHostPolicy = { remote, allowed, portHostPatterns };
 		if (isAllowedRequestHost(host, policy)) return true;
 		if (!remote) return false;
 		remoteHosts ??= remoteExtraHosts();

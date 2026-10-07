@@ -10,6 +10,7 @@ import os from "node:os";
 import { loadConfig, resolveUrlHost } from "@plannotator/shared/config";
 import {
   ALLOWED_HOSTS_ENV,
+  forwardedPortHostPatterns,
   HOST_NOT_ALLOWED_CODE,
   hostNotAllowedMessage,
   isAllowedRequestHost,
@@ -59,11 +60,13 @@ export interface RequestHostGuard {
 export function createRequestHostGuard(): RequestHostGuard {
   const remote = isRemoteSession();
   const allowed = parseAllowedHosts(process.env[ALLOWED_HOSTS_ENV]);
+  // A browser IDE's port proxy (code-server, Coder) forwards its own Host.
+  const portHostPatterns = forwardedPortHostPatterns(process.env.VSCODE_PROXY_URI);
   // Remote-mode names are resolved on the first request that needs them, so
   // loopback and IP-literal requests never read config or ask Tailscale.
   let remoteHosts: string[] | null = null;
   const allows = (host: string | null): boolean => {
-    const policy: RequestHostPolicy = { remote, allowed, extraHosts: servedHostnames };
+    const policy: RequestHostPolicy = { remote, allowed, portHostPatterns, extraHosts: servedHostnames };
     if (isAllowedRequestHost(host, policy)) return true;
     if (!remote) return false;
     remoteHosts ??= remoteExtraHosts();

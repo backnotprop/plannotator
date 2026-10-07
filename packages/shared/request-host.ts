@@ -21,6 +21,10 @@
  *    machine's own hostname, supplied by the runtime adapter).
  *  - `extraHosts` in any mode: names a runtime learned it is served on (the
  *    `tailscale serve` MagicDNS name of a `--tailscale` session).
+ *  - `portHostPatterns` in any mode: the per-port hostnames of a browser IDE's
+ *    port proxy (code-server, Coder), read from the `{{port}}` template in the
+ *    `VSCODE_PROXY_URI` the IDE sets (`forwardedPortHostPatterns`). Such a
+ *    proxy reaches a loopback-bound server and forwards its own Host.
  *  - `PLANNOTATOR_ALLOWED_HOSTS`: a comma list of extra hostnames (a leading
  *    dot matches the domain and its subdomains); `*` turns the check off.
  *  - Everything else, including a malformed Host, is refused.
@@ -45,11 +49,19 @@ export interface AllowedHostsSetting {
 	names: string[];
 }
 
+/** A hostname shape `<prefix><port digits><suffix>` (see forwardedPortHostPatterns). */
+export interface PortHostPattern {
+	prefix: string;
+	suffix: string;
+}
+
 export interface RequestHostPolicy {
 	/** Remote mode: the server binds every interface. */
 	remote: boolean;
 	/** Hostnames this session is served on besides loopback (see above). */
 	extraHosts?: Iterable<string>;
+	/** Per-port proxy hostnames of a browser IDE (see above). */
+	portHostPatterns?: readonly PortHostPattern[];
 	/** Parsed `PLANNOTATOR_ALLOWED_HOSTS`. */
 	allowed?: AllowedHostsSetting;
 }
@@ -65,7 +77,9 @@ export function parseAllowedHosts(value: string | null | undefined): AllowedHost
 			any = true;
 			continue;
 		}
-		const normalized = normalizeHostname(entry.startsWith(".") ? entry.slice(1) : entry);
+		// A plain entry may carry a port (`proxy.example.com:8443`); the port is
+		// never compared, so it is dropped rather than voiding the entry.
+		const normalized = entry.startsWith(".") ? normalizeHostname(entry.slice(1)) : hostnameFromHostHeader(entry);
 		if (!normalized) continue;
 		names.push(entry.startsWith(".") ? `.${normalized}` : normalized);
 	}
@@ -132,6 +146,46 @@ function isLoopbackName(hostname: string): boolean {
 	);
 }
 
+const PORT_PLACEHOLDER = "{{port}}";
+
+/**
+ * Hostname patterns from a browser IDE's port-proxy template,
+ * `VSCODE_PROXY_URI` (code-server and Coder set it, e.g.
+ * `https://{{port}}--main--ws--me.coder.example.com/`). Only a template whose
+ * HOSTNAME holds `{{port}}` yields a pattern: a path-based proxy
+ * (`./proxy/{{port}}/`) serves under the IDE's own host and a prefix path,
+ * which Plannotator's root-relative URLs do not support anyway. The value
+ * comes from the environment the IDE started, never from a request, and names
+ * the IDE's own proxy domain.
+ */
+export function forwardedPortHostPatterns(proxyUri: string | null | undefined): PortHostPattern[] {
+	const value = (proxyUri ?? "").trim();
+	if (!value) return [];
+	const match = /^https?:\/\/([^/?#@]+)/i.exec(value);
+	if (!match) return [];
+	const authority = match[1];
+	const at = authority.indexOf(PORT_PLACEHOLDER);
+	if (at < 0 || authority.indexOf(PORT_PLACEHOLDER, at + 1) >= 0) return [];
+	// Validate with a sample port in the placeholder's place, then split.
+	const sample = hostnameFromHostHeader(authority.replace(PORT_PLACEHOLDER, "1"));
+	if (!sample || sample.includes(":")) return [];
+	const host = authority.toLowerCase().replace(/:\d+$/, "").replace(/\.$/, "");
+	const placeholderAt = host.indexOf(PORT_PLACEHOLDER);
+	if (placeholderAt < 0) return [];
+	const prefix = host.slice(0, placeholderAt);
+	const suffix = host.slice(placeholderAt + PORT_PLACEHOLDER.length);
+	// A bare `{{port}}` host, or one with no dot outside the port, would match
+	// short local names; require a real domain around it.
+	if (!suffix.includes(".") && !prefix.includes(".")) return [];
+	return [{ prefix, suffix }];
+}
+
+function matchesPortHostPattern(hostname: string, pattern: PortHostPattern): boolean {
+	if (!hostname.startsWith(pattern.prefix) || !hostname.endsWith(pattern.suffix)) return false;
+	const middle = hostname.slice(pattern.prefix.length, hostname.length - pattern.suffix.length);
+	return /^\d{1,5}$/.test(middle);
+}
+
 function matchesName(hostname: string, entry: string): boolean {
 	if (entry.startsWith(".")) {
 		const domain = entry.slice(1);
@@ -152,6 +206,9 @@ export function isAllowedRequestHost(hostHeader: string | null | undefined, poli
 		const normalized = normalizeHostname(extra);
 		if (normalized && normalized === hostname) return true;
 	}
+	for (const pattern of policy.portHostPatterns ?? []) {
+		if (matchesPortHostPattern(hostname, pattern)) return true;
+	}
 	for (const entry of policy.allowed?.names ?? []) {
 		if (matchesName(hostname, entry)) return true;
 	}
@@ -169,10 +226,19 @@ export function hostNotAllowedMessage(hostHeader: string | null | undefined): st
 	);
 }
 
-/** The machine's own hostnames for remote mode: the full name and its first label. */
+/**
+ * The machine's own hostnames for remote mode: the full name, its first label,
+ * and the first label under `.local` (the mDNS name another device on the LAN
+ * types; `os.hostname()` omits it on Linux and often on macOS). `.local` is
+ * resolved by multicast DNS on the local link only (RFC 6762), so it cannot be
+ * pointed at this machine from outside the network.
+ */
 export function machineHostnames(hostname: string | null | undefined): string[] {
 	const full = normalizeHostname(hostname ?? "");
-	if (!full || full.includes(":")) return [];
+	if (!full || full.includes(":") || isIpLiteralHostname(full)) return [];
 	const short = full.split(".")[0];
-	return short && short !== full ? [full, short] : [full];
+	const names = [full];
+	if (short && short !== full) names.push(short);
+	if (short && !names.includes(`${short}.local`)) names.push(`${short}.local`);
+	return names;
 }

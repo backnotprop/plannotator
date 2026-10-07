@@ -58,6 +58,7 @@ export function defineRequestHostScenarios(runtime: string, start: StartHostScen
       "PLANNOTATOR_AI",
       "PLANNOTATOR_URL_HOST",
       "PLANNOTATOR_ALLOWED_HOSTS",
+      "VSCODE_PROXY_URI",
       "SSH_TTY",
       "SSH_CONNECTION",
     ],
@@ -153,6 +154,24 @@ export function defineRequestHostScenarios(runtime: string, start: StartHostScen
           expect((await get(server, FIRST_READ[kind], `192.168.1.20:${port}`)).status).toBe(200);
           expect((await get(server, "/", `[fd00::5]:${port}`)).status).toBe(200);
           expect((await get(server, "/", `localhost:${port}`)).status).toBe(200);
+          if (machine) {
+            const short = machine.split(".")[0];
+            expect((await get(server, "/", `${short}.local:${port}`)).status).toBe(200);
+          }
+          expect((await get(server, FIRST_READ[kind], `${EVIL}:${port}`)).status).toBe(403);
+        } finally {
+          server.stop();
+        }
+      });
+
+      test("a browser IDE's port proxy (VSCODE_PROXY_URI) is answered on its per-port hostname in local mode", async () => {
+        await isolate();
+        process.env.VSCODE_PROXY_URI = "https://{{port}}--dev--ws--me.coder.example.com/";
+        const server = await start(kind, { docPath, htmlContent: HTML });
+        try {
+          const port = portOf(server);
+          expect((await get(server, FIRST_READ[kind], `${port}--dev--ws--me.coder.example.com`)).status).toBe(200);
+          expect((await get(server, FIRST_READ[kind], `x--dev--ws--me.coder.example.com`)).status).toBe(403);
           expect((await get(server, FIRST_READ[kind], `${EVIL}:${port}`)).status).toBe(403);
         } finally {
           server.stop();

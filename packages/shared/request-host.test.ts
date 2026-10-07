@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  forwardedPortHostPatterns,
   hostnameFromHostHeader,
   hostNotAllowedMessage,
   isAllowedRequestHost,
@@ -67,6 +68,26 @@ describe("isAllowedRequestHost", () => {
     expect(isAllowedRequestHost("evil.example", policy)).toBe(false);
     expect(isAllowedRequestHost("evil.example", { remote: false, allowed: parseAllowedHosts("*") })).toBe(true);
     expect(parseAllowedHosts(undefined)).toEqual({ any: false, names: [] });
+    // A port on an entry is dropped, not a reason to ignore the entry.
+    expect(parseAllowedHosts("proxy.example.com:8443,[fd00::1]:80")).toEqual({ any: false, names: ["proxy.example.com", "fd00::1"] });
+  });
+
+  test("a browser IDE's port-proxy hostnames (VSCODE_PROXY_URI) are allowed in local mode, and nothing near them", () => {
+    const portHostPatterns = forwardedPortHostPatterns("https://{{port}}--main--ws--me.coder.example.com/");
+    const policy = { remote: false, portHostPatterns };
+    expect(isAllowedRequestHost("19432--main--ws--me.coder.example.com", policy)).toBe(true);
+    expect(isAllowedRequestHost("5173--main--ws--me.coder.example.com:443", policy)).toBe(true);
+    for (const host of ["x--main--ws--me.coder.example.com", "--main--ws--me.coder.example.com", "123456--main--ws--me.coder.example.com", "1--main--ws--me.coder.example.com.evil.example", "evil.example"]) {
+      expect([host, isAllowedRequestHost(host, policy)]).toEqual([host, false]);
+    }
+    expect(isAllowedRequestHost("8080.code.example.com", { remote: false, portHostPatterns: forwardedPortHostPatterns("https://{{port}}.code.example.com") })).toBe(true);
+    // No template in the hostname (path-based proxy), no domain, or not a URL: nothing.
+    expect(forwardedPortHostPatterns("./proxy/{{port}}/")).toEqual([]);
+    expect(forwardedPortHostPatterns("https://code.example.com/proxy/{{port}}/")).toEqual([]);
+    expect(forwardedPortHostPatterns("https://{{port}}/")).toEqual([]);
+    expect(forwardedPortHostPatterns("https://{{port}}-{{port}}.example.com/")).toEqual([]);
+    expect(forwardedPortHostPatterns("https://{{port}}.ex ample.com/")).toEqual([]);
+    expect(forwardedPortHostPatterns(undefined)).toEqual([]);
   });
 });
 
@@ -85,9 +106,11 @@ describe("helpers", () => {
     expect(isIpLiteralHostname("1.2.3.4.example")).toBe(false);
   });
 
-  test("machine hostnames: full name and first label", () => {
+  test("machine hostnames: full name, first label and its mDNS .local name", () => {
     expect(machineHostnames("DevBox.local")).toEqual(["devbox.local", "devbox"]);
-    expect(machineHostnames("devbox")).toEqual(["devbox"]);
+    expect(machineHostnames("devbox")).toEqual(["devbox", "devbox.local"]);
+    expect(machineHostnames("devbox.lan")).toEqual(["devbox.lan", "devbox", "devbox.local"]);
+    expect(machineHostnames("10.0.0.5")).toEqual([]);
     expect(machineHostnames("")).toEqual([]);
   });
 
