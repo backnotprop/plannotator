@@ -1098,12 +1098,15 @@ describe("AI endpoints", () => {
           sessionId,
           prompt: "What changed?",
           contextUpdate: "New annotation: section 3 flagged",
+          // "Ask this session" only; a separate AI never sees it (#1748).
+          draftAnnotations: "Draft 1: DRAFT-SENTINEL",
         }),
       })
     );
     const text = await queryRes.text();
     expect(text).toContain("Context update");
     expect(text).toContain("section 3 flagged");
+    expect(text).not.toContain("DRAFT-SENTINEL");
     expect(text).toContain("What changed?");
   });
 

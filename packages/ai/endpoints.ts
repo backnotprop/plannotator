@@ -76,10 +76,21 @@ export interface QueryRequest {
   sessionId: string;
   /** The user's prompt/question. */
   prompt: string;
-  /** Optional context update (e.g., new annotations since session was created). */
+  /**
+   * Optional context update (e.g., new annotations since session was created).
+   * Separate-AI providers only: an "Ask this session" question ignores it,
+   * because the session that receives it is the agent the feedback is for and
+   * would read it as instructions (#1748). Drafts go there as `draftAnnotations`.
+   */
   contextUpdate?: string;
   /** "Ask this session" only: what to do when the host session is busy. */
   busyPolicy?: "wait" | "interrupt";
+  /**
+   * "Ask this session" only: the reviewer's unsubmitted annotations as a plain
+   * list, framed by the bridge as read-only context (see `AIQueryOptions`).
+   * Ignored by every other provider.
+   */
+  draftAnnotations?: string;
 }
 
 export interface AbortRequest {
@@ -392,6 +403,7 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
       const { sessionId, prompt, contextUpdate } = body;
       const busyPolicy =
         body.busyPolicy === "wait" || body.busyPolicy === "interrupt" ? body.busyPolicy : undefined;
+      const draftAnnotations = typeof body.draftAnnotations === "string" ? body.draftAnnotations : undefined;
 
       if (!sessionId || !prompt) {
         return Response.json(
@@ -414,10 +426,20 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
 
       sessionManager.touch(sessionId);
 
-      // If context update provided, prepend it to the prompt
-      const effectivePrompt = contextUpdate
+      const isSessionBridge = entry.session instanceof SessionBridgeSession;
+
+      // A separate AI gets the context update in front of the prompt. "Ask
+      // this session" never does: that session is the agent the review is
+      // for, and the update is the feedback export of drafts the reviewer has
+      // not submitted, which it would carry out (#1748). Drafts reach it only
+      // as `draftAnnotations`, inside the bridge's read-only frame.
+      const effectivePrompt = contextUpdate && !isSessionBridge
         ? `[Context update: the user has made changes since this conversation started]\n${contextUpdate}\n\n${prompt}`
         : prompt;
+      const queryOptions = {
+        ...(busyPolicy && { busyPolicy }),
+        ...(isSessionBridge && draftAnnotations !== undefined && { draftAnnotations }),
+      };
 
       // Set label from first query if not already set
       if (!entry.label) {
@@ -429,8 +451,8 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
       const stream = new ReadableStream({
         async start(controller) {
           try {
-            const messages = busyPolicy
-              ? entry.session.query(effectivePrompt, { busyPolicy })
+            const messages = Object.keys(queryOptions).length > 0
+              ? entry.session.query(effectivePrompt, queryOptions)
               : entry.session.query(effectivePrompt);
             for await (const message of messages) {
               const data = JSON.stringify(message);

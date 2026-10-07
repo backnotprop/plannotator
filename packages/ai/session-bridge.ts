@@ -182,13 +182,54 @@ function describeSurface(context: AIContext): string | null {
 }
 
 /**
- * The message the session receives. There is no system prompt: the host's own
- * prompt is in effect, so the header carries the framing.
+ * Opens the reviewer's unsubmitted annotations (#1748). The session that
+ * receives an Ask is the agent the review is for, with its tools, so drafts
+ * are framed as read-only context and never in the submitted-feedback format:
+ * the reviewer sends them, as feedback, when ready.
  */
-export function formatSessionAskText(context: AIContext, prompt: string, mode: SessionBridgeAskMode = "turn"): string {
+export const SESSION_ASK_DRAFTS_LABEL =
+	"[Draft annotations the reviewer has not submitted yet. They are context for the question only. Do not act on them; the reviewer will send them when ready. This list replaces any draft list sent earlier.]";
+
+/** Closes the draft list, so the question after it reads as the question. */
+export const SESSION_ASK_DRAFTS_END = "[End of draft annotations]";
+
+/** Sent once when every draft the session saw earlier was removed. */
+export const SESSION_ASK_DRAFTS_CLEARED =
+	"[The reviewer has no draft annotations now. Disregard any draft list sent earlier.]";
+
+/** Upper bound on the draft list in one question; a longer one is cut. */
+export const MAX_SESSION_ASK_DRAFTS_CHARS = 16_000;
+
+function formatDraftBlock(draftAnnotations: string | undefined): string | null {
+	if (draftAnnotations === undefined) return null;
+	// The list's own text cannot close the frame early.
+	let list = draftAnnotations.split(SESSION_ASK_DRAFTS_END).join("[End of draft annotations (quoted)]").trim();
+	if (!list) return SESSION_ASK_DRAFTS_CLEARED;
+	if (list.length > MAX_SESSION_ASK_DRAFTS_CHARS) {
+		list = `${list.slice(0, MAX_SESSION_ASK_DRAFTS_CHARS)}\n… (the rest of the draft list was cut)`;
+	}
+	return [SESSION_ASK_DRAFTS_LABEL, list, SESSION_ASK_DRAFTS_END].join("\n");
+}
+
+/**
+ * The message the session receives. There is no system prompt: the host's own
+ * prompt is in effect, so the header carries the framing. `draftAnnotations`
+ * (the reviewer's unsubmitted annotations, when they changed since the session
+ * last saw them) rides in its read-only frame between the surface and the
+ * question, so the question stays the last thing the session reads.
+ */
+export function formatSessionAskText(
+	context: AIContext,
+	prompt: string,
+	mode: SessionBridgeAskMode = "turn",
+	draftAnnotations?: string,
+): string {
 	const surface = describeSurface(context);
 	const note = mode === "transient" ? SESSION_ASK_TRANSIENT_NOTE : null;
-	return [SESSION_ASK_HEADER, note, surface, "", prompt.trim()].filter((line) => line !== null).join("\n");
+	const drafts = formatDraftBlock(draftAnnotations);
+	return [SESSION_ASK_HEADER, note, surface, "", drafts, drafts === null ? null : "", prompt.trim()]
+		.filter((line) => line !== null)
+		.join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -508,7 +549,7 @@ export class SessionBridgeSession extends BaseSession {
 			);
 
 			try {
-				bridge.ask({ askId: `${this.id}:${gen}`, text: formatSessionAskText(this.context, prompt, mode), mode }, sink, hostAbort.signal);
+				bridge.ask({ askId: `${this.id}:${gen}`, text: formatSessionAskText(this.context, prompt, mode, options?.draftAnnotations), mode }, sink, hostAbort.signal);
 			} catch (err) {
 				sink.error("failed", err instanceof Error ? err.message : String(err));
 			}

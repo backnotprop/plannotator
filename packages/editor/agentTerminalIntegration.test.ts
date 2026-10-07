@@ -59,7 +59,7 @@ describe("agent terminal integration helpers", () => {
     const prompt = buildTerminalAskPrompt({
       documentPath: "/repo/README.md",
       readableFilePath: "/repo/README.md",
-      annotationsContext: "Comment on intro",
+      draftAnnotations: "Draft 1 (line 1): comment on \"old intro\" — tighten",
       inlineDocument: { label: "Current document text", content: "# Should not be inlined" },
       scopedQuestion: "Re: Intro\nSource: /repo/README.md\n\nSelected text:\n```\nold intro\n```\n\nWhat should change?",
     });
@@ -67,7 +67,7 @@ describe("agent terminal integration helpers", () => {
     expect(prompt).toContain("read this file from the current workspace: /repo/README.md");
     expect(prompt).toContain("Selected text:");
     expect(prompt).toContain("old intro");
-    expect(prompt).toContain("Current annotations:");
+    expect(prompt).toContain("Draft 1 (line 1)");
     expect(prompt).not.toContain("# Should not be inlined");
   });
 

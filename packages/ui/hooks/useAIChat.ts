@@ -46,7 +46,29 @@ export interface AskAIParams {
   /** "Ask this session" only: what to do when the host session is busy
    *  ("wait" = ask when it finishes, "interrupt" = stop its turn and ask now). */
   busyPolicy?: 'wait' | 'interrupt';
+  /** "Ask this session" only: the reviewer's CURRENT unsubmitted annotations
+   *  as a plain list (`formatDraftAnnotationsForAsk`; '' when there are none).
+   *  The hook sends it only when it differs from what this session last
+   *  received, and the server frames it as read-only context, never as
+   *  feedback (#1748). Leave unset for every other provider. */
+  draftAnnotations?: string;
 }
+
+/** What to send as `draftAnnotations` for one question: the list when this
+ *  session has not received it yet, '' once to clear drafts it saw earlier,
+ *  nothing when it already has the current list. */
+export function draftAnnotationsToSend(
+  delivered: { sessionId: string; text: string } | null,
+  sessionId: string,
+  current: string | undefined,
+): string | undefined {
+  if (current === undefined) return undefined;
+  const seen = delivered?.sessionId === sessionId ? delivered.text : '';
+  return current === seen ? undefined : current;
+}
+
+/** Stream messages that show the session received the question. */
+const DELIVERED_MESSAGE_TYPES = new Set(['text_delta', 'text', 'tool_use', 'tool_result', 'result']);
 
 /** Overrides for re-asking a question that ended in a busy/gone/blocked answer. */
 export interface AIRetryOptions {
@@ -306,6 +328,9 @@ export function useAIChat({
   // The params each question was asked with, so a busy answer can be
   // re-asked ("Ask when it finishes", "Interrupt and ask now").
   const paramsByQuestionRef = useRef(new Map<string, AskAIParams>());
+  // The draft list the current session last RECEIVED, so an unchanged list is
+  // not pasted into it again on every question.
+  const deliveredDraftsRef = useRef<{ sessionId: string; text: string } | null>(null);
 
   const ask = useCallback(async (params: AskAIParams, askOptions?: { providerId?: string }) => {
     if (abortRef.current) {
@@ -364,11 +389,21 @@ export function useAIChat({
       }
 
       const fullPrompt = buildPrompt(params);
+      const drafts = draftAnnotationsToSend(deliveredDraftsRef.current, sid, params.draftAnnotations);
+      // Recorded once the session shows it received the question, so a busy,
+      // gone or failed ask sends the list again next time.
+      const markDraftsDelivered = (msg: { type?: unknown; code?: unknown }) => {
+        if (drafts === undefined) return;
+        const received = DELIVERED_MESSAGE_TYPES.has(String(msg.type))
+          || (msg.type === 'error' && msg.code === SESSION_ASK_ERROR_CODES.takenOver);
+        if (received) deliveredDraftsRef.current = { sessionId: sid, text: drafts };
+      };
       const res = await aiTransport.query({
         sessionId: sid,
         prompt: fullPrompt,
         ...(params.contextUpdate && { contextUpdate: params.contextUpdate }),
         ...(params.busyPolicy && { busyPolicy: params.busyPolicy }),
+        ...(drafts !== undefined && { draftAnnotations: drafts }),
       }, controller.signal);
 
       if (!res.ok || !res.body) {
@@ -395,6 +430,7 @@ export function useAIChat({
 
           try {
             const msg = JSON.parse(data);
+            markDraftsDelivered(msg);
 
             if (msg.type === 'text_delta') {
               updateMessages(prev =>

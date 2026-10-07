@@ -4,6 +4,7 @@ import { resolveReplyParents } from '@plannotator/core/annotation-threads';
 import { diagramAnchorLocationLine, parseDiagramAnchor } from '@plannotator/core/diagram-anchor';
 import {
   formatQuestionAnswerLines,
+  formatQuestionAnswerText,
   formatQuestionAnswersSection,
   indexQuestionBlocks,
   parseQuestionAnswer,
@@ -774,14 +775,19 @@ const isElementPlaceholderQuote = (text: unknown): boolean =>
  *  element instead (`Feedback on the <nav> element — "Primary"`); every other
  *  annotation keeps the quote line exactly as before. */
 const commentHeadingLine = (ann: any): string => {
+  const element = elementSubject(ann);
+  return element ? `Feedback on ${element}` : `Feedback on: "${ann.originalText}"`;
+};
+
+/** `the <nav> element — "Primary"` for a text-less pinpoint whose quote is
+ *  the bridge's placeholder; null for every other annotation. */
+const elementSubject = (ann: any): string | null => {
   const context = ann?.elementContext;
-  if (context && typeof context.tag === 'string' && isElementPlaceholderQuote(ann.originalText)) {
-    const tag = safeInline(context.tag, 32);
-    const name = context.name ? safeInline(context.name, 120) : '';
-    const file = elementSourceFileName(context);
-    return `Feedback on the <${tag}> element${name ? ` — "${name}"` : ''}${file && file !== name ? ` (${file})` : ''}`;
-  }
-  return `Feedback on: "${ann.originalText}"`;
+  if (!context || typeof context.tag !== 'string' || !isElementPlaceholderQuote(ann.originalText)) return null;
+  const tag = safeInline(context.tag, 32);
+  const name = context.name ? safeInline(context.name, 120) : '';
+  const file = elementSourceFileName(context);
+  return `the <${tag}> element${name ? ` — "${name}"` : ''}${file && file !== name ? ` (${file})` : ''}`;
 };
 
 /** The file a media element shows, so two nameless images read differently in a heading:
@@ -1514,6 +1520,119 @@ export const exportCodeFileAnnotations = (annotations: CodeAnnotation[]): string
 
   output += `---\n`;
   return output;
+};
+
+/** What `formatDraftAnnotationsForAsk` lists: the same collections the
+ *  feedback export reads, before the reviewer submits them. */
+export interface DraftAnnotationsForAsk {
+  /** The session's own document (plan, file, message). */
+  annotations: readonly Annotation[];
+  blocks?: Block[];
+  globalAttachments?: readonly ImageAttachment[];
+  /** Every other document holding drafts, by path. */
+  documents?: ReadonlyMap<string, LinkedDocAnnotationEntry>;
+  codeAnnotations?: readonly CodeAnnotation[];
+  editorAnnotations?: readonly EditorAnnotation[];
+}
+
+const MAX_ASK_DRAFT_ENTRIES = 60;
+const ASK_DRAFT_QUOTE_CHARS = 160;
+const ASK_DRAFT_TEXT_CHARS = 1000;
+
+/**
+ * The reviewer's UNSUBMITTED annotations as a plain list, for an "Ask this
+ * session" question (#1748). It is deliberately not the feedback export: no
+ * title, no "I've reviewed this … and have N pieces of feedback", no numbered
+ * "Feedback on" headings, no injected skill instructions. The session that
+ * reads it is the agent the review is for, so a draft must read as something
+ * the reviewer is still writing, not as a request. The server wraps the list
+ * in a read-only frame (`SESSION_ASK_DRAFTS_LABEL`); this function only lists.
+ *
+ * One line per draft (`Draft 2 (line 14): comment on "…" — …`), numbered in
+ * document order so a question can say "draft 2"; every page-, file- or
+ * reviewer-supplied string is collapsed to one line and capped. Empty string
+ * when there are no drafts.
+ */
+export const formatDraftAnnotationsForAsk = (input: DraftAnnotationsForAsk): string => {
+  type Row = { ann: any; where: string | null };
+  const rows: Row[] = [];
+  const placeOf = (blocks: Block[] | undefined, ann: any): string | null => {
+    if (ann.diffContext) return 'in the version diff';
+    return blocks ? lineLabelForAnnotation(blocks, ann) : null;
+  };
+  for (const ann of sortAnnotationsInDocumentOrder([...input.annotations], input.blocks)) {
+    rows.push({ ann, where: placeOf(input.blocks, ann) });
+  }
+  for (const [path, doc] of input.documents ?? []) {
+    for (const ann of sortAnnotationsInDocumentOrder([...doc.annotations], doc.blocks)) {
+      const line = placeOf(doc.blocks, ann);
+      rows.push({ ann, where: line ? `${safeInline(path, 300)}, ${line}` : safeInline(path, 300) });
+    }
+  }
+
+  const numbers = new Map<string, number>();
+  rows.forEach((row, index) => {
+    if (typeof row.ann?.id === 'string') numbers.set(row.ann.id, index + 1);
+  });
+  const replyParents = resolveReplyParents(rows.map((row) => row.ann));
+  const quote = (value: unknown) => `"${safeInline(value, ASK_DRAFT_QUOTE_CHARS)}"`;
+  const text = (value: unknown) => safeInline(value, ASK_DRAFT_TEXT_CHARS);
+  const imageList = (list: readonly ImageAttachment[]): string =>
+    list.map((img) => `[${safeInline(img?.name, 80)}] ${safeInline(img?.path, 300)}`).join(', ');
+  const images = (list: unknown): string =>
+    Array.isArray(list) && list.length > 0 ? ` (attached: ${imageList(list)})` : '';
+
+  const lines: string[] = [];
+  rows.forEach(({ ann, where }, index) => {
+    const parent = replyParents.get(ann.id);
+    const parentNumber = parent ? numbers.get(parent) : undefined;
+    const head = `Draft ${index + 1}${where ? ` (${where})` : ''}:`;
+    const from = ann.source ? ` (from ${safeInline(ann.source, 60)})` : '';
+    const answer = ann.questionAnswer == null ? null : parseQuestionAnswer(ann.questionAnswer);
+    let body: string;
+    if (answer) {
+      body = `answer to the question ${quote(answer.prompt)} — ${text(formatQuestionAnswerText(answer))}`;
+    } else if (parentNumber !== undefined) {
+      body = `reply to draft ${parentNumber} — ${text(ann.text)}`;
+    } else if (ann.type === 'DELETION') {
+      body = `suggests removing ${quote(ann.originalText)}`;
+    } else if (ann.type === 'GLOBAL_COMMENT') {
+      body = `general note — ${text(ann.text)}`;
+    } else {
+      const subject = elementSubject(ann) ?? quote(ann.originalText);
+      const anchor = ann.diagramAnchor === undefined ? null : parseDiagramAnchor(ann.diagramAnchor);
+      const target = anchor ? `${subject} [${safeInline(diagramAnchorLocationLine(anchor), 300)}]` : subject;
+      body = ann.isQuickLabel
+        ? `label ${quote(ann.text)} on ${target}`
+        : `comment on ${target} — ${text(ann.text)}`;
+    }
+    lines.push(`${head} ${body}${from}${images(ann.images)}`);
+  });
+
+  let next = rows.length;
+  for (const ann of input.codeAnnotations ?? []) {
+    next += 1;
+    const range = ann.lineStart === ann.lineEnd ? `line ${ann.lineStart}` : `lines ${ann.lineStart}–${ann.lineEnd}`;
+    const on = ann.originalCode ? ` on ${quote(ann.originalCode)}` : '';
+    lines.push(`Draft ${next} (${safeInline(ann.filePath, 300)}, ${range}): comment${on} — ${text(ann.text)}${ann.source ? ` (from ${safeInline(ann.source, 60)})` : ''}${images(ann.images)}`);
+  }
+  for (const ann of input.editorAnnotations ?? []) {
+    next += 1;
+    const range = ann.lineStart === ann.lineEnd ? `line ${ann.lineStart}` : `lines ${ann.lineStart}–${ann.lineEnd}`;
+    lines.push(`Draft ${next} (${safeInline(ann.filePath, 300)}, ${range}): comment on ${quote(ann.selectedText)} — ${text(ann.comment)}`);
+  }
+
+  const shown = lines.slice(0, MAX_ASK_DRAFT_ENTRIES);
+  if (lines.length > shown.length) shown.push(`… and ${lines.length - shown.length} more draft annotations`);
+
+  const attachments = input.globalAttachments ?? [];
+  if (attachments.length > 0) shown.push(`Reference images: ${imageList(attachments)}`);
+  for (const [path, doc] of input.documents ?? []) {
+    if (doc.globalAttachments.length > 0) {
+      shown.push(`Reference images (${safeInline(path, 300)}): ${imageList(doc.globalAttachments)}`);
+    }
+  }
+  return shown.join('\n');
 };
 
 export interface MessageAnnotationEntry {

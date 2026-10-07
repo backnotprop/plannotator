@@ -30,7 +30,7 @@ import { documentRendersHtml, htmlAssetRouteFromDocument, resolveHtmlLinkIntent 
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
 import { createPortal } from 'react-dom';
 import { annotateFileFeedback, annotateMessageFeedback, wrapFeedbackForClipboard, type AnnotateFeedbackTemplates } from '@plannotator/shared/feedback-templates';
-import { diagramDocumentBlocks, parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, exportCodeFileAnnotations, exportMessageAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter, type LinkedDocAnnotationEntry, type MessageAnnotationEntry } from '@plannotator/ui/utils/parser';
+import { diagramDocumentBlocks, parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, exportCodeFileAnnotations, exportMessageAnnotations, formatDraftAnnotationsForAsk, extractFrontmatter, wrapFeedbackForAgent, Frontmatter, type LinkedDocAnnotationEntry, type MessageAnnotationEntry } from '@plannotator/ui/utils/parser';
 import { primeSkillCatalog, primeSkillContentsForExport } from '@plannotator/ui/utils/skillCatalog';
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
 import type { AnnotationRestoreReport } from '@plannotator/ui/hooks/useAnnotationHighlighter';
@@ -101,7 +101,7 @@ import {
 } from '@plannotator/ui/utils/agentToolAnnouncement';
 import { useAgentToolSetting } from '@plannotator/ui/hooks/useAgentToolSetting';
 import { useLatchedTrue } from '@plannotator/ui/hooks/useLatchedTrue';
-import { buildDefaultPrompt, useAIChat } from '@plannotator/ui/hooks/useAIChat';
+import { buildDefaultPrompt, draftAnnotationsToSend, useAIChat } from '@plannotator/ui/hooks/useAIChat';
 import { askScopeFromContext as askScopeFromContextFor } from './askScope';
 import { getUIPreferences, type UIPreferences, type PlanWidth } from '@plannotator/ui/utils/uiPreferences';
 import { getEditorMode, saveEditorMode } from '@plannotator/ui/utils/editorMode';
@@ -282,6 +282,7 @@ import {
   type AgentTerminalDeliveryRecord,
   type AnnotateFeedbackTarget,
 } from './agentTerminalIntegration';
+import { askAIAnnotationParams } from './askAIDrafts';
 import {
   buildPlanEditPanelItem,
   buildDirectEditsSection,
@@ -5259,6 +5260,22 @@ const App: React.FC = () => {
     [annotationsOutput, hasAnyAnnotations],
   );
 
+  // The same annotations as a plain draft list, for the agents that act on
+  // what they read ("Ask this session", the agent terminal): never the
+  // feedback export, which they would carry out before Submit (#1748). Read
+  // per question, so it costs nothing when nobody asks.
+  const getAIDraftList = useCallback(() => {
+    const sections = getFeedbackSections();
+    return formatDraftAnnotationsForAsk({
+      annotations: sections.annotations,
+      blocks: sections.blocks,
+      globalAttachments: sections.globalAttachments,
+      documents: sections.linkedDocuments,
+      codeAnnotations,
+      editorAnnotations,
+    });
+  }, [getFeedbackSections, codeAnnotations, editorAnnotations]);
+
   const aiDocumentPath = linkedDocHook.isActive
     ? linkedDocHook.filepath ?? 'linked document'
     : sourceFilePath ?? (annotateSource === 'message' ? 'agent message' : annotateSource === 'folder' ? 'folder document' : 'plan');
@@ -5377,15 +5394,21 @@ const App: React.FC = () => {
     [aiDocumentPath, aiSourceConverted],
   );
 
+  // The draft list the agent terminal last received (per terminal session), so
+  // an unchanged list is not pasted into it on every question (#1748).
+  const terminalDeliveredDraftsRef = useRef<{ sessionId: string; text: string } | null>(null);
   const buildAgentAskPrompt = useCallback((question: string, context?: CommentAskAIContext) => {
     const scopedQuestion = buildDefaultPrompt({
       prompt: question,
       scope: askScopeFromContext(context),
     });
-    return buildTerminalAskPrompt({
+    const terminalSession = String(agentTerminalSessionId ?? 'none');
+    const draftList = getAIDraftList();
+    const draftAnnotations = draftAnnotationsToSend(terminalDeliveredDraftsRef.current, terminalSession, draftList);
+    const prompt = buildTerminalAskPrompt({
       scopedQuestion,
       documentPath: aiDocumentPath,
-      annotationsContext: aiAnnotationsContext,
+      draftAnnotations,
       readableFilePath: terminalAskReadableFilePath,
       inlineDocument: terminalAskReadableFilePath
         ? null
@@ -5394,7 +5417,12 @@ const App: React.FC = () => {
             content: aiRenderAs === 'html' && rawHtml ? rawHtml : displayedMarkdown,
           },
     });
-  }, [aiAnnotationsContext, aiDocumentPath, aiRenderAs, askScopeFromContext, displayedMarkdown, rawHtml, terminalAskReadableFilePath]);
+    // Called once the prompt reached the terminal.
+    const markSent = () => {
+      terminalDeliveredDraftsRef.current = { sessionId: terminalSession, text: draftList };
+    };
+    return { prompt, markSent };
+  }, [agentTerminalSessionId, getAIDraftList, aiDocumentPath, aiRenderAs, askScopeFromContext, displayedMarkdown, rawHtml, terminalAskReadableFilePath]);
 
   const aiDocumentKey = aiContext
     ? `${aiDocumentMode ? 'document' : 'plan'}:${aiRenderAs}:${aiDocumentPath}:${versionInfo?.version ?? 'current'}`
@@ -5457,7 +5485,9 @@ const App: React.FC = () => {
 
   const handleAskAI = useCallback((question: string, context?: CommentAskAIContext): boolean => {
     if (isAgentTerminalReady) {
-      if (sendToAgentTerminal(buildAgentAskPrompt(question, context))) {
+      const terminalAsk = buildAgentAskPrompt(question, context);
+      if (sendToAgentTerminal(terminalAsk.prompt)) {
+        terminalAsk.markSent();
         return true;
       }
       handleAgentTerminalReadyChange(false);
@@ -5475,12 +5505,19 @@ const App: React.FC = () => {
     askAI({
       prompt: question,
       scope: askScopeFromContext(context),
-      contextUpdate: aiSessionId ? aiAnnotationsContext : undefined,
+      ...askAIAnnotationParams({
+        sessionBridge: hasSessionBridge,
+        hasSession: !!aiSessionId,
+        feedbackExport: aiAnnotationsContext,
+        draftList: getAIDraftList,
+      }),
     });
     return true;
   }, [
     aiAnnotationsContext,
     aiSessionId,
+    getAIDraftList,
+    hasSessionBridge,
     askAI,
     askScopeFromContext,
     buildAgentAskPrompt,

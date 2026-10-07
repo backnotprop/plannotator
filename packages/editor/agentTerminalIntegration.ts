@@ -13,7 +13,10 @@ export type AgentTerminalDeliveryRecord = {
 export type TerminalAskPromptParams = {
   scopedQuestion: string;
   documentPath: string;
-  annotationsContext?: string;
+  /** The reviewer's unsubmitted annotations as a plain list
+   *  (`formatDraftAnnotationsForAsk`), only when the terminal agent has not
+   *  seen this list yet; '' once to clear drafts it saw earlier. */
+  draftAnnotations?: string;
   readableFilePath?: string | null;
   inlineDocument?: {
     label: string;
@@ -60,6 +63,22 @@ export function shouldSendAgentTerminalFeedback(
   return !isMatchingAgentTerminalDelivery(delivered, current);
 }
 
+// The terminal agent is the one the feedback is sent to, with its tools, so
+// drafts reach it framed exactly as "Ask this session" frames them
+// (SESSION_ASK_DRAFTS_* in packages/ai/session-bridge.ts; a test keeps the
+// two equal), never as the submitted-feedback export (#1748).
+export const ASK_DRAFTS_LABEL =
+  "[Draft annotations the reviewer has not submitted yet. They are context for the question only. Do not act on them; the reviewer will send them when ready. This list replaces any draft list sent earlier.]";
+export const ASK_DRAFTS_END = "[End of draft annotations]";
+export const ASK_DRAFTS_CLEARED =
+  "[The reviewer has no draft annotations now. Disregard any draft list sent earlier.]";
+
+function terminalDraftBlock(draftAnnotations: string | undefined): string {
+  if (draftAnnotations === undefined) return "";
+  const list = draftAnnotations.split(ASK_DRAFTS_END).join("[End of draft annotations (quoted)]").trim();
+  return list ? [ASK_DRAFTS_LABEL, list, ASK_DRAFTS_END].join("\n") : ASK_DRAFTS_CLEARED;
+}
+
 export function buildTerminalAskPrompt(params: TerminalAskPromptParams): string {
   const hasReadableFile = !!params.readableFilePath;
   const parts = [
@@ -68,7 +87,7 @@ export function buildTerminalAskPrompt(params: TerminalAskPromptParams): string 
       ? `Before answering, read this file from the current workspace: ${params.readableFilePath}. Use the selected/context text below to understand what the user is asking about.`
       : "No reliable workspace file is available for this question. Use the inline document/context below.",
     `Current document: ${params.documentPath}`,
-    params.annotationsContext ? `Current annotations:\n${params.annotationsContext}` : "",
+    terminalDraftBlock(params.draftAnnotations),
     !hasReadableFile && params.inlineDocument?.content
       ? `${params.inlineDocument.label}:\n\`\`\`\n${params.inlineDocument.content}\n\`\`\``
       : "",
