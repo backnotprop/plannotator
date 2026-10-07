@@ -1,6 +1,7 @@
 ---
 import { getCollection, render } from 'astro:content';
 import Blog from '../../layouts/Blog.astro';
+import { isUnlaunchedPost } from '../../lib/inbox-launch';
 
 export async function getStaticPaths() {
   const posts = await getCollection('blog');
@@ -21,6 +22,8 @@ const { Content } = await render(post);
   date={post.data.date}
   author={post.data.author}
   tags={post.data.tags}
+  noindex={isUnlaunchedPost(post.id)}
+  ogImage={post.data.ogImage}
 >
   <Content />
 </Blog>

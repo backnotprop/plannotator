@@ -1,6 +1,7 @@
 import rss from '@astrojs/rss';
 import { getCollection } from 'astro:content';
 import type { APIContext } from 'astro';
+import { isUnlaunchedPost } from '../lib/inbox-launch';
 
 const migratedLinks: Record<string, string> = {
   'annotate-any-web-page-or-html-file': 'https://docs.plannotator.ai/learn/annotate-any-web-page-or-html-file',
@@ -14,7 +15,7 @@ const migratedLinks: Record<string, string> = {
 
 export async function GET(context: APIContext) {
   const posts = (await getCollection('blog'))
-    .filter((post) => !post.data.draft)
+    .filter((post) => !post.data.draft && !isUnlaunchedPost(post.id))
     .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
 
   return rss({

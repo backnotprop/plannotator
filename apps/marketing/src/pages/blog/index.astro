@@ -4,9 +4,10 @@ import Nav from '../../components/Nav.astro';
 import Footer from '../../components/Footer.astro';
 import BlogCard from '../../components/BlogCard.astro';
 import { getCollection } from 'astro:content';
+import { isUnlaunchedPost } from '../../lib/inbox-launch';
 
 const posts = (await getCollection('blog'))
-  .filter((post) => !post.data.draft)
+  .filter((post) => !post.data.draft && !isUnlaunchedPost(post.id))
   .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
 ---
 <Base title="Blog - Plannotator" description="News and updates from Plannotator">
