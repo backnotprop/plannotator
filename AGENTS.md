@@ -2005,6 +2005,7 @@ Sorting and the rest:
 - The contract lives once in `packages/shared/inbox/connection.ts`. The mod keeps a byte-for-byte copy of its CONTRACT section in `apps/hook/hooks/mod/inbox-contract.ts`, pinned by `inbox-contract.test.ts`.
 - The tool is built from the running Inbox's own `tools/list` (`inboxAgentTool`). The connection fills `project_path`, `agent_session`, `agent_host` and `agent_name` and keeps them out of the schema.
 - The wake text (`inboxWakeText`) is `Plannotator Inbox: <subject> (<reply id>)`, the fixed `INBOX_WAKE_INSTRUCTION` line, a blank line, then the reply verbatim. It never carries the thread and never touches the system prompt.
+- A connection whose wake runs sets `_meta["ai.plannotator/inbox-wakes"]: true` on its `tools/call` (`INBOX_WAKES_META_KEY`, `inboxToolCallParams`): the Claude Code mod always, Pi and OpenCode 2 while the session's wake exists, OpenCode 1 never. send_message and submit_guide then end their result with `INBOX_REPLY_ARRIVES_TEXT` (end the turn; the reply arrives by itself) instead of "Call wait_for_reply…", which the stdio shim, raw MCP clients and older connections keep (`callerWakes` in `inbox-mcp.ts`). An older Inbox ignores the key.
 - The bridge is two connection routes:
   - `POST /api/inbox/bridge/poll` holds up to 25 s for the person's replies to that session.
   - `POST /api/inbox/bridge/event` `{ type: "delivered" }` writes `delivery` on the reply, which the thread shows as "Delivered to <agent>".

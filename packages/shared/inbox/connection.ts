@@ -59,6 +59,21 @@ export const INBOX_FILLED_ARGUMENTS = ['project_path', 'agent_session', 'agent_h
 
 export type InboxFilledArguments = Record<(typeof INBOX_FILLED_ARGUMENTS)[number], string>
 
+/**
+ * The `_meta` key a connection sets to `true` on its `tools/call` when the
+ * person's reply reaches this session as a turn by itself (the session's wake
+ * runs). The send tools then say to end the turn instead of waiting with
+ * wait_for_reply. Without it (the stdio shim, a raw MCP client, OpenCode 1,
+ * an older connection) they keep the wait_for_reply advice. An older Inbox
+ * ignores it.
+ */
+export const INBOX_WAKES_META_KEY = 'ai.plannotator/inbox-wakes'
+
+/** The `tools/call` params for an Inbox tool call: `wakes` when this session's replies arrive as turns. */
+export function inboxToolCallParams(call: { name: string; arguments: Record<string, unknown> }, options: { wakes: boolean }): Record<string, unknown> {
+  return { name: call.name, arguments: call.arguments, ...(options.wakes ? { _meta: { [INBOX_WAKES_META_KEY]: true } } : {}) }
+}
+
 /** The bridge routes on the Inbox server (bearer token, loopback Host, no Origin). */
 export const INBOX_BRIDGE_POLL_PATH = '/api/inbox/bridge/poll'
 export const INBOX_BRIDGE_EVENT_PATH = '/api/inbox/bridge/event'

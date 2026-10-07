@@ -102,7 +102,7 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 		...NOT_ACTIVE_ON_REGISTRATION,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			wake?.touch();
-			const result = await connection.callTool(params, { sessionId: ctx.sessionManager.getSessionId(), cwd: ctx.cwd });
+			const result = await connection.callTool(params, { sessionId: ctx.sessionManager.getSessionId(), cwd: ctx.cwd, wakes: wake !== null });
 			if (result.isError) throw new Error(result.text);
 			return { content: [{ type: "text", text: result.text }], details: {} };
 		},

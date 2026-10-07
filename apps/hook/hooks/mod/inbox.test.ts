@@ -218,6 +218,10 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     expect(t.messages[0]?.author).toMatchObject({ kind: 'agent', host: 'claude-code', name: 'Claude Code', session: 'session-send' })
     const bad = await session.callInbox({ action: 'send_message', body: 'x', agent_session: 'someone-else' }, w.project)
     expect('deny' in bad && bad.deny).toContain('takes no "agent_session"')
+    // The mod's wake delivers the reply as a turn: the result says to end the turn, never to wait.
+    const next = await session.callInbox({ action: 'send_message', body: 'A second note.' }, w.project)
+    expect('text' in next && next.text).toContain('arrives in this session by itself')
+    expect('text' in next && next.text).not.toContain('wait_for_reply with this thread_id')
     w.proof(`thread ${sent.thread_id}: project ${t.project.root}, author ${JSON.stringify(t.messages[0]?.author)}`)
   }, 60_000)
 

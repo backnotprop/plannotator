@@ -98,7 +98,7 @@ export async function registerInboxOpenCode2(
         } catch {
           // The plugin's own folder stands.
         }
-        return { content: (await connection.callTool(input, { sessionId: root, cwd })).text };
+        return { content: (await connection.callTool(input, { sessionId: root, cwd, wakes: wakes !== null })).text };
       },
     });
   });

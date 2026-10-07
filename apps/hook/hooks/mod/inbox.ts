@@ -43,6 +43,7 @@ import {
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
   inboxToolCall,
+  inboxToolCallParams,
   inboxToolResultText,
   inboxWakeText,
   mcpAnswerOf,
@@ -315,7 +316,8 @@ export class InboxLink {
     if ('error' in running) return { deny: running.error }
     let answer: Awaited<ReturnType<typeof mcpCall>>
     try {
-      answer = await mcpCall(this.host, running.port, 'tools/call', { name: call.name, arguments: call.arguments })
+      // This session's wake delivers the reply as a turn: the send tools say to end the turn.
+      answer = await mcpCall(this.host, running.port, 'tools/call', inboxToolCallParams(call, { wakes: true }))
     } catch (error) {
       return { deny: `The Plannotator Inbox did not answer (${error instanceof Error ? error.message : String(error)}).` }
     }

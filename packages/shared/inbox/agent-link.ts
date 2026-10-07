@@ -41,6 +41,7 @@ import {
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
   inboxToolCall,
+  inboxToolCallParams,
   inboxToolResultText,
   inboxWakeText,
   mcpAnswerOf,
@@ -205,8 +206,8 @@ export class InboxAgentConnection {
     return this.options.host;
   }
 
-  /** A `plannotator_inbox` call from `sessionId`, working in `cwd`. */
-  async callTool(input: unknown, at: { sessionId: string; cwd: string }): Promise<{ text: string; isError: boolean }> {
+  /** A `plannotator_inbox` call from `sessionId`, working in `cwd`; `wakes` when this session's wake runs (replies arrive as turns). */
+  async callTool(input: unknown, at: { sessionId: string; cwd: string; wakes?: boolean }): Promise<{ text: string; isError: boolean }> {
     const call = inboxToolCall(input, this.tools, {
       project_path: at.cwd,
       agent_session: at.sessionId,
@@ -218,7 +219,7 @@ export class InboxAgentConnection {
     if ("error" in running) return { text: running.error, isError: true };
     let answer: Awaited<ReturnType<typeof mcpCall>>;
     try {
-      answer = await mcpCall(running.port, "tools/call", { name: call.name, arguments: call.arguments });
+      answer = await mcpCall(running.port, "tools/call", inboxToolCallParams(call, { wakes: at.wakes === true }));
     } catch (error) {
       return { text: `The Plannotator Inbox did not answer (${errorText(error)}).`, isError: true };
     }

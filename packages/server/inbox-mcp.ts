@@ -15,6 +15,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxLine, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
+import { INBOX_WAKES_META_KEY } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { recordAgentDecision } from "./inbox-decisions";
@@ -100,6 +101,21 @@ export type ToolResult = {
   structuredContent?: Record<string, unknown>;
   isError?: boolean;
 };
+
+/**
+ * Whether the caller's connection delivers the person's reply into its
+ * session as a turn (`INBOX_WAKES_META_KEY` on the `tools/call`): the
+ * Claude Code mod, Pi and OpenCode 2 while their wake runs. The stdio shim,
+ * raw MCP clients, OpenCode 1 and older connections do not say so.
+ */
+export function callerWakes(ctx: unknown): boolean {
+  const meta = (ctx as { mcpReq?: { _meta?: Record<string, unknown> } } | undefined)?.mcpReq?._meta;
+  return meta?.[INBOX_WAKES_META_KEY] === true;
+}
+
+/** The send tools' last sentence for a caller whose reply arrives by itself. */
+export const INBOX_REPLY_ARRIVES_TEXT =
+  "The person's reply arrives in this session by itself, as a new message once the session is idle: end your turn, or go on with other work; do not call wait_for_reply.";
 
 export function ok(line: string, structured: Record<string, unknown>): ToolResult {
   return { content: [{ type: "text", text: line }], structuredContent: structured };
@@ -290,7 +306,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         .strict(),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
-    async (input) =>
+    async (input, ctx) =>
       guarded(async () => {
         const project = await sendProject(context, input);
         const sent = sendAgentMessage(context, project, input);
@@ -298,7 +314,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           (sent.questions > 0 ? ` asking ${sent.questions} question${sent.questions === 1 ? "" : "s"}` : "") +
           (sent.attachments > 0 ? ` with ${sent.attachments} attachment${sent.attachments === 1 ? "" : "s"}` : "");
         return ok(
-          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}). Call wait_for_reply with this thread_id for the answer, or go on and read_thread later.`,
+          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}). ${callerWakes(ctx) ? INBOX_REPLY_ARRIVES_TEXT : "Call wait_for_reply with this thread_id for the answer, or go on and read_thread later."}`,
           sent.structured,
         );
       }),
