@@ -41,7 +41,7 @@ export function ulid(now: number = Date.now()): string {
   return timePart + randomPart;
 }
 
-export type InboxIdPrefix = "msg" | "prj" | "ses";
+export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec";
 
 export function inboxId(prefix: InboxIdPrefix, now?: number): string {
   return `${prefix}_${ulid(now)}`;
@@ -51,6 +51,7 @@ const ID_RE: Record<InboxIdPrefix, RegExp> = {
   msg: /^msg_[0-9A-HJKMNP-TV-Z]{26}$/,
   prj: /^prj_[0-9A-HJKMNP-TV-Z]{26}$/,
   ses: /^ses_[0-9A-HJKMNP-TV-Z]{26}$/,
+  dec: /^dec_[0-9A-HJKMNP-TV-Z]{26}$/,
 };
 
 export function isInboxId(prefix: InboxIdPrefix, value: unknown): value is string {
@@ -129,6 +130,24 @@ export type InboxAuthor =
       /** A display name the agent gave itself. */
       name: string | null;
     };
+
+/** The hosts whose names the Inbox knows, keyed by `author.host`. */
+export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
+  "claude-code": "Claude Code",
+  claude: "Claude Code",
+  pi: "Pi",
+  opencode: "OpenCode",
+  codex: "Codex",
+  cursor: "Cursor",
+};
+
+/** How the person sees an agent: the name it gave, else its host's name, else "An agent". */
+export function inboxAgentName(author: { kind: string; host?: string | null; name?: string | null } | null | undefined): string {
+  if (!author || author.kind !== "agent") return "An agent";
+  if (author.name) return author.name;
+  if (author.host) return INBOX_HOST_NAMES[author.host] ?? author.host;
+  return "An agent";
+}
 
 /** A message or reply. A thread is its root message's id. */
 export interface InboxMessage {
@@ -215,6 +234,24 @@ export interface InboxQuestionRecord {
   picked_at: string | null;
   sent_reply_id: string | null;
   decision_id: string | null;
+  /**
+   * The card's "Records a decision" switch, as the person set it. Absent
+   * until they touch it: then a `Decision: when answered` question records
+   * and any other does not (`inboxDecisionRecording`). Added in step 3.
+   */
+  decision_recording?: boolean;
+  /** The decision card's words after Done; null or absent: the drafted words. Added in step 3. */
+  decision_draft?: InboxDecisionDraft | null;
+}
+
+/**
+ * The decision card's words as the person left them on Done. A null field
+ * was not edited and keeps following the drafted words (the answer, and
+ * "Asked by <agent>: <question>"), so a later pick still drafts anew.
+ */
+export interface InboxDecisionDraft {
+  text: string | null;
+  reason: string | null;
 }
 
 export type InboxQuestionState = "open" | "picked" | "sent" | "closed";
@@ -247,6 +284,10 @@ export interface InboxQuestion {
   sent_reply_id: string | null;
   decision_id: string | null;
   message_id: string;
+  /** Whether Send records this answer as a decision (the card's switch, or its default). */
+  decision_recording: boolean;
+  /** The decision card's edited words, or null for the drafted ones. */
+  decision_draft: InboxDecisionDraft | null;
 }
 
 /** Workspaces' `NotificationQuestionSummary`: a row's questions, summed. */
@@ -327,15 +368,70 @@ export interface InboxThread {
   messages: InboxMessageWire[];
 }
 
+// ─────────────────────────────── Decisions ───────────────────────────────
+
+/**
+ * A decision's lifecycle (Workspaces' `project_decisions.state`): current
+ * holds; replaced points at its replacement; retired no longer holds.
+ */
+export type InboxDecisionState = "current" | "replaced" | "retired";
+
+export interface InboxDecisionAgent {
+  host: string | null;
+  session: string | null;
+  name: string | null;
+}
+
+/** Where a decision came from. */
+export interface InboxDecisionSource {
+  /**
+   * `answer`: recorded at Send from the person's answer to a question;
+   * `agent`: an agent's record_decision; `person`: the person wrote it (a
+   * replacement on the Decisions page).
+   */
+  kind: "answer" | "agent" | "person";
+  /** The answered question (`<message id>/<key>`), for `answer`. */
+  question_id: string | null;
+  message_id: string | null;
+  thread_id: string | null;
+  /** The asking agent (`answer`) or the recording one (`agent`). */
+  agent: InboxDecisionAgent | null;
+}
+
+/**
+ * One standing decision in a project: Workspaces' decision fields (text,
+ * reason, source, state, version, replaces_id, replacement_id), so a later
+ * sync maps it. `version` counts changes to this record (a retire or a
+ * replace bumps it; a stale version is refused); a replacement is a new
+ * record at version 1 that names what it replaces.
+ */
+export interface InboxDecision {
+  id: string;
+  project_id: string;
+  text: string;
+  reason: string | null;
+  source: InboxDecisionSource;
+  state: InboxDecisionState;
+  version: number;
+  replaces_id: string | null;
+  replacement_id: string | null;
+  created_at: string;
+  /** When the state last changed (a retire or a replace); null while it was never changed. */
+  changed_at: string | null;
+  /** record_decision's idempotency key, when one was given. */
+  idempotency_key: string | null;
+}
+
 // ─────────────────────────────── Lines ───────────────────────────────
 
-export type InboxRecordKind = "project" | "message" | "question";
+export type InboxRecordKind = "project" | "message" | "question" | "decision";
 
 /** One line of the store: a full snapshot of one record. */
 export type InboxLine =
   | { v: 1; seq: number; at: string; kind: "project"; id: string; record: InboxProject }
   | { v: 1; seq: number; at: string; kind: "message"; id: string; record: InboxMessage }
-  | { v: 1; seq: number; at: string; kind: "question"; id: string; record: InboxQuestionRecord };
+  | { v: 1; seq: number; at: string; kind: "question"; id: string; record: InboxQuestionRecord }
+  | { v: 1; seq: number; at: string; kind: "decision"; id: string; record: InboxDecision };
 
 // ─────────────────────────────── Health ───────────────────────────────
 

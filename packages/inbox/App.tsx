@@ -3,17 +3,27 @@
  * `.product/approved/plannotator-inbox-window-2026-10-07/`. A mail client for
  * what agents send: the list in the approved sections (a row is a thread),
  * the thread read as an email with Plannotator's question cards, pick then
- * Send, and Settings.
+ * Send, the project's decisions, and Settings.
  *
- * Routing is the URL hash (`#thread=msg_…`, `#project=prj_…`, `#settings`),
- * the same `#thread=` the MCP tools hand agents.
+ * Routing is the URL hash (`#thread=msg_…`, `#project=prj_…`, `#settings`,
+ * `#decisions=prj_…&decision=dec_…`), the same `#thread=` the MCP tools hand
+ * agents.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { configurePlannotatorUI } from '@plannotator/ui/configure';
-import type { InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
-import { InboxApiError, inboxApi, setPageSession, subscribeInboxEvents, type AgentToolHost, type ListModel, type SettingsModel } from './api';
+import type { InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
+import {
+  InboxApiError,
+  inboxApi,
+  setPageSession,
+  subscribeInboxEvents,
+  type AgentToolHost,
+  type DecisionsModel,
+  type ListModel,
+  type SettingsModel,
+} from './api';
 import { filterSections, heldNotice, waitingCount } from './held';
 import { tildePath } from './format';
 import type { ConnectContext } from './harnesses';
@@ -24,28 +34,39 @@ import { EmptyState } from './components/EmptyState';
 import { SettingsPage } from './components/Settings';
 import { NotificationAsk } from './components/NotificationAsk';
 import { useInboxNotifications } from './notify';
+import { DecisionsPage } from './components/Decisions';
 
 // The Inbox has no /api/config and no browser-agent tools: settings stay in
 // the page's own cookies, and WebMCP is off.
 configurePlannotatorUI({ serverSync: () => {}, webmcp: { enabled: false, namePrefix: 'plannotator.' } });
 
 interface Route {
-  page: 'inbox' | 'settings';
+  page: 'inbox' | 'settings' | 'decisions';
   project: string | null;
   thread: string | null;
+  /** The decision open beside the Decisions list. */
+  decision?: string | null;
 }
 
 function readRoute(): Route {
   const hash = window.location.hash.replace(/^#/, '');
   if (hash === 'settings') return { page: 'settings', project: null, thread: null };
   const params = new URLSearchParams(hash);
+  if (params.has('decisions')) {
+    return { page: 'decisions', project: params.get('decisions') || null, thread: null, decision: params.get('decision') };
+  }
   return { page: 'inbox', project: params.get('project'), thread: params.get('thread') };
 }
 
 function writeRoute(route: Route): void {
   let hash = '';
   if (route.page === 'settings') hash = 'settings';
-  else {
+  else if (route.page === 'decisions') {
+    const params = new URLSearchParams();
+    params.set('decisions', route.project ?? '');
+    if (route.decision) params.set('decision', route.decision);
+    hash = params.toString();
+  } else {
     const params = new URLSearchParams();
     if (route.project) params.set('project', route.project);
     if (route.thread) params.set('thread', route.thread);
@@ -73,6 +94,9 @@ function Inbox() {
   /** The list on screen: held until the person acts (the "N new" notice). */
   const [shown, setShown] = useState<InboxListSection[] | null>(null);
   const [thread, setThread] = useState<InboxThread | null>(null);
+  const [threadDecisions, setThreadDecisions] = useState<InboxDecision[]>([]);
+  const [decisions, setDecisions] = useState<DecisionsModel | null>(null);
+  const [decisionsError, setDecisionsError] = useState<string | null>(null);
   const [settings, setSettings] = useState<SettingsModel | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [update, setUpdate] = useState<InboxHealth['update']>(null);
@@ -125,13 +149,36 @@ function Inbox() {
   const refreshThread = useCallback(async (threadId: string) => {
     try {
       const next = await inboxApi.thread(threadId);
-      if (routeRef.current.thread === threadId) setThread(next.thread);
+      if (routeRef.current.thread === threadId) {
+        setThread(next.thread);
+        setThreadDecisions(next.decisions);
+      }
       return next.thread;
     } catch (cause) {
       if (cause instanceof InboxApiError && cause.status === 404 && routeRef.current.thread === threadId) setThread(null);
       return null;
     }
   }, []);
+
+  /** The Decisions page's project: the route's, else the one with the newest activity. */
+  const decisionsProjectOf = useCallback((route: Route, model: ListModel | null): string | null => {
+    if (route.project) return route.project;
+    const rows = (model?.sections ?? []).flatMap((s) => s.threads).sort((a, b) => b.last_at.localeCompare(a.last_at));
+    return rows[0]?.project.id ?? model?.projects[0]?.id ?? null;
+  }, []);
+
+  const refreshDecisions = useCallback(async (projectId: string | null) => {
+    if (!projectId) return;
+    try {
+      const next = await inboxApi.decisions(projectId);
+      setDecisions(next);
+      setDecisionsError(null);
+    } catch (cause) {
+      setDecisionsError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, []);
+  const latestRef = useRef(latest);
+  latestRef.current = latest;
 
   const refreshSettings = useCallback(async () => {
     try {
@@ -158,6 +205,7 @@ function Inbox() {
             void refreshList(false).then((next) => next && flushNotifications(next));
             const open = routeRef.current.thread;
             if (open) void refreshThread(open);
+            if (routeRef.current.page === 'decisions') void refreshDecisions(decisionsProjectOf(routeRef.current, latestRef.current));
           }, 80);
         },
         onStatus: (next) => setUpdate(next),
@@ -168,7 +216,7 @@ function Inbox() {
       unsubscribe();
       if (timer) clearTimeout(timer);
     };
-  }, [refreshList, refreshSettings, refreshThread, observeEvent, flushNotifications]);
+  }, [refreshList, refreshSettings, refreshThread, observeEvent, flushNotifications, refreshDecisions, decisionsProjectOf]);
 
   // Opening a thread: read it, record the look, and put the list as it now is on screen.
   useEffect(() => {
@@ -192,6 +240,11 @@ function Inbox() {
   useEffect(() => {
     if (route.page === 'settings') void refreshSettings();
   }, [route.page, refreshSettings]);
+
+  const decisionsProject = route.page === 'decisions' ? decisionsProjectOf(route, latest) : null;
+  useEffect(() => {
+    if (decisionsProject) void refreshDecisions(decisionsProject);
+  }, [decisionsProject, refreshDecisions]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -277,11 +330,23 @@ function Inbox() {
     ? { command: settings.mcp_command, mcpUrl: settings.mcp_url, platform: platformOf() }
     : null;
 
-  const filterProject = route.project ? projects.find((p) => p.id === route.project) ?? null : null;
+  const retireDecision = async (decision: InboxDecision) => {
+    await inboxApi.retireDecision(decision.id, decision.version);
+    await refreshDecisions(decision.project_id);
+  };
+
+  const replaceDecision = async (decision: InboxDecision, text: string, reason: string) => {
+    const result = await inboxApi.replaceDecision(decision.id, { version: decision.version, text, reason });
+    await refreshDecisions(decision.project_id);
+    go({ page: 'decisions', project: decision.project_id, thread: null, decision: result.decision.id });
+  };
+
+  const filterProject = route.page === 'inbox' && route.project ? projects.find((p) => p.id === route.project) ?? null : null;
   const notice = shown && latest ? heldNotice(filterSections(shown, route.project), filterSections(latest.sections, route.project)).text : null;
   const firstRun = latest !== null && projects.length === 0;
 
   let main: ReactNode;
+  const decisionsFolder = decisionsProject ? projects.find((p) => p.id === decisionsProject) ?? null : null;
   if (route.page === 'settings') {
     main = (
       <SettingsPage
@@ -293,6 +358,23 @@ function Inbox() {
         onToggleNotifications={(next) => void notifications.setEnabled(next)}
       />
     );
+  } else if (route.page === 'decisions' && decisionsFolder) {
+    main = (
+      <DecisionsPage
+        projects={projects}
+        project={decisionsFolder}
+        model={decisions && decisions.project_id === decisionsFolder.id ? decisions : null}
+        error={decisionsError}
+        openId={route.decision ?? null}
+        onProject={(projectId) => go({ page: 'decisions', project: projectId, thread: null })}
+        onOpen={(decisionId) => go({ page: 'decisions', project: decisionsFolder.id, thread: null, decision: decisionId })}
+        onOpenThread={(threadId) => go({ page: 'inbox', project: null, thread: threadId })}
+        onRetire={retireDecision}
+        onReplace={replaceDecision}
+      />
+    );
+  } else if (route.page === 'decisions') {
+    main = <div className="ib-listcol" />;
   } else if (!latest || !shown) {
     main = <div className="ib-listcol">{loadError && <div className="ib-error" style={{ padding: 22 }}>{loadError}</div>}</div>;
   } else if (firstRun) {
@@ -319,6 +401,8 @@ function Inbox() {
             onQuestions={patchQuestions}
             onChanged={afterWrite}
             onClose={() => go({ ...route, thread: null })}
+            decisions={threadDecisions}
+            onOpenDecisionPage={(decision) => go({ page: 'decisions', project: decision.project_id, thread: null, decision: decision.id })}
           />
         )}
       </>
@@ -332,6 +416,7 @@ function Inbox() {
           page={route.page}
           projectId={route.project}
           inboxCount={waitingCount(latestSections)}
+          decisionsCount={latest?.decisions_waiting ?? 0}
           projects={projects}
           projectCounts={projectCounts}
           updateReady={update !== null}
@@ -339,6 +424,7 @@ function Inbox() {
           onInbox={() => go({ page: 'inbox', project: null, thread: null })}
           onProject={(projectId) => go({ page: 'inbox', project: projectId, thread: null })}
           onSettings={() => go({ page: 'settings', project: null, thread: null })}
+          onDecisions={() => go({ page: 'decisions', project: null, thread: null })}
           onRestart={() => void restart()}
         />
         <main className="ib-main">{main}</main>

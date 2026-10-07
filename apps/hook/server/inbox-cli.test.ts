@@ -261,7 +261,7 @@ describe("plannotator inbox mcp (the stdio shim)", () => {
     expect((await inboxStatus(box.dataDir)).state).toBe("running");
     expect(existsSync(box.browserMarker)).toBe(false);
 
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(["read_thread", "resolve_message", "send_message", "wait_for_reply"]);
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(["list_decisions", "read_thread", "record_decision", "resolve_message", "send_message", "wait_for_reply"]);
     const sent = (
       await client.callTool({
         name: "send_message",

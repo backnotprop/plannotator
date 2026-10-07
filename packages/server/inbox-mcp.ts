@@ -16,12 +16,13 @@ import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { INBOX_THREAD_NAME_MAX, type InboxLine, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { recordAgentDecision } from "./inbox-decisions";
 
 /** wait_for_reply's default hold: inside the 45-55 s window hosts' own tool timeouts allow. */
 export const INBOX_WAIT_DEFAULT_MS = 50_000;
 export const INBOX_WAIT_MAX_SECONDS = 50;
 
-export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "resolve_message", "wait_for_reply"] as const;
+export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "resolve_message", "wait_for_reply", "list_decisions", "record_decision"] as const;
 
 /** Under Claude Code's 2,048-character cap on server instructions. */
 export const INBOX_MCP_INSTRUCTIONS = [
@@ -31,6 +32,7 @@ export const INBOX_MCP_INSTRUCTIONS = [
   "- After sending, either go on with other work or call wait_for_reply with the thread_id. It returns the person's reply as soon as it lands, or { status: \"waiting\", cursor } after about 50 seconds; call it again with that cursor to keep waiting.",
   "- read_thread reads one thread (thread_id) or lists the threads you sent in, in this project.",
   "- resolve_message closes a thread once you have what you needed.",
+  "- list_decisions reads what holds in this project: decisions the person recorded from answers, or agents recorded. record_decision records one you settled with the person. Add `Decision: when answered` to a question block to have its answer recorded.",
   "",
   "The reply is the person's answer to you, framed as theirs: their words, then an \"Answers to your questions\" section. There is no tool to answer or approve on the person's behalf.",
 ].join("\n");
@@ -392,6 +394,76 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           `No reply yet. Call wait_for_reply again with cursor ${cursor} to keep waiting, or go on and check later.`,
           { status: "waiting", cursor, thread_ids: threadIds },
         );
+      }),
+  );
+
+  // ── Step 3: decisions (the rules: packages/server/inbox-decisions.ts) ──
+
+  server.registerTool(
+    "list_decisions",
+    {
+      title: "List the project's decisions",
+      description:
+        "List the decisions that hold in this project (state \"current\", the default), or the replaced, retired or all of them, oldest first. Each has text, reason, source (an answer the person sent, an agent's record_decision, or the person's own words), state, version and, for a replaced one, replacement_id.",
+      inputSchema: z
+        .object({
+          project_path: z.string().optional().describe(PROJECT_PATH_DESCRIPTION),
+          state: z.enum(["current", "replaced", "retired", "all"]).optional().describe("Default \"current\"."),
+          agent_session: z.string().optional().describe(AGENT_SESSION_DESCRIPTION),
+        })
+        .strict(),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async (input) =>
+      guarded(async () => {
+        if (!input.project_path) throw new InboxError("validation_error", "project_path: required (the shim fills it from its folder).");
+        const project = await context.resolveProject(input.project_path);
+        const state = input.state ?? "current";
+        const decisions = store.decisionsOf(project.id).filter((d) => state === "all" || d.state === state);
+        const label = state === "all" ? "" : ` ${state}`;
+        return ok(`${decisions.length}${label} decision${decisions.length === 1 ? "" : "s"} in ${project.name}.`, {
+          project: { id: project.id, name: project.name, root: project.root },
+          decisions,
+        });
+      }),
+  );
+
+  server.registerTool(
+    "record_decision",
+    {
+      title: "Record a decision in the project",
+      description:
+        "Record a decision that now holds in this project, one you settled with the person (it shows on their Decisions page as recorded by you). text is the decision as one statement, e.g. \"Webhooks are verified before any database write.\"; reason says why. To have the person's answer to a question recorded instead, write `Decision: when answered` in the question block.",
+      inputSchema: z
+        .object({
+          text: z.string().min(1).describe("The decision, one statement."),
+          reason: z.string().optional().describe("Why it holds."),
+          project_path: z.string().optional().describe(PROJECT_PATH_DESCRIPTION),
+          idempotency_key: z.string().optional().describe("Any unique string; recording again with the same key answers the first decision."),
+          agent_session: z.string().optional().describe(AGENT_SESSION_DESCRIPTION),
+          agent_name: z.string().optional().describe("How the person sees you, e.g. \"Claude Code\"."),
+          agent_host: z.string().optional().describe("Your agent host, e.g. claude-code, codex, cursor."),
+        })
+        .strict(),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    async (input) =>
+      guarded(async () => {
+        if (!input.project_path) throw new InboxError("validation_error", "project_path: required (the shim fills it from its folder).");
+        const project = await context.resolveProject(input.project_path);
+        const { decision, replayed } = recordAgentDecision(store, {
+          project_id: project.id,
+          text: input.text,
+          reason: input.reason ?? null,
+          agent: { host: input.agent_host?.trim() || null, session: input.agent_session?.trim() || null, name: input.agent_name?.trim() || null },
+          idempotency_key: input.idempotency_key ?? null,
+        });
+        return ok(`${replayed ? "Already recorded" : "Recorded"} in ${project.name}'s decisions (${decision.id}).`, {
+          decision,
+          project: { id: project.id, name: project.name, root: project.root },
+          replayed,
+          url: `${context.baseUrl()}#decisions=${project.id}&decision=${decision.id}`,
+        });
       }),
   );
 

@@ -19,7 +19,7 @@
 import { inboxId } from "@plannotator/core/inbox-types";
 import { inboxStatus, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 
-const FILLED_TOOLS = new Set(["send_message", "read_thread", "wait_for_reply"]);
+const FILLED_TOOLS = new Set(["send_message", "read_thread", "wait_for_reply", "list_decisions", "record_decision"]);
 /** The 2026-07-28 per-request envelope's protocol-version key. */
 const PROTOCOL_VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion";
 

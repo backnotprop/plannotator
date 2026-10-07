@@ -39,6 +39,7 @@ import {
   inboxId,
   INBOX_RECORD_VERSION,
   type InboxAuthor,
+  type InboxDecision,
   type InboxLine,
   type InboxMessage,
   type InboxMessageWire,
@@ -57,6 +58,7 @@ import { inboxListSections, inboxRowUnread, inboxSectionOf } from "./list";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
 import { sanitizeTag } from "@plannotator/core/project";
 import {
+  DECISIONS_FILE,
   INBOX_PROJECTS_DIR,
   InboxError,
   inboxDir,
@@ -172,6 +174,8 @@ export class InboxStore {
   private readonly threadMembers = new Map<string, string[]>();
   /** Every root of each thread name in seq order (`<project>\0<name key>`). */
   private readonly namedThreads = new Map<string, string[]>();
+  /** Every decision, by id (step 3; the rules are packages/server/inbox-decisions.ts). */
+  private readonly decisions = new Map<string, InboxDecision>();
   private readonly tornFiles = new Set<string>();
   private readonly listeners = new Set<InboxListener>();
   private readonly now: () => Date;
@@ -202,7 +206,7 @@ export class InboxStore {
     const lines: InboxLine[] = [];
     for (const key of readdirSync(projectsDir)) {
       const folder = join(projectsDir, key);
-      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE]) {
+      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, DECISIONS_FILE]) {
         const path = join(folder, name);
         let text: string;
         try {
@@ -272,6 +276,9 @@ export class InboxStore {
         else this.messageQuestions.set(line.record.message_id, new Set([line.record.id]));
         break;
       }
+      case "decision":
+        this.decisions.set(line.record.id, line.record);
+        break;
     }
   }
 
@@ -547,7 +554,7 @@ export class InboxStore {
       const folder = this.projectFolder(project);
       const perThread = new Map<string, number>();
       let bytes = 0;
-      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE]) {
+      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, DECISIONS_FILE]) {
         let text: string;
         try {
           text = readFileSync(join(folder, name), "utf8");
@@ -555,7 +562,8 @@ export class InboxStore {
           continue;
         }
         bytes += Buffer.byteLength(text);
-        if (name === PROJECT_FILE) continue;
+        // The project line and its decisions count for the project, not a thread.
+        if (name === PROJECT_FILE || name === DECISIONS_FILE) continue;
         for (const raw of text.split("\n")) {
           const line = parseInboxLine(raw);
           if (!line) continue;
@@ -926,6 +934,63 @@ export class InboxStore {
       throw error;
     }
     return { reply, questions: this.questionsOf(message.id), replayed: false };
+  }
+
+  // ─────────────── decisions (step 3; the rules: packages/server/inbox-decisions.ts) ───────────────
+
+  decision(id: string): InboxDecision | null {
+    return this.decisions.get(id) ?? null;
+  }
+
+  /** A project's decisions, oldest first. */
+  decisionsOf(projectId: string): InboxDecision[] {
+    return [...this.decisions.values()]
+      .filter((d) => d.project_id === projectId)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+  }
+
+  /** The stored question record (`<message id>/<key>`). */
+  questionRecord(id: string): InboxQuestionRecord | null {
+    return this.questions.get(id) ?? null;
+  }
+
+  /** Every question record of a project, in seq order of their messages. */
+  questionRecordsOf(projectId: string): InboxQuestionRecord[] {
+    const out: InboxQuestionRecord[] = [];
+    for (const record of this.questions.values()) if (record.project_id === projectId) out.push(record);
+    return out.sort(
+      (a, b) => (this.messageSeq.get(a.message_id) ?? 0) - (this.messageSeq.get(b.message_id) ?? 0) || a.position - b.position,
+    );
+  }
+
+  /** Append one decision snapshot (a new decision, or a retired or replaced one). */
+  writeDecision(record: InboxDecision): void {
+    const project = this.projectsById.get(record.project_id);
+    if (!project) throw new InboxError("project_not_found", `No project ${record.project_id}.`);
+    this.write(join(this.projectFolder(project), DECISIONS_FILE), {
+      v: INBOX_RECORD_VERSION,
+      seq: this.seq + 1,
+      at: this.stamp(),
+      kind: "decision",
+      id: record.id,
+      record,
+    });
+  }
+
+  /**
+   * Change a question's decision fields only (the switch, the card's words,
+   * the recorded decision's id). Never its answer or revision, so a switch
+   * never races a pick.
+   */
+  writeQuestionDecision(
+    id: string,
+    patch: Partial<Pick<InboxQuestionRecord, "decision_recording" | "decision_draft" | "decision_id">>,
+  ): InboxQuestionRecord {
+    const record = this.questions.get(id);
+    if (!record) throw new InboxError("question_not_found", `No question ${id}.`);
+    const next = { ...record, ...patch };
+    this.appendQuestion(next, this.stamp());
+    return next;
   }
 
   /** Resolve (or reopen) the thread a message belongs to. */

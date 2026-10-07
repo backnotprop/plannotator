@@ -243,6 +243,11 @@ export interface ViewerProps {
    *  (anchor your popover to it). Offered on and off. Ignored when
    *  `readOnly`. */
   onOpenQuestionDecision?: (key: string, anchor: HTMLElement) => void;
+  /** Per question, true draws its decision tag as a plain tag: no switch and
+   *  no opener, as under `readOnly`, while the other questions keep theirs
+   *  (a host whose message holds one sent and one open question). Absent:
+   *  every question follows `readOnly`. */
+  questionDecisionLocked?: (question: IndexedQuestion) => boolean;
   /** `'none'` hides each question card's own status tag (Open / Answered /
    *  Settled / Skipped) so the host can draw its own; the decision tags stay.
    *  Default `'card'`. */
@@ -633,6 +638,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   questionDecisionScope,
   onToggleQuestionDecisionRecording,
   onOpenQuestionDecision,
+  questionDecisionLocked,
   questionStatusTag,
   onAskAI,
   allowImages = true,
@@ -1601,8 +1607,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   renderQuestionFooter={renderQuestionFooter}
                   questionDecisionRecording={question ? questionDecisionRecording?.(question) : undefined}
                   questionDecisionScope={questionDecisionScope}
-                  onToggleQuestionDecisionRecording={readOnly ? undefined : onToggleQuestionDecisionRecording}
-                  onOpenQuestionDecision={readOnly ? undefined : onOpenQuestionDecision}
+                  onToggleQuestionDecisionRecording={readOnly || (question && questionDecisionLocked?.(question)) ? undefined : onToggleQuestionDecisionRecording}
+                  onOpenQuestionDecision={readOnly || (question && questionDecisionLocked?.(question)) ? undefined : onOpenQuestionDecision}
                   questionStatusTag={questionStatusTag}
                 />
               );

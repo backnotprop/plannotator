@@ -1,24 +1,9 @@
 /** Small display helpers for the Inbox window. Pure. */
 
-import type { InboxAuthor } from '@plannotator/core/inbox-types';
+import { inboxAgentName } from '@plannotator/core/inbox-types';
 
-/** The hosts whose marks the window draws, keyed by `author.host`. */
-export const HOST_NAMES: Readonly<Record<string, string>> = {
-  'claude-code': 'Claude Code',
-  claude: 'Claude Code',
-  pi: 'Pi',
-  opencode: 'OpenCode',
-  codex: 'Codex',
-  cursor: 'Cursor',
-};
-
-/** How the person sees an agent: the name it gave, else its host's name, else "An agent". */
-export function agentName(author: InboxAuthor | null | undefined): string {
-  if (!author || author.kind !== 'agent') return 'An agent';
-  if (author.name) return author.name;
-  if (author.host) return HOST_NAMES[author.host] ?? author.host;
-  return 'An agent';
-}
+/** How the person sees an agent: the name it gave, else its host's name, else "An agent" (core's rule, shared with the server's drafts). */
+export const agentName = inboxAgentName;
 
 const TIME = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' });
 const DAY = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' });
@@ -30,6 +15,23 @@ export function shortTime(iso: string, now: Date = new Date()): string {
   const sameDay =
     date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
   return sameDay ? TIME.format(date) : DAY.format(date);
+}
+
+/** "today", "yesterday", else "Oct 3": a day in a sentence ("Asked by Claude Code, today"). */
+export function dayWords(iso: string, now: Date = new Date()): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const start = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((start(now) - start(date)) / 86_400_000);
+  if (days === 0) return 'today';
+  if (days === 1) return 'yesterday';
+  return DAY.format(date);
+}
+
+/** "Oct 3, 10:42 AM": a moment on the Decisions page. */
+export function dateTime(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? '' : `${DAY.format(date)}, ${TIME.format(date)}`;
 }
 
 /** Always the clock time ("10:42 AM"), for lines that say when within a thread. */

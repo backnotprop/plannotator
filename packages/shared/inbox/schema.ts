@@ -6,6 +6,7 @@
  *     projects/<key>/project.json      one line: the project snapshot
  *     projects/<key>/messages.jsonl    messages and replies
  *     projects/<key>/questions.jsonl   one record per question block
+ *     projects/<key>/decisions.jsonl   the project's decisions (step 3)
  *
  * Every line is `{ v, seq, at, kind, id, record }`: a full snapshot of one
  * record. The last line per id is current; nothing is rewritten in place.
@@ -23,12 +24,13 @@ export const INBOX_PROJECTS_DIR = "projects";
 export const PROJECT_FILE = "project.json";
 export const MESSAGES_FILE = "messages.jsonl";
 export const QUESTIONS_FILE = "questions.jsonl";
+export const DECISIONS_FILE = "decisions.jsonl";
 
 export function inboxDir(dataDir: string): string {
   return join(dataDir, INBOX_DIR_NAME);
 }
 
-const KINDS: ReadonlySet<InboxRecordKind> = new Set(["project", "message", "question"]);
+const KINDS: ReadonlySet<InboxRecordKind> = new Set(["project", "message", "question", "decision"]);
 
 /**
  * One line of a store file, or null when it is not a line this reader can

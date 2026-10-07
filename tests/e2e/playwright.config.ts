@@ -1,13 +1,14 @@
 /**
  * The Inbox window's browser proof: a real Chromium against the compiled
- * binary (`plannotator inbox`), under a temp PLANNOTATOR_DATA_DIR. Build the
- * binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
+ * binary (`plannotator inbox`), under a temp PLANNOTATOR_DATA_DIR: the
+ * window (inbox.spec.ts) and its decisions (inbox-decisions.spec.ts). Build
+ * the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
 import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: '.',
-  testMatch: ['inbox.spec.ts', 'notifications.spec.ts'],
+  testMatch: ['inbox.spec.ts', 'notifications.spec.ts', 'inbox-decisions.spec.ts'],
   outputDir: '../../.local/test-results',
   fullyParallel: false,
   workers: 1,

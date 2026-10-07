@@ -3,10 +3,12 @@ import { Icon } from '../icons';
 import { TaterMark } from './TaterMark';
 
 export interface SidebarProps {
-  page: 'inbox' | 'settings';
+  page: 'inbox' | 'settings' | 'decisions';
   projectId: string | null;
   /** Rows waiting on the person, all projects. */
   inboxCount: number;
+  /** Questions that record a decision once answered and sent, all projects. */
+  decisionsCount: number;
   projects: readonly ProjectFolder[];
   /** Rows waiting on the person, per project id. */
   projectCounts: ReadonlyMap<string, number>;
@@ -16,6 +18,7 @@ export interface SidebarProps {
   onInbox: () => void;
   onProject: (projectId: string) => void;
   onSettings: () => void;
+  onDecisions: () => void;
   onRestart: () => void;
 }
 
@@ -38,10 +41,16 @@ export function Sidebar(props: SidebarProps) {
         Inbox
         {!firstRun && props.inboxCount > 0 && <span className="ib-n">{props.inboxCount}</span>}
       </button>
-      {/* The decisions list is a later step (PLAN step 3): drawn, not yet open. */}
-      <button type="button" className="ib-nav" disabled title="Decisions: coming next">
+      <button
+        type="button"
+        className={`ib-nav${props.page === 'decisions' ? ' ib-on' : ''}`}
+        onClick={props.onDecisions}
+        disabled={firstRun}
+        aria-current={props.page === 'decisions' ? 'page' : undefined}
+      >
         <Icon name="diamond" />
         Decisions
+        {props.decisionsCount > 0 && <span className="ib-n">{props.decisionsCount}</span>}
       </button>
       <div className="ib-side-label">Projects</div>
       <div className="ib-projs">

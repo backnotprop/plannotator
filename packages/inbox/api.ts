@@ -6,6 +6,9 @@
  */
 
 import type {
+  InboxDecision,
+  InboxDecisionAgent,
+  InboxDecisionDraft,
   InboxHealth,
   InboxListSection,
   InboxMessage,
@@ -40,12 +43,43 @@ export interface ListModel {
   projects: ProjectFolder[];
   project: string | null;
   sections: InboxListSection[];
+  /** Questions in every project that record a decision once sent: the sidebar's Decisions count. */
+  decisions_waiting: number;
 }
 
 export interface ThreadModel {
   serverSession: string;
   cursor: number;
   thread: InboxThread;
+  /** The decisions this thread's questions recorded, for the "Settled: ..." lines. */
+  decisions: InboxDecision[];
+}
+
+/** A question that records a decision once answered and sent (the Decisions page's Waiting group). */
+export interface WaitingDecision {
+  question_id: string;
+  message_id: string;
+  thread_id: string;
+  project_id: string;
+  prompt: string;
+  agent: InboxDecisionAgent | null;
+  asked_at: string;
+}
+
+export interface DecisionsModel {
+  serverSession: string;
+  cursor: number;
+  project_id: string;
+  waiting: WaitingDecision[];
+  decisions: InboxDecision[];
+}
+
+export interface ReplyResult {
+  reply: unknown;
+  questions: InboxQuestion[];
+  replayed: boolean;
+  decisions: InboxDecision[];
+  decisions_refused: { key: string; code: string; message: string }[];
 }
 
 export interface SettingsModel {
@@ -126,10 +160,15 @@ export const inboxApi = {
       questions: [{ key, revision, answer }],
     }),
   reply: (messageId: string, input: { idempotency_key: string; words: string; questions: { key: string; revision: number }[] }) =>
-    post<{ reply: unknown; questions: InboxQuestion[]; replayed: boolean }>(
-      `/api/inbox/messages/${encodeURIComponent(messageId)}/reply`,
-      input,
-    ),
+    post<ReplyResult>(`/api/inbox/messages/${encodeURIComponent(messageId)}/reply`, input),
+  /** The card's switch and its words on one question: `recording`, and `draft` on Done. */
+  setDecision: (messageId: string, key: string, input: { recording?: boolean; draft?: InboxDecisionDraft | null }) =>
+    post<{ question: InboxQuestion }>(`/api/inbox/messages/${encodeURIComponent(messageId)}/decision`, { key, ...input }),
+  decisions: (projectId: string) => get<DecisionsModel>(`/api/inbox/decisions?project=${encodeURIComponent(projectId)}`),
+  retireDecision: (id: string, version: number) =>
+    post<{ decision: InboxDecision }>(`/api/inbox/decisions/${encodeURIComponent(id)}/retire`, { version }),
+  replaceDecision: (id: string, input: { version: number; text: string; reason: string }) =>
+    post<{ decision: InboxDecision; replaced: InboxDecision }>(`/api/inbox/decisions/${encodeURIComponent(id)}/replace`, input),
   resolve: (messageId: string, resolved: boolean) =>
     post<unknown>(`/api/inbox/messages/${encodeURIComponent(messageId)}/resolve`, { resolved }),
   health: () => get<InboxHealth>('/api/inbox/health'),

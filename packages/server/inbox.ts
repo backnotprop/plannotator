@@ -62,6 +62,13 @@ import { openBrowser } from "./browser";
 import { isAddressInUseError } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { createInboxMcpServer } from "./inbox-mcp";
+import {
+  handleInboxDecisionRoute,
+  INBOX_DECISION_ERROR_STATUS,
+  recordDecisionsForReply,
+  threadDecisions,
+  waitingDecisions,
+} from "./inbox-decisions";
 import { handleFavicon } from "./shared-handlers";
 
 const LOOPBACK = "127.0.0.1";
@@ -147,6 +154,7 @@ const ERROR_STATUS: Record<string, number> = {
   thread_resolved: 409,
   idempotency_key_reused: 409,
   config_not_saved: 500,
+  ...INBOX_DECISION_ERROR_STATUS,
 };
 
 /**
@@ -320,6 +328,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       projects: projectFolders(rows),
       project: projectFilter,
       sections: inboxListSections(projectFilter ? rows.filter((row) => row.project.id === projectFilter) : rows),
+      /** Questions in every project that record a decision once answered and sent: the sidebar's Decisions count. */
+      decisions_waiting: waitingDecisions(store).length,
     };
   };
 
@@ -444,6 +454,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const root = store.message(store.message(line.record.message_id)?.thread_id ?? "");
         return { seq: line.seq, kind: line.kind, id: line.id, question: toInboxQuestion(line.record, root?.resolved_at != null) };
       }
+      case "decision":
+        return { seq: line.seq, kind: line.kind, id: line.id, decision: line.record };
     }
   };
 
@@ -597,7 +609,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (threadMatch && req.method === "GET") {
         const thread = store.thread(threadMatch[1]!);
         if (!thread) return json({ error: "No such thread.", code: "thread_not_found" }, 404);
-        return json({ serverSession, cursor: store.cursor(), thread });
+        const decisionIds = thread.messages.flatMap((m) => (m.questions ?? []).map((q) => q.decision_id));
+        return json({ serverSession, cursor: store.cursor(), thread, decisions: threadDecisions(store, decisionIds) });
       }
 
       const seenMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/seen$/.exec(path);
@@ -625,7 +638,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               questions: (body.questions as never) ?? [],
               idempotency_key: body.idempotency_key as string,
             });
-            return json({ message_id: messageId, questions: result.questions, reply: result.reply, replayed: result.replayed });
+            // Step 3: the sent answers whose decision switch is on become
+            // decisions, after the reply landed; a refused one never undoes it.
+            const decisions = recordDecisionsForReply(store, result.reply.id);
+            return json({
+              message_id: messageId,
+              questions: store.questionsOf(messageId),
+              reply: result.reply,
+              replayed: result.replayed,
+              decisions: decisions.recorded,
+              decisions_refused: decisions.refused,
+            });
           }
           case "resolve": {
             if (body.resolved !== undefined && typeof body.resolved !== "boolean") {
@@ -636,6 +659,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
         }
       }
+
+      // ── Step 3: decisions (packages/server/inbox-decisions.ts) ──
+      const decisionResponse = await handleInboxDecisionRoute(req, url, {
+        store,
+        serverSession,
+        readBody,
+        json,
+        staleTab: (body) => (checkServerSession(body, serverSession) === "mismatch" ? json(serverSessionMismatchBody(), 409) : null),
+      });
+      if (decisionResponse) return decisionResponse;
 
       if (path === "/" && (req.method === "GET" || req.method === "HEAD")) {
         const page = options.htmlContent ?? NOT_BUILT_PAGE;

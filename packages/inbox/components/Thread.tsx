@@ -1,39 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Viewer } from '@plannotator/ui/components/Viewer';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
-import type { InboxMessageWire, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxDecision, InboxDecisionDraft, InboxMessageWire, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import type { IndexedQuestion, QuestionAnswer } from '@plannotator/core/question-block';
+import { inboxDecisionWords } from '@plannotator/core/inbox-questions';
 import { InboxApiError, inboxApi } from '../api';
 import { agentName, clockTime, plural } from '../format';
-import { AuthorMark, Icon } from '../icons';
-
-/**
- * Client-side until the decision record lands (PLAN step 3): the questions
- * whose tag the person switched, `<message id>/<key>` to on or off. Unswitched,
- * a `Decision: when answered` question records and any other does not.
- */
-const DECISION_SWITCH_KEY = 'plannotator-inbox-decision-switch';
-
-type DecisionSwitches = Readonly<Record<string, boolean>>;
-
-function readDecisionSwitches(): DecisionSwitches {
-  try {
-    const raw = window.localStorage.getItem(DECISION_SWITCH_KEY);
-    const parsed = raw ? (JSON.parse(raw) as unknown) : {};
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean'));
-  } catch {
-    return {};
-  }
-}
-
-function writeDecisionSwitches(switches: DecisionSwitches): void {
-  try {
-    window.localStorage.setItem(DECISION_SWITCH_KEY, JSON.stringify(switches));
-  } catch {
-    // Storage off: the switch still works for this page.
-  }
-}
+import { AuthorMark, DecisionDiamond, Icon } from '../icons';
+import { DecisionCard } from './DecisionCard';
 
 const noop = () => {};
 const NO_ANNOTATIONS: never[] = [];
@@ -53,16 +27,19 @@ function MessageBody({
   answers,
   onPick,
   footerFor,
-  decisionSwitches,
+  recordingOf,
   onToggleDecision,
+  onOpenDecision,
 }: {
   message: InboxMessageWire;
   readOnly: boolean;
   answers: ReadonlyMap<string, QuestionAnswer>;
   onPick: (key: string, answer: QuestionAnswer | null) => void;
   footerFor: (key: string) => string | null;
-  decisionSwitches: DecisionSwitches;
+  /** The switch's state per question key (the stored one, or a click not yet saved). */
+  recordingOf: (key: string) => boolean | undefined;
   onToggleDecision: (key: string, next: boolean) => void;
+  onOpenDecision: (key: string, anchor: HTMLElement) => void;
 }) {
   const blocks = useMemo(() => parseMarkdownToBlocks(message.body, { frontmatter: false }), [message.body]);
   const renderFooter = useCallback(
@@ -72,14 +49,24 @@ function MessageBody({
     },
     [footerFor],
   );
-  // Every question carries the tag (the record's 3.1): on by default where the
-  // block says `Decision: when answered`, off elsewhere; a linked decision
-  // (`Decision: [statement](url)`) is already recorded and keeps its own tag.
+  // Every question carries the tag (the record's 3.1): its switch is kept on
+  // the question record (on by default where the block says `Decision: when
+  // answered`, off elsewhere); a linked decision (`Decision: [statement](url)`)
+  // is already recorded and keeps its own tag.
   const recording = useCallback(
-    (question: IndexedQuestion) =>
-      question.question.decision ? undefined : (decisionSwitches[`${message.id}/${question.question.key}`] ?? question.question.decisionOnAnswer === true),
-    [decisionSwitches, message.id],
+    (question: IndexedQuestion) => (question.question.decision ? undefined : recordingOf(question.question.key)),
+    [recordingOf],
   );
+  // Read-only per question: a sent answer's tag is a plain tag while an open
+  // question in the same message keeps its switch and card.
+  const locked = useCallback(
+    (question: IndexedQuestion) => {
+      const wire = message.questions?.find((q) => q.key === question.question.key);
+      return wire !== undefined && (wire.state === 'sent' || wire.decision_id !== null);
+    },
+    [message.questions],
+  );
+
   return (
     <div className="ib-body" data-message-id={message.id}>
       <Viewer
@@ -102,6 +89,8 @@ function MessageBody({
         questionDecisionScope="any"
         questionDecisionRecording={recording}
         onToggleQuestionDecisionRecording={onToggleDecision}
+        onOpenQuestionDecision={onOpenDecision}
+        questionDecisionLocked={locked}
       />
     </div>
   );
@@ -120,9 +109,13 @@ export interface ThreadPaneProps {
   /** Something was written (a Send, resolve): read the thread and the list again. */
   onChanged: () => Promise<void>;
   onClose: () => void;
+  /** The decisions this thread's questions recorded (the "Settled: ..." lines). */
+  decisions: readonly InboxDecision[];
+  /** Open a recorded decision on the Decisions page. */
+  onOpenDecisionPage: (decision: InboxDecision) => void;
 }
 
-export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose }: ThreadPaneProps) {
+export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage }: ThreadPaneProps) {
   const root = thread.messages[0]!;
   const asker = agentName(root.author);
   const resolved = thread.resolved_at !== null;
@@ -136,7 +129,12 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose }: Th
   const threadRef = useRef(thread);
   threadRef.current = thread;
 
-  const [decisionSwitches, setDecisionSwitches] = useState<DecisionSwitches>(readDecisionSwitches);
+  /** Switch clicks shown before the server answers, `<message id>/<key>` to on or off. */
+  const [switching, setSwitching] = useState<ReadonlyMap<string, boolean>>(new Map());
+  /** The decision card open on one question, under the tag's words. */
+  const [card, setCard] = useState<{ messageId: string; key: string; anchor: HTMLElement } | null>(null);
+  /** Decisions a Send could not record (the answers stay sent). */
+  const [refused, setRefused] = useState<{ key: string; message: string }[]>([]);
   const [box, setBox] = useState<{ open: boolean; text: string }>({ open: false, text: '' });
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -149,6 +147,9 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose }: Th
     setPending(new Map());
     setBox({ open: false, text: '' });
     setError(null);
+    setSwitching(new Map());
+    setCard(null);
+    setRefused([]);
     sendKeys.current = null;
     revisions.current.clear();
     bodyRef.current?.scrollTo({ top: 0 });
@@ -216,12 +217,52 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose }: Th
     return null;
   };
 
+  /** The question as the server last answered, with one question replaced. */
+  const patchQuestion = (question: InboxQuestion) => {
+    const message = threadRef.current.messages.find((m) => m.id === question.message_id);
+    if (!message) return;
+    onQuestions(message.id, (message.questions ?? []).map((q) => (q.key === question.key ? question : q)));
+  };
+
+  const recordingOf = (message: InboxMessageWire) => (key: string): boolean | undefined => {
+    const id = `${message.id}/${key}`;
+    if (switching.has(id)) return switching.get(id);
+    return message.questions?.find((q) => q.key === key)?.decision_recording;
+  };
+
+  /** The tag's diamond: saved on the question at once, like a pick. */
   const toggleDecision = (messageId: string) => (key: string, next: boolean) => {
-    setDecisionSwitches((current) => {
-      const updated = { ...current, [`${messageId}/${key}`]: next };
-      writeDecisionSwitches(updated);
-      return updated;
-    });
+    const id = `${messageId}/${key}`;
+    setSwitching((current) => new Map(current).set(id, next));
+    setError(null);
+    void inboxApi
+      .setDecision(messageId, key, { recording: next })
+      .then((result) => patchQuestion(result.question))
+      .catch(async (cause) => {
+        setError(cause instanceof InboxApiError ? cause.message : 'The switch was not saved.');
+        await onChanged();
+      })
+      .finally(() =>
+        setSwitching((current) => {
+          if (current.get(id) !== next) return current;
+          const updated = new Map(current);
+          updated.delete(id);
+          return updated;
+        }),
+      );
+  };
+
+  const openDecision = (messageId: string) => (key: string, anchor: HTMLElement) => setCard({ messageId, key, anchor });
+
+  /** Done on the card: keep its words on the question and turn recording on. */
+  const keepDecision = async (messageId: string, key: string, draft: InboxDecisionDraft | null) => {
+    try {
+      const result = await inboxApi.setDecision(messageId, key, { recording: true, draft });
+      patchQuestion(result.question);
+      setCard(null);
+    } catch (cause) {
+      throw new Error(cause instanceof InboxApiError ? cause.message : 'The decision was not kept.');
+    }
   };
 
   // What a Send carries: every picked, unsent answer, per message.
@@ -257,13 +298,16 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose }: Th
         targets.push({ message: last, questions: [] });
       }
       if (!sendKeys.current) sendKeys.current = new Map(targets.map((t) => [t.message.id, crypto.randomUUID()]));
+      const notRecorded: { key: string; message: string }[] = [];
       for (const [index, target] of targets.entries()) {
-        await inboxApi.reply(target.message.id, {
+        const result = await inboxApi.reply(target.message.id, {
           idempotency_key: sendKeys.current.get(target.message.id) ?? crypto.randomUUID(),
           words: index === targets.length - 1 ? words : '',
           questions: target.questions,
         });
+        notRecorded.push(...result.decisions_refused);
       }
+      setRefused(notRecorded);
       sendKeys.current = null;
       setBox({ open: false, text: '' });
       await onChanged();
@@ -353,9 +397,31 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose }: Th
                   answers={answersOf(message)}
                   onPick={(key, answer) => pick(message.id, key, answer)}
                   footerFor={footerFor(message)}
-                  decisionSwitches={decisionSwitches}
+                  recordingOf={recordingOf(message)}
                   onToggleDecision={toggleDecision(message.id)}
+                  onOpenDecision={openDecision(message.id)}
                 />
+                {questions.map((q) => {
+                  const decision = q.decision_id ? decisions.find((d) => d.id === q.decision_id) : undefined;
+                  if (!decision) return null;
+                  return (
+                    <p className="ib-settled" key={q.key} data-question-settled={q.key}>
+                      <DecisionDiamond />
+                      <span>
+                        Settled:{' '}
+                        <a
+                          href={`#decisions=${decision.project_id}&decision=${decision.id}`}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            onOpenDecisionPage(decision);
+                          }}
+                        >
+                          {decision.text}
+                        </a>
+                      </span>
+                    </p>
+                  );
+                })}
                 {message === lastAgent && !resolved && waitingHoldsUp.length > 0 && (
                   <div className="ib-waitfoot">
                     <b>Waiting on this answer</b>
@@ -458,8 +524,50 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose }: Th
             {error}
           </div>
         )}
+        {refused.map((entry) => (
+          <div className="ib-error" role="status" key={entry.key} data-question-decision-refused={entry.key}>
+            Not recorded as a decision: {entry.message.replace(/\.$/, '')}. The answer was sent.
+          </div>
+        ))}
       </div>
+      {card && <ThreadDecisionCard thread={thread} card={card} answersOf={answersOf} onCancel={() => setCard(null)} onDone={keepDecision} />}
     </section>
+  );
+}
+
+/** The decision card for one question, drafted from its answer as it is now (a pick not yet saved included). */
+function ThreadDecisionCard({
+  thread,
+  card,
+  answersOf,
+  onCancel,
+  onDone,
+}: {
+  thread: InboxThread;
+  card: { messageId: string; key: string; anchor: HTMLElement };
+  answersOf: (message: InboxMessageWire) => Map<string, QuestionAnswer>;
+  onCancel: () => void;
+  onDone: (messageId: string, key: string, draft: InboxDecisionDraft | null) => Promise<void>;
+}) {
+  const message = thread.messages.find((m) => m.id === card.messageId);
+  const question = message?.questions?.find((q) => q.key === card.key);
+  if (!message || !question) return null;
+  const drafted = inboxDecisionWords({
+    answer: answersOf(message).get(card.key) ?? null,
+    prompt: question.prompt,
+    askerName: agentName(message.author),
+    draft: null,
+  });
+  return (
+    <DecisionCard
+      key={`${card.messageId}/${card.key}`}
+      anchor={card.anchor}
+      drafted={drafted}
+      draft={question.decision_draft}
+      projectName={thread.project.name}
+      onCancel={onCancel}
+      onDone={(draft) => onDone(card.messageId, card.key, draft)}
+    />
   );
 }
 

@@ -275,3 +275,51 @@
 .ib-waitfoot .ib-sp { flex: 1; }
 .ib-waitfoot button { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
 .ib-holds { margin: 0 0 6px; padding-left: 18px; font-size: 13.5px; color: var(--muted-foreground); }
+
+/* step 3: the decision card (record 3.1), over the thread, under the tag's words */
+.pn-inbox.ib-deccard-layer { height: auto; position: fixed; top: 0; left: 0; z-index: 50; }
+.ib-deccard { position: fixed; width: 400px; background: var(--popover); color: var(--popover-foreground, var(--foreground)); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.25); padding: 16px 16px 14px; }
+.ib-deccard h4 { margin: 0 0 12px; font-size: 14.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.ib-deccard label, .ib-dform label { display: block; font-size: 13px; font-weight: 500; margin: 0 0 6px; }
+.ib-deccard label span, .ib-dform label span { color: var(--muted-foreground); font-weight: 400; }
+.pn-inbox .ib-ta { display: block; width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; font: inherit; font-size: 13.5px; line-height: 1.5; min-height: 58px; margin: 0 0 12px; background: var(--card); color: var(--foreground); resize: none; field-sizing: content; outline: none; }
+.pn-inbox .ib-ta:focus, .pn-inbox .ib-ta:focus-visible { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 18%, transparent); outline: none; }
+.ib-deccard .ib-in { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted-foreground); margin: 2px 0 12px; }
+.ib-deccard .ib-bt { display: flex; justify-content: flex-end; gap: 8px; }
+.ib-deccard .ib-error { margin: 0 0 10px; }
+.pn-inbox svg.ib-dm { width: 13px; height: 13px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linejoin: round; }
+.ib-deccard h4 svg.ib-dm { stroke: var(--primary); stroke-width: 2; }
+
+/* "Settled: <text>" under a card whose answer recorded a decision */
+.ib-settled { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 0; font-size: 13.5px; }
+.ib-settled svg.ib-dm { margin-top: 4px; color: var(--muted-foreground); }
+.ib-settled a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+
+/* the project's decisions (record 3.2), a row opening beside the list */
+.ib-dpage { padding: 28px 44px; flex: 1; min-width: 0; overflow-y: auto; }
+.ib-dpage.ib-narrow { flex: none; width: 460px; padding: 28px 22px; border-right: 1px solid var(--ib-line); }
+.ib-dh { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+.ib-dh h1 { font-size: 22px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+.pn-inbox .ib-select { height: 30px; padding: 0 28px 0 10px; border-radius: 7px; border: 1px solid var(--border); font: inherit; font-size: 13.5px; background: var(--card); color: var(--foreground); appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m19.5 8.25-7.5 7.5-7.5-7.5'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 9px center; background-size: 13px 13px; }
+.ib-dsub { color: var(--muted-foreground); font-size: 14px; margin: 0 0 22px; }
+.ib-dpage .ib-group + .ib-group { margin-top: 18px; }
+.ib-drow { display: grid; grid-template-columns: 22px minmax(0, 1fr) 300px 120px 90px; align-items: center; gap: 12px; min-height: 50px; padding: 0 12px; border-bottom: 1px solid var(--ib-hair); font-size: 14px; width: 100%; text-align: left; }
+button.ib-drow:hover { background: color-mix(in oklch, var(--muted) 35%, transparent); }
+.ib-drow .ib-st { font-weight: 550; }
+.ib-drow .ib-src, .ib-drow .ib-when { color: var(--muted-foreground); font-size: 13px; }
+.ib-drow .ib-when { text-align: right; }
+.ib-drow .ib-act { text-align: right; }
+.ib-drow.ib-w svg.ib-dm, .ib-drow.ib-ended svg.ib-dm { color: var(--muted-foreground); }
+.ib-drow.ib-ended .ib-st { font-weight: 450; color: var(--muted-foreground); }
+.ib-drow.ib-dnarrow { grid-template-columns: 22px minmax(0, 1fr) auto; padding: 9px 12px; }
+.ib-drow.ib-dnarrow svg.ib-dm { align-self: start; margin-top: 4px; }
+.ib-dtxt { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ib-drow.ib-sel { background: color-mix(in oklch, var(--primary) 9%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--primary) 35%, transparent); border-radius: 6px; }
+.ib-dnone { color: var(--muted-foreground); font-size: 13.5px; margin: 10px 12px; }
+.ib-dstate { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 550; color: var(--muted-foreground); padding-left: 6px; }
+.ib-dfacts { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px 14px; margin: 6px 0 0; font-size: 14px; line-height: 1.5; }
+.ib-dfacts dt { color: var(--muted-foreground); font-size: 13px; }
+.ib-dfacts dd { margin: 0; }
+.pn-inbox .ib-link { color: var(--primary); font-size: 13.5px; text-decoration: underline; text-underline-offset: 2px; margin-left: 8px; text-align: left; }
+.ib-dfacts dd > .ib-link:first-child { margin-left: 0; }
+.ib-dform .ib-ta { min-height: 52px; }

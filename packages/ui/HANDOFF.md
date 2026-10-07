@@ -1726,6 +1726,12 @@ Additive, one optional `Viewer` prop; Plannotator passes none, so its render is 
 - Inside, `Viewer` computes `authoringOff = readOnly || answerOnly` and uses it wherever it used `readOnly` for authoring; the question and checkbox handlers still read `readOnly`. Absent or false, every path is the one it was.
 - The article keeps its card padding; a host that wants the bare text (as the Inbox does) overrides it from its own CSS on `[data-print-region="article"]`.
 
+## Viewer `questionDecisionLocked` (unreleased)
+
+Additive, one optional `Viewer` prop; Plannotator passes none, so its render is unchanged. Added for the Plannotator Inbox (step 3, decisions), where one message can hold a sent question and an open one.
+
+- **`questionDecisionLocked?: (question: IndexedQuestion) => boolean`**: true for a question passes it neither `onToggleQuestionDecisionRecording` nor `onOpenQuestionDecision`, so its decision tag draws as a plain tag (on or dimmed off, as `questionDecisionRecording` says), exactly as under `readOnly`. Other questions in the same `Viewer` keep their switch and opener. Absent or false, every path is the one it was.
+
 ## Publishing & versioning
 
 - **core 0.25.11 / ui 0.51.0: both change. Order: guides.show deploy, then `core` 0.25.11, then `ui` 0.51.0.** ui imports `canonicalQuestionAnswer` and `PI_THINKING_LEVELS`, which no published core before 0.25.11 has, and pins core `0.25.11` exactly. core 0.25.11 pins a new guides.show viewer stylesheet (`viewer.DuqkfIUz.css`, from the gruvbox fix #1721; the viewer JS `viewer.BYGvfCcj.js` is unchanged), which guides.show serves only after a deploy, so run the deploy by hand first (next bullet). **ui 0.51.0 is BREAKING for 0.50.0 consumers of the "Ask this session" exports**: it removes `findUsableSessionBridge`, `resolveSessionBridgeFallback`, the `'fallback'` `SessionAskAction` member, `SessionAskActions`' `fallbackLabel` and `DocumentAIChatPanel`'s `sessionAskFallbackLabel`, and makes a listed bridge the only Ask AI selection. Release notes must say so. Everything else is additive or a fix (including #1725's agent tool switch and offer); see "Ask this session (shipped in 0.50.0; …)", "Comment composer trim (0.51.0; …)", "Ask AI from a diagram comment (0.51.0; …)" and "Questions, restore, drafts and the rest (ui 0.51.0, core 0.25.11)".

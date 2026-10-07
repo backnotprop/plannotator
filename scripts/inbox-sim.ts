@@ -78,6 +78,16 @@ export class SimAgent {
     return this.call('wait_for_reply', { thread_id: threadId, timeout_seconds: timeoutSeconds });
   }
 
+  /** The project's decisions as an agent reads them (`state`: current by default, or replaced, retired, all). */
+  async listDecisions(projectPath: string, state?: 'current' | 'replaced' | 'retired' | 'all'): Promise<Structured[]> {
+    return (await this.call('list_decisions', { project_path: projectPath, ...(state ? { state } : {}) })).decisions as Structured[];
+  }
+
+  /** An agent records a decision it settled with the person. */
+  recordDecision(input: { project_path: string; text: string; reason?: string; idempotency_key?: string }): Promise<Structured> {
+    return this.call('record_decision', { ...input, agent_name: this.name, agent_host: this.host });
+  }
+
   close(): Promise<void> {
     return this.client.close();
   }

@@ -35,6 +35,8 @@ const PATHS = {
   bell: 'M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0',
   info: 'm11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z',
   check: 'm4.5 12.75 6 6 9-13.5',
+  folder:
+    'M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z',
   external: 'M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25',
 } as const;
 
@@ -96,4 +98,13 @@ export function HostMark({ host, big }: { host: string | null | undefined; big?:
 
 export function AuthorMark({ author, big }: { author: InboxAuthor | null | undefined; big?: boolean }) {
   return <HostMark host={author?.kind === 'agent' ? author.host : null} big={big} />;
+}
+
+/** The record's decision diamond (16-unit box), as the Decisions page and the card draw it. */
+export function DecisionDiamond({ className }: { className?: string }) {
+  return (
+    <svg className={`ib-dm${className ? ` ${className}` : ''}`} viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path d="M8 1.8 14.2 8 8 14.2 1.8 8Z" />
+    </svg>
+  );
 }

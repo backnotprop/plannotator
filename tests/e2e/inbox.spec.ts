@@ -91,8 +91,9 @@ test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(builtBinary), `build the binary first: ${builtBinary}`).toBe(true);
-  rmSync(proofDir, { recursive: true, force: true });
+  // Only this spec's own captures: the decisions spec keeps its in proof/decisions/.
   mkdirSync(proofDir, { recursive: true });
+  for (const file of readdirSync(proofDir)) if (file.endsWith('.png') || file === 'index.html') rmSync(join(proofDir, file));
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-e2e-')));
   // A copy the restart proof can replace on disk, as install.sh does.
   const binary = join(root, 'bin', 'plannotator');
@@ -271,8 +272,9 @@ test('a row opens the thread as an email with the question cards; the decision t
   await expect(page.locator(`.ib-nrow[data-thread-id="${world.threads.stopped}"]`)).toHaveAttribute('aria-current', 'true');
 
   // The tag is on every question (ui 0.52.1, questionDecisionScope "any"):
-  // on where the block says `Decision: when answered`, off on the other.
-  const tags = pane.getByRole('button', { name: 'Records a decision' });
+  // on where the block says `Decision: when answered`, off on the other. Its
+  // diamond is the switch; its words open the decision card (inbox-decisions.spec.ts).
+  const tags = pane.getByRole('button', { name: 'Record as a decision', exact: true });
   await expect(tags).toHaveCount(2);
   await expect(tags.nth(0)).toHaveAttribute('aria-pressed', 'true');
   await expect(tags.nth(1)).toHaveAttribute('aria-pressed', 'false');
@@ -284,9 +286,9 @@ test('a row opens the thread as an email with the question cards; the decision t
   await expect(tags.nth(0)).toHaveAttribute('aria-pressed', 'false');
   await expect(tags.nth(1)).toHaveAttribute('aria-pressed', 'true');
   await expect(pane.getByText('Answering this records a decision')).toHaveCount(1);
-  // Kept in the page (client side until the decision record lands, step 3).
+  // Kept on the question record (step 3), so a reload reads it back.
   await page.reload();
-  const after = page.locator('section.ib-pane').getByRole('button', { name: 'Records a decision' });
+  const after = page.locator('section.ib-pane').getByRole('button', { name: 'Record as a decision', exact: true });
   await expect(after.nth(0)).toHaveAttribute('aria-pressed', 'false');
   await expect(after.nth(1)).toHaveAttribute('aria-pressed', 'true');
   await shot('3.1-decision-tag-switched');
