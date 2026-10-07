@@ -24,7 +24,7 @@ import {
   type ListModel,
   type SettingsModel,
 } from './api';
-import { filterSections, heldNotice, waitingCount } from './held';
+import { filterSections, heldNotice, refreshHeldRows, waitingCount } from './held';
 import { tildePath } from './format';
 import type { ConnectContext } from './harnesses';
 import { Sidebar } from './components/Sidebar';
@@ -169,7 +169,8 @@ function Inbox() {
       setPageSession(next.serverSession);
       setLatest(next);
       setUpdate(next.update);
-      setShown((current) => (adopt || current === null || !hasRows(current) ? next.sections : current));
+      // Held: the order waits for an action, but each row's own state (a delivery, an agent's read) follows at once.
+      setShown((current) => (adopt || current === null || !hasRows(current) ? next.sections : refreshHeldRows(current, next.sections)));
       setLoadError(null);
       return next;
     } catch (cause) {

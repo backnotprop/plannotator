@@ -453,6 +453,31 @@ test('"N new" waits behind the notice, and the list moves only on an action', as
   await expect(page.locator('[data-inbox-notice]')).toHaveCount(0);
 });
 
+// The failure this guards: the held list kept a row's whole state, so after the
+// agent had the reply the row still said "Sent · Saved for <agent>" until a
+// reload, while the thread beside it had moved on.
+test("a Sent row follows the agent's read in place, without an action: its state changes, the order does not", async () => {
+  const { page } = world;
+  const claude2 = world.agents[2]!;
+  await page.locator(`[data-thread-id="${world.threads.named}"]`).click();
+  const pane = page.locator('section.ib-pane');
+  await pane.getByText('Trust the webhook', { exact: true }).click();
+  await expect(pane.getByText(/^Picked \d{1,2}:\d{2} [AP]M, not sent$/)).toBeVisible();
+  await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
+  const row = page.locator(`.ib-lbody [data-thread-id="${world.threads.named}"]`);
+  await expect(row).toHaveAttribute('data-section', 'sent');
+  await expect(row).toContainText('Saved for Claude Code');
+  const before = await rowOrder(page);
+
+  // The agent reads the reply (as a wake's delivery or wait_for_reply would): the server lists the thread as Quiet.
+  await claude2.readThread(world.threads.named!);
+  await expect(row).toHaveAttribute('data-section', 'quiet');
+  await expect(row).not.toContainText('Saved for');
+  expect(await rowOrder(page)).toEqual(before);
+  await page.keyboard.press('Escape');
+  await expect(pane).toHaveCount(0);
+});
+
 test('Settings: the agent tool knob applies to the next session, the compact picker, the store on disk', async () => {
   const { page } = world;
   await side(page).getByRole('button', { name: 'Settings' }).click();
@@ -520,7 +545,7 @@ test('"A new version is ready, Restart" follows health, and Restart brings the n
   const after = registry();
   expect(after.pid).not.toBe(before.pid);
   expect(after.port).toBe(before.port);
-  // The page reloaded onto the new Inbox: the same store, the update line gone.
-  await expect(page.locator(`[data-thread-id="${world.threads.named}"]`)).toBeVisible({ timeout: 30_000 });
+  // The page reloaded onto the new Inbox: the same store (the holding row, unfolded; named is Quiet now), the update line gone.
+  await expect(page.locator(`[data-thread-id="${world.threads.holding}"]`)).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('.ib-restart')).toHaveCount(0);
 });

@@ -18,6 +18,11 @@ function rowsById(sections: readonly InboxListSection[]): Map<string, InboxListR
   return out;
 }
 
+/** `row` carries agent activity the row on screen (`old`) lacks: a thread an agent started, or a newer agent message. */
+function hasNewAgentActivity(old: InboxListRow | undefined, row: InboxListRow): boolean {
+  return old === undefined ? row.last_author === 'agent' : row.last_author === 'agent' && row.last_at > old.last_at;
+}
+
 /**
  * The threads in `latest` with agent activity the list on screen does not
  * show: a thread it lacks, or one whose last message is a newer agent
@@ -28,14 +33,32 @@ export function heldNotice(shown: readonly InboxListSection[], latest: readonly 
   const projects = new Set<string>();
   let count = 0;
   for (const row of rowsById(latest).values()) {
-    const old = before.get(row.thread_id);
-    const fresh = old === undefined ? row.last_author === 'agent' : row.last_author === 'agent' && row.last_at > old.last_at;
-    if (!fresh) continue;
+    if (!hasNewAgentActivity(before.get(row.thread_id), row)) continue;
     count += 1;
     projects.add(row.project.name);
   }
   if (count === 0) return { count, text: null };
   return { count, text: projects.size === 1 ? `${count} new in ${[...projects][0]}` : `${count} new` };
+}
+
+/**
+ * The held list with each row's own state brought up to date in place. The
+ * rows keep their sections and their order, which wait for an action; but a
+ * row whose thread changed without new agent activity (the reply was
+ * delivered, an agent read it, the thread was resolved) shows its state as it
+ * now is, so a Sent row stops saying "Saved for" once the agent has the
+ * reply. A row with new agent activity keeps what was on screen: that change
+ * waits behind "N new". A row whose thread is gone stays as it was.
+ */
+export function refreshHeldRows(shown: readonly InboxListSection[], latest: readonly InboxListSection[]): InboxListSection[] {
+  const fresh = rowsById(latest);
+  return shown.map((section) => ({
+    ...section,
+    threads: section.threads.map((row) => {
+      const next = fresh.get(row.thread_id);
+      return next && !hasNewAgentActivity(row, next) ? next : row;
+    }),
+  }));
 }
 
 /** One project's rows only; the sections stay, empty ones included. */
