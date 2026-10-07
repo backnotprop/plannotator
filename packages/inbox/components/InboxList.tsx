@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { agentName, questionCount, shortTime } from '../format';
 import { AuthorMark, Icon } from '../icons';
@@ -14,6 +14,8 @@ export interface InboxListProps {
   narrow: boolean;
   selectedThreadId: string | null;
   notice: string | null;
+  /** The one-time notifications line (record 6.1), above everything else. */
+  ask?: ReactNode;
   onShowNew: () => void;
   onOpen: (row: InboxListRow) => void;
 }
@@ -99,6 +101,7 @@ export function InboxList(props: InboxListProps) {
         {props.path && <span className="ib-path">{props.path}</span>}
       </div>
       <div className="ib-lbody">
+        {props.ask}
         {props.notice && (
           <button type="button" className="ib-notice" onClick={props.onShowNew} data-inbox-notice="">
             <Icon name="inbox" size={15} />

@@ -44,6 +44,7 @@ import {
   saveConfig,
   configuredInboxTool,
   type AgentToolHost,
+  type PlannotatorConfig,
 } from "@plannotator/shared/config";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { isLoopbackHostHeader } from "@plannotator/shared/loopback-host";
@@ -68,6 +69,18 @@ const LOOPBACK = "127.0.0.1";
 export const INBOX_FORBIDDEN_PORT = 19432;
 const SSE_HEARTBEAT_MS = 15_000;
 const DEFAULT_HEALTH_TICK_MS = 60_000;
+/** The list sections a browser notification can come from: questions and stops, never news. */
+const INBOX_NOTIFY_SECTIONS = ["stopped", "holding", "waiting"] as const;
+
+/** `http://localhost:52817`: an origin as the page reports it, nothing more. */
+function isPageOrigin(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (url.protocol === "http:" || url.protocol === "https:") && url.origin === value;
+  } catch {
+    return false;
+  }
+}
 
 export interface InboxServerOptions {
   /** Default: `getPlannotatorDataDir()`. */
@@ -335,6 +348,59 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return { hosts, env: env ?? null };
   };
 
+  /** The browser notifications (record 6.x, 7.2), resolved from config.json: on, all three sections, not dismissed. */
+  const notificationsState = () => {
+    const value = loadConfig().inboxNotifications;
+    const saved = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    const sections = Array.isArray(saved.sections)
+      ? INBOX_NOTIFY_SECTIONS.filter((id) => saved.sections!.includes(id))
+      : [...INBOX_NOTIFY_SECTIONS];
+    return {
+      enabled: saved.enabled !== false,
+      sections,
+      dismissed: saved.dismissed === true,
+      allowed_origin: typeof saved.allowedOrigin === "string" ? saved.allowedOrigin : null,
+    };
+  };
+
+  /** Save the fields named, keeping the others as they are. */
+  const saveNotifications = (input: unknown) => {
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw new InboxError("validation_error", "notifications: an object.", { field: "notifications" });
+    }
+    const current = loadConfig().inboxNotifications;
+    const next: NonNullable<PlannotatorConfig["inboxNotifications"]> =
+      current && typeof current === "object" && !Array.isArray(current) ? { ...current } : {};
+    for (const [field, value] of Object.entries(input as Record<string, unknown>)) {
+      switch (field) {
+        case "enabled":
+        case "dismissed":
+          if (typeof value !== "boolean") throw new InboxError("validation_error", `notifications.${field}: must be a boolean.`, { field: `notifications.${field}` });
+          next[field] = value;
+          break;
+        case "sections":
+          if (!Array.isArray(value) || !value.every((id) => (INBOX_NOTIFY_SECTIONS as readonly unknown[]).includes(id))) {
+            throw new InboxError("validation_error", "notifications.sections: a list of stopped, holding, waiting.", { field: "notifications.sections" });
+          }
+          next.sections = INBOX_NOTIFY_SECTIONS.filter((id) => value.includes(id));
+          break;
+        case "allowed_origin":
+          if (value !== null && (typeof value !== "string" || !isPageOrigin(value))) {
+            throw new InboxError("validation_error", "notifications.allowed_origin: an http origin or null.", { field: "notifications.allowed_origin" });
+          }
+          next.allowedOrigin = value as string | null;
+          break;
+        default:
+          throw new InboxError("validation_error", `notifications.${field}: not a setting (enabled, sections, dismissed, allowed_origin).`, { field: `notifications.${field}` });
+      }
+    }
+    saveConfig({ inboxNotifications: next });
+    if (JSON.stringify(loadConfig().inboxNotifications) !== JSON.stringify(next)) {
+      throw new InboxError("config_not_saved", "config.json could not be written; nothing changed.");
+    }
+    return notificationsState();
+  };
+
   /** What Settings and the connect snippets read. */
   const settingsModel = () => ({
     serverSession,
@@ -347,6 +413,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     home: homedir(),
     data_dir: dataDir,
     inbox_tool: inboxToolState(),
+    notifications: notificationsState(),
     store: store.diskUsage(),
   });
 
@@ -531,7 +598,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(), 409);
-        return json({ inbox_tool: saveInboxTool(body.inbox_tool) });
+        if (body.inbox_tool === undefined && body.notifications === undefined) {
+          throw new InboxError("validation_error", "body: inbox_tool or notifications is required.");
+        }
+        const notifications = body.notifications === undefined ? notificationsState() : saveNotifications(body.notifications);
+        const inboxTool = body.inbox_tool === undefined ? inboxToolState() : saveInboxTool(body.inbox_tool);
+        return json({ inbox_tool: inboxTool, notifications });
       }
 
       const threadMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)$/.exec(path);

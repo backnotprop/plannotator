@@ -22,6 +22,8 @@ import { InboxList } from './components/InboxList';
 import { ThreadPane } from './components/Thread';
 import { EmptyState } from './components/EmptyState';
 import { SettingsPage } from './components/Settings';
+import { NotificationAsk } from './components/NotificationAsk';
+import { useInboxNotifications } from './notify';
 
 // The Inbox has no /api/config and no browser-agent tools: settings stay in
 // the page's own cookies, and WebMCP is off.
@@ -78,6 +80,16 @@ function Inbox() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const routeRef = useRef(route);
   routeRef.current = route;
+  const notifications = useInboxNotifications({
+    settings: settings?.notifications ?? null,
+    onSettings: (next) => setSettings((current) => (current ? { ...current, notifications: next } : current)),
+    // A click on a notification: the thread opens, and the list on screen catches up.
+    openThread: (threadId) => {
+      writeRoute({ page: 'inbox', project: null, thread: threadId });
+      void refreshList(true);
+    },
+  });
+  const { observe: observeEvent, flush: flushNotifications } = notifications;
 
   useEffect(() => {
     const onHash = () => setRoute(readRoute());
@@ -134,10 +146,11 @@ function Inbox() {
       void refreshSettings();
       if (cancelled || !first) return;
       unsubscribe = subscribeInboxEvents(first.cursor, {
-        onRecord: () => {
+        onRecord: (event) => {
+          observeEvent(event);
           if (timer) clearTimeout(timer);
           timer = setTimeout(() => {
-            void refreshList(false);
+            void refreshList(false).then((next) => next && flushNotifications(next));
             const open = routeRef.current.thread;
             if (open) void refreshThread(open);
           }, 80);
@@ -150,7 +163,7 @@ function Inbox() {
       unsubscribe();
       if (timer) clearTimeout(timer);
     };
-  }, [refreshList, refreshSettings, refreshThread]);
+  }, [refreshList, refreshSettings, refreshThread, observeEvent, flushNotifications]);
 
   // Opening a thread: read it, record the look, and put the list as it now is on screen.
   useEffect(() => {
@@ -265,7 +278,17 @@ function Inbox() {
 
   let main: ReactNode;
   if (route.page === 'settings') {
-    main = <SettingsPage settings={settings} context={context} error={settingsError} onToggleTool={toggleTool} />;
+    main = (
+      <SettingsPage
+        settings={settings}
+        context={context}
+        error={settingsError}
+        onToggleTool={toggleTool}
+        permission={notifications.permission}
+        onToggleNotifications={(next) => void notifications.setEnabled(next)}
+        onToggleSection={notifications.setSection}
+      />
+    );
   } else if (!latest || !shown) {
     main = <div className="ib-listcol">{loadError && <div className="ib-error" style={{ padding: 22 }}>{loadError}</div>}</div>;
   } else if (firstRun) {
@@ -281,6 +304,7 @@ function Inbox() {
           narrow={route.thread !== null}
           selectedThreadId={route.thread}
           notice={notice}
+          ask={notifications.ask && <NotificationAsk kind={notifications.ask} onTurnOn={() => void notifications.turnOn()} onNotNow={notifications.notNow} />}
           onShowNew={() => setShown(latest.sections)}
           onOpen={openRow}
         />

@@ -7,7 +7,7 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: '.',
-  testMatch: 'inbox.spec.ts',
+  testMatch: ['inbox.spec.ts', 'notifications.spec.ts'],
   outputDir: '../../.local/test-results',
   fullyParallel: false,
   workers: 1,

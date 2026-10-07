@@ -8,6 +8,7 @@
 import type {
   InboxHealth,
   InboxListSection,
+  InboxMessage,
   InboxProject,
   InboxQuestion,
   InboxThread,
@@ -15,6 +16,19 @@ import type {
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 
 export type AgentToolHost = 'claude-code' | 'pi' | 'opencode';
+
+/** The list sections a notification can come from (questions and stops, never news). */
+export type NotifySection = 'stopped' | 'holding' | 'waiting';
+
+/** The browser notifications as the Inbox keeps them (config.json, so they survive a port change). */
+export interface NotificationSettings {
+  enabled: boolean;
+  sections: NotifySection[];
+  /** The person answered the one-time ask with "Not now". */
+  dismissed: boolean;
+  /** The page origin where they last turned notifications on. */
+  allowed_origin: string | null;
+}
 
 export interface ProjectFolder extends InboxProject {
   threads: number;
@@ -48,6 +62,7 @@ export interface SettingsModel {
   home: string;
   data_dir: string;
   inbox_tool: { hosts: Record<AgentToolHost, boolean>; env: boolean | null };
+  notifications: NotificationSettings;
   store: {
     dir: string;
     bytes: number;
@@ -125,19 +140,35 @@ export const inboxApi = {
   restart: () => post<{ ok: true }>('/api/inbox/restart', {}),
   saveInboxTool: (hosts: Partial<Record<AgentToolHost, boolean>>) =>
     post<{ inbox_tool: SettingsModel['inbox_tool'] }>('/api/inbox/settings', { inbox_tool: hosts }),
+  saveNotifications: (change: Partial<NotificationSettings>) =>
+    post<{ notifications: NotificationSettings }>('/api/inbox/settings', { notifications: change }),
 };
+
+/** One store line as the event stream carries it (packages/server/inbox.ts, `eventPayload`). */
+export type InboxEvent =
+  | { seq: number; kind: 'project'; id: string; project: InboxProject }
+  | { seq: number; kind: 'message'; id: string; message: InboxMessage }
+  | { seq: number; kind: 'question'; id: string; question: InboxQuestion };
 
 /**
  * The server's event stream: `onRecord` for every store line after the
- * cursor, `onStatus` for restart-to-update. EventSource reconnects on its
+ * cursor (the line, for the notifications), `onStatus` for restart-to-update. EventSource reconnects on its
  * own and resumes from the last event id.
  */
 export function subscribeInboxEvents(
   cursor: number,
-  handlers: { onRecord: () => void; onStatus: (update: InboxHealth['update']) => void },
+  handlers: { onRecord: (event: InboxEvent | null) => void; onStatus: (update: InboxHealth['update']) => void },
 ): () => void {
   const source = new EventSource(`/api/inbox/events?cursor=${cursor}`);
-  source.addEventListener('record', () => handlers.onRecord());
+  source.addEventListener('record', (event) => {
+    let parsed: InboxEvent | null = null;
+    try {
+      parsed = JSON.parse((event as MessageEvent<string>).data) as InboxEvent;
+    } catch {
+      // A malformed frame still refreshes the list.
+    }
+    handlers.onRecord(parsed);
+  });
   source.addEventListener('status', (event) => {
     try {
       handlers.onStatus((JSON.parse((event as MessageEvent<string>).data) as { update: InboxHealth['update'] }).update);

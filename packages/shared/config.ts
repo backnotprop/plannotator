@@ -257,6 +257,22 @@ export interface PlannotatorConfig {
    */
   inboxTool?: boolean | Partial<Record<AgentToolHost, boolean>>;
   /**
+   * The Plannotator Inbox's browser notifications, set from the Inbox page
+   * (its one-time ask and its Settings), kept here rather than in the page's
+   * localStorage so they survive the Inbox moving to another port (another
+   * origin). `enabled`: notify at all (unset: on). `sections`: which list
+   * sections notify, from `stopped`, `holding`, `waiting` (unset: all three).
+   * `dismissed`: the person answered the ask with "Not now". `allowedOrigin`:
+   * the page origin where the person last turned them on, so a page on a new
+   * port asks again with "The Inbox moved to a new address".
+   */
+  inboxNotifications?: {
+    enabled?: boolean;
+    sections?: string[];
+    dismissed?: boolean;
+    allowedOrigin?: string | null;
+  };
+  /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
    * callouts, tables, diagrams, task lists, and the other PFM extensions.

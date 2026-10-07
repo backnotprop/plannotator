@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import type { AgentToolHost, SettingsModel } from '../api';
+import type { AgentToolHost, NotifySection, SettingsModel } from '../api';
+import { NOTIFY_SECTIONS } from '../notify';
 import { formatBytes, plural, tildePath } from '../format';
 import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon } from '../icons';
@@ -19,6 +20,79 @@ export interface SettingsPageProps {
   context: ConnectContext | null;
   error: string | null;
   onToggleTool: (host: AgentToolHost, next: boolean) => void;
+  permission: NotificationPermission | 'unsupported';
+  onToggleNotifications: (next: boolean) => void;
+  onToggleSection: (section: NotifySection, next: boolean) => void;
+}
+
+const PERMISSION_LABEL: Record<NotificationPermission | 'unsupported', string> = {
+  granted: 'Allowed in this browser',
+  default: 'Not allowed in this browser yet',
+  denied: 'Blocked in this browser',
+  unsupported: 'This browser cannot show notifications',
+};
+
+/**
+ * Notifications (record 7.2): on or off for this browser, and which sections
+ * notify. Turning it on asks the browser when it has not decided yet.
+ */
+function NotificationsBlock({
+  settings,
+  permission,
+  onToggle,
+  onToggleSection,
+}: {
+  settings: SettingsModel['notifications'];
+  permission: NotificationPermission | 'unsupported';
+  onToggle: (next: boolean) => void;
+  onToggleSection: (section: NotifySection, next: boolean) => void;
+}) {
+  const on = settings.enabled && permission === 'granted';
+  return (
+    <div className="ib-sblock" data-settings-notifications="">
+      <h2>Notifications</h2>
+      <div className="ib-srow" style={{ paddingTop: 0 }}>
+        {PERMISSION_LABEL[permission]}
+        <span className="ib-d">for questions and stops</span>
+        <span className="ib-r">
+          <button
+            type="button"
+            role="switch"
+            className="ib-sw"
+            aria-checked={on}
+            aria-label="Desktop notifications"
+            disabled={permission === 'unsupported' || permission === 'denied'}
+            onClick={() => onToggle(!on)}
+          />
+        </span>
+      </div>
+      {on &&
+        NOTIFY_SECTIONS.map(({ id, label }) => {
+          const checked = settings.sections.includes(id);
+          return (
+            <div className="ib-srow ib-sub" key={id}>
+              {label}
+              <span className="ib-r">
+                <button
+                  type="button"
+                  role="switch"
+                  className="ib-sw"
+                  aria-checked={checked}
+                  aria-label={`Notify for ${label}`}
+                  onClick={() => onToggleSection(id, !checked)}
+                />
+              </span>
+            </div>
+          );
+        })}
+      {permission === 'denied' && (
+        <div className="ib-note">
+          <Icon name="info" />
+          This browser blocks notifications for this page: allow them in its site settings.
+        </div>
+      )}
+    </div>
+  );
 }
 
 function StoreTable({ store, threadCounts }: { store: SettingsModel['store']; threadCounts: (id: string) => number }) {
@@ -79,8 +153,16 @@ function StoreTable({ store, threadCounts }: { store: SettingsModel['store']; th
   );
 }
 
-/** Settings (record 7.1, 7.2): the agent tool knob, Connect an agent, and the store on disk. */
-export function SettingsPage({ settings, context, error, onToggleTool }: SettingsPageProps) {
+/** Settings (record 7.1, 7.2): the agent tool knob, Connect an agent, the store on disk, notifications. */
+export function SettingsPage({
+  settings,
+  context,
+  error,
+  onToggleTool,
+  permission,
+  onToggleNotifications,
+  onToggleSection,
+}: SettingsPageProps) {
   const env = settings?.inbox_tool.env ?? null;
   return (
     <div className="ib-spage" aria-label="Settings">
@@ -139,6 +221,14 @@ export function SettingsPage({ settings, context, error, onToggleTool }: Setting
               Delete thread and delete project come in the next step.
             </div>
           </div>
+        )}
+        {settings && (
+          <NotificationsBlock
+            settings={settings.notifications}
+            permission={permission}
+            onToggle={onToggleNotifications}
+            onToggleSection={onToggleSection}
+          />
         )}
       </div>
     </div>

@@ -144,6 +144,11 @@
 .ib-att { display: inline-flex; align-items: center; gap: 4px; color: var(--muted-foreground); font-size: 13px; white-space: nowrap; flex: none; }
 .ib-notice { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 14px; border-radius: 8px; background: color-mix(in oklch, var(--primary) 10%, var(--card)); border: 1px solid color-mix(in oklch, var(--primary) 25%, transparent); font-size: 13.5px; margin-bottom: 12px; width: 100%; text-align: left; }
 .ib-notice b { margin-left: auto; color: var(--primary); font-weight: 550; }
+.ib-askline { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 9px; border: 1px solid var(--border); background: var(--background); font-size: 13.5px; margin-bottom: 12px; }
+.pn-inbox .ib-askline svg.ib-ic { color: var(--primary); width: 18px; height: 18px; flex: none; }
+.ib-askline .ib-grow { flex: 1; min-width: 0; }
+.ib-askline b { font-weight: 600; }
+.ib-askline .ib-mut { color: var(--muted-foreground); }
 .ib-portline { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); font-size: 13px; margin-bottom: 12px; color: var(--muted-foreground); }
 
 /* buttons */
@@ -246,6 +251,8 @@
 .ib-sblock h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
 .ib-sblock > p { margin: 0 0 12px; font-size: 13.5px; color: var(--muted-foreground); line-height: 1.55; }
 .ib-srow { display: flex; align-items: center; gap: 12px; padding: 8px 0; font-size: 14px; }
+.ib-srow .ib-d { font-size: 12.5px; color: var(--muted-foreground); }
+.ib-srow.ib-sub { padding-left: 14px; font-size: 13.5px; }
 .ib-srow .ib-r { margin-left: auto; display: flex; align-items: center; gap: 10px; }
 .pn-inbox .ib-sw { width: 34px; height: 20px; border-radius: 999px; background: var(--muted); position: relative; border: 1px solid var(--border); flex: none; }
 .ib-sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--card); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: left 120ms ease-out; }

@@ -607,6 +607,37 @@ describe("the window's routes: settings, restart, favicon", () => {
     }
   });
 
+  test("notifications save into config.json (so they survive a port change), field by field, refusing what is not a setting", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      const server = await start(dataDir);
+      const read = async () => (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()).notifications;
+      // Nothing set: on, the three sections that wait on the person, never asked.
+      expect(await read()).toEqual({ enabled: true, sections: ["stopped", "holding", "waiting"], dismissed: false, allowed_origin: null });
+      for (const bad of [{ sections: ["sent"] }, { enabled: "yes" }, { allowed_origin: "http://localhost:1/path" }, { volume: 3 }]) {
+        const refused = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, notifications: bad });
+        expect(refused.status).toBe(422);
+      }
+      expect(existsSync(join(dataDir, "config.json"))).toBe(false);
+      const origin = `http://localhost:${server.port}`;
+      const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, notifications: { dismissed: true } });
+      expect((await saved.json()).notifications.dismissed).toBe(true);
+      await post(server, "/api/inbox/settings", { serverSession: server.serverSession, notifications: { sections: ["waiting", "stopped"], allowed_origin: origin } });
+      expect(await read()).toEqual({ enabled: true, sections: ["stopped", "waiting"], dismissed: true, allowed_origin: origin });
+      expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxNotifications).toEqual({
+        dismissed: true,
+        sections: ["stopped", "waiting"],
+        allowedOrigin: origin,
+      });
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
   test("the two writing routes refuse a foreign Host before anything is written or stopped", async () => {
     const root = tempRoot();
     const dataDir = join(root, "data");
