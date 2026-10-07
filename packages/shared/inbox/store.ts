@@ -565,7 +565,7 @@ export class InboxStore {
    * A Sent row moves to Quiet once its last reply is checked. No write when
    * there is no person reply it has not read.
    */
-  markAgentChecked(threadId: string, upToSeq = Number.POSITIVE_INFINITY): void {
+  markAgentChecked(threadId: string, upToSeq = Number.POSITIVE_INFINITY, at = this.stamp()): void {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) return;
     let checked = 0;
@@ -574,7 +574,6 @@ export class InboxStore {
       if (seq <= upToSeq && this.messages.get(id)?.author.kind === "person") checked = Math.max(checked, seq);
     }
     if (checked === 0 || (root.agent_checked_seq ?? 0) >= checked) return;
-    const at = this.stamp();
     this.appendMessage({ ...root, agent_checked_seq: checked, agent_checked_at: at }, at);
   }
 
@@ -1294,5 +1293,47 @@ export class InboxStore {
     } catch {
       return 0;
     }
+  }
+
+  // ──────────── agent connections (step 6: the reply wake) ────────────
+
+  /**
+   * The person's replies waiting for an agent connection's `session`: replies
+   * to a message that session sent, not yet delivered, and not yet read by an
+   * agent (wait_for_reply or read_thread; any agent's read counts, as for the
+   * Sent band). Derived from the log, so a reply waits for its session across
+   * Inbox restarts and is handed out again until it is delivered. Oldest first.
+   */
+  pendingReplies(session: string): InboxMessage[] {
+    const out: { message: InboxMessage; seq: number }[] = [];
+    for (const message of this.messages.values()) {
+      if (message.author.kind !== "person" || !message.reply_to || message.delivery) continue;
+      const asked = this.messages.get(message.reply_to);
+      if (!asked || asked.author.kind !== "agent" || asked.author.session !== session) continue;
+      const seq = this.messageSeq.get(message.id) ?? 0;
+      if ((this.messages.get(message.thread_id)?.agent_checked_seq ?? 0) >= seq) continue;
+      out.push({ message, seq });
+    }
+    return out.sort((a, b) => a.seq - b.seq).map((entry) => entry.message);
+  }
+
+  /**
+   * A connection delivered a reply into the asking session as a turn: the
+   * reply records it (`delivery`), and the thread counts as read by the agent
+   * up to it (the Sent band's "Delivered to <agent>, <time>"). Idempotent.
+   */
+  recordDelivery(replyId: string, by: { host: string; session: string }): InboxMessage {
+    const reply = this.messages.get(replyId);
+    if (!reply || reply.author.kind !== "person" || !reply.reply_to) throw new InboxError("message_not_found", `No reply ${replyId}.`);
+    const asked = this.messages.get(reply.reply_to);
+    if (!asked || asked.author.kind !== "agent" || asked.author.session !== by.session) {
+      throw new InboxError("validation_error", "session: this reply answers another session's message.", { field: "session" });
+    }
+    if (reply.delivery) return reply;
+    const at = this.stamp();
+    const delivered: InboxMessage = { ...reply, delivery: { state: "delivered", host: by.host, session: by.session, at } };
+    this.appendMessage(delivered, at);
+    this.markAgentChecked(reply.thread_id, this.messageSeq.get(reply.id) ?? 0, at);
+    return delivered;
   }
 }

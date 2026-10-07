@@ -196,6 +196,24 @@ export interface InboxMessage {
    * step 2: older records lack it.
    */
   attachments?: InboxAttachment[];
+  /**
+   * On a person's reply: it reached the asking agent's session as a turn
+   * through an agent connection (the Claude Code mod), and when. Absent until
+   * then; a reply the agent read through the MCP has none. "Replied" is not
+   * stored: it is the asking session's next message in the thread. Added in
+   * step 6: older records lack it.
+   */
+  delivery?: InboxDelivery | null;
+}
+
+/** How a person's reply reached the agent session that asked (`InboxMessage.delivery`). */
+export interface InboxDelivery {
+  state: "delivered";
+  /** The connection's host, e.g. `claude-code`. */
+  host: string;
+  /** The session the reply was delivered to (the asking message's `author.session`). */
+  session: string;
+  at: string;
 }
 
 /** One choice as the wire serves it (Workspaces' `QuestionChoice`). */

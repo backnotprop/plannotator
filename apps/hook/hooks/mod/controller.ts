@@ -10,6 +10,8 @@
 import { BRIDGE_HOST, BRIDGE_MODES, bridgeBaseUrl, createBridge, type BridgeEnd, type BridgeHandle } from './bridge'
 import { deliveryFor, legacyResult, parseHostResult, type HostResultRecord, type SessionKind } from './delivery'
 import type { Host, HttpResult } from './host'
+import { InboxLink } from './inbox'
+import type { InboxToolInfo } from './inbox-contract'
 import {
   aliveArgv,
   CLAIM_EXIT,
@@ -289,6 +291,11 @@ export interface SessionInfo {
   sessionId: string
   dataDir: string
   interactive: boolean
+  /**
+   * The Plannotator Inbox tools this process registered as `plannotator_inbox`
+   * at its first session start (inbox.ts); absent: no Inbox connection.
+   */
+  inboxTools?: readonly InboxToolInfo[]
 }
 
 export class PlannotatorMod {
@@ -324,12 +331,25 @@ export class PlannotatorMod {
   /** Launches another process claimed: watched until delivered, or reported once its claimant is gone. */
   private claimedElsewhere = new Map<string, LaunchRecord>()
   private tickCount = 0
+  /** This session's connection to the Plannotator Inbox (the tool and the reply wake); null without one. */
+  readonly inbox: InboxLink | null
 
   constructor(
     private readonly host: Host,
     readonly session: SessionInfo,
   ) {
     this.instanceId = host.randomHex(8)
+    this.inbox = session.inboxTools
+      ? new InboxLink({
+          host,
+          dataDir: session.dataDir,
+          sessionId: session.sessionId,
+          tools: session.inboxTools,
+          isBusy: () => this.turns.busy,
+          instanceId: this.instanceId,
+        })
+      : null
+    this.inbox?.start()
   }
 
   // --- Lifecycle -----------------------------------------------------------
@@ -485,6 +505,7 @@ export class PlannotatorMod {
     this.disposed = true
     this.timer?.cancel()
     this.timer = null
+    this.inbox?.dispose()
     this.host.status(undefined)
     // Hand the launches this instance watched to any other process on the session at once.
     for (const launch of this.launches.values()) {
@@ -1514,6 +1535,7 @@ export class PlannotatorMod {
     )
     const wasOurs = !!turnId && this.turns.ownsTurn(turnId)
     this.turns.onPromptEntered(prompt)
+    if (!fromUs) this.inbox?.onForeignPrompt(prompt)
     if (wasOurs && turnId && this.turns.isTakenOver(turnId)) this.host.debug(`ask turn ${turnId} taken over`)
     // The person typed here: decisions should arrive in this conversation.
     if (originKind === 'composer') void this.touchLaunches()

@@ -11,9 +11,9 @@
  * Security, on every request, in order:
  *  1. The Host allowlist (request-host-guard.ts), local rule: loopback names.
  *  2. `/mcp`: any Origin is refused (a browser is never an MCP client here).
- *  3. Connection routes (`/api/inbox/control/*`): a loopback Host naming this
- *     port, no Origin, and the registry's bearer token (the pull-bridge
- *     pattern).
+ *  3. Connection routes (`/api/inbox/control/*`, `/api/inbox/bridge/*`): a
+ *     loopback Host naming this port, no Origin, and the registry's bearer
+ *     token (the pull-bridge pattern).
  *  4. State-changing window routes: `isSameOriginOrNoOrigin`, then the
  *     `serverSession` nonce (409 for a tab left open on an older Inbox).
  * No CORS headers anywhere, so another site cannot read an answer.
@@ -31,6 +31,7 @@ import {
   type InboxHealth,
   type InboxLine,
   type InboxListRow,
+  type InboxMessage,
   type InboxProject,
 } from "@plannotator/core/inbox-types";
 import { toInboxQuestion } from "@plannotator/core/inbox-questions";
@@ -52,6 +53,12 @@ import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxListSections } from "@plannotator/shared/inbox/list";
+import {
+  INBOX_BRIDGE_EVENT_PATH,
+  INBOX_BRIDGE_POLL_MAX_MS,
+  INBOX_BRIDGE_POLL_PATH,
+  type InboxReplyCommand,
+} from "@plannotator/shared/inbox/connection";
 import {
   createInboxToken,
   readInboxRegistry,
@@ -530,6 +537,70 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     });
   };
 
+  // ── Agent connections: the reply wake (step 6) ──
+  const threadPageUrl = (base: string, threadId: string) => `${base}#thread=${threadId}`;
+  //
+  // A connection (the Claude Code mod) long-polls for the person's replies to
+  // its session's messages and posts `delivered` once a reply entered the
+  // session as a turn. Nothing is queued in memory: the replies a session
+  // waits for are read from the store (`pendingReplies`), so a reply is handed
+  // out again on every poll until it is delivered or an agent read it, and it
+  // survives an Inbox restart.
+  const replyCommand = (reply: InboxMessage): InboxReplyCommand => ({
+    type: "reply",
+    id: reply.id,
+    thread_id: reply.thread_id,
+    reply_to: reply.reply_to!,
+    subject: store.message(reply.thread_id)?.subject ?? null,
+    body: reply.body,
+    url: threadPageUrl(baseUrl, reply.thread_id),
+  });
+
+  const bridgeSession = (body: Record<string, unknown>): string => {
+    const session = typeof body.session === "string" ? body.session.trim() : "";
+    if (!session) throw new InboxError("validation_error", "session: the agent session id is required.", { field: "session" });
+    return session;
+  };
+
+  /** `{ session, waitMs? }`: answers at once when a reply waits, else holds up to 25 s for one. */
+  const bridgePoll = async (req: Request): Promise<Response> => {
+    const body = await readBody(req);
+    const session = bridgeSession(body);
+    const requested = typeof body.waitMs === "number" && Number.isFinite(body.waitMs) ? body.waitMs : 0;
+    const waitMs = Math.min(Math.max(requested, 0), INBOX_BRIDGE_POLL_MAX_MS);
+    const commands = () => store.pendingReplies(session).map(replyCommand);
+    const now = commands();
+    if (now.length > 0 || waitMs === 0) return json({ commands: now });
+    return new Promise<Response>((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        unsubscribe();
+        req.signal.removeEventListener("abort", finish);
+        resolve(json({ commands: commands() }));
+      };
+      const timer = setTimeout(finish, waitMs);
+      const unsubscribe = store.subscribe((line) => {
+        if (line.kind === "message" && line.record.author.kind === "person" && store.pendingReplies(session).length > 0) finish();
+      });
+      req.signal.addEventListener("abort", finish);
+    });
+  };
+
+  /** `{ session, host, type: "delivered", id }`: the reply entered the session as a turn. */
+  const bridgeEvent = async (req: Request): Promise<Response> => {
+    const body = await readBody(req);
+    const session = bridgeSession(body);
+    if (body.type !== "delivered" || typeof body.id !== "string") {
+      throw new InboxError("validation_error", 'type: "delivered" with the reply id is the only event.', { field: "type" });
+    }
+    const host = typeof body.host === "string" && body.host.trim() ? body.host.trim() : "agent";
+    const reply = store.recordDelivery(body.id, { host, session });
+    return json({ ok: true, delivery: reply.delivery });
+  };
+
   let stopRequested = false;
   let server: ReturnType<typeof Bun.serve>;
   let attachmentRoutes: ReturnType<typeof createInboxAttachmentRoutes>;
@@ -564,7 +635,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       return mcp.fetch(req);
     }
 
-    if (path.startsWith("/api/inbox/control/")) {
+    if (path.startsWith("/api/inbox/control/") || path.startsWith("/api/inbox/bridge/")) {
       if (!isLoopbackHostHeader(req.headers.get("host"), port)) {
         return json({ error: "Connection routes answer only this machine.", code: "forbidden_host" }, 403);
       }
@@ -583,6 +654,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }, 50);
         }
         return json({ ok: true, stopping: true });
+      }
+      if (path === INBOX_BRIDGE_POLL_PATH || path === INBOX_BRIDGE_EVENT_PATH) {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        try {
+          return await (path === INBOX_BRIDGE_POLL_PATH ? bridgePoll(req) : bridgeEvent(req));
+        } catch (error) {
+          return errorResponse(error);
+        }
       }
       return json({ error: "Not found", code: "not_found" }, 404);
     }

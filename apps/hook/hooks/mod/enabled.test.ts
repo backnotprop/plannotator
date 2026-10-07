@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { AGENT_TOOL_DEFAULTS, resolveAgentTool, resolveClaudeCodeMod } from '@plannotator/shared/config'
-import { AGENT_TOOL_DEFAULT, resolveAgentToolEnabled, resolveClaudeModEnabled } from './enabled'
+import { AGENT_TOOL_DEFAULTS, INBOX_TOOL_DEFAULTS, resolveAgentTool, resolveClaudeCodeMod, resolveInboxTool } from '@plannotator/shared/config'
+import { AGENT_TOOL_DEFAULT, INBOX_TOOL_DEFAULT, resolveAgentToolEnabled, resolveClaudeModEnabled, resolveInboxToolEnabled } from './enabled'
 
 // The mod cannot import packages/shared, so it mirrors resolveClaudeCodeMod.
 // The failure this guards: the two drift, and the CLI docs/settings say the
@@ -60,5 +60,32 @@ describe('agent tool switch', () => {
   test('agentTool is its own key: it never reads claudeCodeMod, and the mod switch never reads agentTool', () => {
     expect(resolveAgentToolEnabled(undefined, '{"claudeCodeMod":false}')).toBe(AGENT_TOOL_DEFAULT)
     expect(resolveClaudeModEnabled(undefined, '{"agentTool":false}')).toBe(true)
+  })
+})
+
+// Same mirror for the Inbox connection: the failure is the mod registering the
+// plannotator_inbox tool for a user who turned it off (or the reverse).
+describe('inbox tool switch', () => {
+  const envs = [undefined, '', '1', 'true', 'ON', ' on ', '0', 'false', 'off', 'disabled', 'yes', 'garbage']
+  const configs: unknown[] = [
+    undefined, true, false, 'true', 'false', '1', '0', 'yes', 1, null,
+    // One value per host, as the Inbox's Settings writes it.
+    { 'claude-code': false }, { 'claude-code': true, pi: false }, { pi: true }, { 'claude-code': 'false' }, [],
+  ]
+
+  test('the mod and packages/shared resolve every combination the same way', () => {
+    for (const env of envs) {
+      for (const value of configs) {
+        const config = value === undefined ? {} : { inboxTool: value }
+        const shared = resolveInboxTool(config as never, env === undefined ? {} : { PLANNOTATOR_INBOX_TOOL: env }, 'claude-code')
+        expect([env, value, resolveInboxToolEnabled(env, JSON.stringify(config))]).toEqual([env, value, shared])
+      }
+    }
+    expect(resolveInboxToolEnabled(undefined, '{ not json')).toBe(resolveInboxTool({}, {}, 'claude-code'))
+    expect(INBOX_TOOL_DEFAULT).toBe(INBOX_TOOL_DEFAULTS['claude-code'])
+  })
+
+  test('inboxTool is its own key: agentTool off leaves it on', () => {
+    expect(resolveInboxToolEnabled(undefined, '{"agentTool":false}')).toBe(INBOX_TOOL_DEFAULT)
   })
 })
