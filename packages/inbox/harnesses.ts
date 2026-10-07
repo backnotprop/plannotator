@@ -157,7 +157,7 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
             text: mcpServersSnippet(ctx),
           },
         ],
-        note: 'Open it from Claude > Settings > Developer > Edit Config, then quit and reopen Claude.',
+        note: 'Merge it into mcpServers in Claude > Settings > Developer > Edit Config, then quit and reopen Claude. claude.ai connectors cannot reach this computer.',
       };
     case 'codex':
       return {
@@ -197,7 +197,7 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
     case 'goose':
       return {
         artefacts: [{ kind: 'link', label: 'Add to Goose', href: gooseInstallLink(ctx) }],
-        note: 'Opens Goose, which asks before it adds the extension.',
+        note: 'Opens Goose to add the extension.',
         another: {
           summary: 'in Goose: Extensions > Add custom extension > Standard IO with this command',
           body: { kind: 'code', text: cmd },

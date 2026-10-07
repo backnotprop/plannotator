@@ -264,7 +264,12 @@ test('first run: the three connections, Use MCP instead below the row, the harne
   await shot('1.4-first-run-cursor');
 
   await page.getByRole('tab', { name: 'Claude app' }).click();
-  const json = JSON.parse((await page.getByRole('tabpanel', { name: 'Claude app' }).locator('pre').textContent()) ?? '{}');
+  const claudeApp = page.getByRole('tabpanel', { name: 'Claude app' });
+  const json = JSON.parse((await claudeApp.locator('pre').textContent()) ?? '{}');
+  // The one note: merge, not replace; and the claude.ai connectors trap.
+  await expect(claudeApp.locator('p.ib-cnote')).toHaveText(
+    'Merge it into mcpServers in Claude > Settings > Developer > Edit Config, then quit and reopen Claude. claude.ai connectors cannot reach this computer.',
+  );
   expect(json.mcpServers['plannotator-inbox']).toEqual({ command: binary, args: ['inbox', 'mcp'] });
   await shot('1.5-first-run-claude-app');
   await page.getByRole('tab', { name: 'Codex' }).click();
