@@ -291,6 +291,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         // The owner's own menu-bar mark drops in as Resources/MenuBarIcon.png (+ @2x), a template image; until then a system symbol.
         let custom = Bundle.main.image(forResource: "MenuBarIcon")
+        custom?.size = NSSize(width: 18, height: 18)
         item.button?.image = custom ?? NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "Plannotator Shots")
         item.button?.image?.isTemplate = true
         item.button?.setAccessibilityLabel("Plannotator Shots")
