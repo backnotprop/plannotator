@@ -41,13 +41,20 @@ describe("unknown subcommand", () => {
     expect(findClosestSubcommand("x".repeat(10_000))).toBeNull();
   });
 
-  test("an unreleased subcommand runs but is never suggested", () => {
-    // `inbox` is in HIDDEN_SUBCOMMANDS: a typo must not advertise it, while
-    // the real command still dispatches (it is not "Unknown command").
+  test("an unreleased subcommand is never suggested", () => {
+    // HIDDEN_SUBCOMMANDS is empty now that the Inbox launched, so the filter
+    // is driven with its own set: a hidden name must not be advertised by a
+    // typo, while the same typo finds it once it is released.
+    const hidden = new Set(["inbox"]);
+    expect(findClosestSubcommand("inbo", hidden)).toBeNull();
+    expect(findClosestSubcommand("inbx", hidden)).toBeNull();
+    expect(findClosestSubcommand("inbo")).toBe("inbox");
+    expect(findClosestSubcommand("inbx")).toBe("inbox");
+  });
+
+  test("the launched Inbox dispatches and is suggested", () => {
     expect(findUnknownSubcommand(["inbox", "--background"])).toBeNull();
-    expect(findClosestSubcommand("inbo")).toBeNull();
-    expect(findClosestSubcommand("inbx")).toBeNull();
-    expect(formatUnknownSubcommandError("inbo")).not.toContain("inbox");
+    expect(formatUnknownSubcommandError("inbo")).toContain("plannotator inbox");
   });
 
   test("error text names the typo and points at --help", () => {

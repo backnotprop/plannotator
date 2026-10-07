@@ -20,9 +20,9 @@ const PUBLISHED_SUBCOMMANDS = [
 ];
 
 // Unreleased subcommands still run, but are never suggested to a user.
-const SUGGESTABLE_SUBCOMMANDS = PUBLISHED_SUBCOMMANDS.filter(
-  (sub) => !HIDDEN_SUBCOMMANDS.has(sub),
-);
+function suggestableSubcommands(hidden: ReadonlySet<string>): string[] {
+  return PUBLISHED_SUBCOMMANDS.filter((sub) => !hidden.has(sub));
+}
 
 export const KNOWN_SUBCOMMANDS: ReadonlySet<string> = new Set([
   ...PUBLISHED_SUBCOMMANDS,
@@ -48,12 +48,21 @@ function levenshteinDistance(left: string, right: string): number {
   return previous[right.length];
 }
 
-export function findClosestSubcommand(token: string): string | null {
+/**
+ * The closest published subcommand to a typo, never one in `hidden`
+ * (HIDDEN_SUBCOMMANDS by default; tests pass their own set because the real
+ * one is empty while nothing is unreleased).
+ */
+export function findClosestSubcommand(
+  token: string,
+  hidden: ReadonlySet<string> = HIDDEN_SUBCOMMANDS,
+): string | null {
   const normalized = token.toLowerCase();
   if (!normalized) return null;
+  const candidates = suggestableSubcommands(hidden);
 
   if (normalized.length >= 3) {
-    const prefixMatch = SUGGESTABLE_SUBCOMMANDS.find((candidate) =>
+    const prefixMatch = candidates.find((candidate) =>
       candidate.startsWith(normalized),
     );
     if (prefixMatch) return prefixMatch;
@@ -64,7 +73,7 @@ export function findClosestSubcommand(token: string): string | null {
   let closest: string | null = null;
   let closestDistance = Infinity;
 
-  for (const candidate of SUGGESTABLE_SUBCOMMANDS) {
+  for (const candidate of candidates) {
     if (Math.abs(normalized.length - candidate.length) > tolerance) continue;
 
     const distance = levenshteinDistance(normalized, candidate);

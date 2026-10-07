@@ -177,7 +177,8 @@ Plannotator data too, use:
 plannotator uninstall --purge
 ```
 
-Purge requires typing `purge` at the prompt. The CLI warns that this data is
+Purge also stops a running [Inbox](/docs/reference/inbox/) before it removes
+the Inbox's data. Purge requires typing `purge` at the prompt. The CLI warns that this data is
 local-only: it is not stored on a Plannotator server and cannot be recovered
 after purge. `--yes` (or `-y`) skips confirmation for automation, and is
 required when no interactive terminal is available. `--dry-run` previews the
