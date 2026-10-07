@@ -96,8 +96,10 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   for (const file of readdirSync(proofDir)) if (file.endsWith('.png') || file === 'index.html') rmSync(join(proofDir, file));
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-e2e-')));
   // A copy the restart proof can replace on disk, as install.sh does.
-  const binary = join(root, 'bin', 'plannotator');
-  mkdirSync(join(root, 'bin'));
+  // A long directory name of our own, so the code boxes must wrap the command on any runner.
+  const binDir = join(root, 'a-long-install-directory-name-so-every-connect-command-has-to-wrap', 'bin');
+  const binary = join(binDir, 'plannotator');
+  mkdirSync(binDir, { recursive: true });
   copyFileSync(builtBinary, binary);
   chmodSync(binary, 0o755);
   const dataDir = join(root, 'data');
@@ -232,8 +234,8 @@ test('first run: the three connections, Use MCP instead below the row, the harne
   expect(await heights()).toEqual(before);
   const rowBottom = Math.max(...(await cards.evaluateAll((els) => els.map((el) => el.getBoundingClientRect().bottom))));
   expect((await reveal.boundingBox())!.y).toBeGreaterThanOrEqual(rowBottom);
-  // The binary sits under a long temp path: both boxes wrap it in full.
-  expect(binary.length).toBeGreaterThan(60);
+  // The reveal above names the binary this test started by its absolute path, under a directory name long enough to wrap on any runner.
+  expect(binary.startsWith('/') && binary.endsWith('/a-long-install-directory-name-so-every-connect-command-has-to-wrap/bin/plannotator')).toBe(true);
   await expectCodeUnclipped(page);
   await expect(panel.getByRole('button', { name: 'Copy', exact: true })).toBeVisible();
   await page.mouse.move(0, 0);
