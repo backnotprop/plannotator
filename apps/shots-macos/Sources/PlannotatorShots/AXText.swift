@@ -24,12 +24,6 @@ enum AXText {
 
     static var isTrusted: Bool { AXIsProcessTrusted() }
 
-    /// Asks once for Accessibility (the system prompt names Plannotator Shots).
-    static func requestTrust() {
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
-    }
-
     private static let budget: TimeInterval = 2.0
 
     private static let roleNames: [String: String] = [

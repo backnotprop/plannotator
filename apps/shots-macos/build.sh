@@ -34,6 +34,16 @@ bin="$(swift build -c release ${archs[@]+"${archs[@]}"} --show-bin-path)/Plannot
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin" "$app/Contents/MacOS/PlannotatorShots"
 sed -e "s/__VERSION__/${version#v}/" -e "s/__BUILD__/$build/" Resources/Info.plist > "$app/Contents/Info.plist"
+# Icon slots (the owner's artwork drops in here): Resources/AppIcon.icns, and
+# Resources/MenuBarIcon.png (+ MenuBarIcon@2x.png), a template image. Without
+# them the app shows the generic icon and a system symbol in the menu bar.
+if [ -f Resources/AppIcon.icns ]; then
+  cp Resources/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" "$app/Contents/Info.plist"
+fi
+for icon in Resources/MenuBarIcon.png Resources/MenuBarIcon@2x.png; do
+  if [ -f "$icon" ]; then cp "$icon" "$app/Contents/Resources/"; fi
+done
 printf 'APPL????' > "$app/Contents/PkgInfo"
 
 if [ -n "${SHOTS_SIGN_IDENTITY:-}" ]; then

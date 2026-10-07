@@ -1,5 +1,6 @@
 import AppKit
 import Carbon
+import ScreenCaptureKit
 
 /// Plannotator Shots: an accessory app (no Dock icon, no menu bar of its own)
 /// that owns the global hotkeys, the frozen-screen capture, App-shot window
@@ -14,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var overlay: OverlayController?
     private var flights: [String: (flight: Flight, image: CGImage, from: NSRect)] = [:]
     private var settings = (appShots: false, explainerSeen: false)
+    private let permissions = PermissionFlow()
     private var capturing = false
     private var watchdog: Timer?
 
@@ -25,8 +27,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         hotKeys = HotKeys { [weak self] action in self?.hotKey(action) }
         panel.onMessage = { [weak self] message in self?.pageMessage(message) }
+        permissions.show = { [weak self] state in self?.panel.call("permission", state) }
+        permissions.resume = { [weak self] pending in
+            guard let pending else { return }
+            self?.startCapture(app: pending == .app)
+        }
         setUpStatusItem()
         connect()
+        permissions.resumeAfterLaunch()
         // The hub restarts (an update, a crash): attach again and reload the page.
         watchdog = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -40,7 +48,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do {
                 let attached = try await hub.attach()
                 panel.load(attached)
-                panel.call("permissions", ["screen": Capture.hasPermission, "accessibility": AXText.isTrusted])
+                sendPermissions()
+                if let icon = appIconDataURL() { panel.call("appIcon", icon) }
             } catch {
                 log("hub: \(error.localizedDescription)")
             }
@@ -86,17 +95,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Capture
 
+    private func sendPermissions() {
+        panel.call("permissions", ["screen": Capture.hasPermission, "accessibility": AXText.isTrusted, "screenEverGranted": permissions.screenEverGranted])
+    }
+
+    /// The icon System Settings shows for this app (its own, or the generic one until it has one), for the card's picture.
+    private func appIconDataURL() -> String? {
+        let image = NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath)
+        image.size = NSSize(width: 128, height: 128)
+        guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) else { return nil }
+        return "data:image/png;base64,\(png.base64EncodedString())"
+    }
+
     private func startCapture(app: Bool) {
-        guard !capturing else { return }
+        guard !capturing, !permissions.isActive else { return }
+        // Ask only when needed: Screen Recording at the first capture,
+        // Accessibility only when an App shot is asked for.
         guard Capture.hasPermission else {
-            // The first attempt shows the system prompt; the strip explains it until it is granted.
-            let granted = Capture.requestPermission()
-            log("screen recording requested (granted: \(granted))")
-            panel.call("permissions", ["screen": false, "accessibility": AXText.isTrusted])
+            if permissions.screenEverGranted {
+                // Turned off later: the strip says so; its Turn On opens the card.
+                sendPermissions()
+                panel.call("screenRecordingOff")
+            } else {
+                permissions.begin(.screen, pending: app ? .app : .region)
+            }
             return
         }
-        if app && !settings.explainerSeen {
-            panel.call("explainAppShots")
+        if app && !AXText.isTrusted && !permissions.accessibilityDeclined {
+            permissions.begin(.accessibility, pending: .app)
             return
         }
         capturing = true
@@ -197,7 +223,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func report(_ error: Error) {
         log("capture failed: \(error.localizedDescription)")
         if case CaptureError.noPermission = error {
-            panel.call("permissions", ["screen": false, "accessibility": AXText.isTrusted])
+            sendPermissions()
+            panel.call("screenRecordingOff")
+        } else if !Capture.hasPermission || (error as NSError).domain == SCStreamErrorDomain {
+            // ScreenCaptureKit refused (the switch was turned off while running).
+            sendPermissions()
+            panel.call("screenRecordingOff")
         } else {
             panel.call("captureFailed", error.localizedDescription)
         }
@@ -208,12 +239,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func pageMessage(_ message: [String: Any]) {
         switch message["type"] as? String {
         case "capture":
-            if message["explained"] as? Bool == true {
-                // "Turn on App shots" in the explainer: macOS asks for Accessibility once, for this app.
-                settings.explainerSeen = true
-                if !AXText.isTrusted { AXText.requestTrust() }
-            }
             startCapture(app: message["kind"] as? String == "app")
+        case "permission.begin":
+            // "Turn On" in the strip or the text view, or the ◫ toggle: the card, with nothing pending.
+            let kind = PermissionFlow.Kind(rawValue: message["kind"] as? String ?? "") ?? .screen
+            if !permissions.isActive { permissions.begin(kind, pending: nil) }
+        case "permission.request":
+            permissions.request()
+        case "permission.decline":
+            permissions.decline()
+        case "permission.cancel":
+            permissions.cancel()
+        case "permission.reopen":
+            permissions.reopen()
         case "flightTarget":
             guard let captureId = message["captureId"] as? String, let entry = flights[captureId], let rect = message["rect"] as? [String: Any] else { return }
             let target = panel.screenRect(fromPage: rect)
@@ -251,8 +289,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setUpStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "Plannotator Shots")
+        // The owner's own menu-bar mark drops in as Resources/MenuBarIcon.png (+ @2x), a template image; until then a system symbol.
+        let custom = Bundle.main.image(forResource: "MenuBarIcon")
+        item.button?.image = custom ?? NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "Plannotator Shots")
         item.button?.image?.isTemplate = true
+        item.button?.setAccessibilityLabel("Plannotator Shots")
         let menu = NSMenu()
         menu.addItem(menuItem("Take Shot", "4", #selector(menuShot)))
         menu.addItem(menuItem("Take App Shot", "5", #selector(menuAppShot)))
@@ -292,18 +333,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = try? await hub.post(entry: attached.entry, token: attached.hudToken, path: "/api/shots/settings", json: ["appShots": !settings.appShots])
         }
     }
-    @objc private func menuScreenSettings() { pageMessage(["type": "openSettings", "pane": "screen"]) }
+    @objc private func menuScreenSettings() {
+        if Capture.hasPermission { permissions.openPane(.screen) } else if !permissions.isActive { permissions.begin(.screen, pending: nil) }
+    }
     @objc private func menuAccessibilitySettings() {
-        AXText.requestTrust()
-        pageMessage(["type": "openSettings", "pane": "accessibility"])
+        if AXText.isTrusted { permissions.openPane(.accessibility) } else if !permissions.isActive { permissions.begin(.accessibility, pending: nil) }
     }
     @objc private func menuQuit() { NSApp.terminate(nil) }
 }
 
 extension AppDelegate: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
-        menu.items.first { $0.action == #selector(menuScreenSettings) }?.title = "Screen Recording: \(Capture.hasPermission ? "allowed" : "not allowed…")"
-        menu.items.first { $0.action == #selector(menuAccessibilitySettings) }?.title = "Accessibility (App shot text): \(AXText.isTrusted ? "allowed" : "not allowed…")"
+        menu.items.first { $0.action == #selector(menuScreenSettings) }?.title = Capture.hasPermission ? "Screen Recording ✓" : "Turn On Screen Recording…"
+        menu.items.first { $0.action == #selector(menuAccessibilitySettings) }?.title = AXText.isTrusted ? "Accessibility ✓" : "Turn On Accessibility…"
     }
 }
 

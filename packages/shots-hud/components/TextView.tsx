@@ -14,6 +14,7 @@ interface Props {
   onRemoveLines: (lines: number[]) => void;
   onRestoreLines: (lines: number[]) => void;
   onInclude: (include: boolean) => void;
+  onTurnOnAccessibility: () => void;
 }
 
 function highlight(line: string, query: string) {
@@ -31,7 +32,7 @@ function highlight(line: string, query: string) {
   return parts;
 }
 
-export function TextView({ shot, text, onRemoveLines, onRestoreLines, onInclude }: Props) {
+export function TextView({ shot, text, onRemoveLines, onRestoreLines, onInclude, onTurnOnAccessibility }: Props) {
   const lines = useMemo(() => (text ?? '').split('\n'), [text]);
   const removed = useMemo(() => new Set(shot.text?.removedLines ?? []), [shot.text?.removedLines]);
   const [selection, setSelection] = useState<{ anchor: number; head: number } | null>(null);
@@ -94,7 +95,16 @@ export function TextView({ shot, text, onRemoveLines, onRestoreLines, onInclude 
       </div>
       {text === null ? (
         <div className="tv-body">
-          <div className="tv-empty">{shot.text?.unavailable ? `No window text: ${shot.text.unavailable}.` : 'This shot has no window text.'}</div>
+          {shot.text?.unavailable === 'Accessibility is off' ? (
+            <div className="tv-off">
+              <h4>Accessibility is off</h4>
+              <button type="button" className="perm-btn" onClick={onTurnOnAccessibility}>
+                Turn On
+              </button>
+            </div>
+          ) : (
+            <div className="tv-empty">{shot.text?.unavailable ? `No window text: ${shot.text.unavailable}.` : 'This shot has no window text.'}</div>
+          )}
         </div>
       ) : (
         <div className="tv-body" ref={bodyRef} role="listbox" aria-multiselectable="true" aria-label="Window text, one option per line">

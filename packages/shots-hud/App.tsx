@@ -29,8 +29,9 @@ import { Stage, type Tool } from './components/Stage';
 import { TextView } from './components/TextView';
 import { commentsOn, ThumbImage, useShotImage } from './components/Thumb';
 import { AgentMark } from './components/AgentMark';
+import { PermissionCard, type PermissionKind, type PermissionState } from './components/PermissionCard';
 
-type Mode = 'hidden' | 'strip' | 'panel' | 'picker';
+type Mode = 'hidden' | 'strip' | 'panel' | 'picker' | 'permission';
 
 const STRIP_THUMBS = 5;
 const DELIVERED_LINGER_MS = 2_000;
@@ -65,8 +66,10 @@ export function App() {
   const [sending, setSending] = useState(false);
   const [confirmSend, setConfirmSend] = useState(false);
   const [toast, setToast] = useState<null | { text: string; action?: { label: string; run: () => void } }>(null);
-  const [permissions, setPermissions] = useState({ screen: true, accessibility: true });
-  const [explainer, setExplainer] = useState(false);
+  const [permissions, setPermissions] = useState({ screen: true, accessibility: true, screenEverGranted: false });
+  const [screenOff, setScreenOff] = useState(false);
+  const [permission, setPermission] = useState<{ kind: PermissionKind; state: PermissionState } | null>(null);
+  const [appIcon, setAppIcon] = useState<string | null>(null);
   const [landing, setLanding] = useState<{ captureId: string; shotId: string; first: boolean } | null>(null);
   const [hiddenSend, setHiddenSend] = useState<string | null>(null);
   const [rawTexts, setRawTexts] = useState<Record<string, string | null>>({});
@@ -127,18 +130,22 @@ export function App() {
   }, [delivery?.sendId, delivery?.state]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hasShots = !!collection && shots.length > 0;
-  const mode: Mode =
-    open && (hasShots || explainer)
+  const mode: Mode = permission
+    ? 'permission'
+    : open && hasShots
       ? 'panel'
       : picker
         ? 'picker'
-        : hasShots || delivery || toast || !permissions.screen
+        : hasShots || delivery || toast || screenOff
           ? 'strip'
           : 'hidden';
 
   useEffect(() => {
-    if (!hasShots && !explainer) setOpen(false);
-  }, [hasShots, explainer]);
+    if (!hasShots) setOpen(false);
+  }, [hasShots]);
+  useEffect(() => {
+    if (permissions.screen) setScreenOff(false);
+  }, [permissions.screen]);
   useEffect(() => {
     setConfirmSend(false);
   }, [shots.length, destination?.sessionId]);
@@ -146,13 +153,14 @@ export function App() {
   // Tell the native window how big to be, and whether to take the keyboard.
   useLayoutEffect(() => {
     if (!isNative) return;
-    const element = hudRef.current?.querySelector('.strip') as HTMLElement | null;
+    const element = hudRef.current?.querySelector(mode === 'permission' ? '.perm' : '.strip') as HTMLElement | null;
     const rect = element?.getBoundingClientRect();
     postNative({
       type: 'layout',
       mode,
-      width: mode === 'panel' ? 760 : mode === 'picker' ? 560 : Math.ceil(rect?.width ?? 0),
-      height: mode === 'panel' ? 540 : mode === 'picker' ? 420 : 46,
+      width: mode === 'panel' ? 760 : mode === 'picker' ? 560 : mode === 'permission' ? 460 : Math.ceil(rect?.width ?? 0),
+      height: mode === 'panel' ? 540 : mode === 'picker' ? 420 : mode === 'permission' ? Math.ceil(rect?.height ?? 420) : 46,
+      // The permission card is clicked, never typed into: the app you were in keeps the keyboard.
       focus: mode === 'panel' || mode === 'picker',
     });
   });
@@ -179,10 +187,12 @@ export function App() {
           setEditingBoxId(null);
           setOpen(false);
         },
-        permissions: (state) => setPermissions(state),
-        explainAppShots: () => {
-          setExplainer(true);
-          setOpen(true);
+        permissions: (state) => setPermissions((current) => ({ ...current, ...state })),
+        permission: (state) => setPermission(state.state === 'done' ? null : { kind: state.kind as PermissionKind, state: state.state as PermissionState }),
+        appIcon: (url) => setAppIcon(url),
+        screenRecordingOff: () => {
+          setOpen(false);
+          setScreenOff(true);
         },
         captureFailed: (reason) => setToast({ text: reason }),
       }),
@@ -394,12 +404,9 @@ export function App() {
   };
 
   const setAppShots = (on: boolean) => {
-    if (on && !hub?.settings.explainerSeen) {
-      setExplainer(true);
-      setOpen(true);
-      return;
-    }
     void api.settings({ appShots: on });
+    // App shots read window text: Accessibility is asked for here, and only here.
+    if (on && !permissions.accessibility) postNative({ type: 'permission.begin', kind: 'accessibility' });
   };
 
   useEffect(() => {
@@ -409,7 +416,7 @@ export function App() {
   }, [toast]);
 
   // --- Keys ------------------------------------------------------------------------------------
-  const panelKeys = mode === 'panel' && !explainer;
+  const panelKeys = mode === 'panel';
   const notTyping = (event: KeyboardEvent) => panelKeys && !picker && !isTyping(event);
   useShotsHudShortcuts({
     handlers: {
@@ -494,6 +501,22 @@ export function App() {
 
   return (
     <div ref={hudRef} className="hud-root" data-mode={mode}>
+      {mode === 'permission' && permission && (
+        <div className="hud perm-host">
+          <PermissionCard
+            kind={permission.kind}
+            state={permission.state}
+            appIcon={appIcon}
+            onRequest={() => postNative({ type: 'permission.request' })}
+            onReopen={() => postNative({ type: 'permission.reopen' })}
+            onDecline={() => postNative({ type: 'permission.decline' })}
+            onClose={() => {
+              setPermission(null);
+              postNative({ type: 'permission.cancel' });
+            }}
+          />
+        </div>
+      )}
       {mode === 'picker' && picker && (
         <div className="hud picker-host">
           <Picker
@@ -513,7 +536,7 @@ export function App() {
             shots={shots}
             lastSentShots={hub?.lastSentShots ?? []}
             delivery={delivery}
-            permissions={permissions}
+            screenOff={screenOff}
             landingShotId={landing && !landing.first ? landing.shotId : null}
             thumbRefs={thumbRefs}
             appShots={!!hub?.settings.appShots}
@@ -534,7 +557,7 @@ export function App() {
               else await navigator.clipboard.writeText(text).catch(() => undefined);
               setHiddenSend(lastSent.send?.sendId ?? null);
             }}
-            onOpenSettings={() => postNative({ type: 'openSettings', pane: 'screen' })}
+            onOpenSettings={() => postNative({ type: 'permission.begin', kind: 'screen' })}
             toast={toast}
             onToastAction={() => {
               toast?.action?.run();
@@ -662,6 +685,7 @@ export function App() {
                   onRemoveLines={(lines) => edits.edit(current, { text: { removedLines: [...new Set([...(current.text?.removedLines ?? []), ...lines])].sort((a, b) => a - b) } }, false)}
                   onRestoreLines={(lines) => edits.edit(current, { text: { removedLines: (current.text?.removedLines ?? []).filter((n) => !lines.includes(n)) } }, false)}
                   onInclude={(include) => edits.edit(current, { text: { include } }, false)}
+                  onTurnOnAccessibility={() => postNative({ type: 'permission.begin', kind: 'accessibility' })}
                 />
               </div>
             )}
@@ -677,7 +701,7 @@ export function App() {
                 onClose={() => setAskOpen(false)}
               />
             )}
-            {!current && !explainer && <div className="empty-stage">No shots.</div>}
+            {!current && <div className="empty-stage" />}
           </div>
           <div className="p-foot">
             <div>
@@ -767,42 +791,6 @@ export function App() {
               onClose={() => setPicker(null)}
             />
           )}
-          {explainer && (
-            <div className="explainer">
-              <div className="card glass" role="alertdialog" aria-labelledby="explainer-title">
-                <h3 id="explainer-title">App shots include the window's text.</h3>
-                <p>
-                  Plannotator reads the text the app exposes to accessibility tools. That can include text scrolled out of view. Passwords and secure fields are never read. You can see and
-                  edit the text before you send it.
-                </p>
-                <div className="actions">
-                  <button
-                    type="button"
-                    className="pill-btn"
-                    onClick={() => {
-                      setExplainer(false);
-                      void api.settings({ explainerSeen: true, appShots: false });
-                    }}
-                  >
-                    Not now
-                  </button>
-                  <button
-                    type="button"
-                    className="pill-btn primary"
-                    autoFocus
-                    onClick={() => {
-                      setExplainer(false);
-                      setOpen(hasShots);
-                      void api.settings({ explainerSeen: true, appShots: true });
-                      postNative({ type: 'capture', kind: 'app', explained: true });
-                    }}
-                  >
-                    Turn on App shots
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
           {toast && (
             <div className="toast glass" role="status">
               {toast.text}
@@ -834,7 +822,7 @@ function StripView(props: {
   shots: Shot[];
   lastSentShots: Shot[];
   delivery: ShotsState['lastSent'] extends infer C ? (C extends { send?: infer S } ? S | null : null) : null;
-  permissions: { screen: boolean; accessibility: boolean };
+  screenOff: boolean;
   landingShotId: string | null;
   thumbRefs: React.MutableRefObject<Map<string, HTMLElement>>;
   appShots: boolean;
@@ -866,7 +854,7 @@ function StripView(props: {
       </div>
     );
   }
-  if (!props.permissions.screen && !props.hasShots) {
+  if (props.screenOff) {
     return (
       <div className="strip glass" role="status">
         <span className="state">

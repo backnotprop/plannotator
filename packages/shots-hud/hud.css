@@ -1453,3 +1453,145 @@ html[data-native] .picker-host .picker {
 .shot-note {
   padding: 9px 12px;
 }
+
+/* ---------------------------------------------------------------- permission card (permissions.html) */
+.perm-host {
+  width: 460px;
+}
+html[data-native] .perm-host {
+  width: 100%;
+}
+.perm {
+  width: 460px;
+  border-radius: 18px;
+  overflow: hidden;
+}
+html[data-native] .perm {
+  width: 100%;
+  border-radius: 0;
+}
+.perm-pic {
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 85%);
+}
+.perm-row {
+  width: 372px;
+  border-radius: 16px;
+  background: var(--glass-strong);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.15), 0 0 0 1px var(--hair);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 20px;
+  font: 600 19px var(--font);
+}
+.perm-icon {
+  width: 52px;
+  height: 52px;
+  flex: none;
+}
+.perm-icon.placeholder {
+  border-radius: 12px;
+  background: linear-gradient(180deg, #d1d1d6, #aeaeb2);
+}
+.perm-switch {
+  margin-left: auto;
+  width: 57px;
+  height: 33px;
+  border-radius: 17px;
+  background: var(--accent);
+  position: relative;
+  flex: none;
+}
+.perm-switch::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  top: 3px;
+  width: 27px;
+  height: 27px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.perm-body {
+  padding: 6px 28px 26px;
+  text-align: center;
+}
+.perm-body h3 {
+  margin: 0 0 8px;
+  font: 700 24px/1.2 var(--font);
+  letter-spacing: -0.015em;
+}
+.perm-body p {
+  margin: 0 0 20px;
+  color: var(--text-2);
+  font-size: 15px;
+  line-height: 1.45;
+}
+.perm-body p.last {
+  margin: 0;
+}
+.perm-btn {
+  height: 40px;
+  border-radius: 20px;
+  background: var(--accent);
+  color: #fff;
+  font: 600 14.5px var(--font);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 0 24px;
+  min-width: 240px;
+}
+.perm-btn.quiet {
+  background: var(--fill-2);
+  color: var(--text-2);
+}
+.perm-btn .spin {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+  border-color: currentColor;
+  border-top-color: transparent;
+}
+.perm-link {
+  display: block;
+  margin: 12px auto 0;
+  font: 500 13px var(--font);
+  color: var(--text-3);
+}
+.perm-check {
+  width: 84px;
+  height: 84px;
+  border-radius: 42px;
+  background: var(--ok);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.perm-check .ico {
+  stroke-width: 2.6;
+}
+.tv-off {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  font-family: var(--font);
+  white-space: normal;
+}
+.tv-off h4 {
+  margin: 0;
+  font: 700 20px var(--font);
+}
+.tv-off .perm-btn {
+  min-width: 0;
+}

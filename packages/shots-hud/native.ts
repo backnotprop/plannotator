@@ -39,9 +39,13 @@ export interface NativeCalls {
   /** The capture overlay is opening: tuck the panel into the strip (nothing typed is lost). */
   willCapture(): void;
   /** Permission state, at launch and whenever it changes. */
-  permissions(state: { screen: boolean; accessibility: boolean }): void;
-  /** ⌥⇧⌘5 before the App shots explainer was answered. */
-  explainAppShots(): void;
+  permissions(state: { screen: boolean; accessibility: boolean; screenEverGranted?: boolean }): void;
+  /** The permission card: `done` closes it. */
+  permission(state: { kind: string; state: string }): void;
+  /** The app's own icon (what System Settings lists), for the card's picture. */
+  appIcon(dataUrl: string): void;
+  /** A capture was refused after Screen Recording had worked: it was turned off. */
+  screenRecordingOff(): void;
   /** A capture failed (e.g. the image came back as wallpaper only). */
   captureFailed(reason: string): void;
 }

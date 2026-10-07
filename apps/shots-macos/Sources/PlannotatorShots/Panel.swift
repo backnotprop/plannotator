@@ -14,7 +14,7 @@ final class HUDPanel: NSPanel {
 
 @MainActor
 final class PanelController: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
-    enum Mode: String { case hidden, strip, panel, picker }
+    enum Mode: String { case hidden, strip, panel, picker, permission }
 
     let panel: HUDPanel
     let webView: WKWebView
@@ -127,7 +127,7 @@ final class PanelController: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         let visible = screen.visibleFrame
         let frame = NSRect(x: visible.maxX - width - 16, y: visible.minY + 16, width: width, height: height)
         targetFrame = frame
-        glass.layer?.cornerRadius = next == .strip ? 23 : next == .picker ? 12 : 14
+        glass.layer?.cornerRadius = next == .strip ? 23 : next == .picker ? 12 : next == .permission ? 18 : 14
         if !panel.isVisible || previous == .hidden || Config.reduceMotion {
             panel.setFrame(frame, display: true)
         } else if panel.frame != frame {

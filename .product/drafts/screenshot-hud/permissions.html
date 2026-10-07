@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>Plannotator Shots — first-run permissions</title>
+<style>
+:root{--font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif;--disp:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue",system-ui,sans-serif}
+[data-theme="light"]{
+  --page:#e9e9ec;--page-text:#1d1d1f;--page-text-2:#5b5b60;
+  --wall:radial-gradient(1200px 700px at 18% 10%,#f6d9c4 0%,transparent 60%),radial-gradient(900px 700px at 90% 80%,#c9d8f2 0%,transparent 62%),linear-gradient(160deg,#efe6dc 0%,#dfe5ef 100%);
+  --menubar:rgba(246,246,248,.62);--glass:rgba(246,246,249,.82);--glass-edge:rgba(255,255,255,.75);--hair:rgba(0,0,0,.10);--hair-2:rgba(0,0,0,.06);
+  --text:#1d1d1f;--text-2:rgba(29,29,31,.62);--text-3:rgba(29,29,31,.42);--fill:rgba(0,0,0,.05);--fill-2:rgba(0,0,0,.08);
+  --accent:#007aff;--ok:#28a745;--warn:#c77800;--shadow:0 22px 60px rgba(0,0,0,.22),0 2px 10px rgba(0,0,0,.08);
+  --set-bg:#f5f5f7;--set-side:#ececee;--set-card:#fff;--set-text:#1d1d1f;--set-text-2:#6e6e73;--set-hair:rgba(0,0,0,.08);--switch-off:#e3e3e8;
+}
+[data-theme="dark"]{
+  --page:#141416;--page-text:#f5f5f7;--page-text-2:#a1a1a6;
+  --wall:radial-gradient(1100px 700px at 15% 15%,#3a2a4a 0%,transparent 60%),radial-gradient(900px 700px at 88% 85%,#193a52 0%,transparent 62%),linear-gradient(160deg,#1b1b22 0%,#101418 100%);
+  --menubar:rgba(30,30,34,.55);--glass:rgba(40,40,44,.82);--glass-edge:rgba(255,255,255,.10);--hair:rgba(255,255,255,.12);--hair-2:rgba(255,255,255,.07);
+  --text:#f5f5f7;--text-2:rgba(245,245,247,.64);--text-3:rgba(245,245,247,.42);--fill:rgba(255,255,255,.07);--fill-2:rgba(255,255,255,.11);
+  --accent:#0a84ff;--ok:#32d74b;--warn:#ffb340;--shadow:0 24px 70px rgba(0,0,0,.55),0 2px 10px rgba(0,0,0,.35);
+  --set-bg:#1e1e20;--set-side:#262628;--set-card:#2a2a2d;--set-text:#f5f5f7;--set-text-2:#98989d;--set-hair:rgba(255,255,255,.08);--switch-off:#3a3a3c;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--page);color:var(--page-text);font:13px/1.45 var(--font);-webkit-font-smoothing:antialiased}
+.page{padding:28px 32px 80px;min-width:1344px}
+.head{display:flex;justify-content:space-between;align-items:flex-end;max-width:1280px;margin-bottom:8px}
+.head h1{font-size:22px;font-weight:650;letter-spacing:-.01em;margin:0 0 4px}
+.head p{margin:0;color:var(--page-text-2);max-width:860px}
+.theme-switch{display:inline-flex;background:var(--fill-2);border-radius:8px;padding:2px}
+.theme-switch button{font:500 12px var(--font);color:var(--page-text);background:transparent;border:0;border-radius:6px;padding:5px 12px;cursor:pointer}
+.theme-switch button[aria-pressed="true"]{background:var(--glass);box-shadow:0 1px 2px rgba(0,0,0,.15)}
+.frame{margin:34px 0 0}.frame h2{font-size:15px;font-weight:650;margin:0 0 2px}.frame .cap{color:var(--page-text-2);margin:0 0 12px;max-width:1280px}
+.screen{position:relative;width:1280px;height:800px;overflow:hidden;border-radius:10px;background:var(--wall);box-shadow:0 0 0 1px var(--hair)}
+.menubar{position:absolute;inset:0 0 auto 0;height:25px;background:var(--menubar);backdrop-filter:blur(30px) saturate(180%);display:flex;align-items:center;gap:18px;padding:0 14px;font-size:13px;color:var(--text);z-index:5}
+.menubar b{font-weight:650}.menubar .r{margin-left:auto;display:flex;gap:16px;align-items:center;font-size:12.5px}
+.glyph{width:18px;height:16px;display:inline-flex;align-items:center;justify-content:center}
+.ico{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;display:block}
+.appicon{width:28px;height:28px;border-radius:7px;flex:none;display:block}
+code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--fill-2);padding:1px 5px;border-radius:4px}
+
+/* System Settings */
+.settings{position:absolute;left:80px;top:70px;width:720px;height:560px;border-radius:12px;background:var(--set-bg);box-shadow:var(--shadow);overflow:hidden;color:var(--set-text);display:grid;grid-template-columns:200px 1fr}
+.settings .side{background:var(--set-side);padding:44px 10px 10px;border-right:1px solid var(--set-hair)}
+.settings .lights{position:absolute;left:16px;top:16px;display:flex;gap:8px}.settings .lights i{width:12px;height:12px;border-radius:50%;background:#ff5f57;display:block}.settings .lights i:nth-child(2){background:#febc2e}.settings .lights i:nth-child(3){background:#28c840}
+.side .it{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;font-size:13px}.side .it span{width:18px;height:18px;border-radius:5px;background:#8e8e93;display:block}
+.side .it.on{background:var(--accent);color:#fff}.side .it.on span{background:#fff;opacity:.9}
+.settings .main{padding:16px 22px;overflow:hidden;position:relative}
+.crumb{display:flex;align-items:center;gap:8px;font-weight:650;font-size:15px;margin:2px 0 14px}.crumb .back{color:var(--set-text-2);font-weight:400}
+.card{background:var(--set-card);border-radius:10px;box-shadow:0 0 0 1px var(--set-hair)}
+.card .desc{padding:12px 14px;color:var(--set-text-2);font-size:12px;border-bottom:1px solid var(--set-hair)}
+.row{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--set-hair);font-size:13px;position:relative}.row:last-child{border-bottom:0}
+.row .gen{width:28px;height:28px;border-radius:7px;flex:none}.row .sw{margin-left:auto}
+.row.ours::after{content:"";position:absolute;inset:3px;border-radius:8px;box-shadow:0 0 0 2.5px var(--accent);pointer-events:none}
+.sw{width:38px;height:22px;border-radius:11px;background:var(--switch-off);position:relative;display:inline-block;flex:none}
+.sw::after{content:"";position:absolute;left:2px;top:2px;width:18px;height:18px;border-radius:9px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.sw.on{background:var(--accent)}.sw.on::after{left:18px}
+
+/* The permission card: the HUD window itself */
+.perm{position:absolute;right:16px;bottom:16px;width:460px;border-radius:18px;background:var(--glass);backdrop-filter:blur(40px) saturate(185%);box-shadow:var(--shadow),inset 0 0 0 .5px var(--glass-edge),0 0 0 .5px var(--hair);color:var(--text);overflow:hidden;z-index:20}
+.perm .pic{height:220px;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 10%,transparent),transparent 85%)}
+.big-row{width:372px;border-radius:16px;background:var(--set-card);box-shadow:0 12px 34px rgba(0,0,0,.15),0 0 0 1px var(--set-hair);display:flex;align-items:center;gap:16px;padding:18px 20px;font:600 19px var(--disp);color:var(--set-text)}
+.big-row .appicon{width:52px;height:52px;border-radius:12px}
+.big-row .sw{margin-left:auto;transform:scale(1.5);transform-origin:right center}
+.perm .body{padding:6px 28px 26px;text-align:center}
+.perm h3{margin:0 0 8px;font:700 24px/1.2 var(--disp);letter-spacing:-.015em}
+.perm p{margin:0 0 20px;color:var(--text-2);font-size:15px;line-height:1.45}
+.btn{height:40px;border-radius:20px;background:var(--accent);color:#fff;font:600 14.5px var(--font);display:inline-flex;align-items:center;justify-content:center;gap:9px;padding:0 24px;border:0;min-width:240px}
+.btn.quiet{background:var(--fill-2);color:var(--text-2)}
+.link{display:block;margin-top:12px;font:500 13px var(--font);color:var(--text-3)}
+.spin{width:14px;height:14px;border-radius:7px;border:2px solid currentColor;border-top-color:transparent;display:inline-block;animation:sp 1s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+.check{width:84px;height:84px;border-radius:42px;background:var(--ok);display:flex;align-items:center;justify-content:center;color:#fff}.check svg{width:44px;height:44px;stroke-width:2.6}
+
+/* macOS's own alerts (not ours; shown because the user sees them) */
+.alert{position:absolute;left:50%;top:170px;transform:translateX(-50%);width:270px;border-radius:14px;background:var(--glass);backdrop-filter:blur(40px);box-shadow:var(--shadow),0 0 0 .5px var(--hair);padding:18px 16px 14px;text-align:center;color:var(--text);z-index:30}
+.alert .appicon{width:56px;height:56px;border-radius:13px;margin:0 auto 10px}
+.alert b{display:block;font-size:13px;margin-bottom:6px}.alert p{font-size:11.5px;color:var(--text-2);margin:0 0 12px}
+.alert .ab{display:flex;width:100%;height:28px;border-radius:7px;margin-top:6px;font:500 13px var(--font);align-items:center;justify-content:center;background:var(--fill-2)}
+.alert .ab.pri{background:var(--accent);color:#fff}
+.sys{position:absolute;left:50%;top:132px;transform:translateX(-50%);font:600 11px var(--font);color:var(--page-text-2);background:var(--fill-2);border-radius:10px;padding:2px 9px;z-index:31}
+
+.strip{position:absolute;right:16px;bottom:16px;height:46px;border-radius:23px;display:flex;align-items:center;gap:10px;padding:0 6px 0 16px;background:var(--glass);backdrop-filter:blur(40px) saturate(185%);box-shadow:var(--shadow),inset 0 0 0 .5px var(--glass-edge),0 0 0 .5px var(--hair);font:500 13px var(--font);color:var(--text);z-index:20}
+.strip .w{color:var(--warn)}.strip .btn{height:34px;min-width:0;padding:0 16px;font-size:13px}
+.panel{position:absolute;right:20px;bottom:20px;width:760px;height:540px;border-radius:14px;background:var(--glass);backdrop-filter:blur(40px);box-shadow:var(--shadow),0 0 0 .5px var(--hair);color:var(--text);display:grid;grid-template-rows:46px 1fr 110px;overflow:hidden;z-index:20}
+.p-head{display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--hair-2);font:600 12.5px var(--font)}
+.seg{margin-left:auto;display:inline-flex;background:var(--fill);border-radius:7px;padding:2px}.seg span{padding:4px 10px;border-radius:5px;color:var(--text-2);display:inline-flex}.seg span.on{background:var(--glass);color:var(--text);box-shadow:0 1px 2px rgba(0,0,0,.14)}
+.p-foot{border-top:1px solid var(--hair-2)}
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center}
+.empty h4{margin:0;font:700 20px var(--disp)}.empty .btn{min-width:0}
+
+.notes{margin-top:40px;max-width:1280px;display:grid;grid-template-columns:1fr 1fr;gap:28px;color:var(--page-text-2);font-size:12.5px;line-height:1.55}
+.notes h3{color:var(--page-text);font-size:13.5px;margin:0 0 6px}.notes ul{margin:0;padding-left:18px}.notes li{margin-bottom:5px}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <!-- Neutral placeholder: the owner's app icon replaces it (Resources/AppIcon.icns). -->
+  <symbol id="appicon" viewBox="0 0 64 64">
+    <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d1d1d6"/><stop offset="1" stop-color="#aeaeb2"/></linearGradient></defs>
+    <rect width="64" height="64" rx="14.5" fill="url(#g)"/>
+  </symbol>
+  <symbol id="i-cam" viewBox="0 0 16 16"><path d="M2 5V3.5A1.5 1.5 0 0 1 3.5 2H5M11 2h1.5A1.5 1.5 0 0 1 14 3.5V5M14 11v1.5a1.5 1.5 0 0 1-1.5 1.5H11M5 14H3.5A1.5 1.5 0 0 1 2 12.5V11"/><rect x="5" y="5.5" width="6" height="5" rx="1"/></symbol>
+  <symbol id="i-check" viewBox="0 0 16 16"><path d="M3 8.5 6.5 12 13 4.5"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 16 16"><path d="M8 2.5 14 13H2z"/><path d="M8 6.5v3M8 11.3v.2"/></symbol>
+  <symbol id="i-text" viewBox="0 0 16 16"><path d="M3 4h10M3 7h10M3 10h7M3 13h5"/></symbol>
+  <symbol id="i-image" viewBox="0 0 16 16"><rect x="2.5" y="3" width="11" height="10" rx="1.6"/><circle cx="6" cy="6.5" r="1.1"/><path d="M2.5 11l3.2-3 2.6 2.4 1.9-1.6 3.3 2.9"/></symbol>
+</defs></svg>
+
+<div class="page">
+  <div class="head">
+    <div>
+      <h1>Plannotator Shots — first-run permissions</h1>
+      <p>Draft for review. Each frame is a 1280 × 800 pt desktop at 1:1. The card is the HUD window itself: it floats over every app, System Settings included, so the picture of the switch stays on screen while the user finds the real one. One permission per screen, asked only when needed. The app notices the switch by itself.</p>
+    </div>
+    <div class="theme-switch" role="group" aria-label="Appearance"><button data-t="light" aria-pressed="true">Light</button><button data-t="dark" aria-pressed="false">Dark</button></div>
+  </div>
+
+  <section class="frame">
+    <h2>1 · First ⌥⇧⌘4, Screen Recording off</h2>
+    <p class="cap">Nothing is asked at install or launch. The first shot shows this card instead of the overlay. The picture is the exact row from System Settings, enlarged.</p>
+    <div class="screen">
+      <div class="menubar"><b>Safari</b><span>File</span><span>Edit</span><span>View</span><div class="r"><span class="glyph"><svg class="ico"><use href="#i-cam"/></svg></span><span>Tue 7 Oct 14:22</span></div></div>
+      <div class="perm" role="dialog" aria-labelledby="t1">
+        <div class="pic"><div class="big-row"><svg class="appicon"><use href="#appicon"/></svg>Plannotator Shots<span class="sw on"></span></div></div>
+        <div class="body"><h3 id="t1">Turn on Screen Recording</h3><p>Switch on Plannotator Shots.</p><button class="btn">Open System Settings</button></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="frame">
+    <h2>2 · macOS asks (first click only)</h2>
+    <p class="cap">The first click calls <code>CGRequestScreenCaptureAccess()</code>. macOS shows its alert, and (with a Developer ID signature) adds Plannotator Shots to the list. Its button opens the right pane. Later clicks open <code>Privacy_ScreenCapture</code> directly. The card waits; nothing to press.</p>
+    <div class="screen">
+      <div class="menubar"><b>Safari</b><span>File</span><span>Edit</span><div class="r"><span class="glyph"><svg class="ico"><use href="#i-cam"/></svg></span><span>Tue 7 Oct 14:22</span></div></div>
+      <span class="sys">macOS</span>
+      <div class="alert"><svg class="appicon"><use href="#appicon"/></svg><b>“Plannotator Shots” would like to record this computer’s screen and audio.</b><p>Grant access to this application in Privacy &amp; Security settings, located in System Settings.</p><span class="ab pri">Open System Settings</span><span class="ab">Deny</span></div>
+      <div class="perm">
+        <div class="pic"><div class="big-row"><svg class="appicon"><use href="#appicon"/></svg>Plannotator Shots<span class="sw on"></span></div></div>
+        <div class="body"><h3>Turn on Screen Recording</h3><p>Switch on Plannotator Shots.</p><button class="btn quiet"><span class="spin"></span>Waiting</button></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="frame">
+    <h2>3 · System Settings, with the card beside it</h2>
+    <p class="cap">The card floats over System Settings, so the picture and the real row sit side by side. Every second the app tries a real capture listing (<code>SCShareableContent</code>; the preflight can lag behind the switch).</p>
+    <div class="screen">
+      <div class="menubar"><b>System Settings</b><span>Edit</span><span>View</span><div class="r"><span class="glyph"><svg class="ico"><use href="#i-cam"/></svg></span><span>Tue 7 Oct 14:22</span></div></div>
+      <div class="settings"><div class="lights"><i></i><i></i><i></i></div>
+        <div class="side"><div class="it"><span></span>General</div><div class="it"><span></span>Appearance</div><div class="it"><span></span>Accessibility</div><div class="it"><span></span>Control Center</div><div class="it"><span></span>Desktop &amp; Dock</div><div class="it"><span></span>Displays</div><div class="it"><span></span>Notifications</div><div class="it on"><span></span>Privacy &amp; Security</div><div class="it"><span></span>Touch ID &amp; Password</div></div>
+        <div class="main"><div class="crumb"><span class="back">‹</span>Screen &amp; System Audio Recording</div>
+          <div class="card"><div class="desc">Allow the applications below to record the content of your screen and audio.</div>
+            <div class="row"><span class="gen" style="background:linear-gradient(#4b4b4f,#2c2c2e)"></span>ChatGPT<span class="sw on"></span></div>
+            <div class="row"><span class="gen" style="background:linear-gradient(#fbbc04,#ea4335)"></span>Google Chrome<span class="sw on"></span></div>
+            <div class="row"><span class="gen" style="background:linear-gradient(#1c1c1e,#000)"></span>Ghostty<span class="sw on"></span></div>
+            <div class="row ours"><svg class="appicon"><use href="#appicon"/></svg>Plannotator Shots<span class="sw"></span></div>
+            <div class="row"><span class="gen" style="background:linear-gradient(#ff6a3d,#e0452b)"></span>Screen Studio<span class="sw on"></span></div>
+          </div></div>
+      </div>
+      <div class="perm">
+        <div class="pic"><div class="big-row"><svg class="appicon"><use href="#appicon"/></svg>Plannotator Shots<span class="sw on"></span></div></div>
+        <div class="body"><h3>Turn on Screen Recording</h3><p>Switch on Plannotator Shots.</p><button class="btn quiet"><span class="spin"></span>Waiting</button></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="frame">
+    <h2>4 · Only when macOS insists: one Reopen button</h2>
+    <p class="cap">Seen in the live test: after the switch, macOS asked to "Quit &amp; Reopen". When the switch is on but capture still fails, the card shows one button. It relaunches through LaunchServices and resumes the pending shot. The card never asks the user to find the app or quit it.</p>
+    <div class="screen">
+      <div class="menubar"><b>System Settings</b><span>Edit</span><div class="r"><span class="glyph"><svg class="ico"><use href="#i-cam"/></svg></span><span>Tue 7 Oct 14:23</span></div></div>
+      <div class="perm">
+        <div class="pic"><div class="big-row"><svg class="appicon"><use href="#appicon"/></svg>Plannotator Shots<span class="sw on"></span></div></div>
+        <div class="body"><h3>Almost there</h3><p>Reopen Plannotator Shots to finish.</p><button class="btn">Reopen</button></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="frame">
+    <h2>5 · The first capture: macOS confirms once more</h2>
+    <p class="cap">Also seen in the live test: on the first real capture after the grant, macOS asks again ("bypass the system private window picker"). It returns from time to time for apps that capture without the system picker. We can't suppress it. The overlay simply waits behind it, and the strip does not treat it as a failure.</p>
+    <div class="screen">
+      <div class="menubar"><b>Safari</b><span>File</span><span>Edit</span><div class="r"><span class="glyph"><svg class="ico"><use href="#i-cam"/></svg></span><span>Tue 7 Oct 14:23</span></div></div>
+      <span class="sys">macOS</span>
+      <div class="alert"><svg class="appicon"><use href="#appicon"/></svg><b>“Plannotator Shots” is requesting to bypass the system private window picker and directly access your screen and audio.</b><p>This will allow it to record your screen and system audio, including personal or sensitive information.</p><span class="ab pri">Allow</span><span class="ab">Open System Settings</span></div>
+    </div>
+  </section>
+
+  <section class="frame">
+    <h2>6 · On: a check, then straight to the shot</h2>
+    <p class="cap">As soon as capture works, a large check shows for under a second, then the capture overlay opens. The user never comes back to press anything.</p>
+    <div class="screen">
+      <div class="menubar"><b>System Settings</b><span>Edit</span><div class="r"><span class="glyph"><svg class="ico"><use href="#i-cam"/></svg></span><span>Tue 7 Oct 14:23</span></div></div>
+      <div class="perm">
+        <div class="pic"><div class="check"><svg class="ico"><use href="#i-check"/></svg></div></div>
+        <div class="body"><h3>Screen Recording is on</h3><p style="margin:0">Drag a box around what you mean.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="frame">
+    <h2>7 · App shots: Accessibility, asked only when turned on</h2>
+    <p class="cap">⌥⇧⌘5 or the ◫ toggle, first time. One screen says what App shots add and shows the switch. The first click calls <code>AXIsProcessTrustedWithOptions(prompt: true)</code>, later clicks open <code>Privacy_Accessibility</code>. Live check with <code>AXIsProcessTrusted()</code>; no restart needed. "Not now" takes the window image only.</p>
+    <div class="screen">
+      <div class="menubar"><b>Figma</b><span>File</span><span>Edit</span><div class="r"><span class="glyph"><svg class="ico"><use href="#i-cam"/></svg></span><span>Tue 7 Oct 14:26</span></div></div>
+      <div class="perm">
+        <div class="pic"><div class="big-row"><svg class="appicon"><use href="#appicon"/></svg>Plannotator Shots<span class="sw on"></span></div></div>
+        <div class="body"><h3>Turn on Accessibility</h3><p>App shots include the window’s text.<br>Passwords are never read.</p><button class="btn">Open System Settings</button><span class="link">Not now</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="frame">
+    <h2>8 · Turned off later</h2>
+    <p class="cap">If Screen Recording is turned off, the next shot shows this strip, never a blank or wallpaper-only image. "Turn On" opens frame 1. If Accessibility is off, an App shot still takes the window, and its text view offers the same "Turn On".</p>
+    <div class="screen">
+      <div class="menubar"><b>Safari</b><span>File</span><span>Edit</span><div class="r"><span class="glyph"><svg class="ico"><use href="#i-cam"/></svg></span><span>Tue 7 Oct 16:02</span></div></div>
+      <div class="strip" role="status"><svg class="ico w"><use href="#i-warn"/></svg>Screen Recording is off<span class="btn">Turn On</span></div>
+    </div>
+    <div class="screen" style="margin-top:14px">
+      <div class="menubar"><b>Figma</b><span>File</span><span>Edit</span><div class="r"><span class="glyph"><svg class="ico"><use href="#i-cam"/></svg></span><span>Tue 7 Oct 16:04</span></div></div>
+      <div class="panel">
+        <div class="p-head">Figma — Checkout v3<div class="seg"><span><svg class="ico" style="width:14px;height:14px"><use href="#i-image"/></svg></span><span class="on"><svg class="ico" style="width:14px;height:14px"><use href="#i-text"/></svg></span></div></div>
+        <div class="empty"><svg class="appicon" style="width:52px;height:52px;border-radius:12px"><use href="#appicon"/></svg><h4>Accessibility is off</h4><span class="btn">Turn On</span></div>
+        <div class="p-foot"></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="notes">
+    <div>
+      <h3>Behaviour</h3>
+      <ul>
+        <li><b>Ask only when needed.</b> Screen Recording on the first capture; Accessibility only when App shots are turned on. Nothing is asked at install or launch.</li>
+        <li><b>One button.</b> First click: the system request (<code>CGRequestScreenCaptureAccess</code> / <code>AXIsProcessTrustedWithOptions</code>), which registers the app and shows macOS's alert. Later clicks: the deep link (<code>x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture</code> / <code>?Privacy_Accessibility</code>).</li>
+        <li><b>Live.</b> While a card is up the app checks every second (a <code>SCShareableContent</code> listing; <code>AXIsProcessTrusted</code>). On success it shows the check and carries on with what the user asked for.</li>
+        <li><b>Reopen.</b> Offered only when the switch is on (preflight true) but capture still fails, after the user leaves System Settings. Relaunch through LaunchServices; the pending shot resumes.</li>
+        <li><b>Revoked.</b> A refused capture shows frame 8. The menu-bar item lists both permissions with the same Turn On.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>What the live test showed (dev build, ad-hoc signed, macOS 26.3)</h3>
+      <ul>
+        <li>The prompt appeared, but Plannotator Shots was <b>not in the list</b>: macOS does not list ad-hoc-signed apps. The owner had to add it with +.</li>
+        <li>macOS required <b>Quit &amp; Reopen</b> after the switch (frame 4).</li>
+        <li>A <b>second prompt</b> appeared at the first capture: the private-window-picker bypass confirmation (frame 5).</li>
+        <li><b>Therefore release builds must be Developer ID signed and notarized.</b> Then the app is listed after the prompt, so frames 1–3 are true. TCC keys the grant to the team id plus the bundle id, so it survives updates (ad-hoc grants reset on every rebuild). MDM can also pre-approve it (PPPC). The CI steps exist and are gated on the Apple secrets.</li>
+        <li><b>Icon:</b> a neutral placeholder until the owner supplies the app icon (<code>Resources/AppIcon.icns</code>) and the menu-bar template image (<code>Resources/MenuBarIcon.png</code>). The card shows whatever icon the app has, so its picture always matches the row in System Settings.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+<script>
+for (const b of document.querySelectorAll('.theme-switch button')) b.onclick = () => {
+  document.documentElement.dataset.theme = b.dataset.t;
+  for (const x of document.querySelectorAll('.theme-switch button')) x.setAttribute('aria-pressed', String(x === b));
+};
+</script>
+</body>
+</html>
