@@ -18,6 +18,7 @@ import type { InboxQuestion } from "@plannotator/core/inbox-types";
 import { inboxStatus, isPidAlive, readInboxRegistry, writeInboxRegistry } from "@plannotator/shared/inbox/registry";
 import { startInboxServer } from "@plannotator/server/inbox";
 import { INBOX_MCP_TOOLS } from "@plannotator/server/inbox-mcp";
+import { GUIDE_BRIEF_EXAMPLE } from "../../../packages/server/inbox-guides";
 import { runPlannotatorUninstall } from "@plannotator/server/uninstall";
 
 const entry = resolve(import.meta.dir, "index.ts");
@@ -298,6 +299,15 @@ describe("plannotator inbox mcp (the stdio shim)", () => {
     const reply = (await waiting).structuredContent as { status: string; reply: { body: string } };
     expect(reply.status).toBe("replied");
     expect(reply.reply.body).toContain("Answer: Yes (your recommendation)");
+
+    // submit_guide is routed like send_message: no project_path, and it lands in the same project
+    // and session (an MCP-only agent has no other way to name them).
+    const guided = await client.callTool({ name: "submit_guide", arguments: { ...GUIDE_BRIEF_EXAMPLE, idempotency_key: "guide-1" } });
+    expect(guided.isError).toBeFalsy();
+    const guide = guided.structuredContent as { thread_id: string; project: { root: string } };
+    expect(guide.project.root).toBe(project);
+    const mineNow = (await client.callTool({ name: "read_thread", arguments: {} })).structuredContent as { threads: { thread_id: string }[] };
+    expect(mineNow.threads.map((t) => t.thread_id)).toContain(guide.thread_id);
   }, 90_000);
 });
 
