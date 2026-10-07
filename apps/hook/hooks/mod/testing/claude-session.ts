@@ -52,7 +52,18 @@ export function realHost(options: RealHostOptions): RealHost {
     timers: new Set(),
     onSubmit: async () => undefined,
     now: async () => Date.now(),
-    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    sleep: (ms, signal) =>
+      new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, ms)
+        signal?.addEventListener(
+          'abort',
+          () => {
+            clearTimeout(timer)
+            reject(new Error('aborted'))
+          },
+          { once: true },
+        )
+      }),
     waitForAny: async (paths, timeoutMs) => {
       const deadline = Date.now() + timeoutMs
       while (Date.now() < deadline && !paths.some((path) => existsSync(path))) await new Promise((resolve) => setTimeout(resolve, 50))

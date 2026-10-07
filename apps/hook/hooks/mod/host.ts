@@ -29,8 +29,12 @@ export interface TimerHandle {
 
 export interface Host {
   now(): Promise<number>
-  /** `$.clock.sleep`: counts against a hook's 10 s budget, so never used inside one. */
-  sleep(ms: number): Promise<void>
+  /**
+   * `$.clock.sleep`: counts against a hook's 10 s budget while it waits, so
+   * never used inside one, except as a short bound raced against a `$` call
+   * (inbox.ts `within`), aborted through `signal` the moment that call settles.
+   */
+  sleep(ms: number, signal?: AbortSignal): Promise<void>
   /**
    * Resolve once any of `paths` exists, or after `timeoutMs`. Waits inside a
    * `$.process.run` call, which (unlike a `$.clock` wait) does not count

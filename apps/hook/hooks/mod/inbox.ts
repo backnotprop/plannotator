@@ -75,6 +75,14 @@ const LEASE_EVERY_MS = 5_000
 export const INBOX_LEASE_STALE_MS = 20_000
 /** A claimed reply whose claimant stopped saying it is alive for this long is reported as undelivered. */
 export const INBOX_UNDELIVERED_AFTER_MS = 60_000
+/**
+ * The longest session start waits for a running Inbox's `tools/list`. The
+ * person's first prompt waits for session.start, and `$.http.fetch` gives up
+ * only after 30 s, so an Inbox that accepts and never answers (stopped with
+ * Ctrl-Z, or a port another server reused and holds) would hold that prompt
+ * for 30 s; past this bound the remembered list stands.
+ */
+export const INBOX_DISCOVER_TIMEOUT_MS = 2_000
 /** `plannotator inbox --background` waits up to 20 s for the Inbox to answer. */
 const START_TIMEOUT_MS = 30_000
 
@@ -143,6 +151,20 @@ async function mcpCall(host: Host, port: number, method: string, params: Record<
   return mcpAnswerOf(response.text)
 }
 
+/** `work`'s answer, or null once `ms` passed first; the bounding sleep is aborted as soon as `work` settles. */
+async function within<T>(host: Host, ms: number, work: Promise<T>): Promise<T | null> {
+  const stop = new AbortController()
+  const late = host.sleep(ms, stop.signal).then(
+    () => null,
+    () => null,
+  )
+  try {
+    return await Promise.race([work, late])
+  } finally {
+    stop.abort()
+  }
+}
+
 /**
  * The Inbox tools this session's `plannotator_inbox` tool carries, decided
  * once at session start; null: no tool (no registry, or nothing known about
@@ -155,7 +177,7 @@ export async function discoverInboxTools(host: Host, dataDir: string): Promise<I
   if (!(await host.exists(path))) return null
   const registry = parseInboxRegistry(await host.readFile(path).catch(() => null))
   if (registry) {
-    const answer = await mcpCall(host, registry.port, 'tools/list', {}).catch(() => null)
+    const answer = await within(host, INBOX_DISCOVER_TIMEOUT_MS, mcpCall(host, registry.port, 'tools/list', {})).catch(() => null)
     const tools = answer && 'result' in answer ? parseInboxToolList(answer.result) : []
     if (tools.length > 0) {
       await host.storeSet(STORE_INBOX_TOOLS, { tools }).catch(() => undefined)

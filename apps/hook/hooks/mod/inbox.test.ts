@@ -15,6 +15,7 @@ import { join, resolve } from 'node:path'
 import { mcpAnswerOf } from './inbox'
 import { inboxAgentTool, INBOX_TOOL_ACTIONS, INBOX_WAKE_INSTRUCTION, inboxWakeText } from './inbox-contract'
 import { ClaudeSession } from './testing/claude-session'
+import { INBOX_DISCOVER_TIMEOUT_MS, STORE_INBOX_TOOLS } from './inbox'
 
 const entry = resolve(import.meta.dir, '../../server/index.ts')
 const distDir = resolve(import.meta.dir, '../../dist')
@@ -408,4 +409,34 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     expect(later.inboxTools?.map((tool) => tool.name)).toEqual(session.inboxTools?.map((tool) => tool.name))
     w.proof('a session starting while the Inbox is stopped registers the tool from the list the Inbox last offered')
   }, 90_000)
+
+  // The failure this guards: the person's first prompt waits for session.start,
+  // and `$.http.fetch` gives up only after 30 s, so an Inbox that accepts and
+  // never answers (stopped with Ctrl-Z, a port another server holds) held every
+  // Claude Code start for 30 s.
+  test('a wedged Inbox (accepts, never answers) does not hold session start: the list it last offered stands within the bound', async () => {
+    const w = world('08-wedged-inbox')
+    const wedged = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data() {} } })
+    const registryPath = join(w.dataDir, 'inbox', 'inbox.json')
+    // A pid that has exited: afterEach kills whatever pid the registry names.
+    const exited = Bun.spawnSync(['true']).pid
+    try {
+      mkdirSync(join(w.dataDir, 'inbox'), { recursive: true })
+      writeFileSync(
+        registryPath,
+        JSON.stringify({ v: 1, pid: exited, port: wedged.port, token: 'x'.repeat(32), serverSession: 'wedged', url: `http://127.0.0.1:${wedged.port}/` }),
+      )
+      const remembered = [{ name: 'send_message', description: 'Send.', inputSchema: { type: 'object', properties: { body: { type: 'string' } } } }]
+      w.store.set(STORE_INBOX_TOOLS, { tools: remembered })
+      const started = Date.now()
+      const session = await open(w, 'session-wedged')
+      const took = Date.now() - started
+      expect(session.inboxTools?.map((tool) => tool.name)).toEqual(['send_message'])
+      expect(took).toBeLessThan(INBOX_DISCOVER_TIMEOUT_MS + 2_000)
+      w.proof(`registry names a port that accepts and never answers: session start took ${took} ms and kept the remembered list`)
+    } finally {
+      rmSync(registryPath, { force: true })
+      wedged.stop(true)
+    }
+  }, 20_000)
 })

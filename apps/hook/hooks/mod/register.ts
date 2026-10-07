@@ -90,7 +90,7 @@ const PLUGIN_NAME = 'plannotator'
 function hostOf($: Engine, debugPath: string | null): Host {
   return {
     now: () => $.clock.now(),
-    sleep: (ms) => $.clock.sleep(ms),
+    sleep: (ms, signal) => $.clock.sleep(ms, signal ? { signal } : undefined),
     waitForAny: async (paths, timeoutMs) => {
       await $.process.run(waitArgv(paths, timeoutMs), { timeoutMs: timeoutMs + 5_000 }).catch(() => undefined)
     },
