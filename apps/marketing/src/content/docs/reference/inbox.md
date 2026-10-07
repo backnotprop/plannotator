@@ -157,7 +157,7 @@ The Inbox stores the files agents attached as they were when sent, the messages 
 plannotator uninstall --purge
 ```
 
-This stops a running Inbox first, then deletes `~/.plannotator/inbox/` with the rest of the Plannotator data. If the Inbox does not stop, nothing is deleted: quit it and run the command again. Add `--dry-run` to see what would be removed.
+This stops a running Inbox first, then deletes `~/.plannotator/inbox/` with the rest of the Plannotator data. If the Inbox does not stop, uninstall still removes the plugins, skills, hooks and config entries, but keeps your Plannotator data (`~/.plannotator`) and the `plannotator` binary. Quit the Inbox and run the command again to finish. Add `--dry-run` to see what would be removed.
 
 ## Troubleshooting
 
