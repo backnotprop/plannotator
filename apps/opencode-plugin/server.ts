@@ -42,6 +42,7 @@ import type { SessionBridge } from "@plannotator/ai/session-bridge";
 import { createOpenCodeSessionBridge, markPlanReviewPending } from "./opencode-session-bridge";
 import type { PlanEdit } from "./plan-edits";
 import { getPlanningPrompt } from "./planning-prompt";
+import { findInboxConnection, registerInboxOpenCode2, type InboxToolDomainLike } from "./inbox";
 
 const DEFAULT_PLAN_TIMEOUT_SECONDS = 345_600;
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -180,6 +181,19 @@ const serverPlugin = {
         });
       } catch (error) {
         console.error(`[Plannotator] Could not register the plannotator tool: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    // The Plannotator Inbox (`plannotator_inbox` and the reply wake, inbox.ts):
+    // only where the inbox tool switch allows it for OpenCode and an Inbox was
+    // found, decided here once per plugin setup (the tool list is part of the
+    // prompt). Wrapped like the tool above: a failure must not take the plugin down.
+    if (hasToolTransform) {
+      try {
+        const inbox = await findInboxConnection();
+        if (inbox) await registerInboxOpenCode2(ctx.tool as unknown as InboxToolDomainLike, v2, inbox, (sessionID) => resolveRootSession(v2, sessionID));
+      } catch (error) {
+        console.error(`[Plannotator] Could not register the plannotator_inbox tool: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 

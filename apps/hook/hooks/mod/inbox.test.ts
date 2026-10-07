@@ -12,8 +12,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { mcpAnswerOf } from './inbox'
-import { inboxAgentTool, INBOX_TOOL_ACTIONS, INBOX_WAKE_INSTRUCTION, inboxWakeText } from './inbox-contract'
+import { inboxAgentTool, INBOX_TOOL_ACTIONS, INBOX_WAKE_INSTRUCTION, inboxWakeText, mcpAnswerOf } from './inbox-contract'
 import { ClaudeSession } from './testing/claude-session'
 import { INBOX_DISCOVER_TIMEOUT_MS, STORE_INBOX_TOOLS } from './inbox'
 

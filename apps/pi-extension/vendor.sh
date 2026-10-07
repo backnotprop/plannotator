@@ -39,6 +39,16 @@ for f in annotate-bundle plannotator-tool prompts review-core review-image revie
     > "generated/$f.ts"
 done
 
+# The Plannotator Inbox connection (plannotator_inbox and the reply wake):
+# the pure contract and the node-runtime link the OpenCode plugin uses too.
+# agent-link imports only ./connection and node: modules, so the folder keeps
+# its own relative import.
+mkdir -p generated/inbox
+for f in connection agent-link; do
+  src="../../packages/shared/inbox/$f.ts"
+  printf '// @generated — DO NOT EDIT. Source: packages/shared/inbox/%s.ts\n' "$f" | cat - "$src" > "generated/inbox/$f.ts"
+done
+
 # call-flow.ts imports the repository-owned npm manifest and lock that are
 # written into the managed runtime. Keep those verified install inputs beside
 # the vendored module so raw-TS Pi distributions use the identical bytes.

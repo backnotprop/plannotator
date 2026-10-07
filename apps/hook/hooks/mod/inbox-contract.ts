@@ -91,19 +91,28 @@ export const INBOX_TOOL_LEAD =
 /**
  * Fixed text: how a reply comes back. The connection delivers the person's
  * reply to a message this session sent as a new turn once the session is idle.
+ * Host-neutral: Claude Code frames the turn as the plugin's message, Pi and
+ * OpenCode 2 as a user message, and all three carry the wake's first line.
  */
 export const INBOX_TOOL_WAKE_NOTE =
-  "When the person replies to a message you sent, their reply arrives in this session by itself, as a message from the plannotator plugin, once the session is idle: you can end your turn instead of waiting with wait_for_reply."
+  "When the person replies to a message you sent, their reply arrives in this session by itself once the session is idle, as a message with the line `Plannotator Inbox: <subject> (<reply id>)`: you can end your turn instead of waiting with wait_for_reply."
 
-/** The agent tool: name, description and input schema, built from the Inbox's own tools. Null when it offers none. */
-export function inboxAgentTool(tools: readonly InboxToolInfo[]): { name: string; description: string; inputSchema: Record<string, unknown> } | null {
+/**
+ * The agent tool: name, description and input schema, built from the Inbox's
+ * own tools. Null when it offers none. `wakes: false` for a host that cannot
+ * deliver a reply as a turn (OpenCode 1): the description then says nothing
+ * about replies arriving by themselves.
+ */
+export function inboxAgentTool(
+  tools: readonly InboxToolInfo[],
+  options: { wakes?: boolean } = {},
+): { name: string; description: string; inputSchema: Record<string, unknown> } | null {
   if (tools.length === 0) return null
   const description = [
     INBOX_TOOL_LEAD,
     '',
     ...tools.map((tool) => `- ${tool.name}: ${leadOf(tool.description)}`),
-    '',
-    INBOX_TOOL_WAKE_NOTE,
+    ...(options.wakes === false ? [] : ['', INBOX_TOOL_WAKE_NOTE]),
   ].join('\n')
   const properties: Record<string, Record<string, unknown>> = {
     action: { type: 'string', enum: tools.map((tool) => tool.name), description: 'Which Inbox tool to call.' },
@@ -174,6 +183,31 @@ export function inboxToolResultText(result: unknown): { text: string; isError: b
     : ''
   const structured = value.structuredContent && typeof value.structuredContent === 'object' ? `\n\n${JSON.stringify(value.structuredContent, null, 2)}` : ''
   return { text: `${text}${value.isError === true ? '' : structured}`.trim(), isError: value.isError === true }
+}
+
+/** The JSON-RPC message in an MCP answer: a JSON body, or the `data:` lines of an SSE body. */
+export function mcpAnswerOf(text: string): { result?: unknown; error?: { message?: string } } | null {
+  const candidates = /^\s*(event:|data:|:)/m.test(text)
+    ? text
+        .split(/\r?\n\r?\n/)
+        .map((block) =>
+          block
+            .split(/\r?\n/)
+            .filter((line) => line.startsWith('data:'))
+            .map((line) => line.slice(5).replace(/^ /, ''))
+            .join('\n'),
+        )
+        .filter((data) => data.trim())
+    : [text]
+  for (const candidate of candidates) {
+    try {
+      const value = JSON.parse(candidate) as { result?: unknown; error?: { message?: string } }
+      if (value && typeof value === 'object' && ('result' in value || 'error' in value)) return value
+    } catch {
+      // The next block.
+    }
+  }
+  return null
 }
 
 /** The registry fields a connection reads (`inbox/inbox.json`), re-read on every call. */

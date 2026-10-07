@@ -50,6 +50,8 @@ import { shouldFallbackAfterEmbeddedError } from "./prompt-delivery-error";
 import { executeSubmitPlan } from "./submit-plan-executor";
 import { getPlanningPrompt } from "./planning-prompt";
 import { announceSessionUrl } from "./session-url";
+import { findInboxConnection, inboxToolArgs } from "./inbox";
+import { inboxAgentTool } from "@plannotator/shared/inbox/connection";
 import {
   appendCommandFeedback,
   CommandMessageAgents,
@@ -709,6 +711,32 @@ Do NOT proceed with implementation until your plan is approved.`;
         },
       }),
     };
+  }
+
+  // The Plannotator Inbox tool (inbox.ts), decided once at plugin setup: only
+  // where the inbox tool switch allows it for OpenCode and an Inbox was found.
+  // OpenCode 1 gets the tool only: it has no way to wake an idle session, so
+  // replies are read with wait_for_reply or read_thread, and the description
+  // says nothing about them arriving by themselves.
+  try {
+    const inbox = await findInboxConnection();
+    const spec = inbox ? inboxAgentTool(inbox.tools, { wakes: false }) : null;
+    if (inbox && spec) {
+      plugin.tool = {
+        ...(plugin.tool ?? {}),
+        [spec.name]: tool({
+          description: spec.description,
+          args: inboxToolArgs(spec.inputSchema, tool.schema),
+          async execute(args, context) {
+            const result = await inbox.callTool(args, { sessionId: context.sessionID, cwd: context.directory });
+            if (result.isError) throw new Error(result.text);
+            return result.text;
+          },
+        }),
+      };
+    }
+  } catch (error) {
+    console.error(`[Plannotator] Could not register the plannotator_inbox tool: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   return plugin;

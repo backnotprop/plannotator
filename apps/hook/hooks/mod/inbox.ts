@@ -41,6 +41,7 @@ import {
   inboxToolCall,
   inboxToolResultText,
   inboxWakeText,
+  mcpAnswerOf,
   parseInboxBridgeCommands,
   parseInboxRegistry,
   parseInboxToolList,
@@ -115,31 +116,6 @@ export const INBOX_CLAIM_SCRIPT = [
 
 export function inboxClaimArgv(dir: string, claimant: string): string[] {
   return ['/bin/sh', '-c', INBOX_CLAIM_SCRIPT, 'plannotator-inbox-claim', dir, claimant]
-}
-
-/** The JSON-RPC message in an MCP answer: a JSON body, or the `data:` lines of an SSE body. */
-export function mcpAnswerOf(text: string): { result?: unknown; error?: { message?: string } } | null {
-  const candidates = /^\s*(event:|data:|:)/m.test(text)
-    ? text
-        .split(/\r?\n\r?\n/)
-        .map((block) =>
-          block
-            .split(/\r?\n/)
-            .filter((line) => line.startsWith('data:'))
-            .map((line) => line.slice(5).replace(/^ /, ''))
-            .join('\n'),
-        )
-        .filter((data) => data.trim())
-    : [text]
-  for (const candidate of candidates) {
-    try {
-      const value = JSON.parse(candidate) as { result?: unknown; error?: { message?: string } }
-      if (value && typeof value === 'object' && ('result' in value || 'error' in value)) return value
-    } catch {
-      // The next block.
-    }
-  }
-  return null
 }
 
 async function mcpCall(host: Host, port: number, method: string, params: Record<string, unknown>): Promise<{ result?: unknown; error?: { message?: string } } | null> {

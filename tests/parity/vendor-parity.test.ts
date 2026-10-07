@@ -29,11 +29,15 @@ function collectTsFiles(dir: string): string[] {
   return files;
 }
 
-/** Extract module names imported from generated/ (e.g. "config" from "../generated/config.js") */
+/**
+ * Extract module names imported from generated/ (e.g. "config" from
+ * "../generated/config.ts"). The package imports exact ".ts" paths
+ * (import-specifiers.test.ts); ".js" is still read for older sources.
+ */
 function extractGeneratedImports(filePath: string): string[] {
   const src = readFileSync(filePath, "utf-8");
   const modules: string[] = [];
-  const re = /from\s+["']\.\.?\/generated\/(.+?)\.js["']/g;
+  const re = /(?:from\s+|import\s*\(\s*)["']\.\.?\/generated\/(.+?)\.(?:js|ts)["']/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(src)) !== null) {
     modules.push(m[1]);
@@ -57,10 +61,16 @@ function extractVendoredModules(): Set<string> {
       prefix = "ai/providers/";
     } else if (srcPath.includes("packages/ai/")) {
       prefix = "ai/";
+    } else if (srcPath.includes("packages/shared/inbox/")) {
+      prefix = "inbox/";
     }
     for (const name of names) {
       all.add(prefix + name);
     }
+  }
+  // Single files vendored outside a loop (`> "generated/bridge-script.ts"`).
+  for (const literal of src.matchAll(/"generated\/([^"$]+)\.ts"/g)) {
+    all.add(literal[1]);
   }
   return all;
 }
