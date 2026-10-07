@@ -2029,7 +2029,7 @@ row hidden when off, recorded and plain questions untouched, read-only cards
 static, `statusTag: 'none'`, the `Viewer` threading, and a card with none of
 the props rendering the same markup.
 
-## Decision toggle on any question, and an opener for the host's decision card (ui 0.52.1, unreleased; additive, no core change)
+## Decision toggle on any question, and an opener for the host's decision card (ui 0.52.1; additive, no core change)
 
 Two gaps Workspaces found in 0.52.0 against its approved Inbox design
 ("the tag is the switch" on every question, off by default; "clicking the

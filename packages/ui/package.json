@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/ui",
-  "version": "0.52.0",
+  "version": "0.52.1",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
