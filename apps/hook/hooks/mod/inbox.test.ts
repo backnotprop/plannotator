@@ -26,7 +26,7 @@ const sessions: ClaudeSession[] = []
 beforeAll(() => {
   if (binary) return
   // The CLI from source imports the built HTML; the Inbox never serves it.
-  stubs = ['index.html', 'review.html'].map((name) => join(distDir, name)).filter((path) => !existsSync(path))
+  stubs = ['index.html', 'review.html', 'inbox.html'].map((name) => join(distDir, name)).filter((path) => !existsSync(path))
   mkdirSync(distDir, { recursive: true })
   for (const path of stubs) writeFileSync(path, '<!doctype html><title>test</title>')
 })

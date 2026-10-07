@@ -538,7 +538,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   // ── Agent connections: the reply wake (step 6) ──
-  const threadPageUrl = (base: string, threadId: string) => `${base}#thread=${threadId}`;
   //
   // A connection (the Claude Code mod) long-polls for the person's replies to
   // its session's messages and posts `delivered` once a reply entered the
@@ -546,6 +545,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // waits for are read from the store (`pendingReplies`), so a reply is handed
   // out again on every poll until it is delivered or an agent read it, and it
   // survives an Inbox restart.
+  const threadPageUrl = (base: string, threadId: string) => `${base}#thread=${threadId}`;
   const replyCommand = (reply: InboxMessage): InboxReplyCommand => ({
     type: "reply",
     id: reply.id,
