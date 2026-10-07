@@ -179,8 +179,9 @@ export function formatTopLevelHelp(): string {
  * formatTopLevelHelp() and document it in apps/skills/core/plannotator/SKILL.md.
  *
  * `inbox`: the Plannotator Inbox, hidden until its window ships.
+ * `screenshot`: Plannotator Shots, the native screenshot HUD, hidden until launch.
  */
-export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set(["inbox"]);
+export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set(["inbox", "screenshot"]);
 
 // Per-subcommand usage text. Keyed by the canonical subcommand token; aliases
 // (e.g. `last` → `annotate-last`) are resolved in formatSubcommandHelp().
@@ -348,6 +349,29 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "",
     "Register the MCP entry with an agent, e.g.:",
     "  claude mcp add plannotator-inbox -- plannotator inbox mcp",
+  ].join("\n"),
+  screenshot: [
+    "Usage:",
+    "  plannotator screenshot [--app] [--wait] [--session <host>:<id>] [--no-capture]",
+    "  plannotator screenshot add <image | - | --screen>",
+    "  plannotator screenshot open | status | stop | install-app",
+    "  plannotator screenshot hub [--background]",
+    "",
+    "Plannotator Shots (macOS): freeze the screen, drag a box around what you",
+    "mean, mark it with numbered boxes and comments, and send it to an agent",
+    "session as one message. Collect several shots across apps and Spaces first",
+    "if you like. Hotkeys: ⌥⇧⌘4 shot, ⌥⇧⌘5 App shot (window + its text),",
+    "⌥⇧⌘P show or hide the HUD.",
+    "",
+    "  plannotator screenshot            Open the capture overlay (starts the app",
+    "                                    and the local hub when needed) and return",
+    "  plannotator screenshot --app      Take an App shot of the frontmost window",
+    "  plannotator screenshot --wait     Then wait and print the message when you",
+    "                                    press Send (agents without async delivery)",
+    "  plannotator screenshot add FILE   Add an image file (or - for stdin, or",
+    "                                    --screen for the whole display) as a shot",
+    "  plannotator screenshot open       Open the HUD in the browser",
+    "  plannotator screenshot status     The hub, the app and connected sessions",
   ].join("\n"),
   uninstall: [
     "Usage:",

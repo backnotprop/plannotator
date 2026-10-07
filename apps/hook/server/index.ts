@@ -644,6 +644,13 @@ if (args[0] === "inbox") {
   await runInboxCommand(args.slice(1), { htmlContent: inboxHtmlContent });
 }
 
+// Plannotator Shots: the screenshot HUD's hub, app launcher and waiting
+// command. Loaded on demand so nothing else pays for its embedded page.
+if (args[0] === "screenshot") {
+  const { runShotsCommand } = await import("./shots-command");
+  await runShotsCommand(args.slice(1));
+}
+
 if (isInteractiveNoArgInvocation(args, process.stdin.isTTY)) {
   console.log(formatInteractiveNoArgClarification());
   process.exit(0);

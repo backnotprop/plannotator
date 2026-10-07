@@ -4,6 +4,10 @@
   "private": true,
   "exports": {
     "./agents": "./agents.ts",
+    "./shots/types": "./shots/types.ts",
+    "./shots/compose": "./shots/compose.ts",
+    "./shots/registry": "./shots/registry.ts",
+    "./shots/store": "./shots/store.ts",
     "./annotatable": "./annotatable.ts",
     "./annotate-bundle": "./annotate-bundle.ts",
     "./app-html": "./app-html.ts",

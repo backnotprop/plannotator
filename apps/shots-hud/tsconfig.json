@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true,
+    "types": ["node"],
+    "moduleResolution": "bundler",
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "allowJs": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@plannotator/ui/*": ["../../packages/ui/*"],
+      "@plannotator/shared/*": ["../../packages/shared/*"],
+      "@plannotator/shots-hud": ["../../packages/shots-hud/index.ts"],
+      "@plannotator/shots-hud/*": ["../../packages/shots-hud/*"]
+    },
+    "allowImportingTsExtensions": true,
+    "noEmit": true
+  },
+  "include": ["index.tsx"]
+}

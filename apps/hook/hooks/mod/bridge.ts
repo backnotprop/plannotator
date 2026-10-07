@@ -83,6 +83,13 @@ export interface BridgeOptions {
   /** False once the review settled or the session ended: the loop stops. */
   isLive: () => boolean
   maxFailures?: number
+  /** The poll and event paths; default the review server's `/api/ai/bridge/*` (the Shots hub serves one pair per connection). */
+  pollPath?: string
+  eventPath?: string
+  /** Commands this loop does not know (the Shots hub's `deliver`). */
+  onCommand?: (command: { type: string } & Record<string, unknown>) => void
+  /** Extra fields every poll carries (the Shots hub routes on the last human input). */
+  pollExtras?: () => Record<string, unknown>
 }
 
 export function bridgeBaseUrl(port: number): string {
@@ -126,6 +133,8 @@ export interface BridgeHandle {
   run(): Promise<BridgeEnd>
   /** Push a busy/ready change now (from `turn.start` / `turn.complete`), not at the next poll. */
   pushStatus(): void
+  /** Post an event of the caller's own (e.g. `delivered`), batched with the loop's. */
+  postEvent(event: { type: string } & Record<string, unknown>): void
 }
 
 export function createBridge(options: BridgeOptions): BridgeHandle {
@@ -133,18 +142,20 @@ export function createBridge(options: BridgeOptions): BridgeHandle {
   const base = options.baseUrl.replace(/\/+$/, '')
   const headers = { 'content-type': 'application/json', authorization: `Bearer ${token}` }
   const maxFailures = options.maxFailures ?? 6
+  const pollPath = options.pollPath ?? BRIDGE_POLL_PATH
+  const eventPath = options.eventPath ?? BRIDGE_EVENT_PATH
   const seenAsks = new Set<string>()
   const seenInterrupts = new Set<string>()
-  let outbox: BridgeEvent[] = []
+  let outbox: Array<BridgeEvent | ({ type: string } & Record<string, unknown>)> = []
   let sending: Promise<void> = Promise.resolve()
   let lastStatus: 'ready' | 'busy' = turns.busy ? 'busy' : 'ready'
   /** The server knows the `taken_over` code (poll `features`). */
   let serverTakesTakenOver = false
 
-  const post = async (events: BridgeEvent[]): Promise<void> => {
+  const post = async (events: typeof outbox): Promise<void> => {
     if (events.length === 0) return
     try {
-      const response = await host.fetch(`${base}${BRIDGE_EVENT_PATH}`, {
+      const response = await host.fetch(`${base}${eventPath}`, {
         method: 'POST',
         headers,
         body: JSON.stringify(events.length === 1 ? events[0] : { events }),
@@ -152,7 +163,7 @@ export function createBridge(options: BridgeOptions): BridgeHandle {
       if (response.status === 409) {
         // The server no longer runs a question we are answering: stop ours.
         for (const event of events) {
-          if ('askId' in event) void stopAsk(event.askId)
+          if ('askId' in event && typeof event.askId === 'string') void stopAsk(event.askId)
         }
       }
     } catch {
@@ -167,10 +178,10 @@ export function createBridge(options: BridgeOptions): BridgeHandle {
     return sending
   }
 
-  const emit = (event: BridgeEvent, immediate = true) => {
+  const emit = (event: BridgeEvent | ({ type: string } & Record<string, unknown>), immediate = true) => {
     const last = outbox[outbox.length - 1]
     if (event.type === 'delta' && last?.type === 'delta' && last.askId === event.askId) {
-      last.text += event.text
+      ;(last as { text: string }).text += (event as { text: string }).text
     } else {
       outbox.push(event.type === 'delta' ? { ...event } : event)
     }
@@ -247,6 +258,8 @@ export function createBridge(options: BridgeOptions): BridgeHandle {
       case 'interrupt':
         void runInterrupt(command.interruptId)
         break
+      default:
+        options.onCommand?.(command as { type: string } & Record<string, unknown>)
     }
   }
 
@@ -272,10 +285,10 @@ export function createBridge(options: BridgeOptions): BridgeHandle {
       lastStatus = status
       let response
       try {
-        response = await host.fetch(`${base}${BRIDGE_POLL_PATH}`, {
+        response = await host.fetch(`${base}${pollPath}`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({ status, modes: { turn: true, transient: false }, waitMs: pollWaitFor(turns) }),
+          body: JSON.stringify({ status, modes: { turn: true, transient: false }, waitMs: pollWaitFor(turns), ...(options.pollExtras?.() ?? {}) }),
         })
       } catch {
         failures += 1
@@ -320,7 +333,7 @@ export function createBridge(options: BridgeOptions): BridgeHandle {
     }
   }
 
-  return { run, pushStatus }
+  return { run, pushStatus, postEvent: (event) => emit(event) }
 }
 
 /**

@@ -48,7 +48,7 @@
  */
 
 import { PlannotatorMod } from './controller'
-import { resolveAgentToolEnabled, resolveClaudeModEnabled } from './enabled'
+import { resolveAgentToolEnabled, resolveClaudeModEnabled, resolveShotsEnabled } from './enabled'
 import type { Host } from './host'
 import { COMMANDS, dataDirOf, debugAppendArgv, isModCommand, waitArgv } from './launch'
 import { PLAN_TOOL } from './plan'
@@ -147,7 +147,20 @@ interface Allowed {
   debugPath: string | null
   /** Register Claude's `plannotator` tool (the agent tool switch, on by default). */
   agentTool: boolean
+  /** Plannotator Shots: `/plannotator-screenshot` and the link to the Shots hub (off until launch). */
+  shots: boolean
 }
+
+// --- Plannotator Shots ----------------------------------------------------------
+/** The screenshot HUD's command; registered only when Shots is on. */
+const SHOTS_COMMAND = 'plannotator-screenshot'
+const SHOTS_COMMAND_SPEC = {
+  description: 'Take screenshots with Plannotator Shots, mark them up, and send them here as one message.',
+  argumentHint: '[--app]',
+}
+/** Names this Claude Code process to the Shots hub (two processes can share one session). */
+let shotsProcessTag: string | null = null
+// --------------------------------------------------------------------------------
 
 // One plugin instance per Claude Code process.
 let allowed: Allowed | null = null
@@ -168,11 +181,21 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
   if (mod && !mod.isDisposed && mod.session.sessionId === sessionId) return mod
   if (switching) return switching
   switching = (async () => {
+    const previousSessionId = mod?.session.sessionId
     mod?.dispose()
     await $.env.set('PLANNOTATOR_SESSION_TAG', `claude-code:${sessionId}`)
-    const instance = new PlannotatorMod(hostOf($, settings.debugPath), { sessionId, dataDir: settings.dataDir, interactive: true })
+    if (settings.shots) shotsProcessTag ??= hexOf(crypto.getRandomValues(new Uint8Array(6)))
+    const instance = new PlannotatorMod(hostOf($, settings.debugPath), {
+      sessionId,
+      dataDir: settings.dataDir,
+      interactive: true,
+      ...(settings.shots && shotsProcessTag
+        ? { shots: { processId: shotsProcessTag, ...(previousSessionId && previousSessionId !== sessionId ? { replaces: previousSessionId } : {}) } }
+        : {}),
+    })
     mod = instance
     await instance.restore().catch(() => undefined)
+    instance.shots?.start()
     return instance
   })()
   try {
@@ -207,6 +230,7 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
     dataDir,
     debugPath: debug && debug !== '0' ? `${dataDir}/claude-code-mod/debug.log` : null,
     agentTool: resolveAgentToolEnabled(await $.env.get('PLANNOTATOR_AGENT_TOOL'), configText),
+    shots: resolveShotsEnabled(await $.env.get('PLANNOTATOR_SHOTS'), configText),
   }
 }
 
@@ -220,6 +244,13 @@ async function registerCommands($: Engine): Promise<void> {
       .register({ name, description: spec.description, ...(spec.argumentHint ? { argumentHint: spec.argumentHint } : {}), immediate: true })
       .catch(() => undefined)
   }
+}
+
+/** Plannotator Shots: register `/plannotator-screenshot` unless a skill holds the name (command.run answers it then). */
+async function registerShotsCommand($: Engine): Promise<void> {
+  const listed = await $.command.list().catch(() => [])
+  if ((Array.isArray(listed) ? listed : []).some((command: { name: string }) => command.name === SHOTS_COMMAND)) return
+  await $.command.register({ name: SHOTS_COMMAND, ...SHOTS_COMMAND_SPEC, immediate: true }).catch(() => undefined)
 }
 
 /**
@@ -261,6 +292,7 @@ export function register(on: On) {
     const instance = await currentMod($)
     if (!instance) return result
     await registerCommands($)
+    if (allowed.shots) await registerShotsCommand($)
     // Decided once per process, here: the tool list is part of Claude's
     // prompt, so it never changes under a running session.
     if (allowed.agentTool) await registerTool($)
@@ -283,6 +315,14 @@ export function register(on: On) {
     const spec = COMMANDS[name]
     const text = await instance.runCommand(spec.kind, typeof e.args === 'string' ? e.args : '')
     return { text }
+  })
+
+  // Plannotator Shots: `/plannotator-screenshot` opens the capture overlay and latches this session.
+  on('command.run', { command: [SHOTS_COMMAND] }, async ($: Engine, e: any, next: Next) => {
+    if (!allowed?.shots || e.command !== SHOTS_COMMAND) return next(e)
+    const instance = await currentMod($)
+    if (!instance?.shots) return next(e)
+    return { text: await instance.shots.summon(typeof e.args === 'string' ? e.args : '') }
   })
 
   on('tool.call', async ($: Engine, e: any, next: Next) => {
