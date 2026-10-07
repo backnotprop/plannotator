@@ -1880,7 +1880,7 @@ Pinned by `components/DiagramBlock.askAI.test.tsx` and
 
 ---
 
-## Ask AI names a text selection's source lines (unreleased; additive, no core change)
+## Ask AI names a text selection's source lines (ui 0.52.0; additive, no core change)
 
 An Ask AI question asked from a markdown text selection now says which
 source lines the selection is on, so a phrase that occurs more than once in
@@ -1920,7 +1920,7 @@ heading for single-block selections) and `utils/aiPrompt.test.ts`.
 
 ---
 
-## `CompletionOverlay` `done` state (unreleased; additive)
+## `CompletionOverlay` `done` state (ui 0.52.0; additive)
 
 `submitted` accepts a new value, `'done'`: the session finished with nothing
 sent (Plannotator uses it for an annotate Done with nothing to send). It
@@ -1937,7 +1937,7 @@ so this is a visible change for `'exited'` only there. Every other value
 renders exactly as before. The overlay root now carries
 `data-completion-state={submitted}`.
 
-## Quick Labels: reorder and editable emoji (unreleased; additive, no core change)
+## Quick Labels: reorder and editable emoji (ui 0.52.0; additive, no core change)
 
 Settings → Labels (#1736) lets a person move a label up or down (per-row
 buttons, `aria-label="Move <text> up|down"`, a polite live region announces
@@ -1970,7 +1970,7 @@ What a host should know:
   emoji grapheme, including ZWJ sequences, flags, keycaps and skin tones, or
   null) and `emojiFromFieldInput`. Nothing was removed or renamed.
 
-## Question decision toggle and status tag (ui 0.52.0, unreleased; additive, no core change)
+## Question decision toggle and status tag (ui 0.52.0; additive, no core change)
 
 What Workspaces asked for: the reviewer can switch a `Decision: when answered`
 question's recording off and on from the card itself, and the host can draw
@@ -2030,6 +2030,10 @@ static, `statusTag: 'none'`, the `Viewer` threading, and a card with none of
 the props rendering the same markup.
 
 ---
+
+## Stale-tab guard: `serverSession` (ui 0.52.0, core 0.25.12; additive)
+
+Plannotator's servers issue one random `serverSession` nonce per process (new `@plannotator/core/server-session`) and refuse a decision that echoes a different one with `409 { code: "session_mismatch" }`, so a tab left open on a reused port cannot decide a new session. The client half is `utils/serverSession` (`adoptServerSession`, `withServerSession`, `withServerSessionQuery`, `noteServerSessionMismatch`, `useServerSessionReplaced`) plus `components/ServerSessionReplacedBanner`. Hosts that post decisions to their own backend need none of it: nothing in the shared components sends the field on its own, and a request without it is always accepted.
 
 ## The law (guardrails for anyone editing `@plannotator/ui`)
 
