@@ -1988,8 +1988,10 @@ Plannotator passes none of them, so its cards render exactly as before.
   function of the question, called per question card, so it can read your
   store by `question.question.key`). It applies only to a question carrying
   `Decision: when answered` (`decisionOnAnswer`) whose decision is not
-  already recorded. Off draws the same "Records a decision" tag dimmed with a
-  dotted outline (never different words) and hides the "Answering this
+  already recorded. Off draws the same "Records a decision" tag dimmed (in
+  the theme's `--muted-foreground`, not by opacity, so it stays as legible as
+  any secondary text) with a dotted outline and no fill (never different
+  words), and hides the "Answering this
   records a decision" row (`[data-question-decision-row]`). A recorded
   decision (`Decision: [statement](url)`) and a question with no decision line
   are never affected.

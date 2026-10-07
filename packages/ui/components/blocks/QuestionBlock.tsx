@@ -83,11 +83,14 @@ const DiamondGlyph = () => (
 );
 
 /** Draws a decision tag in its "off" state: the same words, dimmed, with a
- *  dotted outline instead of the tinted fill. Inline so it adds no utility
- *  classes to the shared stylesheet. */
+ *  dotted outline instead of the tinted fill. Dimmed means the theme's
+ *  muted-foreground, not opacity: 60% opacity on primary text dropped the
+ *  default light theme under 3:1, while muted-foreground is the token every
+ *  theme already tunes for secondary text. Inline so it adds no utility
+ *  classes to the shared stylesheet and wins over the tag's `text-primary`. */
 const DECISION_OFF_STYLE: React.CSSProperties = {
   background: 'transparent',
-  opacity: 0.6,
+  color: 'var(--muted-foreground)',
   outline: '1px dotted currentColor',
   outlineOffset: '-1px',
 };

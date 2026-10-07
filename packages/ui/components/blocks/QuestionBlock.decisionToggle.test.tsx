@@ -154,6 +154,10 @@ describe('QuestionBlock decision recording toggle', () => {
     expect(offButton.getAttribute('aria-pressed')).toBe('false');
     expect(offButton.textContent).toBe(button.textContent);
     expect(offButton.style.outlineStyle).toBe('dotted');
+    // Dimmed by the theme's muted-foreground, never by opacity: 60% opacity on
+    // primary text fell under 3:1 in the default light theme.
+    expect(offButton.style.color).toBe('var(--muted-foreground)');
+    expect(offButton.style.opacity).toBe('');
     expect(decisionRow(off) === null).toBe(true);
     expect(off.dataset.questionDecision).toBe('on-answer');
     expect(off.dataset.questionDecisionRecording).toBe('off');
