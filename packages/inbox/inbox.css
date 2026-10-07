@@ -386,3 +386,21 @@ button.ib-drow:hover { background: color-mix(in oklch, var(--muted) 35%, transpa
 .ib-pbody { position: relative; z-index: 0; }
 .ib-pfoot { z-index: 1; }
 .ib-pane.ib-withfile .ib-acts .ib-st { display: none; }
+
+/* Plannotator's code block, copied from packages/editor/index.css (the Inbox
+   does not load that file): message bodies and attached markdown draw their
+   fences as the editor does. */
+pre code.pn-code {
+  display: block;
+  padding: 1rem;
+  border-radius: var(--radius);
+  background: var(--code-bg) !important;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+pre code.pn-code[data-keep-layout] {
+  white-space: pre;
+  overflow-wrap: normal;
+}
