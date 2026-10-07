@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { AgentToolHost, SettingsModel } from '../api';
 import { formatBytes, plural, tildePath } from '../format';
 import { HARNESSES, type ConnectContext } from '../harnesses';
@@ -21,6 +21,9 @@ export interface SettingsPageProps {
   onToggleTool: (host: AgentToolHost, next: boolean) => void;
   permission: NotificationPermission | 'unsupported';
   onToggleNotifications: (next: boolean) => void;
+  /** Delete a thread or a project with its files as they were sent (blobs no other thread uses). */
+  onDeleteThread: (threadId: string) => Promise<void>;
+  onDeleteProject: (projectId: string) => Promise<void>;
 }
 
 const PERMISSION_LABEL: Record<NotificationPermission | 'unsupported', string> = {
@@ -72,7 +75,47 @@ function NotificationsBlock({
   );
 }
 
-function StoreTable({ store, threadCounts }: { store: SettingsModel['store']; threadCounts: (id: string) => number }) {
+/**
+ * Delete thread / Delete project (record 7.1): a first click asks "Delete?
+ * Click again" for a few seconds, a second one deletes. Nothing is undone
+ * once deleted, so one stray click never removes a project.
+ */
+function DeleteLink({ label, what, onDelete }: { label: string; what: string; onDelete: () => Promise<void> }) {
+  const [state, setState] = useState<'idle' | 'confirm' | 'busy'>('idle');
+  useEffect(() => {
+    if (state !== 'confirm') return;
+    const timer = setTimeout(() => setState('idle'), 4000);
+    return () => clearTimeout(timer);
+  }, [state]);
+  return (
+    <button
+      type="button"
+      className={`ib-del-l${state === 'confirm' ? ' ib-confirm' : ''}`}
+      disabled={state === 'busy'}
+      aria-label={state === 'confirm' ? `Delete ${what}: click again to delete` : `${label}: ${what}`}
+      onClick={() => {
+        if (state === 'idle') return setState('confirm');
+        if (state !== 'confirm') return;
+        setState('busy');
+        onDelete().finally(() => setState('idle'));
+      }}
+    >
+      {state === 'confirm' ? 'Delete? Click again' : label}
+    </button>
+  );
+}
+
+function StoreTable({
+  store,
+  threadCounts,
+  onDeleteThread,
+  onDeleteProject,
+}: {
+  store: SettingsModel['store'];
+  threadCounts: (id: string) => number;
+  onDeleteThread: (threadId: string) => Promise<void>;
+  onDeleteProject: (projectId: string) => Promise<void>;
+}) {
   const [open, setOpen] = useState<string | null>(store.projects[0]?.id ?? null);
   const [showAll, setShowAll] = useState(false);
   const shown = showAll ? store.projects : store.projects.slice(0, SHOWN_PROJECTS);
@@ -92,21 +135,17 @@ function StoreTable({ store, threadCounts }: { store: SettingsModel['store']; th
               <td className="ib-n">{plural(threadCounts(project.id), 'thread')}</td>
               <td className="ib-n">{formatBytes(project.bytes)}</td>
               <td className="ib-a">
-                <button type="button" className="ib-del-l" disabled title="Deleting comes in the next step">
-                  Delete project
-                </button>
+                <DeleteLink label="Delete project" what={project.name} onDelete={() => onDeleteProject(project.id)} />
               </td>
             </tr>,
             ...(isOpen
               ? project.threads.map((thread) => (
-                  <tr key={thread.thread_id} className="ib-sub">
+                  <tr key={thread.thread_id} className="ib-sub" data-store-thread={thread.thread_id}>
                     <td>{thread.subject ?? '(no subject)'}</td>
                     <td className="ib-n" />
                     <td className="ib-n">{formatBytes(thread.bytes)}</td>
                     <td className="ib-a">
-                      <button type="button" className="ib-del-l" disabled title="Deleting comes in the next step">
-                        Delete thread
-                      </button>
+                      <DeleteLink label="Delete thread" what={thread.subject ?? 'this thread'} onDelete={() => onDeleteThread(thread.thread_id)} />
                     </td>
                   </tr>
                 ))
@@ -138,6 +177,8 @@ export function SettingsPage({
   onToggleTool,
   permission,
   onToggleNotifications,
+  onDeleteThread,
+  onDeleteProject,
 }: SettingsPageProps) {
   const env = settings?.inbox_tool.env ?? null;
   return (
@@ -187,15 +228,17 @@ export function SettingsPage({
           <div className="ib-sblock">
             <h2>Stored on this machine</h2>
             <p>
-              {formatBytes(settings.store.bytes)} in {tildePath(settings.store.dir, settings.home)}: messages and your answers.
+              <span data-store-bytes={settings.store.bytes}>{formatBytes(settings.store.bytes)}</span> in{' '}
+              {tildePath(settings.store.dir, settings.home)}: messages, attached files as they were sent, and annotations.
             </p>
             {settings.store.projects.length > 0 && (
-              <StoreTable store={settings.store} threadCounts={(id) => settings.store.projects.find((p) => p.id === id)?.threads.length ?? 0} />
+              <StoreTable
+                store={settings.store}
+                threadCounts={(id) => settings.store.projects.find((p) => p.id === id)?.threads.length ?? 0}
+                onDeleteThread={onDeleteThread}
+                onDeleteProject={onDeleteProject}
+              />
             )}
-            <div className="ib-note">
-              <Icon name="info" />
-              Delete thread and delete project come in the next step.
-            </div>
           </div>
         )}
         {settings && (

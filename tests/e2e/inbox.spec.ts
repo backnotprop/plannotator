@@ -91,7 +91,7 @@ test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(builtBinary), `build the binary first: ${builtBinary}`).toBe(true);
-  // Only this spec's own captures: the decisions spec keeps its in proof/decisions/.
+  // Only this spec's own captures: the decisions and attachments specs keep theirs in proof/decisions/ and proof/attachments/.
   mkdirSync(proofDir, { recursive: true });
   for (const file of readdirSync(proofDir)) if (file.endsWith('.png') || file === 'index.html') rmSync(join(proofDir, file));
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-e2e-')));
@@ -391,7 +391,8 @@ test('Settings: the agent tool knob applies to the next session, the compact pic
   const store = page.locator('.ib-stbl');
   await expect(store.locator('[data-store-project="billing-svc"]')).toContainText('2 threads');
   await expect(store.locator('[data-store-project="docs-site"]')).toContainText('2 threads');
-  await expect(store.getByRole('button', { name: 'Delete project' }).first()).toBeDisabled();
+  // Delete thread and delete project are live since step 2 (proved in inbox-attachments.spec.ts).
+  await expect(store.getByRole('button', { name: /Delete project/ }).first()).toBeEnabled();
   await shot('7.1-settings');
 
   await piSwitch.click();

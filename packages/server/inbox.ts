@@ -70,6 +70,8 @@ import {
   waitingDecisions,
 } from "./inbox-decisions";
 import { handleFavicon } from "./shared-handlers";
+import { createInboxAttachmentRoutes } from "./inbox-attachments";
+import { recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
 
 const LOOPBACK = "127.0.0.1";
 /** Remote mode's fixed port: the Inbox never takes it. */
@@ -155,6 +157,12 @@ const ERROR_STATUS: Record<string, number> = {
   idempotency_key_reused: 409,
   config_not_saved: 500,
   ...INBOX_DECISION_ERROR_STATUS,
+  // Attachments and annotations (step 2).
+  attachment_not_found: 404,
+  attachment_missing: 404,
+  attachment_changed_type: 409,
+  annotation_not_found: 404,
+  annotation_closed: 409,
 };
 
 /**
@@ -171,7 +179,11 @@ const WINDOW_CSP = [
   "connect-src 'self'",
   "worker-src 'self' blob:",
   "frame-ancestors 'none'",
-  "base-uri 'none'",
+  // 'self', not 'none': an attached HTML page is drawn in a srcdoc frame,
+  // which inherits this policy, with a <base href> at its own folder's
+  // asset route on this origin (annotate's #1554 serving path). Without it
+  // the base is blocked and the page's frames resolve onto the Inbox.
+  "base-uri 'self'",
   "form-action 'none'",
 ].join("; ");
 
@@ -297,7 +309,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   const mcp = createMcpHandler(
-    () => createInboxMcpServer({ store, baseUrl: () => baseUrl, resolveProject }),
+    () =>
+      createInboxMcpServer({
+        store,
+        baseUrl: () => baseUrl,
+        resolveProject,
+        recordAttachments: (paths, project, base) =>
+          recordInboxAttachments(store.dir, paths, { base, projectRoot: project.root, at: new Date().toISOString() }),
+      }),
     { legacy: "stateless" },
   );
 
@@ -456,6 +475,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
       case "decision":
         return { seq: line.seq, kind: line.kind, id: line.id, decision: line.record };
+      case "annotation":
+        return { seq: line.seq, kind: line.kind, id: line.id, annotation: line.record };
     }
   };
 
@@ -511,6 +532,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   let stopRequested = false;
   let server: ReturnType<typeof Bun.serve>;
+  let attachmentRoutes: ReturnType<typeof createInboxAttachmentRoutes>;
 
   const readBody = async (req: Request): Promise<Record<string, unknown>> => {
     try {
@@ -637,6 +659,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               words: typeof body.words === "string" ? body.words : undefined,
               questions: (body.questions as never) ?? [],
               idempotency_key: body.idempotency_key as string,
+              feedback: typeof body.feedback === "string" ? body.feedback : undefined,
+              annotation_ids: body.annotation_ids as never,
             });
             // Step 3: the sent answers whose decision switch is on become
             // decisions, after the reply landed; a refused one never undoes it.
@@ -685,6 +709,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
       if (path === "/favicon.png" && req.method === "GET") return handleFavicon();
 
+      // Step 2: attachments by id, annotations, the HTML asset route, delete
+      // thread and delete project (packages/server/inbox-attachments.ts).
+      const attached = await attachmentRoutes(req, url);
+      if (attached) return attached;
+
       if (path.startsWith("/api/")) return json({ error: "Not found", code: "not_found" }, 404);
       return new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8", "X-Content-Type-Options": "nosniff" } });
     } catch (error) {
@@ -692,6 +721,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
   };
 
+  attachmentRoutes = createInboxAttachmentRoutes({ store, serverSession, readBody });
   const started = startOnLoopback(fetch, previous?.port ?? null);
   server = started.server;
   portChanged = started.portChanged;

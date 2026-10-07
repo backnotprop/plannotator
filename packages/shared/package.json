@@ -110,7 +110,8 @@
     "./inbox/schema": "./inbox/schema.ts",
     "./inbox/store": "./inbox/store.ts",
     "./inbox/list": "./inbox/list.ts",
-    "./inbox/registry": "./inbox/registry.ts"
+    "./inbox/registry": "./inbox/registry.ts",
+    "./inbox/attachments": "./inbox/attachments.ts"
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.64",

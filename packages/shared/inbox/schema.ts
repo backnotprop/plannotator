@@ -7,6 +7,10 @@
  *     projects/<key>/messages.jsonl    messages and replies
  *     projects/<key>/questions.jsonl   one record per question block
  *     projects/<key>/decisions.jsonl   the project's decisions (step 3)
+ *     projects/<key>/annotations.jsonl the person's annotations on attachments
+ *     blobs/<sha256>                   the bytes of each attachment as sent
+ *     seq.json                         the highest seq ever written (kept
+ *                                      across a deletion, so seq never repeats)
  *
  * Every line is `{ v, seq, at, kind, id, record }`: a full snapshot of one
  * record. The last line per id is current; nothing is rewritten in place.
@@ -25,12 +29,14 @@ export const PROJECT_FILE = "project.json";
 export const MESSAGES_FILE = "messages.jsonl";
 export const QUESTIONS_FILE = "questions.jsonl";
 export const DECISIONS_FILE = "decisions.jsonl";
+export const ANNOTATIONS_FILE = "annotations.jsonl";
+export const SEQ_FLOOR_FILE = "seq.json";
 
 export function inboxDir(dataDir: string): string {
   return join(dataDir, INBOX_DIR_NAME);
 }
 
-const KINDS: ReadonlySet<InboxRecordKind> = new Set(["project", "message", "question", "decision"]);
+const KINDS: ReadonlySet<InboxRecordKind> = new Set(["project", "message", "question", "decision", "annotation"]);
 
 /**
  * One line of a store file, or null when it is not a line this reader can

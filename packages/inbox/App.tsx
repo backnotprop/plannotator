@@ -38,7 +38,20 @@ import { DecisionsPage } from './components/Decisions';
 
 // The Inbox has no /api/config and no browser-agent tools: settings stay in
 // the page's own cookies, and WebMCP is off.
-configurePlannotatorUI({ serverSync: () => {}, webmcp: { enabled: false, namePrefix: 'plannotator.' } });
+// No image uploads and no skill catalog either: a comment's image would need
+// an upload route the Inbox does not have, so the composer says so instead of
+// posting nowhere.
+configurePlannotatorUI({
+  serverSync: () => {},
+  webmcp: { enabled: false, namePrefix: 'plannotator.' },
+  // Skill references in comments read the host's skills; the Inbox has none to offer.
+  skillCatalogTransport: async () => [],
+  uploadTransport: {
+    upload: async () => {
+      throw new Error('Images cannot be added to a comment in the Inbox.');
+    },
+  },
+});
 
 interface Route {
   page: 'inbox' | 'settings' | 'decisions';
@@ -46,6 +59,8 @@ interface Route {
   thread: string | null;
   /** The decision open beside the Decisions list. */
   decision?: string | null;
+  /** An attachment open beside the thread: `file=att_…`, `v=sent` for the version the agent sent, `at=` an annotation to show. */
+  file?: { id: string; version: 'current' | 'sent'; focus: string | null } | null;
 }
 
 function readRoute(): Route {
@@ -55,7 +70,14 @@ function readRoute(): Route {
   if (params.has('decisions')) {
     return { page: 'decisions', project: params.get('decisions') || null, thread: null, decision: params.get('decision') };
   }
-  return { page: 'inbox', project: params.get('project'), thread: params.get('thread') };
+  const thread = params.get('thread');
+  const fileId = thread ? params.get('file') : null;
+  return {
+    page: 'inbox',
+    project: params.get('project'),
+    thread,
+    file: fileId ? { id: fileId, version: params.get('v') === 'sent' ? 'sent' : 'current', focus: params.get('at') } : null,
+  };
 }
 
 function writeRoute(route: Route): void {
@@ -70,6 +92,11 @@ function writeRoute(route: Route): void {
     const params = new URLSearchParams();
     if (route.project) params.set('project', route.project);
     if (route.thread) params.set('thread', route.thread);
+    if (route.thread && route.file) {
+      params.set('file', route.file.id);
+      if (route.file.version === 'sent') params.set('v', 'sent');
+      if (route.file.focus) params.set('at', route.file.focus);
+    }
     hash = params.toString();
   }
   const next = hash ? `#${hash}` : window.location.pathname + window.location.search;
@@ -248,7 +275,8 @@ function Inbox() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || !routeRef.current.thread) return;
+      // An open file owns Escape (the HTML viewer's ladder, the composers).
+      if (event.key !== 'Escape' || !routeRef.current.thread || routeRef.current.file) return;
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable)) return;
       writeRoute({ ...routeRef.current, thread: null });
@@ -318,6 +346,26 @@ function Inbox() {
     }
   };
 
+  // Settings' Delete thread / Delete project: the store, its blobs and the size read again.
+  const deleteThread = async (threadId: string) => {
+    setSettingsError(null);
+    try {
+      await inboxApi.deleteThread(threadId);
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The thread was not deleted.');
+    }
+    await Promise.all([refreshSettings(), refreshList(true)]);
+  };
+  const deleteProject = async (projectId: string) => {
+    setSettingsError(null);
+    try {
+      await inboxApi.deleteProject(projectId);
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The project was not deleted.');
+    }
+    await Promise.all([refreshSettings(), refreshList(true)]);
+  };
+
   const projects = latest?.projects ?? [];
   const latestSections = latest?.sections ?? [];
   const projectCounts = useMemo(() => {
@@ -344,6 +392,8 @@ function Inbox() {
   const filterProject = route.page === 'inbox' && route.project ? projects.find((p) => p.id === route.project) ?? null : null;
   const notice = shown && latest ? heldNotice(filterSections(shown, route.project), filterSections(latest.sections, route.project)).text : null;
   const firstRun = latest !== null && projects.length === 0;
+  // A file beside the thread takes the list's and the sidebar's room (record 2.2).
+  const fileOpen = route.page === 'inbox' && !!route.thread && !!route.file;
 
   let main: ReactNode;
   const decisionsFolder = decisionsProject ? projects.find((p) => p.id === decisionsProject) ?? null : null;
@@ -356,6 +406,8 @@ function Inbox() {
         onToggleTool={toggleTool}
         permission={notifications.permission}
         onToggleNotifications={(next) => void notifications.setEnabled(next)}
+        onDeleteThread={deleteThread}
+        onDeleteProject={deleteProject}
       />
     );
   } else if (route.page === 'decisions' && decisionsFolder) {
@@ -382,6 +434,7 @@ function Inbox() {
   } else {
     main = (
       <>
+        {!fileOpen && (
         <InboxList
           title={filterProject?.name ?? 'Inbox'}
           path={filterProject ? tildePath(filterProject.root, settings?.home) : null}
@@ -394,15 +447,18 @@ function Inbox() {
           onShowNew={() => setShown(latest.sections)}
           onOpen={openRow}
         />
+        )}
         {route.thread && thread && thread.thread_id === route.thread && (
           <ThreadPane
             thread={thread}
             sent={latestSections.flatMap((section) => section.threads).find((row) => row.thread_id === thread.thread_id)?.sent ?? null}
             onQuestions={patchQuestions}
             onChanged={afterWrite}
-            onClose={() => go({ ...route, thread: null })}
+            onClose={() => go({ ...route, thread: null, file: null })}
             decisions={threadDecisions}
             onOpenDecisionPage={(decision) => go({ page: 'decisions', project: decision.project_id, thread: null, decision: decision.id })}
+            file={route.file ?? null}
+            onOpenFile={(file) => writeRoute({ ...routeRef.current, file })}
           />
         )}
       </>
@@ -411,7 +467,7 @@ function Inbox() {
 
   return (
     <div className="pn-inbox">
-      <div className="ib-shell">
+      <div className={`ib-shell${fileOpen ? ' ib-fileopen' : ''}`}>
         <Sidebar
           page={route.page}
           projectId={route.project}

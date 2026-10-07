@@ -17,6 +17,7 @@ import type {
   InboxThread,
 } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
+import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
 
 export type AgentToolHost = 'claude-code' | 'pi' | 'opencode';
 
@@ -159,8 +160,16 @@ export const inboxApi = {
     post<{ questions: InboxQuestion[] }>(`/api/inbox/messages/${encodeURIComponent(messageId)}/picks`, {
       questions: [{ key, revision, answer }],
     }),
-  reply: (messageId: string, input: { idempotency_key: string; words: string; questions: { key: string; revision: number }[] }) =>
-    post<ReplyResult>(`/api/inbox/messages/${encodeURIComponent(messageId)}/reply`, input),
+  reply: (
+    messageId: string,
+    input: {
+      idempotency_key: string;
+      words: string;
+      questions: { key: string; revision: number }[];
+      feedback?: string;
+      annotation_ids?: string[];
+    },
+  ) => post<ReplyResult>(`/api/inbox/messages/${encodeURIComponent(messageId)}/reply`, input),
   /** The card's switch and its words on one question: `recording`, and `draft` on Done. */
   setDecision: (messageId: string, key: string, input: { recording?: boolean; draft?: InboxDecisionDraft | null }) =>
     post<{ question: InboxQuestion }>(`/api/inbox/messages/${encodeURIComponent(messageId)}/decision`, { key, ...input }),
@@ -177,13 +186,40 @@ export const inboxApi = {
     post<{ inbox_tool: SettingsModel['inbox_tool'] }>('/api/inbox/settings', { inbox_tool: hosts }),
   saveNotifications: (change: Partial<NotificationSettings>) =>
     post<{ notifications: NotificationSettings }>('/api/inbox/settings', { notifications: change }),
+  // Step 2: attachments (by id only), annotations, deleting.
+  attachments: (threadId: string) => get<AttachmentsModel>(`/api/inbox/threads/${encodeURIComponent(threadId)}/attachments`),
+  view: (attachmentId: string, version: 'current' | 'sent') =>
+    get<AttachmentView>(`/api/inbox/attachments/${encodeURIComponent(attachmentId)}/view${version === 'sent' ? '?version=sent' : ''}`),
+  saveAnnotation: (attachmentId: string, version: string, annotation: object) =>
+    post<{ annotation: InboxAnnotationRecord }>('/api/inbox/annotations', { attachment_id: attachmentId, version, annotation }),
+  removeAnnotation: (id: string) => post<{ annotation: InboxAnnotationRecord }>(`/api/inbox/annotations/${encodeURIComponent(id)}/remove`, {}),
+  deleteThread: (threadId: string) => post<{ store: SettingsModel['store'] }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/delete`, {}),
+  deleteProject: (projectId: string) => post<{ store: SettingsModel['store'] }>(`/api/inbox/projects/${encodeURIComponent(projectId)}/delete`, {}),
 };
 
 /** One store line as the event stream carries it (packages/server/inbox.ts, `eventPayload`). */
 export type InboxEvent =
   | { seq: number; kind: 'project'; id: string; project: InboxProject }
   | { seq: number; kind: 'message'; id: string; message: InboxMessage }
-  | { seq: number; kind: 'question'; id: string; question: InboxQuestion };
+  | { seq: number; kind: 'question'; id: string; question: InboxQuestion }
+  | { seq: number; kind: 'annotation'; id: string; annotation: InboxAnnotationRecord };
+
+/** A thread's attachments as they are now, and the person's annotations waiting for a Send. */
+export interface AttachmentsModel {
+  serverSession: string;
+  attachments: InboxAttachmentState[];
+  annotations: InboxAnnotationRecord[];
+}
+
+/** One version of a file: its text, and for HTML the page as annotate serves it. */
+export interface AttachmentView {
+  serverSession: string;
+  attachment: InboxAttachmentState;
+  /** "current" or the sent version's sha256: the key annotations are stored under. */
+  version: string;
+  text: string;
+  html: string | null;
+}
 
 /**
  * The server's event stream: `onRecord` for every store line after the

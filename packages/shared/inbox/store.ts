@@ -23,6 +23,7 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -58,8 +59,18 @@ import { inboxListSections, inboxRowUnread, inboxSectionOf } from "./list";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
 import { sanitizeTag } from "@plannotator/core/project";
 import {
+  INBOX_ANNOTATION_CURRENT,
+  isInboxAnnotationId,
+  isInboxAnnotationVersion,
+  type InboxAnnotationRecord,
+  type InboxAttachment,
+} from "@plannotator/core/inbox-types";
+import { inboxBlobSizes, removeUnusedInboxBlobs } from "./attachments";
+import {
+  ANNOTATIONS_FILE,
   DECISIONS_FILE,
   INBOX_PROJECTS_DIR,
+  SEQ_FLOOR_FILE,
   InboxError,
   inboxDir,
   MESSAGES_FILE,
@@ -86,6 +97,8 @@ export interface InboxSendInput {
    * message joins its session's open default thread. Ignored with reply_to.
    */
   thread?: string | null;
+  /** The files attached, already recorded (blobs written) by recordInboxAttachments. */
+  attachments?: InboxAttachment[];
 }
 
 export interface InboxSendResult {
@@ -104,6 +117,13 @@ export interface InboxReplyInput {
   words?: string;
   questions?: InboxAnswerEntry[];
   idempotency_key: string;
+  /**
+   * The person's annotations on the thread's attachments, as Plannotator's
+   * feedback text (the window exports them), appended after the answers.
+   */
+  feedback?: string;
+  /** The annotations that text carries: marked sent with the reply. */
+  annotation_ids?: string[];
 }
 
 export interface InboxReplyResult {
@@ -118,6 +138,12 @@ export interface InboxProjectUsage {
   root: string;
   bytes: number;
   threads: { thread_id: string; subject: string | null; bytes: number }[];
+}
+
+/** An attachment found by its id: the record and the message that carries it. */
+export interface InboxAttachmentHit {
+  attachment: InboxAttachment;
+  message: InboxMessage;
 }
 
 export interface InboxDiskUsage {
@@ -176,6 +202,8 @@ export class InboxStore {
   private readonly namedThreads = new Map<string, string[]>();
   /** Every decision, by id (step 3; the rules are packages/server/inbox-decisions.ts). */
   private readonly decisions = new Map<string, InboxDecision>();
+  /** The person's annotations on attachments, by id. */
+  private readonly annotations = new Map<string, InboxAnnotationRecord>();
   private readonly tornFiles = new Set<string>();
   private readonly listeners = new Set<InboxListener>();
   private readonly now: () => Date;
@@ -201,12 +229,13 @@ export class InboxStore {
     } catch {
       // Best effort (Windows, a filesystem without modes).
     }
+    this.seq = Math.max(this.seq, this.readSeqFloor());
     const projectsDir = join(this.dir, INBOX_PROJECTS_DIR);
     if (!existsSync(projectsDir)) return;
     const lines: InboxLine[] = [];
     for (const key of readdirSync(projectsDir)) {
       const folder = join(projectsDir, key);
-      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, DECISIONS_FILE]) {
+      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, DECISIONS_FILE, ANNOTATIONS_FILE]) {
         const path = join(folder, name);
         let text: string;
         try {
@@ -237,6 +266,11 @@ export class InboxStore {
     for (const record of this.questions.values()) {
       if (record.sent_reply_id === null || this.messages.has(record.sent_reply_id)) continue;
       this.restoreQuestion({ ...record, sent_revision: 0, sent_reply_id: null });
+    }
+    // Annotations a Send marked before its reply line landed wait again.
+    for (const record of this.annotations.values()) {
+      if (record.sent_reply_id === null || this.messages.has(record.sent_reply_id)) continue;
+      this.restoreAnnotation({ ...record, sent_reply_id: null });
     }
   }
 
@@ -278,6 +312,9 @@ export class InboxStore {
       }
       case "decision":
         this.decisions.set(line.record.id, line.record);
+        break;
+      case "annotation":
+        this.annotations.set(line.record.id, line.record);
         break;
     }
   }
@@ -549,12 +586,24 @@ export class InboxStore {
    */
   diskUsage(): InboxDiskUsage {
     const projects: InboxProjectUsage[] = [];
-    let total = 0;
+    const blobSizes = inboxBlobSizes(this.dir);
+    // Every blob once in the total; a project and a thread count each blob they use once.
+    let total = [...blobSizes.values()].reduce((sum, size) => sum + size, 0);
     for (const project of this.listProjects()) {
       const folder = this.projectFolder(project);
       const perThread = new Map<string, number>();
       let bytes = 0;
-      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, DECISIONS_FILE]) {
+      const projectBlobs = new Set<string>();
+      for (const [threadId, blobs] of this.threadBlobs(project.id)) {
+        let threadBytes = 0;
+        for (const sha256 of blobs) {
+          threadBytes += blobSizes.get(sha256) ?? 0;
+          projectBlobs.add(sha256);
+        }
+        perThread.set(threadId, threadBytes);
+      }
+      for (const sha256 of projectBlobs) bytes += blobSizes.get(sha256) ?? 0;
+      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, DECISIONS_FILE, ANNOTATIONS_FILE]) {
         let text: string;
         try {
           text = readFileSync(join(folder, name), "utf8");
@@ -562,18 +611,19 @@ export class InboxStore {
           continue;
         }
         bytes += Buffer.byteLength(text);
+        total += Buffer.byteLength(text);
         // The project line and its decisions count for the project, not a thread.
         if (name === PROJECT_FILE || name === DECISIONS_FILE) continue;
         for (const raw of text.split("\n")) {
           const line = parseInboxLine(raw);
           if (!line) continue;
-          const messageId = line.kind === "message" ? line.record.id : line.kind === "question" ? line.record.message_id : null;
+          const messageId =
+            line.kind === "message" ? line.record.id : line.kind === "question" || line.kind === "annotation" ? line.record.message_id : null;
           const threadId = messageId ? this.messages.get(messageId)?.thread_id : undefined;
           if (!threadId) continue;
           perThread.set(threadId, (perThread.get(threadId) ?? 0) + Buffer.byteLength(raw) + 1);
         }
       }
-      total += bytes;
       const threads = [...perThread.entries()]
         .map(([threadId, threadBytes]) => ({ thread_id: threadId, subject: this.messages.get(threadId)?.subject ?? null, bytes: threadBytes }))
         .sort((a, b) => b.bytes - a.bytes || a.thread_id.localeCompare(b.thread_id));
@@ -749,6 +799,9 @@ export class InboxStore {
       resolved_at: null,
       idempotency_key: key,
       thread_name: threadName,
+      ...(input.attachments && input.attachments.length > 0
+        ? { attachments: input.attachments.map((attachment) => ({ ...attachment, sent_at: at })) }
+        : {}),
     };
     this.appendMessage(message, at);
     for (const question of parsed) {
@@ -880,7 +933,9 @@ export class InboxStore {
     if (!Array.isArray(entries)) throw new InboxError("validation_error", "questions: must be a list.", { field: "questions" });
     const words = typeof input.words === "string" ? input.words : "";
     const plan = this.planAnswers(message, entries, "send");
-    if (plan.length === 0 && words.trim() === "") {
+    const feedback = typeof input.feedback === "string" ? input.feedback.trim() : "";
+    const carried = this.planSentAnnotations(message.thread_id, input.annotation_ids);
+    if (plan.length === 0 && words.trim() === "" && feedback === "") {
       throw new InboxError("validation_error", "words: write a reply or send at least one answer.", { field: "words" });
     }
 
@@ -903,12 +958,18 @@ export class InboxStore {
     const earlier = all
       .filter((r) => !sentKeys.has(r.key) && r.answer !== null && r.sent_revision > 0 && r.sent_revision === r.revision)
       .map((r) => r.answer as QuestionAnswer);
-    const body = composeInboxReplyBody({
-      questions: all,
-      sent: updated.map((r) => r.answer as QuestionAnswer),
-      earlier,
-      words,
-    });
+    // The picks first, then the annotations as Plannotator's feedback text.
+    const body = [
+      composeInboxReplyBody({
+        questions: all,
+        sent: updated.map((r) => r.answer as QuestionAnswer),
+        earlier,
+        words,
+      }),
+      feedback,
+    ]
+      .filter((part) => part !== "")
+      .join("\n\n");
 
     // The questions first, so whoever reads the reply finds them already sent.
     // If any of these writes fails, the questions written so far are put back
@@ -928,9 +989,11 @@ export class InboxStore {
     };
     try {
       for (const record of updated) this.appendQuestion(record, at);
+      for (const record of carried) this.appendAnnotation({ ...record, sent_reply_id: replyId, updated_at: at }, at);
       this.appendMessage(reply, at);
     } catch (error) {
       for (const { record } of plan) this.restoreQuestion(record);
+      for (const record of carried) this.restoreAnnotation(record);
       throw error;
     }
     return { reply, questions: this.questionsOf(message.id), replayed: false };
@@ -1005,5 +1068,231 @@ export class InboxStore {
       this.appendMessage({ ...root, resolved_at: resolved ? at : null }, at);
     }
     return this.threadSummary(root.id)!;
+  }
+
+  // ─────────────────────────── attachments and annotations ───────────────────────────
+
+  /** An attachment by its id: the record and the message that carries it. */
+  attachment(attachmentId: string): InboxAttachmentHit | null {
+    for (const message of this.messages.values()) {
+      const attachment = message.attachments?.find((a) => a.id === attachmentId);
+      if (attachment) return { attachment, message };
+    }
+    return null;
+  }
+
+  /** The thread's attachments, message by message, in thread order. */
+  threadAttachments(threadId: string): InboxAttachmentHit[] {
+    return this.threadMessages(threadId).flatMap((message) => (message.attachments ?? []).map((attachment) => ({ attachment, message })));
+  }
+
+  /** The person's annotations in a thread still waiting for a Send (not removed, not sent). */
+  pendingAnnotations(threadId: string): InboxAnnotationRecord[] {
+    const out: InboxAnnotationRecord[] = [];
+    for (const record of this.annotations.values()) {
+      if (record.thread_id === threadId && record.removed_at === null && record.sent_reply_id === null) out.push(record);
+    }
+    return out.sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+  }
+
+  /**
+   * Save an annotation on an attachment's version (a new one, or an edit of
+   * one still waiting). Its key is the attachment's path and the version:
+   * "current" (the file on disk, whatever its bytes are now) or the sent
+   * blob's hash.
+   */
+  saveAnnotation(input: { attachment_id: string; version: unknown; annotation: unknown }): InboxAnnotationRecord {
+    const hit = this.attachment(input.attachment_id);
+    if (!hit) throw new InboxError("attachment_not_found", `No attachment ${input.attachment_id}.`);
+    if (!isInboxAnnotationVersion(input.version)) {
+      throw new InboxError("validation_error", "version: \"current\" or the sent version's sha256.", { field: "version" });
+    }
+    if (input.version !== INBOX_ANNOTATION_CURRENT && input.version !== hit.attachment.sent_sha256) {
+      throw new InboxError("validation_error", "version: not a version of this attachment.", { field: "version" });
+    }
+    const annotation = input.annotation;
+    if (!annotation || typeof annotation !== "object" || Array.isArray(annotation)) {
+      throw new InboxError("validation_error", "annotation: an object.", { field: "annotation" });
+    }
+    const id = (annotation as Record<string, unknown>).id;
+    if (!isInboxAnnotationId(id)) throw new InboxError("validation_error", "annotation.id: a short id.", { field: "annotation.id" });
+    if (this.isResolved(hit.message.thread_id)) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to annotate.");
+    const existing = this.annotations.get(id);
+    // A draft's key is the file's path and the version, so an annotation
+    // made through one attachment of a file edits from another of the same file.
+    if (existing && (existing.path !== hit.attachment.path || existing.version !== input.version || existing.thread_id !== hit.message.thread_id)) {
+      throw new InboxError("validation_error", "annotation.id: already used on another file or version.", { field: "annotation.id" });
+    }
+    if (existing && (existing.sent_reply_id !== null || existing.removed_at !== null)) {
+      throw new InboxError("annotation_closed", "This annotation was already sent or removed.");
+    }
+    const at = this.stamp();
+    const record: InboxAnnotationRecord = {
+      id,
+      project_id: hit.message.project_id,
+      thread_id: hit.message.thread_id,
+      message_id: existing?.message_id ?? hit.message.id,
+      attachment_id: existing?.attachment_id ?? hit.attachment.id,
+      path: hit.attachment.path,
+      version: input.version,
+      annotation: annotation as Record<string, unknown>,
+      created_at: existing?.created_at ?? at,
+      updated_at: at,
+      removed_at: null,
+      sent_reply_id: null,
+    };
+    this.appendAnnotation(record, at);
+    return record;
+  }
+
+  /** Remove an annotation still waiting for a Send. Removing it again changes nothing. */
+  removeAnnotation(id: string): InboxAnnotationRecord {
+    const record = this.annotations.get(id);
+    if (!record) throw new InboxError("annotation_not_found", `No annotation ${id}.`);
+    if (record.removed_at !== null) return record;
+    if (record.sent_reply_id !== null) throw new InboxError("annotation_closed", "This annotation was already sent.");
+    const at = this.stamp();
+    const next = { ...record, removed_at: at, updated_at: at };
+    this.appendAnnotation(next, at);
+    return next;
+  }
+
+  /** The annotations a Send names: each in this thread and still waiting. */
+  private planSentAnnotations(threadId: string, ids: unknown): InboxAnnotationRecord[] {
+    if (ids === undefined || ids === null) return [];
+    if (!Array.isArray(ids)) throw new InboxError("validation_error", "annotation_ids: must be a list.", { field: "annotation_ids" });
+    const seen = new Set<string>();
+    return ids.map((id, index) => {
+      const field = `annotation_ids[${index}]`;
+      const record = typeof id === "string" ? this.annotations.get(id) : undefined;
+      if (!record || record.thread_id !== threadId) throw new InboxError("annotation_not_found", `${field}: no such annotation in this thread.`, { field });
+      if (seen.has(record.id)) throw new InboxError("validation_error", `${field}: listed twice.`, { field });
+      seen.add(record.id);
+      if (record.removed_at !== null || record.sent_reply_id !== null) {
+        throw new InboxError("annotation_closed", `${field}: already sent or removed.`, { field });
+      }
+      return record;
+    });
+  }
+
+  private appendAnnotation(record: InboxAnnotationRecord, at: string): void {
+    const project = this.projectsById.get(record.project_id);
+    if (!project) throw new InboxError("project_not_found", `No project ${record.project_id}.`);
+    this.write(join(this.projectFolder(project), ANNOTATIONS_FILE), {
+      v: INBOX_RECORD_VERSION,
+      seq: this.seq + 1,
+      at,
+      kind: "annotation",
+      id: record.id,
+      record,
+    });
+  }
+
+  private restoreAnnotation(record: InboxAnnotationRecord): void {
+    this.annotations.set(record.id, record);
+    const key = `annotation:${record.id}`;
+    const line = this.latest.get(key);
+    if (line && line.kind === "annotation") this.latest.set(key, { ...line, record });
+  }
+
+  /** Each thread of a project with the blobs its attachments use. */
+  private threadBlobs(projectId: string): Map<string, Set<string>> {
+    const out = new Map<string, Set<string>>();
+    for (const message of this.messages.values()) {
+      if (message.project_id !== projectId || !message.attachments?.length) continue;
+      const blobs = out.get(message.thread_id) ?? new Set<string>();
+      for (const attachment of message.attachments) blobs.add(attachment.sent_sha256);
+      out.set(message.thread_id, blobs);
+    }
+    return out;
+  }
+
+  // ─────────────────────────── deleting ───────────────────────────
+
+  /**
+   * Delete a thread: its messages, questions and annotations are dropped from
+   * the project's files (its decisions stay: they belong to the project) (each rewritten whole: temp file, then rename), and
+   * every blob no other record uses is removed. The store is then read again
+   * from disk, so what routes and lists next is exactly what a restart reads.
+   */
+  deleteThread(threadId: string): void {
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    const project = this.projectsById.get(root.project_id);
+    if (!project) throw new InboxError("project_not_found", `No project ${root.project_id}.`);
+    const messageIds = new Set(this.threadMembers.get(threadId) ?? []);
+    const folder = this.projectFolder(project);
+    this.keepSeqFloor();
+    for (const name of [MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE]) {
+      const path = join(folder, name);
+      let text: string;
+      try {
+        text = readFileSync(path, "utf8");
+      } catch {
+        continue;
+      }
+      const kept = text.split("\n").filter((raw) => {
+        const line = parseInboxLine(raw);
+        if (!line) return false;
+        if (line.kind === "message") return line.record.thread_id !== threadId;
+        if (line.kind === "question") return !messageIds.has(line.record.message_id);
+        if (line.kind === "annotation") return line.record.thread_id !== threadId;
+        return true;
+      });
+      const temp = `${path}.${process.pid}.tmp`;
+      writeFileSync(temp, kept.length > 0 ? `${kept.join("\n")}\n` : "", { mode: 0o600 });
+      renameSync(temp, path);
+    }
+    this.reload();
+  }
+
+  /** Delete a project: its whole folder, then every blob no other record uses. */
+  deleteProject(projectId: string): void {
+    const project = this.projectsById.get(projectId);
+    if (!project) throw new InboxError("project_not_found", `No project ${projectId}.`);
+    this.keepSeqFloor();
+    rmSync(this.projectFolder(project), { recursive: true, force: true });
+    this.reload();
+  }
+
+  /** Read the store again from disk (after a deletion), then drop the blobs nothing uses. */
+  private reload(): void {
+    this.latest.clear();
+    this.projectsById.clear();
+    this.projectsByRoot.clear();
+    this.messages.clear();
+    this.messageSeq.clear();
+    this.questions.clear();
+    this.messageQuestions.clear();
+    this.sessionThreads.clear();
+    this.threadMembers.clear();
+    this.namedThreads.clear();
+    this.decisions.clear();
+    this.annotations.clear();
+    this.tornFiles.clear();
+    this.load();
+    const used = new Set<string>();
+    for (const message of this.messages.values()) for (const attachment of message.attachments ?? []) used.add(attachment.sent_sha256);
+    removeUnusedInboxBlobs(this.dir, used);
+  }
+
+  /**
+   * Keep the highest seq across a deletion: the lines removed may hold it,
+   * and an agent's cursor already past it must never see that number again.
+   */
+  private keepSeqFloor(): void {
+    const path = join(this.dir, SEQ_FLOOR_FILE);
+    const temp = `${path}.${process.pid}.tmp`;
+    writeFileSync(temp, `${JSON.stringify({ seq: this.seq })}\n`, { mode: 0o600 });
+    renameSync(temp, path);
+  }
+
+  private readSeqFloor(): number {
+    try {
+      const value = JSON.parse(readFileSync(join(this.dir, SEQ_FLOOR_FILE), "utf8")) as { seq?: unknown };
+      return typeof value.seq === "number" && Number.isSafeInteger(value.seq) && value.seq > 0 ? value.seq : 0;
+    } catch {
+      return 0;
+    }
   }
 }

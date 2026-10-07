@@ -65,7 +65,16 @@ export class SimAgent {
     return result.structuredContent ?? {};
   }
 
-  send(input: { project_path: string; body: string; subject?: string; thread?: string; reply_to?: string; idempotency_key?: string }): Promise<Structured> {
+  send(input: {
+    project_path: string;
+    body: string;
+    subject?: string;
+    thread?: string;
+    reply_to?: string;
+    idempotency_key?: string;
+    /** Files to attach: absolute, or relative to project_path. */
+    attachments?: string[];
+  }): Promise<Structured> {
     return this.call('send_message', { ...input, agent_name: this.name, agent_host: this.host });
   }
 

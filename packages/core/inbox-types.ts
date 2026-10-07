@@ -15,6 +15,11 @@
  */
 
 import type { QuestionAnswer, QuestionKind } from "./question-block";
+import type { InboxAnnotationRecord, InboxAttachment } from "./inbox-attachments";
+
+// The attachment shapes and file rules (step 2) live in their own module and
+// reach the Inbox through this published entry, so core's export map is unchanged.
+export * from "./inbox-attachments";
 
 /** Every record and line carries this version. Fields are only ever added. */
 export const INBOX_RECORD_VERSION = 1 as const;
@@ -185,6 +190,12 @@ export interface InboxMessage {
    */
   agent_checked_seq?: number | null;
   agent_checked_at?: string | null;
+  /**
+   * The files an agent attached (send_message's `attachments`), recorded at
+   * send time and read only by their ids (see inbox-attachments.ts). Added in
+   * step 2: older records lack it.
+   */
+  attachments?: InboxAttachment[];
 }
 
 /** One choice as the wire serves it (Workspaces' `QuestionChoice`). */
@@ -424,14 +435,15 @@ export interface InboxDecision {
 
 // ─────────────────────────────── Lines ───────────────────────────────
 
-export type InboxRecordKind = "project" | "message" | "question" | "decision";
+export type InboxRecordKind = "project" | "message" | "question" | "decision" | "annotation";
 
 /** One line of the store: a full snapshot of one record. */
 export type InboxLine =
   | { v: 1; seq: number; at: string; kind: "project"; id: string; record: InboxProject }
   | { v: 1; seq: number; at: string; kind: "message"; id: string; record: InboxMessage }
   | { v: 1; seq: number; at: string; kind: "question"; id: string; record: InboxQuestionRecord }
-  | { v: 1; seq: number; at: string; kind: "decision"; id: string; record: InboxDecision };
+  | { v: 1; seq: number; at: string; kind: "decision"; id: string; record: InboxDecision }
+  | { v: 1; seq: number; at: string; kind: "annotation"; id: string; record: InboxAnnotationRecord };
 
 // ─────────────────────────────── Health ───────────────────────────────
 

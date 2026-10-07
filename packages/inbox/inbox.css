@@ -323,3 +323,66 @@ button.ib-drow:hover { background: color-mix(in oklch, var(--muted) 35%, transpa
 .pn-inbox .ib-link { color: var(--primary); font-size: 13.5px; text-decoration: underline; text-underline-offset: 2px; margin-left: 8px; text-align: left; }
 .ib-dfacts dd > .ib-link:first-child { margin-left: 0; }
 .ib-dform .ib-ta { min-height: 52px; }
+
+/* attachments (step 2, record 2.1 to 2.8) */
+.ib-att-t .ib-ch { font-size: 12px; color: var(--warning); }
+.ib-shell.ib-fileopen { grid-template-columns: 1fr; }
+.ib-shell.ib-fileopen > .ib-side { display: none; }
+.ib-pane.ib-withfile { flex: none; width: 440px; border-right: 1px solid var(--ib-line); z-index: 2; }
+.ib-pane.ib-withfile .ib-annpop { width: 400px; }
+.ib-pane.ib-withfile .ib-pbody { padding: 16px 20px 0; }
+.ib-pane.ib-withfile .ib-pfoot { padding: 12px 20px 14px; }
+.ib-pane.ib-withfile .ib-msg { padding-left: 0; }
+.ib-pane.ib-withfile .ib-att-t { min-width: 0; flex: 1 1 250px; }
+.ib-view { position: relative; z-index: 1; flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-rows: 46px auto minmax(0, 1fr); background: var(--background); }
+.ib-view.ib-full { position: fixed; inset: 0; z-index: 40; }
+.ib-vhead { display: flex; align-items: center; gap: 12px; padding: 0 14px 0 16px; background: var(--card); border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); min-width: 0; }
+.ib-vhead .ib-fn { font-weight: 600; font-size: 14px; white-space: nowrap; }
+.ib-vhead .ib-from { font-size: 12.5px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-vhead .ib-sp { flex: 1; }
+.ib-changed { display: flex; align-items: center; gap: 8px; padding: 8px 18px; font-size: 13px; background: color-mix(in oklab, var(--warning) 10%, var(--card)); border-bottom: 1px solid color-mix(in oklab, var(--warning) 25%, transparent); }
+.ib-changed .ib-ic { color: var(--warning); }
+.pn-inbox .ib-vlink { color: var(--primary); font-weight: 550; }
+.ib-vbody { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 0; }
+.ib-docarea { position: relative; overflow: hidden; background: var(--background); min-height: 0; }
+.ib-docscroll { position: absolute; inset: 0; overflow-y: auto; padding: 58px 24px 24px; }
+.ib-full .ib-docscroll { padding-bottom: 80px; }
+.ib-doccard { max-width: 640px; margin: 0 auto; padding: 0 40px; background: var(--card); border-radius: 10px; box-shadow: var(--card-shadow); }
+.ib-full .ib-doccard { max-width: 760px; padding: 0 56px; }
+.ib-toolstrip { position: absolute; top: 14px; left: 16px; z-index: 3; padding: 3px; border-radius: 9px; background: var(--card); box-shadow: var(--card-shadow); }
+.ib-htmlframe { position: absolute; inset: 0; }
+.ib-full .ib-htmlframe { bottom: 56px; }
+.ib-view-error { position: absolute; top: 12px; left: 16px; right: 16px; z-index: 5; margin: 0; }
+.ib-vstrip { position: absolute; left: 0; right: 0; bottom: 0; height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 20px; background: var(--card); border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); z-index: 4; }
+.ib-vstrip .ib-l { font-size: 13px; color: var(--muted-foreground); }
+.ib-vstrip .ib-rchip { border: 1px solid var(--border); background: var(--card); }
+.ib-vstrip .ib-sp { flex: 1; }
+.ib-apanel { background: var(--card); border-left: 1px solid color-mix(in oklch, var(--border) 50%, transparent); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+
+/* the annotations chip in the reply box and its list */
+.ib-annchip { position: relative; display: inline-flex; }
+.pn-inbox .ib-rchip.ib-ann.ib-on { background: color-mix(in oklch, var(--primary) 14%, transparent); color: var(--primary); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--primary) 40%, transparent); }
+.ib-rchip.ib-ann.ib-on .ib-ic { color: var(--primary); }
+.ib-rchip.ib-none { opacity: 0.55; }
+.ib-annpop { position: absolute; left: 0; bottom: calc(100% + 10px); width: 540px; max-height: 60vh; overflow-y: auto; background: var(--popover); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28); z-index: 30; }
+.ib-aph { display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 6px 0 14px; font-size: 13.5px; border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
+.ib-aph b { font-weight: 600; }
+.ib-aph .ib-sp, .ib-arow .ib-sp, .ib-abt .ib-sp { flex: 1; }
+.ib-arow { padding: 10px 14px; border-bottom: 1px solid color-mix(in oklch, var(--border) 45%, transparent); }
+.ib-arow:last-child { border-bottom: 0; }
+.ib-arow .ib-a1 { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.pn-inbox .ib-arow .ib-af { font-family: var(--font-mono); font-size: 11.5px; color: var(--primary); text-decoration: underline; text-decoration-color: color-mix(in oklch, var(--primary) 35%, transparent); text-underline-offset: 2px; }
+.ib-mini { font-size: 9px; padding: 2px 6px; border-radius: 4px; background: var(--muted); color: var(--muted-foreground); font-weight: 500; }
+.pn-inbox .ib-arow .ib-aa { font-size: 12px; color: var(--muted-foreground); padding: 2px 6px; }
+.ib-arow .ib-aq { margin: 0 0 4px; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55; color: var(--muted-foreground); }
+.ib-arow .ib-ac { margin: 0; font-size: 13.5px; line-height: 1.55; }
+.ib-aed { display: block; width: 100%; border: 1px solid color-mix(in oklch, var(--primary) 60%, transparent); box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 14%, transparent); border-radius: 7px; padding: 8px 10px; font: inherit; font-size: 13.5px; line-height: 1.5; background: var(--card); color: var(--foreground); resize: vertical; outline: none; field-sizing: content; }
+.ib-abt { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+
+/* Settings: a delete asks once more before it removes anything */
+.pn-inbox .ib-del-l.ib-confirm { font-weight: 600; }
+/* The reply box's list opens over the thread above it: the message bodies
+   (Viewer draws itself at z-50) stack inside the thread's own scroll area. */
+.ib-pbody { position: relative; z-index: 0; }
+.ib-pfoot { z-index: 1; }
+.ib-pane.ib-withfile .ib-acts .ib-st { display: none; }

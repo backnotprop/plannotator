@@ -10,6 +10,7 @@
  * question, approves or sends on the person's behalf.
  */
 
+import { isAbsolute } from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
@@ -17,6 +18,7 @@ import { INBOX_THREAD_NAME_MAX, type InboxLine, type InboxMessage, type InboxPro
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { recordAgentDecision } from "./inbox-decisions";
+import type { InboxAttachment } from "@plannotator/core/inbox-types";
 
 /** wait_for_reply's default hold: inside the 45-55 s window hosts' own tool timeouts allow. */
 export const INBOX_WAIT_DEFAULT_MS = 50_000;
@@ -30,6 +32,7 @@ export const INBOX_MCP_INSTRUCTIONS = [
   "",
   "- send_message posts markdown to the person. Your messages land in one thread, your session's, until the person resolves it; pass `thread` (a short name) to keep separate work in its own thread, or to join another session's thread of that name; reply_to answers one message. Ask what you cannot decide alone as question blocks (:::question, :::question-multi, :::question-text); send_message's description has the syntax. Pass an idempotency_key so a retry never posts twice.",
   "- After sending, either go on with other work or call wait_for_reply with the thread_id. It returns the person's reply as soon as it lands, or { status: \"waiting\", cursor } after about 50 seconds; call it again with that cursor to keep waiting.",
+  "- To show the person files (a plan, an HTML prototype, a diagram), pass them in send_message's attachments, e.g. [\"docs/plan.md\"]. They open and annotate them in the Inbox; their annotations come back in the reply after the answers.",
   "- read_thread reads one thread (thread_id) or lists the threads you sent in, in this project.",
   "- resolve_message closes a thread once you have what you needed.",
   "- list_decisions reads what holds in this project: decisions the person recorded from answers, or agents recorded. record_decision records one you settled with the person. Add `Decision: when answered` to a question block to have its answer recorded.",
@@ -60,6 +63,12 @@ export interface InboxMcpContext {
   baseUrl: () => string;
   /** The project for a path an agent named (realpath, git toplevel), created on first use. */
   resolveProject: (path: string) => Promise<InboxProject>;
+  /**
+   * Record the files a message attaches (realpath, inside the project, the
+   * file rules, a blob of the bytes): `base` resolves relative paths. Absent:
+   * attachments are refused.
+   */
+  recordAttachments?: (paths: readonly string[], project: InboxProject, base: string) => InboxAttachment[];
   /** wait_for_reply's default hold in ms (tests pass a shorter one only through timeout_seconds). */
   waitDefaultMs?: number;
 }
@@ -175,6 +184,12 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             ),
           reply_to: z.string().optional().describe("A message id: post this as a reply in that message's thread."),
           idempotency_key: z.string().optional().describe("Any unique string; sending again with the same key answers the first message instead of posting twice."),
+          attachments: z
+            .array(z.string())
+            .optional()
+            .describe(
+              "Files for the person to open and annotate beside your message, e.g. [\"docs/plan.md\", \"proto/admin.html\", \"flow.mmd\"]: absolute, or relative to project_path, inside the project. Markdown, plain text, config and data files, Mermaid and Graphviz sources, and HTML (its relative images and frames load from its folder); .env is refused. The Inbox keeps the version you sent and shows the file as it is now, saying when it changed. The person's annotations come back in their reply.",
+            ),
           agent_session: z.string().optional().describe(AGENT_SESSION_DESCRIPTION),
           agent_name: z.string().optional().describe("How the person sees you, e.g. \"Claude Code\"."),
           agent_host: z.string().optional().describe("Your agent host, e.g. claude-code, codex, cursor."),
@@ -195,6 +210,13 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           }
           projectId = (await context.resolveProject(input.project_path)).id;
         }
+        let attachments: InboxAttachment[] | undefined;
+        if (input.attachments && input.attachments.length > 0) {
+          if (!context.recordAttachments) throw new InboxError("validation_error", "attachments: not taken by this Inbox.");
+          const project = store.project(projectId)!;
+          const base = input.project_path && isAbsolute(input.project_path) ? input.project_path : project.root;
+          attachments = context.recordAttachments(input.attachments, project, base);
+        }
         const result = store.sendMessage({
           project_id: projectId,
           author: {
@@ -208,12 +230,16 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           reply_to: input.reply_to ?? null,
           idempotency_key: input.idempotency_key ?? null,
           thread: input.thread ?? null,
+          attachments,
         });
         const message = result.message;
         const project = store.project(message.project_id)!;
         const questions = (message.questions ?? []).map((q) => ({ key: q.key, kind: q.kind, prompt: q.prompt }));
         const url = threadUrl(context.baseUrl(), message.thread_id);
-        const asked = questions.length > 0 ? ` asking ${questions.length} question${questions.length === 1 ? "" : "s"}` : "";
+        const attachedCount = message.attachments?.length ?? 0;
+        const asked =
+          (questions.length > 0 ? ` asking ${questions.length} question${questions.length === 1 ? "" : "s"}` : "") +
+          (attachedCount > 0 ? ` with ${attachedCount} attachment${attachedCount === 1 ? "" : "s"}` : "");
         return ok(
           `${result.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${message.thread_id}, ${url}). Call wait_for_reply with this thread_id for the answer, or go on and read_thread later.`,
           {
@@ -224,6 +250,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             thread_name: store.message(message.thread_id)?.thread_name ?? null,
             project: { id: project.id, name: project.name, root: project.root },
             questions,
+            attachments: (message.attachments ?? []).map((a) => ({ id: a.id, name: a.name, kind: a.kind, path: a.path })),
             replayed: result.replayed,
             cursor: store.messageCursor(message.id) ?? store.cursor(),
             url,

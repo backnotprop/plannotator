@@ -4,7 +4,12 @@ import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import type { InboxDecision, InboxDecisionDraft, InboxMessageWire, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import type { IndexedQuestion, QuestionAnswer } from '@plannotator/core/question-block';
 import { inboxDecisionWords } from '@plannotator/core/inbox-questions';
-import { InboxApiError, inboxApi } from '../api';
+import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
+import { InboxApiError, inboxApi, type AttachmentsModel } from '../api';
+import { annotationOf, attachmentFeedback } from '../attachments';
+import { AttachmentTiles } from './AttachmentTiles';
+import { AttachmentPane } from './AttachmentPane';
+import { AnnotationsChip } from './AnnotationsChip';
 import { agentName, clockTime, plural } from '../format';
 import { AuthorMark, DecisionDiamond, Icon } from '../icons';
 import { DecisionCard } from './DecisionCard';
@@ -113,9 +118,41 @@ export interface ThreadPaneProps {
   decisions: readonly InboxDecision[];
   /** Open a recorded decision on the Decisions page. */
   onOpenDecisionPage: (decision: InboxDecision) => void;
+  /** The attachment open beside the thread (`#…&file=att_…`), its version, and an annotation to show. */
+  file: { id: string; version: 'current' | 'sent'; focus: string | null } | null;
+  onOpenFile: (file: { id: string; version: 'current' | 'sent'; focus: string | null } | null) => void;
 }
 
-export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage }: ThreadPaneProps) {
+/** The thread's attachments as they are now and the annotations waiting for a Send, kept fresh. */
+function useThreadAttachments(threadId: string, revision: unknown) {
+  const [model, setModel] = useState<AttachmentsModel | null>(null);
+  const load = useCallback(async () => {
+    try {
+      const next = await inboxApi.attachments(threadId);
+      setModel((current) => (current === null || current.serverSession === next.serverSession ? next : current));
+    } catch {
+      // The thread went away; the pane closes with it.
+    }
+  }, [threadId]);
+  useEffect(() => {
+    setModel(null);
+  }, [threadId]);
+  useEffect(() => {
+    void load();
+  }, [load, revision]);
+  // A file edited on disk shows as changed when the person comes back to the window.
+  useEffect(() => {
+    const onFocus = () => void load();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [load]);
+  const patch = useCallback((update: (records: InboxAnnotationRecord[]) => InboxAnnotationRecord[]) => {
+    setModel((current) => (current ? { ...current, annotations: update(current.annotations) } : current));
+  }, []);
+  return { model, load, patch };
+}
+
+export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile }: ThreadPaneProps) {
   const root = thread.messages[0]!;
   const asker = agentName(root.author);
   const resolved = thread.resolved_at !== null;
@@ -141,6 +178,62 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   const sendKeys = useRef<Map<string, string> | null>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+
+  // Attachments (step 2): the files as they are now, and the annotations that ride the next Send.
+  const { model: files, load: reloadFiles, patch: patchRecords } = useThreadAttachments(thread.thread_id, thread);
+  const attachments: InboxAttachmentState[] = files?.attachments ?? [];
+  const records = files?.annotations ?? [];
+  const [full, setFull] = useState(false);
+  const openFile = (attachment: InboxAttachmentState, version: 'current' | 'sent' = 'current', focus: string | null = null) => {
+    setFull(attachment.kind === 'html');
+    onOpenFile({ id: attachment.id, version, focus });
+  };
+  const openRecord = (record: InboxAnnotationRecord) => {
+    const attachment = attachments.find((a) => a.id === record.attachment_id);
+    if (attachment) openFile(attachment, record.version === 'current' ? 'current' : 'sent', record.id);
+  };
+  const countsByPath = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const record of records) counts.set(record.path, (counts.get(record.path) ?? 0) + 1);
+    return counts;
+  }, [records]);
+  const saveRecord = useCallback(
+    (record: InboxAnnotationRecord) => patchRecords((list) => [...list.filter((r) => r.id !== record.id), record]),
+    [patchRecords],
+  );
+  const dropRecord = useCallback((id: string) => patchRecords((list) => list.filter((r) => r.id !== id)), [patchRecords]);
+  const editRecord = async (record: InboxAnnotationRecord, text: string) => {
+    try {
+      const result = await inboxApi.saveAnnotation(record.attachment_id, record.version, { ...annotationOf(record), text });
+      saveRecord(result.annotation);
+    } catch (cause) {
+      setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not saved.');
+    }
+  };
+  const removeRecord = async (record: InboxAnnotationRecord) => {
+    try {
+      await inboxApi.removeAnnotation(record.id);
+      dropRecord(record.id);
+    } catch (cause) {
+      setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not removed.');
+    }
+  };
+  /** The annotations as Plannotator's feedback text: each file version's text read now, so line numbers are what the person read. */
+  const buildFeedback = async (pending: readonly InboxAnnotationRecord[]): Promise<string> => {
+    const texts = new Map<string, string>();
+    for (const record of pending) {
+      const attachment = attachments.find((a) => a.id === record.attachment_id) ?? attachments.find((a) => a.path === record.path);
+      if (!attachment) continue;
+      const key = `${attachment.id}\0${record.version}`;
+      if (texts.has(key)) continue;
+      try {
+        texts.set(key, (await inboxApi.view(attachment.id, record.version === 'current' ? 'current' : 'sent')).text);
+      } catch {
+        texts.set(key, '');
+      }
+    }
+    return attachmentFeedback(pending, attachments, texts, thread.project.root);
+  };
 
   useEffect(() => {
     // Another thread: nothing of the last one carries over.
@@ -268,6 +361,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   // What a Send carries: every picked, unsent answer, per message.
   const picked = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'picked'));
   const picksCount = picked.length;
+  /** Picks or annotations wait for a Send. */
+  const waiting = picksCount > 0 || records.length > 0;
 
   const openBox = (withDraft: boolean) => {
     const draft = withDraft ? picked.map((q) => (q.answer ? `${q.prompt.replace(/[?.!]\s*$/, '')}: ${answerWords(q.answer)}.` : '')).filter(Boolean).join(' ') : '';
@@ -289,8 +384,9 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
           message: m,
           questions: (m.questions ?? []).filter((q) => q.state === 'picked').map((q) => ({ key: q.key, revision: q.revision })),
         }));
+      const pendingAnnotations = records;
       if (targets.length === 0) {
-        if (!words) {
+        if (!words && pendingAnnotations.length === 0) {
           setError('Write a reply or pick an answer first.');
           return;
         }
@@ -299,18 +395,24 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       }
       if (!sendKeys.current) sendKeys.current = new Map(targets.map((t) => [t.message.id, crypto.randomUUID()]));
       const notRecorded: { key: string; message: string }[] = [];
+      // The words and the annotations ride the last reply, after its picks.
+      const feedback = pendingAnnotations.length > 0 ? await buildFeedback(pendingAnnotations) : '';
       for (const [index, target] of targets.entries()) {
+        const last = index === targets.length - 1;
         const result = await inboxApi.reply(target.message.id, {
           idempotency_key: sendKeys.current.get(target.message.id) ?? crypto.randomUUID(),
-          words: index === targets.length - 1 ? words : '',
+          words: last ? words : '',
           questions: target.questions,
+          ...(last && feedback ? { feedback, annotation_ids: pendingAnnotations.map((r) => r.id) } : {}),
         });
         notRecorded.push(...result.decisions_refused);
       }
       setRefused(notRecorded);
       sendKeys.current = null;
       setBox({ open: false, text: '' });
+      setFull(false);
       await onChanged();
+      await reloadFiles();
       // The reply and where it is now sit at the foot of the thread.
       requestAnimationFrame(() => bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight }));
     } catch (cause) {
@@ -342,8 +444,16 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   const waitingHoldsUp = [...new Set(lastAgent.questions?.filter((q) => q.state === 'open').flatMap((q) => q.holds_up) ?? [])];
   const [holdsOpen, setHoldsOpen] = useState(false);
 
+  const openAttachment = file ? attachments.find((a) => a.id === file.id) ?? null : null;
+  const fileOpen = openAttachment !== null;
+
   return (
-    <section className="ib-pane" aria-label={thread.subject ?? 'Thread'} data-thread-id={thread.thread_id}>
+    <>
+    <section
+      className={`ib-pane${fileOpen ? ' ib-withfile' : ''}`}
+      aria-label={thread.subject ?? 'Thread'}
+      data-thread-id={thread.thread_id}
+    >
       <div className="ib-phead">
         <button
           type="button"
@@ -422,6 +532,13 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                     </p>
                   );
                 })}
+                {isAgent && (message.attachments?.length ?? 0) > 0 && (
+                  <AttachmentTiles
+                    attachments={attachments.filter((a) => a.message_id === message.id)}
+                    annotationCounts={countsByPath}
+                    onOpen={(attachment) => openFile(attachment)}
+                  />
+                )}
                 {message === lastAgent && !resolved && waitingHoldsUp.length > 0 && (
                   <div className="ib-waitfoot">
                     <b>Waiting on this answer</b>
@@ -482,12 +599,17 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                   }
                 }}
               />
-              {picksCount > 0 && (
+              {(picksCount > 0 || attachments.length > 0) && (
                 <div className="ib-rfoot">
-                  <span className="ib-rchip" data-picks-chip="">
-                    <Icon name="check" size={13} />
-                    {plural(picksCount, 'pick')}
-                  </span>
+                  {picksCount > 0 && (
+                    <span className="ib-rchip" data-picks-chip="">
+                      <Icon name="check" size={13} />
+                      {plural(picksCount, 'pick')}
+                    </span>
+                  )}
+                  {attachments.length > 0 && (
+                    <AnnotationsChip records={records} attachments={attachments} onEdit={editRecord} onRemove={removeRecord} onOpen={openRecord} />
+                  )}
                 </div>
               )}
             </div>
@@ -505,8 +627,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
           </>
         ) : (
           <div className="ib-acts">
-            {picksCount > 0 && <span className="ib-st">Not sent</span>}
-            {picksCount > 0 && (
+            {waiting && <span className="ib-st">Not sent</span>}
+            {waiting && (
               <button type="button" className="ib-btn ib-pri" onClick={() => void send()} disabled={sending}>
                 <Icon name="send" size={15} />
                 Send
@@ -514,7 +636,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
             )}
             <button type="button" className="ib-btn" onClick={() => openBox(picksCount > 0)}>
               <Icon name="reply" size={15} />
-              {picksCount > 0 ? 'Edit the reply' : 'Reply'}
+              {waiting ? 'Edit the reply' : 'Reply'}
             </button>
             <NewMessageButton />
           </div>
@@ -532,6 +654,42 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       </div>
       {card && <ThreadDecisionCard thread={thread} card={card} answersOf={answersOf} onCancel={() => setCard(null)} onDone={keepDecision} />}
     </section>
+    {openAttachment && (
+      <AttachmentPane
+        attachment={openAttachment}
+        attachments={attachments}
+        records={records}
+        agent={asker}
+        projectName={thread.project.name}
+        projectRoot={thread.project.root}
+        version={file!.version}
+        onVersion={(version) => onOpenFile({ id: openAttachment.id, version, focus: null })}
+        full={full}
+        onToggleFull={() => setFull((v) => !v)}
+        focusId={file!.focus}
+        readOnly={resolved}
+        onSaved={saveRecord}
+        onRemoved={dropRecord}
+        onOpenAt={(attachmentId, version, focus) => onOpenFile({ id: attachmentId, version, focus })}
+        onClose={() => {
+          setFull(false);
+          onOpenFile(null);
+        }}
+        strip={{
+          picks: picksCount,
+          annotations: records.length,
+          onBack: () => {
+            setFull(false);
+            onOpenFile(null);
+          },
+          onWriteReply: () => {
+            setFull(false);
+            openBox(picksCount > 0);
+          },
+        }}
+      />
+    )}
+    </>
   );
 }
 
