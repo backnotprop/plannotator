@@ -2704,33 +2704,63 @@ export const BRIDGE_SCRIPT = `(function() {
   // is the author's reference to the resource: relative to the document's
   // base when it lies under it (a host may re-root assets per session, through
   // a <base> on its own asset route or by rewriting attributes to a session
-  // host), otherwise origin and path. The query and the fragment never count:
-  // they carry per-visit state (signed URLs, tokens) that must not be stored
-  // in an annotation and that changes on the next load anyway. Inline sources
+  // host), else its root-relative path on the document's own origin (a live
+  // app's proxy port changes per session), else origin and path. The query
+  // and the fragment are part of what a source shows (/_next/image?url=a.jpg,
+  // proto.html?step=2, icons.svg#close), so they count, but only as a digest:
+  // they can carry per-visit state (signed URLs, tokens) that must never be
+  // stored in plain text in an annotation. A source whose query changes per
+  // load therefore does not restore, which fails closed. Inline sources
   // (data:, blob:) name no resource and get no key.
   var ANCHOR_SOURCE_PREFIX = 'src:';
+  var ANCHOR_SOURCE_MAX = 176;
+
+  // FNV-1a, 32 bits, as 8 hex digits: an identity check, not a secret.
+  function anchorDigest(value) {
+    var hash = 0x811c9dc5;
+    for (var i = 0; i < value.length; i++) {
+      hash ^= value.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return ('0000000' + hash.toString(16)).slice(-8);
+  }
 
   function anchorSourceKey(el) {
     var raw = descRawSource(el);
     if (!raw || /^(data|blob):/i.test(raw)) return '';
+    var path = raw;
+    var variant = '';
     var url = null;
     try { url = new URL(raw, document.baseURI); } catch (ex) {}
     if (!url || !/^https?:$/i.test(url.protocol)) {
       var mark = raw.search(/[?#]/);
-      return mark >= 0 ? raw.slice(0, mark) : raw;
+      if (mark >= 0) {
+        path = raw.slice(0, mark);
+        variant = raw.slice(mark);
+      }
+    } else {
+      variant = url.search + url.hash;
+      var base = null;
+      try { base = new URL('.', document.baseURI); } catch (ex2) {}
+      if (base && url.origin === base.origin && url.pathname.indexOf(base.pathname) === 0) {
+        path = url.pathname.slice(base.pathname.length);
+      } else if (base && url.origin === base.origin) {
+        path = url.pathname;
+      } else {
+        path = url.origin + url.pathname;
+      }
     }
-    var base = null;
-    try { base = new URL('.', document.baseURI); } catch (ex2) {}
-    if (base && url.origin === base.origin && url.pathname.indexOf(base.pathname) === 0) {
-      return url.pathname.slice(base.pathname.length);
-    }
-    return url.origin + url.pathname;
+    if (!path) return '';
+    return variant ? path + '?' + anchorDigest(variant) : path;
   }
 
   function sourceSnapshotOf(el) {
     var key = anchorSourceKey(el);
     if (!key) return '';
-    return ANCHOR_SOURCE_PREFIX + (key.length > 176 ? key.slice(0, 176) : key);
+    // A long key keeps its head for readability and a digest of the whole,
+    // so two sources that differ only past the cut never compare equal.
+    if (key.length > ANCHOR_SOURCE_MAX) key = key.slice(0, ANCHOR_SOURCE_MAX - 9) + '~' + anchorDigest(key);
+    return ANCHOR_SOURCE_PREFIX + key;
   }
 
   // A source that another element of the same kind shares cannot tell the two
