@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
+  annotateCliTargets,
   buildAnnotateCliArgs,
   buildAnnotatePromptFromBridgeOutcome,
   buildCliBridgeEnv,
@@ -16,6 +17,7 @@ import {
 } from "./cli-bridge";
 import { composeReviewApprovedMessage, getReviewApprovedPrompt, getReviewDeniedSuffix } from "@plannotator/shared/prompts";
 import { OpenCodePromptDeliveryError } from "./prompt-delivery-error";
+import { parseAnnotateArgs } from "@plannotator/shared/annotate-args";
 
 describe("OpenCode CLI bridge helpers", () => {
   test.skipIf(process.platform === "win32")("an older CLI refuses directory reviews before opening the caller repo", async () => {
@@ -198,6 +200,30 @@ process.exit(1);
       "--json",
       "--markdown",
     ]);
+  });
+
+  // Failure caught: a slash command's words passed as ONE argument (the real
+  // CLI reads ". notes.md" as one path), an unquoted path with spaces split
+  // into words, or a dash word in prose reaching the CLI as a real flag.
+  test("slash-command annotate words become separate CLI arguments only when the whole names nothing", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "plannotator-annotate-words-"));
+    try {
+      writeFileSync(path.join(root, "notes.md"), "# Notes\n");
+      writeFileSync(path.join(root, "my notes.md"), "# Notes\n");
+      const targets = (raw: string) => annotateCliTargets(parseAnnotateArgs(raw), raw, root);
+      expect(targets(". notes.md")).toEqual([".", "notes.md"]);
+      expect(targets('"my notes.md" please --gate')).toEqual(["my notes.md", "please"]);
+      expect(targets("my notes.md")).toEqual(["my notes.md"]);
+      expect(targets("nothere.md")).toEqual(["nothere.md"]);
+      // A URL with prose after it once went to the CLI as one "URL".
+      expect(targets("https://example.com/page the pricing part")).toEqual(["https://example.com/page", "the", "pricing", "part"]);
+      expect(targets("https://example.com/page")).toEqual(["https://example.com/page"]);
+      expect(targets("notes.md --require-approval")).toEqual(["notes.md --require-approval"]);
+      expect(buildAnnotateCliArgs(parseAnnotateArgs(". notes.md --gate"), targets(". notes.md --gate")))
+        .toEqual(["annotate", ".", "notes.md", "--json", "--gate"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test("requires a session before launching a gated capable annotate bridge", () => {
