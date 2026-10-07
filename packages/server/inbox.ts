@@ -35,7 +35,7 @@ import {
   type InboxProject,
 } from "@plannotator/core/inbox-types";
 import { toInboxQuestion } from "@plannotator/core/inbox-questions";
-import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "@plannotator/core/server-session";
+import { checkServerSession, createServerSessionNonce, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { extractDirName, extractRepoName } from "@plannotator/core/project";
 import {
   INBOX_TOOL_HOSTS,
@@ -707,7 +707,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (path === "/api/inbox/restart") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
-        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(), 409);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         if (!options.onRestartRequested) {
           return json({ error: "This Inbox cannot restart itself; quit it and run plannotator inbox.", code: "restart_unavailable" }, 409);
         }
@@ -724,7 +724,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method === "GET") return json(settingsModel());
         if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
         const body = await readBody(req);
-        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(), 409);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         if (body.inbox_tool === undefined && body.notifications === undefined) {
           throw new InboxError("validation_error", "body: inbox_tool or notifications is required.");
         }
@@ -745,7 +745,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (seenMatch) {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
-        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(), 409);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         return json({ thread: store.markSeen(seenMatch[1]!) });
       }
 
@@ -757,7 +757,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (messageMatch) {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
-        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(), 409);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const messageId = messageMatch[1]!;
         switch (messageMatch[2]) {
           case "picks": {
@@ -800,7 +800,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         serverSession,
         readBody,
         json,
-        staleTab: (body) => (checkServerSession(body, serverSession) === "mismatch" ? json(serverSessionMismatchBody(), 409) : null),
+        staleTab: (body) => (checkServerSession(body, serverSession) === "mismatch" ? json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409) : null),
       });
       if (decisionResponse) return decisionResponse;
 

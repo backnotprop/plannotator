@@ -29,7 +29,7 @@ import { parseDiffToFiles } from "@plannotator/core/diff-files";
 import { GUIDE_REVIEW_PROMPT, GUIDE_SCHEMA_JSON } from "@plannotator/core/guide-prompt";
 import { parseGuideSnapshot, parseGuideSnapshotJson, type GuideSnapshot } from "@plannotator/core/guide-format";
 import type { InboxGuideRef } from "@plannotator/core/inbox-types";
-import { checkServerSession, serverSessionMismatchBody } from "@plannotator/core/server-session";
+import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { readFileSync } from "node:fs";
 import { inboxBlobPath, writeBlob } from "@plannotator/shared/inbox/attachments";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -164,7 +164,7 @@ export async function inboxGuideRoute(req: Request, path: string, store: InboxSt
     } catch {
       return answer({ error: "body: expected a JSON object.", code: "validation_error" }, 422);
     }
-    if (checkServerSession(body, serverSession) === "mismatch") return answer(serverSessionMismatchBody(), 409);
+    if (checkServerSession(body, serverSession) === "mismatch") return answer(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
     try {
       return answer({ message_id: reviewedMatch[1], reviewed: store.saveGuideReviewed(reviewedMatch[1]!, body.reviewed) });
     } catch (error) {

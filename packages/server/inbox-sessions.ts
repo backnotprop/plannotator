@@ -26,7 +26,7 @@
 
 import { homedir } from "node:os";
 import type { InboxProject } from "@plannotator/core/inbox-types";
-import { checkServerSession, serverSessionMismatchBody } from "@plannotator/core/server-session";
+import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { INBOX_SESSION_LIVE_MS } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -187,7 +187,7 @@ export function createInboxLiveSessions(options: {
     } catch {
       throw new InboxError("validation_error", "body: expected a JSON object.");
     }
-    if (checkServerSession(body, serverSession) === "mismatch") return answer(serverSessionMismatchBody(), 409);
+    if (checkServerSession(body, serverSession) === "mismatch") return answer(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
     if (typeof body.session !== "string" || !body.session) {
       throw new InboxError("validation_error", "session: the live session to write to.", { field: "session" });
     }
