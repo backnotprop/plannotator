@@ -10,7 +10,8 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import fc from "fast-check";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, truncateSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, truncateSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { questionKey, type QuestionAnswer } from "@plannotator/core/question-block";
@@ -66,6 +67,10 @@ const labelArb = fc.stringMatching(/^[A-Za-z][A-Za-z ]{1,20}$/).map((s) => s.tri
 
 const bodyArb = fc.oneof(
   fc.stringMatching(/^[A-Za-z0-9 .,]{1,60}$/).filter((s) => s.trim().length > 0),
+  // Any text an agent can send, newlines, quotes, NULs, U+2028 and lone
+  // surrogates included: a body can never break out of its JSONL line.
+  fc.string({ unit: "binary", minLength: 1, maxLength: 80 }).filter((s) => s.trim().length > 0),
+  fc.constant('x"}\n{"v":1,"seq":999999,"at":"x","kind":"message","id":"msg_FAKE","record":{"id":"msg_FAKE"}}\n'),
   fc.tuple(promptArb, fc.uniqueArray(labelArb, { minLength: 2, maxLength: 4, selector: (s) => s.toLowerCase() })).map(
     ([prompt, labels]) => [":::question", prompt, "", ...labels.map((l) => `- [ ] ${l}`), ":::"].join("\n"),
   ),
@@ -263,6 +268,60 @@ describe("InboxStore invariants", () => {
       }),
       { numRuns: 40 },
     );
+  });
+
+  // A read-only file is how the test makes the append fail; root and Windows ignore that mode.
+  test.skipIf(process.platform === "win32" || process.getuid?.() === 0)("a Send whose reply line never landed reads as picked, and can be sent again", () => {
+    const dir = dataDir();
+    const store = InboxStore.open(dir);
+    const project = store.ensureProject({ name: "repo", root: "/work/repo" });
+    const author = { kind: "agent" as const, host: null, session: null, name: null };
+    const sent = store.sendMessage({ project_id: project.id, author, body: ":::question\nShip it?\n\n- [ ] Yes\n- [ ] No\n:::" });
+    const q = store.questionsOf(sent.message.id)[0]!;
+    store.savePicks(sent.message.id, [{ key: q.key, revision: 0, answer: { v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: ["Yes"] } }]);
+    const messagesFile = join(dir, "inbox", "projects", project.key, "messages.jsonl");
+
+    // The append of the reply fails (here: the file is read-only) after the
+    // questions' "sent" lines were written.
+    chmodSync(messagesFile, 0o400);
+    try {
+      expect(() => store.sendReply(sent.message.id, { idempotency_key: "s", questions: [{ key: q.key, revision: 1 }] })).toThrow();
+    } finally {
+      chmodSync(messagesFile, 0o600);
+    }
+    // Live and after a restart: picked, not "sent" with nothing sent.
+    expect(store.questionsOf(sent.message.id)[0]!.state).toBe("picked");
+    const reopened = InboxStore.open(dir);
+    expect(reopened.questionsOf(sent.message.id)[0]).toMatchObject({ state: "picked", sent_reply_id: null });
+    expect(reopened.thread(sent.message.thread_id)!.messages).toHaveLength(1);
+
+    // The person's retry of the same Send now goes through, once.
+    const retry = reopened.sendReply(sent.message.id, { idempotency_key: "s", questions: [{ key: q.key, revision: 1 }] });
+    expect(retry.replayed).toBe(false);
+    expect(retry.questions[0]).toMatchObject({ state: "sent", sent_reply_id: retry.reply.id });
+    expect(InboxStore.open(dir).questionsOf(sent.message.id)[0]).toMatchObject({ state: "sent", sent_reply_id: retry.reply.id });
+  });
+
+  test("two same-named roots whose 6-hex keys collide still get separate folders", () => {
+    const dir = dataDir();
+    const store = InboxStore.open(dir);
+    // Find two roots whose short keys collide (a birthday search over 6 hex).
+    const seen = new Map<string, string>();
+    let pair: [string, string] | null = null;
+    for (let i = 0; !pair; i++) {
+      const root = `/work/${i}/api`;
+      const short = createHash("sha256").update(root).digest("hex").slice(0, 6);
+      const other = seen.get(short);
+      if (other) pair = [other, root];
+      else seen.set(short, root);
+    }
+    const a = store.ensureProject({ name: "api", root: pair[0] });
+    const b = store.ensureProject({ name: "api", root: pair[1] });
+    expect(a.key).not.toBe(b.key);
+    store.sendMessage({ project_id: a.id, author: { kind: "agent", host: null, session: null, name: null }, body: "to a" });
+    const reopened = InboxStore.open(dir);
+    expect(reopened.listProjects().map((p) => p.root).sort()).toEqual([...pair].sort());
+    expect(reopened.threadsOf(a.id)).toHaveLength(1);
   });
 
   test("question keys are core's: q- + hash of kind and prompt, -2 for a repeat", () => {

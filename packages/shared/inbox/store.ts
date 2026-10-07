@@ -117,9 +117,9 @@ function refusalError(refusal: InboxAnswerRefusal): InboxError {
 }
 
 /** `<name>-<6 hex of the root>`, so two repositories with one name stay apart. */
-export function inboxProjectKey(name: string, root: string): string {
+export function inboxProjectKey(name: string, root: string, hashLength = 6): string {
   const base = sanitizeTag(name) ?? "project";
-  const hash = createHash("sha256").update(root).digest("hex").slice(0, 6);
+  const hash = createHash("sha256").update(root).digest("hex").slice(0, Math.min(hashLength, 64));
   return `${base}-${hash}`;
 }
 
@@ -180,6 +180,29 @@ export class InboxStore {
     }
     lines.sort((a, b) => a.seq - b.seq);
     for (const line of lines) this.apply(line);
+    this.repairUnsentAnswers();
+  }
+
+  /**
+   * A Send writes its questions' "sent" lines before the reply line. When the
+   * reply never landed (the process died, or the append failed), those
+   * questions name a reply that does not exist: read them as picked again, so
+   * the person can Send them, instead of "already sent" with nothing sent.
+   * In memory only; the next pick or Send writes the corrected record.
+   */
+  private repairUnsentAnswers(): void {
+    for (const record of this.questions.values()) {
+      if (record.sent_reply_id === null || this.messages.has(record.sent_reply_id)) continue;
+      this.restoreQuestion({ ...record, sent_revision: 0, sent_reply_id: null });
+    }
+  }
+
+  /** Put a question record back in memory (and in the event log's current view) without writing. */
+  private restoreQuestion(record: InboxQuestionRecord): void {
+    this.questions.set(record.id, record);
+    const key = `question:${record.id}`;
+    const line = this.latest.get(key);
+    if (line && line.kind === "question") this.latest.set(key, { ...line, record });
   }
 
   private apply(line: InboxLine): void {
@@ -328,7 +351,14 @@ export class InboxStore {
 
   private write(file: string, line: InboxLine): void {
     const prefix = this.tornFiles.has(file) ? "\n" : "";
-    appendFileSync(file, `${prefix}${JSON.stringify(line)}\n`, { mode: 0o600 });
+    try {
+      appendFileSync(file, `${prefix}${JSON.stringify(line)}\n`, { mode: 0o600 });
+    } catch (error) {
+      // A failed append may have left part of the line (disk full): the next
+      // append starts on a fresh line so it cannot be glued to the fragment.
+      this.tornFiles.add(file);
+      throw error;
+    }
     this.tornFiles.delete(file);
     this.apply(line);
     for (const listener of this.listeners) {
@@ -375,9 +405,17 @@ export class InboxStore {
     const existing = this.projectsByRoot.get(input.root);
     if (existing) return existing;
     const at = this.stamp();
+    // Six hex of the root's hash keeps two same-named repositories apart; on
+    // the rare collision take more of the hash, so one folder never holds two
+    // projects (the second project.json would replace the first).
+    const taken = new Set([...this.projectsById.values()].map((p) => p.key));
+    let key = inboxProjectKey(input.name, input.root);
+    const inUse = (candidate: string) => taken.has(candidate) || existsSync(join(this.dir, INBOX_PROJECTS_DIR, candidate));
+    for (let length = 12; inUse(key) && length <= 64; length += 13) key = inboxProjectKey(input.name, input.root, length);
+    if (inUse(key)) key = `${inboxProjectKey(input.name, input.root)}-${inboxId("prj").slice(-6).toLowerCase()}`;
     const project: InboxProject = {
       id: inboxId("prj"),
-      key: inboxProjectKey(input.name, input.root),
+      key,
       name: input.name,
       root: input.root,
       created_at: at,
@@ -608,7 +646,9 @@ export class InboxStore {
     });
 
     // The questions first, so whoever reads the reply finds them already sent.
-    for (const record of updated) this.appendQuestion(record, at);
+    // If any of these writes fails, the questions written so far are put back
+    // as they were (on disk, repairUnsentAnswers does the same at the next
+    // start), so a failed Send never leaves answers "sent" with no reply.
     const reply: InboxMessage = {
       id: replyId,
       project_id: message.project_id,
@@ -621,7 +661,13 @@ export class InboxStore {
       resolved_at: null,
       idempotency_key: key,
     };
-    this.appendMessage(reply, at);
+    try {
+      for (const record of updated) this.appendQuestion(record, at);
+      this.appendMessage(reply, at);
+    } catch (error) {
+      for (const { record } of plan) this.restoreQuestion(record);
+      throw error;
+    }
     return { reply, questions: this.questionsOf(message.id), replayed: false };
   }
 
