@@ -201,20 +201,20 @@
 .ib-body [data-print-region="article"] > .mt-4:first-child { margin-top: 0; }
 .ib-qfoot-st { font-size: 12px; color: var(--muted-foreground); white-space: nowrap; }
 
-/* empty state and the connect picker */
-.ib-empty { padding: 34px 0 40px 100px; max-width: 850px; }
-.ib-empty h2 { font-size: 22px; font-weight: 650; margin: 0 0 4px; letter-spacing: -0.01em; }
-.ib-csub { display: flex; align-items: center; gap: 8px; margin: 18px 0 10px; font-size: 15px; font-weight: 600; }
-.ib-csub .ib-ic { color: var(--primary); }
-.ib-hcards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; align-items: start; }
-.ib-hcard { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--card); box-shadow: var(--card-shadow); }
+/* empty state and the connect picker: one vertical rhythm between the heading, the cards, Other agents and the tabs */
+.ib-empty { --ib-rhythm: 28px; display: flex; flex-direction: column; gap: var(--ib-rhythm); padding: 34px 0 40px 100px; max-width: 850px; }
+.ib-empty h2 { font-size: 22px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+.ib-empty h3 { font-size: 14px; font-weight: 600; margin: 0; }
+.ib-hcards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.ib-hcard { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; background: var(--card); box-shadow: var(--card-shadow); }
+.ib-hcard[data-open] { border-color: color-mix(in oklab, var(--primary) 45%, var(--border)); }
 .ib-hcard .ib-hh { display: flex; align-items: center; gap: 10px; }
-.ib-hcard .ib-hn { font-size: 14px; font-weight: 600; }
-.ib-hcard .ib-hw { font-size: 12px; color: var(--muted-foreground); }
-.ib-hcard p { margin: 8px 0 8px; font-size: 13px; line-height: 1.5; color: var(--muted-foreground); }
-.ib-hfold { display: flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 500; }
-.ib-hfold .ib-ic { color: var(--muted-foreground); }
-.ib-ctabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 18px; }
+.ib-hcard p { flex: 1; margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted-foreground); }
+.pn-inbox .ib-hlink { align-self: flex-start; font-size: 12.5px; font-weight: 500; color: var(--primary); }
+.pn-inbox .ib-hlink:hover { text-decoration: underline; text-underline-offset: 2px; }
+.ib-hreveal { margin-top: 12px; }
+.ib-others p { margin: 4px 0 0; font-size: 14px; line-height: 1.5; color: var(--muted-foreground); }
+.ib-ctabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 16px; }
 .ib-ctab { display: inline-flex; align-items: center; height: 30px; padding: 0 11px; border-radius: 7px; font-size: 13.5px; font-weight: 500; color: var(--muted-foreground); }
 .ib-ctab[aria-selected="true"] { background: var(--muted); color: var(--foreground); }
 .ib-tglyph { width: 14px; height: 14px; flex: none; margin-right: 6px; }
@@ -222,25 +222,18 @@
 .pn-inbox .ib-ctab[aria-selected="true"] svg.ib-tglyph { stroke: var(--foreground); }
 .ib-tglyph.ib-img { filter: grayscale(1); opacity: 0.65; }
 .ib-cpanel { display: flex; flex-direction: column; gap: 8px; max-width: 760px; }
-.ib-cpanel .ib-eye { font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted-foreground); }
-.ib-cpanel .ib-lead, .ib-cpanel .ib-after { margin: 0; font-size: 14px; line-height: 1.55; color: var(--muted-foreground); }
 .ib-clab { font-family: var(--font-mono); font-size: 12px; color: var(--foreground); margin-top: 2px; }
 .ib-cbox { display: flex; align-items: flex-start; gap: 10px; border: 1px solid var(--border); background: color-mix(in oklab, var(--muted) 50%, transparent); border-radius: 8px; padding: 9px 12px; }
 .ib-cbox pre { flex: 1; min-width: 0; margin: 0; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6; white-space: pre; overflow-x: auto; color: var(--foreground); }
-.ib-cbox.ib-wrap { margin-top: 8px; padding: 8px 10px; flex-direction: column; align-items: stretch; gap: 6px; }
-.ib-cbox.ib-wrap pre { white-space: pre-wrap; word-break: normal; overflow-wrap: anywhere; font-size: 11.5px; }
 .pn-inbox .ib-copy { flex: none; display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--card); font-size: 12.5px; font-weight: 500; }
-.ib-cbox.ib-wrap .ib-copy { align-self: flex-end; }
+.ib-cnote { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted-foreground); }
 .ib-another { display: flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 500; margin-top: 4px; }
 .ib-another .ib-ic { color: var(--muted-foreground); }
 .ib-another .ib-mut { font-weight: 400; margin-left: 4px; }
 .ib-another-body { margin-top: 2px; }
-.ib-cnote { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.5; color: var(--muted-foreground); padding: 8px 10px; border-radius: 8px; background: color-mix(in oklab, var(--warning) 9%, transparent); }
-.ib-cnote .ib-ic { color: var(--warning); margin-top: 1px; }
 .ib-connect.ib-compact .ib-ctabs { margin: 6px 0 12px; }
 .ib-connect.ib-compact .ib-ctab { height: 26px; padding: 0 9px; font-size: 12.5px; }
 .ib-connect.ib-compact .ib-cpanel { gap: 6px; }
-.ib-connect.ib-compact .ib-cpanel .ib-lead { font-size: 13px; }
 
 /* settings */
 .ib-spage { padding: 28px 44px; flex: 1; overflow-y: auto; min-width: 0; }

@@ -21,12 +21,12 @@ export function CopyButton({ text }: { text: string }) {
   );
 }
 
-/** A code box with Copy; `wrap` is the narrow form inside a host card. */
-export function CodeBox({ text, label, wrap }: { text: string; label?: string; wrap?: boolean }) {
+/** A code box with Copy, under its file path when it has one. */
+export function CodeBox({ text, label }: { text: string; label?: string }) {
   return (
     <>
       {label && <div className="ib-clab">{label}</div>}
-      <div className={`ib-cbox${wrap ? ' ib-wrap' : ''}`}>
+      <div className="ib-cbox">
         <pre>{text}</pre>
         <CopyButton text={text} />
       </div>
@@ -81,7 +81,7 @@ export interface ConnectPickerProps {
   icons?: boolean;
 }
 
-/** Tabs per harness, then the one verified way to add the Inbox there (Workspaces' ConnectAgentSheet shape). */
+/** Tabs per harness, then the one verified way to add the Inbox there and one note (Workspaces' ConnectAgentSheet shape). */
 export function ConnectPicker({ harnesses, initial, context, compact, icons }: ConnectPickerProps) {
   const [selected, setSelected] = useState<HarnessId>(initial);
   const harness = harnesses.find((h) => h.id === selected) ?? harnesses[0]!;
@@ -104,19 +104,11 @@ export function ConnectPicker({ harnesses, initial, context, compact, icons }: C
         ))}
       </div>
       <div className="ib-cpanel" role="tabpanel" aria-label={harness.label}>
-        <div className="ib-eye">{harness.label}</div>
-        <p className="ib-lead">{panel.lead}</p>
         {panel.artefacts.map((artefact, i) => (
           <ArtefactView key={i} artefact={artefact} />
         ))}
-        {panel.after && <p className="ib-after">{panel.after}</p>}
+        {panel.note && <p className="ib-cnote">{panel.note}</p>}
         {panel.another && <Another summary={panel.another.summary} body={panel.another.body} />}
-        {panel.note && (
-          <div className="ib-cnote">
-            <Icon name="info" size={15} />
-            <span>{panel.note}</span>
-          </div>
-        )}
       </div>
     </div>
   );

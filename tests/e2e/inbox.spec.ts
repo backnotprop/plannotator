@@ -152,11 +152,32 @@ function writeContactSheet(): void {
   );
 }
 
-test('first run: the three connections, the harness picker, Copy copies the command', async () => {
+/** Every heading and label the first run shows: headings, host names, tabs, buttons, links, file paths. */
+async function firstRunLabels(page: Page): Promise<string[]> {
+  return page
+    .locator('[data-inbox-empty]')
+    .locator('h1, h2, h3, [role="tab"], button, a, .ib-clab')
+    .evaluateAll((els) => els.map((el) => (el.textContent ?? '').trim()));
+}
+
+test('first run: the three connections, Use MCP instead below the row, the harness picker, Copy copies the command', async () => {
   const { page, url } = world;
   await page.goto(url);
-  await expect(page.getByRole('heading', { name: 'No agent has written yet.' })).toBeVisible();
-  for (const host of ['claude-code', 'pi', 'opencode']) await expect(page.locator(`[data-host="${host}"]`)).toBeVisible();
+  const empty = page.locator('[data-inbox-empty]');
+  await expect(page.getByRole('heading', { name: 'No agent has written yet', exact: true })).toBeVisible();
+  const lines = {
+    'claude-code': ['Claude Code', "Plannotator's mod writes here. Nothing to install."],
+    pi: ['Pi', "Plannotator's extension writes here. Nothing to install."],
+    opencode: ['OpenCode', "Plannotator's plugin writes here. Nothing to install."],
+  } as const;
+  for (const [host, [name, line]] of Object.entries(lines)) {
+    const card = page.locator(`[data-host="${host}"]`);
+    await expect(card.getByRole('heading', { name, exact: true })).toBeVisible();
+    await expect(card.locator('p')).toHaveText(line);
+    await expect(card.getByRole('button', { name: 'Use MCP instead', exact: true })).toHaveAttribute('aria-expanded', 'false');
+  }
+  await expect(empty.getByRole('heading', { name: 'Other agents', exact: true })).toBeVisible();
+  await expect(empty.getByText('Add the Inbox as a local MCP server.', { exact: true })).toBeVisible();
   await expect(page.getByText('Projects appear here when an agent writes from one.')).toBeVisible();
 
   // The Tater mark is Workspaces' sprite: 24 frames over 3.5 s, its first frame under reduced motion.
@@ -170,23 +191,60 @@ test('first run: the three connections, the harness picker, Copy copies the comm
   expect((await motion()).startsWith('none ')).toBe(true);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
 
+  // Codex is selected: the command with Copy, one note, the folded Another way, no eyebrow repeating the name.
   const binary = realpathSync(world.binary);
   const codex = page.getByRole('tab', { name: 'Codex' });
   await expect(codex).toHaveAttribute('aria-selected', 'true');
   const command = `codex mcp add plannotator-inbox -- ${binary} inbox mcp`;
   const panel = page.getByRole('tabpanel', { name: 'Codex' });
   await expect(panel.locator('pre')).toHaveText(command);
+  await expect(panel.locator('p')).toHaveText(['Also adds it to the Codex app and the IDE extension. Restart them after.']);
+  await expect(panel.getByText('Another way', { exact: false })).toBeVisible();
+  await expect(panel.getByText('Codex', { exact: true })).toHaveCount(0);
+  await shot('1.3-first-run-codex');
   await panel.getByRole('button', { name: 'Copy' }).click();
   await expect(panel.getByRole('button', { name: 'Copied' })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(command);
 
-  // "Prefer the MCP? Add it anyway" folds out the host's own command.
-  await page.locator('[data-host="claude-code"]').getByRole('button', { name: 'Prefer the MCP? Add it anyway' }).click();
-  await expect(page.locator('[data-host="claude-code"] pre')).toHaveText(`claude mcp add --scope user plannotator-inbox -- ${binary} inbox mcp`);
-  await shot('1.3-first-run-codex');
+  // One rhythm: the same gap between the heading, the cards, Other agents and the tabs.
+  const boxes = await empty.evaluate((el) => [...el.children].map((child) => child.getBoundingClientRect()).map((r) => ({ top: r.top, bottom: r.bottom })));
+  const gaps = boxes.slice(1).map((box, i) => Math.round(box.top - boxes[i]!.bottom));
+  expect(gaps.length).toBe(3);
+  expect(new Set(gaps).size).toBe(1);
 
-  await page.locator('[data-host="claude-code"]').getByRole('button', { name: 'Prefer the MCP? Add it anyway' }).click();
-  await page.locator('[data-host="pi"]').getByRole('button', { name: 'Prefer the MCP? Add it anyway' }).click();
+  // The cards are one height, and "Use MCP instead" opens the command below the row without making its card taller.
+  const cards = page.locator('.ib-hcard');
+  const heights = async () => (await cards.evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().height))));
+  const before = await heights();
+  expect(new Set(before).size).toBe(1);
+  const claudeLink = page.locator('[data-host="claude-code"]').getByRole('button', { name: 'Use MCP instead', exact: true });
+  await claudeLink.click();
+  await expect(claudeLink).toHaveAttribute('aria-expanded', 'true');
+  const reveal = page.locator('.ib-hreveal');
+  await expect(reveal.locator('pre')).toHaveText(`claude mcp add --scope user plannotator-inbox -- ${binary} inbox mcp`);
+  expect(await heights()).toEqual(before);
+  const rowBottom = Math.max(...(await cards.evaluateAll((els) => els.map((el) => el.getBoundingClientRect().bottom))));
+  expect((await reveal.boundingBox())!.y).toBeGreaterThanOrEqual(rowBottom);
+  await expect(panel.getByRole('button', { name: 'Copy', exact: true })).toBeVisible();
+  await page.mouse.move(0, 0);
+  await shot('1.3-first-run-claude-code');
+
+  // One reveal at a time; the same link closes it.
+  await page.locator('[data-host="pi"]').getByRole('button', { name: 'Use MCP instead', exact: true }).click();
+  await expect(reveal.locator('pre')).toHaveText(`pi mcp add plannotator-inbox -- ${binary} inbox mcp`);
+  await expect(claudeLink).toHaveAttribute('aria-expanded', 'false');
+  expect(await heights()).toEqual(before);
+  await page.locator('[data-host="pi"]').getByRole('button', { name: 'Use MCP instead', exact: true }).click();
+  await expect(reveal).toHaveCount(0);
+
+  // Headers carry no comma: every heading and label, on every tab.
+  for (const tab of await page.getByRole('tab').all()) {
+    await tab.click();
+    const panelNow = page.getByRole('tabpanel');
+    expect(await panelNow.locator('p.ib-cnote').count(), 'one short note per tab').toBeLessThanOrEqual(1);
+    for (const label of await firstRunLabels(page)) expect(label, `a heading or label with a comma: ${label}`).not.toContain(',');
+  }
+
   await page.getByRole('tab', { name: 'Cursor' }).click();
   const link = page.getByRole('link', { name: 'Add to Cursor' });
   const href = (await link.getAttribute('href')) ?? '';
@@ -195,11 +253,11 @@ test('first run: the three connections, the harness picker, Copy copies the comm
   expect(config).toEqual({ command: binary, args: ['inbox', 'mcp'] });
   await shot('1.4-first-run-cursor');
 
-  await page.locator('[data-host="pi"]').getByRole('button', { name: 'Prefer the MCP? Add it anyway' }).click();
   await page.getByRole('tab', { name: 'Claude app' }).click();
   const json = JSON.parse((await page.getByRole('tabpanel', { name: 'Claude app' }).locator('pre').textContent()) ?? '{}');
   expect(json.mcpServers['plannotator-inbox']).toEqual({ command: binary, args: ['inbox', 'mcp'] });
   await shot('1.5-first-run-claude-app');
+  await page.getByRole('tab', { name: 'Codex' }).click();
 });
 
 test('agents write three threads in two projects; the rows land in the six sections with their badges', async () => {
