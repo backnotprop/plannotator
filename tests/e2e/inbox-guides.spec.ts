@@ -135,7 +135,6 @@ test('get_guide_brief returns the method, the shape, the diff steps, the rules a
 
 test('the AUTHORED guide plus patch and a shipped snapshot land as rows with the Guided review mark', async () => {
   const { page, pi, claude } = world;
-  await page.goto(world.url);
   // The brief's worked example, sent as it is: the AUTHORED fixture and its patch.
   const { example } = await pi.guideBrief();
   const authored = await pi.submitGuide({ project_path: world.ledger, ...example, idempotency_key: 'guide-retry-1' });
@@ -157,6 +156,9 @@ test('the AUTHORED guide plus patch and a shipped snapshot land as rows with the
   world.authored = authored as World['authored'];
   world.snapshot = snapshot as World['snapshot'];
 
+  // Opened after both sends: a list already on screen holds a later arrival
+  // behind "N new" (held order), so opening first raced the two sends.
+  await page.goto(world.url);
   for (const sent of [authored, snapshot]) {
     const row = page.locator(`.ib-row[data-thread-id="${sent.thread_id}"]`);
     await expect(row).toBeVisible();
