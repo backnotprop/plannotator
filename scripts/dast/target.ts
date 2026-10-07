@@ -135,6 +135,7 @@ const inboxForwardedPaths = new Set([
   "/",
   "/api/inbox/health",
   "/api/inbox/projects",
+  "/api/inbox/threads",
   `/api/inbox/threads/${inboxThread.message.thread_id}`,
   "/api/definitely-missing",
 ]);

@@ -192,7 +192,7 @@ describe("startup, registry and health", () => {
       const second = await start(dataDir);
       expect(second.port).not.toBe(port);
       expect(second.portChanged).toBe(true);
-      const list = await (await fetch(`http://127.0.0.1:${second.port}/api/inbox/projects`)).json();
+      const list = await (await fetch(`http://127.0.0.1:${second.port}/api/inbox/threads`)).json();
       expect(typeof list.notice).toBe("string");
     } finally {
       squatter.stop(true);
@@ -350,11 +350,15 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
     );
     expect(again).toMatchObject({ message_id: sent.message_id, replayed: true });
 
-    // The window's list model shows one row waiting on the person.
-    const list = await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/projects`)).json();
+    // The window's list model shows one row, a thread, stopped on the person.
+    const list = await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads`)).json();
     expect(list.projects).toHaveLength(1);
-    expect(list.projects[0].threads).toHaveLength(1);
-    expect(list.projects[0].threads[0]).toMatchObject({
+    expect(list.projects[0]).toMatchObject({ name: "api", threads: 1, unread: 1 });
+    const rows = list.sections.flatMap((s: { threads: unknown[] }) => s.threads);
+    expect(rows).toHaveLength(1);
+    expect(list.sections.find((s: { id: string }) => s.id === "stopped").threads[0]).toMatchObject({
+      section: "stopped",
+      project: { name: "api" },
       waiting_on_person: true,
       questions: { open: 2, picked: 0, stopped: true, holds_up: ["the retry worker", "the 409 branch"], prompt: "Which way should the worker go on a Stripe 409?" },
     });

@@ -13,6 +13,7 @@ INBOX_PATHS = (
     "",
     "/api/inbox/health",
     "/api/inbox/projects",
+    "/api/inbox/threads",
     "/api/definitely-missing",
 )
 

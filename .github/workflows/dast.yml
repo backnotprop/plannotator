@@ -175,6 +175,7 @@ jobs:
                   [19435, "/", 200],
                   [19435, "/api/inbox/health", 200],
                   [19435, "/api/inbox/projects", 200],
+                  [19435, "/api/inbox/threads", 200],
                   [19435, "/api/definitely-missing", 404],
                 ];
                 for (const [port, path, expected] of checks) {

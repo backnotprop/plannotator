@@ -109,6 +109,7 @@
     "./live-proxy-node": "./live-proxy-node.ts",
     "./inbox/schema": "./inbox/schema.ts",
     "./inbox/store": "./inbox/store.ts",
+    "./inbox/list": "./inbox/list.ts",
     "./inbox/registry": "./inbox/registry.ts"
   },
   "dependencies": {

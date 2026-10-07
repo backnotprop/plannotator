@@ -1,9 +1,10 @@
 /**
  * STUB PAGE, to be replaced by the designed Inbox window (packages/inbox,
  * apps/inbox) once its design spec is approved. It exists only so
- * `plannotator inbox` opens something real in step 1: the list model (rows by
- * project, threads with their question counts) and a read-only thread, kept
- * live by the event stream. It answers nothing; answers go through the API.
+ * `plannotator inbox` opens something real in step 1: the list model (a row
+ * per thread, in its section, with a project filter) and a read-only thread,
+ * kept live by the event stream. It answers nothing; answers go through the
+ * API. Opening a thread marks it seen.
  *
  * Every piece of agent text is placed with textContent, never as HTML, and the
  * page runs under a nonce CSP with no other script source.
@@ -25,6 +26,7 @@ export function inboxStubPageHtml(nonce: string): string {
   li { padding: .35rem 0; border-bottom: 1px solid #8884; }
   a { color: inherit; }
   .meta { font-size: .8rem; opacity: .7; }
+  .unread { font-weight: 600; }
   pre { white-space: pre-wrap; font: inherit; background: #8881; padding: .6rem; border-radius: 4px; }
 </style>
 </head>
@@ -40,32 +42,62 @@ export function inboxStubPageHtml(nonce: string): string {
   const threadView = document.getElementById("thread");
   const notice = document.getElementById("notice");
   const el = (tag, text, cls) => { const n = document.createElement(tag); if (text != null) n.textContent = text; if (cls) n.className = cls; return n; };
+  let serverSession = null;
+  const hashParam = (name) => (new RegExp("[#&]" + name + "=([A-Za-z0-9_]+)").exec(location.hash) || [])[1] || null;
+  const setHash = (project, thread) => { location.hash = [project ? "project=" + project : "", thread ? "thread=" + thread : ""].filter(Boolean).join("&"); };
   async function loadList() {
-    const res = await fetch("/api/inbox/projects");
+    const project = hashParam("project");
+    const res = await fetch("/api/inbox/threads" + (project ? "?project=" + project : ""));
     const data = await res.json();
+    serverSession = data.serverSession;
     notice.textContent = data.update ? "A newer Plannotator is installed: restart the Inbox to update." : (data.notice || "");
     list.replaceChildren();
-    if (!data.projects.length) list.append(el("p", "Nothing yet. Agents send messages here with the plannotator inbox MCP.", "meta"));
-    for (const entry of data.projects) {
-      list.append(el("h2", entry.project.name + " — " + entry.project.root));
+    if (!data.projects) return;
+    const filter = el("p", null, "meta");
+    const all = el("a", "All projects");
+    all.href = "#";
+    all.addEventListener("click", (e) => { e.preventDefault(); setHash(null, hashParam("thread")); });
+    filter.append(all);
+    for (const p of data.projects) {
+      const a = el("a", p.name + " (" + p.threads + ")");
+      a.href = "#project=" + p.id;
+      a.title = p.root;
+      a.addEventListener("click", (e) => { e.preventDefault(); setHash(p.id, hashParam("thread")); });
+      filter.append(" · ", a);
+    }
+    list.append(filter);
+    if (!data.sections.some((s) => s.threads.length)) list.append(el("p", "Nothing yet. Agents send messages here with the plannotator inbox MCP.", "meta"));
+    for (const section of data.sections) {
+      if (!section.threads.length) continue;
+      list.append(el("h2", section.label));
       const ul = el("ul");
-      for (const t of entry.threads) {
+      for (const t of section.threads) {
         const li = el("li");
+        li.dataset.section = section.id;
         const a = el("a", t.subject || t.thread_id);
-        a.href = "#thread=" + t.thread_id;
-        li.append(a, el("div", (t.waiting_on_person ? "Waiting on you · " : "") + t.questions.open + " open, " + t.questions.picked + " picked · " + t.message_count + " messages" + (t.resolved_at ? " · resolved" : ""), "meta"));
+        a.href = "#" + (project ? "project=" + project + "&" : "") + "thread=" + t.thread_id;
+        if (t.unread) a.className = "unread";
+        const facts = [t.project.name];
+        if (t.thread_name) facts.push("thread: " + t.thread_name);
+        if (t.questions.open) facts.push(t.questions.open + " open");
+        if (t.answered_not_sent) facts.push("Answered, not sent");
+        facts.push(t.message_count + " messages");
+        if (t.resolved_at) facts.push("resolved");
+        li.append(a, el("div", facts.join(" · "), "meta"));
         ul.append(li);
       }
       list.append(ul);
     }
   }
   async function loadThread() {
-    const m = /thread=([A-Za-z0-9_]+)/.exec(location.hash);
+    const id = hashParam("thread");
     threadView.replaceChildren();
-    if (!m) return;
-    const res = await fetch("/api/inbox/threads/" + m[1]);
+    if (!id) return;
+    const res = await fetch("/api/inbox/threads/" + id);
     if (!res.ok) return;
     const { thread } = await res.json();
+    // Opening a thread is a look: its messages so far leave "New since you looked".
+    fetch("/api/inbox/threads/" + id + "/seen", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession }) }).catch(() => {});
     threadView.append(el("h2", thread.subject || thread.thread_id));
     for (const msg of thread.messages) {
       threadView.append(el("div", (msg.author.kind === "person" ? "You" : (msg.author.name || "Agent")) + " · " + msg.created_at, "meta"));
@@ -74,7 +106,7 @@ export function inboxStubPageHtml(nonce: string): string {
     }
   }
   const refresh = () => { loadList().catch(() => {}); loadThread().catch(() => {}); };
-  addEventListener("hashchange", () => loadThread().catch(() => {}));
+  addEventListener("hashchange", refresh);
   refresh();
   const events = new EventSource("/api/inbox/events");
   events.addEventListener("record", refresh);

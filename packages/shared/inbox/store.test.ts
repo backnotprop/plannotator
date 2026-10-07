@@ -11,7 +11,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import fc from "fast-check";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, truncateSync } from "node:fs";
+import { chmodSync, cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, truncateSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { questionKey, type QuestionAnswer } from "@plannotator/core/question-block";
@@ -32,10 +32,14 @@ function dataDir(): string {
 
 /** Everything a reader can observe, as plain JSON. */
 function view(store: InboxStore) {
-  return store.listProjects().map((project) => ({
-    project,
-    threads: store.threadsOf(project.id).map((summary) => ({ summary, thread: store.thread(summary.thread_id) })),
-  }));
+  return {
+    projects: store.listProjects().map((project) => ({
+      project,
+      threads: store.threadsOf(project.id).map((summary) => ({ summary, thread: store.thread(summary.thread_id) })),
+      sections: store.listSections(project.id),
+    })),
+    sections: store.listSections(),
+  };
 }
 
 function storeFiles(dir: string): string[] {
@@ -322,6 +326,141 @@ describe("InboxStore invariants", () => {
     const reopened = InboxStore.open(dir);
     expect(reopened.listProjects().map((p) => p.root).sort()).toEqual([...pair].sort());
     expect(reopened.threadsOf(a.id)).toHaveLength(1);
+  });
+
+  test("routing is deterministic given the event log: an independent replay of the lines assigns every message the same thread", () => {
+    type RouteOp =
+      | { op: "send"; project: number; session: string | null; thread: string | null; key: string | null; body: string }
+      | { op: "reply"; target: number; session: string | null; thread: string | null }
+      | { op: "resolve"; target: number; resolved: boolean }
+      | { op: "seen"; target: number }
+      | { op: "personReply"; target: number; key: string };
+    const routeOpArb: fc.Arbitrary<RouteOp> = fc.oneof(
+      {
+        arbitrary: fc.record({
+          op: fc.constant("send" as const),
+          project: fc.nat(1),
+          session: fc.constantFrom("ses_a", "ses_b", null),
+          thread: fc.constantFrom(null, null, "alpha", "Alpha ", "beta", "  BETA"),
+          key: fc.option(fc.constantFrom("k1", "k2"), { nil: null }),
+          body: fc.constantFrom("one", "two", "three"),
+        }),
+        weight: 5,
+      },
+      fc.record({ op: fc.constant("reply" as const), target: fc.nat(), session: fc.constantFrom("ses_a", "ses_b", null), thread: fc.constantFrom(null, "alpha") }),
+      { arbitrary: fc.record({ op: fc.constant("resolve" as const), target: fc.nat(), resolved: fc.boolean() }), weight: 2 },
+      fc.record({ op: fc.constant("seen" as const), target: fc.nat() }),
+      fc.record({ op: fc.constant("personReply" as const), target: fc.nat(), key: fc.constantFrom("p1", "p2", "p3") }),
+    );
+
+    fc.assert(
+      fc.property(fc.array(routeOpArb, { maxLength: 40 }), (ops) => {
+        const dir = dataDir();
+        const store = InboxStore.open(dir);
+        const ids: string[] = [];
+        const pick = (n: number) => ids[n % Math.max(1, ids.length)];
+        for (const op of ops) {
+          try {
+            if (op.op === "send") {
+              const project = store.ensureProject({ name: `repo${op.project}`, root: `/work/repo${op.project}` });
+              const r = store.sendMessage({
+                project_id: project.id,
+                author: { kind: "agent", host: null, session: op.session, name: null },
+                body: op.body,
+                thread: op.thread,
+                idempotency_key: op.key,
+              });
+              if (!r.replayed) ids.push(r.message.id);
+            } else if (op.op === "reply") {
+              const target = pick(op.target);
+              if (!target) continue;
+              const r = store.sendMessage({
+                project_id: store.message(target)!.project_id,
+                author: { kind: "agent", host: null, session: op.session, name: null },
+                body: "reply",
+                reply_to: target,
+                thread: op.thread,
+              });
+              ids.push(r.message.id);
+            } else if (op.op === "resolve") {
+              const target = pick(op.target);
+              if (target) store.resolveThread(target, op.resolved);
+            } else if (op.op === "seen") {
+              const target = pick(op.target);
+              if (target) store.markSeen(store.message(target)!.thread_id);
+            } else {
+              const target = pick(op.target);
+              if (target) store.sendReply(target, { words: "ok", idempotency_key: op.key });
+            }
+          } catch (error) {
+            if (!(error instanceof InboxError)) throw error;
+          }
+        }
+
+        // The oracle: walk the lines in seq order with only what the log says
+        // at that point, and apply the routing rules from scratch.
+        const lines = allLines(dir).sort((a, b) => a.seq - b.seq);
+        const threadOf = new Map<string, string>();
+        const resolved = new Map<string, boolean>();
+        const bySession = new Map<string, string>();
+        const byName = new Map<string, string>();
+        const nameKey = (name: string) => name.normalize("NFC").trim().replace(/\s+/g, " ").toLowerCase();
+        for (const line of lines) {
+          if (line.kind !== "message") continue;
+          const m = line.record;
+          if (threadOf.has(m.id)) {
+            if (m.id === m.thread_id) resolved.set(m.id, m.resolved_at !== null);
+            continue;
+          }
+          let expected: string;
+          if (m.reply_to) {
+            expected = threadOf.get(m.reply_to)!;
+          } else if (m.author.kind === "person") {
+            throw new Error("a person's message always replies");
+          } else {
+            const name = m.thread_name ?? null;
+            const candidate =
+              name !== null
+                ? byName.get(`${m.project_id}\0${nameKey(name)}`)
+                : m.author.session
+                  ? bySession.get(`${m.project_id}\0${m.author.session}`)
+                  : undefined;
+            expected = candidate && !resolved.get(candidate) ? candidate : m.id;
+          }
+          expect(m.thread_id).toBe(expected);
+          threadOf.set(m.id, m.thread_id);
+          if (m.id === m.thread_id) {
+            resolved.set(m.id, m.resolved_at !== null);
+            if (m.thread_name != null) byName.set(`${m.project_id}\0${nameKey(m.thread_name)}`, m.id);
+            else if (m.author.kind === "agent" && m.author.session) bySession.set(`${m.project_id}\0${m.author.session}`, m.id);
+          }
+        }
+
+        // And the store replayed from disk (a copy, so each has one writer)
+        // routes every next send exactly as the live one does.
+        const project = store.ensureProject({ name: "repo0", root: "/work/repo0" });
+        const copy = dataDir();
+        cpSync(dir, copy, { recursive: true });
+        const replayed = InboxStore.open(copy);
+        expect(view(replayed)).toEqual(view(store));
+        // Threads the probes start get fresh ids on each side: pair them up.
+        const started = new Map<string, string>();
+        for (const session of ["ses_a", "ses_b", null]) {
+          for (const thread of [null, "alpha", "BETA"]) {
+            const probe = { project_id: project.id, author: { kind: "agent" as const, host: null, session, name: null }, body: "probe", thread };
+            const live = store.sendMessage(probe).message;
+            const again = replayed.sendMessage(probe).message;
+            if (live.thread_id === live.id) {
+              expect(again.thread_id).toBe(again.id);
+              started.set(live.id, again.id);
+            } else {
+              expect(again.thread_id).toBe(started.get(live.thread_id) ?? live.thread_id);
+            }
+          }
+        }
+      }),
+      { numRuns: 80 },
+    );
   });
 
   test("question keys are core's: q- + hash of kind and prompt, -2 for a repeat", () => {

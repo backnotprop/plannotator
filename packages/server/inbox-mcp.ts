@@ -13,7 +13,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
-import type { InboxLine, InboxMessage, InboxProject, InboxThreadSummary } from "@plannotator/core/inbox-types";
+import { INBOX_THREAD_NAME_MAX, type InboxLine, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 
@@ -27,16 +27,16 @@ export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "resolve_message"
 export const INBOX_MCP_INSTRUCTIONS = [
   "Plannotator Inbox: send the person a message and get their answer without holding your session on a review tab. The Inbox runs on this machine; the person reads your message there and answers when they can.",
   "",
-  "- send_message posts markdown to the person, as a new thread or a reply (reply_to). Ask what you cannot decide alone as question blocks (:::question, :::question-multi, :::question-text); send_message's description has the syntax. Pass an idempotency_key so a retry never posts twice.",
+  "- send_message posts markdown to the person. Your messages land in one thread, your session's, until the person resolves it; pass `thread` (a short name) to keep separate work in its own thread, or to join another session's thread of that name; reply_to answers one message. Ask what you cannot decide alone as question blocks (:::question, :::question-multi, :::question-text); send_message's description has the syntax. Pass an idempotency_key so a retry never posts twice.",
   "- After sending, either go on with other work or call wait_for_reply with the thread_id. It returns the person's reply as soon as it lands, or { status: \"waiting\", cursor } after about 50 seconds; call it again with that cursor to keep waiting.",
-  "- read_thread reads one thread (thread_id) or lists your threads in this project.",
+  "- read_thread reads one thread (thread_id) or lists the threads you sent in, in this project.",
   "- resolve_message closes a thread once you have what you needed.",
   "",
   "The reply is the person's answer to you, framed as theirs: their words, then an \"Answers to your questions\" section. There is no tool to answer or approve on the person's behalf.",
 ].join("\n");
 
 const SEND_MESSAGE_DESCRIPTION = [
-  "Send the person a markdown message in the Plannotator Inbox: a new thread, or a reply in one (reply_to). Returns the message and thread ids; the answer comes back through wait_for_reply or read_thread.",
+  "Send the person a markdown message in the Plannotator Inbox. It joins your session's open thread in this project (a new one the first time, or once the person resolved it; it keeps its first subject). `thread` names a thread instead: the same name in the same project is the same open thread, across sessions. reply_to answers one message and wins over both. Returns the message and thread ids; the answer comes back through wait_for_reply or read_thread.",
   "",
   QUESTION_AUTHORING_GUIDE,
 ].join("\n");
@@ -44,7 +44,7 @@ const SEND_MESSAGE_DESCRIPTION = [
 const PROJECT_PATH_DESCRIPTION =
   "Absolute path of the repository or folder you work in; the thread lands in that project's row. The `plannotator inbox mcp` shim fills it from its working folder.";
 const AGENT_SESSION_DESCRIPTION =
-  "Your session id. The `plannotator inbox mcp` shim fills it; read_thread's asked_by \"me\" and wait_for_reply without a thread match on it.";
+  "Your session id. The `plannotator inbox mcp` shim fills it. send_message joins your session's thread by it; read_thread's asked_by \"me\" and wait_for_reply without a thread match on it.";
 
 export interface InboxMcpContext {
   store: InboxStore;
@@ -97,14 +97,6 @@ function threadOf(store: InboxStore, input: { thread_id?: string; message_id?: s
   return null;
 }
 
-/** Threads whose root the given agent session sent. */
-function threadsAskedBy(store: InboxStore, session: string, projectId: string | null): InboxThreadSummary[] {
-  const projects = projectId ? [projectId] : store.listProjects().map((p) => p.id);
-  return projects
-    .flatMap((id) => store.threadsOf(id))
-    .filter((t) => t.author.kind === "agent" && t.author.session === session);
-}
-
 /** The seq of the last agent message in a thread: replies after it are new to the agent. */
 function lastAgentCursor(store: InboxStore, threadId: string): number {
   const thread = store.thread(threadId);
@@ -116,6 +108,8 @@ function lastAgentCursor(store: InboxStore, threadId: string): number {
 }
 
 function replyResult(store: InboxStore, reply: InboxMessage, base: string): ToolResult {
+  // The agent now has the person's reply: a Sent row moves to Quiet.
+  store.markAgentChecked(reply.thread_id);
   const cursor = store.messageCursor(reply.id) ?? store.cursor();
   const questions = reply.reply_to ? store.questionsOf(reply.reply_to) : [];
   const root = store.message(reply.thread_id);
@@ -153,7 +147,11 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         .object({
           body: z.string().min(1).describe("The message, markdown. Question blocks render as answerable cards."),
           project_path: z.string().optional().describe(PROJECT_PATH_DESCRIPTION),
-          subject: z.string().optional().describe("A short subject for a new thread. Default: the first question's prompt, else the first line."),
+          subject: z.string().optional().describe("A short subject when this starts a thread (ignored when it joins one). Default: the first question's prompt, else the first line."),
+          thread: z
+            .string()
+            .optional()
+            .describe(`A short thread name (1-${INBOX_THREAD_NAME_MAX} characters, one line), compared without case. Use it to split your work into separate threads, or to join another session's thread of the same name. Ignored with reply_to.`),
           reply_to: z.string().optional().describe("A message id: post this as a reply in that message's thread."),
           idempotency_key: z.string().optional().describe("Any unique string; sending again with the same key answers the first message instead of posting twice."),
           agent_session: z.string().optional().describe(AGENT_SESSION_DESCRIPTION),
@@ -188,6 +186,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           subject: input.subject ?? null,
           reply_to: input.reply_to ?? null,
           idempotency_key: input.idempotency_key ?? null,
+          thread: input.thread ?? null,
         });
         const message = result.message;
         const project = store.project(message.project_id)!;
@@ -199,6 +198,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           {
             message_id: message.id,
             thread_id: message.thread_id,
+            /** True when this message started the thread. */
+            new_thread: message.thread_id === message.id,
+            thread_name: store.message(message.thread_id)?.thread_name ?? null,
             project: { id: project.id, name: project.name, root: project.root },
             questions,
             replayed: result.replayed,
@@ -214,7 +216,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
     {
       title: "Read a thread, or list your threads",
       description:
-        "Read one Inbox thread (thread_id or message_id): every message with its questions and the person's answers. Without an id, list this project's threads, newest first: only the ones you asked unless asked_by is \"anyone\", and only open ones unless include_resolved.",
+        "Read one Inbox thread (thread_id or message_id): every message with its questions and the person's answers. Without an id, list this project's threads, newest activity first, each with its section in the person's list: only the ones you sent in unless asked_by is \"anyone\", and only open ones unless include_resolved.",
       inputSchema: z
         .object({
           thread_id: z.string().optional(),
@@ -232,6 +234,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
       guarded(async () => {
         const threadId = threadOf(store, input);
         if (threadId) {
+          store.markAgentChecked(threadId);
           const thread = store.thread(threadId)!;
           const replies = thread.messages.filter((m) => m.author.kind === "person").length;
           return ok(
@@ -244,7 +247,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         const session = input.agent_session?.trim() || null;
         const askedBy = input.asked_by ?? (session ? "me" : "anyone");
         if (askedBy === "me" && !session) throw new InboxError("validation_error", "asked_by: \"me\" needs agent_session.");
-        let threads = askedBy === "me" ? threadsAskedBy(store, session!, project.id) : store.threadsOf(project.id);
+        let threads = store.listRows({ projectId: project.id, session: askedBy === "me" ? session : null });
         if (!input.include_resolved) threads = threads.filter((t) => t.resolved_at === null);
         const limit = input.limit ?? 20;
         const total = threads.length;
@@ -305,7 +308,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           const session = input.agent_session?.trim();
           if (!session) throw new InboxError("validation_error", "thread_id: required (or agent_session, to wait on every thread you asked).");
           const projectId = input.project_path ? (await context.resolveProject(input.project_path)).id : null;
-          threadIds = threadsAskedBy(store, session, projectId)
+          threadIds = store
+            .listRows({ projectId, session })
             .filter((t) => t.resolved_at === null)
             .map((t) => t.thread_id);
         }

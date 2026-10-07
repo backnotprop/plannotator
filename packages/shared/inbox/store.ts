@@ -46,9 +46,14 @@ import {
   type InboxProject,
   type InboxQuestion,
   type InboxQuestionRecord,
+  type InboxListRow,
+  type InboxListSection,
   type InboxThread,
   type InboxThreadSummary,
+  checkInboxThreadName,
+  inboxThreadNameKey,
 } from "@plannotator/core/inbox-types";
+import { inboxListSections, inboxRowUnread, inboxSectionOf } from "./list";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
 import { sanitizeTag } from "@plannotator/core/project";
 import {
@@ -73,6 +78,12 @@ export interface InboxSendInput {
   subject?: string | null;
   reply_to?: string | null;
   idempotency_key?: string | null;
+  /**
+   * A thread name in this project: the open thread of that name, across
+   * sessions, or a new one under it. Without it (and without reply_to) the
+   * message joins its session's open default thread. Ignored with reply_to.
+   */
+  thread?: string | null;
 }
 
 export interface InboxSendResult {
@@ -133,6 +144,16 @@ export class InboxStore {
   /** The seq of a message's first line: its place in the event log. */
   private readonly messageSeq = new Map<string, number>();
   private readonly questions = new Map<string, InboxQuestionRecord>();
+  /**
+   * Thread routing, kept from each root's first line in seq order, so a
+   * replay of the log gives the same answers: the newest unnamed root an
+   * agent session started in a project (`<project>\0<session>`), and the
+   * newest root of each thread name (`<project>\0<name key>`).
+   */
+  private readonly sessionThreads = new Map<string, string>();
+  /** Each thread's message ids in seq order. */
+  private readonly threadMembers = new Map<string, string[]>();
+  private readonly namedThreads = new Map<string, string>();
   private readonly tornFiles = new Set<string>();
   private readonly listeners = new Set<InboxListener>();
   private readonly now: () => Date;
@@ -218,12 +239,47 @@ export class InboxStore {
         break;
       case "message":
         this.messages.set(line.record.id, line.record);
-        if (!this.messageSeq.has(line.record.id)) this.messageSeq.set(line.record.id, line.seq);
+        if (!this.messageSeq.has(line.record.id)) {
+          this.messageSeq.set(line.record.id, line.seq);
+          const members = this.threadMembers.get(line.record.thread_id);
+          if (members) members.push(line.record.id);
+          else this.threadMembers.set(line.record.thread_id, [line.record.id]);
+          this.indexRoot(line.record);
+        }
         break;
       case "question":
         this.questions.set(line.record.id, line.record);
         break;
     }
+  }
+
+  /** Note a root's routing keys, from its first line only. */
+  private indexRoot(message: InboxMessage): void {
+    if (message.thread_id !== message.id || message.author.kind !== "agent") return;
+    const name = message.thread_name ?? null;
+    if (name !== null) {
+      this.namedThreads.set(`${message.project_id}\0${inboxThreadNameKey(name)}`, message.id);
+    } else if (message.author.session) {
+      this.sessionThreads.set(`${message.project_id}\0${message.author.session}`, message.id);
+    }
+  }
+
+  /**
+   * The thread a message without reply_to joins, or null for a new thread:
+   * the newest thread of that name in the project when `name` is given, else
+   * the newest unnamed thread the session started there; in both cases only
+   * while it is open (resolved means done, so the next message starts anew).
+   * No session and no name: always a new thread.
+   */
+  private routeThread(projectId: string, session: string | null, name: string | null): string | null {
+    const rootId =
+      name !== null
+        ? this.namedThreads.get(`${projectId}\0${inboxThreadNameKey(name)}`)
+        : session
+          ? this.sessionThreads.get(`${projectId}\0${session}`)
+          : undefined;
+    if (!rootId || this.isResolved(rootId)) return null;
+    return rootId;
   }
 
   /** The highest seq written: the event-log cursor "now". */
@@ -264,10 +320,9 @@ export class InboxStore {
     return this.messageSeq.get(id) ?? null;
   }
 
+  /** A thread's messages in seq order (a message's thread never changes, so the index only grows). */
   private threadMessages(threadId: string): InboxMessage[] {
-    const out: InboxMessage[] = [];
-    for (const message of this.messages.values()) if (message.thread_id === threadId) out.push(message);
-    return out.sort((a, b) => (this.messageSeq.get(a.id) ?? 0) - (this.messageSeq.get(b.id) ?? 0));
+    return (this.threadMembers.get(threadId) ?? []).map((id) => this.messages.get(id)!);
   }
 
   private questionRecords(messageId: string): InboxQuestionRecord[] {
@@ -306,6 +361,7 @@ export class InboxStore {
       thread_id: threadId,
       project,
       subject: root.subject,
+      thread_name: root.thread_name ?? null,
       resolved_at: root.resolved_at,
       messages: this.threadMessages(threadId).map((m) => this.wire(m)),
     };
@@ -341,6 +397,104 @@ export class InboxStore {
       if (summary) out.push(summary);
     }
     return out.sort((a, b) => b.last_at.localeCompare(a.last_at) || b.thread_id.localeCompare(a.thread_id));
+  }
+
+  /** One row of the list: the thread's summary, its project label and its section. */
+  listRow(threadId: string): InboxListRow | null {
+    const summary = this.threadSummary(threadId);
+    if (!summary) return null;
+    const root = this.messages.get(threadId)!;
+    const project = this.projectsById.get(root.project_id);
+    if (!project) return null;
+    const messages = this.threadMessages(threadId);
+    const seqOf = (m: InboxMessage) => this.messageSeq.get(m.id) ?? 0;
+    let lastPersonSeq = 0;
+    let waitingSince: string | null = null;
+    for (const message of messages) {
+      if (message.author.kind === "person") lastPersonSeq = seqOf(message);
+      if (waitingSince === null && this.questionsOf(message.id).some((q) => q.state === "open" && !q.orphaned)) {
+        waitingSince = message.created_at;
+      }
+    }
+    // A reply of the person's is a look at everything before it.
+    const seenSeq = Math.max(root.person_seen_seq ?? 0, lastPersonSeq);
+    const unseen = messages.filter((m) => m.author.kind === "agent" && seqOf(m) > seenSeq).length;
+    const last = messages[messages.length - 1] ?? root;
+    const sent =
+      last.author.kind === "person"
+        ? { at: last.created_at, checked_at: (root.agent_checked_seq ?? 0) >= seqOf(last) ? (root.agent_checked_at ?? null) : null }
+        : null;
+    const facts = {
+      ...summary,
+      project: { id: project.id, name: project.name },
+      thread_name: root.thread_name ?? null,
+      answered_not_sent: root.resolved_at === null && summary.questions.open === 0 && summary.questions.picked > 0,
+      waiting_since: waitingSince,
+      unseen,
+      sent,
+    };
+    const section = inboxSectionOf(facts);
+    return { ...facts, section, unread: inboxRowUnread(section) };
+  }
+
+  /**
+   * The list's rows, newest activity first: every thread, or one project's
+   * (`projectId`), or the threads an agent session sent any message in
+   * (`session`: the threads it started, joined or replied in).
+   */
+  listRows(filter: { projectId?: string | null; session?: string | null } = {}): InboxListRow[] {
+    const out: InboxListRow[] = [];
+    for (const [threadId, members] of this.threadMembers) {
+      const root = this.messages.get(threadId);
+      if (!root || root.thread_id !== threadId) continue;
+      if (filter.projectId && root.project_id !== filter.projectId) continue;
+      if (filter.session) {
+        const session = filter.session;
+        const took = members.some((id) => {
+          const author = this.messages.get(id)?.author;
+          return author?.kind === "agent" && author.session === session;
+        });
+        if (!took) continue;
+      }
+      const row = this.listRow(threadId);
+      if (row) out.push(row);
+    }
+    return out.sort((a, b) => b.last_at.localeCompare(a.last_at) || b.thread_id.localeCompare(a.thread_id));
+  }
+
+  /** The list, placed in its sections; a project filter keeps the sections and drops other rows. */
+  listSections(projectId?: string | null): InboxListSection[] {
+    return inboxListSections(this.listRows({ projectId }));
+  }
+
+  /** The person looked at a thread: its agent messages so far are no longer new. No write when nothing is new. */
+  markSeen(threadId: string): InboxListRow {
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    const members = this.threadMembers.get(threadId) ?? [];
+    const latest = Math.max(0, ...members.map((id) => this.messageSeq.get(id) ?? 0));
+    if ((root.person_seen_seq ?? 0) < latest) {
+      const at = this.stamp();
+      this.appendMessage({ ...root, person_seen_seq: latest }, at);
+    }
+    return this.listRow(threadId)!;
+  }
+
+  /**
+   * An agent read the person's replies in a thread (wait_for_reply returned
+   * one, or read_thread read the thread): a Sent row moves to Quiet. No
+   * write when there is no person reply it has not read.
+   */
+  markAgentChecked(threadId: string): void {
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId) return;
+    let lastPersonSeq = 0;
+    for (const id of this.threadMembers.get(threadId) ?? []) {
+      if (this.messages.get(id)?.author.kind === "person") lastPersonSeq = this.messageSeq.get(id) ?? 0;
+    }
+    if (lastPersonSeq === 0 || (root.agent_checked_seq ?? 0) >= lastPersonSeq) return;
+    const at = this.stamp();
+    this.appendMessage({ ...root, agent_checked_seq: lastPersonSeq, agent_checked_at: at }, at);
   }
 
   // ─────────────────────────── writing ───────────────────────────
@@ -439,10 +593,28 @@ export class InboxStore {
     return project;
   }
 
-  /** An agent's message, a new thread or a reply in one. */
+  /**
+   * An agent's message. Where it lands (owner ruling 2026-10-07, "a row is a
+   * thread"), first match wins:
+   *  1. reply_to: that message's thread, as a reply to it (`thread` ignored);
+   *  2. `thread`: the open thread of that name in the project, across
+   *     sessions; a new thread under the name when there is none or it is
+   *     resolved;
+   *  3. otherwise: the session's open default (unnamed) thread in the
+   *     project; a new one when it has none or its last one is resolved, or
+   *     when the sender has no session.
+   * A thread keeps its first message's subject. Routing reads only the
+   * store's log, so a replay routes the same way.
+   */
   sendMessage(input: InboxSendInput): InboxSendResult {
     const body = input.body;
     if (typeof body !== "string" || body.trim() === "") throw new InboxError("validation_error", "body: a message needs a body.", { field: "body" });
+    let threadName: string | null = null;
+    if (input.thread !== undefined && input.thread !== null && !input.reply_to) {
+      const checked = checkInboxThreadName(input.thread);
+      if (!checked.ok) throw new InboxError("validation_error", `thread: ${checked.message}`, { field: "thread" });
+      threadName = checked.name;
+    }
     let projectId = input.project_id;
     let threadId: string | null = null;
     let replyTo: string | null = null;
@@ -470,6 +642,8 @@ export class InboxStore {
       }
     }
 
+    if (!replyTo) threadId = this.routeThread(projectId, input.author.session, threadName);
+
     const at = this.stamp();
     const id = inboxId("msg");
     const parsed = parseInboxQuestionBlocks(body);
@@ -484,6 +658,7 @@ export class InboxStore {
       created_at: at,
       resolved_at: null,
       idempotency_key: key,
+      thread_name: threadName,
     };
     this.appendMessage(message, at);
     for (const question of parsed) {
