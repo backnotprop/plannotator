@@ -38,8 +38,9 @@ import { QuestionContext } from './QuestionContext';
  * (`renderFooter`), and a question carrying `Decision: when answered` or a
  * `Decision: [statement](url)` link shows that beside the prompt. A host can
  * also let the reviewer switch a question's decision recording off and on
- * (`decisionRecording` + `onToggleDecisionRecording`; any question without a
- * recorded decision once the host supplies a state), open its own decision
+ * (`decisionRecording` + `onToggleDecisionRecording`; with
+ * `decisionScope: 'any'`, any question without a recorded decision once the
+ * host supplies a state), open its own decision
  * card from the tag's words (`onOpenDecision`), and hide the card's own
  * status tag to draw its own (`statusTag: 'none'`).
  */
@@ -133,12 +134,18 @@ export interface QuestionBlockProps {
    *  carrying `Decision: when answered` it defaults to true; false draws the
    *  "Records a decision" tag dimmed with a dotted outline and hides the
    *  "Answering this records a decision" row. On a question WITHOUT a
-   *  decision line (ui 0.52.1) a defined value adds the tag in that state
-   *  (false: off; true: on, with the row), so a host can let any answer
-   *  become a decision; undefined leaves such a question with no tag. Has no
-   *  effect on a question whose decision is already recorded
+   *  decision line it is ignored unless `decisionScope` is `'any'` (ui
+   *  0.52.1); then a defined value adds the tag in that state (false: off;
+   *  true: on, with the row), so a host can let any answer become a
+   *  decision, and undefined leaves the question with no tag. Has no effect
+   *  on a question whose decision is already recorded
    *  (`Decision: [statement](url)`). */
   decisionRecording?: boolean;
+  /** Which questions can carry the "Records a decision" tag (ui 0.52.1).
+   *  `'when-answered'` (default, the 0.52.0 behaviour): only a question that
+   *  carries `Decision: when answered`. `'any'`: also a question with no
+   *  decision line, once the host passes a `decisionRecording` for it. */
+  decisionScope?: 'when-answered' | 'any';
   /** Makes the "Records a decision" tag a toggle button (`aria-pressed`):
    *  a click calls this with the question's key and the next state. The host
    *  stores it and passes it back as `decisionRecording`. Not offered in a
@@ -176,6 +183,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   saveLabel,
   renderFooter,
   decisionRecording,
+  decisionScope = 'when-answered',
   onToggleDecisionRecording,
   onOpenDecision,
   statusTag = 'card',
@@ -371,10 +379,12 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   const other = answer?.other ?? '';
   const otherOn = other.trim() !== '';
 
-  // A `Decision: when answered` question the host may switch off, or any
-  // other question once the host supplies a recording state for it. A
-  // recorded decision (`question.decision`) is never affected.
-  const decisionCapable = !question.decision && (!!question.decisionOnAnswer || decisionRecording !== undefined);
+  // A `Decision: when answered` question the host may switch off, or (with
+  // `decisionScope: 'any'`) any other question once the host supplies a
+  // recording state for it. A recorded decision (`question.decision`) is
+  // never affected.
+  const decisionCapable = !question.decision
+    && (!!question.decisionOnAnswer || (decisionScope === 'any' && decisionRecording !== undefined));
   const recordingOn = decisionRecording ?? true;
   const decisionToggleable = decisionCapable && !readOnly && !!onToggleDecisionRecording;
   const decisionOpenable = decisionCapable && !readOnly && !!onOpenDecision;
@@ -417,6 +427,13 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           {decisionCapable && (decisionOpenable ? (
             // Two targets in one tag: the diamond switches recording, the
             // words open the host's decision card. Siblings, never nested.
+            // Target size (WCAG 2.5.8) without changing the drawn tag: the
+            // diamond's invisible `before:` box reaches 6 px past it on every
+            // side (24 px wide, about 30 px tall), and the words, positioned
+            // and later in the tree, paint over its right-hand part, so a
+            // click on the words is always the words. The words (110 px wide)
+            // meet the spacing exception: nothing else to click within 12 px
+            // of their centre line.
             <><span
               className="annotation-exclude select-none inline-flex items-stretch whitespace-nowrap rounded align-[1px] text-[10.5px] font-semibold tracking-[0.03em] bg-primary/15 text-primary"
               style={recordingOn ? undefined : DECISION_OFF_STYLE}
@@ -429,16 +446,16 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                 aria-label="Record as a decision"
                 title="Record as a decision"
                 onClick={() => onToggleDecisionRecording!(question.key, !recordingOn)}
-                className="inline-flex cursor-pointer items-center rounded pl-1.5 pr-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                className="relative inline-flex cursor-pointer items-center rounded pl-1.5 pr-0.5 before:absolute before:-inset-1.5 before:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 data-question-decision-toggle=""
               ><DiamondGlyph /></button>
             ) : (
-              <span className="inline-flex items-center pl-1.5 pr-1"><DiamondGlyph /></span>
+              <span className="inline-flex items-center pl-1.5 pr-0.5"><DiamondGlyph /></span>
             )}<button
               type="button"
               aria-haspopup="dialog"
               onClick={(event) => onOpenDecision!(question.key, event.currentTarget)}
-              className="cursor-pointer rounded py-px pl-0.5 pr-1.5 hover:underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className="relative cursor-pointer rounded py-px pl-0.5 pr-1.5 hover:underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               data-question-decision-open=""
             >Records a decision</button></span>{' '}</>
           ) : decisionToggleable ? (

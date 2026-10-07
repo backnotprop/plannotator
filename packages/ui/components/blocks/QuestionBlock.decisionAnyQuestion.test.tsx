@@ -5,8 +5,10 @@
  * decision card").
  *
  * What regresses if this fails: a question without `Decision: when answered`
- * never offers the tag even when the host supplies a recording state (or
- * offers it when the host did not); switching it on does not show the
+ * never offers the tag even when the host opts in (`questionDecisionScope:
+ * 'any'`) and supplies a recording state, or offers it when the host did not
+ * (including a 0.52.0 host that returns a boolean for every question without
+ * opting in, which 0.52.0 documented as ignored); switching it on does not show the
  * "Answering this records a decision" row; with `onOpenDecision` the tag stays
  * one button (so the words cannot open the card), the two targets nest, the
  * opener does not hand the host an anchor element, or either target drops out
@@ -103,6 +105,7 @@ function Host({
     <Cards
       perQuestion={(q) => ({
         questionDecisionRecording: state[q.question.key] ?? !!q.question.decisionOnAnswer,
+        questionDecisionScope: 'any',
         onToggleQuestionDecisionRecording: (key, next) => {
           toggles.push([key, next]);
           setState((current) => ({ ...current, [key]: next }));
@@ -152,13 +155,25 @@ const tabbables = (el: HTMLElement) =>
   );
 
 describe('decision recording on a question without a decision line', () => {
-  test.skipIf(!hasDom)('shows the tag only when the host supplies a recording state', async () => {
-    const none = await mount(<Cards extra={{ onToggleQuestionDecisionRecording: () => {} }} />);
+  test.skipIf(!hasDom)('without the any scope a supplied state leaves the plain question alone (0.52.0)', async () => {
+    // A 0.52.0 host may return a boolean for every question: the 0.52.0
+    // contract said a question with no decision line ignores it.
+    const el = await mount(<Cards extra={{ questionDecisionRecording: true, onToggleQuestionDecisionRecording: () => {}, onOpenQuestionDecision: () => {} }} />);
+    const [plain, flagged] = cards(el);
+    expect(hasTagText(plain)).toBe(false);
+    expect(plain.hasAttribute('data-question-decision-recording')).toBe(false);
+    expect(decisionRow(plain) === null).toBe(true);
+    // The flagged question still gets its tag and the new opener.
+    expect(opener(flagged) !== null).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('with the any scope, shows the tag only when the host supplies a recording state', async () => {
+    const none = await mount(<Cards extra={{ questionDecisionScope: 'any', onToggleQuestionDecisionRecording: () => {} }} />);
     const plainWithout = cards(none)[0];
     expect(hasTagText(plainWithout)).toBe(false);
     expect(plainWithout.hasAttribute('data-question-decision-recording')).toBe(false);
 
-    const supplied = await mount(<Cards extra={{ questionDecisionRecording: false }} />);
+    const supplied = await mount(<Cards extra={{ questionDecisionScope: 'any', questionDecisionRecording: false }} />);
     const plainOff = cards(supplied)[0];
     expect(hasTagText(plainOff)).toBe(true);
     expect(plainOff.dataset.questionDecisionRecording).toBe('off');
@@ -193,7 +208,7 @@ describe('decision recording on a question without a decision line', () => {
   });
 
   test.skipIf(!hasDom)('a recorded decision is untouched by a supplied state', async () => {
-    const el = await mount(<Cards extra={{ questionDecisionRecording: false, onToggleQuestionDecisionRecording: () => {}, onOpenQuestionDecision: () => {} }} />);
+    const el = await mount(<Cards extra={{ questionDecisionScope: 'any', questionDecisionRecording: false, onToggleQuestionDecisionRecording: () => {}, onOpenQuestionDecision: () => {} }} />);
     const linked = cards(el)[2];
     expect(toggle(linked) === null).toBe(true);
     expect(opener(linked) === null).toBe(true);
@@ -260,7 +275,7 @@ describe('the separate opener for the host decision card', () => {
 
   test.skipIf(!hasDom)('without a toggle handler the diamond is not a control; the words still open', async () => {
     const opened: Array<[string, HTMLElement]> = [];
-    const el = await mount(<Cards extra={{ questionDecisionRecording: true, onOpenQuestionDecision: (k, a) => opened.push([k, a]) }} />);
+    const el = await mount(<Cards extra={{ questionDecisionScope: 'any', questionDecisionRecording: true, onOpenQuestionDecision: (k, a) => opened.push([k, a]) }} />);
     const plain = cards(el)[0];
     expect(toggle(plain) === null).toBe(true);
     await click(opener(plain)!);
@@ -279,7 +294,7 @@ describe('the separate opener for the host decision card', () => {
 
 describe('read-only and no-prop cards', () => {
   test.skipIf(!hasDom)('a read-only card is never interactive', async () => {
-    const all: Props = { questionDecisionRecording: true, onToggleQuestionDecisionRecording: () => {}, onOpenQuestionDecision: () => {} };
+    const all: Props = { questionDecisionScope: 'any', questionDecisionRecording: true, onToggleQuestionDecisionRecording: () => {}, onOpenQuestionDecision: () => {} };
     const el = await mount(<Cards readOnly extra={all} />);
     for (const card of cards(el)) {
       expect(toggle(card) === null).toBe(true);
@@ -307,6 +322,7 @@ describe('read-only and no-prop cards', () => {
         disableCodePathValidation
         readOnly
         onAnswerQuestion={() => {}}
+        questionDecisionScope="any"
         questionDecisionRecording={() => true}
         onToggleQuestionDecisionRecording={() => {}}
         onOpenQuestionDecision={() => {}}
@@ -336,6 +352,7 @@ describe('read-only and no-prop cards', () => {
         stickyActions={false}
         disableCodePathValidation
         onAnswerQuestion={() => {}}
+        questionDecisionScope="any"
         questionDecisionRecording={(q) => (q.question.decisionOnAnswer ? undefined : false)}
         onOpenQuestionDecision={(key) => opened.push(key)}
       />,
@@ -351,7 +368,7 @@ describe('read-only and no-prop cards', () => {
     const html = (el: HTMLElement) => el.innerHTML.replace(/(q-(?:prompt|context|suggest|note)-|question-)[A-Za-z0-9_«»]+/g, '$1#');
     const plain = await mount(<Cards />);
     // An explicit undefined for each new seam is the same card.
-    const spelled = await mount(<Cards extra={{ questionDecisionRecording: undefined, onOpenQuestionDecision: undefined }} />);
+    const spelled = await mount(<Cards extra={{ questionDecisionRecording: undefined, questionDecisionScope: undefined, onOpenQuestionDecision: undefined }} />);
     expect(html(spelled)).toBe(html(plain));
     // Sentinels: the plain question has no tag and no attribute; the flagged
     // question's tag is a plain span with its row.

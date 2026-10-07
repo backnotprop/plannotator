@@ -222,10 +222,16 @@ export interface ViewerProps {
    *  `Decision: when answered` question: false draws its "Records a
    *  decision" tag dimmed with a dotted outline and hides the "Answering this
    *  records a decision" row; true or undefined keeps today's card. On a
-   *  question with no decision line (ui 0.52.1): a boolean adds the tag in
-   *  that state (true also shows the row), undefined adds nothing. Has no
+   *  question with no decision line it is ignored unless
+   *  `questionDecisionScope` is `'any'`; then a boolean adds the tag in that
+   *  state (true also shows the row) and undefined adds nothing. Has no
    *  effect on a question whose decision is already recorded. */
   questionDecisionRecording?: (question: IndexedQuestion) => boolean | undefined;
+  /** Which questions can carry the "Records a decision" tag (ui 0.52.1).
+   *  `'when-answered'` (default, the 0.52.0 behaviour): only questions with
+   *  `Decision: when answered`. `'any'`: also a question with no decision
+   *  line, when `questionDecisionRecording` returns a boolean for it. */
+  questionDecisionScope?: 'when-answered' | 'any';
   /** Makes a question's "Records a decision" tag a toggle button
    *  (`aria-pressed`); a click calls this with the question's key and the
    *  next state, which the host stores and returns from
@@ -614,6 +620,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   saveQuestionAnswerLabel,
   renderQuestionFooter,
   questionDecisionRecording,
+  questionDecisionScope,
   onToggleQuestionDecisionRecording,
   onOpenQuestionDecision,
   questionStatusTag,
@@ -1579,6 +1586,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   saveQuestionAnswerLabel={saveQuestionAnswerLabel}
                   renderQuestionFooter={renderQuestionFooter}
                   questionDecisionRecording={question ? questionDecisionRecording?.(question) : undefined}
+                  questionDecisionScope={questionDecisionScope}
                   onToggleQuestionDecisionRecording={readOnly ? undefined : onToggleQuestionDecisionRecording}
                   onOpenQuestionDecision={readOnly ? undefined : onOpenQuestionDecision}
                   questionStatusTag={questionStatusTag}

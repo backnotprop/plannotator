@@ -2034,19 +2034,28 @@ the props rendering the same markup.
 Two gaps Workspaces found in 0.52.0 against its approved Inbox design
 ("the tag is the switch" on every question, off by default; "clicking the
 tag's words opens the decision card"). Plannotator passes none of this, and a
-card without the new prop or a recording state renders byte-identically to
-0.52.0 (checked by rendering main and the branch with no props, interactive
-and read-only, through `BlockRenderer` and `Viewer`).
+card without the new props renders byte-identically to 0.52.0 (checked by
+rendering main and the branch through `BlockRenderer` and `Viewer`,
+interactive and read-only, with no props, with a 0.52.0-shaped host, and with
+a 0.52.0 host returning a boolean for every question).
 
 | `Viewer` | `BlockRenderer` | `QuestionBlock` |
 | --- | --- | --- |
+| `questionDecisionScope?: 'when-answered' \| 'any'` | same | `decisionScope?: 'when-answered' \| 'any'` |
 | `onOpenQuestionDecision?: (key, anchor: HTMLElement) => void` | same | `onOpenDecision?: (key, anchor: HTMLElement) => void` |
 
-1. **Any question can record a decision.** `decisionRecording` /
-   `questionDecisionRecording` now also reaches a question WITHOUT a decision
-   line: a boolean adds the "◇ Records a decision" tag in that state (and,
-   with `onToggleDecisionRecording`, makes it the toggle), `undefined` leaves
-   the question as it was (no tag). On shows the same "Answering this records
+1. **Any question can record a decision, opt-in.** With
+   `questionDecisionScope="any"` (`decisionScope: 'any'`),
+   `decisionRecording` / `questionDecisionRecording` also reaches a question
+   WITHOUT a decision line: a boolean adds the "◇ Records a decision" tag in
+   that state (and, with `onToggleDecisionRecording`, makes it the toggle),
+   `undefined` leaves the question as it was (no tag). The default,
+   `'when-answered'`, is the 0.52.0 behaviour: only `Decision: when answered`
+   questions carry the tag, and a boolean returned for a plain question is
+   ignored, as 0.52.0 documented. It is an explicit opt-in rather than
+   "a boolean means show it" so that a 0.52.0 host that returns a boolean for
+   every question does not grow tags on its plain questions in a patch
+   release. On shows the same "Answering this records
    a decision" row a `Decision: when answered` question shows; off hides it.
    The default for such a question is whatever you return: start it `false`
    for "off by default". A question with a recorded decision
@@ -2054,10 +2063,6 @@ and read-only, through `BlockRenderer` and `Viewer`).
    `data-question-decision` still describes the question's own line (absent
    for a plain question); `data-question-decision-recording="on" | "off"`
    appears once you supply a state.
-   **Behavior change for 0.52.0 hosts:** a host that returned a boolean from
-   `questionDecisionRecording` for EVERY question (rather than only for
-   `decisionOnAnswer` ones) now gets the tag on its plain questions. Return
-   `undefined` for questions that should stay tag-less.
 2. **A separate opener (`onOpenDecision` / `onOpenQuestionDecision`).** Given,
    the tag is drawn as two adjacent targets inside one visual tag
    (`[data-question-decision-tag]`), siblings, never nested:
@@ -2083,15 +2088,22 @@ and read-only, through `BlockRenderer` and `Viewer`).
 
 Measured in headless Chromium with the default theme: switch and words are
 7.37:1 (dark) / 8.98:1 (light) off, 5.84:1 / 5.15:1 on; the focus ring is
-7.53:1 / 6.53:1 against the card. The split tag has the same box as the 0.52.0
-tag (the switch is 20 × 17.75 px, the words 113 × 17.75 px), so both are
-under the 24 px target size; the approved design keeps the compact tag.
+7.53:1 / 6.53:1 against the card. The split tag draws exactly the 0.52.0 tag
+(127.66 × 17.75 px, the same 4 px between diamond and words). Target size
+(WCAG 2.5.8) is met without changing that look: the diamond (18 × 17.75 px
+drawn) carries an invisible `before:` box 6 px past it on every side, so it
+clicks as 24 × 29.75 px; the words, positioned and later in the tree, paint
+over the box's right-hand part, so a click on the words is always the words,
+and the words (110 px wide) meet the spacing exception.
 
-**No stylesheet change**: only utility classes the package already ships, so
-`styles.css` and the guides.show viewer manifest are unchanged.
+**No stylesheet change**: only utility classes the package already ships
+(the hit box is the `before:absolute before:-inset-1.5 before:content-['']`
+pattern of the annotation panel's icon buttons), so `styles.css` and the
+guides.show viewer manifest are unchanged (`check:manifest` in sync).
 
 Pinned by `components/blocks/QuestionBlock.decisionAnyQuestion.test.tsx`
-(DOM-gated): the tag on a plain question only with a supplied state, the
+(DOM-gated): the tag on a plain question only with the `'any'` scope and a
+supplied state (a boolean without the scope changes nothing), the
 toggle's arguments and the row on/off, the switch and the opener as sibling
 buttons with the anchor element, tab order, the opener without a toggle
 handler, 0.52.0 behavior without `onOpenDecision`, read-only cards, `Viewer`

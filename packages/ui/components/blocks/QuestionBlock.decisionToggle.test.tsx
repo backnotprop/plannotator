@@ -174,8 +174,9 @@ describe('QuestionBlock decision recording toggle', () => {
     expect(toggle(linked) === null).toBe(true);
     expect(linked.dataset.questionDecisionRecording).toBeUndefined();
     expect(decisionRow(linked) !== null).toBe(true);
-    // The handler alone does not reach a question with no decision line; a
-    // recording state does (QuestionBlock.decisionAnyQuestion.test.tsx).
+    // The handler alone does not reach a question with no decision line; the
+    // `'any'` scope plus a recording state does
+    // (QuestionBlock.decisionAnyQuestion.test.tsx).
     const handlerOnly = await mount(<Cards extra={{ onToggleQuestionDecisionRecording: () => {} }} />);
     const plain = cards(handlerOnly)[2];
     expect(toggle(plain) === null).toBe(true);
