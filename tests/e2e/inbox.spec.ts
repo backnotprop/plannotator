@@ -152,6 +152,13 @@ function writeContactSheet(): void {
   );
 }
 
+/** Every visible code box shows its whole text: wrapped, never clipped or scrolled under Copy. */
+async function expectCodeUnclipped(page: Page): Promise<void> {
+  const boxes = await page.locator('.ib-cbox pre:visible').evaluateAll((els) => els.map((el) => ({ text: el.textContent ?? '', scroll: el.scrollWidth, client: el.clientWidth })));
+  expect(boxes.length).toBeGreaterThan(0);
+  for (const box of boxes) expect(box.scroll, `clipped: ${box.text}`).toBeLessThanOrEqual(box.client);
+}
+
 /** Every heading and label the first run shows: headings, host names, tabs, buttons, links, file paths. */
 async function firstRunLabels(page: Page): Promise<string[]> {
   return page
@@ -225,6 +232,9 @@ test('first run: the three connections, Use MCP instead below the row, the harne
   expect(await heights()).toEqual(before);
   const rowBottom = Math.max(...(await cards.evaluateAll((els) => els.map((el) => el.getBoundingClientRect().bottom))));
   expect((await reveal.boundingBox())!.y).toBeGreaterThanOrEqual(rowBottom);
+  // The binary sits under a long temp path: both boxes wrap it in full.
+  expect(binary.length).toBeGreaterThan(60);
+  await expectCodeUnclipped(page);
   await expect(panel.getByRole('button', { name: 'Copy', exact: true })).toBeVisible();
   await page.mouse.move(0, 0);
   await shot('1.3-first-run-claude-code');
@@ -445,6 +455,7 @@ test('Settings: the agent tool knob applies to the next session, the compact pic
   const other = page.getByRole('tabpanel', { name: 'Other MCP client' });
   await expect(other.locator('pre').nth(0)).toHaveText(`${binary} inbox mcp`);
   await expect(other.locator('pre').nth(1)).toHaveText(`http://127.0.0.1:${registry().port}/mcp`);
+  await expectCodeUnclipped(page);
 
   const store = page.locator('.ib-stbl');
   await expect(store.locator('[data-store-project="billing-svc"]')).toContainText('2 threads');
