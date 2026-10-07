@@ -1,16 +1,33 @@
 """Deterministic hooks for Plannotator's packaged ZAP baseline scan."""
 
+# The application scan target (port 19432) and the Plannotator Inbox scan
+# target (port 19435). Each is a read-only route guard in front of the real
+# server; see scripts/dast/target.ts.
+APPLICATION_PATHS = (
+    "",
+    "/api/plan",
+    "/api/ai/capabilities",
+    "/api/definitely-missing",
+)
+INBOX_PATHS = (
+    "",
+    "/api/inbox/health",
+    "/api/inbox/projects",
+    "/api/definitely-missing",
+)
+
+
+def _seed_paths(target):
+    if target.rstrip("/").endswith(":19435"):
+        return INBOX_PATHS
+    return APPLICATION_PATHS
+
 
 def zap_access_target(zap, target):
-    # Seed the real read-only application routes through ZAP so passive rules
-    # inspect the SPA plus its JSON/error responses without invoking any
-    # state-changing endpoint.
-    for path in (
-        "",
-        "/api/plan",
-        "/api/ai/capabilities",
-        "/api/definitely-missing",
-    ):
+    # Seed the real read-only routes through ZAP so passive rules inspect the
+    # SPA (or the Inbox page) plus its JSON/error responses without invoking
+    # any state-changing endpoint.
+    for path in _seed_paths(target):
         response = zap.urlopen(target.rstrip("/") + path)
         if response.startswith("ZAP Error"):
             raise RuntimeError(f"ZAP failed to seed {path or '/'}: {response}")
@@ -36,7 +53,8 @@ def zap_spider(zap, target):
     # fallback and therefore returns the full bundle.) zap_access_target above
     # seeds the real UI/API responses through the passive scanner. Keeping the
     # spider on the application origin also keeps detector-fixture findings out
-    # of the application report.
-    if target.rstrip("/").endswith(":19432"):
-        return zap, target.rstrip("/") + "/api/definitely-missing"
+    # of the application report. The Inbox target gets the same treatment.
+    stripped = target.rstrip("/")
+    if stripped.endswith(":19432") or stripped.endswith(":19435"):
+        return zap, stripped + "/api/definitely-missing"
     return zap, target

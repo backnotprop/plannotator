@@ -48,3 +48,14 @@ The target entry point refuses to start unless
 `PLANNOTATOR_DAST_ISOLATED=1`. Do not set that acknowledgement outside an
 isolated disposable environment. The workflow is the supported execution
 path; the target is not a production server.
+
+The same run also scans a disposable Plannotator Inbox (`plannotator inbox`,
+`packages/server/inbox.ts`) seeded with one thread that asks a question. Its
+read-only guard listens on port 19435 and forwards only `/`,
+`/api/inbox/health`, `/api/inbox/projects`, that thread and an API 404 to the
+Inbox, which itself binds loopback only. Its report is validated separately
+(`inbox.json`, `inbox-summary.md`, `inbox-evidence.json`).
+
+Both guards forward the scanner's own Host (`plannotator-dast-target:<port>`),
+and every Plannotator server refuses Host names it does not know (the Host
+allowlist), so the target sets `PLANNOTATOR_ALLOWED_HOSTS` to that one name.

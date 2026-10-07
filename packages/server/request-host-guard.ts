@@ -56,9 +56,13 @@ export interface RequestHostGuard {
   check(req: Request): Response | null;
 }
 
-/** Build the guard for one server. Env and config are read once, here. */
-export function createRequestHostGuard(): RequestHostGuard {
-  const remote = isRemoteSession();
+/**
+ * Build the guard for one server. Env and config are read once, here.
+ * `localOnly` (the Inbox, which always binds loopback and ignores
+ * PLANNOTATOR_REMOTE) applies the local-mode rule whatever the environment.
+ */
+export function createRequestHostGuard(options: { localOnly?: boolean } = {}): RequestHostGuard {
+  const remote = options.localOnly ? false : isRemoteSession();
   const allowed = parseAllowedHosts(process.env[ALLOWED_HOSTS_ENV]);
   // A browser IDE's port proxy (code-server, Coder) forwards its own Host.
   const portHostPatterns = forwardedPortHostPatterns(process.env.VSCODE_PROXY_URI);

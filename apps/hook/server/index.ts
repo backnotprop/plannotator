@@ -216,6 +216,7 @@ import {
 } from "./cli";
 import { exitOnUnknownSubcommand } from "./unknown-subcommand";
 import { completeAnnotateCommand } from "./annotate-command";
+import { runInboxCommand } from "./inbox-command";
 import {
   annotateStartupFailureExitCode,
   isStrictAnnotateInvocation,
@@ -630,6 +631,13 @@ if (args[0] === "install-runtime") {
     : await installAgentTerminalRuntime();
   console.log(result.message);
   process.exit(result.ok ? 0 : 1);
+}
+
+// The Plannotator Inbox: a long-lived local server with its own registry
+// (inbox/inbox.json). Dispatched before the session registry and the
+// auto-update trigger below, which belong to review sessions.
+if (args[0] === "inbox") {
+  await runInboxCommand(args.slice(1));
 }
 
 if (isInteractiveNoArgInvocation(args, process.stdin.isTTY)) {

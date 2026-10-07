@@ -28,6 +28,7 @@ import {
   resolve,
 } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { inboxStatus, stopInbox } from "@plannotator/shared/inbox/registry";
 import {
   applyEdits,
   createScanner,
@@ -100,6 +101,7 @@ const PURGE_OWNED_TOP_LEVEL = [
   "plans",
   "history",
   "feedback",
+  "inbox",
   "drafts",
   "review-progress",
   "active",
@@ -379,6 +381,28 @@ export async function runPlannotatorUninstall(
     };
   }
 
+  // A running Inbox writes into inbox/ until it exits: purge stops it first,
+  // over its own token-guarded stop route (registry pid as the fallback).
+  let inboxBlocksPurge = false;
+  if (request.purge && !dataDirSafetyIssue) {
+    if (request.dryRun) {
+      const status = await inboxStatus(state.dataDir);
+      if (status.state === "running") {
+        state.planned.push(`Stop the running Plannotator Inbox (pid ${status.entry.pid})`);
+      }
+    } else {
+      const stopped = await stopInbox(state.dataDir);
+      if (stopped.state === "stopped") {
+        state.removed.push(`Stopped the running Plannotator Inbox (pid ${stopped.pid})`);
+      } else if (stopped.state === "still_running") {
+        inboxBlocksPurge = true;
+        state.errors.push(
+          `The Plannotator Inbox (pid ${stopped.pid}) is still running; quit it and run uninstall --purge again.`,
+        );
+      }
+    }
+  }
+
   const paths = resolveOwnedPaths(environment);
 
   await removeHostPlugins(request, environment, paths, state);
@@ -404,7 +428,7 @@ export async function runPlannotatorUninstall(
       // Keep this block synchronous: no host command or other awaited work may
       // reopen a path-swap window after the destructive-boundary revalidation.
       removeInstallerData(request, state);
-      if (request.purge) purgeLocalData(request, state);
+      if (request.purge && !inboxBlocksPurge) purgeLocalData(request, state);
     }
   }
 

@@ -172,6 +172,10 @@ jobs:
                   [19432, "/api/definitely-missing", 404],
                   [19432, "/robots.txt", 404],
                   [19433, "/", 200],
+                  [19435, "/", 200],
+                  [19435, "/api/inbox/health", 200],
+                  [19435, "/api/inbox/projects", 200],
+                  [19435, "/api/definitely-missing", 404],
                 ];
                 for (const [port, path, expected] of checks) {
                   const response = await fetch(`${base}:${port}${path}`);
@@ -182,6 +186,10 @@ jobs:
                 const blocked = await fetch(`${base}:19432/api/approve`, { method: "POST" });
                 if (blocked.status !== 405) {
                   throw new Error(`POST guard: expected 405, got ${blocked.status}`);
+                }
+                const inboxBlocked = await fetch(`${base}:19435/mcp`, { method: "POST" });
+                if (inboxBlocked.status !== 405) {
+                  throw new Error(`Inbox POST guard: expected 405, got ${inboxBlocked.status}`);
                 }
                 const upstreamExposed = await fetch(`${base}:19434/`).then(
                   () => true,
@@ -288,6 +296,49 @@ jobs:
           fi
           mv security-results/zap/zap.out security-results/zap/plannotator-zap.log
 
+      - name: Scan disposable Plannotator Inbox
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          docker run --rm \
+            --network "$DAST_NETWORK" \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --pids-limit 512 \
+            --memory 2g \
+            --tmpfs /tmp:rw,nosuid,nodev,size=256m,mode=1777 \
+            --tmpfs /home/zap/.ZAP:rw,nosuid,nodev,size=512m,uid=1000,gid=1000,mode=0700 \
+            --tmpfs /home/zap/.cache:rw,nosuid,nodev,size=128m,uid=1000,gid=1000,mode=0700 \
+            --tmpfs /home/zap/.config:rw,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700 \
+            --tmpfs /home/zap/.mozilla:rw,nosuid,nodev,size=128m,uid=1000,gid=1000,mode=0700 \
+            --volume "$GITHUB_WORKSPACE/security-results/zap:/zap/wrk:rw" \
+            --volume "$GITHUB_WORKSPACE/security-results/zap/zapdb.script:/zap/db/zapdb.script:ro" \
+            --volume "$GITHUB_WORKSPACE/scripts/dast/zap-hooks.py:/zap/hooks.py:ro" \
+            --workdir /zap/wrk \
+            "$ZAP_IMAGE" \
+            zap-baseline.py \
+              --autooff \
+              -t http://plannotator-dast-target:19435 \
+              -m 1 \
+              -T 10 \
+              -I \
+              -z "-Xmx1024m -silent" \
+              --hook /zap/hooks.py \
+              -J inbox.json \
+              -r inbox.html \
+              -w inbox.md \
+              -l WARN \
+              2>&1 | tee security-results/zap/inbox.log
+          scan_status=${PIPESTATUS[0]}
+          set -e
+          if [[ "$scan_status" -eq 3 || "$scan_status" -gt 3 ]]; then
+            echo "ZAP Inbox scan failed with exit $scan_status." >&2
+            exit "$scan_status"
+          fi
+          mv security-results/zap/zap.out security-results/zap/inbox-zap.log
+
       - name: Validate and summarize DAST evidence
         shell: bash
         run: |
@@ -304,6 +355,19 @@ jobs:
             --summary security-results/zap/summary.md \
             --evidence security-results/zap/evidence.json
           cat security-results/zap/summary.md >> "$GITHUB_STEP_SUMMARY"
+          bun run scripts/dast/report.ts \
+            --report security-results/zap/inbox.json \
+            --sentinel-report security-results/zap/sentinel.json \
+            --scan-log security-results/zap/inbox.log \
+            --zap-log security-results/zap/inbox-zap.log \
+            --sentinel-zap-log security-results/zap/sentinel-zap.log \
+            --minimum-urls 4 \
+            --expected-host plannotator-dast-target \
+            --sentinel-rule 10020 \
+            --summary security-results/zap/inbox-summary.md \
+            --evidence security-results/zap/inbox-evidence.json
+          echo "#### Plannotator Inbox" >> "$GITHUB_STEP_SUMMARY"
+          cat security-results/zap/inbox-summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Capture target diagnostics and tear down
         if: always()

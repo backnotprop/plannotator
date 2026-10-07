@@ -30,25 +30,31 @@
     "./pr": "./pr.ts",
     "./html-assets": "./html-assets.ts",
     "./guide-cli": "./guide/guide-cli.ts",
-    "./live-proxy": "./live-proxy.ts"
+    "./live-proxy": "./live-proxy.ts",
+    "./inbox": "./inbox.ts",
+    "./inbox-mcp": "./inbox-mcp.ts"
   },
   "files": [
     "*.ts",
     "*.mjs"
   ],
   "dependencies": {
+    "@modelcontextprotocol/server": "2.2.0",
     "@pierre/diffs": "1.3.6",
     "@plannotator/ai": "workspace:*",
+    "@plannotator/core": "workspace:*",
     "@plannotator/shared": "workspace:*",
     "@plannotator/webtui": "0.1.0",
     "chokidar": "^5.0.0",
     "jsonc-parser": "^3.3.1",
-    "uqr": "^0.1.3"
+    "uqr": "^0.1.3",
+    "zod": "4.5.4"
   },
   "peerDependencies": {
     "bun": ">=1.0.0"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "2.2.0",
     "glimpseui": "^0.8.0"
   }
 }

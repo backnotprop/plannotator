@@ -47,6 +47,7 @@
       "name": "@plannotator/hooks",
       "version": "0.0.1",
       "dependencies": {
+        "@plannotator/core": "workspace:*",
         "@plannotator/editor": "workspace:*",
         "@plannotator/server": "workspace:*",
         "@plannotator/shared": "workspace:*",
@@ -57,6 +58,7 @@
         "tailwindcss": "^4.1.18",
       },
       "devDependencies": {
+        "@modelcontextprotocol/client": "2.2.0",
         "@types/node": "^22.14.0",
         "@vitejs/plugin-react": "^5.0.0",
         "typescript": "~5.8.2",
@@ -264,15 +266,19 @@
       "name": "@plannotator/server",
       "version": "0.28.6",
       "dependencies": {
+        "@modelcontextprotocol/server": "2.2.0",
         "@pierre/diffs": "1.3.6",
         "@plannotator/ai": "workspace:*",
+        "@plannotator/core": "workspace:*",
         "@plannotator/shared": "workspace:*",
         "@plannotator/webtui": "0.1.0",
         "chokidar": "^5.0.0",
         "jsonc-parser": "^3.3.1",
         "uqr": "^0.1.3",
+        "zod": "4.5.4",
       },
       "devDependencies": {
+        "@modelcontextprotocol/client": "2.2.0",
         "glimpseui": "^0.8.0",
       },
       "peerDependencies": {
@@ -288,6 +294,9 @@
         "chokidar": "^5.0.0",
         "parse5": "^7.3.0",
         "turndown": "^7.2.4",
+      },
+      "devDependencies": {
+        "fast-check": "4.9.0",
       },
     },
     "packages/ui": {
@@ -314,7 +323,7 @@
         "@lezer/highlight": "^1.2.3",
         "@pierre/diffs": "1.3.6",
         "@plannotator/atomic-editor": "^0.9.0",
-        "@plannotator/core": "0.25.11",
+        "@plannotator/core": "0.25.12",
         "@plannotator/markdown-editor": "^0.5.0",
         "@plannotator/web-highlighter": "^0.8.1",
         "@tanstack/react-table": "^8.21.3",
@@ -851,7 +860,13 @@
 
     "@mixmark-io/domino": ["@mixmark-io/domino@2.2.0", "", {}, "sha512-Y28PR25bHXUg88kCV7nivXrP2Nj2RueZ3/l/jdx6J9f8J4nsEGcgX0Qe6lt7Pa+J79+kPiJU3LguR6O/6zrLOw=="],
 
+    "@modelcontextprotocol/client": ["@modelcontextprotocol/client@2.2.0", "", { "dependencies": { "@modelcontextprotocol/core": "2.2.0", "cross-spawn": "^7.0.5", "eventsource": "^3.0.2", "eventsource-parser": "^3.0.0", "jose": "^6.1.3", "pkce-challenge": "^5.0.0", "zod": "^4.2.0" } }, "sha512-LxCou/CSYQ6dwEnjhLZY0KnEuc8V4UJ3IEQCl/uR2yHobSQIEdJKUlKLRYRF5i5FqRGHy1eK7une3aAWDHLtig=="],
+
+    "@modelcontextprotocol/core": ["@modelcontextprotocol/core@2.2.0", "", { "dependencies": { "zod": "^4.2.0" } }, "sha512-iLhmprRmWI8EcosOA3wVvww22z02NkgqhV4fBH6f/odQBsi7xnJc0HGmi21yWO+/iKw2yzqVE127Zhna5/+JXw=="],
+
     "@modelcontextprotocol/sdk": ["@modelcontextprotocol/sdk@1.30.0", "", { "dependencies": { "@hono/node-server": "^1.19.9 || ^2.0.5", "ajv": "^8.17.1", "ajv-formats": "^3.0.1", "content-type": "^1.0.5", "cors": "^2.8.5", "cross-spawn": "^7.0.5", "eventsource": "^3.0.2", "eventsource-parser": "^3.0.0", "express": "^5.2.1", "express-rate-limit": "^8.2.1", "hono": "^4.11.4", "jose": "^6.1.3", "json-schema-typed": "^8.0.2", "pkce-challenge": "^5.0.0", "raw-body": "^3.0.0", "zod": "^3.25 || ^4.0", "zod-to-json-schema": "^3.25.1" }, "peerDependencies": { "@cfworker/json-schema": "^4.1.1" }, "optionalPeers": ["@cfworker/json-schema"] }, "sha512-xKd8OIzlqNzcqcNumGAa6g+PW2kjD5vrpcKOnfldAUPP3j7lnqMPwlTXQm8gF+UwH72z0lqaRbjr9hqGz0eITA=="],
+
+    "@modelcontextprotocol/server": ["@modelcontextprotocol/server@2.2.0", "", { "dependencies": { "@modelcontextprotocol/core": "2.2.0", "zod": "^4.2.0" } }, "sha512-qFnltjus6Gk8Lx6J1w2RXmr3YPN22MNT6qD6zjAkaiWIlFIFxWClz0rXHNuJF/KSUyn5YGhkSvXkWDbQHVLFEQ=="],
 
     "@msgpackr-extract/msgpackr-extract-darwin-arm64": ["@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.4", "", { "os": "darwin", "cpu": "arm64" }, "sha512-LCkGo6JDfaBhgST7UpPWgNgLINpcpabaHfyz5OBx75nUYxBsaEPxjnyNjWpeb/xBup/682QnBfRBy2/LvPutZQ=="],
 

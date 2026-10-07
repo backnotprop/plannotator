@@ -106,7 +106,10 @@
     "./request-host": "./request-host.ts",
     "./host-control": "./host-control.ts",
     "./live-probe": "./live-probe.ts",
-    "./live-proxy-node": "./live-proxy-node.ts"
+    "./live-proxy-node": "./live-proxy-node.ts",
+    "./inbox/schema": "./inbox/schema.ts",
+    "./inbox/store": "./inbox/store.ts",
+    "./inbox/registry": "./inbox/registry.ts"
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.64",
@@ -114,5 +117,8 @@
     "chokidar": "^5.0.0",
     "parse5": "^7.3.0",
     "turndown": "^7.2.4"
+  },
+  "devDependencies": {
+    "fast-check": "4.9.0"
   }
 }
