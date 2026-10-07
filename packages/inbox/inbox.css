@@ -75,8 +75,13 @@
 .ib-shell > * { min-height: 0; overflow: hidden; }
 .ib-side { background: var(--background); border-right: 1px solid var(--ib-line); display: flex; flex-direction: column; padding: 14px 10px 12px; }
 .ib-brand { display: flex; align-items: center; gap: 9px; padding: 0 6px 10px; }
-/* TaterSpriteSidebar's first frame (77x88 at 2x) shown 44 px high, mirrored. */
-.ib-brand .ib-tater { width: 38.5px; height: 44px; flex: none; background-position: left center; background-size: 38.5px 44px; background-repeat: no-repeat; transform: scaleX(-1); }
+/* Workspaces' TaterSpriteSidebar: 24 frames of 77x88 at 2x shown 44 px high
+   (a 924 px strip), mirrored, 3.5 s per loop; the first frame under reduced motion. */
+.ib-brand .ib-tater { width: 38.5px; height: 44px; flex: none; background-position: left center; background-size: 924px 44px; background-repeat: no-repeat; transform: scaleX(-1); animation: ib-tater-sidebar 3.5s steps(24) infinite; }
+@keyframes ib-tater-sidebar { to { background-position: -924px 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .ib-brand .ib-tater { animation: none; }
+}
 .ib-brand b { font-weight: 650; font-size: 15px; letter-spacing: -0.005em; }
 .ib-brand span { color: var(--muted-foreground); font-weight: 500; font-size: 15px; margin-left: -4px; }
 .ib-nav { display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 9px; border-radius: 7px; color: var(--foreground); font-size: 14px; width: 100%; text-align: left; }

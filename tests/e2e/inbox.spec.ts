@@ -57,15 +57,18 @@ function stopInbox(): void {
   }
 }
 
-/** One PNG per proved state, light then dark, at 1440 by 900. */
+/**
+ * One PNG per proved state, light then dark, at 1440 by 900. Taken under
+ * reduced motion, so the Tater mark sits on its first frame as the record draws it.
+ */
 async function shot(name: string): Promise<void> {
   const page = world.page;
   for (const scheme of ['light', 'dark'] as const) {
-    await page.emulateMedia({ colorScheme: scheme });
+    await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
     await page.waitForTimeout(200);
     await page.screenshot({ path: join(proofDir, `${name}-${scheme}.png`) });
   }
-  await page.emulateMedia({ colorScheme: 'light' });
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
 async function agent(name: string, host: string): Promise<SimAgent> {
@@ -154,6 +157,17 @@ test('first run: the three connections, the harness picker, Copy copies the comm
   await expect(page.getByRole('heading', { name: 'No agent has written yet.' })).toBeVisible();
   for (const host of ['claude-code', 'pi', 'opencode']) await expect(page.locator(`[data-host="${host}"]`)).toBeVisible();
   await expect(page.getByText('Projects appear here when an agent writes from one.')).toBeVisible();
+
+  // The Tater mark is Workspaces' sprite: 24 frames over 3.5 s, its first frame under reduced motion.
+  const tater = page.locator('[data-sprite="tater-sidebar"]');
+  const motion = () => tater.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return `${style.animationName} ${style.animationDuration} ${style.animationTimingFunction} ${style.animationPlayState}`;
+  });
+  expect(await motion()).toBe('ib-tater-sidebar 3.5s steps(24) running');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  expect((await motion()).startsWith('none ')).toBe(true);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
 
   const binary = realpathSync(world.binary);
   const codex = page.getByRole('tab', { name: 'Codex' });

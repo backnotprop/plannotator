@@ -1,6 +1,6 @@
-import taterFrame from '../assets/tater-sidebar-frame.webp';
 import type { ProjectFolder } from '../api';
 import { Icon } from '../icons';
+import { TaterMark } from './TaterMark';
 
 export interface SidebarProps {
   page: 'inbox' | 'settings';
@@ -24,7 +24,7 @@ export function Sidebar(props: SidebarProps) {
   return (
     <aside className="ib-side" aria-label="Inbox navigation">
       <div className="ib-brand">
-        <span className="ib-tater" style={{ backgroundImage: `url(${taterFrame})` }} aria-hidden="true" />
+        <TaterMark />
         <b>Plannotator</b>
         <span>Inbox</span>
       </div>
