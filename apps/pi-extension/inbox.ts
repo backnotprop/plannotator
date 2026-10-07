@@ -25,6 +25,11 @@
  * run, so a prompt typed into the wake's turn takes it over, the rule of
  * `pi-session-bridge.ts`'s run protection, and the reply is never sent again.
  * Listeners are registered once, at load (`pi.on` has no unsubscribe before 1.0).
+ *
+ * Two Pi processes on one session (`pi -c` or `--session` twice): the one the
+ * person used last delivers. A session start, a prompt the person submits
+ * (`input` not from an extension) and a `plannotator_inbox` call touch the
+ * session's lease in `InboxWake`; the other process defers while it is live.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -96,6 +101,7 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 		parameters: spec.inputSchema as any,
 		...NOT_ACTIVE_ON_REGISTRATION,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			wake?.touch();
 			const result = await connection.callTool(params, { sessionId: ctx.sessionManager.getSessionId(), cwd: ctx.cwd });
 			if (result.isError) throw new Error(result.text);
 			return { content: [{ type: "text", text: result.text }], details: {} };
@@ -190,8 +196,11 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 		endWaiting(new Error("the session ended"));
 	});
 
-	// The person submitted something: their turn goes first.
-	pi.on("input", () => wake?.onForeignPrompt());
+	// The person submitted something: their turn goes first, and replies follow them to this process.
+	pi.on("input", (event) => {
+		wake?.onForeignPrompt();
+		if (event?.source !== "extension") wake?.touch();
+	});
 	pi.on("agent_start", () => {
 		runOpen = true;
 	});

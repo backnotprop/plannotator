@@ -180,6 +180,7 @@ Register the tool but manage prompts and permissions yourself:
 - **Annotate last message**: Run `/plannotator-last` to annotate the agent's most recent response
 - **Annotate files, folders, and URLs**: Run `/plannotator-annotate` when you want manual review of an artifact
 - **The `plannotator` tool (OpenCode 2, off by default)**: ask the agent to "open notes.md in Plannotator" and it opens the review itself, without waiting on it. Your feedback comes back later as a message that names the review's session id (`pn-…`). The agent can also list the reviews it opened in this session and close one it no longer needs; your unsent comments stay saved as a draft. The tool is off by default: turn it on with `PLANNOTATOR_AGENT_TOOL=1` or `{ "agentTool": true }` in `~/.plannotator/config.json` (the environment variable wins in both directions). OpenCode reads it when it starts.
+- **The `plannotator_inbox` tool (off by default)**: the agent writes to your Plannotator Inbox and reads your answers there: `send_message` (a question, a note, files to annotate as attachments), `read_thread`, `wait_for_reply`, the project's decisions and guided reviews, as your Inbox offers them when OpenCode starts. On OpenCode 2, pressing Send on a reply wakes the session that sent the message: the reply is queued as its own turn once the session is idle, never steered into a running one, and the thread shows "Delivered to OpenCode". On OpenCode 1 the agent has the tool but is not woken; it reads replies with `read_thread` or `wait_for_reply`. The tool appears only when an Inbox is installed (you ran `plannotator inbox` once) and the `inboxTool` setting is on for OpenCode. It is off by default, because OpenCode sends every tool's full definition with each request. Turn it on with `export PLANNOTATOR_INBOX_TOOL=1`, or with `{ "inboxTool": { "opencode": true } }` in `~/.plannotator/config.json` (the Inbox's Settings writes this key; the environment variable wins). OpenCode reads it when it starts.
 - **Obsidian integration**: Auto-save approved plans to your vault with frontmatter and tags
 
 ## Environment Variables
@@ -192,6 +193,7 @@ Register the tool but manage prompts and permissions yourself:
 | `PLANNOTATOR_SHARE_URL` | Custom share portal URL for self-hosting. Default: `https://share.plannotator.ai`. |
 | `PLANNOTATOR_PASTE_URL` | Custom paste service URL for self-hosting. Default: `https://plannotator-paste.plannotator.workers.dev`. |
 | `PLANNOTATOR_PLAN_TIMEOUT_SECONDS` | Timeout for `submit_plan` review wait. Default: `345600` (96h). Set `0` to disable timeout. |
+| `PLANNOTATOR_INBOX_TOOL` | Set to `1` to give the agent the `plannotator_inbox` tool when an Inbox is installed, `0` to keep it out. Wins over `inboxTool` in `~/.plannotator/config.json`. Default: off. |
 | `PLANNOTATOR_BIN` | Override the CLI path used by the OpenCode plugin's CLI runtime fallback. Default: `plannotator` on `PATH`. |
 
 ## Devcontainer / Docker

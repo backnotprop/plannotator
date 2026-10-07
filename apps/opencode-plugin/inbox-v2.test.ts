@@ -382,4 +382,47 @@ describe.skipIf(!opencodeBin || !tarball)("OpenCode 2 ↔ Plannotator Inbox (the
     expect(answered?.author).toMatchObject({ kind: "agent", session });
     w.proof(`a prompt typed into the wake's turn took it over: 1 wake row, 0 interrupts; the wake's answer (reply_to ${replyId}) landed in the thread: Replied`);
   }, 900_000);
+
+  test("two OpenCode 2 servers on one session: the reply goes to the one the person works in, once", async () => {
+    const w = createInboxWorld("plannotator-inbox-oc2-", "03-two-servers-follow-the-person", "opencode2");
+    worlds.push(w);
+    knob(w, true);
+    startInbox(w);
+    const personTurn = gate();
+    // In B the agent reads the project's decisions through the tool, then its turn is held.
+    const m = model((request) => {
+      const last = lastMessage(request);
+      if (last.role === "user" && last.text === "Refactor the webhook handler.") return { toolCall: { name: "plannotator_inbox", arguments: { action: "list_decisions" } } };
+      if (last.role === "tool" && last.text.includes("decision")) return { text: "Refactoring.", hold: personTurn.promise };
+      return null;
+    });
+    // A and B share one OpenCode home and database: one session, two processes.
+    const a = await openOpenCode(w, m);
+    const session = await newSession(a);
+    await type(a, session, "Ask the person what to do on a 409.");
+    await waitFor("the send_message result", () => m.requests.some((request) => lastMessage(request).role === "tool"), 60_000);
+    await idle(a, session);
+    const asked = sentFrom(m);
+    const b = await openOpenCode(w, m);
+
+    // The person works in B (its turn held at the model); A sits idle.
+    await type(b, session, "Refactor the webhook handler.");
+    await waitFor("B's held turn at the model", () => m.requests.some((request) => lastMessage(request).role === "tool" && lastMessage(request).text.includes("decision")), 60_000);
+    const replyId = await personSends(w, asked.message_id, "Retry with the same key.");
+    await Bun.sleep(8_000);
+    expect(wakeRequests(m)).toEqual([]);
+    expect(wakeRows(a, session)).toEqual([]);
+    w.proof(`session ${session} open in servers A and B; the person works in B (its agent called plannotator_inbox, then its turn held), A idle: 8 s after Send, 0 wake rows in A, 0 wake requests at the model`);
+    personTurn.release();
+
+    await waitFor("the wake turn at the model", () => wakeRequests(m)[0], 60_000);
+    await idle(b, session);
+    await Bun.sleep(5_000);
+    expect(wakeRequests(m)).toHaveLength(1);
+    expect(wakeRows(b, session)).toHaveLength(1);
+    expect(wakeRows(a, session)).toEqual([]);
+    const delivered = (await thread(w, asked.thread_id)).messages.find((message) => message.id === replyId)?.delivery;
+    expect(delivered).toMatchObject({ state: "delivered", host: "opencode", session });
+    w.proof(`B's turn ended: the reply was queued in B, once (wake rows A 0, B 1; delivered at ${delivered?.at})`);
+  }, 900_000);
 });

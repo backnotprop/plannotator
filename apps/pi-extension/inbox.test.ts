@@ -356,6 +356,60 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		w.proof(`two Pi processes on session ${first.sessionId}: wakes ${wakes(first).length} + ${wakes(second).length} = 1, one claim (${replyId}), delivered at ${delivered?.at}`);
 	}, 120_000);
 
+	test("two Pi processes on one session: the reply goes to the one the person works in, once, and follows them back to the other", async () => {
+		const w = world("04b-two-processes-follow-the-person");
+		knob(w, true);
+		startInbox(w);
+		const personTurn = gate();
+		const m = model(
+			askingScript((request) => {
+				const last = lastMessage(request);
+				if (last.role === "user" && last.text === "Refactor the webhook handler.") return { text: "Refactoring.", hold: personTurn.promise };
+				return null;
+			}),
+		);
+		const a = await openPi(w, m);
+		await ask(a, "Ask the person what to do on a 409.");
+		const asked = sentFrom(m);
+		const b = await openPi(w, m, { session: a.sessionFile });
+		expect(b.sessionId).toBe(a.sessionId);
+
+		// The person works in B (its turn held at the model); A sits idle.
+		const bFrom = b.events.length;
+		await b.client.prompt("Refactor the webhook handler.");
+		await waitFor("B's turn at the model", () => m.requests.some((request) => lastMessage(request).text === "Refactor the webhook handler."));
+		const replyId = await personSends(w, asked.message_id, "Retry with the same key.");
+		await Bun.sleep(8_000);
+		expect(wakes(a)).toEqual([]);
+		expect(wakes(b)).toEqual([]);
+		w.proof(`session ${a.sessionId} open in A and B; the person works in B (turn held), A idle: 8 s after Send, wakes in A 0, in B 0`);
+		personTurn.release();
+		await settled(b, bFrom);
+		await waitFor("the wake in B", () => wakes(b)[0]);
+		await Bun.sleep(5_000);
+		expect(wakes(a)).toEqual([]);
+		expect(wakes(b)).toHaveLength(1);
+		expect(readdirSync(join(w.dataDir, "inbox", "claims"))).toEqual([replyId]);
+		const delivered = (await thread(w, asked.thread_id)).messages.find((message) => message.id === replyId)?.delivery;
+		expect(delivered).toMatchObject({ state: "delivered", host: "pi", session: a.sessionId });
+		w.proof(`B's turn ended: the reply was delivered in B, once (wakes A 0, B 1; one claim ${replyId}; delivered at ${delivered?.at})`);
+
+		// The person goes back to A and asks there: the next reply lands in A.
+		await ask(a, "Ask the person what to do on a 409.");
+		const again = m.requests
+			.map((request) => lastMessage(request))
+			.filter((last) => last.role === "tool" && last.text.includes('"message_id"'))
+			.map((last) => JSON.parse(last.text.slice(last.text.indexOf("{"))) as { message_id: string })
+			.at(-1)!;
+		const secondReply = await personSends(w, again.message_id, "Fail the job and alert.");
+		await waitFor("the second wake in A", () => wakes(a)[0]);
+		await Bun.sleep(5_000);
+		expect(wakes(a)).toHaveLength(1);
+		expect(wakes(a)[0]!.split("\n", 1)[0]).toEndWith(`(${secondReply})`);
+		expect(wakes(b)).toHaveLength(1);
+		w.proof(`the person asked again in A: the second reply (${secondReply}) was delivered in A, once (wakes A 1, B still 1)`);
+	}, 150_000);
+
 	test("a stopped Inbox is started by the call; with no plannotator to start it, the result says to install Plannotator, once", async () => {
 		const w = world("05-start-and-missing-binary");
 		knob(w, true);

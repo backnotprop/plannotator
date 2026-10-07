@@ -22,12 +22,18 @@
  *    (mkdir of `inbox/claims/<reply id>`), hands the wake text to the host,
  *    and acknowledges `delivered`. It never interrupts a turn: a prompt typed
  *    into the wake's turn takes it over, and the reply is never sent again.
+ *    Two host processes on one session (`pi -c` or `--session` twice): only
+ *    the holder of the session's lease (`inbox/leases/<host>-<session>.json`)
+ *    polls and delivers, and the process the person used last holds it (the
+ *    Claude Code mod's rule); the claim keeps a delivery once whatever the
+ *    lease says.
  *
  * Imports: `./connection` and `node:` modules only, so the vendored copy
  * resolves inside `generated/inbox/`.
  */
 
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -56,6 +62,10 @@ export const INBOX_RETRY_MS = { first: 5_000, max: 60_000 } as const;
 export const INBOX_TICK_MS = 1_000;
 /** `plannotator inbox --background` waits up to 20 s for the Inbox to answer. */
 const START_TIMEOUT_MS = 30_000;
+/** How often a wake renews or re-reads its session's lease (the mod's 5 s). */
+export const INBOX_LEASE_EVERY_MS = 5_000;
+/** A lease not renewed for this long belongs to a process that exited, slept or hung (the mod's 20 s). */
+export const INBOX_LEASE_STALE_MS = 20_000;
 
 /** The first time a call finds no `plannotator` to start the Inbox with. */
 export const INBOX_INSTALL_TEXT =
@@ -73,6 +83,31 @@ function rememberedToolsFileOf(dataDir: string): string {
 
 function claimDirOf(dataDir: string, replyId: string): string {
   return join(dataDir, "inbox", "claims", replyId);
+}
+
+/** One session's lease on one host: which of its processes polls and delivers. */
+export function inboxLeaseFileOf(dataDir: string, host: string, sessionId: string): string {
+  return join(dataDir, "inbox", "leases", `${host}-${sessionId.replace(/[^A-Za-z0-9._-]/g, "_")}.json`);
+}
+
+interface InboxLease {
+  owner: string | null;
+  at: number;
+  touchedAt: number;
+}
+
+function parseLease(text: string | null): InboxLease | null {
+  try {
+    const value = JSON.parse(text ?? "") as Record<string, unknown>;
+    if (typeof value.at !== "number") return null;
+    return {
+      owner: typeof value.owner === "string" && value.owner ? value.owner : null,
+      at: value.at,
+      touchedAt: typeof value.touchedAt === "number" ? value.touchedAt : 0,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function readText(path: string): string | null {
@@ -164,6 +199,10 @@ export class InboxAgentConnection {
 
   get dataDir(): string {
     return this.options.dataDir;
+  }
+
+  get host(): string {
+    return this.options.host;
   }
 
   /** A `plannotator_inbox` call from `sessionId`, working in `cwd`. */
@@ -316,20 +355,31 @@ export class InboxWake {
   private readonly settled = new Set<string>();
   /** Delivered, not yet acknowledged to the Inbox. */
   private readonly unacked = new Set<string>();
+  /** Names this wake in the session's lease. */
+  private readonly instanceId = randomUUID();
+  private readonly leaseFile: string;
+  private leader = false;
+  private leaseCheckedAt = Number.NEGATIVE_INFINITY;
+  /** When the person last acted in this process; the most recent touch wins the lease. */
+  private touchedAt = 0;
 
   constructor(
     private readonly connection: InboxAgentConnection,
     readonly sessionId: string,
     private readonly target: InboxWakeTarget,
     private readonly tickMs = INBOX_TICK_MS,
-  ) {}
+  ) {
+    this.leaseFile = inboxLeaseFileOf(connection.dataDir, connection.host, sessionId);
+  }
 
   get isDisposed(): boolean {
     return this.disposed;
   }
 
+  /** Start the tick. The person is in this process now. */
   start(): void {
     if (this.timer || this.disposed) return;
+    this.touch();
     this.timer = setInterval(() => {
       if (this.ticking) return;
       this.ticking = true;
@@ -349,6 +399,33 @@ export class InboxWake {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.abort.abort();
+    // Let another process on this session take over at once.
+    if (this.leader) writeLease(this.leaseFile, { owner: null, at: 0, touchedAt: 0 });
+    this.leader = false;
+  }
+
+  /** The person acted in this process (typed, or its agent called the tool): replies land here from now on. */
+  touch(): void {
+    this.touchedAt = Date.now();
+    if (!this.disposed) this.holdLease(this.touchedAt);
+  }
+
+  /**
+   * Whether this process polls and delivers: it holds the session's lease
+   * unless another live process does and the person touched that one at
+   * least as recently.
+   */
+  private holdLease(now: number): boolean {
+    this.leaseCheckedAt = now;
+    const lease = parseLease(readText(this.leaseFile));
+    const foreign = !!lease?.owner && lease.owner !== this.instanceId && Math.abs(now - lease.at) < INBOX_LEASE_STALE_MS;
+    if (foreign && lease && lease.touchedAt >= this.touchedAt) {
+      this.leader = false;
+      return false;
+    }
+    writeLease(this.leaseFile, { owner: this.instanceId, at: now, touchedAt: this.touchedAt });
+    this.leader = true;
+    return true;
   }
 
   /** Someone else's prompt is entering the session: the idle count starts over. */
@@ -361,7 +438,10 @@ export class InboxWake {
     // The session is only asked while a reply waits: idle for two ticks in a row, then it goes in.
     this.idleTicks = this.pending.size === 0 || (await this.target.isBusy()) ? 0 : this.idleTicks + 1;
     for (const id of [...this.unacked]) await this.acknowledge(id);
-    if (!this.polling && Date.now() >= this.retryAt) void this.poll();
+    const now = Date.now();
+    if (now - this.leaseCheckedAt >= INBOX_LEASE_EVERY_MS) this.holdLease(now);
+    if (!this.leader) return;
+    if (!this.polling && now >= this.retryAt) void this.poll();
     if (!this.delivering && this.pending.size > 0 && this.idleTicks >= 2) {
       this.delivering = true;
       try {
@@ -421,6 +501,8 @@ export class InboxWake {
       this.idleTicks = 0;
       return;
     }
+    // The person may have moved to another process since the last tick.
+    if (this.disposed || !this.holdLease(Date.now())) return;
     const claim = claimDirOf(this.connection.dataDir, command.id);
     try {
       mkdirSync(join(claim, ".."), { recursive: true, mode: 0o700 });
@@ -452,6 +534,17 @@ export class InboxWake {
     if (!response) return;
     // 200, or a refusal that will not change (the reply is gone or not ours): done.
     if (response.status === 200 || (response.status >= 400 && response.status < 500 && response.status !== 401)) this.unacked.delete(id);
+  }
+}
+
+function writeLease(file: string, lease: InboxLease): void {
+  try {
+    mkdirSync(join(file, ".."), { recursive: true, mode: 0o700 });
+    const tmp = `${file}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(lease), { mode: 0o600 });
+    renameSync(tmp, file);
+  } catch {
+    // Unwritable: the claim still keeps every delivery once.
   }
 }
 

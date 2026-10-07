@@ -22,6 +22,10 @@
  * 20 s is checked against OpenCode itself (`session.wait` answers at once when
  * it is idle), so a lost end event cannot hold replies forever. Nothing here
  * interrupts a session: a prompt typed into the wake's turn takes it over.
+ * Two OpenCode processes on one session (two servers on one database): the
+ * one the person used last delivers. A tool call, a run and a prompt entering
+ * the session in a process touch the session's lease in `InboxWake` there;
+ * the other process defers while it is live.
  */
 
 import { existsSync } from "node:fs";
@@ -141,10 +145,14 @@ class OpenCode2Wakes {
     this.wakes.clear();
   }
 
-  /** Start the wake for a root session, once. */
+  /** Start the wake for a root session, once; later calls say the session is in use here. */
   watch(sessionID: string): void {
     this.seen.add(sessionID);
-    if (this.wakes.has(sessionID)) return;
+    const known = this.wakes.get(sessionID);
+    if (known) {
+      known.touch();
+      return;
+    }
     const wake = new InboxWake(this.connection, sessionID, this.target(sessionID));
     this.wakes.set(sessionID, wake);
     wake.start();
@@ -179,8 +187,11 @@ class OpenCode2Wakes {
       case "session.inbox.enqueued":
         // A prompt is entering the session (the person, another plugin, or
         // the wake itself, which no longer waits): any reply still waiting
-        // lets that turn go first.
-        if ((data?.item as { type?: unknown } | undefined)?.type === "user") this.wakes.get(sessionID)?.onForeignPrompt();
+        // lets that turn go first, and replies follow the person to this process.
+        if ((data?.item as { type?: unknown } | undefined)?.type === "user") {
+          this.wakes.get(sessionID)?.onForeignPrompt();
+          this.wakes.get(sessionID)?.touch();
+        }
         return;
       case "session.deleted":
         this.wakes.get(sessionID)?.dispose();
