@@ -14,17 +14,18 @@ import { isAbsolute } from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
-import { INBOX_THREAD_NAME_MAX, type InboxLine, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
+import { INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxLine, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { recordAgentDecision } from "./inbox-decisions";
 import type { InboxAttachment } from "@plannotator/core/inbox-types";
+import { registerInboxGuideTools } from "./inbox-guides";
 
 /** wait_for_reply's default hold: inside the 45-55 s window hosts' own tool timeouts allow. */
 export const INBOX_WAIT_DEFAULT_MS = 50_000;
 export const INBOX_WAIT_MAX_SECONDS = 50;
 
-export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "resolve_message", "wait_for_reply", "list_decisions", "record_decision"] as const;
+export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "resolve_message", "wait_for_reply", "list_decisions", "record_decision", "get_guide_brief", "submit_guide"] as const;
 
 /** Under Claude Code's 2,048-character cap on server instructions. */
 export const INBOX_MCP_INSTRUCTIONS = [
@@ -36,6 +37,7 @@ export const INBOX_MCP_INSTRUCTIONS = [
   "- read_thread reads one thread (thread_id) or lists the threads you sent in, in this project.",
   "- resolve_message closes a thread once you have what you needed.",
   "- list_decisions reads what holds in this project: decisions the person recorded from answers, or agents recorded. record_decision records one you settled with the person. Add `Decision: when answered` to a question block to have its answer recorded.",
+  "- To walk the person through a code change, call get_guide_brief, write the guide, then submit_guide with the guide and the exact patch: it opens in Plannotator's guide viewer.",
   "",
   "The reply is the person's answer to you, framed as theirs: their words, then an \"Answers to your questions\" section. There is no tool to answer or approve on the person's behalf.",
 ].join("\n");
@@ -57,6 +59,26 @@ const PROJECT_PATH_DESCRIPTION =
 const AGENT_SESSION_DESCRIPTION =
   "Your session id. The `plannotator inbox mcp` shim fills it. send_message joins your session's thread by it; read_thread's asked_by \"me\" and wait_for_reply without a thread match on it.";
 
+/**
+ * The fields every sending tool takes beside its content (send_message and
+ * submit_guide): where the message lands and who sent it.
+ */
+export const SEND_ROUTING_FIELDS = {
+  project_path: z.string().optional().describe(PROJECT_PATH_DESCRIPTION),
+  subject: z.string().optional().describe("A short subject when this starts a thread (ignored when it joins one). Default: the first question's prompt, else the first line."),
+  thread: z
+    .string()
+    .optional()
+    .describe(
+      `A short thread name (1-${INBOX_THREAD_NAME_MAX} characters, one line). Without it, your messages join your session's open thread in this project (a new one the first time, or once the person resolved it; a thread keeps its first subject). With it, the same name in this project is the same open thread, across sessions (compared without case, spacing or invisible characters). Use it to split separate work, or to join another session's thread. Ignored with reply_to.`,
+    ),
+  reply_to: z.string().optional().describe("A message id: post this as a reply in that message's thread."),
+  idempotency_key: z.string().optional().describe("Any unique string; sending again with the same key answers the first message instead of posting twice."),
+  agent_session: z.string().optional().describe(AGENT_SESSION_DESCRIPTION),
+  agent_name: z.string().optional().describe("How the person sees you, e.g. \"Claude Code\"."),
+  agent_host: z.string().optional().describe("Your agent host, e.g. claude-code, codex, cursor."),
+};
+
 export interface InboxMcpContext {
   store: InboxStore;
   /** The Inbox's base URL, `http://localhost:<port>/`. */
@@ -73,21 +95,21 @@ export interface InboxMcpContext {
   waitDefaultMs?: number;
 }
 
-type ToolResult = {
+export type ToolResult = {
   content: { type: "text"; text: string }[];
   structuredContent?: Record<string, unknown>;
   isError?: boolean;
 };
 
-function ok(line: string, structured: Record<string, unknown>): ToolResult {
+export function ok(line: string, structured: Record<string, unknown>): ToolResult {
   return { content: [{ type: "text", text: line }], structuredContent: structured };
 }
 
-function fail(code: string, message: string): ToolResult {
+export function fail(code: string, message: string): ToolResult {
   return { content: [{ type: "text", text: `${code}: ${message}` }], isError: true };
 }
 
-async function guarded(run: () => Promise<ToolResult> | ToolResult): Promise<ToolResult> {
+export async function guarded(run: () => Promise<ToolResult> | ToolResult): Promise<ToolResult> {
   try {
     return await run();
   } catch (error) {
@@ -159,6 +181,86 @@ function replyResult(store: InboxStore, reply: InboxMessage, base: string): Tool
   };
 }
 
+export type AgentSendInput = {
+  body: string;
+  project_path?: string;
+  subject?: string;
+  thread?: string;
+  reply_to?: string;
+  idempotency_key?: string;
+  /** Files to attach (send_message only): absolute, or relative to project_path. */
+  attachments?: string[];
+  agent_session?: string;
+  agent_name?: string;
+  agent_host?: string;
+};
+
+/** The project a send lands in: reply_to's, else the one at project_path. */
+export async function sendProject(context: InboxMcpContext, input: { reply_to?: string; project_path?: string }): Promise<InboxProject> {
+  if (input.reply_to) {
+    const parent = context.store.message(input.reply_to);
+    if (!parent) throw new InboxError("message_not_found", `No message ${input.reply_to}.`);
+    return context.store.project(parent.project_id)!;
+  }
+  if (!input.project_path) {
+    throw new InboxError("validation_error", "project_path: required for a new thread (the shim fills it from its folder).");
+  }
+  return context.resolveProject(input.project_path);
+}
+
+/** An agent's message into `project`, routed by the store (send_message, submit_guide). */
+export function sendAgentMessage(
+  context: InboxMcpContext,
+  project: InboxProject,
+  input: AgentSendInput,
+  guide?: InboxGuideRef,
+): { structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number } {
+  const { store } = context;
+  let attachments: InboxAttachment[] | undefined;
+  if (input.attachments && input.attachments.length > 0) {
+    if (!context.recordAttachments) throw new InboxError("validation_error", "attachments: not taken by this Inbox.");
+    const base = input.project_path && isAbsolute(input.project_path) ? input.project_path : project.root;
+    attachments = context.recordAttachments(input.attachments, project, base);
+  }
+  const result = store.sendMessage({
+    project_id: project.id,
+    author: {
+      kind: "agent",
+      host: input.agent_host?.trim() || null,
+      session: input.agent_session?.trim() || null,
+      name: input.agent_name?.trim() || null,
+    },
+    body: input.body,
+    subject: input.subject ?? null,
+    reply_to: input.reply_to ?? null,
+    idempotency_key: input.idempotency_key ?? null,
+    thread: input.thread ?? null,
+    attachments,
+    guide: guide ?? null,
+  });
+  const message = result.message;
+  const landed = store.project(message.project_id)!;
+  const questions = (message.questions ?? []).map((q) => ({ key: q.key, kind: q.kind, prompt: q.prompt }));
+  return {
+    replayed: result.replayed,
+    questions: questions.length,
+    attachments: message.attachments?.length ?? 0,
+    structured: {
+      message_id: message.id,
+      thread_id: message.thread_id,
+      /** True when this message started the thread. */
+      new_thread: message.thread_id === message.id,
+      thread_name: store.message(message.thread_id)?.thread_name ?? null,
+      project: { id: landed.id, name: landed.name, root: landed.root },
+      questions,
+      attachments: (message.attachments ?? []).map((a) => ({ id: a.id, name: a.name, kind: a.kind, path: a.path })),
+      replayed: result.replayed,
+      cursor: store.messageCursor(message.id) ?? store.cursor(),
+      url: threadUrl(context.baseUrl(), message.thread_id),
+    },
+  };
+}
+
 export function createInboxMcpServer(context: InboxMcpContext): McpServer {
   const { store } = context;
   const server = new McpServer(
@@ -174,87 +276,27 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
       inputSchema: z
         .object({
           body: z.string().min(1).describe("The message, markdown. Question blocks render as answerable cards."),
-          project_path: z.string().optional().describe(PROJECT_PATH_DESCRIPTION),
-          subject: z.string().optional().describe("A short subject when this starts a thread (ignored when it joins one). Default: the first question's prompt, else the first line."),
-          thread: z
-            .string()
-            .optional()
-            .describe(
-              `A short thread name (1-${INBOX_THREAD_NAME_MAX} characters, one line). Without it, your messages join your session's open thread in this project (a new one the first time, or once the person resolved it; a thread keeps its first subject). With it, the same name in this project is the same open thread, across sessions (compared without case, spacing or invisible characters). Use it to split separate work, or to join another session's thread. Ignored with reply_to.`,
-            ),
-          reply_to: z.string().optional().describe("A message id: post this as a reply in that message's thread."),
-          idempotency_key: z.string().optional().describe("Any unique string; sending again with the same key answers the first message instead of posting twice."),
+          ...SEND_ROUTING_FIELDS,
           attachments: z
             .array(z.string())
             .optional()
             .describe(
               "Files for the person to open and annotate beside your message, e.g. [\"docs/plan.md\", \"proto/admin.html\", \"flow.mmd\"]: absolute, or relative to project_path, inside the project. Markdown, plain text, config and data files, Mermaid and Graphviz sources, and HTML (its relative images and frames load from its folder); .env is refused. The Inbox keeps the version you sent and shows the file as it is now, saying when it changed. The person's annotations come back in their reply.",
             ),
-          agent_session: z.string().optional().describe(AGENT_SESSION_DESCRIPTION),
-          agent_name: z.string().optional().describe("How the person sees you, e.g. \"Claude Code\"."),
-          agent_host: z.string().optional().describe("Your agent host, e.g. claude-code, codex, cursor."),
         })
         .strict(),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     async (input) =>
       guarded(async () => {
-        let projectId: string;
-        if (input.reply_to) {
-          const parent = store.message(input.reply_to);
-          if (!parent) throw new InboxError("message_not_found", `No message ${input.reply_to}.`);
-          projectId = parent.project_id;
-        } else {
-          if (!input.project_path) {
-            throw new InboxError("validation_error", "project_path: required for a new thread (the shim fills it from its folder).");
-          }
-          projectId = (await context.resolveProject(input.project_path)).id;
-        }
-        let attachments: InboxAttachment[] | undefined;
-        if (input.attachments && input.attachments.length > 0) {
-          if (!context.recordAttachments) throw new InboxError("validation_error", "attachments: not taken by this Inbox.");
-          const project = store.project(projectId)!;
-          const base = input.project_path && isAbsolute(input.project_path) ? input.project_path : project.root;
-          attachments = context.recordAttachments(input.attachments, project, base);
-        }
-        const result = store.sendMessage({
-          project_id: projectId,
-          author: {
-            kind: "agent",
-            host: input.agent_host?.trim() || null,
-            session: input.agent_session?.trim() || null,
-            name: input.agent_name?.trim() || null,
-          },
-          body: input.body,
-          subject: input.subject ?? null,
-          reply_to: input.reply_to ?? null,
-          idempotency_key: input.idempotency_key ?? null,
-          thread: input.thread ?? null,
-          attachments,
-        });
-        const message = result.message;
-        const project = store.project(message.project_id)!;
-        const questions = (message.questions ?? []).map((q) => ({ key: q.key, kind: q.kind, prompt: q.prompt }));
-        const url = threadUrl(context.baseUrl(), message.thread_id);
-        const attachedCount = message.attachments?.length ?? 0;
+        const project = await sendProject(context, input);
+        const sent = sendAgentMessage(context, project, input);
         const asked =
-          (questions.length > 0 ? ` asking ${questions.length} question${questions.length === 1 ? "" : "s"}` : "") +
-          (attachedCount > 0 ? ` with ${attachedCount} attachment${attachedCount === 1 ? "" : "s"}` : "");
+          (sent.questions > 0 ? ` asking ${sent.questions} question${sent.questions === 1 ? "" : "s"}` : "") +
+          (sent.attachments > 0 ? ` with ${sent.attachments} attachment${sent.attachments === 1 ? "" : "s"}` : "");
         return ok(
-          `${result.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${message.thread_id}, ${url}). Call wait_for_reply with this thread_id for the answer, or go on and read_thread later.`,
-          {
-            message_id: message.id,
-            thread_id: message.thread_id,
-            /** True when this message started the thread. */
-            new_thread: message.thread_id === message.id,
-            thread_name: store.message(message.thread_id)?.thread_name ?? null,
-            project: { id: project.id, name: project.name, root: project.root },
-            questions,
-            attachments: (message.attachments ?? []).map((a) => ({ id: a.id, name: a.name, kind: a.kind, path: a.path })),
-            replayed: result.replayed,
-            cursor: store.messageCursor(message.id) ?? store.cursor(),
-            url,
-          },
+          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}). Call wait_for_reply with this thread_id for the answer, or go on and read_thread later.`,
+          sent.structured,
         );
       }),
   );
@@ -493,6 +535,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         });
       }),
   );
+
+  // Guided reviews (step 5): packages/server/inbox-guides.ts.
+  registerInboxGuideTools(server, context);
 
   return server;
 }

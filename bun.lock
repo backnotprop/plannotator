@@ -269,6 +269,8 @@
       "version": "0.0.1",
       "dependencies": {
         "@plannotator/core": "workspace:*",
+        "@plannotator/guide-viewer": "workspace:*",
+        "@plannotator/review-editor": "workspace:*",
         "@plannotator/ui": "workspace:*",
         "react": "^19.2.8",
         "react-dom": "^19.2.8",

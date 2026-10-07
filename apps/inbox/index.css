@@ -8,6 +8,9 @@
 @source "../../packages/ui/components/**/*.tsx";
 @source "../../packages/ui/hooks/**/*.ts";
 @source "../../packages/inbox/**/*.tsx";
+/* The guided review: the guide chain and the read-only diff renderer it draws with (packages/inbox/guide). */
+@source "../../packages/guide-viewer/**/*.tsx";
+@source "../../packages/review-editor/components/**/*.tsx";
 
 @import "../../packages/ui/theme.css";
 @import "../../packages/inbox/inbox.css";

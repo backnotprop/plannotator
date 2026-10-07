@@ -342,6 +342,10 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
     const reachesModel = sendDescription.slice(0, 2048 - "… [truncated]".length);
     expect(reachesModel).toContain(":::question-text");
     expect(reachesModel).toContain("Do not ask rhetorical questions or questions the codebase answers.");
+    // The guided-review tools reach the model whole, their worked example pointer included.
+    for (const name of ["get_guide_brief", "submit_guide"]) {
+      expect(tools.tools.find((t) => t.name === name)!.description!.length).toBeLessThan(2048);
+    }
 
     const sendResult = await client.callTool({
       name: "send_message",

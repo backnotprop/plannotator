@@ -91,7 +91,7 @@ test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(builtBinary), `build the binary first: ${builtBinary}`).toBe(true);
-  // Only this spec's own captures: the decisions and attachments specs keep theirs in proof/decisions/ and proof/attachments/.
+  // Only this spec's own captures: decisions, attachments and guided reviews keep theirs in proof/decisions/, proof/attachments/ and proof/guides/.
   mkdirSync(proofDir, { recursive: true });
   for (const file of readdirSync(proofDir)) if (file.endsWith('.png') || file === 'index.html') rmSync(join(proofDir, file));
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-e2e-')));
@@ -224,7 +224,13 @@ test('agents write three threads in two projects; the rows land in the six secti
     'Quiet',
   ]);
 
-  // The window had nothing on screen, so the rows come in without a Show.
+  // The window had nothing on screen, so the rows come in without a Show. The
+  // three sends are separate events: when the first lands alone, the list puts
+  // it on screen and holds the rest behind "N new" (held order, proved below),
+  // so the rows on screen are the ones before the notice plus the ones it holds.
+  const notice = page.locator('[data-inbox-notice]');
+  await expect.poll(async () => (await notice.count()) > 0 || (await page.locator('.ib-lbody [data-thread-id]').count()) === 3).toBe(true);
+  if (await notice.count()) await notice.click();
   const stoppedRow = page.locator(`[data-section-id="stopped"] [data-thread-id="${stopped.thread_id}"]`);
   await expect(stoppedRow).toBeVisible();
   await expect(stoppedRow.locator('.ib-badge')).toHaveText('Stopped');
@@ -397,8 +403,16 @@ test('Settings: the agent tool knob applies to the next session, the compact pic
 
   await piSwitch.click();
   await expect(piSwitch).toHaveAttribute('aria-checked', 'true');
-  const config = JSON.parse(readFileSync(join(world.dataDir, 'config.json'), 'utf8'));
-  expect(config.inboxTool).toEqual({ pi: true });
+  // The switch moves at the click; the save lands when the POST answers.
+  await expect
+    .poll(() => {
+      try {
+        return JSON.parse(readFileSync(join(world.dataDir, 'config.json'), 'utf8')).inboxTool;
+      } catch {
+        return null;
+      }
+    })
+    .toEqual({ pi: true });
   await page.locator('.ib-spage').evaluate((el) => el.scrollTo(0, el.scrollHeight));
   await shot('7.2-settings-storage');
   await side(page).getByRole('button', { name: /^Inbox/ }).click();

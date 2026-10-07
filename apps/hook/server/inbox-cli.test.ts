@@ -17,6 +17,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import type { InboxQuestion } from "@plannotator/core/inbox-types";
 import { inboxStatus, isPidAlive, readInboxRegistry, writeInboxRegistry } from "@plannotator/shared/inbox/registry";
 import { startInboxServer } from "@plannotator/server/inbox";
+import { INBOX_MCP_TOOLS } from "@plannotator/server/inbox-mcp";
 import { runPlannotatorUninstall } from "@plannotator/server/uninstall";
 
 const entry = resolve(import.meta.dir, "index.ts");
@@ -261,7 +262,7 @@ describe("plannotator inbox mcp (the stdio shim)", () => {
     expect((await inboxStatus(box.dataDir)).state).toBe("running");
     expect(existsSync(box.browserMarker)).toBe(false);
 
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(["list_decisions", "read_thread", "record_decision", "resolve_message", "send_message", "wait_for_reply"]);
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual([...INBOX_MCP_TOOLS].sort());
     const sent = (
       await client.callTool({
         name: "send_message",

@@ -204,6 +204,18 @@ export interface InboxMessage {
    * step 6: older records lack it.
    */
   delivery?: InboxDelivery | null;
+  /**
+   * A guided review this message carries (submit_guide, PLAN step 5): the
+   * snapshot is a content-addressed blob, `inbox/blobs/<sha256>`. Absent on
+   * every other message and on records older than step 5.
+   */
+  guide?: InboxGuideRef | null;
+  /**
+   * On a message carrying a guide: the person's reviewed tick per section, as
+   * the window's guide viewer last saved it (the record's 4.2, "kept with the
+   * thread"). Absent until the first tick; the snapshot's own ticks apply then.
+   */
+  guide_reviewed?: boolean[] | null;
 }
 
 /** How a person's reply reached the agent session that asked (`InboxMessage.delivery`). */
@@ -214,6 +226,32 @@ export interface InboxDelivery {
   /** The session the reply was delivered to (the asking message's `author.session`). */
   session: string;
   at: string;
+}
+
+// ─────────────────────────────── Guided reviews (step 5) ───────────────────────────────
+
+/**
+ * What a message keeps about the guided review it carries: the blob holding
+ * the snapshot (Plannotator's portable format, `@plannotator/core/guide-format`,
+ * exactly as validated) and the facts the card and the row draw.
+ */
+export interface InboxGuideRef {
+  /** sha256 (hex) of the snapshot JSON, the blob's name under `inbox/blobs/`. */
+  sha256: string;
+  /**
+   * sha256 (hex) of what the agent sent (the guide and the patch, or the
+   * snapshot, as given). A retry with the same idempotency_key compares this:
+   * the built snapshot carries the time it was built, so its own hash differs.
+   */
+  input_sha256: string;
+  /** The snapshot JSON's size in bytes. */
+  bytes: number;
+  title: string;
+  sections: number;
+  /** Files in the patch. */
+  files: number;
+  additions: number;
+  deletions: number;
 }
 
 /** One choice as the wire serves it (Workspaces' `QuestionChoice`). */
@@ -379,6 +417,8 @@ export interface InboxListRow extends InboxThreadSummary {
   unseen: number;
   /** The person's reply is the last message: when, and when the agent read it (null until it has). */
   sent: { at: string; checked_at: string | null } | null;
+  /** A message in the thread carries a guided review: the row's "Guided review" mark. */
+  guide: boolean;
 }
 
 export interface InboxListSection {

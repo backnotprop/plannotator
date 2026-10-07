@@ -9,6 +9,7 @@ import type {
   InboxDecision,
   InboxDecisionAgent,
   InboxDecisionDraft,
+  InboxGuideRef,
   InboxHealth,
   InboxListSection,
   InboxMessage,
@@ -181,6 +182,12 @@ export const inboxApi = {
   resolve: (messageId: string, resolved: boolean) =>
     post<unknown>(`/api/inbox/messages/${encodeURIComponent(messageId)}/resolve`, { resolved }),
   health: () => get<InboxHealth>('/api/inbox/health'),
+  /** The guided review a message carries: its record and the snapshot (validated by the server, parsed again here). */
+  guide: (messageId: string) =>
+    get<{ message_id: string; guide: InboxGuideRef; snapshot: unknown }>(`/api/inbox/messages/${encodeURIComponent(messageId)}/guide`),
+  /** The person's reviewed ticks on that guide, kept on the message. */
+  saveGuideReviewed: (messageId: string, reviewed: boolean[]) =>
+    post<{ message_id: string; reviewed: boolean[] }>(`/api/inbox/messages/${encodeURIComponent(messageId)}/guide/reviewed`, { reviewed }),
   restart: () => post<{ ok: true }>('/api/inbox/restart', {}),
   saveInboxTool: (hosts: Partial<Record<AgentToolHost, boolean>>) =>
     post<{ inbox_tool: SettingsModel['inbox_tool'] }>('/api/inbox/settings', { inbox_tool: hosts }),

@@ -13,6 +13,7 @@ import { AnnotationsChip } from './AnnotationsChip';
 import { agentName, clockTime, plural } from '../format';
 import { AuthorMark, DecisionDiamond, Icon } from '../icons';
 import { DecisionCard } from './DecisionCard';
+import { GuideCard } from './GuideCard';
 
 const noop = () => {};
 const NO_ANNOTATIONS: never[] = [];
@@ -121,6 +122,8 @@ export interface ThreadPaneProps {
   /** The attachment open beside the thread (`#…&file=att_…`), its version, and an annotation to show. */
   file: { id: string; version: 'current' | 'sent'; focus: string | null } | null;
   onOpenFile: (file: { id: string; version: 'current' | 'sent'; focus: string | null } | null) => void;
+  /** Open the guided review a message carries (the record's 4.2). */
+  onOpenGuide: (messageId: string) => void;
 }
 
 /** The thread's attachments as they are now and the annotations waiting for a Send, kept fresh. */
@@ -152,7 +155,7 @@ function useThreadAttachments(threadId: string, revision: unknown) {
   return { model, load, patch };
 }
 
-export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile }: ThreadPaneProps) {
+export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile, onOpenGuide }: ThreadPaneProps) {
   const root = thread.messages[0]!;
   const asker = agentName(root.author);
   const resolved = thread.resolved_at !== null;
@@ -539,6 +542,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                     onOpen={(attachment) => openFile(attachment)}
                   />
                 )}
+                {message.guide && <GuideCard guide={message.guide} onOpen={() => onOpenGuide(message.id)} />}
                 {message === lastAgent && !resolved && waitingHoldsUp.length > 0 && (
                   <div className="ib-waitfoot">
                     <b>Waiting on this answer</b>

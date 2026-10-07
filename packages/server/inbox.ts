@@ -76,6 +76,7 @@ import {
   threadDecisions,
   waitingDecisions,
 } from "./inbox-decisions";
+import { inboxGuideRoute } from "./inbox-guides";
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
@@ -721,6 +722,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(), 409);
         return json({ thread: store.markSeen(seenMatch[1]!) });
       }
+
+      // Guided reviews (step 5): the snapshot a message carries (packages/server/inbox-guides.ts).
+      const guide = await inboxGuideRoute(req, path, store, serverSession);
+      if (guide) return guide;
 
       const messageMatch = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/(picks|reply|resolve)$/.exec(path);
       if (messageMatch) {

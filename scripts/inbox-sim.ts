@@ -4,7 +4,8 @@
  * stdio client, and read the person's answers back. Each SimAgent is one
  * shim process, so one agent session (its own `ses_` id).
  *
- * Used by the window's browser proof (tests/e2e/inbox.spec.ts). Also runs by
+ * Used by the window's browser proofs (tests/e2e/inbox.spec.ts, and
+ * tests/e2e/inbox-guides.spec.ts for guided reviews). Also runs by
  * hand against a compiled binary and a scratch data dir:
  *
  *   bun scripts/inbox-sim.ts --binary .local/plannotator --data-dir /tmp/inbox-demo
@@ -76,6 +77,16 @@ export class SimAgent {
     attachments?: string[];
   }): Promise<Structured> {
     return this.call('send_message', { ...input, agent_name: this.name, agent_host: this.host });
+  }
+
+  /** get_guide_brief: the method, the guide's shape, the diff steps, the rules and a worked example call. */
+  guideBrief(): Promise<Structured> {
+    return this.call('get_guide_brief', {});
+  }
+
+  /** submit_guide: a guide plus its patch, or a snapshot; a refusal throws with the Inbox's words. */
+  submitGuide(input: { project_path?: string; guide?: unknown; patch?: string; snapshot?: unknown; body?: string; subject?: string; thread?: string; reply_to?: string; idempotency_key?: string }): Promise<Structured> {
+    return this.call('submit_guide', { ...input, agent_name: this.name, agent_host: this.host });
   }
 
   /** The thread as the agent reads it (this also tells the Inbox the agent has read the person's reply). */

@@ -4,8 +4,10 @@ name: Inbox window e2e
 # (Playwright, pinned in the root devDependencies) drives the COMPILED binary
 # under a temp data dir while agents write through `plannotator inbox mcp`.
 # The binary is built first, with the flags release.yml compiles with.
-# tests/e2e/inbox.spec.ts and notifications.spec.ts say what they prove. Runs only when the Inbox, the
-# ui it composes, the binary entry or the build could have changed.
+# tests/e2e/inbox.spec.ts (the window), notifications.spec.ts and
+# inbox-guides.spec.ts (guided reviews) say what they prove. Runs only when the
+# Inbox, the ui and the guide viewer it composes, the binary entry or the build
+# could have changed.
 
 on:
   pull_request:
@@ -22,6 +24,10 @@ on:
       - 'packages/shared/html-assets.ts'
       - 'packages/shared/html-assets-node.ts'
       - 'packages/ui/**'
+      - 'packages/guide-viewer/**'
+      - 'packages/review-editor/**'
+      - 'packages/server/guide/**'
+      - 'packages/core/guide*'
       - 'apps/hook/server/index.ts'
       - 'apps/hook/server/inbox*'
       - 'build/**'
@@ -44,6 +50,10 @@ on:
       - 'packages/shared/html-assets.ts'
       - 'packages/shared/html-assets-node.ts'
       - 'packages/ui/**'
+      - 'packages/guide-viewer/**'
+      - 'packages/review-editor/**'
+      - 'packages/server/guide/**'
+      - 'packages/core/guide*'
       - 'apps/hook/server/index.ts'
       - 'apps/hook/server/inbox*'
       - 'build/**'

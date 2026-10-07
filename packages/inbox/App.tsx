@@ -35,6 +35,7 @@ import { SettingsPage } from './components/Settings';
 import { NotificationAsk } from './components/NotificationAsk';
 import { useInboxNotifications } from './notify';
 import { DecisionsPage } from './components/Decisions';
+import { GuidePane } from './components/GuidePane';
 
 // The Inbox has no /api/config and no browser-agent tools: settings stay in
 // the page's own cookies, and WebMCP is off.
@@ -61,6 +62,8 @@ interface Route {
   decision?: string | null;
   /** An attachment open beside the thread: `file=att_…`, `v=sent` for the version the agent sent, `at=` an annotation to show. */
   file?: { id: string; version: 'current' | 'sent'; focus: string | null } | null;
+  /** The message whose guided review is open over the window (`#thread=…&guide=msg_…`). */
+  guide?: string | null;
 }
 
 function readRoute(): Route {
@@ -77,6 +80,7 @@ function readRoute(): Route {
     project: params.get('project'),
     thread,
     file: fileId ? { id: fileId, version: params.get('v') === 'sent' ? 'sent' : 'current', focus: params.get('at') } : null,
+    guide: thread ? params.get('guide') : null,
   };
 }
 
@@ -97,6 +101,7 @@ function writeRoute(route: Route): void {
       if (route.file.version === 'sent') params.set('v', 'sent');
       if (route.file.focus) params.set('at', route.file.focus);
     }
+    if (route.thread && route.guide) params.set('guide', route.guide);
     hash = params.toString();
   }
   const next = hash ? `#${hash}` : window.location.pathname + window.location.search;
@@ -279,7 +284,8 @@ function Inbox() {
       if (event.key !== 'Escape' || !routeRef.current.thread || routeRef.current.file) return;
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable)) return;
-      writeRoute({ ...routeRef.current, thread: null });
+      // An open guided review closes first, back to its thread.
+      writeRoute(routeRef.current.guide ? { ...routeRef.current, guide: null } : { ...routeRef.current, thread: null });
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -394,6 +400,8 @@ function Inbox() {
   const firstRun = latest !== null && projects.length === 0;
   // A file beside the thread takes the list's and the sidebar's room (record 2.2).
   const fileOpen = route.page === 'inbox' && !!route.thread && !!route.file;
+  const guideMessage =
+    route.guide && thread && thread.thread_id === route.thread ? (thread.messages.find((m) => m.id === route.guide && m.guide) ?? null) : null;
 
   let main: ReactNode;
   const decisionsFolder = decisionsProject ? projects.find((p) => p.id === decisionsProject) ?? null : null;
@@ -459,6 +467,7 @@ function Inbox() {
             onOpenDecisionPage={(decision) => go({ page: 'decisions', project: decision.project_id, thread: null, decision: decision.id })}
             file={route.file ?? null}
             onOpenFile={(file) => writeRoute({ ...routeRef.current, file })}
+            onOpenGuide={(messageId) => go({ ...route, guide: messageId })}
           />
         )}
       </>
@@ -485,6 +494,14 @@ function Inbox() {
         />
         <main className="ib-main">{main}</main>
       </div>
+      {guideMessage && thread && (
+        <GuidePane
+          thread={thread}
+          message={guideMessage}
+          onBack={() => go({ ...route, guide: null })}
+          onClose={() => go({ ...route, thread: null, guide: null })}
+        />
+      )}
     </div>
   );
 }

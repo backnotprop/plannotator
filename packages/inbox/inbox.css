@@ -404,3 +404,25 @@ pre code.pn-code[data-keep-layout] {
   white-space: pre;
   overflow-wrap: normal;
 }
+
+/* a guided review: the card at the foot of its message (the record's 4.1) and the guide open over the window (4.2) */
+.ib-att-t.ib-guide { min-width: 420px; padding: 12px 14px; text-align: left; }
+.ib-att-t.ib-guide .ib-fi { width: 38px; height: 38px; color: var(--primary); background: color-mix(in oklch, var(--primary) 12%, transparent); }
+.ib-att-text { display: flex; flex-direction: column; min-width: 0; }
+.ib-add { color: var(--success); }
+.ib-del { color: var(--destructive); }
+.pn-inbox { position: relative; }
+/* The shell is its own stacking context, so nothing inside it (the message body's own layers) draws over the open guide. */
+.ib-shell { isolation: isolate; }
+.ib-viewer { position: absolute; inset: 0; z-index: 20; display: grid; grid-template-rows: 46px minmax(0, 1fr); background: var(--background); }
+.ib-viewer .ib-vhead { padding-left: 10px; }
+.pn-inbox .ib-back { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px; border-radius: 7px; font-size: 13.5px; color: var(--muted-foreground); }
+.pn-inbox .ib-back:hover { background: var(--muted); }
+.ib-vsep { width: 1px; height: 18px; background: var(--border); }
+/* The guide scrolls here (its viewport manager finds this as its scroll root).
+   `text-xs` at 13px is what the review stylesheet sets for Plannotator's code
+   review and guides.show (packages/review-editor/index.css), scoped to the guide. */
+.ib-gerror { padding: 12px 30px 0; }
+.ib-gbody { min-height: 0; overflow-y: auto; --text-xs: 0.8125rem; --text-xs--line-height: calc(1 / 0.75); }
+/* Pierre's diff colours from the theme, as the review stylesheet passes them into its shadow DOM. */
+.ib-gbody diffs-container { --diffs-dark-bg: var(--background); --diffs-light-bg: var(--background); --diffs-dark: var(--foreground); --diffs-light: var(--foreground); }

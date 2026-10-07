@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dir, '..');
@@ -123,6 +123,26 @@ describe('review entry assets', () => {
     expect(read('packages/ui/utils/graphviz.ts')).not.toMatch(staticImport('@viz-js/viz'));
     expect(read('packages/ui/utils/graphviz.ts')).toContain("import('@viz-js/viz')");
     expect(read('packages/ui/utils/generateIdentity.ts')).not.toMatch(staticImport('unique-username-generator'));
+  });
+
+  // The Inbox window's guided review (PLAN step 5) reaches the guide chain and
+  // review-editor's diff renderer through GuidePane's one dynamic import of
+  // `#guide-reader` (packages/inbox/guide/GuideReader.tsx). The single-file
+  // build inlines that chunk, so what this keeps waiting for Open is the
+  // mount (the diff render, the highlighter), not the bytes. A static import
+  // elsewhere would make the window depend on the reader directly, and that
+  // boundary would be gone.
+  test('the Inbox window mounts the guide viewer only through its dynamic import', () => {
+    const heavy = /^import\s+(?!type\b)[^;]*from\s+['"](?:@plannotator\/guide-viewer|@plannotator\/review-editor|#guide-reader)[^'"]*['"]/m;
+    const walk = (dir: string): string[] =>
+      readdirSync(resolve(root, dir), { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory()
+          ? entry.name === 'node_modules' ? [] : walk(`${dir}/${entry.name}`)
+          : /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [`${dir}/${entry.name}`] : [],
+      );
+    const eager = walk('packages/inbox').filter((path) => path !== 'packages/inbox/guide/GuideReader.tsx' && heavy.test(read(path)));
+    expect(eager).toEqual([]);
+    expect(read('packages/inbox/components/GuidePane.tsx')).toContain("lazy(() => import('#guide-reader'))");
   });
 
   // Built-artifact check: a lost eager import would still type-check and pass

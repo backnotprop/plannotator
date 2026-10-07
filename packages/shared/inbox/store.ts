@@ -41,6 +41,7 @@ import {
   INBOX_RECORD_VERSION,
   type InboxAuthor,
   type InboxDecision,
+  type InboxGuideRef,
   type InboxLine,
   type InboxMessage,
   type InboxMessageWire,
@@ -99,6 +100,8 @@ export interface InboxSendInput {
   thread?: string | null;
   /** The files attached, already recorded (blobs written) by recordInboxAttachments. */
   attachments?: InboxAttachment[];
+  /** A guided review the message carries (submit_guide); its blob is written once the message lands. */
+  guide?: InboxGuideRef | null;
 }
 
 export interface InboxSendResult {
@@ -501,6 +504,7 @@ export class InboxStore {
       waiting_since: waitingSince,
       unseen,
       sent,
+      guide: messages.some((m) => m.guide != null),
     };
     const section = inboxSectionOf(facts);
     return { ...facts, section, unread: inboxRowUnread(section) };
@@ -770,7 +774,8 @@ export class InboxStore {
         // name (compared as routing compares names). The thread it joined
         // is the first call's, whatever the routing would say now.
         const sameName = inboxThreadNameKey(message.thread_name ?? "") === inboxThreadNameKey(threadName ?? "");
-        if (message.body !== body || message.reply_to !== replyTo || !sameName) {
+        const sameGuide = (message.guide?.input_sha256 ?? null) === (input.guide?.input_sha256 ?? null);
+        if (message.body !== body || message.reply_to !== replyTo || !sameName || !sameGuide) {
           throw new InboxError(
             "idempotency_key_reused",
             "This idempotency_key was already used for a different message.",
@@ -801,6 +806,7 @@ export class InboxStore {
       ...(input.attachments && input.attachments.length > 0
         ? { attachments: input.attachments.map((attachment) => ({ ...attachment, sent_at: at })) }
         : {}),
+      ...(input.guide ? { guide: input.guide } : {}),
     };
     this.appendMessage(message, at);
     for (const question of parsed) {
@@ -1055,6 +1061,26 @@ export class InboxStore {
     return next;
   }
 
+  /**
+   * The person's reviewed ticks on the guide a message carries (one per
+   * section; padded with false or cut to the guide's sections). No write when
+   * nothing changed.
+   */
+  saveGuideReviewed(messageId: string, reviewed: unknown): boolean[] {
+    const message = this.messages.get(messageId);
+    if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
+    if (!message.guide) throw new InboxError("guide_not_found", "This message carries no guided review.");
+    if (!Array.isArray(reviewed) || reviewed.some((value) => typeof value !== "boolean")) {
+      throw new InboxError("validation_error", "reviewed: a list of booleans, one per section.", { field: "reviewed" });
+    }
+    const next = Array.from({ length: message.guide.sections }, (_, i) => reviewed[i] === true);
+    if (JSON.stringify(next) !== JSON.stringify(message.guide_reviewed ?? null)) {
+      const at = this.stamp();
+      this.appendMessage({ ...message, guide_reviewed: next }, at);
+    }
+    return next;
+  }
+
   /** Resolve (or reopen) the thread a message belongs to. */
   resolveThread(messageId: string, resolved: boolean): InboxThreadSummary {
     const message = this.messages.get(messageId);
@@ -1198,9 +1224,11 @@ export class InboxStore {
   private threadBlobs(projectId: string): Map<string, Set<string>> {
     const out = new Map<string, Set<string>>();
     for (const message of this.messages.values()) {
-      if (message.project_id !== projectId || !message.attachments?.length) continue;
+      if (message.project_id !== projectId || (!message.attachments?.length && !message.guide)) continue;
       const blobs = out.get(message.thread_id) ?? new Set<string>();
-      for (const attachment of message.attachments) blobs.add(attachment.sent_sha256);
+      for (const attachment of message.attachments ?? []) blobs.add(attachment.sent_sha256);
+      // A guided review's snapshot is a blob too (step 5).
+      if (message.guide) blobs.add(message.guide.sha256);
       out.set(message.thread_id, blobs);
     }
     return out;
@@ -1271,7 +1299,10 @@ export class InboxStore {
     this.tornFiles.clear();
     this.load();
     const used = new Set<string>();
-    for (const message of this.messages.values()) for (const attachment of message.attachments ?? []) used.add(attachment.sent_sha256);
+    for (const message of this.messages.values()) {
+      for (const attachment of message.attachments ?? []) used.add(attachment.sent_sha256);
+      if (message.guide) used.add(message.guide.sha256);
+    }
     removeUnusedInboxBlobs(this.dir, used);
   }
 

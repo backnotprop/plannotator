@@ -13,7 +13,8 @@
     "paths": {
       "@plannotator/ui/*": ["../../packages/ui/*"],
       "@plannotator/inbox": ["../../packages/inbox/index.ts"],
-      "@plannotator/inbox/*": ["../../packages/inbox/*"]
+      "@plannotator/inbox/*": ["../../packages/inbox/*"],
+      "#guide-reader": ["../../packages/inbox/guide/reader-module.d.ts"]
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
