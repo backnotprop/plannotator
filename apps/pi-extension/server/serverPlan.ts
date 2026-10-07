@@ -7,6 +7,7 @@ import { contentHash, deleteDraft, loadDraft } from "../generated/draft.ts";
 import { countUnsentDraftComments } from "../generated/host-control.ts";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
+import { createRequestHostGuard } from "./request-host-guard.ts";
 import {
 	type ArchivedPlan,
 	generateSlug,
@@ -292,7 +293,10 @@ export async function startPlanReviewServer(options: {
 	// Lazy cache for in-session archive tab
 	let cachedArchivePlans: ArchivedPlan[] | null = null;
 
+	const requestHostGuard = createRequestHostGuard();
 	const server = createServer(async (req, res) => {
+		// Host allowlist first, before any route (request-host-guard.ts).
+		if (requestHostGuard.refuse(req, res)) return;
 		const url = requestUrl(req);
 
 		if (handleHostControl(req, res, url, { token: hostControlToken, getServerPort: () => boundPort, control: hostControl })) return;
@@ -644,6 +648,7 @@ export async function startPlanReviewServer(options: {
 		}
 	});
 
+	requestHostGuard.attach(server);
 	const { port, portSource } = await listenOnPort(server);
 	boundPort = port;
 	// Remote sessions serve the app page compressed (#1617); start gzip (what

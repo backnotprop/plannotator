@@ -12,6 +12,7 @@
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { appHtmlResponse, likelyAppHtmlEncoding, prewarmAppHtml } from "@plannotator/shared/app-html";
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
+import { createRequestHostGuard } from "./request-host-guard";
 import type { Origin } from "@plannotator/shared/agents";
 import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, getVcsFileBytesForDiff, getVcsDiffFingerprint, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext, detectRemoteDefaultCompareTarget, resolveAvailableDiffType, vcsOwnsDiffType, vcsSupportsSnapshot, materializeVcsSnapshot, gitRuntime } from "./vcs";
 import { basename } from "node:path";
@@ -2008,6 +2009,7 @@ export async function startReviewServer(
     },
   };
 
+  const requestHostGuard = createRequestHostGuard();
   const server = await startBunServerOnAvailablePort((port) =>
     Bun.serve({
         hostname: getServerHostname(),
@@ -2018,6 +2020,10 @@ export async function startReviewServer(
         idleTimeout: 0,
 
         async fetch(req, server) {
+          // Host allowlist first, before any route (request-host-guard.ts).
+          const hostRefusal = requestHostGuard.check(req);
+          if (hostRefusal) return hostRefusal;
+
           const url = new URL(req.url);
 
           const hostControlResponse = handleHostControl(req, url, {

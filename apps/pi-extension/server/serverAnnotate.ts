@@ -22,6 +22,7 @@ import { isPathAllowed } from "../generated/doc-resolve.ts";
 import { countUnsentDraftComments, hostSessionClosedEvent } from "../generated/host-control.ts";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
+import { createRequestHostGuard } from "./request-host-guard.ts";
 import { getPlanVersion, getVersionCount, listVersions } from "../generated/storage.ts";
 import { computeAnnotateHistory, deriveAnnotateHistorySlug, persistAnnotateSubmission, type AnnotateHistoryResult } from "../generated/annotate-history.ts";
 import { htmlDiff } from "../generated/html-diff.ts";
@@ -821,7 +822,10 @@ export async function startAnnotateServer(options: {
 	let liveSessionToken = "";
 	let liveAppUrl = "";
 
+	const requestHostGuard = createRequestHostGuard();
 	const server = createServer(async (req, res) => {
+		// Host allowlist first, before any route (request-host-guard.ts).
+		if (requestHostGuard.refuse(req, res)) return;
 		const url = requestUrl(req);
 
 		if (handleHostControl(req, res, url, { token: hostControlToken, getServerPort: () => boundPort, control: hostControl })) return;
@@ -1396,6 +1400,7 @@ export async function startAnnotateServer(options: {
 
 	let listened: Awaited<ReturnType<typeof listenOnPort>>;
 	try {
+		requestHostGuard.attach(server);
 		listened = await listenOnPort(server);
 	} catch (error) {
 		disposeFailedStart();

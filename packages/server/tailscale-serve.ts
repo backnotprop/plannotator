@@ -35,6 +35,7 @@ import {
   TAILSCALE_SERVE_TIMEOUT_MS,
   type TailscaleRunner,
 } from "@plannotator/shared/tailscale";
+import { allowServedHostname, resetServedHostnamesForTests } from "./request-host-guard";
 
 const activePorts = new Set<number>();
 let exitCleanupInstalled = false;
@@ -122,6 +123,9 @@ export function enableTailscaleServe(
       `--tailscale: could not find an https:// URL for port ${port} in \`tailscale serve\` output.`,
     );
   }
+  // tailscale serve forwards the browser's Host (the MagicDNS name) to the
+  // loopback backend, so the server's Host allowlist must know the name.
+  allowServedHostname(new URL(url).hostname);
   activePorts.add(port);
   cleanupRunner = run;
   if (!exitCleanupInstalled) {
@@ -161,6 +165,7 @@ export function disableTailscaleServe(port: number, run: TailscaleRunner = runTa
  */
 export function resetTailscaleServeForTests(): void {
   activePorts.clear();
+  resetServedHostnamesForTests();
   cleanupRunner = runTailscale;
   if (exitCleanupInstalled) {
     exitCleanupInstalled = false;

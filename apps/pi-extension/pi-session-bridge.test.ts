@@ -491,12 +491,14 @@ describe("Pi annotate server with Ask this session", () => {
 				}),
 			})).json() as { sessionId: string };
 
-			// DNS rebinding: same socket, foreign Host header. Refused before the
-			// question reaches the session.
+			// Same socket, foreign Host header. Refused before the question
+			// reaches the session: by the server-wide Host allowlist for a
+			// foreign name, and by the bridge's own loopback-and-port check for
+			// a loopback name carrying another port.
 			const port = Number(new URL(server.url).port);
-			const rebound = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+			const askWithHost = (hostHeader: string) => new Promise<{ status: number; body: string }>((resolve, reject) => {
 				const req = httpRequest(
-					{ host: "127.0.0.1", port, method: "POST", path: "/api/ai/query", headers: { host: `evil.example:${port}`, "content-type": "application/json" } },
+					{ host: "127.0.0.1", port, method: "POST", path: "/api/ai/query", headers: { host: hostHeader, "content-type": "application/json" } },
 					(res) => {
 						let body = "";
 						res.on("data", (chunk) => { body += chunk; });
@@ -506,8 +508,12 @@ describe("Pi annotate server with Ask this session", () => {
 				req.on("error", reject);
 				req.end(JSON.stringify({ sessionId, prompt: "injected" }));
 			});
+			const rebound = await askWithHost(`evil.example:${port}`);
 			expect(rebound.status).toBe(403);
-			expect(rebound.body).toContain("session_bridge_forbidden_host");
+			expect(rebound.body).toContain("PLANNOTATOR_ALLOWED_HOSTS");
+			const otherPort = await askWithHost(`localhost:${port + 1}`);
+			expect(otherPort.status).toBe(403);
+			expect(otherPort.body).toContain("session_bridge_forbidden_host");
 			expect(host.sent).toHaveLength(0);
 
 			// Node flushes SSE headers with the first chunk, so drive the turn before awaiting.

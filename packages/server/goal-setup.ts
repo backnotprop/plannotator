@@ -17,6 +17,7 @@ import {
   type GoalSetupResult,
 } from "@plannotator/shared/goal-setup";
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
+import { createRequestHostGuard } from "./request-host-guard";
 import { getRepoInfo } from "./repo";
 import {
   handleFavicon,
@@ -102,6 +103,7 @@ export async function startGoalSetupServer(
     resolveDecision(result);
   };
 
+  const requestHostGuard = createRequestHostGuard();
   const server = await startBunServerOnAvailablePort((port) =>
     Bun.serve({
         hostname: getServerHostname(),
@@ -110,6 +112,10 @@ export async function startGoalSetupServer(
         idleTimeout: 0,
 
         async fetch(req) {
+          // Host allowlist first, before any route (request-host-guard.ts).
+          const hostRefusal = requestHostGuard.check(req);
+          if (hostRefusal) return hostRefusal;
+
           const url = new URL(req.url);
 
           if (

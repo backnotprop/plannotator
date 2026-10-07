@@ -14,6 +14,7 @@
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { appHtmlResponse, likelyAppHtmlEncoding, prewarmAppHtml } from "@plannotator/shared/app-html";
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
+import { createRequestHostGuard } from "./request-host-guard";
 import { getRepoInfo } from "./repo";
 import type { Origin } from "@plannotator/shared/agents";
 import { handleImage, handleUpload, handleServerReady, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl } from "./shared-handlers";
@@ -845,6 +846,7 @@ export async function startAnnotateServer(
   let liveSessionToken = "";
   let liveAppUrl = "";
 
+  const requestHostGuard = createRequestHostGuard();
   const server = await startBunServerOnAvailablePort((port) =>
     Bun.serve({
         hostname: getServerHostname(),
@@ -854,6 +856,10 @@ export async function startAnnotateServer(
         idleTimeout: 0,
 
         async fetch(req, server) {
+          // Host allowlist first, before any route (request-host-guard.ts).
+          const hostRefusal = requestHostGuard.check(req);
+          if (hostRefusal) return hostRefusal;
+
           const url = new URL(req.url);
 
           const hostControlResponse = handleHostControl(req, url, {
