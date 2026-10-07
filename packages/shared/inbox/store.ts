@@ -39,6 +39,7 @@ import {
 import {
   inboxId,
   INBOX_RECORD_VERSION,
+  type InboxAddressee,
   type InboxAuthor,
   type InboxDecision,
   type InboxGuideRef,
@@ -1330,7 +1331,8 @@ export class InboxStore {
 
   /**
    * The person's replies waiting for an agent connection's `session`: replies
-   * to a message that session sent, not yet delivered, and not yet read by an
+   * to a message that session sent, and New messages addressed to it (step
+   * 8), not yet delivered, and not yet read by an
    * agent (wait_for_reply or read_thread; any agent's read counts, as for the
    * Sent band). Derived from the log, so a reply waits for its session across
    * Inbox restarts and is handed out again until it is delivered. Oldest first.
@@ -1338,9 +1340,7 @@ export class InboxStore {
   pendingReplies(session: string): InboxMessage[] {
     const out: { message: InboxMessage; seq: number }[] = [];
     for (const message of this.messages.values()) {
-      if (message.author.kind !== "person" || !message.reply_to || message.delivery) continue;
-      const asked = this.messages.get(message.reply_to);
-      if (!asked || asked.author.kind !== "agent" || asked.author.session !== session) continue;
+      if (message.author.kind !== "person" || message.delivery || !this.isFor(message, session)) continue;
       const seq = this.messageSeq.get(message.id) ?? 0;
       if ((this.messages.get(message.thread_id)?.agent_checked_seq ?? 0) >= seq) continue;
       out.push({ message, seq });
@@ -1355,9 +1355,8 @@ export class InboxStore {
    */
   recordDelivery(replyId: string, by: { host: string; session: string }): InboxMessage {
     const reply = this.messages.get(replyId);
-    if (!reply || reply.author.kind !== "person" || !reply.reply_to) throw new InboxError("message_not_found", `No reply ${replyId}.`);
-    const asked = this.messages.get(reply.reply_to);
-    if (!asked || asked.author.kind !== "agent" || asked.author.session !== by.session) {
+    if (!reply || reply.author.kind !== "person" || (!reply.reply_to && !reply.to)) throw new InboxError("message_not_found", `No reply ${replyId}.`);
+    if (!this.isFor(reply, by.session)) {
       throw new InboxError("validation_error", "session: this reply answers another session's message.", { field: "session" });
     }
     if (reply.delivery) return reply;
@@ -1366,5 +1365,57 @@ export class InboxStore {
     this.appendMessage(delivered, at);
     this.markAgentChecked(reply.thread_id, this.messageSeq.get(reply.id) ?? 0, at);
     return delivered;
+  }
+
+  /**
+   * Whether a person's message goes to `session`: a New message addressed to
+   * it (`to`), or a reply to a message it sent.
+   */
+  private isFor(message: InboxMessage, session: string): boolean {
+    if (message.to) return message.to.session === session;
+    const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
+    return asked?.author.kind === "agent" && asked.author.session === session;
+  }
+
+  // ──────────── New message (step 8) ────────────
+
+  /**
+   * The person's New message: their words in a thread, addressed to one agent
+   * session (`to`), answering nothing. That session's connection is handed it
+   * on its next poll (`pendingReplies`) and delivers it as a turn, like a
+   * reply. Replaying the same idempotency key in the thread answers the
+   * message it wrote, and writes nothing. Whether the session is live is the
+   * server's check: `to` null means it is not, and only a replay answers.
+   */
+  sendNewMessage(threadId: string, input: { body: unknown; to: InboxAddressee | null; idempotency_key: unknown }): { message: InboxMessage; replayed: boolean } {
+    const key = typeof input.idempotency_key === "string" ? input.idempotency_key.trim() : "";
+    if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    for (const message of this.threadMessages(threadId)) {
+      if (message.author.kind === "person" && message.to && message.idempotency_key === key) return { message, replayed: true };
+    }
+    if (!input.to) {
+      throw new InboxError("session_not_live", "That session is not live any more: the message was not sent. Press New message again to pick a live one.");
+    }
+    if (root.resolved_at !== null) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to write in it.");
+    const body = typeof input.body === "string" ? input.body.trim() : "";
+    if (!body) throw new InboxError("validation_error", "body: write a message.", { field: "body" });
+    const at = this.stamp();
+    const message: InboxMessage = {
+      id: inboxId("msg"),
+      project_id: root.project_id,
+      thread_id: threadId,
+      reply_to: null,
+      author: { kind: "person" },
+      subject: null,
+      body,
+      created_at: at,
+      resolved_at: null,
+      idempotency_key: key,
+      to: { host: input.to.host, session: input.to.session },
+    };
+    this.appendMessage(message, at);
+    return { message, replayed: false };
   }
 }

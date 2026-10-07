@@ -80,6 +80,7 @@ import { inboxGuideRoute } from "./inbox-guides";
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
+import { createInboxLiveSessions } from "./inbox-sessions";
 
 const LOOPBACK = "127.0.0.1";
 /** Remote mode's fixed port: the Inbox never takes it. */
@@ -171,6 +172,8 @@ const ERROR_STATUS: Record<string, number> = {
   attachment_changed_type: 409,
   annotation_not_found: 404,
   annotation_closed: 409,
+  // New message (step 8).
+  session_not_live: 409,
 };
 
 /**
@@ -548,10 +551,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // survives an Inbox restart.
   const threadPageUrl = (base: string, threadId: string) => `${base}#thread=${threadId}`;
   const replyCommand = (reply: InboxMessage): InboxReplyCommand => ({
-    type: "reply",
+    type: reply.to ? "message" : "reply",
     id: reply.id,
     thread_id: reply.thread_id,
-    reply_to: reply.reply_to!,
+    reply_to: reply.reply_to,
     subject: store.message(reply.thread_id)?.subject ?? null,
     body: reply.body,
     url: threadPageUrl(baseUrl, reply.thread_id),
@@ -569,9 +572,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const session = bridgeSession(body);
     const requested = typeof body.waitMs === "number" && Number.isFinite(body.waitMs) ? body.waitMs : 0;
     const waitMs = Math.min(Math.max(requested, 0), INBOX_BRIDGE_POLL_MAX_MS);
+    // Step 8: a polling session is live (New message can reach it) while its poll is held.
+    const answered = await live.pollStarted(session, bridgeHost(body), body);
     const commands = () => store.pendingReplies(session).map(replyCommand);
     const now = commands();
-    if (now.length > 0 || waitMs === 0) return json({ commands: now });
+    if (now.length > 0 || waitMs === 0) {
+      answered();
+      return json({ commands: now });
+    }
     return new Promise<Response>((resolve) => {
       let done = false;
       const finish = () => {
@@ -580,6 +588,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         clearTimeout(timer);
         unsubscribe();
         req.signal.removeEventListener("abort", finish);
+        answered();
         resolve(json({ commands: commands() }));
       };
       const timer = setTimeout(finish, waitMs);
@@ -590,17 +599,34 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     });
   };
 
-  /** `{ session, host, type: "delivered", id }`: the reply entered the session as a turn. */
+  const bridgeHost = (body: Record<string, unknown>): string => (typeof body.host === "string" && body.host.trim() ? body.host.trim() : "agent");
+
+  /**
+   * `{ session, host, type: "delivered", id }`: the reply or message entered
+   * the session as a turn. `{ session, host, type: "state", busy }` (step 8):
+   * a turn started or ended, for the live sessions New message lists.
+   */
   const bridgeEvent = async (req: Request): Promise<Response> => {
     const body = await readBody(req);
     const session = bridgeSession(body);
-    if (body.type !== "delivered" || typeof body.id !== "string") {
-      throw new InboxError("validation_error", 'type: "delivered" with the reply id is the only event.', { field: "type" });
+    const host = bridgeHost(body);
+    if (body.type === "state") {
+      live.stateChanged(session, host, body);
+      return json({ ok: true });
     }
-    const host = typeof body.host === "string" && body.host.trim() ? body.host.trim() : "agent";
+    if (body.type !== "delivered" || typeof body.id !== "string") {
+      throw new InboxError("validation_error", 'type: "delivered" with the reply id, or "state" with busy.', { field: "type" });
+    }
     const reply = store.recordDelivery(body.id, { host, session });
     return json({ ok: true, delivery: reply.delivery });
   };
+
+  // ── New message (step 8): the live sessions and the window's two routes (packages/server/inbox-sessions.ts) ──
+  const live = createInboxLiveSessions({
+    store,
+    serverSession,
+    resolveRoot: async (path) => (await resolveInboxProjectRoot(path)).root,
+  });
 
   let stopRequested = false;
   let server: ReturnType<typeof Bun.serve>;
@@ -792,6 +818,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         });
       }
       if (path === "/favicon.png" && req.method === "GET") return handleFavicon();
+
+      // Step 8: the live sessions of a thread's project, and New message.
+      const newMessage = await live.route(req, path);
+      if (newMessage) return newMessage;
 
       // Step 2: attachments by id, annotations, the HTML asset route, delete
       // thread and delete project (packages/server/inbox-attachments.ts).

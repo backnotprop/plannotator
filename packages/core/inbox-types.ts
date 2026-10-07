@@ -216,14 +216,28 @@ export interface InboxMessage {
    * thread"). Absent until the first tick; the snapshot's own ticks apply then.
    */
   guide_reviewed?: boolean[] | null;
+  /**
+   * On a person's New message (plan step 8): the live agent session it is
+   * addressed to. Such a message answers nothing (`reply_to` null) and is
+   * delivered to that session as a turn, like a reply. Absent on every other
+   * message and on records older than step 8.
+   */
+  to?: InboxAddressee | null;
 }
 
-/** How a person's reply reached the agent session that asked (`InboxMessage.delivery`). */
+/** The agent session a person's New message is addressed to (`InboxMessage.to`). */
+export interface InboxAddressee {
+  /** The connection's host, e.g. `claude-code`. */
+  host: string;
+  session: string;
+}
+
+/** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */
 export interface InboxDelivery {
   state: "delivered";
   /** The connection's host, e.g. `claude-code`. */
   host: string;
-  /** The session the reply was delivered to (the asking message's `author.session`). */
+  /** The session it was delivered to (the asking message's `author.session`, or the message's `to.session`). */
   session: string;
   at: string;
 }

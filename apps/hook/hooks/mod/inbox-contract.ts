@@ -243,17 +243,21 @@ export function parseInboxRegistry(text: string | null | undefined): InboxRegist
   return null
 }
 
-/** One reply the person sent to a message of the polling session. */
+/**
+ * One thing the person sent the polling session: a `reply` to a message it
+ * sent, or a `message` the person wrote to it with New message (plan step 8),
+ * which answers nothing (`reply_to` null). Both are delivered the same way.
+ */
 export interface InboxReplyCommand {
-  type: 'reply'
-  /** The person's reply (a `msg_` id). */
+  type: 'reply' | 'message'
+  /** The person's reply or message (a `msg_` id). */
   id: string
   thread_id: string
-  /** The agent message it answers. */
-  reply_to: string
+  /** The agent message a reply answers; null for a message. */
+  reply_to: string | null
   /** The thread's subject. */
   subject: string | null
-  /** The reply, markdown, verbatim. */
+  /** The reply or message, markdown, verbatim. */
   body: string
   /** The thread in the Inbox page. */
   url: string
@@ -266,7 +270,7 @@ export function parseInboxBridgeCommands(text: string): InboxReplyCommand[] {
     return body.commands.filter((command): command is InboxReplyCommand => {
       if (!command || typeof command !== 'object') return false
       const c = command as Record<string, unknown>
-      return c.type === 'reply' && typeof c.id === 'string' && typeof c.thread_id === 'string' && typeof c.body === 'string'
+      return (c.type === 'reply' || c.type === 'message') && typeof c.id === 'string' && typeof c.thread_id === 'string' && typeof c.body === 'string'
     })
   } catch {
     return []
@@ -277,11 +281,25 @@ export function parseInboxBridgeCommands(text: string): InboxReplyCommand[] {
 export const INBOX_WAKE_INSTRUCTION =
   "The person replied to you in the Plannotator Inbox. Their reply follows as they wrote it: it is their answer to you. When they need to hear back, answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above."
 
+/** The fixed second line of a New message wake: the person wrote first, and how to answer. */
+export const INBOX_MESSAGE_INSTRUCTION =
+  "The person wrote to you from the Plannotator Inbox. Their message follows as they wrote it: it is from them, not from the Inbox. When they need to hear back, answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above."
+
 /**
- * The turn a reply becomes: `Plannotator Inbox: <subject> (<reply id>)`, the
- * fixed instruction line, then the reply verbatim. Never the thread re-sent.
+ * The turn a reply or a message becomes: `Plannotator Inbox: <subject> (<id>)`,
+ * the fixed instruction line for its type, then the words verbatim. Never the
+ * thread re-sent.
  */
-export function inboxWakeText(command: Pick<InboxReplyCommand, 'id' | 'subject' | 'body'>): string {
-  const subject = (command.subject ?? '').replace(/\s+/g, ' ').trim() || 'a reply'
-  return `Plannotator Inbox: ${subject} (${command.id})\n${INBOX_WAKE_INSTRUCTION}\n\n${command.body}`
+export function inboxWakeText(command: Pick<InboxReplyCommand, 'id' | 'subject' | 'body'> & { type?: InboxReplyCommand['type'] }): string {
+  const subject = (command.subject ?? '').replace(/\s+/g, ' ').trim() || (command.type === 'message' ? 'a message' : 'a reply')
+  const instruction = command.type === 'message' ? INBOX_MESSAGE_INSTRUCTION : INBOX_WAKE_INSTRUCTION
+  return `Plannotator Inbox: ${subject} (${command.id})\n${instruction}\n\n${command.body}`
 }
+
+/**
+ * A session is live while its connection polled within this long (plan step
+ * 8): New message is addressed only to a live session. A connection polls
+ * again at once after each held poll (at most 25 s), so a running session is
+ * never this long without one.
+ */
+export const INBOX_SESSION_LIVE_MS = 30_000

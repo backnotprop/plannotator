@@ -12,7 +12,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { inboxAgentTool, INBOX_TOOL_ACTIONS, INBOX_WAKE_INSTRUCTION, inboxWakeText, mcpAnswerOf } from './inbox-contract'
+import { inboxAgentTool, INBOX_MESSAGE_INSTRUCTION, INBOX_TOOL_ACTIONS, INBOX_WAKE_INSTRUCTION, inboxWakeText, mcpAnswerOf } from './inbox-contract'
 import { ClaudeSession } from './testing/claude-session'
 import { INBOX_DISCOVER_TIMEOUT_MS, STORE_INBOX_TOOLS } from './inbox'
 
@@ -438,4 +438,75 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
       wedged.stop(true)
     }
   }, 20_000)
+  // Plan step 8, record 5.x: New message. The failure this guards: the person
+  // writes to a live session of the project and it never arrives, arrives
+  // twice, or lands in a session the person did not pick.
+  test('New message: the polls make both sessions of the project live (the writer first); the message reaches the picked session once, as a turn; a gone session is refused', async () => {
+    const w = world('09-new-message')
+    startInbox(w)
+    const writer = await open(w, 'session-writer')
+    const asked = await send(writer, w, 'Run finished. The export now streams rows to the file.')
+    const other = await open(w, 'session-other')
+    const { port } = registry(w)
+    const live = await waitFor('both sessions live', async () => {
+      const model = (await (await fetch(`http://127.0.0.1:${port}/api/inbox/threads/${asked.thread_id}/sessions`)).json()) as {
+        sessions: { session: string; host: string; busy: boolean | null; wrote_thread: boolean }[]
+      }
+      return model.sessions.length === 2 ? model.sessions : null
+    })
+    expect(live.map((s) => [s.session, s.host, s.wrote_thread, s.busy])).toEqual([
+      ['session-writer', 'claude-code', true, false],
+      ['session-other', 'claude-code', false, false],
+    ])
+    w.proof(`live sessions of the thread's project, from the mod's polls (project_path = ${w.project}):\n${JSON.stringify(live, null, 2)}\n`)
+
+    const health = (await (await fetch(`http://127.0.0.1:${port}/api/inbox/health`)).json()) as { serverSession: string }
+    const post = (session: string, body: string, key: string) =>
+      fetch(`http://127.0.0.1:${port}/api/inbox/threads/${asked.thread_id}/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: `http://127.0.0.1:${port}` },
+        body: JSON.stringify({ serverSession: health.serverSession, session, body, idempotency_key: key }),
+      })
+    const words = 'While you are in there, add a header row to the CSV export.'
+    const response = await post('session-other', words, 'nm-1')
+    expect(response.status).toBe(200)
+    const message = ((await response.json()) as { message: { id: string; to: unknown; reply_to: unknown } }).message
+    expect(message).toMatchObject({ reply_to: null, to: { host: 'claude-code', session: 'session-other' } })
+    // A double press of Send writes nothing new.
+    expect(((await (await post('session-other', words, 'nm-1')).json()) as { replayed: boolean; message: { id: string } })).toMatchObject({ replayed: true, message: { id: message.id } })
+
+    const turn = await waitFor('the New message turn', () => other.turns.find((t) => t.text.includes(message.id)))
+    await Bun.sleep(3_000)
+    expect(other.host.submits).toEqual([inboxWakeText({ type: 'message', id: message.id, subject: 'Run finished. The export now streams rows to the file.', body: words })])
+    const lines = other.host.submits[0]!.split('\n')
+    expect(lines[0]).toBe(`Plannotator Inbox: Run finished. The export now streams rows to the file. (${message.id})`)
+    expect(lines[1]).toBe(INBOX_MESSAGE_INSTRUCTION)
+    expect(other.host.submits[0]!.endsWith(`\n\n${words}`)).toBe(true)
+    expect(writer.host.submits).toEqual([])
+    w.proof(`turn.start ${turn.id} in session-other:\n${turn.text}\n\nsession-writer submits: ${writer.host.submits.length}`)
+
+    const delivered = await waitFor('the delivery record', async () => (await thread(w, asked.thread_id)).messages.find((m) => m.id === message.id)?.delivery)
+    expect(delivered).toMatchObject({ state: 'delivered', host: 'claude-code', session: 'session-other' })
+    w.proof(`thread shows: Delivered to Claude Code, ${delivered.at}`)
+
+    // The wake's fixed line asks for reply_to set to the id it names: that answer lands in the same thread.
+    const answer = await other.callInbox({ action: 'send_message', body: 'Added the header row.', reply_to: message.id }, w.project)
+    if ('deny' in answer) throw new Error(answer.deny)
+    expect((await thread(w, asked.thread_id)).messages.at(-1)).toMatchObject({ body: 'Added the header row.', author: { kind: 'agent', session: 'session-other' } })
+    w.proof('session-other answered with reply_to the id in the wake: the answer is the last message of the same thread')
+
+    // The picked session quits: it is not live once its last poll is 30 s old,
+    // and a message to it is refused, nothing written.
+    other.quit()
+    const before = (await thread(w, asked.thread_id)).messages.length
+    await waitFor('session-other no longer live', async () => {
+      const model = (await (await fetch(`http://127.0.0.1:${port}/api/inbox/threads/${asked.thread_id}/sessions`)).json()) as { sessions: { session: string }[] }
+      return model.sessions.every((s) => s.session !== 'session-other') ? true : null
+    }, 60_000)
+    const refused = await post('session-other', 'Are you there?', 'nm-2')
+    expect(refused.status).toBe(409)
+    expect(((await refused.json()) as { code: string }).code).toBe('session_not_live')
+    expect((await thread(w, asked.thread_id)).messages).toHaveLength(before)
+    w.proof('session-other quit: gone from the live list after 30 s; a New message to it answers 409 session_not_live and writes nothing')
+  }, 120_000)
 })

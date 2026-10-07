@@ -4,8 +4,9 @@ name: Inbox window e2e
 # (Playwright, pinned in the root devDependencies) drives the COMPILED binary
 # under a temp data dir while agents write through `plannotator inbox mcp`.
 # The binary is built first, with the flags release.yml compiles with.
-# tests/e2e/inbox.spec.ts (the window), notifications.spec.ts and
-# inbox-guides.spec.ts (guided reviews) say what they prove. Runs only when the
+# tests/e2e/inbox.spec.ts (the window), notifications.spec.ts,
+# inbox-guides.spec.ts (guided reviews) and inbox-new-message.spec.ts (New
+# message) say what they prove. Runs only when the
 # Inbox, the ui and the guide viewer it composes, the binary entry or the build
 # could have changed.
 

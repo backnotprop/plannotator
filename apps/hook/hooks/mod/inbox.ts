@@ -25,6 +25,10 @@
  * turn goes first), is checked once more with the Inbox, claimed once across
  * processes, submitted as a turn (`inboxWakeText`), and acknowledged
  * (`delivered`), which the thread shows as "Delivered to Claude Code, <time>".
+ * A New message the person addressed to this session (plan step 8) arrives
+ * on the same poll and takes the same path. Each poll also tells the Inbox
+ * where the session works and whether a turn runs, and a `state` event tells
+ * it when a turn starts or ends: the Inbox lists live sessions from these.
  *
  * Two Claude Code processes on one session (`claude --continue` while the
  * first still runs): one of them polls and delivers, the holder of the
@@ -187,6 +191,8 @@ export interface InboxLinkOptions {
   tools: readonly InboxToolInfo[]
   /** A turn is running (or a question of Ask this session is in flight). */
   isBusy: () => boolean
+  /** The session's working folder, sent with each poll so New message can find the session by project. */
+  cwd?: () => Promise<string>
   /** Names this process in the lease and the claims. */
   instanceId: string
 }
@@ -219,6 +225,10 @@ export class InboxLink {
   /** The reply whose turn this process is submitting, kept alive in its claim. */
   private submitting: string | null = null
   private delivering = false
+  /** When this link started (the session, near enough), and the turn state last told the Inbox (step 8). */
+  private startedAt = 0
+  private busy: boolean | null = null
+  private idleSince = 0
 
   constructor(private readonly options: InboxLinkOptions) {
     this.host = options.host
@@ -233,6 +243,10 @@ export class InboxLink {
   /** Start the tick. The person is in this process now. */
   start(): void {
     if (this.timer || this.disposed) return
+    void this.host.now().then((now) => {
+      this.startedAt ||= now
+      this.idleSince ||= now
+    })
     void this.touch()
     this.timer = this.host.every(INBOX_TICK_MS, () => {
       if (this.ticking) return
@@ -366,8 +380,16 @@ export class InboxLink {
 
   private async tick(): Promise<void> {
     if (this.disposed || !(await this.ensureDir())) return
-    this.idleTicks = this.options.isBusy() ? 0 : this.idleTicks + 1
+    const busy = this.options.isBusy()
+    this.idleTicks = busy ? 0 : this.idleTicks + 1
     const now = await this.host.now()
+    if (busy !== this.busy) {
+      const known = this.busy !== null
+      this.busy = busy
+      if (!busy) this.idleSince = now
+      // A turn started or ended: the Inbox's live sessions say so (step 8).
+      if (known && this.leader) void this.bridge(INBOX_BRIDGE_EVENT_PATH, { type: 'state', busy, idle_since: this.idleSince })
+    }
     if (now - this.leaseCheckedAt >= LEASE_EVERY_MS) {
       await this.holdLease(now)
       if (this.submitting) await this.host.writeFile(`${this.claimDir(this.submitting)}/alive`, String(now)).catch(() => undefined)
@@ -417,9 +439,19 @@ export class InboxLink {
       .catch(() => null)
   }
 
-  /** The replies the Inbox has for this session now (waitMs 0), or null when it did not answer. */
+  /**
+   * The replies and messages the Inbox has for this session now (waitMs 0),
+   * or null when it did not answer. The poll says where the session works and
+   * whether a turn runs, for New message's live sessions (step 8).
+   */
   private async pendingNow(waitMs: number): Promise<InboxReplyCommand[] | null> {
-    const response = await this.bridge(INBOX_BRIDGE_POLL_PATH, { waitMs })
+    const cwd = this.options.cwd ? await this.options.cwd().catch(() => '') : ''
+    const response = await this.bridge(INBOX_BRIDGE_POLL_PATH, {
+      waitMs,
+      ...(cwd ? { project_path: cwd } : {}),
+      ...(this.startedAt ? { started_at: this.startedAt } : {}),
+      ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
+    })
     return response && response.status === 200 ? parseInboxBridgeCommands(response.text) : null
   }
 
@@ -439,7 +471,7 @@ export class InboxLink {
       this.retryAt = 0
       for (const command of commands) {
         if (this.settled.has(command.id) || this.pending.has(command.id) || this.elsewhere.has(command.id)) continue
-        this.host.debug(`inbox: reply ${command.id} for this session`)
+        this.host.debug(`inbox: ${command.type} ${command.id} for this session`)
         this.pending.set(command.id, command)
       }
     } finally {
@@ -475,7 +507,7 @@ export class InboxLink {
     if (claim?.exitCode !== INBOX_CLAIM_EXIT.won) return
     this.submitting = command.id
     await this.host.writeFile(`${dir}/alive`, String(await this.host.now())).catch(() => undefined)
-    this.host.debug(`inbox: delivering reply ${command.id}`)
+    this.host.debug(`inbox: delivering ${command.type} ${command.id}`)
     try {
       // Resolves once Claude is idle and took the turn.
       await this.host.submit(inboxWakeText(command))
@@ -484,7 +516,7 @@ export class InboxLink {
       this.settle(command.id)
       await this.host.writeFile(`${dir}/reported`, '1').catch(() => undefined)
       this.host.toast(
-        `A reply in the Plannotator Inbox (${command.subject ?? 'a thread'}) could not be delivered to this session (${error instanceof Error ? error.message : String(error)}). Read it in the Inbox: ${command.url}`,
+        `${command.type === 'message' ? 'A message' : 'A reply'} in the Plannotator Inbox (${command.subject ?? 'a thread'}) could not be delivered to this session (${error instanceof Error ? error.message : String(error)}). Read it in the Inbox: ${command.url}`,
       )
       return
     }
@@ -530,7 +562,7 @@ export class InboxLink {
     this.settled.add(id)
     await this.host.writeFile(`${dir}/reported`, '1').catch(() => undefined)
     this.host.toast(
-      `A reply in the Plannotator Inbox (${entry.command.subject ?? 'a thread'}) arrived for this session but was not delivered (the Claude Code process that took it quit). Read it in the Inbox: ${entry.command.url}`,
+      `${entry.command.type === 'message' ? 'A message' : 'A reply'} in the Plannotator Inbox (${entry.command.subject ?? 'a thread'}) arrived for this session but was not delivered (the Claude Code process that took it quit). Read it in the Inbox: ${entry.command.url}`,
     )
   }
 }

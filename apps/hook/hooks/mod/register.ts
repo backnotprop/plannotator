@@ -193,7 +193,7 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
       sessionId,
       dataDir: settings.dataDir,
       interactive: true,
-      ...(inboxTools ? { inboxTools } : {}),
+      ...(inboxTools ? { inboxTools, cwd: async () => String(await $.session.cwd()) } : {}),
     })
     mod = instance
     await instance.restore().catch(() => undefined)

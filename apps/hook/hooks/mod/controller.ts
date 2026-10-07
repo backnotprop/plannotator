@@ -296,6 +296,8 @@ export interface SessionInfo {
    * at its first session start (inbox.ts); absent: no Inbox connection.
    */
   inboxTools?: readonly InboxToolInfo[]
+  /** The session's working folder, read when asked (the Inbox link's polls say where the session works). */
+  cwd?: () => Promise<string>
 }
 
 export class PlannotatorMod {
@@ -346,6 +348,7 @@ export class PlannotatorMod {
           sessionId: session.sessionId,
           tools: session.inboxTools,
           isBusy: () => this.turns.busy,
+          ...(session.cwd ? { cwd: session.cwd } : {}),
           instanceId: this.instanceId,
         })
       : null

@@ -190,4 +190,52 @@ describe("Inbox connection bridge", () => {
     servers.push(again);
     expect((await poll(again, "session-a")).map((c) => c.id)).toEqual([replyId]);
   });
+  // Step 8, New message. The failure this guards: the window lists a session
+  // of another project, or hands the person's message to a session they did
+  // not pick.
+  test("New message: polls make sessions live per project (a connection without project_path counts where it wrote); the message goes to the picked session only", async () => {
+    const { server, client, project } = await setup();
+    const elsewhere = join(project, "..", "other");
+    mkdirSync(elsewhere, { recursive: true });
+    const asked = await agentSends(client, project, "session-a", "Run finished.");
+    const live = async () =>
+      ((await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads/${asked.thread_id}/sessions`)).json()) as {
+        sessions: { session: string; busy: boolean | null; wrote_thread: boolean }[];
+      }).sessions;
+    expect(await live()).toEqual([]);
+
+    // session-a sends no project_path: live here because it wrote here. session-b says where it works; session-c works elsewhere.
+    await bridge(server, INBOX_BRIDGE_POLL_PATH, { session: "session-a", host: "pi", waitMs: 0 });
+    await bridge(server, INBOX_BRIDGE_POLL_PATH, { session: "session-b", host: "claude-code", waitMs: 0, project_path: project, busy: false, idle_since: 1_000 });
+    await bridge(server, INBOX_BRIDGE_POLL_PATH, { session: "session-c", host: "claude-code", waitMs: 0, project_path: elsewhere, busy: false });
+    expect(await live()).toMatchObject([
+      { session: "session-a", busy: null, wrote_thread: true },
+      { session: "session-b", busy: false, wrote_thread: false },
+    ]);
+    // A turn starts in session-b.
+    expect((await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "session-b", host: "claude-code", type: "state", busy: true })).status).toBe(200);
+    expect((await live()).find((s) => s.session === "session-b")?.busy).toBe(true);
+
+    const send = (session: string) =>
+      fetch(`http://127.0.0.1:${server.port}/api/inbox/threads/${asked.thread_id}/message`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ serverSession: server.serverSession, session, body: "Add a header row.", idempotency_key: `nm-${session}` }),
+      });
+    expect((await send("session-c")).status).toBe(409);
+    const sent = await send("session-b");
+    expect(sent.status).toBe(200);
+    const message = ((await sent.json()) as { message: { id: string } }).message;
+    expect(await poll(server, "session-a")).toEqual([]);
+    expect(await poll(server, "session-c")).toEqual([]);
+    expect(await poll(server, "session-b")).toMatchObject([{ type: "message", id: message.id, reply_to: null, subject: "Run finished.", body: "Add a header row." }]);
+    expect((await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "session-a", host: "pi", type: "delivered", id: message.id })).status).toBe(422);
+    expect((await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "session-b", host: "claude-code", type: "delivered", id: message.id })).status).toBe(200);
+    expect((await thread(server, asked.thread_id)).messages.at(-1)).toMatchObject({
+      id: message.id,
+      to: { host: "claude-code", session: "session-b" },
+      delivery: { state: "delivered", host: "claude-code", session: "session-b" },
+    });
+    expect(await poll(server, "session-b")).toEqual([]);
+  });
 });

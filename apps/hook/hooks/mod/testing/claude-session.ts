@@ -140,7 +140,7 @@ export class ClaudeSession {
   private idleWaiters: (() => void)[] = []
   private sequence = 0
 
-  private constructor(host: RealHost, mod: PlannotatorMod, inboxTools: readonly InboxToolInfo[] | null, private readonly dataDir: string) {
+  private constructor(host: RealHost, mod: PlannotatorMod, inboxTools: readonly InboxToolInfo[] | null, private readonly dataDir: string, private readonly cwd: string) {
     this.host = host
     this.mod = mod
     this.inboxTools = inboxTools
@@ -155,9 +155,9 @@ export class ClaudeSession {
       sessionId: options.sessionId,
       dataDir: options.dataDir,
       interactive: true,
-      ...(inboxTools ? { inboxTools } : {}),
+      ...(inboxTools ? { inboxTools, cwd: async () => options.cwd } : {}),
     })
-    return new ClaudeSession(host, mod, inboxTools, options.dataDir)
+    return new ClaudeSession(host, mod, inboxTools, options.dataDir, options.cwd)
   }
 
   get sessionId(): string {
@@ -171,7 +171,7 @@ export class ClaudeSession {
       sessionId: newSessionId,
       dataDir: this.dataDir,
       interactive: true,
-      ...(this.inboxTools ? { inboxTools: this.inboxTools } : {}),
+      ...(this.inboxTools ? { inboxTools: this.inboxTools, cwd: async () => this.cwd } : {}),
     })
   }
 

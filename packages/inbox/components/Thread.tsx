@@ -14,6 +14,7 @@ import { agentName, clockTime, plural } from '../format';
 import { AuthorMark, DecisionDiamond, Icon } from '../icons';
 import { DecisionCard } from './DecisionCard';
 import { GuideCard } from './GuideCard';
+import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
 
 const noop = () => {};
 const NO_ANNOTATIONS: never[] = [];
@@ -182,6 +183,20 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   const textRef = useRef<HTMLTextAreaElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
 
+  // New message (record 5.x): the project's live sessions, and what the button opened.
+  const { model: live, load: loadLive } = useLiveSessions(thread.thread_id);
+  const [newMessage, setNewMessage] = useState<NewMessageMode>(null);
+  const pressNewMessage = async () => {
+    if (newMessage?.kind === 'pick' || newMessage?.kind === 'none') {
+      setNewMessage(null);
+      return;
+    }
+    const now = await loadLive();
+    const sessions = now?.sessions ?? [];
+    setBox({ open: false, text: '' });
+    setNewMessage(sessions.length === 0 ? { kind: 'none' } : sessions.length === 1 ? { kind: 'compose', target: sessions[0]! } : { kind: 'pick' });
+  };
+
   // Attachments (step 2): the files as they are now, and the annotations that ride the next Send.
   const { model: files, load: reloadFiles, patch: patchRecords } = useThreadAttachments(thread.thread_id, thread);
   const attachments: InboxAttachmentState[] = files?.attachments ?? [];
@@ -246,6 +261,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     setSwitching(new Map());
     setCard(null);
     setRefused([]);
+    setNewMessage(null);
     sendKeys.current = null;
     revisions.current.clear();
     bodyRef.current?.scrollTo({ top: 0 });
@@ -368,6 +384,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   const waiting = picksCount > 0 || records.length > 0;
 
   const openBox = (withDraft: boolean) => {
+    setNewMessage(null);
     const draft = withDraft ? picked.map((q) => (q.answer ? `${q.prompt.replace(/[?.!]\s*$/, '')}: ${answerWords(q.answer)}.` : '')).filter(Boolean).join(' ') : '';
     setBox({ open: true, text: draft });
     setError(null);
@@ -435,14 +452,19 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     }
   };
 
-  // The last message is the person's: say where it is.
+  // The last message is the person's: say where it is. A New message names
+  // the session's host it went to, and is delivered as a turn (step 8).
   const last = thread.messages[thread.messages.length - 1]!;
   const delivered =
-    last.author.kind === 'person'
-      ? sent?.checked_at
-        ? `Delivered to ${asker}, ${clockTime(sent.checked_at)}`
-        : `Saved for ${asker}. It sees it when it checks.`
-      : null;
+    last.author.kind !== 'person'
+      ? null
+      : last.to
+        ? last.delivery
+          ? { state: 'delivered', text: `Delivered to ${hostName(last.delivery.host)}, ${clockTime(last.delivery.at)}` }
+          : { state: 'queued', text: `${hostName(last.to.host)} takes it as its next turn.` }
+        : sent?.checked_at
+          ? { state: 'delivered', text: `Delivered to ${asker}, ${clockTime(sent.checked_at)}` }
+          : { state: 'saved', text: `Saved for ${asker}. It sees it when it checks.` };
 
   const waitingHoldsUp = [...new Set(lastAgent.questions?.filter((q) => q.state === 'open').flatMap((q) => q.holds_up) ?? [])];
   const [holdsOpen, setHoldsOpen] = useState(false);
@@ -492,7 +514,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                   <div className="ib-who">
                     {isAgent ? agentName(message.author) : 'You'} <span>in {thread.project.name}</span>
                   </div>
-                  <div className="ib-to">to {isAgent ? 'you' : asker}</div>
+                  <div className="ib-to">to {isAgent ? 'you' : message.to ? hostName(message.to.host) : asker}</div>
                 </div>
                 <div className="ib-tm">
                   {clockTime(message.created_at)}
@@ -561,9 +583,9 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                   </ul>
                 )}
                 {message === last && delivered && (
-                  <div className="ib-delivered" data-delivery={delivered.startsWith('Delivered') ? 'delivered' : 'saved'}>
+                  <div className="ib-delivered" data-delivery={delivered.state}>
                     <Icon name="check" size={14} />
-                    {delivered}
+                    {delivered.text}
                   </div>
                 )}
               </div>
@@ -579,6 +601,18 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
               Reopen
             </button>
           </div>
+        ) : newMessage?.kind === 'compose' ? (
+          <NewMessageComposer
+            key={newMessage.target.session}
+            thread={thread}
+            target={newMessage.target}
+            onCancel={() => setNewMessage(null)}
+            onSent={async () => {
+              setNewMessage(null);
+              await onChanged();
+              requestAnimationFrame(() => bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight }));
+            }}
+          />
         ) : box.open ? (
           <>
             <div className="ib-reply-l">
@@ -626,7 +660,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                 Cancel
               </button>
               <span className="ib-sp" />
-              <NewMessageButton />
+              <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />
             </div>
           </>
         ) : (
@@ -642,8 +676,20 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
               <Icon name="reply" size={15} />
               {waiting ? 'Edit the reply' : 'Reply'}
             </button>
-            <NewMessageButton />
+            <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />
           </div>
+        )}
+        {!resolved && (
+          <NewMessagePopover
+            thread={thread}
+            asker={asker}
+            askerHost={root.author.kind === 'agent' ? root.author.host : null}
+            live={live}
+            mode={newMessage}
+            onPick={(target) => setNewMessage({ kind: 'compose', target })}
+            onReplyInstead={() => openBox(picksCount > 0)}
+            onClose={() => setNewMessage(null)}
+          />
         )}
         {error && (
           <div className="ib-error" role="alert">
@@ -730,15 +776,5 @@ function ThreadDecisionCard({
       onCancel={onCancel}
       onDone={(draft) => onDone(card.messageId, card.key, draft)}
     />
-  );
-}
-
-/** New message (record 5.x) is a later step (PLAN step 8): drawn beside Reply, not yet live. */
-function NewMessageButton() {
-  return (
-    <button type="button" className="ib-btn" disabled title="New message: coming next">
-      <Icon name="compose" size={15} />
-      New message
-    </button>
   );
 }

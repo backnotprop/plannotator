@@ -108,6 +108,27 @@ export interface SettingsModel {
   };
 }
 
+/** One live agent session of a thread's project (New message, record 5.x). */
+export interface LiveSession {
+  session: string;
+  host: string;
+  started_at: string;
+  last_seen_at: string;
+  /** A turn runs now; null when its connection does not say. */
+  busy: boolean | null;
+  idle_since: string | null;
+  /** It wrote in this thread. */
+  wrote_thread: boolean;
+}
+
+export interface LiveSessionsModel {
+  serverSession: string;
+  home: string;
+  project: InboxProject;
+  /** The thread's own writers first. */
+  sessions: LiveSession[];
+}
+
 export class InboxApiError extends Error {
   constructor(
     readonly status: number,
@@ -201,6 +222,10 @@ export const inboxApi = {
     post<{ annotation: InboxAnnotationRecord }>('/api/inbox/annotations', { attachment_id: attachmentId, version, annotation }),
   removeAnnotation: (id: string) => post<{ annotation: InboxAnnotationRecord }>(`/api/inbox/annotations/${encodeURIComponent(id)}/remove`, {}),
   deleteThread: (threadId: string) => post<{ store: SettingsModel['store'] }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/delete`, {}),
+  // Step 8: New message to a live session of the thread's project.
+  sessions: (threadId: string) => get<LiveSessionsModel>(`/api/inbox/threads/${encodeURIComponent(threadId)}/sessions`),
+  newMessage: (threadId: string, input: { session: string; body: string; idempotency_key: string }) =>
+    post<{ message: InboxMessage; replayed: boolean }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/message`, input),
   deleteProject: (projectId: string) => post<{ store: SettingsModel['store'] }>(`/api/inbox/projects/${encodeURIComponent(projectId)}/delete`, {}),
 };
 
