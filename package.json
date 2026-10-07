@@ -54,7 +54,7 @@
   "devDependencies": {
     "@modelcontextprotocol/client": "2.2.0",
     "@playwright/test": "1.63.0",
-    "@types/node": "^25.5.2",
+    "@types/node": "^26.6.3",
     "@types/turndown": "^5.0.6",
     "bun-types": "^1.4.0"
   },
