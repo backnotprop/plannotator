@@ -7,22 +7,29 @@ import { InboxApiError, inboxApi } from '../api';
 import { agentName, clockTime, plural } from '../format';
 import { AuthorMark, Icon } from '../icons';
 
-/** Client-side until the decision record lands (PLAN step 3): the questions whose tag was switched off. */
-const DECISION_OFF_KEY = 'plannotator-inbox-decision-off';
+/**
+ * Client-side until the decision record lands (PLAN step 3): the questions
+ * whose tag the person switched, `<message id>/<key>` to on or off. Unswitched,
+ * a `Decision: when answered` question records and any other does not.
+ */
+const DECISION_SWITCH_KEY = 'plannotator-inbox-decision-switch';
 
-function readDecisionOff(): Set<string> {
+type DecisionSwitches = Readonly<Record<string, boolean>>;
+
+function readDecisionSwitches(): DecisionSwitches {
   try {
-    const raw = window.localStorage.getItem(DECISION_OFF_KEY);
-    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
-    return new Set(Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : []);
+    const raw = window.localStorage.getItem(DECISION_SWITCH_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : {};
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean'));
   } catch {
-    return new Set();
+    return {};
   }
 }
 
-function writeDecisionOff(ids: Set<string>): void {
+function writeDecisionSwitches(switches: DecisionSwitches): void {
   try {
-    window.localStorage.setItem(DECISION_OFF_KEY, JSON.stringify([...ids]));
+    window.localStorage.setItem(DECISION_SWITCH_KEY, JSON.stringify(switches));
   } catch {
     // Storage off: the switch still works for this page.
   }
@@ -46,7 +53,7 @@ function MessageBody({
   answers,
   onPick,
   footerFor,
-  decisionOff,
+  decisionSwitches,
   onToggleDecision,
 }: {
   message: InboxMessageWire;
@@ -54,7 +61,7 @@ function MessageBody({
   answers: ReadonlyMap<string, QuestionAnswer>;
   onPick: (key: string, answer: QuestionAnswer | null) => void;
   footerFor: (key: string) => string | null;
-  decisionOff: ReadonlySet<string>;
+  decisionSwitches: DecisionSwitches;
   onToggleDecision: (key: string, next: boolean) => void;
 }) {
   const blocks = useMemo(() => parseMarkdownToBlocks(message.body, { frontmatter: false }), [message.body]);
@@ -65,9 +72,13 @@ function MessageBody({
     },
     [footerFor],
   );
+  // Every question carries the tag (the record's 3.1): on by default where the
+  // block says `Decision: when answered`, off elsewhere; a linked decision
+  // (`Decision: [statement](url)`) is already recorded and keeps its own tag.
   const recording = useCallback(
-    (question: IndexedQuestion) => (question.question.decisionOnAnswer ? !decisionOff.has(`${message.id}/${question.question.key}`) : undefined),
-    [decisionOff, message.id],
+    (question: IndexedQuestion) =>
+      question.question.decision ? undefined : (decisionSwitches[`${message.id}/${question.question.key}`] ?? question.question.decisionOnAnswer === true),
+    [decisionSwitches, message.id],
   );
   return (
     <div className="ib-body" data-message-id={message.id}>
@@ -88,6 +99,7 @@ function MessageBody({
         questionAnswers={answers}
         onAnswerQuestion={(_blockId, answer, key) => onPick(key, answer)}
         renderQuestionFooter={renderFooter}
+        questionDecisionScope="any"
         questionDecisionRecording={recording}
         onToggleQuestionDecisionRecording={onToggleDecision}
       />
@@ -124,7 +136,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose }: Th
   const threadRef = useRef(thread);
   threadRef.current = thread;
 
-  const [decisionOff, setDecisionOff] = useState<Set<string>>(readDecisionOff);
+  const [decisionSwitches, setDecisionSwitches] = useState<DecisionSwitches>(readDecisionSwitches);
   const [box, setBox] = useState<{ open: boolean; text: string }>({ open: false, text: '' });
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -205,11 +217,9 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose }: Th
   };
 
   const toggleDecision = (messageId: string) => (key: string, next: boolean) => {
-    setDecisionOff((current) => {
-      const updated = new Set(current);
-      if (next) updated.delete(`${messageId}/${key}`);
-      else updated.add(`${messageId}/${key}`);
-      writeDecisionOff(updated);
+    setDecisionSwitches((current) => {
+      const updated = { ...current, [`${messageId}/${key}`]: next };
+      writeDecisionSwitches(updated);
       return updated;
     });
   };
@@ -343,7 +353,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose }: Th
                   answers={answersOf(message)}
                   onPick={(key, answer) => pick(message.id, key, answer)}
                   footerFor={footerFor(message)}
-                  decisionOff={decisionOff}
+                  decisionSwitches={decisionSwitches}
                   onToggleDecision={toggleDecision(message.id)}
                 />
                 {message === lastAgent && !resolved && waitingHoldsUp.length > 0 && (

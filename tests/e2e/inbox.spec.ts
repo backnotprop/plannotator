@@ -256,19 +256,30 @@ test('a row opens the thread as an email with the question cards; the decision t
   // Opening is a look: the row is no longer new to the person.
   await expect(page.locator(`.ib-nrow[data-thread-id="${world.threads.stopped}"]`)).toHaveAttribute('aria-current', 'true');
 
-  const tag = pane.getByRole('button', { name: 'Records a decision' });
-  await expect(tag).toHaveAttribute('aria-pressed', 'true');
-  await expect(pane.getByText('Answering this records a decision')).toBeVisible();
+  // The tag is on every question (ui 0.52.1, questionDecisionScope "any"):
+  // on where the block says `Decision: when answered`, off on the other.
+  const tags = pane.getByRole('button', { name: 'Records a decision' });
+  await expect(tags).toHaveCount(2);
+  await expect(tags.nth(0)).toHaveAttribute('aria-pressed', 'true');
+  await expect(tags.nth(1)).toHaveAttribute('aria-pressed', 'false');
+  await expect(pane.getByText('Answering this records a decision')).toHaveCount(1);
   await shot('2.1-thread');
 
-  await tag.click();
-  await expect(tag).toHaveAttribute('aria-pressed', 'false');
-  await expect(pane.getByText('Answering this records a decision')).toBeHidden();
+  await tags.nth(0).click();
+  await tags.nth(1).click();
+  await expect(tags.nth(0)).toHaveAttribute('aria-pressed', 'false');
+  await expect(tags.nth(1)).toHaveAttribute('aria-pressed', 'true');
+  await expect(pane.getByText('Answering this records a decision')).toHaveCount(1);
   // Kept in the page (client side until the decision record lands, step 3).
   await page.reload();
-  await expect(page.locator('section.ib-pane').getByRole('button', { name: 'Records a decision' })).toHaveAttribute('aria-pressed', 'false');
-  await page.locator('section.ib-pane').getByRole('button', { name: 'Records a decision' }).click();
-  await expect(page.locator('section.ib-pane').getByRole('button', { name: 'Records a decision' })).toHaveAttribute('aria-pressed', 'true');
+  const after = page.locator('section.ib-pane').getByRole('button', { name: 'Records a decision' });
+  await expect(after.nth(0)).toHaveAttribute('aria-pressed', 'false');
+  await expect(after.nth(1)).toHaveAttribute('aria-pressed', 'true');
+  await shot('3.1-decision-tag-switched');
+  await after.nth(0).click();
+  await after.nth(1).click();
+  await expect(after.nth(0)).toHaveAttribute('aria-pressed', 'true');
+  await expect(after.nth(1)).toHaveAttribute('aria-pressed', 'false');
 });
 
 test('a pick is saved at once and the agent reads it through read_thread', async () => {
