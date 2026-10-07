@@ -1,6 +1,5 @@
 import { useState } from 'react';
-import type { AgentToolHost, NotifySection, SettingsModel } from '../api';
-import { NOTIFY_SECTIONS } from '../notify';
+import type { AgentToolHost, SettingsModel } from '../api';
 import { formatBytes, plural, tildePath } from '../format';
 import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon } from '../icons';
@@ -22,7 +21,6 @@ export interface SettingsPageProps {
   onToggleTool: (host: AgentToolHost, next: boolean) => void;
   permission: NotificationPermission | 'unsupported';
   onToggleNotifications: (next: boolean) => void;
-  onToggleSection: (section: NotifySection, next: boolean) => void;
 }
 
 const PERMISSION_LABEL: Record<NotificationPermission | 'unsupported', string> = {
@@ -33,19 +31,17 @@ const PERMISSION_LABEL: Record<NotificationPermission | 'unsupported', string> =
 };
 
 /**
- * Notifications (record 7.2): on or off for this browser, and which sections
- * notify. Turning it on asks the browser when it has not decided yet.
+ * Notifications (record 7.2): one switch, for questions and stops. Turning it
+ * on asks the browser when it has not decided yet.
  */
 function NotificationsBlock({
   settings,
   permission,
   onToggle,
-  onToggleSection,
 }: {
   settings: SettingsModel['notifications'];
   permission: NotificationPermission | 'unsupported';
   onToggle: (next: boolean) => void;
-  onToggleSection: (section: NotifySection, next: boolean) => void;
 }) {
   const on = settings.enabled && permission === 'granted';
   return (
@@ -66,25 +62,6 @@ function NotificationsBlock({
           />
         </span>
       </div>
-      {on &&
-        NOTIFY_SECTIONS.map(({ id, label }) => {
-          const checked = settings.sections.includes(id);
-          return (
-            <div className="ib-srow ib-sub" key={id}>
-              {label}
-              <span className="ib-r">
-                <button
-                  type="button"
-                  role="switch"
-                  className="ib-sw"
-                  aria-checked={checked}
-                  aria-label={`Notify for ${label}`}
-                  onClick={() => onToggleSection(id, !checked)}
-                />
-              </span>
-            </div>
-          );
-        })}
       {permission === 'denied' && (
         <div className="ib-note">
           <Icon name="info" />
@@ -161,7 +138,6 @@ export function SettingsPage({
   onToggleTool,
   permission,
   onToggleNotifications,
-  onToggleSection,
 }: SettingsPageProps) {
   const env = settings?.inbox_tool.env ?? null;
   return (
@@ -227,7 +203,6 @@ export function SettingsPage({
             settings={settings.notifications}
             permission={permission}
             onToggle={onToggleNotifications}
-            onToggleSection={onToggleSection}
           />
         )}
       </div>

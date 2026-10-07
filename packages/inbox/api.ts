@@ -17,13 +17,9 @@ import type { QuestionAnswer } from '@plannotator/core/question-block';
 
 export type AgentToolHost = 'claude-code' | 'pi' | 'opencode';
 
-/** The list sections a notification can come from (questions and stops, never news). */
-export type NotifySection = 'stopped' | 'holding' | 'waiting';
-
 /** The browser notifications as the Inbox keeps them (config.json, so they survive a port change). */
 export interface NotificationSettings {
   enabled: boolean;
-  sections: NotifySection[];
   /** The person answered the one-time ask with "Not now". */
   dismissed: boolean;
   /** The page origin where they last turned notifications on. */

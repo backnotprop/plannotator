@@ -1,13 +1,15 @@
 /**
  * Browser notifications from the open Inbox page (record 6.x; owner Q8: the
- * page first on every platform, the Mac helper later). One notification per
- * thread, tagged by the thread id, so a second item in the same thread
- * replaces the first; nothing while the Inbox tab is in front; a click
- * focuses the tab and opens the thread.
+ * page first on every platform, the Mac helper later).
  *
- * An item is a new question in an agent's message, placed as the list places
- * it: a `Stopped:` line is Stopped on you, a `Holds up:` line Holding up work,
- * any other question Waiting on you. News never notifies.
+ * An item is a new question in an agent's message (a `Stopped:` line, a
+ * `Holds up:` line or any other question); news never notifies. Every Inbox
+ * notification shares one tag, so the browser shows one at a time. While the
+ * tab is away, the page keeps the threads it notified about: with one, the
+ * banner names the project, the agent and the subject, and a click opens that
+ * thread; with more, a burst becomes one notice, "3 waiting in 2 projects",
+ * and a click opens the list. The set clears when the tab comes to the front,
+ * where nothing is raised: the "N new" notice and the counts are enough.
  *
  * The settings live on the Inbox server (config.json), not in localStorage:
  * the permission is per origin and the Inbox can move to another port, so
@@ -15,34 +17,27 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { InboxAuthor, InboxQuestion } from '@plannotator/core/inbox-types';
-import { inboxApi, type InboxEvent, type ListModel, type NotificationSettings, type NotifySection } from './api';
-import { agentName } from './format';
+import type { InboxAuthor, InboxSectionId } from '@plannotator/core/inbox-types';
+import { inboxApi, type InboxEvent, type ListModel, type NotificationSettings } from './api';
+import { agentName, plural } from './format';
 
-/** Strongest first, as the list orders its sections. */
-export const NOTIFY_SECTIONS: readonly { id: NotifySection; label: string }[] = [
-  { id: 'stopped', label: 'Stopped on you' },
-  { id: 'holding', label: 'Holding up work' },
-  { id: 'waiting', label: 'Waiting on you' },
-];
+/** The one tag every Inbox notification carries: a new one replaces the last. */
+export const NOTIFICATION_TAG = 'plannotator-inbox';
 
-const RANK: Record<NotifySection, number> = { stopped: 0, holding: 1, waiting: 2 };
-
-/** Where the list puts a thread for this question. */
-export function sectionOfQuestion(question: Pick<InboxQuestion, 'stopped' | 'holds_up'>): NotifySection {
-  if (question.stopped) return 'stopped';
-  if (question.holds_up.length > 0) return 'holding';
-  return 'waiting';
-}
-
-/** The banner: "billing-svc: Claude Code stopped on you", then the thread's subject (record 6.2). */
-export function notificationText(input: { project: string; agent: string; subject: string; section: NotifySection }): {
+/** One thread's banner (record 6.2): "billing-svc: Claude Code stopped on you", then the subject. */
+export function threadNotificationText(input: { project: string; agent: string; subject: string; section: InboxSectionId | null }): {
   title: string;
   body: string;
 } {
-  const what =
-    input.section === 'stopped' ? 'stopped on you' : input.section === 'holding' ? 'is holding up work on you' : 'is waiting on you';
+  const what = input.section === 'stopped' ? 'stopped on you' : 'is waiting on you';
   return { title: `${input.project}: ${input.agent} ${what}`, body: input.subject };
+}
+
+/** A burst (record 6.2): "3 waiting in 2 projects", or "2 waiting in billing-svc"; the body names the projects. */
+export function burstNotificationText(projects: readonly string[]): { title: string; body: string } {
+  const distinct = [...new Set(projects)];
+  const where = distinct.length === 1 ? distinct[0]! : plural(distinct.length, 'project');
+  return { title: `${projects.length} waiting in ${where}`, body: distinct.join(', ') };
 }
 
 export type AskKind = 'ask' | 'moved';
@@ -58,7 +53,7 @@ export function askKind(settings: NotificationSettings, permission: Notification
   return settings.allowed_origin && settings.allowed_origin !== origin ? 'moved' : 'ask';
 }
 
-/** The Inbox tab is in front: the "N new" notice and the counts are enough (record 6.3). */
+/** The Inbox tab is in front (record 6.3). */
 function pageInFront(): boolean {
   return document.visibilityState === 'visible' && document.hasFocus();
 }
@@ -69,11 +64,6 @@ function supported(): boolean {
 
 function currentPermission(): NotificationPermission | 'unsupported' {
   return supported() ? Notification.permission : 'unsupported';
-}
-
-interface PendingItem {
-  messageId: string;
-  section: NotifySection;
 }
 
 export interface InboxNotifications {
@@ -88,25 +78,28 @@ export interface InboxNotifications {
   turnOn: () => Promise<void>;
   notNow: () => void;
   setEnabled: (next: boolean) => Promise<void>;
-  setSection: (section: NotifySection, next: boolean) => void;
 }
 
 export function useInboxNotifications(options: {
   settings: NotificationSettings | null;
   onSettings: (next: NotificationSettings) => void;
   openThread: (threadId: string) => void;
+  openList: () => void;
 }): InboxNotifications {
   const [permission, setPermission] = useState(currentPermission);
   const [askRaised, setAskRaised] = useState(false);
   const settingsRef = useRef(options.settings);
   settingsRef.current = options.settings;
-  const openRef = useRef(options.openThread);
-  openRef.current = options.openThread;
+  const openRef = useRef({ thread: options.openThread, list: options.openList });
+  openRef.current = { thread: options.openThread, list: options.openList };
   const onSettingsRef = useRef(options.onSettings);
   onSettingsRef.current = options.onSettings;
   const messages = useRef(new Map<string, { threadId: string; author: InboxAuthor }>());
   const counted = useRef(new Set<string>());
-  const pending = useRef<PendingItem[]>([]);
+  /** Message ids with a new question, waiting for the list read. */
+  const pending = useRef<string[]>([]);
+  /** The threads notified since the tab was last in front, with their project names. */
+  const away = useRef(new Map<string, string>());
 
   // A grant or block made in the browser's site settings shows without a reload.
   useEffect(() => {
@@ -121,6 +114,19 @@ export function useInboxNotifications(options: {
       })
       .catch(() => {});
     return () => status?.removeEventListener('change', sync);
+  }, []);
+
+  // Back in front: the person sees the list, so the next notice starts a new burst.
+  useEffect(() => {
+    const back = () => {
+      if (pageInFront()) away.current.clear();
+    };
+    window.addEventListener('focus', back);
+    document.addEventListener('visibilitychange', back);
+    return () => {
+      window.removeEventListener('focus', back);
+      document.removeEventListener('visibilitychange', back);
+    };
   }, []);
 
   const save = useCallback(async (change: Partial<NotificationSettings>) => {
@@ -143,7 +149,7 @@ export function useInboxNotifications(options: {
       // A new question is open at revision 0; a pick or a Send of an old one is not an item.
       if (q.state !== 'open' || q.revision !== 0 || counted.current.has(id)) return;
       counted.current.add(id);
-      pending.current.push({ messageId: q.message_id, section: sectionOfQuestion(q) });
+      pending.current.push(q.message_id);
     }
   }, []);
 
@@ -152,16 +158,13 @@ export function useInboxNotifications(options: {
     pending.current = [];
     const settings = settingsRef.current;
     if (items.length === 0 || !settings || !settings.enabled || !supported()) return;
-    // One per thread: its strongest item, in a section the person kept on.
-    const byThread = new Map<string, { section: NotifySection; author: InboxAuthor }>();
-    for (const item of items) {
-      if (!settings.sections.includes(item.section)) continue;
-      const message = messages.current.get(item.messageId);
-      if (!message) continue;
-      const held = byThread.get(message.threadId);
-      if (!held || RANK[item.section] < RANK[held.section]) byThread.set(message.threadId, { section: item.section, author: message.author });
+    // The threads these items landed in, newest last, with the agent that wrote.
+    const threads = new Map<string, InboxAuthor>();
+    for (const messageId of items) {
+      const message = messages.current.get(messageId);
+      if (message) threads.set(message.threadId, message.author);
     }
-    if (byThread.size === 0) return;
+    if (threads.size === 0) return;
     const now = Notification.permission;
     setPermission(now);
     if (now === 'default') {
@@ -170,24 +173,33 @@ export function useInboxNotifications(options: {
     }
     if (now !== 'granted' || pageInFront()) return;
     const rows = new Map(list.sections.flatMap((section) => section.threads).map((row) => [row.thread_id, row]));
-    for (const [threadId, { section, author }] of byThread) {
+    for (const threadId of threads.keys()) away.current.set(threadId, rows.get(threadId)?.project.name ?? 'Plannotator Inbox');
+    let text: { title: string; body: string };
+    let open: () => void;
+    if (away.current.size === 1) {
+      const [threadId, author] = [...threads][0]!;
       const row = rows.get(threadId);
-      const { title, body } = notificationText({
+      text = threadNotificationText({
         project: row?.project.name ?? 'Plannotator Inbox',
         agent: agentName(author),
         subject: row?.subject ?? '(no subject)',
-        section,
+        section: row?.section ?? null,
       });
-      try {
-        const notification = new Notification(title, { body, tag: threadId });
-        notification.onclick = () => {
-          window.focus();
-          notification.close();
-          openRef.current(threadId);
-        };
-      } catch {
-        // A browser that only notifies through a service worker: nothing to show.
-      }
+      open = () => openRef.current.thread(threadId);
+    } else {
+      text = burstNotificationText([...away.current.values()]);
+      open = () => openRef.current.list();
+    }
+    try {
+      const notification = new Notification(text.title, { body: text.body, tag: NOTIFICATION_TAG });
+      notification.onclick = () => {
+        window.focus();
+        notification.close();
+        away.current.clear();
+        open();
+      };
+    } catch {
+      // A browser that only notifies through a service worker: nothing to show.
     }
   }, []);
 
@@ -217,17 +229,8 @@ export function useInboxNotifications(options: {
     [save],
   );
 
-  const setSection = useCallback(
-    (section: NotifySection, next: boolean) => {
-      const current = settingsRef.current?.sections ?? [];
-      const sections = NOTIFY_SECTIONS.map((s) => s.id).filter((id) => (id === section ? next : current.includes(id)));
-      void save({ sections });
-    },
-    [save],
-  );
-
   const ask =
     askRaised && options.settings && permission !== 'unsupported' ? askKind(options.settings, permission, window.location.origin) : null;
 
-  return { permission, ask, observe, flush, turnOn, notNow, setEnabled, setSection };
+  return { permission, ask, observe, flush, turnOn, notNow, setEnabled };
 }

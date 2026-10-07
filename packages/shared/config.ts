@@ -260,15 +260,12 @@ export interface PlannotatorConfig {
    * The Plannotator Inbox's browser notifications, set from the Inbox page
    * (its one-time ask and its Settings), kept here rather than in the page's
    * localStorage so they survive the Inbox moving to another port (another
-   * origin). `enabled`: notify at all (unset: on). `sections`: which list
-   * sections notify, from `stopped`, `holding`, `waiting` (unset: all three).
-   * `dismissed`: the person answered the ask with "Not now". `allowedOrigin`:
+   * origin). `enabled`: notify at all (unset: on). `dismissed`: the person answered the ask with "Not now". `allowedOrigin`:
    * the page origin where the person last turned them on, so a page on a new
    * port asks again with "The Inbox moved to a new address".
    */
   inboxNotifications?: {
     enabled?: boolean;
-    sections?: string[];
     dismissed?: boolean;
     allowedOrigin?: string | null;
   };

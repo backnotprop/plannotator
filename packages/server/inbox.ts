@@ -69,9 +69,6 @@ const LOOPBACK = "127.0.0.1";
 export const INBOX_FORBIDDEN_PORT = 19432;
 const SSE_HEARTBEAT_MS = 15_000;
 const DEFAULT_HEALTH_TICK_MS = 60_000;
-/** The list sections a browser notification can come from: questions and stops, never news. */
-const INBOX_NOTIFY_SECTIONS = ["stopped", "holding", "waiting"] as const;
-
 /** `http://localhost:52817`: an origin as the page reports it, nothing more. */
 function isPageOrigin(value: string): boolean {
   try {
@@ -348,16 +345,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return { hosts, env: env ?? null };
   };
 
-  /** The browser notifications (record 6.x, 7.2), resolved from config.json: on, all three sections, not dismissed. */
+  /** The browser notifications (record 6.x, 7.2), resolved from config.json: on and not dismissed unless set. */
   const notificationsState = () => {
     const value = loadConfig().inboxNotifications;
     const saved = value && typeof value === "object" && !Array.isArray(value) ? value : {};
-    const sections = Array.isArray(saved.sections)
-      ? INBOX_NOTIFY_SECTIONS.filter((id) => saved.sections!.includes(id))
-      : [...INBOX_NOTIFY_SECTIONS];
     return {
       enabled: saved.enabled !== false,
-      sections,
       dismissed: saved.dismissed === true,
       allowed_origin: typeof saved.allowedOrigin === "string" ? saved.allowedOrigin : null,
     };
@@ -378,12 +371,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (typeof value !== "boolean") throw new InboxError("validation_error", `notifications.${field}: must be a boolean.`, { field: `notifications.${field}` });
           next[field] = value;
           break;
-        case "sections":
-          if (!Array.isArray(value) || !value.every((id) => (INBOX_NOTIFY_SECTIONS as readonly unknown[]).includes(id))) {
-            throw new InboxError("validation_error", "notifications.sections: a list of stopped, holding, waiting.", { field: "notifications.sections" });
-          }
-          next.sections = INBOX_NOTIFY_SECTIONS.filter((id) => value.includes(id));
-          break;
         case "allowed_origin":
           if (value !== null && (typeof value !== "string" || !isPageOrigin(value))) {
             throw new InboxError("validation_error", "notifications.allowed_origin: an http origin or null.", { field: "notifications.allowed_origin" });
@@ -391,7 +378,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           next.allowedOrigin = value as string | null;
           break;
         default:
-          throw new InboxError("validation_error", `notifications.${field}: not a setting (enabled, sections, dismissed, allowed_origin).`, { field: `notifications.${field}` });
+          throw new InboxError("validation_error", `notifications.${field}: not a setting (enabled, dismissed, allowed_origin).`, { field: `notifications.${field}` });
       }
     }
     saveConfig({ inboxNotifications: next });

@@ -252,7 +252,6 @@
 .ib-sblock > p { margin: 0 0 12px; font-size: 13.5px; color: var(--muted-foreground); line-height: 1.55; }
 .ib-srow { display: flex; align-items: center; gap: 12px; padding: 8px 0; font-size: 14px; }
 .ib-srow .ib-d { font-size: 12.5px; color: var(--muted-foreground); }
-.ib-srow.ib-sub { padding-left: 14px; font-size: 13.5px; }
 .ib-srow .ib-r { margin-left: auto; display: flex; align-items: center; gap: 10px; }
 .pn-inbox .ib-sw { width: 34px; height: 20px; border-radius: 999px; background: var(--muted); position: relative; border: 1px solid var(--border); flex: none; }
 .ib-sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--card); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: left 120ms ease-out; }

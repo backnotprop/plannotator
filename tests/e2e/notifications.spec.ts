@@ -151,9 +151,21 @@ async function agent(name: string, host: string): Promise<SimAgent> {
 
 const calls = (): Promise<Recorded[]> => world.page.evaluate(() => window.__notifications.calls);
 
+/** Put the tab in front or away, with the events a browser fires when that happens. */
 async function setFront(visible: boolean, focused: boolean): Promise<void> {
-  await world.page.evaluate(([v, f]) => Object.assign(window.__front, { visible: v, focused: f }), [visible, focused] as const);
+  await world.page.evaluate(
+    ([v, f]) => {
+      Object.assign(window.__front, { visible: v, focused: f });
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event(f ? 'focus' : 'blur'));
+    },
+    [visible, focused] as const,
+  );
 }
+
+/** Every Inbox notification carries this one tag, so the browser shows one at a time. */
+const TAG = 'plannotator-inbox';
+let stoppedThread = '';
 
 /** The page has read the list the agent's write produced: the held list shows it behind "N new" (or on screen). */
 async function pageSaw(threadId: string): Promise<void> {
@@ -279,11 +291,9 @@ test('Settings turns them on; after a port change the line returns once as "move
   const block = page.locator('[data-settings-notifications]');
   await expect(block).toContainText('Allowed in this browser');
   const main = block.getByRole('switch', { name: 'Desktop notifications' });
-  // On by default, and allowed by the browser: the switch reads on, all three sections notify.
+  // On by default, and allowed by the browser: the one drawn switch reads on.
   await expect(main).toHaveAttribute('aria-checked', 'true');
-  for (const label of ['Stopped on you', 'Holding up work', 'Waiting on you']) {
-    await expect(block.getByRole('switch', { name: `Notify for ${label}` })).toHaveAttribute('aria-checked', 'true');
-  }
+  await expect(block.getByRole('switch')).toHaveCount(1);
   await main.click();
   await expect(main).toHaveAttribute('aria-checked', 'false');
   await expect.poll(() => config().inboxNotifications?.enabled).toBe(false);
@@ -312,7 +322,7 @@ test('Settings turns them on; after a port change the line returns once as "move
   await expect.poll(() => config().inboxNotifications?.allowedOrigin).toBe(new URL(url).origin);
 });
 
-test('with permission, a Stopped thread raises exactly one notification with the subject, tagged by the thread', async () => {
+test('with permission, a Stopped thread raises exactly one notification with the subject', async () => {
   const { page } = world;
   await page.goto(world.url);
   await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
@@ -327,23 +337,24 @@ test('with permission, a Stopped thread raises exactly one notification with the
     {
       title: 'billing-svc: Pi stopped on you',
       body: 'Which way should the worker go on a Stripe 409?',
-      tag: sent.thread_id,
+      tag: TAG,
     },
   ]);
+  stoppedThread = sent.thread_id;
   writeFileSync(join(proofDir, '6.2-notification.json'), `${JSON.stringify(raised[0], null, 2)}\n`);
 });
 
-test('a second item in the same thread replaces the first: the same tag, so the browser shows one', async () => {
+test('a second item in the same thread replaces the first, and the title follows the thread\'s section', async () => {
   const pi = world.agents.at(-1)!;
   const before = await calls();
-  const first = before.at(-1)!;
   const next = await pi.send({ project_path: world.billing, body: question('Also cap the retries at the worker?') });
-  expect(next.thread_id).toBe(first.tag);
+  expect(next.thread_id).toBe(stoppedThread);
   await expect.poll(async () => (await calls()).length).toBe(before.length + 1);
   await world.page.waitForTimeout(400);
-  const raised = (await calls()).slice(before.length);
-  expect(raised.map((c) => c.tag)).toEqual([first.tag]);
-  expect(raised[0]!.title).toBe('billing-svc: Pi is waiting on you');
+  // The new question is a plain one, but the thread is still Stopped on you.
+  expect((await calls()).slice(before.length)).toEqual([
+    { title: 'billing-svc: Pi stopped on you', body: 'Which way should the worker go on a Stripe 409?', tag: TAG },
+  ]);
 });
 
 test('a focused, visible Inbox raises nothing', async () => {
@@ -363,7 +374,7 @@ test('a click on the notification focuses the tab and opens the thread', async (
   await setFront(false, false);
   const codex = world.agents.at(-1)!;
   const sent = await codex.send({ project_path: world.docs, body: question('Move the changelog under docs/?') });
-  await expect.poll(async () => (await calls()).at(-1)?.tag).toBe(sent.thread_id);
+  await expect.poll(async () => (await calls()).at(-1)?.title).toBe('docs-site: Codex stopped on you');
   await page.evaluate(() => window.__notifications.instances.at(-1)!.dispatchEvent(new Event('click')));
   await expect(page).toHaveURL(new RegExp(`#thread=${sent.thread_id}$`));
   // The thread this agent opened a moment ago (its session's thread), with the new question in it.
@@ -371,8 +382,46 @@ test('a click on the notification focuses the tab and opens the thread', async (
   await shot('6.2-click-opened-thread');
 });
 
-test('the Settings switch off raises nothing; a section switched off raises nothing for that section', async () => {
+test('a burst becomes one notice, "3 waiting in 2 projects", and its click opens the list', async () => {
   const { page } = world;
+  // In front and away again: a new burst starts.
+  await setFront(true, true);
+  await setFront(false, false);
+  const before = (await calls()).length;
+  const claude = await agent('Claude Code', 'claude-code');
+  const first = await claude.send({ project_path: world.docs, body: DEMO_MESSAGES.holding });
+  // One thread so far: its own banner. A Holds up thread reads "is waiting on you".
+  await expect.poll(async () => (await calls()).length).toBe(before + 1);
+  expect((await calls()).at(-1)).toEqual({
+    title: 'docs-site: Claude Code is waiting on you',
+    body: 'Detect the installed agents, or ask the reader to pick?',
+    tag: TAG,
+  });
+  const second = await (await agent('OpenCode', 'opencode')).send({ project_path: world.billing, body: question('Drop the old refunds table?') });
+  await expect.poll(async () => (await calls()).length).toBe(before + 2);
+  const third = await (await agent('Pi', 'pi')).send({ project_path: world.billing, body: question('Rotate the webhook secret now?') });
+  await expect.poll(async () => (await calls()).length).toBe(before + 3);
+  const raised = (await calls()).slice(before);
+  // Each replaces the last on the one tag: the browser shows only the summary.
+  expect(raised.map((c) => c.tag)).toEqual([TAG, TAG, TAG]);
+  expect(raised.slice(1)).toEqual([
+    { title: '2 waiting in 2 projects', body: 'docs-site, billing-svc', tag: TAG },
+    { title: '3 waiting in 2 projects', body: 'docs-site, billing-svc', tag: TAG },
+  ]);
+  writeFileSync(join(proofDir, '6.2-burst.json'), `${JSON.stringify(raised, null, 2)}\n`);
+
+  await page.evaluate(() => window.__notifications.instances.at(-1)!.dispatchEvent(new Event('click')));
+  // The list at rest, as it now is: no thread open, nothing held behind "N new".
+  await expect(page).not.toHaveURL(/#thread=/);
+  await expect(page.locator('section.ib-pane')).toHaveCount(0);
+  await expect(page.locator('[data-inbox-notice]')).toHaveCount(0);
+  for (const sent of [first, second, third]) await expect(page.locator(`.ib-lbody [data-thread-id="${sent.thread_id}"]`)).toBeVisible();
+  await shot('6.2-burst-opened-list');
+});
+
+test('the Settings switch off raises nothing', async () => {
+  const { page } = world;
+  await setFront(true, true);
   await setFront(false, false);
   await page.getByRole('button', { name: 'Settings' }).click();
   const block = page.locator('[data-settings-notifications]');
@@ -380,29 +429,19 @@ test('the Settings switch off raises nothing; a section switched off raises noth
   await main.click();
   await expect(main).toHaveAttribute('aria-checked', 'false');
   await expect.poll(() => config().inboxNotifications?.enabled).toBe(false);
-  const opencode = world.agents[1]!;
-  let before = (await calls()).length;
-  const off = await opencode.send({ project_path: world.docs, body: question('Drop the beta banner?', 'Stopped: the release notes wait on this.') });
-  await expect.poll(async () => (await (await page.request.get(`${world.url}api/inbox/threads/${off.thread_id}`)).json()).thread?.thread_id).toBe(off.thread_id);
+  const before = (await calls()).length;
+  const codex = await agent('Codex', 'codex');
+  const off = await codex.send({ project_path: world.billing, body: question('Pause the nightly import?', 'Stopped: the import job waits on this.') });
+  await expect.poll(async () => (await page.request.get(`${world.url}api/inbox/threads/${off.thread_id}`)).status()).toBe(200);
   await page.waitForTimeout(800);
   expect((await calls()).length).toBe(before);
 
+  // Back on, the next item in that thread notifies: the switch was the only thing holding it.
   await main.click();
   await expect(main).toHaveAttribute('aria-checked', 'true');
-  const stopped = block.getByRole('switch', { name: 'Notify for Stopped on you' });
-  await stopped.click();
-  await expect(stopped).toHaveAttribute('aria-checked', 'false');
-  await expect.poll(() => config().inboxNotifications?.sections).toEqual(['holding', 'waiting']);
-  before = (await calls()).length;
-  const codex = await agent('Codex', 'codex');
-  const stop = await codex.send({ project_path: world.billing, body: question('Pause the nightly import?', 'Stopped: the import job waits on this.') });
-  await expect.poll(async () => (await page.request.get(`${world.url}api/inbox/threads/${stop.thread_id}`)).status()).toBe(200);
-  await page.waitForTimeout(800);
-  expect((await calls()).length).toBe(before);
-  // A plain question in the same thread is Waiting on you, which still notifies.
   await codex.send({ project_path: world.billing, body: question('And keep the weekly one?') });
   await expect.poll(async () => (await calls()).length).toBe(before + 1);
-  expect((await calls()).at(-1)).toMatchObject({ title: 'billing-svc: Codex is waiting on you', tag: stop.thread_id });
+  expect((await calls()).at(-1)).toMatchObject({ title: 'billing-svc: Codex stopped on you', tag: TAG });
 });
 
 test('no page errors along the way', () => {

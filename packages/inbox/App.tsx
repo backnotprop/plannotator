@@ -88,6 +88,11 @@ function Inbox() {
       writeRoute({ page: 'inbox', project: null, thread: threadId });
       void refreshList(true);
     },
+    // A click on a burst's notice: the list at rest, as it now is.
+    openList: () => {
+      writeRoute({ page: 'inbox', project: null, thread: null });
+      void refreshList(true);
+    },
   });
   const { observe: observeEvent, flush: flushNotifications } = notifications;
 
@@ -286,7 +291,6 @@ function Inbox() {
         onToggleTool={toggleTool}
         permission={notifications.permission}
         onToggleNotifications={(next) => void notifications.setEnabled(next)}
-        onToggleSection={notifications.setSection}
       />
     );
   } else if (!latest || !shown) {
