@@ -168,12 +168,16 @@ describe('QuestionBlock decision recording toggle', () => {
     expect(decisionRow(cards(el)[0]) !== null).toBe(true);
   });
 
-  test.skipIf(!hasDom)('a recorded decision and a plain question get no toggle', async () => {
+  test.skipIf(!hasDom)('a recorded decision gets no toggle; a plain question gets none without a host state', async () => {
     const el = await mount(<ToggleHost toggles={[]} />);
-    const [, linked, plain] = cards(el);
+    const linked = cards(el)[1];
     expect(toggle(linked) === null).toBe(true);
     expect(linked.dataset.questionDecisionRecording).toBeUndefined();
     expect(decisionRow(linked) !== null).toBe(true);
+    // The handler alone does not reach a question with no decision line; a
+    // recording state does (QuestionBlock.decisionAnyQuestion.test.tsx).
+    const handlerOnly = await mount(<Cards extra={{ onToggleQuestionDecisionRecording: () => {} }} />);
+    const plain = cards(handlerOnly)[2];
     expect(toggle(plain) === null).toBe(true);
     expect(plain.dataset.questionDecisionRecording).toBeUndefined();
   });

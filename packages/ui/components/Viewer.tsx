@@ -218,17 +218,25 @@ export interface ViewerProps {
    *  decision"), given the indexed question and its saved answer. Rendered in
    *  read-only cards too; return null for none. */
   renderQuestionFooter?: (question: IndexedQuestion, answer: QuestionAnswer | undefined) => React.ReactNode;
-  /** Whether answering a `Decision: when answered` question records a
-   *  decision, per question: return false to draw its "Records a decision"
-   *  tag dimmed with a dotted outline and hide the "Answering this records a
-   *  decision" row; true or undefined keeps today's card. Not consulted for a
-   *  question whose decision is already recorded. */
+  /** Whether answering a question records a decision, per question. On a
+   *  `Decision: when answered` question: false draws its "Records a
+   *  decision" tag dimmed with a dotted outline and hides the "Answering this
+   *  records a decision" row; true or undefined keeps today's card. On a
+   *  question with no decision line (ui 0.52.1): a boolean adds the tag in
+   *  that state (true also shows the row), undefined adds nothing. Has no
+   *  effect on a question whose decision is already recorded. */
   questionDecisionRecording?: (question: IndexedQuestion) => boolean | undefined;
-  /** Makes a `Decision: when answered` question's "Records a decision" tag a
-   *  toggle button (`aria-pressed`); a click calls this with the question's
-   *  key and the next state, which the host stores and returns from
+  /** Makes a question's "Records a decision" tag a toggle button
+   *  (`aria-pressed`); a click calls this with the question's key and the
+   *  next state, which the host stores and returns from
    *  `questionDecisionRecording`. Ignored when `readOnly`. */
   onToggleQuestionDecisionRecording?: (key: string, next: boolean) => void;
+  /** Opens the host's decision card (ui 0.52.1): the tag splits into a
+   *  diamond switch (the toggle above) and the words "Records a decision" as
+   *  a button that calls this with the question's key and the words' element
+   *  (anchor your popover to it). Offered on and off. Ignored when
+   *  `readOnly`. */
+  onOpenQuestionDecision?: (key: string, anchor: HTMLElement) => void;
   /** `'none'` hides each question card's own status tag (Open / Answered /
    *  Settled / Skipped) so the host can draw its own; the decision tags stay.
    *  Default `'card'`. */
@@ -607,6 +615,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   renderQuestionFooter,
   questionDecisionRecording,
   onToggleQuestionDecisionRecording,
+  onOpenQuestionDecision,
   questionStatusTag,
   onAskAI,
   allowImages = true,
@@ -1571,6 +1580,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   renderQuestionFooter={renderQuestionFooter}
                   questionDecisionRecording={question ? questionDecisionRecording?.(question) : undefined}
                   onToggleQuestionDecisionRecording={readOnly ? undefined : onToggleQuestionDecisionRecording}
+                  onOpenQuestionDecision={readOnly ? undefined : onOpenQuestionDecision}
                   questionStatusTag={questionStatusTag}
                 />
               );

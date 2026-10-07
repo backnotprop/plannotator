@@ -37,9 +37,11 @@ import { QuestionContext } from './QuestionContext';
  * A host can add its own actions at the right of the footer
  * (`renderFooter`), and a question carrying `Decision: when answered` or a
  * `Decision: [statement](url)` link shows that beside the prompt. A host can
- * also let the reviewer switch a `Decision: when answered` question's
- * recording off and on (`decisionRecording` + `onToggleDecisionRecording`),
- * and hide the card's own status tag to draw its own (`statusTag: 'none'`).
+ * also let the reviewer switch a question's decision recording off and on
+ * (`decisionRecording` + `onToggleDecisionRecording`; any question without a
+ * recorded decision once the host supplies a state), open its own decision
+ * card from the tag's words (`onOpenDecision`), and hide the card's own
+ * status tag to draw its own (`statusTag: 'none'`).
  */
 
 /** Pointer travel (px) above which a press on a choice row is a drag. */
@@ -127,17 +129,30 @@ export interface QuestionBlockProps {
    *  saved answer (never the unsaved draft). Rendered in read-only cards too;
    *  return null for nothing. */
   renderFooter?: (question: IndexedQuestion, answer: QuestionAnswer | undefined) => React.ReactNode;
-  /** Whether answering a `Decision: when answered` question records a
-   *  decision (default true). False draws the "Records a decision" tag dimmed
-   *  with a dotted outline and hides the "Answering this records a decision"
-   *  row. Has no effect on a question whose decision is already recorded
-   *  (`Decision: [statement](url)`) or that carries no decision line. */
+  /** Whether answering this question records a decision. On a question
+   *  carrying `Decision: when answered` it defaults to true; false draws the
+   *  "Records a decision" tag dimmed with a dotted outline and hides the
+   *  "Answering this records a decision" row. On a question WITHOUT a
+   *  decision line (ui 0.52.1) a defined value adds the tag in that state
+   *  (false: off; true: on, with the row), so a host can let any answer
+   *  become a decision; undefined leaves such a question with no tag. Has no
+   *  effect on a question whose decision is already recorded
+   *  (`Decision: [statement](url)`). */
   decisionRecording?: boolean;
   /** Makes the "Records a decision" tag a toggle button (`aria-pressed`):
    *  a click calls this with the question's key and the next state. The host
    *  stores it and passes it back as `decisionRecording`. Not offered in a
    *  read-only card (no answer handler), which draws the tag as it stands. */
   onToggleDecisionRecording?: (key: string, next: boolean) => void;
+  /** Opens the host's decision card (ui 0.52.1). Given, the tag splits into
+   *  two targets inside one visual tag: the diamond is the switch
+   *  (`onToggleDecisionRecording`, labelled "Record as a decision") and the
+   *  words "Records a decision" are a button (`aria-haspopup="dialog"`) that
+   *  calls this with the question's key and the words' own element, to
+   *  anchor a popover. Offered whether recording is on or off (the host
+   *  decides what an off question's card does). Not offered in a read-only
+   *  card. */
+  onOpenDecision?: (key: string, anchor: HTMLElement) => void;
   /** `'none'` hides the card's own status tag (Open / Answered / Settled /
    *  Skipped) so the host can draw its own; the decision tags stay. Default
    *  `'card'`. */
@@ -162,6 +177,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   renderFooter,
   decisionRecording,
   onToggleDecisionRecording,
+  onOpenDecision,
   statusTag = 'card',
   onOpenLinkedDoc,
   onOpenCodeFile,
@@ -355,11 +371,13 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   const other = answer?.other ?? '';
   const otherOn = other.trim() !== '';
 
-  // A `Decision: when answered` question the host may switch off. A recorded
-  // decision (`question.decision`) is never affected.
-  const decisionCapable = !question.decision && !!question.decisionOnAnswer;
+  // A `Decision: when answered` question the host may switch off, or any
+  // other question once the host supplies a recording state for it. A
+  // recorded decision (`question.decision`) is never affected.
+  const decisionCapable = !question.decision && (!!question.decisionOnAnswer || decisionRecording !== undefined);
   const recordingOn = decisionRecording ?? true;
   const decisionToggleable = decisionCapable && !readOnly && !!onToggleDecisionRecording;
+  const decisionOpenable = decisionCapable && !readOnly && !!onOpenDecision;
   // Present only when the host speaks to recording, so a card without these
   // props carries exactly the attributes it always did.
   const recordingAttr = decisionCapable && (decisionRecording !== undefined || !!onToggleDecisionRecording)
@@ -396,7 +414,34 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
         <span className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{eyebrow}</span>
         <span className="ml-auto">
           {question.decision && <><Tag tone="rec"><DiamondGlyph />Decision</Tag>{' '}</>}
-          {decisionCapable && (decisionToggleable ? (
+          {decisionCapable && (decisionOpenable ? (
+            // Two targets in one tag: the diamond switches recording, the
+            // words open the host's decision card. Siblings, never nested.
+            <><span
+              className="annotation-exclude select-none inline-flex items-stretch whitespace-nowrap rounded align-[1px] text-[10.5px] font-semibold tracking-[0.03em] bg-primary/15 text-primary"
+              style={recordingOn ? undefined : DECISION_OFF_STYLE}
+              data-pinpoint-ignore=""
+              data-question-decision-tag=""
+            >{decisionToggleable ? (
+              <button
+                type="button"
+                aria-pressed={recordingOn}
+                aria-label="Record as a decision"
+                title="Record as a decision"
+                onClick={() => onToggleDecisionRecording!(question.key, !recordingOn)}
+                className="inline-flex cursor-pointer items-center rounded pl-1.5 pr-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                data-question-decision-toggle=""
+              ><DiamondGlyph /></button>
+            ) : (
+              <span className="inline-flex items-center pl-1.5 pr-1"><DiamondGlyph /></span>
+            )}<button
+              type="button"
+              aria-haspopup="dialog"
+              onClick={(event) => onOpenDecision!(question.key, event.currentTarget)}
+              className="cursor-pointer rounded py-px pl-0.5 pr-1.5 hover:underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              data-question-decision-open=""
+            >Records a decision</button></span>{' '}</>
+          ) : decisionToggleable ? (
             // Focus shows as a ring, not an outline: the dotted outline is
             // what draws the off state.
             <><button
@@ -427,7 +472,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       <p id={promptId} className="m-0 text-[15px] font-semibold leading-[1.45] text-foreground" data-question-part="prompt">
         {inline(question.prompt)}
       </p>
-      {(question.decision || (question.decisionOnAnswer && recordingOn)) && (
+      {(question.decision || (decisionCapable && recordingOn)) && (
         <div
           className="annotation-exclude mt-2 mb-0.5 flex items-center gap-2 rounded-lg bg-primary/8 px-[9px] py-1.5 text-[12.5px] leading-[18px] text-foreground [&>svg]:text-primary"
           data-pinpoint-ignore=""
