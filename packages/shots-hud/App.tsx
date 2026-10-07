@@ -28,6 +28,7 @@ import { Picker } from './components/Picker';
 import { Stage, type Tool } from './components/Stage';
 import { TextView } from './components/TextView';
 import { commentsOn, ThumbImage, useShotImage } from './components/Thumb';
+import { AgentMark } from './components/AgentMark';
 
 type Mode = 'hidden' | 'strip' | 'panel' | 'picker';
 
@@ -40,10 +41,10 @@ function isTyping(event: KeyboardEvent): boolean {
   return !!target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
 }
 
-function shotTitle(shot: Shot, index: number, total: number): { title: string; sub?: string } {
-  const where = [shot.kind === 'app' ? 'App shot' : null, shot.source?.app, shot.source?.windowTitle].filter(Boolean).join(' — ').replace('App shot — ', 'App shot · ');
+function shotTitle(shot: Shot): { title: string; sub?: string } {
+  const where = [shot.source?.app, shot.source?.windowTitle].filter(Boolean).join(' — ');
   const fallback = shot.kind === 'display' ? 'Screen' : shot.kind === 'window' ? 'Window' : 'Screenshot';
-  return { title: `${index + 1} of ${total} · ${where || fallback}`, sub: shot.source?.url?.replace(/^https?:\/\//, '') };
+  return { title: where || fallback, sub: shot.source?.url?.replace(/^https?:\/\//, '') };
 }
 
 export function App() {
@@ -460,30 +461,32 @@ export function App() {
     );
   }
 
+  // Who it goes to: the agent's mark and the project. "Auto" stays visible: a guess must look like a guess.
+  const destinationName = destination ? connectionLabel(destination) : 'No session';
   const chip = (
-    <button type="button" className={`chip${!destination ? ' choose' : ''}`} onClick={() => setPicker({ reason: 'choose' })} title="Choose where it goes (⌘K)">
-      {connections.length === 0 && !destination ? (
-        <span>No session</span>
-      ) : destination ? (
+    <button
+      type="button"
+      className={`chip${!destination ? ' choose' : ''}${destination && !destination.live ? ' gone' : ''}`}
+      onClick={() => setPicker({ reason: 'choose' })}
+      title="Where it goes (⌘K)"
+      aria-label={destination ? `Send to ${destinationName}${isAuto ? ', chosen automatically' : ''}. Change` : 'Choose where it goes'}
+    >
+      {destination ? (
         <>
-          <span className={`dot${destination.live ? '' : ' off'}`} />
-          {isAuto && <span className="auto">Auto ·</span>}
-          <span>
-            {connectionLabel(destination)}
-            {mode === 'panel' ? ' ▾' : ''}
-          </span>
+          <AgentMark host={destination.host} title={destination.title} />
+          <span className="chip-name">{destination.project || HOST_LABELS[destination.host]}</span>
+          {isAuto && <span className="auto">Auto</span>}
         </>
       ) : (
-        <span>Choose…</span>
+        <span>{connections.length === 0 ? 'No session' : 'Choose…'}</span>
       )}
     </button>
   );
 
   const sendButton = (
-    <button type="button" className={`send${confirmSend ? ' confirm' : ''}`} disabled={sending} onClick={() => void send()}>
-      {mode === 'strip' && <Icon name="up" size={14} />}
-      {sending ? 'Sending…' : confirmSend ? 'Send now' : 'Send'}
-      {mode === 'panel' && <span className="k">⌘↩</span>}
+    <button type="button" className={`send${confirmSend ? ' confirm' : ''}`} disabled={sending} onClick={() => void send()} aria-label={confirmSend ? 'Send now' : 'Send'}>
+      {sending ? <span className="spin" /> : <Icon name="up" size={14} />}
+      {confirmSend ? 'Send now' : 'Send'}
     </button>
   );
 
@@ -552,20 +555,28 @@ export function App() {
               </button>
             </div>
             <div className="p-title">
-              {current ? shotTitle(current, index, shots.length).title : 'Plannotator Shots'}
-              {current && view === 'image' && shotTitle(current, index, shots.length).sub && <small>{shotTitle(current, index, shots.length).sub}</small>}
+              {current ? shotTitle(current).title : ''}
+              {current && view === 'image' && shotTitle(current).sub && <small>{shotTitle(current).sub}</small>}
             </div>
-            <div className="seg" role="group" aria-label="View">
-              <button type="button" className={view === 'image' ? 'on' : ''} onClick={() => setView('image')}>
-                Image
-              </button>
-              <button type="button" className={view === 'text' ? 'on' : ''} disabled={!current?.text} onClick={() => setView('text')} title="View text (T)">
-                Text
-              </button>
-            </div>
-            <button type="button" className={`hbtn${askOpen ? ' on' : ''}`} onClick={() => (askOpen ? setAskOpen(false) : askAbout(current?.boxes.find((b) => b.id === selectedId)))}>
+            {current?.text && (
+              <div className="seg" role="group" aria-label="View">
+                <button type="button" className={view === 'image' ? 'on' : ''} onClick={() => setView('image')} aria-label="Image" title="Image">
+                  <Icon name="image" size={14} />
+                </button>
+                <button type="button" className={view === 'text' ? 'on' : ''} onClick={() => setView('text')} aria-label="Window text (T)" title="Window text (T)">
+                  <Icon name="text" size={14} />
+                </button>
+              </div>
+            )}
+            <button
+              type="button"
+              className={`hbtn${askOpen ? ' on' : ''}`}
+              aria-label="Ask this session (⌘J)"
+              title="Ask this session (⌘J)"
+              aria-pressed={askOpen}
+              onClick={() => (askOpen ? setAskOpen(false) : askAbout(current?.boxes.find((b) => b.id === selectedId)))}
+            >
               <Icon name="ask" />
-              Ask <span className="k">⌘J</span>
             </button>
             <div style={{ position: 'relative' }}>
               <button type="button" className="hbtn" aria-label="More" onClick={() => setMenu(menu === 'more' ? null : 'more')}>
@@ -614,7 +625,6 @@ export function App() {
                     }}
                   >
                     <Icon name={icon} />
-                    <span className="kk">{key}</span>
                   </button>
                 ))}
               </div>
@@ -691,18 +701,18 @@ export function App() {
                       <ThumbImage shot={shot} />
                       <span className="n">{i + 1}</span>
                       {shot.text && <span className="app">T</span>}
-                      {count > 0 ? <span className="badge">{count}</span> : <span className="nodot" />}
+                      {count > 0 && <span className="badge">{count}</span>}
                     </button>
                   );
                 })}
                 <button type="button" className="fm add" onClick={() => postNative({ type: 'capture', kind: hub?.settings.appShots ? 'app' : 'region' })} aria-label="Take another shot (⌥⇧⌘4)">
-                  +<span>⌥⇧⌘4</span>
+                  <Icon name="plus" />
                 </button>
               </div>
               <div className="note">
                 <input
                   value={noteDraft ?? collection?.note ?? ''}
-                  placeholder="Note for this send — e.g. “All from the staging build”"
+                  placeholder="Add a note"
                   aria-label="Note for this send"
                   onChange={(e) => setNoteDraft(e.target.value)}
                   onBlur={() => {
@@ -716,9 +726,11 @@ export function App() {
               </div>
             </div>
             <div className="foot-r">
-              <span className={`sum${confirmSend ? ' confirm' : ''}`}>
-                {confirmSend && liveDestination ? `Send ${summary} to ${connectionLabel(liveDestination)}? ⌘↩ again` : summary}
-              </span>
+              {confirmSend && liveDestination && (
+                <span className="sum confirm" role="status">
+                  {summary} → {liveDestination.project || HOST_LABELS[liveDestination.host]} · ⌘↩
+                </span>
+              )}
               <span className="go">
                 {chip}
                 {noSession ? (
@@ -859,10 +871,10 @@ function StripView(props: {
       <div className="strip glass" role="status">
         <span className="state">
           <Icon name="warn" className="ico" style={{ color: 'var(--warn)' }} />
-          Plannotator Shots needs Screen Recording
+          Screen Recording is off
         </span>
         <button type="button" className="send" style={{ height: 30 }} onClick={props.onOpenSettings}>
-          Open System Settings
+          Turn On
         </button>
       </div>
     );
@@ -870,6 +882,13 @@ function StripView(props: {
   if (!props.hasShots && delivery) {
     const thumbs = props.lastSentShots.slice(-4);
     const label = delivery.label;
+    const project = label.includes(' · ') ? label.slice(label.indexOf(' · ') + 3) : label;
+    const who = delivery.host ? (
+      <span className="who-chip">
+        <AgentMark host={delivery.host} size={16} />
+        {project}
+      </span>
+    ) : null;
     return (
       <div className={`strip glass${delivery.state === 'delivered' || delivery.state === 'copied' ? ' fade-out' : ''}`} role="status" style={{ paddingRight: 12 }}>
         {thumbs.length > 0 && (
@@ -882,34 +901,34 @@ function StripView(props: {
           </div>
         )}
         {delivery.state === 'delivered' && (
-          <span className="state">
+          <span className="state" aria-label={`Sent to ${label}`}>
             <Icon name="check" className="ico ok" />
-            Sent to {label}
+            Sent{who}
           </span>
         )}
         {delivery.state === 'copied' && (
           <span className="state">
             <Icon name="check" className="ico ok" />
-            Copied as Markdown
+            Copied
           </span>
         )}
         {delivery.state === 'pending' && (
           <span className="state">
             <span className="spin" />
-            Sending to {label}…
+            Sending{who}
           </span>
         )}
         {delivery.state === 'queued' && (
-          <span className="state">
+          <span className="state" title="The session is busy; it reads this next." aria-label={`Queued: ${label} is busy and reads this next`}>
             <Icon name="clock" className="ico warn" />
-            Queued: {label.split(' · ')[0]} is mid-turn, it will read this next
+            Queued{who}
           </span>
         )}
         {delivery.state === 'ended' && (
           <>
             <span className="state">
               <Icon name="warn" className="ico bad" />
-              Not delivered: that session ended
+              Session ended
             </span>
             <button type="button" className="mini-link" onClick={props.onRetarget}>
               Send elsewhere…

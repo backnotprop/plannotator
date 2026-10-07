@@ -5,6 +5,7 @@
 
 import { useEffect, useState } from 'react';
 import { HOST_LONG_LABELS, type ConnectionView } from '@plannotator/shared/shots/types';
+import { AgentMark } from './AgentMark';
 
 interface Props {
   connections: ConnectionView[];
@@ -14,8 +15,6 @@ interface Props {
   onCopy: () => void;
   onClose: () => void;
 }
-
-const HOST_GLYPH: Record<string, string> = { 'claude-code': 'CC', pi: 'Pi', opencode: 'OC', 'cli-wait': '>_' };
 
 function ago(at: number): string {
   if (!at) return '';
@@ -59,7 +58,7 @@ export function Picker({ connections, current, title = 'Send to', onPick, onCopy
         <div className="pk-list">
           {connections.length === 0 && (
             <div className="pk-empty">
-              No agent session is connected. Run <b>/plannotator-screenshot</b> in your agent to receive shots, or copy them as Markdown.
+              No session. Run <b>/plannotator-screenshot</b> in your agent.
             </div>
           )}
           {connections.map((connection, i) => {
@@ -76,12 +75,11 @@ export function Picker({ connections, current, title = 'Send to', onPick, onCopy
                 onMouseEnter={() => setIndex(i)}
                 onClick={() => onPick(connection)}
               >
-                <div className={`host h-${connection.host}`}>{HOST_GLYPH[connection.host]}</div>
+                <AgentMark host={connection.host} title={connection.title} size={30} />
                 <div>
-                  <div className="t">
-                    {HOST_LONG_LABELS[connection.host]}
-                    {connection.project ? ` · ${connection.project}` : ''}
-                    {auto && <span style={{ fontWeight: 500, opacity: 0.8 }}> · Auto</span>}
+                  <div className="t" aria-label={`${HOST_LONG_LABELS[connection.host]}, ${connection.project}${auto ? ', automatic choice' : ''}`}>
+                    {connection.project || HOST_LONG_LABELS[connection.host]}
+                    {auto && <span className="auto"> Auto</span>}
                   </div>
                   <div className="sub">
                     {shortPath(connection.cwd)}
@@ -89,26 +87,17 @@ export function Picker({ connections, current, title = 'Send to', onPick, onCopy
                   </div>
                 </div>
                 <div className="st">
-                  {state}
+                  {state === 'working' ? <span className="w">working</span> : state}
                   <br />
-                  {connection.host === 'cli-wait' ? 'ask not available' : ago(connection.lastHumanInputAt)}
+                  {connection.host === 'cli-wait' ? '' : ago(connection.lastHumanInputAt)}
                 </div>
               </button>
             );
           })}
         </div>
         <div className="pk-foot">
-          <span>
-            <span className="k">↑↓</span> choose
-          </span>
-          <span>
-            <span className="k">Return</span> send here
-          </span>
-          <span>
-            <span className="k">Esc</span> back
-          </span>
-          <button type="button" style={{ marginLeft: 'auto' }} onClick={onCopy}>
-            No session? Copy as Markdown <span className="k">⇧⌘C</span>
+          <button type="button" onClick={onCopy}>
+            Copy as Markdown <span className="k">⇧⌘C</span>
           </button>
         </div>
       </div>

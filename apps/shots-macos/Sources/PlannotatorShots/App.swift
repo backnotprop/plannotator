@@ -90,7 +90,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !capturing else { return }
         guard Capture.hasPermission else {
             // The first attempt shows the system prompt; the strip explains it until it is granted.
-            Capture.requestPermission()
+            let granted = Capture.requestPermission()
+            log("screen recording requested (granted: \(granted))")
             panel.call("permissions", ["screen": false, "accessibility": AXText.isTrusted])
             return
         }

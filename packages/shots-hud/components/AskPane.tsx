@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from 'react';
 import { renderChatMarkdown } from '@plannotator/ui/utils/aiChatFormat';
 import type { ConnectionView, Shot } from '@plannotator/shared/shots/types';
 import { HOST_LONG_LABELS, HOST_LABELS } from '@plannotator/shared/shots/types';
+import { AgentMark } from './AgentMark';
 import { streamAsk } from '../api';
 import { Icon } from '../icons';
 
@@ -127,7 +128,18 @@ export function AskPane({ entries, setEntries, context, setContext, destination,
       <div className="qa" ref={scrollRef} aria-live="polite">
         {entries.length === 0 && (
           <div className="qa-empty">
-            {canAsk ? `Ask ${who} about these shots. The answer comes from the session itself, as a real turn.` : 'Asking needs a live session that can answer here (Claude Code with the Plannotator mod, Pi or OpenCode 2).'}
+            {canAsk ? (
+              <span className="ask-hello">
+                {destination && <AgentMark host={destination.host} title={destination.title} size={28} />}
+                <span>
+                  Ask <b>{destination?.project || who}</b>
+                  <br />
+                  <span className="muted">The session itself answers.</span>
+                </span>
+              </span>
+            ) : (
+              'This session can’t answer here.'
+            )}
           </div>
         )}
         {entries.map((entry) => (
@@ -180,10 +192,10 @@ export function AskPane({ entries, setEntries, context, setContext, destination,
               {c.boxN ? ` · box ${c.boxN}` : ''}
             </button>
           ))}
-          <span className="who">
+          <span className="who" aria-label={`${who}${running ? ', answering' : ''}`}>
             {running && <span className="spin" />}
-            {who}
-            {running ? ' · answering' : ''}
+            {destination && <AgentMark host={destination.host} title={destination.title} size={16} />}
+            {destination?.project || who}
           </span>
         </div>
         <div className="inbox">
@@ -192,7 +204,7 @@ export function AskPane({ entries, setEntries, context, setContext, destination,
             rows={1}
             value={question}
             disabled={!canAsk}
-            placeholder={entries.length ? 'Ask a follow-up…' : 'Ask about these shots…'}
+            placeholder={entries.length ? 'Follow up…' : 'Ask…'}
             aria-label="Ask this session"
             onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={(event) => {
@@ -210,10 +222,7 @@ export function AskPane({ entries, setEntries, context, setContext, destination,
             }}
           />
         </div>
-        <div className="share-note">
-          Ask this session: a real turn in that session.
-          {shared.length > 0 ? ` Asking shares shot ${shared.join(', ')} with ${host}.` : ''}
-        </div>
+        {shared.length > 0 && <div className="share-note">Shares shot {shared.join(', ')} with {host}</div>}
       </div>
     </div>
   );

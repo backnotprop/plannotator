@@ -1336,3 +1336,120 @@ html[data-native] .picker-host .picker {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
+
+/* ---------------------------------------------------------------- lean pass: marks instead of words */
+.agent-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: #fff;
+}
+.agent-mark svg {
+  width: 62%;
+  height: 62%;
+  display: block;
+}
+.chip {
+  padding: 0 12px 0 6px;
+  gap: 7px;
+}
+.chip .agent-mark {
+  margin-right: 1px;
+}
+.chip.choose {
+  padding: 0 12px;
+}
+.chip.gone .agent-mark {
+  opacity: 0.45;
+}
+.chip-name {
+  font-weight: 600;
+}
+.chip .auto {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+.who-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+  font-weight: 600;
+}
+.pk-row .auto {
+  font-weight: 500;
+  opacity: 0.7;
+  font-size: 11.5px;
+}
+.pk-row .agent-mark {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+.pk-foot button {
+  color: var(--text-2);
+}
+.ask-hello {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text);
+  line-height: 1.45;
+}
+.ctx .who .agent-mark {
+  margin-right: 1px;
+}
+
+/* breathing room */
+.panel {
+  grid-template-rows: 46px 1fr 110px;
+}
+.p-head {
+  padding: 0 12px 0 14px;
+  gap: 12px;
+}
+.hbtn {
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  justify-content: center;
+}
+.seg button {
+  padding: 4px 10px;
+  display: inline-flex;
+  align-items: center;
+}
+.rail {
+  gap: 6px;
+  padding-top: 12px;
+}
+.p-foot {
+  padding: 12px 16px;
+}
+.note {
+  margin-top: 10px;
+  height: 28px;
+}
+.fm .badge {
+  right: 4px;
+  bottom: 4px;
+}
+.cmt {
+  padding: 10px 12px 10px 34px;
+}
+.cmt-n {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  width: 17px;
+  height: 17px;
+  border-radius: 9px;
+  background: var(--marker);
+  color: #fff;
+  font: 700 10px/17px var(--font);
+  text-align: center;
+  font-style: normal;
+}
+.shot-note {
+  padding: 9px 12px;
+}

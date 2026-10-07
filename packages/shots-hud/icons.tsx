@@ -12,6 +12,13 @@ const PATHS: Record<string, ReactNode> = {
     </>
   ),
   text: <path d="M3 4h10M3 7h10M3 10h7M3 13h5" />,
+  image: (
+    <>
+      <rect x="2.5" y="3" width="11" height="10" rx="1.6" />
+      <circle cx="6" cy="6.5" r="1.1" />
+      <path d="M2.5 11l3.2-3 2.6 2.4 1.9-1.6 3.3 2.9" />
+    </>
+  ),
   ask: <path d="M2.5 4.5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H7l-3 2.5v-2.5h0a2 2 0 0 1-1.5-2z" />,
   left: <path d="M10 3 5 8l5 5" />,
   right: <path d="M6 3l5 5-5 5" />,
@@ -44,6 +51,7 @@ const PATHS: Record<string, ReactNode> = {
   ),
   trash: <path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5" />,
   close: <path d="M4 4l8 8M12 4l-8 8" />,
+  plus: <path d="M8 3.5v9M3.5 8h9" />,
   more: (
     <>
       <circle cx="3.5" cy="8" r="1" fill="currentColor" />

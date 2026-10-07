@@ -287,7 +287,6 @@ export function Stage(props: Props) {
       {props.noteOpen && <NoteCard value={shot.note} onChange={props.onNote} onClose={props.onCloseNote} />}
       {!props.noteOpen && shot.note.trim() && (
         <div className="shot-note glass" onClick={props.onCloseNote} role="note">
-          <label>Note for this shot</label>
           {shot.note}
         </div>
       )}
@@ -341,9 +340,7 @@ function CommentCard(props: {
   }, [text, editing]);
   return (
     <div ref={props.cardRef} className={`cmt glass${editing ? ' editing' : ''}`} style={{ left: props.x, top: props.y }} onPointerDown={(e) => e.stopPropagation()} onClick={editing ? undefined : props.onEdit}>
-      <div className="who">
-        <i>{box.n}</i>Box {box.n}
-      </div>
+      <i className="cmt-n" aria-hidden="true">{box.n}</i>
       {editing ? (
         <>
           <textarea
@@ -351,7 +348,7 @@ function CommentCard(props: {
             autoFocus
             rows={1}
             value={text}
-            placeholder="What about this?"
+            placeholder="Comment"
             aria-label={`Comment for box ${box.n}`}
             onChange={(event) => setText(event.target.value)}
             onKeyDown={(event) => {
@@ -381,7 +378,6 @@ function CommentCard(props: {
               if (text.trim() !== box.comment) props.onSave(text.trim());
             }}
           />
-          <div className="hint">Return to save · Esc to cancel · ⌘J ask about this</div>
         </>
       ) : (
         <div className="body">{box.comment}</div>
@@ -398,12 +394,12 @@ function NoteCard(props: { value: string; onChange: (value: string) => void; onC
   }, []);
   return (
     <div className="shot-note glass" onPointerDown={(e) => e.stopPropagation()}>
-      <label htmlFor="shot-note">Note for this shot</label>
+      <label htmlFor="shot-note" className="sr-only">Note for this shot</label>
       <input
         id="shot-note"
         ref={ref}
         value={value}
-        placeholder="e.g. Only with SAVE10"
+        placeholder="Note for this shot"
         onChange={(event) => setValue(event.target.value)}
         onBlur={() => {
           props.onChange(value.trim());
