@@ -7,6 +7,7 @@
 
 import { useEffect } from 'react';
 import { Icon } from '../icons';
+import shotsMark from '../assets/shots-mark.png';
 
 export type PermissionKind = 'screen' | 'accessibility';
 export type PermissionState = 'ask' | 'waiting' | 'reopen' | 'granted';
@@ -66,7 +67,7 @@ export function PermissionCard(props: {
     <div className="perm glass" role="dialog" aria-labelledby="perm-title" aria-describedby="perm-line">
       <div className="perm-pic" aria-hidden="true">
         <div className="perm-row">
-          {props.appIcon ? <img className="perm-icon" src={props.appIcon} alt="" /> : <span className="perm-icon placeholder" />}
+          <img className="perm-icon" src={props.appIcon ?? shotsMark} alt="" />
           Plannotator Shots
           <span className="perm-switch" />
         </div>
