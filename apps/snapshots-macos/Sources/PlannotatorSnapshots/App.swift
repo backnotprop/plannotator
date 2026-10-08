@@ -126,6 +126,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         capturing = true
+        permissions.clearPendingShot()
         panel.call("willCapture")
         Task { @MainActor in
             defer { capturing = false }

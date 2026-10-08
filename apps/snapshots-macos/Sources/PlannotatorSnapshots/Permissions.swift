@@ -185,11 +185,17 @@ final class PermissionFlow {
         timer = nil
         if showCheck, let kind { draw(["kind": kind.rawValue, "state": State.granted.rawValue]) }
         if !showCheck { draw(["kind": kind?.rawValue ?? "", "state": "done"]) }
+        // A granted permission keeps a pending capture saved until the capture actually
+        // opens (clearPendingShot): macOS often makes the app Quit & Reopen right after
+        // the switch goes on, and the reopened app must carry on with what you started.
+        if !showCheck || pending == nil { defaults.removeObject(forKey: "pendingSnapshot") }
         kind = nil
         pending = nil
         reopenShown = false
-        defaults.removeObject(forKey: "pendingSnapshot")
     }
+
+    /// The capture a permission was holding has opened (or was given up): nothing to resume.
+    func clearPendingShot() { defaults.removeObject(forKey: "pendingSnapshot") }
 
     /// Relaunch through LaunchServices; the pending snapshot is kept and resumes.
     func reopen() {
@@ -218,6 +224,12 @@ final class PermissionFlow {
             return
         }
         log("permission: resuming a \(action.rawValue) snapshot after relaunch")
+        // macOS's Quit & Reopen after the switch went on: the permission is there now,
+        // so go straight to the capture instead of showing a card again.
+        if (kind == .screen && CGPreflightScreenCaptureAccess()) || (kind == .accessibility && AXIsProcessTrusted()) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.resume?(action) }
+            return
+        }
         self.kind = kind
         self.pending = action
         draw(["kind": kind.rawValue, "state": State.waiting.rawValue])
