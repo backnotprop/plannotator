@@ -30,7 +30,12 @@ import { agentToolSaveFailed, saveConfig, detectGitUser, getServerConfig, isAgen
 import { appendFeedbackRecord, type FeedbackDecision, type FeedbackSurface } from "../generated/feedback-archive.ts";
 import { isFaviconStyle, type FaviconStyle } from "../generated/favicon.ts";
 import { getAnnotateFileFeedbackTemplate, getAnnotateMessageFeedbackTemplate } from "../generated/prompts.ts";
-import { disabledSourceSave, type SourceSaveRequest } from "../generated/source-save.ts";
+import {
+	disabledSourceSave,
+	sourceSaveCrossOriginResponse,
+	sourceSaveDecidedResponse,
+	type SourceSaveRequest,
+} from "../generated/source-save.ts";
 import { getAnnotateReferenceRootPaths } from "../generated/annotate-reference-roots-node.ts";
 import {
 	createSourceSaveCapability,
@@ -1199,11 +1204,30 @@ export async function startAnnotateServer(options: {
 				rootHtmlVersionDiff,
 			});
 		} else if (url.pathname === "/api/source/save" && req.method === "POST") {
+			// Edit Mode writes the reviewer's files, so a page on another site
+			// must never reach this (a preflight-free text/plain POST would).
+			if (!isSameOriginOrNoOrigin(req.headers.origin ?? null, req.headers.host ?? "", req.headers["sec-fetch-site"])) {
+				json(res, sourceSaveCrossOriginResponse(), 403);
+				return;
+			}
 			let body: SourceSaveRequest;
 			try {
 				body = (await parseBody(req)) as unknown as SourceSaveRequest;
 			} catch {
 				json(res, { ok: false, code: "invalid-request", message: "Invalid JSON body." }, 400);
+				return;
+			}
+			// Stale-tab guard: a tab left open on a reused port must not write
+			// files for a session it never showed. Missing is accepted.
+			if (checkServerSession(body, serverSession) === "mismatch") {
+				json(res, serverSessionMismatchBody(), 409);
+				return;
+			}
+			// Once the review is decided (feedback, approve, Close, or the
+			// agent's close) a tab left open can no longer write the files:
+			// the agent may already be editing them itself.
+			if (decision.isSettled()) {
+				json(res, sourceSaveDecidedResponse(), 409);
 				return;
 			}
 

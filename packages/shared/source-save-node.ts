@@ -268,6 +268,8 @@ export function resolveBundleSourceSavePaths(paths: readonly string[]): Set<stri
 	const allowed = new Set<string>();
 	for (const path of paths) {
 		if (!isSourceSaveFilePath(path)) continue;
+		// A symlinked entry is writable at its target even when that lies outside
+		// every reference root: the user named this file, as a single-file session would write it.
 		const real = resolveSourceSaveLocation(path);
 		if (!real || !isSourceSaveFilePath(real)) continue;
 		try {

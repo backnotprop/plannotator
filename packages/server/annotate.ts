@@ -27,7 +27,12 @@ import { isPathAllowed } from "@plannotator/shared/doc-resolve";
 import { getPlanVersion, getVersionCount, listVersions } from "@plannotator/shared/storage";
 import { computeAnnotateHistory, deriveAnnotateHistorySlug, persistAnnotateSubmission, type AnnotateHistoryResult } from "@plannotator/shared/annotate-history";
 import { htmlDiff } from "@plannotator/shared/html-diff";
-import { disabledSourceSave, type SourceSaveRequest } from "@plannotator/shared/source-save";
+import {
+  disabledSourceSave,
+  sourceSaveCrossOriginResponse,
+  sourceSaveDecidedResponse,
+  type SourceSaveRequest,
+} from "@plannotator/shared/source-save";
 import { getAnnotateReferenceRootPaths } from "@plannotator/shared/annotate-reference-roots-node";
 import { getAnnotateFileFeedbackTemplate, getAnnotateMessageFeedbackTemplate } from "@plannotator/shared/prompts";
 import {
@@ -1170,6 +1175,11 @@ export async function startAnnotateServer(
           }
 
           if (url.pathname === "/api/source/save" && req.method === "POST") {
+            // Edit Mode writes the reviewer's files, so a page on another site
+            // must never reach this (a preflight-free text/plain POST would).
+            if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) {
+              return Response.json(sourceSaveCrossOriginResponse(), { status: 403 });
+            }
             let body: SourceSaveRequest;
             try {
               body = (await req.json()) as SourceSaveRequest;
@@ -1178,6 +1188,15 @@ export async function startAnnotateServer(
                 { ok: false, code: "invalid-request", message: "Invalid JSON body." },
                 { status: 400 },
               );
+            }
+            // Stale-tab guard: a tab left open on a reused port must not write
+            // files for a session it never showed. Missing is accepted.
+            if (checkServerSession(body, serverSession) === "mismatch") return sessionMismatch();
+            // Once the review is decided (feedback, approve, Close, or the
+            // agent's close) a tab left open can no longer write the files:
+            // the agent may already be editing them itself.
+            if (decision.isSettled()) {
+              return Response.json(sourceSaveDecidedResponse(), { status: 409 });
             }
 
             if (typeof body.text !== "string" || typeof body.baseHash !== "string") {
