@@ -54,7 +54,7 @@ enum Appearance: String, CaseIterable, Identifiable {
     }
 }
 
-enum RootTab: Hashable { case inbox, settings }
+enum RootTab: Hashable { case inbox, decisions, settings }
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
@@ -63,6 +63,7 @@ struct RootView: View {
         @Bindable var model = model
         TabView(selection: $tab) {
             Tab("Inbox", systemImage: "tray", value: RootTab.inbox) { InboxTab() }
+            Tab("Decisions", systemImage: "diamond", value: RootTab.decisions) { DecisionsTab() }
             Tab("Settings", systemImage: "gearshape", value: RootTab.settings) { SettingsTab() }
         }
         .tabBarMinimizeBehavior(.onScrollDown)

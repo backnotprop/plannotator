@@ -60,13 +60,23 @@ bun apps/ios/scripts/proof.ts --binary .local/plannotator
 ```
 
 It starts that binary's Inbox under a temp data dir, connects agents through
-`plannotator inbox mcp`, makes a fresh simulator and runs `xcodebuild test`:
-the PlannotatorKit tests, then the flow (pair by typed address and code, the
+`plannotator inbox mcp`, makes a fresh simulator, builds once, runs
+`WarmUpLaunch` alone (the app's first launch and first pairing, which take a
+minute or more on a cold CI runner), then the rest: the PlannotatorKit tests,
+then the flow (pair by typed address and code, the
 list, "2 new" while scrolled, a swipe, picks, a note, Other, Send and the
 agent's `wait_for_reply`, Resolve, Delete, removal on the computer, pairing
-again, Remove this source). Light and dark screenshots of each screen and a
-recording of the pair-pick-send flow land in `.local/proof/ios/`. CI runs the
-same command (`.github/workflows/ios.yml`).
+again, Remove this source), and the decisions and New message flow
+(`DecisionsProofTests`: a Send with the switch off records nothing; the switch
+on opens the decision card, and after Send the decision is in the Decisions tab
+and in the window's own decisions route; New message to one live Claude Code
+session, to the picked one of two, and the "not running" words for a project
+with none). The live sessions are the Claude Code mod's own code on real
+processes (`apps/hook/hooks/mod/testing/claude-session.ts`), started by the
+script in the projects the test writes to. Light and dark screenshots of each
+screen and recordings land in `.local/proof/ios/`; `--only
+PlannotatorUITests/DecisionsProofTests` runs one test. CI runs the same command
+(`.github/workflows/ios.yml`).
 
 The script also runs the relay (`apps/relay`) under `wrangler dev`, with a
 local HTTP/2 server standing in for APNs, and points the Inbox at it. The

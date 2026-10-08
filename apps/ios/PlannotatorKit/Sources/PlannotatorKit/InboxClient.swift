@@ -233,7 +233,7 @@ public struct InboxClient: Sendable {
         let _: Ignored = try await post("threads/\(id)/delete", Body())
     }
 
-    /// `POST messages/:id/decision`: the card's switch (7.21). The decision card itself is M3.
+    /// `POST messages/:id/decision`: the card's switch (7.21). Done on the decision card is `keepDecision`.
     public func setDecisionRecording(message id: String, key: String, recording: Bool) async throws(InboxError) -> InboxQuestion {
         struct Body: Encodable { var idempotencyKey = UUID().uuidString; var key: String; var recording: Bool }
         struct Answer: Decodable { var question: InboxQuestion }

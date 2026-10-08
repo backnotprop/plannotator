@@ -6,7 +6,8 @@ name: Inbox window e2e
 # The binary is built first, with the flags release.yml compiles with.
 # tests/e2e/inbox.spec.ts (the window), notifications.spec.ts,
 # inbox-guides.spec.ts (guided reviews), inbox-new-message.spec.ts (New
-# message) and inbox-phones.spec.ts (pairing a phone) say what they prove;
+# message), inbox-order.spec.ts (newest first inside a section) and
+# inbox-phones.spec.ts (pairing a phone) say what they prove;
 # packages/server/inbox-devices.test.ts replays the phone door's contract
 # exchanges on the same binary, and inbox-lan.test.ts proves the Wi-Fi
 # listener there (a pinned phone over the runner's network address; no

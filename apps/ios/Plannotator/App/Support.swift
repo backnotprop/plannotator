@@ -75,6 +75,14 @@ enum When {
             : date.formatted(.dateTime.month(.abbreviated).day())
     }
 
+    /// "today", "yesterday", else "Oct 3": a day in a sentence ("Asked by Claude Code, today").
+    static func dayWords(_ text: String?) -> String {
+        guard let date = date(text) else { return "" }
+        if Calendar.current.isDateInToday(date) { return "today" }
+        if Calendar.current.isDateInYesterday(date) { return "yesterday" }
+        return date.formatted(.dateTime.month(.abbreviated).day())
+    }
+
     /// "Oct 7, 10:02 AM".
     static func dayAndTime(_ date: Date) -> String {
         "\(date.formatted(.dateTime.month(.abbreviated).day())), \(date.formatted(date: .omitted, time: .shortened))"
