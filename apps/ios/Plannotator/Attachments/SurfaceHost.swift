@@ -113,7 +113,8 @@ final class SurfaceHost: NSObject {
     /// Every http, https, ws and wss load is blocked, except an http or https
     /// request to open a new window: that is how a tapped link in an agent's
     /// page reaches `createWebViewWith`, which never makes a web view for it.
-    static let offlineRules = #"[{"trigger":{"url-filter":"^(https?|wss?)://"},"action":{"type":"block"}},{"trigger":{"url-filter":"^https?://","resource-type":["popup"]},"action":{"type":"ignore-previous-rules"}}]"#
+    /// (A content rule's url-filter has no alternation, so ws and wss are a rule of their own.)
+    static let offlineRules = #"[{"trigger":{"url-filter":"^https?://"},"action":{"type":"block"}},{"trigger":{"url-filter":"^wss?://"},"action":{"type":"block"}},{"trigger":{"url-filter":"^https?://","resource-type":["popup"]},"action":{"type":"ignore-previous-rules"}}]"#
 
     /// The policy every file of an agent's page folder is served under: the
     /// surface's own (`apps/inbox/surface.html`), so a page the agent's page
