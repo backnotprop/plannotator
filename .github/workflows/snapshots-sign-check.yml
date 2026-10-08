@@ -42,10 +42,17 @@ jobs:
           case "$REF" in
             ""|-*|*[!A-Za-z0-9._/-]*) echo "::error::Not a branch or tag name: $REF"; exit 1 ;;
           esac
-          # A tag's peeled line (^{}) names the commit; a branch line already does.
-          lines=$(git ls-remote --heads --tags "https://github.com/$REPO.git" "refs/heads/$REF" "refs/tags/$REF" "refs/tags/$REF^{}")
-          sha=$(printf '%s\n' "$lines" | awk '$2 ~ /\^\{\}$/ {print $1; exit}')
-          [ -n "$sha" ] || sha=$(printf '%s\n' "$lines" | awk 'NF {print $1; exit}')
+          # ls-remote matches patterns against the END of ref names, so keep only
+          # exact names, and refuse a name that is both a branch and a tag.
+          lines=$(git ls-remote --heads --tags "https://github.com/$REPO.git" "refs/heads/$REF" "refs/tags/$REF")
+          branch=$(printf '%s\n' "$lines" | awk -v r="refs/heads/$REF" '$2 == r {print $1}')
+          tag=$(printf '%s\n' "$lines" | awk -v r="refs/tags/$REF^{}" '$2 == r {print $1}')
+          [ -n "$tag" ] || tag=$(printf '%s\n' "$lines" | awk -v r="refs/tags/$REF" '$2 == r {print $1}')
+          if [ -n "$branch" ] && [ -n "$tag" ]; then
+            echo "::error::$REF names both a branch and a tag of $REPO; refusing to guess"
+            exit 1
+          fi
+          sha="${branch:-$tag}"
           if [ -z "$sha" ]; then
             echo "::error::$REF is not a branch or tag of $REPO"
             exit 1
