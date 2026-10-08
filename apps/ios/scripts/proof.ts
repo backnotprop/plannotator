@@ -295,6 +295,13 @@ try {
   proxy.stop(true);
   await Promise.allSettled([claude, ...Object.values(others), ...newsAgents].map((a) => a.close()));
   await fetch(`${inbox}/api/inbox/control/stop`, { method: 'POST', headers: { Authorization: `Bearer ${registry.token}` } }).catch(() => {});
+  if (status !== 0) {
+    // A crash of the app leaves its report with the simulator's host; keep it with the frames.
+    const reports = join(process.env.HOME ?? '', 'Library/Logs/DiagnosticReports');
+    for (const name of spawnSync('ls', [reports], { encoding: 'utf8' }).stdout.split('\n').filter((n) => n.startsWith('Plannotator'))) {
+      spawnSync('cp', [join(reports, name), shots]);
+    }
+  }
   if (!keepSimulator) spawnSync('xcrun', ['simctl', 'delete', udid]);
   if (status === 0) rmSync(tmp, { recursive: true, force: true });
   else process.stdout.write(`\nKept for a look: ${tmp} (Proof.xcresult, the Inbox's data dir)\n`);

@@ -62,12 +62,17 @@ struct ScanScreen: View {
             }
         }
         .task {
-            // No camera (the simulator), no prompt.
+            #if targetEnvironment(simulator)
+            // The simulator has no camera; VisionKit is not asked at all there.
+            camera = .unavailable
+            #else
+            // No camera, no prompt.
             guard DataScannerViewController.isSupported, await AVCaptureDevice.requestAccess(for: .video) else {
                 camera = .unavailable
                 return
             }
             camera = DataScannerViewController.isAvailable ? .ready : .unavailable
+            #endif
         }
         .onDisappear { if torch { setTorch(false) } }
     }
