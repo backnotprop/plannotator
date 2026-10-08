@@ -34,7 +34,7 @@ final class AttachmentProofTests: ProofCase {
         planTile.tap()
         let title = web("Retry worker for Stripe 409s")
         // The first open loads the 20 MB surface; a cold shared runner takes its time.
-        expect(title, "the plan's title", timeout: 90)
+        expect(title, "the plan's title")
         try await control.shot("4.1-plan")
         // The document follows Dynamic Type (the surface's text scale), the bars follow the system.
         try await control.post("/text-size", ["size": "accessibility-extra-extra-extra-large"])
@@ -208,7 +208,7 @@ final class AttachmentProofTests: ProofCase {
         app.webViews.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", text, text)).firstMatch
     }
 
-    private func expect(_ target: XCUIElement, _ what: String, timeout: TimeInterval = 30, file: StaticString = #filePath, line: UInt = #line) {
+    private func expect(_ target: XCUIElement, _ what: String, timeout: TimeInterval = ProofWait.opening, file: StaticString = #filePath, line: UInt = #line) {
         if !target.waitForExistence(timeout: timeout) {
             print("— \(what) not found. The screen:\n\(app.debugDescription)")
             XCTFail("\(what) not found", file: file, line: line)

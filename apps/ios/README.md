@@ -61,18 +61,28 @@ bun apps/ios/scripts/proof.ts --binary .local/plannotator
 ```
 
 It starts that binary's Inbox under a temp data dir, connects agents through
-`plannotator inbox mcp`, makes a fresh simulator and runs `xcodebuild test`:
-the PlannotatorKit tests, then the flows: pairing and answering (pair by typed
-address and code, the list, "2 new" while scrolled, a swipe, picks, a note,
-Other, Send and the agent's `wait_for_reply`, Resolve, Delete, removal on the
-computer, pairing again, Remove this source), and attachments (an agent sends
+`plannotator inbox mcp`, makes a fresh simulator, builds once, runs
+`WarmUpLaunch` alone (the app's first launch and first pairing, which take a
+minute or more on a cold CI runner), then the rest: the PlannotatorKit tests,
+then the flow (pair by typed address and code, the
+list, "2 new" while scrolled, a swipe, picks, a note, Other, Send and the
+agent's `wait_for_reply`, Resolve, Delete, removal on the computer, pairing
+again, Remove this source), and the decisions and New message flow
+(`DecisionsProofTests`: a Send with the switch off records nothing; the switch
+on opens the decision card, and after Send the decision is in the Decisions tab
+and in the window's own decisions route; New message to one live Claude Code
+session, to the picked one of two, and the "not running" words for a project
+with none), and attachments (`AttachmentProofTests`: an agent sends
 `scripts/fixtures`' plan, ticket page and Mermaid flow; a comment on each by
 touch; the changed line and the sent version; links; Share; the page's forged
-bridge messages dropped; the "3 annotations" sheet opening a file at its mark;
-Send, with the agent's feedback naming all three). `--only
-PlannotatorUITests/AttachmentProofTests` runs one. Light and dark screenshots of each screen and a
-recording of the pair-pick-send flow land in `.local/proof/ios/`. CI runs the
-same command (`.github/workflows/ios.yml`).
+bridge messages and its embed's beacons dropped; the "3 annotations" sheet
+opening a file at its mark; Send, with the agent's feedback naming all three).
+Every proof class ends by clearing the app's stored sources. The live sessions are the Claude Code mod's own code on real
+processes (`apps/hook/hooks/mod/testing/claude-session.ts`), started by the
+script in the projects the test writes to. Light and dark screenshots of each
+screen and recordings land in `.local/proof/ios/`; `--only
+PlannotatorUITests/DecisionsProofTests` runs one test. CI runs the same command
+(`.github/workflows/ios.yml`).
 
 ## Release and App Review
 

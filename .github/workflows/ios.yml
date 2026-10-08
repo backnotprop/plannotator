@@ -26,6 +26,8 @@ on:
       - 'packages/inbox/surface/**'
       - 'packages/inbox/attachments.ts'
       - 'apps/inbox/surface*'
+      - 'apps/hook/hooks/mod/inbox*'
+      - 'apps/hook/hooks/mod/testing/**'
       - '.github/workflows/ios.yml'
   push:
     branches:
@@ -42,6 +44,8 @@ on:
       - 'packages/inbox/surface/**'
       - 'packages/inbox/attachments.ts'
       - 'apps/inbox/surface*'
+      - 'apps/hook/hooks/mod/inbox*'
+      - 'apps/hook/hooks/mod/testing/**'
       - '.github/workflows/ios.yml'
 
 permissions:

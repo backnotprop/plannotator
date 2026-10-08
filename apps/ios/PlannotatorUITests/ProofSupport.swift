@@ -125,21 +125,21 @@ struct Control {
 extension ProofCase {
     /// Pairs with the proof's Inbox by its loopback address and six digits (1.3).
     func pairByCode() async throws {
-        XCTAssertTrue(element("connect-computer").waitForExistence(timeout: 30))
+        XCTAssertTrue(element("connect-computer").waitForExistence(timeout: ProofWait.opening))
         element("connect-computer").tap()
-        XCTAssertTrue(element("find-nearby").waitForExistence(timeout: 30))
+        XCTAssertTrue(element("find-nearby").waitForExistence(timeout: ProofWait.opening))
         element("find-nearby").tap()
         let offer = try await control.post("/offer")
         let field = element("address-field")
-        XCTAssertTrue(field.waitForExistence(timeout: 30))
+        XCTAssertTrue(field.waitForExistence(timeout: ProofWait.opening))
         field.tap()
         field.typeText(try XCTUnwrap(offer["address"] as? String))
         element("address-next").tap()
         let codeField = element("pairing-code")
-        XCTAssertTrue(codeField.waitForExistence(timeout: 30))
+        XCTAssertTrue(codeField.waitForExistence(timeout: ProofWait.opening))
         codeField.tap()
         codeField.typeText(try XCTUnwrap(offer["code"] as? String))
-        XCTAssertTrue(anyRow().waitForExistence(timeout: 30))
+        XCTAssertTrue(anyRow().waitForExistence(timeout: ProofWait.opening))
     }
 
     /// Remove this source (9.2), leaving the app as a fresh install finds it.

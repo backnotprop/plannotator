@@ -10,7 +10,7 @@ final class ProofTests: ProofCase {
         app.launch()
 
         // 1.1: nothing connected yet.
-        XCTAssertTrue(element("connect-computer").waitForExistence(timeout: 30))
+        XCTAssertTrue(element("connect-computer").waitForExistence(timeout: ProofWait.opening))
         try await control.shot("1.1")
 
         // The agents write before the phone pairs, so the list draws full.
@@ -21,7 +21,7 @@ final class ProofTests: ProofCase {
 
         // 1.2, then 1.3: pair by a typed address and the six digits.
         element("connect-computer").tap()
-        XCTAssertTrue(element("find-nearby").waitForExistence(timeout: 30))
+        XCTAssertTrue(element("find-nearby").waitForExistence(timeout: ProofWait.opening))
         try await control.shot("1.2")
         try await control.post("/video/start", ["name": "M1-pair-pick-send"])
         element("find-nearby").tap()
@@ -29,14 +29,14 @@ final class ProofTests: ProofCase {
         let address = try XCTUnwrap(offer["address"] as? String)
         let code = try XCTUnwrap(offer["code"] as? String)
         let field = element("address-field")
-        XCTAssertTrue(field.waitForExistence(timeout: 30))
+        XCTAssertTrue(field.waitForExistence(timeout: ProofWait.opening))
         field.tap()
         field.typeText(address)
         element("address-next").tap()
 
         // A wrong code first: refused, with the tries left.
         let codeField = element("pairing-code")
-        XCTAssertTrue(codeField.waitForExistence(timeout: 30))
+        XCTAssertTrue(codeField.waitForExistence(timeout: ProofWait.opening))
         codeField.tap()
         codeField.typeText(String(code.prefix(5)) + (code.last == "9" ? "0" : "9"))
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS '4 tries left'")).firstMatch.waitForExistence(timeout: 30))
@@ -46,7 +46,7 @@ final class ProofTests: ProofCase {
 
         // 2.1B: the list, drawn from the Inbox.
         let stoppedRow = element("row-\(stopped)")
-        XCTAssertTrue(stoppedRow.waitForExistence(timeout: 30))
+        XCTAssertTrue(stoppedRow.waitForExistence(timeout: ProofWait.opening))
         try await control.shot("2.1B")
 
         // The largest Dynamic Type size: the rows stack and wrap, nothing is cut to "…".

@@ -12,6 +12,13 @@ public struct InboxAuthor: Codable, Hashable, Sendable {
     public var session: String?
     public var name: String?
 
+    public init(kind: String, host: String? = nil, session: String? = nil, name: String? = nil) {
+        self.kind = kind
+        self.host = host
+        self.session = session
+        self.name = name
+    }
+
     public var isAgent: Bool { kind == "agent" }
 
     /// How the person sees an agent: the name it gave, else its host's name, else "An agent"
@@ -154,6 +161,8 @@ public struct InboxQuestion: Codable, Hashable, Sendable, Identifiable {
     public var sentReplyId: String?
     public var messageId: String
     public var decisionRecording: Bool
+    /// The decision card's kept words (7.21); nil follows the answer.
+    public var decisionDraft: InboxDecisionDraft?
 
     public var id: String { "\(messageId)/\(key)" }
     public var isOpen: Bool { state == "open" }

@@ -61,6 +61,7 @@ struct RootView: View {
         @Bindable var model = model
         TabView {
             Tab("Inbox", systemImage: "tray") { InboxTab() }
+            Tab("Decisions", systemImage: "diamond") { DecisionsTab() }
             Tab("Settings", systemImage: "gearshape") { SettingsTab() }
         }
         .tabBarMinimizeBehavior(.onScrollDown)

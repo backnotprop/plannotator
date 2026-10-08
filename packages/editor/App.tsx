@@ -630,7 +630,9 @@ const App: React.FC = () => {
         description,
         duration: autoUpdateNotice.kind === 'failed' ? 10000 : 6000,
         action: { label: 'Release notes', onClick: () => window.open(autoUpdateNotice.releaseUrl, '_blank', 'noopener,noreferrer') },
-        classNames: { toast: '!w-auto', description: '!text-foreground/70' },
+        // The failed notice names the update log's path: keep that line selectable
+        // so it can be copied (every other toast is select-none, see <Toaster>).
+        classNames: { toast: '!w-auto', description: autoUpdateNotice.kind === 'failed' ? '!text-foreground/70 select-text' : '!text-foreground/70' },
       });
     }, 1500);
     return () => clearTimeout(t);
@@ -7780,6 +7782,9 @@ const App: React.FC = () => {
           position="top-right"
           offset={64}
           toastOptions={{
+            // Sonner aborts a swipe-to-dismiss once any text is selected, so a
+            // mouse drag across selectable toast text never dismisses it.
+            className: 'select-none',
             style: {
               '--normal-bg': 'var(--card)',
               '--normal-border': 'var(--border)',
