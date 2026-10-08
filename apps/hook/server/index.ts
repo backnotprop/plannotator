@@ -216,6 +216,7 @@ import {
 } from "./cli";
 import { exitOnUnknownSubcommand } from "./unknown-subcommand";
 import { completeAnnotateCommand } from "./annotate-command";
+import { takeAnnotateLiveFlags } from "./live-flags";
 import { runInboxCommand } from "./inbox-command";
 import {
   annotateStartupFailureExitCode,
@@ -400,13 +401,9 @@ const renderMarkdownFlag = renderMarkdownIdx !== -1;
 if (renderMarkdownFlag) args.splice(renderMarkdownIdx, 1);
 // Live app annotation flags (annotate, loopback URLs): --app forces live
 // mode, --static forces the classic conversion pipeline. Transport-shape
-// flags: never echoed in the tolerant handoff's re-run flag list.
-const appFlagIdx = args.indexOf("--app");
-const appFlag = appFlagIdx !== -1;
-if (appFlag) args.splice(appFlagIdx, 1);
-const staticFlagIdx = args.indexOf("--static");
-const staticFlag = staticFlagIdx !== -1;
-if (staticFlag) args.splice(staticFlagIdx, 1);
+// flags: never echoed in the tolerant handoff's re-run flag list. Taken from
+// annotate's argv only: `plannotator snapshot --app` is that command's own flag.
+const { app: appFlag, static: staticFlag } = takeAnnotateLiveFlags(args);
 
 // Stdout matrix for annotate / annotate-last / copilot annotate-last.
 //
@@ -644,11 +641,11 @@ if (args[0] === "inbox") {
   await runInboxCommand(args.slice(1), { htmlContent: inboxHtmlContent });
 }
 
-// Plannotator Shots: the screenshot HUD's hub, app launcher and waiting
+// Plannotator Snapshots: the capture HUD's hub, app launcher and waiting
 // command. Loaded on demand so nothing else pays for its embedded page.
-if (args[0] === "screenshot") {
-  const { runShotsCommand } = await import("./shots-command");
-  await runShotsCommand(args.slice(1));
+if (args[0] === "snapshot") {
+  const { runSnapshotCommand } = await import("./snapshot-command");
+  await runSnapshotCommand(args.slice(1));
 }
 
 if (isInteractiveNoArgInvocation(args, process.stdin.isTTY)) {

@@ -72,8 +72,8 @@ jobs:
       - name: Run tests
         run: bun test
 
-  # --- Plannotator Shots (macOS app) ------------------------------------------
-  # Builds "Plannotator Shots.app" (universal) for embedding in the darwin
+  # --- Plannotator Snapshots (macOS app) ------------------------------------------
+  # Builds "Plannotator Snapshots.app" (universal) for embedding in the darwin
   # binaries (apps/hook/server/index-darwin.ts). Developer ID signing and
   # notarization run only on tag pushes AND when the Apple secrets exist;
   # otherwise the app is ad-hoc signed (fine for PR dry runs and for curl
@@ -83,7 +83,7 @@ jobs:
   # APPLE_DEVELOPER_ID_IDENTITY ("Developer ID Application: Name (TEAMID)"),
   # APPLE_NOTARY_KEY_P8 (base64 App Store Connect API key), APPLE_NOTARY_KEY_ID,
   # APPLE_NOTARY_ISSUER_ID.
-  shots-macos:
+  snapshots-macos:
     runs-on: macos-latest
     permissions:
       contents: read
@@ -101,7 +101,7 @@ jobs:
           P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
           P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
         run: |
-          keychain="$RUNNER_TEMP/shots.keychain-db"
+          keychain="$RUNNER_TEMP/snapshots.keychain-db"
           password="$(openssl rand -hex 16)"
           echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
           security create-keychain -p "$password" "$keychain"
@@ -112,33 +112,33 @@ jobs:
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
           rm -f "$RUNNER_TEMP/cert.p12"
 
-      - name: Build Plannotator Shots.app
+      - name: Build Plannotator Snapshots.app
         env:
-          SHOTS_SIGN_IDENTITY: ${{ env.HAS_SIGNING == 'true' && secrets.APPLE_DEVELOPER_ID_IDENTITY || '' }}
+          SNAPSHOTS_SIGN_IDENTITY: ${{ env.HAS_SIGNING == 'true' && secrets.APPLE_DEVELOPER_ID_IDENTITY || '' }}
           NOTARY_KEY_P8: ${{ env.HAS_NOTARY == 'true' && secrets.APPLE_NOTARY_KEY_P8 || '' }}
-          SHOTS_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
-          SHOTS_NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          SNAPSHOTS_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          SNAPSHOTS_NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
         run: |
           VERSION=$(jq -r .version package.json)
-          if [ -n "$NOTARY_KEY_P8" ] && [ -n "$SHOTS_SIGN_IDENTITY" ]; then
+          if [ -n "$NOTARY_KEY_P8" ] && [ -n "$SNAPSHOTS_SIGN_IDENTITY" ]; then
             echo "$NOTARY_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
-            export SHOTS_NOTARY_KEY="$RUNNER_TEMP/notary.p8"
+            export SNAPSHOTS_NOTARY_KEY="$RUNNER_TEMP/notary.p8"
           fi
-          SHOTS_BUILD="$VERSION.$GITHUB_RUN_NUMBER" apps/shots-macos/build.sh "$VERSION"
-          codesign -dv "apps/shots-macos/dist/Plannotator Shots.app" 2>&1 | grep -E "Identifier|Authority|Signature" || true
+          SNAPSHOTS_BUILD="$VERSION.$GITHUB_RUN_NUMBER" apps/snapshots-macos/build.sh "$VERSION"
+          codesign -dv "apps/snapshots-macos/dist/Plannotator Snapshots.app" 2>&1 | grep -E "Identifier|Authority|Signature" || true
           rm -f "$RUNNER_TEMP/notary.p8"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: shots-macos
+          name: snapshots-macos
           path: |
-            apps/shots-macos/dist/PlannotatorShots.zip
-            apps/shots-macos/dist/build.txt
+            apps/snapshots-macos/dist/PlannotatorSnapshots.zip
+            apps/snapshots-macos/dist/build.txt
           if-no-files-found: error
   # ------------------------------------------------------------------------------
 
   build:
-    needs: [test, shots-macos]
+    needs: [test, snapshots-macos]
     runs-on: ubuntu-latest
     # Build job has NO id-token / attestations permissions. Compilation
     # itself doesn't need OIDC minting — those capabilities live in the
@@ -168,21 +168,21 @@ jobs:
           bun run build:review
           bun run build:hook
 
-      # Plannotator Shots: the darwin binaries embed the app (index-darwin.ts).
+      # Plannotator Snapshots: the darwin binaries embed the app (index-darwin.ts).
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: shots-macos
-          path: apps/shots-macos/dist
+          name: snapshots-macos
+          path: apps/snapshots-macos/dist
 
       - name: Compile binaries (cross-compile all targets)
         run: |
           VERSION=$(jq -r .version package.json)
 
-          # macOS ARM64 (with Plannotator Shots.app embedded)
+          # macOS ARM64 (with Plannotator Snapshots.app embedded)
           bun build apps/hook/server/index-darwin.ts --compile --no-compile-autoload-bunfig --target=bun-darwin-arm64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-darwin-arm64
           sha256sum plannotator-darwin-arm64 > plannotator-darwin-arm64.sha256
 
-          # macOS x64 (with Plannotator Shots.app embedded)
+          # macOS x64 (with Plannotator Snapshots.app embedded)
           bun build apps/hook/server/index-darwin.ts --compile --no-compile-autoload-bunfig --target=bun-darwin-x64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-darwin-x64
           sha256sum plannotator-darwin-x64 > plannotator-darwin-x64.sha256
 

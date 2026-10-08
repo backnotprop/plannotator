@@ -87,21 +87,21 @@ export function resolveAgentToolEnabled(envValue: string | undefined, configText
 }
 
 /**
- * Plannotator Shots (the screenshot HUD) in the mod: the `/plannotator-screenshot`
- * command and the session's link to the Shots hub. OFF until launch, because
+ * Plannotator Snapshots (the capture HUD) in the mod: the `/plannotator-snapshot`
+ * command and the session's link to the Snapshots hub. OFF until launch, because
  * the plugin ships from main to every mod user; on with:
  *
- *   PLANNOTATOR_SHOTS=1                 (env; also true/on; 0/false/off/disabled turns it off and wins over the file)
- *   { "shots": true }                   (config.json in the data dir)
+ *   PLANNOTATOR_SNAPSHOTS=1                 (env; also true/on; 0/false/off/disabled turns it off and wins over the file)
+ *   { "snapshots": true }                   (config.json in the data dir)
  *
  * Read once, at the first session.start of the Claude Code process.
  */
-export function resolveShotsEnabled(envValue: string | undefined, configText: string | null | undefined): boolean {
+export function resolveSnapshotsEnabled(envValue: string | undefined, configText: string | null | undefined): boolean {
   const fromEnv = parseClaudeModEnv(envValue)
   if (fromEnv !== undefined) return fromEnv
   if (!configText) return false
   try {
-    const value = (JSON.parse(configText) as Record<string, unknown> | null)?.shots
+    const value = (JSON.parse(configText) as Record<string, unknown> | null)?.snapshots
     return value === true || value === 'true' || value === '1'
   } catch {
     return false

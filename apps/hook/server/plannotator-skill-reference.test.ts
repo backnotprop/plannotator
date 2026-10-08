@@ -64,6 +64,7 @@ const ANNOTATE_SKILL_MD_PATH = join(
 const PARSER_SOURCES = [
   join(import.meta.dir, "index.ts"),
   join(import.meta.dir, "cli.ts"),
+  join(import.meta.dir, "live-flags.ts"),
   join(import.meta.dir, "..", "..", "..", "packages", "shared", "review-args.ts"),
   join(import.meta.dir, "..", "..", "..", "packages", "server", "guide", "guide-cli.ts"),
 ];

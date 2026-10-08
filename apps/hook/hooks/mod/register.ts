@@ -48,7 +48,7 @@
  */
 
 import { PlannotatorMod } from './controller'
-import { resolveAgentToolEnabled, resolveClaudeModEnabled, resolveShotsEnabled } from './enabled'
+import { resolveAgentToolEnabled, resolveClaudeModEnabled, resolveSnapshotsEnabled } from './enabled'
 import type { Host } from './host'
 import { COMMANDS, dataDirOf, debugAppendArgv, isModCommand, waitArgv } from './launch'
 import { PLAN_TOOL } from './plan'
@@ -147,19 +147,19 @@ interface Allowed {
   debugPath: string | null
   /** Register Claude's `plannotator` tool (the agent tool switch, on by default). */
   agentTool: boolean
-  /** Plannotator Shots: `/plannotator-screenshot` and the link to the Shots hub (off until launch). */
-  shots: boolean
+  /** Plannotator Snapshots: `/plannotator-snapshot` and the link to the Snapshots hub (off until launch). */
+  snapshots: boolean
 }
 
-// --- Plannotator Shots ----------------------------------------------------------
-/** The screenshot HUD's command; registered only when Shots is on. */
-const SHOTS_COMMAND = 'plannotator-screenshot'
-const SHOTS_COMMAND_SPEC = {
-  description: 'Take screenshots with Plannotator Shots, mark them up, and send them here as one message.',
-  argumentHint: '[--snapshot]',
+// --- Plannotator Snapshots ----------------------------------------------------------
+/** The capture HUD's command; registered only when Snapshots is on. */
+const SNAPSHOTS_COMMAND = 'plannotator-snapshot'
+const SNAPSHOTS_COMMAND_SPEC = {
+  description: 'Capture your screen with Plannotator Snapshots, mark it up, and send it here as one message.',
+  argumentHint: '[--app]',
 }
-/** Names this Claude Code process to the Shots hub (two processes can share one session). */
-let shotsProcessTag: string | null = null
+/** Names this Claude Code process to the Snapshots hub (two processes can share one session). */
+let snapshotsProcessTag: string | null = null
 // --------------------------------------------------------------------------------
 
 // One plugin instance per Claude Code process.
@@ -184,18 +184,18 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
     const previousSessionId = mod?.session.sessionId
     mod?.dispose()
     await $.env.set('PLANNOTATOR_SESSION_TAG', `claude-code:${sessionId}`)
-    if (settings.shots) shotsProcessTag ??= hexOf(crypto.getRandomValues(new Uint8Array(6)))
+    if (settings.snapshots) snapshotsProcessTag ??= hexOf(crypto.getRandomValues(new Uint8Array(6)))
     const instance = new PlannotatorMod(hostOf($, settings.debugPath), {
       sessionId,
       dataDir: settings.dataDir,
       interactive: true,
-      ...(settings.shots && shotsProcessTag
-        ? { shots: { processId: shotsProcessTag, ...(previousSessionId && previousSessionId !== sessionId ? { replaces: previousSessionId } : {}) } }
+      ...(settings.snapshots && snapshotsProcessTag
+        ? { snapshots: { processId: snapshotsProcessTag, ...(previousSessionId && previousSessionId !== sessionId ? { replaces: previousSessionId } : {}) } }
         : {}),
     })
     mod = instance
     await instance.restore().catch(() => undefined)
-    instance.shots?.start()
+    instance.snapshots?.start()
     return instance
   })()
   try {
@@ -230,7 +230,7 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
     dataDir,
     debugPath: debug && debug !== '0' ? `${dataDir}/claude-code-mod/debug.log` : null,
     agentTool: resolveAgentToolEnabled(await $.env.get('PLANNOTATOR_AGENT_TOOL'), configText),
-    shots: resolveShotsEnabled(await $.env.get('PLANNOTATOR_SHOTS'), configText),
+    snapshots: resolveSnapshotsEnabled(await $.env.get('PLANNOTATOR_SNAPSHOTS'), configText),
   }
 }
 
@@ -246,11 +246,11 @@ async function registerCommands($: Engine): Promise<void> {
   }
 }
 
-/** Plannotator Shots: register `/plannotator-screenshot` unless a skill holds the name (command.run answers it then). */
-async function registerShotsCommand($: Engine): Promise<void> {
+/** Plannotator Snapshots: register `/plannotator-snapshot` unless a skill holds the name (command.run answers it then). */
+async function registerSnapshotsCommand($: Engine): Promise<void> {
   const listed = await $.command.list().catch(() => [])
-  if ((Array.isArray(listed) ? listed : []).some((command: { name: string }) => command.name === SHOTS_COMMAND)) return
-  await $.command.register({ name: SHOTS_COMMAND, ...SHOTS_COMMAND_SPEC, immediate: true }).catch(() => undefined)
+  if ((Array.isArray(listed) ? listed : []).some((command: { name: string }) => command.name === SNAPSHOTS_COMMAND)) return
+  await $.command.register({ name: SNAPSHOTS_COMMAND, ...SNAPSHOTS_COMMAND_SPEC, immediate: true }).catch(() => undefined)
 }
 
 /**
@@ -292,7 +292,7 @@ export function register(on: On) {
     const instance = await currentMod($)
     if (!instance) return result
     await registerCommands($)
-    if (allowed.shots) await registerShotsCommand($)
+    if (allowed.snapshots) await registerSnapshotsCommand($)
     // Decided once per process, here: the tool list is part of Claude's
     // prompt, so it never changes under a running session.
     if (allowed.agentTool) await registerTool($)
@@ -307,14 +307,14 @@ export function register(on: On) {
   })
 
   // Matched by name: an unmatched hook makes the engine credit Plannotator on every plugin's command answer.
-  on('command.run', { command: [...Object.keys(COMMANDS), SHOTS_COMMAND] }, async ($: Engine, e: any, next: Next) => {
+  on('command.run', { command: [...Object.keys(COMMANDS), SNAPSHOTS_COMMAND] }, async ($: Engine, e: any, next: Next) => {
     const name: string = typeof e.command === 'string' ? e.command : ''
-    // Plannotator Shots: `/plannotator-screenshot` opens the capture overlay and latches this session.
-    if (name === SHOTS_COMMAND) {
-      if (!allowed?.shots) return next(e)
+    // Plannotator Snapshots: `/plannotator-snapshot` opens the capture overlay and latches this session.
+    if (name === SNAPSHOTS_COMMAND) {
+      if (!allowed?.snapshots) return next(e)
       const instance = await currentMod($)
-      if (!instance?.shots) return next(e)
-      return { text: await instance.shots.summon(typeof e.args === 'string' ? e.args : '') }
+      if (!instance?.snapshots) return next(e)
+      return { text: await instance.snapshots.summon(typeof e.args === 'string' ? e.args : '') }
     }
     if (!allowed || !isModCommand(name)) return next(e)
     const instance = await currentMod($)

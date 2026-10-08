@@ -116,7 +116,7 @@ export interface PullSessionBridgeOptions extends PullSessionBridgeConfig {
 	now?: () => number;
 	/**
 	 * Commands beyond ask/cancel/interrupt that a server hosting several
-	 * sessions sends to one of them (the Plannotator Shots hub's `deliver`).
+	 * sessions sends to one of them (the Plannotator Snapshots hub's `deliver`).
 	 * Called whenever commands are collected for a poll; it returns the ones
 	 * due now and owns their re-sending. A host that does not know a command
 	 * ignores it.

@@ -1,0 +1,20 @@
+{
+  "name": "@plannotator/snapshots-hud",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./hud.css": "./hud.css"
+  },
+  "dependencies": {
+    "@plannotator/shared": "workspace:*",
+    "@plannotator/ui": "workspace:*",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5"
+  }
+}

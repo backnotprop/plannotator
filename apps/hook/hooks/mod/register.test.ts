@@ -22,8 +22,8 @@ describe('command.run registration', () => {
     expect(hooks).toHaveLength(1)
     const matcher = hooks[0]?.matcher as { command?: unknown } | undefined
     expect(Array.isArray(matcher?.command)).toBe(true)
-    // Plus Plannotator Shots' command, answered only when Shots is switched on.
-    expect([...(matcher?.command as string[])].sort()).toEqual([...Object.keys(COMMANDS), 'plannotator-screenshot'].sort())
+    // Plus Plannotator Snapshots' command, answered only when Snapshots is switched on.
+    expect([...(matcher?.command as string[])].sort()).toEqual([...Object.keys(COMMANDS), 'plannotator-snapshot'].sort())
     expect(Object.keys(COMMANDS).sort()).toEqual(['plannotator-annotate', 'plannotator-last', 'plannotator-review'])
   })
 })

@@ -246,7 +246,7 @@ export interface SessionBridgeProviderOptions {
 	pollIntervalMs?: number;
 	/**
 	 * The "Surface: …" line for a surface the context modes do not describe
-	 * (Plannotator Shots asks from its HUD, outside any review).
+	 * (Plannotator Snapshots asks from its HUD, outside any review).
 	 */
 	surface?: string;
 }

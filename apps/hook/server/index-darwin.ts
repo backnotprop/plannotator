@@ -1,17 +1,17 @@
 /**
  * The macOS entry of the compiled CLI: the same CLI, plus the zipped
- * "Plannotator Shots.app" embedded in the binary. `plannotator screenshot`
+ * "Plannotator Snapshots.app" embedded in the binary. `plannotator snapshot`
  * installs it into ~/Applications when its build differs from the installed
- * one (shots-command.ts). Built only on macOS release jobs, after
- * apps/shots-macos/build.sh produced dist/PlannotatorShots.zip.
+ * one (snapshot-command.ts). Built only on macOS release jobs, after
+ * apps/snapshots-macos/build.sh produced dist/PlannotatorSnapshots.zip.
  */
 
 // @ts-ignore - Bun import attribute for an embedded file
-import shotsAppZip from "../../shots-macos/dist/PlannotatorShots.zip" with { type: "file" };
+import snapshotsAppZip from "../../snapshots-macos/dist/PlannotatorSnapshots.zip" with { type: "file" };
 // @ts-ignore - Bun import attribute for text
-import shotsAppBuild from "../../shots-macos/dist/build.txt" with { type: "text" };
+import snapshotsAppBuild from "../../snapshots-macos/dist/build.txt" with { type: "text" };
 
-globalThis.__PLANNOTATOR_SHOTS_APP_ZIP__ = shotsAppZip as unknown as string;
-globalThis.__PLANNOTATOR_SHOTS_APP_BUILD__ = (shotsAppBuild as unknown as string).trim();
+globalThis.__PLANNOTATOR_SNAPSHOTS_APP_ZIP__ = snapshotsAppZip as unknown as string;
+globalThis.__PLANNOTATOR_SNAPSHOTS_APP_BUILD__ = (snapshotsAppBuild as unknown as string).trim();
 
 await import("./index");

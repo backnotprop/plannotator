@@ -83,12 +83,12 @@ export interface BridgeOptions {
   /** False once the review settled or the session ended: the loop stops. */
   isLive: () => boolean
   maxFailures?: number
-  /** The poll and event paths; default the review server's `/api/ai/bridge/*` (the Shots hub serves one pair per connection). */
+  /** The poll and event paths; default the review server's `/api/ai/bridge/*` (the Snapshots hub serves one pair per connection). */
   pollPath?: string
   eventPath?: string
-  /** Commands this loop does not know (the Shots hub's `deliver`). */
+  /** Commands this loop does not know (the Snapshots hub's `deliver`). */
   onCommand?: (command: { type: string } & Record<string, unknown>) => void
-  /** Extra fields every poll carries (the Shots hub routes on the last human input). */
+  /** Extra fields every poll carries (the Snapshots hub routes on the last human input). */
   pollExtras?: () => Record<string, unknown>
 }
 

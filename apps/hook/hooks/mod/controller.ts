@@ -77,7 +77,7 @@ import {
   type PlannotatorTarget,
 } from './tool'
 import { TurnTracker, type EnteredPrompt } from './turns'
-import { ShotsLink } from './shots'
+import { SnapshotsLink } from './snapshots'
 
 /** Persisted in `$.store` so open reviews reattach after a restart or `--resume`. */
 export interface LaunchRecord {
@@ -290,8 +290,8 @@ export interface SessionInfo {
   sessionId: string
   dataDir: string
   interactive: boolean
-  /** Plannotator Shots is switched on (enabled.ts): this session links to the Shots hub. */
-  shots?: { processId: string; replaces?: string }
+  /** Plannotator Snapshots is switched on (enabled.ts): this session links to the Snapshots hub. */
+  snapshots?: { processId: string; replaces?: string }
 }
 
 export class PlannotatorMod {
@@ -328,16 +328,16 @@ export class PlannotatorMod {
   private claimedElsewhere = new Map<string, LaunchRecord>()
   private tickCount = 0
 
-  /** The session's link to the Plannotator Shots hub, when Shots is on. */
-  readonly shots: ShotsLink | null
+  /** The session's link to the Plannotator Snapshots hub, when Snapshots is on. */
+  readonly snapshots: SnapshotsLink | null
 
   constructor(
     private readonly host: Host,
     readonly session: SessionInfo,
   ) {
     this.instanceId = host.randomHex(8)
-    this.shots = session.shots
-      ? new ShotsLink({ host, dataDir: session.dataDir, sessionId: session.sessionId, processId: session.shots.processId, turns: this.turns, ...(session.shots.replaces ? { replaces: session.shots.replaces } : {}) })
+    this.snapshots = session.snapshots
+      ? new SnapshotsLink({ host, dataDir: session.dataDir, sessionId: session.sessionId, processId: session.snapshots.processId, turns: this.turns, ...(session.snapshots.replaces ? { replaces: session.snapshots.replaces } : {}) })
       : null
   }
 
@@ -492,7 +492,7 @@ export class PlannotatorMod {
    */
   dispose(): void {
     this.disposed = true
-    this.shots?.dispose()
+    this.snapshots?.dispose()
     this.timer?.cancel()
     this.timer = null
     this.host.status(undefined)
@@ -1527,8 +1527,8 @@ export class PlannotatorMod {
     if (wasOurs && turnId && this.turns.isTakenOver(turnId)) this.host.debug(`ask turn ${turnId} taken over`)
     // The person typed here: decisions should arrive in this conversation.
     if (originKind === 'composer') void this.touchLaunches()
-    // ...and a hotkey-started Shots collection picks the session typed into last.
-    if (originKind === 'composer') this.shots?.noteHumanInput(text)
+    // ...and a hotkey-started Snapshots collection picks the session typed into last.
+    if (originKind === 'composer') this.snapshots?.noteHumanInput(text)
   }
 
   /** A prompt reached prompt.submit, before the hooks beneath it ran, from register.ts. */
@@ -1567,7 +1567,7 @@ export class PlannotatorMod {
 
   private pushBridgeStatus(): void {
     for (const launch of this.launches.values()) launch.bridge?.pushStatus()
-    this.shots?.pushStatus()
+    this.snapshots?.pushStatus()
   }
 
   // --- Names ----------------------------------------------------------------------
