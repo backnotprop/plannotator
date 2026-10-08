@@ -8,7 +8,8 @@ preload = ["./tests/setup/feedback-archive-off.ts", "./packages/ui/test-setup/ha
 # The Claude Code mod's engine-harness tests run under `claude plugin test`
 # (scripts/test-claude-code-mod.sh), not bun: they import 'claude-code/testing'.
 # The Inbox's browser proofs run under Playwright (`bun run test:e2e:inbox`),
-# against a compiled binary, not under bun test.
+# against a compiled binary, not under bun test. The iPhone app's tests are
+# Swift (XCUITest and PlannotatorKit), run by apps/ios/scripts/proof.ts.
 # The relay's proof (apps/relay/test) runs `wrangler dev`: it runs from its own
 # folder in the relay workflow, not in the root run.
-pathIgnorePatterns = ["apps/hook/tests/**", "tests/e2e/**", "apps/relay/**"]
+pathIgnorePatterns = ["apps/hook/tests/**", "tests/e2e/**", "apps/ios/**", "apps/relay/**"]

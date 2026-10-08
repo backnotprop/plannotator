@@ -1,0 +1,79 @@
+# The Plannotator iPhone app. `xcodegen generate` (in apps/ios) writes
+# Plannotator.xcodeproj from this file; both are committed, so a fresh clone
+# builds with xcodebuild alone. See README.md.
+name: Plannotator
+options:
+  bundleIdPrefix: ai.plannotator
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: false
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+packages:
+  PlannotatorKit:
+    path: PlannotatorKit
+targets:
+  Plannotator:
+    type: application
+    platform: iOS
+    sources:
+      - path: Plannotator
+    dependencies:
+      - package: PlannotatorKit
+    info:
+      path: Plannotator/Info.plist
+      properties:
+        CFBundleDisplayName: Plannotator
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSCameraUsageDescription: Plannotator reads the pairing code your computer shows.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        CFBundleURLTypes:
+          - CFBundleURLName: ai.plannotator.app.pair
+            CFBundleURLSchemes: [plannotator]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.plannotator.app
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+        SWIFT_APPROACHABLE_CONCURRENCY: YES
+        ENABLE_PREVIEWS: YES
+  PlannotatorUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: PlannotatorUITests
+    dependencies:
+      - target: Plannotator
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.plannotator.app.uitests
+        TARGETED_DEVICE_FAMILY: "1"
+        TEST_TARGET_NAME: Plannotator
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Plannotator:
+    build:
+      targets:
+        Plannotator: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - package: PlannotatorKit/PlannotatorKitTests
+        - name: PlannotatorUITests
