@@ -549,7 +549,15 @@ export function commandFailureNoticeText(command: string, message: string): stri
   return `${formatCommandFailureNotice(command, message)}${COMMAND_FAILURE_NOTICE_MARKER}`;
 }
 
-const COMMAND_FAILURE_NOTICE_RE = /^Plannotator \/plannotator-(?:review|annotate|last) failed: \S[\s\S]*\n\n\(Plannotator notice for the person; not a request\.\)$/;
+const COMMAND_FAILURE_NOTICE_RE = /^Plannotator \/plannotator-(?:review|annotate|last|snapshot) failed: \S[\s\S]*\n\n\(Plannotator notice for the person; not a request\.\)$/;
+
+/** A command's own notice (`/plannotator-snapshot`'s "Plannotator Snapshots is open: …"), marked like a failure notice. */
+const COMMAND_NOTICE_RE = /^Plannotator Snapshots [^\n]*\n\n\(Plannotator notice for the person; not a request\.\)$/;
+
+/** The `text` of a command notice: the visible line plus the marker. */
+export function commandNoticeText(line: string): string {
+  return `${line.trim()}${COMMAND_FAILURE_NOTICE_MARKER}`;
+}
 
 /** Is this model-context message one of our transcript notices (session URL or command failure)? */
 function isSessionUrlNoticeMessage(message: unknown): boolean {
@@ -561,7 +569,7 @@ function isSessionUrlNoticeMessage(message: unknown): boolean {
       ? content[0].text
       : undefined;
   if (typeof text !== "string") return false;
-  if (COMMAND_FAILURE_NOTICE_RE.test(text)) return true;
+  if (COMMAND_FAILURE_NOTICE_RE.test(text) || COMMAND_NOTICE_RE.test(text)) return true;
   return text.startsWith(SESSION_URL_NOTICE_PREFIX)
     && /^https?:\/\/\S+$/.test(text.slice(SESSION_URL_NOTICE_PREFIX.length));
 }
@@ -762,6 +770,22 @@ export function createCommandFailureNotifier(
     const text = commandFailureNoticeText(command, message);
     return await synthetic({ sessionID, text, description, resume: false, delivery: CO_PROMOTED_DELIVERY });
   };
+}
+
+/**
+ * Show the person a command's own line (`/plannotator-snapshot`: "Plannotator
+ * Snapshots is open: …"), as a transcript notice that starts no model turn.
+ * The failure notice's mechanism and its filter: `dropSessionUrlNotices` keeps
+ * it out of the model's requests. Undefined on an older host with no
+ * `synthetic`, or with no session.
+ */
+export function createCommandNoticeNotifier(
+  ctx: V2ContextLike,
+  sessionID: string | undefined,
+): ((line: string) => Promise<unknown>) | undefined {
+  const synthetic = ctx.session?.synthetic;
+  if (typeof synthetic !== "function" || !sessionID) return undefined;
+  return async (line) => await synthetic({ sessionID, text: commandNoticeText(line), description: line.trim(), resume: false, delivery: CO_PROMOTED_DELIVERY });
 }
 
 /**

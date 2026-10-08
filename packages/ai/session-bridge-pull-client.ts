@@ -36,6 +36,28 @@ export interface PullSessionBridgeClientOptions {
 	maxFailures?: number;
 	fetch?: typeof fetch;
 	log?: (message: string) => void;
+	/**
+	 * Another server that speaks this protocol under its own paths (the
+	 * Plannotator Snapshots hub's `/api/connections/<id>/poll|event`).
+	 * Default: the review servers' `/api/ai/bridge/poll|event`.
+	 */
+	pollPath?: string;
+	eventPath?: string;
+	/** Extra fields for every poll body (the Snapshots hub routes on `lastHumanInputAt` and `title`). */
+	pollExtras?: () => Record<string, unknown>;
+	/**
+	 * A command of a type this protocol does not know (the Snapshots hub's
+	 * `deliver`). `post` sends an event of any type through the same ordered
+	 * outbox, so it reaches the server after everything sent before it.
+	 */
+	onExtraCommand?: (command: { type: string } & Record<string, unknown>, post: (event: { type: string } & Record<string, unknown>) => void) => void;
+	/**
+	 * How long to stay away after another client took the server's poll
+	 * (`superseded`: two processes on one session). Without a pause the two
+	 * would supersede each other in a busy loop. Unset: poll again at once
+	 * (the review servers, which have one client).
+	 */
+	supersededWaitMs?: () => number;
 }
 
 interface HostAsk {
@@ -89,6 +111,8 @@ export async function runPullSessionBridgeClient(options: PullSessionBridgeClien
 	const { bridge, signal } = options;
 	const log = options.log ?? (() => {});
 	const headers = { "content-type": "application/json", authorization: `Bearer ${options.token}` };
+	const pollUrl = `${base}${options.pollPath ?? SESSION_BRIDGE_POLL_PATH}`;
+	const eventUrl = `${base}${options.eventPath ?? SESSION_BRIDGE_EVENT_PATH}`;
 
 	/** Questions this host has seen (commands are re-sent until acknowledged). */
 	const asks = new Map<string, HostAsk>();
@@ -105,7 +129,7 @@ export async function runPullSessionBridgeClient(options: PullSessionBridgeClien
 	const post = async (events: BridgeHostEvent[]): Promise<void> => {
 		if (events.length === 0) return;
 		try {
-			const res = await doFetch(`${base}${SESSION_BRIDGE_EVENT_PATH}`, {
+			const res = await doFetch(eventUrl, {
 				method: "POST",
 				headers,
 				body: JSON.stringify(events.length === 1 ? events[0] : { events }),
@@ -114,7 +138,7 @@ export async function runPullSessionBridgeClient(options: PullSessionBridgeClien
 				// The server no longer runs a question we are answering (the reviewer
 				// stopped it before we confirmed it): stop ours.
 				for (const event of events) {
-					if ("askId" in event) stopAsk(event.askId);
+					if ("askId" in event && typeof event.askId === "string") stopAsk(event.askId);
 				}
 			}
 			await res.body?.cancel().catch(() => {});
@@ -227,6 +251,8 @@ export async function runPullSessionBridgeClient(options: PullSessionBridgeClien
 			case "interrupt":
 				void runInterrupt(command.interruptId);
 				break;
+			default:
+				options.onExtraCommand?.(command as { type: string } & Record<string, unknown>, (event) => emit(event as unknown as BridgeHostEvent));
 		}
 	};
 
@@ -247,10 +273,10 @@ export async function runPullSessionBridgeClient(options: PullSessionBridgeClien
 			let res: Response;
 			try {
 				lastStatus = readStatus(bridge);
-				res = await doFetch(`${base}${SESSION_BRIDGE_POLL_PATH}`, {
+				res = await doFetch(pollUrl, {
 					method: "POST",
 					headers,
-					body: JSON.stringify({ status: lastStatus, modes: bridge.modes, waitMs: pollWaitMs }),
+					body: JSON.stringify({ ...(options.pollExtras?.() ?? {}), status: lastStatus, modes: bridge.modes, waitMs: pollWaitMs }),
 					signal,
 				});
 			} catch (error) {
@@ -277,7 +303,7 @@ export async function runPullSessionBridgeClient(options: PullSessionBridgeClien
 				continue;
 			}
 			failures = 0;
-			let body: { commands?: BridgeCommand[]; closing?: boolean; features?: unknown } = {};
+			let body: { commands?: BridgeCommand[]; closing?: boolean; superseded?: boolean; features?: unknown } = {};
 			try {
 				body = (await res.json()) as typeof body;
 			} catch {
@@ -288,6 +314,7 @@ export async function runPullSessionBridgeClient(options: PullSessionBridgeClien
 				if (command && typeof command === "object" && typeof command.type === "string") handleCommand(command);
 			}
 			if (body.closing) stopped = true;
+			else if (body.superseded === true && options.supersededWaitMs) await sleep(options.supersededWaitMs(), signal);
 		}
 	} finally {
 		clearInterval(statusTimer);

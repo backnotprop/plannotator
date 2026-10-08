@@ -84,7 +84,8 @@ export class SnapshotsLink {
   start(): void {
     if (this.started || this.disposed) return
     this.started = true
-    void this.loop()
+    // The plugin environment can unload under the loop (its $ calls then reject): end quietly.
+    void this.loop().catch(() => undefined)
   }
 
   dispose(): void {

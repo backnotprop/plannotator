@@ -43,6 +43,7 @@ import { createOpenCodeSessionBridge, markPlanReviewPending } from "./opencode-s
 import type { PlanEdit } from "./plan-edits";
 import { getPlanningPrompt } from "./planning-prompt";
 import { findInboxConnection, registerInboxOpenCode2, type InboxToolDomainLike } from "./inbox";
+import { createOpenCodeSnapshots, type OpenCodeSnapshots } from "./snapshots";
 
 const DEFAULT_PLAN_TIMEOUT_SECONDS = 345_600;
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -118,6 +119,19 @@ const serverPlugin = {
     // those domains is probed, so setup completes there instead of throwing.
     const hasSessionHooks = typeof (ctx.session as { hook?: unknown } | undefined)?.hook === "function";
     const hasToolTransform = typeof (ctx.tool as { transform?: unknown } | undefined)?.transform === "function";
+    // Plannotator Snapshots (`/plannotator-snapshot` and each session's link
+    // to the Snapshots hub, snapshots.ts): on unless PLANNOTATOR_SNAPSHOTS /
+    // `snapshots` turn it off, decided once per plugin setup. Only where the
+    // plugin can prompt a session (the Send arrives as a turn); OpenCode 1
+    // keeps the markdown stub's blocking `plannotator snapshot --wait`.
+    let snapshots: OpenCodeSnapshots | null = null;
+    if (typeof v2.session?.prompt === "function") {
+      try {
+        snapshots = createOpenCodeSnapshots(v2, { resolveRoot: (sessionID) => resolveRootSession(v2, sessionID) });
+      } catch (error) {
+        console.error(`[Plannotator] Could not set up Plannotator Snapshots: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     const nativeDeps: NativeCommandDeps = {
       ctx: v2,
       getAgents,
@@ -125,6 +139,7 @@ const serverPlugin = {
       // so the reviews it opens offer the tool's switch only where it exists.
       getBridgeContext: () => getBridgeContext(getAgents, hasToolTransform),
       launches,
+      ...(snapshots ? { extraCommands: [snapshots.command] } : {}),
     };
     try {
       await registerNativeCommands(nativeDeps);

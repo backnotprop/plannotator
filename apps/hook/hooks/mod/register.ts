@@ -156,7 +156,7 @@ interface Allowed {
   debugPath: string | null
   /** Register Claude's `plannotator` tool (the agent tool switch, on by default). */
   agentTool: boolean
-  /** Plannotator Snapshots: `/plannotator-snapshot` and the link to the Snapshots hub (off until launch). */
+  /** Plannotator Snapshots: `/plannotator-snapshot` and the link to the Snapshots hub (on by default; PLANNOTATOR_SNAPSHOTS=0 turns it off). */
   snapshots: boolean
   /** Connect to the Plannotator Inbox when one is found (the inbox tool switch, on by default). */
   inboxTool: boolean

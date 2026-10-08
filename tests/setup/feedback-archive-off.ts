@@ -33,3 +33,8 @@ delete process.env.PLANNOTATOR_AGENT_TOOL;
 // refuses at once, so a pairing answers `relay: null`. The relay's own proof
 // (apps/relay/test) sets its `wrangler dev` URL in the env it spawns.
 process.env.PLANNOTATOR_RELAY_URL = "http://127.0.0.1:9";
+
+// The Snapshots switch decides whether /plannotator-snapshot and the hub link
+// exist at all (on by default); a contributor who turned it off in their shell
+// must not change what the tests see. Tests that need it off set it in their bodies.
+delete process.env.PLANNOTATOR_SNAPSHOTS;

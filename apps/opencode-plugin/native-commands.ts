@@ -30,6 +30,7 @@ import { createOpenCodeSessionBridge } from "./opencode-session-bridge";
 import {
   createV2BridgeClient,
   readListPayload,
+  type V2CommandDefinition,
   type V2CommandDraft,
   type V2CommandInvocation,
   type V2ContextLike,
@@ -114,6 +115,12 @@ export interface NativeCommandDeps {
    * its decision message names its session id.
    */
   launches?: OpenCodeLaunchRegistry;
+  /**
+   * More native commands that run their own way (`/plannotator-snapshot`,
+   * snapshots.ts). Added with the three above and reclaimed from the markdown
+   * stubs the same way.
+   */
+  extraCommands?: readonly V2CommandDefinition[];
 }
 
 /** Resolve the invocation's working directory, session location first. */
@@ -212,10 +219,10 @@ function defaultWait(ms: number): Promise<void> {
  * ConfigCommandPlugin, replaying the installed markdown stubs) added the name
  * after us and won.
  */
-async function ownsNativeCommands(ctx: V2ContextLike): Promise<boolean> {
+async function ownsNativeCommands(ctx: V2ContextLike, extra: readonly V2CommandDefinition[] = []): Promise<boolean> {
   const list = await ctx.command?.list?.();
   const commands = readListPayload(list);
-  return NATIVE_COMMANDS.every((command) => commands.some((entry) =>
+  return [...NATIVE_COMMANDS, ...extra].every((command) => commands.some((entry) =>
     entry.name === command.name && entry.description === command.description));
 }
 
@@ -260,6 +267,7 @@ export async function reclaimNativeCommands(input: {
   apply: () => Promise<void>;
   isSupported: () => boolean;
   wait?: (ms: number) => Promise<void>;
+  extraCommands?: readonly V2CommandDefinition[];
 }): Promise<void> {
   const wait = input.wait ?? defaultWait;
   const list = input.ctx.command?.list;
@@ -278,7 +286,7 @@ export async function reclaimNativeCommands(input: {
 
     let owned: boolean;
     try {
-      owned = await ownsNativeCommands(input.ctx);
+      owned = await ownsNativeCommands(input.ctx, input.extraCommands);
     } catch {
       return;
     }
@@ -340,6 +348,19 @@ export async function registerNativeCommands(deps: NativeCommandDeps): Promise<b
           },
         });
       }
+      for (const extra of deps.extraCommands ?? []) {
+        draft.add({
+          name: extra.name,
+          description: extra.description,
+          execute: async (invocation) => {
+            try {
+              await extra.execute(invocation);
+            } catch (error) {
+              console.error(`[Plannotator] /${extra.name} failed: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          },
+        });
+      }
     });
   };
 
@@ -350,6 +371,7 @@ export async function registerNativeCommands(deps: NativeCommandDeps): Promise<b
     apply,
     isSupported: () => supported,
     wait: deps.wait,
+    extraCommands: deps.extraCommands,
   });
 
   return supported;
