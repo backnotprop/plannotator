@@ -1,7 +1,7 @@
 /**
  * The Plannotator Inbox relay: a Cloudflare Worker with one Durable Object
  * per mailbox (adr/implementation/inbox-mobile.md, section 4). It carries
- * pushes, and with R2 the phone's reads and answers, between a person's
+ * pushes, and the phone's reads and answers, between a person's
  * Inbox and their phones, and holds only what it cannot read: every body is
  * an envelope under a key made at pairing on the computer and the phone.
  *
@@ -11,8 +11,11 @@
  *   DELETE /v1/mailboxes/:mbx/devices/:dev              Inbox bearer: remove it
  *   PUT    /v1/mailboxes/:mbx/devices/:dev/carriage     device bearer: the phone's relay switch
  *   PUT    /v1/mailboxes/:mbx/devices/:dev/apns         device bearer: the phone's APNs token
+ *   GET    /v1/mailboxes/:mbx/devices/:dev/items        device bearer: the held down items after a number
+ *   POST   /v1/mailboxes/:mbx/devices/:dev/ack          device bearer: delete them, by number or store cursor
+ *   POST   /v1/mailboxes/:mbx/devices/:dev/commands     device bearer: a command up, held for the Inbox
  *   POST   /v1/mailboxes/:mbx/push                      Inbox bearer: one push to one phone
- *   GET    /v1/mailboxes/:mbx/socket                    Inbox bearer, WebSocket: hello, carriage
+ *   GET    /v1/mailboxes/:mbx/socket                    Inbox bearer, WebSocket: hello, carriage, command; item, applied
  *
  * Owner-deployed (`wrangler deploy` from this folder, never from CI); lanes
  * run it under `wrangler dev` only.
@@ -81,6 +84,6 @@ export default {
     const stub = env.MAILBOX.get(env.MAILBOX.idFromName(match[1]!));
     // The body is read here, whole: a mailbox that refuses before reading a streamed body leaves workerd an unread request stream.
     const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
-    return stub.fetch(`https://mailbox${match[2]}`, { method: req.method, headers: req.headers, body });
+    return stub.fetch(`https://mailbox${match[2]}${url.search}`, { method: req.method, headers: req.headers, body });
   },
 } satisfies ExportedHandler<Env>;

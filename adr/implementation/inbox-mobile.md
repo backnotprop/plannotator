@@ -192,18 +192,19 @@ The switch's window routes (added in P2; the first draft named the switch but no
 
 A Cloudflare Worker in `apps/relay/` with one Durable Object per mailbox, on the model of `apps/guides-show/worker`: it holds what it cannot read. The origin is `https://relay.plannotator.ai` (owner item 20, recommended); `PLANNOTATOR_RELAY_URL` points the Inbox at `wrangler dev` in a proof.
 
-Built in two steps (R1, 2026-10-08). R1 built the mailbox, its devices, the APNs token, push, the phone's relay switch and the Inbox's socket with its `hello` and `carriage` frames. R2 adds the down items, the phone's fetch and ack, the commands up, `inbox_online`, and the socket's `item`, `command` and `applied` frames. Until R2 lands, `items`, `ack` and `commands` answer `404 not_found` like any path the relay does not serve, and the relay reads no frame from the Inbox's socket.
+Built in two steps (R1, 2026-10-08). R1 built the mailbox, its devices, the APNs token, push, the phone's relay switch and the Inbox's socket with its `hello` and `carriage` frames. R2 built the down items, the phone's fetch and ack, the commands up, `inbox_online`, and the socket's `item`, `command` and `applied` frames (written in by R2: the up key, the result item as the only file shape, the drain order, the two door routes the relay does not carry, and envelopes kept in parts).
 
 ### Keys
 
 All made on the computer and the phone at pairing; none ever reaches the relay.
 
 - **The pairing secret** `S`: the offer's 32 bytes, held by the phone (Keychain, this device only, shared with the notification extension's group) and by the computer (`inbox/device-secrets/<dev id>`).
-- **The device key** `K = HKDF-SHA256(ikm = S, salt = UTF-8 bytes of the device id, info = "plannotator-inbox relay key v1", length = 32)`: the AES-256-GCM key of every envelope between this Inbox and this phone.
+- **The device key** `K = HKDF-SHA256(ikm = S, salt = UTF-8 bytes of the device id, info = "plannotator-inbox relay key v1", length = 32)`: the AES-256-GCM key of every envelope the Inbox sends this phone: the down items and the push.
+- **The up key** `U = HKDF-SHA256(ikm = S, salt = UTF-8 bytes of the device id, info = "plannotator-inbox relay up v1", length = 32)`: the AES-256-GCM key of every command this phone sends up (written in by R2). With one key for both directions, a relay could hand a down envelope back to the Inbox as a command, and only the plaintext shapes would refuse it; with a key per direction, the Inbox's up key does not open it. A separate key is the smaller change: the envelope layout, `K` and the push stay as R1 built them, and no associated data has to be agreed byte for byte on both sides.
 - **The relay secret** `R = HKDF-SHA256(ikm = S, salt = UTF-8 bytes of the device id, info = "plannotator-inbox relay auth v1", length = 32)`, base64url: the phone's bearer at the relay. The relay stores only `SHA-256(R)` as hex.
 - **The mailbox secret** `M`: 32 random bytes, base64url, made by the Inbox with the mailbox and kept in `inbox/relay.json` (0600) as `{ v: 1, url, mailbox_id, secret }`. The Inbox's bearer at the relay. The relay stores only `SHA-256(M)` as hex.
 
-Both hashes are taken over the bearer as sent, the base64url string's UTF-8 bytes, which is what the relay hashes when a request arrives (written in by R1). Web Crypto (`deriveBits` with `HKDF`; `deriveRelayKeys` in `packages/core/crypto.ts`) and CryptoKit (`HKDF<SHA256>.deriveKey`) both compute these. R1 commits test vectors made from all-zero inputs in `packages/core/fixtures/inbox-relay-vectors.json`: the pairing secret, the device id, `K`, `R`, `SHA-256(R)`, and three envelopes with their plaintexts. TypeScript checks them in `packages/core/crypto.test.ts`; the app's tests (M5) check the same file in Swift, and the device proof has each side open the other's envelopes.
+Both hashes are taken over the bearer as sent, the base64url string's UTF-8 bytes, which is what the relay hashes when a request arrives (written in by R1). Web Crypto (`deriveBits` with `HKDF`; `deriveRelayKeys` in `packages/core/crypto.ts`) and CryptoKit (`HKDF<SHA256>.deriveKey`) both compute these. R1 commits test vectors made from all-zero inputs in `packages/core/fixtures/inbox-relay-vectors.json`: the pairing secret, the device id, `K`, `R`, `SHA-256(R)`, and three envelopes with their plaintexts; R2 adds `U` (`derived.up_key`) and one command envelope under it (`up_envelopes`). TypeScript checks them in `packages/core/crypto.test.ts`; the app's tests (M5) check the same file in Swift, and the device proof has each side open the other's envelopes.
 
 ### The envelope
 
@@ -212,7 +213,7 @@ Exactly the format `packages/core/crypto.ts` writes: `base64url(IV || ciphertext
 ### What the relay stores and deletes
 
 - **Per mailbox:** `secret_sha256`.
-- **Per device:** `secret_sha256`, `carriage` (the phone's relay switch), the APNs token and its environment (plain: Apple needs it), `cursor` (the highest store seq the Inbox has posted for it, a number), the next item number `n`, the down items `{ n, cursor, ciphertext }`, the up commands `{ id, ciphertext }`.
+- **Per device:** `secret_sha256`, `carriage` (the phone's relay switch), the APNs token and its environment (plain: Apple needs it), `cursor` (the highest store seq the Inbox has posted for it, a number), the next item number `n`, the down items `{ n, cursor, ciphertext }`, the up commands `{ id, ciphertext }` in the order they arrived. An envelope is kept in parts of at most 1,000,000 characters, one row each, and joined when read: a SQLite-backed Durable Object refuses a row above 2 MB, and the relay sets no item size of its own (written in by R2). Items and commands are bounded only by the platform's own request and WebSocket message limits.
 - **Never:** a key, a secret, a subject, a body. Logs carry ids and status codes only.
 - **Deleted:** a down item when the phone acknowledges it (by item number, or by store cursor when it read those lines directly); every down item when the phone turns carriage off; an up command when the Inbox reports it applied; a device and everything it holds when the Inbox removes it (a revoke); an APNs token when Apple answers 410. There is no time sweep.
 
@@ -231,7 +232,7 @@ Every route answers JSON. Errors are `{ error, code }`: `400 bad_request`, `401 
 | `GET /v1/mailboxes/:mbx/socket` | Inbox bearer, WebSocket upgrade | frames below | | 7.31 |
 | `GET /v1/mailboxes/:mbx/devices/:dev/items?after=n` | device bearer | | `{ items: [{ n, ciphertext }], inbox_online }`, every held item after `n` in order | 7.32 |
 | `POST /v1/mailboxes/:mbx/devices/:dev/ack` | device bearer | `{ through: n }`, or `{ cursor }` when the phone read the store directly up to that seq | `204`; deletes items up to `n`, or record items whose cursor is at or below `cursor` | 7.33 |
-| `POST /v1/mailboxes/:mbx/devices/:dev/commands` | device bearer | `{ id, ciphertext }` | `202 { queued: true, inbox_online }`; an `id` it already holds answers `200 { queued: false, inbox_online }` | 7.34 |
+| `POST /v1/mailboxes/:mbx/devices/:dev/commands` | device bearer | `{ id, ciphertext }` | `202 { queued: true, inbox_online }`; an `id` it already holds answers `200 { queued: false, inbox_online }`; a command whose frame to the Inbox would pass Cloudflare's 32 MiB WebSocket message limit answers `413 { error, code: "command_too_large", limit_bytes }` and is not held (it could never be handed over, and would close the Inbox's socket at every `hello`) | 7.34 |
 
 `inbox_online` says whether the Inbox's socket is connected now: the phone's "Sent. Waiting for your computer" (owner item 26).
 
@@ -242,22 +243,26 @@ The Inbox holds one outbound WebSocket to its mailbox while the mailbox has a de
 Relay to Inbox:
 
 - `{ "type": "hello", "devices": [{ "device_id", "cursor", "carriage": boolean, "apns": boolean }] }` on connect. The Inbox writes each listed device's `carriage` into its device record, removes any listed device it revoked, and registers only the non-revoked devices with `carriage: true` that the relay does not list. A device whose phone turned carriage off stays listed, so a reconnect never registers it again.
-- `{ "type": "command", "device_id", "id", "ciphertext" }`: each held up command, in order, until it is applied.
+- `{ "type": "command", "device_id", "id", "ciphertext" }`: each held up command. Right after `hello`, every held command in the order it arrived; afterwards each new one as the phone posts it. A command stays held until the Inbox reports it applied, so one handed to a socket that was already dead goes out again after the next `hello`.
 - `{ "type": "carriage", "device_id", "on", "cursor" }`: the phone flipped its relay switch (9.2). The Inbox writes `carriage` into the device record. Off: it sends that device no items and no pushes. On: it resumes items after `cursor`.
 
 Inbox to relay:
 
-- `{ "type": "item", "device_id", "cursor", "ciphertext" }`: one down item, sent only to a device with carriage on. `cursor` is the record's store seq, or null for a result; the relay keeps the highest so the Inbox resumes from `hello`.
+- `{ "type": "item", "device_id", "cursor", "ciphertext" }`: one down item, sent only to a device with carriage on. `cursor` is the record's store seq, or null for a result; the relay keeps the highest so the Inbox resumes from `hello`. The relay drops an item for a device it does not hold or whose carriage is off.
 - `{ "type": "applied", "device_id", "id" }`: the command was applied (or refused); the relay deletes it.
+
+The drain order (written in by R2). The Inbox handles the socket's frames one at a time, in the order they arrive. On `hello` it settles the devices as above, then sends each listed device with carriage on every store line after the `cursor` `hello` gave, in seq order; a device it registers while the socket is open is carried from the cursor it registered with. Then come the held commands, each applied in turn: opened with the device's up key, applied through the door, answered with a result item, then reported `applied`. Store lines written meanwhile, the command's own writes among them, go down as they are written, so a result can follow the records it caused. A command no key here opens (a revoked device, a forged or reflected envelope) is reported `applied` with no result item. `inbox_online` is the socket as the relay last saw it: a computer that went to sleep without closing it reads as online until the connection times out, and its commands wait at the relay all the same.
 
 ### What goes down and up
 
 Down item plaintexts:
 
-- `{ "v": 1, "type": "record", "seq", "kind", "id", "<kind>": record }`: one store line, exactly the `record` event of the event stream (`eventPayload` in `packages/server/inbox.ts`) with `v` and `type` added. After a device's `cursor`, every line goes down, in seq order. A phone reading over the Wi-Fi or the tailnet acknowledges by store cursor (`ack { cursor }`), so its queue holds only what it missed.
-- `{ "v": 1, "type": "result", "id", "status", "content_type", "body_b64" }`: the door's answer to an up command, its bytes as base64.
+- `{ "v": 1, "type": "record", "after", "seq", "kind", "id", "<kind>": record }`: one store line, exactly the `record` event of the event stream (`eventPayload` in `packages/server/inbox.ts`) with `v`, `type` and `after` added. After a device's `cursor`, every line goes down, in seq order. `after` is the seq the device's previous item on this socket reached (the cursor the relay held, for the first after a `hello` or a `carriage` frame): a phone whose last seen seq is lower than an item's `after` knows an item was delayed or dropped and reads the list again (written in by R2 after plannotator-ops's review). A line whose `item` frame would pass Cloudflare's 32 MiB WebSocket message limit goes down as the placeholder `{ "v": 1, "type": "record", "after", "seq", "kind", "id", "too_large": true }`, and the cursor moves past it; the phone reads that record over the Wi-Fi or the tailnet, or shows that it is too large to show here (M6 draws the words). Written in by R2 after plannotator-ops's review: the store caps nothing, and one line over the limit closed the socket at every resend, held every later line and every command behind the reconnect loop. A phone reading over the Wi-Fi or the tailnet acknowledges by store cursor (`ack { cursor }`), so its queue holds only what it missed.
+- `{ "v": 1, "type": "result", "id", "status", "content_type", "body_b64" }`: the door's answer to an up command, its status, its `Content-Type` and its body bytes exactly, as base64 (standard alphabet, padded). It goes only to a device with carriage on. `id` is the id sealed inside the command, never the relay's plaintext frame `id`, and the Inbox refuses a command whose sealed `id` is not its frame's (written in by R2 after its review: otherwise the relay could file one command's authentic result under another command's id, a GET's 200 under a Send it dropped). A result whose `item` frame would pass Cloudflare's WebSocket message limit (32 MiB, the platform's own) is replaced by `status: 413`, `content_type: application/json; charset=utf-8` and the body `{ "error", "code": "result_too_large", "limit_bytes": 33554432 }`, and the command is reported applied (written in by R2 after its review: one frame over the limit closed the socket, the command was handed over again at every `hello`, and every command behind it waited forever). The phone opens such a file over the Wi-Fi or the tailnet.
 
-Up command plaintext: `{ "v": 1, "id", "method", "path", "body" }`, where `path` is a door path (`/api/inbox/device/...`) and `body` is the JSON body the phone would have sent directly. The Inbox applies it through the door as that device, so the allowlist, the revocation check and the idempotency rule are the same on every path. A GET through the relay (the list after a long absence, an attachment's view, an HTML asset) is a command whose `id` is a fresh random id; a POST's `id` is its `idempotency_key` (section 6).
+Files have no item of their own (written in by R2): a file is the result of a GET. An attachment is `GET attachments/:id/view` (the current version) or `GET attachments/:id/view?version=sent` (the version the agent sent), whose result carries 7.15's JSON with `text` and `html`; an HTML asset is `GET html-assets/<token>/<path>`, whose result carries the asset's bytes and type as 7.16 answers them. A result is one envelope whatever its size (kept in parts at the relay, above).
+
+Up command plaintext: `{ "v": 1, "id", "method", "path", "body" }`, sealed under the up key `U`, where `path` is a door path (`/api/inbox/device/...`, with its query string when the route takes one, `?version=sent` or `?project=prj_...`) and `body` is the JSON body the phone would have sent directly (a POST only). The Inbox applies it in-process through the door as that device (never as a loopback HTTP call), so the allowlist, the revocation check and the idempotency rule are the same on every path: every POST goes through the door's idempotency log per device and key, so a command the relay hands over again, or replays later, answers the stored result and writes nothing. A GET through the relay (the list after a long absence, an attachment's view, an HTML asset) is a command whose `id` is a fresh random id; a POST's `id` is its `idempotency_key` (section 6). Two door routes are not carried, and answer a result of `404 device_route_not_found`: `pair` (pairing through the relay is not in v1) and `events` (the down items are the relay's event stream; an endless answer cannot be one result).
 
 ### Push
 
@@ -268,6 +273,7 @@ The push plaintext, encrypted under the device key:
 ```json
 {
   "v": 1,
+  "type": "push",
   "thread_id": "msg_01K70000000000000000000010",
   "message_id": "msg_01K70000000000000000000010",
   "subject": "Run the retry tests against the Stripe test clock?",
@@ -286,10 +292,11 @@ The push plaintext, encrypted under the device key:
 }
 ```
 
+- `type` is always `"push"` (written in by R2 after plannotator-ops's review): pushes and down items are sealed under the same key `K`, so the phone opens an APNs `e` only when its `type` is `"push"`, and a down item only when its `type` is `"record"` or `"result"`; a relay cannot pass one off as the other.
 - `agent` is `inboxAgentName(author)`, `project` the project's name.
 - `question` is present only when the message has exactly one question, it is single-choice, and it has at most four choices (Apple shows at most four actions). Otherwise it is null, and the notification opens the thread (render 7.2).
-- `collapse_id` is `HMAC-SHA256(K, UTF-8 bytes of the thread id)` as 64 lowercase hex, so a thread's newer push replaces its older one and the relay never learns the thread (written in by R1 after plannotator-ops's review; the first draft sent the thread id). The phone reads the thread from the decrypted `thread_id`, never from the collapse id. The relay refuses a collapse id that is not 1 to 64 printable ASCII bytes, Apple's ceiling, with `400 bad_request`.
-- Apple's payload ceiling is 4096 bytes. When the APNs body would pass it, the Inbox sets `question.context` to null, then `question` to null, then sends `{ v, thread_id, message_id }` alone.
+- `collapse_id` is `HMAC-SHA256(C, UTF-8 bytes of the thread id)` as 64 lowercase hex, where `C = HKDF-SHA256(ikm = S, salt = UTF-8 bytes of the device id, info = "plannotator-inbox relay collapse v1", length = 32)` (written in by R2 after plannotator-ops's delta review of R1: a MAC under the envelope key `K` would use one key for two jobs; `C` is the Inbox's alone, the phone never computes it, so it has no vector), so a thread's newer push replaces its older one and the relay never learns the thread (written in by R1 after plannotator-ops's review; the first draft sent the thread id). The phone reads the thread from the decrypted `thread_id`, never from the collapse id. The relay refuses a collapse id that is not 1 to 64 printable ASCII bytes, Apple's ceiling, with `400 bad_request`.
+- Apple's payload ceiling is 4096 bytes. When the APNs body would pass it, the Inbox sets `question.context` to null, then `question` to null, then sends `{ v, type, thread_id, message_id }` alone.
 
 What the relay sends to APNs, with `apns-push-type: alert`, `apns-priority: 10`, `apns-topic: ai.plannotator.app` and `apns-collapse-id: <collapse_id>`:
 
@@ -898,7 +905,7 @@ websocat -H 'Authorization: Bearer BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB' 
 > {"type":"applied","device_id":"dev_01K70000000000000000000001","id":"00000000-0000-4000-8000-000000000003"}
 ```
 
-The command's plaintext is `{"v":1,"id":"00000000-0000-4000-8000-000000000003","method":"POST","path":"/api/inbox/device/messages/msg_01K70000000000000000000010/reply","body":{"idempotency_key":"00000000-0000-4000-8000-000000000003","words":"Go ahead.","questions":[{"key":"q-1a2b3c4d","revision":1}]}}`; the result item's plaintext is `{"v":1,"type":"result","id":"00000000-0000-4000-8000-000000000003","status":200,"content_type":"application/json; charset=utf-8","body_b64":"<7.11's answer as base64>"}`.
+The command's plaintext, under the up key `U`, is `{"v":1,"id":"00000000-0000-4000-8000-000000000003","method":"POST","path":"/api/inbox/device/messages/msg_01K70000000000000000000010/reply","body":{"idempotency_key":"00000000-0000-4000-8000-000000000003","words":"Go ahead.","questions":[{"key":"q-1a2b3c4d","revision":1}]}}`; the result item's plaintext is `{"v":1,"type":"result","id":"00000000-0000-4000-8000-000000000003","status":200,"content_type":"application/json; charset=utf-8","body_b64":"<7.11's answer as base64>"}`.
 
 ### 7.32 The phone fetches after a cursor
 
