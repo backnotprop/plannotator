@@ -1081,19 +1081,27 @@ html[data-native] .panel {
   white-space: nowrap;
   overflow: hidden;
 }
+/* A standard spinner: a faint full ring with one bright quarter turning on it.
+   (A ring with one side cut away read as a "U" when it was not moving.) */
 .spin {
   width: 10px;
   height: 10px;
-  border-radius: 5px;
-  border: 1.5px solid var(--text-3);
-  border-top-color: transparent;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-top-color: currentColor;
+  color: var(--text-3);
   display: inline-block;
-  animation: sp 1s linear infinite;
+  animation: sp 0.8s linear infinite;
   flex: none;
 }
 @keyframes sp {
   to {
     transform: rotate(360deg);
+  }
+}
+@keyframes spin-breathe {
+  50% {
+    opacity: 0.35;
   }
 }
 .inbox {
@@ -1304,9 +1312,12 @@ html[data-native] .panel {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .caret,
-  .spin {
+  .caret {
     animation: none;
+  }
+  /* Reduced motion: no turning, a slow fade says "still working". */
+  .spin {
+    animation: spin-breathe 1.6s ease-in-out infinite;
   }
   .th.arrived {
     animation: none;
@@ -1556,8 +1567,7 @@ html[data-native] .perm {
   width: 14px;
   height: 14px;
   border-width: 2px;
-  border-color: currentColor;
-  border-top-color: transparent;
+  color: inherit;
 }
 .perm-link {
   display: block;
