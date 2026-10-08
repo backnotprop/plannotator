@@ -246,9 +246,14 @@ async function armed(frame: FrameLocator, count: 0 | 1): Promise<void> {
         bridge: typeof (window as any).__plannotatorBridgeInternals,
         body: document.body ? [...document.body.attributes].map((a) => a.name) : null,
         probe: document.getElementById('probe')?.textContent,
+        fromParent: (window as any).__seenMessages,
       }))
       .catch((e) => String(e));
-    throw new Error(`the frame's bridge did not ${count ? 'arm' : 'stand down'}: ${JSON.stringify(state)}; page errors: ${JSON.stringify(world.errors)}; frames: ${world.page.frames().map((f) => f.url()).join(', ')}`, { cause: error });
+    const main = await world.page.evaluate(() => ({
+      fromFrame: (window as any).__seenMessages,
+      iframes: document.querySelectorAll('[data-surface-attachment] iframe').length,
+    }));
+    throw new Error(`the frame's bridge did not ${count ? 'arm' : 'stand down'}: ${JSON.stringify(state)}; main: ${JSON.stringify(main)}; page errors: ${JSON.stringify(world.errors)}; frames: ${world.page.frames().map((f) => f.url()).join(', ')}`, { cause: error });
   }
 }
 
@@ -338,6 +343,9 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   await page.addInitScript(() => {
     const post = (message: unknown) => (window as any).__surfaceShellPost(message);
     (window as any).webkit = { messageHandlers: { plannotatorSurface: { postMessage: post } } };
+    // For a failure report only: the frame messages each side received.
+    const seen: string[] = ((window as any).__seenMessages = []);
+    window.addEventListener('message', (e) => seen.push(String((e.data as { type?: unknown } | null)?.type)), true);
   });
   world = {
     root,
