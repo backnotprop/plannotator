@@ -76,12 +76,15 @@ jobs:
 
       - name: Run the relay proof
         working-directory: apps/relay
-        run: PLANNOTATOR_INBOX_TEST_BINARY="$GITHUB_WORKSPACE/.local/plannotator" RELAY_PROOF_APPLE=1 bun test
+        # INBOX_PROOF_DIR: the carriage's transcript and storage dumps (ids, hashes and envelopes only), kept with the logs.
+        run: PLANNOTATOR_INBOX_TEST_BINARY="$GITHUB_WORKSPACE/.local/plannotator" RELAY_PROOF_APPLE=1 INBOX_PROOF_DIR="$GITHUB_WORKSPACE/.local/relay-proof" bun test
 
       - name: Keep the relay's logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: relay-proof
-          path: apps/relay/.wrangler/proof-*/wrangler.log
+          path: |
+            apps/relay/.wrangler/proof-*/wrangler.log
+            .local/relay-proof/
           if-no-files-found: ignore

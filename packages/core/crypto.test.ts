@@ -181,7 +181,7 @@ describe("live paste service E2E", () => {
 describe("the Inbox relay's vectors", () => {
   test("the pairing secret and device id derive the vectors' key and relay secret", async () => {
     const derived = await deriveRelayKeys(vectors.pairing_secret, vectors.device_id);
-    expect(derived).toEqual({ key: vectors.derived.key, relaySecret: vectors.derived.relay_secret });
+    expect(derived).toEqual({ key: vectors.derived.key, upKey: vectors.derived.up_key, relaySecret: vectors.derived.relay_secret });
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(derived.relaySecret)));
     expect(Buffer.from(digest).toString("hex")).toBe(vectors.derived.relay_secret_sha256);
   });
@@ -195,6 +195,12 @@ describe("the Inbox relay's vectors", () => {
       const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(plaintext)));
       expect(Buffer.concat([iv, sealed]).toString("base64url")).toBe(envelope);
     }
+  });
+
+  test("each direction has its own key: a down envelope does not open as a command, nor a command as a down item", async () => {
+    for (const { plaintext, envelope } of vectors.up_envelopes) expect(await decryptWithKey(envelope, vectors.derived.up_key)).toBe(plaintext);
+    await expect(decryptWithKey(vectors.envelopes[0]!.envelope, vectors.derived.up_key)).rejects.toThrow();
+    await expect(decryptWithKey(vectors.up_envelopes[0]!.envelope, vectors.derived.key)).rejects.toThrow();
   });
 
   test("encryptWithKey makes a fresh IV each time, and a wrong key or a changed byte does not open", async () => {

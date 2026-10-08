@@ -15,14 +15,19 @@
  *    `hello` on connect (each phone's relay switch written into its record,
  *    a revoked phone removed, a phone the relay does not list registered) and
  *    `carriage` when a phone flips its switch;
+ *  - carries (R2): down, every store line after each phone's cursor as an
+ *    `item` sealed under that phone's key, to phones whose switch is on;
+ *    up, each `command` opened with the phone's up key and applied through
+ *    the device door in-process (`apply`), answered with a `result` item and
+ *    then `applied`, so the relay deletes it. Frames are handled one at a
+ *    time in the order they arrive: `hello`, then the held commands;
  *  - posts one push per paired phone whose switch is on when an agent's
  *    message lands with a question or a guided review (where the window's
  *    browser notification fires for a question, packages/inbox/notify.ts),
  *    the summary encrypted under that phone's key.
  *
  * The phone registers its own APNs token at the relay with its relay secret
- * (exchange 7.29); the Inbox never sees it. The down items and the commands
- * up (R2) are not here yet.
+ * (exchange 7.29); the Inbox never sees it.
  *
  * The relay is `https://relay.plannotator.ai` unless `PLANNOTATOR_RELAY_URL`
  * names another (a `wrangler dev` relay in a proof). A mailbox, once made,
@@ -32,10 +37,11 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { deriveRelayKeys, encryptWithKey } from "@plannotator/core/crypto";
+import { decryptWithKey, deriveRelayKeys, encryptWithKey } from "@plannotator/core/crypto";
 import { inboxAgentName } from "@plannotator/core/inbox-types";
 import { sha256Hex, type InboxDevice, type InboxDevices } from "@plannotator/shared/inbox/devices";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
+import type { InboxLine } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 
 export const DEFAULT_RELAY_URL = "https://relay.plannotator.ai";
@@ -134,10 +140,30 @@ interface CarriageFrame {
   cursor: number | null;
 }
 
+interface CommandFrame {
+  type: "command";
+  device_id: string;
+  id: string;
+  ciphertext: string;
+}
+
+/** A command's plaintext (section 4, "What goes down and up"). */
+interface CommandPlaintext {
+  v: 1;
+  id: string;
+  method: string;
+  path: string;
+  body?: unknown;
+}
+
 export interface InboxRelayContext {
   dataDir: string;
   store: InboxStore;
   devices: InboxDevices;
+  /** A store line as the event stream's `record` event writes it (`eventPayload` in inbox.ts). */
+  payload: (line: InboxLine) => unknown;
+  /** Apply a command as a device, in-process through the device door (inbox-devices.ts `asDevice`). */
+  apply: (deviceId: string, command: { method: string; path: string; body?: unknown }) => Promise<Response>;
   /** Where a new mailbox is made. Default: `relayUrl()`. */
   url?: string;
   /** One line per event, ids and status codes only (the Inbox's log). */
@@ -154,6 +180,13 @@ export function createInboxRelay(context: InboxRelayContext) {
   let delay = RECONNECT_FIRST_MS;
   let stopped = false;
   let unsubscribe: (() => void) | null = null;
+  /** Per phone with carriage on, on this socket: the store seq its items have reached. Cleared on each new socket. */
+  const sent = new Map<string, number>();
+  /** Phones whose items are being sent now, and those that need another pass when it ends. */
+  const pumping = new Set<string>();
+  const again = new Set<string>();
+  /** Frames are handled one at a time, in arrival order, across reconnects too: a command handed over again waits for the first to finish. */
+  let frames: Promise<void> = Promise.resolve();
 
   const call = (method: string, path: string, bearer: string | null, body?: unknown, url = mailbox?.url): Promise<Response> =>
     fetch(`${url}${path}`, {
@@ -197,8 +230,11 @@ export function createInboxRelay(context: InboxRelayContext) {
     const secret = devices.secret(device.id);
     if (!mailbox || !secret) return;
     const { relaySecret } = await deriveRelayKeys(secret, device.id);
-    const answer = await call("PUT", mailboxPath(`/devices/${device.id}`), mailbox.secret, { secret_sha256: sha256Hex(relaySecret), cursor: store.cursor() });
+    const cursor = store.cursor();
+    const answer = await call("PUT", mailboxPath(`/devices/${device.id}`), mailbox.secret, { secret_sha256: sha256Hex(relaySecret), cursor });
     log(`register ${device.id} ${answer.status}`);
+    // On an open socket the phone is carried from here; otherwise the next hello lists it with this cursor.
+    if (answer.ok && socket?.readyState === WebSocket.OPEN && !sent.has(device.id)) sent.set(device.id, cursor);
   };
 
   const remove = async (deviceId: string): Promise<void> => {
@@ -208,6 +244,8 @@ export function createInboxRelay(context: InboxRelayContext) {
   };
 
   const onHello = async (frame: HelloFrame): Promise<void> => {
+    log(`hello ${frame.devices.length}`);
+    sent.clear();
     const listed = new Set<string>();
     for (const entry of frame.devices) {
       listed.add(entry.device_id);
@@ -218,10 +256,98 @@ export function createInboxRelay(context: InboxRelayContext) {
     for (const device of devices.list()) {
       if (device.carriage && !listed.has(device.id)) await register(device).catch(() => log(`register ${device.id} failed`));
     }
+    // Resume each listed phone with carriage on from the cursor the relay holds; a phone registered just now starts at the store's cursor then.
+    for (const entry of frame.devices) {
+      const local = devices.get(entry.device_id);
+      if (local && local.revoked_at === null && entry.carriage) sent.set(local.id, entry.cursor);
+    }
+    for (const id of sent.keys()) void pump(id);
   };
 
-  const onFrame = (text: string) => {
-    let frame: HelloFrame | CarriageFrame;
+  const send = (frame: unknown): boolean => {
+    if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+    socket.send(JSON.stringify(frame));
+    return true;
+  };
+
+  /**
+   * Send one phone every store line after the seq it has reached, sealed
+   * under its key, until it has them all. One pass at a time per phone; a
+   * line written meanwhile asks for another pass.
+   */
+  const pump = async (deviceId: string): Promise<void> => {
+    if (pumping.has(deviceId)) {
+      again.add(deviceId);
+      return;
+    }
+    pumping.add(deviceId);
+    try {
+      do {
+        again.delete(deviceId);
+        const secret = devices.secret(deviceId);
+        if (!secret) return;
+        const { key } = await deriveRelayKeys(secret, deviceId);
+        pass: for (;;) {
+          const from = sent.get(deviceId);
+          if (from === undefined) return;
+          const lines = store.changesSince(from);
+          if (lines.length === 0) break;
+          let reached = from;
+          for (const line of lines) {
+            if (!devices.get(deviceId)?.carriage) return;
+            const ciphertext = await encryptWithKey(JSON.stringify({ v: 1, type: "record", ...(context.payload(line) as object) }), key);
+            // A carriage frame moved the cursor meanwhile: start again from it.
+            if (sent.get(deviceId) !== reached) continue pass;
+            if (!send({ type: "item", device_id: deviceId, cursor: line.seq, ciphertext })) return;
+            reached = line.seq;
+            sent.set(deviceId, reached);
+          }
+        }
+      } while (again.has(deviceId));
+    } finally {
+      pumping.delete(deviceId);
+    }
+  };
+
+  /** The command a phone sealed under its up key, or null when no key here opens it (a revoked phone, a forged or reflected envelope). */
+  const openCommand = async (frame: CommandFrame, upKey: string): Promise<CommandPlaintext | null> => {
+    try {
+      const opened = JSON.parse(await decryptWithKey(frame.ciphertext, upKey)) as CommandPlaintext;
+      return opened?.v === 1 && typeof opened.method === "string" && typeof opened.path === "string" ? opened : null;
+    } catch {
+      return null;
+    }
+  };
+
+  /** One command: opened with the phone's up key, applied through the door, answered with a result item, then reported applied. */
+  const onCommand = async (frame: CommandFrame): Promise<void> => {
+    const secret = devices.secret(frame.device_id);
+    const keys = secret ? await deriveRelayKeys(secret, frame.device_id) : null;
+    const command = keys ? await openCommand(frame, keys.upKey) : null;
+    if (keys && command) {
+      const answer = await context.apply(frame.device_id, { method: command.method, path: command.path, body: command.body });
+      const bytes = Buffer.from(await answer.arrayBuffer());
+      log(`command ${frame.device_id} ${command.method} ${answer.status}`);
+      if (devices.get(frame.device_id)?.carriage) {
+        const result = {
+          v: 1,
+          type: "result",
+          id: frame.id,
+          status: answer.status,
+          content_type: answer.headers.get("content-type") ?? "application/octet-stream",
+          body_b64: bytes.toString("base64"),
+        };
+        send({ type: "item", device_id: frame.device_id, cursor: null, ciphertext: await encryptWithKey(JSON.stringify(result), keys.key) });
+      }
+    } else {
+      // Refused the same way whatever the reason: reported applied, so the relay lets it go.
+      log(`command ${frame.device_id} refused`);
+    }
+    send({ type: "applied", device_id: frame.device_id, id: frame.id });
+  };
+
+  const onFrame = async (text: string): Promise<void> => {
+    let frame: HelloFrame | CarriageFrame | CommandFrame;
     try {
       frame = JSON.parse(text);
     } catch {
@@ -229,9 +355,18 @@ export function createInboxRelay(context: InboxRelayContext) {
     }
     if (frame?.type === "hello" && Array.isArray(frame.devices)) {
       delay = RECONNECT_FIRST_MS;
-      void onHello(frame);
+      await onHello(frame);
     } else if (frame?.type === "carriage" && typeof frame.device_id === "string" && typeof frame.on === "boolean") {
       devices.setCarriage(frame.device_id, frame.on, new Date().toISOString());
+      // On: resume after the cursor the phone holds. Off: nothing more goes to it.
+      if (frame.on && typeof frame.cursor === "number") {
+        sent.set(frame.device_id, frame.cursor);
+        void pump(frame.device_id);
+      } else {
+        sent.delete(frame.device_id);
+      }
+    } else if (frame?.type === "command" && typeof frame.device_id === "string" && typeof frame.id === "string" && typeof frame.ciphertext === "string") {
+      await onCommand(frame);
     }
   };
 
@@ -243,11 +378,14 @@ export function createInboxRelay(context: InboxRelayContext) {
     const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${mailbox.secret}` } } as unknown as string[]);
     socket = ws;
     ws.onmessage = (event) => {
-      if (typeof event.data === "string") onFrame(event.data);
+      if (typeof event.data !== "string") return;
+      const text = event.data;
+      frames = frames.then(() => (socket === ws ? onFrame(text) : undefined)).catch((error) => log(`frame failed: ${error instanceof Error ? error.message : String(error)}`));
     };
     ws.onclose = () => {
       if (socket !== ws) return;
       socket = null;
+      sent.clear();
       if (stopped || devices.list().length === 0) return;
       retry = setTimeout(() => {
         retry = null;
@@ -322,11 +460,14 @@ export function createInboxRelay(context: InboxRelayContext) {
     /** A phone was removed on the computer or by itself: gone from the relay with all it held. */
     revoked(device: InboxDevice): void {
       // One that fails here is removed when the socket next says hello.
+      sent.delete(device.id);
       void remove(device.id).catch(() => log(`remove ${device.id} failed`));
       if (devices.list().length === 0) disconnect();
     },
     start(): void {
       unsubscribe = store.subscribe((line) => {
+        // Every line goes down to each phone this socket is carrying.
+        for (const id of sent.keys()) void pump(id);
         // A message's first line: `at` is its `created_at`. Its questions are written in the same turn, so they are read after it.
         if (line.kind !== "message" || line.record.author.kind !== "agent" || line.at !== line.record.created_at) return;
         const id = line.record.id;

@@ -94,8 +94,9 @@ export class SimAgent {
     return (await this.call('read_thread', { thread_id: threadId })).thread as Structured;
   }
 
-  waitForReply(threadId: string, timeoutSeconds = 50): Promise<Structured> {
-    return this.call('wait_for_reply', { thread_id: threadId, timeout_seconds: timeoutSeconds });
+  /** `cursor`: the one a previous answer returned, to wait for a later reply only. */
+  waitForReply(threadId: string, timeoutSeconds = 50, cursor?: number): Promise<Structured> {
+    return this.call('wait_for_reply', { thread_id: threadId, timeout_seconds: timeoutSeconds, ...(cursor === undefined ? {} : { cursor }) });
   }
 
   /** The project's decisions as an agent reads them (`state`: current by default, or replaced, retired, all). */

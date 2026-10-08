@@ -890,8 +890,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     tailscale: options.tailscale,
     relay: { paired: (device) => relay.paired(device), revoked: (device) => relay.revoked(device) },
   });
-  // The relay (packages/server/inbox-relay.ts): the mailbox socket while a phone is paired, and the pushes.
-  relay = createInboxRelay({ dataDir, store, devices: phones.devices });
+  // The relay (packages/server/inbox-relay.ts): the mailbox socket while a phone is paired, the pushes, and the
+  // carriage: store lines down as the event stream writes them, commands up through the door in-process.
+  relay = createInboxRelay({ dataDir, store, devices: phones.devices, payload: eventPayload, apply: phones.asDevice });
   relay.start();
   phones.startTailnet();
   phones.startLan();

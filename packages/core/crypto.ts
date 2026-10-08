@@ -105,22 +105,25 @@ export function decryptWithKey(envelope: string, key: string): Promise<string> {
 
 const RELAY_KEY_INFO = 'plannotator-inbox relay key v1';
 const RELAY_AUTH_INFO = 'plannotator-inbox relay auth v1';
+const RELAY_UP_INFO = 'plannotator-inbox relay up v1';
 
 /**
- * The two values a pairing secret gives one phone at the relay (section 4,
- * "Keys"), both HKDF-SHA256 over the secret with the device id as salt:
- * `key`, the AES-256-GCM key of every envelope between this Inbox and this
- * phone, and `relaySecret`, the phone's bearer at the relay (which keeps only
- * the SHA-256 of that string). All base64url without padding.
+ * The values a pairing secret gives one phone at the relay (section 4,
+ * "Keys"), each HKDF-SHA256 over the secret with the device id as salt:
+ * `key`, the AES-256-GCM key of every envelope the Inbox sends the phone
+ * (down items and pushes); `upKey`, the key of every command the phone sends
+ * up, so the relay cannot reflect one direction's envelope into the other;
+ * and `relaySecret`, the phone's bearer at the relay (which keeps only the
+ * SHA-256 of that string). All base64url without padding.
  */
-export async function deriveRelayKeys(pairingSecret: string, deviceId: string): Promise<{ key: string; relaySecret: string }> {
+export async function deriveRelayKeys(pairingSecret: string, deviceId: string): Promise<{ key: string; upKey: string; relaySecret: string }> {
   const ikm = await crypto.subtle.importKey('raw', base64urlToBytes(pairingSecret).buffer as ArrayBuffer, 'HKDF', false, ['deriveBits']);
   const salt = new TextEncoder().encode(deviceId);
   const derive = async (info: string) =>
     bytesToBase64url(
       new Uint8Array(await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt, info: new TextEncoder().encode(info) }, ikm, 256))
     );
-  return { key: await derive(RELAY_KEY_INFO), relaySecret: await derive(RELAY_AUTH_INFO) };
+  return { key: await derive(RELAY_KEY_INFO), upKey: await derive(RELAY_UP_INFO), relaySecret: await derive(RELAY_AUTH_INFO) };
 }
 
 // --- Helpers ---

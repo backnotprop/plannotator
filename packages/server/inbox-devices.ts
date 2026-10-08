@@ -15,7 +15,9 @@
  * then handed to the window's own handler under the window's path, through
  * the server's own `fetch` on loopback; the door adds and strips nothing. A
  * POST's answer is kept per device and key (inbox/device-commands.jsonl), so
- * a retry over another path answers the same without writing again.
+ * a retry over another path answers the same without writing again. A
+ * command up through the relay enters at `asDevice`, in-process, past the
+ * bearer check: the up key that opened it names the device.
  *
  * The tailnet. "Reach from my tailnet" opens a second loopback listener that
  * serves the door and nothing else, and publishes THAT port at
@@ -347,6 +349,34 @@ export function createInboxDevices(context: InboxDevicesContext) {
     }
   };
 
+  const caught = (error: unknown): Response => {
+    if (error instanceof InboxError) return json({ error: error.message, code: error.code, ...error.details }, error.code === "validation_error" ? 422 : 400);
+    return refuse(500, "internal_error", "Internal error.");
+  };
+
+  /** One request from a known, live device: its own revoke, or an allowlisted route handed to the window. */
+  const serve = async (req: Request, url: URL, route: string, device: InboxDevice): Promise<Response> => {
+    devices.touch(device.id, now().toISOString());
+    if (route === "revoke" && req.method === "POST") return json({ device: publicDevice(revoke(device)) });
+    for (const entry of ALLOWLIST) {
+      if (entry.method !== req.method) continue;
+      const match = entry.route.exec(route);
+      if (!match) continue;
+      const windowPath = entry.window(match);
+      if (req.method === "POST") return await command(req, device, url.pathname, windowPath);
+      if (route !== "events") return await toWindow(req, windowPath, url.search, null, req.signal);
+      // The event stream lives until the phone leaves or is removed.
+      const stream = new AbortController();
+      req.signal.addEventListener("abort", () => stream.abort());
+      const open = streams.get(device.id) ?? new Set();
+      open.add(stream);
+      streams.set(device.id, open);
+      stream.signal.addEventListener("abort", () => open.delete(stream));
+      return await toWindow(req, windowPath, url.search, null, stream.signal);
+    }
+    return refuse(404, "device_route_not_found", "Not a phone route.");
+  };
+
   const door = async (req: Request, url: URL, secretOnly = false): Promise<Response> => {
     try {
       if (req.headers.get("origin") !== null) return refuse(403, "origin_not_allowed", "Browser requests are not accepted here.");
@@ -357,28 +387,44 @@ export function createInboxDevices(context: InboxDevicesContext) {
       const device = devices.byToken(token);
       if (!device) return refuse(401, "device_token_invalid", "This token does not belong to a paired phone.");
       if (device.revoked_at !== null) return refuse(401, "device_revoked", "This phone was removed from the Inbox. Pair it again.");
-      devices.touch(device.id, now().toISOString());
-      if (route === "revoke" && req.method === "POST") return json({ device: publicDevice(revoke(device)) });
-      for (const entry of ALLOWLIST) {
-        if (entry.method !== req.method) continue;
-        const match = entry.route.exec(route);
-        if (!match) continue;
-        const windowPath = entry.window(match);
-        if (req.method === "POST") return await command(req, device, url.pathname, windowPath);
-        if (route !== "events") return await toWindow(req, windowPath, url.search, null, req.signal);
-        // The event stream lives until the phone leaves or is removed.
-        const stream = new AbortController();
-        req.signal.addEventListener("abort", () => stream.abort());
-        const open = streams.get(device.id) ?? new Set();
-        open.add(stream);
-        streams.set(device.id, open);
-        stream.signal.addEventListener("abort", () => open.delete(stream));
-        return await toWindow(req, windowPath, url.search, null, stream.signal);
-      }
-      return refuse(404, "device_route_not_found", "Not a phone route.");
+      return await serve(req, url, route, device);
     } catch (error) {
-      if (error instanceof InboxError) return json({ error: error.message, code: error.code, ...error.details }, error.code === "validation_error" ? 422 : 400);
-      return refuse(500, "internal_error", "Internal error.");
+      return caught(error);
+    }
+  };
+
+  /**
+   * A command that came up through the relay (contract section 4), applied
+   * in-process as the device whose key opened it: the same revocation check,
+   * allowlist and idempotency log as a request at the door, so a command the
+   * relay replays writes nothing again. Two door routes are not carried:
+   * `pair` (pairing through the relay is not in v1) and `events` (the down
+   * items are the relay's stream; an endless answer cannot be one result).
+   */
+  const asDevice = async (deviceId: string, input: { method: string; path: string; body?: unknown }): Promise<Response> => {
+    try {
+      const device = devices.get(deviceId);
+      if (!device) return refuse(401, "device_token_invalid", "This token does not belong to a paired phone.");
+      if (device.revoked_at !== null) return refuse(401, "device_revoked", "This phone was removed from the Inbox. Pair it again.");
+      if (input.method !== "GET" && input.method !== "POST") return refuse(404, "device_route_not_found", "Not a phone route.");
+      let url: URL;
+      try {
+        url = new URL(input.path, `http://127.0.0.1:${context.port()}`);
+      } catch {
+        return refuse(404, "device_route_not_found", "Not a phone route.");
+      }
+      const route = url.pathname.startsWith(DOOR_PREFIX) ? url.pathname.slice(DOOR_PREFIX.length) : "";
+      if (!route || route === "pair" || route === "events" || url.origin !== `http://127.0.0.1:${context.port()}`) {
+        return refuse(404, "device_route_not_found", "Not a phone route.");
+      }
+      const req = new Request(url, {
+        method: input.method,
+        headers: input.method === "POST" ? { "Content-Type": "application/json" } : {},
+        body: input.method === "POST" ? JSON.stringify(input.body ?? {}) : undefined,
+      });
+      return await serve(req, url, route, device);
+    } catch (error) {
+      return caught(error);
     }
   };
 
@@ -611,5 +657,5 @@ export function createInboxDevices(context: InboxDevicesContext) {
     return null;
   };
 
-  return { door, windowRoute, startTailnet, stopTailnet, startLan: lan.start, stopLan: lan.stop, devices };
+  return { door, asDevice, windowRoute, startTailnet, stopTailnet, startLan: lan.start, stopLan: lan.stop, devices };
 }
