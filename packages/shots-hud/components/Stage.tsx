@@ -6,13 +6,17 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Rect, Shot, ShotBox, ShotStroke } from '@plannotator/shared/shots/types';
+import { Icon } from '../icons';
 
-export type Tool = 'box' | 'arrow' | 'pen' | 'redact' | 'note';
+export type Tool = 'box' | 'arrow' | 'pen' | 'redact';
 
 const MARKER = '#ff3b30';
 const STROKE_DISPLAY_PX = 3.5;
 const CARD_W = 236;
 const MIN_DRAG = 6;
+/** Room kept under the shot for its note field (the field is 30 px, 10 px off the bottom). */
+const NOTE_ROOM = 32;
+const NOTE_MIN_W = 320;
 
 interface Props {
   shot: Shot;
@@ -20,7 +24,8 @@ interface Props {
   tool: Tool;
   selectedId: string | null;
   editingBoxId: string | null;
-  noteOpen: boolean;
+  /** The note field, so N and the rail button can focus it. */
+  noteRef?: React.Ref<HTMLTextAreaElement>;
   /** Width covered on the right (the Ask pane): the shot fits in what is left. */
   reserveRight?: number;
   /** The stage image's rect in the window, for the capture flight. */
@@ -33,7 +38,6 @@ interface Props {
   onAddStroke: (stroke: ShotStroke) => void;
   onAddRedaction: (rect: Rect) => void;
   onNote: (note: string) => void;
-  onCloseNote: () => void;
   onAskAbout: (box: ShotBox) => void;
 }
 
@@ -86,7 +90,7 @@ export function Stage(props: Props) {
 
   // Fit the shot, leaving room on the right for comment cards when the shot is tall enough to allow it.
   const layout = useMemo(() => {
-    const H = size.height;
+    const H = size.height - NOTE_ROOM;
     const W = size.width - (props.reserveRight ?? 0);
     if (W <= 0 || !H) return null;
     const pad = 22;
@@ -121,14 +125,10 @@ export function Stage(props: Props) {
     event.preventDefault();
     const target = event.target as HTMLElement;
     const hit = target.closest('[data-mark-id]') as HTMLElement | null;
-    if (hit && (tool === 'box' || tool === 'redact' || tool === 'note')) {
+    if (hit && (tool === 'box' || tool === 'redact')) {
       const id = hit.dataset.markId!;
       props.onSelect(id);
       if (hit.dataset.markKind === 'box') props.onEditBox(id);
-      return;
-    }
-    if (tool === 'note') {
-      props.onSelect(null);
       return;
     }
     props.onEditBox(null);
@@ -185,7 +185,7 @@ export function Stage(props: Props) {
       const leftSide = left + bx * scale - CARD_W - 14;
       const x = right + CARD_W <= size.width - 8 ? right : leftSide >= 8 ? leftSide : Math.max(8, size.width - CARD_W - 8);
       const estimate = heights[box.id] ?? 44 + Math.ceil(Math.max(1, box.comment.length) / 34) * 17 + (box.id === editingBoxId ? 20 : 0);
-      const y = Math.max(floor, Math.min(size.height - estimate - 8, top + by * scale - 14));
+      const y = Math.max(floor, Math.min(size.height - NOTE_ROOM - estimate - 8, top + by * scale - 14));
       floor = y + estimate + 6;
       placed.push({ box, x, y });
     }
@@ -284,11 +284,20 @@ export function Stage(props: Props) {
           onAsk={() => props.onAskAbout(box)}
         />
       ))}
-      {props.noteOpen && <NoteCard value={shot.note} onChange={props.onNote} onClose={props.onCloseNote} />}
-      {!props.noteOpen && shot.note.trim() && (
-        <div className="shot-note glass" onClick={props.onCloseNote} role="note">
-          {shot.note}
-        </div>
+      {layout && (
+        <ShotNote
+          key={shot.id}
+          noteRef={props.noteRef}
+          value={shot.note}
+          onChange={props.onNote}
+          // A caption under the shot: as wide as the image, never narrower than a sentence.
+          style={(() => {
+            const room = size.width - (props.reserveRight ?? 0);
+            const width = Math.min(room - 24, Math.max(layout.width, NOTE_MIN_W));
+            const left = Math.max(12, Math.min(room - 12 - width, layout.left + layout.width / 2 - width / 2));
+            return { left, width };
+          })()}
+        />
       )}
     </div>
   );
@@ -386,34 +395,55 @@ function CommentCard(props: {
   );
 }
 
-function NoteCard(props: { value: string; onChange: (value: string) => void; onClose: () => void }) {
-  const ref = useRef<HTMLInputElement>(null);
-  const [value, setValue] = useState(props.value);
-  useEffect(() => {
-    ref.current?.focus();
-  }, []);
+/**
+ * The note on the whole image: always there under the shot, saved as it is
+ * typed (like the box comments, it travels with the shot). Enter or Esc leaves
+ * the field; ⇧↩ starts a new line. Keys typed here never reach the HUD's
+ * shortcuts, except the ⌘ ones (⌘↩ sends with the note in it).
+ */
+function ShotNote(props: { noteRef?: React.Ref<HTMLTextAreaElement>; value: string; onChange: (value: string) => void; style: React.CSSProperties }) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  const setRef = (element: HTMLTextAreaElement | null) => {
+    ref.current = element;
+    const outer = props.noteRef;
+    if (typeof outer === 'function') outer(element);
+    else if (outer) (outer as React.MutableRefObject<HTMLTextAreaElement | null>).current = element;
+  };
+  // Grows upward with the text (a few lines), so the shot never jumps while you type.
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    element.style.height = 'auto';
+    element.style.height = `${Math.min(element.scrollHeight, 88)}px`;
+  }, [props.value]);
+  const has = props.value.trim().length > 0;
   return (
-    <div className="shot-note glass" onPointerDown={(e) => e.stopPropagation()}>
-      <label htmlFor="shot-note" className="sr-only">Note for this shot</label>
-      <input
-        id="shot-note"
-        ref={ref}
-        value={value}
-        placeholder="Note for this shot"
-        onChange={(event) => setValue(event.target.value)}
-        onBlur={() => {
-          props.onChange(value.trim());
-          props.onClose();
-        }}
+    <div className={`shot-note${has ? ' has' : ''}`} style={props.style} onPointerDown={(e) => e.stopPropagation()}>
+      <textarea
+        ref={setRef}
+        rows={1}
+        value={props.value}
+        placeholder="Note on this image"
+        aria-label="Note on this image"
+        spellCheck
+        onChange={(event) => props.onChange(event.target.value)}
         onKeyDown={(event) => {
+          if (event.metaKey || event.ctrlKey) return;
           event.stopPropagation();
-          if (event.key === 'Enter' || event.key === 'Escape') {
+          if ((event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) || event.key === 'Escape') {
             event.preventDefault();
-            if (event.key === 'Enter') props.onChange(value.trim());
-            props.onClose();
+            event.currentTarget.blur();
           }
         }}
+        onBlur={(event) => {
+          if (event.currentTarget.value !== event.currentTarget.value.trim()) props.onChange(event.currentTarget.value.trim());
+        }}
       />
+      {has && (
+        <button type="button" className="shot-note-x" aria-label="Remove the note" title="Remove the note" onClick={() => props.onChange('')}>
+          <Icon name="close" size={11} />
+        </button>
+      )}
     </div>
   );
 }

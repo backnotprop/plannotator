@@ -618,25 +618,58 @@ html[data-native] .panel {
 }
 .shot-note {
   position: absolute;
-  left: 16px;
-  right: 16px;
-  bottom: 12px;
-  border-radius: 10px;
-  padding: 8px 10px;
+  bottom: 10px;
+  min-height: 30px;
+  border-radius: 8px;
+  background: var(--fill);
+  display: flex;
+  align-items: flex-end;
   z-index: 4;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
 }
-.shot-note label {
-  font: 600 11px var(--font);
-  color: var(--text-3);
-  display: block;
-  margin-bottom: 3px;
+.shot-note:hover {
+  background: var(--fill-2);
 }
-.shot-note input {
-  width: 100%;
+.shot-note.has,
+.shot-note:focus-within {
+  background: var(--glass-strong);
+  box-shadow: 0 0 0 0.5px var(--hair), 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+.shot-note:focus-within {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent), 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+.shot-note textarea {
+  flex: 1;
+  min-width: 0;
   border: 0;
   outline: 0;
+  resize: none;
   background: transparent;
-  font-size: 12.5px;
+  color: var(--text);
+  font: 400 12.5px/18px var(--font);
+  padding: 6px 10px;
+  height: 30px;
+  max-height: 88px;
+  overflow-y: auto;
+  display: block;
+}
+.shot-note textarea::placeholder {
+  color: var(--text-3);
+}
+.shot-note-x {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: 0 4px 4px 0;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+}
+.shot-note-x:hover {
+  background: var(--fill-2);
+  color: var(--text);
 }
 .empty-stage {
   position: absolute;
@@ -1461,9 +1494,6 @@ html[data-native] .picker-host .picker {
   text-align: center;
   font-style: normal;
 }
-.shot-note {
-  padding: 9px 12px;
-}
 
 /* ---------------------------------------------------------------- permission card (permissions.html) */
 .perm-host {
@@ -1604,4 +1634,56 @@ html[data-native] .perm {
 }
 .tv-off .perm-btn {
   min-width: 0;
+}
+
+/* ---------------------------------------------------------------- panel resize (native only)
+   The window grows up and left from its bottom-right anchor. Panel.swift's
+   PanelResizer takes the mouse in exactly these bands (5 pt top and left, a
+   14 pt corner); here they only draw the corner's mark and set the cursors. */
+.resize {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 40;
+}
+.resize > span {
+  position: absolute;
+  pointer-events: auto;
+}
+.resize-top {
+  top: 0;
+  left: 14px;
+  right: 0;
+  height: 5px;
+  cursor: ns-resize;
+}
+.resize-left {
+  top: 14px;
+  left: 0;
+  bottom: 0;
+  width: 5px;
+  cursor: ew-resize;
+}
+.resize-corner {
+  top: 0;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+}
+.resize-corner svg {
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  fill: none;
+  stroke: var(--text-3);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  opacity: 0.7;
+  transition: opacity 0.15s ease, stroke 0.15s ease;
+}
+.resize-corner:hover svg,
+.resize:hover .resize-corner svg {
+  opacity: 1;
+  stroke: var(--text-2);
 }

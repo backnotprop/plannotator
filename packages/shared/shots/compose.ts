@@ -74,15 +74,23 @@ function strokeSummary(shot: Shot): string | null {
   return `Drawn on the image: ${bits.join(", ")}.`;
 }
 
+/** Box comments with text. */
 export function commentCount(shots: readonly Shot[]): number {
-  return shots.reduce((sum, shot) => sum + shot.boxes.filter((box) => box.comment.trim()).length + (shot.note.trim() ? 1 : 0), 0);
+  return shots.reduce((sum, shot) => sum + shot.boxes.filter((box) => box.comment.trim()).length, 0);
 }
 
-/** "Plannotator: 3 screenshots from you — 5 comments." */
+/** Shots with a note on the whole image. */
+export function noteCount(shots: readonly Shot[]): number {
+  return shots.filter((shot) => shot.note.trim()).length;
+}
+
+/** "Plannotator: 3 screenshots from you — 1 note, 5 comments." */
 export function composeHeadline(shots: readonly Shot[]): string {
+  const notes = noteCount(shots);
   const comments = commentCount(shots);
+  const bits = [notes ? plural(notes, "note") : null, comments ? plural(comments, "comment") : null].filter(Boolean);
   const head = `Plannotator: ${plural(shots.length, "screenshot")} from you`;
-  return comments > 0 ? `${head} — ${plural(comments, "comment")}.` : `${head}.`;
+  return bits.length > 0 ? `${head} — ${bits.join(", ")}.` : `${head}.`;
 }
 
 export function composeShotsMessage(input: ComposeInput): string {
@@ -105,6 +113,9 @@ export function composeShotsMessage(input: ComposeInput): string {
       const edited = shot.text.removedLines.length > 0 || shot.text.edited ? ", edited by the user" : "";
       lines.push(`Window text: ${join(dir, "app-text.txt")} (${sentTextChars.toLocaleString("en-US")} characters${edited})`);
     }
+    // The note on the whole image comes first: it frames the numbered boxes below it.
+    const note = shot.note.trim();
+    if (note) lines.push(`Note on this image: ${note}`);
     const boxes = [...shot.boxes].sort((a, b) => a.n - b.n);
     for (const box of boxes) {
       const comment = box.comment.trim();
@@ -115,8 +126,7 @@ export function composeShotsMessage(input: ComposeInput): string {
     const strokes = strokeSummary(shot);
     if (strokes) lines.push(strokes);
     if (shot.redactions.length > 0) lines.push(`${plural(shot.redactions.length, "area")} blacked out by the user.`);
-    if (shot.note.trim()) lines.push(`Note: ${shot.note.trim()}`);
-    if (boxes.length === 0 && !shot.note.trim()) lines.push("(no comments)");
+    if (boxes.length === 0 && !note) lines.push("(no comments)");
   });
   return lines.join("\n");
 }
@@ -138,6 +148,7 @@ export function composeShotsSidecar(input: ComposeInput): unknown {
         image: { path: join(dir, agent.file), size: [agent.width, agent.height] },
         originalSize: [shot.original.width, shot.original.height],
         displayScale: shot.display?.scale,
+        note: shot.note.trim() || undefined,
         boxes: [...shot.boxes]
           .sort((a, b) => a.n - b.n)
           .map((box) => ({
@@ -149,7 +160,6 @@ export function composeShotsSidecar(input: ComposeInput): unknown {
           })),
         strokes: shot.strokes.length || undefined,
         redactions: shot.redactions.length || undefined,
-        note: shot.note.trim() || undefined,
         ...(shot.text && sentTextChars !== null
           ? { text: { path: join(dir, "app-text.txt"), chars: sentTextChars, edited: shot.text.removedLines.length > 0 || !!shot.text.edited } }
           : {}),
@@ -158,9 +168,13 @@ export function composeShotsSidecar(input: ComposeInput): unknown {
   };
 }
 
-/** The send summary above the button: "4 shots · 3 comments · 1 window text (9.8k chars)". */
+/** The send summary above the button: "4 shots · 1 note · 3 comments · 1 window text (9.8k chars)". */
 export function sendSummary(shots: readonly Shot[], textChars: (shot: Shot) => number | null): string {
-  const parts = [plural(shots.length, "shot"), plural(commentCount(shots), "comment")];
+  const notes = noteCount(shots);
+  const comments = commentCount(shots);
+  const parts = [plural(shots.length, "shot")];
+  if (notes) parts.push(plural(notes, "note"));
+  if (comments || !notes) parts.push(plural(comments, "comment"));
   const texts = shots.map(textChars).filter((chars): chars is number => chars !== null);
   if (texts.length > 0) {
     const total = texts.reduce((a, b) => a + b, 0);

@@ -57,7 +57,6 @@ export function App() {
   const [view, setView] = useState<'image' | 'text'>('image');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingBoxId, setEditingBoxId] = useState<string | null>(null);
-  const [noteOpen, setNoteOpen] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
   const [askEntries, setAskEntries] = useState<AskEntry[]>([]);
   const [askContext, setAskContext] = useState<AskContext[]>([]);
@@ -78,6 +77,7 @@ export function App() {
   const edits = useShotEdits();
   const hudRef = useRef<HTMLDivElement>(null);
   const stageImageRef = useRef<HTMLDivElement>(null);
+  const shotNoteRef = useRef<HTMLTextAreaElement>(null);
   const thumbRefs = useRef(new Map<string, HTMLElement>());
 
   // --- Hub state -----------------------------------------------------------------------
@@ -150,7 +150,8 @@ export function App() {
     setConfirmSend(false);
   }, [shots.length, destination?.sessionId]);
 
-  // Tell the native window how big to be, and whether to take the keyboard.
+  // Tell the native window how big to be, and whether to take the keyboard. For the panel
+  // this is the default (and smallest) size: the native side keeps the size it was dragged to.
   useLayoutEffect(() => {
     if (!isNative) return;
     const element = hudRef.current?.querySelector(mode === 'permission' ? '.perm' : '.strip') as HTMLElement | null;
@@ -291,7 +292,6 @@ export function App() {
     setCurrentId(next.id);
     setSelectedId(null);
     setEditingBoxId(null);
-    setNoteOpen(false);
     if (view === 'text' && !next.text) setView('image');
   };
 
@@ -425,10 +425,10 @@ export function App() {
       drawTool: { when: notTyping, handle: () => setTool('pen') },
       redactTool: { when: notTyping, handle: () => setTool('redact') },
       noteTool: {
-        when: notTyping,
+        when: (e) => notTyping(e) && view === 'image',
         handle: () => {
-          setTool('note');
-          setNoteOpen(true);
+          setEditingBoxId(null);
+          shotNoteRef.current?.focus();
         },
       },
       viewText: { when: (e) => notTyping(e) && !!current?.text, handle: () => setView((v) => (v === 'text' ? 'image' : 'text')) },
@@ -445,7 +445,6 @@ export function App() {
         when: () => panelKeys && !picker,
         handle: () => {
           if (menu) setMenu(null);
-          else if (noteOpen) setNoteOpen(false);
           else if (askOpen) setAskOpen(false);
           else if (view === 'text') setView('image');
           else if (confirmSend) setConfirmSend(false);
@@ -568,6 +567,19 @@ export function App() {
       )}
       {mode === 'panel' && (
         <div className="hud panel glass" role="dialog" aria-label={current ? `Shot ${index + 1} of ${shots.length}` : 'Plannotator Shots'}>
+          {isNative && (
+            // The native window runs the drag (Panel.swift, PanelResizer); this only draws the
+            // corner's mark and gives WebKit the same cursors, so the two never disagree.
+            <div className="resize" aria-hidden="true" title="Drag to resize · double-click for the default size">
+              <span className="resize-top" />
+              <span className="resize-left" />
+              <span className="resize-corner">
+                <svg viewBox="0 0 10 10" width="10" height="10">
+                  <path d="M1.5 9V6.5a5 5 0 0 1 5-5H9" />
+                </svg>
+              </span>
+            </div>
+          )}
           <div className="p-head">
             <div className="nav-btns">
               <button type="button" aria-label="Previous shot (←)" disabled={index <= 0} onClick={() => go(-1)}>
@@ -632,7 +644,6 @@ export function App() {
                     ['arrow', 'arrow', 'A', 'Arrow'],
                     ['pen', 'pen', 'D', 'Draw'],
                     ['redact', 'redact', 'B', 'Redact'],
-                    ['note', 'note', 'N', 'Note for this shot'],
                   ] as const
                 ).map(([id, icon, key, label]) => (
                   <button
@@ -642,14 +653,23 @@ export function App() {
                     aria-label={`${label} (${key})`}
                     aria-pressed={tool === id}
                     title={`${label} (${key})`}
-                    onClick={() => {
-                      setTool(id);
-                      if (id === 'note') setNoteOpen(true);
-                    }}
+                    onClick={() => setTool(id)}
                   >
                     <Icon name={icon} />
                   </button>
                 ))}
+                <button
+                  type="button"
+                  className="tool"
+                  aria-label="Note on this image (N)"
+                  title="Note on this image (N)"
+                  onClick={() => {
+                    setEditingBoxId(null);
+                    shotNoteRef.current?.focus();
+                  }}
+                >
+                  <Icon name="note" />
+                </button>
               </div>
             )}
             {current && view === 'image' && (
@@ -660,7 +680,7 @@ export function App() {
                 tool={tool}
                 selectedId={selectedId}
                 editingBoxId={editingBoxId}
-                noteOpen={noteOpen}
+                noteRef={shotNoteRef}
                 reserveRight={askOpen ? 420 : 0}
                 onSelect={setSelectedId}
                 onCreateBox={createBox}
@@ -670,10 +690,6 @@ export function App() {
                 onAddStroke={(stroke) => edits.edit(current, { strokes: [...current.strokes, stroke] })}
                 onAddRedaction={(rect) => edits.edit(current, { redactions: [...current.redactions, { id: crypto.randomUUID(), rect: rect.map((v) => Math.round(v)) as Rect }] })}
                 onNote={(note) => edits.edit(current, { note }, false)}
-                onCloseNote={() => {
-                  setNoteOpen((value) => !value);
-                  if (tool === 'note') setTool('box');
-                }}
                 onAskAbout={(box) => askAbout(box)}
               />
             )}
@@ -736,7 +752,7 @@ export function App() {
               <div className="note">
                 <input
                   value={noteDraft ?? collection?.note ?? ''}
-                  placeholder="Add a note"
+                  placeholder="Note for this send"
                   aria-label="Note for this send"
                   onChange={(e) => setNoteDraft(e.target.value)}
                   onBlur={() => {

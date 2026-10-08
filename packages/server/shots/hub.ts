@@ -313,6 +313,7 @@ export function createShotsHub(options: ShotsHubOptions): ShotsHub {
       const agent = shot.agent ?? { file: shot.original.file, width: shot.original.width, height: shot.original.height };
       lines.push(`Shot ${index}${where ? ` (${where})` : ""}: ${join(store.shotDir(shot), agent.file)} (${agent.width}×${agent.height})`);
       const scale = agent.width / shot.original.width;
+      if (shot.note.trim()) lines.push(`  Note on this image: ${shot.note.trim()}`);
       for (const box of shot.boxes) {
         if (boxIds.size > 0 && !boxIds.has(box.id)) continue;
         const [x, y, w, h] = box.rect.map((value) => Math.round(value * scale));
