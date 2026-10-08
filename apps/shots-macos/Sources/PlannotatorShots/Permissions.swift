@@ -69,7 +69,7 @@ final class PermissionFlow {
         self.kind = kind
         self.pending = pending
         // A shot started before macOS made the app quit and reopen resumes after it.
-        if let pending { defaults.set(["action": pending.rawValue, "kind": kind.rawValue, "at": Date().timeIntervalSince1970], forKey: "pendingShot") }
+        if let pending { defaults.set(["action": pending.rawValue, "kind": kind.rawValue, "at": Date().timeIntervalSince1970, "pid": Int(ProcessInfo.processInfo.processIdentifier)], forKey: "pendingShot") }
         log("permission \(kind.rawValue): ask (pending \(pending?.rawValue ?? "none"))")
         show?(["kind": kind.rawValue, "state": State.ask.rawValue])
         startChecking()
@@ -196,9 +196,14 @@ final class PermissionFlow {
         guard let saved = defaults.dictionary(forKey: "pendingShot"),
               let action = Pending(rawValue: saved["action"] as? String ?? ""),
               let kind = Kind(rawValue: saved["kind"] as? String ?? ""),
-              let at = saved["at"] as? Double, Date().timeIntervalSince1970 - at < 600
+              let at = saved["at"] as? Double, Date().timeIntervalSince1970 - at < 600,
+              // Only a shot an EARLIER process saved: the URL command that launched this one
+              // is handled before didFinishLaunching, and its own fresh card must stay on Ask.
+              (saved["pid"] as? Int) != Int(ProcessInfo.processInfo.processIdentifier)
         else {
-            defaults.removeObject(forKey: "pendingShot")
+            // This process's own shot stays saved: macOS may still make the app quit and reopen.
+            let own = (defaults.dictionary(forKey: "pendingShot")?["pid"] as? Int) == Int(ProcessInfo.processInfo.processIdentifier)
+            if !own { defaults.removeObject(forKey: "pendingShot") }
             return
         }
         log("permission: resuming a \(action.rawValue) shot after relaunch")
