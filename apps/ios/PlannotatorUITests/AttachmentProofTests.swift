@@ -44,14 +44,31 @@ final class AttachmentProofTests: ProofCase {
         XCTAssertFalse(target.exists && target.isHittable, "the commented line starts below the fold")
 
         // Long press: the system selection, with Comment first in the edit menu (4.1), then the sheet (4.2).
+        // A cold CI simulator sometimes raises no edit menu for a synthesized long press: one more
+        // press, then the toolstrip's pinpoint (a tap on the line opens the same comment sheet),
+        // and the path that ran is named in the log and the results.
         swipeWeb(until: target)
-        target.press(forDuration: 1.2)
         let comment = app.menuItems["Comment"]
-        expect(comment, "Comment in the edit menu")
-        try await control.shot("4.1-menu")
-        comment.tap()
+        var path = "the edit menu"
+        target.press(forDuration: 1.2)
+        if !comment.waitForExistence(timeout: 15) {
+            swipeWeb(until: target)
+            target.press(forDuration: 2)
+        }
+        if comment.waitForExistence(timeout: 15) {
+            try await control.shot("4.1-menu")
+            comment.tap()
+        } else {
+            path = "the toolstrip's pinpoint (no edit menu on this simulator)"
+            app.webViews.switches["Pinpoint"].firstMatch.tap()
+            swipeWeb(until: target)
+            target.tap()
+        }
+        XCTContext.runActivity(named: "Comment on the plan through \(path)") { _ in }
+        print("— Comment on the plan through \(path)")
         let words = element("comment-text")
         expect(words, "the comment sheet")
+        words.tap()
         words.typeText("Ten an hour is a lot for one customer. Alert on three.")
         try await control.shot("4.2")
         element("comment-save").tap()

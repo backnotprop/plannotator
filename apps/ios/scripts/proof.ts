@@ -364,11 +364,18 @@ const control = Bun.serve({
         case '/more':
           return Response.json(await more());
         case '/reset-app': {
-          // After a proof class: the app's stored sources and caches go, as a fresh install has none.
-          spawnSync('xcrun', ['simctl', 'spawn', udid, 'defaults', 'delete', 'ai.plannotator.app']);
-          const container = spawnSync('xcrun', ['simctl', 'get_app_container', udid, 'ai.plannotator.app', 'data'], { encoding: 'utf8' }).stdout.trim();
-          if (container.startsWith('/')) rmSync(join(container, 'Library', 'Caches', 'inbox'), { recursive: true, force: true });
-          return Response.json({ ok: true });
+          // After a proof class: the app as a cold install has it (no sources, the
+          // first-run screen), whatever the class left behind. Reinstalled from this
+          // run's own build; the app clears its Keychain items when it starts with no sources.
+          const appPath = join(derived, 'Build', 'Products', 'Debug-iphonesimulator', 'Plannotator.app');
+          spawnSync('xcrun', ['simctl', 'terminate', udid, 'ai.plannotator.app']);
+          spawnSync('xcrun', ['simctl', 'uninstall', udid, 'ai.plannotator.app']);
+          const installed = spawnSync('xcrun', ['simctl', 'install', udid, appPath], { encoding: 'utf8' });
+          if (installed.status !== 0) throw new Error(`reinstall: ${installed.stderr}`);
+          // And the computer forgets the phone it paired, as before the class.
+          const { devices } = (await (await windowRoute('/api/inbox/devices')).json()) as { devices: { id: string }[] };
+          for (const device of devices) await windowRoute(`/api/inbox/devices/${device.id}/revoke`, { method: 'POST', body: '{}' });
+          return Response.json({ ok: true, revoked: devices.length });
         }
         case '/attach':
           return Response.json(await attach());
@@ -509,7 +516,7 @@ try {
     process.stdout.write(`\nWarm-up ${attempt}: ${warm === 0 ? 'done' : 'did not finish, the app is still warming'}\n`);
     if (warm === 0) break;
   }
-  if (status === 0) status = await xcodebuild(['test-without-building', ...(only ? [`-only-testing:${only}`] : [`-skip-testing:${warmUp}`]), '-resultBundlePath', join(tmp, 'Proof.xcresult')]);
+  if (status === 0) status = await xcodebuild(['test-without-building', ...(only ? only.split(',').map((test) => `-only-testing:${test}`) : [`-skip-testing:${warmUp}`]), '-resultBundlePath', join(tmp, 'Proof.xcresult')]);
 } finally {
   video?.kill('SIGINT');
   await m3Close();
