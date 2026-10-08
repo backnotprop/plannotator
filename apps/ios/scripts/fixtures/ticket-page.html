@@ -29,10 +29,10 @@
   .tier.out { opacity: .45; }
   .tier.out em { text-decoration: line-through; }
   .cta { margin: 16px 22px 0; display: flex; align-items: center; gap: 12px; }
-  .btnx { flex: 1; height: 56px; border: 0; border-radius: 28px; background: #c8ff3d; color: #141a00; font: 900 18px/1 inherit; font-family: inherit; letter-spacing: -.3px; box-shadow: 0 10px 30px rgba(200, 255, 61, .28); }
+  .btnx { flex: 1; height: 56px; border: 0; border-radius: 28px; background: #c8ff3d; color: #141a00; font-family: inherit; font-size: 18px; font-weight: 900; line-height: 1; letter-spacing: -.3px; box-shadow: 0 10px 30px rgba(200, 255, 61, .28); }
   .go { display: flex; align-items: center; }
-  .go i { width: 30px; height: 30px; border-radius: 15px; margin-left: -9px; box-shadow: 0 0 0 2.5px #0e0b1c; }
-  .go i:first-child { margin-left: 0; }
+  .go img { display: block; width: 30px; height: 30px; border-radius: 15px; margin-left: -9px; box-shadow: 0 0 0 2.5px #0e0b1c; }
+  .go img:first-child { margin-left: 0; }
   .going { margin: 10px 22px 0; font-size: 12.5px; color: #a99ccf; font-weight: 600; }
   .lu { display: flex; gap: 14px; padding: 0 22px; }
   .lu div { text-align: center; font-size: 12.5px; font-weight: 700; width: 70px; }
@@ -65,7 +65,7 @@
   </div>
   <div class="cta">
     <button class="btnx" type="button">Get tickets · €24</button>
-    <div class="go" aria-hidden="true"><i style="background:#ff7a45"></i><i style="background:#7b5cff"></i><i style="background:#2bd98f"></i></div>
+    <div class="go"><img src="going/mira.png" alt="Mira"><img src="going/joão.png" alt="João"><img src="going/dj tern.png" alt="DJ Tern"></div>
   </div>
   <p class="going">Mira, Joao and 210 others are going</p>
   <h2>LINEUP</h2>
@@ -79,8 +79,15 @@
     <a href="https://example.com/low-tide/venue">Venue map</a>
     <a href="plannotator://pair?v=1&amp;name=Low%20Tide&amp;tailnet=127.0.0.1%3A9&amp;secret=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&amp;code=111111">Open in the app</a>
     <small>Pier 9 Rooftop, Lisbon. Doors 21:00, last entry 01:00.</small>
+    <small id="photos"></small>
   </footer>
 <script>
+  // The proof's: the photos of who is going come from this page's folder, one name with a space and one with an accent.
+  window.addEventListener('load', function () {
+    var photos = Array.prototype.slice.call(document.querySelectorAll('.go img'));
+    var shown = photos.filter(function (img) { return img.complete && img.naturalWidth > 0; }).length;
+    document.getElementById('photos').textContent = 'Photos: ' + shown + ' of ' + photos.length;
+  });
   // The proof's: a page that tries to reach the app with nobody touching it.
   setTimeout(function () {
     var draft = { id: 'forged', blockId: '', startOffset: 0, endOffset: 0, type: 'COMMENT', text: '', originalText: 'Forged' };

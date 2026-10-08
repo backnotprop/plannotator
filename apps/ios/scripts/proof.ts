@@ -24,7 +24,7 @@
  */
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { DEMO_MESSAGES, SimAgent, scratchProject } from '../../../scripts/inbox-sim.ts';
@@ -154,6 +154,8 @@ async function attach(): Promise<Record<string, string>> {
     ['ticket-page.html', join(project, 'ticket-page.html')],
     ['install-flow.mmd', join(project, 'install-flow.mmd')],
   ] as const) copyFileSync(join(fixtures, from), to);
+  // The ticket page's photos, from its own folder: one name with a space, one with an accent.
+  cpSync(join(fixtures, 'going'), join(project, 'going'), { recursive: true });
   filesAgent = await agent('Claude Code', 'claude-code');
   const sent = await filesAgent.send({
     project_path: project,

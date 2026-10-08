@@ -39,6 +39,10 @@ struct AttachmentCover: View {
     @State private var link: ContentLink?
     @State private var shareFile: URL?
     @FocusState private var focused: Bool
+    /// The switch and any open panel, which an HTML page ends above.
+    @State private var bottomHeight: CGFloat = 0
+    /// The surface has drawn the open file.
+    @State private var painted = false
 
     private var host: SurfaceHost { .shared }
     private var thread: InboxThread? { session.threads[threadId] }
@@ -56,11 +60,14 @@ struct AttachmentCover: View {
             if let line = changedLine { line }
             ZStack(alignment: .bottom) {
                 if view != nil {
-                    // An HTML page keeps its last lines above the switch, so a link at its foot can be reached;
-                    // a text file draws under the home indicator, its toolstrip inside the surface.
+                    // An HTML page ends above the switch and any open panel, so a link at its foot can be
+                    // reached and a pin stays in sight while Parent and Child move it (4.3); a text file draws
+                    // under the home indicator, its toolstrip inside the surface. Until the surface has drawn
+                    // this file the screen's own colour shows, never the page's first paint.
                     SurfaceRepresentable(webView: host.webView)
-                        .padding(.bottom, attachment?.isHTML == true ? 62 : 0)
+                        .padding(.bottom, attachment?.isHTML == true ? bottomHeight + 8 : 0)
                         .ignoresSafeArea(edges: attachment?.isHTML == true ? [] : .bottom)
+                        .opacity(painted ? 1 : 0)
                         .accessibilityIdentifier("surface")
                 } else if let loadProblem {
                     ContentUnavailableView {
@@ -86,7 +93,7 @@ struct AttachmentCover: View {
         .onChange(of: scheme) { sendAppearance() }
         .onChange(of: typeSize) { sendAppearance() }
         .sheet(isPresented: $showList) {
-            AnnotationsSheet(session: session, threadId: threadId, current: file.attachmentId) { next in
+            AnnotationsSheet(session: session, threadId: threadId, current: file.attachmentId, onEdited: { host.send(Bridge.CommitAnnotation(annotation: $0)) }) { next in
                 showList = false
                 file = next
             }
@@ -214,6 +221,7 @@ struct AttachmentCover: View {
         }
         .animation(reduceMotion ? .easeInOut(duration: 0.2) : .snappy, value: composer)
         .animation(reduceMotion ? .easeInOut(duration: 0.2) : .snappy, value: shown)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bottomHeight = $0 }
     }
 
     /// 4.3's switch: Annotate (a tap pins) or Interact (the page's own clicks), and Fit.
@@ -418,6 +426,8 @@ struct AttachmentCover: View {
             shareFile = Self.writeShareFile(next)
             await host.whenReady()
             present(next)
+            await host.drawn()
+            painted = true
         } catch {
             loadProblem = error.message
         }
@@ -546,8 +556,9 @@ struct AttachmentCover: View {
         html.replacingOccurrences(of: "<base href=\"/api/html-assets/", with: "<base href=\"plannotator-asset://inbox/api/html-assets/")
     }
 
+    /// The folder token, read from the `<base href>` the door wrote, never from text the page carries.
     static func assetToken(_ html: String) -> String? {
-        html.firstMatch(of: /plannotator-asset:\/\/inbox\/api\/html-assets\/([^\/"]+)\//).map { String($0.1) }
+        html.firstMatch(of: /<base href="plannotator-asset:\/\/inbox\/api\/html-assets\/([^\/"]+)\/">/).map { String($0.1) }
     }
 
     /// "Pick a host (node E)" as the sheet draws it: the name bold, the part after it.

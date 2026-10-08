@@ -28,8 +28,9 @@ enum SurfaceEvent {
 ///   so its relative files load and the token never reaches web content.
 /// - Bridge messages are taken from the main frame only: an agent's page,
 ///   in the surface's sandboxed frame, can post to the handler too.
-/// - Links open only as a real tap or as the surface's own `link`, and only
-///   for `https` and `mailto`; every other navigation away is cancelled.
+/// - Links open only for `https` and `mailto`: the surface's own `link` (its
+///   markdown, a real tap), or a new window an agent's page opened right after
+///   the person's touch; every other navigation away is cancelled.
 @Observable
 final class SurfaceHost: NSObject {
     static let shared = SurfaceHost()
@@ -113,6 +114,11 @@ final class SurfaceHost: NSObject {
 
     private func deliver(_ json: String) {
         webView.callAsyncJavaScript("window.plannotatorSurface.receive(JSON.parse(m))", arguments: ["m": json], in: nil, in: .page) { _ in }
+    }
+
+    /// Waits until the surface has painted what it was last sent (two animation frames).
+    func drawn() async {
+        _ = try? await webView.callAsyncJavaScript("await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))", contentWorld: .page)
     }
 
     /// Send's feedback text for these annotations (contract section 5,
@@ -199,11 +205,6 @@ extension SurfaceHost: WKScriptMessageHandler {
 extension SurfaceHost: WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
         guard let url = action.request.url else { return .cancel }
-        // A link activated anywhere: the shell decides it (right after the person's touch), the frame stays.
-        if action.navigationType == .linkActivated {
-            if Date.now.timeIntervalSince(touches.last) < 1.2 { open(url) } else { cancelledNavigations += 1 }
-            return .cancel
-        }
         if action.targetFrame?.isMainFrame ?? false {
             return url == Self.surfaceURL ? .allow : .cancel
         }
@@ -220,11 +221,7 @@ extension SurfaceHost: WKNavigationDelegate, WKUIDelegate {
     /// URL itself, and only right after the person's own touch.
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         guard let url = action.request.url else { return nil }
-        if action.navigationType == .linkActivated || Date.now.timeIntervalSince(touches.last) < 1.2 {
-            open(url)
-        } else {
-            cancelledNavigations += 1
-        }
+        if Date.now.timeIntervalSince(touches.last) < 1.2 { open(url) } else { cancelledNavigations += 1 }
         return nil
     }
 
@@ -333,7 +330,8 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler {
             task.didFailWithError(URLError(.fileDoesNotExist))
             return
         }
-        let path = url.path()
+        // Decoded once here; the door's URL is encoded once again when it is built.
+        let path = url.path(percentEncoded: false)
         guard path.hasPrefix("\(Self.prefix)\(token)/") else {
             task.didFailWithError(URLError(.fileDoesNotExist))
             return

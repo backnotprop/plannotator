@@ -8,6 +8,8 @@ struct AnnotationsSheet: View {
     let threadId: String
     /// The file on screen when opened from an attachment, else nil.
     let current: String?
+    /// An edit saved here, for a file on screen to draw.
+    var onEdited: (InboxAnnotationRecord) -> Void = { _ in }
     let open: (OpenFile) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var editing: InboxAnnotationRecord?
@@ -92,9 +94,9 @@ struct AnnotationsSheet: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .sheet(item: $editing) { record in
-            EditAnnotationSheet(record: record) { text throws(InboxError) in
+            EditAnnotationSheet(record: record, save: { text throws(InboxError) in
                 try await session.saveAnnotation(thread: threadId, attachment: record.attachmentId, version: record.version, annotation: record.annotation.setting("text", to: .string(text)))
-            }
+            }, onSaved: onEdited)
         }
         .alert("Something went wrong", isPresented: Binding(get: { problem != nil }, set: { if !$0 { problem = nil } })) {
             Button("OK", role: .cancel) {}

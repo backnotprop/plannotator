@@ -334,8 +334,9 @@ final class SourceSession {
         let attachments = files[thread.threadId]?.attachments ?? []
         var texts: [Bridge.Text] = []
         for record in annotations where !texts.contains(where: { $0.attachment_id == record.attachmentId && $0.version == record.version }) {
-            let view = try await client.view(attachment: record.attachmentId, sent: record.version != "current")
-            texts.append(.init(attachment_id: record.attachmentId, version: record.version, text: view.text))
+            // A file that can no longer be read (deleted or moved on the computer) goes with no text, as the window sends it.
+            let text = (try? await client.view(attachment: record.attachmentId, sent: record.version != "current"))?.text ?? ""
+            texts.append(.init(attachment_id: record.attachmentId, version: record.version, text: text))
         }
         guard let text = await SurfaceHost.shared.feedback(annotations: annotations, attachments: attachments, texts: texts, projectRoot: thread.project.root ?? ""), !text.isEmpty else {
             throw .refused(status: 0, code: "feedback_unavailable", message: "Your annotations could not be written into the reply. Try Send again.", triesLeft: nil)

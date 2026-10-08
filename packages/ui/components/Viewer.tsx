@@ -305,6 +305,9 @@ export interface ViewerHandle {
    *  (`'parent'`) or back in (`'child'`), for a host that composes
    *  (`onHostDraft`). The markdown `Viewer` does not implement it. */
   stepPin?: (direction: 'parent' | 'child') => void;
+  /** `HtmlViewer` only: scroll the pinned draft into the middle of the
+   *  frame, for a host whose panel covers part of it. */
+  revealPin?: () => void;
   /** Markdown `Viewer` only, for a host that composes (`onHostDraft`) on a
    *  touch screen: make the page's text selection a draft now (the host's own
    *  Comment action), reported through `onHostDraft` as `'selection'`.

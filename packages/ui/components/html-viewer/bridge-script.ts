@@ -775,6 +775,14 @@ export const BRIDGE_SCRIPT = `(function() {
       stepPin(e.data.direction === 'child' ? 'child' : 'parent');
     }
 
+    else if (type === PREFIX + 'reveal-pin') {
+      // A host whose own panel covers the page's lower part (a phone's comment
+      // sheet) shrank the frame: bring the pinned draft back into view.
+      if (pendingPinEl && pendingPinEl.isConnected) {
+        try { pendingPinEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (ex) {}
+      }
+    }
+
     else if (type === PREFIX + 'scroll-to') {
       // Selecting an annotation scrolls its first resolved target into view
       // and flashes the overlay focus highlight over EVERY rect of EVERY

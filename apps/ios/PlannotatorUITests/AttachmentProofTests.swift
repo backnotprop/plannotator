@@ -94,6 +94,8 @@ final class AttachmentProofTests: ProofCase {
         element("attachment-ticket-page.html").tap()
         let tickets = app.webViews.buttons["Get tickets · €24"]
         expect(tickets, "the ticket page")
+        // The page's own folder: photos named with a space ("dj tern.png") and an accent ("joão.png") load.
+        expect(app.webViews.staticTexts["Photos: 3 of 3"], "all three photos from the page's folder")
         try await Task.sleep(for: .seconds(4))
         XCTAssertFalse(element("comment-panel").exists, "a forged message opened a composer")
         let probe = element("bridge-dropped")
@@ -106,11 +108,16 @@ final class AttachmentProofTests: ProofCase {
         try await control.shot("4.3-page")
 
         // A pin by touch, moved to its parent and back to the child, then saved.
+        // The pinned element stays in sight above the switch and the panel the whole time.
         tickets.tap()
         expect(element("pin-parent"), "the pin's sheet")
+        try await expectAbovePanel(tickets, "the pinned button")
         try await control.shot("4.3-pin")
         element("pin-parent").tap()
+        try await expectAbovePanel(tickets, "the button inside the pinned parent")
+        try await control.shot("4.3-pin-parent")
         element("pin-child").tap()
+        try await expectAbovePanel(tickets, "the pinned button, back from its parent")
         let pinWords = element("comment-text")
         pinWords.tap()
         pinWords.typeText("Show the booking fee in this price, not at checkout.")
@@ -220,6 +227,17 @@ final class AttachmentProofTests: ProofCase {
     private func tapLink(_ title: String, in container: XCUIElement) {
         let link = container.links[title].firstMatch
         if link.exists { link.tap() } else { app.links[title].firstMatch.tap() }
+    }
+
+    /// The element is on screen and wholly above the Annotate and Interact switch (and so above the panel).
+    private func expectAbovePanel(_ target: XCUIElement, _ what: String) async throws {
+        let strip = element("mode-annotate")
+        let deadline = Date.now.addingTimeInterval(10)
+        while Date.now < deadline {
+            if target.exists, target.isHittable, target.frame.maxY <= strip.frame.minY, target.frame.minY >= 110 { return }
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        XCTFail("\(what) is not in sight above the panel: \(target.frame) under \(strip.frame)")
     }
 
     /// Safari View Controller is up on that host; then closed.

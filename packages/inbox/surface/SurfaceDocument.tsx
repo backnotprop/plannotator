@@ -122,6 +122,8 @@ export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function
     if (next.intent === 'selection') {
       postToShell({ type: 'selection', quote: annotation.originalText, draft: wire });
     } else if (annotation.htmlAnchor) {
+      // Parent or Child may have moved it out of sight.
+      requestAnimationFrame(() => viewerRef.current?.revealPin?.());
       postToShell({
         type: 'pin',
         target: { label: next.label ?? annotation.htmlAnchor.tagName.toLowerCase(), selector: annotation.htmlAnchor.selector },
@@ -163,6 +165,17 @@ export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function
     },
     [blocks],
   );
+
+  // The shell's panel covers the page's lower part and shrinks the web view:
+  // the pin being written about stays in sight.
+  useEffect(() => {
+    if (!isHtml) return;
+    const onResize = () => {
+      if (draft.current?.intent === 'compose') viewerRef.current?.revealPin?.();
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [isHtml]);
 
   // A press anywhere in the document puts down a settled selection (the shell
   // closes its edit menu); a new selection then starts fresh. Pins and

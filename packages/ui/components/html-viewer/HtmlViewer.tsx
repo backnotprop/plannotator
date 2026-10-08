@@ -1050,6 +1050,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         hook.applyAnnotations(forCurrentPage(anns)),
       stepPin: (direction: "parent" | "child") =>
         postToBridge({ type: `${PREFIX}step-pin`, direction }),
+      revealPin: () => postToBridge({ type: `${PREFIX}reveal-pin` }),
     }));
 
     const handleGlobalCommentSubmit = useCallback(
