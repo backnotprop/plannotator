@@ -157,7 +157,7 @@ export function PhonesBlock() {
       <div className="ib-srow" data-tailnet={tailnetOn ? 'on' : 'off'}>
         Reach from my tailnet
         <span className="ib-d" data-tailnet-address={tailnet?.address ?? ''}>
-          {tailnetOn ? `https://${tailnet!.address}` : 'Through Tailscale, without opening this computer to the internet'}
+          {tailnetOn ? tailnet!.address : 'Through Tailscale, without opening this computer to the internet'}
         </span>
         <span className="ib-r">
           <button

@@ -9,7 +9,9 @@
  * Proved: Pair a phone draws a QR code of the offer's own link and the
  * offer's six digits with its countdown; a phone that redeems the QR secret
  * appears in the list and the panel closes; Remove (asked twice) revokes it
- * and the phone's next request is 401 device_revoked.
+ * and the phone's next request is 401 device_revoked; a code closed by five
+ * wrong tries, and the tailnet switch's two error states, drawn through a
+ * `tailscale` script on PATH.
  *
  * With PLANNOTATOR_E2E_TAILNET=1 on a Mac signed in to Tailscale, one more
  * test turns on "Reach from my tailnet", reaches the door at the MagicDNS name
@@ -22,7 +24,7 @@
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { qrModules } from '../../packages/inbox/qr';
@@ -142,6 +144,59 @@ test('Pair a phone: the QR is the offer\'s link, the digits are the offer\'s cod
   expect(after.status).toBe(401);
   expect(((await after.json()) as { code: string }).code).toBe('device_revoked');
   expect(world.errors).toEqual([]);
+});
+
+test('a code closed by five wrong tries, and the tailnet switch\'s two error states (a mapping that is not the Inbox\'s on 8443; Tailscale stopped)', async () => {
+  const { page } = world;
+  await page.goto(`${world.url}#settings`);
+  const block = page.locator('[data-settings-phones]');
+  const made = page.waitForResponse((r) => r.url().endsWith('/api/inbox/pairing'));
+  await block.getByRole('button', { name: 'Pair a phone' }).click();
+  const offer = (await (await made).json()) as { offer: { code: string } };
+  const wrong = offer.offer.code === '000000' ? '000001' : '000000';
+  for (let i = 0; i < 5; i++) expect((await door('pair', { body: { code: wrong, name: 'x', platform: 'ios' } })).status).toBe(401);
+  expect((await door('pair', { body: { code: offer.offer.code, name: 'x', platform: 'ios' } })).status).toBe(410);
+  await shot('settings-phones-code-closed-by-wrong-tries');
+  await block.getByRole('button', { name: 'Done' }).click();
+
+  // A second Inbox whose `tailscale` is a script on PATH, so CI and this Mac show the same states without a tailnet.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-phones-tailscale-')));
+  const bin = join(root, 'bin');
+  mkdirSync(bin);
+  writeFileSync(
+    join(bin, 'tailscale'),
+    `#!/bin/sh\nif [ "$(cat '${join(root, 'mode')}')" = down ]; then echo 'Tailscale is stopped.' >&2; exit 1; fi\nif [ "$1" = serve ] && [ "$2" = status ]; then echo '{"TCP":{"8443":{"HTTPS":true}},"Web":{"x.ts.net:8443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:3000"}}}}}'; exit 0; fi\nexit 1\n`,
+  );
+  chmodSync(join(bin, 'tailscale'), 0o755);
+  const env = { PATH: `${bin}:${process.env.PATH ?? ''}`, HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: 'none' };
+  const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
+  expect(started.status, started.stderr).toBe(0);
+  const other = await world.context.newPage();
+  try {
+    world.page = other;
+    await other.goto(`${started.stdout.trim()}#settings`);
+    const phones = other.locator('[data-settings-phones]');
+    const toggle = phones.getByRole('switch', { name: 'Reach from my tailnet' });
+    for (const [mode, words, name] of [
+      ['taken', 'Another tailscale serve mapping already uses port 8443', 'settings-phones-tailnet-port-taken'],
+      ['down', 'Tailscale could not publish the Inbox', 'settings-phones-tailnet-unavailable'],
+    ] as const) {
+      writeFileSync(join(root, 'mode'), mode);
+      await toggle.click();
+      await expect(phones.locator('.ib-error')).toContainText(words);
+      await expect(toggle).toHaveAttribute('aria-checked', 'false');
+      await shot(name);
+    }
+  } finally {
+    world.page = page;
+    await other.close();
+    try {
+      process.kill(JSON.parse(readFileSync(join(root, 'data', 'inbox', 'inbox.json'), 'utf8')).pid, 'SIGTERM');
+    } catch {
+      // Already gone.
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('Reach from my tailnet: the door answers at the MagicDNS name on 8443, nothing else does (run by hand on a tailnet)', async () => {

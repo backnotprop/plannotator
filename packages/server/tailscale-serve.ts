@@ -156,10 +156,12 @@ export function enableTailscaleServe(
       `--tailscale: could not find an https:// URL for port ${httpsPort} in \`tailscale serve\` output.`,
     );
   }
+  // The Inbox (persist) publishes a door-only listener that reads no Host, so
+  // its window's allowlist never learns the tailnet name.
+  if (options.persist) return { url };
   // tailscale serve forwards the browser's Host (the MagicDNS name) to the
   // loopback backend, so the server's Host allowlist must know the name.
   allowServedHostname(new URL(url).hostname);
-  if (options.persist) return { url };
   activePorts.add(httpsPort);
   cleanupRunner = run;
   if (!exitCleanupInstalled) {

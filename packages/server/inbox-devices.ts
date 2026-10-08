@@ -161,6 +161,30 @@ function bearer(req: Request): string | null {
   return match ? match[1]! : null;
 }
 
+/**
+ * Take down the mapping on 8443 when it points at one of `targets` (this
+ * Inbox's door listeners). "none" when there is no such mapping, "failed"
+ * when Tailscale could not say or could not remove it.
+ */
+function takeDownOwnMapping(run: TailscaleRunner, targets: readonly string[]): "removed" | "none" | "failed" {
+  const status = run(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
+  if (status.error || status.status !== 0) return "failed";
+  const existing = serveStatusProxy(status.stdout, INBOX_TAILNET_HTTPS_PORT);
+  if (existing.state === "malformed") return "failed";
+  if (existing.state !== "mapped" || !targets.includes(existing.proxy)) return "none";
+  return removeTailscaleServe(INBOX_TAILNET_HTTPS_PORT, run) ? "removed" : "failed";
+}
+
+/**
+ * `uninstall --purge` with the Inbox stopped: take down the tailnet mapping
+ * the last run left, by the door_port inbox.json kept. Nothing is spawned when
+ * the switch was never on.
+ */
+export function takeDownInboxTailnet(dataDir: string, run: TailscaleRunner = runTailscale): "removed" | "none" | "failed" {
+  const door = readInboxRegistry(dataDir)?.tailnet?.door_port;
+  return door ? takeDownOwnMapping(run, [`http://127.0.0.1:${door}`]) : "none";
+}
+
 export function createInboxDevices(context: InboxDevicesContext) {
   const now = () => (context.now ? context.now() : new Date());
   const tailscale = context.tailscale ?? runTailscale;
@@ -263,7 +287,8 @@ export function createInboxDevices(context: InboxDevicesContext) {
       throw new InboxError("validation_error", "idempotency_key: required on a phone's command.", { field: "idempotency_key" });
     }
     const slot = `${device.id}\n${key}`;
-    await inFlight.get(slot);
+    // Wait while the same command runs; no await when none does, so the check and the claim below happen in one turn.
+    while (inFlight.has(slot)) await inFlight.get(slot);
     const seen = commands.get(slot);
     if (seen) {
       if (seen.method !== req.method || seen.path !== doorPath) {
@@ -403,6 +428,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
       const served = new URL(url);
       tailnet.address = `${served.hostname}:${served.port || "443"}`;
       tailnet.error = null;
+      hangup(true);
       return { ok: true };
     } catch (error) {
       closeDoorListener();
@@ -414,29 +440,57 @@ export function createInboxDevices(context: InboxDevicesContext) {
   };
 
   /** Take this Inbox's own mapping down (never someone else's) and close the door listener. */
-  const unpublish = () => {
-    const status = tailscale(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
-    const existing = !status.error && status.status === 0 ? serveStatusProxy(status.stdout, INBOX_TAILNET_HTTPS_PORT) : null;
-    if (existing?.state === "mapped" && ownTargets().includes(existing.proxy)) removeTailscaleServe(INBOX_TAILNET_HTTPS_PORT, tailscale);
-    closeDoorListener();
-    tailnet.address = null;
+  /**
+   * A terminal closing a foreground Inbox (SIGHUP) would end it without its
+   * clean stop and leave the mapping pointing at a dead port. Routed through
+   * the clean stop only while a mapping exists, as `--tailscale` sessions do,
+   * so the signal's default (and `nohup`) is untouched otherwise.
+   */
+  const onHangup = () => {
+    stopTailnet();
+    process.exit(129);
+  };
+  const hangup = (on: boolean) => {
+    process.removeListener("SIGHUP", onHangup);
+    if (on) process.once("SIGHUP", onHangup);
   };
 
-  /** At start: the switch was on, so open the door listener and point the mapping at it. */
+  /** Take this Inbox's own mapping down (never someone else's); the listener closes unless the take-down failed. */
+  const unpublish = (): "removed" | "none" | "failed" => {
+    const result = takeDownOwnMapping(tailscale, ownTargets());
+    if (result === "failed") return result;
+    closeDoorListener();
+    hangup(false);
+    tailnet.address = null;
+    return result;
+  };
+
+  /**
+   * At start: the switch was on, so point the mapping at a fresh door
+   * listener before anything else uses it. If that fails, a mapping the last
+   * run left (a crash, kill -9) is taken down, so it never points at a dead
+   * port for longer than this start.
+   */
   const startTailnet = () => {
     if (!context.registry().tailnet) return;
     tailnet.on = true;
     if (publish().ok) saveSwitch(true);
+    else takeDownOwnMapping(tailscale, ownTargets());
   };
 
   /**
    * A clean stop (quit, the stop route, a restart to update, which runs this
    * before it starts the new binary) takes the mapping and the door listener
    * down, so nothing is published while the Inbox is stopped. The switch stays
-   * on in inbox.json and the next start publishes again.
+   * on in inbox.json (with door_port, so a take-down that failed here is done
+   * by the next start or `uninstall --purge`), and the next start publishes
+   * again.
    */
   const stopTailnet = () => {
-    if (tailnet.address !== null || doorServer) unpublish();
+    if (tailnet.address === null && !doorServer) return;
+    unpublish();
+    closeDoorListener();
+    hangup(false);
   };
 
   const setTailnet = (on: boolean): Response => {
@@ -447,7 +501,10 @@ export function createInboxDevices(context: InboxDevicesContext) {
       saveSwitch(true);
       return json({ tailnet });
     }
-    unpublish();
+    // A take-down that failed changes nothing: the switch stays on, door_port is kept, and the window says why.
+    if (unpublish() === "failed") {
+      return refuse(409, "tailnet_unavailable", `Tailscale could not take the Inbox's address down. Try again, or run "tailscale serve --https=${INBOX_TAILNET_HTTPS_PORT} off".`);
+    }
     tailnet.on = false;
     tailnet.error = null;
     saveSwitch(false);

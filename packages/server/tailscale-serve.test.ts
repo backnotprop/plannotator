@@ -16,6 +16,7 @@ import {
   enableTailscaleServe,
   resetTailscaleServeForTests,
 } from "./tailscale-serve";
+import { createRequestHostGuard } from "./request-host-guard";
 
 const SERVE_OUTPUT = [
   "Available within your tailnet:",
@@ -224,6 +225,8 @@ describe("enableTailscaleServe for the Inbox (8443, persisted, re-pointed)", () 
     expect(calls[1]).toEqual(["serve", "--bg", "--https=8443", "http://127.0.0.1:52900"]);
     // Persisted: no exit teardown, so a restart-to-update never takes the new run's mapping down.
     expect(process.listenerCount("exit")).toBe(before);
+    // And the served name never joins a window's Host allowlist: the Inbox publishes a door-only listener.
+    expect(createRequestHostGuard({ localOnly: true }).check(new Request("http://127.0.0.1/", { headers: { Host: "vps-1.tail1234.ts.net:8443" } }))?.status).toBe(403);
   });
 
   test("never overwrites a mapping on 8443 that points anywhere else", () => {

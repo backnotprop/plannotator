@@ -35,6 +35,7 @@ import {
 } from "../../tests/helpers/inbox-world";
 import { resetServedHostnamesForTests } from "./request-host-guard";
 import { startInboxServer } from "./inbox";
+import { createInboxDevices, takeDownInboxTailnet } from "./inbox-devices";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { GUIDE_BRIEF_EXAMPLE } from "./inbox-guides";
 
@@ -556,8 +557,15 @@ describe("the device door, in process", () => {
     roots.push(dataDir);
     // Tailscale's serve config, kept by a scripted CLI through the seam the Inbox runs the real one with.
     const serve = new Map<number, string>();
+    // Tailscale failing to answer status, or to publish (stopped, signed out).
+    const down = { status: false, serve: false };
+    const calls: string[][] = [];
     const tailscale: TailscaleRunner = (args) => {
+      calls.push(args);
       const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
+      const fail = { status: 1, stdout: "", stderr: "Tailscale is stopped." };
+      if (args[1] === "status" && down.status) return fail;
+      if (args[1] !== "status" && !args.includes("off") && down.serve) return fail;
       if (args[1] === "status") {
         if (serve.size === 0) return ok("{}");
         const TCP = Object.fromEntries([...serve.keys()].map((p) => [String(p), { HTTPS: true }]));
@@ -613,9 +621,20 @@ describe("the device door, in process", () => {
           expect([host, path, ...(await refused(response))]).toEqual([host, path, 404, "device_route_not_found"]);
         }
       }
+      // The window's port never learns the tailnet name (phones use their own listener).
+      expect((await fetch(`${main}/api/inbox/threads`, { headers: { Host: "macbook-pro.tail0000.ts.net:8443" } })).status).toBe(403);
       // The window's own port is unchanged: a loopback client with no Origin is served as before.
       expect((await fetch(`${main}/api/inbox/threads`, { headers: { Host: "localhost" } })).status).toBe(200);
       expect((await fetch(`${main}/api/inbox/pairing`, { method: "POST", headers: { Host: "localhost" }, body: "{}" })).status).toBe(201);
+
+      // Off while Tailscale cannot answer: nothing changes and the window is told, so door_port still names the mapping to take down.
+      down.status = true;
+      const stuck = await fetch(`${main}/api/inbox/tailnet`, { method: "POST", body: JSON.stringify({ on: false }) });
+      expect(await refused(stuck)).toEqual([409, "tailnet_unavailable"]);
+      expect(serve.get(8443)).toBe(target);
+      expect(JSON.parse(readFileSync(join(dataDir, "inbox", "inbox.json"), "utf8")).tailnet).toEqual({ https_port: 8443, door_port: doorPort });
+      expect((await fetch(`${tailnetDoor}/api/inbox/device/health`, { headers: { Authorization: `Bearer ${token}` } })).status).toBe(200);
+      down.status = false;
 
       // Off: the mapping and the listener are gone; the switch is cleared.
       await fetch(`${main}/api/inbox/tailnet`, { method: "POST", body: JSON.stringify({ on: false }) });
@@ -638,13 +657,66 @@ describe("the device door, in process", () => {
       await Bun.sleep(150);
       expect(atRestart).toBeUndefined();
 
+      // After a crash (kill -9): the mapping still points at the dead run's door listener.
+      const crashed = await startInboxServer({ dataDir, binaryPath: null, tailscale });
+      const deadDoor = serve.get(8443)!;
+      crashed.stop();
+      serve.set(8443, deadDoor);
+      // The next start that cannot publish takes that leftover down rather than leave it.
+      down.serve = true;
+      const unpublished = await startInboxServer({ dataDir, binaryPath: null, tailscale });
+      expect(serve.has(8443)).toBe(false);
+      unpublished.stop();
+      down.serve = false;
+      // With the Inbox stopped, uninstall --purge's take-down finds it by door_port.
+      const leftover = `http://127.0.0.1:${JSON.parse(readFileSync(join(dataDir, "inbox", "inbox.json"), "utf8")).tailnet.door_port}`;
+      serve.set(8443, leftover);
+      expect(takeDownInboxTailnet(dataDir, tailscale)).toBe("removed");
+      expect(serve.has(8443)).toBe(false);
+      expect(takeDownInboxTailnet(dataDir, tailscale)).toBe("none");
+
       // A mapping someone else put on 8443 is never taken down.
       const third = await startInboxServer({ dataDir, binaryPath: null, tailscale });
       serve.set(8443, "http://127.0.0.1:3000");
       third.stop();
       expect(serve.get(8443)).toBe("http://127.0.0.1:3000");
+      expect(takeDownInboxTailnet(dataDir, tailscale)).toBe("none");
+      // A data dir whose switch was never on spawns no tailscale at all.
+      const before = calls.length;
+      expect(takeDownInboxTailnet(mkdtempSync(join(tmpdir(), "plannotator-inbox-devices-none-")), tailscale)).toBe("none");
+      expect(calls.length).toBe(before);
     } finally {
       resetServedHostnamesForTests();
     }
+  });
+  test("one command sent twice at once is applied once: the second waits for the first and replays its answer", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "plannotator-inbox-devices-race-"));
+    roots.push(dataDir);
+    // The window's handler, counted: the door hands each allowed request to it.
+    let applied = 0;
+    const phones = createInboxDevices({
+      dataDir,
+      serverSession: "0".repeat(32),
+      port: () => 1,
+      previousPort: null,
+      registry: () => ({ v: 1, pid: process.pid, port: 1, url: "", version: "dev", token: "t".repeat(64), serverSession: "0".repeat(32), startedAt: "" }),
+      readBody: async (req) => (await req.json()) as Record<string, unknown>,
+      dispatch: async () => {
+        applied += 1;
+        await Bun.sleep(20);
+        return Response.json({ thread: { thread_id: "msg_x" } });
+      },
+    });
+    const made = (await (await phones.windowRoute(new Request("http://127.0.0.1/api/inbox/pairing", { method: "POST", body: "{}" }), new URL("http://127.0.0.1/api/inbox/pairing")))!.json()) as Json;
+    const pairUrl = new URL("http://127.0.0.1/api/inbox/device/pair");
+    const paired = (await (await phones.door(new Request(pairUrl, { method: "POST", body: JSON.stringify({ code: made.offer.code, name: "iPhone", platform: "ios" }) }), pairUrl)).json()) as Json;
+    const url = new URL("http://127.0.0.1/api/inbox/device/threads/msg_x/seen");
+    const send = () =>
+      phones.door(new Request(url, { method: "POST", headers: { Authorization: `Bearer ${paired.token}` }, body: JSON.stringify({ idempotency_key: "same-tap" }) }), url);
+    // Both bodies are already in memory, so both requests reach the key check in the same turn.
+    const [a, b] = await Promise.all([send(), send()]);
+    expect(applied).toBe(1);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    expect([a.headers.get("idempotent-replayed"), b.headers.get("idempotent-replayed")]).toEqual([null, "true"]);
   });
 });
