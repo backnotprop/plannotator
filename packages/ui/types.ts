@@ -520,3 +520,29 @@ export type {
   MentionSource,
   MentionTrigger,
 } from './utils/mentions';
+
+/**
+ * The composer handed to the host (opt-in `onHostDraft` on `Viewer` and
+ * `HtmlViewer`; Plannotator supplies neither). With it a viewer draws no
+ * toolbar or composer of its own: it reports what a comment would be on, and
+ * the host writes the comment, saves it, and draws it as saved through
+ * `annotations` or `applySharedAnnotations`.
+ */
+export interface HostDraft {
+  /** The annotation a comment here would carry, with an empty `text`. */
+  annotation: Annotation;
+  /**
+   * `'selection'`: a text selection settled; the host offers its own Comment
+   * (a phone's edit menu). `'compose'`: open the composer now (a pinpoint
+   * tap, Comment mode, an HTML pin).
+   */
+  intent: 'selection' | 'compose';
+  /** What it is on, as a composer names it ("div.btnx"). Absent for text. */
+  label?: string;
+  /**
+   * Drop the draft: its pending highlight or pin goes. The host calls it when
+   * the person cancels, and after the save, before it draws the saved
+   * annotation. A draft already replaced by a newer one ignores it.
+   */
+  cancel: () => void;
+}

@@ -8,7 +8,8 @@
     "./inbox.css": "./inbox.css"
   },
   "imports": {
-    "#guide-reader": "./guide/GuideReader.tsx"
+    "#guide-reader": "./guide/GuideReader.tsx",
+    "#surface-guide-reader": "./guide/SurfaceGuideReader.tsx"
   },
   "dependencies": {
     "@plannotator/core": "workspace:*",

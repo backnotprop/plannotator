@@ -42,7 +42,7 @@ plannotator/
 │   │   ├── core/                 # Platform-agnostic logic (handler, storage interface, cors)
 │   │   ├── stores/               # Storage backends (fs, kv, s3)
 │   │   └── targets/              # Deployment entries (bun.ts, cloudflare.ts)
-│   ├── inbox/                    # The Plannotator Inbox window's Vite single-file build (packages/inbox); build:hook copies it to apps/hook/dist/inbox.html
+│   ├── inbox/                    # The Plannotator Inbox window's Vite single-file build (packages/inbox); build:hook copies it to apps/hook/dist/inbox.html, and the phone's surface (build:surface) to apps/hook/dist/surface.html
 │   ├── review/                   # Standalone review server (for development)
 │   │   ├── index.html
 │   │   ├── index.tsx
@@ -102,7 +102,7 @@ plannotator/
 │   │   ├── draft.ts              # Annotation draft persistence (node:fs only)
 │   │   ├── project.ts            # Pure string helpers (sanitizeTag, extractRepoName, extractDirName)
 │   │   └── inbox/                # The Inbox store (store.ts, append-only JSONL; thread routing), the per-thread list sections (list.ts), layout + line reader (schema.ts), registry (registry.ts: inbox/inbox.json)
-│   ├── inbox/                    # The Plannotator Inbox window (App, sidebar, list, thread, empty state, Settings), composed from ui; built by apps/inbox
+│   ├── inbox/                    # The Plannotator Inbox window (App, sidebar, list, thread, empty state, Settings), composed from ui, and surface/ (what a phone hosts); built by apps/inbox
 │   ├── guide-viewer/             # @plannotator/guide-viewer — the Guided Review chain (GuideView → GuideSectionCard → GuideFileCard → GuideViewportManager) behind a narrow GuideHost context; used by review-editor (ReviewGuideHost + AllFilesCodeView) and by the guides.show viewer (readOnly). Also home of diffParser, DiffFile, and the two markdown renderers.
 │   ├── editor/                   # Plan review app
 │   │   ├── App.tsx               # Main plan review app
@@ -2048,6 +2048,12 @@ Sorting and the rest:
 - Idempotency: a POST's status and JSON body are kept per device and key and read at start. The same key on the same route answers them again with `Idempotent-Replayed: true` and writes nothing; on another route it is `409 idempotency_key_reused`; a 5xx is not kept.
 - Remove: Settings' Remove (`POST /api/inbox/devices/:id/revoke`) or the phone's own `POST /api/inbox/device/revoke` marks the record revoked, deletes its secret and ends its open event streams. Its next request is `401 device_revoked`.
 - Settings' Phones block (`packages/inbox/components/Phones.tsx`; not in the window's design record, OWNER-ITEMS item 23, built in Settings' own rows): the Wi-Fi switch with the LAN address, the certificate's SHA-256 in groups of four and, where nothing can publish Bonjour, a note that phones will not list it but the scan still pairs; the pairing panel says "or enter the code" only while the tailnet is on; the tailnet switch with the served address (the two in the order the iPhone's 9.2 lists them); Pair a phone (with neither path on, its note offers "Turn on Reach from this Wi-Fi" in place) (the QR, the digits, the countdown, New code; it watches the device list while open and closes when the phone appears), the paired phones with platform, last seen and Remove (asked twice).
+
+**The surface** (PLAN step S1; contract section 5). `apps/inbox`'s `build:surface` (`vite.surface.config.ts`, entry `surface.html`) builds `packages/inbox/surface` into one file, which `build:hook` copies to `apps/hook/dist/surface.html`; the iPhone app bundles it.
+- It mounts only `Viewer` with the annotation toolstrip, `HtmlViewer` with pins, `DiagramViewer` (lazy) and the guide (`packages/inbox/guide/SurfaceGuideReader.tsx` behind `#surface-guide-reader`, lazy: the sections, then one `GuideSectionCard` per screen).
+- No network: CSP `default-src 'none'`, `connect-src 'none'`; an HTML page's folder loads from the shell's `plannotator-asset:` scheme. The system face on Plannotator's tokens; settings live in memory; diffs unified and wrapped.
+- The bridge: `packages/core/inbox-surface-bridge.ts` (re-exported by `inbox-types`), the surface's end in `packages/inbox/surface/bridge.ts`. The composer is the shell's: the viewers report drafts through ui's `onHostDraft` seams, and `commit_annotation` draws the saved one.
+- Proof: `tests/e2e/surface.spec.ts`, Playwright WebKit against the built file and a compiled Inbox (in `inbox-e2e.yml`).
 
 **Security**, on every request:
 - The Host allowlist (`createRequestHostGuard({ localOnly: true })`).

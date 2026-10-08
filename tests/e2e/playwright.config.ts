@@ -3,14 +3,15 @@
  * binary (`plannotator inbox`), under a temp PLANNOTATOR_DATA_DIR: the window
  * (inbox.spec.ts), notifications, decisions (inbox-decisions.spec.ts) and
  * guided reviews (inbox-guides.spec.ts), New message
- * (inbox-new-message.spec.ts) and phones (inbox-phones.spec.ts). Build the binary first (see
- * inbox.spec.ts), then `bun run test:e2e:inbox`.
+ * (inbox-new-message.spec.ts), phones (inbox-phones.spec.ts), and the
+ * surface a phone hosts, in WebKit (surface.spec.ts). Build the binary
+ * first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
 import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: '.',
-  testMatch: ['inbox.spec.ts', 'notifications.spec.ts', 'inbox-decisions.spec.ts', 'inbox-attachments.spec.ts', 'inbox-guides.spec.ts', 'inbox-new-message.spec.ts', 'inbox-phones.spec.ts'],
+  testMatch: ['inbox.spec.ts', 'notifications.spec.ts', 'inbox-decisions.spec.ts', 'inbox-attachments.spec.ts', 'inbox-guides.spec.ts', 'inbox-new-message.spec.ts', 'inbox-phones.spec.ts', 'surface.spec.ts'],
   outputDir: '../../.local/test-results',
   fullyParallel: false,
   workers: 1,

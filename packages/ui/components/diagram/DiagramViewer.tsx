@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { buildDiagramAnchorValue, type DiagramAnchor, type DiagramKind, type DiagramTarget } from '@plannotator/core/diagram-anchor';
 import { cn } from '../../lib/utils';
 import { diagramFamilyOf } from '../../utils/diagram-anchor';
@@ -43,6 +43,14 @@ export type DiagramAskAI = (
   additionalTargets: readonly DiagramTarget[],
 ) => boolean | void | Promise<boolean | void>;
 
+/** A part chosen for a comment the host composes (`onHostDraft`). */
+export interface DiagramHostDraft {
+  /** The anchor a comment there carries (its `sourceLine` in document lines). */
+  readonly anchor: DiagramAnchor;
+  /** Drop the draft: the part's ring goes. A draft already replaced ignores it. */
+  readonly cancel: () => void;
+}
+
 export interface DiagramViewerProps {
   readonly kind: DiagramKind;
   /** The diagram text. With `onSave` this is the saved baseline the pane's
@@ -52,6 +60,11 @@ export interface DiagramViewerProps {
   readonly comments: readonly DiagramComment[];
   /** A comment composed on a part. Absent: clicks open nothing. */
   readonly onCreateComment?: DiagramCreateComment;
+  /** Opt-in host capability: the composer handed to the host. A click on a
+   * part reports it here (null when the draft closes) and no composer is
+   * drawn; the host saves the comment and passes it back in `comments`.
+   * Absent: unchanged. */
+  readonly onHostDraft?: (draft: DiagramHostDraft | null) => void;
   /** Ask AI from the composer. Absent: the composer offers no Ask AI. */
   readonly onAskAI?: DiagramAskAI;
   /** Save the pane's text. Absent: there is no Source pane. */
@@ -104,6 +117,7 @@ export function DiagramViewer({
   theme,
   comments,
   onCreateComment,
+  onHostDraft,
   onAskAI,
   onSave,
   readOnlySource = false,
@@ -142,7 +156,7 @@ export function DiagramViewer({
   const [svgRoot, setSvgRoot] = useState<SVGSVGElement | null>(null);
   const onSvgRoot = useCallback((root: SVGSVGElement | null) => setSvgRoot(root), []);
 
-  const canCreate = onCreateComment !== undefined || commentingDisabledReason !== undefined;
+  const canCreate = onCreateComment !== undefined || commentingDisabledReason !== undefined || onHostDraft !== undefined;
   const commentsState = useDiagramComments({
     finder,
     svgRoot,
@@ -190,6 +204,29 @@ export function DiagramViewer({
     if (!sourceOpen) cancelComposer();
   }, [cancelComposer, sourceOpen]);
 
+  // The composer handed to the host: the draft's part goes out, and the
+  // host's cancel closes it only while it is still the open one.
+  const onHostDraftRef = useRef(onHostDraft);
+  onHostDraftRef.current = onHostDraft;
+  const openComposer = commentsState.composer;
+  const openComposerRef = useRef(openComposer);
+  openComposerRef.current = openComposer;
+  const hostComposes = onHostDraft !== undefined;
+  useEffect(() => {
+    const report = onHostDraftRef.current;
+    if (!report) return;
+    if (openComposer === null) {
+      report(null);
+      return;
+    }
+    report({
+      anchor: buildDiagramAnchorValue(openComposer.primary.target, openComposer.sourceLine),
+      cancel: () => {
+        if (openComposerRef.current === openComposer) cancelComposer();
+      },
+    });
+  }, [cancelComposer, hostComposes, openComposer]);
+
   // Ask AI asks about the part the draft is on; the host's handler decides
   // whether the question was taken, and a taken question closes the draft
   // exactly as the markdown composer closes.
@@ -215,7 +252,7 @@ export function DiagramViewer({
         selectedCommentId={selectedCommentId}
         onSelectComment={onSelectComment}
         renderComposer={(anchorRect) =>
-          commentsState.composer === null ? null : (
+          commentsState.composer === null || hostComposes ? null : (
             <DiagramComposer
               key={`${commentsState.composer.primary.target.id ?? ''}:${commentsState.composer.primary.target.from ?? ''}:${commentsState.composer.primary.target.to ?? ''}`}
               draft={commentsState.composer}
@@ -233,7 +270,7 @@ export function DiagramViewer({
         }
       />
     ),
-    [askFromComposer, commentingDisabledReason, commentsState, onSelectComment, selectedCommentId, sourceDirty],
+    [askFromComposer, commentingDisabledReason, commentsState, hostComposes, onSelectComment, selectedCommentId, sourceDirty],
   );
 
   const showFallback = render.svgNode === null;

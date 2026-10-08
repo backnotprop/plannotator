@@ -14,7 +14,7 @@ import {
   isVimSelectionActionId,
   type VimSelectionHudContext,
 } from "../../shortcuts";
-import type { Annotation, EditorMode, ImageAttachment, InputMethod } from "../../types";
+import type { Annotation, EditorMode, HostDraft, ImageAttachment, InputMethod } from "../../types";
 import { AnnotationType } from "../../types";
 import { copyTextPreservingFocus } from "../../utils/clipboard";
 import { elementIdentityForAskAI } from "../../utils/parser";
@@ -325,6 +325,16 @@ export interface HtmlViewerProps {
    * warning). Meaningless on the inline path, which never shows a strip.
    */
   bridgeErrorDisplay?: "banner" | "none";
+  /**
+   * Opt-in host capability: the composer handed to the host (see
+   * `HostDraft`). A text selection reports `intent: 'selection'` and a pin
+   * `intent: 'compose'` with the element's label, instead of opening the
+   * toolbar or the composer; the selection clearing reports null. With it the
+   * handle's `stepPin` moves a pinned draft to the element around it or back
+   * in. The host saves the comment and draws it through `annotations` /
+   * `applySharedAnnotations`. Ignored when `readOnly`. Absent → unchanged.
+   */
+  onHostDraft?: (draft: HostDraft | null) => void;
 }
 
 /**
@@ -377,6 +387,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       bridgeReadyTimeoutMs = DEFAULT_BRIDGE_READY_TIMEOUT_MS,
       onBridgeUnavailable,
       bridgeErrorDisplay = "banner",
+      onHostDraft,
     },
     ref,
   ) => {
@@ -613,6 +624,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onUnanchoredChange: handleBridgeUnanchored,
       maxAdditionalTargets,
       scrollBehavior,
+      onHostDraft: readOnly ? undefined : onHostDraft,
     });
     createdIdsRef.current = hook.createdAnnotationIds;
 
@@ -1012,6 +1024,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       // Shared/draft restores respect the live page filter too.
       applySharedAnnotations: (anns: Annotation[]) =>
         hook.applyAnnotations(forCurrentPage(anns)),
+      stepPin: (direction: "parent" | "child") =>
+        postToBridge({ type: `${PREFIX}step-pin`, direction }),
     }));
 
     const handleGlobalCommentSubmit = useCallback(

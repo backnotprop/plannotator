@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, type RefObject } from "react";
-import { AnnotationType, type Annotation, type EditorMode, type HtmlAnnotationTarget, type HtmlElementAnchor, type HtmlElementContext, type ImageAttachment } from "../../types";
+import { AnnotationType, type Annotation, type EditorMode, type HostDraft, type HtmlAnnotationTarget, type HtmlElementAnchor, type HtmlElementContext, type ImageAttachment } from "../../types";
 import { THUMBS_UP_LABEL, type QuickLabel } from "../../utils/quickLabels";
 import { getIdentity } from "../../utils/identity";
 import type {
@@ -199,6 +199,10 @@ export interface UseHtmlAnnotationOptions {
   /** scrollIntoView behavior for scroll-to (selecting an annotation).
    *  Absent: smooth, as before; pass 'auto' to honor reduced motion. */
   scrollBehavior?: 'smooth' | 'auto';
+  /** The composer handed to the host (see `HostDraft` and HtmlViewer's
+   *  `onHostDraft`): a selection or a pin reports a draft instead of opening
+   *  the toolbar or the composer. Absent: unchanged. */
+  onHostDraft?: (draft: HostDraft | null) => void;
 }
 
 /** Clamp a host cap into the package's bound; anything unusable is the default. */
@@ -465,6 +469,7 @@ export function useHtmlAnnotation({
   onUnanchoredChange,
   maxAdditionalTargets,
   scrollBehavior,
+  onHostDraft,
 }: UseHtmlAnnotationOptions): Omit<
   UseAnnotationHighlighterReturn,
   "highlighterRef" | "highlightRange" | "highlightMathElement"
@@ -536,6 +541,10 @@ export function useHtmlAnnotation({
   onPageChangeRef.current = onPageChange;
   const onLinkClickRef = useRef(onLinkClick);
   onLinkClickRef.current = onLinkClick;
+  const onHostDraftRef = useRef(onHostDraft);
+  onHostDraftRef.current = onHostDraft;
+  // The id of the draft the host holds, so a stale cancel cannot drop a newer one.
+  const hostDraftIdRef = useRef<string | null>(null);
   // The effective cap and whether the host set one: only an explicit cap
   // rides on arm-multi-select, so an unconfigured viewer posts today's message.
   const maxTargetsRef = useRef(resolveMaxAdditionalTargets(maxAdditionalTargets));
@@ -659,6 +668,39 @@ export function useHtmlAnnotation({
         pendingAnchorRef.current = message.anchor ?? null;
         pendingContextRef.current = message.context ?? null;
         setDraftTargets([]); // a new selection always starts a fresh draft
+        const reportDraft = onHostDraftRef.current;
+        if (reportDraft) {
+          // The host composes: HTML is comment-only, so every selection or
+          // pin is a comment draft, and nothing of ours opens.
+          const id = nextHtmlAnnId();
+          hostDraftIdRef.current = id;
+          reportDraft({
+            annotation: {
+              id,
+              blockId: "",
+              startOffset: 0,
+              endOffset: 0,
+              type: AnnotationType.COMMENT,
+              text: "",
+              originalText: message.text,
+              author: getIdentity(),
+              createdA: Date.now(),
+              htmlAnchor: message.anchor,
+              elementContext: message.context,
+            },
+            intent: message.pinpoint ? "compose" : "selection",
+            label: message.targetLabel,
+            cancel: () => {
+              if (hostDraftIdRef.current !== id) return;
+              hostDraftIdRef.current = null;
+              post({ type: `${PREFIX}cancel-selection` });
+              pendingTextRef.current = "";
+              pendingAnchorRef.current = null;
+              pendingContextRef.current = null;
+            },
+          });
+          return;
+        }
         const anchor = positionAnchor(message.rect);
         if (!anchor) return;
 
@@ -754,6 +796,10 @@ export function useHtmlAnnotation({
       }
 
       if (type === `${PREFIX}selection-clear`) {
+        if (onHostDraftRef.current && hostDraftIdRef.current) {
+          hostDraftIdRef.current = null;
+          onHostDraftRef.current(null);
+        }
         setToolbarState(null);
         // Keep the captured text alive while a comment/quick-label is open: the user
         // is composing, and the selection collapsing or scrolling out of view must

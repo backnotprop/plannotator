@@ -29,8 +29,8 @@ import { useConfigValue } from '@plannotator/ui/config';
 const NO_ANNOTATIONS: never[] = [];
 const noop = () => {};
 
-/** The read-only diff renderer, configured from Plannotator's diff settings like guides.show's. */
-const ReadOnlyDiff: FC<GuideDiffRendererProps> = (props) => {
+/** The read-only diff renderer, configured from Plannotator's diff settings like guides.show's (the surface's reader draws with it too). */
+export const ReadOnlyDiff: FC<GuideDiffRendererProps> = (props) => {
   const diffStyle = useConfigValue('diffStyle');
   const diffOverflow = useConfigValue('diffOverflow');
   const diffIndicators = useConfigValue('diffIndicators');

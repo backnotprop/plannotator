@@ -14,10 +14,11 @@
       "@plannotator/ui/*": ["../../packages/ui/*"],
       "@plannotator/inbox": ["../../packages/inbox/index.ts"],
       "@plannotator/inbox/*": ["../../packages/inbox/*"],
-      "#guide-reader": ["../../packages/inbox/guide/reader-module.d.ts"]
+      "#guide-reader": ["../../packages/inbox/guide/reader-module.d.ts"],
+      "#surface-guide-reader": ["../../packages/inbox/guide/surface-reader-module.d.ts"]
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["index.tsx"]
+  "include": ["index.tsx", "surface.tsx"]
 }

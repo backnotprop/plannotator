@@ -20,6 +20,8 @@ import type { InboxAnnotationRecord, InboxAttachment } from "./inbox-attachments
 // The attachment shapes and file rules (step 2) live in their own module and
 // reach the Inbox through this published entry, so core's export map is unchanged.
 export * from "./inbox-attachments";
+// The surface bridge's messages (the phone, PLAN step S1), the same way.
+export * from "./inbox-surface-bridge";
 
 /** Every record and line carries this version. Fields are only ever added. */
 export const INBOX_RECORD_VERSION = 1 as const;

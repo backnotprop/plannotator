@@ -313,7 +313,8 @@ Annotations are Plannotator's `Annotation` (`packages/ui/types.ts`) inside the I
 | Type | Fields | When |
 |---|---|---|
 | `open_attachment` | `attachment: InboxAttachmentState`, `version` (`"current"` or the sent sha256), `text`, `html` (string with the rewritten base, or null), `annotations: InboxAnnotationRecord[]` (this file and version, waiting for a Send), `focus` (an annotation id to scroll to, or null) | the person opens a file (3.6, 4.1 to 4.4) |
-| `open_guide` | `message_id`, `guide: InboxGuideRef`, `snapshot`, `reviewed: boolean[] or null` | a guided review opens (6.1, 6.2) |
+| `open_guide` | `message_id`, `guide: InboxGuideRef`, `snapshot`, `reviewed: boolean[] or null` | a guided review opens on its sections (6.1) |
+| `open_section` | `section` (an index, or null for the sections) | the shell's back button in 6.2 (S1, see below) |
 | `set_mode` | `mode: "annotate" or "interact"` | the switch of 4.3 |
 | `step_pin` | `direction: "parent" or "child"` | Parent or Child in 4.3 |
 | `set_appearance` | `theme: "light" or "dark"`, `text_scale` (the Dynamic Type size as a multiple of the default, from `UIFontMetrics`) | at open and on every change |
@@ -329,9 +330,12 @@ Annotations are Plannotator's `Annotation` (`packages/ui/types.ts`) inside the I
 | `pin` | `target: { label, selector }`, `draft: Annotation` | an HTML pin landed, or Parent or Child moved it (4.3) |
 | `draft` | `target: { kind: "block" or "node" or "edge", label }`, `draft: Annotation` | a tap on a block (pinpoint) or a diagram part: open the composer now (4.4) |
 | `annotation` | `id` | a saved mark was tapped: the shell shows it with Edit and Remove (4.3) |
-| `reviewed` | `message_id`, `reviewed: boolean[]` | a section's Reviewed tick (6.2) |
+| `reviewed` | `message_id`, `reviewed: boolean[]` | a section's Reviewed tick (6.1, 6.2) |
+| `section` | `message_id`, `section` (an index, or null for the sections), `sections` (how many pages) | the guide moved, by Continue, Previous or Next; the shell titles 6.2 "02 of 04" and swaps its close button for back (S1, see below) |
 | `link` | `href` | a link in the content; the shell opens it in the system browser |
 | `error` | `code`, `message` | the surface could not draw what it was given |
+
+`open_section` and `section` were added by S1 (2026-10-08): 6.1 and 6.2 put the guide's title and its close or back button in the shell's bar, and Continue, Previous, Reviewed and Next in the document, so each side has to tell the other where the guide is. A `selection` with both fields null follows only a selection draft; a pin or a part whose draft closes sends nothing. A `pin`'s `label` is the element's name as Plannotator's pinpoint names it ("Button", a heading's words), and `selector` is the draft's `htmlAnchor.selector`. A `draft`'s `label` is the quote's first words for a block and "Pick a host (node E)" for a diagram part; `kind` is `block` for a whole-diagram comment too. The surface is `apps/hook/dist/surface.html`; its CSP is `default-src 'none'` with `connect-src 'none'`, and lets an HTML page's own folder load from `plannotator-asset:` (script, style, image, font, media, frame and `base-uri`), since the page's frame inherits the policy.
 
 A draft is an `Annotation` with an empty `text`. The shell fills the person's words into `text`, saves `{ attachment_id, version, annotation }` through the door (7.17), and answers with `commit_annotation`. Edit (4.3) is the same save with the same annotation id and a new key. HTML-asset tokens live in the Inbox's memory, so after the Inbox restarts an asset answers 404; the shell then fetches `view` again.
 

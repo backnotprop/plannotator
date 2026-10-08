@@ -10,7 +10,9 @@ name: Inbox window e2e
 # packages/server/inbox-devices.test.ts replays the phone door's contract
 # exchanges on the same binary, and inbox-lan.test.ts proves the Wi-Fi
 # listener there (a pinned phone over the runner's network address; no
-# Bonjour on the runner, so the typed-address path). Runs only when the
+# Bonjour on the runner, so the typed-address path); surface.spec.ts drives
+# the surface a phone hosts (apps/hook/dist/surface.html) in WebKit, the
+# engine WKWebView is. Runs only when the
 # Inbox, the ui and the guide viewer it composes, the binary entry or the build
 # could have changed.
 
@@ -107,15 +109,15 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+          key: playwright-chromium-webkit-${{ runner.os }}-${{ steps.playwright.outputs.version }}
 
-      - name: Install Chromium
+      - name: Install Chromium and WebKit
         if: steps.browser-cache.outputs.cache-hit != 'true'
-        run: bunx playwright install --with-deps chromium
+        run: bunx playwright install --with-deps chromium webkit
 
-      - name: Install Chromium's system libraries
+      - name: Install the browsers' system libraries
         if: steps.browser-cache.outputs.cache-hit == 'true'
-        run: bunx playwright install-deps chromium
+        run: bunx playwright install-deps chromium webkit
 
       - name: Build the apps and compile the binary
         run: >-
