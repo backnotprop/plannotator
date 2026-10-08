@@ -33,6 +33,8 @@ targets:
       - path: Plannotator
     dependencies:
       - package: PlannotatorKit
+      # M5: the notification service extension, embedded in the app.
+      - target: PlannotatorNotifications
     postBuildScripts:
       # Plannotator's surface (contract section 5): apps/inbox's build:surface,
       # bundled as surface.html. Built again only when its sources are newer.
@@ -97,6 +99,49 @@ targets:
         Release:
           WORKSPACES_HOST: ""
           WORKSPACES_ORIGIN: ""
+          # M5: push (production APNs) and the app group the notification
+          # extension shares, also the Keychain group of the device credentials.
+          # Debug and TestFlight carry the same two, development, in Workspaces.entitlements.
+          CODE_SIGN_ENTITLEMENTS: Plannotator/Plannotator.entitlements
+  # M5: opens a relay push with the device key and writes renders 7.1 and 7.2.
+  PlannotatorNotifications:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: PlannotatorNotifications
+    dependencies:
+      - package: PlannotatorKit
+    entitlements:
+      path: PlannotatorNotifications/PlannotatorNotifications.entitlements
+      properties:
+        com.apple.security.application-groups: [group.ai.plannotator.app]
+    info:
+      path: PlannotatorNotifications/Info.plist
+      properties:
+        CFBundleDisplayName: Plannotator Notifications
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.plannotator.app.notifications
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_APPROACHABLE_CONCURRENCY: YES
+  # M5: tests that need the app's own entitlements (its Keychain groups), hosted in the app.
+  PlannotatorTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: PlannotatorTests
+    dependencies:
+      - target: Plannotator
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.plannotator.app.tests
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: YES
   PlannotatorUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -121,4 +166,5 @@ schemes:
       config: Debug
       targets:
         - package: PlannotatorKit/PlannotatorKitTests
+        - name: PlannotatorTests
         - name: PlannotatorUITests

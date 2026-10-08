@@ -183,6 +183,176 @@ export function defineAnnotateBundleScenarios(runtime: string, start: StartBundl
       expect((await served.json()).markdown).toContain("Linked body.");
     });
 
+    // Edit Mode: a bundle is several single-file sessions in one review, so
+    // each listed file saves back to disk the way it would opened alone.
+    const save = (server: BundleScenarioServer, path: string, text: string, baseHash: string) =>
+      post(server, "/api/source/save", { path, text, baseHash, allowMissingBase: true });
+
+    test("a bundle file saves", async () => {
+      const server = await openBundle();
+      const served = await (await doc(server, spec)).json();
+      expect(served.sourceSave).toMatchObject({ enabled: true, scope: "folder-file", path: spec });
+      const response = await save(server, spec, "# Spec\n\nEdited body.\n", served.sourceSave.hash);
+      expect(response.status).toBe(200);
+      expect((await response.json()).ok).toBe(true);
+      expect(readFileSync(spec, "utf-8")).toBe("# Spec\n\nEdited body.\n");
+      // A stale base is a conflict, never an overwrite.
+      const stale = await save(server, spec, "lost", served.sourceSave.hash);
+      expect(stale.status).toBe(409);
+      expect(readFileSync(spec, "utf-8")).toBe("# Spec\n\nEdited body.\n");
+      // Raw HTML stays read-only, as it is for a single file.
+      expect((await (await doc(server, mock)).json()).sourceSave).toMatchObject({ enabled: false });
+    });
+
+    test("a path outside the bundle is refused (403)", async () => {
+      const outside = join(root, "elsewhere.md");
+      writeFileSync(outside, "# Elsewhere\n");
+      const server = await openBundle();
+      // A document linked from a bundle file is served, but read-only, exactly
+      // as a document linked from a single file is.
+      const linked = await (await doc(server, sibling)).json();
+      expect(linked.sourceSave?.enabled ?? false).toBe(false);
+      const hash = (await (await doc(server, spec)).json()).sourceSave.hash;
+      for (const target of [sibling, outside, join(root, "work/docs/new.md"), "../elsewhere.md"]) {
+        const response = await save(server, target, "# Overwritten\n", hash);
+        expect(response.status).toBe(403);
+      }
+      // A save without a path names no file at all.
+      const noPath = await post(server, "/api/source/save", { text: "x", baseHash: hash });
+      expect(noPath.status).toBe(403);
+      expect(readFileSync(sibling, "utf-8")).toBe("# Unlisted\n");
+      expect(readFileSync(outside, "utf-8")).toBe("# Elsewhere\n");
+      expect(readFileSync(spec, "utf-8")).toBe("# Spec\n\nBody of the spec.\n");
+    });
+
+    test("a symlink alias resolves to its file", async () => {
+      mkdirSync(join(root, "outside"), { recursive: true });
+      const real = join(root, "outside/real.md");
+      const other = join(root, "outside/other.md");
+      writeFileSync(real, "# Real\n\nLinked body.\n");
+      writeFileSync(other, "# Other\n");
+      const link = join(root, "work/docs/link.md");
+      symlinkSync(real, link);
+      const server = await start({
+        markdown: "",
+        filePath: join(root, "work"),
+        mode: "annotate-bundle",
+        bundleFiles: [{ path: link, renderAs: "markdown" }, { path: spec, renderAs: "markdown" }],
+      });
+      servers.push(server);
+      const served = await (await doc(server, link)).json();
+      // The capability names the file the link points to.
+      expect(served.sourceSave).toMatchObject({ enabled: true, path: real });
+      const viaLink = await save(server, link, "# Real\n\nEdited through the link.\n", served.sourceSave.hash);
+      expect(viaLink.status).toBe(200);
+      const after = await viaLink.json();
+      expect(readFileSync(real, "utf-8")).toBe("# Real\n\nEdited through the link.\n");
+      // The real path names the same file, so it saves too.
+      const viaReal = await save(server, real, "# Real\n\nAgain.\n", after.hash);
+      expect(viaReal.status).toBe(200);
+      expect(readFileSync(real, "utf-8")).toBe("# Real\n\nAgain.\n");
+      // The link's directory on the far side is not the bundle: its other files stay read-only.
+      expect((await save(server, other, "# Overwritten\n", after.hash)).status).toBe(403);
+      expect(readFileSync(other, "utf-8")).toBe("# Other\n");
+    });
+
+    // The guards every state-changing endpoint carries, on source save too.
+    const saveWith = (server: BundleScenarioServer, body: Record<string, unknown>, headers: Record<string, string> = {}) =>
+      fetch(`${server.url}/api/source/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body: JSON.stringify(body),
+      });
+    const specHash = async (server: BundleScenarioServer) =>
+      (await (await doc(server, spec)).json()).sourceSave.hash as string;
+    const original = "# Spec\n\nBody of the spec.\n";
+
+    test("a cross-origin save is refused (403) and writes nothing", async () => {
+      const server = await openBundle();
+      const hash = await specHash(server);
+      for (const headers of <Record<string, string>[]>[
+        { Origin: "https://evil.example" },
+        { Origin: "null" },
+        { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" },
+        { "Sec-Fetch-Site": "same-site", Origin: "http://localhost:1" },
+      ]) {
+        const response = await saveWith(server, { path: spec, text: "# Pwned\n", baseHash: hash }, headers);
+        expect(response.status).toBe(403);
+      }
+      expect(readFileSync(spec, "utf-8")).toBe(original);
+    });
+
+    test("the VS Code panel's proxied save (Sec-Fetch-Site same-origin, Origin naming the proxy) is allowed", async () => {
+      const server = await openBundle();
+      const hash = await specHash(server);
+      const response = await saveWith(
+        server,
+        { path: spec, text: "# Spec\n\nFrom the panel.\n", baseHash: hash },
+        { Origin: "http://127.0.0.1:1", "Sec-Fetch-Site": "same-origin" },
+      );
+      expect(response.status).toBe(200);
+      expect(readFileSync(spec, "utf-8")).toBe("# Spec\n\nFrom the panel.\n");
+    });
+
+    test("a save from a tab of another session (serverSession mismatch) is refused (409)", async () => {
+      const server = await openBundle();
+      const plan = await (await fetch(`${server.url}/api/plan`)).json();
+      expect(typeof plan.serverSession).toBe("string");
+      const hash = await specHash(server);
+      const stale = await saveWith(server, { path: spec, text: "# Stale\n", baseHash: hash, serverSession: "0".repeat(32) });
+      expect(stale.status).toBe(409);
+      expect((await stale.json()).code).toBe("session_mismatch");
+      expect(readFileSync(spec, "utf-8")).toBe(original);
+      // This session's own nonce saves.
+      const own = await saveWith(server, { path: spec, text: "# Spec\n\nOwn.\n", baseHash: hash, serverSession: plan.serverSession });
+      expect(own.status).toBe(200);
+      expect(readFileSync(spec, "utf-8")).toBe("# Spec\n\nOwn.\n");
+    });
+
+    for (const [label, decide] of [
+      ["feedback", (server: BundleScenarioServer) => post(server, "/api/feedback", { feedback: "Done", annotations: [] })],
+      ["Close", (server: BundleScenarioServer) => fetch(`${server.url}/api/exit`, { method: "POST" })],
+    ] as const) {
+      test(`a save after the review is decided (${label}) is refused (409)`, async () => {
+        const server = await openBundle();
+        const hash = await specHash(server);
+        expect((await decide(server)).ok).toBe(true);
+        const late = await saveWith(server, { path: spec, text: "# Late\n", baseHash: hash });
+        expect(late.status).toBe(409);
+        expect(await late.json()).toMatchObject({ ok: false, decided: true });
+        expect(readFileSync(spec, "utf-8")).toBe(original);
+      });
+    }
+
+    test("a bundle file swapped for a symlink after the review opened is refused (403)", async () => {
+      mkdirSync(join(root, "outside"), { recursive: true });
+      const secret = join(root, "outside/secret.md");
+      writeFileSync(secret, "# Secret\n");
+      const server = await openBundle();
+      const hash = await specHash(server);
+      rmSync(spec);
+      symlinkSync(secret, spec);
+      const response = await saveWith(server, { path: spec, text: "# Overwritten\n", baseHash: hash, allowMissingBase: true });
+      expect(response.status).toBe(403);
+      expect(readFileSync(secret, "utf-8")).toBe("# Secret\n");
+    });
+
+    test("a bundle file deleted during the review can be saved back (recreated)", async () => {
+      const server = await openBundle();
+      const hash = await specHash(server);
+      rmSync(spec);
+      // A save that does not allow a missing base names nothing on disk.
+      const strict = await saveWith(server, { path: spec, text: "# Back\n", baseHash: hash });
+      expect(strict.status).toBe(403);
+      expect(() => readFileSync(spec, "utf-8")).toThrow();
+      const recreated = await saveWith(server, { path: spec, text: "# Back\n", baseHash: hash, allowMissingBase: true });
+      expect(recreated.status).toBe(200);
+      expect(readFileSync(spec, "utf-8")).toBe("# Back\n");
+      // A file that never belonged to the bundle is not created beside it.
+      const stranger = join(root, "work/docs/new.md");
+      expect((await saveWith(server, { path: stranger, text: "# New\n", baseHash: hash, allowMissingBase: true })).status).toBe(403);
+    });
+
     test("each text file's version history is saved when the review opens", async () => {
       const server = await openBundle();
       const versions = async (path: string) =>

@@ -26,6 +26,12 @@ meta repo.
 - `PlannotatorKit/`: a local Swift package with the device-door client, the
   wire models, the event stream, the `plannotator://pair` link, the Keychain
   item and the markdown splitter. No third-party dependencies.
+- `PlannotatorNotifications/`: the notification service extension. It opens
+  a relay push's envelope with the device key derived from the pairing secret
+  (kept in the Keychain group `group.ai.plannotator.app`, shared with the
+  app), writes the subject and "<agent> in <project>", and gives a message
+  with one single-choice question its choices as actions. With previews
+  hidden every notification reads "Question from an agent".
 - `PlannotatorUITests/`: the XCUITest proof.
 - `Plannotator/Colors.xcassets`: generated from
   `packages/ui/themes/plannotator.css` by `bun apps/ios/scripts/gen-colors.ts`;
@@ -83,6 +89,19 @@ script in the projects the test writes to. Light and dark screenshots of each
 screen and recordings land in `.local/proof/ios/`; `--only
 PlannotatorUITests/DecisionsProofTests` runs one test. CI runs the same command
 (`.github/workflows/ios.yml`).
+
+The script also runs the relay (`apps/relay`) under `wrangler dev`, with a
+local HTTP/2 server standing in for APNs, and points the Inbox at it. The
+notification flow (`RelayPushTests`) pairs, turns on Allow notifications (the
+token reaches the relay), has agents ask, and hands the exact body Apple
+received to `xcrun simctl push`: the lock screen, the choices, a choice that
+reaches the agent's `wait_for_reply`, one that goes up through the relay when
+the computer cannot be reached directly, a tap that opens the thread, and
+previews hidden. `simctl push` never runs a
+notification service extension, so in the simulator a push that arrives while
+the app is in front is dressed by the app with the extension's code; the
+extension under a real push and Face ID before a choice need a signed build
+on a phone. `--only PlannotatorUITests/RelayPushTests` runs that flow alone.
 
 ## Release and App Review
 

@@ -24,10 +24,14 @@
  */
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { chmodSync, copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import http2 from 'node:http2';
 import { tmpdir } from 'node:os';
+import { Database } from 'bun:sqlite';
 import { dirname, join, resolve } from 'node:path';
 import { DEMO_MESSAGES, SimAgent, scratchProject } from '../../../scripts/inbox-sim.ts';
+import { GUIDE_BRIEF_EXAMPLE } from '../../../packages/server/inbox-guides.ts';
+import { deriveRelayKeys } from '../../../packages/core/crypto.ts';
 import { ClaudeSession } from '../../hook/hooks/mod/testing/claude-session.ts';
 
 const args = process.argv.slice(2);
@@ -66,6 +70,94 @@ function run(cmd: string, argv: string[], options: { env?: Record<string, string
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// ─── M5: the relay under wrangler dev, and Apple played locally ───
+//
+// The Inbox posts its pushes to the relay (apps/relay under `wrangler dev`,
+// as R1's proof runs it); the relay sends them over HTTP/2 to a local server
+// standing in for APNs, which keeps each body. The notification test hands
+// that exact body to `xcrun simctl push`. The APNs key is made for this run
+// and lives only in the relay's env file under the temp dir.
+
+interface Pushed { path: string; collapseId: string; body: string }
+const pushes: Pushed[] = [];
+/** The file holding each thread's latest push body, for `simctl push`. */
+const pushFiles = new Map<string, string>();
+const apple = http2.createServer();
+apple.on('stream', (stream: http2.ServerHttp2Stream, headers) => {
+  let body = '';
+  stream.on('data', (chunk) => (body += chunk));
+  stream.on('end', () => {
+    pushes.push({ path: String(headers[':path']), collapseId: String(headers['apns-collapse-id']), body });
+    stream.respond({ ':status': 200, 'apns-id': crypto.randomUUID() });
+    stream.end();
+  });
+});
+await new Promise<void>((ready) => apple.listen(0, '127.0.0.1', () => ready()));
+
+const freePort = () => {
+  const server = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data() {} } });
+  const port = server.port;
+  server.stop(true);
+  return port;
+};
+const relayDir = join(repo, 'apps/relay');
+const relayState = join(tmp, 'relay');
+mkdirSync(relayState, { recursive: true });
+const apnsKey = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+writeFileSync(
+  join(relayState, 'relay.env'),
+  [
+    `APNS_KEY=${Buffer.from(await crypto.subtle.exportKey('pkcs8', apnsKey.privateKey)).toString('base64')}`,
+    'APNS_KEY_ID=KEY0000000',
+    'APNS_TEAM_ID=TEAM000000',
+    `APNS_ORIGIN=http://127.0.0.1:${(apple.address() as { port: number }).port}`,
+  ].join('\n') + '\n',
+  { mode: 0o600 },
+);
+const relayPort = freePort();
+const relayUrl = `http://127.0.0.1:${relayPort}`;
+const relayLog: string[] = [];
+const relay = spawn(
+  join(relayDir, 'node_modules/.bin/wrangler'),
+  ['dev', '--local', '--ip', '127.0.0.1', '--port', String(relayPort), '--inspector-port', String(freePort()), '--persist-to', relayState, '--env-file', join(relayState, 'relay.env'), '--show-interactive-dev-session=false'],
+  { cwd: relayDir, env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: '1' }, stdio: ['ignore', 'pipe', 'pipe'] },
+);
+for (const stream of [relay.stdout, relay.stderr]) stream?.on('data', (chunk) => relayLog.push(String(chunk)));
+for (let tries = 0; ; tries++) {
+  const status = await fetch(`${relayUrl}/v1/nothing`).then((r) => r.status).catch(() => 0);
+  if (status === 404) break;
+  if (tries > 600) throw new Error(`wrangler dev did not start:\n${relayLog.join('')}`);
+  await sleep(100);
+}
+// Warm the relay: the first request to a Durable Object under wrangler dev
+// builds it, which on a CI runner can hold the Inbox's first pairing (it
+// registers the phone at the relay before it answers) past the test's waits.
+await fetch(`${relayUrl}/v1/mailboxes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ secret_sha256: '0'.repeat(64) }) }).catch(() => {});
+env.PLANNOTATOR_RELAY_URL = relayUrl;
+
+/** The relay's stored devices, read from its Durable Object's SQLite file (as R1's proof reads them). */
+function relayDevices(): Record<string, unknown>[] {
+  const dir = join(relayState, 'v3', 'do', 'plannotator-relay-Mailbox');
+  if (!existsSync(dir)) return [];
+  const rows: Record<string, unknown>[] = [];
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.sqlite') && f !== 'metadata.sqlite')) {
+    // wrangler dev holds the file open and writes it; a read that misses is
+    // skipped here, and the test reads again (it polls).
+    try {
+      const db = new Database(join(dir, file), { readonly: true });
+      try {
+        const tables = (db.query("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((t) => t.name);
+        if (tables.includes('devices')) rows.push(...(db.query('SELECT id, carriage, apns_token, apns_environment FROM devices').all() as Record<string, unknown>[]));
+      } finally {
+        db.close();
+      }
+    } catch {
+      continue;
+    }
+  }
+  return rows;
+}
 
 // ─── The Inbox and its agents ───
 
@@ -301,7 +393,8 @@ async function attach(): Promise<Record<string, string>> {
 
 // ─── The door, through a proxy the test can break ───
 
-let proxyMode: 'pass' | 'down' | 'drop-reply' = 'pass';
+// 'gone': what `tailscale serve` answers when nothing listens behind it (502), for M5's lock-screen answer.
+let proxyMode: 'pass' | 'down' | 'drop-reply' | 'gone' = 'pass';
 /** A response that never completes: the connection dies, as a network drop does. */
 const dropped = () => new Response(new ReadableStream({ start: (controller) => controller.error(new Error('dropped')) }));
 const proxy = Bun.serve({
@@ -311,6 +404,7 @@ const proxy = Bun.serve({
   async fetch(request) {
     const url = new URL(request.url);
     if (proxyMode === 'down') return dropped();
+    if (proxyMode === 'gone') return new Response('Bad Gateway', { status: 502 });
     const forwarded = await fetch(`${inbox}${url.pathname}${url.search}`, {
       method: request.method,
       headers: [...request.headers].filter(([name]) => !['host', 'connection', 'content-length'].includes(name.toLowerCase())),
@@ -483,6 +577,89 @@ const control = Bun.serve({
           await new Promise((r) => (video ? video.once('exit', r) : r(null)));
           video = null;
           return Response.json({ ok: true });
+        // ── M5: the relay and the pushes ──
+        case '/relay':
+          // The relay's stored devices: registered at pairing, then the APNs token.
+          return Response.json({ devices: relayDevices() });
+        case '/ask': {
+          // An agent's message lands; the Inbox pushes through the relay to Apple, played
+          // locally. Answers the thread and the exact body Apple received for it.
+          const before = pushes.length;
+          const writer = await agent(body.agent ?? 'Claude Code', body.host ?? 'claude-code');
+          newsAgents.push(writer);
+          let sent: Record<string, unknown>;
+          if (body.kind === 'guide') {
+            sent = await writer.submitGuide({ ...GUIDE_BRIEF_EXAMPLE, project_path: projects['ledger']!, subject: 'Run finished. A guided review of the export change is attached.' });
+          } else if (body.kind === 'ship') {
+            sent = await writer.send({ project_path: projects['checkout-web']!, subject: 'Ship the dark ticket page behind a flag?', body: question('Ship the dark ticket page behind a flag?', ['Yes', 'No']) });
+          } else {
+            sent = await writer.send({ project_path: projects['billing-svc']!, subject: 'Run the retry tests against the Stripe test clock?', body: ['The retry worker is ready.', '', question('Run the retry tests against the Stripe test clock?', ['Yes', 'No'], ['They take about four minutes against the test key.'])].join('\n') });
+          }
+          const thread = sent.thread_id as string;
+          replies.set(thread, waitForPersonReply(writer, thread));
+          for (let tries = 0; pushes.length === before; tries++) {
+            if (tries > 300) throw new Error(`no push reached Apple for ${thread}`);
+            await sleep(100);
+          }
+          const pushed = pushes.at(-1)!;
+          // Files named by this script, never by the request: the nth push, kept for /push and for the record.
+          const file = join(tmp, `push-${pushes.length}.json`);
+          writeFileSync(file, pushed.body);
+          writeFileSync(join(shots, `M5-push-${pushes.length}.json`), pushed.body);
+          pushFiles.set(thread, file);
+          return Response.json({ thread, bytes: pushed.body.length, collapse_id: pushed.collapseId, device_token: pushed.path.split('/').at(-1) });
+        }
+        case '/relay-log':
+          // How many commands the relay queued: a lock-screen answer that went up through it.
+          return Response.json({ queued: relayLog.join('').split('relay: command ').filter((line) => line.includes(' queued')).length });
+        case '/push': {
+          // The exact body Apple received for that thread, delivered to the simulator.
+          const file = pushFiles.get(body.thread ?? '');
+          if (!file) return Response.json({ error: 'no push for that thread' }, { status: 404 });
+          run('xcrun', ['simctl', 'push', udid, 'ai.plannotator.app', file]);
+          return Response.json({ ok: true });
+        }
+        case '/relay-token-stand-in': {
+          // A simulator that cannot reach APNs (a CI runner) never gets a token:
+          // register a stand-in for each paired phone at the relay, as the phone
+          // would (7.29, its relay secret derived from the pairing secret the
+          // computer keeps), so the pushes still go out. The brief allows a fake
+          // token for the registration call; the test says which it used.
+          const mailbox = JSON.parse(readFileSync(join(dataDir, 'inbox', 'relay.json'), 'utf8')) as { url: string; mailbox_id: string };
+          const token = 'a'.repeat(64);
+          let registered = 0;
+          // The paired phones as the computer lists them (the relay's storage file can miss a read while wrangler writes it).
+          const { devices } = (await (await windowRoute('/api/inbox/devices')).json()) as { devices: { id: string }[] };
+          for (const device of devices) {
+            const id = device.id;
+            const secret = readFileSync(join(dataDir, 'inbox', 'device-secrets', id.replace(/[^A-Za-z0-9_]/g, '')), 'utf8').trim();
+            const { relaySecret } = await deriveRelayKeys(secret, id);
+            const answer = await fetch(`${mailbox.url}/v1/mailboxes/${mailbox.mailbox_id}/devices/${id}/apns`, {
+              method: 'PUT',
+              headers: { Authorization: `Bearer ${relaySecret}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token, environment: 'sandbox' }),
+            });
+            if (answer.status === 204) registered += 1;
+          }
+          return Response.json({ registered, token });
+        }
+        case '/push-unopenable': {
+          // A push this phone holds no key for (as from a computer it was removed from):
+          // R1's vector envelope, sealed under the all-zero test device's key.
+          const vectors = JSON.parse(readFileSync(join(repo, 'packages/core/fixtures/inbox-relay-vectors.json'), 'utf8')) as { envelopes: { envelope: string }[] };
+          const file = join(tmp, 'push-unopenable.json');
+          writeFileSync(file, JSON.stringify({ aps: { alert: { title: 'Plannotator', body: 'New in your Inbox' }, 'mutable-content': 1, sound: 'default' }, e: vectors.envelopes[1]!.envelope }));
+          run('xcrun', ['simctl', 'push', udid, 'ai.plannotator.app', file]);
+          return Response.json({ ok: true });
+        }
+        case '/shot-one':
+          // One frame as the screen is now (the lock screen cannot be re-themed mid-test).
+          run('xcrun', ['simctl', 'io', udid, 'screenshot', join(shots, `${body.name ?? 'shot'}.png`)]);
+          return Response.json({ ok: true });
+        case '/appearance':
+          run('xcrun', ['simctl', 'ui', udid, 'appearance', body.mode ?? 'light']);
+          await sleep(1200);
+          return Response.json({ ok: true });
         default:
           return Response.json({ error: 'unknown' }, { status: 404 });
       }
@@ -522,6 +699,9 @@ try {
   await m3Close();
   control.stop(true);
   proxy.stop(true);
+  relay.kill();
+  apple.close();
+  if (status !== 0) writeFileSync(join(shots, 'relay-wrangler.log'), relayLog.join(''));
   await Promise.allSettled([claude, ...Object.values(others), ...newsAgents, ...(filesAgent ? [filesAgent] : [])].map((a) => a.close()));
   await fetch(`${inbox}/api/inbox/control/stop`, { method: 'POST', headers: { Authorization: `Bearer ${registry.token}` } }).catch(() => {});
   if (status !== 0) {

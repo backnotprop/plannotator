@@ -12,6 +12,8 @@ struct Source: Codable, Hashable, Identifiable {
     /// The address this phone reaches it at: the tailnet publication (or loopback in the simulator).
     var address: InboxAddress
     var pairedAt: Date
+    /// The computer's relay mailbox, from the pairing answer: where this phone's APNs token goes.
+    var relay: InboxRelayRef?
 }
 
 /// A computer the phone has seen in a QR link or paired with, listed under
@@ -34,6 +36,10 @@ final class AppModel {
     var pairing = false
     /// A pairing link opened from outside the app, waiting for the person's yes.
     var offered: PairLink?
+    /// Notifications: the permission, the APNs token, 9.1's switches.
+    let notifier = Notifier()
+    /// A thread a notification opened, for the Inbox tab to push.
+    var opening: ThreadRoute?
     /// The Workspaces sign-in sheet (1.4) is up, or its session is being redeemed.
     private(set) var signingIn = false
     var signInProblem: String?
@@ -50,7 +56,7 @@ final class AppModel {
         known = loadEach(KnownComputer.self, "known")
         if WorkspacesAccount.origin != nil { workspaces = load(WorkspacesAccount.self, "workspacesAccount") }
         // iOS keeps Keychain items when an app is deleted; a fresh install starts clean.
-        if sources.isEmpty { Keychain.deleteAll() }
+        if sources.isEmpty { Keychain.deleteAll() } else { Keychain.migrate() }
         let active = defaults.string(forKey: "activeSource")
         if active == WorkspacesAccount.sourceId, workspaces != nil {
             showWorkspaces()
@@ -182,7 +188,7 @@ final class AppModel {
     private func redeem(at address: InboxAddress, secret: String?, code: String?) async throws(InboxError) {
         let answer = try await InboxClient.pair(at: address, secret: secret, code: code, name: UIDevice.current.name)
         Keychain.save(DeviceCredential(token: answer.token, secret: answer.secret), device: answer.device.id)
-        let source = Source(id: answer.device.id, name: answer.computer.name, address: address, pairedAt: .now)
+        let source = Source(id: answer.device.id, name: answer.computer.name, address: address, pairedAt: .now, relay: answer.relay)
         // Pairing again with a computer this phone was removed from replaces the old source.
         for old in sources where old.address == address { forget(old, showNext: false) }
         sources.append(source)
@@ -192,6 +198,7 @@ final class AppModel {
         session = nil
         show(source)
         pairing = false
+        await notifier.paired(source)
     }
 
     // MARK: Removing

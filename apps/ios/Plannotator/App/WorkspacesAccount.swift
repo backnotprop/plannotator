@@ -199,16 +199,3 @@ nonisolated final class LoopbackReturn: @unchecked Sendable {
         }
     }
 }
-
-// MARK: Push for Workspaces (W2's device door)
-
-extension Notification.Name {
-    static let pushToken = Notification.Name("ai.plannotator.pushToken")
-}
-
-/// Hands the app the APNs token iOS gives it.
-final class AppDelegate: NSObject, UIApplicationDelegate {
-    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
-        NotificationCenter.default.post(name: .pushToken, object: deviceToken)
-    }
-}

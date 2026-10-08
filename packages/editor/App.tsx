@@ -2804,6 +2804,9 @@ const App: React.FC = () => {
     (activeEditableDocument?.sourceSave?.enabled || displayedMarkdown !== '' || editStats !== null) &&
     !archive.archiveMode &&
     !goalSetupMode &&
+    // A file opened in a folder session or a review of several files (bundles
+    // run as folder sessions) is editable when the server granted it source
+    // save: any file in the folder, or exactly the bundle's own files.
     (!linkedDocHook.isActive || (annotateSource === 'folder' && activeEditableDocument?.sourceSave?.enabled)) &&
     !isPlanDiffActive &&
     !isSharedSession &&
@@ -5683,15 +5686,20 @@ const App: React.FC = () => {
       const res = await fetch('/api/source/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: JSON.stringify(withServerSession({
           path: saveBaseSource.scope === 'folder-file' ? saveBaseSource.path : undefined,
           text: edited,
           baseHash: saveBaseSource.hash,
           baseMtimeMs: saveBaseSource.mtimeMs,
           baseEol: saveBaseSource.eol,
           allowMissingBase: true,
-        }),
+        })),
       });
+      // A tab on a port a newer session took over: show the reload prompt, write nothing.
+      if (await noteServerSessionMismatch(res)) {
+        editableDocuments.markError(activeDocument.key, 'This review was replaced; reload the page.');
+        return true;
+      }
       const data = (await res.json()) as SourceSaveResponse;
 
       if (!res.ok || !data.ok) {

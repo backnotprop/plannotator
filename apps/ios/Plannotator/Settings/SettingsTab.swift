@@ -1,7 +1,8 @@
 import PlannotatorKit
 import SwiftUI
 
-/// 9.1: sources with their status, and this phone's appearance and haptics.
+/// 9.1: sources with their status, notifications and the lock-screen answer,
+/// and this phone's appearance and haptics.
 struct SettingsTab: View {
     @Environment(AppModel.self) private var model
     @AppStorage("appearance") private var appearance = Appearance.system
@@ -61,6 +62,7 @@ struct SettingsTab: View {
                 } header: {
                     header("Sources")
                 }
+                NotificationsSection()
                 Section {
                     Picker("Appearance", selection: $appearance) {
                         ForEach(Appearance.allCases) { Text($0.label).tag($0) }
@@ -111,6 +113,30 @@ struct SettingsTab: View {
     static var version: String {
         let info = Bundle.main.infoDictionary
         return "\(info?["CFBundleShortVersionString"] as? String ?? "1.0") (\(info?["CFBundleVersion"] as? String ?? "1"))"
+    }
+}
+
+/// 9.1's Notifications: "Allow notifications" asks the system once (never
+/// at launch); "Answer from the lock screen" gives a single-choice question
+/// its choices as buttons.
+struct NotificationsSection: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var notifier = model.notifier
+        Section {
+            Toggle("Allow notifications", isOn: Binding(get: { notifier.allowed }, set: { on in
+                Task { await notifier.setAllowed(on, sources: model.sources) }
+            }))
+            .accessibilityIdentifier("allow-notifications")
+            Toggle("Answer from the lock screen", isOn: $notifier.answerOnLockScreen)
+                .disabled(!notifier.allowed)
+                .accessibilityIdentifier("answer-lock-screen")
+        } header: {
+            Text("Notifications").font(.subheadline.weight(.semibold)).foregroundStyle(Color.ink).textCase(nil)
+        } footer: {
+            Text("A message with one question and one choice to make shows its choices as buttons. Anything else opens the thread.")
+        }
     }
 }
 

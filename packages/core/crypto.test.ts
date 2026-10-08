@@ -199,6 +199,12 @@ describe("the Inbox relay's vectors", () => {
     }
   });
 
+  test("one vector is a push sealed with type push, as the Inbox sends it and the app opens it", async () => {
+    const pushes = vectors.envelopes.filter(({ plaintext }) => plaintext.includes('"type":"push"'));
+    expect(pushes).toHaveLength(1);
+    expect(JSON.parse(await decryptWithKey(pushes[0]!.envelope, vectors.derived.key))).toMatchObject({ v: 1, type: "push", question: { choices: [{ label: "Yes" }, { label: "No" }] } });
+  });
+
   test("each direction has its own key: a down envelope does not open as a command, nor a command as a down item", async () => {
     for (const { plaintext, envelope } of vectors.up_envelopes) expect(await decryptWithKey(envelope, vectors.derived.up_key)).toBe(plaintext);
     await expect(decryptWithKey(vectors.envelopes[0]!.envelope, vectors.derived.up_key)).rejects.toThrow();
