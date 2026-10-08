@@ -79,7 +79,7 @@ export const api = {
   reveal: (id: string) => call('POST', `/api/snapshots/collection/${id}/reveal`, {}),
   discard: (id: string) => call('DELETE', `/api/snapshots/collection/${id}`),
   restore: (id: string) => call('POST', `/api/snapshots/collection/${id}/restore`, {}),
-  settings: (patch: { appCapture?: boolean; explainerSeen?: boolean }) => call('POST', '/api/snapshots/settings', patch),
+  settings: (patch: { appCapture?: boolean; captureMode?: 'screen' | 'app'; explainerSeen?: boolean }) => call('POST', '/api/snapshots/settings', patch),
 };
 
 /** Follow the hub's state stream; reconnects until stopped. */

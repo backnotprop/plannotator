@@ -2,6 +2,17 @@ import AppKit
 import Carbon
 import ScreenCaptureKit
 
+/// What a capture request asks for. The raw values are the wire names the CLI's
+/// URL command (`kind=`) and the HUD page (`{ type: 'capture', kind }`) use.
+enum CaptureKind: String {
+    /// Screen Capture: the frozen overlay, starting on a box (Space: a window, F: the screen).
+    case region
+    /// App Capture, ⌥⇧⌘5: the frontmost window plus its text, no overlay.
+    case app
+    /// App Capture by click: the overlay, starting on picking a window to take with its text.
+    case appPick = "app-pick"
+}
+
 /// Plannotator Snapshots: an accessory app (no Dock icon, no menu bar of its own)
 /// that owns the global hotkeys, the frozen-screen capture, App Capture window
 /// text, the HUD panel and the capture flight. Everything else (the snapshots
@@ -30,7 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         permissions.show = { [weak self] state in self?.panel.call("permission", state) }
         permissions.resume = { [weak self] pending in
             guard let pending else { return }
-            self?.startCapture(app: pending == .app)
+            self?.startCapture(pending)
         }
         setUpStatusItem()
         connect()
@@ -72,7 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch url.host {
         case "capture":
             connect()
-            startCapture(app: query["kind"] == "app")
+            startCapture(CaptureKind(rawValue: query["kind"] ?? "") ?? .region)
         case "show":
             connect()
             panel.call("toggle")
@@ -87,8 +98,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func hotKey(_ action: HotKeys.Action) {
         switch action {
-        case .screenCapture: startCapture(app: settings.appCapture)
-        case .appCapture: startCapture(app: true)
+        case .screenCapture: startCapture(settings.appCapture ? .app : .region)
+        case .appCapture: startCapture(.app)
         case .toggle: panel.call("toggle")
         }
     }
@@ -107,7 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return "data:image/png;base64,\(png.base64EncodedString())"
     }
 
-    private func startCapture(app: Bool) {
+    private func startCapture(_ kind: CaptureKind) {
         guard !capturing, !permissions.isActive else { return }
         // Ask only when needed: Screen Recording at the first capture,
         // Accessibility only when an App Capture is asked for.
@@ -117,12 +128,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 sendPermissions()
                 panel.call("screenRecordingOff")
             } else {
-                permissions.begin(.screen, pending: app ? .app : .region)
+                permissions.begin(.screen, pending: kind)
             }
             return
         }
-        if app && !AXText.isTrusted && !permissions.accessibilityDeclined {
-            permissions.begin(.accessibility, pending: .app)
+        if kind != .region && !textAllowed {
+            permissions.begin(.accessibility, pending: kind)
             return
         }
         capturing = true
@@ -130,7 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.call("willCapture")
         Task { @MainActor in
             defer { capturing = false }
-            if app {
+            if kind == .app {
                 await takeAppCapture()
                 return
             }
@@ -138,7 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Freeze first: menus and hover states stay in the snapshot.
                 let frozen = try await Capture.freezeAll()
                 let result: OverlayController.Result = await withCheckedContinuation { continuation in
-                    let controller = OverlayController(displays: frozen, startInWindowMode: false) { continuation.resume(returning: $0) }
+                    let controller = OverlayController(displays: frozen, startMode: kind == .appPick ? .app : .region, textAllowed: textAllowed) { continuation.resume(returning: $0) }
                     overlay = controller
                     controller.show()
                 }
@@ -150,10 +161,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// App Capture may read window text: Accessibility is on, or was declined for this session
+    /// ("Not now": the window is taken without its text).
+    private var textAllowed: Bool { AXText.isTrusted || permissions.accessibilityDeclined }
+
     private func handle(_ result: OverlayController.Result) async {
         switch result {
         case .cancelled:
             return
+        case .needsAccessibility:
+            // App Capture chosen in the overlay: the card asks (only now), then the overlay
+            // opens again on picking a window. "Not now" picks one without its text.
+            permissions.begin(.accessibility, pending: .appPick)
         case .region(let display, let rect):
             guard let image = Capture.crop(display, to: rect) else { return }
             let global = Coords.toGlobal(rect)
@@ -161,7 +180,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await register(image: image, from: rect, kind: "region", window: under, scale: display.scale)
         case .display(let display):
             await register(image: display.image, from: display.screen.frame, kind: "display", window: nil, scale: display.scale)
-        case .window(let window, let display):
+        case .window(let window, _, withText: true):
+            await takeAppCapture(window)
+        case .window(let window, let display, withText: false):
             do {
                 let image = try await Capture.window(window.id)
                 await register(image: image, from: Coords.toAppKit(window.bounds), kind: "window", window: window, scale: display?.scale ?? 2)
@@ -171,9 +192,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// ⌥⇧⌘5: the frontmost window, plus its accessibility text, with no picker.
-    private func takeAppCapture() async {
-        guard let window = Capture.frontmostWindow() else {
+    /// An App Capture: a window plus its accessibility text. ⌥⇧⌘5 takes the frontmost
+    /// window with no picker; the overlay's App Capture passes the window you clicked.
+    private func takeAppCapture(_ picked: WindowInfo? = nil) async {
+        guard let window = picked ?? Capture.frontmostWindow() else {
             report(CaptureError.failed("There is no window to capture."))
             return
         }
@@ -243,7 +265,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // A (re)loaded page starts empty: put back a permission card that is still open.
             permissions.redraw()
         case "capture":
-            startCapture(app: message["kind"] as? String == "app")
+            startCapture(CaptureKind(rawValue: message["kind"] as? String ?? "") ?? .region)
         case "permission.begin":
             // "Turn On" in the strip or the text view, or the ◫ toggle: the card, with nothing pending.
             let kind = PermissionFlow.Kind(rawValue: message["kind"] as? String ?? "") ?? .screen
@@ -325,11 +347,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return item
     }
 
-    @objc private func menuScreenCapture() { startCapture(app: false) }
-    @objc private func menuAppCapture() { startCapture(app: true) }
+    @objc private func menuScreenCapture() { startCapture(.region) }
+    @objc private func menuAppCapture() { startCapture(.app) }
     @objc private func menuDelayedScreenCapture() {
         // Menus that are open block global hotkeys; this one closes, waits, and shoots.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.startCapture(app: false) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.startCapture(.region) }
     }
     @objc private func menuToggle() { panel.call("toggle") }
     @objc private func menuToggleAppCapture() {

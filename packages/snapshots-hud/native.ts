@@ -6,7 +6,7 @@
  * Web → native: `window.webkit.messageHandlers.snapshots.postMessage(message)`.
  *   { type: 'ready' }
  *   { type: 'layout', mode: 'hidden' | 'strip' | 'panel', width, height, focus }
- *   { type: 'capture', kind: 'region' | 'app' }
+ *   { type: 'capture', kind: 'region' | 'app' | 'app-pick' }   (app: the front window, as ⌥⇧⌘5; app-pick: the overlay, on picking a window)
  *   { type: 'flightTarget', captureId, rect: { x, y, width, height } }   (window coordinates, CSS px)
  *   { type: 'flightLanded', captureId }
  *   { type: 'openSettings', pane: 'screen' | 'accessibility' }

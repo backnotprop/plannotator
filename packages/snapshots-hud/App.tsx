@@ -15,6 +15,7 @@ import {
   type Rect,
   type Snapshot,
   type SnapshotBox,
+  type SnapshotsCaptureMode,
   type SnapshotsState,
 } from '@plannotator/shared/snapshots/types';
 import { useSnapshotsHudShortcuts } from '@plannotator/ui/shortcuts/snapshots/snapshotsHud.shortcuts';
@@ -30,6 +31,7 @@ import { TextView } from './components/TextView';
 import { commentsOn, ThumbImage, useSnapshotImage } from './components/Thumb';
 import { AgentMark } from './components/AgentMark';
 import { PermissionCard, type PermissionKind, type PermissionState } from './components/PermissionCard';
+import { CaptureControl, captureKindFor } from './components/CaptureControl';
 
 type Mode = 'hidden' | 'strip' | 'panel' | 'picker' | 'permission';
 
@@ -115,7 +117,21 @@ export function App() {
     }
   }, [snapshots, rawTexts]);
 
-  // Native settings mirror (the ◫ toggle decides what ⌥⇧⌘4 takes).
+  // The new-capture control's mode (Screen / App), remembered by the hub. Shown at once on a
+  // click, before the hub's state comes back.
+  const [chosenMode, setChosenMode] = useState<SnapshotsCaptureMode | null>(null);
+  const captureMode: SnapshotsCaptureMode = chosenMode ?? hub?.settings.captureMode ?? 'screen';
+  useEffect(() => {
+    if (chosenMode && hub?.settings.captureMode === chosenMode) setChosenMode(null);
+  }, [chosenMode, hub?.settings.captureMode]);
+  const chooseCaptureMode = (mode: SnapshotsCaptureMode) => {
+    setChosenMode(mode);
+    void api.settings({ captureMode: mode });
+  };
+  // App Capture asks for Accessibility when it starts (as ⌥⇧⌘5 does), never when chosen.
+  const newCapture = () => postNative({ type: 'capture', kind: captureKindFor(captureMode) });
+
+  // Native settings mirror (the menu bar's "App Capture for ⌥⇧⌘4" decides what ⌥⇧⌘4 takes).
   useEffect(() => {
     if (hub) postNative({ type: 'settings', appCapture: hub.settings.appCapture, explainerSeen: hub.settings.explainerSeen });
   }, [hub?.settings.appCapture, hub?.settings.explainerSeen]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -403,12 +419,6 @@ export function App() {
     setToast({ text: `Discarded ${snapshots.length} snapshot${snapshots.length === 1 ? '' : 's'}.`, action: { label: 'Undo', run: () => void api.restore(id) } });
   };
 
-  const setAppCapture = (on: boolean) => {
-    void api.settings({ appCapture: on });
-    // App Capture reads window text: Accessibility is asked for here, and only here.
-    if (on && !permissions.accessibility) postNative({ type: 'permission.begin', kind: 'accessibility' });
-  };
-
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(null), toast.action ? 10_000 : 4_000);
@@ -538,13 +548,14 @@ export function App() {
             screenOff={screenOff}
             landingSnapshotId={landing && !landing.first ? landing.snapshotId : null}
             thumbRefs={thumbRefs}
-            appCapture={!!hub?.settings.appCapture}
+            captureMode={captureMode}
             noSession={noSession}
             online={online}
             chip={chip}
             sendButton={sendButton}
             onOpen={(snapshotId) => openPanelAt(snapshotId ?? snapshots.find((s) => commentsOn(s) === 0)?.id ?? snapshots[0]?.id)}
-            onAppCapture={setAppCapture}
+            onCaptureMode={chooseCaptureMode}
+            onCapture={newCapture}
             onCopy={() => void copyMarkdown()}
             onReveal={() => void reveal()}
             onRetarget={() => setPicker({ reason: 'retarget' })}
@@ -745,9 +756,7 @@ export function App() {
                     </button>
                   );
                 })}
-                <button type="button" className="fm add" onClick={() => postNative({ type: 'capture', kind: hub?.settings.appCapture ? 'app' : 'region' })} aria-label="Take another snapshot (⌥⇧⌘4)">
-                  <Icon name="plus" />
-                </button>
+                <CaptureControl mode={captureMode} onMode={chooseCaptureMode} onCapture={newCapture} />
               </div>
               <div className="note">
                 <input
@@ -841,13 +850,14 @@ function StripView(props: {
   screenOff: boolean;
   landingSnapshotId: string | null;
   thumbRefs: React.MutableRefObject<Map<string, HTMLElement>>;
-  appCapture: boolean;
+  captureMode: SnapshotsCaptureMode;
   noSession: boolean;
   online: boolean;
   chip: React.ReactNode;
   sendButton: React.ReactNode;
   onOpen: (snapshotId?: string) => void;
-  onAppCapture: (on: boolean) => void;
+  onCaptureMode: (mode: SnapshotsCaptureMode) => void;
+  onCapture: () => void;
   onCopy: () => void;
   onReveal: () => void;
   onRetarget: () => void;
@@ -996,15 +1006,7 @@ function StripView(props: {
       </div>
       <span className="count">{snapshots.length}</span>
       <span className="sep" />
-      <button
-        type="button"
-        className={`icon-btn${props.appCapture ? ' on' : ''}`}
-        title={props.appCapture ? 'App Capture (window + text): on' : 'App Capture (window + text): off'}
-        aria-pressed={props.appCapture}
-        onClick={() => props.onAppCapture(!props.appCapture)}
-      >
-        <Icon name="appCapture" />
-      </button>
+      <CaptureControl mode={props.captureMode} onMode={props.onCaptureMode} onCapture={props.onCapture} />
       {props.noSession ? (
         <>
           <span className="chip">No session</span>

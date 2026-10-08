@@ -23,6 +23,7 @@ const PATHS: Record<string, ReactNode> = {
   left: <path d="M10 3 5 8l5 5" />,
   right: <path d="M6 3l5 5-5 5" />,
   up: <path d="M8 13V3M4 7l4-4 4 4" />,
+  region: <rect x="2.5" y="3.5" width="11" height="9" rx="1" strokeDasharray="2.2 1.8" />,
   appCapture: (
     <>
       <rect x="2" y="3" width="12" height="10" rx="1.5" />

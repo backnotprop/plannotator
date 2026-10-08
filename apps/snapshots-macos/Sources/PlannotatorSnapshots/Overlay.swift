@@ -3,33 +3,43 @@ import AppKit
 /// The capture overlay: one borderless, non-activating panel per display over
 /// a frozen image of that display. The app you were in stays the active app
 /// (its menu bar stays); the overlay holds the keyboard only while you select.
+/// The toolbar at the bottom (CaptureToolbar) offers the same choices by click.
 ///
-///   drag            a box (region)
-///   Space           pick a window instead (click or Return takes it)
+///   drag            a box (region): a Screen Capture
+///   Space           pick a window instead (click or Return takes it), picture only
 ///   F               the whole display under the pointer
+///   A               App Capture: pick a window, taken with its accessibility text
 ///   N               a centered box to adjust by keyboard (arrows move, ⇧ arrows resize)
 ///   Return          take the box (or the highlighted window)
 ///   Esc             cancel, leaving nothing behind
 final class OverlayController {
-    enum Mode { case region, window }
+    enum Mode { case region, window, app }
     enum Result {
         case region(FrozenDisplay, CGRect) // AppKit global rect
-        case window(WindowInfo, FrozenDisplay?)
+        /// `withText`: an App Capture (the window plus its accessibility text).
+        case window(WindowInfo, FrozenDisplay?, withText: Bool)
         case display(FrozenDisplay)
+        /// App Capture was chosen, but Accessibility has not been asked for yet.
+        case needsAccessibility
         case cancelled
     }
 
     private(set) var mode: Mode = .region
     private var panels: [OverlayPanel] = []
     private var completion: ((Result) -> Void)?
+    private let toolbar = CaptureToolbar()
+    /// Accessibility is on, or was declined for this session ("Not now": the window without text).
+    private let textAllowed: Bool
     let windows: [WindowInfo]
     var hoverWindow: WindowInfo? { didSet { panels.forEach { $0.overlay.needsDisplay = true } } }
 
-    init(displays: [FrozenDisplay], startInWindowMode: Bool, completion: @escaping (Result) -> Void) {
+    init(displays: [FrozenDisplay], startMode: Mode, textAllowed: Bool, completion: @escaping (Result) -> Void) {
         windows = Capture.windows()
-        mode = startInWindowMode ? .window : .region
+        mode = startMode
+        self.textAllowed = textAllowed
         self.completion = completion
         panels = displays.map { OverlayPanel(display: $0, controller: self) }
+        toolbar.onPick = { [weak self] item in self?.pick(item) }
     }
 
     var windowNumbers: [Int] { panels.map(\.windowNumber) }
@@ -40,17 +50,63 @@ final class OverlayController {
         let screen = NSScreen.withMouse
         (panels.first { $0.display.screen == screen } ?? panels.first)?.makeKey()
         NSCursor.crosshair.set()
+        toolbar.show(on: screen, selected: toolbarItem)
         updateHover()
     }
 
+    private var toolbarItem: CaptureToolbar.Item {
+        switch mode {
+        case .region: return .screen
+        case .window: return .window
+        case .app: return .app
+        }
+    }
+
+    /// Space: a box ↔ a window (picture only).
     func toggleMode() {
-        mode = mode == .region ? .window : .region
-        panels.forEach { $0.overlay.selection = nil; $0.overlay.needsDisplay = true }
+        setMode(mode == .region ? .window : .region)
+    }
+
+    func setMode(_ next: Mode) {
+        if next == .app && !textAllowed {
+            // Accessibility is asked for only now, the way ⌥⇧⌘5 asks: the card needs the screen back.
+            finish(.needsAccessibility)
+            return
+        }
+        mode = next
+        panels.forEach { $0.overlay.clearSelection() }
+        toolbar.select(toolbarItem)
         updateHover()
+    }
+
+    private func pick(_ item: CaptureToolbar.Item) {
+        switch item {
+        case .cancel: finish(.cancelled)
+        case .screen: setMode(.region)
+        case .window: setMode(.window)
+        case .app: setMode(.app)
+        case .fullScreen:
+            if let display = displayUnderMouse() { finish(.display(display)) }
+        }
+    }
+
+    /// The pointer moved: the toolbar follows it to another display.
+    func pointerMoved(on screen: NSScreen) {
+        toolbar.follow(screen)
+        updateHover()
+    }
+
+    /// A box is being dragged: the toolbar steps out of the way.
+    func setDragging(_ dragging: Bool) {
+        toolbar.setDragging(dragging)
+    }
+
+    func takeWindow(_ window: WindowInfo) {
+        finish(.window(window, frozenDisplay(containing: window), withText: mode == .app))
     }
 
     func updateHover() {
-        guard mode == .window else {
+        guard mode != .region else {
             hoverWindow = nil
             return
         }
@@ -69,6 +125,7 @@ final class OverlayController {
         guard let completion else { return }
         self.completion = nil
         for panel in panels { panel.orderOut(nil) }
+        toolbar.close()
         NSCursor.arrow.set()
         panels = []
         completion(result)
@@ -124,7 +181,14 @@ final class OverlayView: NSView {
         let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeAlways, .inVisibleRect, .cursorUpdate], owner: self, userInfo: nil)
         addTrackingArea(area)
         setAccessibilityRole(.layoutArea)
-        setAccessibilityLabel("Capture overlay. Drag a box, Space to pick a window, F for the whole screen, Escape to cancel.")
+        setAccessibilityLabel("Capture overlay. Drag a box for a Screen Capture, Space to pick a window, F for the whole screen, A for an App Capture with the window's text, Escape to cancel.")
+    }
+
+    func clearSelection() {
+        selection = nil
+        dragStart = nil
+        keyboardBox = false
+        needsDisplay = true
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -141,7 +205,7 @@ final class OverlayView: NSView {
         ctx.draw(display.image, in: bounds)
         let veil = NSColor(white: 0, alpha: controller.mode == .region && selection != nil ? 0.30 : 0.18)
 
-        if controller.mode == .window, let window = controller.hoverWindow {
+        if controller.mode != .region, let window = controller.hoverWindow {
             let rect = Coords.toAppKit(window.bounds).offsetBy(dx: -display.screen.frame.minX, dy: -display.screen.frame.minY)
             veil.setFill()
             let path = NSBezierPath(rect: bounds)
@@ -154,7 +218,8 @@ final class OverlayView: NSView {
             outline.lineWidth = 2
             outline.stroke()
             if rect.intersects(bounds) {
-                drawLabel([window.app, window.title].filter { !$0.isEmpty }.joined(separator: " — "), at: CGPoint(x: rect.minX + 8, y: rect.maxY - 30))
+                let name = [window.app, window.title].filter { !$0.isEmpty }.joined(separator: " — ")
+                drawLabel(controller.mode == .app ? "\(name)  ·  App Capture, with its text" : name, at: CGPoint(x: rect.minX + 8, y: rect.maxY - 30))
             }
         } else if let selection {
             veil.setFill()
@@ -179,7 +244,6 @@ final class OverlayView: NSView {
                 drawLabel("\(px), \(py)", at: CGPoint(x: mouse.x + 12, y: mouse.y - 28))
             }
         }
-        drawHint()
     }
 
     private func drawLabel(_ text: String, at point: CGPoint, alignRight: CGFloat? = nil) {
@@ -193,51 +257,21 @@ final class OverlayView: NSView {
         (text as NSString).draw(at: CGPoint(x: box.minX + 7, y: box.minY + 3), withAttributes: attributes)
     }
 
-    private func drawHint() {
-        let segments: [(key: String, text: String)] = controller.mode == .region
-            ? [("drag", "a box"), ("Space", "window"), ("F", "screen"), ("Esc", "cancel")]
-            : [("click", "a window"), ("Space", "box"), ("F", "screen"), ("Esc", "cancel")]
-        let keyFont = NSFont.systemFont(ofSize: 11, weight: .medium)
-        let textFont = NSFont.systemFont(ofSize: 12, weight: .medium)
-        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        let fg = dark ? NSColor(white: 0.96, alpha: 1) : NSColor(white: 0.11, alpha: 1)
-        var width: CGFloat = 14
-        var parts: [(NSAttributedString, NSAttributedString)] = []
-        for segment in segments {
-            let key = NSAttributedString(string: segment.key, attributes: [.font: keyFont, .foregroundColor: fg])
-            let text = NSAttributedString(string: segment.text, attributes: [.font: textFont, .foregroundColor: fg])
-            parts.append((key, text))
-            width += key.size().width + 10 + 4 + text.size().width + 14
-        }
-        let pill = NSRect(x: (bounds.width - width) / 2, y: bounds.height - 40 - 32, width: width, height: 32)
-        (dark ? NSColor(white: 0.16, alpha: 0.86) : NSColor(white: 0.96, alpha: 0.88)).setFill()
-        NSBezierPath(roundedRect: pill, xRadius: 16, yRadius: 16).fill()
-        var x = pill.minX + 14
-        for (key, text) in parts {
-            let keyBox = NSRect(x: x, y: pill.midY - 9, width: key.size().width + 10, height: 18)
-            (dark ? NSColor(white: 1, alpha: 0.12) : NSColor(white: 0, alpha: 0.08)).setFill()
-            NSBezierPath(roundedRect: keyBox, xRadius: 4, yRadius: 4).fill()
-            key.draw(at: CGPoint(x: keyBox.minX + 5, y: keyBox.minY + 2))
-            x = keyBox.maxX + 4
-            text.draw(at: CGPoint(x: x, y: pill.midY - text.size().height / 2))
-            x += text.size().width + 14
-        }
-    }
-
     // MARK: Mouse
 
     override func mouseMoved(with event: NSEvent) {
         NSCursor.crosshair.set()
-        controller.updateHover()
+        controller.pointerMoved(on: display.screen)
         if controller.mode == .region, selection == nil { needsDisplay = true }
     }
 
     override func mouseDown(with event: NSEvent) {
         window?.makeKey()
-        if controller.mode == .window { return }
+        if controller.mode != .region { return }
         keyboardBox = false
         dragStart = convert(event.locationInWindow, from: nil)
         selection = nil
+        controller.setDragging(true)
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -248,14 +282,15 @@ final class OverlayView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        if controller.mode == .window {
-            if let window = controller.hoverWindow { controller.finish(.window(window, controller.frozenDisplay(containing: window))) }
+        if controller.mode != .region {
+            if let window = controller.hoverWindow { controller.takeWindow(window) }
             return
         }
         dragStart = nil
         guard let selection, selection.width >= 4, selection.height >= 4 else {
             self.selection = nil
             needsDisplay = true
+            controller.setDragging(false)
             return
         }
         commitSelection(selection)
@@ -281,13 +316,15 @@ final class OverlayView: NSView {
         case 49: // Space
             controller.toggleMode()
         case 36, 76: // Return
-            if controller.mode == .window, let window = controller.hoverWindow {
-                controller.finish(.window(window, controller.frozenDisplay(containing: window)))
+            if controller.mode != .region, let window = controller.hoverWindow {
+                controller.takeWindow(window)
             } else if let selection, selection.width >= 4, selection.height >= 4 {
                 commitSelection(selection)
             }
         case 3: // F
             if let display = controller.displayUnderMouse() { controller.finish(.display(display)) }
+        case 0: // A
+            controller.setMode(.app)
         case 45: // N
             if controller.mode == .region {
                 keyboardBox = true

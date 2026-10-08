@@ -20,7 +20,8 @@ import ScreenCaptureKit
 final class PermissionFlow {
     enum Kind: String { case screen, accessibility }
     enum State: String { case ask, waiting, reopen, granted }
-    enum Pending: String { case region, app }
+    /// What runs once the permission is there: the capture you asked for (`CaptureKind`).
+    typealias Pending = CaptureKind
 
     private let defaults = UserDefaults.standard
     private var timer: Timer?

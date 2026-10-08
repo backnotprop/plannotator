@@ -756,17 +756,6 @@ html[data-native] .panel {
   font: 700 8px/13px var(--font);
   text-align: center;
 }
-.fm.add {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-3);
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--hair);
-  font-size: 11px;
-  flex-direction: column;
-  gap: 1px;
-}
 .note {
   height: 30px;
   border-radius: 8px;
@@ -1686,4 +1675,82 @@ html[data-native] .perm {
 .resize:hover .resize-corner svg {
   opacity: 1;
   stroke: var(--text-2);
+}
+
+/* ---------------------------------------------------------------- new capture: + and Screen / App */
+.cap {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 30px;
+  padding: 2px;
+  border-radius: 15px;
+  background: var(--fill);
+  flex: none;
+  --seg-on: #fff;
+}
+@media (prefers-color-scheme: dark) {
+  .cap {
+    --seg-on: rgba(255, 255, 255, 0.17);
+  }
+}
+.cap-go {
+  width: 26px;
+  height: 26px;
+  border-radius: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+  flex: none;
+  transition: background-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+.cap-go:hover {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.cap-go:active {
+  background: var(--fill-2);
+  transform: scale(0.94);
+}
+.cap-seg {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding-left: 3px;
+  border-left: 1px solid var(--hair);
+}
+.cap-seg button {
+  height: 26px;
+  padding: 0 9px 0 7px;
+  border-radius: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: 500 12px var(--font);
+  color: var(--text-2);
+  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+.cap-seg button .ico {
+  stroke-width: 1.5;
+}
+.cap-seg button:hover {
+  color: var(--text);
+}
+.cap-seg button.on {
+  background: var(--seg-on);
+  color: var(--text);
+  box-shadow: 0 0 0 0.5px var(--hair), 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+.film .cap {
+  margin-left: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cap-go,
+  .cap-seg button {
+    transition: none;
+  }
+  .cap-go:active {
+    transform: none;
+  }
 }

@@ -101,7 +101,7 @@ export function createSnapshotsHub(options: SnapshotsHubOptions): SnapshotsHub {
   let revision = 0;
   const listeners = new Set<(state: SnapshotsState) => void>();
   const settingsPath = join(store.root, "settings.json");
-  let settings: SnapshotsSettings = { appCapture: false, explainerSeen: false };
+  let settings: SnapshotsSettings = { appCapture: false, captureMode: "screen", explainerSeen: false };
   try {
     settings = { ...settings, ...(JSON.parse(readFileSync(settingsPath, "utf8")) as Partial<SnapshotsSettings>) };
   } catch {
@@ -594,6 +594,7 @@ export function createSnapshotsHub(options: SnapshotsHubOptions): SnapshotsHub {
       const body = await readBody(req);
       if (typeof body.appCapture === "boolean") settings.appCapture = body.appCapture;
       if (typeof body.explainerSeen === "boolean") settings.explainerSeen = body.explainerSeen;
+      if (body.captureMode === "screen" || body.captureMode === "app") settings.captureMode = body.captureMode;
       try {
         await Bun.write(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
       } catch {

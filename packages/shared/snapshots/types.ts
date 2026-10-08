@@ -167,9 +167,14 @@ export interface SnapshotsState {
   revision: number;
 }
 
+/** The two capture modes: a Screen Capture (a box, picture only) or an App Capture (a window plus its text). */
+export type SnapshotsCaptureMode = "screen" | "app";
+
 export interface SnapshotsSettings {
-  /** The strip's ◫ toggle: ⌥⇧⌘4 takes an App Capture (window + its text) instead of a Screen Capture. */
+  /** The menu bar's "App Capture for ⌥⇧⌘4": ⌥⇧⌘4 takes an App Capture (window + its text) instead of a Screen Capture. */
   appCapture: boolean;
+  /** The HUD's new-capture control (Screen / App): the mode its + button starts, remembered. */
+  captureMode: SnapshotsCaptureMode;
   /** The one-time App Capture explainer was answered. */
   explainerSeen: boolean;
 }
