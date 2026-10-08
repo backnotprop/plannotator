@@ -158,7 +158,8 @@ extension AppModel {
               let source = sources.first(where: { $0.id == device }), let credential = Keychain.load(device: device) else { return }
         let label = question.choices[index].label
         let pick = QuestionAnswer(key: question.key, kind: "single", prompt: question.prompt, selected: [label])
-        let keyName = "lock-screen|\(summary.messageId)"
+        // One key per message and choice: a different choice later is a new Send, never the first one's replay.
+        let keyName = "lock-screen|\(summary.messageId)|\(index)"
         let send = InboxClient.ReplyBody(
             idempotencyKey: SendKeys.key(source: device, message: keyName),
             words: "",
@@ -178,7 +179,8 @@ extension AppModel {
         } catch {
             guard let relay = source.relay.flatMap({ RelayClient(relay: $0, device: device, secret: credential.secret) }),
                   let carried = try? await relay.reply(message: summary.messageId, send) else {
-                await tell(summary, device: device, "“\(label)” was not sent. \(error.message)")
+                // No definite answer from the computer: the Send may have landed before the connection died.
+                await tell(summary, device: device, "“\(label)” may not have been sent: your computer can't be reached. Open the thread to check.")
                 return
             }
             // The relay holds it under its key until the Inbox applies it.

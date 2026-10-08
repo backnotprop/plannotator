@@ -56,7 +56,7 @@ final class AppModel {
         known = load([KnownComputer].self, "known") ?? []
         if WorkspacesAccount.origin != nil { workspaces = load(WorkspacesAccount.self, "workspacesAccount") }
         // iOS keeps Keychain items when an app is deleted; a fresh install starts clean.
-        if sources.isEmpty { Keychain.deleteAll() }
+        if sources.isEmpty { Keychain.deleteAll() } else { Keychain.migrate() }
         let active = defaults.string(forKey: "activeSource")
         if active == WorkspacesAccount.sourceId, workspaces != nil {
             showWorkspaces()

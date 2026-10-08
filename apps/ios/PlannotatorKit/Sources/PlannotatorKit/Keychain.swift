@@ -66,10 +66,35 @@ public enum Keychain {
         SecItemDelete(base(device) as CFDictionary)
     }
 
-    /// Every item this app wrote (a fresh start after the app was deleted keeps
-    /// Keychain items on iOS; the app clears what no paired source names).
+    /// Every item this app wrote, in the shared group or in the app's own
+    /// (a fresh start after the app was deleted keeps Keychain items on iOS;
+    /// the app clears what no paired source names).
     public static func deleteAll() {
-        SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccessGroup as String: group] as CFDictionary)
+        SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service] as CFDictionary)
+    }
+
+    /// Moves the items an earlier build saved in the app's own access group
+    /// (before M5) into the shared group, so a phone paired then keeps its
+    /// computers after the update and the extension can read their keys.
+    /// Run at launch, before anything is loaded.
+    public static func migrate() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecReturnAttributes as String: true,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+        ]
+        var items: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &items) == errSecSuccess, let rows = items as? [[String: Any]] else { return }
+        for row in rows {
+            guard let old = row[kSecAttrAccessGroup as String] as? String, old != group,
+                  let device = row[kSecAttrAccount as String] as? String, let data = row[kSecValueData as String] as? Data,
+                  let credential = try? JSONDecoder().decode(DeviceCredential.self, from: data) else { continue }
+            if load(device: device) == nil { save(credential, device: device) }
+            guard load(device: device) != nil else { continue }
+            SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: device, kSecAttrAccessGroup as String: old] as CFDictionary)
+        }
     }
 
     static func base(_ device: String) -> [String: Any] {

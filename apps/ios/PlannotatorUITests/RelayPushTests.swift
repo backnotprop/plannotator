@@ -279,10 +279,12 @@ final class RelayPushTests: XCTestCase {
         return ["When Unlocked", "Never", "Always"].first { before.contains($0) } ?? "When Unlocked"
     }
 
+    /// The tab bar minimizes on scroll (iOS 26); scrolling back up brings its
+    /// items back, which a slow runner can take a moment to draw.
     private func tab(_ name: String) {
         let button = app.tabBars.buttons[name]
         var tries = 0
-        while !button.exists, tries < 4 {
+        while !button.waitForExistence(timeout: 3), tries < 6 {
             app.swipeDown(velocity: .fast)
             tries += 1
         }

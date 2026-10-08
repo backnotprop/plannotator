@@ -111,6 +111,19 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: ai.plannotator.app.notifications
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_APPROACHABLE_CONCURRENCY: YES
+  # M5: tests that need the app's own entitlements (its Keychain groups), hosted in the app.
+  PlannotatorTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: PlannotatorTests
+    dependencies:
+      - target: Plannotator
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.plannotator.app.tests
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: YES
   PlannotatorUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -135,4 +148,5 @@ schemes:
       config: Debug
       targets:
         - package: PlannotatorKit/PlannotatorKitTests
+        - name: PlannotatorTests
         - name: PlannotatorUITests

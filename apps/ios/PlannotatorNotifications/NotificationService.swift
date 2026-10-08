@@ -1,3 +1,4 @@
+import Foundation
 import PlannotatorKit
 import UserNotifications
 
@@ -30,9 +31,16 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
         if let fallback { finish(fallback) }
     }
 
+    /// The dressed content and the time-out fallback race to here from two
+    /// threads; the lock lets exactly one reach the system.
+    private let lock = NSLock()
+
     private func finish(_ content: UNNotificationContent) {
-        deliver?(content)
+        lock.lock()
+        let handler = deliver
         deliver = nil
+        lock.unlock()
+        handler?(content)
     }
 
     private func plain(_ content: UNNotificationContent) -> UNMutableNotificationContent {
