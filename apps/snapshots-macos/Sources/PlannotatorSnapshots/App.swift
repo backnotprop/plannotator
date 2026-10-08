@@ -202,6 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             async let image = Capture.window(window.id)
             let text = await Task.detached { AXText.capture(pid: window.pid, bundleId: window.bundleId, windowTitle: window.title, frame: window.bounds) }.value
+            if let enablement = text.enablement { log("app text \(window.bundleId ?? window.app): \(enablement)\(text.text == nil ? ", no text" : "")") }
             let scale = NSScreen.screens.first { $0.frame.intersects(Coords.toAppKit(window.bounds)) }?.backingScaleFactor ?? 2
             await register(image: try await image, from: Coords.toAppKit(window.bounds), kind: "app", window: window, scale: scale, text: text)
         } catch {
