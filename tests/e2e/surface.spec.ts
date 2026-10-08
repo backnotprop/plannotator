@@ -127,12 +127,10 @@ const TICKET_PAGE = `<!doctype html>
   catch (e) { out.push('own webkit: ' + e.name); }
   parent.postMessage({ v: 1, type: 'link', href: 'https://evil.example/relay' }, '*');
   out.push('relay: posted');
-  // The viewer's own frame protocol, forged with no tap, well after any tap of the tests before.
-  setTimeout(function () {
-    parent.postMessage({ type: 'plannotator-bridge-link-click', href: 'https://evil.example/forged' }, '*');
-    parent.postMessage({ type: 'plannotator-bridge-link-click', href: 'mailto:evil@evil.example' }, '*');
-    document.getElementById('forged').textContent = 'forged';
-  }, 15000);
+  // The viewer's own frame protocol, forged by the page with no tap.
+  parent.postMessage({ type: 'plannotator-bridge-link-click', href: 'https://evil.example/forged' }, '*');
+  parent.postMessage({ type: 'plannotator-bridge-link-click', href: 'mailto:evil@evil.example' }, '*');
+  document.getElementById('forged').textContent = 'forged';
   fetch('http://127.0.0.1:1/').then(function () { out.push('fetch: reached'); }, function () { out.push('fetch: refused'); }).then(function () {
     document.getElementById('probe').textContent = out.join(' | ');
   });
@@ -169,8 +167,6 @@ interface World {
   inbox: ShellMessage[];
   attachments: { plan: any; ticket: any; flow: any };
   guide: { thread_id: string; message_id: string };
-  /** When the ticket page opened: its script forges a link 15 s later. */
-  ticketOpenedAt: number;
 }
 
 let world: World;
@@ -337,7 +333,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     inbox,
     attachments: { plan: plan.attachments[0], ticket: ticket.attachments[0], flow: flow.attachments[0] },
     guide: { thread_id: guide.thread_id, message_id: guide.message_id },
-    ticketOpenedAt: 0,
   };
 });
 
@@ -453,7 +448,6 @@ test('HTML: a pin steps to its parent and back to its child, is saved and drawn;
   const ticket = world.attachments.ticket;
   const from0 = mark();
   await openAttachment(ticket);
-  world.ticketOpenedAt = Date.now();
   const frame = ticketFrame();
   await expect(frame.locator('h1')).toContainText('LOW');
   await send({ type: 'set_mode', mode: 'annotate' });
@@ -524,18 +518,16 @@ test("the agent's HTML frame cannot reach the bridge", async () => {
   expect(world.inbox.filter((m) => m.main && m.message.type === 'error')).toEqual([expect.objectContaining({ message: expect.objectContaining({ code: 'bridge_version' }) })]);
   expect(htmlFrame().url()).not.toContain('surface.html');
 
-  // The viewer's link message forged by the page's script, no tap: refused. Nothing
-  // touches the page while the timer runs out: Playwright's own evaluate calls
-  // count as a gesture in WebKit, so the wait is a plain one.
-  await world.page.waitForTimeout(Math.max(0, world.ticketOpenedAt + 16_000 - Date.now()));
+  // The viewer's link message forged by the page's script at load: no `link`. The
+  // surface never forwards a link from an agent's page; the shell decides that
+  // navigation itself (contract section 5), so a real tap there sends none
+  // either. The markdown test proves a link in the surface's own document goes out.
   await expect(frame.locator('#forged')).toHaveText('forged');
-  expect(world.inbox.filter((m) => m.main && m.message.type === 'link' && !String(m.message.href).startsWith('https://docs.stripe.com'))).toEqual([]);
-  // A link the person taps still goes to the shell.
   await send({ type: 'set_mode', mode: 'interact' });
-  const from = mark();
   await frame.locator('#venue').click();
-  expect(await next('link', from)).toMatchObject({ href: 'https://lowtide.example/venue' });
   await send({ type: 'set_mode', mode: 'annotate' });
+  await world.page.waitForTimeout(300);
+  expect(world.inbox.filter((m) => m.main && m.message.type === 'link' && !String(m.message.href).startsWith('https://docs.stripe.com'))).toEqual([]);
 });
 
 test('diagram: a tap on a node drafts a comment on it; saved, its badge shows', async () => {

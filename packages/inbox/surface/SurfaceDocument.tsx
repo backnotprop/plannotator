@@ -49,12 +49,6 @@ function shortLabel(text: string): string {
   return `${cut.slice(0, cut.lastIndexOf(' ') > 30 ? cut.lastIndexOf(' ') : 60)}…`;
 }
 
-/** The page's own base (the shell rewrote it onto its asset scheme), for resolving a link the frame swallowed. */
-function baseOf(html: string | null): string | null {
-  const match = html?.match(/<base\s[^>]*href=["']([^"']+)["']/i);
-  return match ? match[1] : null;
-}
-
 export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function SurfaceDocument({ open, records, interact }, ref) {
   const { attachment, version } = open;
   const viewerRef = useRef<ViewerHandle>(null);
@@ -177,10 +171,11 @@ export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function
     if (id) postToShell({ type: 'annotation', id });
   }, []);
 
-  const base = baseOf(open.html);
-
   return (
     <div className={`sf-doc${isHtml ? ' sf-doc-html' : ''}${isDiagram ? ' sf-doc-diagram' : ''}`} data-surface-attachment={attachment.id} data-kind={attachment.kind}>
+      {/* No onOpenLink: a link in the agent's page never becomes a bridge `link`
+          (its script could forge the frame's message); the shell decides that
+          navigation itself (contract section 5). */}
       {isHtml && open.html !== null && (
         <HtmlViewer
           ref={viewerRef}
@@ -193,18 +188,6 @@ export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function
           mode="selection"
           inputMethod="pinpoint"
           annotateModeActive={!interact}
-          onOpenLink={(href) => {
-            // The frame's link message is page-controlled: the agent's script
-            // can post it with no tap. Only a link the person just tapped goes
-            // to the shell (a real tap in the frame activates this window too).
-            if (!navigator.userActivation?.isActive) return;
-            try {
-              const url = new URL(href, base ?? undefined);
-              if (/^(https?|mailto):$/.test(url.protocol)) postToShell({ type: 'link', href: url.href });
-            } catch {
-              // Not a URL anything can open.
-            }
-          }}
           fullViewport
           hideControls
           maxAdditionalTargets={0}
