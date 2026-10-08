@@ -262,6 +262,8 @@ struct NewMessageSheet: View {
         }
         .presentationDetents([.large])
         .interactiveDismissDisabled(!text.trimmed.isEmpty)
+        // Edited words are a new message: a retry after an edit gets its own key.
+        .onChange(of: text) { key = UUID().uuidString.lowercased() }
         .onAppear { focused = true }
     }
 

@@ -187,7 +187,13 @@ async function m3Seed(): Promise<Record<string, string>> {
     body: 'Run finished. The 41 archived projects are reindexed and the search page reads them again.',
   });
 
-  // Live Claude Code sessions: two in ledger (one wrote the thread), one in api-gateway.
+  const ids = { decide: decide.thread_id, no_decision: noDecision.thread_id, waits: waits.thread_id, pi: piThread.thread_id } as Record<string, string>;
+  m3Threads.push(...Object.values(ids));
+  return ids;
+}
+
+/** Live Claude Code sessions: two in ledger (one writes the thread), one in api-gateway. */
+async function m3Live(): Promise<Record<string, string>> {
   const live = async (name: string, project: string) => {
     const session = await ClaudeSession.start({ env: m3Env, cwd: project, store: new Map(), sessionId: crypto.randomUUID(), dataDir });
     if (!session.inboxTools) throw new Error('the mod found no Inbox');
@@ -213,9 +219,8 @@ async function m3Seed(): Promise<Record<string, string>> {
       await sleep(250);
     }
   }
-  const ids = { decide: decide.thread_id, no_decision: noDecision.thread_id, waits: waits.thread_id, pi: piThread.thread_id, ledger, gateway } as Record<string, string>;
-  m3Threads.push(...Object.values(ids));
-  return { ...ids, ledger_writer_session: ledgerWriter.sessionId };
+  m3Threads.push(ledger, gateway);
+  return { ledger, gateway, ledger_writer_session: ledgerWriter.sessionId };
 }
 
 /** A live session's wake for the person's New message, and its answer in the same thread. */
@@ -388,6 +393,8 @@ const control = Bun.serve({
         }
         case '/m3-seed':
           return Response.json(await m3Seed());
+        case '/m3-live':
+          return Response.json(await m3Live());
         case '/m3-turn':
           return Response.json(await m3Turn(body.who ?? ''));
         case '/m3-decisions':
@@ -425,13 +432,21 @@ const control = Bun.serve({
 // ─── The test ───
 
 let status = 1;
-try {
-  const test = spawn(
-    'xcodebuild',
-    ['test', '-project', join(repo, 'apps/ios/Plannotator.xcodeproj'), '-scheme', 'Plannotator', '-destination', `id=${udid}`, '-derivedDataPath', derived, '-resultBundlePath', join(tmp, 'Proof.xcresult'), ...(only ? [`-only-testing:${only}`] : [])],
-    { stdio: 'inherit', env: { ...process.env, TEST_RUNNER_PROOF_CONTROL: `http://127.0.0.1:${control.port}` } },
+// Build once, then WarmUpLaunch alone: the app's first launch and first pairing
+// on this fresh simulator, which a cold CI runner makes take a minute or more,
+// so every proof class after it starts warm (PlannotatorUITests/WarmUpLaunch.swift).
+const xcodebuild = (args: string[]) =>
+  new Promise<number>((r) =>
+    spawn('xcodebuild', [...args, '-project', join(repo, 'apps/ios/Plannotator.xcodeproj'), '-scheme', 'Plannotator', '-destination', `id=${udid}`, '-derivedDataPath', derived], {
+      stdio: 'inherit',
+      env: { ...process.env, TEST_RUNNER_PROOF_CONTROL: `http://127.0.0.1:${control.port}` },
+    }).once('exit', (code) => r(code ?? 1)),
   );
-  status = await new Promise<number>((r) => test.once('exit', (code) => r(code ?? 1)));
+const warmUp = 'PlannotatorUITests/WarmUpLaunch';
+try {
+  status = await xcodebuild(['build-for-testing']);
+  if (status === 0) status = await xcodebuild(['test-without-building', `-only-testing:${warmUp}`, '-resultBundlePath', join(tmp, 'WarmUp.xcresult')]);
+  if (status === 0) status = await xcodebuild(['test-without-building', ...(only ? [`-only-testing:${only}`] : [`-skip-testing:${warmUp}`]), '-resultBundlePath', join(tmp, 'Proof.xcresult')]);
 } finally {
   video?.kill('SIGINT');
   await m3Close();

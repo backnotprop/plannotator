@@ -25,8 +25,6 @@ final class DecisionsProofTests: XCTestCase {
         let seeded = try await control.post("/m3-seed")
         let decide = try XCTUnwrap(seeded["decide"] as? String)
         let noDecision = try XCTUnwrap(seeded["no_decision"] as? String)
-        let ledger = try XCTUnwrap(seeded["ledger"] as? String)
-        let gateway = try XCTUnwrap(seeded["gateway"] as? String)
         let pi = try XCTUnwrap(seeded["pi"] as? String)
         try await pairByCode()
         try await control.post("/video/start", ["name": "M3-decisions-new-message"])
@@ -114,6 +112,11 @@ final class DecisionsProofTests: XCTestCase {
         back()
         tab("Inbox")
 
+        // The live Claude Code sessions start now, not at the seed, so the runner is quiet while the app pairs.
+        let live = try await control.post("/m3-live")
+        let gateway = try XCTUnwrap(live["gateway"] as? String)
+        let ledger = try XCTUnwrap(live["ledger"] as? String)
+
         // 8.2: one live session in api-gateway; New message opens the compose sheet addressed to it.
         try await openRow(gateway)
         let newMessage = element("new-message")
@@ -160,7 +163,7 @@ final class DecisionsProofTests: XCTestCase {
         try await darkFrame("8.1", open: { newMessage.tap() }, shown: menuHeading)
         // The thread's writer first; each item says what the session is doing.
         let sorted = items.allElementsBoundByIndex.sorted { $0.frame.minY < $1.frame.minY }
-        XCTAssertEqual(sorted[0].identifier, "live-session-\(try XCTUnwrap(seeded["ledger_writer_session"] as? String))", "the writer first")
+        XCTAssertEqual(sorted[0].identifier, "live-session-\(try XCTUnwrap(live["ledger_writer_session"] as? String))", "the writer first")
         // Pick the other session, the one that did not write the thread.
         sorted[1].tap()
         XCTAssertTrue(words.waitForExistence(timeout: 30))
@@ -221,29 +224,22 @@ final class DecisionsProofTests: XCTestCase {
         try await control.post("/m3-dark", ["on": "false", "snap": name])
     }
 
-    /// How long the opening screens may take. This test runs first, so it carries the
-    /// app's first launch on the simulator: on a cold macOS CI runner the launch took
-    /// 42 to 46 s to idle, the pairing cover then did not appear within 30 s, and the
-    /// first list after pairing did not either (run 37799098038, both attempts). Local
-    /// runs take a few seconds. 30 s was the wrong bound for that launch, not a slow app.
-    private let firstLaunch: TimeInterval = 120
-
     private func pairByCode() async throws {
-        XCTAssertTrue(element("connect-computer").waitForExistence(timeout: firstLaunch))
+        XCTAssertTrue(element("connect-computer").waitForExistence(timeout: ProofWait.opening))
         element("connect-computer").tap()
-        XCTAssertTrue(element("find-nearby").waitForExistence(timeout: firstLaunch))
+        XCTAssertTrue(element("find-nearby").waitForExistence(timeout: ProofWait.opening))
         element("find-nearby").tap()
         let offer = try await control.post("/offer")
         let field = element("address-field")
-        XCTAssertTrue(field.waitForExistence(timeout: firstLaunch))
+        XCTAssertTrue(field.waitForExistence(timeout: ProofWait.opening))
         field.tap()
         field.typeText(try XCTUnwrap(offer["address"] as? String))
         element("address-next").tap()
         let code = element("pairing-code")
-        XCTAssertTrue(code.waitForExistence(timeout: firstLaunch))
+        XCTAssertTrue(code.waitForExistence(timeout: ProofWait.opening))
         code.tap()
         code.typeText(try XCTUnwrap(offer["code"] as? String))
-        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'row-'")).firstMatch.waitForExistence(timeout: firstLaunch))
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'row-'")).firstMatch.waitForExistence(timeout: ProofWait.opening))
     }
 
     private func element(_ id: String) -> XCUIElement {

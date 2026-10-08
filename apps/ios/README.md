@@ -54,8 +54,10 @@ bun apps/ios/scripts/proof.ts --binary .local/plannotator
 ```
 
 It starts that binary's Inbox under a temp data dir, connects agents through
-`plannotator inbox mcp`, makes a fresh simulator and runs `xcodebuild test`:
-the PlannotatorKit tests, then the flow (pair by typed address and code, the
+`plannotator inbox mcp`, makes a fresh simulator, builds once, runs
+`WarmUpLaunch` alone (the app's first launch and first pairing, which take a
+minute or more on a cold CI runner), then the rest: the PlannotatorKit tests,
+then the flow (pair by typed address and code, the
 list, "2 new" while scrolled, a swipe, picks, a note, Other, Send and the
 agent's `wait_for_reply`, Resolve, Delete, removal on the computer, pairing
 again, Remove this source), and the decisions and New message flow
