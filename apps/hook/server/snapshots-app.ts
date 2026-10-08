@@ -14,6 +14,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { isManagedBinary } from "@plannotator/server/auto-update";
 
 export const SNAPSHOTS_APP_NAME = "Plannotator Snapshots";
 export const SNAPSHOTS_BUNDLE_ID = "ai.plannotator.snapshots";
@@ -162,12 +163,38 @@ export function snapshotsAppDefaultsArgv(dataDir: string, cli: string[]): string
   ];
 }
 
-/** Save the data dir and the CLI's argv in the app's defaults, before the app is opened. */
-export function rememberForApp(dataDir: string, cli: string[]): void {
+export interface RememberForAppOptions {
+  /** `__CLI_VERSION__` of the running CLI; undefined for a run from source. */
+  version: string | undefined;
+  /** The running executable. */
+  execPath: string;
+  /** Whether that executable is the file the install script manages (default: auto-update's own check). */
+  isManaged?: (execPath: string) => boolean;
+  /** Runs `defaults` (tests pass a recorder). Returns the exit status and stderr. */
+  run?: (argv: string[]) => { status: number | null; stderr: string };
+}
+
+/**
+ * Save the data dir and the CLI's argv in the app's defaults, before the app
+ * is opened. The defaults are global to the installed app, so only the
+ * compiled CLI the install script manages writes them: a run from source, a
+ * dev build elsewhere, or a test with a temporary PLANNOTATOR_DATA_DIR never
+ * moves the person's app to another data dir. Returns whether it wrote.
+ */
+export function rememberForApp(dataDir: string, cli: string[], options: RememberForAppOptions): boolean {
+  const isManaged = options.isManaged ?? ((execPath: string) => isManagedBinary(execPath));
+  if (!options.version || !isManaged(options.execPath)) return false;
+  const run =
+    options.run ??
+    ((argv: string[]) => {
+      const result = spawnSync("/usr/bin/defaults", argv, { encoding: "utf8" });
+      return { status: result.status, stderr: result.stderr ?? "" };
+    });
   for (const argv of snapshotsAppDefaultsArgv(dataDir, cli)) {
-    const result = spawnSync("/usr/bin/defaults", argv, { encoding: "utf8" });
+    const result = run(argv);
     if (result.status !== 0) throw new Error(`Could not save ${SNAPSHOTS_APP_NAME}'s settings: ${result.stderr.trim() || `exit ${result.status}`}`);
   }
+  return true;
 }
 
 /** `plannotator-snapshots://<action>?kind=…`: an action and a capture kind, nothing else. */

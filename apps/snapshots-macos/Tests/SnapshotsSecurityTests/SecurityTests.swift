@@ -30,7 +30,13 @@ final class URLCommandTests: XCTestCase {
 final class HubOriginTests: XCTestCase {
     func testAcceptsLoopbackWithTheRegistryPort() {
         XCTAssertEqual(HubOrigin(hubURL: "http://127.0.0.1:51234", port: 51234)?.base, "http://127.0.0.1:51234")
-        XCTAssertEqual(HubOrigin(hubURL: "http://localhost:51234/", port: 51234)?.base, "http://localhost:51234")
+        XCTAssertEqual(HubOrigin(hubURL: "http://127.0.0.1:51234/", port: 51234)?.base, "http://127.0.0.1:51234")
+    }
+
+    func testRefusesLocalhostWhichMayBeIPv6() {
+        // The hub binds 127.0.0.1; `localhost` can resolve to ::1, another socket.
+        XCTAssertNil(HubOrigin(hubURL: "http://localhost:51234", port: 51234))
+        XCTAssertNil(HubOrigin(hubURL: "http://[::1]:51234", port: 51234))
     }
 
     func testRefusesAnythingElse() {
@@ -49,7 +55,7 @@ final class HubOriginTests: XCTestCase {
         let origin = try XCTUnwrap(HubOrigin(hubURL: "http://127.0.0.1:51234", port: 51234))
         XCTAssertTrue(origin.contains(URL(string: "http://127.0.0.1:51234/hud")))
         XCTAssertFalse(origin.contains(URL(string: "http://127.0.0.1:51235/hud")))
-        XCTAssertFalse(origin.contains(URL(string: "http://localhost:51234/hud")), "the spelling the page was loaded under")
+        XCTAssertFalse(origin.contains(URL(string: "http://localhost:51234/hud")), "only the IPv4 literal the hub binds")
         XCTAssertFalse(origin.contains(URL(string: "https://127.0.0.1:51234/hud")))
         XCTAssertTrue(origin.matches(protocol: "http", host: "127.0.0.1", port: 51234))
         XCTAssertFalse(origin.matches(protocol: "https", host: "127.0.0.1", port: 51234))

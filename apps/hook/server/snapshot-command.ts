@@ -155,7 +155,7 @@ async function hubFetch(entry: SnapshotsHubEntry, path: string, body?: unknown, 
  * running in this terminal inherits it.
  */
 function openSnapshotsApp(app: string, action: "capture" | "show", kind: "app" | "region", dataDir: string): void {
-  rememberForApp(dataDir, selfCommand());
+  rememberForApp(dataDir, selfCommand(), { version: getCliVersion(), execPath: process.execPath });
   const result = spawnSync("/usr/bin/open", ["-g", "-a", app, snapshotsAppUrl(action, kind)], { encoding: "utf8" });
   if (result.status !== 0) throw new Error(`Could not open ${SNAPSHOTS_APP_NAME}: ${result.stderr.trim() || `exit ${result.status}`}`);
 }

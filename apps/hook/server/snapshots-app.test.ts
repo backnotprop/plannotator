@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { compareBuildStamps, installEmbeddedApp, SNAPSHOTS_APP_NAME, SNAPSHOTS_BUNDLE_ID, snapshotsAppDefaultsArgv, snapshotsAppUrl } from "./snapshots-app";
+import { compareBuildStamps, installEmbeddedApp, rememberForApp, SNAPSHOTS_APP_NAME, SNAPSHOTS_BUNDLE_ID, snapshotsAppDefaultsArgv, snapshotsAppUrl } from "./snapshots-app";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -60,6 +60,29 @@ describe("the app's URL and defaults", () => {
       ["write", SNAPSHOTS_BUNDLE_ID, "dataDir", "-string", "/data dir"],
       ["write", SNAPSHOTS_BUNDLE_ID, "cli", "-array", "-string", "/bin/plannotator"],
     ]);
+  });
+});
+
+describe("rememberForApp", () => {
+  const recorder = () => {
+    const calls: string[][] = [];
+    return { calls, run: (argv: string[]) => (calls.push(argv), { status: 0, stderr: "" }) };
+  };
+
+  test("a run from source never writes the app's defaults", () => {
+    const r = recorder();
+    // No __CLI_VERSION__, and the executable is bun: exactly what `bun apps/hook/server/index.ts snapshot` is.
+    expect(rememberForApp("/tmp/test-data", [process.execPath, "/src/index.ts"], { version: undefined, execPath: process.execPath, run: r.run })).toBe(false);
+    // Even a version, when the executable is not the installed binary (the real check against ~/.local/bin).
+    expect(rememberForApp("/tmp/test-data", [process.execPath], { version: "0.29.0", execPath: process.execPath, run: r.run })).toBe(false);
+    expect(r.calls).toEqual([]);
+  });
+
+  test("the installed release binary writes both keys", () => {
+    const r = recorder();
+    const written = rememberForApp("/data", ["/home/me/.local/bin/plannotator"], { version: "0.29.0", execPath: "/home/me/.local/bin/plannotator", isManaged: () => true, run: r.run });
+    expect(written).toBe(true);
+    expect(r.calls).toEqual(snapshotsAppDefaultsArgv("/data", ["/home/me/.local/bin/plannotator"]));
   });
 });
 

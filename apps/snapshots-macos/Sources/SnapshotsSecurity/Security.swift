@@ -40,18 +40,19 @@ public enum URLCommand: Equatable {
     }
 }
 
-/// The hub's origin as the registry names it: `http://127.0.0.1:<port>` or `http://localhost:<port>`, nothing else.
+/// The hub's origin as the registry names it: `http://127.0.0.1:<port>`, nothing else. The hub binds
+/// the IPv4 literal; `localhost` can resolve to `::1`, a different socket, so it is not accepted.
 public struct HubOrigin: Equatable {
     public let host: String
     public let port: Int
 
-    public static let loopbackHosts: Set<String> = ["127.0.0.1", "localhost"]
+    public static let loopbackHost = "127.0.0.1"
 
-    /// Accepts exactly `http://<loopback>:<port>` (an optional trailing slash), with the port the registry names.
+    /// Accepts exactly `http://127.0.0.1:<port>` (an optional trailing slash), with the port the registry names.
     public init?(hubURL: String, port expected: Int) {
         guard let url = URLComponents(string: hubURL),
               url.scheme == "http",
-              let host = url.host?.lowercased(), HubOrigin.loopbackHosts.contains(host),
+              let host = url.host?.lowercased(), host == HubOrigin.loopbackHost,
               let port = url.port, port == expected, port > 0, port < 65536,
               url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
               url.path.isEmpty || url.path == "/"
