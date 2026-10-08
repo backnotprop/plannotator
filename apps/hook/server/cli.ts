@@ -160,6 +160,9 @@ export function formatTopLevelHelp(): string {
     "  plannotator sessions",
     "  plannotator inbox [--background | --no-open]",
     "  plannotator inbox mcp",
+    "  plannotator snapshot [--app] [--wait] [--session <host>:<id>] [--no-capture]",
+    "  plannotator snapshot add <image | - | --screen>",
+    "  plannotator snapshot open | status | stop | install-app [--force] | hub [--background]",
     "  plannotator uninstall [--purge] [--yes] [--dry-run]",
     "  plannotator improve-context",
     "",
@@ -180,9 +183,9 @@ export function formatTopLevelHelp(): string {
  * To launch one, delete it from this set, add its usage lines to
  * formatTopLevelHelp() and document it in apps/skills/core/plannotator/SKILL.md.
  *
- * `snapshot`: Plannotator Snapshots, the native capture HUD, hidden until launch.
+ * Empty: `snapshot` (Plannotator Snapshots) was the last one, and launched.
  */
-export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set(["snapshot"]);
+export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>();
 
 // Per-subcommand usage text. Keyed by the canonical subcommand token; aliases
 // (e.g. `last` → `annotate-last`) are resolved in formatSubcommandHelp().
@@ -376,6 +379,15 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "                                  --screen for the whole display) as a snapshot",
     "  plannotator snapshot open       Open the HUD in the browser",
     "  plannotator snapshot status     The hub, the app and connected sessions",
+    "  plannotator snapshot stop       Stop the local hub",
+    "  plannotator snapshot install-app  Install the app into ~/Applications (never",
+    "                                  over a newer build unless --force)",
+    "  plannotator snapshot hub        Run the local hub here (--background: detached)",
+    "  --session <host>:<id>           Send to that agent session (hosts pass their own)",
+    "  --no-capture                    Show the HUD without opening the capture overlay",
+    "",
+    "Capture is macOS only (macOS 14+). Turn the agent integrations off with",
+    "PLANNOTATOR_SNAPSHOTS=0 or { \"snapshots\": false } in ~/.plannotator/config.json.",
   ].join("\n"),
   uninstall: [
     "Usage:",
@@ -431,6 +443,7 @@ export function formatInteractiveNoArgClarification(): string {
     "  plannotator archive",
     "  plannotator sessions",
     "  plannotator inbox",
+    "  plannotator snapshot",
     "  plannotator uninstall",
     "",
     "Run 'plannotator --help' for top-level usage.",

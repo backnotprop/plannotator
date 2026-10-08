@@ -17,7 +17,7 @@ on:
       ref:
         description: Branch or tag of this repository to build
         required: true
-        default: feat/shots-macos
+        default: main
 
 permissions:
   contents: read

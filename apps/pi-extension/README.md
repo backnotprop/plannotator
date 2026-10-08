@@ -314,6 +314,10 @@ The extension also ships the `plannotator` knowledge skill (a CLI reference) for
 
 With this tool the agent writes to your Plannotator Inbox and reads it: `send_message` starts or continues a thread (a question, a note, files to annotate as attachments), `read_thread` and `wait_for_reply` read your answers, `list_decisions` and `record_decision` keep the project's decisions, and `get_guide_brief` and `submit_guide` send you a guided review. The actions are the ones your Inbox offers when the session starts. When you press Send on a reply, the session that sent the message wakes: the reply goes in as a follow-up once Pi is idle (a run is never interrupted), and the thread shows "Delivered to Pi". If two Pi processes have the same session open, the one you used last gets it. The tool appears only when an Inbox is installed (you ran `plannotator inbox` once) and the `inboxTool` setting is on for Pi. It is off by default on Pi, because Pi sends every tool's full definition with each request. Turn it on with `export PLANNOTATOR_INBOX_TOOL=1`, or with `{ "inboxTool": { "pi": true } }` in `~/.plannotator/config.json` (the Inbox's Settings writes this key; the environment variable wins). The setting is read when a session starts. A call starts a stopped Inbox in the background. In print or JSON mode the tool is inactive.
 
+### Snapshots (macOS)
+
+Run `/plannotator-snapshot` to show the agent your screen. Plannotator Snapshots opens: drag a box around what you mean (or take a whole window with its text, `--app`), mark it with numbered boxes and comments, and press ⌘↩. The command returns at once, and the snapshots arrive in this session as one follow-up message with each image's path and your comments; Pi never interrupts a run for it. ⌘J in the HUD asks this session about a snapshot as a real turn. Capture needs macOS 14 or newer and the `plannotator` CLI. Snapshots is on by default; turn it off with `PLANNOTATOR_SNAPSHOTS=0` or `{ "snapshots": false }` in `~/.plannotator/config.json` (read when the session starts). Details: [plannotator.ai/docs/commands/snapshot](https://plannotator.ai/docs/commands/snapshot/).
+
 ### Archive browser
 
 The Plannotator archive browser is available through the shared event API as `archive`, which opens the saved plan/decision browser for future callers. The orchestrator does not expose a dedicated archive command yet.
@@ -330,6 +334,7 @@ During execution, the agent marks completed steps with `[DONE:n]` markers. Progr
 | `/plannotator-review [DIRECTORY \| PR_URL]` | Open code review UI for current changes, another repository/worktree, or a PR |
 | `/plannotator-annotate <file>` | Open markdown file in annotation UI |
 | `/plannotator-last` | Annotate the last assistant message |
+| `/plannotator-snapshot [--app]` | Capture your screen (macOS), mark it up and send it to this session |
 
 When the `plannotator` tool is turned on, the agent opens, lists and closes reviews with it (see above).
 

@@ -9,7 +9,7 @@
  *   - Subcommands: BIDIRECTIONAL. Every subcommand the skill documents must
  *     exist in the CLI, and every user-facing CLI subcommand must appear in
  *     the skill. A renamed, removed, or newly added subcommand fails here.
- *     Unreleased subcommands (HIDDEN_SUBCOMMANDS in cli.ts, today `snapshot`)
+ *     Unreleased subcommands (HIDDEN_SUBCOMMANDS in cli.ts, empty today)
  *     are the one exception, and the rule flips for them: they must NOT be
  *     in the skill or the top-level help until they are taken out of that
  *     set.
@@ -274,6 +274,13 @@ describe("plannotator knowledge skill freshness", () => {
     expect(HIDDEN_SUBCOMMANDS.has("inbox")).toBe(false);
     expect(formatTopLevelHelp()).toContain("plannotator inbox mcp");
     expect(documentedSubcommands.has("inbox")).toBe(true);
+  });
+
+  test("Snapshots is released: in the top-level help and the skill", () => {
+    // It was the hidden subcommand until launch; nothing hides it now.
+    expect(HIDDEN_SUBCOMMANDS.has("snapshot")).toBe(false);
+    expect(formatTopLevelHelp()).toContain("plannotator snapshot add");
+    expect(documentedSubcommands.has("snapshot")).toBe(true);
   });
 });
 

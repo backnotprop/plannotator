@@ -1,6 +1,6 @@
 /**
  * `plannotator snapshot`: Plannotator Snapshots, the native capture HUD.
- * Hidden until launch (HIDDEN_SUBCOMMANDS in cli.ts).
+ * Capture is macOS only; `add`, `open`, `status`, `stop` and `hub` run anywhere.
  *
  *   plannotator snapshot [--app] [--session <host>:<id>] [--no-capture]
  *       Start the hub and the Plannotator Snapshots app if needed and open the
