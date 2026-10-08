@@ -9,7 +9,8 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { runPullSessionBridgeClient } from "@plannotator/ai/session-bridge-pull-client";
 import type { SessionBridge, SessionBridgeAskRequest } from "@plannotator/ai/session-bridge";
 import {
@@ -165,6 +166,37 @@ describe("Snapshots agent link", () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(bridges).toBe(0);
     expect(idle.connected).toBe(false);
+  });
+
+  // hub.json outlives the hub. The failure: every session on a machine that
+  // used Snapshots once fetches a dead port, rewrites its lease and spawns git every 5 s.
+  test("a stale hub.json whose pid is dead: no fetch, no lease written, no git", async () => {
+    const dataDir = tempSnapshotsDataDir();
+    cleanups.push(() => rmSync(dataDir, { recursive: true, force: true }));
+    const exited = Bun.spawn(["true"]);
+    await exited.exited;
+    mkdirSync(join(dataDir, "snapshots"), { recursive: true });
+    writeFileSync(
+      join(dataDir, "snapshots", "hub.json"),
+      JSON.stringify({ v: 1, pid: exited.pid, port: 9, url: "http://127.0.0.1:9", version: "test", token: "t".repeat(64), serverSession: "gone", startedAt: "", cli: [] }),
+    );
+    const realFetch = globalThis.fetch;
+    const fetched: string[] = [];
+    globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+      fetched.push(String(input instanceof Request ? input.url : input));
+      return realFetch(input, init);
+    }) as typeof fetch;
+    try {
+      const stale = link(dataDir, "s-stale", { deliver: async () => undefined });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(fetched).toEqual([]);
+      expect(existsSync(join(dataDir, "snapshots", "leases"))).toBe(false);
+      // The project name (`git rev-parse`) is looked up only on connecting.
+      expect((stale as unknown as { project: string | null }).project).toBeNull();
+      expect(stale.connected).toBe(false);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 
   test("summon off macOS explains and starts nothing", async () => {

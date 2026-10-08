@@ -122,6 +122,7 @@ interface HubEntry {
   token: string;
   port: number;
   serverSession: string;
+  pid: number;
 }
 
 /** One session's lease on one host: which of its processes polls and delivers. */
@@ -144,7 +145,13 @@ export function readSnapshotsHubEntry(dataDir: string): HubEntry | null {
     if (value.v !== 1 || typeof value.url !== "string" || typeof value.token !== "string") return null;
     const port = /^http:\/\/127\.0\.0\.1:(\d+)$/.exec(value.url);
     if (!port) return null;
-    return { url: value.url, token: value.token, port: Number(port[1]), serverSession: typeof value.serverSession === "string" ? value.serverSession : "" };
+    return {
+      url: value.url,
+      token: value.token,
+      port: Number(port[1]),
+      serverSession: typeof value.serverSession === "string" ? value.serverSession : "",
+      pid: typeof value.pid === "number" ? value.pid : 0,
+    };
   } catch {
     return null;
   }
@@ -162,7 +169,28 @@ function errorText(error: unknown): string {
 /** The hub is up: its registry names a port that answers health with the registry's serverSession. */
 export async function isSnapshotsHubRunning(dataDir: string): Promise<boolean> {
   const entry = readSnapshotsHubEntry(dataDir);
-  if (!entry) return false;
+  return entry ? hubAnswers(entry) : false;
+}
+
+/**
+ * The registry's hub process exists. `hub.json` stays on disk after the hub
+ * exits, so this signal check comes before any fetch: a stale registry costs
+ * a file read, never a loopback call to a dead port.
+ */
+function hubPidAlive(entry: HubEntry): boolean {
+  if (!Number.isInteger(entry.pid) || entry.pid <= 0) return false;
+  try {
+    process.kill(entry.pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM: it exists, under another user.
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** A live hub: its pid runs and its port answers health with the registry's serverSession. */
+async function hubAnswers(entry: HubEntry): Promise<boolean> {
+  if (!hubPidAlive(entry)) return false;
   try {
     const response = await fetch(`${entry.url}/api/snapshots/health`, { signal: AbortSignal.timeout(1_500) });
     if (!response.ok) return false;
@@ -390,10 +418,13 @@ export class SnapshotsAgentLink<B> {
     while (!this.disposed) {
       // A file read: nothing is spawned, watched or probed until there is a hub.
       const hub = readSnapshotsHubEntry(this.options.dataDir);
-      if (!hub) {
+      // A registry left by a hub that exited costs a file read and a pid check:
+      // no fetch, no lease write, no git, until a live hub answers.
+      if (!hub || !(await hubAnswers(hub))) {
         await this.sleep(retryMs);
         continue;
       }
+      if (this.disposed) break;
       // Another process of this session holds it: that one polls and delivers.
       if (!this.holdLease(Date.now())) {
         await this.sleep(leaseEveryMs);
