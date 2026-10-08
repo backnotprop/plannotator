@@ -46,6 +46,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: relay-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   relay:
     name: Inbox relay (wrangler dev with the compiled binary)
@@ -72,7 +76,7 @@ jobs:
 
       - name: Run the relay proof
         working-directory: apps/relay
-        run: PLANNOTATOR_INBOX_TEST_BINARY="$GITHUB_WORKSPACE/.local/plannotator" bun test
+        run: PLANNOTATOR_INBOX_TEST_BINARY="$GITHUB_WORKSPACE/.local/plannotator" RELAY_PROOF_APPLE=1 bun test
 
       - name: Keep the relay's logs
         if: always()

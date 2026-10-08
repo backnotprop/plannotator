@@ -288,7 +288,7 @@ The push plaintext, encrypted under the device key:
 
 - `agent` is `inboxAgentName(author)`, `project` the project's name.
 - `question` is present only when the message has exactly one question, it is single-choice, and it has at most four choices (Apple shows at most four actions). Otherwise it is null, and the notification opens the thread (render 7.2).
-- `collapse_id` is the thread id, so a thread's newer push replaces its older one.
+- `collapse_id` is `HMAC-SHA256(K, UTF-8 bytes of the thread id)` as 64 lowercase hex, so a thread's newer push replaces its older one and the relay never learns the thread (written in by R1 after plannotator-ops's review; the first draft sent the thread id). The phone reads the thread from the decrypted `thread_id`, never from the collapse id. The relay refuses a collapse id that is not 1 to 64 printable ASCII bytes, Apple's ceiling, with `400 bad_request`.
 - Apple's payload ceiling is 4096 bytes. When the APNs body would pass it, the Inbox sets `question.context` to null, then `question` to null, then sends `{ v, thread_id, message_id }` alone.
 
 What the relay sends to APNs, with `apns-push-type: alert`, `apns-priority: 10`, `apns-topic: ai.plannotator.app` and `apns-collapse-id: <collapse_id>`:
@@ -871,7 +871,7 @@ curl -sS -X PUT "$RELAY/v1/mailboxes/mbx_AAAAAAAAAAAAAAAAAAAAAA/devices/dev_01K7
 ```sh
 curl -sS -X POST "$RELAY/v1/mailboxes/mbx_AAAAAAAAAAAAAAAAAAAAAA/push" \
   -H 'Authorization: Bearer BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB' -H 'Content-Type: application/json' \
-  -d '{"device_id":"dev_01K70000000000000000000001","collapse_id":"msg_01K70000000000000000000010","ciphertext":"AAAAAAAAAAAAAAAAexampleciphertextexample"}'
+  -d '{"device_id":"dev_01K70000000000000000000001","collapse_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ciphertext":"AAAAAAAAAAAAAAAAexampleciphertextexample"}'
 ```
 
 `202 { "sent": true }`. With no APNs token registered: `200 { "sent": false, "reason": "no_apns_token" }`. On a relay without the APNs key: `200 { "sent": false, "reason": "no_apns_key" }`. Apple refusing the provider token: `502 { "error": "APNs answered 403 InvalidProviderToken.", "code": "apns_failed", "apns_status": 403, "apns_reason": "InvalidProviderToken" }`.

@@ -29,7 +29,7 @@
  * stays at the URL relay.json names.
  */
 
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deriveRelayKeys, encryptWithKey } from "@plannotator/core/crypto";
@@ -298,7 +298,9 @@ export function createInboxRelay(context: InboxRelayContext) {
       try {
         const { key } = await deriveRelayKeys(secret, device.id);
         const ciphertext = await sizedEnvelope(summary, key);
-        const answer = await call("POST", mailboxPath("/push"), mailbox.secret, { device_id: device.id, collapse_id: message.thread_id, ciphertext });
+        // The collapse id: the thread id under the phone's key, so a thread's newer push replaces its older one and the relay never learns the thread.
+        const collapseId = createHmac("sha256", Buffer.from(key, "base64url")).update(message.thread_id).digest("hex");
+        const answer = await call("POST", mailboxPath("/push"), mailbox.secret, { device_id: device.id, collapse_id: collapseId, ciphertext });
         const result = (await answer.json().catch(() => ({}))) as { reason?: string; code?: string };
         log(`push ${message.id} ${device.id} ${answer.status}${result.reason ? ` ${result.reason}` : result.code ? ` ${result.code}` : ""}`);
       } catch (error) {

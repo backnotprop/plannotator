@@ -31,6 +31,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync,
 import http2 from "node:http2";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { createHmac } from "node:crypto";
 import { decryptWithKey, deriveRelayKeys } from "@plannotator/core/crypto";
 import { SimAgent } from "../../../scripts/inbox-sim";
 import { createInboxWorld, destroyInboxWorld, registry, stopInbox, stubBuiltHtml, worldEnv, type InboxWorld } from "../../../tests/helpers/inbox-world";
@@ -247,6 +248,9 @@ describe("the relay with an Inbox, under wrangler dev", () => {
     return { body, phone: { id: body.device.id as string, token: body.token as string, secret: body.secret as string, ...derived } };
   };
 
+  /** The collapse id the Inbox sends: the thread id under the phone's key, never the thread id itself. */
+  const collapseOf = (threadId: string) => createHmac("sha256", Buffer.from(phone.key, "base64url")).update(threadId).digest("hex");
+
   const device = async (id: string) => ((await (await win("/api/inbox/devices")).json()) as Json).devices.find((d: Json) => d.id === id);
 
   beforeAll(async () => {
@@ -351,7 +355,7 @@ describe("the relay with an Inbox, under wrangler dev", () => {
       "apns-push-type": "alert",
       "apns-priority": "10",
       "apns-topic": "ai.plannotator.app",
-      "apns-collapse-id": sent.thread_id,
+      "apns-collapse-id": collapseOf(sent.thread_id),
     });
     const body = JSON.parse(push.body);
     expect(body.aps).toEqual({ alert: { title: "Plannotator", body: "New in your Inbox" }, "mutable-content": 1, sound: "default" });
@@ -387,7 +391,7 @@ describe("the relay with an Inbox, under wrangler dev", () => {
     });
     await until(() => apple.pushes.length, (n) => n === 1, "one push for two questions");
     expect(JSON.parse(await decryptWithKey(JSON.parse(apple.pushes[0]!.body).e, phone.key)).question).toBeNull();
-    expect(apple.pushes[0]!.headers["apns-collapse-id"]).toBe(two.thread_id);
+    expect(apple.pushes[0]!.headers["apns-collapse-id"]).toBe(collapseOf(two.thread_id));
 
     await agent.send({ project_path: w.project, thread: "news", body: "The migration finished. Nothing to answer." });
     const guided = await agent.submitGuide({ ...GUIDE_BRIEF_EXAMPLE, project_path: w.project, thread: "token-refresh", idempotency_key: "guide-relay-1" });
@@ -502,7 +506,81 @@ describe("a relay without the APNs key", () => {
   });
 });
 
-describe("the transport to Apple's real sandbox", () => {
+describe("a hostile server in Apple's place", () => {
+  let relay: Relay;
+  let server: ReturnType<typeof Bun.listen>;
+  let mode: "oversized" | "flood" | "graceful-goaway" = "oversized";
+  const frame = (type: number, flags: number, stream: number, payload: Uint8Array) => {
+    const out = new Uint8Array(9 + payload.length);
+    out.set([(payload.length >> 16) & 255, (payload.length >> 8) & 255, payload.length & 255, type, flags, 0, 0, 0, stream], 0);
+    out.set(payload, 9);
+    return out;
+  };
+
+  beforeAll(async () => {
+    // A raw TCP peer that answers each connection by `mode`, never by the protocol's rules.
+    server = Bun.listen({
+      hostname: "127.0.0.1",
+      port: 0,
+      socket: {
+        data(socket) {
+          if ((socket.data as { answered?: boolean } | undefined)?.answered) return;
+          socket.data = { answered: true };
+          socket.write(frame(4, 0, 0, new Uint8Array()));
+          if (mode === "oversized") {
+            // A DATA frame that says 16 MiB, then a trickle.
+            socket.write(new Uint8Array([0xff, 0xff, 0xff, 0x0, 0x0, 0, 0, 0, 1, 1, 2, 3]));
+          } else if (mode === "flood") {
+            socket.write(frame(1, 0x4, 1, new Uint8Array([0x8c]))); // :status 400, END_HEADERS
+            for (let i = 0; i < 64; i++) socket.write(frame(0, 0, 1, new Uint8Array(1000).fill(0x61)));
+          } else {
+            socket.write(frame(7, 0, 0, new Uint8Array([0, 0, 0, 1, 0, 0, 0, 0]))); // GOAWAY, last stream 1, NO_ERROR
+            socket.write(frame(1, 0x5, 1, new Uint8Array([0x88]))); // :status 200, END_HEADERS | END_STREAM
+          }
+        },
+      },
+      data: undefined as unknown,
+    } as Parameters<typeof Bun.listen>[0]);
+    const key = await throwawayKey();
+    relay = await startRelay("hostile", { APNS_KEY: key.pkcs8, APNS_KEY_ID: "KEY0000000", APNS_TEAM_ID: "TEAM000000", APNS_ORIGIN: `http://127.0.0.1:${server.port}` });
+  }, 90_000);
+  afterAll(() => {
+    relay?.stop();
+    server?.stop(true);
+  });
+
+  test("a frame over 16 KiB and a flood of body fail at once, never buffered to the timeout; a graceful GOAWAY that covers the push still answers", async () => {
+    const secret = "mailbox-secret-for-the-hostile-proof";
+    const { mailbox_id } = (await (await fetch(`${relay.url}/v1/mailboxes`, { method: "POST", body: JSON.stringify({ secret_sha256: sha256(secret) }) })).json()) as Json;
+    const at = (method: string, path: string, body: unknown, bearer: string) =>
+      fetch(`${relay.url}/v1/mailboxes/${mailbox_id}${path}`, { method, headers: { Authorization: `Bearer ${bearer}` }, body: JSON.stringify(body) });
+    const dev = "dev_00000000000000000000000000";
+    await at("PUT", `/devices/${dev}`, { secret_sha256: sha256("phone"), cursor: 0 }, secret);
+    expect((await at("PUT", `/devices/${dev}/apns`, { token: TOKEN_OK, environment: "sandbox" }, "phone")).status).toBe(204);
+    const push = async () => {
+      const started = Date.now();
+      const answer = await at("POST", "/push", { device_id: dev, collapse_id: "c".repeat(64), ciphertext: "AAAAexample" }, secret);
+      return { status: answer.status, body: (await answer.json()) as Json, ms: Date.now() - started };
+    };
+    mode = "oversized";
+    const oversized = await push();
+    expect(oversized).toMatchObject({ status: 502, body: { code: "apns_failed" } });
+    expect(oversized.body.error).toContain("over 16384");
+    expect(oversized.ms).toBeLessThan(3000);
+    mode = "flood";
+    const flood = await push();
+    expect(flood).toMatchObject({ status: 502, body: { code: "apns_failed" } });
+    expect(flood.body.error).toContain("too large");
+    expect(flood.ms).toBeLessThan(3000);
+    mode = "graceful-goaway";
+    expect(await push()).toMatchObject({ status: 202, body: { sent: true } });
+    // Apple's own ceiling on the collapse id, at the relay.
+    expect((await at("POST", "/push", { device_id: dev, collapse_id: "c".repeat(65), ciphertext: "AAAAexample" }, secret)).status).toBe(400);
+  }, 30_000);
+});
+
+// Apple's real hosts: run where RELAY_PROOF_APPLE=1 (the relay workflow sets it), so a local run works offline.
+describe.skipIf(process.env.RELAY_PROOF_APPLE !== "1")("the transport to Apple's real push hosts, sandbox and production", () => {
   let relay: Relay;
 
   beforeAll(async () => {

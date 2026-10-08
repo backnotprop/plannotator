@@ -58,6 +58,7 @@ export const HASH = /^[0-9a-f]{64}$/;
 const DEVICE_ID = /^dev_[A-Za-z0-9]+$/;
 const APNS_TOKEN = /^[0-9a-fA-F]+$/;
 const ENVELOPE = /^[A-Za-z0-9_-]+$/;
+const COLLAPSE_ID = /^[\x21-\x7e]{1,64}$/;
 
 const isCursor = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
@@ -234,8 +235,9 @@ export class Mailbox extends DurableObject<Env> {
     const deviceId = input?.device_id;
     const collapseId = input?.collapse_id;
     const envelope = input?.ciphertext;
-    if (typeof deviceId !== "string" || typeof collapseId !== "string" || !collapseId || typeof envelope !== "string" || !ENVELOPE.test(envelope)) {
-      return refuse(400, "bad_request", "{ device_id, collapse_id, ciphertext }.");
+    // Apple takes a collapse id of at most 64 bytes.
+    if (typeof deviceId !== "string" || typeof collapseId !== "string" || !COLLAPSE_ID.test(collapseId) || typeof envelope !== "string" || !ENVELOPE.test(envelope)) {
+      return refuse(400, "bad_request", "{ device_id, collapse_id (1 to 64 printable ASCII), ciphertext }.");
     }
     const device = this.device(deviceId);
     if (!device) return refuse(404, "device_not_found");

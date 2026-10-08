@@ -56,6 +56,10 @@ const END_HEADERS = 0x4;
 const PADDED = 0x8;
 const PRIORITY = 0x20;
 const STREAM = 1;
+/** The default SETTINGS_MAX_FRAME_SIZE, which this client never raises. */
+const MAX_FRAME_SIZE = 16_384;
+/** The most of an answer's header block, or of its body, the client keeps. */
+const MAX_KEPT_BYTES = 8_192;
 
 /** HPACK integer with an N-bit prefix (RFC 7541 section 5.1); `first` carries the bits above the prefix. */
 function hpackInt(value: number, prefixBits: number, first: number): number[] {
@@ -186,7 +190,7 @@ function fragment(flags: number, payload: Uint8Array): Uint8Array {
   return payload.subarray(start, end);
 }
 
-/** Send one request and read its answer. Throws on a transport failure, a reset stream, GOAWAY before the answer, or the timeout. */
+/** Send one request and read its answer. Throws on a transport failure, a reset stream, an error GOAWAY, a frame over 16 KiB, an answer over 8 KiB, or the timeout. */
 export async function h2Request(request: H2Request): Promise<H2Response> {
   const authority = request.port === 443 ? request.hostname : `${request.hostname}:${request.port}`;
   const socket = connect({ hostname: request.hostname, port: request.port }, { secureTransport: request.tls ? "on" : "off", allowHalfOpen: false });
@@ -205,43 +209,77 @@ export async function h2Request(request: H2Request): Promise<H2Response> {
         frame(DATA, END_STREAM, STREAM, request.body),
       ]),
     );
-    let buffer: Uint8Array = new Uint8Array();
+    // One buffer with a read offset: what is unread is at most one partial frame (16 KiB) plus the last read.
+    let buffer = new Uint8Array(MAX_FRAME_SIZE + 9);
+    let at = 0;
+    let filled = 0;
     let headerBytes: Uint8Array[] = [];
+    let headerSize = 0;
     let status: number | null = null;
     const body: Uint8Array[] = [];
+    let bodySize = 0;
+    let goingAway = false;
     for (;;) {
       const { value, done } = await reader.read();
-      if (done) throw new Error("HTTP/2 connection closed before the answer");
-      buffer = concat([buffer, value]);
-      while (buffer.length >= 9) {
-        const length = (buffer[0]! << 16) | (buffer[1]! << 8) | buffer[2]!;
-        if (buffer.length < 9 + length) break;
-        const type = buffer[3]!;
-        const flags = buffer[4]!;
-        const stream = ((buffer[5]! & 127) << 24) | (buffer[6]! << 16) | (buffer[7]! << 8) | buffer[8]!;
-        const payload = buffer.slice(9, 9 + length);
-        buffer = buffer.slice(9 + length);
+      if (done) throw new Error(goingAway ? "HTTP/2 GOAWAY before the answer" : "HTTP/2 connection closed before the answer");
+      if (filled + value.length > buffer.length) {
+        const unread = buffer.subarray(at, filled);
+        const next = filled - at + value.length > buffer.length ? new Uint8Array(filled - at + value.length) : buffer;
+        next.set(unread, 0);
+        buffer = next;
+        filled -= at;
+        at = 0;
+      }
+      buffer.set(value, filled);
+      filled += value.length;
+      while (filled - at >= 9) {
+        const length = (buffer[at]! << 16) | (buffer[at + 1]! << 8) | buffer[at + 2]!;
+        // The client never raises SETTINGS_MAX_FRAME_SIZE, so a longer frame is a protocol error (RFC 9113 4.2).
+        if (length > MAX_FRAME_SIZE) throw new Error(`HTTP/2 frame of ${length} bytes, over ${MAX_FRAME_SIZE}`);
+        if (filled - at < 9 + length) break;
+        const type = buffer[at + 3]!;
+        const flags = buffer[at + 4]!;
+        const stream = ((buffer[at + 5]! & 127) << 24) | (buffer[at + 6]! << 16) | (buffer[at + 7]! << 8) | buffer[at + 8]!;
+        const payload = buffer.slice(at + 9, at + 9 + length);
+        at += 9 + length;
+        if (at === filled) at = filled = 0;
         if (type === SETTINGS && !(flags & ACK)) await writer.write(frame(SETTINGS, ACK, 0, new Uint8Array()));
         else if (type === PING && !(flags & ACK)) await writer.write(frame(PING, ACK, 0, payload));
-        else if (type === GOAWAY) throw new Error(`HTTP/2 GOAWAY: ${new TextDecoder().decode(payload.subarray(8))}`);
-        else if (stream !== STREAM) continue;
+        else if (type === GOAWAY) {
+          // A graceful GOAWAY (NO_ERROR) whose last stream id covers stream 1 still answers it: keep reading.
+          const lastStream = ((payload[0]! & 127) << 24) | (payload[1]! << 16) | (payload[2]! << 8) | payload[3]!;
+          const code = ((payload[4]! << 24) | (payload[5]! << 16) | (payload[6]! << 8) | payload[7]!) >>> 0;
+          if (code !== 0 || lastStream < STREAM) throw new Error(`HTTP/2 GOAWAY: ${new TextDecoder().decode(payload.subarray(8))}`);
+          goingAway = true;
+        } else if (stream !== STREAM) continue;
         else if (type === RST_STREAM) throw new Error("HTTP/2 stream reset");
         else if (type === HEADERS || type === CONTINUATION) {
-          headerBytes.push(type === HEADERS ? fragment(flags, payload) : payload);
+          const part = type === HEADERS ? fragment(flags, payload) : payload;
+          headerSize += part.length;
+          if (headerSize > MAX_KEPT_BYTES) throw new Error("HTTP/2 answer headers too large");
+          headerBytes.push(part);
           if (flags & END_HEADERS) {
             if (status === null) status = decodeStatus(concat(headerBytes));
             headerBytes = [];
+            headerSize = 0;
           }
           if (type === HEADERS && flags & END_STREAM) return { status: status ?? 0, body: "" };
         } else if (type === DATA) {
-          body.push(fragment(flags & PADDED, payload));
+          const part = fragment(flags & PADDED, payload);
+          bodySize += part.length;
+          // Apple's answers are a few dozen bytes of JSON: a longer one is not Apple.
+          if (bodySize > MAX_KEPT_BYTES) throw new Error("HTTP/2 answer body too large");
+          body.push(part);
           if (flags & END_STREAM) return { status: status ?? 0, body: new TextDecoder().decode(concat(body)) };
         }
       }
     }
   };
+  const run = exchange();
+  // After a timeout the exchange is abandoned; its own failure, when the socket closes, is nobody's to handle.
+  run.catch(() => {});
   try {
-    return await Promise.race([exchange(), timeout]);
+    return await Promise.race([run, timeout]);
   } finally {
     if (timer !== undefined) clearTimeout(timer);
     try {

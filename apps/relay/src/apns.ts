@@ -43,18 +43,19 @@ function base64url(bytes: Uint8Array): string {
 }
 
 const encoder = new TextEncoder();
-let cached: { keyId: string; token: string; madeAt: number } | null = null;
+let cached: { signer: string; token: string; madeAt: number } | null = null;
 
-/** The provider token, made again after 50 minutes or when the key id changes. */
+/** The provider token, made again after 50 minutes or when the team or the key id changes. */
 async function providerToken(apns: ApnsKey, now: number): Promise<string> {
-  if (cached && cached.keyId === apns.keyId && now - cached.madeAt < TOKEN_LIFETIME_MS) return cached.token;
+  const signer = `${apns.teamId}\n${apns.keyId}`;
+  if (cached && cached.signer === signer && now - cached.madeAt < TOKEN_LIFETIME_MS) return cached.token;
   const der = Uint8Array.from(atob(apns.key.replace(/-----[^-]+-----/g, "").replace(/\s+/g, "")), (c) => c.charCodeAt(0));
   const key = await crypto.subtle.importKey("pkcs8", der, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
   const header = base64url(encoder.encode(JSON.stringify({ alg: "ES256", kid: apns.keyId })));
   const claims = base64url(encoder.encode(JSON.stringify({ iss: apns.teamId, iat: Math.floor(now / 1000) })));
   // WebCrypto's ECDSA signature is r || s, the form JWS ES256 wants.
   const signature = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, encoder.encode(`${header}.${claims}`)));
-  cached = { keyId: apns.keyId, token: `${header}.${claims}.${base64url(signature)}`, madeAt: now };
+  cached = { signer, token: `${header}.${claims}.${base64url(signature)}`, madeAt: now };
   return cached.token;
 }
 
