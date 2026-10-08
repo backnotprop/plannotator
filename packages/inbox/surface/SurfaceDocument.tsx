@@ -194,6 +194,10 @@ export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function
           inputMethod="pinpoint"
           annotateModeActive={!interact}
           onOpenLink={(href) => {
+            // The frame's link message is page-controlled: the agent's script
+            // can post it with no tap. Only a link the person just tapped goes
+            // to the shell (a real tap in the frame activates this window too).
+            if (!navigator.userActivation?.isActive) return;
             try {
               const url = new URL(href, base ?? undefined);
               if (/^(https?|mailto):$/.test(url.protocol)) postToShell({ type: 'link', href: url.href });

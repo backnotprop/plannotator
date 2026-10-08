@@ -110,7 +110,9 @@ const TICKET_PAGE = `<!doctype html>
     <div class="faces"><span style="background:#ff8a4c"></span><span style="background:#7b5cff"></span><span style="background:#2ed392"></span></div></div>
   <h2>LINEUP</h2>
   <ul class="lineup"><li>Mira Okafor · sunset set</li><li>Jonas Ribeiro · live</li><li>Halvorsen b2b Tiles</li></ul>
+  <p><a id="venue" href="https://lowtide.example/venue">The venue</a></p>
   <p id="probe">probing</p>
+  <p id="forged"></p>
 </main>
 <script>
   // The page's own behavior: Interact must reach it.
@@ -125,6 +127,12 @@ const TICKET_PAGE = `<!doctype html>
   catch (e) { out.push('own webkit: ' + e.name); }
   parent.postMessage({ v: 1, type: 'link', href: 'https://evil.example/relay' }, '*');
   out.push('relay: posted');
+  // The viewer's own frame protocol, forged with no tap, well after any tap of the tests before.
+  setTimeout(function () {
+    parent.postMessage({ type: 'plannotator-bridge-link-click', href: 'https://evil.example/forged' }, '*');
+    parent.postMessage({ type: 'plannotator-bridge-link-click', href: 'mailto:evil@evil.example' }, '*');
+    document.getElementById('forged').textContent = 'forged';
+  }, 15000);
   fetch('http://127.0.0.1:1/').then(function () { out.push('fetch: reached'); }, function () { out.push('fetch: refused'); }).then(function () {
     document.getElementById('probe').textContent = out.join(' | ');
   });
@@ -161,6 +169,8 @@ interface World {
   inbox: ShellMessage[];
   attachments: { plan: any; ticket: any; flow: any };
   guide: { thread_id: string; message_id: string };
+  /** When the ticket page opened: its script forges a link 15 s later. */
+  ticketOpenedAt: number;
 }
 
 let world: World;
@@ -327,6 +337,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     inbox,
     attachments: { plan: plan.attachments[0], ticket: ticket.attachments[0], flow: flow.attachments[0] },
     guide: { thread_id: guide.thread_id, message_id: guide.message_id },
+    ticketOpenedAt: 0,
   };
 });
 
@@ -442,6 +453,7 @@ test('HTML: a pin steps to its parent and back to its child, is saved and drawn;
   const ticket = world.attachments.ticket;
   const from0 = mark();
   await openAttachment(ticket);
+  world.ticketOpenedAt = Date.now();
   const frame = ticketFrame();
   await expect(frame.locator('h1')).toContainText('LOW');
   await send({ type: 'set_mode', mode: 'annotate' });
@@ -511,6 +523,19 @@ test("the agent's HTML frame cannot reach the bridge", async () => {
   expect(world.inbox.filter((m) => m.main && String(m.message.href ?? '').includes('evil.example'))).toEqual([]);
   expect(world.inbox.filter((m) => m.main && m.message.type === 'error')).toEqual([expect.objectContaining({ message: expect.objectContaining({ code: 'bridge_version' }) })]);
   expect(htmlFrame().url()).not.toContain('surface.html');
+
+  // The viewer's link message forged by the page's script, no tap: refused. Nothing
+  // touches the page while the timer runs out: Playwright's own evaluate calls
+  // count as a gesture in WebKit, so the wait is a plain one.
+  await world.page.waitForTimeout(Math.max(0, world.ticketOpenedAt + 16_000 - Date.now()));
+  await expect(frame.locator('#forged')).toHaveText('forged');
+  expect(world.inbox.filter((m) => m.main && m.message.type === 'link' && !String(m.message.href).startsWith('https://docs.stripe.com'))).toEqual([]);
+  // A link the person taps still goes to the shell.
+  await send({ type: 'set_mode', mode: 'interact' });
+  const from = mark();
+  await frame.locator('#venue').click();
+  expect(await next('link', from)).toMatchObject({ href: 'https://lowtide.example/venue' });
+  await send({ type: 'set_mode', mode: 'annotate' });
 });
 
 test('diagram: a tap on a node drafts a comment on it; saved, its badge shows', async () => {
@@ -591,10 +616,20 @@ test('theme and text size apply as the shell sends them', async () => {
   const bigger = (await paragraph.boundingBox())!;
   // Larger text reflows the same paragraph onto more, taller lines.
   expect(bigger.height).toBeGreaterThan(base.height * 1.5);
+  // The toolstrip stays on top of the larger text: each button is what a tap at its centre hits.
+  const covered = await page.evaluate(() =>
+    [...document.querySelectorAll('.sf-toolstrip button')].filter((button) => {
+      const r = button.getBoundingClientRect();
+      return !button.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+    }).length,
+  );
+  expect(covered).toBe(0);
   const background = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  await page.waitForTimeout(2000);
   await page.screenshot({ path: join(proofDir, '10-text-size-dark.png') });
   await appearance('light', 1.6);
   expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).not.toBe(background);
+  await page.waitForTimeout(2000);
   await page.screenshot({ path: join(proofDir, '10-text-size-light.png') });
   await appearance('light', 1);
   expect(world.errors).toEqual([]);

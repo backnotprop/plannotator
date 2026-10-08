@@ -72,6 +72,8 @@
    and drawn at 44 pt targets (its buttons are 28 px). */
 .sf-toolstrip {
   position: fixed;
+  /* Above the document (Viewer's own layer is z-50). */
+  z-index: 100;
   left: 50%;
   bottom: calc(10px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
@@ -227,6 +229,8 @@
 }
 .sf-gfoot {
   position: fixed;
+  /* Above the document (Viewer's own layer is z-50). */
+  z-index: 100;
   left: 0;
   right: 0;
   bottom: 0;
@@ -264,6 +268,8 @@
 }
 .sf-gnav {
   position: fixed;
+  /* Above the document (Viewer's own layer is z-50). */
+  z-index: 100;
   left: 0;
   right: 0;
   bottom: 0;
