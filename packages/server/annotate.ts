@@ -34,6 +34,8 @@ import {
 	createSourceSaveCapability,
 	createSourceSaveCapabilityFromText,
 	readSourceFileSnapshot,
+	resolveBundleSourceSavePaths,
+	resolveBundleSourceSaveTarget,
 	resolveFolderSourceFile,
 	resolveFolderSourceFileForSave,
 	saveSourceFileAtomic,
@@ -684,6 +686,10 @@ export async function startAnnotateServer(
       ? initialSingleFileSourceSave.path
       : resolveUserPath(filePath)
     : null;
+  // A review of several files: Edit Mode may write exactly the bundle's own
+  // files (real paths, captured now, as a single-file session captures its
+  // one file), never a document they link to.
+  const bundleSourceSavePaths = bundleFiles ? resolveBundleSourceSavePaths(bundlePaths) : null;
   const openedSourceFilePaths = new Set<string>();
   if (initialSingleFileSourcePath) openedSourceFilePaths.add(initialSingleFileSourcePath);
   const getPrimarySource = () => {
@@ -1152,6 +1158,7 @@ export async function startAnnotateServer(
                 ? initialSingleFileSourcePath ?? filePath
                 : undefined,
               sourceSaveFolderPath: mode === "annotate-folder" ? folderPath : undefined,
+              sourceSaveBundlePaths: bundleSourceSavePaths ?? undefined,
               onSourceDocumentServed: (path) => openedSourceFilePaths.add(path),
               rootPaths: getReferenceRootPaths(),
               annotateHistory:
@@ -1196,6 +1203,8 @@ export async function startAnnotateServer(
               ) {
                 targetPath = null;
               }
+            } else if (bundleSourceSavePaths && typeof body.path === "string") {
+              targetPath = resolveBundleSourceSaveTarget(body.path, bundleSourceSavePaths);
             }
 
             if (!targetPath) {
@@ -1209,6 +1218,7 @@ export async function startAnnotateServer(
               allowMissingBase: body.allowMissingBase === true,
               missingBaseEol: body.baseEol,
               allowedRoot: mode === "annotate-folder" ? folderPath : undefined,
+              allowedFiles: bundleSourceSavePaths ?? undefined,
             });
             const status = result.ok
               ? 200

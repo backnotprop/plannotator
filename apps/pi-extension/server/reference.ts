@@ -55,6 +55,7 @@ import { parseCodePath, type ParsedCodePath } from "../generated/code-file.ts";
 import { htmlToMarkdown } from "../generated/html-to-markdown.ts";
 import { disabledSourceSave, type SourceFileSnapshot, type SourceSaveCapability } from "../generated/source-save.ts";
 import {
+	createBundleSourceSaveCapability,
 	createSourceSaveCapability,
 	createSourceSaveCapabilityFromSnapshot,
 	readSourceFileSnapshot,
@@ -86,6 +87,9 @@ export interface HandleDocOptions {
 	rewriteHtml?: (html: string, filepath: string) => string;
 	sourceSaveFilePath?: string;
 	sourceSaveFolderPath?: string;
+	/** A review of several files: the real paths of its own files that source save may write
+	 *  (`resolveBundleSourceSavePaths`). Every other document stays read-only. */
+	sourceSaveBundlePaths?: ReadonlySet<string>;
 	onSourceDocumentServed?: (path: string) => void;
 	rootPaths?: string[];
 	/**
@@ -185,7 +189,7 @@ function applyDocOptions<T extends Record<string, unknown>>(
 		}
 	}
 	if (typeof data.filepath !== "string") {
-		return (options.sourceSaveFolderPath || options.sourceSaveFilePath
+		return (options.sourceSaveFolderPath || options.sourceSaveFilePath || options.sourceSaveBundlePaths
 			? { ...next, sourceSave: disabledSourceSave("not-local-file") }
 			: next) as DocOptionsResult<T>;
 	}
@@ -201,6 +205,13 @@ function applyDocOptions<T extends Record<string, unknown>>(
 			? createSourceSaveCapabilityFromSnapshot("single-file", data.filepath, sourceSnapshot)
 			: createSourceSaveCapability("single-file", data.filepath);
 		if (sourcePath && doc.enabled && sourcePath === doc.path) {
+			options.onSourceDocumentServed?.(doc.path);
+			return { ...next, sourceSave: doc } as DocOptionsResult<T>;
+		}
+	}
+	if (options.sourceSaveBundlePaths) {
+		const doc = createBundleSourceSaveCapability(data.filepath, options.sourceSaveBundlePaths, sourceSnapshot);
+		if (doc?.enabled) {
 			options.onSourceDocumentServed?.(doc.path);
 			return { ...next, sourceSave: doc } as DocOptionsResult<T>;
 		}

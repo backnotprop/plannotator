@@ -2802,6 +2802,9 @@ const App: React.FC = () => {
     (activeEditableDocument?.sourceSave?.enabled || displayedMarkdown !== '' || editStats !== null) &&
     !archive.archiveMode &&
     !goalSetupMode &&
+    // A file opened in a folder session or a review of several files (bundles
+    // run as folder sessions) is editable when the server granted it source
+    // save: any file in the folder, or exactly the bundle's own files.
     (!linkedDocHook.isActive || (annotateSource === 'folder' && activeEditableDocument?.sourceSave?.enabled)) &&
     !isPlanDiffActive &&
     !isSharedSession &&
