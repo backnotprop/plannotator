@@ -33,6 +33,8 @@ final class PermissionFlow {
         didSet { if let show, let card = lastCard { show(card) } }
     }
     private var lastCard: [String: Any]?
+    /// Draw the open card again, e.g. into a page that just (re)loaded.
+    func redraw() { if let card = lastCard { show?(card) } }
     private func draw(_ card: [String: Any]) {
         lastCard = (card["state"] as? String) == "done" ? nil : card
         show?(card)

@@ -238,6 +238,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func pageMessage(_ message: [String: Any]) {
         switch message["type"] as? String {
+        case "ready":
+            // A (re)loaded page starts empty: put back a permission card that is still open.
+            permissions.redraw()
         case "capture":
             startCapture(snapshot: message["kind"] as? String == "snapshot")
         case "permission.begin":
