@@ -35,7 +35,7 @@ export function inboxBinary(): string | undefined {
 export function stubBuiltHtml(): string[] {
   if (inboxBinary()) return [];
   mkdirSync(distDir, { recursive: true });
-  const made = ["index.html", "review.html", "inbox.html"].map((name) => join(distDir, name)).filter((path) => !existsSync(path));
+  const made = ["index.html", "review.html", "inbox.html", "snapshots-hud.html"].map((name) => join(distDir, name)).filter((path) => !existsSync(path));
   for (const path of made) writeFileSync(path, "<!doctype html><title>test</title>");
   return made;
 }

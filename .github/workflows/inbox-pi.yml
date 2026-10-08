@@ -6,8 +6,11 @@ name: Inbox Pi connection
 # in RPC mode with Pi's own RpcClient, the extension loaded from source, a
 # scripted model endpoint, and the person's Send through the window's route.
 # It runs once on the Pi the repo installs and once more for the floor
-# (Pi 0.79.1, which has no agent_settled). Runs only when the extension, the
-# Inbox server, its store or the connection contract could have changed.
+# (Pi 0.79.1, which has no agent_settled). apps/pi-extension/snapshots-live.test.ts
+# proves the Snapshots link the same way against `plannotator snapshot hub`
+# (one delivery of a Send, Ask as a turn). Runs only when the extension, the
+# Inbox or Snapshots server, their stores or the connection contract could
+# have changed.
 
 on:
   pull_request:
@@ -21,6 +24,11 @@ on:
       - 'packages/shared/config.ts'
       - 'apps/hook/server/index.ts'
       - 'apps/hook/server/inbox*'
+      - 'packages/server/snapshots/**'
+      - 'packages/shared/snapshots/**'
+      - 'apps/hook/server/snapshot*'
+      - 'tests/helpers/snapshots-*.ts'
+      - 'packages/ai/session-bridge-pull*'
       - 'tests/helpers/inbox-world.ts'
       - 'tests/helpers/scripted-model.ts'
       - 'package.json'
@@ -37,6 +45,11 @@ on:
       - 'packages/shared/config.ts'
       - 'apps/hook/server/index.ts'
       - 'apps/hook/server/inbox*'
+      - 'packages/server/snapshots/**'
+      - 'packages/shared/snapshots/**'
+      - 'apps/hook/server/snapshot*'
+      - 'tests/helpers/snapshots-*.ts'
+      - 'packages/ai/session-bridge-pull*'
       - 'tests/helpers/inbox-world.ts'
       - 'tests/helpers/scripted-model.ts'
       - 'package.json'
@@ -91,7 +104,7 @@ jobs:
         run: |
           export PI_TEST_OLD_CLI="$RUNNER_TEMP/pi-floor/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
           export PLANNOTATOR_DATA_DIR="$(mktemp -d)"
-          bun test apps/pi-extension/inbox.test.ts tests/parity/vendor-parity.test.ts
+          bun test apps/pi-extension/inbox.test.ts apps/pi-extension/snapshots-live.test.ts tests/parity/vendor-parity.test.ts
 
       - name: Keep the transcripts
         if: always()

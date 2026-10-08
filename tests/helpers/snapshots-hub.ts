@@ -16,8 +16,8 @@ const PNG_1X1 = Buffer.from(
   "base64",
 );
 
-export interface TestSnapshotsHub {
-  server: SnapshotsHubServer;
+/** What the HUD and the CLI do to a hub, by its url and hub token (in process or started by the CLI). */
+export interface SnapshotsHubClient {
   url: string;
   /** The hub token's routes (summon, as `plannotator snapshot --session` does). */
   summon(host: string, sessionId: string): Promise<void>;
@@ -30,12 +30,27 @@ export interface TestSnapshotsHub {
   state(): Promise<Record<string, any>>;
   /** Wait until `check` holds on the hub's state. */
   waitForState(check: (state: Record<string, any>) => boolean, timeoutMs?: number): Promise<Record<string, any>>;
+}
+
+export interface TestSnapshotsHub extends SnapshotsHubClient {
+  server: SnapshotsHubServer;
   stop(): void;
 }
 
 export async function startTestSnapshotsHub(dataDir: string): Promise<TestSnapshotsHub> {
   const server = startSnapshotsHubServer({ dataDir, version: "test", cli: ["plannotator"] });
-  const { url, token } = server.entry;
+  const client = await snapshotsHubClient(server.entry.url, server.entry.token);
+  return {
+    ...client,
+    server,
+    stop() {
+      server.stop();
+    },
+  };
+}
+
+/** Attach as the HUD to the hub at `url` (hub token `token`). */
+export async function snapshotsHubClient(url: string, token: string): Promise<SnapshotsHubClient> {
   const hubHeaders = { authorization: `Bearer ${token}`, "content-type": "application/json" };
   const attach = (await (await fetch(`${url}/api/snapshots/attach`, { method: "POST", headers: hubHeaders, body: "{}" })).json()) as { hudToken: string };
   const hud = { authorization: `Bearer ${attach.hudToken}`, "content-type": "application/json" };
@@ -45,7 +60,6 @@ export async function startTestSnapshotsHub(dataDir: string): Promise<TestSnapsh
   const state = async () => (await (await fetch(`${url}/api/snapshots/state`, { headers: hud })).json()) as Record<string, any>;
 
   return {
-    server,
     url,
     async summon(host, sessionId) {
       const response = await fetch(`${url}/api/snapshots/summon`, { method: "POST", headers: hubHeaders, body: JSON.stringify({ host, sessionId }) });
@@ -89,9 +103,6 @@ export async function startTestSnapshotsHub(dataDir: string): Promise<TestSnapsh
         if (Date.now() > deadline) throw new Error(`hub state never matched: ${JSON.stringify({ connections: current.connections, lastSent: current.lastSent })}`);
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
-    },
-    stop() {
-      server.stop();
     },
   };
 }
