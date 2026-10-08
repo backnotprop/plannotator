@@ -27,3 +27,9 @@ process.env.PLANNOTATOR_FEEDBACK_HISTORY = "0";
 // all; a contributor who set it in their shell must not change what the tests
 // see (host defaults apply). Tests that need it on set it in their bodies.
 delete process.env.PLANNOTATOR_AGENT_TOOL;
+
+// The Inbox makes a relay mailbox at a phone's first pairing (packages/server/
+// inbox-relay.ts). Tests never reach the hosted relay: a closed loopback port
+// refuses at once, so a pairing answers `relay: null`. The relay's own proof
+// (apps/relay/test) sets its `wrangler dev` URL in the env it spawns.
+process.env.PLANNOTATOR_RELAY_URL = "http://127.0.0.1:9";

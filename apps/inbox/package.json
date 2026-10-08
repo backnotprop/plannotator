@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "build:surface": "vite build -c vite.surface.config.ts"
   },
   "dependencies": {
     "@fontsource-variable/geist-mono": "5.3.0",

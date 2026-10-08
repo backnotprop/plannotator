@@ -9,9 +9,10 @@
  *   - Subcommands: BIDIRECTIONAL. Every subcommand the skill documents must
  *     exist in the CLI, and every user-facing CLI subcommand must appear in
  *     the skill. A renamed, removed, or newly added subcommand fails here.
- *     Unreleased subcommands (HIDDEN_SUBCOMMANDS in cli.ts) are the one
- *     exception, and the rule flips for them: they must NOT be in the skill
- *     or the top-level help until they are taken out of that set.
+ *     Unreleased subcommands (HIDDEN_SUBCOMMANDS in cli.ts, today `snapshot`)
+ *     are the one exception, and the rule flips for them: they must NOT be
+ *     in the skill or the top-level help until they are taken out of that
+ *     set.
  *   - Flags: ONE-DIRECTIONAL. Every flag the skill mentions must be accepted
  *     somewhere in the CLI, so a renamed or deleted flag fails. The reverse
  *     is NOT asserted: a new CLI flag that the skill never mentions passes.
@@ -237,25 +238,42 @@ describe("plannotator knowledge skill freshness", () => {
     }
   });
 
-  test("unreleased subcommands stay out of the skill and the top-level help", () => {
-    // What regresses: someone documents a hidden subcommand (the Inbox before
-    // its window ships) and agents start running it, or it leaks into
-    // `plannotator --help`. A hidden entry must also still be a real
-    // subcommand, so a stale name in the set cannot make this pass vacuously.
-    const topLevel = formatTopLevelHelp();
-    const skillText = skillDoc.toLowerCase();
-    for (const sub of HIDDEN_SUBCOMMANDS) {
-      expect(
-        sub in SUBCOMMAND_HELP,
-        `HIDDEN_SUBCOMMANDS names \`${sub}\`, which has no SUBCOMMAND_HELP entry — remove it from the set`,
-      ).toBe(true);
-      expect(
-        documentedSubcommands.has(sub),
-        `\`plannotator ${sub}\` is unreleased (HIDDEN_SUBCOMMANDS in cli.ts) but apps/skills/core/plannotator/SKILL.md documents it`,
-      ).toBe(false);
-      expect(skillText).not.toContain(`plannotator ${sub}`);
-      expect(topLevel).not.toContain(`plannotator ${sub}`);
+  // Every way a hidden subcommand can leak, for one name. Separate from the
+  // test so the check can be driven with a set other than HIDDEN_SUBCOMMANDS,
+  // which is empty while nothing is unreleased.
+  function hiddenSubcommandLeaks(sub: string): string[] {
+    const leaks: string[] = [];
+    if (!(sub in SUBCOMMAND_HELP)) {
+      leaks.push(`HIDDEN_SUBCOMMANDS names \`${sub}\`, which has no SUBCOMMAND_HELP entry — remove it from the set`);
     }
+    if (documentedSubcommands.has(sub) || skillDoc.toLowerCase().includes(`plannotator ${sub}`)) {
+      leaks.push(`\`plannotator ${sub}\` is unreleased (HIDDEN_SUBCOMMANDS in cli.ts) but apps/skills/core/plannotator/SKILL.md documents it`);
+    }
+    if (formatTopLevelHelp().includes(`plannotator ${sub}`)) {
+      leaks.push(`\`plannotator ${sub}\` is unreleased (HIDDEN_SUBCOMMANDS in cli.ts) but \`plannotator --help\` lists it`);
+    }
+    return leaks;
+  }
+
+  test("unreleased subcommands stay out of the skill and the top-level help", () => {
+    // What regresses: someone documents a hidden subcommand and agents start
+    // running it, or it leaks into `plannotator --help`. A hidden entry must
+    // also still be a real subcommand, so a stale name in the set cannot make
+    // this pass vacuously.
+    for (const sub of HIDDEN_SUBCOMMANDS) {
+      expect(hiddenSubcommandLeaks(sub)).toEqual([]);
+    }
+    // The check itself must still bite: a released, documented subcommand
+    // reads as leaked in both places, and a name with no help entry as stale.
+    expect(hiddenSubcommandLeaks("review")).toHaveLength(2);
+    expect(hiddenSubcommandLeaks("no-such-subcommand")).toHaveLength(1);
+  });
+
+  test("the Inbox is released: in the top-level help and the skill", () => {
+    // It was the hidden subcommand until launch; nothing hides it now.
+    expect(HIDDEN_SUBCOMMANDS.has("inbox")).toBe(false);
+    expect(formatTopLevelHelp()).toContain("plannotator inbox mcp");
+    expect(documentedSubcommands.has("inbox")).toBe(true);
   });
 });
 

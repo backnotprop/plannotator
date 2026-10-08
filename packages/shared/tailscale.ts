@@ -133,9 +133,13 @@ export function detectTailnetHost(run: TailscaleRunner = runTailscale): TailnetH
   };
 }
 
-/** `tailscale serve --bg --https=<port> http://127.0.0.1:<port>` */
-export function buildServeArgs(port: number): string[] {
-  return ["serve", "--bg", `--https=${port}`, `http://127.0.0.1:${port}`];
+/**
+ * `tailscale serve --bg --https=<httpsPort> http://127.0.0.1:<port>`. The
+ * HTTPS port is the local port unless named: the Inbox publishes on a stable
+ * 8443 in front of whatever loopback port it has this run.
+ */
+export function buildServeArgs(port: number, httpsPort: number = port): string[] {
+  return ["serve", "--bg", `--https=${httpsPort}`, `http://127.0.0.1:${port}`];
 }
 
 /** `tailscale serve --https=<port> off` — the matching teardown. */
@@ -188,6 +192,31 @@ export function checkServeStatusPort(stdout: string, port: number): ServeStatusP
     if (result !== "free") return result;
   }
   return "free";
+}
+
+/**
+ * Where an existing serve mapping on `port` sends its root handler, so a
+ * caller can tell its own mapping (a loopback port it used before) from
+ * someone else's. `free` when no mapping holds the port, `malformed` when the
+ * output is not recognizable, else the mapping's `/` proxy target ("" when it
+ * has none, such as a TCP forward or a file server). Read like
+ * checkServeStatusPort: background and foreground configs both count.
+ */
+export function serveStatusProxy(stdout: string, port: number): { state: "free" } | { state: "malformed" } | { state: "mapped"; proxy: string } {
+  const check = checkServeStatusPort(stdout, port);
+  if (check !== "conflict") return { state: check };
+  const parsed = JSON.parse(stdout.trim()) as Record<string, unknown>;
+  const configs = [parsed, ...Object.values((parsed.Foreground as Record<string, unknown> | undefined) ?? {})];
+  for (const config of configs) {
+    const web = (config as { Web?: unknown } | null)?.Web;
+    if (!web || typeof web !== "object") continue;
+    for (const [hostPort, entry] of Object.entries(web as Record<string, unknown>)) {
+      if (!hostPort.endsWith(`:${port}`)) continue;
+      const proxy = (entry as { Handlers?: Record<string, { Proxy?: unknown }> } | null)?.Handlers?.["/"]?.Proxy;
+      return { state: "mapped", proxy: typeof proxy === "string" ? proxy : "" };
+    }
+  }
+  return { state: "mapped", proxy: "" };
 }
 
 /**

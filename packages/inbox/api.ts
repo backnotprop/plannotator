@@ -9,6 +9,7 @@ import type {
   InboxDecision,
   InboxDecisionAgent,
   InboxDecisionDraft,
+  InboxGuideRef,
   InboxHealth,
   InboxListSection,
   InboxMessage,
@@ -107,6 +108,62 @@ export interface SettingsModel {
   };
 }
 
+/** One live agent session of a thread's project (New message, record 5.x). */
+export interface LiveSession {
+  session: string;
+  host: string;
+  started_at: string;
+  last_seen_at: string;
+  /** A turn runs now; null when its connection does not say. */
+  busy: boolean | null;
+  idle_since: string | null;
+  /** It wrote in this thread. */
+  wrote_thread: boolean;
+}
+
+export interface LiveSessionsModel {
+  serverSession: string;
+  home: string;
+  project: InboxProject;
+  /** The thread's own writers first. */
+  sessions: LiveSession[];
+}
+
+/** A paired phone as the window lists it (adr/implementation/inbox-mobile.md, 7.36). */
+export interface PairedDevice {
+  id: string;
+  name: string;
+  platform: string;
+  created_at: string;
+  last_seen_at: string;
+  revoked_at: string | null;
+  carriage: boolean;
+}
+
+/** An open pairing offer (7.1): the QR link and the six digits. */
+export interface PairingOffer {
+  offer: { code: string; expires_at: string };
+  link: string;
+  computer: { name: string };
+  addresses: { tailnet: string | null; lan: string | null; fingerprint: string | null };
+}
+
+/** "Reach from my tailnet": the switch, the address while it works, and why not when it does not. */
+export interface TailnetState {
+  on: boolean;
+  address: string | null;
+  error: string | null;
+}
+
+/** "Reach from this Wi-Fi": the switch, the address and the certificate's SHA-256 while it works, whether phones can find it by Bonjour, and why not when it does not. */
+export interface LanState {
+  on: boolean;
+  address: string | null;
+  fingerprint: string | null;
+  bonjour: boolean;
+  error: string | null;
+}
+
 export class InboxApiError extends Error {
   constructor(
     readonly status: number,
@@ -181,6 +238,12 @@ export const inboxApi = {
   resolve: (messageId: string, resolved: boolean) =>
     post<unknown>(`/api/inbox/messages/${encodeURIComponent(messageId)}/resolve`, { resolved }),
   health: () => get<InboxHealth>('/api/inbox/health'),
+  /** The guided review a message carries: its record and the snapshot (validated by the server, parsed again here). */
+  guide: (messageId: string) =>
+    get<{ message_id: string; guide: InboxGuideRef; snapshot: unknown }>(`/api/inbox/messages/${encodeURIComponent(messageId)}/guide`),
+  /** The person's reviewed ticks on that guide, kept on the message. */
+  saveGuideReviewed: (messageId: string, reviewed: boolean[]) =>
+    post<{ message_id: string; reviewed: boolean[] }>(`/api/inbox/messages/${encodeURIComponent(messageId)}/guide/reviewed`, { reviewed }),
   restart: () => post<{ ok: true }>('/api/inbox/restart', {}),
   saveInboxTool: (hosts: Partial<Record<AgentToolHost, boolean>>) =>
     post<{ inbox_tool: SettingsModel['inbox_tool'] }>('/api/inbox/settings', { inbox_tool: hosts }),
@@ -194,6 +257,18 @@ export const inboxApi = {
     post<{ annotation: InboxAnnotationRecord }>('/api/inbox/annotations', { attachment_id: attachmentId, version, annotation }),
   removeAnnotation: (id: string) => post<{ annotation: InboxAnnotationRecord }>(`/api/inbox/annotations/${encodeURIComponent(id)}/remove`, {}),
   deleteThread: (threadId: string) => post<{ store: SettingsModel['store'] }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/delete`, {}),
+  // Step 8: New message to a live session of the thread's project.
+  sessions: (threadId: string) => get<LiveSessionsModel>(`/api/inbox/threads/${encodeURIComponent(threadId)}/sessions`),
+  newMessage: (threadId: string, input: { session: string; body: string; idempotency_key: string }) =>
+    post<{ message: InboxMessage; replayed: boolean }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/message`, input),
+  // Phones: pairing, the paired devices, the tailnet and Wi-Fi switches (packages/server/inbox-devices.ts).
+  pairPhone: () => post<PairingOffer>('/api/inbox/pairing', {}),
+  devices: () => get<{ devices: PairedDevice[] }>('/api/inbox/devices'),
+  removeDevice: (id: string) => post<{ device: PairedDevice }>(`/api/inbox/devices/${encodeURIComponent(id)}/revoke`, {}),
+  tailnet: () => get<{ tailnet: TailnetState }>('/api/inbox/tailnet'),
+  setTailnet: (on: boolean) => post<{ tailnet: TailnetState }>('/api/inbox/tailnet', { on }),
+  lan: () => get<{ lan: LanState }>('/api/inbox/lan'),
+  setLan: (on: boolean) => post<{ lan: LanState }>('/api/inbox/lan', { on }),
   deleteProject: (projectId: string) => post<{ store: SettingsModel['store'] }>(`/api/inbox/projects/${encodeURIComponent(projectId)}/delete`, {}),
 };
 

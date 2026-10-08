@@ -82,6 +82,7 @@ import { isBrowserSessionStoppedError } from "./browser-session-error.ts";
 import { classifyAnnotateOutcome } from "./annotate-outcome.ts";
 import { classifyReviewOutcome } from "./review-outcome.ts";
 import { createPiSessionBridgeHub } from "./pi-session-bridge.ts";
+import { setupPiInbox } from "./inbox.ts";
 import type { BrowserDecisionSession, PlanReviewBrowserSession, PlanReviewDecision } from "./plannotator-browser.ts";
 import type { AnnotateBundleFile } from "./generated/annotate-bundle.ts";
 import {
@@ -398,7 +399,7 @@ export function approvedPlanSection(filePath: string, approvedPlan: string, file
 	return `## Approved plan\n\nThis is the exact plan text the reviewer approved. Execute it as written here, not from the file.${drift}\n\n${fence}markdown\n${approvedPlan.replace(/\n$/, "")}\n${fence}`;
 }
 
-export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtensionDeps = {}): void {
+export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtensionDeps = {}): void | Promise<void> {
 	const startPlanReview = deps.startPlanReview ?? startPlanReviewBrowserSession;
 	const planBrowserHtmlAvailable = deps.hasPlanBrowserHtml ?? hasPlanBrowserHtml;
 	const reviewBrowserHtmlAvailable = deps.hasReviewBrowserHtml ?? hasReviewBrowserHtml;
@@ -2554,4 +2555,10 @@ Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the
 			keepModelWhenPhaseUnchanged: true,
 		});
 	});
+
+	// The Plannotator Inbox (`plannotator_inbox` and the reply wake, inbox.ts):
+	// only where the inbox tool switch allows it for Pi and an Inbox was found.
+	// Pi awaits the extension factory, so the tool list is read (bounded) before
+	// the session's first request; otherwise this returns nothing.
+	return setupPiInbox(pi, { isAskActive: () => sessionBridgeHub.hasActiveAsk });
 }

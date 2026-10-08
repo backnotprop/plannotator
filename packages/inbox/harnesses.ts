@@ -59,12 +59,11 @@ export type Artefact =
   | { kind: 'code'; text: string; label?: string }
   | { kind: 'link'; label: string; href: string };
 
+/** What a selected tab shows: the artefact, one short note, and the folded "Another way". */
 export interface HarnessPanel {
-  lead: string;
   artefacts: Artefact[];
-  after?: string;
-  another?: { summary: string; body?: Artefact };
   note?: string;
+  another?: { summary: string; body?: Artefact };
 }
 
 export interface ConnectContext {
@@ -126,7 +125,7 @@ export function gooseInstallLink(ctx: ConnectContext): string {
   return `goose://extension?${params.join('&')}`;
 }
 
-/** The "Prefer the MCP? Add it anyway" line under each Plannotator host's card. */
+/** What "Use MCP instead" reveals under each Plannotator host's card. */
 export function hostMcpSnippet(host: 'claude-code' | 'pi' | 'opencode', ctx: ConnectContext): string {
   const cmd = shellLine(ctx.command);
   if (host === 'claude-code') return `claude mcp add --scope user ${SERVER} -- ${cmd}`;
@@ -139,17 +138,15 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
   switch (id) {
     case 'claude-code':
       return {
-        lead: "Run this in a terminal. It covers the terminal and the Claude app's Code tab, in every project.",
         artefacts: [{ kind: 'code', text: hostMcpSnippet('claude-code', ctx) }],
-        after: "Not needed with Plannotator's Claude Code plugin: its mod already writes here.",
+        note: "Not needed with Plannotator's Claude Code plugin, whose mod already writes here.",
         another: {
-          summary: 'the HTTP address, if you prefer it',
+          summary: 'the HTTP address',
           body: { kind: 'code', text: `claude mcp add --scope user --transport http ${SERVER} ${ctx.mcpUrl}` },
         },
       };
     case 'claude-app':
       return {
-        lead: "Add this to Claude's config file. Open it from the Claude menu > Settings > Developer > Edit Config.",
         artefacts: [
           {
             kind: 'code',
@@ -160,28 +157,24 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
             text: mcpServersSnippet(ctx),
           },
         ],
-        after: 'Merge it into an existing "mcpServers" if there is one. Then quit Claude completely and reopen it. The Code tab picks it up too.',
-        note: 'Custom connectors on claude.ai cannot reach this computer, so this file is the way in.',
+        note: 'Merge it into mcpServers in Claude > Settings > Developer > Edit Config, then quit and reopen Claude. claude.ai connectors cannot reach this computer.',
       };
     case 'codex':
       return {
-        lead: 'Run this in a terminal. It also adds the Inbox to the Codex app and the IDE extension, which share its config.',
         artefacts: [{ kind: 'code', text: `codex mcp add ${SERVER} -- ${cmd}` }],
-        after: 'Then restart the Codex app or the IDE extension if one is open.',
-        another: { summary: 'in the Codex app: Settings > MCP servers > Add server > STDIO, then Restart' },
+        note: 'Also adds it to the Codex app and the IDE extension. Restart them after.',
+        another: { summary: 'in the Codex app: Settings > MCP servers > Add server > STDIO then Restart' },
       };
     case 'cursor':
       return {
-        lead: 'Opens Cursor and asks it to add the Inbox as a local server.',
         artefacts: [{ kind: 'link', label: 'Add to Cursor', href: cursorInstallLink(ctx) }],
-        after: "Cursor asks before it uses the Inbox's tools the first time.",
+        note: 'Opens Cursor, which asks before it adds the server.',
         another: { summary: 'add it to ~/.cursor/mcp.json by hand', body: { kind: 'code', label: '~/.cursor/mcp.json', text: mcpServersSnippet(ctx) } },
       };
     case 'vscode':
       return {
-        lead: 'Opens VS Code and asks it to add the Inbox to your user profile.',
         artefacts: [{ kind: 'link', label: 'Install in VS Code', href: vscodeInstallLink(ctx) }],
-        after: 'VS Code asks you to trust the server the first time it starts.',
+        note: 'Opens VS Code, which asks you to trust the server the first time it starts.',
         another: {
           summary: 'run code --add-mcp in a terminal',
           body: { kind: 'code', text: `code --add-mcp ${shellWord(JSON.stringify({ name: SERVER, type: 'stdio', ...stdio(ctx) }))}` },
@@ -189,8 +182,8 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
       };
     case 'windsurf':
       return {
-        lead: 'Run this in a terminal. It adds the Inbox to Devin Desktop (formerly Windsurf) in every project.',
         artefacts: [{ kind: 'code', text: `devin mcp add -s user ${SERVER} -- ${cmd}` }],
+        note: 'Adds it to Devin Desktop (formerly Windsurf) in every project.',
         another: {
           summary: 'add it to ~/.config/devin/mcp_config.json by hand',
           body: { kind: 'code', label: '~/.config/devin/mcp_config.json', text: mcpServersSnippet(ctx) },
@@ -198,41 +191,39 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
       };
     case 'gemini':
       return {
-        lead: 'Run this in a terminal. It adds the Inbox to Gemini CLI in every project.',
         artefacts: [{ kind: 'code', text: `gemini mcp add -s user ${SERVER} ${cmd}` }],
+        note: 'Adds it to Gemini CLI in every project.',
       };
     case 'goose':
       return {
-        lead: 'Opens Goose and asks it to add the Inbox as an extension.',
         artefacts: [{ kind: 'link', label: 'Add to Goose', href: gooseInstallLink(ctx) }],
+        note: 'Opens Goose to add the extension.',
         another: {
-          summary: 'in Goose: Extensions > Add custom extension > Standard IO, with this command',
+          summary: 'in Goose: Extensions > Add custom extension > Standard IO with this command',
           body: { kind: 'code', text: cmd },
         },
       };
     case 'amp':
       return {
-        lead: 'Run this in a terminal.',
         artefacts: [{ kind: 'code', text: `amp mcp add ${SERVER} -- ${cmd}` }],
+        note: 'Run it in a terminal.',
       };
     case 'cline':
       return {
-        lead: 'Run this in a terminal for the Cline CLI.',
         artefacts: [{ kind: 'code', text: `cline mcp add ${SERVER} --yes -- ${cmd}` }],
+        note: 'Adds it to the Cline CLI.',
         another: {
-          summary: 'in the Cline extension: MCP Servers > Configure > Configure MCP Servers, then paste this',
+          summary: 'in the Cline extension: MCP Servers > Configure > Configure MCP Servers then paste this',
           body: { kind: 'code', text: mcpServersSnippet(ctx) },
         },
       };
     case 'pi':
       return {
-        lead: 'Run this in a terminal, then /reload in a running Pi session.',
         artefacts: [{ kind: 'code', text: hostMcpSnippet('pi', ctx) }],
-        after: "Not needed with Plannotator's Pi extension: it already writes here.",
+        note: 'Then run /reload in a running Pi session.',
       };
     case 'opencode':
       return {
-        lead: "Add this to opencode.json: the project's, or ~/.config/opencode/opencode.json.",
         artefacts: [
           {
             kind: 'code',
@@ -240,32 +231,31 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
             text: json({ $schema: 'https://opencode.ai/config.json', mcp: { [SERVER]: { type: 'local', command: [...ctx.command], enabled: true } } }),
           },
         ],
-        after: "Not needed with Plannotator's OpenCode plugin: it already writes here.",
+        note: "Use the project's opencode.json or ~/.config/opencode/opencode.json.",
       };
     case 'zed':
       return {
-        lead: "Add this to Zed's settings.json.",
         artefacts: [{ kind: 'code', label: '~/.config/zed/settings.json', text: json({ context_servers: { [SERVER]: { ...stdio(ctx), env: {} } } }) }],
+        note: "Merge it into Zed's settings.json.",
         another: { summary: 'in Zed: Settings > AI > MCP Servers > Add Server' },
       };
     case 'kiro':
       return {
-        lead: "Add this to Kiro's MCP config. Kiro picks it up without a restart.",
         artefacts: [{ kind: 'code', label: '~/.kiro/settings/mcp.json', text: mcpServersSnippet(ctx) }],
+        note: 'Kiro picks it up without a restart.',
       };
     case 'jetbrains':
       return {
-        lead: 'In the IDE: Settings | Tools | AI Assistant | Model Context Protocol (MCP) > Add, then paste this.',
         artefacts: [{ kind: 'code', text: mcpServersSnippet(ctx) }],
+        note: 'Paste it in Settings | Tools | AI Assistant | Model Context Protocol (MCP) > Add.',
       };
     case 'other':
       return {
-        lead: 'Use the command where your client can run one. It starts the Inbox when it is not running.',
         artefacts: [
           { kind: 'code', label: 'Command (stdio)', text: cmd },
           { kind: 'code', label: 'Address (Streamable HTTP)', text: ctx.mcpUrl },
         ],
-        note: 'The port can change when the Inbox restarts, and the address fails while it is stopped. Prefer the command.',
+        note: 'Prefer the command: the port can change when the Inbox restarts.',
       };
   }
 }

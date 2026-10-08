@@ -26,6 +26,18 @@ export default defineConfig({
       '@plannotator/inbox': path.resolve(__dirname, '../../packages/inbox/index.ts'),
     },
   },
+  // The guided review's diff renderer (review-editor's AllFilesCodeView)
+  // imports Pierre's highlight worker (?worker&inline), whose dynamic
+  // import("shiki/wasm") edge iife cannot split: emit it as ES with dynamic
+  // imports collapsed, as apps/review does.
+  worker: {
+    format: 'es',
+    rollupOptions: {
+      output: {
+        inlineDynamicImports: true,
+      },
+    },
+  },
   build: {
     target: 'esnext',
     assetsInlineLimit: 100000000,

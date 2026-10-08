@@ -6,7 +6,7 @@
  * `graphviz`, `mermaid`, `diagram-anchor`, `diagram-anchor-graphviz`,
  * `diagram-projection`).
  */
-export { DiagramViewer, type DiagramAskAI, type DiagramViewerProps } from './DiagramViewer';
+export { DiagramViewer, type DiagramAskAI, type DiagramHostDraft, type DiagramViewerProps } from './DiagramViewer';
 export { DiagramPopout } from './DiagramPopout';
 export { DiagramPending, DiagramInlineSource, DiagramBlockPending } from './DiagramPending';
 export { isDiagramControlEvent, DIAGRAM_CONTROL_SELECTOR } from './diagramControls';

@@ -2,7 +2,7 @@ import { generateId } from '../utils/generateId';
 import React, { useRef, useState, useEffect, useLayoutEffect, useMemo, forwardRef, useImperativeHandle, useCallback, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { ImageLightbox } from './ImageLightbox';
-import { AnnotationType, type Block, type Annotation, type EditorMode, type InputMethod, type ImageAttachment, type ActionsLabelMode } from '../types';
+import { AnnotationType, type Block, type Annotation, type EditorMode, type InputMethod, type ImageAttachment, type ActionsLabelMode, type HostDraft } from '../types';
 import { applyHighlight, codeBlockClassName, onCodeHighlightSwap } from '../utils/codeHighlight';
 import { paintCodeBlockMark } from '../utils/codeBlockMark';
 import { useFenceTheme } from '../hooks/useFenceTheme';
@@ -283,12 +283,28 @@ export interface ViewerProps {
   /** Fires once per highlight-restore pass with what it tried and what it could
    *  not anchor, so a host can mark the leftovers in its annotation panel. */
   onRestoreReport?: (report: AnnotationRestoreReport) => void;
+  /**
+   * Opt-in host capability: the composer handed to the host (see
+   * `HostDraft`). A selection settling, a pinpoint tap or Comment mode reports
+   * a draft here instead of opening the toolbar or a composer (a pinpoint tap
+   * reports `intent: 'compose'`), and null when it closes. The document
+   * actions (Global comment, Copy) and the code-block and table hover
+   * toolbars are not drawn, and a pinpoint tap on a code block does nothing.
+   * The host saves the comment and draws it through `annotations` /
+   * `applySharedAnnotations`. Ignored when authoring is off. Absent →
+   * unchanged.
+   */
+  onHostDraft?: (draft: HostDraft | null) => void;
 }
 
 export interface ViewerHandle {
   removeHighlight: (id: string) => void;
   clearAllHighlights: () => void;
   applySharedAnnotations: (annotations: Annotation[]) => void;
+  /** `HtmlViewer` only: move a pinned draft to the element around it
+   *  (`'parent'`) or back in (`'child'`), for a host that composes
+   *  (`onHostDraft`). The markdown `Viewer` does not implement it. */
+  stepPin?: (direction: 'parent' | 'child') => void;
 }
 
 interface CodeBlockToolbarTarget {
@@ -648,10 +664,12 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   vimHudEnabled = false,
   vimHudKeyPanelEnabled = true,
   onVimHudKeyPanelChange,
+  onHostDraft,
 }, ref) => {
   // Annotation authoring is off when read-only, and when the host only wants
   // answers (`answerOnly`); question cards and checkboxes follow `readOnly`.
   const authoringOff = readOnly || answerOnly;
+  const hostComposes = onHostDraft !== undefined && !authoringOff;
   const viewerAnnotationHeader = authoringOff ? undefined : annotationHeader;
   const hasViewerAnnotationHeader = viewerAnnotationHeader !== undefined;
   const [copied, setCopied] = useState(false);
@@ -794,6 +812,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     verifyRestoredContent: true,
     onRestoreMismatch: handleRestoreMismatch,
     onRestoreReport,
+    onHostDraft: hostComposes ? onHostDraft : undefined,
   });
 
   // Refs for code block annotation path
@@ -994,12 +1013,16 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     onHandledCommand: handleVimCommand,
   });
 
+  // With the composer handed to the host, a pinpoint tap opens it at once.
+  const hostPinpointRange = useCallback((range: Range) => highlightRange(range, 'comment'), [highlightRange]);
+  const noHostCodeBlockClick = useCallback(() => {}, []);
   const { hoverTarget, clearHover: clearPinpointHover } = usePinpoint({
     containerRef,
     inputMethod,
-    enabled: !authoringOff && !toolbarState && !hookCommentPopover && !viewerCommentPopover && !hookQuickLabelPicker && !codeBlockQuickLabelPicker && !(isPlanDiffActive ?? false) && !vim.helpOpen,
-    onSelectRange: highlightRange,
-    onCodeBlockClick: handlePinpointCodeBlockClick,
+    // A host composer's draft stays open while the host composes; the next tap replaces it.
+    enabled: !authoringOff && (hostComposes || (!toolbarState && !hookCommentPopover)) && !viewerCommentPopover && !hookQuickLabelPicker && !codeBlockQuickLabelPicker && !(isPlanDiffActive ?? false) && !vim.helpOpen,
+    onSelectRange: hostComposes ? hostPinpointRange : highlightRange,
+    onCodeBlockClick: hostComposes ? noHostCodeBlockClick : handlePinpointCodeBlockClick,
   });
   clearPinpointHoverRef.current = clearPinpointHover;
   const vimOwnsHudTarget = vimHudEnabled
@@ -1439,7 +1462,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           <>
             {badgeClearance > 0 && <div data-print-hide style={{ height: badgeClearance }} aria-hidden="true" />}
             {stickyActions && <div ref={stickySentinelRef} className="h-0 w-0 float-right" aria-hidden="true" />}
-            {answerOnly ? null : stickyActions ? (
+            {answerOnly || hostComposes ? null : stickyActions ? (
               <StickyActionsLane className={`flex items-start gap-1 md:gap-2 rounded-lg p-1 md:p-2 transition-colors duration-150 ${isStuck ? 'bg-card/95 backdrop-blur-sm shadow-sm' : ''} ${gridEnabled ? '-mr-3 md:-mr-5 lg:-mr-7 xl:-mr-9' : '-mr-1 md:-mr-2'} mt-6 md:-mt-5 lg:-mt-7 xl:-mt-9`}>
                 {documentActions}
               </StickyActionsLane>
@@ -1523,7 +1546,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   tableHoverTimeoutRef.current = null;
                 }
                 setIsTableToolbarExiting(false);
-                if (!toolbarState) {
+                if (!toolbarState && !hostComposes) {
                   setHoveredTable({ block: group.block, element });
                 }
               }}
@@ -1541,7 +1564,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             <CodeBlock
               key={group.block.id}
               block={group.block}
-              onHover={authoringOff || inputMethod === 'pinpoint' ? undefined : (element) => {
+              onHover={authoringOff || hostComposes || inputMethod === 'pinpoint' ? undefined : (element) => {
                 // Clear any pending leave timeout
                 if (hoverTimeoutRef.current) {
                   clearTimeout(hoverTimeoutRef.current);
@@ -1562,7 +1585,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   });
                 }
               }}
-              onLeave={authoringOff || inputMethod === 'pinpoint' ? undefined : () => {
+              onLeave={authoringOff || hostComposes || inputMethod === 'pinpoint' ? undefined : () => {
                 if (keyboardCodeBlockToolbarOpen) return;
                 // Delay then start exit animation
                 hoverTimeoutRef.current = setTimeout(() => {
@@ -1617,7 +1640,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         )}
 
         {/* Text selection toolbar */}
-        {!authoringOff && toolbarState && (
+        {!authoringOff && !hostComposes && toolbarState && (
           <ToolbarErrorBoundary>
             <AnnotationToolbar
               element={toolbarState.element}
@@ -1756,7 +1779,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         )}
 
         {/* Comment popover — hook handles text selection, Viewer handles global + code block */}
-        {!authoringOff && hookCommentPopover && (
+        {!authoringOff && !hostComposes && hookCommentPopover && (
             <CommentPopover
               anchorEl={hookCommentPopover.anchorEl}
               contextText={hookCommentPopover.contextText}
@@ -1808,7 +1831,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         )}
 
         {/* Quick Label floating picker — hook handles text selection, Viewer handles code blocks */}
-        {!authoringOff && hookQuickLabelPicker && (
+        {!authoringOff && !hostComposes && hookQuickLabelPicker && (
           <FloatingQuickLabelPicker
             anchorEl={hookQuickLabelPicker.anchorEl}
             cursorHint={hookQuickLabelPicker.cursorHint}

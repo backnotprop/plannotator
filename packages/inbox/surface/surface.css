@@ -1,0 +1,338 @@
+/*
+ * The surface (PLAN step S1): the document a native shell hosts, on
+ * Plannotator's theme tokens (packages/ui/theme.css) in the system face
+ * (owner decision 7), light and dark from the shell. The shell draws every
+ * bar and sheet, so nothing here is chrome: the document, its marks, the
+ * annotation toolstrip and the guide's own controls. Classes carry an `sf-`
+ * prefix so they never meet ui's. The iPhone design of record is
+ * .product/approved/plannotator-mobile-iphone-2026-10-07/ (3.6, 4.1 to 4.4,
+ * 6.1, 6.2).
+ */
+
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, system-ui, sans-serif !important;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace !important;
+  /* The Dynamic Type size the shell sends (set_appearance), 1 at the default. */
+  --sf-text-scale: 1;
+  /* Plannotator's body text is 15px; iOS Body is 17pt. */
+  --sf-zoom: calc(var(--sf-text-scale) * 17 / 15);
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+  body {
+    font-family: var(--font-sans);
+    color: var(--foreground);
+    background: var(--card);
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+.pn-surface {
+  height: 100%;
+}
+
+/* ─── An attachment ─── */
+
+.sf-doc {
+  position: relative;
+  height: 100%;
+  background: var(--card);
+}
+.sf-docscroll {
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: 0 4px calc(96px + env(safe-area-inset-bottom));
+}
+/* Dynamic Type for the document: the whole Viewer scales and reflows, as
+   native text does. The page of an HTML file and a diagram keep their own
+   scale (fitted, pinch to zoom). */
+.sf-docscroll > * {
+  zoom: var(--sf-zoom);
+}
+.sf-docscroll [data-print-region="article"] {
+  padding-left: 14px;
+  padding-right: 14px;
+  background: transparent;
+}
+.sf-doc-html,
+.sf-doc-diagram {
+  background: var(--background);
+}
+
+/* The annotation toolstrip (4.1), Plannotator's own, floating at the thumb
+   and drawn at 44 pt targets (its buttons are 28 px). */
+.sf-toolstrip {
+  position: fixed;
+  /* Above the document (Viewer's own layer is z-50). */
+  z-index: 100;
+  left: 50%;
+  bottom: calc(10px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  width: max-content;
+  zoom: 1.6;
+  padding: 3px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--card) 82%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.6);
+  backdrop-filter: blur(18px) saturate(1.6);
+  box-shadow:
+    0 6px 24px rgb(0 0 0 / 0.14),
+    0 0 0 0.5px color-mix(in oklch, var(--border) 85%, transparent);
+}
+.sf-toolstrip > div {
+  flex-wrap: nowrap;
+}
+.sf-toolstrip > div > div {
+  border: 0;
+  background: transparent;
+  border-radius: 999px;
+}
+.sf-toolstrip button {
+  border-radius: 999px;
+}
+
+/* ─── A guided review: the sections (6.1) ─── */
+
+.sf-guide {
+  min-height: 100%;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: calc(17px * var(--sf-text-scale));
+  line-height: 1.35;
+}
+.sf-glist {
+  padding: 8px 20px calc(120px + env(safe-area-inset-bottom));
+}
+.sf-gtitle {
+  margin: 0 0 10px;
+  font-size: 1.65em;
+  line-height: 1.18;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.sf-gintent {
+  margin: 0 0 14px;
+  font-size: 1em;
+  line-height: 1.45;
+  color: color-mix(in oklch, var(--foreground) 88%, transparent);
+}
+.sf-gcounts {
+  margin: 0 0 24px;
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  color: var(--muted-foreground);
+}
+.sf-add {
+  color: var(--success);
+}
+.sf-del {
+  color: var(--destructive);
+}
+.sf-gsechead {
+  margin: 0 0 8px 16px;
+  font-size: 0.88em;
+  font-weight: 600;
+}
+.sf-gsections {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-radius: 22px;
+  background: var(--card);
+  overflow: hidden;
+}
+.sf-gsection {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.sf-gsection + .sf-gsection::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 68px;
+  right: 0;
+  border-top: 0.5px solid var(--border);
+}
+.sf-grow {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 0 14px 16px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+}
+.sf-gnum {
+  flex: 0 0 48px;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--muted-foreground);
+}
+.sf-gtext {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.sf-gname {
+  font-size: 1em;
+  line-height: 1.25;
+}
+.sf-gmeta {
+  font-size: 0.8em;
+  color: var(--muted-foreground);
+}
+.sf-gtickbtn {
+  flex: 0 0 auto;
+  width: 64px;
+  min-height: 44px;
+  align-self: stretch;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 0;
+  color: inherit;
+}
+.sf-tick {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in oklch, var(--muted-foreground) 70%, transparent);
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+.sf-tick.sf-on {
+  border-color: var(--success);
+  background: var(--success);
+  color: var(--success-foreground);
+}
+.sf-tick svg {
+  width: 16px;
+  height: 16px;
+}
+.sf-gfoot {
+  position: fixed;
+  /* Above the document (Viewer's own layer is z-50). */
+  z-index: 100;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 12px 24px calc(14px + env(safe-area-inset-bottom));
+}
+.sf-gcontinue {
+  width: 100%;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 1em;
+  font-weight: 600;
+  color: var(--primary-foreground);
+  background: var(--primary);
+  box-shadow: 0 8px 24px color-mix(in oklch, var(--primary) 35%, transparent);
+}
+.sf-gcontinue svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* ─── A guided review: one section (6.2) ─── */
+
+.sf-gpage {
+  padding: 6px 10px calc(110px + env(safe-area-inset-bottom));
+}
+/* Plannotator's section card, at a phone's reading size. */
+.sf-gcard {
+  zoom: calc(var(--sf-text-scale) * 1.12);
+}
+.sf-gnav {
+  position: fixed;
+  /* Above the document (Viewer's own layer is z-50). */
+  z-index: 100;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px calc(12px + env(safe-area-inset-bottom));
+}
+.sf-gnav > :first-child {
+  justify-self: start;
+}
+.sf-gnav > :last-child {
+  justify-self: end;
+}
+.sf-gnavbtn {
+  min-height: 48px;
+  min-width: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--foreground);
+  background: color-mix(in oklch, var(--card) 82%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.6);
+  backdrop-filter: blur(18px) saturate(1.6);
+  box-shadow:
+    0 6px 20px rgb(0 0 0 / 0.12),
+    0 0 0 0.5px color-mix(in oklch, var(--border) 85%, transparent);
+}
+.sf-gnavbtn svg {
+  width: 16px;
+  height: 16px;
+}
+.sf-greviewed[aria-pressed="true"] {
+  color: var(--success);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sf-tick {
+    transition: none;
+  }
+}
+
+/* One section per screen: a file's diff box takes the height its diff has,
+   up to most of the screen, instead of the desktop's line-count estimate,
+   which leaves a blank band under a short diff at a phone's width. A longer
+   diff still scrolls inside its box, where the renderer draws what is in
+   view. */
+.sf-gcard [data-guide-code-view-mounted] {
+  height: auto !important;
+}
+.sf-gcard [data-guide-code-view-mounted] > div {
+  height: auto;
+}
+.sf-gcard [data-guide-code-view-mounted] > div > div {
+  height: auto;
+  max-height: 70vh;
+  contain: none;
+}

@@ -11,6 +11,16 @@ declare class TextEncoder {
   encode(input?: string): Uint8Array
 }
 
+declare class AbortSignal {
+  readonly aborted: boolean
+  addEventListener(type: 'abort', listener: () => void, options?: { once?: boolean }): void
+}
+
+declare class AbortController {
+  readonly signal: AbortSignal
+  abort(): void
+}
+
 declare class URL {
   constructor(url: string, base?: string)
   readonly host: string

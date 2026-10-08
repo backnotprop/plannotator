@@ -4,8 +4,18 @@ name: Inbox window e2e
 # (Playwright, pinned in the root devDependencies) drives the COMPILED binary
 # under a temp data dir while agents write through `plannotator inbox mcp`.
 # The binary is built first, with the flags release.yml compiles with.
-# tests/e2e/inbox.spec.ts and notifications.spec.ts say what they prove. Runs only when the Inbox, the
-# ui it composes, the binary entry or the build could have changed.
+# tests/e2e/inbox.spec.ts (the window), notifications.spec.ts,
+# inbox-guides.spec.ts (guided reviews), inbox-new-message.spec.ts (New
+# message), inbox-order.spec.ts (newest first inside a section) and
+# inbox-phones.spec.ts (pairing a phone) say what they prove;
+# packages/server/inbox-devices.test.ts replays the phone door's contract
+# exchanges on the same binary, and inbox-lan.test.ts proves the Wi-Fi
+# listener there (a pinned phone over the runner's network address; no
+# Bonjour on the runner, so the typed-address path); surface.spec.ts drives
+# the surface a phone hosts (apps/hook/dist/surface.html) in WebKit, the
+# engine WKWebView is. Runs only when the
+# Inbox, the ui and the guide viewer it composes, the binary entry or the build
+# could have changed.
 
 on:
   pull_request:
@@ -19,15 +29,25 @@ on:
       - 'packages/core/inbox*'
       - 'packages/shared/config.ts'
       - 'packages/server/html-assets.ts'
+      - 'packages/server/tailscale-serve.ts'
+      - 'packages/server/request-host-guard.ts'
+      - 'packages/shared/tailscale.ts'
       - 'packages/shared/html-assets.ts'
       - 'packages/shared/html-assets-node.ts'
       - 'packages/ui/**'
+      - 'packages/guide-viewer/**'
+      - 'packages/review-editor/**'
+      - 'packages/server/guide/**'
+      - 'packages/core/guide*'
       - 'apps/hook/server/index.ts'
+      - 'apps/hook/package.json'
       - 'apps/hook/server/inbox*'
       - 'build/**'
       - 'package.json'
       - 'bun.lock'
       - 'tests/e2e/**'
+      - 'tests/helpers/inbox-world.ts'
+      - 'tests/helpers/pinned-phone.ts'
       - 'scripts/inbox-sim.ts'
       - '.github/workflows/inbox-e2e.yml'
   push:
@@ -41,15 +61,25 @@ on:
       - 'packages/core/inbox*'
       - 'packages/shared/config.ts'
       - 'packages/server/html-assets.ts'
+      - 'packages/server/tailscale-serve.ts'
+      - 'packages/server/request-host-guard.ts'
+      - 'packages/shared/tailscale.ts'
       - 'packages/shared/html-assets.ts'
       - 'packages/shared/html-assets-node.ts'
       - 'packages/ui/**'
+      - 'packages/guide-viewer/**'
+      - 'packages/review-editor/**'
+      - 'packages/server/guide/**'
+      - 'packages/core/guide*'
       - 'apps/hook/server/index.ts'
+      - 'apps/hook/package.json'
       - 'apps/hook/server/inbox*'
       - 'build/**'
       - 'package.json'
       - 'bun.lock'
       - 'tests/e2e/**'
+      - 'tests/helpers/inbox-world.ts'
+      - 'tests/helpers/pinned-phone.ts'
       - 'scripts/inbox-sim.ts'
       - '.github/workflows/inbox-e2e.yml'
 
@@ -82,15 +112,15 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+          key: playwright-chromium-webkit-${{ runner.os }}-${{ steps.playwright.outputs.version }}
 
-      - name: Install Chromium
+      - name: Install Chromium and WebKit
         if: steps.browser-cache.outputs.cache-hit != 'true'
-        run: bunx playwright install --with-deps chromium
+        run: bunx playwright install --with-deps chromium webkit
 
-      - name: Install Chromium's system libraries
+      - name: Install the browsers' system libraries
         if: steps.browser-cache.outputs.cache-hit == 'true'
-        run: bunx playwright install-deps chromium
+        run: bunx playwright install-deps chromium webkit
 
       - name: Build the apps and compile the binary
         run: >-
@@ -100,6 +130,11 @@ jobs:
 
       - name: Run the Inbox window proof
         run: bun run test:e2e:inbox
+
+      - name: Replay the phone door's contract exchanges and the Wi-Fi listener on the binary
+        run: |
+          export PLANNOTATOR_DATA_DIR="$(mktemp -d)"
+          PLANNOTATOR_INBOX_TEST_BINARY="$PWD/.local/plannotator" bun test packages/server/inbox-devices.test.ts packages/server/inbox-lan.test.ts
 
       - name: Keep the screenshots
         if: always()

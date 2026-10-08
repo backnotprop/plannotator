@@ -107,3 +107,43 @@ export function resolveSnapshotsEnabled(envValue: string | undefined, configText
     return false
   }
 }
+
+/**
+ * Whether the mod registers the `plannotator_inbox` tool and runs the reply
+ * wake when nothing is set (and an Inbox is found). Mirrors the claude-code
+ * entry of `INBOX_TOOL_DEFAULTS` in packages/shared/config.ts.
+ */
+export const INBOX_TOOL_DEFAULT = true
+
+/**
+ * Whether the mod connects this session to the Plannotator Inbox (the
+ * `plannotator_inbox` tool and the reply wake), when `inbox/inbox.json`
+ * exists. Off with:
+ *
+ *   PLANNOTATOR_INBOX_TOOL=0            (env; also false/off/disabled; wins over the config file)
+ *   { "inboxTool": false }              (config.json in the data dir, every host)
+ *   { "inboxTool": { "claude-code": false } }   (this host only; the Inbox's Settings writes this)
+ *
+ * Mirrors `resolveInboxTool(config, env, 'claude-code')` in
+ * packages/shared/config.ts. Read once, at the first session.start of the
+ * Claude Code process, like the agent tool switch.
+ */
+export function resolveInboxToolEnabled(envValue: string | undefined, configText: string | null | undefined): boolean {
+  const fromEnv = parseClaudeModEnv(envValue)
+  if (fromEnv !== undefined) return fromEnv
+  if (!configText) return INBOX_TOOL_DEFAULT
+  let value: unknown
+  try {
+    value = (JSON.parse(configText) as Record<string, unknown> | null)?.inboxTool
+  } catch {
+    return INBOX_TOOL_DEFAULT
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) value = (value as Record<string, unknown>)['claude-code']
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase()
+    if (v === 'true' || v === '1') return true
+    if (v === 'false' || v === '0') return false
+  }
+  return INBOX_TOOL_DEFAULT
+}

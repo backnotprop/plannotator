@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dir, '..');
 const read = (path: string) => readFileSync(resolve(root, path), 'utf8');
 
 describe('review entry assets', () => {
-  test.each(['apps/portal/index.html', 'apps/hook/index.html', 'apps/review/index.html', 'apps/inbox/index.html'])(
+  test.each(['apps/portal/index.html', 'apps/hook/index.html', 'apps/review/index.html', 'apps/inbox/index.html', 'apps/inbox/surface.html'])(
     '%s has no externally hosted startup scripts or styles',
     (path) => {
       expect(read(path)).not.toMatch(
@@ -125,6 +125,40 @@ describe('review entry assets', () => {
     expect(read('packages/ui/utils/generateIdentity.ts')).not.toMatch(staticImport('unique-username-generator'));
   });
 
+  // The Inbox window's guided review (PLAN step 5) reaches the guide chain and
+  // review-editor's diff renderer through GuidePane's one dynamic import of
+  // `#guide-reader` (packages/inbox/guide/GuideReader.tsx). The single-file
+  // build inlines that chunk, so what this keeps waiting for Open is the
+  // mount (the diff render, the highlighter), not the bytes. A static import
+  // elsewhere would make the window depend on the reader directly, and that
+  // boundary would be gone.
+  // The surface a phone hosts (PLAN step S1) has no network at all: every
+  // byte arrives over the bridge. Its policy is the boundary, so it is pinned.
+  test('the surface forbids every connection and loads nothing from outside', () => {
+    const html = read('apps/inbox/surface.html');
+    const csp = html.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/)?.[1] ?? '';
+    expect(csp).toContain("default-src 'none'");
+    expect(csp).toContain("connect-src 'none'");
+    expect(csp).not.toMatch(/https?:/);
+  });
+
+  test('the Inbox window mounts the guide viewer only through its dynamic import', () => {
+    const heavy = /^import\s+(?!type\b)[^;]*from\s+['"](?:@plannotator\/guide-viewer|@plannotator\/review-editor|#guide-reader)[^'"]*['"]/m;
+    const walk = (dir: string): string[] =>
+      readdirSync(resolve(root, dir), { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory()
+          ? entry.name === 'node_modules' ? [] : walk(`${dir}/${entry.name}`)
+          : /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [`${dir}/${entry.name}`] : [],
+      );
+    const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx'];
+    const eager = walk('packages/inbox').filter((path) => !readers.includes(path) && heavy.test(read(path)));
+    expect(eager).toEqual([]);
+    expect(read('packages/inbox/components/GuidePane.tsx')).toContain("lazy(() => import('#guide-reader'))");
+    // The surface's reader (one section per screen) and its diagram engine wait the same way.
+    expect(read('packages/inbox/surface/SurfaceGuide.tsx')).toContain("lazy(() => import('#surface-guide-reader'))");
+    expect(read('packages/inbox/surface/SurfaceDocument.tsx')).toContain("lazy(() => import('./SurfaceDiagram'))");
+  });
+
   // Built-artifact check: a lost eager import would still type-check and pass
   // every unit test, so the built single-file bundles are read directly.
   // Two different kinds of marker, deliberately:
@@ -207,7 +241,7 @@ describe('review entry assets', () => {
   // dist/ is gitignored, so this skips cleanly on an unbuilt checkout. The CI
   // job that builds the bundles runs this file right after the build so the
   // assertion is not silently optional there.
-  const bundles = ['apps/review/dist/index.html', 'apps/hook/dist/index.html', 'apps/hook/dist/inbox.html'];
+  const bundles = ['apps/review/dist/index.html', 'apps/hook/dist/index.html', 'apps/hook/dist/inbox.html', 'apps/hook/dist/surface.html'];
   for (const path of bundles) {
     test.skipIf(!existsSync(resolve(root, path)))(`${path} ships no inlined WebAssembly`, () => {
       // Asserted on a boolean, not the string: these bundles are ~20MB and a

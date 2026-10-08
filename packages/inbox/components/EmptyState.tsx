@@ -1,37 +1,24 @@
 import { useState } from 'react';
 import { hostMcpSnippet, OTHER_HARNESSES, type ConnectContext } from '../harnesses';
-import { HostMark, Icon } from '../icons';
+import { HostMark } from '../icons';
 import { CodeBox, ConnectPicker } from './ConnectPicker';
 
-const HOSTS = [
-  { host: 'claude-code', piece: 'The Plannotator mod', name: 'Claude Code', who: 'Comes with Plannotator for Claude Code.' },
-  { host: 'pi', piece: 'The Pi extension', name: 'Pi', who: "Plannotator's extension for Pi." },
-  { host: 'opencode', piece: 'The OpenCode plugin', name: 'OpenCode', who: "Plannotator's plugin for OpenCode." },
-] as const;
+type PlannotatorHost = 'claude-code' | 'pi' | 'opencode';
 
-function HostCard({ host, context }: { host: (typeof HOSTS)[number]; context: ConnectContext }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="ib-hcard" data-host={host.host}>
-      <div className="ib-hh">
-        <HostMark host={host.host} big />
-        <div>
-          <div className="ib-hn">{host.piece}</div>
-          <div className="ib-hw">{host.name}</div>
-        </div>
-      </div>
-      <p>{host.who} It writes here on its own and wakes the agent when you Send, so no MCP is needed.</p>
-      <button type="button" className="ib-hfold" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-        <Icon name={open ? 'chevD' : 'chevR'} size={13} />
-        Prefer the MCP? Add it anyway
-      </button>
-      {open && <CodeBox text={hostMcpSnippet(host.host, context)} wrap />}
-    </div>
-  );
-}
+const HOSTS: readonly { host: PlannotatorHost; name: string; line: string }[] = [
+  { host: 'claude-code', name: 'Claude Code', line: "Plannotator's mod writes here. Nothing to install." },
+  { host: 'pi', name: 'Pi', line: "Plannotator's extension writes here. Nothing to install." },
+  { host: 'opencode', name: 'OpenCode', line: "Plannotator's plugin writes here. Nothing to install." },
+];
 
-/** First run (record 1.3 to 1.5): the three Plannotator connections, then any other agent's harness. */
+/**
+ * First run (record 1.3, the addendum "the empty state, as the owner saw it
+ * built"): the three Plannotator connections, then every other agent's
+ * harness. "Use MCP instead" opens that host's command below the row, so the
+ * cards keep one height.
+ */
 export function EmptyState({ context }: { context: ConnectContext | null }) {
+  const [revealed, setRevealed] = useState<PlannotatorHost | null>(null);
   return (
     <section className="ib-listcol" aria-label="Inbox">
       <div className="ib-lhead">
@@ -39,21 +26,39 @@ export function EmptyState({ context }: { context: ConnectContext | null }) {
       </div>
       <div className="ib-lbody">
         <div className="ib-empty" data-inbox-empty="">
-          <h2>No agent has written yet.</h2>
+          <h2>No agent has written yet</h2>
           {context && (
             <>
-              <div className="ib-csub">
-                <Icon name="check" size={15} />
-                Claude Code, Pi and OpenCode need nothing more
+              <div className="ib-hosts">
+                <div className="ib-hcards">
+                  {HOSTS.map(({ host, name, line }) => (
+                    <div className="ib-hcard" data-host={host} data-open={revealed === host || undefined} key={host}>
+                      <div className="ib-hh">
+                        <HostMark host={host} big />
+                        <h3>{name}</h3>
+                      </div>
+                      <p>{line}</p>
+                      <button
+                        type="button"
+                        className="ib-hlink"
+                        aria-expanded={revealed === host}
+                        aria-controls="ib-hreveal"
+                        onClick={() => setRevealed((open) => (open === host ? null : host))}
+                      >
+                        Use MCP instead
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                {revealed && (
+                  <div className="ib-hreveal" id="ib-hreveal" data-reveal={revealed}>
+                    <CodeBox text={hostMcpSnippet(revealed, context)} />
+                  </div>
+                )}
               </div>
-              <div className="ib-hcards">
-                {HOSTS.map((host) => (
-                  <HostCard key={host.host} host={host} context={context} />
-                ))}
-              </div>
-              <div className="ib-csub">
-                <Icon name="code" size={15} />
-                Any other agent: add the Inbox as an MCP server
+              <div className="ib-others">
+                <h3>Other agents</h3>
+                <p>Add the Inbox as a local MCP server.</p>
               </div>
               <ConnectPicker harnesses={OTHER_HARNESSES} initial="codex" context={context} icons />
             </>

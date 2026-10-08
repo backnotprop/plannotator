@@ -6,7 +6,8 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { encrypt, decrypt } from "./crypto";
+import { encrypt, decrypt, decryptWithKey, deriveRelayKeys, encryptWithKey } from "./crypto";
+import vectors from "./fixtures/inbox-relay-vectors.json";
 import { deflateSync, inflateSync } from "bun";
 
 // Bun's test runner doesn't have CompressionStream (browser API).
@@ -168,5 +169,52 @@ describe("live paste service E2E", () => {
   test("expired/nonexistent paste returns 404", async () => {
     const res = await fetch(`${PASTE_API}/api/paste/ZZZZZZZZ`);
     expect(res.status).toBe(404);
+  });
+});
+
+/**
+ * The Inbox relay's keys and envelope (adr/implementation/inbox-mobile.md,
+ * section 4) against the committed vectors, which the iPhone app checks in
+ * Swift too (M5): if either side derives or lays out bytes differently, a
+ * phone cannot open what the Inbox sends.
+ */
+describe("the Inbox relay's vectors", () => {
+  test("the pairing secret and device id derive the vectors' key and relay secret", async () => {
+    const derived = await deriveRelayKeys(vectors.pairing_secret, vectors.device_id);
+    expect(derived).toMatchObject({ key: vectors.derived.key, upKey: vectors.derived.up_key, relaySecret: vectors.derived.relay_secret });
+    // The collapse id's HMAC key is the Inbox's alone (the phone never computes it), so it has no vector; it is its own key.
+    expect(new Set([derived.key, derived.upKey, derived.collapseKey, derived.relaySecret]).size).toBe(4);
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(derived.relaySecret)));
+    expect(Buffer.from(digest).toString("hex")).toBe(vectors.derived.relay_secret_sha256);
+  });
+
+  test("every vector envelope opens to its plaintext, and sealing it again with its IV gives the same bytes", async () => {
+    const key = await crypto.subtle.importKey("raw", Buffer.from(vectors.derived.key, "base64url"), "AES-GCM", false, ["encrypt"]);
+    for (const { plaintext, envelope } of vectors.envelopes) {
+      expect(await decryptWithKey(envelope, vectors.derived.key)).toBe(plaintext);
+      const bytes = Buffer.from(envelope, "base64url");
+      const iv = bytes.subarray(0, 12);
+      const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(plaintext)));
+      expect(Buffer.concat([iv, sealed]).toString("base64url")).toBe(envelope);
+    }
+  });
+
+  test("each direction has its own key: a down envelope does not open as a command, nor a command as a down item", async () => {
+    for (const { plaintext, envelope } of vectors.up_envelopes) expect(await decryptWithKey(envelope, vectors.derived.up_key)).toBe(plaintext);
+    await expect(decryptWithKey(vectors.envelopes[0]!.envelope, vectors.derived.up_key)).rejects.toThrow();
+    await expect(decryptWithKey(vectors.up_envelopes[0]!.envelope, vectors.derived.key)).rejects.toThrow();
+  });
+
+  test("encryptWithKey makes a fresh IV each time, and a wrong key or a changed byte does not open", async () => {
+    const plaintext = vectors.envelopes[0]!.plaintext;
+    const a = await encryptWithKey(plaintext, vectors.derived.key);
+    const b = await encryptWithKey(plaintext, vectors.derived.key);
+    expect(a).not.toBe(b);
+    expect(await decryptWithKey(a, vectors.derived.key)).toBe(plaintext);
+    const other = (await deriveRelayKeys(vectors.pairing_secret, "dev_00000000000000000000000001")).key;
+    await expect(decryptWithKey(a, other)).rejects.toThrow();
+    const flipped = Buffer.from(a, "base64url");
+    flipped[20] ^= 1;
+    await expect(decryptWithKey(flipped.toString("base64url"), vectors.derived.key)).rejects.toThrow();
   });
 });

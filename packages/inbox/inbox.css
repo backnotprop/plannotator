@@ -201,20 +201,20 @@
 .ib-body [data-print-region="article"] > .mt-4:first-child { margin-top: 0; }
 .ib-qfoot-st { font-size: 12px; color: var(--muted-foreground); white-space: nowrap; }
 
-/* empty state and the connect picker */
-.ib-empty { padding: 34px 0 40px 100px; max-width: 850px; }
-.ib-empty h2 { font-size: 22px; font-weight: 650; margin: 0 0 4px; letter-spacing: -0.01em; }
-.ib-csub { display: flex; align-items: center; gap: 8px; margin: 18px 0 10px; font-size: 15px; font-weight: 600; }
-.ib-csub .ib-ic { color: var(--primary); }
-.ib-hcards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; align-items: start; }
-.ib-hcard { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--card); box-shadow: var(--card-shadow); }
+/* empty state and the connect picker: one vertical rhythm between the heading, the cards, Other agents and the tabs */
+.ib-empty { --ib-rhythm: 28px; display: flex; flex-direction: column; gap: var(--ib-rhythm); padding: 34px 0 40px 100px; max-width: 850px; }
+.ib-empty h2 { font-size: 22px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+.ib-empty h3 { font-size: 14px; font-weight: 600; margin: 0; }
+.ib-hcards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.ib-hcard { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; background: var(--card); box-shadow: var(--card-shadow); }
+.ib-hcard[data-open] { border-color: color-mix(in oklab, var(--primary) 45%, var(--border)); }
 .ib-hcard .ib-hh { display: flex; align-items: center; gap: 10px; }
-.ib-hcard .ib-hn { font-size: 14px; font-weight: 600; }
-.ib-hcard .ib-hw { font-size: 12px; color: var(--muted-foreground); }
-.ib-hcard p { margin: 8px 0 8px; font-size: 13px; line-height: 1.5; color: var(--muted-foreground); }
-.ib-hfold { display: flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 500; }
-.ib-hfold .ib-ic { color: var(--muted-foreground); }
-.ib-ctabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 18px; }
+.ib-hcard p { flex: 1; margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted-foreground); }
+.pn-inbox .ib-hlink { align-self: flex-start; font-size: 12.5px; font-weight: 500; color: var(--primary); }
+.pn-inbox .ib-hlink:hover { text-decoration: underline; text-underline-offset: 2px; }
+.ib-hreveal { margin-top: 12px; }
+.ib-others p { margin: 4px 0 0; font-size: 14px; line-height: 1.5; color: var(--muted-foreground); }
+.ib-ctabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 16px; }
 .ib-ctab { display: inline-flex; align-items: center; height: 30px; padding: 0 11px; border-radius: 7px; font-size: 13.5px; font-weight: 500; color: var(--muted-foreground); }
 .ib-ctab[aria-selected="true"] { background: var(--muted); color: var(--foreground); }
 .ib-tglyph { width: 14px; height: 14px; flex: none; margin-right: 6px; }
@@ -222,25 +222,18 @@
 .pn-inbox .ib-ctab[aria-selected="true"] svg.ib-tglyph { stroke: var(--foreground); }
 .ib-tglyph.ib-img { filter: grayscale(1); opacity: 0.65; }
 .ib-cpanel { display: flex; flex-direction: column; gap: 8px; max-width: 760px; }
-.ib-cpanel .ib-eye { font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted-foreground); }
-.ib-cpanel .ib-lead, .ib-cpanel .ib-after { margin: 0; font-size: 14px; line-height: 1.55; color: var(--muted-foreground); }
 .ib-clab { font-family: var(--font-mono); font-size: 12px; color: var(--foreground); margin-top: 2px; }
 .ib-cbox { display: flex; align-items: flex-start; gap: 10px; border: 1px solid var(--border); background: color-mix(in oklab, var(--muted) 50%, transparent); border-radius: 8px; padding: 9px 12px; }
-.ib-cbox pre { flex: 1; min-width: 0; margin: 0; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6; white-space: pre; overflow-x: auto; color: var(--foreground); }
-.ib-cbox.ib-wrap { margin-top: 8px; padding: 8px 10px; flex-direction: column; align-items: stretch; gap: 6px; }
-.ib-cbox.ib-wrap pre { white-space: pre-wrap; word-break: normal; overflow-wrap: anywhere; font-size: 11.5px; }
+.ib-cbox pre { flex: 1; min-width: 0; margin: 0; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; word-break: normal; overflow-wrap: anywhere; color: var(--foreground); }
 .pn-inbox .ib-copy { flex: none; display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--card); font-size: 12.5px; font-weight: 500; }
-.ib-cbox.ib-wrap .ib-copy { align-self: flex-end; }
+.ib-cnote { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted-foreground); }
 .ib-another { display: flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 500; margin-top: 4px; }
 .ib-another .ib-ic { color: var(--muted-foreground); }
 .ib-another .ib-mut { font-weight: 400; margin-left: 4px; }
 .ib-another-body { margin-top: 2px; }
-.ib-cnote { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.5; color: var(--muted-foreground); padding: 8px 10px; border-radius: 8px; background: color-mix(in oklab, var(--warning) 9%, transparent); }
-.ib-cnote .ib-ic { color: var(--warning); margin-top: 1px; }
 .ib-connect.ib-compact .ib-ctabs { margin: 6px 0 12px; }
 .ib-connect.ib-compact .ib-ctab { height: 26px; padding: 0 9px; font-size: 12.5px; }
 .ib-connect.ib-compact .ib-cpanel { gap: 6px; }
-.ib-connect.ib-compact .ib-cpanel .ib-lead { font-size: 13px; }
 
 /* settings */
 .ib-spage { padding: 28px 44px; flex: 1; overflow-y: auto; min-width: 0; }
@@ -258,6 +251,8 @@
 .pn-inbox .ib-sw[aria-checked="true"] { background: var(--primary); border-color: var(--primary); }
 .ib-sw[aria-checked="true"]::after { left: 16px; background: #fff; }
 .ib-note { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted-foreground); margin-top: 6px; }
+.ib-fp { margin: -4px 0 4px; font-size: 12px; color: var(--muted-foreground); }
+.ib-fp span { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.02em; margin-left: 6px; color: var(--foreground); overflow-wrap: anywhere; }
 .pn-inbox .ib-note svg.ib-ic { width: 14px; height: 14px; }
 .ib-stbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .ib-stbl td { padding: 8px 0; border-bottom: 1px solid color-mix(in oklch, var(--border) 45%, transparent); }
@@ -268,6 +263,22 @@
 .ib-stbl .ib-fold { display: inline-flex; align-items: center; gap: 6px; }
 .pn-inbox .ib-del-l { font-size: 12.5px; color: var(--destructive); font-weight: 500; }
 .pn-inbox .ib-del-l:disabled { opacity: 0.45; }
+/* Phones in Settings (not in the record: OWNER-ITEMS item 23, built on Settings' own rows and tokens). */
+.ib-pair { display: flex; gap: 22px; align-items: flex-start; padding: 16px; margin: 6px 0 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+.ib-qr-wrap { flex: none; width: 196px; height: 196px; border-radius: 8px; overflow: hidden; box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); }
+.ib-qr-wrap.ib-stale { opacity: 0.25; }
+.ib-qr { display: block; width: 100%; height: 100%; }
+.ib-pair-t { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
+.ib-pair-t h3 { font-size: 15px; font-weight: 600; margin: 0; }
+.ib-pair-t > p { margin: 0; font-size: 13.5px; color: var(--muted-foreground); }
+.ib-pair-code { font-family: var(--font-mono); font-size: 30px; font-weight: 600; letter-spacing: 0.12em; font-variant-numeric: tabular-nums; margin: 6px 0 2px; }
+.ib-pair-foot { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-pair-foot > span { margin-right: 4px; }
+.ib-devices { margin-top: 4px; border-top: 1px solid color-mix(in oklch, var(--border) 45%, transparent); }
+.ib-devices .ib-srow { border-bottom: 1px solid color-mix(in oklch, var(--border) 45%, transparent); }
+.ib-srow > .ib-ic { color: var(--muted-foreground); }
+.ib-srow .ib-paired { display: inline-flex; align-items: center; gap: 5px; }
+.ib-srow .ib-paired .ib-ic { color: var(--primary); }
 
 /* "Waiting on this answer" at the foot of the asking message */
 .ib-waitfoot { margin-top: 18px; border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); padding: 10px 0; display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
@@ -345,10 +356,9 @@ button.ib-drow:hover { background: color-mix(in oklch, var(--muted) 35%, transpa
 .pn-inbox .ib-vlink { color: var(--primary); font-weight: 550; }
 .ib-vbody { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 0; }
 .ib-docarea { position: relative; overflow: hidden; background: var(--background); min-height: 0; }
-.ib-docscroll { position: absolute; inset: 0; overflow-y: auto; padding: 58px 24px 24px; }
+/* Plannotator's plan look: Grid is its card on the grid paper, Clean the document on the card colour (bg-grid or bg-card, Viewer's gridEnabled). */
+.ib-docscroll { position: absolute; inset: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; padding: 58px 24px 24px; }
 .ib-full .ib-docscroll { padding-bottom: 80px; }
-.ib-doccard { max-width: 640px; margin: 0 auto; padding: 0 40px; background: var(--card); border-radius: 10px; box-shadow: var(--card-shadow); }
-.ib-full .ib-doccard { max-width: 760px; padding: 0 56px; }
 .ib-toolstrip { position: absolute; top: 14px; left: 16px; z-index: 3; padding: 3px; border-radius: 9px; background: var(--card); box-shadow: var(--card-shadow); }
 .ib-htmlframe { position: absolute; inset: 0; }
 .ib-full .ib-htmlframe { bottom: 56px; }
@@ -404,3 +414,42 @@ pre code.pn-code[data-keep-layout] {
   white-space: pre;
   overflow-wrap: normal;
 }
+
+/* a guided review: the card at the foot of its message (the record's 4.1) and the guide open over the window (4.2) */
+.ib-att-t.ib-guide { min-width: 420px; padding: 12px 14px; text-align: left; }
+.ib-att-t.ib-guide .ib-fi { width: 38px; height: 38px; color: var(--primary); background: color-mix(in oklch, var(--primary) 12%, transparent); }
+.ib-att-text { display: flex; flex-direction: column; min-width: 0; }
+.ib-add { color: var(--success); }
+.ib-del { color: var(--destructive); }
+.pn-inbox { position: relative; }
+/* The shell is its own stacking context, so nothing inside it (the message body's own layers) draws over the open guide. */
+.ib-shell { isolation: isolate; }
+.ib-viewer { position: absolute; inset: 0; z-index: 20; display: grid; grid-template-rows: 46px minmax(0, 1fr); background: var(--background); }
+.ib-viewer .ib-vhead { padding-left: 10px; }
+.pn-inbox .ib-back { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px; border-radius: 7px; font-size: 13.5px; color: var(--muted-foreground); }
+.pn-inbox .ib-back:hover { background: var(--muted); }
+.ib-vsep { width: 1px; height: 18px; background: var(--border); }
+/* The guide scrolls here (its viewport manager finds this as its scroll root).
+   `text-xs` at 13px is what the review stylesheet sets for Plannotator's code
+   review and guides.show (packages/review-editor/index.css), scoped to the guide. */
+.ib-gerror { padding: 12px 30px 0; }
+.ib-gbody { min-height: 0; overflow-y: auto; --text-xs: 0.8125rem; --text-xs--line-height: calc(1 / 0.75); }
+/* Pierre's diff colours from the theme, as the review stylesheet passes them into its shadow DOM. */
+.ib-gbody diffs-container { --diffs-dark-bg: var(--background); --diffs-light-bg: var(--background); --diffs-dark: var(--foreground); --diffs-light: var(--foreground); }
+
+/* New message (record 5.x): the button's states beside Reply, the list of live
+   sessions (5.2) and the "not running" state (5.3), above the button. */
+.pn-inbox .ib-btn.ib-on { border-color: color-mix(in oklch, var(--primary) 55%, transparent); background: color-mix(in oklch, var(--primary) 10%, var(--card)); color: var(--primary); }
+.pn-inbox .ib-btn.ib-dis { opacity: 0.5; }
+.ib-nmpop { position: absolute; left: 212px; bottom: calc(100% + 3px); background: var(--popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22); z-index: 6; }
+.ib-menu.ib-nmpop { width: 360px; padding: 6px; }
+.ib-menu .ib-mh { font-size: 12.5px; color: var(--muted-foreground); padding: 6px 8px 8px; }
+.pn-inbox .ib-menu .ib-mi { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 8px; border-radius: 7px; text-align: left; }
+.pn-inbox .ib-menu .ib-mi.ib-on, .pn-inbox .ib-menu .ib-mi:hover, .pn-inbox .ib-menu .ib-mi:focus-visible { background: color-mix(in oklch, var(--primary) 10%, transparent); }
+.ib-menu .ib-mi .ib-mk { margin-top: 2px; }
+.ib-menu .ib-mi .ib-t { display: block; font-size: 13.5px; font-weight: 550; }
+.ib-menu .ib-mi .ib-d { display: block; font-size: 12.5px; color: var(--muted-foreground); }
+.ib-state.ib-nmpop { width: 390px; padding: 14px 16px; }
+.ib-state h5 { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+.ib-state p { margin: 0 0 10px; font-size: 13px; line-height: 1.55; color: var(--muted-foreground); }
+.pn-inbox .ib-menu:hover .ib-mi.ib-on:not(:hover) { background: transparent; }

@@ -20,6 +20,8 @@ import type { InboxAnnotationRecord, InboxAttachment } from "./inbox-attachments
 // The attachment shapes and file rules (step 2) live in their own module and
 // reach the Inbox through this published entry, so core's export map is unchanged.
 export * from "./inbox-attachments";
+// The surface bridge's messages (the phone, PLAN step S1), the same way.
+export * from "./inbox-surface-bridge";
 
 /** Every record and line carries this version. Fields are only ever added. */
 export const INBOX_RECORD_VERSION = 1 as const;
@@ -46,7 +48,7 @@ export function ulid(now: number = Date.now()): string {
   return timePart + randomPart;
 }
 
-export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec";
+export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev";
 
 export function inboxId(prefix: InboxIdPrefix, now?: number): string {
   return `${prefix}_${ulid(now)}`;
@@ -57,6 +59,8 @@ const ID_RE: Record<InboxIdPrefix, RegExp> = {
   prj: /^prj_[0-9A-HJKMNP-TV-Z]{26}$/,
   ses: /^ses_[0-9A-HJKMNP-TV-Z]{26}$/,
   dec: /^dec_[0-9A-HJKMNP-TV-Z]{26}$/,
+  /** A paired phone (adr/implementation/inbox-mobile.md, section 2). */
+  dev: /^dev_[0-9A-HJKMNP-TV-Z]{26}$/,
 };
 
 export function isInboxId(prefix: InboxIdPrefix, value: unknown): value is string {
@@ -196,6 +200,76 @@ export interface InboxMessage {
    * step 2: older records lack it.
    */
   attachments?: InboxAttachment[];
+  /**
+   * On a person's reply: it reached the asking agent's session as a turn
+   * through an agent connection (the Claude Code mod), and when. Absent until
+   * then; a reply the agent read through the MCP has none. "Replied" is not
+   * stored: it is the asking session's next message in the thread. Added in
+   * step 6: older records lack it.
+   */
+  delivery?: InboxDelivery | null;
+  /**
+   * A guided review this message carries (submit_guide, PLAN step 5): the
+   * snapshot is a content-addressed blob, `inbox/blobs/<sha256>`. Absent on
+   * every other message and on records older than step 5.
+   */
+  guide?: InboxGuideRef | null;
+  /**
+   * On a message carrying a guide: the person's reviewed tick per section, as
+   * the window's guide viewer last saved it (the record's 4.2, "kept with the
+   * thread"). Absent until the first tick; the snapshot's own ticks apply then.
+   */
+  guide_reviewed?: boolean[] | null;
+  /**
+   * On a person's New message (plan step 8): the live agent session it is
+   * addressed to. Such a message answers nothing (`reply_to` null) and is
+   * delivered to that session as a turn, like a reply. Absent on every other
+   * message and on records older than step 8.
+   */
+  to?: InboxAddressee | null;
+}
+
+/** The agent session a person's New message is addressed to (`InboxMessage.to`). */
+export interface InboxAddressee {
+  /** The connection's host, e.g. `claude-code`. */
+  host: string;
+  session: string;
+}
+
+/** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */
+export interface InboxDelivery {
+  state: "delivered";
+  /** The connection's host, e.g. `claude-code`. */
+  host: string;
+  /** The session it was delivered to (the asking message's `author.session`, or the message's `to.session`). */
+  session: string;
+  at: string;
+}
+
+// ─────────────────────────────── Guided reviews (step 5) ───────────────────────────────
+
+/**
+ * What a message keeps about the guided review it carries: the blob holding
+ * the snapshot (Plannotator's portable format, `@plannotator/core/guide-format`,
+ * exactly as validated) and the facts the card and the row draw.
+ */
+export interface InboxGuideRef {
+  /** sha256 (hex) of the snapshot JSON, the blob's name under `inbox/blobs/`. */
+  sha256: string;
+  /**
+   * sha256 (hex) of what the agent sent (the guide and the patch, or the
+   * snapshot, as given). A retry with the same idempotency_key compares this:
+   * the built snapshot carries the time it was built, so its own hash differs.
+   */
+  input_sha256: string;
+  /** The snapshot JSON's size in bytes. */
+  bytes: number;
+  title: string;
+  sections: number;
+  /** Files in the patch. */
+  files: number;
+  additions: number;
+  deletions: number;
 }
 
 /** One choice as the wire serves it (Workspaces' `QuestionChoice`). */
@@ -361,6 +435,8 @@ export interface InboxListRow extends InboxThreadSummary {
   unseen: number;
   /** The person's reply is the last message: when, and when the agent read it (null until it has). */
   sent: { at: string; checked_at: string | null } | null;
+  /** A message in the thread carries a guided review: the row's "Guided review" mark. */
+  guide: boolean;
 }
 
 export interface InboxListSection {

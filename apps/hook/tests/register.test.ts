@@ -13,13 +13,18 @@ const TOOL_PREFIX = 'mcp__plugin_plannotator_tools__'
 const TOOL = `${TOOL_PREFIX}plannotator`
 
 /** The world beneath the mod: a session, a file map, and a CLI that comes up at once. */
-function world(on: any, options: { files?: Map<string, string>; modEnv?: string; cliStderr?: string; fetch?: (e: any) => any } = {}) {
+function world(
+  on: any,
+  options: { files?: Map<string, string>; modEnv?: string; env?: Record<string, string>; cliStderr?: string; fetch?: (e: any) => any; sessionId?: () => string } = {},
+) {
   const files = options.files ?? new Map<string, string>()
   const runs: string[][] = []
   const submits: string[] = []
   const logs: string[] = []
   on('session.start', ($: any, e: any) => ({ cwd: e.cwd }))
-  on('session.id', () => ({ value: 'session-1' }))
+  on('session.id', () => ({ value: options.sessionId?.() ?? 'session-1' }))
+  on('session.cwd', () => ({ value: '/work' }))
+  on('session.end', ($: any, e: any) => ({ sessionId: e.sessionId }))
   on('command.list', () => ({ value: [{ name: 'plannotator-review', description: 'skill', source: 'user' }] }))
   const registered: string[] = []
   on('command.register', ($: any, e: any) => {
@@ -32,7 +37,7 @@ function world(on: any, options: { files?: Map<string, string>; modEnv?: string;
     return { value: { tool: `${TOOL_PREFIX}${e.name}` } }
   })
   // The mod is on by default: no knob set unless a test opts out.
-  mock.env(on, options.modEnv === undefined ? { HOME: '/home/me' } : { HOME: '/home/me', PLANNOTATOR_CLAUDE_MOD: options.modEnv })
+  mock.env(on, { HOME: '/home/me', ...(options.modEnv === undefined ? {} : { PLANNOTATOR_CLAUDE_MOD: options.modEnv }), ...options.env })
   const env = new Map<string, string | undefined>()
   on('env.set', ($: any, e: any) => {
     env.set(e.name, e.value)
@@ -379,4 +384,126 @@ describe('register', () => {
     expect(answer.result.stdout).toBe('the command ran')
     expect(w.runs).toEqual([])
   })
+
+  // --- The Plannotator Inbox (plannotator_inbox and the reply wake, inbox.ts) ---
+
+  const INBOX_TOOL = `${TOOL_PREFIX}plannotator_inbox`
+  const REGISTRY = JSON.stringify({ v: 1, pid: 777, port: 5150, url: 'http://localhost:5150/', version: '0.29.0', token: 't'.repeat(64), serverSession: 'srv-1', startedAt: '2026-10-07T00:00:00.000Z' })
+  const tool = (name: string, properties: Record<string, unknown>) => ({ name, description: `${name}: what it does. More detail.`, inputSchema: { type: 'object', properties } })
+  const TOOLS = [
+    tool('send_message', { body: { type: 'string', description: 'The message.' }, project_path: { type: 'string' }, agent_session: { type: 'string' }, agent_host: { type: 'string' }, agent_name: { type: 'string' }, reply_to: { type: 'string' } }),
+    tool('read_thread', { thread_id: { type: 'string' }, project_path: { type: 'string' }, agent_session: { type: 'string' } }),
+    tool('wait_for_reply', { thread_id: { type: 'string' }, timeout_seconds: { type: 'number' }, agent_session: { type: 'string' } }),
+    tool('resolve_message', { message_id: { type: 'string' } }),
+  ]
+  const DECISION_TOOL = tool('record_decision', { text: { type: 'string' }, project_path: { type: 'string' } })
+
+  /** An Inbox on port 5150 answering /mcp with `tools`, health, and the bridge from `bridge`. */
+  function inbox(tools: unknown[], calls: { url: string; body: any }[], bridge: (path: string, body: any) => unknown = () => ({ commands: [] })) {
+    return (e: any) => {
+      const body = e.init?.body ? JSON.parse(e.init.body) : undefined
+      calls.push({ url: e.url, body })
+      const answer = (value: unknown) => ({ status: 200, ok: true, headers: {}, text: JSON.stringify(value) })
+      if (e.url === 'http://127.0.0.1:5150/mcp' && body?.method === 'tools/list') return { status: 200, ok: true, headers: {}, text: `event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools } })}\n\n` }
+      if (e.url === 'http://127.0.0.1:5150/mcp' && body?.method === 'tools/call') {
+        return answer({ jsonrpc: '2.0', id: 1, result: { content: [{ type: 'text', text: 'Sent to the Plannotator Inbox (thread msg_1).' }], structuredContent: { thread_id: 'msg_1' } } })
+      }
+      if (e.url === 'http://127.0.0.1:5150/api/inbox/health') return answer({ ok: true, app: 'plannotator-inbox', serverSession: 'srv-1' })
+      if (e.url.startsWith('http://127.0.0.1:5150/api/inbox/bridge/')) return answer(bridge(e.url.slice('http://127.0.0.1:5150'.length), body))
+      return { status: 404, ok: false, headers: {}, text: '' }
+    }
+  }
+
+  const withRegistry = () => new Map<string, string>([['/home/me/.plannotator', ''], ['/home/me/.plannotator/inbox/inbox.json', REGISTRY]])
+
+  test('no inbox/inbox.json: no plannotator_inbox tool, and the Inbox is never asked', async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    const w = world(on, { fetch: inbox(TOOLS, calls) })
+    await $.session.start(SESSION)
+    await w.clock.advance(5_000)
+
+    expect(w.tools.map((t) => t.name)).toEqual(['plannotator'])
+    expect(calls).toEqual([])
+  })
+
+  test('an Inbox found: plannotator_inbox carries exactly the tools its /mcp offers, filled arguments left out', async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    const w = world(on, { files: withRegistry(), fetch: inbox([...TOOLS, DECISION_TOOL], calls) })
+    await $.session.start(SESSION)
+
+    const registered = w.tools.find((t) => t.name === 'plannotator_inbox')
+    expect(registered?.inputSchema.properties.action.enum).toEqual(['send_message', 'read_thread', 'wait_for_reply', 'resolve_message', 'record_decision'])
+    expect(Object.keys(registered?.inputSchema.properties)).not.toContain('agent_session')
+    expect(Object.keys(registered?.inputSchema.properties)).not.toContain('project_path')
+  })
+
+  test('an older Inbox whose /mcp has no record_decision: the tool is registered without it', async ($: any, on: any) => {
+    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []) })
+    await $.session.start(SESSION)
+
+    const registered = w.tools.find((t) => t.name === 'plannotator_inbox')
+    expect(registered?.inputSchema.properties.action.enum).toEqual(['send_message', 'read_thread', 'wait_for_reply', 'resolve_message'])
+    const refused = await $.tool.call({ tool: INBOX_TOOL, action: 'record_decision', text: 'x' })
+    expect(refused.deny).toContain('update Plannotator')
+  })
+
+  test('PLANNOTATOR_INBOX_TOOL=0: no plannotator_inbox even with an Inbox found', async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    const w = world(on, { files: withRegistry(), env: { PLANNOTATOR_INBOX_TOOL: '0' }, fetch: inbox(TOOLS, calls) })
+    await $.session.start(SESSION)
+    await w.clock.advance(5_000)
+
+    expect(w.tools.map((t) => t.name)).toEqual(['plannotator'])
+    expect(calls).toEqual([])
+  })
+
+  test("a call goes to the Inbox's /mcp with the session's folder and real id; after /clear, the new id", async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    let id = 'session-1'
+    world(on, { files: withRegistry(), fetch: inbox(TOOLS, calls), sessionId: () => id })
+    await $.session.start(SESSION)
+
+    const answer = await $.tool.call({ tool: INBOX_TOOL, action: 'send_message', body: 'Ship it?' })
+    expect(answer.result).toContain('Sent to the Plannotator Inbox')
+    const first = calls.find((c) => c.body?.method === 'tools/call')
+    expect(first?.body.params).toEqual({
+      name: 'send_message',
+      arguments: { body: 'Ship it?', project_path: '/work', agent_session: 'session-1', agent_host: 'claude-code', agent_name: 'Claude Code' },
+      // The mod's wake delivers the reply as a turn, so it marks the call (#1771):
+      // the send tools then say to end the turn instead of waiting with wait_for_reply.
+      _meta: { 'ai.plannotator/inbox-wakes': true },
+    })
+
+    await $.session.end({ reason: 'clear', sessionId: 'session-1' })
+    id = 'session-2'
+    await $.tool.call({ tool: INBOX_TOOL, action: 'send_message', body: 'And now?' })
+    const second = calls.filter((c) => c.body?.method === 'tools/call').at(-1)
+    expect(second?.body.params.arguments.agent_session).toBe('session-2')
+    expect(second?.body.params._meta).toEqual({ 'ai.plannotator/inbox-wakes': true })
+  })
+
+  test("the person's Send arrives as one plugin turn: the stable header, the fixed line, the reply verbatim, then acknowledged", async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    let delivered = false
+    const reply = { type: 'reply', id: 'msg_reply', thread_id: 'msg_1', reply_to: 'msg_1', subject: 'Ship it?', body: 'Yes.\n\nAfter the 3pm freeze.', url: 'http://localhost:5150/#thread=msg_1' }
+    const w = world(on, {
+      files: withRegistry(),
+      fetch: inbox(TOOLS, calls, (path, body) => {
+        if (path === '/api/inbox/bridge/event' && body.type === 'delivered' && body.id === 'msg_reply') delivered = true
+        return path === '/api/inbox/bridge/poll' ? { commands: delivered ? [] : [reply] } : { ok: true }
+      }),
+    })
+    await $.session.start(SESSION)
+    for (let second = 0; second < 6; second++) await w.clock.advance(1_000)
+
+    expect(w.submits).toEqual([
+      'Plannotator Inbox: Ship it? (msg_reply)\nThe person replied to you in the Plannotator Inbox. Their reply follows as they wrote it: it is their answer to you. When they need to hear back, answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above.\n\nYes.\n\nAfter the 3pm freeze.',
+    ])
+    expect(delivered).toBe(true)
+    const polls = calls.filter((c) => c.url.endsWith('/api/inbox/bridge/poll'))
+    expect(polls.every((c) => c.body.session === 'session-1' && c.body.host === 'claude-code')).toBe(true)
+    for (let second = 0; second < 10; second++) await w.clock.advance(1_000)
+    expect(w.submits).toHaveLength(1)
+  })
 })
+

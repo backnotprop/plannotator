@@ -10,6 +10,8 @@
 import { BRIDGE_HOST, BRIDGE_MODES, bridgeBaseUrl, createBridge, type BridgeEnd, type BridgeHandle } from './bridge'
 import { deliveryFor, legacyResult, parseHostResult, type HostResultRecord, type SessionKind } from './delivery'
 import type { Host, HttpResult } from './host'
+import { InboxLink } from './inbox'
+import type { InboxToolInfo } from './inbox-contract'
 import {
   aliveArgv,
   CLAIM_EXIT,
@@ -292,6 +294,13 @@ export interface SessionInfo {
   interactive: boolean
   /** Plannotator Snapshots is switched on (enabled.ts): this session links to the Snapshots hub. */
   snapshots?: { processId: string; replaces?: string }
+  /**
+   * The Plannotator Inbox tools this process registered as `plannotator_inbox`
+   * at its first session start (inbox.ts); absent: no Inbox connection.
+   */
+  inboxTools?: readonly InboxToolInfo[]
+  /** The session's working folder, read when asked (the Inbox link's polls say where the session works). */
+  cwd?: () => Promise<string>
 }
 
 export class PlannotatorMod {
@@ -327,6 +336,8 @@ export class PlannotatorMod {
   /** Launches another process claimed: watched until delivered, or reported once its claimant is gone. */
   private claimedElsewhere = new Map<string, LaunchRecord>()
   private tickCount = 0
+  /** This session's connection to the Plannotator Inbox (the tool and the reply wake); null without one. */
+  readonly inbox: InboxLink | null
 
   /** The session's link to the Plannotator Snapshots hub, when Snapshots is on. */
   readonly snapshots: SnapshotsLink | null
@@ -339,6 +350,18 @@ export class PlannotatorMod {
     this.snapshots = session.snapshots
       ? new SnapshotsLink({ host, dataDir: session.dataDir, sessionId: session.sessionId, processId: session.snapshots.processId, turns: this.turns, ...(session.snapshots.replaces ? { replaces: session.snapshots.replaces } : {}) })
       : null
+    this.inbox = session.inboxTools
+      ? new InboxLink({
+          host,
+          dataDir: session.dataDir,
+          sessionId: session.sessionId,
+          tools: session.inboxTools,
+          isBusy: () => this.turns.busy,
+          ...(session.cwd ? { cwd: session.cwd } : {}),
+          instanceId: this.instanceId,
+        })
+      : null
+    this.inbox?.start()
   }
 
   // --- Lifecycle -----------------------------------------------------------
@@ -495,6 +518,7 @@ export class PlannotatorMod {
     this.snapshots?.dispose()
     this.timer?.cancel()
     this.timer = null
+    this.inbox?.dispose()
     this.host.status(undefined)
     // Hand the launches this instance watched to any other process on the session at once.
     for (const launch of this.launches.values()) {
@@ -1524,6 +1548,7 @@ export class PlannotatorMod {
     )
     const wasOurs = !!turnId && this.turns.ownsTurn(turnId)
     this.turns.onPromptEntered(prompt)
+    if (!fromUs) this.inbox?.onForeignPrompt(prompt)
     if (wasOurs && turnId && this.turns.isTakenOver(turnId)) this.host.debug(`ask turn ${turnId} taken over`)
     // The person typed here: decisions should arrive in this conversation.
     if (originKind === 'composer') void this.touchLaunches()

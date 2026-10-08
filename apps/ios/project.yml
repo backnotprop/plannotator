@@ -1,0 +1,106 @@
+# The Plannotator iPhone app. `xcodegen generate` (in apps/ios) writes
+# Plannotator.xcodeproj from this file; both are committed, so a fresh clone
+# builds with xcodebuild alone. See README.md.
+name: Plannotator
+options:
+  bundleIdPrefix: ai.plannotator
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: false
+# TestFlight is a Release build with the Workspaces source; Release is the App
+# Store build without it (the first App Store release is local only).
+configs:
+  Debug: debug
+  TestFlight: release
+  Release: release
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+packages:
+  PlannotatorKit:
+    path: PlannotatorKit
+targets:
+  Plannotator:
+    type: application
+    platform: iOS
+    sources:
+      - path: Plannotator
+    dependencies:
+      - package: PlannotatorKit
+    info:
+      path: Plannotator/Info.plist
+      properties:
+        CFBundleDisplayName: Plannotator
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSCameraUsageDescription: Plannotator reads the pairing code your computer shows.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        CFBundleURLTypes:
+          - CFBundleURLName: ai.plannotator.app.pair
+            CFBundleURLSchemes: [plannotator]
+        # The Workspaces source (M7): the origin this build signs in to, or
+        # empty for no Workspaces source at all. See WORKSPACES_HOST below.
+        WorkspacesOrigin: $(WORKSPACES_ORIGIN)
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.plannotator.app
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+        SWIFT_APPROACHABLE_CONCURRENCY: YES
+        ENABLE_PREVIEWS: YES
+      # The Workspaces source: WORKSPACES_HOST is the one switch. Debug and
+      # TestFlight name the host; Release (the App Store build) leaves it empty,
+      # so that build has no Workspaces source and no associated domain. The
+      # host gives the origin the app signs in to and the associated domain the
+      # https sign-in return needs (applinks and webcredentials, Workspaces.entitlements).
+      # Production: set WORKSPACES_HOST to workspaces.plannotator.ai.
+      configs:
+        Debug:
+          WORKSPACES_HOST: staging.workspaces.plannotator.ai
+          WORKSPACES_ORIGIN: https://$(WORKSPACES_HOST)
+          CODE_SIGN_ENTITLEMENTS: Plannotator/Workspaces.entitlements
+        TestFlight:
+          WORKSPACES_HOST: staging.workspaces.plannotator.ai
+          WORKSPACES_ORIGIN: https://$(WORKSPACES_HOST)
+          CODE_SIGN_ENTITLEMENTS: Plannotator/Workspaces.entitlements
+        Release:
+          WORKSPACES_HOST: ""
+          WORKSPACES_ORIGIN: ""
+  PlannotatorUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: PlannotatorUITests
+    dependencies:
+      - target: Plannotator
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.plannotator.app.uitests
+        TARGETED_DEVICE_FAMILY: "1"
+        TEST_TARGET_NAME: Plannotator
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Plannotator:
+    build:
+      targets:
+        Plannotator: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - package: PlannotatorKit/PlannotatorKitTests
+        - name: PlannotatorUITests

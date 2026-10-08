@@ -234,7 +234,7 @@ test.afterAll(async () => {
 test('the ask appears when the first thread arrives, never on first paint', async () => {
   const { page } = world;
   await page.goto(world.url);
-  await expect(page.getByRole('heading', { name: 'No agent has written yet.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'No agent has written yet', exact: true })).toBeVisible();
   expect(await page.evaluate(() => Notification.permission)).toBe('default');
   await page.waitForTimeout(500);
   await expect(page.locator('[data-notification-ask]')).toHaveCount(0);

@@ -12,6 +12,7 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { questionKey, type QuestionAnswer } from "@plannotator/core/question-block";
 import type { InboxQuestion } from "@plannotator/core/inbox-types";
 import { inboxStatus, readInboxRegistry } from "@plannotator/shared/inbox/registry";
+import { INBOX_SERVER_SESSION_MISMATCH_ERROR } from "@plannotator/core/server-session";
 import { INBOX_MCP_INSTRUCTIONS, INBOX_MCP_TOOLS } from "./inbox-mcp";
 import { INBOX_FORBIDDEN_PORT, startInboxServer, type InboxServer } from "./inbox";
 
@@ -179,6 +180,24 @@ describe("startup, registry and health", () => {
     expect((await stale.json()).code).toBe("session_mismatch");
     const unchanged = await (await fetch(`http://127.0.0.1:${second.port}/api/inbox/threads/${sent.message_id}`)).json();
     expect(unchanged.thread.messages[0].questions[0].revision).toBe(0);
+
+    // The window shows the refusal's `error` as it is: every route family says
+    // Inbox, never the review wording plan, annotate and code review keep.
+    const routes = [
+      `/api/inbox/threads/${sent.thread_id}/seen`, // inbox.ts
+      `/api/inbox/messages/${sent.message_id}/guide/reviewed`, // inbox-guides.ts
+      `/api/inbox/threads/${sent.thread_id}/message`, // inbox-sessions.ts
+      "/api/inbox/annotations", // inbox-attachments.ts
+      "/api/inbox/settings",
+    ];
+    for (const route of routes) {
+      const refused = await post(second, route, { serverSession: firstSession });
+      expect(refused.status).toBe(409);
+      const body = await refused.json();
+      expect(body.code).toBe("session_mismatch");
+      expect(body.error).toBe(INBOX_SERVER_SESSION_MISMATCH_ERROR);
+      expect(body.error).not.toContain("review");
+    }
   });
 
   test("when the last port is taken by something else, it falls back to a random port and says so once", async () => {
@@ -207,6 +226,11 @@ describe("startup, registry and health", () => {
     chmodSync(binary, 0o755);
     const server = await start(join(root, "data"), { version: "1.0.0", binaryPath: binary, healthTickMs: 50 });
     const health = () => fetch(`http://127.0.0.1:${server.port}/api/inbox/health`).then((r) => r.json());
+    // Wait for the first probe itself, not a fixed window: macOS assesses a
+    // freshly written executable on its first exec (about 90 ms here, far
+    // more when the machine is busy), so the probe can start after 300 ms.
+    const started = Date.now() + 5000;
+    while (Date.now() < started && !existsSync(runs)) await Bun.sleep(10);
     await Bun.sleep(300);
     expect((await health()).update).toBeNull();
     // Several ticks went by: an unchanged binary was run once, not every tick.
@@ -342,6 +366,10 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
     const reachesModel = sendDescription.slice(0, 2048 - "… [truncated]".length);
     expect(reachesModel).toContain(":::question-text");
     expect(reachesModel).toContain("Do not ask rhetorical questions or questions the codebase answers.");
+    // The guided-review tools reach the model whole, their worked example pointer included.
+    for (const name of ["get_guide_brief", "submit_guide"]) {
+      expect(tools.tools.find((t) => t.name === name)!.description!.length).toBeLessThan(2048);
+    }
 
     const sendResult = await client.callTool({
       name: "send_message",

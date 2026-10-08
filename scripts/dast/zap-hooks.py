@@ -15,6 +15,9 @@ INBOX_PATHS = (
     "/api/inbox/projects",
     "/api/inbox/threads",
     "/api/definitely-missing",
+    "/api/inbox/device/health",
+    "/api/inbox/device/threads",
+    "/api/inbox/device/settings",
 )
 
 

@@ -39,6 +39,13 @@
  *   command Claude already chose to run does.
  * - "Ask this session": each launched server gets a pull-bridge token; the
  *   mod polls it and runs the reviewer's questions as turns (bridge.ts).
+ * - The Plannotator Inbox (inbox.ts): where `inbox/inbox.json` exists at
+ *   session start and the inbox tool switch allows it (on by default,
+ *   `PLANNOTATOR_INBOX_TOOL=0` / `{ "inboxTool": false }`), the
+ *   `plannotator_inbox` tool, whose actions are the Inbox's own MCP tools read
+ *   once from its `/mcp`, and the reply wake: the person's Send in the Inbox
+ *   reaches the session that asked as a turn once it is idle. No registry:
+ *   nothing is registered and nothing polls.
  * - `PLANNOTATOR_SESSION_TAG=claude-code:<session id>` in the environment
  *   every process the session starts inherits, so a Plannotator server can be
  *   matched to the session that started it.
@@ -48,8 +55,10 @@
  */
 
 import { PlannotatorMod } from './controller'
-import { resolveAgentToolEnabled, resolveClaudeModEnabled, resolveSnapshotsEnabled } from './enabled'
+import { resolveAgentToolEnabled, resolveClaudeModEnabled, resolveInboxToolEnabled, resolveSnapshotsEnabled } from './enabled'
 import type { Host } from './host'
+import { discoverInboxTools } from './inbox'
+import { inboxAgentTool, type InboxToolInfo } from './inbox-contract'
 import { COMMANDS, dataDirOf, debugAppendArgv, isModCommand, waitArgv } from './launch'
 import { PLAN_TOOL } from './plan'
 import { answerShellCall, SHELL_TOOL, shellTakeOver } from './take-over'
@@ -81,7 +90,7 @@ const PLUGIN_NAME = 'plannotator'
 function hostOf($: Engine, debugPath: string | null): Host {
   return {
     now: () => $.clock.now(),
-    sleep: (ms) => $.clock.sleep(ms),
+    sleep: (ms, signal) => $.clock.sleep(ms, signal ? { signal } : undefined),
     waitForAny: async (paths, timeoutMs) => {
       await $.process.run(waitArgv(paths, timeoutMs), { timeoutMs: timeoutMs + 5_000 }).catch(() => undefined)
     },
@@ -149,6 +158,8 @@ interface Allowed {
   agentTool: boolean
   /** Plannotator Snapshots: `/plannotator-snapshot` and the link to the Snapshots hub (off until launch). */
   snapshots: boolean
+  /** Connect to the Plannotator Inbox when one is found (the inbox tool switch, on by default). */
+  inboxTool: boolean
 }
 
 // --- Plannotator Snapshots ----------------------------------------------------------
@@ -164,6 +175,14 @@ let snapshotsProcessTag: string | null = null
 
 // One plugin instance per Claude Code process.
 let allowed: Allowed | null = null
+/**
+ * The Inbox tools registered as `plannotator_inbox` at the first session.start
+ * (fixed for the process: the tool list is part of Claude's prompt); null: no
+ * Inbox connection.
+ */
+let inboxTools: readonly InboxToolInfo[] | null = null
+/** `mcp__<plugin server>__plannotator_inbox` as the engine registered it; null until then. */
+let inboxToolName: string | null = null
 let mod: PlannotatorMod | null = null
 let switching: Promise<PlannotatorMod | null> | null = null
 
@@ -192,6 +211,7 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
       ...(settings.snapshots && snapshotsProcessTag
         ? { snapshots: { processId: snapshotsProcessTag, ...(previousSessionId && previousSessionId !== sessionId ? { replaces: previousSessionId } : {}) } }
         : {}),
+      ...(inboxTools ? { inboxTools, cwd: async () => String(await $.session.cwd()) } : {}),
     })
     mod = instance
     await instance.restore().catch(() => undefined)
@@ -231,6 +251,7 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
     debugPath: debug && debug !== '0' ? `${dataDir}/claude-code-mod/debug.log` : null,
     agentTool: resolveAgentToolEnabled(await $.env.get('PLANNOTATOR_AGENT_TOOL'), configText),
     snapshots: resolveSnapshotsEnabled(await $.env.get('PLANNOTATOR_SNAPSHOTS'), configText),
+    inboxTool: resolveInboxToolEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
   }
 }
 
@@ -277,6 +298,25 @@ async function registerTool($: Engine): Promise<void> {
   }
 }
 
+/**
+ * Register `plannotator_inbox` when an Inbox is found (inbox.ts): its actions
+ * are the tools the Inbox offers, so an older Inbox gives fewer actions and no
+ * registry gives no tool at all.
+ */
+async function registerInboxTool($: Engine, settings: Allowed): Promise<void> {
+  const tools = await discoverInboxTools(hostOf($, settings.debugPath), settings.dataDir).catch(() => null)
+  const spec = tools ? inboxAgentTool(tools) : null
+  if (!tools || !spec) return
+  try {
+    const registered = await $.tool.register(spec)
+    inboxToolName = registered && typeof registered.tool === 'string' ? registered.tool : null
+    if (inboxToolName) inboxTools = tools
+  } catch (error) {
+    inboxToolName = null
+    $.ui.log(`Plannotator: the plannotator_inbox tool is not available in this session (${error instanceof Error ? error.message : String(error)}).`)
+  }
+}
+
 /** A tool call's arguments: the event minus the keys the engine reserves. */
 function toolArgsOf(e: Record<string, unknown>): Record<string, unknown> {
   const { tool: _tool, tool_use_id: _id, agentId: _agent, consent: _consent, ...args } = e
@@ -289,6 +329,8 @@ export function register(on: On) {
     if (allowed) return result
     allowed = await resolveAllowed($, e)
     if (!allowed) return result
+    // Before the instance exists: it owns the Inbox link when the tool is registered.
+    if (allowed.inboxTool) await registerInboxTool($, allowed)
     const instance = await currentMod($)
     if (!instance) return result
     await registerCommands($)
@@ -336,6 +378,14 @@ export function register(on: On) {
         return { deny: 'Invalid plannotator call: action "last" annotates the main session\'s last message and is not available to a subagent.' }
       }
       const answer = await instance.runTool(toolArgsOf(e))
+      return 'deny' in answer ? { deny: answer.deny } : { result: answer.text }
+    }
+    // `plannotator_inbox`: the Inbox tool the call names, through the Inbox's
+    // /mcp, with this session's working folder and id filled in (inbox.ts).
+    if (allowed && inboxToolName && e.tool === inboxToolName) {
+      const instance = await currentMod($)
+      if (!instance?.inbox) return { deny: 'The Plannotator Inbox is not connected in this session; use the plannotator inbox mcp server instead.' }
+      const answer = await instance.inbox.callTool(toolArgsOf(e), String(await $.session.cwd()))
       return 'deny' in answer ? { deny: answer.deny } : { result: answer.text }
     }
     // Claude running `plannotator annotate|review|last` in Bash on the main

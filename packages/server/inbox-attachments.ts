@@ -17,7 +17,7 @@
  * draw the Inbox inside itself (#1554).
  */
 
-import { checkServerSession, serverSessionMismatchBody } from "@plannotator/core/server-session";
+import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { INBOX_ANNOTATION_CURRENT, type InboxAttachment } from "@plannotator/core/inbox-types";
 import {
   inboxAttachmentState,
@@ -71,7 +71,7 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
 
   const guardedBody = async (req: Request): Promise<Record<string, unknown> | Response> => {
     const body = await context.readBody(req);
-    if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(), 409);
+    if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
     return body;
   };
 

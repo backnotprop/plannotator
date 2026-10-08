@@ -177,6 +177,9 @@ jobs:
                   [19435, "/api/inbox/projects", 200],
                   [19435, "/api/inbox/threads", 200],
                   [19435, "/api/definitely-missing", 404],
+                  [19435, "/api/inbox/device/health", 401],
+                  [19435, "/api/inbox/device/threads", 401],
+                  [19435, "/api/inbox/device/settings", 401],
                 ];
                 for (const [port, path, expected] of checks) {
                   const response = await fetch(`${base}:${port}${path}`);
@@ -187,6 +190,10 @@ jobs:
                 const blocked = await fetch(`${base}:19432/api/approve`, { method: "POST" });
                 if (blocked.status !== 405) {
                   throw new Error(`POST guard: expected 405, got ${blocked.status}`);
+                }
+                const doorFromPage = await fetch(`${base}:19435/api/inbox/device/health`, { headers: { Origin: "https://evil.example" } });
+                if (doorFromPage.status !== 403) {
+                  throw new Error(`Inbox device door Origin guard: expected 403, got ${doorFromPage.status}`);
                 }
                 const inboxBlocked = await fetch(`${base}:19435/mcp`, { method: "POST" });
                 if (inboxBlocked.status !== 405) {

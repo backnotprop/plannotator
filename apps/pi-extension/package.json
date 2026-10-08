@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/pi-extension",
-  "version": "0.28.7",
+  "version": "0.28.8",
   "type": "module",
   "description": "Plannotator Pi extension - interactive plan review with annotations, annotate agent messages, and review code/PRs",
   "author": "backnotprop",
@@ -40,6 +40,7 @@
     "plannotator-browser-runtime.ts",
     "plannotator-events.ts",
     "plannotator-tool-host.ts",
+    "inbox.ts",
     "server.ts",
     "tool-scope.ts",
     "config.ts",

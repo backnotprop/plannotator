@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useState, useCallback, type RefObject } from 'react';
 import Highlighter from '@plannotator/web-highlighter';
-import type { Annotation, EditorMode, ImageAttachment } from '../types';
+import type { Annotation, EditorMode, HostDraft, ImageAttachment } from '../types';
 import { AnnotationType } from '../types';
 import type { QuickLabel } from '../utils/quickLabels';
 import { getIdentity } from '../utils/identity';
@@ -710,6 +710,13 @@ export interface UseAnnotationHighlighterOptions {
   /** Fires once per `applyAnnotations` pass with what that pass tried and what
    *  it could not anchor, so a host can mark the leftovers in its panel. */
   onRestoreReport?: (report: AnnotationRestoreReport) => void;
+  /**
+   * The composer handed to the host (see `HostDraft`). Set: whenever a
+   * selection's toolbar or composer would open, the host gets the draft
+   * instead (and null when it closes); the host draws no toolbar or composer
+   * from this hook's state. Absent: unchanged.
+   */
+  onHostDraft?: (draft: HostDraft | null) => void;
 }
 
 /** The outcome of one `applyAnnotations` pass. */
@@ -796,6 +803,7 @@ export function useAnnotationHighlighter({
   verifyRestoredContent = false,
   onRestoreMismatch,
   onRestoreReport,
+  onHostDraft,
 }: UseAnnotationHighlighterOptions): UseAnnotationHighlighterReturn {
   const highlighterRef = useRef<Highlighter | null>(null);
   const modeRef = useRef<EditorMode>(mode);
@@ -996,7 +1004,8 @@ export function useAnnotationHighlighter({
     return null;
   }, []);
 
-  const createAnnotationFromSource = (
+  /** The annotation a selection's source makes, or null for a blank quote. No side effects. */
+  const buildAnnotationFromSource = (
     highlighter: Highlighter,
     source: any,
     type: AnnotationType,
@@ -1005,11 +1014,11 @@ export function useAnnotationHighlighter({
     isQuickLabel?: boolean,
     quickLabelTip?: string,
     mentions?: readonly string[],
-  ) => {
+  ): Annotation | null => {
     // #881: the last line before an annotation exists. A quote of pure
     // whitespace cannot be re-anchored on the next load, so it would come back
     // as an invisible row that is still counted and still exported.
-    if (isBlankQuote(source?.text)) return;
+    if (isBlankQuote(source?.text)) return null;
 
     const doms = highlighter.getDoms(source.id);
     let blockId = '';
@@ -1057,6 +1066,22 @@ export function useAnnotationHighlighter({
       ...(isQuickLabel ? { isQuickLabel: true } : {}),
       ...(quickLabelTip ? { quickLabelTip } : {}),
     };
+    return newAnnotation;
+  };
+
+  const createAnnotationFromSource = (
+    highlighter: Highlighter,
+    source: any,
+    type: AnnotationType,
+    text?: string,
+    images?: ImageAttachment[],
+    isQuickLabel?: boolean,
+    quickLabelTip?: string,
+    mentions?: readonly string[],
+  ) => {
+    const newAnnotation = buildAnnotationFromSource(highlighter, source, type, text, images, isQuickLabel, quickLabelTip, mentions);
+    if (!newAnnotation) return;
+    const mathTargets = pendingMathTargetsRef.current;
 
     if (type === AnnotationType.DELETION) {
       highlighter.addClass('deletion', source.id);
@@ -2024,6 +2049,66 @@ export function useAnnotationHighlighter({
     setQuickLabelPicker(null);
     window.getSelection()?.removeAllRanges();
   }, [clearPendingSelection, quickLabelPicker]);
+
+  // --- The composer handed to the host (onHostDraft) ---
+  // The toolbar and composer states still drive everything here; the host is
+  // told about them instead of seeing them drawn. A math source has no id of
+  // its own until it is committed, so its draft id is minted once per source.
+  const onHostDraftRef = useRef(onHostDraft);
+  onHostDraftRef.current = onHostDraft;
+  const hostDraftIdsRef = useRef(new WeakMap<object, string>());
+  const hostDraftOn = onHostDraft !== undefined;
+  useEffect(() => {
+    const report = onHostDraftRef.current;
+    if (!report) return;
+    const open = commentPopover ?? toolbarState;
+    const source = open?.source;
+    const highlighter = highlighterRef.current;
+    if (!source || !highlighter) {
+      report(null);
+      return;
+    }
+    let annotation: Annotation | null;
+    if (isMathAnnotationSource(source)) {
+      let id = hostDraftIdsRef.current.get(source);
+      if (!id) {
+        id = annotationId();
+        hostDraftIdsRef.current.set(source, id);
+      }
+      annotation = {
+        id,
+        blockId: source.blockId,
+        startOffset: 0,
+        endOffset: source.text.length,
+        type: AnnotationType.COMMENT,
+        text: '',
+        originalText: source.text,
+        createdA: Date.now(),
+        author: getIdentity(),
+      };
+    } else {
+      annotation = buildAnnotationFromSource(highlighter, source, AnnotationType.COMMENT, '');
+    }
+    if (!annotation) {
+      report(null);
+      return;
+    }
+    report({
+      annotation,
+      intent: commentPopover ? 'compose' : 'selection',
+      cancel: () => {
+        // A newer selection owns the pending state now: leave it alone.
+        if (pendingSourceRef.current !== source) return;
+        if (!isMathAnnotationSource(source)) highlighterRef.current?.remove(source.id);
+        clearPendingSelection();
+        setToolbarState(null);
+        setCommentPopover(null);
+        window.getSelection()?.removeAllRanges();
+      },
+    });
+    // buildAnnotationFromSource reads refs only; the states are the inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commentPopover, toolbarState, hostDraftOn, clearPendingSelection]);
 
   return {
     highlighterRef,

@@ -48,8 +48,8 @@ function isInside(path: string, root: string): boolean {
   return path === root || path.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
 }
 
-/** Write a blob once (temp file, then rename), owner-only. */
-function writeBlob(inboxDirPath: string, sha256: string, bytes: Uint8Array): void {
+/** Write a blob once (temp file, then rename), owner-only. Also the guided reviews' writer (step 5, packages/server/inbox-guides.ts). */
+export function writeBlob(inboxDirPath: string, sha256: string, bytes: Uint8Array): void {
   const dir = inboxBlobsDir(inboxDirPath);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const path = inboxBlobPath(inboxDirPath, sha256);

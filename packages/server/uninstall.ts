@@ -28,7 +28,8 @@ import {
   resolve,
 } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
-import { inboxStatus, stopInbox } from "@plannotator/shared/inbox/registry";
+import { inboxStatus, readInboxRegistry, stopInbox } from "@plannotator/shared/inbox/registry";
+import { INBOX_TAILNET_HTTPS_PORT, takeDownInboxTailnet } from "./inbox-devices";
 import { runningSnapshotsHub } from "@plannotator/shared/snapshots/registry";
 import {
   applyEdits,
@@ -413,6 +414,16 @@ export async function runPlannotatorUninstall(
         state.errors.push(
           `The Plannotator Inbox (pid ${stopped.pid}) is still running; quit it and run uninstall --purge again.`,
         );
+      }
+    }
+    // "Reach from my tailnet": a mapping a crashed Inbox left behind (a clean stop already took its own down).
+    if (!inboxBlocksPurge && readInboxRegistry(state.dataDir)?.tailnet) {
+      if (request.dryRun) {
+        state.planned.push(`Take down the Plannotator Inbox's tailnet address (tailscale serve --https=${INBOX_TAILNET_HTTPS_PORT})`);
+      } else {
+        const tailnet = takeDownInboxTailnet(state.dataDir);
+        if (tailnet === "removed") state.removed.push(`Took down the Plannotator Inbox's tailnet address (tailscale serve --https=${INBOX_TAILNET_HTTPS_PORT})`);
+        if (tailnet === "failed") state.warnings.push(`Could not check or remove the Inbox's tailnet address; run: tailscale serve --https=${INBOX_TAILNET_HTTPS_PORT} off`);
       }
     }
   }

@@ -766,6 +766,13 @@ export const BRIDGE_SCRIPT = `(function() {
       flashMultiTarget(typeof e.data.key === 'string' ? e.data.key : '');
     }
 
+    else if (type === PREFIX + 'step-pin') {
+      // A host's Parent or Child (a phone's comment sheet): move the pinned
+      // draft to the element around it, or back in. Re-pins through
+      // annotateElement, so the parent sees an ordinary pinpoint selection.
+      stepPin(e.data.direction === 'child' ? 'child' : 'parent');
+    }
+
     else if (type === PREFIX + 'scroll-to') {
       // Selecting an annotation scrolls its first resolved target into view
       // and flashes the overlay focus highlight over EVERY rect of EVERY
@@ -3760,6 +3767,41 @@ export const BRIDGE_SCRIPT = `(function() {
     });
   }
 
+  // Parent and Child for a pinned draft. The trail holds the elements stepped
+  // out of, so Child goes back the way Parent came; past it, Child takes the
+  // first element child. A new pin by click starts a new trail.
+  var pinStepTrail = [];
+  var steppingPin = false;
+  function stepPin(direction) {
+    if (!pendingPinEl || !pendingPinEl.isConnected) return;
+    var from = pendingPinEl;
+    var next = null;
+    if (direction === 'parent') {
+      var up = from.parentElement;
+      if (up && up !== document.body && up !== document.documentElement) next = up;
+    } else {
+      var back = pinStepTrail[pinStepTrail.length - 1];
+      if (back && back.isConnected && from.contains(back)) next = back;
+      else {
+        for (var child = from.firstElementChild; child; child = child.nextElementSibling) {
+          if (isViewerOverlayNode(child)) continue;
+          if (/^(SCRIPT|STYLE|TEMPLATE|NOSCRIPT)$/.test(child.tagName)) continue;
+          next = child;
+          break;
+        }
+      }
+    }
+    if (!next) return;
+    var trail = pinStepTrail.slice();
+    if (direction === 'parent') trail.push(from);
+    else if (trail[trail.length - 1] === next) trail.pop();
+    else trail = [];
+    steppingPin = true;
+    try { annotateElement(next, undefined, pendingPinViaPinpoint, null); }
+    finally { steppingPin = false; }
+    pinStepTrail = trail;
+  }
+
   // Pin an element: select its text if possible (so a <mark> can wrap it), else
   // post its text + box directly so the toolbar still anchors (e.g. an SVG node,
   // whose <text> doesn't select like HTML text). Either way the element stays
@@ -3767,6 +3809,7 @@ export const BRIDGE_SCRIPT = `(function() {
   // rides along so the annotation can restore to this exact element later.
   function annotateElement(el, modeOverride, viaPinpoint, clickPoint) {
     if (!el) return false;
+    if (!steppingPin) pinStepTrail = [];
     pinpointHover = null;
     hidePinpointLabel();
     clearMultiTargets(); // a new primary starts a fresh draft

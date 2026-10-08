@@ -1,0 +1,31 @@
+{
+  "about": "Test vectors for the Inbox relay's keys and envelope (adr/implementation/inbox-mobile.md, section 4), from all-zero inputs. packages/core/crypto.test.ts checks them in TypeScript; the iPhone app's tests (M5, M6) check the same file in Swift. `envelopes` are sealed under `derived.key` (down: items and pushes), `up_envelopes` under `derived.up_key` (commands). Public by design: nothing here protects anything.",
+  "pairing_secret": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "device_id": "dev_00000000000000000000000000",
+  "derived": {
+    "key": "EWmqHqbdwPC6kxOAZoGZpQiyudtOsYa_Vf1fUDAn-Wk",
+    "up_key": "4jMsHMODebuTRvS6-J6tQjH7ocO29bfO7muGjK59dj8",
+    "relay_secret": "Z-gLD9fMyL1FP8urppXEy76cfRANNu3KzK7WVnGOd9I",
+    "relay_secret_sha256": "2dd0e6dc8b7e933117fe89ad28217652c08ce3389c29b81fa212bc31d9e7b43a"
+  },
+  "envelopes": [
+    {
+      "plaintext": "{\"v\":1,\"thread_id\":\"msg_00000000000000000000000000\",\"message_id\":\"msg_00000000000000000000000000\",\"subject\":\"Run the retry tests against the test clock?\",\"project\":\"billing-svc\",\"agent\":\"Claude Code\",\"question\":{\"key\":\"q-00000000\",\"revision\":0,\"prompt\":\"Run the retry tests against the test clock?\",\"context\":\"They take about four minutes.\",\"choices\":[{\"label\":\"Yes\",\"recommended\":true},{\"label\":\"No\",\"recommended\":false}]}}",
+      "envelope": "AAAAAAAAAAAAAAAAuKKDpvO11dJb1xEax5VgdZKHp8Sg7Kk1vFL581G7JJdH8mqUdFpvKIADr94tn0sXTPU0rsfJKfIowo7FoyC0rOtzJpQpmqpClRVimmxF1CwgOCQTmZTlOjXrVFHV1n9_7yO8m33rVdgTGjq1PVcQQxpOfLJrK-DOvaJf0W9PwMRmFA0QrtkHDha8CS7H9Uq3cIpEkaubWISdzfl0o8z4QcuzYfwQP2-f0vMy2DJDXHZ-3z2wG9osltYpTc6OZ_bO5BviPTkSmt1LH7GVdH9bQjx9vyurmItKDUPLQLmZZZ2YK6QbNfbR9XMa0lSp7IBNp9HthWoZF_9yRMU6G6ulUgLL96bAaRaMdKK_he5bj4ttvKCNguAIS1al5WhJAIePISb_8TsDSIwKAKEOPg0V30LD4HBJ94TdpUCthqg10npcSxFBGwkifb_L61j-2C6o3nzM3qV9vdcPOm3HzFWezo85JvD3uD_siiFJ_K3HexYvao-fP3EyaGNWNEEB5vpaAjGILOKE1KkprzhkQoBYpYx2xLRyvoh2pmzBGNeP_ptl1cHhKT-OhDkbWYP8n1eXERitXB8Ze_o"
+    },
+    {
+      "plaintext": "{\"v\":1}",
+      "envelope": "AAAAAAAAAAAAAAABY5Is1uKEWJC6n8rMRS40HS7poFPKJMU"
+    },
+    {
+      "plaintext": "Café, naïve, ✓ 日本",
+      "envelope": "AAAAAAAAAAAAAAACS3xyZIFuro9vPMGn8XW2hOSszCVtzFJgKCXLMeHANdchNLSUaYR7Yls"
+    }
+  ],
+  "up_envelopes": [
+    {
+      "plaintext": "{\"v\":1,\"id\":\"00000000-0000-4000-8000-000000000003\",\"method\":\"POST\",\"path\":\"/api/inbox/device/messages/msg_00000000000000000000000000/reply\",\"body\":{\"idempotency_key\":\"00000000-0000-4000-8000-000000000003\",\"words\":\"Go ahead.\",\"questions\":[{\"key\":\"q-00000000\",\"revision\":1}]}}",
+      "envelope": "AAAAAAAAAAAAAAAD9yKN83_pO_aoP38OaY1PuA4_ZQ66ie9NoSCovpfNunZq24fjZvhxgzhX7UiroExJxKRrO0c2b03z8y29izUPyoe6auDiR57PexvM6gJWVOTkboLZcYAmG6XkJpFF27tFJXTw7nTI8EYYq0VBSV5tNT0kVuoVcqH9Pyd3gIroyU0mYPYRtsppGAqkD5VRTeQM_B6XSV5mwxupEXi_J1wVepqebIYkkDFddYeuXgb1G3-wDYVAayBVUKwT905hatV1KrBYgQ3hudiiYSLxVm054rUiq15pW0ayNDL0pGloHtDE2ze08QHu-4meceFoLwJxhtHqk-v1GYJMFy_niXVGiYbWwjKkoaCO0Hru7PzR9UZIDb1ebtd2mC6dcZXLDLrXRTw"
+    }
+  ]
+}

@@ -158,6 +158,8 @@ export function formatTopLevelHelp(): string {
     "  plannotator guide share --id <savedGuideId> | --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--public] [--ttl <7d>] [--json]",
     "  plannotator guide unshare <id> --token <deleteToken>",
     "  plannotator sessions",
+    "  plannotator inbox [--background | --no-open]",
+    "  plannotator inbox mcp",
     "  plannotator uninstall [--purge] [--yes] [--dry-run]",
     "  plannotator improve-context",
     "",
@@ -178,10 +180,9 @@ export function formatTopLevelHelp(): string {
  * To launch one, delete it from this set, add its usage lines to
  * formatTopLevelHelp() and document it in apps/skills/core/plannotator/SKILL.md.
  *
- * `inbox`: the Plannotator Inbox, hidden until its window ships.
  * `snapshot`: Plannotator Snapshots, the native capture HUD, hidden until launch.
  */
-export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set(["inbox", "snapshot"]);
+export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set(["snapshot"]);
 
 // Per-subcommand usage text. Keyed by the canonical subcommand token; aliases
 // (e.g. `last` → `annotate-last`) are resolved in formatSubcommandHelp().
@@ -343,9 +344,11 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "  plannotator inbox --background  Start it detached without opening a browser,",
     "                                  print its URL and exit (what agents run)",
     "  plannotator inbox --no-open     Run it here without opening a browser",
-    "  plannotator inbox mcp           Stdio MCP server for agents: send_message,",
-    "                                  read_thread, resolve_message, wait_for_reply.",
-    "                                  Starts a stopped Inbox (no browser tab).",
+    "  plannotator inbox mcp           Stdio MCP server for agents: messages, questions,",
+    "                                  files, decisions and guided reviews (send_message,",
+    "                                  read_thread, wait_for_reply, resolve_message,",
+    "                                  list_decisions, record_decision, get_guide_brief,",
+    "                                  submit_guide). Starts a stopped Inbox (no browser tab).",
     "",
     "Register the MCP entry with an agent, e.g.:",
     "  claude mcp add plannotator-inbox -- plannotator inbox mcp",
@@ -427,6 +430,7 @@ export function formatInteractiveNoArgClarification(): string {
     "  plannotator last",
     "  plannotator archive",
     "  plannotator sessions",
+    "  plannotator inbox",
     "  plannotator uninstall",
     "",
     "Run 'plannotator --help' for top-level usage.",

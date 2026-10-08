@@ -1,0 +1,814 @@
+---
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import InboxShot from '../components/inbox/InboxShot.astro';
+import { INBOX_LAUNCHED, INBOX_POST_ID } from '../lib/inbox-launch';
+
+// /inbox/ is generated only once the Inbox launches: until then the deployed
+// site has no such page (src/lib/inbox-launch.ts).
+export function getStaticPaths() {
+  return INBOX_LAUNCHED ? [{ params: { inbox: 'inbox' } }] : [];
+}
+
+// Words of record: research/design/plannotator-inbox-marketing-2026-10-07
+// (LANDING-v5.md, with LANDING-v4.md sections 3 to 8). Visual spec: that
+// folder's landing/index.html. No motion on this page (owner, round 2).
+const title = 'Plannotator Inbox';
+const description =
+  'An async surface for long-running coding agents. Questions and blockers and reviews from every agent arrive in one inbox while they work. Answer and annotate there with Plannotator.';
+const github = 'https://github.com/backnotprop/plannotator';
+const install = 'curl -fsSL https://plannotator.ai/install.sh | bash';
+const copyIcon =
+  '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+const btn =
+  'inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-border text-sm text-foreground font-medium hover:bg-muted/50 transition-colors';
+const steps = [
+  {
+    title: 'An agent writes to the Inbox while it works.',
+    body: 'A question with options. A blocker. A plan or a prototype or a diff to review.',
+  },
+  { title: 'You answer in the Inbox.', body: 'Pick an option. Annotate the file with Plannotator. Send.' },
+  {
+    title: 'The agent gets the answer.',
+    body: 'It arrives as the session\'s next turn. The thread shows "Delivered to Claude Code".',
+  },
+];
+---
+
+<Base
+  title={title}
+  description={description}
+  ogImage="https://plannotator.ai/assets/inbox/inbox-og.jpg"
+>
+  <div class="min-h-screen bg-background text-foreground">
+    <Nav />
+
+    <main class="max-w-6xl mx-auto px-6 md:px-8">
+      <!-- ── 1. Hero ── -->
+      <header class="ib-hero">
+        <div class="ib-hero-inner">
+          <div class="ib-cmd-row">
+            <p class="ib-cmd">plannotator inbox</p>
+            <a href={github} target="_blank" rel="noopener noreferrer" class="ib-gh" aria-label="Plannotator on GitHub">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8C0 11.54 2.29 14.53 5.47 15.59C5.87 15.66 6.02 15.42 6.02 15.21C6.02 15.02 6.01 14.39 6.01 13.72C4 14.09 3.48 13.23 3.32 12.78C3.23 12.55 2.84 11.84 2.5 11.65C2.22 11.5 1.82 11.13 2.49 11.12C3.12 11.11 3.57 11.7 3.72 11.94C4.44 13.15 5.59 12.81 6.05 12.6C6.12 12.08 6.33 11.73 6.56 11.53C4.78 11.33 2.92 10.64 2.92 7.58C2.92 6.71 3.23 5.99 3.74 5.43C3.66 5.23 3.38 4.41 3.82 3.31C3.82 3.31 4.49 3.1 6.02 4.13C6.66 3.95 7.34 3.86 8.02 3.86C8.7 3.86 9.38 3.95 10.02 4.13C11.55 3.09 12.22 3.31 12.22 3.31C12.66 4.41 12.38 5.23 12.3 5.43C12.81 5.99 13.12 6.7 13.12 7.58C13.12 10.65 11.25 11.33 9.47 11.53C9.76 11.78 10.01 12.26 10.01 13.01C10.01 14.08 10 14.94 10 15.21C10 15.42 10.15 15.67 10.55 15.59C13.71 14.53 16 11.53 16 8C16 3.58 12.42 0 8 0Z"/></svg>
+            </a>
+          </div>
+
+          <h1 class="font-display ib-heading">An async surface for your <em>long&#8209;running agents</em></h1>
+
+          <p class="ib-overview">
+            Coding agents now work for hours. Over a run they have questions. They hit blockers. They produce plans and
+            prototypes and diffs you need to review. The Inbox is where all of that arrives while they keep working. You
+            read it like mail and answer when you get to it. Reviewing and annotating is the native Plannotator
+            experience. The agent picks up your answer and goes on.
+          </p>
+
+          <p class="ib-trust">Local. Claude Code and Pi and OpenCode and any MCP agent. Open source.</p>
+
+          <div class="hero-install ib-install flex items-center px-5 pr-12 py-3.5 text-sm max-w-xl w-full">
+            <span class="text-muted-foreground select-none mr-2" aria-hidden="true">$</span>
+            <code class="text-foreground select-all">{install}</code>
+            <button type="button" class="copy-btn" data-copy={install} aria-label="Copy install command" set:html={copyIcon} />
+          </div>
+          <p class="ib-then">then <code>plannotator inbox</code></p>
+
+          <div class="flex flex-wrap gap-3">
+            <a href={github} target="_blank" rel="noopener noreferrer" class={btn}>GitHub</a>
+            <a href="#how" class={btn}>
+              How it works
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14m0 0l-6-6m6 6l6-6" /></svg>
+            </a>
+          </div>
+        </div>
+
+        <InboxShot
+          name="1.1"
+          alt="The Inbox list with threads grouped by what each one needs"
+          large
+          eager
+          class="ib-hero-shot"
+        />
+      </header>
+
+      <!-- ── 2. Why ── -->
+      <section class="ib-arc" id="why">
+        <h2 class="font-display ib-arc-title">Why not the agent's own window</h2>
+        <p class="ib-body">
+          The agent's window is for the run you are watching. Long runs are the ones you are not watching. With several
+          agents going you are not sitting in any of their windows. Their questions and blockers and reviews need
+          somewhere to land that is not a scrollback.
+        </p>
+        <p class="ib-body">
+          The Inbox is that place. Every agent writes to it. Each item is a thread with its context attached. You open
+          it when you are ready. You answer or annotate once. The agent continues from there.
+        </p>
+      </section>
+
+      <!-- ── 3. How it works ── -->
+      <section class="ib-arc" id="how">
+        <h2 class="font-display ib-arc-title">How it works</h2>
+      </section>
+      <div>
+        <div class="ib-loop">
+          {steps.map((step, i) => (
+            <Fragment>
+              {i > 0 && (
+                <span class="ib-loop-arrow" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M13 6l6 6-6 6" /></svg>
+                </span>
+              )}
+              <div class="ib-loop-node">
+                <span class="ib-loop-step">{String(i + 1).padStart(2, '0')}</span>
+                <h3 class="ib-loop-title">{step.title}</h3>
+                <p class="ib-loop-body">{step.body}</p>
+              </div>
+            </Fragment>
+          ))}
+        </div>
+        <InboxShot name="2.6" alt="The reply box with two picks and three annotations ready to send" large class="ib-after" />
+      </div>
+
+      <!-- ── 4. What arrives during one run ── -->
+      <section class="ib-arc ib-arc-gap" id="run">
+        <h2 class="font-display ib-arc-title">What arrives during one run</h2>
+      </section>
+
+      <section class="ib-beat" id="plan">
+        <div class="ib-beat-head">
+          <p class="ib-beat-n">01</p>
+          <h3 class="font-display ib-title">The plan</h3>
+          <p class="ib-body">
+            The agent drafts a plan and asks what it cannot decide alone. The plan opens next to the thread. You comment
+            on a line and pick the answers. Nothing reaches the agent until you send.
+          </p>
+          <p class="ib-note">If the agent edits the plan after sending it the Inbox says so and opens the version it sent.</p>
+        </div>
+        <InboxShot name="2.2" alt="Two questions from Claude Code next to its plan with a comment on one line" />
+      </section>
+
+      <div class="ib-interlude">
+        <p class="font-display">
+          You are somewhere else while this happens. <span>The agents keep working. The Inbox tells you when something needs you.</span>
+        </p>
+      </div>
+
+      <section class="ib-beat" id="decision">
+        <div class="ib-beat-head">
+          <p class="ib-beat-n">02</p>
+          <h3 class="font-display ib-title">A question the plan did not cover</h3>
+          <p class="ib-body">
+            Halfway through the agent hits a case the plan left open and stops. The thread goes to the top under
+            "Stopped on you". You answer. If the answer is a decision you turn the switch on and the decision is stored
+            with the project. Your agents read it on the next run.
+          </p>
+        </div>
+        <InboxShot name="3.1" alt="An answer being recorded as a decision for the project" />
+      </section>
+
+      <section class="ib-beat" id="prototype">
+        <div class="ib-beat-head">
+          <p class="ib-beat-n">03</p>
+          <h3 class="font-display ib-title">A prototype</h3>
+          <p class="ib-body">
+            The agent attaches the prototype. It opens inside the Inbox at full screen. You pin comments on the parts to
+            change. The comments go with your next send.
+          </p>
+          <p class="ib-note">Markdown and HTML and Mermaid and Graphviz. Plannotator's annotation tools.</p>
+        </div>
+        <InboxShot
+          name="proto-inbox"
+          alt="The releases prototype open full screen in the Inbox with one comment pinned on the Forced badge"
+        />
+        <p class="ib-caption">The prototype open in the Inbox with one comment pinned</p>
+      </section>
+
+      <section class="ib-payoff" id="guide">
+        <p class="ib-beat-n">04</p>
+        <h2 class="font-display ib-arc-title ib-payoff-title">The guided review</h2>
+        <p class="ib-body ib-payoff-body">
+          At the end of the run the agent sends a guided review. The change is split into sections in reading order.
+          Each section has its diff and a short summary. Every file is checked against the real diff. You read the whole
+          change in one sitting.
+        </p>
+        <div class="ib-pair">
+          <InboxShot name="4.1" alt="A guided review arriving in a thread from Pi" />
+          <InboxShot name="4.2" alt="The guided review open at section two of four next to its diff" />
+        </div>
+      </section>
+
+      <!-- ── 5. Connections ── -->
+      <section class="ib-arc ib-arc-gap-lg" id="connections">
+        <h2 class="font-display ib-arc-title">Connections</h2>
+        <p class="ib-body">
+          Plannotator's Claude Code mod and Pi extension and OpenCode plugin write to the Inbox on their own and wake
+          the agent when you send. Nothing to install for those three.
+        </p>
+      </section>
+      <div>
+        <div class="ib-hosts">
+          <div class="ib-host"><img src="/assets/icon-claude.svg" alt="" /><b>Claude Code</b></div>
+          <div class="ib-host"><img src="/assets/icon-pi.svg" alt="" class="icon-pi" /><b>Pi</b></div>
+          <div class="ib-host"><img src="/assets/icon-opencode-dark.svg" alt="" class="icon-opencode" /><b>OpenCode</b></div>
+        </div>
+        <div class="ib-any">
+          <p class="ib-body">
+            Any other agent connects to the Inbox as a local MCP server. The Inbox shows the exact step for Codex and
+            Cursor and VS Code and Gemini CLI and Zed and Goose and Amp and Cline.
+          </p>
+          <div class="hero-install ib-install ib-codebox flex items-center px-4 pr-12 py-3 text-[0.8125rem] max-w-xl w-full">
+            <code class="text-foreground">codex mcp add plannotator-inbox -- plannotator inbox mcp</code>
+            <button
+              type="button"
+              class="copy-btn"
+              data-copy="codex mcp add plannotator-inbox -- plannotator inbox mcp"
+              aria-label="Copy the Codex command"
+              set:html={copyIcon}
+            />
+          </div>
+        </div>
+        <InboxShot
+          name="first-run"
+          alt="The first run screen with the three Plannotator connections and a picker for any other agent"
+          class="ib-after"
+        />
+      </div>
+
+      <!-- ── 6. Local ── -->
+      <section class="ib-arc ib-arc-gap" id="local">
+        <h2 class="font-display ib-arc-title">Local</h2>
+        <ul class="ib-caps">
+          <li>Listens on <code>127.0.0.1</code>. Opens in your browser.</li>
+          <li>Threads and answers and decisions are files under <code>~/.plannotator</code>.</li>
+          <li>Part of Plannotator. MIT or Apache 2.0.</li>
+        </ul>
+      </section>
+
+      <!-- ── 7. Hosted ── -->
+      <p class="ib-hosted">
+        <span class="ib-soon font-mono text-[0.6875rem] rounded bg-primary/15 text-primary border border-primary/30 leading-none">coming</span>
+        The same inbox hosted and on your phone.
+      </p>
+
+      <!-- The post, linked here because /blog redirects to the docs' Learn page. -->
+      <p class="ib-post">
+        <span class="ib-post-label">Blog</span>
+        <a href={`/blog/${INBOX_POST_ID}/`}>An Async Surface for Long-Running Agents</a>
+      </p>
+
+      <!-- ── 8. Install ── -->
+      <section class="ib-cta" id="install">
+        <h2 class="font-display ib-title">Install</h2>
+        <p class="ib-body">Install Plannotator and run <code>plannotator inbox</code>.</p>
+        <div class="hero-install ib-install flex items-center px-5 pr-12 py-3.5 text-sm max-w-xl w-full">
+          <span class="text-muted-foreground select-none mr-2" aria-hidden="true">$</span>
+          <code class="text-foreground select-all">{install}</code>
+          <button type="button" class="copy-btn" data-copy={install} aria-label="Copy install command" set:html={copyIcon} />
+        </div>
+        <div class="flex flex-wrap gap-3">
+          <a
+            href="https://docs.plannotator.ai/open-source/start/installation"
+            class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground border border-primary text-sm font-medium hover:bg-primary/90 transition-colors"
+          >
+            Install guide
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+          </a>
+          <a href={github} target="_blank" rel="noopener noreferrer" class={btn}>GitHub</a>
+        </div>
+      </section>
+    </main>
+
+    <!-- ── Screenshot lightbox (code-review.astro's, picking the shown mode) ── -->
+    <div class="ib-lightbox" data-lightbox-modal hidden>
+      <div class="ib-lightbox-backdrop" data-close-lightbox></div>
+      <div class="ib-lightbox-dialog" role="dialog" aria-modal="true" aria-label="Screenshot">
+        <button class="ib-lightbox-close" type="button" aria-label="Close" data-close-lightbox>&times;</button>
+        <img class="ib-lightbox-img" alt="" />
+      </div>
+    </div>
+
+    <script is:inline>
+      (() => {
+        // Copy buttons in the install and command blocks.
+        const check =
+          '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>';
+        document.querySelectorAll('[data-copy]').forEach((b) => {
+          const icon = b.innerHTML;
+          b.addEventListener('click', () => {
+            navigator.clipboard.writeText(b.getAttribute('data-copy') || '').then(() => {
+              b.innerHTML = check;
+              setTimeout(() => { b.innerHTML = icon; }, 1500);
+            });
+          });
+        });
+
+        // Lightbox: the 2x render of the mode on screen.
+        const lb = document.querySelector('[data-lightbox-modal]');
+        const img = lb?.querySelector('.ib-lightbox-img');
+        if (!lb || !img) return;
+        const close = () => {
+          lb.hidden = true;
+          document.body.style.overflow = '';
+          img.removeAttribute('src');
+        };
+        document.querySelectorAll('[data-lightbox-dark]').forEach((b) =>
+          b.addEventListener('click', () => {
+            const light = document.documentElement.classList.contains('light');
+            img.src = b.getAttribute(light ? 'data-lightbox-light' : 'data-lightbox-dark');
+            img.alt = b.getAttribute('data-lightbox-alt') || '';
+            lb.hidden = false;
+            document.body.style.overflow = 'hidden';
+          }),
+        );
+        document.querySelectorAll('[data-close-lightbox]').forEach((b) => b.addEventListener('click', close));
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && !lb.hidden) close();
+        });
+      })();
+    </script>
+
+    <Footer />
+  </div>
+</Base>
+
+<style>
+  /* The code-review page's shapes (cr-hero, cr-arc, cr-loop, cr-caps, cr-cta),
+     at the sizes the Inbox visual spec draws. Tokens come from global.css. */
+  main {
+    --ib-dim: color-mix(in oklab, var(--foreground) 62%, transparent);
+    --ib-subtle: color-mix(in oklab, var(--foreground) 38%, transparent);
+  }
+
+  main code {
+    font-family: var(--font-mono);
+  }
+
+  /* ── Hero ── */
+  .ib-hero {
+    padding: 6.5rem 0 3rem;
+  }
+
+  .ib-hero-inner {
+    max-width: 46rem;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1.25rem;
+  }
+
+  .ib-cmd-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    width: 100%;
+  }
+
+  .ib-cmd {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--primary);
+    letter-spacing: 0.01em;
+  }
+
+  .ib-gh {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    line-height: 1;
+    padding: 0.5rem 0.875rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--ib-dim);
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  .ib-gh:hover,
+  .ib-gh:focus-visible {
+    color: var(--foreground);
+    border-color: var(--ib-subtle);
+  }
+
+  .ib-heading {
+    font-size: clamp(2.5rem, 7vw, 4rem);
+    line-height: 1.04;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    text-wrap: balance;
+  }
+
+  .ib-heading em {
+    font-style: normal;
+    color: var(--primary);
+  }
+
+  .ib-overview {
+    font-size: 1rem;
+    line-height: 1.7;
+    color: var(--ib-dim);
+    max-width: 42rem;
+  }
+
+  .ib-trust {
+    font-size: 11px;
+    letter-spacing: 0.025em;
+    color: color-mix(in oklab, var(--muted-foreground) 55%, transparent);
+  }
+
+  .ib-install code {
+    white-space: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .ib-codebox code {
+    white-space: normal;
+    overflow-wrap: break-word;
+    line-height: 1.6;
+  }
+
+  @media (max-width: 639px) {
+    .ib-install {
+      align-items: flex-start;
+      padding: 0.75rem 2.75rem 0.75rem 1rem;
+      font-size: 0.75rem;
+    }
+    .ib-install code {
+      white-space: normal;
+      overflow-wrap: break-word;
+      line-height: 1.6;
+    }
+    .ib-install :global(.copy-btn) {
+      top: 0.75rem;
+      transform: none;
+    }
+  }
+
+  .ib-then {
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
+    margin-top: -0.5rem;
+  }
+
+  .ib-then code {
+    font-size: 0.95em;
+    color: var(--foreground);
+  }
+
+  .ib-hero :global(.ib-hero-shot) {
+    margin-top: 3.5rem;
+  }
+
+  /* ── Chapter markers (cr-arc) ── */
+  .ib-arc {
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+    padding: 4.5rem 0 2.5rem;
+    border-top: 2px solid var(--border);
+  }
+
+  .ib-arc-gap { margin-top: 4rem; }
+  .ib-arc-gap-lg { margin-top: 5rem; }
+
+  .ib-arc-title {
+    font-size: clamp(1.75rem, 3.5vw, 2.375rem);
+    line-height: 1.1;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  .ib-arc .ib-body { max-width: 42rem; }
+  .ib-arc .ib-body + .ib-body { margin-top: 0.25rem; }
+
+  .ib-title {
+    font-size: clamp(1.375rem, 2.6vw, 1.75rem);
+    line-height: 1.2;
+    font-weight: 650;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+  }
+
+  .ib-body {
+    font-size: 0.9375rem;
+    line-height: 1.7;
+    color: var(--ib-dim);
+  }
+
+  .ib-body code,
+  .ib-caps code {
+    font-size: 0.85em;
+    padding: 0.05em 0.35em;
+    border-radius: 5px;
+    background: color-mix(in oklab, var(--foreground) 8%, transparent);
+    color: var(--foreground);
+  }
+
+  .ib-note {
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: var(--ib-subtle);
+  }
+
+  /* main raises this over the frame's own margin: 0 (InboxShot's scoped .ib-shot). */
+  main :global(.ib-after) {
+    margin-top: 2rem;
+  }
+
+  /* ── Three steps (cr-loop) ── */
+  .ib-loop {
+    display: flex;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .ib-loop-node {
+    flex: 1 1 0;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--card);
+    padding: 1.5rem 1.5rem 1.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .ib-loop-step {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--primary);
+    letter-spacing: 0.05em;
+  }
+
+  .ib-loop-title {
+    font-size: 1.35rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .ib-loop-body {
+    font-size: 0.95rem;
+    line-height: 1.55;
+    color: color-mix(in oklab, var(--foreground) 66%, transparent);
+  }
+
+  .ib-loop-arrow {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    color: color-mix(in oklab, var(--primary) 70%, var(--foreground));
+  }
+
+  .ib-loop-arrow svg { width: 26px; height: 26px; }
+
+  @media (max-width: 800px) {
+    .ib-loop { flex-direction: column; }
+    .ib-loop-arrow { justify-content: center; transform: rotate(90deg); padding: 0.25rem 0; }
+  }
+
+  /* ── One run, end to end ── */
+  .ib-beat {
+    padding: 3.5rem 0 0;
+    scroll-margin-top: 4rem;
+  }
+
+  .ib-arc + .ib-beat { padding-top: 0.5rem; }
+
+  .ib-beat-head {
+    display: grid;
+    gap: 0.875rem;
+    margin-bottom: 1.75rem;
+    max-width: 46rem;
+  }
+
+  .ib-beat-n {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--primary);
+    letter-spacing: 0.05em;
+  }
+
+  .ib-interlude {
+    margin: 4.5rem 0 1rem;
+    padding: 2.5rem 0;
+    border-top: 1px solid color-mix(in oklab, var(--border) 55%, transparent);
+    border-bottom: 1px solid color-mix(in oklab, var(--border) 55%, transparent);
+  }
+
+  .ib-interlude p {
+    font-size: clamp(1.5rem, 3.2vw, 2.25rem);
+    line-height: 1.2;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    max-width: 48rem;
+    text-wrap: balance;
+  }
+
+  .ib-interlude span { color: var(--ib-dim); }
+
+  .ib-caption {
+    margin-top: 0.75rem;
+    font-size: 0.8125rem;
+    color: var(--ib-subtle);
+  }
+
+  .ib-payoff {
+    margin-top: 5rem;
+    padding-top: 4.5rem;
+    border-top: 2px solid var(--border);
+    scroll-margin-top: 4rem;
+  }
+
+  .ib-payoff-title {
+    margin-top: 0.625rem;
+    font-size: clamp(2rem, 4.4vw, 3rem);
+  }
+
+  .ib-payoff-body {
+    max-width: 44rem;
+    margin-top: 0.875rem;
+  }
+
+  .ib-pair {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.25rem;
+    margin-top: 1.75rem;
+  }
+
+  /* ── Connections ── */
+  .ib-hosts {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+  }
+
+  @media (min-width: 640px) {
+    .ib-hosts { grid-template-columns: repeat(3, 1fr); }
+  }
+
+  .ib-host {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.875rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--card);
+  }
+
+  .ib-host img {
+    width: 22px;
+    height: 22px;
+    object-fit: contain;
+    flex: 0 0 auto;
+  }
+
+  .ib-host b {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+  }
+
+  .ib-any {
+    margin-top: 2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+  }
+
+  .ib-any .ib-body { max-width: 44rem; }
+
+  /* ── Local (cr-caps) ── */
+  .ib-caps {
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+    margin-top: 1rem;
+    padding: 1.125rem 0 1.125rem 1.125rem;
+    border-left: 2px solid color-mix(in oklab, var(--primary) 50%, transparent);
+    max-width: 44rem;
+  }
+
+  .ib-caps li {
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    color: var(--ib-dim);
+  }
+
+  /* ── Hosted line ── */
+  .ib-hosted {
+    margin: 4rem 0 0;
+    padding: 1.5rem 0;
+    border-top: 1px solid color-mix(in oklab, var(--border) 55%, transparent);
+    border-bottom: 1px solid color-mix(in oklab, var(--border) 55%, transparent);
+    text-align: center;
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    color: var(--ib-dim);
+    text-wrap: balance;
+  }
+
+  .ib-soon {
+    padding: 2px 6px;
+    margin-right: 0.5rem;
+    vertical-align: 1px;
+  }
+
+  .ib-post {
+    margin-top: 2.5rem;
+    font-size: 0.9375rem;
+    color: var(--ib-dim);
+  }
+
+  .ib-post-label {
+    margin-right: 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ib-subtle);
+  }
+
+  .ib-post a {
+    color: var(--foreground);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklab, var(--foreground) 30%, transparent);
+    text-underline-offset: 3px;
+  }
+
+  .ib-post a:hover { text-decoration-color: var(--primary); }
+
+  /* ── Install (cr-cta) ── */
+  .ib-cta {
+    padding: 5rem 0 6rem;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .ib-cta .ib-body { max-width: 40rem; }
+
+  /* ── Lightbox (code-review.astro's cr-lightbox) ── */
+  .ib-lightbox[hidden] { display: none; }
+
+  .ib-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4vw;
+  }
+
+  .ib-lightbox-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.82);
+    backdrop-filter: blur(4px);
+  }
+
+  .ib-lightbox-dialog {
+    position: relative;
+    max-width: 96vw;
+    max-height: 92vh;
+  }
+
+  .ib-lightbox-img {
+    display: block;
+    max-width: 96vw;
+    max-height: 92vh;
+    width: auto;
+    height: auto;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    box-shadow: 0 40px 120px rgba(0, 0, 0, 0.6);
+  }
+
+  .ib-lightbox-close {
+    position: absolute;
+    top: -48px;
+    right: 0;
+    width: 40px;
+    height: 40px;
+    border: none;
+    background: transparent;
+    color: #fff;
+    font-size: 36px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.8;
+  }
+
+  .ib-lightbox-close:hover { opacity: 1; }
+</style>

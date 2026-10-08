@@ -3,17 +3,24 @@
  * (`plannotator inbox`), Bun-only. Pi and OpenCode are its clients; it needs
  * no node:http mirror.
  *
- * LOCAL ONLY in v1: it always binds 127.0.0.1 and ignores PLANNOTATOR_REMOTE,
- * PLANNOTATOR_PORT and --tailscale. It holds tokens and everything agents
- * sent, so a wide bind with no auth is not acceptable. Port: the last one it
- * had (from the registry) first, else random; never 19432.
+ * LOCAL ONLY by default: it always binds 127.0.0.1 and ignores
+ * PLANNOTATOR_REMOTE, PLANNOTATOR_PORT and --tailscale. It holds tokens and
+ * everything agents sent, so a wide bind with no auth is not acceptable. A
+ * paired phone reaches it through the device door only, over a path the
+ * person switched on ("Reach from my tailnet": a door-only listener that
+ * `tailscale serve` points at, inbox-devices.ts; "Reach from this Wi-Fi": a
+ * door-only TLS listener on every interface, inbox-lan.ts). Port: the
+ * last one it had (from the registry) first, else random; never 19432.
  *
  * Security, on every request, in order:
  *  1. The Host allowlist (request-host-guard.ts), local rule: loopback names.
+ *     The device door, `/api/inbox/device/*` (no Origin, a phone's bearer
+ *     token, an allowlist), sits beside the window here; the tailnet and the
+ *     Wi-Fi reach it through their own door-only listeners, never here.
  *  2. `/mcp`: any Origin is refused (a browser is never an MCP client here).
- *  3. Connection routes (`/api/inbox/control/*`): a loopback Host naming this
- *     port, no Origin, and the registry's bearer token (the pull-bridge
- *     pattern).
+ *  3. Connection routes (`/api/inbox/control/*`, `/api/inbox/bridge/*`): a
+ *     loopback Host naming this port, no Origin, and the registry's bearer
+ *     token (the pull-bridge pattern).
  *  4. State-changing window routes: `isSameOriginOrNoOrigin`, then the
  *     `serverSession` nonce (409 for a tab left open on an older Inbox).
  * No CORS headers anywhere, so another site cannot read an answer.
@@ -31,10 +38,11 @@ import {
   type InboxHealth,
   type InboxLine,
   type InboxListRow,
+  type InboxMessage,
   type InboxProject,
 } from "@plannotator/core/inbox-types";
 import { toInboxQuestion } from "@plannotator/core/inbox-questions";
-import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "@plannotator/core/server-session";
+import { checkServerSession, createServerSessionNonce, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { extractDirName, extractRepoName } from "@plannotator/core/project";
 import {
   INBOX_TOOL_HOSTS,
@@ -53,6 +61,13 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxListSections } from "@plannotator/shared/inbox/list";
 import {
+  INBOX_BRIDGE_EVENT_PATH,
+  INBOX_BRIDGE_POLL_MAX_MS,
+  INBOX_BRIDGE_POLL_PATH,
+  INBOX_MAX_REQUEST_BYTES,
+  type InboxReplyCommand,
+} from "@plannotator/shared/inbox/connection";
+import {
   createInboxToken,
   readInboxRegistry,
   writeInboxRegistry,
@@ -69,9 +84,14 @@ import {
   threadDecisions,
   waitingDecisions,
 } from "./inbox-decisions";
+import { inboxGuideRoute } from "./inbox-guides";
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
+import { createInboxLiveSessions } from "./inbox-sessions";
+import { createInboxDevices, DOOR_PREFIX } from "./inbox-devices";
+import { createInboxRelay } from "./inbox-relay";
+import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 
 const LOOPBACK = "127.0.0.1";
 /** Remote mode's fixed port: the Inbox never takes it. */
@@ -121,6 +141,10 @@ export interface InboxServerOptions {
    * else `plannotator`.
    */
   selfCommand?: readonly string[];
+  /** The phone door's clock (packages/server/inbox-devices.ts): the pairing offer's expiry. Default: the wall clock. */
+  now?: () => Date;
+  /** How "Reach from my tailnet" runs the `tailscale` CLI. Default: the CLI on PATH. */
+  tailscale?: TailscaleRunner;
 }
 
 export interface InboxServer {
@@ -163,6 +187,8 @@ const ERROR_STATUS: Record<string, number> = {
   attachment_changed_type: 409,
   annotation_not_found: 404,
   annotation_closed: 409,
+  // New message (step 8).
+  session_not_live: 409,
 };
 
 /**
@@ -261,7 +287,7 @@ async function probeBinaryVersion(binaryPath: string): Promise<string | null> {
 
 function startOnLoopback(fetch: Parameters<typeof Bun.serve>[0]["fetch"], preferred: number | null): { server: ReturnType<typeof Bun.serve>; portChanged: boolean } {
   const serve = (port: number) =>
-    Bun.serve({ hostname: LOOPBACK, port, idleTimeout: 0, fetch } as Parameters<typeof Bun.serve>[0]);
+    Bun.serve({ hostname: LOOPBACK, port, idleTimeout: 0, maxRequestBodySize: INBOX_MAX_REQUEST_BYTES, fetch } as Parameters<typeof Bun.serve>[0]);
   let portChanged = false;
   if (preferred && preferred !== INBOX_FORBIDDEN_PORT) {
     try {
@@ -317,7 +343,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         recordAttachments: (paths, project, base) =>
           recordInboxAttachments(store.dir, paths, { base, projectRoot: project.root, at: new Date().toISOString() }),
       }),
-    { legacy: "stateless" },
+    { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES },
   );
 
   const health = (): InboxHealth => ({ ok: true, app: INBOX_APP_ID, version, serverSession, pid: process.pid, update });
@@ -530,9 +556,98 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     });
   };
 
+  // ── Agent connections: the reply wake (step 6) ──
+  //
+  // A connection (the Claude Code mod) long-polls for the person's replies to
+  // its session's messages and posts `delivered` once a reply entered the
+  // session as a turn. Nothing is queued in memory: the replies a session
+  // waits for are read from the store (`pendingReplies`), so a reply is handed
+  // out again on every poll until it is delivered or an agent read it, and it
+  // survives an Inbox restart.
+  const threadPageUrl = (base: string, threadId: string) => `${base}#thread=${threadId}`;
+  const replyCommand = (reply: InboxMessage): InboxReplyCommand => ({
+    type: reply.to ? "message" : "reply",
+    id: reply.id,
+    thread_id: reply.thread_id,
+    reply_to: reply.reply_to,
+    subject: store.message(reply.thread_id)?.subject ?? null,
+    body: reply.body,
+    url: threadPageUrl(baseUrl, reply.thread_id),
+  });
+
+  const bridgeSession = (body: Record<string, unknown>): string => {
+    const session = typeof body.session === "string" ? body.session.trim() : "";
+    if (!session) throw new InboxError("validation_error", "session: the agent session id is required.", { field: "session" });
+    return session;
+  };
+
+  /** `{ session, waitMs? }`: answers at once when a reply waits, else holds up to 25 s for one. */
+  const bridgePoll = async (req: Request): Promise<Response> => {
+    const body = await readBody(req);
+    const session = bridgeSession(body);
+    const requested = typeof body.waitMs === "number" && Number.isFinite(body.waitMs) ? body.waitMs : 0;
+    const waitMs = Math.min(Math.max(requested, 0), INBOX_BRIDGE_POLL_MAX_MS);
+    // Step 8: a polling session is live (New message can reach it) while its poll is held.
+    const answered = await live.pollStarted(session, bridgeHost(body), body);
+    const commands = () => store.pendingReplies(session).map(replyCommand);
+    const now = commands();
+    if (now.length > 0 || waitMs === 0) {
+      answered();
+      return json({ commands: now });
+    }
+    return new Promise<Response>((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        unsubscribe();
+        req.signal.removeEventListener("abort", finish);
+        answered();
+        resolve(json({ commands: commands() }));
+      };
+      const timer = setTimeout(finish, waitMs);
+      const unsubscribe = store.subscribe((line) => {
+        if (line.kind === "message" && line.record.author.kind === "person" && store.pendingReplies(session).length > 0) finish();
+      });
+      req.signal.addEventListener("abort", finish);
+    });
+  };
+
+  const bridgeHost = (body: Record<string, unknown>): string => (typeof body.host === "string" && body.host.trim() ? body.host.trim() : "agent");
+
+  /**
+   * `{ session, host, type: "delivered", id }`: the reply or message entered
+   * the session as a turn. `{ session, host, type: "state", busy }` (step 8):
+   * a turn started or ended, for the live sessions New message lists.
+   */
+  const bridgeEvent = async (req: Request): Promise<Response> => {
+    const body = await readBody(req);
+    const session = bridgeSession(body);
+    const host = bridgeHost(body);
+    if (body.type === "state") {
+      live.stateChanged(session, host, body);
+      return json({ ok: true });
+    }
+    if (body.type !== "delivered" || typeof body.id !== "string") {
+      throw new InboxError("validation_error", 'type: "delivered" with the reply id, or "state" with busy.', { field: "type" });
+    }
+    const reply = store.recordDelivery(body.id, { host, session });
+    return json({ ok: true, delivery: reply.delivery });
+  };
+
+  // ── New message (step 8): the live sessions and the window's two routes (packages/server/inbox-sessions.ts) ──
+  const live = createInboxLiveSessions({
+    store,
+    serverSession,
+    resolveRoot: async (path) => (await resolveInboxProjectRoot(path)).root,
+  });
+
   let stopRequested = false;
   let server: ReturnType<typeof Bun.serve>;
   let attachmentRoutes: ReturnType<typeof createInboxAttachmentRoutes>;
+  let phones: ReturnType<typeof createInboxDevices>;
+  let relay: ReturnType<typeof createInboxRelay>;
 
   const readBody = async (req: Request): Promise<Record<string, unknown>> => {
     try {
@@ -557,6 +672,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const path = url.pathname;
     const origin = req.headers.get("origin");
 
+    // Phones (packages/server/inbox-devices.ts): the device door. The tailnet
+    // reaches the door only, through its own listener, never this port.
+    if (path === "/api/inbox/device" || path.startsWith(DOOR_PREFIX)) return phones.door(req, url);
+
     if (path === "/mcp") {
       if (origin !== null) {
         return json({ error: "Browser requests are not accepted on /mcp.", code: "origin_not_allowed" }, 403);
@@ -564,7 +683,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       return mcp.fetch(req);
     }
 
-    if (path.startsWith("/api/inbox/control/")) {
+    if (path.startsWith("/api/inbox/control/") || path.startsWith("/api/inbox/bridge/")) {
       if (!isLoopbackHostHeader(req.headers.get("host"), port)) {
         return json({ error: "Connection routes answer only this machine.", code: "forbidden_host" }, 403);
       }
@@ -584,6 +703,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         return json({ ok: true, stopping: true });
       }
+      if (path === INBOX_BRIDGE_POLL_PATH || path === INBOX_BRIDGE_EVENT_PATH) {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        try {
+          return await (path === INBOX_BRIDGE_POLL_PATH ? bridgePoll(req) : bridgeEvent(req));
+        } catch (error) {
+          return errorResponse(error);
+        }
+      }
       return json({ error: "Not found", code: "not_found" }, 404);
     }
 
@@ -601,7 +728,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (path === "/api/inbox/restart") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
-        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(), 409);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         if (!options.onRestartRequested) {
           return json({ error: "This Inbox cannot restart itself; quit it and run plannotator inbox.", code: "restart_unavailable" }, 409);
         }
@@ -618,7 +745,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method === "GET") return json(settingsModel());
         if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
         const body = await readBody(req);
-        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(), 409);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         if (body.inbox_tool === undefined && body.notifications === undefined) {
           throw new InboxError("validation_error", "body: inbox_tool or notifications is required.");
         }
@@ -639,15 +766,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (seenMatch) {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
-        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(), 409);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         return json({ thread: store.markSeen(seenMatch[1]!) });
       }
+
+      // Guided reviews (step 5): the snapshot a message carries (packages/server/inbox-guides.ts).
+      const guide = await inboxGuideRoute(req, path, store, serverSession);
+      if (guide) return guide;
 
       const messageMatch = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/(picks|reply|resolve)$/.exec(path);
       if (messageMatch) {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
-        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(), 409);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const messageId = messageMatch[1]!;
         switch (messageMatch[2]) {
           case "picks": {
@@ -690,7 +821,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         serverSession,
         readBody,
         json,
-        staleTab: (body) => (checkServerSession(body, serverSession) === "mismatch" ? json(serverSessionMismatchBody(), 409) : null),
+        staleTab: (body) => (checkServerSession(body, serverSession) === "mismatch" ? json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409) : null),
       });
       if (decisionResponse) return decisionResponse;
 
@@ -709,10 +840,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
       if (path === "/favicon.png" && req.method === "GET") return handleFavicon();
 
+      // Step 8: the live sessions of a thread's project, and New message.
+      const newMessage = await live.route(req, path);
+      if (newMessage) return newMessage;
+
       // Step 2: attachments by id, annotations, the HTML asset route, delete
       // thread and delete project (packages/server/inbox-attachments.ts).
       const attached = await attachmentRoutes(req, url);
       if (attached) return attached;
+
+      // Phones: pairing, the device list and revoke, the tailnet and Wi-Fi switches.
+      const phoneRoute = await phones.windowRoute(req, url);
+      if (phoneRoute) return phoneRoute;
 
       if (path.startsWith("/api/")) return json({ error: "Not found", code: "not_found" }, 404);
       return new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8", "X-Content-Type-Options": "nosniff" } });
@@ -737,8 +876,27 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     token,
     serverSession,
     startedAt: new Date().toISOString(),
+    ...(previous?.tailnet ? { tailnet: previous.tailnet } : {}),
+    ...(previous?.lan ? { lan: previous.lan } : {}),
   };
   writeInboxRegistry(dataDir, registry);
+  phones = createInboxDevices({
+    dataDir,
+    serverSession,
+    port: () => port,
+    registry: () => registry,
+    readBody,
+    dispatch: fetch,
+    now: options.now,
+    tailscale: options.tailscale,
+    relay: { paired: (device) => relay.paired(device), revoked: (device) => relay.revoked(device) },
+  });
+  // The relay (packages/server/inbox-relay.ts): the mailbox socket while a phone is paired, the pushes, and the
+  // carriage: store lines down as the event stream writes them, commands up through the door in-process.
+  relay = createInboxRelay({ dataDir, store, devices: phones.devices, payload: eventPayload, apply: phones.asDevice });
+  relay.start();
+  phones.startTailnet();
+  phones.startLan();
 
   const binaryPath = options.binaryPath !== undefined ? options.binaryPath : version !== "dev" ? process.execPath : null;
   let tick: ReturnType<typeof setInterval> | null = null;
@@ -777,6 +935,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (tick) clearInterval(tick);
     void mcp.close().catch(() => {});
     server.stop(true);
+    // The tailnet mapping and the door listener, the Wi-Fi listener and its
+    // Bonjour record, before a restart starts the new run.
+    phones.stopTailnet();
+    phones.stopLan();
+    relay.stop();
   };
 
   return { port, url: baseUrl, token, serverSession, portChanged, store, registry, stop };

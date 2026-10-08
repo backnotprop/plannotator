@@ -21,9 +21,13 @@
  *   new       agent messages the person has not looked at
  *   quiet     the remainder
  *
- * Order inside a section: Stopped and Waiting oldest waiting first; Holding
- * most held up first, then oldest; Sent, New and Quiet newest first. Ties
- * break on the thread id, so the order is total.
+ * Order inside every section: newest first, by the thread's latest message
+ * (`last_at`, the time the row shows), so the time column reads down in order
+ * (owner ruling 2026-10-08: an older question sat above a newer one in
+ * "Waiting on you"). A row moves when the thread gains a message: an agent's
+ * new message, or the person's reply (which in most cases moves it to Sent).
+ * Picks, looks and reads move it between sections only. Ties break on the
+ * thread id, so the order is total.
  */
 
 import {
@@ -65,30 +69,11 @@ function newestFirst(left: InboxListRow, right: InboxListRow): number {
   return right.last_at.localeCompare(left.last_at) || byId(left, right);
 }
 
-function oldestWaitingFirst(left: InboxListRow, right: InboxListRow): number {
-  const l = left.waiting_since ?? left.last_at;
-  const r = right.waiting_since ?? right.last_at;
-  return l.localeCompare(r) || byId(left, right);
-}
-
-function mostHeldUpFirst(left: InboxListRow, right: InboxListRow): number {
-  return right.questions.holds_up.length - left.questions.holds_up.length || oldestWaitingFirst(left, right);
-}
-
-const ORDER: Record<InboxSectionId, (left: InboxListRow, right: InboxListRow) => number> = {
-  stopped: oldestWaitingFirst,
-  holding: mostHeldUpFirst,
-  waiting: oldestWaitingFirst,
-  sent: newestFirst,
-  new: newestFirst,
-  quiet: newestFirst,
-};
-
 /** Every section, in the approved order, each with its rows in order (empty ones included). */
 export function inboxListSections(rows: readonly InboxListRow[]): InboxListSection[] {
   return INBOX_SECTIONS.map(({ id, label }) => ({
     id,
     label,
-    threads: rows.filter((row) => row.section === id).sort(ORDER[id]),
+    threads: rows.filter((row) => row.section === id).sort(newestFirst),
   }));
 }

@@ -367,6 +367,33 @@ jobs:
           "$(command -v opencode2)"
           "$RUNNER_TEMP"/plannotator-opencode-*.tgz
 
+      # The Plannotator Inbox connection on the same installed package: the
+      # plannotator_inbox tool and the reply wake, on the real OpenCode 2 with
+      # a scripted model endpoint, against the binary compiled with the
+      # release flags (apps/opencode-plugin/inbox-v2.test.ts).
+      - name: Compile the binary for the Inbox proofs
+        run: >-
+          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig
+          --define '__CLI_VERSION__="0.0.0-dev"' --outfile .local/plannotator
+
+      - name: Run the Inbox connection proofs on the installed package
+        env:
+          PLANNOTATOR_INBOX_TEST_BINARY: ${{ github.workspace }}/.local/plannotator
+          INBOX_PROOF_DIR: ${{ github.workspace }}/.local/proof/inbox-opencode
+        run: |
+          export OPENCODE2_BIN="$(command -v opencode2)"
+          export OPENCODE_PLUGIN_TARBALL="$(ls "$RUNNER_TEMP"/plannotator-opencode-*.tgz)"
+          export PLANNOTATOR_DATA_DIR="$(mktemp -d)"
+          bun test apps/opencode-plugin/inbox-v2.test.ts apps/opencode-plugin/inbox.test.ts
+
+      - name: Keep the Inbox transcripts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: inbox-opencode-proof
+          path: .local/proof/
+          if-no-files-found: ignore
+
   guides-show:
     name: guides.show viewer (budgets + pinned manifest)
     runs-on: ubuntu-latest

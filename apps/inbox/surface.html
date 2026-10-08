@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- No network: every byte arrives over the bridge (connect-src 'none').
+         An agent's HTML page runs in HtmlViewer's srcdoc frame and inherits
+         this policy: its own folder's files load from the shell's asset
+         scheme, nothing else does. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' plannotator-asset:; style-src 'unsafe-inline' plannotator-asset:; img-src data: blob: plannotator-asset:; font-src data: plannotator-asset:; media-src data: blob: plannotator-asset:; frame-src plannotator-asset: about: data: blob:; worker-src blob:; connect-src 'none'; base-uri plannotator-asset:; form-action 'none'" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Plannotator</title>
+  </head>
+  <body class="overflow-hidden overscroll-none antialiased">
+    <div id="root" class="h-full overflow-hidden"></div>
+    <script type="module" src="/surface.tsx"></script>
+  </body>
+</html>

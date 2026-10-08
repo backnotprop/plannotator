@@ -46,7 +46,17 @@ export function checkServerSession(body: unknown, expected: string): "ok" | "mis
   return value === expected ? "ok" : "mismatch";
 }
 
-/** The JSON body a server answers a mismatch with (status 409). */
-export function serverSessionMismatchBody(): { error: string; code: string } {
-  return { error: SERVER_SESSION_MISMATCH_ERROR, code: SERVER_SESSION_MISMATCH_CODE };
+/**
+ * The Plannotator Inbox's words for the same refusal: the Inbox holds no
+ * review, and a refused write (a pick, a Send, a setting) saved nothing.
+ */
+export const INBOX_SERVER_SESSION_MISMATCH_ERROR =
+  "This Inbox page is out of date: a newer Plannotator Inbox runs on the same address. Reload the page to see it; nothing was saved.";
+
+/**
+ * The JSON body a server answers a mismatch with (status 409). `error`
+ * defaults to the review wording; the Inbox passes its own.
+ */
+export function serverSessionMismatchBody(error: string = SERVER_SESSION_MISMATCH_ERROR): { error: string; code: string } {
+  return { error, code: SERVER_SESSION_MISMATCH_CODE };
 }

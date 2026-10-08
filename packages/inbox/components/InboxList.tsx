@@ -54,6 +54,13 @@ function WideRow({ row, onOpen }: { row: InboxListRow; onOpen: () => void }) {
         <AuthorMark author={row.author} />
         {row.thread_name && <span className="ib-key">{row.thread_name}</span>}
         <span className="ib-s">{subjectOf(row)}</span>
+        {/* The record's 1.1: a thread that carries a guided review says so after its subject. */}
+        {row.guide && !sent && (
+          <span className="ib-att" data-guide-mark="">
+            <Icon name="book" size={13} />
+            Guided review
+          </span>
+        )}
       </span>
       <span className="ib-c">{countOf(row)}</span>
       <span className="ib-t">{shortTime(row.last_at)}</span>
