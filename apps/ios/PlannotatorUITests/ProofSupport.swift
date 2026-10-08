@@ -20,6 +20,15 @@ class ProofCase: XCTestCase {
         app.launchArguments = ["-PlannotatorProof"]
     }
 
+    /// Every proof class leaves the app as a fresh install finds it, whatever
+    /// happened in it: a failure in one class never starts the next one paired.
+    /// (The app clears its Keychain items when it starts with no sources.)
+    override func tearDown() async throws {
+        app?.terminate()
+        try? await control?.post("/reset-app")
+        try await super.tearDown()
+    }
+
     // MARK: Helpers
 
     func element(_ id: String) -> XCUIElement {

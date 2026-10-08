@@ -46,6 +46,13 @@ final class SurfaceHost: NSObject {
     private(set) var droppedUntouched = 0
     /// Navigations away from the surface the shell refused.
     private(set) var cancelledNavigations = 0
+    /// The surface itself failed to load: files cannot be opened until the app restarts.
+    private(set) var loadError: String?
+    /// What the proof reads when a first open never draws: loads, web content ends, the rule list.
+    private(set) var trace = "loads=0"
+    @ObservationIgnored private var loads = 0
+    @ObservationIgnored private var terminations = 0
+    @ObservationIgnored private var rules = "pending"
     /// An agent's HTML page is open: its pins and selections are page-reported
     /// (contract section 5), so one counts only right after the person's own touch.
     @ObservationIgnored var pageReported = false
@@ -98,15 +105,16 @@ final class SurfaceHost: NSObject {
         guard !loaded else { return }
         loaded = true
         Task {
-            guard let rules = try? await WKContentRuleListStore.default().compileContentRuleList(
+            guard let list = try? await WKContentRuleListStore.default().compileContentRuleList(
                 forIdentifier: "plannotator-surface-offline", encodedContentRuleList: Self.offlineRules) else {
+                rules = "refused"
                 isUnavailable = true
-                readyWaiters.forEach { $0.resume() }
-                readyWaiters = []
+                releaseWaiters()
                 return
             }
-            webView.configuration.userContentController.add(rules)
-            webView.load(URLRequest(url: Self.surfaceURL))
+            rules = "ok"
+            webView.configuration.userContentController.add(list)
+            load()
         }
     }
 
@@ -121,10 +129,26 @@ final class SurfaceHost: NSObject {
     /// embeds from its folder is as offline as the page itself.
     static let assetPolicy = "default-src 'none'; script-src 'unsafe-inline' plannotator-asset:; style-src 'unsafe-inline' plannotator-asset: data:; img-src plannotator-asset: data: blob:; font-src plannotator-asset: data:; media-src plannotator-asset: data: blob:; frame-src plannotator-asset: about: data: blob:; worker-src blob:; connect-src 'none'; base-uri plannotator-asset:; form-action 'none'"
 
-    /// Waits for the surface, or returns at once when it cannot load (`isUnavailable`).
+    private func load() {
+        loads += 1
+        updateTrace()
+        webView.load(URLRequest(url: Self.surfaceURL))
+    }
+
+    private func releaseWaiters() {
+        updateTrace()
+        readyWaiters.forEach { $0.resume() }
+        readyWaiters = []
+    }
+
+    private func updateTrace() {
+        trace = "loads=\(loads) ended=\(terminations) rules=\(rules) ready=\(isReady) error=\(loadError ?? "none")"
+    }
+
+    /// Waits for the surface, or returns at once when it cannot load (`isUnavailable`, `loadError`).
     func whenReady() async {
         warm()
-        if isReady || isUnavailable { return }
+        if isReady || isUnavailable || loadError != nil { return }
         await withCheckedContinuation { readyWaiters.append($0) }
     }
 
@@ -186,6 +210,7 @@ final class SurfaceHost: NSObject {
         switch type {
         case "ready":
             isReady = true
+            updateTrace()
             let queued = outbox
             outbox = []
             queued.forEach(deliver)
@@ -257,9 +282,27 @@ extension SurfaceHost: WKNavigationDelegate, WKUIDelegate {
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         // The system ended the page (memory): load it again; the screen re-opens its file on ready.
         isReady = false
+        terminations += 1
         feedbackWaiters.values.forEach { $0.resume(returning: nil) }
         feedbackWaiters = [:]
-        webView.load(URLRequest(url: Self.surfaceURL))
+        load()
+    }
+
+    /// The surface itself did not load (never an agent's frame: those are subframes).
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        surfaceFailed(error)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        surfaceFailed(error)
+    }
+
+    private func surfaceFailed(_ error: Error) {
+        let error = error as NSError
+        // A load replaced by the next one (a reload) is not a failure.
+        guard !isReady, error.code != NSURLErrorCancelled, error.code != 102 else { return }
+        loadError = error.localizedDescription
+        releaseWaiters()
     }
 }
 

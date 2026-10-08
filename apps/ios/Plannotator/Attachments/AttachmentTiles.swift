@@ -29,6 +29,8 @@ struct AttachmentTiles: View {
             }
         }
         .padding(.top, 4)
+        // The surface (20 MB) starts loading while the person reads, so a file opens at once.
+        .task { SurfaceHost.shared.warm() }
     }
 
     private func tile(_ attachment: InboxAttachmentState) -> some View {

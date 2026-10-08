@@ -392,7 +392,7 @@ struct AttachmentCover: View {
     @ViewBuilder
     private var proofProbe: some View {
         if ProcessInfo.processInfo.arguments.contains("-PlannotatorProof") {
-            Text("\(host.droppedFrameMessages) \(host.droppedUntouched) \(host.cancelledNavigations)")
+            Text("\(host.droppedFrameMessages) \(host.droppedUntouched) \(host.cancelledNavigations) \(host.trace)")
                 .font(.system(size: 1))
                 .opacity(0.01)
                 .accessibilityIdentifier("bridge-dropped")
@@ -427,7 +427,7 @@ struct AttachmentCover: View {
             let next = try await door.view(attachment: file.attachmentId, sent: sent)
             if sent != file.sent { file.sent = sent }
             await host.whenReady()
-            guard !host.isUnavailable else {
+            guard !host.isUnavailable, host.loadError == nil else {
                 loadProblem = "Files can't be shown on this iPhone right now."
                 return
             }

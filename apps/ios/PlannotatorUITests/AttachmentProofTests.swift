@@ -33,7 +33,8 @@ final class AttachmentProofTests: ProofCase {
         // 4.1: the plan full screen. Its last section starts below the fold.
         planTile.tap()
         let title = web("Retry worker for Stripe 409s")
-        expect(title, "the plan's title")
+        // The first open loads the 20 MB surface; a cold shared runner takes its time.
+        expect(title, "the plan's title", timeout: 90)
         try await control.shot("4.1-plan")
         // The document follows Dynamic Type (the surface's text scale), the bars follow the system.
         try await control.post("/text-size", ["size": "accessibility-extra-extra-extra-large"])

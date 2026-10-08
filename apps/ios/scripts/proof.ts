@@ -235,6 +235,13 @@ const control = Bun.serve({
           return Response.json(await seed());
         case '/more':
           return Response.json(await more());
+        case '/reset-app': {
+          // After a proof class: the app's stored sources and caches go, as a fresh install has none.
+          spawnSync('xcrun', ['simctl', 'spawn', udid, 'defaults', 'delete', 'ai.plannotator.app']);
+          const container = spawnSync('xcrun', ['simctl', 'get_app_container', udid, 'ai.plannotator.app', 'data'], { encoding: 'utf8' }).stdout.trim();
+          if (container.startsWith('/')) rmSync(join(container, 'Library', 'Caches', 'inbox'), { recursive: true, force: true });
+          return Response.json({ ok: true });
+        }
         case '/attach':
           return Response.json(await attach());
         case '/beacon':
