@@ -48,7 +48,10 @@ final class RelayPushTests: XCTestCase {
         code.typeText(try XCTUnwrap(offer["code"] as? String))
         // The list, or its empty state when this test runs alone.
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'row-' OR label == 'Nothing waiting'")).firstMatch.waitForExistence(timeout: 30))
-        let registered = try await relayDevices()
+        let registered = try await until("this phone at the relay") { () async throws -> [[String: Any]]? in
+            let devices = try await self.relayDevices()
+            return devices.isEmpty ? nil : devices
+        }
         XCTAssertEqual(registered.count, 1, "\(registered)")
         XCTAssertTrue(registered.first?["apns_token"] is NSNull, "\(registered)")
 
@@ -168,8 +171,19 @@ final class RelayPushTests: XCTestCase {
         unlock()
         _ = try setShowPreviews(previews)
 
-        // Leave the phone with no source, as it came.
         app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+        // A push no key here opens (as from a computer this phone was removed
+        // from), arriving in front: shown once as "Question from an agent",
+        // never dressed again.
+        try await control.post("/push-unopenable")
+        let unopened = notification(containing: "Question from an agent")
+        XCTAssertTrue(unopened.waitForExistence(timeout: 30))
+        sleep(3)
+        XCTAssertEqual(springboard.descendants(matching: .any).matching(identifier: "NotificationShortLookView").matching(NSPredicate(format: "label CONTAINS 'Question from an agent'")).count, 1)
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
+
+        // Leave the phone with no source, as it came.
         try await removeSources()
     }
 

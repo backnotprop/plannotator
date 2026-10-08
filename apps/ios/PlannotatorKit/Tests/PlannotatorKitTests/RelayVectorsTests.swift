@@ -40,7 +40,7 @@ import Testing
     @Test func opensEveryEnvelope() throws {
         let v = Self.vectors
         let keys = try #require(RelayKeys(secret: v.pairingSecret, device: v.deviceId))
-        #expect(v.envelopes.count == 3)
+        #expect(v.envelopes.count == 4)
         for envelope in v.envelopes {
             let plaintext = try #require(keys.open(envelope.envelope))
             #expect(String(decoding: plaintext, as: UTF8.self) == envelope.plaintext)
@@ -59,6 +59,18 @@ import Testing
         let sealed = try #require(keys.sealUp(Data("{\"v\":1}".utf8)))
         #expect(keys.openUp(sealed).map { String(decoding: $0, as: UTF8.self) } == "{\"v\":1}")
         #expect(keys.open(sealed) == nil)
+    }
+
+    // The typed push vector, sealed by TypeScript as the Inbox sends it, opens
+    // as a push on the phone and reads as 7.1 and 7.2.
+    @Test func theTypedPushVectorOpens() throws {
+        let v = Self.vectors
+        let push = try #require(v.envelopes.first { $0.plaintext.contains("\"type\":\"push\"") })
+        let opened = try #require(PushSummary.open(push.envelope, devices: [("dev_00000000000000000000000001", v.pairingSecret), (v.deviceId, v.pairingSecret)]))
+        #expect(opened.device == v.deviceId)
+        #expect(opened.summary.title == "Run the retry tests against the test clock?")
+        #expect(opened.summary.body == "Claude Code in billing-svc: They take about four minutes.")
+        #expect(opened.summary.actions.map(\.label) == ["Yes", "No"])
     }
 
     @Test func anotherDevicesKeyOpensNothing() throws {

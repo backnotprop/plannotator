@@ -40,6 +40,8 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
         plain.title = "Plannotator"
         plain.body = PushNotification.hiddenPreviewBody
         plain.categoryIdentifier = PushNotification.messageCategory
+        // Only the envelope, for the app to open if it is in front; nothing the relay put beside it.
+        plain.userInfo = (content.userInfo["e"] as? String).map { ["e": $0] } ?? [:]
         return plain
     }
 }

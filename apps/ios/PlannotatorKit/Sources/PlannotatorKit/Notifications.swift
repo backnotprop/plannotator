@@ -36,6 +36,9 @@ public enum PushNotification {
         guard let envelope = content.userInfo["e"] as? String, let opened = PushSummary.open(envelope, devices: devices) else {
             content.title = "Plannotator"
             content.body = hiddenPreviewBody
+            // Nothing of it is kept: no envelope to try again (the app would
+            // dress it once more, forever), no plaintext the relay put beside it.
+            content.userInfo = [:]
             await keep(nil, center: center)
             return content
         }

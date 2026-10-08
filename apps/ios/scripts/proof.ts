@@ -133,12 +133,18 @@ function relayDevices(): Record<string, unknown>[] {
   if (!existsSync(dir)) return [];
   const rows: Record<string, unknown>[] = [];
   for (const file of readdirSync(dir).filter((f) => f.endsWith('.sqlite') && f !== 'metadata.sqlite')) {
-    const db = new Database(join(dir, file), { readonly: true });
+    // wrangler dev holds the file open and writes it; a read that misses is
+    // skipped here, and the test reads again (it polls).
     try {
-      const tables = (db.query("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((t) => t.name);
-      if (tables.includes('devices')) rows.push(...(db.query('SELECT id, carriage, apns_token, apns_environment FROM devices').all() as Record<string, unknown>[]));
-    } finally {
-      db.close();
+      const db = new Database(join(dir, file), { readonly: true });
+      try {
+        const tables = (db.query("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((t) => t.name);
+        if (tables.includes('devices')) rows.push(...(db.query('SELECT id, carriage, apns_token, apns_environment FROM devices').all() as Record<string, unknown>[]));
+      } finally {
+        db.close();
+      }
+    } catch {
+      continue;
     }
   }
   return rows;
@@ -400,6 +406,15 @@ const control = Bun.serve({
           // The exact body Apple received for that thread, delivered to the simulator.
           const file = pushFiles.get(body.thread ?? '');
           if (!file) return Response.json({ error: 'no push for that thread' }, { status: 404 });
+          run('xcrun', ['simctl', 'push', udid, 'ai.plannotator.app', file]);
+          return Response.json({ ok: true });
+        }
+        case '/push-unopenable': {
+          // A push this phone holds no key for (as from a computer it was removed from):
+          // R1's vector envelope, sealed under the all-zero test device's key.
+          const vectors = JSON.parse(readFileSync(join(repo, 'packages/core/fixtures/inbox-relay-vectors.json'), 'utf8')) as { envelopes: { envelope: string }[] };
+          const file = join(tmp, 'push-unopenable.json');
+          writeFileSync(file, JSON.stringify({ aps: { alert: { title: 'Plannotator', body: 'New in your Inbox' }, 'mutable-content': 1, sound: 'default' }, e: vectors.envelopes[1]!.envelope }));
           run('xcrun', ['simctl', 'push', udid, 'ai.plannotator.app', file]);
           return Response.json({ ok: true });
         }
