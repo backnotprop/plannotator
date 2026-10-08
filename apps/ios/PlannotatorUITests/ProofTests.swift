@@ -5,6 +5,8 @@ import XCTest
 /// test's control calls (`PROOF_CONTROL`). Without it the test is skipped.
 @MainActor
 final class ProofTests: XCTestCase {
+    // Waits are long: a shared CI runner can take tens of seconds to find an
+    // element that a local simulator finds at once.
     private var app: XCUIApplication!
     private var control: Control!
 
@@ -21,7 +23,7 @@ final class ProofTests: XCTestCase {
         app.launch()
 
         // 1.1: nothing connected yet.
-        XCTAssertTrue(element("connect-computer").waitForExistence(timeout: 10))
+        XCTAssertTrue(element("connect-computer").waitForExistence(timeout: 30))
         try await control.shot("1.1")
 
         // The agents write before the phone pairs, so the list draws full.
@@ -32,7 +34,7 @@ final class ProofTests: XCTestCase {
 
         // 1.2, then 1.3: pair by a typed address and the six digits.
         element("connect-computer").tap()
-        XCTAssertTrue(element("find-nearby").waitForExistence(timeout: 5))
+        XCTAssertTrue(element("find-nearby").waitForExistence(timeout: 30))
         try await control.shot("1.2")
         try await control.post("/video/start", ["name": "M1-pair-pick-send"])
         element("find-nearby").tap()
@@ -40,24 +42,24 @@ final class ProofTests: XCTestCase {
         let address = try XCTUnwrap(offer["address"] as? String)
         let code = try XCTUnwrap(offer["code"] as? String)
         let field = element("address-field")
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertTrue(field.waitForExistence(timeout: 30))
         field.tap()
         field.typeText(address)
         element("address-next").tap()
 
         // A wrong code first: refused, with the tries left.
         let codeField = element("pairing-code")
-        XCTAssertTrue(codeField.waitForExistence(timeout: 5))
+        XCTAssertTrue(codeField.waitForExistence(timeout: 30))
         codeField.tap()
         codeField.typeText(String(code.prefix(5)) + (code.last == "9" ? "0" : "9"))
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS '4 tries left'")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS '4 tries left'")).firstMatch.waitForExistence(timeout: 30))
         codeField.typeText(String(code.prefix(3)))
         try await control.shot("1.3")
         codeField.typeText(String(code.dropFirst(3)))
 
         // 2.1B: the list, drawn from the Inbox.
         let stoppedRow = element("row-\(stopped)")
-        XCTAssertTrue(stoppedRow.waitForExistence(timeout: 15))
+        XCTAssertTrue(stoppedRow.waitForExistence(timeout: 30))
         try await control.shot("2.1B")
 
         // The largest Dynamic Type size: the rows stack and wrap, nothing is cut to "…".
@@ -71,17 +73,17 @@ final class ProofTests: XCTestCase {
         let arrived = try await control.post("/more")
         let keep = try XCTUnwrap(arrived["keep"] as? String)
         let pill = element("new-pill")
-        XCTAssertTrue(pill.waitForExistence(timeout: 15))
+        XCTAssertTrue(pill.waitForExistence(timeout: 30))
         XCTAssertTrue(pill.label.contains("2 new"))
         try await control.shot("2.3")
         pill.tap()
-        XCTAssertTrue(app.buttons.containing(NSPredicate(format: "label CONTAINS 'Ship the dark ticket page'")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons.containing(NSPredicate(format: "label CONTAINS 'Ship the dark ticket page'")).firstMatch.waitForExistence(timeout: 30))
 
         // 2.4: a row swiped shows Delete and Resolve.
         let docsRow = app.buttons.containing(NSPredicate(format: "label CONTAINS 'Is this the install flow'")).firstMatch
-        XCTAssertTrue(docsRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(docsRow.waitForExistence(timeout: 30))
         docsRow.swipeLeft()
-        XCTAssertTrue(app.buttons["Resolve"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Resolve"].waitForExistence(timeout: 30))
         try await control.shot("2.4")
         app.buttons["Resolve"].tap()
 
@@ -95,7 +97,7 @@ final class ProofTests: XCTestCase {
         try await control.shot("thread-unreachable")
         try await control.post("/proxy", ["mode": "pass"])
         app.buttons["Try Again"].firstMatch.tap()
-        XCTAssertTrue(app.buttons["choice-The dark one"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["choice-The dark one"].waitForExistence(timeout: 30))
         back()
         app.swipeDown()
         app.swipeDown()
@@ -103,7 +105,7 @@ final class ProofTests: XCTestCase {
         // 3.1: the thread at rest.
         stoppedRow.tap()
         let first = app.buttons["choice-Retry with the same idempotency key"]
-        XCTAssertTrue(first.waitForExistence(timeout: 10))
+        XCTAssertTrue(first.waitForExistence(timeout: 30))
         try await control.shot("3.1")
 
         // The thread at the largest Dynamic Type size: it wraps inside the screen.
@@ -135,7 +137,7 @@ final class ProofTests: XCTestCase {
         try await control.shot("3.4A")
         element("reply-field").tap()
         let text = element("reply-text")
-        XCTAssertTrue(text.waitForExistence(timeout: 5))
+        XCTAssertTrue(text.waitForExistence(timeout: 30))
         text.typeText("Start with the test account.")
         try await control.shot("3.5")
         element("send").tap()
@@ -147,13 +149,13 @@ final class ProofTests: XCTestCase {
         XCTAssertTrue(body.contains("Keep Retry all out of v1."), body)
         XCTAssertTrue(body.contains("Behind a flag, on for the test account first."), body)
         XCTAssertTrue(body.contains("Start with the test account."), body)
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Sent '")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Sent '")).firstMatch.waitForExistence(timeout: 30))
         try await control.post("/video/stop")
 
         // Resolve: back to the list, the thread under Quiet.
         element("thread-resolve").tap()
         let quiet = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Quiet'")).firstMatch
-        XCTAssertTrue(anyRow().waitForExistence(timeout: 10))
+        XCTAssertTrue(anyRow().waitForExistence(timeout: 30))
         scrollTo(quiet) // the list draws lazily: Quiet is below the fold
         quiet.tap()
         scrollTo(stoppedRow)
@@ -161,7 +163,7 @@ final class ProofTests: XCTestCase {
 
         // Delete, from the thread's menu.
         stoppedRow.tap()
-        XCTAssertTrue(element("thread-more").waitForExistence(timeout: 10))
+        XCTAssertTrue(element("thread-more").waitForExistence(timeout: 30))
         element("thread-more").tap()
         app.buttons["Delete Thread"].firstMatch.tap()
         app.sheets.buttons["Delete Thread"].firstMatch.tap()
@@ -181,7 +183,7 @@ final class ProofTests: XCTestCase {
         let testsBody = try XCTUnwrap((testsReply["reply"] as? [String: Any])?["body"] as? String, "reply: \(testsReply)")
         XCTAssertTrue(testsBody.contains("Yes"), testsBody)
         XCTAssertTrue(testsBody.contains("Run them after the deploy."), testsBody)
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Sent '")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Sent '")).firstMatch.waitForExistence(timeout: 30))
         try await control.shot("note-after-send")
         back()
 
@@ -192,7 +194,7 @@ final class ProofTests: XCTestCase {
         XCTAssertTrue(waitForLabel(element("reply-field"), "1 pick"))
         try await control.post("/proxy", ["mode": "drop-reply"])
         element("send").tap()
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Sent '")).firstMatch.waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Sent '")).firstMatch.waitForExistence(timeout: 30))
         XCTAssertFalse(element("send-problem").exists, "a false \"Not sent\" line")
         let refundsReply = try await control.post("/reply", ["thread": refunds])
         XCTAssertTrue(((refundsReply["reply"] as? [String: Any])?["body"] as? String ?? "").contains("Trust the webhook"), "\(refundsReply)")
@@ -203,12 +205,12 @@ final class ProofTests: XCTestCase {
 
         // A thread deleted on the computer while it is open: drawn as gone, no controls left.
         try await openRow(keep)
-        XCTAssertTrue(app.buttons["choice-Yes"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["choice-Yes"].waitForExistence(timeout: 30))
         try await control.post("/delete-on-computer", ["thread": keep])
         // The Inbox writes no event for a deletion; the phone learns it at its
         // next read of the thread (here a pull, as the person would).
         pullToRefresh()
-        XCTAssertTrue(element("thread-gone").waitForExistence(timeout: 15))
+        XCTAssertTrue(element("thread-gone").waitForExistence(timeout: 30))
         XCTAssertFalse(app.buttons["choice-Yes"].exists)
         try await control.shot("thread-deleted")
         app.buttons["Back to Inbox"].firstMatch.tap()
@@ -216,10 +218,10 @@ final class ProofTests: XCTestCase {
         // 9.1 and 9.2.
         tab("Settings")
         let source = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'source-'")).firstMatch
-        XCTAssertTrue(source.waitForExistence(timeout: 5))
+        XCTAssertTrue(source.waitForExistence(timeout: 30))
         try await control.shot("9.1")
         source.tap()
-        XCTAssertTrue(element("remove-source").waitForExistence(timeout: 5))
+        XCTAssertTrue(element("remove-source").waitForExistence(timeout: 30))
         try await control.shot("9.2")
         app.navigationBars.buttons.element(boundBy: 0).tap() // back to Settings
 
@@ -228,33 +230,33 @@ final class ProofTests: XCTestCase {
         tab("Inbox")
         app.swipeDown()
         let pairAgain = app.buttons["Pair Again"]
-        XCTAssertTrue(pairAgain.waitForExistence(timeout: 15))
+        XCTAssertTrue(pairAgain.waitForExistence(timeout: 30))
         try await control.shot("removed")
 
         // Pair again through the computer the phone already knows (1.3's tailnet list).
         pairAgain.tap()
         element("find-nearby").tap()
         let known = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", address)).firstMatch
-        XCTAssertTrue(known.waitForExistence(timeout: 5))
+        XCTAssertTrue(known.waitForExistence(timeout: 30))
         let again = try await control.post("/offer")
         known.tap()
-        XCTAssertTrue(codeField.waitForExistence(timeout: 5))
+        XCTAssertTrue(codeField.waitForExistence(timeout: 30))
         codeField.tap()
         codeField.typeText(try XCTUnwrap(again["code"] as? String))
-        XCTAssertTrue(anyRow().waitForExistence(timeout: 15))
+        XCTAssertTrue(anyRow().waitForExistence(timeout: 30))
 
         // Remove this source (9.2): the computer no longer lists the phone.
         tab("Settings")
         source.tap()
         element("remove-source").tap()
         app.sheets.buttons["Remove This Source"].firstMatch.tap()
-        XCTAssertTrue(element("add-source").waitForExistence(timeout: 10))
+        XCTAssertTrue(element("add-source").waitForExistence(timeout: 30))
         XCTAssertFalse(source.exists)
         let devices = try await control.get("/devices")
         XCTAssertEqual((devices["devices"] as? [Any])?.count, 0, "\(devices)")
 
         tab("Inbox")
-        XCTAssertTrue(element("connect-computer").waitForExistence(timeout: 5))
+        XCTAssertTrue(element("connect-computer").waitForExistence(timeout: 30))
     }
 
     // MARK: Helpers
@@ -312,7 +314,7 @@ final class ProofTests: XCTestCase {
 
     private func waitForLabel(_ target: XCUIElement, _ text: String) -> Bool {
         let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", text), object: target)
-        return XCTWaiter().wait(for: [expectation], timeout: 5) == .completed
+        return XCTWaiter().wait(for: [expectation], timeout: 30) == .completed
     }
 }
 
