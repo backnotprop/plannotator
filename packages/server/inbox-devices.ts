@@ -17,11 +17,13 @@
  * POST's answer is kept per device and key (inbox/device-commands.jsonl), so
  * a retry over another path answers the same without writing again.
  *
- * The tailnet. "Reach from my tailnet" publishes the loopback port at
- * `https://<MagicDNS name>:8443` through `tailscale serve` (never funnel),
- * kept in inbox.json as `tailnet: { https_port }` and re-pointed at the
- * current port at each start. A request under that name reaches the door and
- * nothing else.
+ * The tailnet. "Reach from my tailnet" opens a second loopback listener that
+ * serves the door and nothing else, and publishes THAT port at
+ * `https://<MagicDNS name>:8443` through `tailscale serve` (never funnel).
+ * `tailscale serve` passes the client's Host header through, so the socket,
+ * not a header, keeps tailnet requests on the door. Kept in inbox.json as
+ * `tailnet: { https_port, door_port }`; published at each start, taken down
+ * (listener and mapping) when the switch goes off and at each clean stop.
  */
 
 import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
@@ -40,7 +42,6 @@ import {
 import { readInboxRegistry, writeInboxRegistry, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { runTailscale, serveStatusProxy, TAILSCALE_SERVE_TIMEOUT_MS, type TailscaleRunner } from "@plannotator/shared/tailscale";
-import { isServedHostHeader } from "./request-host-guard";
 import { enableTailscaleServe, removeTailscaleServe, TailscaleServeError } from "./tailscale-serve";
 
 /** The pairing offer's lifetime (limit, contract section 1): long enough to fetch a phone. */
@@ -127,8 +128,6 @@ export interface InboxDevicesContext {
   serverSession: string;
   /** This run's loopback port. */
   port: () => number;
-  /** The port the last run had, whose serve mapping is this Inbox's own. */
-  previousPort: number | null;
   registry: () => InboxRegistryEntry;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   /** The server's own `fetch`: the door hands each allowed request to it on loopback. */
@@ -331,17 +330,57 @@ export function createInboxDevices(context: InboxDevicesContext) {
     }
   };
 
-  // ── The tailnet (contract section 1) ──
+  // ── The tailnet (contract sections 1 and 2) ──
+  //
+  // `tailscale serve` passes the client's own Host header through, so a Host
+  // check cannot tell a tailnet peer from this machine. While the switch is
+  // on, the Inbox runs a second loopback listener that serves the door and
+  // nothing else, and the tailnet mapping points at it, never at the window's
+  // port: the socket keeps tailnet requests on the door.
 
-  const ownTargets = () => [context.port(), context.previousPort].filter((p): p is number => !!p).map((p) => `http://127.0.0.1:${p}`);
+  let doorServer: ReturnType<typeof Bun.serve> | null = null;
+
+  const doorOnly = (req: Request): Promise<Response> | Response => {
+    let url: URL;
+    try {
+      url = new URL(req.url, "http://127.0.0.1");
+    } catch {
+      return refuse(404, "device_route_not_found", "Not a phone route.");
+    }
+    if (url.pathname !== "/api/inbox/device" && !url.pathname.startsWith(DOOR_PREFIX)) return refuse(404, "device_route_not_found", "Not a phone route.");
+    return door(req, url);
+  };
+
+  /** The door listener, on the port it had last time when it is free. */
+  const openDoorListener = (): number => {
+    if (doorServer) return doorServer.port as number;
+    const serve = (port: number) => Bun.serve({ hostname: "127.0.0.1", port, idleTimeout: 0, fetch: doorOnly } as Parameters<typeof Bun.serve>[0]);
+    const last = context.registry().tailnet?.door_port;
+    try {
+      doorServer = last ? serve(last) : serve(0);
+    } catch {
+      doorServer = serve(0);
+    }
+    return doorServer.port as number;
+  };
+
+  const closeDoorListener = () => {
+    doorServer?.stop(true);
+    doorServer = null;
+  };
+
+  /** Targets a mapping of this Inbox's own points at: this run's door listener, or the last run's. */
+  const ownTargets = () =>
+    [doorServer?.port, context.registry().tailnet?.door_port].filter((p): p is number => !!p).map((p) => `http://127.0.0.1:${p}`);
 
   const saveSwitch = (on: boolean) => {
     const entry = { ...(readInboxRegistry(context.dataDir) ?? context.registry()) };
-    if (on) entry.tailnet = { https_port: INBOX_TAILNET_HTTPS_PORT };
+    const value = on && doorServer ? { https_port: INBOX_TAILNET_HTTPS_PORT, door_port: doorServer.port as number } : undefined;
+    if (value) entry.tailnet = value;
     else delete entry.tailnet;
     writeInboxRegistry(context.dataDir, entry);
     const live = context.registry();
-    if (on) live.tailnet = entry.tailnet;
+    if (value) live.tailnet = value;
     else delete live.tailnet;
   };
 
@@ -356,15 +395,17 @@ export function createInboxDevices(context: InboxDevicesContext) {
     return { code: "tailnet_unavailable", message: `Tailscale could not publish the Inbox. ${detail}` };
   };
 
-  /** Publish (or re-point) the tailnet address; the error stays on the state for the window. */
+  /** Open the door listener and point the tailnet mapping at it; on failure both are closed and the error kept for the window. */
   const publish = (): { ok: true } | { ok: false; code: string; message: string } => {
     try {
-      const { url } = enableTailscaleServe(context.port(), tailscale, { httpsPort: INBOX_TAILNET_HTTPS_PORT, ownTargets: ownTargets(), persist: true });
+      const doorPort = openDoorListener();
+      const { url } = enableTailscaleServe(doorPort, tailscale, { httpsPort: INBOX_TAILNET_HTTPS_PORT, ownTargets: ownTargets(), persist: true });
       const served = new URL(url);
       tailnet.address = `${served.hostname}:${served.port || "443"}`;
       tailnet.error = null;
       return { ok: true };
     } catch (error) {
+      closeDoorListener();
       const words = tailnetWords(error);
       tailnet.address = null;
       tailnet.error = words.message;
@@ -372,11 +413,30 @@ export function createInboxDevices(context: InboxDevicesContext) {
     }
   };
 
-  /** At start: the switch was on, so point the mapping at this run's port. */
+  /** Take this Inbox's own mapping down (never someone else's) and close the door listener. */
+  const unpublish = () => {
+    const status = tailscale(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
+    const existing = !status.error && status.status === 0 ? serveStatusProxy(status.stdout, INBOX_TAILNET_HTTPS_PORT) : null;
+    if (existing?.state === "mapped" && ownTargets().includes(existing.proxy)) removeTailscaleServe(INBOX_TAILNET_HTTPS_PORT, tailscale);
+    closeDoorListener();
+    tailnet.address = null;
+  };
+
+  /** At start: the switch was on, so open the door listener and point the mapping at it. */
   const startTailnet = () => {
     if (!context.registry().tailnet) return;
     tailnet.on = true;
-    publish();
+    if (publish().ok) saveSwitch(true);
+  };
+
+  /**
+   * A clean stop (quit, the stop route, a restart to update, which runs this
+   * before it starts the new binary) takes the mapping and the door listener
+   * down, so nothing is published while the Inbox is stopped. The switch stays
+   * on in inbox.json and the next start publishes again.
+   */
+  const stopTailnet = () => {
+    if (tailnet.address !== null || doorServer) unpublish();
   };
 
   const setTailnet = (on: boolean): Response => {
@@ -387,12 +447,8 @@ export function createInboxDevices(context: InboxDevicesContext) {
       saveSwitch(true);
       return json({ tailnet });
     }
-    // Off: take down only a mapping that is this Inbox's own.
-    const status = tailscale(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
-    const existing = !status.error && status.status === 0 ? serveStatusProxy(status.stdout, INBOX_TAILNET_HTTPS_PORT) : null;
-    if (existing?.state === "mapped" && ownTargets().includes(existing.proxy)) removeTailscaleServe(INBOX_TAILNET_HTTPS_PORT, tailscale);
+    unpublish();
     tailnet.on = false;
-    tailnet.address = null;
     tailnet.error = null;
     saveSwitch(false);
     return json({ tailnet });
@@ -435,15 +491,5 @@ export function createInboxDevices(context: InboxDevicesContext) {
     return null;
   };
 
-  /**
-   * A request under the tailnet name reaches the door and nothing else
-   * (contract section 2, "Where the door answers").
-   */
-  const servedHostRefusal = (req: Request, path: string): Response | null => {
-    if (!isServedHostHeader(req.headers.get("host"))) return null;
-    if (path === "/api/inbox/device" || path.startsWith(DOOR_PREFIX)) return null;
-    return refuse(403, "forbidden_host", "Only the phone routes answer on this address.");
-  };
-
-  return { door, windowRoute, servedHostRefusal, startTailnet, devices };
+  return { door, windowRoute, startTailnet, stopTailnet, devices };
 }

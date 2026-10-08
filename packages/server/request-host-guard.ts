@@ -34,19 +34,6 @@ export function allowServedHostname(hostname: string): void {
   if (hostname) servedHostnames.add(hostname.toLowerCase());
 }
 
-/**
- * The request arrived under a name this process published through `tailscale
- * serve` (the Inbox's tailnet name, where only the phone door answers).
- */
-export function isServedHostHeader(host: string | null): boolean {
-  if (!host || servedHostnames.size === 0) return false;
-  try {
-    return servedHostnames.has(new URL(`http://${host}`).hostname.toLowerCase());
-  } catch {
-    return false;
-  }
-}
-
 export function resetServedHostnamesForTests(): void {
   servedHostnames.clear();
 }

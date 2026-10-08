@@ -1811,12 +1811,12 @@ One long-lived local server per machine. Agents leave messages, `:::question` bl
 - It always binds `127.0.0.1` and ignores `PLANNOTATOR_REMOTE`, `PLANNOTATOR_PORT` and `--tailscale`, because it holds tokens and everything agents sent.
 - Port: the last one (from the registry) comes first, so the browser's notification permission holds. When something else holds that port, the Inbox takes a random port and shows a one-time notice (stderr and the list model's `notice`). It never uses 19432.
 - A paired phone reaches it only through the device door (see "Phones"), and only over a path the person switched on in Settings:
-  - "Reach from my tailnet" (off by default): `tailscale serve --bg --https=8443 http://127.0.0.1:<port>`, serve and never funnel. The switch is kept in `inbox.json` as `tailnet: { https_port: 8443 }` and the mapping is re-pointed at the current port at each start. A mapping on 8443 that the Inbox did not make (its target is not this run's or the last run's loopback port) is never overwritten: the switch stays off and Settings says so. The mapping survives the Inbox's exit (Tailscale's `--bg` persistence) and is taken down when the switch goes off. Under that tailnet name only the door answers; the window, `/mcp`, the bridge and every other route are `403 forbidden_host`.
+  - "Reach from my tailnet" (off by default): a second loopback listener that serves the device door and nothing else, published with `tailscale serve --bg --https=8443 http://127.0.0.1:<door port>`, serve and never funnel. The window's port is never published: `tailscale serve` passes the client's own Host header through, so only the socket can keep tailnet requests on the door. The switch is kept in `inbox.json` as `tailnet: { https_port: 8443, door_port }`; each start publishes again. The listener and the mapping go when the switch goes off and at every clean stop (quit, the stop route, and a restart to update, before it starts the new binary). A mapping on 8443 that the Inbox did not make (its target is not this run's or the last run's door listener) is never overwritten or taken down: the switch stays off and Settings says so.
   - "Reach from this Wi-Fi" (mobile step P2, not built): a TLS listener serving only the door.
   - The relay (R1, R2, not built).
 
 **Registry** `${dataDir}/inbox/inbox.json` (`packages/shared/inbox/registry.ts`).
-- Shape: `{ v, pid, port, url, version, token, serverSession, startedAt }`, mode 0600, written atomically at every start and kept after exit. "Found" means the file exists. The token rotates every start.
+- Shape: `{ v, pid, port, url, version, token, serverSession, startedAt, tailnet? }` (`tailnet: { https_port, door_port }` while "Reach from my tailnet" is on), mode 0600, written atomically at every start and kept after exit. "Found" means the file exists. The token rotates every start.
 - Running: `GET /api/inbox/health` on that port answers with this entry's `serverSession`.
 - Stopped: a dead pid with no answer, a port answering for another Inbox, or a live pid with nothing listening (a reused pid).
 - Busy: a live pid whose port takes the health request but does not answer in time. Callers wait for a busy Inbox (up to 20 s, then an error) and never replace it, because a second process would be a second writer on the store.
@@ -2057,7 +2057,7 @@ Sorting and the rest:
 - No CORS headers on the Inbox's routes. The one exception is annotate's asset route for an attached HTML page's folder.
 - The window's CSP: `default-src 'self'`, inline script and style, `connect-src 'self'`, `frame-ancestors 'none'`, `base-uri 'self'`, `form-action 'none'`.
 - Agent text reaches the page only through React and Plannotator's markdown renderer.
-- The device door (`/api/inbox/device/*`): no Origin, the phone's bearer token, the allowlist (see "Phones"). Under the published tailnet name only the door answers.
+- The device door (`/api/inbox/device/*`): no Origin, the phone's bearer token, the allowlist (see "Phones"). The tailnet reaches only the door, through its own listener (see "Local only by default").
 - DAST (`.github/workflows/dast.yml`) scans a seeded Inbox on port 19435, the door's refusals included.
 
 **Proofs.** Every proof runs under a temp data dir, against a real server, with no mocks.

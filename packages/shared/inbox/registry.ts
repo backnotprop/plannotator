@@ -43,10 +43,10 @@ export interface InboxRegistryEntry {
   startedAt: string;
   /**
    * "Reach from my tailnet" is on (adr/implementation/inbox-mobile.md,
-   * section 1): the tailnet HTTPS port, kept across starts and re-pointed at
-   * each start's loopback port. Absent: off.
+   * section 1): the tailnet HTTPS port and the door-only listener's loopback
+   * port it publishes (reused at the next start when free). Absent: off.
    */
-  tailnet?: { https_port: number };
+  tailnet?: { https_port: number; door_port?: number };
 }
 
 export function inboxRegistryPath(dataDir: string): string {

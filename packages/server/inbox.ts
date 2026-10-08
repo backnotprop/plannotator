@@ -7,13 +7,15 @@
  * PLANNOTATOR_REMOTE, PLANNOTATOR_PORT and --tailscale. It holds tokens and
  * everything agents sent, so a wide bind with no auth is not acceptable. A
  * paired phone reaches it through the device door only, over a path the
- * person switched on ("Reach from my tailnet": inbox-devices.ts). Port: the
+ * person switched on ("Reach from my tailnet": a door-only listener that
+ * `tailscale serve` points at, inbox-devices.ts). Port: the
  * last one it had (from the registry) first, else random; never 19432.
  *
  * Security, on every request, in order:
- *  1. The Host allowlist (request-host-guard.ts), local rule: loopback names
- *     (and the published tailnet name, which reaches only the device door,
- *     `/api/inbox/device/*`: no Origin, a phone's bearer token, an allowlist).
+ *  1. The Host allowlist (request-host-guard.ts), local rule: loopback names.
+ *     The device door, `/api/inbox/device/*` (no Origin, a phone's bearer
+ *     token, an allowlist), sits beside the window here; the tailnet reaches
+ *     it through its own door-only listener (inbox-devices.ts), never here.
  *  2. `/mcp`: any Origin is refused (a browser is never an MCP client here).
  *  3. Connection routes (`/api/inbox/control/*`, `/api/inbox/bridge/*`): a
  *     loopback Host naming this port, no Origin, and the registry's bearer
@@ -86,6 +88,7 @@ import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
 import { createInboxLiveSessions } from "./inbox-sessions";
 import { createInboxDevices, DOOR_PREFIX } from "./inbox-devices";
+import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 
 const LOOPBACK = "127.0.0.1";
 /** Remote mode's fixed port: the Inbox never takes it. */
@@ -137,6 +140,8 @@ export interface InboxServerOptions {
   selfCommand?: readonly string[];
   /** The phone door's clock (packages/server/inbox-devices.ts): the pairing offer's expiry. Default: the wall clock. */
   now?: () => Date;
+  /** How "Reach from my tailnet" runs the `tailscale` CLI. Default: the CLI on PATH. */
+  tailscale?: TailscaleRunner;
 }
 
 export interface InboxServer {
@@ -663,11 +668,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const path = url.pathname;
     const origin = req.headers.get("origin");
 
-    // Phones (packages/server/inbox-devices.ts): the device door, and the
-    // tailnet name answering nothing else.
+    // Phones (packages/server/inbox-devices.ts): the device door. The tailnet
+    // reaches the door only, through its own listener, never this port.
     if (path === "/api/inbox/device" || path.startsWith(DOOR_PREFIX)) return phones.door(req, url);
-    const offTailnet = phones.servedHostRefusal(req, path);
-    if (offTailnet) return offTailnet;
 
     if (path === "/mcp") {
       if (origin !== null) {
@@ -876,11 +879,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     dataDir,
     serverSession,
     port: () => port,
-    previousPort: previous?.port ?? null,
     registry: () => registry,
     readBody,
     dispatch: fetch,
     now: options.now,
+    tailscale: options.tailscale,
   });
   phones.startTailnet();
 
@@ -921,6 +924,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (tick) clearInterval(tick);
     void mcp.close().catch(() => {});
     server.stop(true);
+    // The tailnet mapping and the door listener, before a restart starts the new run.
+    phones.stopTailnet();
   };
 
   return { port, url: baseUrl, token, serverSession, portChanged, store, registry, stop };

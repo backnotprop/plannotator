@@ -11,8 +11,10 @@
  *    and sends, and the agent's wait_for_reply, through `plannotator inbox
  *    mcp` and the MCP SDK's stdio client, gets the answer.
  *  - "In process": what a process cannot show without waiting ten minutes
- *    or a real tailnet: the offer's expiry (the server's clock option) and
- *    the tailnet name reaching the door and nothing else.
+ *    or a real tailnet: the offer's expiry (the server's clock option), and
+ *    the tailnet path through a scripted `tailscale` CLI (the runner seam):
+ *    serve points at a door-only listener, a spoofed Host reaches no window
+ *    route there, and the mapping goes with the switch and a clean stop.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -31,8 +33,9 @@ import {
   worldEnv,
   type InboxWorld,
 } from "../../tests/helpers/inbox-world";
-import { allowServedHostname, resetServedHostnamesForTests } from "./request-host-guard";
+import { resetServedHostnamesForTests } from "./request-host-guard";
 import { startInboxServer } from "./inbox";
+import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { GUIDE_BRIEF_EXAMPLE } from "./inbox-guides";
 
 const DEVICE_KEYS = ["carriage", "created_at", "id", "last_seen_at", "name", "platform", "revoked_at"];
@@ -548,38 +551,99 @@ describe("the device door, in process", () => {
     }
   });
 
-  test("under the tailnet name only the door answers: the window, /mcp, the bridge, settings, restart, pairing and the device list are 403 forbidden_host", async () => {
+  test("the tailnet reaches only the door: tailscale serve points at a door-only listener, so a spoofed Host reaches no window route; the mapping and the listener go when the switch goes off and at a clean stop or restart", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "plannotator-inbox-devices-tailnet-"));
     roots.push(dataDir);
-    const inbox = await startInboxServer({ dataDir, binaryPath: null });
-    // What enableTailscaleServe does once serve reports the URL.
-    allowServedHostname("macbook-pro.tail0000.ts.net");
+    // Tailscale's serve config, kept by a scripted CLI through the seam the Inbox runs the real one with.
+    const serve = new Map<number, string>();
+    const tailscale: TailscaleRunner = (args) => {
+      const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
+      if (args[1] === "status") {
+        if (serve.size === 0) return ok("{}");
+        const TCP = Object.fromEntries([...serve.keys()].map((p) => [String(p), { HTTPS: true }]));
+        const Web = Object.fromEntries([...serve].map(([p, proxy]) => [`macbook-pro.tail0000.ts.net:${p}`, { Handlers: { "/": { Proxy: proxy } } }]));
+        return ok(JSON.stringify({ TCP, Web }));
+      }
+      const httpsPort = Number(/--https=(\d+)/.exec(args.join(" "))![1]);
+      if (args.includes("off")) {
+        serve.delete(httpsPort);
+        return ok();
+      }
+      serve.set(httpsPort, args.at(-1)!);
+      return ok(`Available within your tailnet:\n\nhttps://macbook-pro.tail0000.ts.net:${httpsPort}/\n|-- proxy ${args.at(-1)}\n`);
+    };
+    const refused = async (response: Response) => [response.status, ((await response.json()) as Json).code];
     try {
-      const base = `http://127.0.0.1:${inbox.port}`;
-      const host = { Host: "macbook-pro.tail0000.ts.net:8443" };
-      const made = (await (await fetch(`${base}/api/inbox/pairing`, { method: "POST", body: "{}" })).json()) as Json;
-      const paired = await fetch(`${base}/api/inbox/device/pair`, { method: "POST", headers: { ...host, "Content-Type": "application/json" }, body: JSON.stringify({ code: made.offer.code, name: "iPhone", platform: "ios" }) });
+      const inbox = await startInboxServer({ dataDir, binaryPath: null, tailscale });
+      const main = `http://127.0.0.1:${inbox.port}`;
+      const on = await fetch(`${main}/api/inbox/tailnet`, { method: "POST", body: JSON.stringify({ on: true }) });
+      expect(((await on.json()) as Json).tailnet).toMatchObject({ on: true, address: "macbook-pro.tail0000.ts.net:8443" });
+      // What tailscale serve forwards to: the door listener, never the window's port.
+      const target = serve.get(8443)!;
+      const doorPort = Number(new URL(target).port);
+      expect(target).toBe(`http://127.0.0.1:${doorPort}`);
+      expect(doorPort).not.toBe(inbox.port);
+      expect(JSON.parse(readFileSync(join(dataDir, "inbox", "inbox.json"), "utf8")).tailnet).toEqual({ https_port: 8443, door_port: doorPort });
+      const tailnetDoor = `http://127.0.0.1:${doorPort}`;
+
+      // A tailnet peer through serve: the door works there.
+      const made = (await (await fetch(`${main}/api/inbox/pairing`, { method: "POST", body: "{}" })).json()) as Json;
+      const paired = await fetch(`${tailnetDoor}/api/inbox/device/pair`, { method: "POST", headers: { Host: "macbook-pro.tail0000.ts.net:8443", "Content-Type": "application/json" }, body: JSON.stringify({ code: made.offer.code, name: "iPhone", platform: "ios" }) });
       expect(paired.status).toBe(201);
       const { token } = (await paired.json()) as Json;
-      expect((await fetch(`${base}/api/inbox/device/threads`, { headers: { ...host, Authorization: `Bearer ${token}` } })).status).toBe(200);
-      for (const [method, path] of [
-        ["GET", "/"],
-        ["GET", "/favicon.png"],
-        ["POST", "/mcp"],
-        ["POST", "/api/inbox/bridge/poll"],
-        ["POST", "/api/inbox/control/stop"],
-        ["GET", "/api/inbox/threads"],
-        ["GET", "/api/inbox/settings"],
-        ["POST", "/api/inbox/restart"],
-        ["POST", "/api/inbox/pairing"],
-        ["GET", "/api/inbox/devices"],
-        ["GET", "/api/inbox/tailnet"],
-      ] as const) {
-        const response = await fetch(`${base}${path}`, { method, headers: { ...host, Authorization: `Bearer ${token}` }, body: method === "POST" ? "{}" : undefined });
-        expect([path, response.status, ((await response.json()) as Json).code]).toEqual([path, 403, "forbidden_host"]);
+      expect((await fetch(`${tailnetDoor}/api/inbox/device/threads`, { headers: { Authorization: `Bearer ${token}` } })).status).toBe(200);
+
+      // The same peer spoofing a loopback Host (serve passes it through) reaches no window route there.
+      for (const host of ["localhost", "127.0.0.1", `127.0.0.1:${inbox.port}`, "macbook-pro.tail0000.ts.net:8443"]) {
+        for (const [method, path] of [
+          ["GET", "/"],
+          ["GET", "/api/inbox/threads"],
+          ["POST", "/api/inbox/pairing"],
+          ["POST", "/mcp"],
+          ["GET", "/api/inbox/settings"],
+          ["POST", "/api/inbox/settings"],
+          ["POST", "/api/inbox/restart"],
+          ["POST", "/api/inbox/projects/prj_x/delete"],
+          ["POST", "/api/inbox/bridge/poll"],
+          ["POST", "/api/inbox/control/stop"],
+          ["GET", "/api/inbox/devices"],
+          ["POST", "/api/inbox/tailnet"],
+        ] as const) {
+          const response = await fetch(`${tailnetDoor}${path}`, { method, headers: { Host: host }, body: method === "POST" ? "{}" : undefined });
+          expect([host, path, ...(await refused(response))]).toEqual([host, path, 404, "device_route_not_found"]);
+        }
       }
-    } finally {
+      // The window's own port is unchanged: a loopback client with no Origin is served as before.
+      expect((await fetch(`${main}/api/inbox/threads`, { headers: { Host: "localhost" } })).status).toBe(200);
+      expect((await fetch(`${main}/api/inbox/pairing`, { method: "POST", headers: { Host: "localhost" }, body: "{}" })).status).toBe(201);
+
+      // Off: the mapping and the listener are gone; the switch is cleared.
+      await fetch(`${main}/api/inbox/tailnet`, { method: "POST", body: JSON.stringify({ on: false }) });
+      expect(serve.has(8443)).toBe(false);
+      expect(await fetch(`${tailnetDoor}/api/inbox/device/health`).then(() => "answered", () => "closed")).toBe("closed");
+      expect(JSON.parse(readFileSync(join(dataDir, "inbox", "inbox.json"), "utf8")).tailnet).toBeUndefined();
+
+      // On again, then a clean stop: both go, the switch stays on for the next start, which publishes again.
+      await fetch(`${main}/api/inbox/tailnet`, { method: "POST", body: JSON.stringify({ on: true }) });
+      expect(serve.has(8443)).toBe(true);
       inbox.stop();
+      expect(serve.has(8443)).toBe(false);
+      expect(JSON.parse(readFileSync(join(dataDir, "inbox", "inbox.json"), "utf8")).tailnet.https_port).toBe(8443);
+      let atRestart: string | undefined = "not called";
+      const next = await startInboxServer({ dataDir, binaryPath: null, tailscale, onRestartRequested: () => (atRestart = serve.get(8443)) });
+      expect(serve.get(8443)).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+      expect(serve.get(8443)).not.toBe(`http://127.0.0.1:${next.port}`);
+      // Restart to update takes the mapping down before the new run starts (no race with its publish).
+      expect((await fetch(`http://127.0.0.1:${next.port}/api/inbox/restart`, { method: "POST", body: "{}" })).status).toBe(200);
+      await Bun.sleep(150);
+      expect(atRestart).toBeUndefined();
+
+      // A mapping someone else put on 8443 is never taken down.
+      const third = await startInboxServer({ dataDir, binaryPath: null, tailscale });
+      serve.set(8443, "http://127.0.0.1:3000");
+      third.stop();
+      expect(serve.get(8443)).toBe("http://127.0.0.1:3000");
+    } finally {
       resetServedHostnamesForTests();
     }
   });

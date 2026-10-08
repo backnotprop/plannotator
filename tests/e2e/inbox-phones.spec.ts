@@ -144,7 +144,7 @@ test('Pair a phone: the QR is the offer\'s link, the digits are the offer\'s cod
   expect(world.errors).toEqual([]);
 });
 
-test('Reach from my tailnet: the door answers at the MagicDNS name on 8443, the window does not (run by hand on a tailnet)', async () => {
+test('Reach from my tailnet: the door answers at the MagicDNS name on 8443, nothing else does (run by hand on a tailnet)', async () => {
   test.skip(process.env.PLANNOTATOR_E2E_TAILNET !== '1', 'needs a Mac signed in to Tailscale (PLANNOTATOR_E2E_TAILNET=1)');
   const { page } = world;
   await page.goto(`${world.url}#settings`);
@@ -165,9 +165,10 @@ test('Reach from my tailnet: the door answers at the MagicDNS name on 8443, the 
     expect(redeemed.status).toBe(201);
     const { token } = (await redeemed.json()) as { token: string };
     expect((await door('health', { base, token })).status).toBe(200);
-    expect((await fetch(`${base}/api/inbox/threads`)).status).toBe(403);
-    expect((await fetch(`${base}/mcp`, { method: 'POST', body: '{}' })).status).toBe(403);
-    expect((await fetch(`${base}/`)).status).toBe(403);
+    // Only the door is served there (tailscale serve points at the door-only listener), whatever Host the peer sends.
+    expect((await fetch(`${base}/api/inbox/threads`)).status).toBe(404);
+    expect((await fetch(`${base}/mcp`, { method: 'POST', body: '{}' })).status).toBe(404);
+    expect((await fetch(`${base}/`)).status).toBe(404);
     await expect(block.locator('[data-device]')).toHaveCount(1, { timeout: 10_000 });
     await shot('settings-phones-tailnet-paired');
   } finally {
