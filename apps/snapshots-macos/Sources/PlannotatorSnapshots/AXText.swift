@@ -47,18 +47,28 @@ enum AXText {
             return Result(text: nil, url: nil, unavailable: "this app is on the exclusion list", enablement: nil)
         }
         guard isTrusted else { return Result(text: nil, url: nil, unavailable: "Accessibility is off", enablement: nil) }
-        // One budget for everything: asking for the tree, waiting for it, and the walk.
+        // One budget for everything: asking for the tree, waiting, the walk, and the reset of
+        // AXEnhancedUserInterface. Every accessibility message is clamped to what is left
+        // (children do not inherit the app element's messaging timeout, so each element gets
+        // its own), and the work stops `restoreReserve` early so the reset fits too.
         let deadline = Date().addingTimeInterval(budget)
+        let workDeadline = deadline.addingTimeInterval(-AXEnablement.restoreReserve)
         let app = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(app, 0.25)
+        let reader = LiveTree(deadline: workDeadline)
         let family = AXEnablement.family(bundleId: bundleId, frameworks: AXEnablement.frameworks(of: pid))
         let key = AXEnablement.processKey(pid: pid, launched: NSRunningApplication(processIdentifier: pid)?.launchDate)
         var notes: [String] = []
-        var restore: (() -> Void)?
-        defer { restore?() }
+        var restore: ((AXUIElement) -> Void)?
+        defer {
+            if let restore, let timeout = AXEnablement.messagingTimeout(now: Date(), deadline: deadline) {
+                AXUIElementSetMessagingTimeout(app, timeout)
+                restore(app)
+            }
+        }
 
         /// Asks the app to build its tree (see AXEnablement); true when it said yes.
         func ask() -> Bool {
+            guard reader.prepare(app) else { return false }
             let manual = AXEnablement.enableManual(app)
             if AXEnablement.accepted(manual) {
                 AXEnablement.markEnabled(key)
@@ -66,7 +76,7 @@ enum AXText {
                 return true
             }
             if restore == nil, AXEnablement.useEnhancedFallback(family: family, manualResult: manual),
-               let undo = AXEnablement.enableEnhancedTemporarily(app) {
+               reader.prepare(app), let undo = AXEnablement.enableEnhancedTemporarily(app) {
                 restore = undo
                 notes.append("\(AXEnablement.enhancedAttribute) set for this capture (\(AXEnablement.manualAttribute) refused: \(manual.rawValue))")
                 return true
@@ -78,9 +88,10 @@ enum AXText {
         /// Waits, bounded, until the window shows content, polling with a short probe walk.
         func settle(_ window: AXUIElement) {
             let started = Date()
-            let until = started.addingTimeInterval(AXEnablement.settleTime(now: started, deadline: deadline))
+            let until = started.addingTimeInterval(AXEnablement.settleTime(now: started, deadline: workDeadline))
             while true {
-                let probe = walk(window, deadline: min(until, Date().addingTimeInterval(0.15)), stopAfterContent: sparseThreshold)
+                let probeDeadline = min(until, Date().addingTimeInterval(0.15))
+                let probe = walk(window, source: LiveTree(deadline: probeDeadline), deadline: probeDeadline, stopAfterContent: sparseThreshold)
                 if !isSparse(probe.lines) {
                     notes.append("tree ready in \(Int(Date().timeIntervalSince(started) * 1000)) ms")
                     return
@@ -94,14 +105,14 @@ enum AXText {
         let step = AXEnablement.step(family: family, alreadyEnabled: AXEnablement.wasEnabled(key))
         // Asked before looking for the window, so the app starts building at once.
         let askedFirst = step == .beforeWalk && ask()
-        guard let window = matchWindow(app: app, title: windowTitle, frame: frame) else {
+        guard let window = matchWindow(app: app, title: windowTitle, frame: frame, reader: reader) else {
             return Result(text: nil, url: nil, unavailable: noText, enablement: summary(family, notes))
         }
         if askedFirst { settle(window) }
-        var result = walk(window, deadline: deadline)
+        var result = walk(window, source: reader, deadline: workDeadline)
         if step == .ifSparse, isSparse(result.lines), !result.cut, ask() {
             settle(window)
-            let again = walk(window, deadline: deadline)
+            let again = walk(window, source: reader, deadline: workDeadline)
             if again.lines.count > result.lines.count { result = again }
         }
         let text = result.lines.joined(separator: "\n")
@@ -133,32 +144,19 @@ enum AXText {
         return content.count < sparseThreshold
     }
 
-    private static func attribute(_ element: AXUIElement, _ name: String) -> AnyObject? {
-        var value: AnyObject?
-        return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
-    }
-
-    private static func string(_ element: AXUIElement, _ name: String) -> String? {
-        guard let value = attribute(element, name) else { return nil }
-        if let text = value as? String { return text }
-        if let number = value as? NSNumber { return number.stringValue }
-        if CFGetTypeID(value) == CFURLGetTypeID() { return (value as! URL).absoluteString }
-        return nil
-    }
-
-    private static func matchWindow(app: AXUIElement, title: String, frame: CGRect) -> AXUIElement? {
-        guard let windows = attribute(app, kAXWindowsAttribute) as? [AXUIElement] else {
-            return attribute(app, kAXFocusedWindowAttribute).map { $0 as! AXUIElement }
+    private static func matchWindow(app: AXUIElement, title: String, frame: CGRect, reader: LiveTree) -> AXUIElement? {
+        guard let windows = reader.attribute(app, kAXWindowsAttribute) as? [AXUIElement] else {
+            return reader.attribute(app, kAXFocusedWindowAttribute).map { $0 as! AXUIElement }
         }
         func frameOf(_ window: AXUIElement) -> CGRect {
             var origin = CGPoint.zero, size = CGSize.zero
-            if let value = attribute(window, kAXPositionAttribute) { AXValueGetValue(value as! AXValue, .cgPoint, &origin) }
-            if let value = attribute(window, kAXSizeAttribute) { AXValueGetValue(value as! AXValue, .cgSize, &size) }
+            if let value = reader.attribute(window, kAXPositionAttribute) { AXValueGetValue(value as! AXValue, .cgPoint, &origin) }
+            if let value = reader.attribute(window, kAXSizeAttribute) { AXValueGetValue(value as! AXValue, .cgSize, &size) }
             return CGRect(origin: origin, size: size)
         }
         return windows.first { frameOf($0).integral == frame.integral }
-            ?? windows.first { !title.isEmpty && string($0, kAXTitleAttribute) == title }
-            ?? (attribute(app, kAXFocusedWindowAttribute).map { $0 as! AXUIElement })
+            ?? windows.first { !title.isEmpty && reader.string($0, kAXTitleAttribute) == title }
+            ?? (reader.attribute(app, kAXFocusedWindowAttribute).map { $0 as! AXUIElement })
             ?? windows.first
     }
 
@@ -167,8 +165,9 @@ enum AXText {
     }
 
     /// The window's outline, stopping at `deadline` (`cut`), or early once
-    /// `stopAfterContent` content lines were found (the readiness probe).
-    private static func walk(_ root: AXUIElement, deadline: Date, stopAfterContent: Int? = nil) -> (lines: [String], url: String?, cut: Bool) {
+    /// `stopAfterContent` content lines were found (the readiness probe). Generic over
+    /// the tree so tests can walk a fake one.
+    static func walk<Source: AXTreeSource>(_ root: Source.Element, source: Source, deadline: Date, stopAfterContent: Int? = nil) -> (lines: [String], url: String?, cut: Bool) {
         var lines: [String] = []
         var url: String?
         var cut = false
@@ -176,26 +175,27 @@ enum AXText {
         var content = 0
         var seen = Set<String>()
 
-        func visit(_ element: AXUIElement, depth: Int) {
+        func visit(_ element: Source.Element, depth: Int) {
             if enough { return }
             if Date() > deadline {
                 cut = true
                 return
             }
-            let role = string(element, kAXRoleAttribute) ?? ""
-            let subrole = string(element, kAXSubroleAttribute) ?? ""
+            let role = source.string(element, kAXRoleAttribute) ?? ""
+            let subrole = source.string(element, kAXSubroleAttribute) ?? ""
+            // Nothing else of a secure field is read: not its value, title or children.
             if subrole == "AXSecureTextField" {
                 lines.append(String(repeating: "  ", count: depth) + "field  [secure, not read]")
                 return
             }
-            if role == "AXWebArea", url == nil, let found = string(element, "AXURL") { url = found }
+            if role == "AXWebArea", url == nil, let found = source.string(element, "AXURL") { url = found }
             let name = roleNames[role] ?? role.replacingOccurrences(of: "AX", with: "").lowercased()
-            let title = string(element, kAXTitleAttribute) ?? ""
+            let title = source.string(element, kAXTitleAttribute) ?? ""
             let value = role == "AXStaticText" || role.hasSuffix("TextField") || role == "AXTextArea" || role == "AXComboBox" || role == "AXSlider" || role == "AXCheckBox"
-                ? string(element, kAXValueAttribute) ?? ""
+                ? source.string(element, kAXValueAttribute) ?? ""
                 : ""
-            let description = string(element, kAXDescriptionAttribute) ?? ""
-            let selected = string(element, kAXSelectedTextAttribute) ?? ""
+            let description = source.string(element, kAXDescriptionAttribute) ?? ""
+            let selected = source.string(element, kAXSelectedTextAttribute) ?? ""
             var parts = [title, value, description].map(clean).filter { !$0.isEmpty }
             // The same string twice (a label that is also its value) reads once.
             parts = parts.reduce(into: [String]()) { acc, part in if !acc.contains(part) { acc.append(part) } }
@@ -215,8 +215,7 @@ enum AXText {
                 }
                 nextDepth = depth + 1
             }
-            guard let children = attribute(element, kAXChildrenAttribute) as? [AXUIElement] else { return }
-            for child in children {
+            for child in source.children(element) {
                 visit(child, depth: nextDepth)
                 if cut || enough { return }
             }
@@ -224,5 +223,44 @@ enum AXText {
 
         visit(root, depth: 0)
         return (lines, url, cut)
+    }
+}
+
+/// What the walk reads: an accessibility tree, live or fake.
+protocol AXTreeSource {
+    associatedtype Element
+    func string(_ element: Element, _ name: String) -> String?
+    func children(_ element: Element) -> [Element]
+}
+
+/// The live tree, with every message bounded by the deadline: each element gets its own
+/// messaging timeout (children do not inherit the app element's), clamped to what is left
+/// of the budget, and nothing is asked once the deadline has passed.
+struct LiveTree: AXTreeSource {
+    let deadline: Date
+
+    /// Sets this element's messaging timeout for the next message; false when out of time.
+    func prepare(_ element: AXUIElement) -> Bool {
+        guard let timeout = AXEnablement.messagingTimeout(now: Date(), deadline: deadline) else { return false }
+        AXUIElementSetMessagingTimeout(element, timeout)
+        return true
+    }
+
+    func attribute(_ element: AXUIElement, _ name: String) -> AnyObject? {
+        guard prepare(element) else { return nil }
+        var value: AnyObject?
+        return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
+    }
+
+    func string(_ element: AXUIElement, _ name: String) -> String? {
+        guard let value = attribute(element, name) else { return nil }
+        if let text = value as? String { return text }
+        if let number = value as? NSNumber { return number.stringValue }
+        if CFGetTypeID(value) == CFURLGetTypeID() { return (value as! URL).absoluteString }
+        return nil
+    }
+
+    func children(_ element: AXUIElement) -> [AXUIElement] {
+        attribute(element, kAXChildrenAttribute) as? [AXUIElement] ?? []
     }
 }

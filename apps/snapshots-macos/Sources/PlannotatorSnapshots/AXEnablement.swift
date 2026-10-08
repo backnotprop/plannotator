@@ -143,14 +143,34 @@ enum AXEnablement {
         AXUIElementSetAttributeValue(app, manualAttribute as CFString, kCFBooleanTrue)
     }
 
-    /// `AXEnhancedUserInterface` on, for the fallback; returns a closure that puts it back
-    /// when it was explicitly off before (never when its earlier state is unknown, so
-    /// a screen reader's setting is never cleared), or nil when the write was refused.
-    static func enableEnhancedTemporarily(_ app: AXUIElement) -> (() -> Void)? {
+    /// Whether the fallback writes `AXEnhancedUserInterface` and resets it to false after the
+    /// capture. Only an explicit `true` read beforehand (a screen reader such as VoiceOver
+    /// set it) is left alone; off or unknown is written and always reset, so the attribute
+    /// never outlives the capture.
+    static func enhancedIsOurs(before: Bool?) -> Bool { before != true }
+
+    /// `AXEnhancedUserInterface` on, for the fallback. Returns the reset to run after the
+    /// capture (a no-op when it was already on), or nil when the write was refused.
+    static func enableEnhancedTemporarily(_ app: AXUIElement) -> ((AXUIElement) -> Void)? {
         var before: AnyObject?
-        let wasOff = AXUIElementCopyAttributeValue(app, enhancedAttribute as CFString, &before) == .success
-            && (before as? Bool) == false
+        let read = AXUIElementCopyAttributeValue(app, enhancedAttribute as CFString, &before) == .success ? before as? Bool : nil
+        guard enhancedIsOurs(before: read) else { return { _ in } }
         guard AXUIElementSetAttributeValue(app, enhancedAttribute as CFString, kCFBooleanTrue) == .success else { return nil }
-        return wasOff ? { AXUIElementSetAttributeValue(app, enhancedAttribute as CFString, kCFBooleanFalse) } : {}
+        return { app in AXUIElementSetAttributeValue(app, enhancedAttribute as CFString, kCFBooleanFalse) }
+    }
+
+    // MARK: Time
+
+    /// Kept at the end of the 2 s budget for the `AXEnhancedUserInterface` reset.
+    static let restoreReserve: TimeInterval = 0.1
+    /// The longest any single accessibility message may wait.
+    static let messageTimeout: TimeInterval = 0.25
+
+    /// The messaging timeout for the next query: at most `messageTimeout`, never past
+    /// `deadline`; nil when the deadline has passed (do not ask at all).
+    static func messagingTimeout(now: Date, deadline: Date) -> Float? {
+        let remaining = deadline.timeIntervalSince(now)
+        guard remaining > 0.005 else { return nil }
+        return Float(min(messageTimeout, remaining))
     }
 }

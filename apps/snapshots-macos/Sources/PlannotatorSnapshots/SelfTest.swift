@@ -27,6 +27,7 @@ enum SelfTest {
         check(E.step(family: .other, alreadyEnabled: false) == .ifSparse, "other apps are asked only when empty")
         check(!E.useEnhancedFallback(family: .electron, manualResult: .attributeUnsupported), "Electron never gets AXEnhancedUserInterface")
         check(!E.useEnhancedFallback(family: .chromium, manualResult: .cannotComplete), "a busy Chrome is not a refusal")
+        check(E.enhancedIsOurs(before: nil), "an unknown AXEnhancedUserInterface is reset after the capture")
         let now = Date()
         check(E.settleTime(now: now, deadline: now.addingTimeInterval(2)) == E.settleLimit, "the wait is capped")
         check(E.settleTime(now: now, deadline: now.addingTimeInterval(0.5)) == 0, "the wait never eats the walk's budget")
