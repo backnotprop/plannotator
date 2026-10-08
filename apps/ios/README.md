@@ -84,16 +84,22 @@ is a list row), so the same list, thread, cards and reply bar draw both.
 - **Sign in** opens the sign-in door (`/auth/desktop/login`) in the system
   browser sheet (ephemeral, so nothing is shared with Safari). A signed build
   returns through `https://<origin>/auth/mobile/return/<nonce>`, which needs the
-  associated domain (`applinks:` and `webcredentials:` for the origin) and the
-  Team ID. The simulator has neither, so a simulator build returns through the
+  associated domain (below) and the Team ID. The simulator has neither, so a simulator build returns through the
   door's loopback shape: a one-request listener on 127.0.0.1 hands the return
   to the sheet's `plannotator` scheme. Only a return carrying the sign-in's own
   `state` is redeemed. The session cookies live in the app's own cookie store;
   mutations echo the `csrf` cookie as `X-CSRF-Token`.
-- **The build setting** `WORKSPACES_ORIGIN` decides whether a build has the
-  source at all: Debug has staging, Release leaves it empty (the first App
-  Store release is local only), and a TestFlight archive sets it:
-  `xcodebuild archive ... WORKSPACES_ORIGIN=https://staging.workspaces.plannotator.ai`.
+- **The build setting** `WORKSPACES_HOST` decides whether a build has the
+  source at all. Debug and the TestFlight configuration name staging; Release,
+  the App Store build, leaves it empty (the first App Store release is local
+  only), so it has no Workspaces source and no associated domain. The host
+  gives both the origin the app signs in to and the associated domain the
+  `https` return needs (`Plannotator/Workspaces.entitlements`: `applinks:` and
+  `webcredentials:` for that host). A TestFlight build is
+  `xcodebuild archive -configuration TestFlight ...`; for production, set
+  `WORKSPACES_HOST=workspaces.plannotator.ai`. The simulator ignores the
+  entitlement; a signed build also needs the Team ID in the server's
+  association file (owner item 1).
 
 Its proof runs against staging with a test account (never a person's own) and
 an API key of that account for the asking agent, locally only:

@@ -8,6 +8,12 @@ options:
     iOS: "26.0"
   createIntermediateGroups: true
   generateEmptyDirectories: false
+# TestFlight is a Release build with the Workspaces source; Release is the App
+# Store build without it (the first App Store release is local only).
+configs:
+  Debug: debug
+  TestFlight: release
+  Release: release
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -45,7 +51,7 @@ targets:
           - CFBundleURLName: ai.plannotator.app.pair
             CFBundleURLSchemes: [plannotator]
         # The Workspaces source (M7): the origin this build signs in to, or
-        # empty for no Workspaces source at all. See WORKSPACES_ORIGIN below.
+        # empty for no Workspaces source at all. See WORKSPACES_HOST below.
         WorkspacesOrigin: $(WORKSPACES_ORIGIN)
     settings:
       base:
@@ -55,14 +61,23 @@ targets:
         SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
         SWIFT_APPROACHABLE_CONCURRENCY: YES
         ENABLE_PREVIEWS: YES
-      # The Workspaces source is in Debug and TestFlight builds and out of the
-      # App Store build (the first App Store release is local only). Release
-      # leaves it empty; a TestFlight archive sets it on the command line
-      # (`xcodebuild archive ... WORKSPACES_ORIGIN=https://staging.workspaces.plannotator.ai`).
+      # The Workspaces source: WORKSPACES_HOST is the one switch. Debug and
+      # TestFlight name the host; Release (the App Store build) leaves it empty,
+      # so that build has no Workspaces source and no associated domain. The
+      # host gives the origin the app signs in to and the associated domain the
+      # https sign-in return needs (applinks and webcredentials, Workspaces.entitlements).
+      # Production: set WORKSPACES_HOST to workspaces.plannotator.ai.
       configs:
         Debug:
-          WORKSPACES_ORIGIN: https://staging.workspaces.plannotator.ai
+          WORKSPACES_HOST: staging.workspaces.plannotator.ai
+          WORKSPACES_ORIGIN: https://$(WORKSPACES_HOST)
+          CODE_SIGN_ENTITLEMENTS: Plannotator/Workspaces.entitlements
+        TestFlight:
+          WORKSPACES_HOST: staging.workspaces.plannotator.ai
+          WORKSPACES_ORIGIN: https://$(WORKSPACES_HOST)
+          CODE_SIGN_ENTITLEMENTS: Plannotator/Workspaces.entitlements
         Release:
+          WORKSPACES_HOST: ""
           WORKSPACES_ORIGIN: ""
   PlannotatorUITests:
     type: bundle.ui-testing

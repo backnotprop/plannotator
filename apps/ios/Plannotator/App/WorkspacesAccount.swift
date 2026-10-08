@@ -8,9 +8,9 @@ import UIKit
 struct WorkspacesAccount: Codable, Hashable {
     static let sourceId = "workspaces"
 
-    /// The Workspaces this build talks to: the `WORKSPACES_ORIGIN` build setting
-    /// (Debug and TestFlight builds set it; the App Store build leaves it empty,
-    /// and then the app has no Workspaces source at all).
+    /// The Workspaces this build talks to, from the `WORKSPACES_HOST` build
+    /// setting (Debug and TestFlight set it; the App Store build leaves it
+    /// empty, and then the app has no Workspaces source at all).
     static let origin: URL? = (Bundle.main.object(forInfoDictionaryKey: "WorkspacesOrigin") as? String)
         .flatMap { $0.isEmpty ? nil : URL(string: $0) }
 

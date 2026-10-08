@@ -321,7 +321,7 @@ try {
     [
       'test', '-project', join(repo, 'apps/ios/Plannotator.xcodeproj'), '-scheme', 'Plannotator', '-destination', `id=${udid}`,
       '-derivedDataPath', derived, '-resultBundlePath', join(tmp, 'Proof.xcresult'), '-only-testing:PlannotatorUITests/WorkspacesProofTests',
-      `WORKSPACES_ORIGIN=${origin}`,
+      `WORKSPACES_HOST=${new URL(origin).hostname}`,
     ],
     { stdio: 'inherit', env: { ...process.env, TEST_RUNNER_WORKSPACES_PROOF_CONTROL: `http://127.0.0.1:${control.port}` } },
   );

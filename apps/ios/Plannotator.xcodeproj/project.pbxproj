@@ -69,6 +69,7 @@
 		E749D4EC2D60D348C66E4721 /* PlannotatorKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = PlannotatorKit; path = PlannotatorKit; sourceTree = SOURCE_ROOT; };
 		F372FCD08C903FF6080BE00E /* Plannotator.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Plannotator.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F46914B8F633116D2FBECDB4 /* ProofTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProofTests.swift; sourceTree = "<group>"; };
+		FB3B680B0504E801041C29EA /* Workspaces.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Workspaces.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -165,6 +166,7 @@
 				CBEA43689480D730B4AC4D7F /* Colors.xcassets */,
 				25783EB204BEC1769A9D3F31 /* Info.plist */,
 				598B6A5629A31EDD2457B936 /* PrivacyInfo.xcprivacy */,
+				FB3B680B0504E801041C29EA /* Workspaces.entitlements */,
 				FE63721F949D4E7E7EB3F4C7 /* App */,
 				EB54E46BBE545BBFA65B5E04 /* Inbox */,
 				750B4BC97A453EC943BAE4DC /* Pairing */,
@@ -346,6 +348,67 @@
 			};
 			name = Debug;
 		};
+		1B3B3D0059D61EFCE580EA3C /* TestFlight */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = TestFlight;
+		};
 		2AD8ABDC10CF4614E8070390 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -414,6 +477,28 @@
 			};
 			name = Debug;
 		};
+		5E603242A12F3234B32EDDA8 /* TestFlight */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Plannotator/Workspaces.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = Plannotator/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.plannotator.app;
+				SDKROOT = iphoneos;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				TARGETED_DEVICE_FAMILY = 1;
+				WORKSPACES_HOST = staging.workspaces.plannotator.ai;
+				WORKSPACES_ORIGIN = "https://$(WORKSPACES_HOST)";
+			};
+			name = TestFlight;
+		};
 		AC6CE21C8396E34C1C54E64A /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -430,9 +515,27 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				TARGETED_DEVICE_FAMILY = 1;
+				WORKSPACES_HOST = "";
 				WORKSPACES_ORIGIN = "";
 			};
 			name = Release;
+		};
+		B345D67B801E049851FC1583 /* TestFlight */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.plannotator.app.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = Plannotator;
+			};
+			name = TestFlight;
 		};
 		CC8F4614F90DBB65346FE7D3 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -516,6 +619,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Plannotator/Workspaces.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = Plannotator/Info.plist;
@@ -528,7 +632,8 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				TARGETED_DEVICE_FAMILY = 1;
-				WORKSPACES_ORIGIN = "https://staging.workspaces.plannotator.ai";
+				WORKSPACES_HOST = staging.workspaces.plannotator.ai;
+				WORKSPACES_ORIGIN = "https://$(WORKSPACES_HOST)";
 			};
 			name = Debug;
 		};
@@ -540,6 +645,7 @@
 			buildConfigurations = (
 				0FDA10DF626119D3F6734532 /* Debug */,
 				D02BB4F7F081E548CE0558E8 /* Release */,
+				B345D67B801E049851FC1583 /* TestFlight */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
@@ -549,6 +655,7 @@
 			buildConfigurations = (
 				2AD8ABDC10CF4614E8070390 /* Debug */,
 				CC8F4614F90DBB65346FE7D3 /* Release */,
+				1B3B3D0059D61EFCE580EA3C /* TestFlight */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
@@ -558,6 +665,7 @@
 			buildConfigurations = (
 				F87CE8E89AB4E9B15D691CFD /* Debug */,
 				AC6CE21C8396E34C1C54E64A /* Release */,
+				5E603242A12F3234B32EDDA8 /* TestFlight */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

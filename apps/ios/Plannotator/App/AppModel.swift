@@ -64,7 +64,7 @@ final class AppModel {
     /// The shown source's id: a computer's device id, or "workspaces".
     var activeId: String? { session?.id }
 
-    /// This build has the Workspaces source (the `WORKSPACES_ORIGIN` build setting).
+    /// This build has the Workspaces source (the `WORKSPACES_HOST` build setting).
     var hasWorkspaces: Bool { WorkspacesAccount.origin != nil }
 
     func show(_ source: Source) {
