@@ -6,7 +6,7 @@ This document is the contract the iPhone app, the Inbox's device door, the LAN l
 
 The posture, in one paragraph. The Inbox stays a loopback server. A phone pairs once and gets its own random bearer token. Three paths carry the same requests: the tailnet (`tailscale serve` in front of the loopback port), the same Wi-Fi (a TLS listener whose certificate the phone pins), and the relay (a Cloudflare Worker that holds only ciphertext under keys made at pairing). Every phone request goes through one door, `/api/inbox/device/*`, which maps an explicit allowlist onto the window's existing handlers. Nothing else answers a phone.
 
-Two limits exist because pairing cannot work without them, and there are no others: an offer lives 10 minutes, and its six-digit code closes after 5 wrong tries. Apple's own ceilings apply where Apple sets them (a push body of 4096 bytes, four notification actions).
+Two limits exist because pairing cannot work without them: an offer lives 10 minutes, and its six-digit code closes after 5 wrong tries. The relay's mailbox creation reuses the brake guides.show already has on its create route (section 4), with no number of its own. Apple's own ceilings apply where Apple sets them (a push body of 4096 bytes, four notification actions). There are no other limits.
 
 ## 1. The pairing offer and its QR payload
 
@@ -26,12 +26,18 @@ Two limits exist because pairing cannot work without them, and there are no othe
 
 An offer is single use. It closes when it is redeemed, when it expires, after 5 wrong codes, or when the window makes a new one: one offer is open at a time, so six digits always name one offer. The offer lives in the server's memory only; a restart closes it.
 
-With both addresses null the offer still answers. A simulator reaches the Inbox on `127.0.0.1`, and the window tells a person with a real phone to turn on one of the two switches.
+Pairing needs the phone to reach the computer once, over the same Wi-Fi or the tailnet; the relay does not carry a redemption in v1. With both addresses null the offer still answers (a simulator reaches the Inbox on `127.0.0.1`), and "Pair a phone" offers the "Reach from this Wi-Fi" switch in place.
+
+### The tailnet publication
+
+"Reach from my tailnet" publishes the loopback port with `tailscale serve --bg --https=8443 http://127.0.0.1:<port>`: serve, never funnel. The HTTPS port is 8443, kept in `inbox.json` as `tailnet: { https_port: 8443 }`, so the address a phone holds survives the local port moving; the mapping is pointed at the current local port at each start, and the served name is allowed through `allowServedHostname`. When another serve mapping already holds 8443, the window says so and the switch stays off: the Inbox never overwrites a mapping it did not make. `buildServeArgs` gains this two-port form in P1.
+
+How the phone finds a computer on the tailnet (1.3, "On your tailnet"): it does not discover one. Bonjour does not cross a tailnet and an iOS app cannot ask Tailscale for its peers, as the record's own caption for 1.3 says. The section lists the tailnet address of each computer this phone already knows (from a QR it scanned) and a row to type the `host:port` the Inbox prints; either way the person then types the six digits.
 
 ### The link
 
 ```
-plannotator://pair?v=1&name=MacBook%20Pro&tailnet=macbook-pro.tail0000.ts.net%3A8443&lan=192.168.1.24%3A47321&fp=abab...ab&secret=AAAA...A&code=482913&mailbox=mbx_AAAA...A
+plannotator://pair?v=1&name=MacBook%20Pro&tailnet=macbook-pro.tail0000.ts.net%3A8443&lan=192.168.1.24%3A47321&fp=abab...ab&secret=AAAA...A&code=482913
 ```
 
 | Parameter | Value | Present |
@@ -43,9 +49,8 @@ plannotator://pair?v=1&name=MacBook%20Pro&tailnet=macbook-pro.tail0000.ts.net%3A
 | `fp` | the LAN certificate's SHA-256, 64 lowercase hex | with `lan` |
 | `secret` | the pairing secret: 32 random bytes, base64url without padding (43 characters) | always |
 | `code` | the six digits | always |
-| `mailbox` | the relay mailbox id | when the Inbox has a mailbox (its second pairing on) |
 
-The phone reads a link with an unknown `v` as "update the app". Both addresses are tried in order (LAN, then tailnet) for the redemption.
+The phone reads a link with an unknown `v` as "update the app". Both addresses are tried in order (LAN, then tailnet) for the redemption. The relay's address and mailbox arrive in the redemption's answer, not in the link.
 
 ## 2. The device token door
 
@@ -62,6 +67,7 @@ interface InboxDevice {
   created_at: string;
   last_seen_at: string;    // kept in memory on every request; a line is written when its UTC day changes
   revoked_at: string | null;
+  carriage: boolean;       // the relay carries this phone's items and pushes; true at pairing, set by the phone's relay switch (9.2, section 4)
 }
 ```
 
@@ -84,7 +90,7 @@ The first redemption makes the mailbox when there is none yet (section 4).
 
 - `GET /api/inbox/devices` (window route): `{ devices: [device without token_sha256] }`, the devices not revoked, newest first.
 - `POST /api/inbox/devices/:id/revoke` (window route, window guards) `{ serverSession? }`: `{ device }`. Deletes the device's secret file and its relay registration.
-- `POST /api/inbox/device/revoke` (door route, the phone's own token): revokes the calling device, for "Remove this source" (9.2). `{ device }`. Revoking twice changes nothing.
+- `POST /api/inbox/device/revoke` (door route, the phone's own token): revokes the calling device, for "Remove this source" (9.2), with the same effects as the window's revoke. `{ device }`. Revoking twice changes nothing.
 
 ### The door
 
@@ -114,23 +120,22 @@ The allowlist. Each row is the window's handler as it is today, with the request
 | `POST messages/:id/resolve` | same | `{ idempotency_key, resolved? }` | `{ thread: summary }` | 7.12 |
 | `POST threads/:id/delete` | same | `{ idempotency_key }` | `{ ok, store }` | 7.13 |
 | `GET threads/:id/attachments` | same | | `{ serverSession, attachments: [state], annotations }` | 7.14 |
-| `GET attachments/:id[?version=sent]` | same | | the bytes, `text/plain`, CSP `sandbox`; Share sends the file as sent (the "..." menu of section 4 of the record) | 7.15 |
-| `GET attachments/:id/view[?version=sent]` | same | | `{ serverSession, attachment, version, text, html }` | 7.16 |
-| `GET html-assets/<token>/<path>` | `GET /api/html-assets/<token>/<path>` | | the asset's bytes, as annotate serves them | 7.17 |
-| `POST annotations` | same | `{ idempotency_key, attachment_id, version, annotation }` | `{ annotation }` | 7.18 |
-| `POST annotations/:id/remove` | same | `{ idempotency_key }` | `{ annotation }` | 7.19 |
-| `GET messages/:id/guide` | same | | `{ message_id, guide, snapshot }` | 7.20 |
-| `POST messages/:id/guide/reviewed` | same | `{ idempotency_key, reviewed: boolean[] }` | `{ message_id, reviewed }` | 7.21 |
-| `POST messages/:id/decision` | same | `{ idempotency_key, key, recording?, draft? }` | `{ question }` | 7.22 |
-| `GET decisions?project=prj_...` | same | | `{ serverSession, cursor, project_id, waiting, decisions }` | 7.23 |
-| `GET threads/:id/sessions` | same | | `{ serverSession, home, project, sessions }` | 7.24 |
-| `POST threads/:id/message` | same | `{ idempotency_key, session, body }` | `{ message, replayed }` | 7.25 |
-| `POST revoke` | (the door's own) | `{}` | `{ device }` | 7.26 |
+| `GET attachments/:id/view[?version=sent]` | same | | `{ serverSession, attachment, version, text, html }`; also Share (the "..." menu of section 4 of the record), which writes `text` to a file named `attachment.name` | 7.15 |
+| `GET html-assets/<token>/<path>` | `GET /api/html-assets/<token>/<path>` | | the asset's bytes, as annotate serves them | 7.16 |
+| `POST annotations` | same | `{ idempotency_key, attachment_id, version, annotation }` | `{ annotation }` | 7.17 |
+| `POST annotations/:id/remove` | same | `{ idempotency_key }` | `{ annotation }` | 7.18 |
+| `GET messages/:id/guide` | same | | `{ message_id, guide, snapshot }` | 7.19 |
+| `POST messages/:id/guide/reviewed` | same | `{ idempotency_key, reviewed: boolean[] }` | `{ message_id, reviewed }` | 7.20 |
+| `POST messages/:id/decision` | same | `{ idempotency_key, key, recording?, draft? }` | `{ question }` | 7.21 |
+| `GET decisions?project=prj_...` | same | | `{ serverSession, cursor, project_id, waiting, decisions }` | 7.22 |
+| `GET threads/:id/sessions` | same | | `{ serverSession, home, project, sessions }` | 7.23 |
+| `POST threads/:id/message` | same | `{ idempotency_key, session, body }` | `{ message, replayed }` | 7.24 |
+| `POST revoke` | (the door's own) | `{}` | `{ device }` | 7.25 |
 | `POST pair` | (the door's own) | `{ secret or code, name, platform }` | see above | 7.2, 7.3 |
 
 Door routes are written relative to `/api/inbox/device/`; window routes keep their full paths.
 
-What the door never answers, by construction (none is in the allowlist, and a non-loopback Host reaches nothing else): `/`, `/favicon.png`, `/mcp`, `/api/inbox/bridge/*`, `/api/inbox/control/*`, `/api/inbox/settings`, `/api/inbox/restart`, `/api/inbox/projects/:id/delete`, `/api/inbox/decisions/:id/retire` and `replace`, `/api/inbox/pairing`, `/api/inbox/devices*`. The computer chores stay on the computer (decision 5). The bridge and control routes keep their own guards and refuse a device token like any other wrong token (`401 unauthorized`).
+What the door never answers, by construction (none is in the allowlist, and a non-loopback Host reaches nothing else): `/`, `/favicon.png`, `/mcp`, `/api/inbox/bridge/*`, `/api/inbox/control/*`, `/api/inbox/attachments/:id` (raw bytes; every attachment kind is text and `view` carries it), `/api/inbox/settings`, `/api/inbox/restart`, `/api/inbox/projects/:id/delete`, `/api/inbox/decisions/:id/retire` and `replace`, `/api/inbox/pairing`, `/api/inbox/devices*`. The computer chores stay on the computer (decision 5). The bridge and control routes keep their own guards and refuse a device token like any other wrong token (`401 unauthorized`).
 
 ### Error codes
 
@@ -154,10 +159,10 @@ Off until "Reach from this Wi-Fi" is switched on in the window's Settings (P2).
 
 - **What it serves:** the door, and only the door. Anything outside `/api/inbox/device/` answers `404 device_route_not_found`. It skips the Host allowlist: it serves only a bearer door that refuses any Origin, and a browser cannot present the token.
 - **Where:** all interfaces, on a port chosen free the first time and kept in `inbox.json` as `lan: { port }`, so the address a phone holds survives a restart.
-- **TLS:** an ECDSA P-256 certificate, self-signed, subject `CN=Plannotator Inbox`, made the first time the listener starts and kept in `inbox/tls/cert.pem` and `inbox/tls/key.pem` (files 0600, directory 0700). It is never rotated. Deleting `inbox/tls/` makes a new one, and every phone paired over the Wi-Fi pairs again.
+- **TLS:** an ECDSA P-256 certificate, self-signed, subject `CN=Plannotator Inbox`, made by `openssl` as a child process the first time the listener starts and kept in `inbox/tls/cert.pem` and `inbox/tls/key.pem` (files 0600, directory 0700). It is never rotated. Deleting `inbox/tls/` makes a new one, and every phone paired over the Wi-Fi pairs again.
 - **The fingerprint:** SHA-256 of the certificate's DER bytes, 64 lowercase hex. It rides the link as `fp` and the Bonjour record as `fp`.
 - **What the phone checks:** the leaf certificate's SHA-256 equals the fingerprint it holds. Nothing else: no host name, no chain, no dates. The pin is the check.
-- **Bonjour:** while the listener is on, the Inbox advertises `_plannotator-inbox._tcp` with the instance name `computer.name`, the listener's port, and TXT `v=1` and `fp=<fingerprint>`. The phone lists these in 1.3 and matches a found record to a paired computer by `fp`, so a new IP address is followed without pairing again. A phone that pairs by typed digits after picking a record pins the record's `fp`.
+- **Bonjour:** while the listener is on, the Inbox advertises `_plannotator-inbox._tcp` through a child process (`dns-sd -R` on macOS, `avahi-publish` on Linux; no dependency; where neither exists the listener still works by typed address) with the instance name `computer.name`, the listener's port, and TXT `v=1` and `fp=<fingerprint>`. The phone lists these in 1.3 and matches a found record to a paired computer by `fp`, so a new IP address is followed without pairing again. A phone that pairs by typed digits after picking a record pins the record's `fp`.
 
 ## 4. The relay
 
@@ -181,25 +186,26 @@ Exactly the format `packages/core/crypto.ts` writes: `base64url(IV || ciphertext
 ### What the relay stores and deletes
 
 - **Per mailbox:** `secret_sha256`.
-- **Per device:** `secret_sha256`, the APNs token and its environment (plain: Apple needs it), `cursor` (the highest store seq the Inbox has posted for it, a number), the next item number `n`, the down items `{ n, cursor, ciphertext }`, the up commands `{ id, ciphertext }`.
+- **Per device:** `secret_sha256`, `carriage` (the phone's relay switch), the APNs token and its environment (plain: Apple needs it), `cursor` (the highest store seq the Inbox has posted for it, a number), the next item number `n`, the down items `{ n, cursor, ciphertext }`, the up commands `{ id, ciphertext }`.
 - **Never:** a key, a secret, a subject, a body. Logs carry ids and status codes only.
-- **Deleted:** a down item when the phone acknowledges it; an up command when the Inbox reports it applied; a device and everything it holds when either side removes it; an APNs token when Apple answers 410.
+- **Deleted:** a down item when the phone acknowledges it (by item number, or by store cursor when it read those lines directly); every down item when the phone turns carriage off; an up command when the Inbox reports it applied; a device and everything it holds when the Inbox removes it (a revoke); an APNs token when Apple answers 410. There is no time sweep.
 
 ### Routes
 
-Every route answers JSON. Errors are `{ error, code }`: `400 bad_request`, `401 unauthorized` (a bearer whose SHA-256 does not match), `404 mailbox_not_found`, `404 device_not_found`. "Inbox bearer" is `Authorization: Bearer <M>`; "device bearer" is `Authorization: Bearer <R>` of the device in the path.
+Every route answers JSON. Errors are `{ error, code }`: `400 bad_request`, `401 unauthorized` (a bearer whose SHA-256 does not match), `404 mailbox_not_found`, `404 device_not_found`, and `429 too_many_requests` with `Retry-After` from the creation brake. `POST /v1/mailboxes` goes through the same Cloudflare rate limiting rule guides.show puts on `POST /api/g` (the `[[ratelimits]]` block of `apps/guides-show/wrangler.toml`, keyed on `CF-Connecting-IP`, failing open where it cannot resolve); the relay adds no number of its own, and no other route is braked. "Inbox bearer" is `Authorization: Bearer <M>`; "device bearer" is `Authorization: Bearer <R>` of the device in the path.
 
 | Route | Who | Request | Answer | Exchange |
 |---|---|---|---|---|
-| `POST /v1/mailboxes` | the Inbox, at its first pairing | `{ secret_sha256 }` | `201 { mailbox_id }`; `mbx_` plus 16 random bytes as base64url | 7.27 |
-| `PUT /v1/mailboxes/:mbx/devices/:dev` | Inbox bearer | `{ secret_sha256, cursor }`: `SHA-256(R)` and the store cursor at pairing (the phone read everything before it directly) | `200 { device_id }`; repeating it with the same hash is a no-op | 7.28 |
-| `DELETE /v1/mailboxes/:mbx/devices/:dev` | Inbox bearer, or that device's bearer | | `204`; the Inbox's socket gets `device_removed` | 7.29 |
-| `PUT /v1/mailboxes/:mbx/devices/:dev/apns` | device bearer | `{ token, environment: "sandbox" or "production" }`; `token: null` removes it | `204` | 7.30 |
-| `POST /v1/mailboxes/:mbx/push` | Inbox bearer | `{ device_id, collapse_id, ciphertext }` | `202 { sent: true }`, or `200 { sent: false, reason: "no_apns_token" or "apns_gone" }` | 7.31 |
-| `GET /v1/mailboxes/:mbx/socket` | Inbox bearer, WebSocket upgrade | frames below | | 7.32 |
-| `GET /v1/mailboxes/:mbx/devices/:dev/items?after=n` | device bearer | | `{ items: [{ n, ciphertext }], inbox_online }`, every held item after `n` in order | 7.33 |
-| `POST /v1/mailboxes/:mbx/devices/:dev/ack` | device bearer | `{ through: n }` | `204`; deletes items up to `n` | 7.34 |
-| `POST /v1/mailboxes/:mbx/devices/:dev/commands` | device bearer | `{ id, ciphertext }` | `202 { queued: true, inbox_online }`; an `id` it already holds answers `200 { queued: false, inbox_online }` | 7.35 |
+| `POST /v1/mailboxes` | the Inbox, at its first pairing | `{ secret_sha256 }` | `201 { mailbox_id }`; `mbx_` plus 16 random bytes as base64url | 7.26 |
+| `PUT /v1/mailboxes/:mbx/devices/:dev` | Inbox bearer | `{ secret_sha256, cursor }`: `SHA-256(R)` and the store cursor at pairing (the phone read everything before it directly) | `200 { device_id }`; repeating it with the same hash is a no-op | 7.27 |
+| `DELETE /v1/mailboxes/:mbx/devices/:dev` | Inbox bearer | | `204`; the device's revoke on the computer | 7.28 |
+| `PUT /v1/mailboxes/:mbx/devices/:dev/carriage` | device bearer | `{ on: false }`, or `{ on: true, cursor }` with the store cursor the phone holds | `204`; the device stays registered either way, and the Inbox's socket gets a `carriage` frame | 7.35 |
+| `PUT /v1/mailboxes/:mbx/devices/:dev/apns` | device bearer | `{ token, environment: "sandbox" or "production" }`; `token: null` removes it | `204` | 7.29 |
+| `POST /v1/mailboxes/:mbx/push` | Inbox bearer | `{ device_id, collapse_id, ciphertext }` | `202 { sent: true }`, or `200 { sent: false, reason: "no_apns_token" or "apns_gone" }` | 7.30 |
+| `GET /v1/mailboxes/:mbx/socket` | Inbox bearer, WebSocket upgrade | frames below | | 7.31 |
+| `GET /v1/mailboxes/:mbx/devices/:dev/items?after=n` | device bearer | | `{ items: [{ n, ciphertext }], inbox_online }`, every held item after `n` in order | 7.32 |
+| `POST /v1/mailboxes/:mbx/devices/:dev/ack` | device bearer | `{ through: n }`, or `{ cursor }` when the phone read the store directly up to that seq | `204`; deletes items up to `n`, or record items whose cursor is at or below `cursor` | 7.33 |
+| `POST /v1/mailboxes/:mbx/devices/:dev/commands` | device bearer | `{ id, ciphertext }` | `202 { queued: true, inbox_online }`; an `id` it already holds answers `200 { queued: false, inbox_online }` | 7.34 |
 
 `inbox_online` says whether the Inbox's socket is connected now: the phone's "Sent. Waiting for your computer" (owner item 26).
 
@@ -209,27 +215,27 @@ The Inbox holds one outbound WebSocket to its mailbox while the mailbox has a de
 
 Relay to Inbox:
 
-- `{ "type": "hello", "devices": [{ "device_id", "cursor", "apns": boolean }] }` on connect. The Inbox registers any non-revoked device the relay does not list, and removes any listed device it revoked.
+- `{ "type": "hello", "devices": [{ "device_id", "cursor", "carriage": boolean, "apns": boolean }] }` on connect. The Inbox writes each listed device's `carriage` into its device record, removes any listed device it revoked, and registers only the non-revoked devices with `carriage: true` that the relay does not list. A device whose phone turned carriage off stays listed, so a reconnect never registers it again.
 - `{ "type": "command", "device_id", "id", "ciphertext" }`: each held up command, in order, until it is applied.
-- `{ "type": "device_removed", "device_id" }`: the phone removed itself at the relay (its relay switch, open question 3).
+- `{ "type": "carriage", "device_id", "on", "cursor" }`: the phone flipped its relay switch (9.2). The Inbox writes `carriage` into the device record. Off: it sends that device no items and no pushes. On: it resumes items after `cursor`.
 
 Inbox to relay:
 
-- `{ "type": "item", "device_id", "cursor", "ciphertext" }`: one down item. `cursor` is the store seq the item brings the device to; the relay keeps it so the Inbox resumes from `hello`.
+- `{ "type": "item", "device_id", "cursor", "ciphertext" }`: one down item, sent only to a device with carriage on. `cursor` is the record's store seq, or null for a result; the relay keeps the highest so the Inbox resumes from `hello`.
 - `{ "type": "applied", "device_id", "id" }`: the command was applied (or refused); the relay deletes it.
 
 ### What goes down and up
 
 Down item plaintexts:
 
-- `{ "v": 1, "type": "record", "seq", "kind", "id", "<kind>": record }`: one store line, exactly the `record` event of the event stream (`eventPayload` in `packages/server/inbox.ts`) with `v` and `type` added. After a device's `cursor`, every line goes down, in seq order.
+- `{ "v": 1, "type": "record", "seq", "kind", "id", "<kind>": record }`: one store line, exactly the `record` event of the event stream (`eventPayload` in `packages/server/inbox.ts`) with `v` and `type` added. After a device's `cursor`, every line goes down, in seq order. A phone reading over the Wi-Fi or the tailnet acknowledges by store cursor (`ack { cursor }`), so its queue holds only what it missed.
 - `{ "v": 1, "type": "result", "id", "status", "content_type", "body_b64" }`: the door's answer to an up command, its bytes as base64.
 
 Up command plaintext: `{ "v": 1, "id", "method", "path", "body" }`, where `path` is a door path (`/api/inbox/device/...`) and `body` is the JSON body the phone would have sent directly. The Inbox applies it through the door as that device, so the allowlist, the revocation check and the idempotency rule are the same on every path. A GET through the relay (the list after a long absence, an attachment's view, an HTML asset) is a command whose `id` is a fresh random id; a POST's `id` is its `idempotency_key` (section 6).
 
 ### Push
 
-The Inbox posts one push per paired device that has the relay, after an agent's message lands with a question or a guided review (`send_message` or `submit_guide`, where `packages/inbox/notify.ts` would raise a browser notification for the question). One message is one push however many questions it carries.
+The Inbox posts one push per paired device with carriage on, after an agent's message lands with a question or a guided review (`send_message` or `submit_guide`, where `packages/inbox/notify.ts` would raise a browser notification for the question). One message is one push however many questions it carries.
 
 The push plaintext, encrypted under the device key:
 
@@ -303,7 +309,7 @@ Annotations are Plannotator's `Annotation` (`packages/ui/types.ts`) inside the I
 | `link` | `href` | a link in the content; the shell opens it in the system browser |
 | `error` | `code`, `message` | the surface could not draw what it was given |
 
-A draft is an `Annotation` with an empty `text`. The shell fills the person's words into `text`, saves `{ attachment_id, version, annotation }` through the door (7.18), and answers with `commit_annotation`.
+A draft is an `Annotation` with an empty `text`. The shell fills the person's words into `text`, saves `{ attachment_id, version, annotation }` through the door (7.17), and answers with `commit_annotation`. Edit (4.3) is the same save with the same annotation id and a new key. HTML-asset tokens live in the Inbox's memory, so after the Inbox restarts an asset answers 404; the shell then fetches `view` again.
 
 ## 6. Idempotency
 
@@ -321,13 +327,13 @@ Every command a phone sends carries one key: `idempotency_key` in the request bo
 | Decision switch | `POST messages/:id/decision` | body `idempotency_key` |
 | New message | `POST threads/:id/message` | body `idempotency_key` (also the store's own key) |
 
-- **The door** keeps `inbox/device-commands.jsonl`, one line per applied command: `{ v: 1, at, device_id, key, method, path, status, body }`, with the answer's status and JSON body. It is read at start. A key seen before for that device on the same method and path answers the recorded status and body, adds `Idempotent-Replayed: true`, and writes nothing. The same key on another route is `409 idempotency_key_reused`. A 5xx is not recorded, so a retry runs again.
+- **The door** keeps `inbox/device-commands.jsonl`, one line per applied command: `{ v: 1, at, device_id, key, method, path, status, body }`, with the answer's status and JSON body. It is read at start. A key seen before for that device on the same method and path answers the recorded status and body, adds `Idempotent-Replayed: true`, and writes nothing. That header is the replay signal: a replayed Send answers its recorded body, whose `replayed` field reads as it did the first time. The log keeps every answer body, reply bodies included, for as long as the store lives. The same key on another route is `409 idempotency_key_reused`. A 5xx is not recorded, so a retry runs again.
 - **The relay path** carries the key as the up command's `id`. The relay holds one command per `id`, and the Inbox applies it through the door, so a command posted twice, or re-sent after the Inbox applied it but before the relay heard, writes once.
 - **The lock-screen answer** is one Send with the pick inside it (7.11): `{ idempotency_key, questions: [{ key, revision, answer: { v: 1, key, kind: "single", prompt, selected: [label] } }] }`. It tries the direct path first, then the relay, with the same key.
 
 ## 7. The exchanges
 
-P1 replays 7.1 to 7.26 against a compiled binary; P2 replays 7.2 over the LAN; R1 and R2 replay 7.27 to 7.35 against `wrangler dev`. Fixture values are placeholders, never secrets: `AAAA...` stands for a 32-byte value, `tok_exampleaaaa...` for a token, repeated hex for a hash.
+P1 replays 7.1 to 7.25, 7.36 and 7.37 against a compiled binary; P2 replays 7.2 over the LAN; R1 and R2 replay 7.26 to 7.35 against `wrangler dev`. Fixture values are placeholders, never secrets: `AAAA...` stands for a 32-byte value, `tok_exampleaaaa...` for a token, repeated hex for a hash.
 
 ```sh
 INBOX=https://macbook-pro.tail0000.ts.net:8443   # or http://127.0.0.1:<port> in a proof
@@ -629,15 +635,7 @@ curl -sS "$INBOX/api/inbox/device/threads/msg_01K70000000000000000000010/attachm
 }
 ```
 
-### 7.15 An attachment's bytes (Share)
-
-```sh
-curl -sS "$INBOX/api/inbox/device/attachments/att_01K70000000000000000000020?version=sent" -H "Authorization: Bearer $TOKEN"
-```
-
-`200`, `Content-Type: text/plain; charset=utf-8`, `Content-Security-Policy: sandbox`, `Content-Disposition: inline; filename="retry-plan.md"`, the file as sent. A file gone from disk without `?version=sent`: `404 attachment_missing`.
-
-### 7.16 An attachment's view
+### 7.15 An attachment's view
 
 ```sh
 curl -sS "$INBOX/api/inbox/device/attachments/att_01K70000000000000000000021/view" -H "Authorization: Bearer $TOKEN"
@@ -655,7 +653,7 @@ curl -sS "$INBOX/api/inbox/device/attachments/att_01K70000000000000000000021/vie
 
 The shell rewrites that base to `plannotator-asset://inbox/api/html-assets/0000000000000001/` before `open_attachment` (section 5).
 
-### 7.17 An HTML asset
+### 7.16 An HTML asset
 
 ```sh
 curl -sS "$INBOX/api/inbox/device/html-assets/0000000000000001/images/sun.png" -H "Authorization: Bearer $TOKEN" -o sun.png
@@ -663,7 +661,7 @@ curl -sS "$INBOX/api/inbox/device/html-assets/0000000000000001/images/sun.png" -
 
 `200`, the image's bytes and type, as annotate's asset route answers.
 
-### 7.18 Save an annotation
+### 7.17 Save an annotation
 
 ```sh
 curl -sS -X POST "$INBOX/api/inbox/device/annotations" \
@@ -690,7 +688,7 @@ curl -sS -X POST "$INBOX/api/inbox/device/annotations" \
 }
 ```
 
-### 7.19 Remove an annotation
+### 7.18 Remove an annotation
 
 ```sh
 curl -sS -X POST "$INBOX/api/inbox/device/annotations/ann-1/remove" \
@@ -698,9 +696,9 @@ curl -sS -X POST "$INBOX/api/inbox/device/annotations/ann-1/remove" \
   -d '{"idempotency_key":"00000000-0000-4000-8000-000000000007"}'
 ```
 
-`{ "annotation": <7.18's record with "removed_at": "2026-10-08T10:54:00.000Z"> }`.
+`{ "annotation": <7.17's record with "removed_at": "2026-10-08T10:54:00.000Z"> }`.
 
-### 7.20 A guided review
+### 7.19 A guided review
 
 ```sh
 curl -sS "$INBOX/api/inbox/device/messages/msg_01K70000000000000000000040/guide" -H "Authorization: Bearer $TOKEN"
@@ -708,7 +706,7 @@ curl -sS "$INBOX/api/inbox/device/messages/msg_01K70000000000000000000040/guide"
 
 `{ "message_id": "msg_01K70000000000000000000040", "guide": { "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "input_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "bytes": 5120, "title": "Token refresh", "sections": 1, "files": 2, "additions": 2, "deletions": 2 }, "snapshot": { "kind": "plannotator-guided-review", "...": "the stored snapshot" } }`. A message with none: `404 guide_not_found`.
 
-### 7.21 A reviewed tick
+### 7.20 A reviewed tick
 
 ```sh
 curl -sS -X POST "$INBOX/api/inbox/device/messages/msg_01K70000000000000000000040/guide/reviewed" \
@@ -718,7 +716,7 @@ curl -sS -X POST "$INBOX/api/inbox/device/messages/msg_01K7000000000000000000004
 
 `{ "message_id": "msg_01K70000000000000000000040", "reviewed": [true] }`.
 
-### 7.22 The decision switch
+### 7.21 The decision switch
 
 ```sh
 curl -sS -X POST "$INBOX/api/inbox/device/messages/msg_01K70000000000000000000010/decision" \
@@ -728,7 +726,7 @@ curl -sS -X POST "$INBOX/api/inbox/device/messages/msg_01K7000000000000000000001
 
 `{ "question": <7.7's question with "decision_recording": true, "decision_draft": { "text": "Run the retry tests against the test clock before each release.", "reason": null }> }`. After the answer was sent: `409 question_already_sent`.
 
-### 7.23 A project's decisions
+### 7.22 A project's decisions
 
 ```sh
 curl -sS "$INBOX/api/inbox/device/decisions?project=prj_01K70000000000000000000002" -H "Authorization: Bearer $TOKEN"
@@ -759,7 +757,7 @@ curl -sS "$INBOX/api/inbox/device/decisions?project=prj_01K700000000000000000000
 }
 ```
 
-### 7.24 Live sessions for New message
+### 7.23 Live sessions for New message
 
 ```sh
 curl -sS "$INBOX/api/inbox/device/threads/msg_01K70000000000000000000010/sessions" -H "Authorization: Bearer $TOKEN"
@@ -776,7 +774,7 @@ curl -sS "$INBOX/api/inbox/device/threads/msg_01K70000000000000000000010/session
 }
 ```
 
-### 7.25 New message
+### 7.24 New message
 
 ```sh
 curl -sS -X POST "$INBOX/api/inbox/device/threads/msg_01K70000000000000000000010/message" \
@@ -786,7 +784,7 @@ curl -sS -X POST "$INBOX/api/inbox/device/threads/msg_01K70000000000000000000010
 
 `{ "message": { "id": "msg_01K70000000000000000000012", "reply_to": null, "author": { "kind": "person" }, "body": "Also run them against the EU account.", "to": { "host": "claude-code", "session": "ses_01K70000000000000000000003" }, "idempotency_key": "00000000-0000-4000-8000-000000000010", "...": "the rest of the message" }, "replayed": false }`. No live session: `409 session_not_live`, nothing written.
 
-### 7.26 The phone removes itself
+### 7.25 The phone removes itself
 
 ```sh
 curl -sS -X POST "$INBOX/api/inbox/device/revoke" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}'
@@ -794,16 +792,16 @@ curl -sS -X POST "$INBOX/api/inbox/device/revoke" -H "Authorization: Bearer $TOK
 
 `{ "device": { "id": "dev_01K70000000000000000000001", "name": "iPhone", "platform": "ios", "created_at": "2026-10-08T10:03:12.000Z", "last_seen_at": "2026-10-08T10:56:00.000Z", "revoked_at": "2026-10-08T10:56:00.000Z" } }`. Every later request with that token: `401 device_revoked`. A path outside the allowlist, for example `GET $INBOX/api/inbox/device/settings`: `404 { "error": "Not a phone route.", "code": "device_route_not_found" }`.
 
-### 7.27 Create a mailbox
+### 7.26 Create a mailbox
 
 ```sh
 curl -sS -X POST "$RELAY/v1/mailboxes" -H 'Content-Type: application/json' \
   -d '{"secret_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
 ```
 
-`201 { "mailbox_id": "mbx_AAAAAAAAAAAAAAAAAAAAAA" }`.
+`201 { "mailbox_id": "mbx_AAAAAAAAAAAAAAAAAAAAAA" }`. Past the reused creation brake: `429 { "error": "too many requests", "code": "too_many_requests" }` with `Retry-After: 60`.
 
-### 7.28 Register a device
+### 7.27 Register a device
 
 ```sh
 curl -sS -X PUT "$RELAY/v1/mailboxes/mbx_AAAAAAAAAAAAAAAAAAAAAA/devices/dev_01K70000000000000000000001" \
@@ -813,16 +811,16 @@ curl -sS -X PUT "$RELAY/v1/mailboxes/mbx_AAAAAAAAAAAAAAAAAAAAAA/devices/dev_01K7
 
 `200 { "device_id": "dev_01K70000000000000000000001" }`. A wrong mailbox bearer: `401 { "error": "unauthorized", "code": "unauthorized" }`.
 
-### 7.29 Remove a device
+### 7.28 Remove a device
 
 ```sh
 curl -sS -X DELETE "$RELAY/v1/mailboxes/mbx_AAAAAAAAAAAAAAAAAAAAAA/devices/dev_01K70000000000000000000001" \
-  -H 'Authorization: Bearer CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC'
+  -H 'Authorization: Bearer BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'
 ```
 
-`204`. The Inbox's socket receives `{ "type": "device_removed", "device_id": "dev_01K70000000000000000000001" }`.
+`204`, sent by the Inbox when the device is revoked on the computer (7.25, 7.37). The device's queue, commands and APNs token are gone. With a device bearer: `401 unauthorized`.
 
-### 7.30 Register the APNs token
+### 7.29 Register the APNs token
 
 ```sh
 curl -sS -X PUT "$RELAY/v1/mailboxes/mbx_AAAAAAAAAAAAAAAAAAAAAA/devices/dev_01K70000000000000000000001/apns" \
@@ -832,7 +830,7 @@ curl -sS -X PUT "$RELAY/v1/mailboxes/mbx_AAAAAAAAAAAAAAAAAAAAAA/devices/dev_01K7
 
 `204`.
 
-### 7.31 Post a push
+### 7.30 Post a push
 
 ```sh
 curl -sS -X POST "$RELAY/v1/mailboxes/mbx_AAAAAAAAAAAAAAAAAAAAAA/push" \
@@ -842,7 +840,7 @@ curl -sS -X POST "$RELAY/v1/mailboxes/mbx_AAAAAAAAAAAAAAAAAAAAAA/push" \
 
 `202 { "sent": true }`. With no APNs token registered: `200 { "sent": false, "reason": "no_apns_token" }`.
 
-### 7.32 The Inbox's socket
+### 7.31 The Inbox's socket
 
 ```sh
 websocat -H 'Authorization: Bearer BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB' \
@@ -850,16 +848,16 @@ websocat -H 'Authorization: Bearer BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB' 
 ```
 
 ```
-< {"type":"hello","devices":[{"device_id":"dev_01K70000000000000000000001","cursor":1288,"apns":true}]}
+< {"type":"hello","devices":[{"device_id":"dev_01K70000000000000000000001","cursor":1288,"carriage":true,"apns":true}]}
 > {"type":"item","device_id":"dev_01K70000000000000000000001","cursor":1289,"ciphertext":"AAAAAAAAAAAAAAAAexampleciphertextexample"}
 < {"type":"command","device_id":"dev_01K70000000000000000000001","id":"00000000-0000-4000-8000-000000000003","ciphertext":"AAAAAAAAAAAAAAAAexamplecommandexample"}
-> {"type":"item","device_id":"dev_01K70000000000000000000001","cursor":1291,"ciphertext":"AAAAAAAAAAAAAAAAexampleresultexample"}
+> {"type":"item","device_id":"dev_01K70000000000000000000001","cursor":null,"ciphertext":"AAAAAAAAAAAAAAAAexampleresultexample"}
 > {"type":"applied","device_id":"dev_01K70000000000000000000001","id":"00000000-0000-4000-8000-000000000003"}
 ```
 
 The command's plaintext is `{"v":1,"id":"00000000-0000-4000-8000-000000000003","method":"POST","path":"/api/inbox/device/messages/msg_01K70000000000000000000010/reply","body":{"idempotency_key":"00000000-0000-4000-8000-000000000003","words":"Go ahead.","questions":[{"key":"q-1a2b3c4d","revision":1}]}}`; the result item's plaintext is `{"v":1,"type":"result","id":"00000000-0000-4000-8000-000000000003","status":200,"content_type":"application/json; charset=utf-8","body_b64":"<7.11's answer as base64>"}`.
 
-### 7.33 The phone fetches after a cursor
+### 7.32 The phone fetches after a cursor
 
 ```sh
 curl -sS "$RELAY/v1/mailboxes/mbx_AAAAAAAAAAAAAAAAAAAAAA/devices/dev_01K70000000000000000000001/items?after=12" \
@@ -868,16 +866,16 @@ curl -sS "$RELAY/v1/mailboxes/mbx_AAAAAAAAAAAAAAAAAAAAAA/devices/dev_01K70000000
 
 `{ "items": [ { "n": 13, "ciphertext": "AAAAAAAAAAAAAAAAexampleciphertextexample" }, { "n": 14, "ciphertext": "AAAAAAAAAAAAAAAAexampleresultexample" } ], "inbox_online": true }`.
 
-### 7.34 The phone acknowledges
+### 7.33 The phone acknowledges
 
 ```sh
 curl -sS -X POST "$RELAY/v1/mailboxes/mbx_AAAAAAAAAAAAAAAAAAAAAA/devices/dev_01K70000000000000000000001/ack" \
   -H 'Authorization: Bearer CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC' -H 'Content-Type: application/json' -d '{"through":14}'
 ```
 
-`204`. Items 13 and 14 are deleted.
+`204`. Items 13 and 14 are deleted. A phone that read the store directly up to seq 1301 sends `-d '{"cursor":1301}'` instead, and every record item at or below 1301 is deleted.
 
-### 7.35 The phone sends a command up
+### 7.34 The phone sends a command up
 
 ```sh
 curl -sS -X POST "$RELAY/v1/mailboxes/mbx_AAAAAAAAAAAAAAAAAAAAAA/devices/dev_01K70000000000000000000001/commands" \
@@ -887,17 +885,44 @@ curl -sS -X POST "$RELAY/v1/mailboxes/mbx_AAAAAAAAAAAAAAAAAAAAAA/devices/dev_01K
 
 `202 { "queued": true, "inbox_online": false }`. The same `id` again: `200 { "queued": false, "inbox_online": false }`.
 
+### 7.35 The phone's relay switch
+
+```sh
+curl -sS -X PUT "$RELAY/v1/mailboxes/mbx_AAAAAAAAAAAAAAAAAAAAAA/devices/dev_01K70000000000000000000001/carriage" \
+  -H 'Authorization: Bearer CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC' -H 'Content-Type: application/json' -d '{"on":false}'
+```
+
+`204`. The device's held items are deleted, and the Inbox's socket receives `{"type":"carriage","device_id":"dev_01K70000000000000000000001","on":false,"cursor":null}`. Back on, with the store cursor the phone holds: `-d '{"on":true,"cursor":1301}'`, and the socket receives `{"type":"carriage","device_id":"dev_01K70000000000000000000001","on":true,"cursor":1301}`.
+
+### 7.36 The window lists devices
+
+```sh
+curl -sS http://127.0.0.1:52817/api/inbox/devices
+```
+
+`{ "devices": [ { "id": "dev_01K70000000000000000000001", "name": "iPhone", "platform": "ios", "created_at": "2026-10-08T10:03:12.000Z", "last_seen_at": "2026-10-08T10:55:01.000Z", "revoked_at": null, "carriage": true } ] }`.
+
+### 7.37 The window removes a device
+
+```sh
+curl -sS -X POST http://127.0.0.1:52817/api/inbox/devices/dev_01K70000000000000000000001/revoke -H 'Content-Type: application/json' -d '{}'
+```
+
+`{ "device": { "id": "dev_01K70000000000000000000001", "name": "iPhone", "platform": "ios", "created_at": "2026-10-08T10:03:12.000Z", "last_seen_at": "2026-10-08T10:55:01.000Z", "revoked_at": "2026-10-08T11:00:00.000Z", "carriage": true } }`. The Inbox then sends 7.28 to the relay. The phone's next request answers `401 device_revoked`.
+
 ## 8. What this contract leaves out
 
-The Workspaces source (W0 to W2 have their own contract), FCM and Android, the iPad, deleting a mailbox, a retention sweep at the relay, rates on the relay's public routes, device attestation, request signing, re-authentication, and any Settings, restart or storage route on the phone.
+The Workspaces source (W0 to W2 have their own contract), FCM and Android, the iPad, pairing through the relay, deleting a mailbox, a retention sweep at the relay, rates beyond the reused creation brake, raw attachment bytes on the door, device attestation, request signing, re-authentication, and any Settings, restart or storage route on the phone.
 
-## 9. Open questions
+## 9. Rulings written in (2026-10-08)
 
-1. **Pairing with only the relay.** A redemption needs the phone to reach the computer once, over the same Wi-Fi or the tailnet. A person with neither switch on cannot pair, though the relay could carry it (the phone posts its redemption to the mailbox in the QR, encrypted under a key derived from the pairing secret). Is pairing over the relay in v1, or does "Pair a phone" turn on the Wi-Fi listener?
-2. **`mailbox` in the QR.** The redemption answer already carries `relay: { url, mailbox_id }`, so the QR's `mailbox` is used only by question 1's path. Keep it, or drop it until question 1 is settled?
-3. **The relay switch of 9.2.** Turning it off for one phone must stop carriage and push for that phone, and turning it on must start them again. This contract has `DELETE .../devices/:dev` for off, but nothing the phone can call to come back on. Proposal: a device-bearer `PUT /v1/mailboxes/:mbx/devices/:dev/carriage { on }`, with the device kept registered while off.
-4. **Which messages push.** Record 7.1 draws a plain "Run finished. A guided review ... is attached" notification, while the browser notifies only on questions. This contract pushes on a question or a guided review. Should every agent message push?
-5. **What the relay holds when nobody collects.** Items wait until the phone acknowledges them. A phone that is lost, never opened again or switched to another path leaves its queue at the relay until the device is removed. Owner items mention a sweep; this contract has none.
-6. **The relay's public routes.** `POST /v1/mailboxes` is open to anyone, like guides.show's create route. guides.show brakes creation per IP; this contract does not, under the no-limits rule. Confirm, or reuse guides.show's brake.
-7. **Making the certificate and the Bonjour record from Bun (P2).** Bun has no X.509 writer and no mDNS advertiser. The choices are `openssl` and `dns-sd` as child processes (present on macOS, not everywhere) or a small dependency for each. P2 picks one and names it.
-8. **The two-port tailnet publication (P1).** `buildServeArgs` maps an HTTPS port to the same local port. A stable phone address needs a fixed HTTPS port in front of a local port that moves, so P1 adds a two-port form. Which fixed port, and what happens when another serve mapping holds it?
+The coordinator ruled the eight questions the first draft left open; each is now part of the sections above.
+
+1. Pairing through the relay is not in v1. With neither path on, "Pair a phone" offers the Wi-Fi switch (section 1).
+2. The QR link carries no `mailbox`; the redemption's answer carries the relay (section 1).
+3. The phone's relay switch is `PUT .../devices/:dev/carriage`. Its state lives in the device record, and a reconnect registers only devices with carriage on (sections 2 and 4).
+4. Pushes go out for questions and guided reviews only (section 4, Push).
+5. The relay has no time sweep. A phone reading directly acknowledges by store cursor (section 4).
+6. Mailbox creation reuses guides.show's per-IP brake, with no new number (section 4, Routes).
+7. The certificate and the Bonjour record come from `openssl` and `dns-sd` (`avahi-publish` on Linux) as child processes, with no dependency (section 3).
+8. The tailnet HTTPS port is 8443, kept in `inbox.json`. A mapping held by something else is reported, never overwritten (section 1).
