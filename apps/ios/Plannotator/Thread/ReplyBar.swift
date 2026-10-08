@@ -41,7 +41,8 @@ struct ReplyBar: View {
 
     private var bar: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            NewMessageButton(session: session, thread: thread, replyInstead: open, problem: $problem)
+            // New message writes to a live session of a computer's Inbox; Workspaces has none.
+            if !session.isWorkspaces { NewMessageButton(session: session, thread: thread, replyInstead: open, problem: $problem) }
             Button(action: open) {
                 HStack(spacing: 6) {
                     if picked.isEmpty && words.trimmed.isEmpty {

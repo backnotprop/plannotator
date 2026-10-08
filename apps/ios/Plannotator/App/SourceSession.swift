@@ -64,6 +64,10 @@ final class SourceSession {
 
     var isWorkspaces: Bool { kind == .workspaces }
 
+    /// The computer's device door, for what only the local Inbox answers (the
+    /// decision card's words, the Decisions tab, New message); nil for Workspaces.
+    var inbox: InboxClient? { client as? InboxClient }
+
     // MARK: The stream (foreground only)
 
     /// Connects: refreshes what is on screen, then follows the event stream from
@@ -249,14 +253,16 @@ final class SourceSession {
     /// Done on the decision card (5.1): recording on, with the person's words
     /// (nil keeps the drafted ones, which follow the answer).
     func keepDecision(_ question: InboxQuestion, draft: InboxDecisionDraft?, thread id: String) async throws(InboxError) {
-        let saved = try await client.keepDecision(message: question.messageId, key: question.key, draft: draft)
+        guard let inbox else { return }
+        let saved = try await inbox.keepDecision(message: question.messageId, key: question.key, draft: draft)
         replace([saved], message: question.messageId, thread: id)
     }
 
     /// New message (8.2): the person's words to one live session, in this
     /// thread. The key is the caller's, kept until a definite answer.
     func newMessage(thread id: String, to session: InboxLiveSession, body: String, key: String) async throws(InboxError) {
-        try await client.newMessage(thread: id, session: session.session, body: body, idempotencyKey: key)
+        guard let inbox else { return }
+        try await inbox.newMessage(thread: id, session: session.session, body: body, idempotencyKey: key)
         await loadThread(id)
         await refresh()
     }
@@ -276,9 +282,9 @@ final class SourceSession {
     }
 
     func loadDecisions() async {
-        guard let project = decisionsProject else { return }
+        guard let project = decisionsProject, let inbox else { return }
         do {
-            let model = try await client.decisions(project: project)
+            let model = try await inbox.decisions(project: project)
             decisions[project] = model
             cache.write(model, "decisions-\(project)")
         } catch {

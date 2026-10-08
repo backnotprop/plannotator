@@ -117,7 +117,8 @@ struct NewMessageButton: View {
     @discardableResult
     private func read() async -> Bool {
         do {
-            live = try await session.client.sessions(thread: thread.threadId)
+            guard let inbox = session.inbox else { return false }
+            live = try await inbox.sessions(thread: thread.threadId)
             return true
         } catch {
             return false

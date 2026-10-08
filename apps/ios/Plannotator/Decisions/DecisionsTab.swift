@@ -20,11 +20,13 @@ struct DecisionsTab: View {
             .navigationTitle("Decisions")
             .navigationSubtitle(SourceMenu.subtitle(model.session))
             .toolbarTitleMenu { SourceMenu() }
+            // As the Inbox tab draws it: iOS 26 shows the title menu's chevron only on an inline title.
+            .toolbarTitleDisplayMode(.inline)
             .navigationDestination(for: ThreadRoute.self) { route in
                 if let session = model.session { ThreadScreen(session: session, threadId: route.id) }
             }
         }
-        .onChange(of: model.session?.source.id) { path = [] }
+        .onChange(of: model.session?.id) { path = [] }
     }
 }
 
@@ -57,10 +59,12 @@ struct DecisionsList: View {
     @ViewBuilder private var content: some View {
         if session.status == .removed {
             SourceRemoved(session: session)
+        } else if session.isWorkspaces {
+            ContentUnavailableView("Decisions in Workspaces", systemImage: "diamond", description: Text("This tab shows the decisions of your computer's Inbox. Decisions recorded in Workspaces are on its website."))
         } else if let project, let shown {
             list(project, shown)
         } else if session.list != nil, projects.isEmpty {
-            ContentUnavailableView("No decisions yet", systemImage: "diamond", description: Text("When you answer an agent on \(session.source.name) and record the answer as a decision, it shows up here."))
+            ContentUnavailableView("No decisions yet", systemImage: "diamond", description: Text("When you answer an agent on \(session.name) and record the answer as a decision, it shows up here."))
         } else if session.status == .unreachable {
             SourceUnreachable(session: session)
         } else {
