@@ -349,7 +349,7 @@ export async function runSnapshotCommand(args: string[]): Promise<never> {
   const app = resolveSnapshotsApp();
   if (!app) {
     fail(
-      `${SNAPSHOTS_APP_NAME} is not installed. Run 'plannotator snapshot add --screen' to capture the screen without it, or 'plannotator snapshot open' for the browser HUD.`,
+      `${SNAPSHOTS_APP_NAME} is not installed. Run 'plannotator snapshot install-app' to install it, or 'plannotator snapshot open' for the browser HUD.`,
     );
   }
   try {

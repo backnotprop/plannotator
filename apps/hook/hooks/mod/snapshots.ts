@@ -60,6 +60,11 @@ export function snapshotsClaimArgv(dir: string, claimant: string): string[] {
 /** What a plannotator from before Snapshots answers `plannotator snapshot` with. */
 const OLDER_CLI = /unknown (sub)?command|no plan content in hook event/i
 export const SNAPSHOTS_UPDATE_TEXT = 'The plannotator on this machine has no Snapshots (an older version); update Plannotator.'
+/** What `plannotator snapshot` says when the Mac app is missing, after it summoned this session (so the session is linked). */
+const APP_MISSING = /Plannotator Snapshots is not installed/
+/** The answer then. A copy of SNAPSHOTS_APP_MISSING_TEXT in packages/shared/snapshots/agent-link.ts (a hooks module imports only its own files); snapshots.test.ts keeps them equal. */
+export const SNAPSHOTS_APP_MISSING_TEXT =
+  'This session is linked to Plannotator Snapshots, but the Mac app is not installed: run `plannotator snapshot install-app`.'
 
 interface HubEntry {
   url: string
@@ -224,6 +229,7 @@ export class SnapshotsLink {
       const output = (result.stderr || result.stdout).trim()
       // A binary from before Snapshots: `Unknown command: snapshot`, or (before 0.27.11) the classic hook's refusal.
       if (OLDER_CLI.test(output)) return SNAPSHOTS_UPDATE_TEXT
+      if (APP_MISSING.test(output)) return SNAPSHOTS_APP_MISSING_TEXT
       return `Plannotator Snapshots could not start: ${output || `exit ${result.exitCode}`}`
     }
     return result.stdout.trim()

@@ -19,7 +19,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startTestSnapshotsHub, tempSnapshotsDataDir, type TestSnapshotsHub } from "../../tests/helpers/snapshots-hub";
+import { SNAPSHOTS_APP_MISSING_TEXT } from "@plannotator/shared/snapshots/agent-link";
+import { startTestSnapshotsHub, stubAppMissingPlannotator, tempSnapshotsDataDir, type TestSnapshotsHub } from "../../tests/helpers/snapshots-hub";
 import serverPlugin, { resolveRootSession } from "./server";
 import { createOpenCodeSnapshots, SNAPSHOTS_COMMAND } from "./snapshots";
 import { dropSessionUrlNotices } from "./v2-client";
@@ -222,6 +223,18 @@ describe("Plannotator Snapshots on OpenCode 2", () => {
     const sent = await hub.send((await hub.capture()).collectionId);
     await hub.waitForState((state) => state.lastSent?.send?.state === "delivered");
     expect(snapshotSends(fake)).toEqual([expect.objectContaining({ sessionID: ROOT, text: sent.text, delivery: "steer" })]);
+  });
+
+  test("the Mac app is missing: the notice says this session is linked and how to install the app", async () => {
+    const hub = await world();
+    process.env.PLANNOTATOR_BIN = stubAppMissingPlannotator();
+    const fake = fakeOpenCode();
+    const snapshots = snapshotsFor(fake, "darwin");
+    await snapshots.command.execute({ sessionID: ROOT, prompt: { text: "" } });
+    expect(fake.synthetics).toHaveLength(1);
+    expect(fake.synthetics[0].description).toContain(SNAPSHOTS_APP_MISSING_TEXT);
+    // True as said: the session is linked to the hub.
+    await hub.waitForState((state) => state.connections.some((c: { host: string; sessionId: string }) => c.host === "opencode" && c.sessionId === ROOT));
   });
 
   test("costs nothing until a hub runs: then a running session links itself and Ask is a real turn; the hub going away ends it", async () => {

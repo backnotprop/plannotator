@@ -61,6 +61,11 @@ export const SNAPSHOTS_LEASE_STALE_MS = 20_000;
 /** What a plannotator from before Snapshots answers `plannotator snapshot` with. */
 const OLDER_CLI = /unknown (sub)?command|no plan content in hook event/i;
 export const SNAPSHOTS_UPDATE_TEXT = "The plannotator on this machine has no Snapshots (an older version); update Plannotator.";
+/** What `plannotator snapshot` says when the Mac app is missing, after it summoned this session (so the session is linked). */
+const APP_MISSING = /Plannotator Snapshots is not installed/;
+/** The host's answer then: the session is linked, only the app is missing. Kept equal to the Claude Code mod's copy (apps/hook/hooks/mod/snapshots.ts). */
+export const SNAPSHOTS_APP_MISSING_TEXT =
+  "This session is linked to Plannotator Snapshots, but the Mac app is not installed: run `plannotator snapshot install-app`.";
 
 export const SNAPSHOTS_MACOS_ONLY_TEXT =
   "Plannotator Snapshots captures the screen on macOS only for now. Here you can add an image with `plannotator snapshot add <file>` and open the HUD in a browser with `plannotator snapshot open`; a send from it still arrives in this session.";
@@ -276,6 +281,7 @@ export async function summonSnapshots(input: {
     const output = (run.stderr || run.stdout).trim();
     if (run.exitCode !== 0) {
       if (OLDER_CLI.test(output)) return { ok: false, text: SNAPSHOTS_UPDATE_TEXT };
+      if (APP_MISSING.test(output)) return { ok: false, text: SNAPSHOTS_APP_MISSING_TEXT };
       return { ok: false, text: `Plannotator Snapshots could not start: ${output || `exit ${run.exitCode}`}` };
     }
     return { ok: true, text: run.stdout.trim() || "Plannotator Snapshots is open." };

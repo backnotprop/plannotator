@@ -2,7 +2,9 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { PlannotatorMod } from './controller'
 import { resolveSnapshotsEnabled } from './enabled'
 import type { HttpResult } from './host'
-import { SNAPSHOTS_UNDELIVERED_AFTER_MS, SNAPSHOTS_UPDATE_TEXT, SnapshotsLink, snapshotsSessionDirOf } from './snapshots'
+import { SNAPSHOTS_APP_MISSING_TEXT as SHARED_APP_MISSING_TEXT } from '../../../../packages/shared/snapshots/agent-link'
+import { CLI_APP_MISSING_LINE } from '../../../../tests/helpers/snapshots-hub'
+import { SNAPSHOTS_APP_MISSING_TEXT, SNAPSHOTS_UNDELIVERED_AFTER_MS, SNAPSHOTS_UPDATE_TEXT, SnapshotsLink, snapshotsSessionDirOf } from './snapshots'
 import { fakeHost, type FakeHost } from './testing/fake-host'
 import { TurnTracker } from './turns'
 
@@ -229,6 +231,15 @@ describe('/plannotator-snapshot in the mod', () => {
       host.onRun = (call) => (call.argv[1] === 'snapshot' ? { exitCode: 1, stdout: '', stderr } : undefined)
       expect(await linkOn(host).summon('')).toBe(SNAPSHOTS_UPDATE_TEXT)
     }
+  })
+
+  test('the Mac app is missing: the session is linked and the person is told how to install the app', async () => {
+    // The CLI summoned this session before it looked for the app; "could not start" would be untrue.
+    const host = fakeHost()
+    host.onRun = (call) => (call.argv[1] === 'snapshot' ? { exitCode: 1, stdout: '', stderr: `${CLI_APP_MISSING_LINE}\n` } : undefined)
+    expect(await linkOn(host).summon('')).toBe(SNAPSHOTS_APP_MISSING_TEXT)
+    // One sentence for every host: the mod's copy equals Pi's and OpenCode's.
+    expect(SNAPSHOTS_APP_MISSING_TEXT).toBe(SHARED_APP_MISSING_TEXT)
   })
 
   test('nothing is spawned until a hub exists', async () => {

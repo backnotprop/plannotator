@@ -16,10 +16,11 @@ import type { SessionBridge, SessionBridgeAskRequest } from "@plannotator/ai/ses
 import {
   SnapshotsAgentLink,
   summonSnapshots,
+  SNAPSHOTS_APP_MISSING_TEXT,
   SNAPSHOTS_MACOS_ONLY_TEXT,
   SNAPSHOTS_UPDATE_TEXT,
 } from "@plannotator/shared/snapshots/agent-link";
-import { startTestSnapshotsHub, tempSnapshotsDataDir, type TestSnapshotsHub } from "../../../tests/helpers/snapshots-hub";
+import { CLI_APP_MISSING_LINE, startTestSnapshotsHub, stubAppMissingPlannotator, tempSnapshotsDataDir, type TestSnapshotsHub } from "../../../tests/helpers/snapshots-hub";
 import { SNAPSHOTS_ASK_SURFACE } from "./connections";
 
 const cleanups: Array<() => void> = [];
@@ -213,5 +214,20 @@ describe("Snapshots agent link", () => {
     chmodSync(bin, 0o755);
     const answer = await summonSnapshots({ dataDir: dir, host: "pi", sessionId: "x", args: "", cwd: process.cwd(), platform: "darwin", env: { ...process.env, PLANNOTATOR_BIN: bin } });
     expect(answer).toEqual({ ok: false, text: SNAPSHOTS_UPDATE_TEXT });
+  });
+
+  test("the Mac app is missing: say the session is linked and how to install the app, not \"could not start\"", async () => {
+    // The CLI summons the session before it looks for the app, so the session IS linked.
+    const bin = stubAppMissingPlannotator();
+    const answer = await summonSnapshots({ dataDir: "/nonexistent", host: "pi", sessionId: "x", args: "", cwd: process.cwd(), platform: "darwin", env: { ...process.env, PLANNOTATOR_BIN: bin } });
+    expect(answer).toEqual({ ok: false, text: SNAPSHOTS_APP_MISSING_TEXT });
+    expect(SNAPSHOTS_APP_MISSING_TEXT).toContain("`plannotator snapshot install-app`");
+  });
+
+  test("the stub's line is the CLI's own text for a missing app", async () => {
+    // What regresses: the CLI rewords it and every host falls back to "could not start".
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync(join(import.meta.dir, "../../../apps/hook/server/snapshot-command.ts"), "utf8");
+    expect(source).toContain(CLI_APP_MISSING_LINE.replace("Plannotator Snapshots", "${SNAPSHOTS_APP_NAME}"));
   });
 });

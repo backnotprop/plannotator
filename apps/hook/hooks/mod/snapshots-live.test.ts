@@ -17,6 +17,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test'
 import { createInboxWorld, stubBuiltHtml, worldEnv, type InboxWorld } from '../../../../tests/helpers/inbox-world'
 import { startCliSnapshotsHub, stopCliSnapshotsHub, type CliSnapshotsHub } from '../../../../tests/helpers/snapshots-world'
+import { SNAPSHOTS_APP_MISSING_TEXT } from './snapshots'
 import { ClaudeSession, PLUGIN_FRAME } from './testing/claude-session'
 
 const darwin = process.platform === 'darwin'
@@ -104,9 +105,10 @@ describe.skipIf(process.platform === 'win32')('Claude Code ↔ Plannotator Snaps
     const session = await open(w, 'session-snap')
 
     const reply = await runSlashCommand(w, session, hub)
-    // No native app in the temp HOME: the command says why it could not open the capture overlay, in the CLI's words.
-    expect(reply).toStartWith('Plannotator Snapshots could not start: ')
-    expect(reply).toContain(darwin ? 'Plannotator Snapshots is not installed' : 'runs on macOS for now')
+    // No native app in the temp HOME. On macOS the real CLI summoned this session first, so the
+    // reply says the session is linked and how to install the app; elsewhere the CLI refuses.
+    if (darwin) expect(reply).toBe(SNAPSHOTS_APP_MISSING_TEXT)
+    else expect(reply).toContain('runs on macOS for now')
     await linked(hub, 'session-snap')
 
     const { collectionId, snapshotId } = await hub.capture()

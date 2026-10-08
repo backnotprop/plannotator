@@ -5,7 +5,7 @@
  * person pressing Send or asking from the HUD without the native app.
  */
 
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startSnapshotsHubServer, type SnapshotsHubServer } from "../../packages/server/snapshots/server";
@@ -109,4 +109,21 @@ export async function snapshotsHubClient(url: string, token: string): Promise<Sn
 
 export function tempSnapshotsDataDir(): string {
   return mkdtempSync(join(tmpdir(), "plannotator-snapshots-data-"));
+}
+
+/**
+ * What the real `plannotator snapshot --session <host>:<id>` prints when the
+ * Mac app is missing, after it summoned the session (apps/hook/server/snapshot-command.ts;
+ * packages/server/snapshots/agent-link.test.ts keeps this equal to the CLI's text).
+ */
+export const CLI_APP_MISSING_LINE =
+  "Plannotator Snapshots is not installed. Run 'plannotator snapshot install-app' to install it, or 'plannotator snapshot open' for the browser HUD.";
+
+/** A `plannotator` stand-in that answers `snapshot` the way the CLI does on a Mac without the app: that line on stderr, exit 1. Returns its path. */
+export function stubAppMissingPlannotator(): string {
+  const dir = mkdtempSync(join(tmpdir(), "plannotator-snapshots-noapp-"));
+  const bin = join(dir, "plannotator");
+  writeFileSync(bin, `#!/bin/sh\necho "${CLI_APP_MISSING_LINE}" >&2\nexit 1\n`);
+  chmodSync(bin, 0o755);
+  return bin;
 }

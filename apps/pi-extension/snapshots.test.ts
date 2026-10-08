@@ -18,7 +18,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startTestSnapshotsHub, tempSnapshotsDataDir, type TestSnapshotsHub } from "../../tests/helpers/snapshots-hub.ts";
+import { startTestSnapshotsHub, stubAppMissingPlannotator, tempSnapshotsDataDir, type TestSnapshotsHub } from "../../tests/helpers/snapshots-hub.ts";
+import { SNAPSHOTS_APP_MISSING_TEXT } from "./generated/snapshots/agent-link.ts";
 import { createPiSessionBridgeHub } from "./pi-session-bridge.ts";
 import { PI_SNAPSHOTS_COMMAND, setupPiSnapshots } from "./snapshots.ts";
 
@@ -188,6 +189,17 @@ describe("Plannotator Snapshots on Pi", () => {
 		expect(fake.commands.has(PI_SNAPSHOTS_COMMAND)).toBe(false);
 		await new Promise((resolve) => setTimeout(resolve, 300));
 		expect((await hub.state()).connections).toEqual([]);
+	});
+
+	test("the Mac app is missing: the person reads that this session is linked and how to install the app", async () => {
+		const { hub } = await world();
+		const fake = createPi();
+		setup(fake, { ...process.env, PLANNOTATOR_BIN: stubAppMissingPlannotator() });
+		fake.emit("session_start", { reason: "startup" });
+		await fake.commands.get(PI_SNAPSHOTS_COMMAND)!.handler("", fake.ctx);
+		expect(fake.notices.at(-1)).toEqual({ message: SNAPSHOTS_APP_MISSING_TEXT, type: "warning" });
+		// True as said: the session is linked to the hub.
+		await hub.waitForState((state) => state.connections.some((c: { host: string; sessionId: string }) => c.host === "pi" && c.sessionId === SESSION_ID));
 	});
 
 	test("off macOS: no session links at start; the command explains, runs no plannotator, and links this session on demand", async () => {

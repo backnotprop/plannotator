@@ -12,6 +12,7 @@
  *
  * INBOX_PROOF_DIR=<dir> keeps a transcript per proof under <dir>/pi-snapshots/.
  */
+import { SNAPSHOTS_APP_MISSING_TEXT } from "./generated/snapshots/agent-link.ts";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -192,7 +193,7 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Snapshots (the real Pi in RPC mode,
 		const notice = await runSnapshotCommand(w, pi);
 		if (process.platform === "darwin") {
 			// The real CLI summoned this session, then found no app in the temp HOME: nothing native ran.
-			expect(notice).toContain("not installed");
+			expect(notice).toBe(SNAPSHOTS_APP_MISSING_TEXT);
 		} else {
 			expect(notice).toContain("plannotator snapshot add");
 		}
