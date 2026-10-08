@@ -835,6 +835,12 @@ function removeInstalledFiles(
     state,
   );
 
+  for (const layout of ["config", "antigravity-cli"]) {
+    const base = join(environment.homeDir, ".gemini", layout);
+    removePath(join(base, "plugins", "plannotator"), request, state);
+    removePath(join(base, "policies", "plannotator.toml"), request, state);
+  }
+
   cleanupRecognizableKiroAgent(
     join(environment.homeDir, ".kiro", "agents", "plannotator.json"),
     request,

@@ -77,6 +77,7 @@ export type {
   CodexSDKConfig,
   PiSDKConfig,
   OpenCodeConfig,
+  AntigravityLSConfig,
 } from "./types.ts";
 
 // Provider registry

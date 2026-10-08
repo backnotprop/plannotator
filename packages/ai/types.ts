@@ -369,3 +369,15 @@ export interface OpenCodeConfig extends AIProviderConfig {
   /** Port for the spawned OpenCode server. Default: 0 (OS-assigned free port). */
   port?: number;
 }
+
+export interface AntigravityLSConfig extends AIProviderConfig {
+  type: "antigravity-ls";
+  /**
+   * Explicit path to the agy CLI binary.
+   */
+  executablePath?: string;
+  /**
+   * Whether to enforce sandbox mode. Defaults to true.
+   */
+  sandbox?: boolean;
+}

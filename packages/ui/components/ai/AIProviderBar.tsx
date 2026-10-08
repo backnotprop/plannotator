@@ -96,12 +96,12 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
 
       {showReasoningEffort && (
         <select
-          value={selectedReasoningEffort ?? ''}
+          value={selectedReasoningEffort ?? currentModel?.defaultReasoningEffort ?? ''}
           onChange={(event) => onReasoningEffortChange?.(event.target.value || null)}
           className="w-16 bg-transparent text-[11px] text-foreground focus:outline-none [&>option]:bg-card [&>option]:text-foreground"
           aria-label="Reasoning effort"
         >
-          <option value="">Auto</option>
+          {!currentModel?.defaultReasoningEffort && <option value="">Auto</option>}
           {reasoningEfforts.map(effort => (
             <option key={effort.id} value={effort.id}>
               {effort.label}

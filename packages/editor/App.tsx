@@ -4305,8 +4305,8 @@ const App: React.FC = () => {
         ...planRevisionBodyField(),
       };
 
-      // Include permission mode for Claude Code
-      if (origin === 'claude-code') {
+      // Include permission mode for Claude Code and Antigravity
+      if (origin === 'claude-code' || origin === 'antigravity') {
         body.permissionMode = permissionMode;
       }
 

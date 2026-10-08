@@ -26,6 +26,7 @@ export const PLAN_TOOL_NAMES: Record<PromptRuntime, string> = {
   "gemini-cli": "exit_plan_mode",
   "oh-my-pi": "ExitPlanMode",
   "mistral-vibe": "exit_plan_mode",
+  antigravity: "write_to_file",
 };
 
 export function getPlanToolName(runtime?: PromptRuntime | null): string {

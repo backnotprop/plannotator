@@ -293,6 +293,7 @@ export const INSTALL_FLAG_SPELLINGS = {
   "skip-kiro": { posix: "--skip-kiro", powershell: "-SkipKiro" },
   "skip-vibe": { posix: "--skip-vibe", powershell: "-SkipVibe" },
   "skip-opencode": { posix: "--skip-opencode", powershell: "-SkipOpencode" },
+  "skip-antigravity": { posix: "--skip-antigravity", powershell: "-SkipAntigravity" },
   "skip-skills": { posix: "--skip-skills", powershell: "-SkipSkills" },
 } as const;
 

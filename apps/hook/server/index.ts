@@ -155,6 +155,14 @@ import {
   getPlanToolName,
   buildPlanFileRule,
 } from "@plannotator/shared/prompts";
+import {
+  getAntigravityPlan,
+  formatAntigravityDecision,
+  getAntigravityPlanningLockDenial,
+  setPlanningLock,
+  clearPlanningLock,
+  getAntigravityPlanTarget,
+} from "./antigravity-plan";
 import { buildReviewOutput, supportsReviewApprovalNotes } from "./review-output";
 import { registerSession, unregisterSession, listSessions, type SessionInfo } from "@plannotator/server/sessions";
 import { enableAutoUpdateNotice, scheduleAutoUpdateCheck } from "@plannotator/server/auto-update";
@@ -553,6 +561,14 @@ async function readStaticPatch(patchFile: string, cwd: string): Promise<{ rawPat
   }
 }
 
+if (args[0] === "unlock") {
+  const rawCwd = process.env.PLANNOTATOR_CWD || process.cwd();
+  const workspaceRoot = rawCwd.split(/[/\\]\.agents/)[0] || rawCwd;
+  clearPlanningLock(workspaceRoot);
+  console.log(`Cleared planning lock for ${workspaceRoot}`);
+  process.exit(0);
+}
+
 if (args[0] === "uninstall") {
   let options: ReturnType<typeof parseUninstallOptions>;
   try {
@@ -717,6 +733,7 @@ const pasteApiUrl = process.env.PLANNOTATOR_PASTE_URL || undefined;
 const originOverride = process.env.PLANNOTATOR_ORIGIN as Origin | undefined;
 const detectedOrigin: Origin =
   (originOverride && originOverride in AGENT_CONFIG) ? originOverride :
+  process.env.ANTIGRAVITY_LS_ADDRESS ? "antigravity" :
   process.env.CODEX_THREAD_ID ? "codex" :
   process.env.COPILOT_CLI ? "copilot-cli" :
   process.env.OPENCODE ? "opencode" :
@@ -2863,13 +2880,43 @@ if (args[0] === "sessions") {
   let planContent = "";
   let permissionMode = "default";
   let isGemini = false;
+  const isAntigravity = event !== null && typeof event === "object" && "toolCall" in event;
   let planFilename = "";
 
   // Detect harness: Gemini sends plan_filename (file on disk), Claude Code sends plan (inline)
   planFilename = event.tool_input?.plan_filename || event.tool_input?.plan_path || "";
-  isGemini = !!planFilename;
+  isGemini = !isAntigravity && !!planFilename;
 
-  if (isGemini) {
+  if (isAntigravity) {
+    try {
+      const lockDenial = getAntigravityPlanningLockDenial(event);
+      if (lockDenial) {
+        console.log(JSON.stringify({ decision: "deny", reason: lockDenial }));
+        process.exit(0);
+      }
+
+      const plan = getAntigravityPlan(event);
+      if (plan === null) {
+        console.log(JSON.stringify({ decision: "allow" }));
+        process.exit(0);
+      }
+      planContent = plan;
+      const rawCwd =
+        (Array.isArray(event.workspacePaths) && typeof event.workspacePaths[0] === "string" && event.workspacePaths[0]) ||
+        process.env.PLANNOTATOR_CWD ||
+        process.cwd();
+      const workspaceRoot = rawCwd.split(/[/\\]\.agents/)[0] || rawCwd;
+      if (workspaceRoot && workspaceRoot !== rawCwd) {
+        process.chdir(workspaceRoot);
+        process.env.PLANNOTATOR_CWD = workspaceRoot;
+      }
+      const planTarget = getAntigravityPlanTarget(event) || "plan.md";
+      setPlanningLock(workspaceRoot, planTarget, "in_review");
+    } catch (error) {
+      console.log(JSON.stringify({ decision: "deny", reason: error instanceof Error ? error.message : String(error) }));
+      process.exit(0);
+    }
+  } else if (isGemini) {
     // Reconstruct full plan path from transcript_path and session_id:
     // transcript_path = <projectTempDir>/chats/session-...json
     // plan lives at   = <projectTempDir>/<session_id>/plans/<plan_filename>
@@ -2892,9 +2939,9 @@ if (args[0] === "sessions") {
   // Start the plan review server
   const server = await startPlannotatorServer({
     plan: planContent,
-    origin: isGemini ? "gemini-cli" : detectedOrigin,
+    origin: isAntigravity ? "antigravity" : isGemini ? "gemini-cli" : detectedOrigin,
     // Claude Code writes the plan to disk before the hook fires.
-    planFilePath: isGemini ? undefined : event.tool_input?.planFilePath,
+    planFilePath: (isGemini || isAntigravity) ? undefined : event.tool_input?.planFilePath,
     permissionMode,
     sharingEnabled,
     shareBaseUrl,
@@ -2929,7 +2976,20 @@ if (args[0] === "sessions") {
   server.stop();
 
   // Output decision in the appropriate format for the harness
-  if (isGemini) {
+  if (isAntigravity) {
+    const rawCwd =
+      (Array.isArray(event.workspacePaths) && typeof event.workspacePaths[0] === "string" && event.workspacePaths[0]) ||
+      process.env.PLANNOTATOR_CWD ||
+      process.cwd();
+    const workspaceRoot = rawCwd.split(/[/\\]\.agents/)[0] || rawCwd;
+    const planTarget = getAntigravityPlanTarget(event) || "plan.md";
+    if (result.approved) {
+      clearPlanningLock(workspaceRoot);
+    } else {
+      setPlanningLock(workspaceRoot, planTarget, "denied", result.feedback);
+    }
+    console.log(JSON.stringify(formatAntigravityDecision(result)));
+  } else if (isGemini) {
     if (result.approved) {
       console.log(result.feedback ? JSON.stringify({ systemMessage: result.feedback }) : "{}");
     } else {

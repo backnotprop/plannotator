@@ -2,7 +2,7 @@ import type React from 'react';
 import type { ModelsSource } from '@plannotator/core/model-catalog';
 
 /** The tools whose model lists are discovered from the installed CLI. */
-export type ModelSourceTool = 'claude' | 'codex';
+export type ModelSourceTool = 'claude' | 'codex' | 'antigravity';
 
 export interface ModelSourceInfo {
   modelsSource?: ModelsSource;
@@ -12,12 +12,14 @@ export interface ModelSourceInfo {
 const TOOL_NAME: Record<ModelSourceTool, string> = {
   claude: 'Claude Code',
   codex: 'Codex',
+  antigravity: 'Antigravity',
 };
 
-/** The hint tool for an Ask AI provider type (`claude-agent-sdk`, `codex-sdk`); null for the rest. */
+/** The hint tool for an Ask AI provider type (`claude-agent-sdk`, `codex-sdk`, `antigravity-ls`); null for the rest. */
 export function modelSourceToolForProvider(providerType: string | null | undefined): ModelSourceTool | null {
   if (providerType === 'claude-agent-sdk') return 'claude';
   if (providerType === 'codex-sdk') return 'codex';
+  if (providerType === 'antigravity-ls') return 'antigravity';
   return null;
 }
 

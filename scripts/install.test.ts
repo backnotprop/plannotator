@@ -402,7 +402,7 @@ describe("install.sh", () => {
     // Flags exist for Codex plus the two integrations where the mechanism
     // generalizes identically (detect -> write): Gemini and Kiro. OpenCode
     // gets a plain do-not-write switch (no detection leg).
-    for (const flag of ["--skip-codex)", "--skip-gemini)", "--skip-kiro)", "--skip-vibe)", "--skip-opencode)"]) {
+    for (const flag of ["--skip-codex)", "--skip-gemini)", "--skip-kiro)", "--skip-vibe)", "--skip-opencode)", "--skip-antigravity)"]) {
       expect(script).toContain(flag);
     }
     // Env vars follow the existing PLANNOTATOR_SKIP_*_INSTALL naming.
@@ -411,6 +411,7 @@ describe("install.sh", () => {
     expect(script).toContain("PLANNOTATOR_SKIP_KIRO_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_VIBE_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_OPENCODE_INSTALL");
+    expect(script).toContain("PLANNOTATOR_SKIP_ANTIGRAVITY_INSTALL");
     // Config layer (M2): the skipInstall OBJECT is extracted first (awk,
     // character-indexed so single-line JSON works too) and per-agent keys
     // are matched only inside it - a "codex": true under some OTHER key can
@@ -427,7 +428,7 @@ describe("install.sh", () => {
     expect(script).toContain("continue # explicit false is a veto, never a skip");
     // skills rides the same loop: not an agent, but the same three layers
     // and the same skipInstall key region.
-    expect(script).toContain("for _agent in codex gemini kiro vibe opencode skills; do");
+    expect(script).toContain("for _agent in codex gemini kiro vibe opencode antigravity skills; do");
     // The old whole-file grep form is gone.
     expect(script).not.toContain('grep -q \'"codex"[[:space:]]*:[[:space:]]*true\' "$_config_dir/config.json"');
     // Precedence by textual layering (later assignment wins): config grep,
@@ -493,7 +494,8 @@ describe("install.sh", () => {
     expect(envIdx).toBeGreaterThan(configIdx);
     expect(flagIdx).toBeGreaterThan(envIdx);
     // Advertised in the usage text alongside the per-agent opt-outs.
-    expect(script).toContain("[--skip-kiro] [--skip-vibe] [--skip-opencode] [--skip-skills]");
+    expect(script).toContain("[--skip-antigravity]");
+    expect(script).toContain("[--skip-skills]");
     expect(script).toContain("PLANNOTATOR_SKIP_SKILLS_INSTALL; config key:");
   });
 
@@ -734,11 +736,13 @@ describe("install.ps1", () => {
     expect(script).toContain("[switch]$SkipKiro");
     expect(script).toContain("[switch]$SkipVibe");
     expect(script).toContain("[switch]$SkipOpencode");
+    expect(script).toContain("[switch]$SkipAntigravity");
     expect(script).toContain("PLANNOTATOR_SKIP_CODEX_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_GEMINI_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_KIRO_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_VIBE_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_OPENCODE_INSTALL");
+    expect(script).toContain("PLANNOTATOR_SKIP_ANTIGRAVITY_INSTALL");
     // Config layer parses the real nested JSON (strict boolean check, like
     // verifyAttestation).
     expect(script).toContain("$cfg.skipInstall.codex -is [bool]");
@@ -746,6 +750,7 @@ describe("install.ps1", () => {
     expect(script).toContain("$cfg.skipInstall.kiro -is [bool]");
     expect(script).toContain("$cfg.skipInstall.vibe -is [bool]");
     expect(script).toContain("$cfg.skipInstall.opencode -is [bool]");
+    expect(script).toContain("$cfg.skipInstall.antigravity -is [bool]");
     // Precedence by textual layering (later assignment wins): config, then
     // env var, then switch.
     const configIdx = script.indexOf('$skipCodexSource = "config skipInstall.codex"');
@@ -1104,17 +1109,19 @@ describe("install.cmd", () => {
     expect(script).toContain('if /i "%~1"=="--skip-kiro"');
     expect(script).toContain('if /i "%~1"=="--skip-vibe"');
     expect(script).toContain('if /i "%~1"=="--skip-opencode"');
+    expect(script).toContain('if /i "%~1"=="--skip-antigravity"');
     expect(script).toContain("PLANNOTATOR_SKIP_CODEX_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_GEMINI_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_KIRO_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_VIBE_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_OPENCODE_INSTALL");
+    expect(script).toContain("PLANNOTATOR_SKIP_ANTIGRAVITY_INSTALL");
     // Config layer (M2): the REAL JSON is parsed by PowerShell (strict
     // boolean check, matching install.ps1) instead of a line-oblivious
     // findstr - so a "codex": true under some OTHER key can never opt
     // anyone out and an explicit false inside skipInstall is honored.
     expect(script).toContain("$c.skipInstall.$k");
-    expect(script).toContain("@('codex','gemini','kiro','vibe','opencode','skills')");
+    expect(script).toContain("@('codex','gemini','kiro','vibe','opencode','antigravity','skills')");
     expect(script).toContain("$v -is [bool] -and $v");
     expect(script).toContain("PLN_CONFIG_JSON");
     expect(script).toContain("skipInstall.codex");
@@ -1122,6 +1129,7 @@ describe("install.cmd", () => {
     expect(script).toContain("skipInstall.kiro");
     expect(script).toContain("skipInstall.vibe");
     expect(script).toContain("skipInstall.opencode");
+    expect(script).toContain("skipInstall.antigravity");
     // The old whole-file findstr form is gone.
     expect(script).not.toContain('findstr /r /c:"\\"codex\\"');
     // Precedence by textual layering (later assignment wins): config, then
@@ -1175,7 +1183,7 @@ describe("install.cmd", () => {
     expect(envIdx).toBeGreaterThan(configIdx);
     expect(flagIdx).toBeGreaterThan(envIdx);
     // Advertised in the usage text alongside the per-agent opt-outs.
-    expect(script).toContain("[--skip-opencode] [--skip-skills]");
+    expect(script).toContain("[--skip-opencode] [--skip-antigravity] [--skip-skills]");
   });
 
   test("--skip-skills jumps past the clone without tripping the guard (#1201)", () => {
@@ -2184,6 +2192,7 @@ describe("PlannotatorConfig schema", () => {
     expect(match![1]).toContain("gemini?: boolean");
     expect(match![1]).toContain("kiro?: boolean");
     expect(match![1]).toContain("opencode?: boolean");
+    expect(match![1]).toContain("antigravity?: boolean");
   });
 });
 
@@ -2649,7 +2658,7 @@ describe("install-flags.json is written by every installer", () => {
   test("install.ps1 and install.cmd record the same neutral ids after both exits", () => {
     const ps = readScript("install.ps1");
     const cmd = readScript("install.cmd");
-    for (const id of ["minimal", "no-minimal", "verify-attestation", "skip-attestation", "with-call-flow", "skip-codex", "skip-gemini", "skip-kiro", "skip-vibe", "skip-opencode", "skip-skills"]) {
+    for (const id of ["minimal", "no-minimal", "verify-attestation", "skip-attestation", "with-call-flow", "skip-codex", "skip-gemini", "skip-kiro", "skip-vibe", "skip-opencode", "skip-antigravity", "skip-skills"]) {
       expect(ps).toContain(`$ids += "${id}"`);
       expect(cmd).toContain(`call :AddInstallFlag ${id}`);
     }
@@ -2723,7 +2732,7 @@ function runScanner(scannerBody: string, rawJson: string): string[] {
   if (r.exitCode !== 0) {
     throw new Error(`scanner driver failed: ${r.stderr.toString()}`);
   }
-  return r.stdout.toString().split("\n").filter((l) => l.length > 0);
+  return r.stdout.toString().split(/\r?\n/).filter((l) => l.length > 0);
 }
 
 describe("install.cmd encoded fetcher blob", () => {

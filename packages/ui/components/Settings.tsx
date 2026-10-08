@@ -1504,8 +1504,8 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                       </>
                     )}
 
-                    {/* Permission Mode (Claude Code only) */}
-                    {origin === 'claude-code' && mode === 'plan' && (
+                    {/* Permission Mode (Claude Code & Antigravity) */}
+                    {(origin === 'claude-code' || origin === 'antigravity') && mode === 'plan' && (
                       <>
                         <div className="border-t border-border" />
                         <div className="space-y-2">
@@ -1520,7 +1520,10 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                             onChange={(e) => handlePermissionModeChange(e.target.value as PermissionMode)}
                             className="w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
                           >
-                            {PERMISSION_MODE_OPTIONS.map((option) => (
+                            {(origin === 'antigravity'
+                              ? PERMISSION_MODE_OPTIONS.filter((o) => o.value !== 'auto')
+                              : PERMISSION_MODE_OPTIONS
+                            ).map((option) => (
                               <option key={option.value} value={option.value}>
                                 {option.label}
                               </option>

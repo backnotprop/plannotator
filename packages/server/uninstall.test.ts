@@ -886,6 +886,49 @@ describe("default uninstall", () => {
     });
   });
 
+  test("removes both Antigravity layouts and preserves unrelated host files", async () => {
+    const fixture = createFixture();
+    const owned: string[] = [];
+    const unrelated: string[] = [];
+    for (const layout of ["config", "antigravity-cli"]) {
+      const base = join(fixture.homeDir, ".gemini", layout);
+      owned.push(
+        join(base, "plugins", "plannotator"),
+        join(base, "policies", "plannotator.toml"),
+      );
+      writeJson(join(base, "plugins", "plannotator", "plugin.json"), {
+        name: "plannotator",
+      });
+      writeText(join(base, "plugins", "plannotator", "hooks.json"));
+      writeText(join(base, "policies", "plannotator.toml"));
+      unrelated.push(
+        join(base, "settings.json"),
+        join(base, "plugins", "other", "plugin.json"),
+        join(base, "policies", "custom.toml"),
+      );
+    }
+    for (const path of unrelated) writeText(path, "user content");
+
+    const dryRun = await runPlannotatorUninstall(
+      { purge: false, dryRun: true },
+      fixture.environment,
+    );
+    expect(dryRun.ok).toBe(true);
+    for (const path of owned) {
+      expect(dryRun.planned).toContain(path);
+      expect(existsSync(path)).toBe(true);
+    }
+
+    const result = await runPlannotatorUninstall(
+      { purge: false, dryRun: false },
+      fixture.environment,
+    );
+    expect(result.ok).toBe(true);
+    for (const path of owned) expect(existsSync(path)).toBe(false);
+    for (const path of unrelated)
+      expect(readFileSync(path, "utf8")).toBe("user content");
+  });
+
   test("preserves strict JSON indentation, line endings, and trailing newline", async () => {
     const fixture = createFixture();
     const settingsPath = join(
