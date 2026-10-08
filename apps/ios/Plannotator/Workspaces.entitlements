@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The Workspaces sign-in return (https://<host>/auth/mobile/return/<nonce>):
+	     ASWebAuthenticationSession needs webcredentials for an https callback,
+	     applinks lets a tapped return link open the app. Debug and TestFlight only. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:$(WORKSPACES_HOST)</string>
+		<string>webcredentials:$(WORKSPACES_HOST)</string>
+	</array>
+	<!-- Push and the app group the notification extension shares (M5): the
+	     development APNs environment for Debug and TestFlight; the App Store
+	     build signs with Plannotator.entitlements, production. -->
+	<key>aps-environment</key>
+	<string>development</string>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.ai.plannotator.app</string>
+	</array>
+</dict>
+</plist>

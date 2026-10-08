@@ -101,6 +101,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        // Each paired computer's relay, and Workspaces' device door (M7) when signed in.
+        model.pushToken = deviceToken
         Task { await model.notifier.registered(deviceToken, sources: model.sources) }
     }
 
@@ -159,14 +161,14 @@ extension AppModel {
         let keyName = "lock-screen|\(summary.messageId)"
         let send = InboxClient.ReplyBody(
             idempotencyKey: SendKeys.key(source: device, message: keyName),
-            words: nil,
+            words: "",
             questions: [.init(key: question.key, revision: question.revision, answer: pick)]
         )
         do throws(InboxError) {
             _ = try await InboxClient(address: source.address, token: credential.token)
-                .reply(message: summary.messageId, idempotencyKey: send.idempotencyKey, words: nil, questions: send.questions)
+                .reply(message: summary.messageId, idempotencyKey: send.idempotencyKey, words: send.words, questions: send.questions)
             SendKeys.clear(source: device, message: keyName)
-            if session?.source.id == device {
+            if session?.id == device {
                 await session?.refresh()
                 await session?.loadThread(summary.threadId)
             }

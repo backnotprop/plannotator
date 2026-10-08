@@ -45,15 +45,17 @@ senders pick Apple's host from that.
 
 ## 4. A TestFlight build (Workspaces source on, internal testers only)
 
-The Workspaces source is decided by one build setting, `WORKSPACES_ORIGIN`
-(added by M7 in `project.yml`): Debug has staging, Release leaves it empty, and
-this archive sets it. Exported with `testFlightInternalTestingOnly`, App Store
+The Workspaces source is decided by one build setting, `WORKSPACES_HOST`
+(M7, `project.yml`): Debug and the TestFlight configuration name staging, and
+carry the associated domain the sign-in return needs
+(`Plannotator/Workspaces.entitlements`); Release, the App Store build, leaves
+it empty. This archive uses the TestFlight configuration. Exported with `testFlightInternalTestingOnly`, App Store
 Connect refuses to offer the build to external testers or the App Store, which
 holds the Workspaces build back until account deletion ships (`APP-REVIEW.md`
 section 4).
 
-1. Archive: `xcodebuild archive -project apps/ios/Plannotator.xcodeproj -scheme Plannotator -configuration Release -destination 'generic/platform=iOS' -archivePath /tmp/plannotator-ios/testflight.xcarchive DEVELOPMENT_TEAM=<TEAM_ID> WORKSPACES_ORIGIN=https://staging.workspaces.plannotator.ai -allowProvisioningUpdates`
-2. Check the source is on: `/usr/libexec/PlistBuddy -c 'Print :WorkspacesOrigin' /tmp/plannotator-ios/testflight.xcarchive/Products/Applications/Plannotator.app/Info.plist` prints the staging origin.
+1. Archive: `xcodebuild archive -project apps/ios/Plannotator.xcodeproj -scheme Plannotator -configuration TestFlight -destination 'generic/platform=iOS' -archivePath /tmp/plannotator-ios/testflight.xcarchive DEVELOPMENT_TEAM=<TEAM_ID> -allowProvisioningUpdates`
+2. Check the source is on: `/usr/libexec/PlistBuddy -c 'Print :WorkspacesOrigin' /tmp/plannotator-ios/testflight.xcarchive/Products/Applications/Plannotator.app/Info.plist` prints the staging origin, and `codesign -d --entitlements - /tmp/plannotator-ios/testflight.xcarchive/Products/Applications/Plannotator.app` lists `applinks:` and `webcredentials:` for `staging.workspaces.plannotator.ai`.
 3. Export options, once:
 
    ```sh

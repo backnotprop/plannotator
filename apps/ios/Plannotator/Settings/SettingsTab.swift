@@ -7,6 +7,7 @@ struct SettingsTab: View {
     @Environment(AppModel.self) private var model
     @AppStorage("appearance") private var appearance = Appearance.system
     @AppStorage("haptics") private var haptics = true
+    @State private var choosing = false
 
     var body: some View {
         NavigationStack {
@@ -21,21 +22,43 @@ struct SettingsTab: View {
                                     Text(pathLine(source)).font(.footnote).foregroundStyle(Color.inkSecondary)
                                 }
                                 Spacer(minLength: 8)
-                                if let color = statusColor(source) {
+                                if let color = statusColor(source.id) {
                                     Circle().fill(color).frame(width: 8, height: 8).accessibilityHidden(true)
                                 }
                             }
                             .accessibilityElement(children: .combine)
-                            .accessibilityValue(statusWords(source))
+                            .accessibilityValue(statusWords(source.id))
                         }
                         .accessibilityIdentifier("source-\(source.id)")
                     }
+                    if let account = model.workspaces {
+                        NavigationLink(value: account) {
+                            HStack(spacing: 13) {
+                                Image("WorkspacesIcon").resizable().scaledToFit().frame(width: 30, height: 30).accessibilityHidden(true)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text("Workspaces").foregroundStyle(Color.ink)
+                                    Text([account.name, account.teamLine].compactMap { $0 }.joined(separator: " · ")).font(.footnote).foregroundStyle(Color.inkSecondary)
+                                }
+                                Spacer(minLength: 8)
+                                if let color = statusColor(WorkspacesAccount.sourceId) {
+                                    Circle().fill(color).frame(width: 8, height: 8).accessibilityHidden(true)
+                                }
+                            }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityValue(statusWords(WorkspacesAccount.sourceId))
+                        }
+                        .accessibilityIdentifier("source-workspaces")
+                    }
                     Button {
-                        model.pairing = true
+                        if model.hasWorkspaces, model.workspaces == nil { choosing = true } else { model.pairing = true }
                     } label: {
                         Label("Add a source", systemImage: "plus")
                     }
                     .accessibilityIdentifier("add-source")
+                    .confirmationDialog("Add a source", isPresented: $choosing) {
+                        Button("Your computer's Inbox") { model.pairing = true }
+                        Button("Workspaces") { Task { await model.signInToWorkspaces() } }
+                    }
                 } header: {
                     header("Sources")
                 }
@@ -56,6 +79,7 @@ struct SettingsTab: View {
             .background(Color.ground)
             .navigationTitle("Settings")
             .navigationDestination(for: Source.self) { SourceScreen(source: $0) }
+            .navigationDestination(for: WorkspacesAccount.self) { WorkspacesScreen(account: $0) }
         }
     }
 
@@ -67,8 +91,8 @@ struct SettingsTab: View {
         source.address.isLoopback ? "Inbox · on this Mac" : "Inbox · over your tailnet"
     }
 
-    private func statusColor(_ source: Source) -> Color? {
-        guard model.active?.id == source.id, let status = model.session?.status else { return nil }
+    private func statusColor(_ id: String) -> Color? {
+        guard model.activeId == id, let status = model.session?.status else { return nil }
         switch status {
         case .connected: return .success
         case .unreachable, .removed: return .inkSecondary
@@ -76,12 +100,12 @@ struct SettingsTab: View {
         }
     }
 
-    private func statusWords(_ source: Source) -> String {
-        guard model.active?.id == source.id, let status = model.session?.status else { return "" }
+    private func statusWords(_ id: String) -> String {
+        guard model.activeId == id, let status = model.session?.status else { return "" }
         switch status {
         case .connected: return "Connected"
         case .unreachable: return "Not reachable"
-        case .removed: return "Removed"
+        case .removed: return id == WorkspacesAccount.sourceId ? "Signed out" : "Removed"
         case .connecting: return ""
         }
     }
@@ -126,7 +150,7 @@ struct SourceScreen: View {
     @State private var unreachable: InboxError?
     @State private var removing = false
 
-    private var status: SourceSession.Status? { model.active?.id == source.id ? model.session?.status : nil }
+    private var status: SourceSession.Status? { model.activeId == source.id ? model.session?.status : nil }
 
     var body: some View {
         List {

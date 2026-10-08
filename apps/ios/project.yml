@@ -8,6 +8,12 @@ options:
     iOS: "26.0"
   createIntermediateGroups: true
   generateEmptyDirectories: false
+# TestFlight is a Release build with the Workspaces source; Release is the App
+# Store build without it (the first App Store release is local only).
+configs:
+  Debug: debug
+  TestFlight: release
+  Release: release
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -29,14 +35,6 @@ targets:
       - package: PlannotatorKit
       # M5: the notification service extension, embedded in the app.
       - target: PlannotatorNotifications
-    # M5: push (the development APNs environment; signing for distribution
-    # switches it) and the app group shared with the extension, which is also
-    # the Keychain access group the device credentials live in.
-    entitlements:
-      path: Plannotator/Plannotator.entitlements
-      properties:
-        aps-environment: development
-        com.apple.security.application-groups: [group.ai.plannotator.app]
     info:
       path: Plannotator/Info.plist
       properties:
@@ -54,6 +52,9 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: ai.plannotator.app.pair
             CFBundleURLSchemes: [plannotator]
+        # The Workspaces source (M7): the origin this build signs in to, or
+        # empty for no Workspaces source at all. See WORKSPACES_HOST below.
+        WorkspacesOrigin: $(WORKSPACES_ORIGIN)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.plannotator.app
@@ -62,6 +63,28 @@ targets:
         SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
         SWIFT_APPROACHABLE_CONCURRENCY: YES
         ENABLE_PREVIEWS: YES
+      # The Workspaces source: WORKSPACES_HOST is the one switch. Debug and
+      # TestFlight name the host; Release (the App Store build) leaves it empty,
+      # so that build has no Workspaces source and no associated domain. The
+      # host gives the origin the app signs in to and the associated domain the
+      # https sign-in return needs (applinks and webcredentials, Workspaces.entitlements).
+      # Production: set WORKSPACES_HOST to workspaces.plannotator.ai.
+      configs:
+        Debug:
+          WORKSPACES_HOST: staging.workspaces.plannotator.ai
+          WORKSPACES_ORIGIN: https://$(WORKSPACES_HOST)
+          CODE_SIGN_ENTITLEMENTS: Plannotator/Workspaces.entitlements
+        TestFlight:
+          WORKSPACES_HOST: staging.workspaces.plannotator.ai
+          WORKSPACES_ORIGIN: https://$(WORKSPACES_HOST)
+          CODE_SIGN_ENTITLEMENTS: Plannotator/Workspaces.entitlements
+        Release:
+          WORKSPACES_HOST: ""
+          WORKSPACES_ORIGIN: ""
+          # M5: push (production APNs) and the app group the notification
+          # extension shares, also the Keychain group of the device credentials.
+          # Debug and TestFlight carry the same two, development, in Workspaces.entitlements.
+          CODE_SIGN_ENTITLEMENTS: Plannotator/Plannotator.entitlements
   # M5: opens a relay push with the device key and writes renders 7.1 and 7.2.
   PlannotatorNotifications:
     type: app-extension

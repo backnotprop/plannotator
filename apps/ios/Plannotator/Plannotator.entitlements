@@ -2,8 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- The App Store build (Release): push through the relay for the local
+	     Inbox, production APNs, and the app group the notification extension
+	     shares. No Workspaces source here, so no associated domains. -->
 	<key>aps-environment</key>
-	<string>development</string>
+	<string>production</string>
 	<key>com.apple.security.application-groups</key>
 	<array>
 		<string>group.ai.plannotator.app</string>

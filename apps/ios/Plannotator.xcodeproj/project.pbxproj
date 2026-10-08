@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		0A745ED7E033F3F3D754E540 /* MarkdownBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D8E1B3EBB2AB11C7E6E27B /* MarkdownBlockView.swift */; };
+		46D0FE8237FE6062F3746A52 /* WorkspacesAccount.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16F1299C93CAE54EF4AF4CEC /* WorkspacesAccount.swift */; };
 		5867DBD02A3FF373C9836CED /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = EC927CEFE2B6FC8A8A657308 /* PrivacyInfo.xcprivacy */; };
 		5944E4D916A50A99BDA389C1 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 598B6A5629A31EDD2457B936 /* PrivacyInfo.xcprivacy */; };
 		594CA27509F2F48BE7D56418 /* RelayPushTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFEA26793561E1B1E8ADEF69 /* RelayPushTests.swift */; };
@@ -16,6 +17,8 @@
 		7EDF141F1FB9321AE7EBA951 /* ProofTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F46914B8F633116D2FBECDB4 /* ProofTests.swift */; };
 		7EEA4E2F6EBFBB80E12B02DD /* InboxList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 729DFDA227BB573B45C51ABA /* InboxList.swift */; };
 		816B34352561832D2EC37193 /* SourceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = D94B0997D360DDF87495584C /* SourceSession.swift */; };
+		9693042CB206FC951CCBD5C0 /* SourceWords.swift in Sources */ = {isa = PBXBuildFile; fileRef = 056E53BCBB9C75C39CF0C1B4 /* SourceWords.swift */; };
+		98803B42D344150F9E71D5C7 /* WorkspacesScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A03AEC6967C5C1B2348C7C39 /* WorkspacesScreen.swift */; };
 		9C69E7C68268E0358F1EA5A2 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 063C495C6C3BF0442EBE14B6 /* NotificationService.swift */; };
 		AC40C5EB1D7BA9B0779543F9 /* ThreadScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FB104AD044FE8C2A168C00B /* ThreadScreen.swift */; };
 		AF3B4BE063CB1B126B06C87D /* Notifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64F3CF367FE84AF2F4BE0D46 /* Notifications.swift */; };
@@ -26,6 +29,8 @@
 		BD956C4C0F9DADC8935C3735 /* QuestionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA7E355D502DC8680C310B43 /* QuestionCard.swift */; };
 		C41C48CD406A4C9A2A388A4D /* PlannotatorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58703DC1C0F8D410DA8B2261 /* PlannotatorApp.swift */; };
 		C87471AB2A0E526F89FA3FCE /* PlannotatorNotifications.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E9CA91EEE5343CB85949FE10 /* PlannotatorNotifications.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		C951B57FF0EF2F4365437A33 /* WorkspacesProofTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8D1EBCADD40C8D0D27704C3 /* WorkspacesProofTests.swift */; };
+		CAE3FABDB78EE260B36B9C84 /* DocumentRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF22F84CF3DA75D948E92259 /* DocumentRow.swift */; };
 		CD90DF7B85015262889A9741 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03FE93863969F83918318159 /* AppModel.swift */; };
 		D1271AA242EEA609CB34D513 /* Colors.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CBEA43689480D730B4AC4D7F /* Colors.xcassets */; };
 		D5A54937EB306159D24FF67F /* SettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 259C44811B6CA3DF346CAEAD /* SettingsTab.swift */; };
@@ -66,8 +71,10 @@
 
 /* Begin PBXFileReference section */
 		03FE93863969F83918318159 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		056E53BCBB9C75C39CF0C1B4 /* SourceWords.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceWords.swift; sourceTree = "<group>"; };
 		063C495C6C3BF0442EBE14B6 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		081FAF267E676DFEF28B65D4 /* PairingCover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingCover.swift; sourceTree = "<group>"; };
+		16F1299C93CAE54EF4AF4CEC /* WorkspacesAccount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspacesAccount.swift; sourceTree = "<group>"; };
 		25783EB204BEC1769A9D3F31 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		259C44811B6CA3DF346CAEAD /* SettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTab.swift; sourceTree = "<group>"; };
 		3D5C9E105CCF7A9F7C9D6F69 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -81,12 +88,15 @@
 		70D85F4E93F5586925DB1552 /* PlannotatorUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PlannotatorUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		729DFDA227BB573B45C51ABA /* InboxList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxList.swift; sourceTree = "<group>"; };
 		9533C33C3337AC046895F24A /* PlannotatorNotifications.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PlannotatorNotifications.entitlements; sourceTree = "<group>"; };
+		A03AEC6967C5C1B2348C7C39 /* WorkspacesScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspacesScreen.swift; sourceTree = "<group>"; };
 		A75FC4A447CD8F81BA524A07 /* Plannotator.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Plannotator.entitlements; sourceTree = "<group>"; };
 		AA5E9351CAE37AE10982C5DE /* ReplyBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplyBar.swift; sourceTree = "<group>"; };
 		AFEA26793561E1B1E8ADEF69 /* RelayPushTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayPushTests.swift; sourceTree = "<group>"; };
 		BA7E355D502DC8680C310B43 /* QuestionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionCard.swift; sourceTree = "<group>"; };
+		BF22F84CF3DA75D948E92259 /* DocumentRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentRow.swift; sourceTree = "<group>"; };
 		C0D8E1B3EBB2AB11C7E6E27B /* MarkdownBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownBlockView.swift; sourceTree = "<group>"; };
 		CBEA43689480D730B4AC4D7F /* Colors.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Colors.xcassets; sourceTree = "<group>"; };
+		D8D1EBCADD40C8D0D27704C3 /* WorkspacesProofTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspacesProofTests.swift; sourceTree = "<group>"; };
 		D94B0997D360DDF87495584C /* SourceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceSession.swift; sourceTree = "<group>"; };
 		E39E0503FC6505B9D44219B1 /* Support.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support.swift; sourceTree = "<group>"; };
 		E749D4EC2D60D348C66E4721 /* PlannotatorKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = PlannotatorKit; path = PlannotatorKit; sourceTree = SOURCE_ROOT; };
@@ -94,6 +104,7 @@
 		EC927CEFE2B6FC8A8A657308 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		F372FCD08C903FF6080BE00E /* Plannotator.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Plannotator.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F46914B8F633116D2FBECDB4 /* ProofTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProofTests.swift; sourceTree = "<group>"; };
+		FB3B680B0504E801041C29EA /* Workspaces.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Workspaces.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -121,6 +132,7 @@
 			children = (
 				F46914B8F633116D2FBECDB4 /* ProofTests.swift */,
 				AFEA26793561E1B1E8ADEF69 /* RelayPushTests.swift */,
+				D8D1EBCADD40C8D0D27704C3 /* WorkspacesProofTests.swift */,
 			);
 			path = PlannotatorUITests;
 			sourceTree = "<group>";
@@ -129,6 +141,7 @@
 			isa = PBXGroup;
 			children = (
 				259C44811B6CA3DF346CAEAD /* SettingsTab.swift */,
+				A03AEC6967C5C1B2348C7C39 /* WorkspacesScreen.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -156,6 +169,7 @@
 		C649A5EA65A056A92E3FD0A4 /* Thread */ = {
 			isa = PBXGroup;
 			children = (
+				BF22F84CF3DA75D948E92259 /* DocumentRow.swift */,
 				C0D8E1B3EBB2AB11C7E6E27B /* MarkdownBlockView.swift */,
 				BA7E355D502DC8680C310B43 /* QuestionCard.swift */,
 				AA5E9351CAE37AE10982C5DE /* ReplyBar.swift */,
@@ -210,6 +224,7 @@
 				25783EB204BEC1769A9D3F31 /* Info.plist */,
 				A75FC4A447CD8F81BA524A07 /* Plannotator.entitlements */,
 				598B6A5629A31EDD2457B936 /* PrivacyInfo.xcprivacy */,
+				FB3B680B0504E801041C29EA /* Workspaces.entitlements */,
 				FE63721F949D4E7E7EB3F4C7 /* App */,
 				EB54E46BBE545BBFA65B5E04 /* Inbox */,
 				750B4BC97A453EC943BAE4DC /* Pairing */,
@@ -226,7 +241,9 @@
 				64F3CF367FE84AF2F4BE0D46 /* Notifications.swift */,
 				58703DC1C0F8D410DA8B2261 /* PlannotatorApp.swift */,
 				D94B0997D360DDF87495584C /* SourceSession.swift */,
+				056E53BCBB9C75C39CF0C1B4 /* SourceWords.swift */,
 				E39E0503FC6505B9D44219B1 /* Support.swift */,
+				16F1299C93CAE54EF4AF4CEC /* WorkspacesAccount.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -369,6 +386,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				CD90DF7B85015262889A9741 /* AppModel.swift in Sources */,
+				CAE3FABDB78EE260B36B9C84 /* DocumentRow.swift in Sources */,
 				7EEA4E2F6EBFBB80E12B02DD /* InboxList.swift in Sources */,
 				E69B1BC67D0DEE64C6457A48 /* InboxTab.swift in Sources */,
 				0A745ED7E033F3F3D754E540 /* MarkdownBlockView.swift in Sources */,
@@ -380,8 +398,11 @@
 				B6FABC29603721A20786EEA5 /* ReplyBar.swift in Sources */,
 				D5A54937EB306159D24FF67F /* SettingsTab.swift in Sources */,
 				816B34352561832D2EC37193 /* SourceSession.swift in Sources */,
+				9693042CB206FC951CCBD5C0 /* SourceWords.swift in Sources */,
 				69CED55597F6832AE2A22F48 /* Support.swift in Sources */,
 				AC40C5EB1D7BA9B0779543F9 /* ThreadScreen.swift in Sources */,
+				46D0FE8237FE6062F3746A52 /* WorkspacesAccount.swift in Sources */,
+				98803B42D344150F9E71D5C7 /* WorkspacesScreen.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -399,6 +420,7 @@
 			files = (
 				7EDF141F1FB9321AE7EBA951 /* ProofTests.swift in Sources */,
 				594CA27509F2F48BE7D56418 /* RelayPushTests.swift in Sources */,
+				C951B57FF0EF2F4365437A33 /* WorkspacesProofTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -434,6 +456,67 @@
 				TEST_TARGET_NAME = Plannotator;
 			};
 			name = Debug;
+		};
+		1B3B3D0059D61EFCE580EA3C /* TestFlight */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = TestFlight;
 		};
 		1DB8844547DD8CDEDC529239 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -520,6 +603,45 @@
 			};
 			name = Debug;
 		};
+		52E39A97793B929BF40703CB /* TestFlight */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = PlannotatorNotifications/PlannotatorNotifications.entitlements;
+				INFOPLIST_FILE = PlannotatorNotifications/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.plannotator.app.notifications;
+				SDKROOT = iphoneos;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = TestFlight;
+		};
+		5E603242A12F3234B32EDDA8 /* TestFlight */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Plannotator/Workspaces.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = Plannotator/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.plannotator.app;
+				SDKROOT = iphoneos;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				TARGETED_DEVICE_FAMILY = 1;
+				WORKSPACES_HOST = staging.workspaces.plannotator.ai;
+				WORKSPACES_ORIGIN = "https://$(WORKSPACES_HOST)";
+			};
+			name = TestFlight;
+		};
 		AC6CE21C8396E34C1C54E64A /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -537,8 +659,27 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				TARGETED_DEVICE_FAMILY = 1;
+				WORKSPACES_HOST = "";
+				WORKSPACES_ORIGIN = "";
 			};
 			name = Release;
+		};
+		B345D67B801E049851FC1583 /* TestFlight */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.plannotator.app.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = Plannotator;
+			};
+			name = TestFlight;
 		};
 		CC8F4614F90DBB65346FE7D3 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -622,7 +763,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = Plannotator/Plannotator.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Plannotator/Workspaces.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = Plannotator/Info.plist;
@@ -635,6 +776,8 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				TARGETED_DEVICE_FAMILY = 1;
+				WORKSPACES_HOST = staging.workspaces.plannotator.ai;
+				WORKSPACES_ORIGIN = "https://$(WORKSPACES_HOST)";
 			};
 			name = Debug;
 		};
@@ -663,6 +806,7 @@
 			buildConfigurations = (
 				0FDA10DF626119D3F6734532 /* Debug */,
 				D02BB4F7F081E548CE0558E8 /* Release */,
+				B345D67B801E049851FC1583 /* TestFlight */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
@@ -672,6 +816,7 @@
 			buildConfigurations = (
 				F8848E45A4272F94EAC10CB8 /* Debug */,
 				1DB8844547DD8CDEDC529239 /* Release */,
+				52E39A97793B929BF40703CB /* TestFlight */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
@@ -681,6 +826,7 @@
 			buildConfigurations = (
 				2AD8ABDC10CF4614E8070390 /* Debug */,
 				CC8F4614F90DBB65346FE7D3 /* Release */,
+				1B3B3D0059D61EFCE580EA3C /* TestFlight */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
@@ -690,6 +836,7 @@
 			buildConfigurations = (
 				F87CE8E89AB4E9B15D691CFD /* Debug */,
 				AC6CE21C8396E34C1C54E64A /* Release */,
+				5E603242A12F3234B32EDDA8 /* TestFlight */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
