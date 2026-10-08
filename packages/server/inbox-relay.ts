@@ -107,6 +107,8 @@ function writeRelayFile(dataDir: string, value: InboxRelayFile): void {
 /** The push summary a phone decrypts (section 4, "Push"). */
 interface PushPlaintext {
   v: 1;
+  /** Pushes and down items share the device key: the reader checks the type, so a relay cannot pass one off as the other. */
+  type: "push";
   thread_id: string;
   message_id: string;
   subject?: string;
@@ -123,16 +125,16 @@ interface PushPlaintext {
 
 /** The fullest summary whose APNs body fits Apple's 4096 bytes: without the context, then without the question, then ids alone. */
 async function sizedEnvelope(summary: PushPlaintext, key: string): Promise<string> {
-  const { v, thread_id, message_id } = summary;
+  const { v, type, thread_id, message_id } = summary;
   const tries: PushPlaintext[] = [summary];
   if (summary.question?.context) tries.push({ ...summary, question: { ...summary.question, context: null } });
   if (summary.question) tries.push({ ...summary, question: null });
-  tries.push({ v, thread_id, message_id });
+  tries.push({ v, type, thread_id, message_id });
   for (const plaintext of tries) {
     const envelope = await encryptWithKey(JSON.stringify(plaintext), key);
     if (Buffer.byteLength(apnsBody(envelope)) <= APNS_BODY_LIMIT) return envelope;
   }
-  return encryptWithKey(JSON.stringify({ v, thread_id, message_id }), key);
+  return encryptWithKey(JSON.stringify({ v, type, thread_id, message_id }), key);
 }
 
 interface HelloFrame {
@@ -278,6 +280,23 @@ export function createInboxRelay(context: InboxRelayContext) {
   };
 
   /**
+   * One store line's item frame, sealed under the phone's key. `after` is the
+   * seq the phone's previous item reached, so a phone that last saw a lower
+   * seq knows an item was delayed or dropped and reads the list again. Past
+   * the WebSocket message limit the line goes down as a placeholder
+   * (`too_large: true`), and the cursor moves past it: one oversized line
+   * must not hold every later line and every command behind a reconnect loop.
+   */
+  const recordFrame = async (deviceId: string, line: InboxLine, after: number, key: string): Promise<string> => {
+    const seal = async (plaintext: object) =>
+      JSON.stringify({ type: "item", device_id: deviceId, cursor: line.seq, ciphertext: await encryptWithKey(JSON.stringify(plaintext), key) });
+    const frame = await seal({ v: 1, type: "record", after, ...(context.payload(line) as object) });
+    if (Buffer.byteLength(frame) <= WEBSOCKET_MESSAGE_LIMIT) return frame;
+    log(`record ${line.seq} too large for ${deviceId}`);
+    return seal({ v: 1, type: "record", after, seq: line.seq, kind: line.kind, id: line.id, too_large: true });
+  };
+
+  /**
    * Send one phone every store line after the seq it has reached, sealed
    * under its key, until it has them all. One pass at a time per phone; a
    * line written meanwhile asks for another pass.
@@ -302,10 +321,11 @@ export function createInboxRelay(context: InboxRelayContext) {
           let reached = from;
           for (const line of lines) {
             if (!devices.get(deviceId)?.carriage) return;
-            const ciphertext = await encryptWithKey(JSON.stringify({ v: 1, type: "record", ...(context.payload(line) as object) }), key);
+            const frame = await recordFrame(deviceId, line, reached, key);
             // A carriage frame moved the cursor meanwhile: start again from it.
             if (sent.get(deviceId) !== reached) continue pass;
-            if (!send({ type: "item", device_id: deviceId, cursor: line.seq, ciphertext })) return;
+            if (!socket || socket.readyState !== WebSocket.OPEN) return;
+            socket.send(frame);
             reached = line.seq;
             sent.set(deviceId, reached);
           }
@@ -436,6 +456,7 @@ export function createInboxRelay(context: InboxRelayContext) {
     const only = questions.length === 1 ? questions[0]! : null;
     const summary: PushPlaintext = {
       v: 1,
+      type: "push",
       thread_id: message.thread_id,
       message_id: message.id,
       subject: store.message(message.thread_id)?.subject ?? message.subject ?? "",

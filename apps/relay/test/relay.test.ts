@@ -382,6 +382,7 @@ describe("the relay with an Inbox, under wrangler dev", () => {
     const summary = JSON.parse(await decryptWithKey(body.e, phone.key));
     expect(summary).toEqual({
       v: 1,
+      type: "push",
       thread_id: sent.thread_id,
       message_id: sent.message_id ?? sent.thread_id,
       subject: SUBJECT,
@@ -652,6 +653,9 @@ describe("the carriage: a phone reads and answers the Inbox through the relay al
     // In seq order, each after the cursor the relay held at pairing.
     const seqs = down.filter((item) => item.type === "record").map((item) => item.seq);
     expect(seqs).toEqual([...seqs].sort((x, y) => x - y));
+    // Each record names the seq the previous one reached, so a phone notices a delayed or dropped item.
+    const records = down.filter((item) => item.type === "record");
+    for (let i = 1; i < records.length; i++) expect(records[i]!.after).toBe(records[i - 1]!.seq);
     say(`down to the iPhone: ${down.length} record items (${[...new Set(down.map((item) => item.kind))].join(", ")}), seq ${seqs[0]} to ${seqs.at(-1)}`);
 
     const held = rows("items");
@@ -802,6 +806,34 @@ describe("the carriage: a phone reads and answers the Inbox through the relay al
     record("storage-3-after-ack.json", dumpMailbox(relay, mailbox.mailbox_id));
     say(`ack through ${a.n}: items and commands tables empty`);
   }, 60_000);
+
+  test("a store line past the WebSocket message limit goes down as a placeholder, and the next line still arrives; a command past it is refused at the relay", async () => {
+    // The person pastes a 25 MiB log into a reply on the computer (the store caps nothing); sealed, its item would pass 32 MiB.
+    const health = (await (await fetch(`${base}/api/inbox/health`)).json()) as Json;
+    const pasted = await win(`/api/inbox/messages/${messageId}/reply`, { serverSession: health.serverSession, idempotency_key: "00000000-0000-4000-8000-0000000000c1", words: `The whole log:\n\n${"x".repeat(25 * 1024 * 1024)}` });
+    expect(pasted.status).toBe(200);
+    const giantId = ((await pasted.json()) as Json).reply.id as string;
+    const after = await agent.send({ project_path: w.project, thread: "after the giant", body: "The line after the giant one." });
+    const seen = await until(
+      async () => (await fetchItems(a), a.seen),
+      (items) => items.some((item) => item.kind === "message" && item.id === (after.message_id ?? after.thread_id)),
+      "the line after the giant one",
+      60_000,
+    );
+    const placeholder = seen.find((item) => item.kind === "message" && item.id === giantId)!;
+    expect(placeholder).toEqual({ n: expect.any(Number), v: 1, type: "record", after: expect.any(Number), seq: expect.any(Number), kind: "message", id: giantId, too_large: true });
+    await until(inboxLog, (log) => log.includes(`record ${placeholder.seq} too large for ${a.id}`), "the log line");
+    say(`a 25 MiB reply: down as the placeholder { seq ${placeholder.seq}, kind message, too_large: true }; the message after it delivered`);
+
+    const huge = await atRelay(a, "POST", "/commands", { id: "huge-1", ciphertext: "A".repeat(32 * 1024 * 1024) });
+    expect(huge.status).toBe(413);
+    expect(await huge.json()).toMatchObject({ code: "command_too_large", limit_bytes: 32 * 1024 * 1024 });
+    expect(rows("commands")).toEqual([]);
+    expect((await ask(a, "GET", "threads")).status).toBe(200);
+    say("a 32 MiB command: 413 command_too_large at the relay, not held; the next command answered");
+    await fetchItems(a);
+    expect((await atRelay(a, "POST", "/ack", { through: a.n })).status).toBe(204);
+  }, 120_000);
 
   test("a phone that read the store directly acknowledges by cursor; a removed phone's items are gone with it", async () => {
     await agent.send({ project_path: w.project, thread: "news", body: "The migration finished." });

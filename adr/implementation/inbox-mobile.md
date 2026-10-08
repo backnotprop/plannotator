@@ -232,7 +232,7 @@ Every route answers JSON. Errors are `{ error, code }`: `400 bad_request`, `401 
 | `GET /v1/mailboxes/:mbx/socket` | Inbox bearer, WebSocket upgrade | frames below | | 7.31 |
 | `GET /v1/mailboxes/:mbx/devices/:dev/items?after=n` | device bearer | | `{ items: [{ n, ciphertext }], inbox_online }`, every held item after `n` in order | 7.32 |
 | `POST /v1/mailboxes/:mbx/devices/:dev/ack` | device bearer | `{ through: n }`, or `{ cursor }` when the phone read the store directly up to that seq | `204`; deletes items up to `n`, or record items whose cursor is at or below `cursor` | 7.33 |
-| `POST /v1/mailboxes/:mbx/devices/:dev/commands` | device bearer | `{ id, ciphertext }` | `202 { queued: true, inbox_online }`; an `id` it already holds answers `200 { queued: false, inbox_online }` | 7.34 |
+| `POST /v1/mailboxes/:mbx/devices/:dev/commands` | device bearer | `{ id, ciphertext }` | `202 { queued: true, inbox_online }`; an `id` it already holds answers `200 { queued: false, inbox_online }`; a command whose frame to the Inbox would pass Cloudflare's 32 MiB WebSocket message limit answers `413 { error, code: "command_too_large", limit_bytes }` and is not held (it could never be handed over, and would close the Inbox's socket at every `hello`) | 7.34 |
 
 `inbox_online` says whether the Inbox's socket is connected now: the phone's "Sent. Waiting for your computer" (owner item 26).
 
@@ -257,7 +257,7 @@ The drain order (written in by R2). The Inbox handles the socket's frames one at
 
 Down item plaintexts:
 
-- `{ "v": 1, "type": "record", "seq", "kind", "id", "<kind>": record }`: one store line, exactly the `record` event of the event stream (`eventPayload` in `packages/server/inbox.ts`) with `v` and `type` added. After a device's `cursor`, every line goes down, in seq order. A phone reading over the Wi-Fi or the tailnet acknowledges by store cursor (`ack { cursor }`), so its queue holds only what it missed.
+- `{ "v": 1, "type": "record", "after", "seq", "kind", "id", "<kind>": record }`: one store line, exactly the `record` event of the event stream (`eventPayload` in `packages/server/inbox.ts`) with `v`, `type` and `after` added. After a device's `cursor`, every line goes down, in seq order. `after` is the seq the device's previous item on this socket reached (the cursor the relay held, for the first after a `hello` or a `carriage` frame): a phone whose last seen seq is lower than an item's `after` knows an item was delayed or dropped and reads the list again (written in by R2 after plannotator-ops's review). A line whose `item` frame would pass Cloudflare's 32 MiB WebSocket message limit goes down as the placeholder `{ "v": 1, "type": "record", "after", "seq", "kind", "id", "too_large": true }`, and the cursor moves past it; the phone reads that record over the Wi-Fi or the tailnet, or shows that it is too large to show here (M6 draws the words). Written in by R2 after plannotator-ops's review: the store caps nothing, and one line over the limit closed the socket at every resend, held every later line and every command behind the reconnect loop. A phone reading over the Wi-Fi or the tailnet acknowledges by store cursor (`ack { cursor }`), so its queue holds only what it missed.
 - `{ "v": 1, "type": "result", "id", "status", "content_type", "body_b64" }`: the door's answer to an up command, its status, its `Content-Type` and its body bytes exactly, as base64 (standard alphabet, padded). It goes only to a device with carriage on. `id` is the id sealed inside the command, never the relay's plaintext frame `id`, and the Inbox refuses a command whose sealed `id` is not its frame's (written in by R2 after its review: otherwise the relay could file one command's authentic result under another command's id, a GET's 200 under a Send it dropped). A result whose `item` frame would pass Cloudflare's WebSocket message limit (32 MiB, the platform's own) is replaced by `status: 413`, `content_type: application/json; charset=utf-8` and the body `{ "error", "code": "result_too_large", "limit_bytes": 33554432 }`, and the command is reported applied (written in by R2 after its review: one frame over the limit closed the socket, the command was handed over again at every `hello`, and every command behind it waited forever). The phone opens such a file over the Wi-Fi or the tailnet.
 
 Files have no item of their own (written in by R2): a file is the result of a GET. An attachment is `GET attachments/:id/view` (the current version) or `GET attachments/:id/view?version=sent` (the version the agent sent), whose result carries 7.15's JSON with `text` and `html`; an HTML asset is `GET html-assets/<token>/<path>`, whose result carries the asset's bytes and type as 7.16 answers them. A result is one envelope whatever its size (kept in parts at the relay, above).
@@ -273,6 +273,7 @@ The push plaintext, encrypted under the device key:
 ```json
 {
   "v": 1,
+  "type": "push",
   "thread_id": "msg_01K70000000000000000000010",
   "message_id": "msg_01K70000000000000000000010",
   "subject": "Run the retry tests against the Stripe test clock?",
@@ -291,10 +292,11 @@ The push plaintext, encrypted under the device key:
 }
 ```
 
+- `type` is always `"push"` (written in by R2 after plannotator-ops's review): pushes and down items are sealed under the same key `K`, so the phone opens an APNs `e` only when its `type` is `"push"`, and a down item only when its `type` is `"record"` or `"result"`; a relay cannot pass one off as the other.
 - `agent` is `inboxAgentName(author)`, `project` the project's name.
 - `question` is present only when the message has exactly one question, it is single-choice, and it has at most four choices (Apple shows at most four actions). Otherwise it is null, and the notification opens the thread (render 7.2).
 - `collapse_id` is `HMAC-SHA256(C, UTF-8 bytes of the thread id)` as 64 lowercase hex, where `C = HKDF-SHA256(ikm = S, salt = UTF-8 bytes of the device id, info = "plannotator-inbox relay collapse v1", length = 32)` (written in by R2 after plannotator-ops's delta review of R1: a MAC under the envelope key `K` would use one key for two jobs; `C` is the Inbox's alone, the phone never computes it, so it has no vector), so a thread's newer push replaces its older one and the relay never learns the thread (written in by R1 after plannotator-ops's review; the first draft sent the thread id). The phone reads the thread from the decrypted `thread_id`, never from the collapse id. The relay refuses a collapse id that is not 1 to 64 printable ASCII bytes, Apple's ceiling, with `400 bad_request`.
-- Apple's payload ceiling is 4096 bytes. When the APNs body would pass it, the Inbox sets `question.context` to null, then `question` to null, then sends `{ v, thread_id, message_id }` alone.
+- Apple's payload ceiling is 4096 bytes. When the APNs body would pass it, the Inbox sets `question.context` to null, then `question` to null, then sends `{ v, type, thread_id, message_id }` alone.
 
 What the relay sends to APNs, with `apns-push-type: alert`, `apns-priority: 10`, `apns-topic: ai.plannotator.app` and `apns-collapse-id: <collapse_id>`:
 

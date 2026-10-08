@@ -74,6 +74,8 @@ const ENVELOPE = /^[A-Za-z0-9_-]+$/;
 const COLLAPSE_ID = /^[\x21-\x7e]{1,64}$/;
 /** A command's id: the phone's idempotency key, or a fresh random id for a read. */
 const COMMAND_ID = /^[A-Za-z0-9_.:-]+$/;
+/** Cloudflare's WebSocket message limit (32 MiB), the platform's: a command whose frame to the Inbox would pass it could never be handed over. */
+const WEBSOCKET_MESSAGE_LIMIT = 32 * 1024 * 1024;
 
 const isCursor = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
@@ -326,6 +328,10 @@ export class Mailbox extends DurableObject<Env> {
     }
     if (this.sql.exec("SELECT 1 FROM commands WHERE device_id = ? AND id = ? LIMIT 1", device.id, id).toArray().length > 0) {
       return json({ queued: false, inbox_online: this.online() });
+    }
+    // Refused at the door: held, it would close the Inbox's socket at every hello and stop every command behind it.
+    if (JSON.stringify({ type: "command", device_id: device.id, id, ciphertext: envelope }).length > WEBSOCKET_MESSAGE_LIMIT) {
+      return json({ error: "This command is too large to carry through the relay.", code: "command_too_large", limit_bytes: WEBSOCKET_MESSAGE_LIMIT }, 413);
     }
     const seq = (this.sql.exec<{ seq: number }>("SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM commands").one().seq);
     parts(envelope).forEach((data, part) => this.sql.exec("INSERT INTO commands (seq, device_id, id, part, data) VALUES (?, ?, ?, ?, ?)", seq, device.id, id, part, data));
