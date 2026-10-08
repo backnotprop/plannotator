@@ -17,17 +17,18 @@
  * after the Inbox applied it.
  *
  *   bun apps/ios/scripts/proof.ts --binary .local/plannotator \
- *     [--device "iPhone 17"] [--shots .local/proof/ios] [--derived <DerivedData>] [--keep-simulator]
+ *     [--device "iPhone 17"] [--shots .local/proof/ios] [--derived <DerivedData>] [--keep-simulator] [--only <test>]
  *
  * Every process runs with PLANNOTATOR_BROWSER=none and its own data dir; the
  * person's ~/.plannotator is never read.
  */
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { DEMO_MESSAGES, SimAgent, scratchProject } from '../../../scripts/inbox-sim.ts';
+import { ClaudeSession } from '../../hook/hooks/mod/testing/claude-session.ts';
 
 const args = process.argv.slice(2);
 const flag = (name: string, fallback?: string) => {
@@ -40,6 +41,8 @@ const deviceType = flag('--device', 'iPhone 17')!;
 const shots = resolve(flag('--shots', join(repo, '.local/proof/ios'))!);
 const derived = resolve(flag('--derived', join(tmpdir(), 'plannotator-ios-derived'))!);
 const keepSimulator = args.includes('--keep-simulator');
+// One test while working on it, e.g. --only PlannotatorUITests/AttachmentProofTests.
+const only = flag('--only');
 
 const tmp = mkdtempSync(join(tmpdir(), 'plannotator-ios-proof-'));
 const dataDir = join(tmp, 'data');
@@ -51,6 +54,10 @@ const env: Record<string, string> = {
   PLANNOTATOR_DATA_DIR: dataDir,
   PLANNOTATOR_BROWSER: 'none',
 };
+// Every plannotator process this script starts gets exactly this env: a temp data dir, never ~/.plannotator.
+if (!env.PLANNOTATOR_DATA_DIR.startsWith(tmpdir()) || env.PLANNOTATOR_DATA_DIR.includes('/.plannotator')) {
+  throw new Error(`Refusing to start an Inbox on ${env.PLANNOTATOR_DATA_DIR}: the proof runs on a temp data dir only.`);
+}
 
 function run(cmd: string, argv: string[], options: { env?: Record<string, string>; quiet?: boolean } = {}): string {
   const result = spawnSync(cmd, argv, { env: options.env ?? (process.env as Record<string, string>), encoding: 'utf8' });
@@ -132,6 +139,124 @@ async function more(): Promise<Record<string, string>> {
   const ship = await codex.send({ project_path: projects['checkout-web']!, body: question('Ship the dark ticket page behind a flag?', ['Yes', 'No']), subject: 'Ship the dark ticket page behind a flag?' });
   const keep = await opencode.send({ project_path: projects['docs-site']!, body: question('Keep the old install page for a week?', ['Yes', 'No']), subject: 'Keep the old install page for a week?' });
   return { ship: ship.thread_id as string, keep: keep.thread_id as string };
+}
+
+// ─── M3: decisions, and New message to live Claude Code sessions ───
+//
+// The live sessions are the Claude Code mod's own code on real processes,
+// HTTP and files (apps/hook/hooks/mod/testing/claude-session.ts, the mod
+// harness the Inbox's Claude Code proofs use): each polls the Inbox's bridge
+// from its project, so the Inbox counts it live, and a New message wakes it
+// as a turn. Pi writes through the MCP like the other agents and never polls,
+// so its project has no live session (8.3).
+
+const m3Bin = join(tmp, 'bin');
+mkdirSync(m3Bin, { recursive: true });
+writeFileSync(join(m3Bin, 'plannotator'), `#!/bin/sh\nexec '${binary}' "$@"\n`);
+chmodSync(join(m3Bin, 'plannotator'), 0o755);
+const m3Env = { ...env, PATH: `${m3Bin}:${env.PATH}` };
+const m3Sessions = new Map<string, { session: ClaudeSession; cwd: string }>();
+const m3Agents: SimAgent[] = [];
+const m3Threads: string[] = [];
+
+async function m3Seed(): Promise<Record<string, string>> {
+  const billing = projects['billing-svc']!;
+  const writer = await agent('Claude Code', 'claude-code');
+  const tests = await agent('Claude Code', 'claude-code');
+  const refunds = await agent('Claude Code', 'claude-code');
+  const pi = await agent('Pi', 'pi');
+  m3Agents.push(writer, tests, refunds, pi);
+  const decide = await writer.send({
+    project_path: billing,
+    subject: 'Which way should the worker go on a Stripe 409?',
+    body: ['I checked the 409 row against the Stripe docs. Two things before I go on.', '', question('Which way should the worker go on a Stripe 409?', ['Retry with the same idempotency key', 'Fail the job and send it to the dead-letter queue']), '', question('Ship the retry worker behind a flag?', ['Yes', 'No'])].join('\n'),
+  });
+  const noDecision = await tests.send({ project_path: billing, subject: 'Run the retry tests against the Stripe test clock?', body: question('Run the retry tests against the Stripe test clock?', ['Yes', 'No'], ['They take about four minutes against the test key.']) });
+  // Waits on a call: the block itself asks for a decision once answered.
+  const waits = await refunds.send({ project_path: billing, subject: 'Refund events: trust the webhook or poll Stripe?', body: question('Refund events: trust the webhook or poll Stripe?', ['Trust the webhook', 'Poll Stripe every minute'], ['Decision: when answered']) });
+  // What already holds, and one decision retired, as the record's 5.2 draws the page.
+  await writer.recordDecision({ project_path: billing, text: 'The worker never refunds on its own; refunds stay a person\'s call.' });
+  await writer.recordDecision({ project_path: billing, text: 'Webhooks are verified before any database write.' });
+  const old = await writer.recordDecision({ project_path: billing, text: 'Failed charges wait an hour before a retry.' });
+  const oldDecision = (old.decision ?? old) as { id: string; version: number };
+  const retired = await windowRoute(`/api/inbox/decisions/${oldDecision.id}/retire`, { method: 'POST', body: JSON.stringify({ version: oldDecision.version }) });
+  if (!retired.ok) throw new Error(`retire: ${retired.status} ${await retired.text()}`);
+  const piThread = await pi.send({
+    project_path: projects['search-indexer']!,
+    subject: 'Run finished. The archived projects are reindexed.',
+    body: 'Run finished. The 41 archived projects are reindexed and the search page reads them again.',
+  });
+
+  // Live Claude Code sessions: two in ledger (one wrote the thread), one in api-gateway.
+  const live = async (name: string, project: string) => {
+    const session = await ClaudeSession.start({ env: m3Env, cwd: project, store: new Map(), sessionId: crypto.randomUUID(), dataDir });
+    if (!session.inboxTools) throw new Error('the mod found no Inbox');
+    m3Sessions.set(name, { session, cwd: project });
+    return session;
+  };
+  const say = async (session: ClaudeSession, cwd: string, body: string) => {
+    const answer = await session.callInbox({ action: 'send_message', body }, cwd);
+    if ('deny' in answer) throw new Error(answer.deny);
+    return (JSON.parse(answer.text.slice(answer.text.indexOf('{'))) as { thread_id: string }).thread_id;
+  };
+  const ledgerWriter = await live('ledger-writer', projects['ledger']!);
+  const ledger = await say(ledgerWriter, projects['ledger']!, 'Run finished. The export now streams rows to the file instead of building it in memory.');
+  await live('ledger-other', projects['ledger']!);
+  const gatewaySession = await live('gateway', projects['api-gateway']!);
+  const gateway = await say(gatewaySession, projects['api-gateway']!, 'Run finished. The CSV export endpoint is behind the gateway now.');
+  for (const [thread, count] of [[ledger, 2], [gateway, 1]] as const) {
+    const deadline = Date.now() + 30_000;
+    for (;;) {
+      const model = (await (await windowRoute(`/api/inbox/threads/${thread}/sessions`)).json()) as { sessions: unknown[] };
+      if (model.sessions.length === count) break;
+      if (Date.now() > deadline) throw new Error(`${count} live sessions for ${thread}: ${JSON.stringify(model)}`);
+      await sleep(250);
+    }
+  }
+  const ids = { decide: decide.thread_id, no_decision: noDecision.thread_id, waits: waits.thread_id, pi: piThread.thread_id, ledger, gateway } as Record<string, string>;
+  m3Threads.push(...Object.values(ids));
+  return { ...ids, ledger_writer_session: ledgerWriter.sessionId };
+}
+
+/** A live session's wake for the person's New message, and its answer in the same thread. */
+async function m3Turn(who: string): Promise<Record<string, unknown>> {
+  const target = m3Sessions.get(who);
+  if (!target) throw new Error(`no session ${who}`);
+  const deadline = Date.now() + 60_000;
+  while (target.session.host.submits.length === 0) {
+    if (Date.now() > deadline) throw new Error(`no New message turn in ${who}`);
+    await sleep(200);
+  }
+  const wake = target.session.host.submits.at(-1)!;
+  const id = /\((msg_[0-9A-Z]+)\)$/.exec(wake.split('\n')[0]!)?.[1];
+  if (!id) throw new Error(`a wake with no id: ${wake.split('\n')[0]}`);
+  const answer = await target.session.callInbox({ action: 'send_message', reply_to: id, body: 'Added the header row: an empty ledger now exports a valid CSV.' }, target.cwd);
+  if ('deny' in answer) throw new Error(answer.deny);
+  await sleep(1500); // a wrong delivery would land in another session now
+  return { wake: wake.split('\n')[0], submits: Object.fromEntries([...m3Sessions].map(([name, s]) => [name, s.session.host.submits.length])) };
+}
+
+/** What the desktop window's Decisions page reads for the thread's project (its own route). */
+async function m3Decisions(thread: string): Promise<Record<string, unknown>> {
+  const { thread: t } = (await (await windowRoute(`/api/inbox/threads/${thread}`)).json()) as { thread: { project: { id: string } } };
+  const model = (await (await windowRoute(`/api/inbox/decisions?project=${t.project.id}`)).json()) as {
+    decisions: { text: string; state: string; source: { thread_id: string | null } }[];
+  };
+  return {
+    of_thread: model.decisions.filter((d) => d.source.thread_id === thread).map((d) => ({ text: d.text, state: d.state })),
+    current: model.decisions.filter((d) => d.state === 'current').map((d) => d.text).reverse(),
+  };
+}
+
+async function m3Close(): Promise<void> {
+  for (const { session } of m3Sessions.values()) session.quit();
+  m3Sessions.clear();
+  await Promise.allSettled(m3Agents.splice(0).map((a) => a.close()));
+}
+
+async function m3Cleanup(): Promise<void> {
+  await m3Close();
+  for (const thread of m3Threads.splice(0)) await windowRoute(`/api/inbox/threads/${thread}/delete`, { method: 'POST', body: '{}' });
 }
 
 // ─── The door, through a proxy the test can break ───
@@ -261,6 +386,21 @@ const control = Bun.serve({
           for (const device of devices) await windowRoute(`/api/inbox/devices/${device.id}/revoke`, { method: 'POST', body: '{}' });
           return Response.json({ removed: devices.length });
         }
+        case '/m3-seed':
+          return Response.json(await m3Seed());
+        case '/m3-turn':
+          return Response.json(await m3Turn(body.who ?? ''));
+        case '/m3-decisions':
+          return Response.json(await m3Decisions(body.thread ?? ''));
+        case '/m3-dark':
+          // A menu or a popover opened while the simulator is already dark (switching under an open one leaves it light).
+          if (body.snap) run('xcrun', ['simctl', 'io', udid, 'screenshot', join(shots, `${body.snap}-dark.png`)]);
+          run('xcrun', ['simctl', 'ui', udid, 'appearance', body.on === 'true' ? 'dark' : 'light']);
+          await sleep(1200);
+          return Response.json({ ok: true });
+        case '/m3-cleanup':
+          await m3Cleanup();
+          return Response.json({ ok: true });
         case '/shot':
           await shot(body.name ?? 'shot');
           return Response.json({ ok: true });
@@ -288,12 +428,13 @@ let status = 1;
 try {
   const test = spawn(
     'xcodebuild',
-    ['test', '-project', join(repo, 'apps/ios/Plannotator.xcodeproj'), '-scheme', 'Plannotator', '-destination', `id=${udid}`, '-derivedDataPath', derived, '-resultBundlePath', join(tmp, 'Proof.xcresult')],
+    ['test', '-project', join(repo, 'apps/ios/Plannotator.xcodeproj'), '-scheme', 'Plannotator', '-destination', `id=${udid}`, '-derivedDataPath', derived, '-resultBundlePath', join(tmp, 'Proof.xcresult'), ...(only ? [`-only-testing:${only}`] : [])],
     { stdio: 'inherit', env: { ...process.env, TEST_RUNNER_PROOF_CONTROL: `http://127.0.0.1:${control.port}` } },
   );
   status = await new Promise<number>((r) => test.once('exit', (code) => r(code ?? 1)));
 } finally {
   video?.kill('SIGINT');
+  await m3Close();
   control.stop(true);
   proxy.stop(true);
   await Promise.allSettled([claude, ...Object.values(others), ...newsAgents].map((a) => a.close()));

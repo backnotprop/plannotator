@@ -15,6 +15,8 @@ struct QuestionCard: View {
 
     private enum Field { case other, note, text }
     @FocusState private var focus: Field?
+    /// The decision card (5.1) is up.
+    @State private var decisionCard = false
     @Environment(\.dynamicTypeSize) private var typeSize
     @ScaledMetric(relativeTo: .body) private var promptSize: CGFloat = 18
 
@@ -123,11 +125,18 @@ struct QuestionCard: View {
     }
 
     /// The decision tag as a real switch (3.1), the small switch the record draws.
+    /// Turning it on opens the decision card (5.1), and recording starts at
+    /// its Done; with it on, the row's words open the card again to change
+    /// them. Turning it off is saved at once.
     private var decisionRow: some View {
-        let on = question.decisionRecording
+        let on = question.decisionRecording || decisionCard
         let binding = Binding(get: { on }, set: { next in
-            Task {
-                do throws(InboxError) { try await session.setRecording(question, on: next, thread: threadId) } catch { onError(error.message) }
+            if next {
+                decisionCard = true
+            } else {
+                Task {
+                    do throws(InboxError) { try await session.setRecording(question, on: false, thread: threadId) } catch { onError(error.message) }
+                }
             }
         })
         return HStack(spacing: 8) {
@@ -146,10 +155,14 @@ struct QuestionCard: View {
         .background(on ? Color.tint.opacity(0.09) : .clear, in: .rect(cornerRadius: 12))
         .overlay { if !on { RoundedRectangle(cornerRadius: 12).strokeBorder(Color.hairline) } }
         .contentShape(.rect(cornerRadius: 12))
-        .onTapGesture { if !locked { binding.wrappedValue.toggle() } }
+        .onTapGesture { if !locked { decisionCard = true } }
         .disabled(locked)
         .accessibilityElement(children: .combine)
+        .accessibilityAction(named: "Edit the decision") { if !locked, question.decisionRecording { decisionCard = true } }
         .accessibilityIdentifier("decision-\(question.key)")
+        .sheet(isPresented: $decisionCard) {
+            DecisionSheet(question: question, session: session, threadId: threadId)
+        }
     }
 
     private func choiceRow(_ choice: InboxChoice) -> some View {

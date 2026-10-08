@@ -21,7 +21,7 @@ struct InboxTab: View {
                 }
             }
             .navigationTitle("Inbox")
-            .navigationSubtitle(subtitle)
+            .navigationSubtitle(SourceMenu.subtitle(model.session))
             .toolbarTitleMenu { SourceMenu() }
             // 1.5A: the title is the switcher. iOS 26 draws the title menu's
             // chevron only on an inline title; a large title hides the switcher
@@ -34,20 +34,22 @@ struct InboxTab: View {
         .onChange(of: model.session?.id) { path = [] }
     }
 
-    private var subtitle: Text {
-        guard let session = model.session else { return Text("No source yet") }
+}
+
+/// The title's menu (1.5A): each source with what waits in it, one shown at a
+/// time, and Add a source. Inbox and Decisions both carry it.
+struct SourceMenu: View {
+    @Environment(AppModel.self) private var model
+
+    /// The source under the large title, and whether it can be reached.
+    static func subtitle(_ session: SourceSession?) -> Text {
+        guard let session else { return Text("No source yet") }
         switch session.status {
         case .unreachable: return Text("\(session.name) · Not reachable")
         case .removed: return Text("\(session.name) · \(session.isWorkspaces ? "Signed out" : "Removed")")
         default: return Text(session.name)
         }
     }
-}
-
-/// The title's menu (1.5A): each source with what waits in it, one shown at a
-/// time, and Add a source.
-struct SourceMenu: View {
-    @Environment(AppModel.self) private var model
 
     var body: some View {
         Picker("Source", selection: Binding(get: { model.activeId }, set: { show($0) })) {

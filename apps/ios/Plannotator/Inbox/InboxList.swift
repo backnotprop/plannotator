@@ -6,7 +6,6 @@ import SwiftUI
 struct InboxList: View {
     let session: SourceSession
     @Binding var path: [ThreadRoute]
-    @Environment(AppModel.self) private var model
     @State private var quietOpen = false
     @State private var deleting: InboxListRow?
     @State private var problem: String?
@@ -30,17 +29,7 @@ struct InboxList: View {
 
     @ViewBuilder private var content: some View {
         if session.status == .removed {
-            ContentUnavailableView {
-                Label(session.removedTitle, systemImage: session.removedSymbol)
-            } description: {
-                Text(session.removedHelp)
-            } actions: {
-                Button(session.removedAction) {
-                    if session.isWorkspaces { Task { await model.signInToWorkspaces() } } else { model.pairing = true }
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            .background(Color.screen)
+            SourceRemoved(session: session)
         } else if let list = session.list {
             if list.sections.allSatisfy(\.threads.isEmpty) {
                 ScrollView {
@@ -53,14 +42,7 @@ struct InboxList: View {
                 rows(list)
             }
         } else if session.status == .unreachable {
-            ContentUnavailableView {
-                Label("Can't reach \(session.name)", systemImage: "wifi.slash")
-            } description: {
-                Text(session.unreachableHelp)
-            } actions: {
-                Button("Try Again") { Task { await session.refresh() } }
-            }
-            .background(Color.screen)
+            SourceUnreachable(session: session)
         } else {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.screen)
         }

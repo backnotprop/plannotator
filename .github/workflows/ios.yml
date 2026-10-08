@@ -22,6 +22,8 @@ on:
       - 'apps/hook/server/index.ts'
       - 'apps/hook/server/inbox*'
       - 'scripts/inbox-sim.ts'
+      - 'apps/hook/hooks/mod/inbox*'
+      - 'apps/hook/hooks/mod/testing/**'
       - '.github/workflows/ios.yml'
   push:
     branches:
@@ -35,6 +37,8 @@ on:
       - 'apps/hook/server/index.ts'
       - 'apps/hook/server/inbox*'
       - 'scripts/inbox-sim.ts'
+      - 'apps/hook/hooks/mod/inbox*'
+      - 'apps/hook/hooks/mod/testing/**'
       - '.github/workflows/ios.yml'
 
 permissions:

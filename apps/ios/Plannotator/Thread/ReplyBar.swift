@@ -2,7 +2,8 @@ import PlannotatorKit
 import SwiftUI
 import UIKit
 
-/// 3.4A: the reply bar docked over the thread, Send always under the thumb.
+/// 3.4A: the reply bar docked over the thread, New message on its left (8.1),
+/// Send always under the thumb.
 /// Tapping the field opens the composer above the keyboard (3.5), with the
 /// picks written in as words, as on the desktop.
 struct ReplyBar: View {
@@ -40,6 +41,7 @@ struct ReplyBar: View {
 
     private var bar: some View {
         HStack(alignment: .bottom, spacing: 8) {
+            NewMessageButton(session: session, thread: thread, replyInstead: open, problem: $problem)
             Button(action: open) {
                 HStack(spacing: 6) {
                     if picked.isEmpty && words.trimmed.isEmpty {
