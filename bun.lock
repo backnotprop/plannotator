@@ -171,6 +171,16 @@
         "vite": "^6.2.0",
       },
     },
+    "apps/relay": {
+      "name": "@plannotator/relay",
+      "version": "0.0.1",
+      "devDependencies": {
+        "@cloudflare/workers-types": "^4.20241218.0",
+        "@plannotator/core": "workspace:*",
+        "typescript": "~5.8.2",
+        "wrangler": "^4.127.1",
+      },
+    },
     "apps/review": {
       "name": "@plannotator/review",
       "version": "0.0.1",
@@ -1073,6 +1083,8 @@
     "@plannotator/pi-extension": ["@plannotator/pi-extension@workspace:apps/pi-extension"],
 
     "@plannotator/portal": ["@plannotator/portal@workspace:apps/portal"],
+
+    "@plannotator/relay": ["@plannotator/relay@workspace:apps/relay"],
 
     "@plannotator/review": ["@plannotator/review@workspace:apps/review"],
 

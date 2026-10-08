@@ -1,0 +1,24 @@
+{
+  "about": "Test vectors for the Inbox relay's keys and envelope (adr/implementation/inbox-mobile.md, section 4), from all-zero inputs. packages/core/crypto.test.ts checks them in TypeScript; the iPhone app's tests (M5) check the same file in Swift. Public by design: nothing here protects anything.",
+  "pairing_secret": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "device_id": "dev_00000000000000000000000000",
+  "derived": {
+    "key": "EWmqHqbdwPC6kxOAZoGZpQiyudtOsYa_Vf1fUDAn-Wk",
+    "relay_secret": "Z-gLD9fMyL1FP8urppXEy76cfRANNu3KzK7WVnGOd9I",
+    "relay_secret_sha256": "2dd0e6dc8b7e933117fe89ad28217652c08ce3389c29b81fa212bc31d9e7b43a"
+  },
+  "envelopes": [
+    {
+      "plaintext": "{\"v\":1,\"thread_id\":\"msg_00000000000000000000000000\",\"message_id\":\"msg_00000000000000000000000000\",\"subject\":\"Run the retry tests against the test clock?\",\"project\":\"billing-svc\",\"agent\":\"Claude Code\",\"question\":{\"key\":\"q-00000000\",\"revision\":0,\"prompt\":\"Run the retry tests against the test clock?\",\"context\":\"They take about four minutes.\",\"choices\":[{\"label\":\"Yes\",\"recommended\":true},{\"label\":\"No\",\"recommended\":false}]}}",
+      "envelope": "AAAAAAAAAAAAAAAAuKKDpvO11dJb1xEax5VgdZKHp8Sg7Kk1vFL581G7JJdH8mqUdFpvKIADr94tn0sXTPU0rsfJKfIowo7FoyC0rOtzJpQpmqpClRVimmxF1CwgOCQTmZTlOjXrVFHV1n9_7yO8m33rVdgTGjq1PVcQQxpOfLJrK-DOvaJf0W9PwMRmFA0QrtkHDha8CS7H9Uq3cIpEkaubWISdzfl0o8z4QcuzYfwQP2-f0vMy2DJDXHZ-3z2wG9osltYpTc6OZ_bO5BviPTkSmt1LH7GVdH9bQjx9vyurmItKDUPLQLmZZZ2YK6QbNfbR9XMa0lSp7IBNp9HthWoZF_9yRMU6G6ulUgLL96bAaRaMdKK_he5bj4ttvKCNguAIS1al5WhJAIePISb_8TsDSIwKAKEOPg0V30LD4HBJ94TdpUCthqg10npcSxFBGwkifb_L61j-2C6o3nzM3qV9vdcPOm3HzFWezo85JvD3uD_siiFJ_K3HexYvao-fP3EyaGNWNEEB5vpaAjGILOKE1KkprzhkQoBYpYx2xLRyvoh2pmzBGNeP_ptl1cHhKT-OhDkbWYP8n1eXERitXB8Ze_o"
+    },
+    {
+      "plaintext": "{\"v\":1}",
+      "envelope": "AAAAAAAAAAAAAAABY5Is1uKEWJC6n8rMRS40HS7poFPKJMU"
+    },
+    {
+      "plaintext": "Café, naïve, ✓ 日本",
+      "envelope": "AAAAAAAAAAAAAAACS3xyZIFuro9vPMGn8XW2hOSszCVtzFJgKCXLMeHANdchNLSUaYR7Yls"
+    }
+  ]
+}

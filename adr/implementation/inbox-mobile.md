@@ -192,6 +192,8 @@ The switch's window routes (added in P2; the first draft named the switch but no
 
 A Cloudflare Worker in `apps/relay/` with one Durable Object per mailbox, on the model of `apps/guides-show/worker`: it holds what it cannot read. The origin is `https://relay.plannotator.ai` (owner item 20, recommended); `PLANNOTATOR_RELAY_URL` points the Inbox at `wrangler dev` in a proof.
 
+Built in two steps (R1, 2026-10-08). R1 built the mailbox, its devices, the APNs token, push, the phone's relay switch and the Inbox's socket with its `hello` and `carriage` frames. R2 adds the down items, the phone's fetch and ack, the commands up, `inbox_online`, and the socket's `item`, `command` and `applied` frames. Until R2 lands, `items`, `ack` and `commands` answer `404 not_found` like any path the relay does not serve, and the relay reads no frame from the Inbox's socket.
+
 ### Keys
 
 All made on the computer and the phone at pairing; none ever reaches the relay.
@@ -201,7 +203,7 @@ All made on the computer and the phone at pairing; none ever reaches the relay.
 - **The relay secret** `R = HKDF-SHA256(ikm = S, salt = UTF-8 bytes of the device id, info = "plannotator-inbox relay auth v1", length = 32)`, base64url: the phone's bearer at the relay. The relay stores only `SHA-256(R)` as hex.
 - **The mailbox secret** `M`: 32 random bytes, base64url, made by the Inbox with the mailbox and kept in `inbox/relay.json` (0600) as `{ v: 1, url, mailbox_id, secret }`. The Inbox's bearer at the relay. The relay stores only `SHA-256(M)` as hex.
 
-Web Crypto (`deriveBits` with `HKDF`) and CryptoKit (`HKDF<SHA256>.deriveKey`) both compute these. R1 commits test vectors made from all-zero inputs, and the proof has Swift and TypeScript open each other's envelopes.
+Both hashes are taken over the bearer as sent, the base64url string's UTF-8 bytes, which is what the relay hashes when a request arrives (written in by R1). Web Crypto (`deriveBits` with `HKDF`; `deriveRelayKeys` in `packages/core/crypto.ts`) and CryptoKit (`HKDF<SHA256>.deriveKey`) both compute these. R1 commits test vectors made from all-zero inputs in `packages/core/fixtures/inbox-relay-vectors.json`: the pairing secret, the device id, `K`, `R`, `SHA-256(R)`, and three envelopes with their plaintexts. TypeScript checks them in `packages/core/crypto.test.ts`; the app's tests (M5) check the same file in Swift, and the device proof has each side open the other's envelopes.
 
 ### The envelope
 
@@ -216,16 +218,16 @@ Exactly the format `packages/core/crypto.ts` writes: `base64url(IV || ciphertext
 
 ### Routes
 
-Every route answers JSON. Errors are `{ error, code }`: `400 bad_request`, `401 unauthorized` (a bearer whose SHA-256 does not match), `404 mailbox_not_found`, `404 device_not_found`, and `429 too_many_requests` with `Retry-After` from the creation brake. `POST /v1/mailboxes` goes through the same Cloudflare rate limiting rule guides.show puts on `POST /api/g` (the `[[ratelimits]]` block of `apps/guides-show/wrangler.toml`, keyed on `CF-Connecting-IP`, failing open where it cannot resolve); the relay adds no number of its own, and no other route is braked. "Inbox bearer" is `Authorization: Bearer <M>`; "device bearer" is `Authorization: Bearer <R>` of the device in the path.
+Every route answers JSON. Errors are `{ error, code }`: `400 bad_request`, `401 unauthorized` (a bearer whose SHA-256 does not match), `404 mailbox_not_found`, `404 device_not_found`, `404 not_found` (a path the relay does not serve), `429 too_many_requests` with `Retry-After` from the creation brake, and on a push `502 apns_failed` when Apple cannot be reached or refuses for another reason than 410, with `apns_status` and `apns_reason` (Apple's `reason`, or null) beside `error` and `code` (written in by R1: the first draft named no answer for Apple's other refusals). `POST /v1/mailboxes` goes through the same Cloudflare rate limiting rule guides.show puts on `POST /api/g` (the `[[ratelimits]]` block of `apps/guides-show/wrangler.toml`, keyed on `CF-Connecting-IP`, failing open where it cannot resolve); the relay adds no number of its own, and no other route is braked. "Inbox bearer" is `Authorization: Bearer <M>`; "device bearer" is `Authorization: Bearer <R>` of the device in the path.
 
 | Route | Who | Request | Answer | Exchange |
 |---|---|---|---|---|
 | `POST /v1/mailboxes` | the Inbox, at its first pairing | `{ secret_sha256 }` | `201 { mailbox_id }`; `mbx_` plus 16 random bytes as base64url | 7.26 |
-| `PUT /v1/mailboxes/:mbx/devices/:dev` | Inbox bearer | `{ secret_sha256, cursor }`: `SHA-256(R)` and the store cursor at pairing (the phone read everything before it directly) | `200 { device_id }`; repeating it with the same hash is a no-op | 7.27 |
+| `PUT /v1/mailboxes/:mbx/devices/:dev` | Inbox bearer | `{ secret_sha256, cursor }`: `SHA-256(R)` and the store cursor at pairing (the phone read everything before it directly) | `200 { device_id }`; repeating it with the same hash is a no-op; another hash starts the device over (carriage on, the given cursor, no APNs token) | 7.27 |
 | `DELETE /v1/mailboxes/:mbx/devices/:dev` | Inbox bearer | | `204`; the device's revoke on the computer | 7.28 |
 | `PUT /v1/mailboxes/:mbx/devices/:dev/carriage` | device bearer | `{ on: false }`, or `{ on: true, cursor }` with the store cursor the phone holds | `204`; the device stays registered either way, and the Inbox's socket gets a `carriage` frame | 7.35 |
 | `PUT /v1/mailboxes/:mbx/devices/:dev/apns` | device bearer | `{ token, environment: "sandbox" or "production" }`; `token: null` removes it | `204` | 7.29 |
-| `POST /v1/mailboxes/:mbx/push` | Inbox bearer | `{ device_id, collapse_id, ciphertext }` | `202 { sent: true }`, or `200 { sent: false, reason: "no_apns_token" or "apns_gone" }` | 7.30 |
+| `POST /v1/mailboxes/:mbx/push` | Inbox bearer | `{ device_id, collapse_id, ciphertext }` | `202 { sent: true }`, or `200 { sent: false, reason: "no_apns_token", "apns_gone" or "no_apns_key" }` (the relay holds no APNs key yet; written in by R1), or `502 apns_failed` | 7.30 |
 | `GET /v1/mailboxes/:mbx/socket` | Inbox bearer, WebSocket upgrade | frames below | | 7.31 |
 | `GET /v1/mailboxes/:mbx/devices/:dev/items?after=n` | device bearer | | `{ items: [{ n, ciphertext }], inbox_online }`, every held item after `n` in order | 7.32 |
 | `POST /v1/mailboxes/:mbx/devices/:dev/ack` | device bearer | `{ through: n }`, or `{ cursor }` when the phone read the store directly up to that seq | `204`; deletes items up to `n`, or record items whose cursor is at or below `cursor` | 7.33 |
@@ -235,7 +237,7 @@ Every route answers JSON. Errors are `{ error, code }`: `400 bad_request`, `401 
 
 ### The Inbox's socket
 
-The Inbox holds one outbound WebSocket to its mailbox while the mailbox has a device, and reconnects when it drops. Frames are JSON text.
+The Inbox holds one outbound WebSocket to its mailbox while the mailbox has a device, and reconnects when it drops (1 s after, doubling to 60 s, back to 1 s at each `hello`). A new socket replaces an older one, which the relay closes with code 4000. Frames are JSON text.
 
 Relay to Inbox:
 
@@ -287,13 +289,15 @@ The push plaintext, encrypted under the device key:
 - `agent` is `inboxAgentName(author)`, `project` the project's name.
 - `question` is present only when the message has exactly one question, it is single-choice, and it has at most four choices (Apple shows at most four actions). Otherwise it is null, and the notification opens the thread (render 7.2).
 - `collapse_id` is the thread id, so a thread's newer push replaces its older one.
-- Apple's payload ceiling is 4096 bytes. When the APNs body would pass it, the Inbox drops `question.context`, then `question`, then sends `{ v, thread_id, message_id }` alone.
+- Apple's payload ceiling is 4096 bytes. When the APNs body would pass it, the Inbox sets `question.context` to null, then `question` to null, then sends `{ v, thread_id, message_id }` alone.
 
 What the relay sends to APNs, with `apns-push-type: alert`, `apns-priority: 10`, `apns-topic: ai.plannotator.app` and `apns-collapse-id: <collapse_id>`:
 
 ```json
 { "aps": { "alert": { "title": "Plannotator", "body": "New in your Inbox" }, "mutable-content": 1, "sound": "default" }, "e": "<envelope>" }
 ```
+
+The relay signs Apple's provider token (ES256) with the APNs key it holds as Worker secrets (`APNS_KEY`, the .p8 text, `APNS_KEY_ID`, `APNS_TEAM_ID`) and reuses it for 50 minutes. It sends over HTTP/2 on a `connect()` TLS socket (`apps/relay/src/apns-h2.ts`), never `fetch`: a Worker's `fetch` reaches origins over HTTP/1.1 in workerd, which APNs refuses (the mobile spike, item 6). The host follows the token's environment: `api.sandbox.push.apple.com` or `api.push.apple.com`. A 410 deletes the token. Without `APNS_KEY` the relay answers `no_apns_key` and logs it once.
 
 The cleartext alert shows only if the notification service extension cannot run. The extension decrypts `e` with the device key and sets the title to `subject` and the body to `<agent> in <project>`, followed by `: <context>` when the question carries one (render 7.1). With a question it registers a category for that notification whose actions are the choices, recommended first, identifiers `choice.0` to `choice.3`, each `authenticationRequired` (render 7.2). A tapped choice is one Send (section 6, exchange 7.11).
 
@@ -870,7 +874,7 @@ curl -sS -X POST "$RELAY/v1/mailboxes/mbx_AAAAAAAAAAAAAAAAAAAAAA/push" \
   -d '{"device_id":"dev_01K70000000000000000000001","collapse_id":"msg_01K70000000000000000000010","ciphertext":"AAAAAAAAAAAAAAAAexampleciphertextexample"}'
 ```
 
-`202 { "sent": true }`. With no APNs token registered: `200 { "sent": false, "reason": "no_apns_token" }`.
+`202 { "sent": true }`. With no APNs token registered: `200 { "sent": false, "reason": "no_apns_token" }`. On a relay without the APNs key: `200 { "sent": false, "reason": "no_apns_key" }`. Apple refusing the provider token: `502 { "error": "APNs answered 403 InvalidProviderToken.", "code": "apns_failed", "apns_status": 403, "apns_reason": "InvalidProviderToken" }`.
 
 ### 7.31 The Inbox's socket
 

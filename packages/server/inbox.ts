@@ -89,6 +89,7 @@ import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
 import { createInboxLiveSessions } from "./inbox-sessions";
 import { createInboxDevices, DOOR_PREFIX } from "./inbox-devices";
+import { createInboxRelay } from "./inbox-relay";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 
 const LOOPBACK = "127.0.0.1";
@@ -645,6 +646,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let server: ReturnType<typeof Bun.serve>;
   let attachmentRoutes: ReturnType<typeof createInboxAttachmentRoutes>;
   let phones: ReturnType<typeof createInboxDevices>;
+  let relay: ReturnType<typeof createInboxRelay>;
 
   const readBody = async (req: Request): Promise<Record<string, unknown>> => {
     try {
@@ -886,7 +888,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     dispatch: fetch,
     now: options.now,
     tailscale: options.tailscale,
+    relay: { paired: (device) => relay.paired(device), revoked: (device) => relay.revoked(device) },
   });
+  // The relay (packages/server/inbox-relay.ts): the mailbox socket while a phone is paired, and the pushes.
+  relay = createInboxRelay({ dataDir, store, devices: phones.devices });
+  relay.start();
   phones.startTailnet();
   phones.startLan();
 
@@ -931,6 +937,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Bonjour record, before a restart starts the new run.
     phones.stopTailnet();
     phones.stopLan();
+    relay.stop();
   };
 
   return { port, url: baseUrl, token, serverSession, portChanged, store, registry, stop };

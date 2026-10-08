@@ -139,6 +139,11 @@ export interface InboxDevicesContext {
   dispatch: (req: Request) => Promise<Response>;
   now?: () => Date;
   tailscale?: TailscaleRunner;
+  /** The relay (packages/server/inbox-relay.ts): told of each pairing, whose answer carries the mailbox, and of each removal. */
+  relay?: {
+    paired: (device: InboxDevice) => Promise<{ url: string; mailbox_id: string } | null>;
+    revoked: (device: InboxDevice) => void;
+  };
 }
 
 /** The computer's name as the phone shows it: macOS's ComputerName, else the host name's first label. */
@@ -221,6 +226,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
     const revoked = devices.revoke(device.id, now().toISOString()) ?? device;
     for (const stream of streams.get(device.id) ?? []) stream.abort();
     streams.delete(device.id);
+    context.relay?.revoked(revoked);
     return revoked;
   };
 
@@ -276,8 +282,9 @@ export function createInboxDevices(context: InboxDevicesContext) {
     offer = null;
     const token = `tok_${randomBytes(32).toString("base64url")}`;
     const device = devices.add({ id: inboxId("dev"), name: byName.name, platform: platform.name, token, secret: open.secret, at: now().toISOString() });
-    // The relay (section 4) arrives with R1; until then a phone reaches the Inbox directly.
-    return json({ device: publicDevice(device), token, secret: open.secret, computer: computer(), addresses: addresses(), relay: null }, 201);
+    // The relay (section 4): the mailbox, made at the first pairing, and this phone registered there; null when it cannot be reached.
+    const relay = (await context.relay?.paired(device)) ?? null;
+    return json({ device: publicDevice(device), token, secret: open.secret, computer: computer(), addresses: addresses(), relay }, 201);
   };
 
   // ── The door (contract section 2) ──

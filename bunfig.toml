@@ -9,4 +9,6 @@ preload = ["./tests/setup/feedback-archive-off.ts", "./packages/ui/test-setup/ha
 # (scripts/test-claude-code-mod.sh), not bun: they import 'claude-code/testing'.
 # The Inbox's browser proofs run under Playwright (`bun run test:e2e:inbox`),
 # against a compiled binary, not under bun test.
-pathIgnorePatterns = ["apps/hook/tests/**", "tests/e2e/**"]
+# The relay's proof (apps/relay/test) runs `wrangler dev`: it runs from its own
+# folder in the relay workflow, not in the root run.
+pathIgnorePatterns = ["apps/hook/tests/**", "tests/e2e/**", "apps/relay/**"]

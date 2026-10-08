@@ -1,0 +1,7 @@
+# Bun reads only the bunfig.toml in the directory `bun test` runs from, so the
+# root preloads are mirrored here for runs from this package directory. Keep in
+# step with the root bunfig.toml [test] section (guarded by
+# tests/package-bunfig.test.ts). The root bunfig skips apps/relay: its proof
+# runs `wrangler dev`, in the relay workflow, from this folder.
+[test]
+preload = ["../../tests/setup/feedback-archive-off.ts", "../../packages/ui/test-setup/happy-dom.ts"]
