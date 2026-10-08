@@ -223,7 +223,7 @@ describe("the relay with an Inbox, under wrangler dev", () => {
   let agent: SimAgent;
   let base = "";
   let env: Record<string, string> = {};
-  let phone: { id: string; token: string; secret: string; key: string; relaySecret: string };
+  let phone: { id: string; token: string; secret: string; key: string; collapseKey: string; relaySecret: string };
   let mailbox: { url: string; mailbox_id: string; secret: string };
 
   const win = (path: string, body?: unknown) =>
@@ -268,8 +268,8 @@ describe("the relay with an Inbox, under wrangler dev", () => {
     return { body, phone: { id: body.device.id as string, token: body.token as string, secret: body.secret as string, ...derived } };
   };
 
-  /** The collapse id the Inbox sends: the thread id under the phone's key, never the thread id itself. */
-  const collapseOf = (threadId: string) => createHmac("sha256", Buffer.from(phone.key, "base64url")).update(threadId).digest("hex");
+  /** The collapse id the Inbox sends: the thread id under the phone's collapse key, never the thread id itself. */
+  const collapseOf = (threadId: string) => createHmac("sha256", Buffer.from(phone.collapseKey, "base64url")).update(threadId).digest("hex");
 
   const device = async (id: string) => ((await (await win("/api/inbox/devices")).json()) as Json).devices.find((d: Json) => d.id === id);
 

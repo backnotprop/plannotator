@@ -49,7 +49,7 @@ plannotator/
 │   │   ├── index.tsx
 │   │   └── vite.config.ts
 │   ├── guides-show/               # guides.show — portable Guided Review viewer (multi-file CDN build) + Cloudflare Worker (viewer/, worker/, share/, build/); the Worker is the only host target, self-hosting = deploying it under your own account
-│   ├── relay/                     # The Inbox relay (mobile steps R1, R2): a Cloudflare Worker + one Durable Object per mailbox (src/index.ts, src/mailbox.ts), holding only ciphertext and hashes: pushes, and the phone's reads and answers while it is away; src/apns-h2.ts is a standalone HTTP/2 client for APNs over connect(). Private, own version line, owner-deployed (never from CI); its proof (test/) runs `wrangler dev` in the relay workflow and is skipped by the root `bun test`
+│   ├── relay/                     # The Inbox relay (mobile steps R1, R2): a Cloudflare Worker + one Durable Object per mailbox (src/index.ts, src/mailbox.ts), holding only ciphertext and hashes: pushes, and the phone's reads and answers while it is away; src/apns-h2.ts is a standalone HTTP/2 client for APNs over connect(). Private, own version line, owner-deployed (never from CI; README.md has the deploy); its proof (test/) runs `wrangler dev` in the relay workflow and is skipped by the root `bun test`
 │   ├── vscode-extension/         # VS Code extension — opens plans in editor tabs
 │   │   ├── bin/                   # Router scripts (open-in-vscode, xdg-open)
 │   │   ├── src/                   # extension.ts, cookie-proxy.ts, ipc-server.ts, panel-manager.ts, editor-annotations.ts, vscode-theme.ts

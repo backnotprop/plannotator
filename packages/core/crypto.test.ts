@@ -181,7 +181,9 @@ describe("live paste service E2E", () => {
 describe("the Inbox relay's vectors", () => {
   test("the pairing secret and device id derive the vectors' key and relay secret", async () => {
     const derived = await deriveRelayKeys(vectors.pairing_secret, vectors.device_id);
-    expect(derived).toEqual({ key: vectors.derived.key, upKey: vectors.derived.up_key, relaySecret: vectors.derived.relay_secret });
+    expect(derived).toMatchObject({ key: vectors.derived.key, upKey: vectors.derived.up_key, relaySecret: vectors.derived.relay_secret });
+    // The collapse id's HMAC key is the Inbox's alone (the phone never computes it), so it has no vector; it is its own key.
+    expect(new Set([derived.key, derived.upKey, derived.collapseKey, derived.relaySecret]).size).toBe(4);
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(derived.relaySecret)));
     expect(Buffer.from(digest).toString("hex")).toBe(vectors.derived.relay_secret_sha256);
   });

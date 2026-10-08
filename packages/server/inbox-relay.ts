@@ -434,10 +434,10 @@ export function createInboxRelay(context: InboxRelayContext) {
       const secret = devices.secret(device.id);
       if (!secret) continue;
       try {
-        const { key } = await deriveRelayKeys(secret, device.id);
+        const { key, collapseKey } = await deriveRelayKeys(secret, device.id);
         const ciphertext = await sizedEnvelope(summary, key);
-        // The collapse id: the thread id under the phone's key, so a thread's newer push replaces its older one and the relay never learns the thread.
-        const collapseId = createHmac("sha256", Buffer.from(key, "base64url")).update(message.thread_id).digest("hex");
+        // The collapse id: the thread id under the phone's collapse key (its own HKDF label, never the envelope key), so a thread's newer push replaces its older one and the relay never learns the thread.
+        const collapseId = createHmac("sha256", Buffer.from(collapseKey, "base64url")).update(message.thread_id).digest("hex");
         const answer = await call("POST", mailboxPath("/push"), mailbox.secret, { device_id: device.id, collapse_id: collapseId, ciphertext });
         const result = (await answer.json().catch(() => ({}))) as { reason?: string; code?: string };
         log(`push ${message.id} ${device.id} ${answer.status}${result.reason ? ` ${result.reason}` : result.code ? ` ${result.code}` : ""}`);
