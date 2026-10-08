@@ -68,9 +68,13 @@ struct RootView: View {
                 }
             }
         } message: { link in
-            Text(link.tailnet == nil
-                ? "This code has no address your phone can reach. On your computer, turn on Reach from my tailnet, then show the code again."
-                : "This phone will read and answer the Inbox at that address. Pair only with a computer you know.")
+            // The address the client will dial, alone on the first line; the
+            // name, which the link chooses, comes after it and is marked as a name.
+            if let address = link.tailnet {
+                Text("\(address.hostPort)\nNamed “\(link.name)”\n\nThis phone will read and answer the Inbox at that address. Pair only with a computer you know.")
+            } else {
+                Text("This code has no address your phone can reach. On your computer, turn on Reach from my tailnet, then show the code again.")
+            }
         }
         .alert("Not paired", isPresented: Binding(get: { pairProblem != nil }, set: { if !$0 { pairProblem = nil } })) {
             Button("OK", role: .cancel) {}
@@ -81,10 +85,6 @@ struct RootView: View {
 
     @State private var pairProblem: String?
 
-    /// "Pair with MacBook Pro at macbook-pro.tail0000.ts.net:8443?": the address is the one contacted.
-    private var offerTitle: String {
-        guard let link = model.offered else { return "" }
-        guard let address = link.tailnet else { return "Pair with \(link.name)?" }
-        return "Pair with \(link.name) at \(address.hostPort)?"
-    }
+    /// The title names no one: the address the phone will contact is the message's first line.
+    private var offerTitle: String { "Pair with this computer?" }
 }

@@ -229,15 +229,32 @@ final class ProofTests: XCTestCase {
         try await control.shot("link-in-message")
         back()
 
-        // A pairing link opened from outside the app asks first, naming the
-        // address it will contact; nothing is redeemed until Pair.
-        let external = try await control.post("/pair-link")
+        // A link whose address carries user info (shows one host, dials
+        // another) has no address the phone will contact: no Pair button.
+        let hostile = try await control.post("/pair-link", ["tailnet": "macbook-pro.tail0000.ts.net:8443@evil.example"])
+        try await control.post("/open-url", ["url": try XCTUnwrap(hostile["url"] as? String)])
+        allowSystemOpenPrompt()
+        let refused = app.alerts.matching(NSPredicate(format: "label == 'Pair with this computer?'")).firstMatch
+        XCTAssertTrue(refused.waitForExistence(timeout: 30))
+        XCTAssertFalse(refused.buttons["Pair"].exists, "a user-info address can be paired")
+        XCTAssertTrue(refused.staticTexts.containing(NSPredicate(format: "label CONTAINS 'no address your phone can reach'")).firstMatch.exists)
+        try await control.shot("pair-link-userinfo")
+        refused.buttons["Cancel"].tap()
+
+        // A pairing link opened from outside the app asks first; nothing is
+        // redeemed until Pair. The name reads like an address, but the line
+        // the person reads is the host the phone will dial.
+        let impostor = "MacBook Pro at macbook-pro.tail0000.ts.net:8443"
+        let external = try await control.post("/pair-link", ["name": impostor])
         let pairURL = try XCTUnwrap(external["url"] as? String)
         let pairAddress = try XCTUnwrap(external["address"] as? String)
-        let confirm = app.alerts.matching(NSPredicate(format: "label CONTAINS %@", pairAddress)).firstMatch
+        let confirm = app.alerts.matching(NSPredicate(format: "label == 'Pair with this computer?'")).firstMatch
         try await control.post("/open-url", ["url": pairURL])
         allowSystemOpenPrompt()
         XCTAssertTrue(confirm.waitForExistence(timeout: 30))
+        let message = confirm.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", pairAddress)).firstMatch.label
+        // The message's first line is the dialled host (VoiceOver reads a line break as a space).
+        XCTAssertTrue(message.hasPrefix(pairAddress + "\n") || message.hasPrefix(pairAddress + " Named"), "the dialled host leads the message: \(message)")
         try await control.shot("pair-link-confirm")
         let devices2 = try await deviceCount()
         XCTAssertEqual(devices2, 1, "nothing redeemed")

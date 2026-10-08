@@ -216,7 +216,10 @@ const control = Bun.serve({
           const offer = (await answer.json()) as { link: string; computer: { name: string } };
           if (!answer.ok) throw new Error(`pairing offer: ${answer.status}`);
           const link = new URL(offer.link);
-          link.searchParams.set('tailnet', `127.0.0.1:${proxy.port}`);
+          // The test may stand in a hostile link: a name that reads like an
+          // address, or an address with user info in it.
+          link.searchParams.set('tailnet', body.tailnet ?? `127.0.0.1:${proxy.port}`);
+          if (body.name) link.searchParams.set('name', body.name);
           link.searchParams.delete('lan');
           link.searchParams.delete('fp');
           return Response.json({ url: link.toString(), address: `127.0.0.1:${proxy.port}`, name: offer.computer.name });

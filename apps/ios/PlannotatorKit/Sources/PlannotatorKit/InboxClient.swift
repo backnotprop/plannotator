@@ -39,8 +39,12 @@ public enum InboxError: Error, Equatable, Sendable {
 /// An Inbox address as a phone holds it: `host:port`. Loopback names speak
 /// plain HTTP (the simulator reaches the Mac's own Inbox); every other address
 /// is the tailnet publication, which `tailscale serve` answers over HTTPS.
+///
+/// A host and an optional port, nothing else: no user info (`a@b` would show
+/// `a` and dial `b`), no path, no query. `hostPort` is rebuilt from the parsed
+/// host and port, so what a screen shows is exactly what the client dials.
 public struct InboxAddress: Hashable, Sendable, Codable {
-    public var hostPort: String
+    public private(set) var hostPort: String
 
     public init?(_ text: String) {
         var value = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -48,12 +52,14 @@ public struct InboxAddress: Hashable, Sendable, Codable {
             value = String(value.dropFirst(prefix.count))
         }
         while value.hasSuffix("/") { value.removeLast() }
-        guard !value.isEmpty, !value.contains("/"), !value.contains(" "),
-              URL(string: "https://\(value)")?.host != nil else { return nil }
-        hostPort = value
+        guard !value.isEmpty, !value.contains("@"), !value.contains("/"), !value.contains(" "),
+              let parts = URLComponents(string: "https://\(value)"),
+              parts.user == nil, parts.password == nil, parts.path.isEmpty, parts.query == nil, parts.fragment == nil,
+              let host = parts.host, !host.isEmpty else { return nil }
+        hostPort = parts.port.map { "\(host):\($0)" } ?? host
     }
 
-    public var host: String { URL(string: "https://\(hostPort)")?.host ?? hostPort }
+    public var host: String { URLComponents(string: "https://\(hostPort)")?.host ?? hostPort }
 
     public var isLoopback: Bool { ["127.0.0.1", "localhost", "::1"].contains(host) }
 

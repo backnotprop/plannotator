@@ -17,6 +17,15 @@ import Testing
         #expect(link.name == "Michael\u{2019}s MacBook Pro (2)")
     }
 
+    // A link that shows one host and dials another must not parse to an address.
+    @Test func userInfoInAnAddressIsRefused() {
+        #expect(InboxAddress("macbook-pro.tail0000.ts.net:8443@evil.example") == nil)
+        #expect(InboxAddress("user:pw@evil.example:443") == nil)
+        let link = try? PairLink.parse("plannotator://pair?v=1&name=MacBook&tailnet=macbook-pro.tail0000.ts.net%3A8443%40evil.example&secret=AAAA&code=482913").get()
+        #expect(link != nil && link?.tailnet == nil)
+        #expect(InboxAddress("box.tail0000.ts.net:8443")?.host == "box.tail0000.ts.net")
+    }
+
     @Test func anUnknownVersionAsksForAnUpdate() {
         #expect(PairLink.parse("plannotator://pair?v=2&secret=x&code=123456") == .failure(.newerVersion))
         #expect(PairLink.parse("https://example.com") == .failure(.notALink))

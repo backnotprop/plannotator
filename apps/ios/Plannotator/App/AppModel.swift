@@ -57,7 +57,6 @@ final class AppModel {
 
     /// Redeems a scanned link: its secret at the first address that answers.
     func pair(link: PairLink) async throws(InboxError) {
-        if let tailnet = link.tailnet { remember(KnownComputer(name: link.name, address: tailnet)) }
         // The LAN address needs the pinned certificate (P2); the tailnet is what this build reaches.
         guard let address = link.tailnet else { throw .refused(status: 0, code: "no_address", message: "This code has no address your phone can reach. On your computer, turn on Reach from my tailnet, then show the code again.", triesLeft: nil) }
         try await redeem(at: address, secret: link.secret, code: nil)
