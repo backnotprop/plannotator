@@ -419,8 +419,10 @@ const control = Bun.serve({
           const mailbox = JSON.parse(readFileSync(join(dataDir, 'inbox', 'relay.json'), 'utf8')) as { url: string; mailbox_id: string };
           const token = 'a'.repeat(64);
           let registered = 0;
-          for (const device of relayDevices()) {
-            const id = String(device.id);
+          // The paired phones as the computer lists them (the relay's storage file can miss a read while wrangler writes it).
+          const { devices } = (await (await windowRoute('/api/inbox/devices')).json()) as { devices: { id: string }[] };
+          for (const device of devices) {
+            const id = device.id;
             const secret = readFileSync(join(dataDir, 'inbox', 'device-secrets', id.replace(/[^A-Za-z0-9_]/g, '')), 'utf8').trim();
             const { relaySecret } = await deriveRelayKeys(secret, id);
             const answer = await fetch(`${mailbox.url}/v1/mailboxes/${mailbox.mailbox_id}/devices/${id}/apns`, {
