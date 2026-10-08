@@ -46,7 +46,7 @@ import {
   inboxToolCallParams,
   inboxToolResultText,
   inboxWakeText,
-  mcpAnswerOf,
+  mcpAnswerOfResponse,
   parseInboxBridgeCommands,
   parseInboxRegistry,
   parseInboxToolList,
@@ -129,7 +129,7 @@ async function mcpCall(host: Host, port: number, method: string, params: Record<
     headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
   })
-  return mcpAnswerOf(response.text)
+  return mcpAnswerOfResponse(response.status, response.text)
 }
 
 /** `work`'s answer, or null once `ms` passed first; the bounding sleep is aborted as soon as `work` settles. */

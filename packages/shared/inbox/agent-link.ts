@@ -44,7 +44,7 @@ import {
   inboxToolCallParams,
   inboxToolResultText,
   inboxWakeText,
-  mcpAnswerOf,
+  mcpAnswerOfResponse,
   parseInboxBridgeCommands,
   parseInboxRegistry,
   parseInboxToolList,
@@ -139,7 +139,7 @@ async function mcpCall(
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
     signal,
   });
-  return mcpAnswerOf(await response.text());
+  return mcpAnswerOfResponse(response.status, await response.text());
 }
 
 /**

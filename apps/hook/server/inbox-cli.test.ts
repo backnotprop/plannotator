@@ -20,6 +20,8 @@ import { startInboxServer } from "@plannotator/server/inbox";
 import { INBOX_MCP_TOOLS } from "@plannotator/server/inbox-mcp";
 import { GUIDE_BRIEF_EXAMPLE } from "../../../packages/server/inbox-guides";
 import { runPlannotatorUninstall } from "@plannotator/server/uninstall";
+import { INBOX_MAX_REQUEST_BYTES } from "@plannotator/shared/inbox/connection";
+import { runInboxMcpShim } from "./inbox-mcp-shim";
 
 const entry = resolve(import.meta.dir, "index.ts");
 const distDir = resolve(import.meta.dir, "../dist");
@@ -309,6 +311,89 @@ describe("plannotator inbox mcp (the stdio shim)", () => {
     const mineNow = (await client.callTool({ name: "read_thread", arguments: {} })).structuredContent as { threads: { thread_id: string }[] };
     expect(mineNow.threads.map((t) => t.thread_id)).toContain(guide.thread_id);
   }, 90_000);
+});
+
+describe("plannotator inbox mcp: large messages", () => {
+  test("a send_message past 4 MiB through the stdio shim lands whole, quickly", async () => {
+    const box = sandbox();
+    const project = gitProject(box);
+    const client = new Client({ name: "shim-large", version: "1.0.0" });
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: ["run", entry, "inbox", "mcp"],
+      cwd: project,
+      env: box.env,
+      stderr: "pipe",
+    });
+    await client.connect(transport);
+    cleanups.push(() => client.close());
+    const registry = readInboxRegistry(box.dataDir)!;
+    pids.add(registry.pid);
+
+    // Past 4 MiB (the MCP SDK's default request bound), with multi-byte text so
+    // stdin chunks split characters.
+    const line = "The worker drains the queue — résumé ✓ 测试\n";
+    const body = line.repeat(Math.ceil((4 * 1024 * 1024) / Buffer.byteLength(line)) + 1);
+    expect(Buffer.byteLength(body)).toBeGreaterThan(4 * 1024 * 1024);
+    const sent = await client.callTool({ name: "send_message", arguments: { body, idempotency_key: "large-1" } }, { timeout: 30_000 });
+    expect(sent.isError).toBeFalsy();
+    const { thread_id } = sent.structuredContent as { thread_id: string };
+    const { thread } = await (await fetch(`http://127.0.0.1:${registry.port}/api/inbox/threads/${thread_id}`)).json();
+    expect(thread.messages[0].body).toBe(body);
+  }, 90_000);
+
+  test("a message over the Inbox's request bound is refused at once, with an error naming the bound", async () => {
+    const box = sandbox();
+    const project = gitProject(box);
+    const client = new Client({ name: "shim-too-large", version: "1.0.0" });
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: ["run", entry, "inbox", "mcp"],
+      cwd: project,
+      env: box.env,
+      stderr: "pipe",
+    });
+    await client.connect(transport);
+    cleanups.push(() => client.close());
+    pids.add(readInboxRegistry(box.dataDir)!.pid);
+
+    const started = Date.now();
+    const refused = await client
+      .callTool({ name: "send_message", arguments: { body: "x".repeat(INBOX_MAX_REQUEST_BYTES), idempotency_key: "huge-1" } }, { timeout: 30_000 })
+      .then(
+        () => null,
+        (error: Error) => error,
+      );
+    expect(refused?.message).toContain(`at most ${INBOX_MAX_REQUEST_BYTES} bytes`);
+    expect(Date.now() - started).toBeLessThan(20_000);
+    // The shim is still serving.
+    expect((await client.listTools()).tools.length).toBeGreaterThan(0);
+  }, 90_000);
+
+  test("an HTTP refusal from the Inbox answers the request that caused it, never with id null", async () => {
+    // The MCP SDK's own refusals (413, 400, 406) carry `id: null`; Bun's 413 has no body at all.
+    const answers = [
+      () => Response.json({ jsonrpc: "2.0", error: { code: -32000, message: "Payload Too Large: Request body must not exceed 4194304 bytes" }, id: null }, { status: 413 }),
+      () => new Response(null, { status: 413 }),
+    ];
+    for (const answer of answers) {
+      const fake = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: answer });
+      cleanups.push(() => fake.stop(true));
+      const lines: string[] = [];
+      const request = JSON.stringify({ jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "send_message", arguments: { body: "hi" } } });
+      await runInboxMcpShim({
+        dataDir: sandbox().dataDir,
+        cwd: tmpdir(),
+        ensureRunning: async () => ({ v: 1, pid: process.pid, port: fake.port, url: "", version: "test", token: "t", serverSession: "s", startedAt: "" }) as never,
+        input: new Blob([`${request}\n`]).stream(),
+        write: (line) => lines.push(line),
+      });
+      expect(lines).toHaveLength(1);
+      const reply = JSON.parse(lines[0]!) as { id: unknown; error?: { message: string } };
+      expect(reply.id).toBe(7);
+      expect(reply.error?.message).toMatch(/Payload Too Large|at most \d+ bytes/);
+    }
+  });
 });
 
 describe("plannotator inbox (a person)", () => {

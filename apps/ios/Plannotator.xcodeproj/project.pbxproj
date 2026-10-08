@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		0A745ED7E033F3F3D754E540 /* MarkdownBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D8E1B3EBB2AB11C7E6E27B /* MarkdownBlockView.swift */; };
 		58D305472817FAC5D67A30FE /* AttachmentTiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADC9F5E0C9F44390E786FB45 /* AttachmentTiles.swift */; };
+		5944E4D916A50A99BDA389C1 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 598B6A5629A31EDD2457B936 /* PrivacyInfo.xcprivacy */; };
 		69CED55597F6832AE2A22F48 /* Support.swift in Sources */ = {isa = PBXBuildFile; fileRef = E39E0503FC6505B9D44219B1 /* Support.swift */; };
 		7EDF141F1FB9321AE7EBA951 /* ProofTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F46914B8F633116D2FBECDB4 /* ProofTests.swift */; };
 		7EEA4E2F6EBFBB80E12B02DD /* InboxList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 729DFDA227BB573B45C51ABA /* InboxList.swift */; };
@@ -51,6 +52,7 @@
 		4CB7B7015D5AEEFE5AD4D8AC /* LinkViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkViews.swift; sourceTree = "<group>"; };
 		559DB35326954FAE3EDAFAE9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		58703DC1C0F8D410DA8B2261 /* PlannotatorApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlannotatorApp.swift; sourceTree = "<group>"; };
+		598B6A5629A31EDD2457B936 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		609D222F2BF3C34763B18A1E /* NearbyScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyScreen.swift; sourceTree = "<group>"; };
 		67B6227C80FBE3869B1AD532 /* InboxTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxTab.swift; sourceTree = "<group>"; };
 		6C4839632E4D1D6B4AB57C4E /* ProofSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProofSupport.swift; sourceTree = "<group>"; };
@@ -177,6 +179,7 @@
 				559DB35326954FAE3EDAFAE9 /* Assets.xcassets */,
 				CBEA43689480D730B4AC4D7F /* Colors.xcassets */,
 				25783EB204BEC1769A9D3F31 /* Info.plist */,
+				598B6A5629A31EDD2457B936 /* PrivacyInfo.xcprivacy */,
 				FE63721F949D4E7E7EB3F4C7 /* App */,
 				7990D16261F6E0254FC28472 /* Attachments */,
 				EB54E46BBE545BBFA65B5E04 /* Inbox */,
@@ -290,6 +293,7 @@
 			files = (
 				BC97E4610AA7A0BD4ED1D8DC /* Assets.xcassets in Resources */,
 				D1271AA242EEA609CB34D513 /* Colors.xcassets in Resources */,
+				5944E4D916A50A99BDA389C1 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

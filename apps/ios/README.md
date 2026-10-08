@@ -31,6 +31,15 @@ meta repo.
   `packages/ui/themes/plannotator.css` by `bun apps/ios/scripts/gen-colors.ts`;
   `--check` fails when the theme moved and the catalog did not.
 
+## What you need to run it
+
+Xcode 26 with the iOS 26 simulator runtime (Xcode, Settings, Components), and
+`bun` for the scripts. `xcodegen` (`brew install xcodegen`) only when you change
+`project.yml` or add a file: the generated project is committed. The proof also
+needs a compiled `plannotator` binary from this checkout (below), never the one
+on your PATH. A simulator build needs no Apple account and no signing; a device
+build needs your own team in Xcode.
+
 ## Build and run
 
 ```bash
@@ -64,6 +73,16 @@ Send, with the agent's feedback naming all three). `--only
 PlannotatorUITests/AttachmentProofTests` runs one. Light and dark screenshots of each screen and a
 recording of the pair-pick-send flow land in `.local/proof/ios/`. CI runs the
 same command (`.github/workflows/ios.yml`).
+
+## Release and App Review
+
+- `Plannotator/PrivacyInfo.xcprivacy`: the privacy manifest (no tracking, no
+  collected data, `UserDefaults` for the app's own settings only). Each
+  bundle whose code uses a required-reason API needs its own.
+- `APP-REVIEW.md`: what App Review is told, and the privacy and export
+  compliance answers.
+- `RELEASE.md`: the release runbook the owner runs himself (the Apple account,
+  the keys, the archive, the upload, TestFlight, the submission).
 
 ## Version
 
