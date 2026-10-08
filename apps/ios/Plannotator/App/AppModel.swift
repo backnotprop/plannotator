@@ -35,8 +35,8 @@ final class AppModel {
     private let defaults = UserDefaults.standard
 
     init() {
-        sources = load([Source].self, "sources") ?? []
-        known = load([KnownComputer].self, "known") ?? []
+        sources = loadEach(Source.self, "sources")
+        known = loadEach(KnownComputer.self, "known")
         // iOS keeps Keychain items when an app is deleted; a fresh install starts clean.
         if sources.isEmpty { Keychain.deleteAll() }
         let active = defaults.string(forKey: "activeSource")
@@ -121,7 +121,18 @@ final class AppModel {
         defaults.set(try? JSONEncoder().encode(known), forKey: "known")
     }
 
-    private func load<T: Decodable>(_ type: T.Type, _ key: String) -> T? {
-        defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(T.self, from: $0) }
+    /// A stored list, read entry by entry: one entry that no longer reads (an
+    /// address this build refuses) is dropped, and the rest stay.
+    private func loadEach<T: Decodable>(_ type: T.Type, _ key: String) -> [T] {
+        guard let data = defaults.data(forKey: key),
+              let entries = try? JSONDecoder().decode([Entry<T>].self, from: data) else { return [] }
+        return entries.compactMap(\.value)
+    }
+
+    private struct Entry<T: Decodable>: Decodable {
+        let value: T?
+        init(from decoder: Decoder) throws {
+            value = try? T(from: decoder)
+        }
     }
 }
