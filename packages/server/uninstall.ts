@@ -30,6 +30,7 @@ import {
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { inboxStatus, readInboxRegistry, stopInbox } from "@plannotator/shared/inbox/registry";
 import { INBOX_TAILNET_HTTPS_PORT, takeDownInboxTailnet } from "./inbox-devices";
+import { runningSnapshotsHub } from "@plannotator/shared/snapshots/registry";
 import {
   applyEdits,
   createScanner,
@@ -54,6 +55,15 @@ const KNOWLEDGE_SKILLS = [
   "plannotator",
 ] as const;
 
+// Core skills that arrived after the legacy slash commands and the Codex-home
+// era (apps/skills/core/plannotator-snapshot, Plannotator Snapshots). Installed
+// to the same scopes as CORE_SKILLS, but kept out of LEGACY_COMMAND_NAMES and
+// STALE_CODEX_SKILLS for the knowledge skill's reason: a user's own
+// ~/.claude/commands/<name>.md must never be collateral.
+const LATER_CORE_SKILLS = [
+  "plannotator-snapshot",
+] as const;
+
 const EXTRA_SKILLS = [
   "plannotator-compound",
   "plannotator-setup-goal",
@@ -68,6 +78,7 @@ const LEGACY_COMMAND_NAMES = [
 const KIRO_SKILLS = [
   "plannotator-review",
   "plannotator-annotate",
+  "plannotator-snapshot",
   // The knowledge skill installs into ~/.kiro/skills like the action skills.
   // Safe to name here: this list only ever removes ~/.kiro/skills/<name>
   // directories, never a command file a user may own.
@@ -84,6 +95,7 @@ const VIBE_SKILLS = [
   "plannotator-review",
   "plannotator-annotate",
   "plannotator-last",
+  "plannotator-snapshot",
   "plannotator",
 ] as const;
 
@@ -112,6 +124,8 @@ const PURGE_OWNED_TOP_LEVEL = [
   "guides",
   "failed-comments",
   "semantic-diff",
+  // Plannotator Snapshots: the hub's registry, sent and open collections, settings, logs.
+  "snapshots",
   "migrations",
   "config.json",
   "install-prefs",
@@ -411,6 +425,15 @@ export async function runPlannotatorUninstall(
         if (tailnet === "removed") state.removed.push(`Took down the Plannotator Inbox's tailnet address (tailscale serve --https=${INBOX_TAILNET_HTTPS_PORT})`);
         if (tailnet === "failed") state.warnings.push(`Could not check or remove the Inbox's tailnet address; run: tailscale serve --https=${INBOX_TAILNET_HTTPS_PORT} off`);
       }
+    }
+  }
+
+  // Plannotator Snapshots: a running hub writes into snapshots/ until it exits.
+  if (request.purge && !dataDirSafetyIssue && !request.dryRun) {
+    const hub = await runningSnapshotsHub(state.dataDir).catch(() => null);
+    if (hub) {
+      await fetch(`${hub.url}/api/snapshots/stop`, { method: "POST", headers: { authorization: `Bearer ${hub.token}` }, signal: AbortSignal.timeout(2000) }).catch(() => undefined);
+      state.removed.push(`Stopped the Plannotator Snapshots hub (pid ${hub.pid})`);
     }
   }
 
@@ -732,7 +755,12 @@ function removeInstalledFiles(
   paths: ReturnType<typeof resolveOwnedPaths>,
   state: MutableUninstallResult,
 ): void {
-  for (const skill of [...CORE_SKILLS, ...KNOWLEDGE_SKILLS]) {
+  // Plannotator Snapshots.app, which `plannotator snapshot` installs from the darwin binary.
+  if (environment.platform === "darwin") {
+    removePath(join(environment.homeDir, "Applications", "Plannotator Snapshots.app"), request, state);
+  }
+
+  for (const skill of [...CORE_SKILLS, ...LATER_CORE_SKILLS, ...KNOWLEDGE_SKILLS]) {
     removePath(
       join(paths.claudeDir, "skills", skill),
       request,
@@ -756,7 +784,7 @@ function removeInstalledFiles(
 
   cleanupStaleSkillLayout(
     join(paths.claudeDir, "skills", "core"),
-    [...CORE_SKILLS, ...KNOWLEDGE_SKILLS],
+    [...CORE_SKILLS, ...LATER_CORE_SKILLS, ...KNOWLEDGE_SKILLS],
     request,
     state,
   );
@@ -801,6 +829,16 @@ function removeInstalledFiles(
       );
     }
   }
+  // The OpenCode command stubs of the later core skills (never Claude commands).
+  for (const command of LATER_CORE_SKILLS) {
+    for (const configDir of paths.configDirs) {
+      removePath(
+        join(configDir, "opencode", "commands", `${command}.md`),
+        request,
+        state,
+      );
+    }
+  }
 
   // @plannotator/opencode's postinstall writes the knowledge skill here so
   // OpenCode's `{skill,skills}/**/SKILL.md` scan under its config dir finds it.
@@ -821,6 +859,7 @@ function removeInstalledFiles(
     "plannotator-review",
     "plannotator-annotate",
     "plannotator-last",
+    "plannotator-snapshot",
   ]) {
     removePath(
       join(environment.homeDir, ".gemini", "commands", `${command}.toml`),

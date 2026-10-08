@@ -132,7 +132,8 @@ describe('register', () => {
     })
     await $.session.start(SESSION)
 
-    expect(w.registered.sort()).toEqual(['plannotator-annotate', 'plannotator-last'])
+    // Plannotator Snapshots is on by default, so its command is registered too.
+    expect(w.registered.sort()).toEqual(['plannotator-annotate', 'plannotator-last', 'plannotator-snapshot'])
     for (const [command, args, subcommand] of [
       ['plannotator-review', '', 'review'],
       ['plannotator-annotate', 'notes.md', 'annotate'],

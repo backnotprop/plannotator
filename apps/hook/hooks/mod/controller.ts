@@ -79,6 +79,7 @@ import {
   type PlannotatorTarget,
 } from './tool'
 import { TurnTracker, type EnteredPrompt } from './turns'
+import { SnapshotsLink } from './snapshots'
 
 /** Persisted in `$.store` so open reviews reattach after a restart or `--resume`. */
 export interface LaunchRecord {
@@ -291,6 +292,8 @@ export interface SessionInfo {
   sessionId: string
   dataDir: string
   interactive: boolean
+  /** Plannotator Snapshots is switched on (enabled.ts): this session links to the Snapshots hub. */
+  snapshots?: { processId: string; replaces?: string }
   /**
    * The Plannotator Inbox tools this process registered as `plannotator_inbox`
    * at its first session start (inbox.ts); absent: no Inbox connection.
@@ -336,11 +339,17 @@ export class PlannotatorMod {
   /** This session's connection to the Plannotator Inbox (the tool and the reply wake); null without one. */
   readonly inbox: InboxLink | null
 
+  /** The session's link to the Plannotator Snapshots hub, when Snapshots is on. */
+  readonly snapshots: SnapshotsLink | null
+
   constructor(
     private readonly host: Host,
     readonly session: SessionInfo,
   ) {
     this.instanceId = host.randomHex(8)
+    this.snapshots = session.snapshots
+      ? new SnapshotsLink({ host, dataDir: session.dataDir, sessionId: session.sessionId, processId: session.snapshots.processId, instanceId: this.instanceId, turns: this.turns, ...(session.snapshots.replaces ? { replaces: session.snapshots.replaces } : {}) })
+      : null
     this.inbox = session.inboxTools
       ? new InboxLink({
           host,
@@ -506,6 +515,7 @@ export class PlannotatorMod {
    */
   dispose(): void {
     this.disposed = true
+    this.snapshots?.dispose()
     this.timer?.cancel()
     this.timer = null
     this.inbox?.dispose()
@@ -1542,6 +1552,8 @@ export class PlannotatorMod {
     if (wasOurs && turnId && this.turns.isTakenOver(turnId)) this.host.debug(`ask turn ${turnId} taken over`)
     // The person typed here: decisions should arrive in this conversation.
     if (originKind === 'composer') void this.touchLaunches()
+    // ...and a hotkey-started Snapshots collection picks the session typed into last.
+    if (originKind === 'composer') this.snapshots?.noteHumanInput(text)
   }
 
   /** A prompt reached prompt.submit, before the hooks beneath it ran, from register.ts. */
@@ -1580,6 +1592,7 @@ export class PlannotatorMod {
 
   private pushBridgeStatus(): void {
     for (const launch of this.launches.values()) launch.bridge?.pushStatus()
+    this.snapshots?.pushStatus()
   }
 
   // --- Names ----------------------------------------------------------------------

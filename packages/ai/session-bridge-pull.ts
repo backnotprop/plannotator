@@ -114,12 +114,24 @@ export interface PullSessionBridgeOptions extends PullSessionBridgeConfig {
 	/** Default 15s: after a cancel, how long to wait for the host to confirm before freeing the slot. */
 	cancelGraceMs?: number;
 	now?: () => number;
+	/**
+	 * Commands beyond ask/cancel/interrupt that a server hosting several
+	 * sessions sends to one of them (the Plannotator Snapshots hub's `deliver`).
+	 * Called whenever commands are collected for a poll; it returns the ones
+	 * due now and owns their re-sending. A host that does not know a command
+	 * ignores it.
+	 */
+	extraCommands?: (now: number) => Array<{ type: string } & Record<string, unknown>>;
+	/** An event of a type this bridge does not know (e.g. `delivered`), handed over as is. */
+	onExtraEvent?: (event: Record<string, unknown>) => void;
 }
 
 export interface PullSessionBridge {
 	readonly bridge: SessionBridge;
 	/** Handle a request to one of the two bridge paths. `null` for any other path. */
 	handle(req: Request): Promise<Response> | null;
+	/** Hand newly due `extraCommands` to an open poll now instead of at its next round. */
+	notify(): void;
 	/** Server shutdown: answer open polls with `closing`, fail anything still waiting. */
 	dispose(): void;
 }
@@ -127,6 +139,7 @@ export interface PullSessionBridge {
 const STATUSES: ReadonlySet<string> = new Set(["ready", "busy", "blocked", "gone"]);
 const ERROR_CODES: ReadonlySet<string> = new Set(["busy", "blocked", "gone", "aborted", "failed", "taken_over"]);
 const BRIDGE_HOSTS: ReadonlySet<string> = new Set(["pi", "opencode", "claude-code"]);
+const KNOWN_EVENTS: ReadonlySet<string> = new Set(["status", "interrupted", "started", "delta", "tool", "done", "error"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return !!value && typeof value === "object" && !Array.isArray(value);
@@ -289,6 +302,7 @@ export function createPullSessionBridge(options: PullSessionBridgeOptions): Pull
 			interrupt.sentAt = t;
 			commands.push({ type: "interrupt", interruptId: interrupt.interruptId });
 		}
+		if (options.extraCommands) commands.push(...(options.extraCommands(t) as unknown as BridgeCommand[]));
 		return commands;
 	};
 
@@ -471,6 +485,10 @@ export function createPullSessionBridge(options: PullSessionBridgeOptions): Pull
 	/** Apply one host event. Returns false when it names a question that is not running. */
 	const applyEvent = (event: unknown): boolean => {
 		if (!isRecord(event) || typeof event.type !== "string") return true;
+		if (!KNOWN_EVENTS.has(event.type)) {
+			options.onExtraEvent?.(event);
+			return true;
+		}
 		if (event.type === "status") {
 			applyStatus(event.status);
 			if (hostStatus === "gone") failForGone();
@@ -542,6 +560,9 @@ export function createPullSessionBridge(options: PullSessionBridgeOptions): Pull
 			const refused = authorize(req);
 			if (refused) return Promise.resolve(refused);
 			return path === SESSION_BRIDGE_POLL_PATH ? handlePoll(req) : handleEvent(req);
+		},
+		notify() {
+			flush();
 		},
 		dispose() {
 			if (disposed) return;

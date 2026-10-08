@@ -7,8 +7,10 @@ name: Inbox Claude Code connection
 # `plannotator inbox --background`, and packages/server/inbox-bridge.test.ts
 # drives the bridge routes. The plain `bun test` job runs the same proofs
 # against the CLI from source; this job runs them against the binary built
-# with the flags release.yml compiles with. Runs only when the mod, the Inbox
-# server, its store or the connection contract could have changed.
+# with the flags release.yml compiles with. apps/hook/hooks/mod/snapshots-live.test.ts
+# proves the mod's Snapshots link against `plannotator snapshot hub` the same
+# way. Runs only when the mod, the Inbox or Snapshots server, their stores or
+# the connection contract could have changed.
 
 on:
   pull_request:
@@ -22,6 +24,11 @@ on:
       - 'packages/shared/config.ts'
       - 'apps/hook/server/index.ts'
       - 'apps/hook/server/inbox*'
+      - 'packages/server/snapshots/**'
+      - 'packages/shared/snapshots/**'
+      - 'apps/hook/server/snapshot*'
+      - 'tests/helpers/snapshots-*.ts'
+      - 'packages/ai/session-bridge-pull*'
       - 'package.json'
       - 'bun.lock'
       - '.github/workflows/inbox-claude-code.yml'
@@ -36,6 +43,11 @@ on:
       - 'packages/shared/config.ts'
       - 'apps/hook/server/index.ts'
       - 'apps/hook/server/inbox*'
+      - 'packages/server/snapshots/**'
+      - 'packages/shared/snapshots/**'
+      - 'apps/hook/server/snapshot*'
+      - 'tests/helpers/snapshots-*.ts'
+      - 'packages/ai/session-bridge-pull*'
       - 'package.json'
       - 'bun.lock'
       - '.github/workflows/inbox-claude-code.yml'
@@ -72,7 +84,7 @@ jobs:
           INBOX_PROOF_DIR: ${{ github.workspace }}/.local/proof/inbox-claude-code
         run: |
           export PLANNOTATOR_DATA_DIR="$(mktemp -d)"
-          bun test apps/hook/hooks/mod/inbox.test.ts packages/server/inbox-bridge.test.ts
+          bun test apps/hook/hooks/mod/inbox.test.ts apps/hook/hooks/mod/snapshots-live.test.ts packages/server/inbox-bridge.test.ts
 
       - name: Keep the transcripts
         if: always()

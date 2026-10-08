@@ -93,6 +93,13 @@ export function isPlanReviewPending(sessionID: string): boolean {
 	return planReviewPending.has(sessionID);
 }
 
+/**
+ * One Plannotator question at a time per OpenCode session, across every
+ * bridge on it (a review's and Plannotator Snapshots' can be open at once),
+ * as Pi's bridge hub does: the turn that holds the session's slot, by session id.
+ */
+const sessionTurnSlots = new Map<string, object>();
+
 const ID_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 let lastIdTimestamp = 0;
 let idCounter = 0;
@@ -281,6 +288,7 @@ export function createOpenCodeSessionBridge(options: OpenCodeSessionBridgeOption
 		turn.finished = true;
 		clearWatchdog(turn);
 		if (active === turn) active = null;
+		if (sessionTurnSlots.get(sessionID) === turn) sessionTurnSlots.delete(sessionID);
 		report();
 	};
 
@@ -487,6 +495,7 @@ export function createOpenCodeSessionBridge(options: OpenCodeSessionBridgeOption
 			stepCalledTools: false,
 		};
 		active = turn;
+		sessionTurnSlots.set(sessionID, turn);
 
 		signal.addEventListener(
 			"abort",
@@ -591,7 +600,7 @@ export function createOpenCodeSessionBridge(options: OpenCodeSessionBridgeOption
 				askTransient(req.text, sink, signal);
 				return;
 			}
-			if (active) {
+			if (active || sessionTurnSlots.has(sessionID)) {
 				sink.error("busy", "Another Plannotator question is still running in this session.");
 				return;
 			}
@@ -633,6 +642,8 @@ export function createOpenCodeSessionBridge(options: OpenCodeSessionBridgeOption
 			probeTimer = null;
 			const turn = active;
 			if (turn && !turn.delivered) finishTurn(turn, () => turn.sink.error("gone"));
+			// A delivered turn is left running, but this bridge no longer watches it: free the slot.
+			if (turn && sessionTurnSlots.get(sessionID) === turn) sessionTurnSlots.delete(sessionID);
 		},
 	};
 }

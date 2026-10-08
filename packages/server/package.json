@@ -8,6 +8,8 @@
   "exports": {
     ".": "./index.ts",
     "./review": "./review.ts",
+    "./snapshots/hub": "./snapshots/hub.ts",
+    "./snapshots/server": "./snapshots/server.ts",
     "./annotate": "./annotate.ts",
     "./remote": "./remote.ts",
     "./browser": "./browser.ts",

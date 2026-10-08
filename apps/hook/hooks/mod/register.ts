@@ -55,12 +55,13 @@
  */
 
 import { PlannotatorMod } from './controller'
-import { resolveAgentToolEnabled, resolveClaudeModEnabled, resolveInboxToolEnabled } from './enabled'
+import { resolveAgentToolEnabled, resolveClaudeModEnabled, resolveInboxToolEnabled, resolveSnapshotsEnabled } from './enabled'
 import type { Host } from './host'
 import { discoverInboxTools } from './inbox'
 import { inboxAgentTool, type InboxToolInfo } from './inbox-contract'
 import { COMMANDS, dataDirOf, debugAppendArgv, isModCommand, waitArgv } from './launch'
 import { PLAN_TOOL } from './plan'
+import { MACOS_MARKER } from './snapshots'
 import { answerShellCall, SHELL_TOOL, shellTakeOver } from './take-over'
 import { PLANNOTATOR_TOOL_DESCRIPTION, PLANNOTATOR_TOOL_INPUT_SCHEMA, PLANNOTATOR_TOOL_NAME } from './tool'
 
@@ -156,9 +157,24 @@ interface Allowed {
   debugPath: string | null
   /** Register Claude's `plannotator` tool (the agent tool switch, on by default). */
   agentTool: boolean
+  /** Plannotator Snapshots: `/plannotator-snapshot` and the link to the Snapshots hub (on by default; PLANNOTATOR_SNAPSHOTS=0 turns it off). */
+  snapshots: boolean
+  /** Snapshots is on and this is macOS: every session links to the hub at start (elsewhere only on /plannotator-snapshot). */
+  snapshotsAutoLink: boolean
   /** Connect to the Plannotator Inbox when one is found (the inbox tool switch, on by default). */
   inboxTool: boolean
 }
+
+// --- Plannotator Snapshots ----------------------------------------------------------
+/** The capture HUD's command; registered only when Snapshots is on. */
+const SNAPSHOTS_COMMAND = 'plannotator-snapshot'
+const SNAPSHOTS_COMMAND_SPEC = {
+  description: 'Capture your screen with Plannotator Snapshots, mark it up, and send it here as one message.',
+  argumentHint: '[--app]',
+}
+/** Names this Claude Code process to the Snapshots hub (two processes can share one session). */
+let snapshotsProcessTag: string | null = null
+// --------------------------------------------------------------------------------
 
 // One plugin instance per Claude Code process.
 let allowed: Allowed | null = null
@@ -187,16 +203,23 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
   if (mod && !mod.isDisposed && mod.session.sessionId === sessionId) return mod
   if (switching) return switching
   switching = (async () => {
+    const previousSessionId = mod?.session.sessionId
     mod?.dispose()
     await $.env.set('PLANNOTATOR_SESSION_TAG', `claude-code:${sessionId}`)
+    if (settings.snapshots) snapshotsProcessTag ??= hexOf(crypto.getRandomValues(new Uint8Array(6)))
     const instance = new PlannotatorMod(hostOf($, settings.debugPath), {
       sessionId,
       dataDir: settings.dataDir,
       interactive: true,
+      ...(settings.snapshots && snapshotsProcessTag
+        ? { snapshots: { processId: snapshotsProcessTag, ...(previousSessionId && previousSessionId !== sessionId ? { replaces: previousSessionId } : {}) } }
+        : {}),
       ...(inboxTools ? { inboxTools, cwd: async () => String(await $.session.cwd()) } : {}),
     })
     mod = instance
     await instance.restore().catch(() => undefined)
+    // Capture is macOS only: elsewhere a session links only when /plannotator-snapshot runs there.
+    if (settings.snapshotsAutoLink) instance.snapshots?.start()
     return instance
   })()
   try {
@@ -227,10 +250,14 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
     return null
   }
   const debug = await $.env.get('PLANNOTATOR_MOD_DEBUG')
+  const snapshots = resolveSnapshotsEnabled(await $.env.get('PLANNOTATOR_SNAPSHOTS'), configText)
   return {
     dataDir,
     debugPath: debug && debug !== '0' ? `${dataDir}/claude-code-mod/debug.log` : null,
     agentTool: resolveAgentToolEnabled(await $.env.get('PLANNOTATOR_AGENT_TOOL'), configText),
+    snapshots,
+    // macOS, told by a file only macOS has (no process spawned).
+    snapshotsAutoLink: snapshots && (await $.fs.exists(MACOS_MARKER).catch(() => false)) === true,
     inboxTool: resolveInboxToolEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
   }
 }
@@ -245,6 +272,13 @@ async function registerCommands($: Engine): Promise<void> {
       .register({ name, description: spec.description, ...(spec.argumentHint ? { argumentHint: spec.argumentHint } : {}), immediate: true })
       .catch(() => undefined)
   }
+}
+
+/** Plannotator Snapshots: register `/plannotator-snapshot` unless a skill holds the name (command.run answers it then). */
+async function registerSnapshotsCommand($: Engine): Promise<void> {
+  const listed = await $.command.list().catch(() => [])
+  if ((Array.isArray(listed) ? listed : []).some((command: { name: string }) => command.name === SNAPSHOTS_COMMAND)) return
+  await $.command.register({ name: SNAPSHOTS_COMMAND, ...SNAPSHOTS_COMMAND_SPEC, immediate: true }).catch(() => undefined)
 }
 
 /**
@@ -307,6 +341,7 @@ export function register(on: On) {
     const instance = await currentMod($)
     if (!instance) return result
     await registerCommands($)
+    if (allowed.snapshots) await registerSnapshotsCommand($)
     // Decided once per process, here: the tool list is part of Claude's
     // prompt, so it never changes under a running session.
     if (allowed.agentTool) await registerTool($)
@@ -321,8 +356,15 @@ export function register(on: On) {
   })
 
   // Matched by name: an unmatched hook makes the engine credit Plannotator on every plugin's command answer.
-  on('command.run', { command: Object.keys(COMMANDS) }, async ($: Engine, e: any, next: Next) => {
+  on('command.run', { command: [...Object.keys(COMMANDS), SNAPSHOTS_COMMAND] }, async ($: Engine, e: any, next: Next) => {
     const name: string = typeof e.command === 'string' ? e.command : ''
+    // Plannotator Snapshots: `/plannotator-snapshot` opens the capture overlay and latches this session.
+    if (name === SNAPSHOTS_COMMAND) {
+      if (!allowed?.snapshots) return next(e)
+      const instance = await currentMod($)
+      if (!instance?.snapshots) return next(e)
+      return { text: await instance.snapshots.summon(typeof e.args === 'string' ? e.args : '') }
+    }
     if (!allowed || !isModCommand(name)) return next(e)
     const instance = await currentMod($)
     if (!instance) return next(e)

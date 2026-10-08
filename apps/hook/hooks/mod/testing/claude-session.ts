@@ -148,7 +148,7 @@ export class ClaudeSession {
   }
 
   /** `session.start`: decide the Inbox connection once (inbox.ts), then make the session's mod. */
-  static async start(options: RealHostOptions & { sessionId: string; dataDir: string }): Promise<ClaudeSession> {
+  static async start(options: RealHostOptions & { sessionId: string; dataDir: string; snapshots?: { processId: string } }): Promise<ClaudeSession> {
     const host = realHost(options)
     const inboxTools = await discoverInboxTools(host, options.dataDir)
     const mod = new PlannotatorMod(host, {
@@ -156,6 +156,8 @@ export class ClaudeSession {
       dataDir: options.dataDir,
       interactive: true,
       ...(inboxTools ? { inboxTools, cwd: async () => options.cwd } : {}),
+      // Snapshots switched on (register.ts passes it when PLANNOTATOR_SNAPSHOTS resolves on).
+      ...(options.snapshots ? { snapshots: options.snapshots } : {}),
     })
     return new ClaudeSession(host, mod, inboxTools, options.dataDir, options.cwd)
   }

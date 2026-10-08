@@ -160,6 +160,9 @@ export function formatTopLevelHelp(): string {
     "  plannotator sessions",
     "  plannotator inbox [--background | --no-open]",
     "  plannotator inbox mcp",
+    "  plannotator snapshot [--app] [--wait] [--session <host>:<id>] [--no-capture]",
+    "  plannotator snapshot add <image | - | --screen>",
+    "  plannotator snapshot open | status | stop | install-app [--force] | hub [--background]",
     "  plannotator uninstall [--purge] [--yes] [--dry-run]",
     "  plannotator improve-context",
     "",
@@ -180,7 +183,7 @@ export function formatTopLevelHelp(): string {
  * To launch one, delete it from this set, add its usage lines to
  * formatTopLevelHelp() and document it in apps/skills/core/plannotator/SKILL.md.
  *
- * Empty: `inbox` (the Plannotator Inbox) was the last one, and launched.
+ * Empty: `snapshot` (Plannotator Snapshots) was the last one, and launched.
  */
 export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>();
 
@@ -353,6 +356,39 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Register the MCP entry with an agent, e.g.:",
     "  claude mcp add plannotator-inbox -- plannotator inbox mcp",
   ].join("\n"),
+  snapshot: [
+    "Usage:",
+    "  plannotator snapshot [--app] [--wait] [--session <host>:<id>] [--no-capture]",
+    "  plannotator snapshot add <image | - | --screen>",
+    "  plannotator snapshot open | status | stop | install-app [--force]",
+    "  plannotator snapshot hub [--background]",
+    "",
+    "Plannotator Snapshots (macOS): freeze the screen, drag a box around what you",
+    "mean, mark it with numbered boxes and comments, and send it to an agent",
+    "session as one message. Collect several snapshots across apps and Spaces",
+    "first if you like. Hotkeys: ⌥⇧⌘4 Screen Capture (a box, picture only),",
+    "⌥⇧⌘5 App Capture (a whole window plus its text), ⌥⇧⌘P show or hide the HUD.",
+    "",
+    "  plannotator snapshot            Open the capture overlay for a Screen Capture",
+    "                                  (starts the app and the local hub when needed)",
+    "                                  and return",
+    "  plannotator snapshot --app      Take an App Capture of the frontmost window",
+    "  plannotator snapshot --wait     Then wait and print the message when you",
+    "                                  press Send (agents without async delivery)",
+    "  plannotator snapshot add FILE   Add an image file (or - for stdin, or",
+    "                                  --screen for the whole display) as a snapshot",
+    "  plannotator snapshot open       Open the HUD in the browser",
+    "  plannotator snapshot status     The hub, the app and connected sessions",
+    "  plannotator snapshot stop       Stop the local hub",
+    "  plannotator snapshot install-app  Install the app into ~/Applications (never",
+    "                                  over a newer build unless --force)",
+    "  plannotator snapshot hub        Run the local hub here (--background: detached)",
+    "  --session <host>:<id>           Send to that agent session (hosts pass their own)",
+    "  --no-capture                    Show the HUD without opening the capture overlay",
+    "",
+    "Capture is macOS only (macOS 14+). Turn the agent integrations off with",
+    "PLANNOTATOR_SNAPSHOTS=0 or { \"snapshots\": false } in ~/.plannotator/config.json.",
+  ].join("\n"),
   uninstall: [
     "Usage:",
     "  plannotator uninstall [--purge] [--yes | -y] [--dry-run]",
@@ -407,6 +443,7 @@ export function formatInteractiveNoArgClarification(): string {
     "  plannotator archive",
     "  plannotator sessions",
     "  plannotator inbox",
+    "  plannotator snapshot",
     "  plannotator uninstall",
     "",
     "Run 'plannotator --help' for top-level usage.",

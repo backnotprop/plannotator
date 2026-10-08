@@ -65,6 +65,7 @@ const ANNOTATE_SKILL_MD_PATH = join(
 const PARSER_SOURCES = [
   join(import.meta.dir, "index.ts"),
   join(import.meta.dir, "cli.ts"),
+  join(import.meta.dir, "live-flags.ts"),
   join(import.meta.dir, "..", "..", "..", "packages", "shared", "review-args.ts"),
   join(import.meta.dir, "..", "..", "..", "packages", "server", "guide", "guide-cli.ts"),
 ];
@@ -273,6 +274,13 @@ describe("plannotator knowledge skill freshness", () => {
     expect(HIDDEN_SUBCOMMANDS.has("inbox")).toBe(false);
     expect(formatTopLevelHelp()).toContain("plannotator inbox mcp");
     expect(documentedSubcommands.has("inbox")).toBe(true);
+  });
+
+  test("Snapshots is released: in the top-level help and the skill", () => {
+    // It was the hidden subcommand until launch; nothing hides it now.
+    expect(HIDDEN_SUBCOMMANDS.has("snapshot")).toBe(false);
+    expect(formatTopLevelHelp()).toContain("plannotator snapshot add");
+    expect(documentedSubcommands.has("snapshot")).toBe(true);
   });
 });
 

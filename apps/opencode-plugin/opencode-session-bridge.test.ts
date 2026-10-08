@@ -443,6 +443,32 @@ describe("OpenCode session bridge", () => {
     await waitFor(() => sink.done !== undefined);
     expect(sink.done).toBe("The answer.");
   });
+
+  // A review's bridge and Plannotator Snapshots' bridge can be open on one
+  // session at once. The failure: two questions run in one session together.
+  test("one question at a time per session, across bridges", async () => {
+    const host = fakeHost();
+    const review = bridgeFor(host);
+    const snapshots = bridgeFor(host);
+    const first = recordingSink();
+    review.ask({ askId: "a1", text: "[Plannotator Ask AI] first?", mode: "turn" }, first.sink, new AbortController().signal);
+    await waitFor(() => host.prompts.length === 1);
+    const second = recordingSink();
+    snapshots.ask({ askId: "a2", text: "[Plannotator Ask AI] second?", mode: "turn" }, second.sink, new AbortController().signal);
+    expect(second.error?.code).toBe("busy");
+    expect(host.prompts).toHaveLength(1);
+
+    // The first answers; the session's slot is free again.
+    host.emit("session.execution.started");
+    host.emit("session.inbox.delivered", { inboxID: host.prompts[0].id });
+    host.emit("session.text.delta", { assistantMessageID: "m1", ordinal: 0, delta: "One." });
+    host.emit("session.execution.succeeded");
+    await waitFor(() => first.done !== undefined);
+    const third = recordingSink();
+    snapshots.ask({ askId: "a3", text: "[Plannotator Ask AI] third?", mode: "turn" }, third.sink, new AbortController().signal);
+    await waitFor(() => host.prompts.length === 2);
+    expect(third.error).toBeUndefined();
+  });
 });
 
 describe("OpenCode message ids", () => {

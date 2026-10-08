@@ -370,7 +370,10 @@ jobs:
       # The Plannotator Inbox connection on the same installed package: the
       # plannotator_inbox tool and the reply wake, on the real OpenCode 2 with
       # a scripted model endpoint, against the binary compiled with the
-      # release flags (apps/opencode-plugin/inbox-v2.test.ts).
+      # release flags (apps/opencode-plugin/inbox-v2.test.ts), and the
+      # Snapshots link the same way against `plannotator snapshot hub`
+      # (apps/opencode-plugin/snapshots-v2.test.ts: one queued delivery of a
+      # Send, Ask as a turn; the binary embeds no app, so nothing native runs).
       - name: Compile the binary for the Inbox proofs
         run: >-
           bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig
@@ -384,7 +387,7 @@ jobs:
           export OPENCODE2_BIN="$(command -v opencode2)"
           export OPENCODE_PLUGIN_TARBALL="$(ls "$RUNNER_TEMP"/plannotator-opencode-*.tgz)"
           export PLANNOTATOR_DATA_DIR="$(mktemp -d)"
-          bun test apps/opencode-plugin/inbox-v2.test.ts apps/opencode-plugin/inbox.test.ts
+          bun test apps/opencode-plugin/inbox-v2.test.ts apps/opencode-plugin/inbox.test.ts apps/opencode-plugin/snapshots-v2.test.ts
 
       - name: Keep the Inbox transcripts
         if: always()

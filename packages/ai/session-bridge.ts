@@ -227,8 +227,9 @@ export function formatSessionAskText(
 	prompt: string,
 	mode: SessionBridgeAskMode = "turn",
 	draftAnnotations?: string,
+	surfaceOverride?: string,
 ): string {
-	const surface = describeSurface(context);
+	const surface = surfaceOverride ?? describeSurface(context);
 	const note = mode === "transient" ? SESSION_ASK_TRANSIENT_NOTE : null;
 	const drafts = formatDraftBlock(draftAnnotations);
 	return [SESSION_ASK_HEADER, note, surface, "", drafts, drafts === null ? null : "", prompt.trim()]
@@ -243,6 +244,11 @@ export function formatSessionAskText(
 export interface SessionBridgeProviderOptions {
 	/** How often to re-check `status()` while a question waits. Default 250ms. */
 	pollIntervalMs?: number;
+	/**
+	 * The "Surface: …" line for a surface the context modes do not describe
+	 * (Plannotator Snapshots asks from its HUD, outside any review).
+	 */
+	surface?: string;
 }
 
 export interface SessionBridgeInfo {
@@ -257,6 +263,7 @@ export class SessionBridgeProvider implements AIProvider {
 	readonly capabilities: AIProviderCapabilities;
 	readonly label: string;
 	readonly pollIntervalMs: number;
+	readonly surface: string | undefined;
 
 	private inFlight: SessionBridgeSession | null = null;
 	private closing = false;
@@ -271,6 +278,7 @@ export class SessionBridgeProvider implements AIProvider {
 		this.capabilities = { fork: false, resume: false, streaming: true, tools: bridge.modes.turn };
 		this.label = sessionBridgeLabel(bridge.host, bridge.modes);
 		this.pollIntervalMs = options.pollIntervalMs ?? 250;
+		this.surface = options.surface;
 	}
 
 	/** Live status for `/api/ai/capabilities`. */
@@ -553,7 +561,7 @@ export class SessionBridgeSession extends BaseSession {
 			);
 
 			try {
-				bridge.ask({ askId: `${this.id}:${gen}`, text: formatSessionAskText(this.context, prompt, mode, options?.draftAnnotations), mode }, sink, hostAbort.signal);
+				bridge.ask({ askId: `${this.id}:${gen}`, text: formatSessionAskText(this.context, prompt, mode, options?.draftAnnotations, provider.surface), mode }, sink, hostAbort.signal);
 			} catch (err) {
 				sink.error("failed", err instanceof Error ? err.message : String(err));
 			}

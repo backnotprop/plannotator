@@ -87,6 +87,43 @@ export function resolveAgentToolEnabled(envValue: string | undefined, configText
 }
 
 /**
+ * Whether Plannotator Snapshots is on when nothing is set. Mirrors
+ * `SNAPSHOTS_DEFAULT` in packages/shared/config.ts (enabled.test.ts keeps them
+ * equal): on, for every agent.
+ */
+export const SNAPSHOTS_DEFAULT = true
+
+/**
+ * Plannotator Snapshots (the capture HUD) in the mod: the `/plannotator-snapshot`
+ * command and the session's link to the Snapshots hub. ON by default; off with:
+ *
+ *   PLANNOTATOR_SNAPSHOTS=0                 (env; also false/off/disabled; 1/true/on forces it on; wins over the file)
+ *   { "snapshots": false }                  (config.json in the data dir)
+ *
+ * Mirrors `resolveSnapshotsEnabled(config, env)` in packages/shared/config.ts,
+ * the one switch Pi and OpenCode read too. Read once, at the first
+ * session.start of the Claude Code process.
+ */
+export function resolveSnapshotsEnabled(envValue: string | undefined, configText: string | null | undefined): boolean {
+  const fromEnv = parseClaudeModEnv(envValue)
+  if (fromEnv !== undefined) return fromEnv
+  if (!configText) return SNAPSHOTS_DEFAULT
+  let value: unknown
+  try {
+    value = (JSON.parse(configText) as Record<string, unknown> | null)?.snapshots
+  } catch {
+    return SNAPSHOTS_DEFAULT
+  }
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase()
+    if (v === 'true' || v === '1') return true
+    if (v === 'false' || v === '0') return false
+  }
+  return SNAPSHOTS_DEFAULT
+}
+
+/**
  * Whether the mod registers the `plannotator_inbox` tool and runs the reply
  * wake when nothing is set (and an Inbox is found). Mirrors the claude-code
  * entry of `INBOX_TOOL_DEFAULTS` in packages/shared/config.ts.

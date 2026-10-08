@@ -549,7 +549,7 @@ export function commandFailureNoticeText(command: string, message: string): stri
   return `${formatCommandFailureNotice(command, message)}${COMMAND_FAILURE_NOTICE_MARKER}`;
 }
 
-const COMMAND_FAILURE_NOTICE_RE = /^Plannotator \/plannotator-(?:review|annotate|last) failed: \S[\s\S]*\n\n\(Plannotator notice for the person; not a request\.\)$/;
+const COMMAND_FAILURE_NOTICE_RE = /^Plannotator \/plannotator-(?:review|annotate|last|snapshot) failed: \S[\s\S]*\n\n\(Plannotator notice for the person; not a request\.\)$/;
 
 /** Is this model-context message one of our transcript notices (session URL or command failure)? */
 function isSessionUrlNoticeMessage(message: unknown): boolean {
