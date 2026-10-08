@@ -2035,6 +2035,8 @@ Sorting and the rest:
 
 **Server routes** are listed under "Inbox Server" in "Server API".
 
+**On a phone** (planned, not built): `adr/implementation/inbox-mobile.md` is the wire contract the iPhone app and its server steps build against: the pairing offer, the device token door `/api/inbox/device/*`, the LAN listener, the relay, the surface bridge and the idempotency rule.
+
 **Security**, on every request:
 - The Host allowlist (`createRequestHostGuard({ localOnly: true })`).
 - `/mcp` refuses any request with an Origin (403 `origin_not_allowed`).
