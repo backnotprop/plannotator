@@ -57,7 +57,7 @@ plannotator://pair?v=1&name=MacBook%20Pro&tailnet=macbook-pro.tail0000.ts.net%3A
 | `secret` | the pairing secret: 32 random bytes, base64url without padding (43 characters) | always |
 | `code` | the six digits | always |
 
-The phone reads a link with an unknown `v` as "update the app". Both addresses are tried in order (LAN, then tailnet) for the redemption. The relay's address and mailbox arrive in the redemption's answer, not in the link.
+The phone reads a link with an unknown `v` as "update the app". Both addresses are tried in order (LAN, then tailnet) for the redemption by the QR's secret; typed digits go to the tailnet or loopback only, never the LAN (section 3). The relay's address and mailbox arrive in the redemption's answer, not in the link.
 
 ## 2. The device token door
 
@@ -88,6 +88,7 @@ Each device also has its pairing secret kept on the computer, in `inbox/device-s
 
 - `201 { device, token, secret, computer: { name }, addresses: { tailnet, lan, fingerprint }, relay }`. `secret` is the offer's pairing secret, returned on both paths, so a phone that paired by digits holds it too. `relay` is `{ url, mailbox_id }` once the Inbox has a mailbox, else null. When a mailbox exists the Inbox registers the new device at the relay before answering (section 4); if the relay cannot be reached it registers it when its socket next connects.
 - `410 offer_expired` when no open offer matches: never made, used, expired, replaced, or closed by wrong codes.
+- `400 code_not_accepted_here` on the LAN listener for a redemption by `code` without `secret`: over the Wi-Fi a phone pairs by the QR only (section 3). The window's port and the tailnet's listener take both. The offer is untouched: no wrong try is counted.
 - `401 pairing_code_wrong { tries_left }` on a wrong code. The fifth wrong code closes the offer and answers `tries_left: 0`.
 - `422 validation_error` with no `secret` or `code`, or a bad `name`.
 
@@ -166,6 +167,7 @@ The door answers in the window's shape, `{ error, code, ...details }`, with thes
 | 409 | `tailnet_port_taken` | the window's tailnet switch: another mapping holds 8443 (window route) |
 | 409 | `tailnet_unavailable` | the window's tailnet switch: Tailscale cannot publish (window route) |
 | 409 | `lan_unavailable` | the window's Wi-Fi switch: `openssl` cannot make the certificate (window route, section 3) |
+| 400 | `code_not_accepted_here` | a redemption by six digits on the LAN listener: over the Wi-Fi a phone pairs by the QR only (section 3) |
 
 ## 3. The LAN listener
 
@@ -177,7 +179,8 @@ Off until "Reach from this Wi-Fi" is switched on in the window's Settings (P2).
 - **TLS:** an ECDSA P-256 certificate, self-signed, subject `CN=Plannotator Inbox`, valid for 100 years (the phone reads no dates), made by `openssl` as child processes the first time the listener starts (`openssl ecparam -name prime256v1 -genkey -noout`, then `openssl req -new -x509 -days 36500 -subj "/CN=Plannotator Inbox"`, two steps, which macOS's LibreSSL 3.3 and OpenSSL 3 both accept) and kept in `inbox/tls/cert.pem` and `inbox/tls/key.pem` (files 0600, directory 0700; LibreSSL writes the files 0644, so they are made inside the 0700 directory and set to 0600 after). It is never rotated. Deleting `inbox/tls/` makes a new one, and every phone paired over the Wi-Fi pairs again. With `openssl` missing or failing, the switch answers `409 lan_unavailable` and stays off.
 - **The fingerprint:** SHA-256 of the certificate's DER bytes, 64 lowercase hex. It rides the link as `fp` and the Bonjour record as `fp`.
 - **What the phone checks:** the leaf certificate's SHA-256 equals the fingerprint it holds. Nothing else: no host name, no chain, no dates. The pin is the check.
-- **Bonjour:** while the listener is on, the Inbox advertises `_plannotator-inbox._tcp` through a child process (`dns-sd -R` on macOS, `avahi-publish -s` on Linux; no dependency; where neither exists the listener still works by typed address and the window says so) with the instance name `computer.name`, the listener's port, and TXT `v=1` and `fp=<fingerprint>`. The phone lists these in 1.3 and matches a found record to a paired computer by `fp`, so a new IP address is followed without pairing again. A phone that pairs by typed digits after picking a record pins the record's `fp`. The publisher runs under `sh`, which ends it when its stdin closes: the Inbox closes it on a clean stop, and the kernel closes it when the Inbox dies without one (kill -9), so no record outlives the Inbox.
+- **Pairing over the Wi-Fi is by the QR only** (ruled 2026-10-08 after plannotator-ops's review of PR 1780). The fingerprint reaches the phone from the computer's screen, never from the network. The reason: anyone on the Wi-Fi can publish a Bonjour record with the computer's name, their own port and their own `fp`. A phone that pinned a record's `fp` and sent typed digits there would hand the person's own correct code to that listener, which relays it to the real Inbox on the first try, gets the token and the pairing secret (the relay keys derive from it), and sits in the middle for good; the five-try limit does not help. So the LAN listener's `pair` takes the 32-byte `secret` only and refuses a `code` with `400 code_not_accepted_here`. Typed digits stay for the tailnet (`tailscale serve` and MagicDNS authenticate the host) and for loopback (the simulator).
+- **Bonjour:** while the listener is on, the Inbox advertises `_plannotator-inbox._tcp` through a child process (`dns-sd -R` on macOS, `avahi-publish -s` on Linux; no dependency; where neither exists the listener still works at the address the QR carries and the window says phones will not list it) with the instance name `computer.name`, the listener's port, and TXT `v=1` and `fp=<fingerprint>`. The record's `fp` is an identity hint only, for a computer the phone already paired by QR: the phone matches a found record to a known computer by the `fp` it holds, so a new IP address is followed without pairing again. A record whose `fp` the phone does not know is never pinned; 1.3's "On this Wi-Fi" row for it reads "Scan the code on <name>'s screen" and leads to the QR scan, not to the six-digit sheet (the record's render of 1.3 draws the digits sheet after a Wi-Fi row; that sheet belongs to the tailnet's rows and the typed address). The publisher runs under `sh`, which ends it when its stdin closes: the Inbox closes it on a clean stop, and the kernel closes it when the Inbox dies without one (kill -9), so no record outlives the Inbox.
 - **Off and stops:** switching off closes the listener, ends the publisher and clears `lan` from `inbox.json`; the certificate stays, so switching on again keeps every phone's pin. A clean stop (quit, the stop route, a restart to update, before the new run starts) closes the listener and the publisher and leaves the switch on; the next start opens the same port again with the same certificate.
 
 The switch's window routes (added in P2; the first draft named the switch but no route), beside the tailnet's:
@@ -406,7 +409,7 @@ curl -sS -X POST "$INBOX/api/inbox/device/pair" -H 'Content-Type: application/js
   -d '{"code":"482914","name":"iPhone","platform":"ios"}'
 ```
 
-`401 { "error": "That code is not the one on your computer.", "code": "pairing_code_wrong", "tries_left": 4 }`. With `"code":"482913"` the answer is 7.2's.
+`401 { "error": "That code is not the one on your computer.", "code": "pairing_code_wrong", "tries_left": 4 }`. With `"code":"482913"` the answer is 7.2's. `$INBOX` here is the tailnet or loopback: on the LAN listener any `code` answers `400 { "error": "Over the Wi-Fi, pair by scanning the QR code on your computer's screen.", "code": "code_not_accepted_here" }` and the offer stays open.
 
 ### 7.4 Health
 

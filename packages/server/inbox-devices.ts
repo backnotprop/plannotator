@@ -244,7 +244,14 @@ export function createInboxDevices(context: InboxDevicesContext) {
     };
   };
 
-  const redeem = async (req: Request): Promise<Response> => {
+  /**
+   * `secretOnly`: the LAN listener. Over the Wi-Fi the phone pins the
+   * certificate whose fingerprint the QR carried from this computer's screen;
+   * a fingerprint learned from the network (a Bonjour record anyone on the
+   * Wi-Fi can publish) would let a listener in the middle relay the person's
+   * own six digits. So the LAN takes the QR secret only (contract section 3).
+   */
+  const redeem = async (req: Request, secretOnly: boolean): Promise<Response> => {
     const body = await context.readBody(req);
     const byName = checkInboxThreadName(body.name);
     if (!byName.ok) throw new InboxError("validation_error", `name: ${byName.message}`, { field: "name" });
@@ -252,6 +259,9 @@ export function createInboxDevices(context: InboxDevicesContext) {
     if (!platform.ok) throw new InboxError("validation_error", `platform: ${platform.message}`, { field: "platform" });
     const secret = typeof body.secret === "string" && body.secret ? body.secret : null;
     const code = typeof body.code === "string" && body.code ? body.code : null;
+    if (secretOnly && !secret && code) {
+      return refuse(400, "code_not_accepted_here", "Over the Wi-Fi, pair by scanning the QR code on your computer's screen.");
+    }
     if (!secret && !code) throw new InboxError("validation_error", "secret or code: one is required.", { field: "secret" });
     const open = openOffer();
     const expired = () => refuse(410, "offer_expired", "This pairing code is no longer open. Make a new one on your computer.");
@@ -330,11 +340,11 @@ export function createInboxDevices(context: InboxDevicesContext) {
     }
   };
 
-  const door = async (req: Request, url: URL): Promise<Response> => {
+  const door = async (req: Request, url: URL, secretOnly = false): Promise<Response> => {
     try {
       if (req.headers.get("origin") !== null) return refuse(403, "origin_not_allowed", "Browser requests are not accepted here.");
       const route = url.pathname.startsWith(DOOR_PREFIX) ? url.pathname.slice(DOOR_PREFIX.length) : "";
-      if (route === "pair" && req.method === "POST") return await redeem(req);
+      if (route === "pair" && req.method === "POST") return await redeem(req, secretOnly);
       const token = bearer(req);
       if (!token) return refuse(401, "device_token_missing", "This request needs the phone's token.");
       const device = devices.byToken(token);
@@ -375,16 +385,19 @@ export function createInboxDevices(context: InboxDevicesContext) {
 
   let doorServer: ReturnType<typeof Bun.serve> | null = null;
 
-  const doorOnly = (req: Request): Promise<Response> | Response => {
-    let url: URL;
-    try {
-      url = new URL(req.url, "http://127.0.0.1");
-    } catch {
-      return refuse(404, "device_route_not_found", "Not a phone route.");
-    }
-    if (url.pathname !== "/api/inbox/device" && !url.pathname.startsWith(DOOR_PREFIX)) return refuse(404, "device_route_not_found", "Not a phone route.");
-    return door(req, url);
-  };
+  /** A listener that serves the door and nothing else: the tailnet's, and (`secretOnly`, QR pairing only) the Wi-Fi's. */
+  const doorOnly =
+    (secretOnly: boolean) =>
+    (req: Request): Promise<Response> | Response => {
+      let url: URL;
+      try {
+        url = new URL(req.url, "http://127.0.0.1");
+      } catch {
+        return refuse(404, "device_route_not_found", "Not a phone route.");
+      }
+      if (url.pathname !== "/api/inbox/device" && !url.pathname.startsWith(DOOR_PREFIX)) return refuse(404, "device_route_not_found", "Not a phone route.");
+      return door(req, url, secretOnly);
+    };
 
   // ── The Wi-Fi (contract section 3): the same door-only handler, over TLS on every interface. ──
 
@@ -402,13 +415,13 @@ export function createInboxDevices(context: InboxDevicesContext) {
     savedPort: () => context.registry().lan?.port ?? null,
     savePort: saveLan,
     name: () => computer().name,
-    fetch: doorOnly,
+    fetch: doorOnly(true),
   });
 
   /** The door listener, on the port it had last time when it is free. */
   const openDoorListener = (): number => {
     if (doorServer) return doorServer.port as number;
-    const serve = (port: number) => Bun.serve({ hostname: "127.0.0.1", port, idleTimeout: 0, fetch: doorOnly } as Parameters<typeof Bun.serve>[0]);
+    const serve = (port: number) => Bun.serve({ hostname: "127.0.0.1", port, idleTimeout: 0, fetch: doorOnly(false) } as Parameters<typeof Bun.serve>[0]);
     const last = context.registry().tailnet?.door_port;
     try {
       doorServer = last ? serve(last) : serve(0);

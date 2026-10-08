@@ -10,7 +10,9 @@
  * directory 0700); the phone pins its SHA-256. A `_plannotator-inbox._tcp`
  * Bonjour record is published through `dns-sd -R` (macOS) or `avahi-publish`
  * (Linux) as a child process; where neither exists the listener still works
- * by typed address. Off, and at every clean stop, the listener and the
+ * at the address the QR carries. Pairing over it is by the QR's secret only
+ * (inbox-devices.ts `redeem`): the fingerprint reaches the phone from this
+ * computer's screen, never from the network. Off, and at every clean stop, the listener and the
  * record go.
  */
 
@@ -30,7 +32,7 @@ export interface LanState {
   address: string | null;
   /** The certificate's SHA-256, 64 lowercase hex, while the listener runs. */
   fingerprint: string | null;
-  /** The Bonjour record is published (1.3 lists it). False where neither `dns-sd` nor `avahi-publish` exists: the phone types the address. */
+  /** The Bonjour record is published (1.3 lists it). False where neither `dns-sd` nor `avahi-publish` exists: phones do not list it, and the QR still pairs. */
   bonjour: boolean;
   /** Why the listener is not working, in the window's words. */
   error: string | null;

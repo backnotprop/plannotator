@@ -11,6 +11,8 @@
  *
  * Proved: the switch opens the listener and fills the QR's `lan` and `fp`;
  * a phone pairs over the LAN address (exchange 7.2) and reads with its token;
+ * six digits are refused there (QR only over the Wi-Fi) while the window's
+ * port still takes them;
  * a wrong fingerprint is refused by the phone before it sends anything; the
  * window, `/mcp`, the bridge, control, settings, restart and pairing are
  * absent there whatever Host, Origin or encoded path is sent; the Bonjour
@@ -171,14 +173,31 @@ describe("Reach from this Wi-Fi, on the binary", () => {
     expect(replay.headers["idempotent-replayed"]).toBe("true");
   });
 
+  test("over the Wi-Fi, pairing is by the QR only: six digits are refused on the LAN listener (the offer stays open), the secret pairs, and the same digits still pair on the window's port", async () => {
+    const made = (await (await win("/api/inbox/pairing", { serverSession })).json()) as Json;
+    const digits = await phone("/api/inbox/device/pair", { body: { code: made.offer.code, name: "Typed", platform: "ios" } });
+    expect([digits.status, JSON.parse(digits.text)]).toEqual([400, { error: "Over the Wi-Fi, pair by scanning the QR code on your computer's screen.", code: "code_not_accepted_here" }]);
+    // Refused before the offer is read: no wrong try counted, the right code still works where digits are allowed.
+    const onWindow = await fetch(`${base}/api/inbox/device/pair`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: made.offer.code, name: "Typed on loopback", platform: "ios" }) });
+    expect(onWindow.status).toBe(201);
+    // The secret pairs over the LAN.
+    const next = (await (await win("/api/inbox/pairing", { serverSession })).json()) as Json;
+    const secret = new URL(next.link.replace("plannotator://", "https://pair.invalid/")).searchParams.get("secret");
+    const wrongDigits = await phone("/api/inbox/device/pair", { body: { code: next.offer.code === "000000" ? "000001" : "000000", name: "Typed", platform: "ios" } });
+    expect(JSON.parse(wrongDigits.text).code).toBe("code_not_accepted_here");
+    const scanned = await phone("/api/inbox/device/pair", { body: { secret, name: "Scanned", platform: "ios" } });
+    expect(scanned.status).toBe(201);
+  });
+
   test("a wrong fingerprint is refused by the phone, before it sends a byte", async () => {
     const wrong = lan.fingerprint.replace(/^./, (c: string) => (c === "0" ? "1" : "0"));
     const made = (await (await win("/api/inbox/pairing", { serverSession })).json()) as Json;
-    const attempt = await phone("/api/inbox/device/pair", { fingerprint: wrong, body: { code: made.offer.code, name: "Impostor", platform: "ios" } }).catch((error) => error);
+    const secret = new URL(made.link.replace("plannotator://", "https://pair.invalid/")).searchParams.get("secret");
+    const attempt = await phone("/api/inbox/device/pair", { fingerprint: wrong, body: { secret, name: "Impostor", platform: "ios" } }).catch((error) => error);
     expect(attempt).toBeInstanceOf(PinMismatchError);
     expect((attempt as PinMismatchError).presented).toBe(lan.fingerprint);
     // Nothing reached the Inbox: the offer is still open for the right phone.
-    const right = await phone("/api/inbox/device/pair", { body: { code: made.offer.code, name: "iPhone 2", platform: "ios" } });
+    const right = await phone("/api/inbox/device/pair", { body: { secret, name: "iPhone 2", platform: "ios" } });
     expect(right.status).toBe(201);
   });
 

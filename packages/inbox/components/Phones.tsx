@@ -214,7 +214,7 @@ export function PhonesBlock() {
       {lanOn && !lan!.bonjour && (
         <div className="ib-note" data-lan-no-bonjour="">
           <Icon name="info" />
-          Phones cannot find this computer on their own here (no dns-sd or avahi-publish). On the phone, type the address.
+          Phones will not see this computer in their nearby list (no dns-sd or avahi-publish). Scanning the code still pairs them.
         </div>
       )}
       {lan?.on && lan.error && <div className="ib-error">{lan.error}</div>}
@@ -244,7 +244,8 @@ export function PhonesBlock() {
           </div>
           <div className="ib-pair-t">
             <h3>Pair a phone</h3>
-            <p>Scan with Plannotator on your iPhone, or enter the code.</p>
+            {/* Over the Wi-Fi the phone pairs by the scan only (contract section 3); the digits serve the tailnet. */}
+            <p>{offer.addresses.tailnet ? 'Scan with Plannotator on your iPhone, or enter the code.' : 'Scan with Plannotator on your iPhone.'}</p>
             <div className="ib-pair-code" data-pair-code={offer.offer.code} aria-label={`Pairing code ${offer.offer.code.split('').join(' ')}`}>
               {offer.offer.code.slice(0, 3)} {offer.offer.code.slice(3)}
             </div>

@@ -16,7 +16,8 @@
  * the QR gains `lan` and `fp`; the row shows the address and the
  * certificate's SHA-256; a phone pins it and pairs over the LAN address; off
  * closes it. A second Inbox whose PATH has no dns-sd or avahi-publish draws
- * the typed-address note, and an `openssl` that fails draws the error.
+ * the no-Bonjour note, and an `openssl` that fails draws the error. Over the
+ * Wi-Fi the phone pairs by the QR only: the LAN door refuses the six digits.
  *
  * With PLANNOTATOR_E2E_TAILNET=1 on a Mac signed in to Tailscale, one more
  * test turns on "Reach from my tailnet", reaches the door at the MagicDNS name
@@ -262,7 +263,7 @@ test('Reach from this Wi-Fi: the panel turns it on, the row shows the address an
   expect(world.errors).toEqual([]);
 });
 
-test('Reach from this Wi-Fi where nothing can announce it (typed address) and where openssl fails', async () => {
+test('Reach from this Wi-Fi where nothing can announce it (no Bonjour) and where openssl fails', async () => {
   const { page } = world;
   // A second Inbox whose PATH holds only `openssl`: no dns-sd, no avahi-publish. The script fails while the mode file says so.
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-phones-lan-')));
@@ -284,7 +285,7 @@ test('Reach from this Wi-Fi where nothing can announce it (typed address) and wh
     const toggle = phones.getByRole('switch', { name: 'Reach from this Wi-Fi' });
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-checked', 'true');
-    await expect(phones.locator('[data-lan-no-bonjour]')).toContainText('On the phone, type the address.');
+    await expect(phones.locator('[data-lan-no-bonjour]')).toContainText('Scanning the code still pairs them.');
     await shot('settings-phones-lan-no-bonjour');
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-checked', 'false');
