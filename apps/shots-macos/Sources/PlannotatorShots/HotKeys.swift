@@ -3,11 +3,11 @@ import Foundation
 
 /// Global hotkeys through Carbon's RegisterEventHotKey: no Accessibility or
 /// Input Monitoring permission (an event tap or a global key monitor would need
-/// one). ⌥⇧⌘4 shot, ⌥⇧⌘5 App shot, ⌥⇧⌘P show or hide the HUD.
+/// one). ⌥⇧⌘4 shot, ⌥⇧⌘5 Snapshot, ⌥⇧⌘P show or hide the HUD.
 final class HotKeys {
     enum Action: UInt32 {
         case shot = 1
-        case appShot = 2
+        case snapshot = 2
         case toggle = 3
     }
 
@@ -29,7 +29,7 @@ final class HotKeys {
         }, 1, &spec, nil, &eventHandler)
         let modifiers = UInt32(optionKey | shiftKey | cmdKey)
         register(UInt32(kVK_ANSI_4), modifiers, .shot, "⌥⇧⌘4")
-        register(UInt32(kVK_ANSI_5), modifiers, .appShot, "⌥⇧⌘5")
+        register(UInt32(kVK_ANSI_5), modifiers, .snapshot, "⌥⇧⌘5")
         register(UInt32(kVK_ANSI_P), modifiers, .toggle, "⌥⇧⌘P")
     }
 

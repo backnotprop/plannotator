@@ -18,13 +18,13 @@ const COPY: Record<PermissionKind, { title: string; line: React.ReactNode; done:
     title: 'Turn on Accessibility',
     line: (
       <>
-        App shots include the window’s text.
+        Snapshots include the window’s text.
         <br />
         Passwords are never read.
       </>
     ),
     done: 'Accessibility is on',
-    doneLine: 'App shots include the window’s text.',
+    doneLine: 'Snapshots include the window’s text.',
   },
 };
 

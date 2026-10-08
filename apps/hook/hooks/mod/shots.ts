@@ -113,7 +113,7 @@ export class ShotsLink {
    * as the destination, open the capture overlay. Returns at once.
    */
   async summon(args: string): Promise<string> {
-    const extra = args.split(/\s+/).filter((word) => word === '--app')
+    const extra = args.split(/\s+/).filter((word) => word === '--snapshot')
     const result = await this.options.host
       .run(['plannotator', 'screenshot', '--session', `claude-code:${this.options.sessionId}`, ...extra], { timeoutMs: 30_000 })
       .catch((error: unknown) => ({ exitCode: 1, stdout: '', stderr: error instanceof Error ? error.message : String(error) }))

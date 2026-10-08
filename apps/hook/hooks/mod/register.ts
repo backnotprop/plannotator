@@ -156,7 +156,7 @@ interface Allowed {
 const SHOTS_COMMAND = 'plannotator-screenshot'
 const SHOTS_COMMAND_SPEC = {
   description: 'Take screenshots with Plannotator Shots, mark them up, and send them here as one message.',
-  argumentHint: '[--app]',
+  argumentHint: '[--snapshot]',
 }
 /** Names this Claude Code process to the Shots hub (two processes can share one session). */
 let shotsProcessTag: string | null = null

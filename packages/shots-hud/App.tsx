@@ -105,7 +105,7 @@ export function App() {
     if (!current && shots.length > 0) setCurrentId(shots[0]!.id);
   }, [current, shots]);
 
-  // Window text for App shots, fetched once per shot.
+  // Window text for Snapshots, fetched once per shot.
   useEffect(() => {
     for (const shot of shots) {
       if (shot.text && !(shot.id in rawTexts)) {
@@ -117,8 +117,8 @@ export function App() {
 
   // Native settings mirror (the ◫ toggle decides what ⌥⇧⌘4 takes).
   useEffect(() => {
-    if (hub) postNative({ type: 'settings', appShots: hub.settings.appShots, explainerSeen: hub.settings.explainerSeen });
-  }, [hub?.settings.appShots, hub?.settings.explainerSeen]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (hub) postNative({ type: 'settings', snapshots: hub.settings.snapshots, explainerSeen: hub.settings.explainerSeen });
+  }, [hub?.settings.snapshots, hub?.settings.explainerSeen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- What is on screen -------------------------------------------------------------------
   const lastSent = hub?.lastSent ?? null;
@@ -403,9 +403,9 @@ export function App() {
     setToast({ text: `Discarded ${shots.length} shot${shots.length === 1 ? '' : 's'}.`, action: { label: 'Undo', run: () => void api.restore(id) } });
   };
 
-  const setAppShots = (on: boolean) => {
-    void api.settings({ appShots: on });
-    // App shots read window text: Accessibility is asked for here, and only here.
+  const setSnapshots = (on: boolean) => {
+    void api.settings({ snapshots: on });
+    // Snapshots read window text: Accessibility is asked for here, and only here.
     if (on && !permissions.accessibility) postNative({ type: 'permission.begin', kind: 'accessibility' });
   };
 
@@ -539,13 +539,13 @@ export function App() {
             screenOff={screenOff}
             landingShotId={landing && !landing.first ? landing.shotId : null}
             thumbRefs={thumbRefs}
-            appShots={!!hub?.settings.appShots}
+            snapshots={!!hub?.settings.snapshots}
             noSession={noSession}
             online={online}
             chip={chip}
             sendButton={sendButton}
             onOpen={(shotId) => openPanelAt(shotId ?? shots.find((s) => commentsOn(s) === 0)?.id ?? shots[0]?.id)}
-            onAppShots={setAppShots}
+            onSnapshots={setSnapshots}
             onCopy={() => void copyMarkdown()}
             onReveal={() => void reveal()}
             onRetarget={() => setPicker({ reason: 'retarget' })}
@@ -729,7 +729,7 @@ export function App() {
                     </button>
                   );
                 })}
-                <button type="button" className="fm add" onClick={() => postNative({ type: 'capture', kind: hub?.settings.appShots ? 'app' : 'region' })} aria-label="Take another shot (⌥⇧⌘4)">
+                <button type="button" className="fm add" onClick={() => postNative({ type: 'capture', kind: hub?.settings.snapshots ? 'snapshot' : 'region' })} aria-label="Take another shot (⌥⇧⌘4)">
                   <Icon name="plus" />
                 </button>
               </div>
@@ -825,13 +825,13 @@ function StripView(props: {
   screenOff: boolean;
   landingShotId: string | null;
   thumbRefs: React.MutableRefObject<Map<string, HTMLElement>>;
-  appShots: boolean;
+  snapshots: boolean;
   noSession: boolean;
   online: boolean;
   chip: React.ReactNode;
   sendButton: React.ReactNode;
   onOpen: (shotId?: string) => void;
-  onAppShots: (on: boolean) => void;
+  onSnapshots: (on: boolean) => void;
   onCopy: () => void;
   onReveal: () => void;
   onRetarget: () => void;
@@ -982,12 +982,12 @@ function StripView(props: {
       <span className="sep" />
       <button
         type="button"
-        className={`icon-btn${props.appShots ? ' on' : ''}`}
-        title={props.appShots ? 'App shots (window + text): on' : 'App shots (window + text): off'}
-        aria-pressed={props.appShots}
-        onClick={() => props.onAppShots(!props.appShots)}
+        className={`icon-btn${props.snapshots ? ' on' : ''}`}
+        title={props.snapshots ? 'Snapshots (window + text): on' : 'Snapshots (window + text): off'}
+        aria-pressed={props.snapshots}
+        onClick={() => props.onSnapshots(!props.snapshots)}
       >
-        <Icon name="appshot" />
+        <Icon name="snapshot" />
       </button>
       {props.noSession ? (
         <>

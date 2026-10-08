@@ -1,5 +1,5 @@
 /**
- * View text: an App shot's accessibility text in place of the image, before
+ * View text: a Snapshot's accessibility text in place of the image, before
  * it is sent. Lines can be selected and removed (they never reach the agent),
  * or the text can be left out entirely.
  */

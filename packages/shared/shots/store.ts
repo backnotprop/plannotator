@@ -8,7 +8,7 @@
  *       original.png             the native capture, full resolution, local only
  *       agent.png                ≤ 2000 px, marks and redactions burned in (what the agent reads)
  *       crop-1.png …             crops of small boxes, redacted
- *       app-text.raw.txt         App shots: the window text as captured, local only
+ *       app-text.raw.txt         Snapshots: the window text as captured, local only
  *       app-text.txt             written at send: the text minus the lines the person removed
  *       shot.json                boxes, strokes, redactions, note, app identity
  *     shots.json                 written at send: the structured sidecar the message names
@@ -60,7 +60,7 @@ export interface CaptureInput {
   height?: number;
   display?: { id?: number; scale: number };
   source?: ShotSource;
-  /** App shots: absolute path of the captured window text, moved in like the image. */
+  /** Snapshots: absolute path of the captured window text, moved in like the image. */
   textFile?: string;
   /** Why there is no window text (e.g. "Accessibility is off"). */
   textUnavailable?: string;
@@ -285,7 +285,7 @@ export class ShotsStore {
       this.moveIn(input.textFile, join(dir, "app-text.raw.txt"));
       const raw = readFileSync(join(dir, "app-text.raw.txt"), "utf8");
       shot.text = { chars: raw.length, include: raw.trim().length > 0, removedLines: [], source: "accessibility" };
-    } else if (input.kind === "app") {
+    } else if (input.kind === "snapshot") {
       shot.text = { chars: 0, include: false, removedLines: [], source: "accessibility", unavailable: input.textUnavailable ?? "No text" };
     }
     this.saveShot(shot);

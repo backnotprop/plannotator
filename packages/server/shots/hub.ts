@@ -101,7 +101,7 @@ export function createShotsHub(options: ShotsHubOptions): ShotsHub {
   let revision = 0;
   const listeners = new Set<(state: ShotsState) => void>();
   const settingsPath = join(store.root, "settings.json");
-  let settings: ShotsSettings = { appShots: false, explainerSeen: false };
+  let settings: ShotsSettings = { snapshots: false, explainerSeen: false };
   try {
     settings = { ...settings, ...(JSON.parse(readFileSync(settingsPath, "utf8")) as Partial<ShotsSettings>) };
   } catch {
@@ -443,7 +443,7 @@ export function createShotsHub(options: ShotsHubOptions): ShotsHub {
 
   const captureFromBody = (body: Record<string, unknown>): CaptureInput | null => {
     if (typeof body.file !== "string" || !body.file.startsWith("/")) return null;
-    const kinds = ["region", "window", "display", "app"];
+    const kinds = ["region", "window", "display", "snapshot"];
     const source = body.source && typeof body.source === "object" ? (body.source as Record<string, unknown>) : null;
     const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
     const display = body.display && typeof body.display === "object" ? (body.display as Record<string, unknown>) : null;
@@ -591,7 +591,7 @@ export function createShotsHub(options: ShotsHubOptions): ShotsHub {
     if (path === "/api/shots/ask" && method === "POST") return handleAsk(req);
     if (path === "/api/shots/settings" && method === "POST") {
       const body = await readBody(req);
-      if (typeof body.appShots === "boolean") settings.appShots = body.appShots;
+      if (typeof body.snapshots === "boolean") settings.snapshots = body.snapshots;
       if (typeof body.explainerSeen === "boolean") settings.explainerSeen = body.explainerSeen;
       try {
         await Bun.write(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);

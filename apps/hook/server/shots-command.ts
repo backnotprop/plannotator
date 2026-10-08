@@ -2,11 +2,11 @@
  * `plannotator screenshot`: Plannotator Shots, the native screenshot HUD.
  * Hidden until launch (HIDDEN_SUBCOMMANDS in cli.ts).
  *
- *   plannotator screenshot [--app] [--session <host>:<id>] [--no-capture]
+ *   plannotator screenshot [--snapshot] [--session <host>:<id>] [--no-capture]
  *       Start the hub and the Plannotator Shots app if needed and open the
  *       capture overlay. With --session (the Claude Code mod passes its own),
  *       that session receives the send. Returns at once.
- *   plannotator screenshot --wait [--app]
+ *   plannotator screenshot --wait [--snapshot]
  *       The same, then wait as a "waiting command" destination: print the
  *       message when the person presses Send, and exit 0. For agents without
  *       async delivery (Codex, Gemini, Copilot, Claude Code without the mod).
@@ -372,13 +372,13 @@ export async function runShotsCommand(args: string[]): Promise<never> {
 
   // Capture (the default), optionally waiting for the send.
   let wait = false;
-  let appShot = false;
+  let snapshot = false;
   let capture = true;
   let session: { host: string; sessionId: string } | null = null;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--wait") wait = true;
-    else if (arg === "--app") appShot = true;
+    else if (arg === "--snapshot") snapshot = true;
     else if (arg === "--no-capture") capture = false;
     else if (arg === "--session") session = parseSession(args[++i]);
     else if (arg?.startsWith("--session=")) session = parseSession(arg.slice("--session=".length));
@@ -404,7 +404,7 @@ export async function runShotsCommand(args: string[]): Promise<never> {
   }
   try {
     openShotsApp(app, capture ? "capture" : "show", {
-      kind: appShot ? "app" : "region",
+      kind: snapshot ? "snapshot" : "region",
       dataDir,
       cli: JSON.stringify(selfCommand()),
     });

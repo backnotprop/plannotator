@@ -3,7 +3,7 @@ import Carbon
 import ScreenCaptureKit
 
 /// Plannotator Shots: an accessory app (no Dock icon, no menu bar of its own)
-/// that owns the global hotkeys, the frozen-screen capture, App-shot window
+/// that owns the global hotkeys, the frozen-screen capture, Snapshot window
 /// text, the HUD panel and the capture flight. Everything else (the shots
 /// store, sessions, delivery, Ask) lives in the hub.
 @MainActor
@@ -14,7 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var overlay: OverlayController?
     private var flights: [String: (flight: Flight, image: CGImage, from: NSRect)] = [:]
-    private var settings = (appShots: false, explainerSeen: false)
+    private var settings = (snapshots: false, explainerSeen: false)
     private let permissions = PermissionFlow()
     private var capturing = false
     private var watchdog: Timer?
@@ -30,7 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         permissions.show = { [weak self] state in self?.panel.call("permission", state) }
         permissions.resume = { [weak self] pending in
             guard let pending else { return }
-            self?.startCapture(app: pending == .app)
+            self?.startCapture(snapshot: pending == .snapshot)
         }
         setUpStatusItem()
         connect()
@@ -72,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch url.host {
         case "capture":
             connect()
-            startCapture(app: query["kind"] == "app")
+            startCapture(snapshot: query["kind"] == "snapshot")
         case "show":
             connect()
             panel.call("toggle")
@@ -87,8 +87,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func hotKey(_ action: HotKeys.Action) {
         switch action {
-        case .shot: startCapture(app: settings.appShots)
-        case .appShot: startCapture(app: true)
+        case .shot: startCapture(snapshot: settings.snapshots)
+        case .snapshot: startCapture(snapshot: true)
         case .toggle: panel.call("toggle")
         }
     }
@@ -107,30 +107,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return "data:image/png;base64,\(png.base64EncodedString())"
     }
 
-    private func startCapture(app: Bool) {
+    private func startCapture(snapshot: Bool) {
         guard !capturing, !permissions.isActive else { return }
         // Ask only when needed: Screen Recording at the first capture,
-        // Accessibility only when an App shot is asked for.
+        // Accessibility only when a Snapshot is asked for.
         guard Capture.hasPermission else {
             if permissions.screenEverGranted {
                 // Turned off later: the strip says so; its Turn On opens the card.
                 sendPermissions()
                 panel.call("screenRecordingOff")
             } else {
-                permissions.begin(.screen, pending: app ? .app : .region)
+                permissions.begin(.screen, pending: snapshot ? .snapshot : .region)
             }
             return
         }
-        if app && !AXText.isTrusted && !permissions.accessibilityDeclined {
-            permissions.begin(.accessibility, pending: .app)
+        if snapshot && !AXText.isTrusted && !permissions.accessibilityDeclined {
+            permissions.begin(.accessibility, pending: .snapshot)
             return
         }
         capturing = true
         panel.call("willCapture")
         Task { @MainActor in
             defer { capturing = false }
-            if app {
-                await appShot()
+            if snapshot {
+                await takeSnapshot()
                 return
             }
             do {
@@ -171,7 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// ⌥⇧⌘5: the frontmost window, plus its accessibility text, with no picker.
-    private func appShot() async {
+    private func takeSnapshot() async {
         guard let window = Capture.frontmostWindow() else {
             report(CaptureError.failed("There is no window to capture."))
             return
@@ -180,7 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             async let image = Capture.window(window.id)
             let text = await Task.detached { AXText.capture(pid: window.pid, bundleId: window.bundleId, windowTitle: window.title, frame: window.bounds) }.value
             let scale = NSScreen.screens.first { $0.frame.intersects(Coords.toAppKit(window.bounds)) }?.backingScaleFactor ?? 2
-            await register(image: try await image, from: Coords.toAppKit(window.bounds), kind: "app", window: window, scale: scale, text: text)
+            await register(image: try await image, from: Coords.toAppKit(window.bounds), kind: "snapshot", window: window, scale: scale, text: text)
         } catch {
             report(error)
         }
@@ -239,7 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func pageMessage(_ message: [String: Any]) {
         switch message["type"] as? String {
         case "capture":
-            startCapture(app: message["kind"] as? String == "app")
+            startCapture(snapshot: message["kind"] as? String == "snapshot")
         case "permission.begin":
             // "Turn On" in the strip or the text view, or the ◫ toggle: the card, with nothing pending.
             let kind = PermissionFlow.Kind(rawValue: message["kind"] as? String ?? "") ?? .screen
@@ -262,9 +262,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "flightLanded":
             if let captureId = message["captureId"] as? String { flights.removeValue(forKey: captureId)?.flight.remove() }
         case "settings":
-            settings.appShots = message["appShots"] as? Bool ?? false
+            settings.snapshots = message["snapshots"] as? Bool ?? false
             settings.explainerSeen = message["explainerSeen"] as? Bool ?? false
-            appShotItem?.state = settings.appShots ? .on : .off
+            snapshotsItem?.state = settings.snapshots ? .on : .off
         case "openSettings":
             let pane = message["pane"] as? String == "accessibility" ? "Privacy_Accessibility" : "Privacy_ScreenCapture"
             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") { NSWorkspace.shared.open(url) }
@@ -285,7 +285,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Menu-bar item
 
-    private var appShotItem: NSMenuItem?
+    private var snapshotsItem: NSMenuItem?
 
     private func setUpStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -296,14 +296,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.image?.isTemplate = true
         item.button?.setAccessibilityLabel("Plannotator Shots")
         let menu = NSMenu()
-        menu.addItem(menuItem("Take Shot", "4", #selector(menuShot)))
-        menu.addItem(menuItem("Take App Shot", "5", #selector(menuAppShot)))
-        menu.addItem(menuItem("Shot in 3 Seconds", "", #selector(menuDelayedShot)))
+        menu.addItem(menuItem("Take Screenshot", "4", #selector(menuShot)))
+        menu.addItem(menuItem("Take Snapshot", "5", #selector(menuSnapshot)))
+        menu.addItem(menuItem("Screenshot in 3 Seconds", "", #selector(menuDelayedShot)))
         menu.addItem(menuItem("Show HUD", "p", #selector(menuToggle)))
         menu.addItem(.separator())
-        let appShots = menuItem("App Shots for ⌥⇧⌘4", "", #selector(menuToggleAppShots))
-        appShotItem = appShots
-        menu.addItem(appShots)
+        let snapshots = menuItem("Snapshots for ⌥⇧⌘4", "", #selector(menuToggleSnapshots))
+        snapshotsItem = snapshots
+        menu.addItem(snapshots)
         menu.addItem(.separator())
         menu.addItem(menuItem("Screen Recording…", "", #selector(menuScreenSettings)))
         menu.addItem(menuItem("Accessibility…", "", #selector(menuAccessibilitySettings)))
@@ -321,17 +321,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return item
     }
 
-    @objc private func menuShot() { startCapture(app: false) }
-    @objc private func menuAppShot() { startCapture(app: true) }
+    @objc private func menuShot() { startCapture(snapshot: false) }
+    @objc private func menuSnapshot() { startCapture(snapshot: true) }
     @objc private func menuDelayedShot() {
         // Menus that are open block global hotkeys; this one closes, waits, and shoots.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.startCapture(app: false) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.startCapture(snapshot: false) }
     }
     @objc private func menuToggle() { panel.call("toggle") }
-    @objc private func menuToggleAppShots() {
+    @objc private func menuToggleSnapshots() {
         Task { @MainActor in
             guard let attached = try? await hub.attach() else { return }
-            _ = try? await hub.post(entry: attached.entry, token: attached.hudToken, path: "/api/shots/settings", json: ["appShots": !settings.appShots])
+            _ = try? await hub.post(entry: attached.entry, token: attached.hudToken, path: "/api/shots/settings", json: ["snapshots": !settings.snapshots])
         }
     }
     @objc private func menuScreenSettings() {

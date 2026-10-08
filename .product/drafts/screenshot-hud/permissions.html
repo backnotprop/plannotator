@@ -200,20 +200,20 @@ code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--fill
   </section>
 
   <section class="frame">
-    <h2>7 · App shots: Accessibility, asked only when turned on</h2>
-    <p class="cap">⌥⇧⌘5 or the ◫ toggle, first time. One screen says what App shots add and shows the switch. The first click calls <code>AXIsProcessTrustedWithOptions(prompt: true)</code>, later clicks open <code>Privacy_Accessibility</code>. Live check with <code>AXIsProcessTrusted()</code>; no restart needed. "Not now" takes the window image only.</p>
+    <h2>7 · Snapshots: Accessibility, asked only when turned on</h2>
+    <p class="cap">⌥⇧⌘5 or the ◫ toggle, first time. One screen says what Snapshots add and shows the switch. The first click calls <code>AXIsProcessTrustedWithOptions(prompt: true)</code>, later clicks open <code>Privacy_Accessibility</code>. Live check with <code>AXIsProcessTrusted()</code>; no restart needed. "Not now" takes the window image only.</p>
     <div class="screen">
       <div class="menubar"><b>Figma</b><span>File</span><span>Edit</span><div class="r"><span class="glyph"><svg class="ico"><use href="#i-cam"/></svg></span><span>Tue 7 Oct 14:26</span></div></div>
       <div class="perm">
         <div class="pic"><div class="big-row"><svg class="appicon"><use href="#appicon"/></svg>Plannotator Shots<span class="sw on"></span></div></div>
-        <div class="body"><h3>Turn on Accessibility</h3><p>App shots include the window’s text.<br>Passwords are never read.</p><button class="btn">Open System Settings</button><span class="link">Not now</span></div>
+        <div class="body"><h3>Turn on Accessibility</h3><p>Snapshots include the window’s text.<br>Passwords are never read.</p><button class="btn">Open System Settings</button><span class="link">Not now</span></div>
       </div>
     </div>
   </section>
 
   <section class="frame">
     <h2>8 · Turned off later</h2>
-    <p class="cap">If Screen Recording is turned off, the next shot shows this strip, never a blank or wallpaper-only image. "Turn On" opens frame 1. If Accessibility is off, an App shot still takes the window, and its text view offers the same "Turn On".</p>
+    <p class="cap">If Screen Recording is turned off, the next shot shows this strip, never a blank or wallpaper-only image. "Turn On" opens frame 1. If Accessibility is off, an Snapshot still takes the window, and its text view offers the same "Turn On".</p>
     <div class="screen">
       <div class="menubar"><b>Safari</b><span>File</span><span>Edit</span><div class="r"><span class="glyph"><svg class="ico"><use href="#i-cam"/></svg></span><span>Tue 7 Oct 16:02</span></div></div>
       <div class="strip" role="status"><svg class="ico w"><use href="#i-warn"/></svg>Screen Recording is off<span class="btn">Turn On</span></div>
@@ -232,7 +232,7 @@ code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--fill
     <div>
       <h3>Behaviour</h3>
       <ul>
-        <li><b>Ask only when needed.</b> Screen Recording on the first capture; Accessibility only when App shots are turned on. Nothing is asked at install or launch.</li>
+        <li><b>Ask only when needed.</b> Screen Recording on the first capture; Accessibility only when Snapshots are turned on. Nothing is asked at install or launch.</li>
         <li><b>One button.</b> First click: the system request (<code>CGRequestScreenCaptureAccess</code> / <code>AXIsProcessTrustedWithOptions</code>), which registers the app and shows macOS's alert. Later clicks: the deep link (<code>x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture</code> / <code>?Privacy_Accessibility</code>).</li>
         <li><b>Live.</b> While a card is up the app checks every second (a <code>SCShareableContent</code> listing; <code>AXIsProcessTrusted</code>). On success it shows the check and carries on with what the user asked for.</li>
         <li><b>Reopen.</b> Offered only when the switch is on (preflight true) but capture still fails, after the user leaves System Settings. Relaunch through LaunchServices; the pending shot resumes.</li>

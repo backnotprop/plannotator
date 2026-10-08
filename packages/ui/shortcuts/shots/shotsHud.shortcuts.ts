@@ -14,7 +14,7 @@ export const shotsHudShortcuts = defineShortcutScope({
     drawTool: { description: 'Draw', bindings: ['D'], section: 'Tools', displayOrder: 30 },
     redactTool: { description: 'Redact: black out an area in everything the agent receives', bindings: ['B'], section: 'Tools', displayOrder: 40 },
     noteTool: { description: 'Note for the whole shot', bindings: ['N'], section: 'Tools', displayOrder: 50 },
-    viewText: { description: 'View text (App shots)', bindings: ['T'], section: 'Shots', displayOrder: 60 },
+    viewText: { description: 'View text (Snapshots)', bindings: ['T'], section: 'Shots', displayOrder: 60 },
     previousShot: { description: 'Previous shot', bindings: ['ArrowLeft'], section: 'Shots', displayOrder: 70 },
     nextShot: { description: 'Next shot', bindings: ['ArrowRight'], section: 'Shots', displayOrder: 80 },
     deleteSelection: { description: 'Delete the selected box (or the shot)', bindings: ['Backspace', 'Delete'], section: 'Shots', displayOrder: 90 },

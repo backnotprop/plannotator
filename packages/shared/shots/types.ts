@@ -8,7 +8,7 @@
  * with the pixels the agent reads.
  */
 
-export type ShotKind = "region" | "window" | "display" | "app";
+export type ShotKind = "region" | "window" | "display" | "snapshot";
 
 /** `[x, y, w, h]` in image pixels. */
 export type Rect = [number, number, number, number];
@@ -85,7 +85,7 @@ export interface Shot {
   note: string;
   /** Box crops the HUD wrote (box id -> file name), small boxes only. */
   crops: Record<string, string>;
-  /** App shots: the window's accessibility text. */
+  /** Snapshots: the window's accessibility text. */
   text?: ShotText;
 }
 
@@ -168,9 +168,9 @@ export interface ShotsState {
 }
 
 export interface ShotsSettings {
-  /** The strip's ◫ toggle: ⌥⇧⌘4 takes App shots (window + its text) instead of a box. */
-  appShots: boolean;
-  /** The one-time App shots explainer was answered. */
+  /** The strip's ◫ toggle: ⌥⇧⌘4 takes Snapshots (window + its text) instead of a box. */
+  snapshots: boolean;
+  /** The one-time Snapshots explainer was answered. */
   explainerSeen: boolean;
 }
 

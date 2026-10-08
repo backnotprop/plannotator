@@ -1,7 +1,7 @@
 import AppKit
 import ApplicationServices
 
-/// An App shot's window text: the window's accessibility tree walked into an
+/// A Snapshot's window text: the window's accessibility tree walked into an
 /// indented outline ("role  text"), the way a person reads the window, so the
 /// agent can quote exact strings, labels and URLs instead of reading pixels.
 ///

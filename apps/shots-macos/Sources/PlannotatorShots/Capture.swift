@@ -101,7 +101,7 @@ enum Capture {
         }
     }
 
-    /// The frontmost app's front window (an App shot's target).
+    /// The frontmost app's front window (a Snapshot's target).
     static func frontmostWindow() -> WindowInfo? {
         guard let app = NSWorkspace.shared.frontmostApplication else { return windows().first }
         return windows().first { $0.pid == app.processIdentifier } ?? windows().first

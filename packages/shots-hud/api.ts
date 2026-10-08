@@ -79,7 +79,7 @@ export const api = {
   reveal: (id: string) => call('POST', `/api/shots/collection/${id}/reveal`, {}),
   discard: (id: string) => call('DELETE', `/api/shots/collection/${id}`),
   restore: (id: string) => call('POST', `/api/shots/collection/${id}/restore`, {}),
-  settings: (patch: { appShots?: boolean; explainerSeen?: boolean }) => call('POST', '/api/shots/settings', patch),
+  settings: (patch: { snapshots?: boolean; explainerSeen?: boolean }) => call('POST', '/api/shots/settings', patch),
 };
 
 /** Follow the hub's state stream; reconnects until stopped. */

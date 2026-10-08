@@ -54,10 +54,10 @@ function quoted(text: string): string {
   return `"${text.replace(/\s+/g, " ").trim()}"`;
 }
 
-/** "## 2. App shot — Figma — "Checkout v3" — https://…" */
+/** "## 2. Snapshot — Figma — "Checkout v3" — https://…" */
 function headingFor(index: number, shot: Shot): string {
   const parts: string[] = [];
-  if (shot.kind === "app") parts.push("App shot");
+  if (shot.kind === "snapshot") parts.push("Snapshot");
   const source = shot.source ?? {};
   if (source.app) parts.push(source.app);
   if (source.windowTitle) parts.push(quoted(source.windowTitle));

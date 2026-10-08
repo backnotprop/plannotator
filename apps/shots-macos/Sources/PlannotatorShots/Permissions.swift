@@ -3,7 +3,7 @@ import ScreenCaptureKit
 
 /// The first-run permission flow (approved: .product/approved/screenshot-hud/
 /// permissions.html). One card per permission, asked only when needed:
-/// Screen Recording at the first capture, Accessibility only for App shots.
+/// Screen Recording at the first capture, Accessibility only for Snapshots.
 ///
 ///   ask      → the card: the exact switch row, enlarged, and one button
 ///   waiting  → after the button: macOS's own request the first time
@@ -20,7 +20,7 @@ import ScreenCaptureKit
 final class PermissionFlow {
     enum Kind: String { case screen, accessibility }
     enum State: String { case ask, waiting, reopen, granted }
-    enum Pending: String { case region, app }
+    enum Pending: String { case region, snapshot }
 
     private let defaults = UserDefaults.standard
     private var timer: Timer?
@@ -30,7 +30,7 @@ final class PermissionFlow {
     var show: (([String: Any]) -> Void)?
     /// Runs the shot the user asked for once the permission is there.
     var resume: ((Pending?) -> Void)?
-    /// App shots without text, for this session ("Not now").
+    /// Snapshots without text, for this session ("Not now").
     private(set) var accessibilityDeclined = false
 
     // MARK: State that outlives a relaunch
@@ -106,7 +106,7 @@ final class PermissionFlow {
         log("permission \(kind.rawValue): opened System Settings › \(pane)")
     }
 
-    /// "Not now" (App shots): take the window without its text.
+    /// "Not now" (Snapshots): take the window without its text.
     func decline() {
         guard kind == .accessibility else { return }
         accessibilityDeclined = true

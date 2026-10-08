@@ -6,12 +6,12 @@
  * Web → native: `window.webkit.messageHandlers.shots.postMessage(message)`.
  *   { type: 'ready' }
  *   { type: 'layout', mode: 'hidden' | 'strip' | 'panel', width, height, focus }
- *   { type: 'capture', kind: 'region' | 'app' }
+ *   { type: 'capture', kind: 'region' | 'snapshot' }
  *   { type: 'flightTarget', captureId, rect: { x, y, width, height } }   (window coordinates, CSS px)
  *   { type: 'flightLanded', captureId }
  *   { type: 'openSettings', pane: 'screen' | 'accessibility' }
  *   { type: 'clipboard', text?, files? }
- *   { type: 'settings', appShots }
+ *   { type: 'settings', snapshots }
  *
  * Native → web: functions on `window.shotsHud` (see NativeCalls).
  */
