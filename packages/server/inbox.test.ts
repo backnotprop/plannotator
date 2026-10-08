@@ -226,6 +226,11 @@ describe("startup, registry and health", () => {
     chmodSync(binary, 0o755);
     const server = await start(join(root, "data"), { version: "1.0.0", binaryPath: binary, healthTickMs: 50 });
     const health = () => fetch(`http://127.0.0.1:${server.port}/api/inbox/health`).then((r) => r.json());
+    // Wait for the first probe itself, not a fixed window: macOS assesses a
+    // freshly written executable on its first exec (about 90 ms here, far
+    // more when the machine is busy), so the probe can start after 300 ms.
+    const started = Date.now() + 5000;
+    while (Date.now() < started && !existsSync(runs)) await Bun.sleep(10);
     await Bun.sleep(300);
     expect((await health()).update).toBeNull();
     // Several ticks went by: an unchanged binary was run once, not every tick.
