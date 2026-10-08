@@ -225,7 +225,7 @@ describe("Plannotator Snapshots on OpenCode 2", () => {
     expect(snapshotSends(fake)).toEqual([expect.objectContaining({ sessionID: ROOT, text: sent.text, delivery: "steer" })]);
   });
 
-  test("the Mac app is missing: the notice says this session is linked and how to install the app", async () => {
+  test("a plannotator built without the Mac app: the notice says this session is linked and to reinstall", async () => {
     const hub = await world();
     process.env.PLANNOTATOR_BIN = stubAppMissingPlannotator();
     const fake = fakeOpenCode();

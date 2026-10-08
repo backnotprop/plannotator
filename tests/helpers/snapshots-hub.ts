@@ -117,7 +117,7 @@ export function tempSnapshotsDataDir(): string {
  * packages/server/snapshots/agent-link.test.ts keeps this equal to the CLI's text).
  */
 export const CLI_APP_MISSING_LINE =
-  "Plannotator Snapshots is not installed. Run 'plannotator snapshot install-app' to install it, or 'plannotator snapshot open' for the browser HUD.";
+  "Plannotator Snapshots is not installed, and this plannotator was built without it. Reinstall Plannotator with the install script (https://plannotator.ai/docs/getting-started/installation/), or run 'plannotator snapshot open' for the browser HUD.";
 
 /** A `plannotator` stand-in that answers `snapshot` the way the CLI does on a Mac without the app: that line on stderr, exit 1. Returns its path. */
 export function stubAppMissingPlannotator(): string {

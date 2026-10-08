@@ -61,11 +61,15 @@ export const SNAPSHOTS_LEASE_STALE_MS = 20_000;
 /** What a plannotator from before Snapshots answers `plannotator snapshot` with. */
 const OLDER_CLI = /unknown (sub)?command|no plan content in hook event/i;
 export const SNAPSHOTS_UPDATE_TEXT = "The plannotator on this machine has no Snapshots (an older version); update Plannotator.";
-/** What `plannotator snapshot` says when the Mac app is missing, after it summoned this session (so the session is linked). */
+/**
+ * What `plannotator snapshot` says when it summoned this session (so the session is linked) and then found no
+ * Mac app: only a plannotator built without the embedded app gets there (a release binary installs its own), so
+ * `install-app` cannot help; reinstalling can.
+ */
 const APP_MISSING = /Plannotator Snapshots is not installed/;
-/** The host's answer then: the session is linked, only the app is missing. Kept equal to the Claude Code mod's copy (apps/hook/hooks/mod/snapshots.ts). */
+/** The host's answer then. Kept equal to the Claude Code mod's copy (apps/hook/hooks/mod/snapshots.ts). */
 export const SNAPSHOTS_APP_MISSING_TEXT =
-  "This session is linked to Plannotator Snapshots, but the Mac app is not installed: run `plannotator snapshot install-app`.";
+  "This session is linked to Plannotator Snapshots, but this plannotator was built without the Mac app: reinstall it with the install script (https://plannotator.ai/docs/getting-started/installation/), or use `plannotator snapshot open` for the browser HUD.";
 
 export const SNAPSHOTS_MACOS_ONLY_TEXT =
   "Plannotator Snapshots captures the screen on macOS only for now. Here you can add an image with `plannotator snapshot add <file>` and open the HUD in a browser with `plannotator snapshot open`; a send from it still arrives in this session.";

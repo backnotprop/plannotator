@@ -61,6 +61,7 @@ import { discoverInboxTools } from './inbox'
 import { inboxAgentTool, type InboxToolInfo } from './inbox-contract'
 import { COMMANDS, dataDirOf, debugAppendArgv, isModCommand, waitArgv } from './launch'
 import { PLAN_TOOL } from './plan'
+import { MACOS_MARKER } from './snapshots'
 import { answerShellCall, SHELL_TOOL, shellTakeOver } from './take-over'
 import { PLANNOTATOR_TOOL_DESCRIPTION, PLANNOTATOR_TOOL_INPUT_SCHEMA, PLANNOTATOR_TOOL_NAME } from './tool'
 
@@ -256,7 +257,7 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
     agentTool: resolveAgentToolEnabled(await $.env.get('PLANNOTATOR_AGENT_TOOL'), configText),
     snapshots,
     // macOS, told by a file only macOS has (no process spawned).
-    snapshotsAutoLink: snapshots && (await $.fs.exists('/System/Library/CoreServices/SystemVersion.plist').catch(() => false)) === true,
+    snapshotsAutoLink: snapshots && (await $.fs.exists(MACOS_MARKER).catch(() => false)) === true,
     inboxTool: resolveInboxToolEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
   }
 }

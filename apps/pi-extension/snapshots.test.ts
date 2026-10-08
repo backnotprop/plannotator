@@ -191,7 +191,7 @@ describe("Plannotator Snapshots on Pi", () => {
 		expect((await hub.state()).connections).toEqual([]);
 	});
 
-	test("the Mac app is missing: the person reads that this session is linked and how to install the app", async () => {
+	test("a plannotator built without the Mac app: the person reads that this session is linked and to reinstall", async () => {
 		const { hub } = await world();
 		const fake = createPi();
 		setup(fake, { ...process.env, PLANNOTATOR_BIN: stubAppMissingPlannotator() });

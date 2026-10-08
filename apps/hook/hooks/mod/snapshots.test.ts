@@ -2,9 +2,9 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { PlannotatorMod } from './controller'
 import { resolveSnapshotsEnabled } from './enabled'
 import type { HttpResult } from './host'
-import { SNAPSHOTS_APP_MISSING_TEXT as SHARED_APP_MISSING_TEXT } from '../../../../packages/shared/snapshots/agent-link'
+import { SNAPSHOTS_APP_MISSING_TEXT as SHARED_APP_MISSING_TEXT, SNAPSHOTS_MACOS_ONLY_TEXT as SHARED_MACOS_ONLY_TEXT } from '../../../../packages/shared/snapshots/agent-link'
 import { CLI_APP_MISSING_LINE } from '../../../../tests/helpers/snapshots-hub'
-import { SNAPSHOTS_APP_MISSING_TEXT, SNAPSHOTS_UNDELIVERED_AFTER_MS, SNAPSHOTS_UPDATE_TEXT, SnapshotsLink, snapshotsSessionDirOf } from './snapshots'
+import { MACOS_MARKER, SNAPSHOTS_APP_MISSING_TEXT, SNAPSHOTS_MACOS_ONLY_TEXT, SNAPSHOTS_UNDELIVERED_AFTER_MS, SNAPSHOTS_UPDATE_TEXT, SnapshotsLink, snapshotsSessionDirOf } from './snapshots'
 import { fakeHost, type FakeHost } from './testing/fake-host'
 import { TurnTracker } from './turns'
 
@@ -225,17 +225,35 @@ function linkOn(host: FakeHost): SnapshotsLink {
 describe('/plannotator-snapshot in the mod', () => {
   // The plugin installs from main while the binary updates separately: an
   // older plannotator has no `snapshot`, and its raw refusal reads as a bug.
+  /** A fake host on macOS (the file only macOS has). */
+  const macHost = (): FakeHost => {
+    const host = fakeHost()
+    host.files.set(MACOS_MARKER, '')
+    return host
+  }
+
+  test('off macOS: the macOS-only text Pi and OpenCode give, no plannotator run, and this session links on demand', async () => {
+    // What regresses: on Linux the CLI's refusal (or an older binary's) reached the person as "update Plannotator".
+    const host = fakeHost()
+    const link = linkOn(host)
+    expect(await link.summon('')).toBe(SNAPSHOTS_MACOS_ONLY_TEXT)
+    expect(SNAPSHOTS_MACOS_ONLY_TEXT).toBe(SHARED_MACOS_ONLY_TEXT)
+    expect(host.runs.filter((call) => call.argv[1] === 'snapshot')).toEqual([])
+    expect((link as unknown as { started: boolean }).started).toBe(true)
+  })
+
   test('a plannotator from before Snapshots: the person is told to update', async () => {
     for (const stderr of ["Unknown command: snapshot\n\nRun 'plannotator --help' for the list of commands.\n", 'No plan content in hook event\n']) {
-      const host = fakeHost()
+      const host = macHost()
       host.onRun = (call) => (call.argv[1] === 'snapshot' ? { exitCode: 1, stdout: '', stderr } : undefined)
       expect(await linkOn(host).summon('')).toBe(SNAPSHOTS_UPDATE_TEXT)
     }
   })
 
-  test('the Mac app is missing: the session is linked and the person is told how to install the app', async () => {
-    // The CLI summoned this session before it looked for the app; "could not start" would be untrue.
-    const host = fakeHost()
+  test('a plannotator built without the Mac app: the session is linked and the person is told to reinstall', async () => {
+    // The CLI summoned this session before it looked for the app; "could not start" would be untrue,
+    // and `install-app` cannot help a binary with nothing embedded.
+    const host = macHost()
     host.onRun = (call) => (call.argv[1] === 'snapshot' ? { exitCode: 1, stdout: '', stderr: `${CLI_APP_MISSING_LINE}\n` } : undefined)
     expect(await linkOn(host).summon('')).toBe(SNAPSHOTS_APP_MISSING_TEXT)
     // One sentence for every host: the mod's copy equals Pi's and OpenCode's.

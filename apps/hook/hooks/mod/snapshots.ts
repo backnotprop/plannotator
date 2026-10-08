@@ -60,11 +60,16 @@ export function snapshotsClaimArgv(dir: string, claimant: string): string[] {
 /** What a plannotator from before Snapshots answers `plannotator snapshot` with. */
 const OLDER_CLI = /unknown (sub)?command|no plan content in hook event/i
 export const SNAPSHOTS_UPDATE_TEXT = 'The plannotator on this machine has no Snapshots (an older version); update Plannotator.'
-/** What `plannotator snapshot` says when the Mac app is missing, after it summoned this session (so the session is linked). */
+/** A file only macOS has: how the mod tells macOS without spawning a process. */
+export const MACOS_MARKER = '/System/Library/CoreServices/SystemVersion.plist'
+/** Off macOS, as Pi and OpenCode say it. A copy of SNAPSHOTS_MACOS_ONLY_TEXT in packages/shared/snapshots/agent-link.ts; snapshots.test.ts keeps them equal. */
+export const SNAPSHOTS_MACOS_ONLY_TEXT =
+  'Plannotator Snapshots captures the screen on macOS only for now. Here you can add an image with `plannotator snapshot add <file>` and open the HUD in a browser with `plannotator snapshot open`; a send from it still arrives in this session.'
+/** What `plannotator snapshot` says when it summoned this session and then found no Mac app (a plannotator built without it). */
 const APP_MISSING = /Plannotator Snapshots is not installed/
 /** The answer then. A copy of SNAPSHOTS_APP_MISSING_TEXT in packages/shared/snapshots/agent-link.ts (a hooks module imports only its own files); snapshots.test.ts keeps them equal. */
 export const SNAPSHOTS_APP_MISSING_TEXT =
-  'This session is linked to Plannotator Snapshots, but the Mac app is not installed: run `plannotator snapshot install-app`.'
+  'This session is linked to Plannotator Snapshots, but this plannotator was built without the Mac app: reinstall it with the install script (https://plannotator.ai/docs/getting-started/installation/), or use `plannotator snapshot open` for the browser HUD.'
 
 interface HubEntry {
   url: string
@@ -220,6 +225,11 @@ export class SnapshotsLink {
     const extra = args.split(/\s+/).filter((word) => word === '--app')
     // The person is here: this process links and delivers.
     await this.touch()
+    // Capture is macOS only: elsewhere explain, run nothing, and link this session on demand so a send still arrives.
+    if (!(await this.options.host.exists(MACOS_MARKER).catch(() => false))) {
+      this.start()
+      return SNAPSHOTS_MACOS_ONLY_TEXT
+    }
     const result = await this.options.host
       .run(['plannotator', 'snapshot', '--session', `claude-code:${this.options.sessionId}`, ...extra], { timeoutMs: 30_000 })
       .catch((error: unknown) => ({ exitCode: 1, stdout: '', stderr: error instanceof Error ? error.message : String(error) }))

@@ -1,6 +1,7 @@
 /**
  * `plannotator snapshot`: Plannotator Snapshots, the native capture HUD.
- * Capture is macOS only; `add`, `open`, `status`, `stop` and `hub` run anywhere.
+ * Capture is macOS only, and so is `add --screen` (macOS's screencapture); `add <file>`, `open`,
+ * `status`, `stop` and `hub` run anywhere.
  *
  *   plannotator snapshot [--app] [--session <host>:<id>] [--no-capture]
  *       Start the hub and the Plannotator Snapshots app if needed and open the
@@ -349,7 +350,7 @@ export async function runSnapshotCommand(args: string[]): Promise<never> {
   const app = resolveSnapshotsApp();
   if (!app) {
     fail(
-      `${SNAPSHOTS_APP_NAME} is not installed. Run 'plannotator snapshot install-app' to install it, or 'plannotator snapshot open' for the browser HUD.`,
+      `${SNAPSHOTS_APP_NAME} is not installed, and this plannotator was built without it. Reinstall Plannotator with the install script (https://plannotator.ai/docs/getting-started/installation/), or run 'plannotator snapshot open' for the browser HUD.`,
     );
   }
   try {

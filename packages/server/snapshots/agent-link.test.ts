@@ -216,12 +216,14 @@ describe("Snapshots agent link", () => {
     expect(answer).toEqual({ ok: false, text: SNAPSHOTS_UPDATE_TEXT });
   });
 
-  test("the Mac app is missing: say the session is linked and how to install the app, not \"could not start\"", async () => {
+  test("a plannotator built without the Mac app: say the session is linked and to reinstall, not \"could not start\"", async () => {
     // The CLI summons the session before it looks for the app, so the session IS linked.
     const bin = stubAppMissingPlannotator();
     const answer = await summonSnapshots({ dataDir: "/nonexistent", host: "pi", sessionId: "x", args: "", cwd: process.cwd(), platform: "darwin", env: { ...process.env, PLANNOTATOR_BIN: bin } });
     expect(answer).toEqual({ ok: false, text: SNAPSHOTS_APP_MISSING_TEXT });
-    expect(SNAPSHOTS_APP_MISSING_TEXT).toContain("`plannotator snapshot install-app`");
+    // `install-app` cannot help a binary with nothing embedded: never send the person in a circle.
+    expect(SNAPSHOTS_APP_MISSING_TEXT).not.toContain("install-app");
+    expect(SNAPSHOTS_APP_MISSING_TEXT).toContain("install script");
   });
 
   test("the stub's line is the CLI's own text for a missing app", async () => {

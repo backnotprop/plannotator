@@ -200,7 +200,7 @@ Plannotator Snapshots lets the person show you their screen: they freeze it, dra
 - `--wait` blocks until the person presses Send, then prints the message on stdout and exits 0. Use it when nothing else delivers to you; run it with a long timeout or in the background.
 - In Claude Code (with the Plannotator mod), Pi and OpenCode, `/plannotator-snapshot` opens it without blocking and the send arrives in the session as a new message; the person can also ask the session about a snapshot from the HUD. Do not run `--wait` there. `PLANNOTATOR_SNAPSHOTS=0` or `{ "snapshots": false }` turns these integrations off.
 - `--session <host>:<id>` names the session that receives the send; hosts pass their own. Never invent one.
-- `add` registers an image file (`-` reads stdin, `--screen` captures the whole display) as a snapshot; `open` opens the HUD in a browser; `status` shows the hub, the app and connected sessions; `stop` stops the local hub; `install-app` (re)installs the app; `hub` runs the local hub (`--background` detaches). These work without the app, which helps off macOS.
+- `add` registers an image file (`-` reads stdin, `--screen` captures the whole display) as a snapshot; `open` opens the HUD in a browser; `status` shows the hub, the app and connected sessions; `stop` stops the local hub; `install-app` (re)installs the app; `hub` runs the local hub (`--background` detaches). `add <file>`, `open`, `status`, `stop` and `hub` work without the app and off macOS; `add --screen` uses macOS's `screencapture`, so it needs macOS.
 
 ## Other subcommands
 

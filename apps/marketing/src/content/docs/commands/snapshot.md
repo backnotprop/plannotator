@@ -72,10 +72,10 @@ The hotkeys need no Accessibility or Input Monitoring permission.
 | `plannotator snapshot open` | Open the HUD in your browser |
 | `plannotator snapshot status` | Show the hub, the app and the connected sessions |
 | `plannotator snapshot stop` | Stop the local hub |
-| `plannotator snapshot install-app` | Install the app into `~/Applications`. It never replaces a newer build unless you add `--force` |
+| `plannotator snapshot install-app` | Install the app that ships inside the macOS `plannotator` binary into `~/Applications`. It never replaces a newer build unless you add `--force` |
 | `plannotator snapshot hub` | Run the local hub in this terminal (`--background` detaches it) |
 
-`add`, `open`, `status`, `stop` and `hub` also work off macOS, without the app.
+`add <file>`, `open`, `status`, `stop` and `hub` also work off macOS and without the app. `add --screen` uses macOS's `screencapture`, so it needs macOS.
 
 ## Turning it off
 
