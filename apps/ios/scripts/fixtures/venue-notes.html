@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Venue notes</title>
+<!-- The proof's: a page the ticket page embeds from its own folder, which tries to phone home. -->
+<style>
+  body { margin: 0; color: #a99ccf; background: #0e0b1c; font: 600 12.5px/1.4 -apple-system, system-ui, sans-serif; }
+</style>
+</head>
+<body>
+<p id="note">Lift to the roof from the Pier 9 lobby.</p>
+<script>
+  var beacon = '__PROOF_BEACON__';
+  new Image().src = beacon + '?via=image';
+  fetch(beacon + '?via=fetch', { mode: 'no-cors' }).catch(function () {});
+  document.getElementById('note').textContent = 'Lift to the roof from the Pier 9 lobby. Notes ran.';
+</script>
+</body>
+</html>

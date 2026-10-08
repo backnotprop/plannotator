@@ -143,6 +143,7 @@ async function more(): Promise<Record<string, string>> {
 // M2: one message with three files to comment on (the record's 4.1, 4.3 and 4.4).
 const fixtures = join(repo, 'apps/ios/scripts/fixtures');
 let filesAgent: SimAgent | null = null;
+const beacons: string[] = [];
 let planPath = '';
 
 async function attach(): Promise<Record<string, string>> {
@@ -156,6 +157,8 @@ async function attach(): Promise<Record<string, string>> {
   ] as const) copyFileSync(join(fixtures, from), to);
   // The ticket page's photos, from its own folder: one name with a space, one with an accent.
   cpSync(join(fixtures, 'going'), join(project, 'going'), { recursive: true });
+  // A page the ticket page embeds from its folder, which tries to reach this script's beacon.
+  writeFileSync(join(project, 'venue-notes.html'), readFileSync(join(fixtures, 'venue-notes.html'), 'utf8').replace('__PROOF_BEACON__', `http://127.0.0.1:${control.port}/beacon`));
   filesAgent = await agent('Claude Code', 'claude-code');
   const sent = await filesAgent.send({
     project_path: project,
@@ -234,6 +237,12 @@ const control = Bun.serve({
           return Response.json(await more());
         case '/attach':
           return Response.json(await attach());
+        case '/beacon':
+          // Anything an agent's page managed to send out of the phone's surface.
+          beacons.push(new URL(request.url).search);
+          return new Response('', { status: 204 });
+        case '/beacons':
+          return Response.json({ count: beacons.length, hits: beacons });
         case '/edit-plan': {
           // The agent edits the plan after the person commented: the file on disk is no longer what was sent.
           const text = readFileSync(planPath, 'utf8').replace('at the end of the first week.', 'at the end of the first two weeks.');

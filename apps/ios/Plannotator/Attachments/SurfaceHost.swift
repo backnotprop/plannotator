@@ -87,12 +87,31 @@ final class SurfaceHost: NSObject {
         #endif
     }
 
-    /// Loads the surface once; later calls do nothing.
+    /// Loads the surface once; later calls do nothing. The web view never
+    /// reaches the network: every http and https load is blocked by a content
+    /// rule list before the surface loads (Safari View Controller, a separate
+    /// view, opens links).
     func warm() {
         guard !loaded else { return }
         loaded = true
-        webView.load(URLRequest(url: Self.surfaceURL))
+        Task {
+            if let rules = try? await WKContentRuleListStore.default().compileContentRuleList(
+                forIdentifier: "plannotator-surface-offline", encodedContentRuleList: Self.offlineRules) {
+                webView.configuration.userContentController.add(rules)
+            }
+            webView.load(URLRequest(url: Self.surfaceURL))
+        }
     }
+
+    /// Every http and https load is blocked, except the request to open a new
+    /// window: that is how a tapped link in an agent's page reaches
+    /// `createWebViewWith`, which never makes a web view for it.
+    static let offlineRules = #"[{"trigger":{"url-filter":"^https?://"},"action":{"type":"block"}},{"trigger":{"url-filter":"^https?://","resource-type":["popup"]},"action":{"type":"ignore-previous-rules"}}]"#
+
+    /// The policy every file of an agent's page folder is served under: the
+    /// surface's own (`apps/inbox/surface.html`), so a page the agent's page
+    /// embeds from its folder is as offline as the page itself.
+    static let assetPolicy = "default-src 'none'; script-src 'unsafe-inline' plannotator-asset:; style-src 'unsafe-inline' plannotator-asset: data:; img-src plannotator-asset: data: blob:; font-src plannotator-asset: data:; media-src plannotator-asset: data: blob:; frame-src plannotator-asset: about: data: blob:; worker-src blob:; connect-src 'none'; base-uri plannotator-asset:; form-action 'none'"
 
     func whenReady() async {
         warm()
@@ -347,7 +366,10 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler {
             // A stopped task must not be answered.
             guard let self, self.running.removeValue(forKey: id) != nil else { return }
             if let result {
-                task.didReceive(HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": result.mimeType])!)
+                task.didReceive(HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: [
+                    "Content-Type": result.mimeType,
+                    "Content-Security-Policy": SurfaceHost.assetPolicy,
+                ])!)
                 task.didReceive(result.data)
                 task.didFinish()
             } else {

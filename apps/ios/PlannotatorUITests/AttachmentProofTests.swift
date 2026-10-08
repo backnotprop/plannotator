@@ -96,6 +96,8 @@ final class AttachmentProofTests: ProofCase {
         expect(tickets, "the ticket page")
         // The page's own folder: photos named with a space ("dj tern.png") and an accent ("joão.png") load.
         expect(app.webViews.staticTexts["Photos: 3 of 3"], "all three photos from the page's folder")
+        // A page it embeds from its folder runs, and its image beacon and fetch reach nothing.
+        expect(app.webViews.staticTexts["Lift to the roof from the Pier 9 lobby. Notes ran."], "the embedded page's script")
         try await Task.sleep(for: .seconds(4))
         XCTAssertFalse(element("comment-panel").exists, "a forged message opened a composer")
         let probe = element("bridge-dropped")
@@ -105,6 +107,8 @@ final class AttachmentProofTests: ProofCase {
         XCTAssertGreaterThan(counts[1], 0, "a pin the page forged through the viewer's protocol is dropped without a touch")
         XCTAssertTrue(tickets.exists, "the scripted navigation was cancelled")
         try await expectNothingOpened()
+        let beacons = try await control.get("/beacons")
+        XCTAssertEqual(beacons["count"] as? Int, 0, "the embedded page phoned home: \(beacons)")
         try await control.shot("4.3-page")
 
         // A pin by touch, moved to its parent and back to the child, then saved.
