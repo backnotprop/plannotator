@@ -8,14 +8,15 @@
  * everything agents sent, so a wide bind with no auth is not acceptable. A
  * paired phone reaches it through the device door only, over a path the
  * person switched on ("Reach from my tailnet": a door-only listener that
- * `tailscale serve` points at, inbox-devices.ts). Port: the
+ * `tailscale serve` points at, inbox-devices.ts; "Reach from this Wi-Fi": a
+ * door-only TLS listener on every interface, inbox-lan.ts). Port: the
  * last one it had (from the registry) first, else random; never 19432.
  *
  * Security, on every request, in order:
  *  1. The Host allowlist (request-host-guard.ts), local rule: loopback names.
  *     The device door, `/api/inbox/device/*` (no Origin, a phone's bearer
- *     token, an allowlist), sits beside the window here; the tailnet reaches
- *     it through its own door-only listener (inbox-devices.ts), never here.
+ *     token, an allowlist), sits beside the window here; the tailnet and the
+ *     Wi-Fi reach it through their own door-only listeners, never here.
  *  2. `/mcp`: any Origin is refused (a browser is never an MCP client here).
  *  3. Connection routes (`/api/inbox/control/*`, `/api/inbox/bridge/*`): a
  *     loopback Host naming this port, no Origin, and the registry's bearer
@@ -845,7 +846,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const attached = await attachmentRoutes(req, url);
       if (attached) return attached;
 
-      // Phones: pairing, the device list and revoke, the tailnet switch.
+      // Phones: pairing, the device list and revoke, the tailnet and Wi-Fi switches.
       const phoneRoute = await phones.windowRoute(req, url);
       if (phoneRoute) return phoneRoute;
 
@@ -873,6 +874,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     serverSession,
     startedAt: new Date().toISOString(),
     ...(previous?.tailnet ? { tailnet: previous.tailnet } : {}),
+    ...(previous?.lan ? { lan: previous.lan } : {}),
   };
   writeInboxRegistry(dataDir, registry);
   phones = createInboxDevices({
@@ -886,6 +888,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     tailscale: options.tailscale,
   });
   phones.startTailnet();
+  phones.startLan();
 
   const binaryPath = options.binaryPath !== undefined ? options.binaryPath : version !== "dev" ? process.execPath : null;
   let tick: ReturnType<typeof setInterval> | null = null;
@@ -924,8 +927,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (tick) clearInterval(tick);
     void mcp.close().catch(() => {});
     server.stop(true);
-    // The tailnet mapping and the door listener, before a restart starts the new run.
+    // The tailnet mapping and the door listener, the Wi-Fi listener and its
+    // Bonjour record, before a restart starts the new run.
     phones.stopTailnet();
+    phones.stopLan();
   };
 
   return { port, url: baseUrl, token, serverSession, portChanged, store, registry, stop };

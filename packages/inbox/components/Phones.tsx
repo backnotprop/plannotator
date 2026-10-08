@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { inboxApi, type PairedDevice, type PairingOffer, type TailnetState } from '../api';
+import { inboxApi, type LanState, type PairedDevice, type PairingOffer, type TailnetState } from '../api';
 import { shortTime } from '../format';
 import { Icon } from '../icons';
 import { qrModules } from '../qr';
@@ -18,6 +18,11 @@ function QrCode({ link }: { link: string }) {
       <path d={path.d} fill="#000" />
     </svg>
   );
+}
+
+/** The certificate's SHA-256 in groups of four, for a person comparing it by eye. */
+function grouped(hex: string): string {
+  return hex.match(/.{1,4}/g)?.join(' ') ?? hex;
 }
 
 function countdown(ms: number): string {
@@ -53,13 +58,15 @@ function RemoveLink({ name, onRemove }: { name: string; onRemove: () => Promise<
 
 /**
  * Phones (not in the window's design record: OWNER-ITEMS item 23, built in
- * Settings' own style): "Reach from my tailnet", "Pair a phone" with the QR
+ * Settings' own style): "Reach from this Wi-Fi" and "Reach from my tailnet",
+ * in the order the iPhone's 9.2 lists them, "Pair a phone" with the QR
  * code and the six digits (the panel the iPhone's 1.2 render points at), and
  * the paired phones with Remove.
  */
 export function PhonesBlock() {
   const [devices, setDevices] = useState<PairedDevice[] | null>(null);
   const [tailnet, setTailnet] = useState<TailnetState | null>(null);
+  const [lan, setLan] = useState<LanState | null>(null);
   const [offer, setOffer] = useState<PairingOffer | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [paired, setPaired] = useState<string | null>(null);
@@ -80,6 +87,10 @@ export function PhonesBlock() {
     inboxApi
       .tailnet()
       .then(({ tailnet: state }) => setTailnet(state))
+      .catch(() => {});
+    inboxApi
+      .lan()
+      .then(({ lan: state }) => setLan(state))
       .catch(() => {});
   }, [readDevices]);
 
@@ -127,9 +138,31 @@ export function PhonesBlock() {
       const { tailnet: state } = await inboxApi.setTailnet(on);
       setTailnet(state);
       // The QR carries the address: a code made before the switch moved is made again.
-      if (offer) setOffer(await inboxApi.pairPhone());
+      if (offer) {
+        setOffer(await inboxApi.pairPhone());
+        setNow(Date.now());
+      }
     } catch (cause) {
       setTailnet((current) => (current ? { ...current, on: false, address: null } : current));
+      setError(cause instanceof Error ? cause.message : 'The switch was not saved.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const switchLan = async (on: boolean) => {
+    setError(null);
+    setBusy(true);
+    try {
+      const { lan: state } = await inboxApi.setLan(on);
+      setLan(state);
+      // The QR carries the address and the fingerprint: a code made before the switch moved is made again.
+      if (offer) {
+        setOffer(await inboxApi.pairPhone());
+        setNow(Date.now());
+      }
+    } catch (cause) {
+      setLan((current) => (current ? { ...current, on: false, address: null, fingerprint: null, bonjour: false } : current));
       setError(cause instanceof Error ? cause.message : 'The switch was not saved.');
     } finally {
       setBusy(false);
@@ -149,11 +182,42 @@ export function PhonesBlock() {
   const left = offer ? Date.parse(offer.offer.expires_at) - now : 0;
   const expired = offer !== null && left <= 0;
   const tailnetOn = tailnet?.on === true && tailnet.address !== null;
+  // On while the listener runs, even with no network address for a moment (the error says so).
+  const lanOn = lan?.on === true && lan.fingerprint !== null;
 
   return (
     <div className="ib-sblock" data-settings-phones="">
       <h2>Phones</h2>
       <p>Read and answer the Inbox from Plannotator on your iPhone. Each phone gets its own key, and Remove takes it back.</p>
+      <div className="ib-srow" data-lan={lanOn ? 'on' : 'off'}>
+        Reach from this Wi-Fi
+        <span className="ib-d" data-lan-address={lan?.address ?? ''}>
+          {lanOn ? (lan!.address ?? 'No network address') : 'Phones on the same network, over an encrypted connection they check'}
+        </span>
+        <span className="ib-r">
+          <button
+            type="button"
+            role="switch"
+            className="ib-sw"
+            aria-checked={lanOn}
+            aria-label="Reach from this Wi-Fi"
+            disabled={!lan || busy}
+            onClick={() => void switchLan(!lanOn)}
+          />
+        </span>
+      </div>
+      {lanOn && (
+        <div className="ib-fp" data-lan-fingerprint={lan!.fingerprint!}>
+          Certificate SHA-256 <span>{grouped(lan!.fingerprint!)}</span>
+        </div>
+      )}
+      {lanOn && !lan!.bonjour && (
+        <div className="ib-note" data-lan-no-bonjour="">
+          <Icon name="info" />
+          Phones cannot find this computer on their own here (no dns-sd or avahi-publish). On the phone, type the address.
+        </div>
+      )}
+      {lan?.on && lan.error && <div className="ib-error">{lan.error}</div>}
       <div className="ib-srow" data-tailnet={tailnetOn ? 'on' : 'off'}>
         Reach from my tailnet
         <span className="ib-d" data-tailnet-address={tailnet?.address ?? ''}>
@@ -194,9 +258,12 @@ export function PhonesBlock() {
               </button>
             </div>
             {!offer.addresses.tailnet && !offer.addresses.lan && (
-              <div className="ib-note">
+              <div className="ib-note" data-pair-no-path="">
                 <Icon name="info" />
-                Your phone needs a way to reach this computer: turn on Reach from my tailnet.
+                Your phone needs a way to reach this computer.
+                <button type="button" className="ib-btn ib-sm" disabled={busy || !lan} onClick={() => void switchLan(true)}>
+                  Turn on Reach from this Wi-Fi
+                </button>
               </div>
             )}
           </div>

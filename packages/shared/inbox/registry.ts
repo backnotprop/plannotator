@@ -1,7 +1,7 @@
 /**
  * Plannotator Inbox registry: `${dataDir}/inbox/inbox.json`.
  *
- * `{ v, pid, port, url, version, token, serverSession, startedAt, tailnet? }`, mode
+ * `{ v, pid, port, url, version, token, serverSession, startedAt, tailnet?, lan? }`, mode
  * 0600, written by the Inbox server when it starts and LEFT IN PLACE when it
  * exits, so a person who ran the Inbox once has it found by every agent
  * session, and a caller can start it again on the port it last had.
@@ -47,6 +47,12 @@ export interface InboxRegistryEntry {
    * port it publishes (reused at the next start when free). Absent: off.
    */
   tailnet?: { https_port: number; door_port?: number };
+  /**
+   * "Reach from this Wi-Fi" is on (adr/implementation/inbox-mobile.md,
+   * section 3): the LAN listener's port, reused at the next start when free.
+   * Absent: off.
+   */
+  lan?: { port: number };
 }
 
 export function inboxRegistryPath(dataDir: string): string {

@@ -698,7 +698,6 @@ describe("the device door, in process", () => {
       dataDir,
       serverSession: "0".repeat(32),
       port: () => 1,
-      previousPort: null,
       registry: () => ({ v: 1, pid: process.pid, port: 1, url: "", version: "dev", token: "t".repeat(64), serverSession: "0".repeat(32), startedAt: "" }),
       readBody: async (req) => (await req.json()) as Record<string, unknown>,
       dispatch: async () => {

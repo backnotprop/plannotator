@@ -24,6 +24,10 @@
  * not a header, keeps tailnet requests on the door. Kept in inbox.json as
  * `tailnet: { https_port, door_port }`; published at each start, taken down
  * (listener and mapping) when the switch goes off and at each clean stop.
+ *
+ * The Wi-Fi. "Reach from this Wi-Fi" opens a TLS listener on every interface
+ * that serves the same door-only handler, with a pinned self-signed
+ * certificate and a Bonjour record (inbox-lan.ts, contract section 3).
  */
 
 import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
@@ -42,6 +46,7 @@ import {
 import { readInboxRegistry, writeInboxRegistry, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { runTailscale, serveStatusProxy, TAILSCALE_SERVE_TIMEOUT_MS, type TailscaleRunner } from "@plannotator/shared/tailscale";
+import { createInboxLan, LanUnavailableError } from "./inbox-lan";
 import { enableTailscaleServe, removeTailscaleServe, TailscaleServeError } from "./tailscale-serve";
 
 /** The pairing offer's lifetime (limit, contract section 1): long enough to fetch a phone. */
@@ -202,7 +207,10 @@ export function createInboxDevices(context: InboxDevicesContext) {
   const tailnet: TailnetState = { on: false, address: null, error: null };
 
   const computer = () => ({ name: (name ??= computerName()) });
-  const addresses = () => ({ tailnet: tailnet.address, lan: null, fingerprint: null });
+  const addresses = () => {
+    const wifi = lan.state();
+    return { tailnet: tailnet.address, lan: wifi.address, fingerprint: wifi.address ? wifi.fingerprint : null };
+  };
 
   const openOffer = (): Offer | null => {
     if (offer && offer.expiresAt <= now().getTime()) offer = null;
@@ -223,14 +231,16 @@ export function createInboxDevices(context: InboxDevicesContext) {
     const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
     const expiresAt = now().getTime() + PAIRING_OFFER_MS;
     offer = { secret, code, expiresAt, wrong: 0 };
+    const reach = addresses();
     const params = [`v=1`, `name=${encodeURIComponent(computer().name)}`];
-    if (tailnet.address) params.push(`tailnet=${encodeURIComponent(tailnet.address)}`);
+    if (reach.tailnet) params.push(`tailnet=${encodeURIComponent(reach.tailnet)}`);
+    if (reach.lan && reach.fingerprint) params.push(`lan=${encodeURIComponent(reach.lan)}`, `fp=${reach.fingerprint}`);
     params.push(`secret=${secret}`, `code=${code}`);
     return {
       offer: { code, expires_at: new Date(expiresAt).toISOString() },
       link: `plannotator://pair?${params.join("&")}`,
       computer: computer(),
-      addresses: addresses(),
+      addresses: reach,
     };
   };
 
@@ -375,6 +385,25 @@ export function createInboxDevices(context: InboxDevicesContext) {
     if (url.pathname !== "/api/inbox/device" && !url.pathname.startsWith(DOOR_PREFIX)) return refuse(404, "device_route_not_found", "Not a phone route.");
     return door(req, url);
   };
+
+  // ── The Wi-Fi (contract section 3): the same door-only handler, over TLS on every interface. ──
+
+  /** Keep "Reach from this Wi-Fi" in inbox.json (and this run's entry): `lan: { port }` while on. */
+  const saveLan = (port: number | null) => {
+    const entry = { ...(readInboxRegistry(context.dataDir) ?? context.registry()) };
+    for (const target of [entry, context.registry()]) {
+      if (port) target.lan = { port };
+      else delete target.lan;
+    }
+    writeInboxRegistry(context.dataDir, entry);
+  };
+  const lan = createInboxLan({
+    dataDir: context.dataDir,
+    savedPort: () => context.registry().lan?.port ?? null,
+    savePort: saveLan,
+    name: () => computer().name,
+    fetch: doorOnly,
+  });
 
   /** The door listener, on the port it had last time when it is free. */
   const openDoorListener = (): number => {
@@ -545,8 +574,22 @@ export function createInboxDevices(context: InboxDevicesContext) {
       if (typeof body.on !== "boolean") throw new InboxError("validation_error", "on: must be a boolean.", { field: "on" });
       return setTailnet(body.on);
     }
+    if (path === "/api/inbox/lan") {
+      if (req.method === "GET") return json({ lan: lan.state() });
+      if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
+      const body = await context.readBody(req);
+      const stale = staleTab(body);
+      if (stale) return stale;
+      if (typeof body.on !== "boolean") throw new InboxError("validation_error", "on: must be a boolean.", { field: "on" });
+      try {
+        return json({ lan: lan.set(body.on) });
+      } catch (error) {
+        if (error instanceof LanUnavailableError) return refuse(409, "lan_unavailable", error.message);
+        throw error;
+      }
+    }
     return null;
   };
 
-  return { door, windowRoute, startTailnet, stopTailnet, devices };
+  return { door, windowRoute, startTailnet, stopTailnet, startLan: lan.start, stopLan: lan.stop, devices };
 }

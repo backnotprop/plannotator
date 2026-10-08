@@ -155,6 +155,15 @@ export interface TailnetState {
   error: string | null;
 }
 
+/** "Reach from this Wi-Fi": the switch, the address and the certificate's SHA-256 while it works, whether phones can find it by Bonjour, and why not when it does not. */
+export interface LanState {
+  on: boolean;
+  address: string | null;
+  fingerprint: string | null;
+  bonjour: boolean;
+  error: string | null;
+}
+
 export class InboxApiError extends Error {
   constructor(
     readonly status: number,
@@ -252,12 +261,14 @@ export const inboxApi = {
   sessions: (threadId: string) => get<LiveSessionsModel>(`/api/inbox/threads/${encodeURIComponent(threadId)}/sessions`),
   newMessage: (threadId: string, input: { session: string; body: string; idempotency_key: string }) =>
     post<{ message: InboxMessage; replayed: boolean }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/message`, input),
-  // Phones: pairing, the paired devices, the tailnet switch (packages/server/inbox-devices.ts).
+  // Phones: pairing, the paired devices, the tailnet and Wi-Fi switches (packages/server/inbox-devices.ts).
   pairPhone: () => post<PairingOffer>('/api/inbox/pairing', {}),
   devices: () => get<{ devices: PairedDevice[] }>('/api/inbox/devices'),
   removeDevice: (id: string) => post<{ device: PairedDevice }>(`/api/inbox/devices/${encodeURIComponent(id)}/revoke`, {}),
   tailnet: () => get<{ tailnet: TailnetState }>('/api/inbox/tailnet'),
   setTailnet: (on: boolean) => post<{ tailnet: TailnetState }>('/api/inbox/tailnet', { on }),
+  lan: () => get<{ lan: LanState }>('/api/inbox/lan'),
+  setLan: (on: boolean) => post<{ lan: LanState }>('/api/inbox/lan', { on }),
   deleteProject: (projectId: string) => post<{ store: SettingsModel['store'] }>(`/api/inbox/projects/${encodeURIComponent(projectId)}/delete`, {}),
 };
 
