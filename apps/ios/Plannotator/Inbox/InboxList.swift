@@ -31,17 +31,20 @@ struct InboxList: View {
     @ViewBuilder private var content: some View {
         if session.status == .removed {
             ContentUnavailableView {
-                Label("This phone was removed", systemImage: "iphone.slash")
+                Label(session.removedTitle, systemImage: session.removedSymbol)
             } description: {
-                Text("It was removed from the Inbox on \(session.source.name). Pair it again to keep answering.")
+                Text(session.removedHelp)
             } actions: {
-                Button("Pair Again") { model.pairing = true }.buttonStyle(.borderedProminent)
+                Button(session.removedAction) {
+                    if session.isWorkspaces { Task { await model.signInToWorkspaces() } } else { model.pairing = true }
+                }
+                .buttonStyle(.borderedProminent)
             }
             .background(Color.screen)
         } else if let list = session.list {
             if list.sections.allSatisfy(\.threads.isEmpty) {
                 ScrollView {
-                    ContentUnavailableView("Nothing waiting", systemImage: "tray", description: Text("When an agent writes to the Inbox on \(session.source.name), it shows up here."))
+                    ContentUnavailableView("Nothing waiting", systemImage: "tray", description: Text(session.emptyHelp))
                         .padding(.top, 80)
                 }
                 .refreshable { await session.refresh() }
@@ -51,9 +54,9 @@ struct InboxList: View {
             }
         } else if session.status == .unreachable {
             ContentUnavailableView {
-                Label("Can't reach \(session.source.name)", systemImage: "wifi.slash")
+                Label("Can't reach \(session.name)", systemImage: "wifi.slash")
             } description: {
-                Text("Check that the Inbox is running on your computer and that Tailscale is on.")
+                Text(session.unreachableHelp)
             } actions: {
                 Button("Try Again") { Task { await session.refresh() } }
             }
@@ -138,12 +141,14 @@ struct InboxList: View {
                 Label("Resolve", systemImage: "archivebox")
             }
             .tint(.tint)
-            Button {
-                deleting = row
-            } label: {
-                Label("Delete", systemImage: "trash")
+            if session.canDelete {
+                Button {
+                    deleting = row
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .tint(.destructive)
             }
-            .tint(.destructive)
         }
     }
 

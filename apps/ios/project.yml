@@ -44,6 +44,9 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: ai.plannotator.app.pair
             CFBundleURLSchemes: [plannotator]
+        # The Workspaces source (M7): the origin this build signs in to, or
+        # empty for no Workspaces source at all. See WORKSPACES_ORIGIN below.
+        WorkspacesOrigin: $(WORKSPACES_ORIGIN)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.plannotator.app
@@ -52,6 +55,15 @@ targets:
         SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
         SWIFT_APPROACHABLE_CONCURRENCY: YES
         ENABLE_PREVIEWS: YES
+      # The Workspaces source is in Debug and TestFlight builds and out of the
+      # App Store build (the first App Store release is local only). Release
+      # leaves it empty; a TestFlight archive sets it on the command line
+      # (`xcodebuild archive ... WORKSPACES_ORIGIN=https://staging.workspaces.plannotator.ai`).
+      configs:
+        Debug:
+          WORKSPACES_ORIGIN: https://staging.workspaces.plannotator.ai
+        Release:
+          WORKSPACES_ORIGIN: ""
   PlannotatorUITests:
     type: bundle.ui-testing
     platform: iOS

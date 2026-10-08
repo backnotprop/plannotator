@@ -51,5 +51,7 @@
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
+	<key>WorkspacesOrigin</key>
+	<string>$(WORKSPACES_ORIGIN)</string>
 </dict>
 </plist>
