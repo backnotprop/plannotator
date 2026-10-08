@@ -1876,7 +1876,7 @@ More rules:
 8. Anything else: Quiet.
 
 Sorting and the rest:
-- Stopped and Waiting sort oldest waiting first. Holding sorts most held-up first. Sent, New and Quiet sort newest activity first.
+- Every section sorts newest first by the thread's latest message (`last_at`, the time the row shows); ties on the thread id (owner ruling 2026-10-08).
 - `unread` (bold) means Stopped, Holding, Waiting or New.
 - "Looked" is `POST /api/inbox/threads/:id/seen`, sent when a thread opens. The person's own reply also counts.
 - "The agent read it" is recorded when `wait_for_reply` returns the person's reply or `read_thread` reads the thread, which moves a Sent row to Quiet. Any agent's read counts.
@@ -2094,6 +2094,7 @@ Sorting and the rest:
   - `notifications.spec.ts`
   - `inbox-attachments.spec.ts`
   - `inbox-guides.spec.ts`
+  - `inbox-order.spec.ts` (three agents' questions read newest first in Waiting on you; a reply moves its row to Sent)
   - `inbox-phones.spec.ts` (Pair a phone, the device list and Remove; Reach from this Wi-Fi with a pinned phone pairing over the LAN, the no-Bonjour note and `openssl` failing; with `PLANNOTATOR_E2E_TAILNET=1` on a Mac signed in to Tailscale, the door at the MagicDNS name on 8443)
 
   PNGs land in `.local/proof/`.
