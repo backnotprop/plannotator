@@ -27,6 +27,8 @@ final class ProofTests: XCTestCase {
         // The agents write before the phone pairs, so the list draws full.
         let seeded = try await control.post("/seed")
         let stopped = try XCTUnwrap(seeded["stopped"] as? String)
+        let tests = try XCTUnwrap(seeded["tests"] as? String)
+        let refunds = try XCTUnwrap(seeded["refunds"] as? String)
 
         // 1.2, then 1.3: pair by a typed address and the six digits.
         element("connect-computer").tap()
@@ -58,10 +60,16 @@ final class ProofTests: XCTestCase {
         XCTAssertTrue(stoppedRow.waitForExistence(timeout: 15))
         try await control.shot("2.1B")
 
+        // The largest Dynamic Type size: the rows stack and wrap, nothing is cut to "…".
+        try await control.post("/text-size", ["size": "accessibility-extra-extra-extra-large"])
+        try await control.shot("ax-list")
+        try await control.post("/text-size", ["size": "large"])
+
         // 2.3: scrolled, two new threads wait behind the pill; a tap shows them.
         app.swipeUp()
         app.swipeUp()
-        try await control.post("/more")
+        let arrived = try await control.post("/more")
+        let keep = try XCTUnwrap(arrived["keep"] as? String)
         let pill = element("new-pill")
         XCTAssertTrue(pill.waitForExistence(timeout: 15))
         XCTAssertTrue(pill.label.contains("2 new"))
@@ -77,11 +85,35 @@ final class ProofTests: XCTestCase {
         try await control.shot("2.4")
         app.buttons["Resolve"].tap()
 
+        // A thread never read on this phone while the computer is out of reach:
+        // "Can't reach", then Try Again once it is back.
+        try await control.post("/proxy", ["mode": "down"])
+        let ticketRow = app.buttons.containing(NSPredicate(format: "label CONTAINS 'Which ticket page should I take forward'")).firstMatch
+        scrollTo(ticketRow)
+        ticketRow.tap()
+        XCTAssertTrue(element("thread-unreachable").waitForExistence(timeout: 30))
+        try await control.shot("thread-unreachable")
+        try await control.post("/proxy", ["mode": "pass"])
+        app.buttons["Try Again"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["choice-The dark one"].waitForExistence(timeout: 15))
+        back()
+        app.swipeDown()
+        app.swipeDown()
+
         // 3.1: the thread at rest.
         stoppedRow.tap()
         let first = app.buttons["choice-Retry with the same idempotency key"]
         XCTAssertTrue(first.waitForExistence(timeout: 10))
         try await control.shot("3.1")
+
+        // The thread at the largest Dynamic Type size: it wraps inside the screen.
+        try await control.post("/text-size", ["size": "accessibility-extra-extra-extra-large"])
+        try await control.shot("ax-thread")
+        app.swipeUp()
+        try await control.shot("ax-thread-card")
+        try await control.post("/text-size", ["size": "large"])
+        app.swipeDown()
+        app.swipeDown()
 
         // 3.2: a pick, a note, Other.
         first.tap()
@@ -109,7 +141,7 @@ final class ProofTests: XCTestCase {
         element("send").tap()
 
         // The agent's wait_for_reply gets the answer.
-        let reply = try await control.get("/reply")
+        let reply = try await control.post("/reply", ["thread": stopped])
         let body = try XCTUnwrap((reply["reply"] as? [String: Any])?["body"] as? String ?? reply["body"] as? String, "reply: \(reply)")
         XCTAssertTrue(body.contains("Retry with the same idempotency key"), body)
         XCTAssertTrue(body.contains("Keep Retry all out of v1."), body)
@@ -136,6 +168,50 @@ final class ProofTests: XCTestCase {
         scrollTo(quiet)
         XCTAssertTrue(quiet.exists)
         XCTAssertFalse(stoppedRow.exists)
+
+        // A note still being typed when Send is tapped rides that Send.
+        try await openRow(tests)
+        app.buttons["choice-Yes"].tap()
+        let testsKey = try XCTUnwrap(questionKeys().first)
+        element("add-note-\(testsKey)").tap()
+        element("note-field-\(testsKey)").typeText("Run them after the deploy.")
+        try await control.shot("note-before-send")
+        element("send").tap()
+        let testsReply = try await control.post("/reply", ["thread": tests])
+        let testsBody = try XCTUnwrap((testsReply["reply"] as? [String: Any])?["body"] as? String, "reply: \(testsReply)")
+        XCTAssertTrue(testsBody.contains("Yes"), testsBody)
+        XCTAssertTrue(testsBody.contains("Run them after the deploy."), testsBody)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Sent '")).firstMatch.waitForExistence(timeout: 10))
+        try await control.shot("note-after-send")
+        back()
+
+        // A Send the Inbox applies whose answer never arrives: the phone re-reads
+        // the thread, shows it sent, and says nothing about trying again.
+        try await openRow(refunds)
+        app.buttons["choice-Trust the webhook"].tap()
+        XCTAssertTrue(waitForLabel(element("reply-field"), "1 pick"))
+        try await control.post("/proxy", ["mode": "drop-reply"])
+        element("send").tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Sent '")).firstMatch.waitForExistence(timeout: 20))
+        XCTAssertFalse(element("send-problem").exists, "a false \"Not sent\" line")
+        let refundsReply = try await control.post("/reply", ["thread": refunds])
+        XCTAssertTrue(((refundsReply["reply"] as? [String: Any])?["body"] as? String ?? "").contains("Trust the webhook"), "\(refundsReply)")
+        let count = try await control.post("/person-replies", ["thread": refunds])
+        XCTAssertEqual(count["count"] as? Int, 1, "applied once")
+        try await control.shot("send-dropped-after-apply")
+        back()
+
+        // A thread deleted on the computer while it is open: drawn as gone, no controls left.
+        try await openRow(keep)
+        XCTAssertTrue(app.buttons["choice-Yes"].waitForExistence(timeout: 10))
+        try await control.post("/delete-on-computer", ["thread": keep])
+        // The Inbox writes no event for a deletion; the phone learns it at its
+        // next read of the thread (here a pull, as the person would).
+        pullToRefresh()
+        XCTAssertTrue(element("thread-gone").waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["choice-Yes"].exists)
+        try await control.shot("thread-deleted")
+        app.buttons["Back to Inbox"].firstMatch.tap()
 
         // 9.1 and 9.2.
         tab("Settings")
@@ -185,6 +261,25 @@ final class ProofTests: XCTestCase {
 
     private func element(_ id: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
+    }
+
+    private func pullToRefresh() {
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+        start.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)))
+    }
+
+    private func back() {
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+    }
+
+    /// Opens a list row, scrolling to it (the list draws lazily).
+    private func openRow(_ thread: String) async throws {
+        let row = element("row-\(thread)")
+        app.swipeDown()
+        app.swipeDown()
+        scrollTo(row)
+        XCTAssertTrue(row.exists, "row \(thread)")
+        row.tap()
     }
 
     /// The tab bar minimizes on scroll (iOS 26); scrolling back up brings its items back.

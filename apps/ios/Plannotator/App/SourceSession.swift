@@ -24,6 +24,13 @@ final class SourceSession {
     /// The project filter (the toolbar menu); nil shows every project.
     private(set) var project: String?
     private(set) var threads: [String: InboxThread] = [:]
+    /// Why a thread is not on screen: still loading, the computer could not be
+    /// reached before it was ever read, or it is gone (deleted on the computer).
+    private(set) var threadProblems: [String: ThreadProblem] = [:]
+    /// What the person is typing in a card's Other, note or answer field,
+    /// per question id, until it is saved. Send reads these too, so words
+    /// still in a field are never lost.
+    var drafts: [String: FieldDraft] = [:]
 
     private var onScreen: [String: Int] = [:]
     private var stream: Task<Void, Never>?
@@ -160,14 +167,25 @@ final class SourceSession {
         if onScreen[id] == 0 { onScreen[id] = nil }
     }
 
-    func loadThread(_ id: String) async {
+    /// Reads a thread. Answers false when it could not be read.
+    @discardableResult
+    func loadThread(_ id: String) async -> Bool {
         do {
             let answer = try await client.thread(id)
             threads[id] = answer.thread
+            threadProblems[id] = nil
             cache.write(answer.thread, "thread-\(id)")
+            return true
         } catch {
-            if error.code == "thread_not_found" { threads[id] = nil }
+            if error.code == "thread_not_found" {
+                threads[id] = nil
+                threadProblems[id] = .gone
+                cache.remove("thread-\(id)")
+            } else if threads[id] == nil, !error.isUnpaired {
+                threadProblems[id] = .unreachable
+            }
             fail(error)
+            return false
         }
     }
 
@@ -211,6 +229,7 @@ final class SourceSession {
     /// words on the last. Each message's idempotency key is kept until the
     /// Inbox gives a definite answer, across retries and app restarts.
     func send(thread id: String, words: String) async throws(InboxError) {
+        commitDrafts(thread: id)
         await pickChains[id]?.value
         guard let thread = threads[id] else { return }
         var targets: [(message: InboxMessage, questions: [InboxClient.SendQuestion])] = thread.messages.compactMap { message in
@@ -224,14 +243,23 @@ final class SourceSession {
         }
         for (index, target) in targets.enumerated() {
             let key = SendKeys.key(source: source.id, message: target.message.id)
+            let repliesBefore = replies(to: target.message.id, in: thread)
             do {
                 let answer = try await client.reply(message: target.message.id, idempotencyKey: key, words: index == targets.count - 1 ? words.trimmed : "", questions: target.questions)
                 SendKeys.clear(source: source.id, message: target.message.id)
                 replace(answer.questions, message: answer.messageId, thread: id)
             } catch {
-                if error.isDefinite { SendKeys.clear(source: source.id, message: target.message.id) }
-                await loadThread(id)
-                throw error
+                if error.isDefinite {
+                    SendKeys.clear(source: source.id, message: target.message.id)
+                    await loadThread(id)
+                    throw error
+                }
+                // No answer: the Inbox may have applied it before the connection
+                // dropped. The thread says which; a retry uses the same key and
+                // is applied once either way.
+                guard await loadThread(id) else { throw .sendUnconfirmed }
+                guard let now = threads[id], replies(to: target.message.id, in: now) > repliesBefore else { throw error }
+                SendKeys.clear(source: source.id, message: target.message.id)
             }
         }
         await loadThread(id)
@@ -249,6 +277,38 @@ final class SourceSession {
         threads[id] = nil
         cache.remove("thread-\(id)")
         await refresh()
+    }
+
+    private func replies(to message: String, in thread: InboxThread) -> Int {
+        thread.messages.filter { !$0.author.isAgent && $0.replyTo == message }.count
+    }
+
+    // MARK: Fields still being typed
+
+    /// Saves every field the person is typing in this thread's cards, as a pick.
+    func commitDrafts(thread id: String) {
+        guard let thread = threads[id] else { return }
+        for question in thread.messages.flatMap({ $0.questions ?? [] }) where drafts[question.id] != nil {
+            commitDraft(question, thread: id)
+        }
+    }
+
+    /// Saves one card's typed fields (when they change its answer) and ends its draft.
+    func commitDraft(_ question: InboxQuestion, thread id: String, onError: @escaping (String) -> Void = { _ in }) {
+        guard let draft = drafts.removeValue(forKey: question.id) else { return }
+        let next = question.applying(draft)
+        guard next != question.answer, !(next == nil && question.answer == nil) else { return }
+        pick(question, answer: next, thread: id, onError: onError)
+    }
+
+    /// Some field in this thread holds words that would change an answer.
+    func hasTypedAnswers(thread id: String) -> Bool {
+        guard let thread = threads[id] else { return false }
+        return thread.messages.flatMap { $0.questions ?? [] }.contains { question in
+            guard let draft = drafts[question.id] else { return false }
+            let next = question.applying(draft)
+            return next != question.answer && next != nil
+        }
     }
 
     // MARK: Local edits
@@ -273,6 +333,33 @@ final class SourceSession {
         }
         thread.messages[m].questions = current
         threads[id] = thread
+    }
+}
+
+enum ThreadProblem { case unreachable, gone }
+
+/// A card's fields as typed: nil is a field not being edited.
+struct FieldDraft: Equatable {
+    var other: String?
+    var note: String?
+    var text: String?
+}
+
+extension InboxQuestion {
+    /// The answer with the typed fields applied, as the card's own edits make it.
+    func applying(_ draft: FieldDraft) -> QuestionAnswer? {
+        var next = answer ?? QuestionAnswer(key: key, kind: kind, prompt: prompt)
+        if let other = draft.other?.trimmed {
+            next.skipped = nil
+            next.other = other.isEmpty ? nil : other
+            if kind != "multi", !other.isEmpty { next.selected = [] }
+        }
+        if let text = draft.text?.trimmed {
+            next.skipped = nil
+            next.text = text.isEmpty ? nil : text
+        }
+        if let note = draft.note?.trimmed { next.note = note.isEmpty ? nil : note }
+        return next.isEmpty ? nil : next
     }
 }
 

@@ -8,12 +8,16 @@ public enum InboxError: Error, Equatable, Sendable {
     case unreachable
     /// The answer was not what the contract says.
     case unreadable
+    /// A Send got no answer and the thread could not be read after it: it may
+    /// or may not have landed. A retry with the same key is applied once.
+    case sendUnconfirmed
 
     public var message: String {
         switch self {
         case .refused(_, _, let message, _): message
         case .unreachable: "Your computer can't be reached right now."
         case .unreadable: "Your computer sent an answer this app can't read. Update Plannotator on both."
+        case .sendUnconfirmed: "Your computer can't be reached, so it is not certain this was sent. Tap Send again; it is sent once either way."
         }
     }
 

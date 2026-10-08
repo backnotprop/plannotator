@@ -15,11 +15,7 @@ struct QuestionCard: View {
 
     private enum Field { case other, note, text }
     @FocusState private var focus: Field?
-    @State private var otherOpen = false
-    @State private var otherText = ""
-    @State private var noteOpen = false
-    @State private var noteText = ""
-    @State private var freeText = ""
+    @Environment(\.dynamicTypeSize) private var typeSize
     @ScaledMetric(relativeTo: .body) private var promptSize: CGFloat = 18
 
     private var locked: Bool { readOnly || question.isSent || question.isClosed }
@@ -29,7 +25,30 @@ struct QuestionCard: View {
     private var selected: [String] {
         status == "answered" || status == "skipped" ? (answer?.selected ?? []) : question.choices.filter(\.settled).map(\.label)
     }
-    private var hasOther: Bool { otherOpen || !(answer?.other ?? "").trimmed.isEmpty }
+    /// The fields being typed live in the session, so Send can read them (blocker 1 of the review).
+    private var draft: FieldDraft? { session.drafts[question.id] }
+    private var hasOther: Bool { draft?.other != nil || !(answer?.other ?? "").trimmed.isEmpty }
+    private var noteOpen: Bool { draft?.note != nil }
+
+    private func field(_ path: WritableKeyPath<FieldDraft, String?>, saved: String?) -> Binding<String> {
+        Binding(
+            get: { session.drafts[question.id]?[keyPath: path] ?? saved ?? "" },
+            set: { value in
+                var next = session.drafts[question.id] ?? FieldDraft()
+                // Return ends a field (the fields wrap, so it would otherwise add a line).
+                next[keyPath: path] = value.replacingOccurrences(of: "\n", with: "")
+                session.drafts[question.id] = next
+                if value.contains("\n") { focus = nil }
+            }
+        )
+    }
+
+    private func open(_ path: WritableKeyPath<FieldDraft, String?>, saved: String?, focus target: Field) {
+        var next = session.drafts[question.id] ?? FieldDraft()
+        if next[keyPath: path] == nil { next[keyPath: path] = saved ?? "" }
+        session.drafts[question.id] = next
+        focus = target
+    }
     private var hasNote: Bool { !(answer?.note ?? "").trimmed.isEmpty }
 
     var body: some View {
@@ -65,22 +84,11 @@ struct QuestionCard: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Question \(number) of \(total)")
         .accessibilityIdentifier("question-\(question.key)")
-        .onAppear {
-            otherText = answer?.other ?? ""
-            freeText = answer?.text ?? ""
-            noteText = answer?.note ?? ""
-        }
-        // Return ends a field (the fields wrap, so it would otherwise add a line).
-        .onChange(of: otherText) { _, text in if text.contains("\n") { otherText = text.replacingOccurrences(of: "\n", with: ""); focus = nil } }
-        .onChange(of: noteText) { _, text in if text.contains("\n") { noteText = text.replacingOccurrences(of: "\n", with: ""); focus = nil } }
-        .onChange(of: freeText) { _, text in if text.contains("\n") { freeText = text.replacingOccurrences(of: "\n", with: ""); focus = nil } }
-        .onChange(of: focus) { old, _ in
-            // A field commits when the person leaves it.
-            switch old {
-            case .other: commitOther()
-            case .note: commitNote()
-            case .text: commitText()
-            case nil: break
+        .onChange(of: focus) { old, now in
+            // A field saves when the person leaves it (Send saves it too).
+            if old != nil, now == nil {
+                if draft?.other?.trimmed.isEmpty == true, (answer?.other ?? "").isEmpty { session.drafts[question.id]?.other = nil }
+                session.commitDraft(question, thread: threadId, onError: onError)
             }
         }
     }
@@ -88,12 +96,13 @@ struct QuestionCard: View {
     // MARK: Parts
 
     private var header: some View {
-        HStack(spacing: 8) {
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(spacing: 8))
+        return layout {
             Text("Question \(number) of \(total)".uppercased())
                 .font(.caption.weight(.semibold))
                 .tracking(0.6)
                 .foregroundStyle(Color.inkSecondary)
-            Spacer(minLength: 8)
+            if !stacked { Spacer(minLength: 8) }
             StatusTag(status: status)
         }
         .padding(.horizontal, 2)
@@ -180,8 +189,7 @@ struct QuestionCard: View {
     @ViewBuilder private var otherRow: some View {
         let on = hasOther && status == "answered"
         Button {
-            otherOpen = true
-            focus = .other
+            open(\.other, saved: answer?.other, focus: .other)
         } label: {
             HStack(spacing: 12) {
                 Radio(on: on, square: false, dashed: true)
@@ -200,7 +208,7 @@ struct QuestionCard: View {
         .accessibilityAddTraits(on ? .isSelected : [])
         .accessibilityIdentifier("choice-other-\(question.key)")
         if hasOther {
-            TextField("Other…", text: $otherText, axis: .vertical)
+            TextField("Other…", text: field(\.other, saved: answer?.other), axis: .vertical)
                 .focused($focus, equals: .other)
                 .submitLabel(.done)
                 .onSubmit { focus = nil }
@@ -219,7 +227,7 @@ struct QuestionCard: View {
     }
 
     private var textAnswer: some View {
-        TextField("Your answer", text: $freeText, axis: .vertical)
+        TextField("Your answer", text: field(\.text, saved: answer?.text), axis: .vertical)
             .focused($focus, equals: .text)
             .submitLabel(.done)
             .onSubmit { focus = nil }
@@ -235,7 +243,7 @@ struct QuestionCard: View {
 
     @ViewBuilder private var noteArea: some View {
         if noteOpen {
-            TextField("Add a note", text: $noteText, axis: .vertical)
+            TextField("Add a note", text: field(\.note, saved: answer?.note), axis: .vertical)
                 .focused($focus, equals: .note)
                 .submitLabel(.done)
                 .onSubmit { focus = nil }
@@ -258,32 +266,36 @@ struct QuestionCard: View {
         }
     }
 
+    /// One row at the usual sizes; stacked at the accessibility sizes, where it would not fit.
+    private var stacked: Bool { typeSize.isAccessibilitySize }
+
     private var footer: some View {
-        HStack(spacing: 18) {
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10)) : AnyLayout(HStackLayout(spacing: 18))
+        return layout {
             if !locked {
                 Button(hasNote ? "Edit note" : "Add note") {
-                    noteOpen = true
-                    noteText = answer?.note ?? ""
-                    focus = .note
+                    open(\.note, saved: answer?.note, focus: .note)
                 }
-                .fixedSize()
+                .fixedSize(horizontal: !stacked, vertical: true)
                 .accessibilityIdentifier("add-note-\(question.key)")
-                Button(status == "skipped" ? "Unskip" : "Skip") { toggleSkip() }.fixedSize()
+                Button(status == "skipped" ? "Unskip" : "Skip") { toggleSkip() }
+                    .fixedSize(horizontal: !stacked, vertical: true)
             }
-            Spacer(minLength: 0)
+            if !stacked { Spacer(minLength: 0) }
             if !locked, status != "answered", question.hasRecommendation {
                 Button("Accept recommended") { accept() }
                     .fontWeight(.semibold)
-                    .lineLimit(1)
-                    .fixedSize()
+                    .lineLimit(stacked ? nil : 1)
+                    .fixedSize(horizontal: !stacked, vertical: true)
                     .padding(.horizontal, 13)
                     .padding(.vertical, 6)
                     .background(Color.tint.opacity(0.14), in: .capsule)
                     .accessibilityIdentifier("accept-\(question.key)")
             } else if let line = footerLine {
-                Text(line).font(.footnote).foregroundStyle(Color.inkSecondary).multilineTextAlignment(.trailing)
+                Text(line).font(.footnote).foregroundStyle(Color.inkSecondary).multilineTextAlignment(stacked ? .leading : .trailing)
             }
         }
+        .padding(.vertical, stacked ? 10 : 0)
         .font(.subheadline.weight(.medium))
         .foregroundStyle(Color.tint)
         .buttonStyle(.borderless)
@@ -321,42 +333,9 @@ struct QuestionCard: View {
             guard selected != [label] || status != "answered" else { return }
             next.selected = [label]
             next.other = nil
-            otherOpen = false
-            otherText = ""
+            session.drafts[question.id]?.other = nil
         }
         Haptics.selection()
-        commit(next)
-    }
-
-    private func commitOther() {
-        let text = otherText.trimmed
-        guard text != (answer?.other ?? "").trimmed else {
-            if text.isEmpty { otherOpen = false }
-            return
-        }
-        var next = base
-        next.skipped = nil
-        next.other = text.isEmpty ? nil : text
-        if question.kind != "multi", !text.isEmpty { next.selected = [] }
-        if text.isEmpty { otherOpen = false } else { Haptics.selection() }
-        commit(next)
-    }
-
-    private func commitText() {
-        let text = freeText.trimmed
-        guard text != (answer?.text ?? "").trimmed else { return }
-        var next = base
-        next.skipped = nil
-        next.text = text.isEmpty ? nil : text
-        commit(next)
-    }
-
-    private func commitNote() {
-        noteOpen = false
-        let text = noteText.trimmed
-        guard text != (answer?.note ?? "").trimmed else { return }
-        var next = base
-        next.note = text.isEmpty ? nil : text
         commit(next)
     }
 
@@ -369,8 +348,7 @@ struct QuestionCard: View {
             next.other = nil
             next.text = nil
             next.skipped = true
-            otherOpen = false
-            otherText = ""
+            session.drafts[question.id]?.other = nil
         }
         Haptics.selection()
         commit(next)
@@ -379,7 +357,6 @@ struct QuestionCard: View {
     private func accept() {
         guard let next = question.recommendedAnswer(keeping: base) else { return }
         Haptics.selection()
-        if let other = next.other { otherText = other; otherOpen = true }
         commit(next)
     }
 }
@@ -422,7 +399,8 @@ struct RecommendedPill: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 1)
             .background(Color.tint.opacity(0.14), in: .rect(cornerRadius: 6))
-            .fixedSize()
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
     }
 }
 

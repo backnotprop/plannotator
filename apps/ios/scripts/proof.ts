@@ -8,8 +8,13 @@
  * asks this script, over a loopback control server, for what only the
  * computer can do: make a pairing offer, have an agent write, hand back what
  * the agent's `wait_for_reply` received, remove the phone on the computer,
- * list the computer's devices, take a light and a dark screenshot, record
- * the screen.
+ * delete a thread on the computer, list the computer's devices, take a light
+ * and a dark screenshot, set the text size, record the screen.
+ *
+ * The phone reaches the Inbox through a loopback proxy in front of it, so the
+ * test can take the computer out of reach (`down`) or let a Send reach the
+ * Inbox and then drop its answer (`drop-reply`), as a connection that dies
+ * after the Inbox applied it.
  *
  *   bun apps/ios/scripts/proof.ts --binary .local/plannotator \
  *     [--device "iPhone 17"] [--shots .local/proof/ios] [--derived <DerivedData>] [--keep-simulator]
@@ -80,15 +85,15 @@ const others = {
 const question = (prompt: string, choices: string[], extra: string[] = []) =>
   [':::question', prompt, ...extra, '', ...choices.map((c) => `- [ ] ${c}`), `Recommended: ${choices[0]}`, ':::'].join('\n');
 
-let stoppedThread = '';
 const newsAgents: SimAgent[] = [];
-let reply: Promise<Record<string, unknown>> | null = null;
+/** What each asking agent's wait_for_reply received, by thread. */
+const replies = new Map<string, Promise<Record<string, unknown>>>();
 
 // As an agent waits: call again after each "waiting", and after a client
 // timeout (a slow CI runner can hold a call past the SDK's 60 s default).
-async function waitForPersonReply(threadId: string): Promise<Record<string, unknown>> {
+async function waitForPersonReply(asker: SimAgent, threadId: string): Promise<Record<string, unknown>> {
   for (;;) {
-    const result = await claude.waitForReply(threadId, 25).catch((error: unknown) => {
+    const result = await asker.waitForReply(threadId, 25).catch((error: unknown) => {
       if (String(error).includes('timed out')) return { status: 'waiting' };
       throw error;
     });
@@ -98,11 +103,10 @@ async function waitForPersonReply(threadId: string): Promise<Record<string, unkn
 
 async function seed(): Promise<Record<string, string>> {
   const stopped = await claude.send({ project_path: projects['billing-svc']!, body: DEMO_MESSAGES.stopped, subject: 'Which way should the worker go on a Stripe 409?' });
-  stoppedThread = stopped.thread_id as string;
-  reply = waitForPersonReply(stoppedThread);
+  replies.set(stopped.thread_id as string, waitForPersonReply(claude, stopped.thread_id as string));
   await others.pi.send({ project_path: projects['search-indexer']!, body: ['The archive has 41 projects with stale indexes.', '', question('Reindex the archived projects now?', ['Reindex tonight', 'Leave them'], ['Holds up: the search page; the export; the archive banner.'])].join('\n'), subject: 'Reindex the archived projects now?' });
-  await others.claudeTests.send({ project_path: projects['billing-svc']!, body: ['The retry worker is ready.', '', question('Run the retry tests against the Stripe test clock?', ['Yes', 'No'], ['They take about four minutes against the test key.'])].join('\n'), subject: 'Run the retry tests against the Stripe test clock?' });
-  await others.claudeRefunds.send({ project_path: projects['billing-svc']!, body: DEMO_MESSAGES.named, thread: 'refund-webhooks', subject: 'Refund events: trust the webhook or poll Stripe?' });
+  const tests = await others.claudeTests.send({ project_path: projects['billing-svc']!, body: ['The retry worker is ready.', '', question('Run the retry tests against the Stripe test clock?', ['Yes', 'No'], ['They take about four minutes against the test key.'])].join('\n'), subject: 'Run the retry tests against the Stripe test clock?' });
+  const refunds = await others.claudeRefunds.send({ project_path: projects['billing-svc']!, body: DEMO_MESSAGES.named, thread: 'refund-webhooks', subject: 'Refund events: trust the webhook or poll Stripe?' });
   await others.codex.send({ project_path: projects['checkout-web']!, body: ['Two ticket pages are built.', '', question('Which ticket page should I take forward?', ['The dark one', 'The light one'])].join('\n'), subject: 'Which ticket page should I take forward?' });
   await others.opencode.send({ project_path: projects['docs-site']!, body: ['## Install flow', '', 'The flow now **detects** the agent first, then asks.', '', '- one command', '- one prompt', '', question('Is this the install flow you want?', ['Yes', 'No'])].join('\n'), subject: 'Is this the install flow you want?' });
   for (const [name, text] of [
@@ -115,17 +119,47 @@ async function seed(): Promise<Record<string, string>> {
     newsAgents.push(writer);
     await writer.send({ project_path: projects[name]!, body: text });
   }
-  return { stopped: stoppedThread };
+  replies.set(tests.thread_id as string, waitForPersonReply(others.claudeTests, tests.thread_id as string));
+  replies.set(refunds.thread_id as string, waitForPersonReply(others.claudeRefunds, refunds.thread_id as string));
+  return { stopped: stopped.thread_id as string, tests: tests.thread_id as string, refunds: refunds.thread_id as string };
 }
 
-async function more(): Promise<void> {
+async function more(): Promise<Record<string, string>> {
   // New sessions, so each message starts its own thread.
   const codex = await agent('Codex', 'codex');
   const opencode = await agent('OpenCode', 'opencode');
   newsAgents.push(codex, opencode);
-  await codex.send({ project_path: projects['checkout-web']!, body: question('Ship the dark ticket page behind a flag?', ['Yes', 'No']), subject: 'Ship the dark ticket page behind a flag?' });
-  await opencode.send({ project_path: projects['docs-site']!, body: question('Keep the old install page for a week?', ['Yes', 'No']), subject: 'Keep the old install page for a week?' });
+  const ship = await codex.send({ project_path: projects['checkout-web']!, body: question('Ship the dark ticket page behind a flag?', ['Yes', 'No']), subject: 'Ship the dark ticket page behind a flag?' });
+  const keep = await opencode.send({ project_path: projects['docs-site']!, body: question('Keep the old install page for a week?', ['Yes', 'No']), subject: 'Keep the old install page for a week?' });
+  return { ship: ship.thread_id as string, keep: keep.thread_id as string };
 }
+
+// ─── The door, through a proxy the test can break ───
+
+let proxyMode: 'pass' | 'down' | 'drop-reply' = 'pass';
+/** A response that never completes: the connection dies, as a network drop does. */
+const dropped = () => new Response(new ReadableStream({ start: (controller) => controller.error(new Error('dropped')) }));
+const proxy = Bun.serve({
+  hostname: '127.0.0.1',
+  port: 0,
+  idleTimeout: 120,
+  async fetch(request) {
+    const url = new URL(request.url);
+    if (proxyMode === 'down') return dropped();
+    const forwarded = await fetch(`${inbox}${url.pathname}${url.search}`, {
+      method: request.method,
+      headers: [...request.headers].filter(([name]) => !['host', 'connection', 'content-length'].includes(name.toLowerCase())),
+      body: request.method === 'POST' ? await request.arrayBuffer() : undefined,
+    });
+    if (proxyMode === 'drop-reply' && request.method === 'POST' && url.pathname.endsWith('/reply')) {
+      // The Inbox applied the Send; the phone never hears the answer.
+      proxyMode = 'pass';
+      await forwarded.arrayBuffer();
+      return dropped();
+    }
+    return new Response(forwarded.body, { status: forwarded.status, headers: forwarded.headers });
+  },
+});
 
 // ─── The simulator ───
 
@@ -163,17 +197,33 @@ const control = Bun.serve({
         case '/seed':
           return Response.json(await seed());
         case '/more':
-          await more();
+          return Response.json(await more());
+        case '/proxy':
+          proxyMode = body.mode as typeof proxyMode;
+          return Response.json({ mode: proxyMode });
+        case '/delete-on-computer': {
+          const answer = await windowRoute(`/api/inbox/threads/${body.thread}/delete`, { method: 'POST', body: '{}' });
+          return Response.json({ ok: answer.ok }, { status: answer.ok ? 200 : 500 });
+        }
+        case '/person-replies': {
+          // How many replies of the person's the thread holds on the computer.
+          const answer = (await (await windowRoute(`/api/inbox/threads/${body.thread}`)).json()) as { thread: { messages: { author: { kind: string } }[] } };
+          return Response.json({ count: answer.thread.messages.filter((m) => m.author.kind === 'person').length });
+        }
+        case '/text-size':
+          // The simulator's Dynamic Type size, e.g. accessibility-extra-extra-extra-large, then large.
+          run('xcrun', ['simctl', 'ui', udid, 'content_size', body.size ?? 'large']);
+          await sleep(1500);
           return Response.json({ ok: true });
         case '/offer': {
           const answer = await windowRoute('/api/inbox/pairing', { method: 'POST', body: '{}' });
           const offer = (await answer.json()) as { offer: { code: string } };
           if (!answer.ok) throw new Error(`pairing offer: ${answer.status} ${JSON.stringify(offer)}`);
-          return Response.json({ address: `127.0.0.1:${registry.port}`, code: offer.offer.code });
+          return Response.json({ address: `127.0.0.1:${proxy.port}`, code: offer.offer.code });
         }
         case '/reply': {
-          // What the agent's wait_for_reply received for the stopped thread.
-          const result = await Promise.race([reply, sleep(90_000).then(() => null)]);
+          // What the asking agent's wait_for_reply received for that thread.
+          const result = await Promise.race([replies.get(body.thread ?? '') ?? Promise.resolve(null), sleep(90_000).then(() => null)]);
           return Response.json(result ?? { error: 'no reply within 90 s' }, { status: result ? 200 : 504 });
         }
         case '/devices':
@@ -217,6 +267,7 @@ try {
 } finally {
   video?.kill('SIGINT');
   control.stop(true);
+  proxy.stop(true);
   await Promise.allSettled([claude, ...Object.values(others), ...newsAgents].map((a) => a.close()));
   await fetch(`${inbox}/api/inbox/control/stop`, { method: 'POST', headers: { Authorization: `Bearer ${registry.token}` } }).catch(() => {});
   if (!keepSimulator) spawnSync('xcrun', ['simctl', 'delete', udid]);

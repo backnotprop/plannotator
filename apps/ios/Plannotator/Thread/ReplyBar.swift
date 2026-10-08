@@ -1,5 +1,6 @@
 import PlannotatorKit
 import SwiftUI
+import UIKit
 
 /// 3.4A: the reply bar docked over the thread, Send always under the thumb.
 /// Tapping the field opens the composer above the keyboard (3.5), with the
@@ -16,12 +17,13 @@ struct ReplyBar: View {
 
     private var asker: String { thread.messages.first?.author.agentName ?? "the agent" }
     private var picked: [InboxQuestion] { thread.messages.flatMap { ($0.questions ?? []).filter(\.isPicked) } }
-    private var canSend: Bool { !picked.isEmpty || !words.trimmed.isEmpty }
+    private var canSend: Bool { !picked.isEmpty || !words.trimmed.isEmpty || session.hasTypedAnswers(thread: thread.threadId) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let problem {
                 Label(problem, systemImage: "exclamationmark.circle.fill")
+                    .accessibilityLabel(problem)
                     .font(.footnote)
                     .foregroundStyle(Color.destructive)
                     .padding(.horizontal, 16)
@@ -149,6 +151,9 @@ struct ReplyBar: View {
         sending = true
         problem = nil
         let text = words
+        // End editing everywhere: Send itself saves what the cards' fields hold.
+        focused = false
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         Task {
             defer { sending = false }
             do throws(InboxError) {
@@ -159,7 +164,11 @@ struct ReplyBar: View {
                 composing = false
             } catch {
                 Haptics.error()
-                problem = error.isDefinite ? error.message : "Not sent. \(error.message) Tap Send to try again."
+                problem = switch error {
+                case .sendUnconfirmed: error.message
+                case _ where error.isDefinite: error.message
+                default: "Not sent. \(error.message) Tap Send to try again."
+                }
             }
         }
     }

@@ -102,7 +102,8 @@ struct AgentMark: View {
             }
         }
         .scaledToFit()
-        .frame(width: size, height: size)
+        // Grows with the text, but no wider than a list row's mark can sit.
+        .frame(width: min(size, 32), height: min(size, 32))
         .accessibilityHidden(true)
     }
 

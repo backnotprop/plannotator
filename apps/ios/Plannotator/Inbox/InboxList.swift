@@ -187,44 +187,59 @@ private struct NewPillLabel: LabelStyle {
 /// one; badge, agent mark, the named thread's chip and the subject on line two.
 struct ListRowView: View {
     let row: InboxListRow
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
+        // At the accessibility sizes both lines stack and the subject wraps,
+        // so nothing is cut to "…".
+        let large = typeSize.isAccessibilitySize
         VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 9) {
-                Text(row.project.name).lineLimit(1)
-                Spacer(minLength: 8)
-                if let count { Text(count).lineLimit(1) }
-                Text(When.short(row.lastAt)).monospacedDigit().lineLimit(1)
+            Group {
+                if large {
+                    Text(row.project.name)
+                    Text([count, When.short(row.lastAt)].compactMap { $0 }.joined(separator: " · "))
+                } else {
+                    HStack(alignment: .firstTextBaseline, spacing: 9) {
+                        Text(row.project.name).lineLimit(1)
+                        Spacer(minLength: 8)
+                        if let count { Text(count).lineLimit(1) }
+                        Text(When.short(row.lastAt)).monospacedDigit().lineLimit(1)
+                    }
+                }
             }
             .font(.subheadline)
             .foregroundStyle(Color.inkSecondary)
-            HStack(spacing: 7) {
-                if let badge {
-                    Text(badge)
-                        .font(.footnote.weight(.semibold))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.ink.opacity(0.38)))
-                        .fixedSize()
-                }
-                AgentMark(author: row.author)
-                if let name = row.threadName {
-                    Text(name)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(Color.inkSecondary)
-                        .lineLimit(1)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color.hairline))
-                        .fixedSize()
+            let line = large ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(spacing: 7))
+            line {
+                HStack(spacing: 7) {
+                    if let badge {
+                        Text(badge)
+                            .font(.footnote.weight(.semibold))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.ink.opacity(0.38)))
+                            .fixedSize()
+                    }
+                    AgentMark(author: row.author)
+                    if let name = row.threadName {
+                        Text(name)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(Color.inkSecondary)
+                            .lineLimit(1)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color.hairline))
+                            .fixedSize(horizontal: !large, vertical: false)
+                    }
                 }
                 Text(subject)
-                    .layoutPriority(-1)
+                    .layoutPriority(large ? 0 : -1)
                     .font(.body.weight(row.unread ? .semibold : .regular))
                     .foregroundStyle(row.section == "sent" ? Color.inkSecondary : Color.ink)
-                    .lineLimit(1)
+                    .lineLimit(large ? 4 : 1)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 3)
         .contentShape(.rect)
         .accessibilityElement(children: .ignore)
