@@ -57,6 +57,9 @@ export function snapshotsSessionDirOf(dataDir: string, sessionId: string): strin
 export function snapshotsClaimArgv(dir: string, claimant: string): string[] {
   return ['/bin/sh', '-c', INBOX_CLAIM_SCRIPT, 'plannotator-snapshots-claim', dir, claimant]
 }
+/** What a plannotator from before Snapshots answers `plannotator snapshot` with. */
+const OLDER_CLI = /unknown (sub)?command|no plan content in hook event/i
+export const SNAPSHOTS_UPDATE_TEXT = 'The plannotator on this machine has no Snapshots (an older version); update Plannotator.'
 
 interface HubEntry {
   url: string
@@ -138,6 +141,10 @@ export class SnapshotsLink {
   private timer: { cancel: () => void } | null = null
   private ticking = false
   private leadershipWaiters: Array<() => void> = []
+  /** A hub was found once: the lease, the claims and the tick run only from then on. */
+  private hubSeen = false
+  /** When this link started (the session, a summon): its first touch. */
+  private startedAt = 0
 
   constructor(private readonly options: SnapshotsLinkOptions) {
     this.dir = snapshotsSessionDirOf(options.dataDir, options.sessionId)
@@ -164,7 +171,11 @@ export class SnapshotsLink {
           this.ticking = false
         })
     })
-    void this.loop()
+    void this.options.host.now().then((now) => {
+      this.startedAt ||= now
+    })
+    // The plugin environment can unload under the loop (its $ calls then reject): end quietly.
+    void this.loop().catch(() => undefined)
   }
 
   dispose(): void {
@@ -209,7 +220,12 @@ export class SnapshotsLink {
       .catch((error: unknown) => ({ exitCode: 1, stdout: '', stderr: error instanceof Error ? error.message : String(error) }))
     // The hub may have just started: connect now rather than at the next registry check.
     this.start()
-    if (result.exitCode !== 0) return `Plannotator Snapshots could not start: ${(result.stderr || result.stdout).trim() || `exit ${result.exitCode}`}`
+    if (result.exitCode !== 0) {
+      const output = (result.stderr || result.stdout).trim()
+      // A binary from before Snapshots: `Unknown command: snapshot`, or (before 0.27.11) the classic hook's refusal.
+      if (OLDER_CLI.test(output)) return SNAPSHOTS_UPDATE_TEXT
+      return `Plannotator Snapshots could not start: ${output || `exit ${result.exitCode}`}`
+    }
     return result.stdout.trim()
   }
 
@@ -233,7 +249,8 @@ export class SnapshotsLink {
   /** The person acted in this process: it links and delivers from now on. */
   async touch(): Promise<void> {
     this.touchedAt = await this.options.host.now()
-    if (this.disposed || !(await this.ensureDir())) return
+    // Before a hub exists only the time is kept; the loop takes the lease once it finds one.
+    if (this.disposed || !this.hubSeen || !(await this.ensureDir())) return
     await this.holdLease(this.touchedAt)
   }
 
@@ -270,7 +287,7 @@ export class SnapshotsLink {
   }
 
   private async tick(): Promise<void> {
-    if (this.disposed || !(await this.ensureDir())) return
+    if (this.disposed || !this.hubSeen || !(await this.ensureDir())) return
     const now = await this.options.host.now()
     await this.holdLease(now)
     if (this.submitting) await this.options.host.writeFile(`${this.claimDir(this.submitting)}/alive`, String(now)).catch(() => undefined)
@@ -308,9 +325,19 @@ export class SnapshotsLink {
 
   private async loop(): Promise<void> {
     const { host } = this.options
+    // Nothing is spawned (no git, no claim folder, no lease) until there is a hub to connect to.
+    while (!this.disposed && !this.hubSeen) {
+      if (await this.readHub()) {
+        this.hubSeen = true
+        break
+      }
+      await host.sleep(NO_HUB_RETRY_MS)
+    }
+    if (this.disposed) return
     await this.identify()
-    // Starting here is the person being here (session start, a summon).
-    await this.touch()
+    // Starting here is the person being here (session start, a summon): that is when this process touched.
+    this.touchedAt = Math.max(this.touchedAt, this.startedAt)
+    if (await this.ensureDir()) await this.holdLease(await host.now())
     while (!this.disposed) {
       if (!this.leader) {
         await this.waitForLeadership()

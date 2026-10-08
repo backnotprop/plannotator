@@ -1,8 +1,8 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import { PlannotatorMod } from './controller'
 import { resolveSnapshotsEnabled } from './enabled'
 import type { HttpResult } from './host'
-import { SNAPSHOTS_UNDELIVERED_AFTER_MS, SnapshotsLink, snapshotsSessionDirOf } from './snapshots'
+import { SNAPSHOTS_UNDELIVERED_AFTER_MS, SNAPSHOTS_UPDATE_TEXT, SnapshotsLink, snapshotsSessionDirOf } from './snapshots'
 import { fakeHost, type FakeHost } from './testing/fake-host'
 import { TurnTracker } from './turns'
 
@@ -188,11 +188,10 @@ describe('SnapshotsLink: two Claude Code processes on one session', () => {
 })
 
 describe('Snapshots switched off', () => {
-  test('is the default, and a mod without it makes no link', async () => {
-    expect(resolveSnapshotsEnabled(undefined, null)).toBe(false)
-    expect(resolveSnapshotsEnabled(undefined, '{}')).toBe(false)
-    expect(resolveSnapshotsEnabled(undefined, '{"snapshots": true}')).toBe(true)
+  test('PLANNOTATOR_SNAPSHOTS=0 or { "snapshots": false } turns it off, and a mod without it makes no link', async () => {
+    expect(resolveSnapshotsEnabled(undefined, '{"snapshots": false}')).toBe(false)
     expect(resolveSnapshotsEnabled('0', '{"snapshots": true}')).toBe(false)
+    expect(resolveSnapshotsEnabled('0', null)).toBe(false)
 
     const host = fakeHost()
     const hub = withFakeHub(host)
@@ -205,5 +204,37 @@ describe('Snapshots switched off', () => {
     expect(host.runs.some((call) => call.argv.includes('snapshot'))).toBe(false)
     expect([...host.files.keys()].some((path) => path.includes('/snapshots/') && !path.endsWith('hub.json'))).toBe(false)
     mod.dispose()
+  })
+})
+
+const updateLinks: SnapshotsLink[] = []
+afterEach(() => {
+  while (updateLinks.length > 0) updateLinks.pop()!.dispose()
+})
+
+function linkOn(host: FakeHost): SnapshotsLink {
+  // A real wait, so the link's look for a hub never spins.
+  host.sleep = () => new Promise((resolve) => setTimeout(resolve, 5))
+  const link = new SnapshotsLink({ host, dataDir: '/data', sessionId: 's-1', processId: 'p-1', instanceId: 'cccc', turns: new TurnTracker() })
+  updateLinks.push(link)
+  return link
+}
+
+describe('/plannotator-snapshot in the mod', () => {
+  // The plugin installs from main while the binary updates separately: an
+  // older plannotator has no `snapshot`, and its raw refusal reads as a bug.
+  test('a plannotator from before Snapshots: the person is told to update', async () => {
+    for (const stderr of ["Unknown command: snapshot\n\nRun 'plannotator --help' for the list of commands.\n", 'No plan content in hook event\n']) {
+      const host = fakeHost()
+      host.onRun = (call) => (call.argv[1] === 'snapshot' ? { exitCode: 1, stdout: '', stderr } : undefined)
+      expect(await linkOn(host).summon('')).toBe(SNAPSHOTS_UPDATE_TEXT)
+    }
+  })
+
+  test('nothing is spawned until a hub exists', async () => {
+    const host = fakeHost()
+    linkOn(host).start()
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(host.runs).toEqual([])
   })
 })

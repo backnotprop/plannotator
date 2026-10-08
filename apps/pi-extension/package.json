@@ -41,6 +41,7 @@
     "plannotator-events.ts",
     "plannotator-tool-host.ts",
     "inbox.ts",
+    "snapshots.ts",
     "server.ts",
     "tool-scope.ts",
     "config.ts",

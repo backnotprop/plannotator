@@ -27,6 +27,12 @@ let package = Package(
             ]
         ),
         .testTarget(name: "SnapshotsSecurityTests", dependencies: ["SnapshotsSecurity"]),
+        // `swift test`: the pure decisions (which apps are asked for their tree,
+        // with which attribute, how long to wait). build.sh never builds it.
+        .testTarget(
+            name: "PlannotatorSnapshotsTests",
+            dependencies: ["PlannotatorSnapshots"]
+        ),
     ],
     swiftLanguageVersions: [.v5]
 )

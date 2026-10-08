@@ -49,6 +49,16 @@ for f in connection agent-link; do
   printf '// @generated — DO NOT EDIT. Source: packages/shared/inbox/%s.ts\n' "$f" | cat - "$src" > "generated/inbox/$f.ts"
 done
 
+# Plannotator Snapshots: the session's link to the Snapshots hub
+# (/plannotator-snapshot, delivery of a send, Ask from the HUD). agent-link
+# imports only node: modules (the pull-bridge client is injected), so the
+# folder needs no rewrites.
+mkdir -p generated/snapshots
+for f in agent-link; do
+  src="../../packages/shared/snapshots/$f.ts"
+  printf '// @generated — DO NOT EDIT. Source: packages/shared/snapshots/%s.ts\n' "$f" | cat - "$src" > "generated/snapshots/$f.ts"
+done
+
 # call-flow.ts imports the repository-owned npm manifest and lock that are
 # written into the managed runtime. Keep those verified install inputs beside
 # the vendored module so raw-TS Pi distributions use the identical bytes.
@@ -134,7 +144,7 @@ for f in ai-context model-catalog; do
     | cat - "../../packages/core/$f.ts" > "generated/ai/$f.ts"
 done
 
-for f in index types provider session-manager endpoints context base-session session-bridge session-bridge-pull; do
+for f in index types provider session-manager endpoints context base-session session-bridge session-bridge-pull session-bridge-pull-client; do
   src="../../packages/ai/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/ai/%s.ts\n' "$f" | cat - "$src" \
     | sed -e "s|from ['\"]@plannotator/core/ai-context['\"]|from './ai-context.ts'|g" \
