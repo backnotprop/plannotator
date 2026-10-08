@@ -73,6 +73,16 @@ export interface SurfaceOpenSection {
   section: number | null;
 }
 
+/**
+ * The wrap button in 6.2's bar: a guide's diffs wrapped (the default), or one
+ * code line per row, scrolled sideways.
+ */
+export interface SurfaceSetWrap {
+  v: 1;
+  type: "set_wrap";
+  wrap: boolean;
+}
+
 /** The Annotate and Interact switch of 4.3. */
 export interface SurfaceSetMode {
   v: 1;
@@ -149,6 +159,7 @@ export type SurfaceShellMessage =
   | SurfaceOpenAttachment
   | SurfaceOpenGuide
   | SurfaceOpenSection
+  | SurfaceSetWrap
   | SurfaceSetMode
   | SurfaceStepPin
   | SurfaceSetAppearance
@@ -263,6 +274,7 @@ const SHELL_TYPES: ReadonlySet<string> = new Set<SurfaceShellMessage["type"]>([
   "open_attachment",
   "open_guide",
   "open_section",
+  "set_wrap",
   "set_mode",
   "step_pin",
   "set_appearance",
@@ -299,6 +311,9 @@ export function readSurfaceShellMessage(value: unknown): { ok: true; message: Su
       break;
     case "open_section":
       if (value.section !== null && !(Number.isInteger(value.section) && (value.section as number) >= 0)) return bad("section is an index or null.");
+      break;
+    case "set_wrap":
+      if (typeof value.wrap !== "boolean") return bad("wrap is a boolean.");
       break;
     case "set_mode":
       if (value.mode !== "annotate" && value.mode !== "interact") return bad('mode is "annotate" or "interact".');

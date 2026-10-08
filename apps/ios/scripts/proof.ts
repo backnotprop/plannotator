@@ -8,7 +8,8 @@
  * asks this script, over a loopback control server, for what only the
  * computer can do: make a pairing offer, have an agent write, hand back what
  * the agent's `wait_for_reply` received, remove the phone on the computer,
- * delete a thread on the computer, list the computer's devices, take a light
+ * delete a thread on the computer, list the computer's devices, send a
+ * guided review and read its ticks as the desktop window does, take a light
  * and a dark screenshot, set the text size, record the screen.
  *
  * The phone reaches the Inbox through a loopback proxy in front of it, so the
@@ -391,6 +392,25 @@ async function attach(): Promise<Record<string, string>> {
   return { thread };
 }
 
+// M4: Pi sends the record's guided review of the ledger export (6.1, 6.2), a
+// shipped fixture (scripts/fixtures/ledger-export.*) through submit_guide.
+async function guide(): Promise<Record<string, string>> {
+  const pi = await agent('Pi', 'pi');
+  newsAgents.push(pi);
+  const sent = await pi.submitGuide({
+    project_path: projects['ledger']!,
+    subject: 'Run finished. A guided review of the export change is attached.',
+    body: [
+      'The export now streams rows to the file instead of building it in memory. Peak memory on the March ledger went from 1.9 GB to 140 MB.',
+      '',
+      'I wrote a guided review so you can read it in order. Four sections; the second one is the part I would look at hardest.',
+    ].join('\n'),
+    guide: JSON.parse(readFileSync(join(fixtures, 'ledger-export.guide.json'), 'utf8')),
+    patch: readFileSync(join(fixtures, 'ledger-export.patch'), 'utf8'),
+  });
+  return { thread: sent.thread_id as string, message: sent.message_id as string };
+}
+
 // ─── The door, through a proxy the test can break ───
 
 // 'gone': what `tailscale serve` answers when nothing listens behind it (502), for M5's lock-screen answer.
@@ -479,6 +499,14 @@ const control = Bun.serve({
           return new Response('', { status: 204 });
         case '/beacons':
           return Response.json({ count: beacons.length, hits: beacons });
+        case '/guide':
+          return Response.json(await guide());
+        case '/guide-ticks': {
+          // The ticks as the desktop window reads them: the thread through the window's own route.
+          const answer = (await (await windowRoute(`/api/inbox/threads/${body.thread}`)).json()) as { thread: { messages: { id: string; guide_reviewed?: boolean[] | null }[] } };
+          const message = answer.thread.messages.find((m) => m.id === body.message);
+          return Response.json({ reviewed: (message?.guide_reviewed ?? []).map(String).join(',') });
+        }
         case '/edit-plan': {
           // The agent edits the plan after the person commented: the file on disk is no longer what was sent.
           const text = readFileSync(planPath, 'utf8').replace('at the end of the first week.', 'at the end of the first two weeks.');

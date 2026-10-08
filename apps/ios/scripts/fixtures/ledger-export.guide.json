@@ -1,0 +1,35 @@
+{
+  "title": "Stream ledger exports instead of building them in memory",
+  "intent": "The export used to collect every row before writing the file. It now writes rows as the cursor yields them, so memory stays flat however large the ledger is.",
+  "sections": [
+    {
+      "title": "Why memory grew with the ledger",
+      "overview": "The export read the whole ledger into one array before it wrote a byte. Memory grew with the row count, and the March ledger did not fit on the small worker.",
+      "diffs": [{ "file": "docs/export.md", "summary": "The docs now say how the export reads and writes." }]
+    },
+    {
+      "title": "The streaming writer",
+      "overview": "The writer takes rows from the database cursor and flushes every 500 rows. A failed write closes the cursor and removes the partial file, so a half export is never left behind.",
+      "diffs": [
+        { "file": "src/export/export-writer.ts", "summary": "Replaces the in-memory array with a cursor loop and a flush every 500 rows." },
+        { "file": "src/export/export-writer.test.ts", "summary": "Covers the flush size, a failed write and memory on a large ledger." }
+      ]
+    },
+    {
+      "title": "A failed write leaves no partial file",
+      "overview": "Removing the partial file must not fail when the write failed before the file existed.",
+      "diffs": [
+        { "file": "src/export/partial-file.ts", "summary": "A file that is already gone is fine." },
+        { "file": "src/export/partial-file.test.ts", "summary": "The case where nothing was written." }
+      ]
+    },
+    {
+      "title": "Memory on the March ledger",
+      "overview": "The benchmark now runs the streaming export. Peak memory went from 1.9 GB to 140 MB.",
+      "diffs": [{ "file": "bench/march-ledger.ts", "summary": "Labels the run and records the numbers." }]
+    }
+  ],
+  "review": { "gitRef": "origin/main...HEAD", "base": "origin/main" },
+  "source": { "kind": "local", "repo": "acme/ledger", "branch": "feat/stream-export", "headSha": "4f1c2a9e0b7d36e58a1f2c4b9d0e7a6f3c5b8d21" },
+  "generator": { "engine": "pi", "model": "pi" }
+}

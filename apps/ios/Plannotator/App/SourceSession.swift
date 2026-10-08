@@ -44,6 +44,7 @@ final class SourceSession {
     private var stream: Task<Void, Never>?
     private var pendingRefresh: Task<Void, Never>?
     private var pickChains: [String: Task<Void, Never>] = [:]
+    private var tickChains: [String: Task<Void, Never>] = [:]
     private let cache: Cache
 
     init(source: Source, token: String) {
@@ -442,6 +443,29 @@ final class SourceSession {
         thread.messages.filter { !$0.author.isAgent && $0.replyTo == message }.count
     }
 
+    // MARK: Guided reviews (6.1, 6.2)
+
+    /// The person's reviewed ticks on a guide, kept at once on screen and saved
+    /// through the door. Ticks on one guide go out one after another, each with
+    /// every section's tick as the person left them, so the last tap wins.
+    /// When one is refused or cannot reach the computer, the thread is read
+    /// again and `onError` hands back the ticks the Inbox keeps.
+    func saveTicks(_ reviewed: [Bool], message: String, thread id: String, onError: @escaping (_ message: String, _ kept: [Bool]?) -> Void) {
+        editMessage(message, thread: id) { $0.guideReviewed = reviewed }
+        let previous = tickChains[message]
+        tickChains[message] = Task { [weak self] in
+            await previous?.value
+            guard let self else { return }
+            do throws(InboxError) {
+                _ = try await self.client.saveGuideReviewed(message: message, reviewed: reviewed)
+            } catch {
+                await self.loadThread(id)
+                let kept = self.threads[id]?.messages.first { $0.id == message }?.guideReviewed
+                onError("Not marked. \(error.message)", kept)
+            }
+        }
+    }
+
     // MARK: Fields still being typed
 
     /// Saves every field the person is typing in this thread's cards, as a pick.
@@ -481,6 +505,12 @@ final class SourceSession {
               let m = thread.messages.firstIndex(where: { $0.id == question.messageId }),
               let q = thread.messages[m].questions?.firstIndex(where: { $0.key == question.key }) else { return }
         change(&thread.messages[m].questions![q])
+        threads[id] = thread
+    }
+
+    private func editMessage(_ message: String, thread id: String, _ change: (inout InboxMessage) -> Void) {
+        guard var thread = threads[id], let m = thread.messages.firstIndex(where: { $0.id == message }) else { return }
+        change(&thread.messages[m])
         threads[id] = thread
     }
 

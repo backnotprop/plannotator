@@ -90,6 +90,9 @@ function Surface() {
         case 'open_section':
           setSection(message.section);
           break;
+        case 'set_wrap':
+          configStore.set('diffOverflow', message.wrap ? 'wrap' : 'scroll');
+          break;
         case 'set_mode':
           setInteract(message.mode === 'interact');
           break;
@@ -100,6 +103,7 @@ function Surface() {
           setMode(message.theme);
           document.documentElement.style.setProperty('--sf-text-scale', String(message.text_scale));
           document.documentElement.style.setProperty('--sf-text-adjust', `${((message.text_scale * 17) / 15) * 100}%`);
+          document.documentElement.style.setProperty('--sf-guide-adjust', `${message.text_scale * 112}%`);
           break;
         case 'commit_annotation':
           setRecords((current) => upsert(current, message.annotation));

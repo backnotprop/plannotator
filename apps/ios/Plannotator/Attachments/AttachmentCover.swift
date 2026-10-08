@@ -478,7 +478,7 @@ struct AttachmentCover: View {
         case .annotation(let id):
             guard composer == nil else { return }
             shown = records.first { $0.id == id }
-        case .error:
+        case .error, .reviewed, .section:
             break
         }
     }
@@ -551,10 +551,7 @@ struct AttachmentCover: View {
     }
 
     private func sendAppearance() {
-        // The body size at this Dynamic Type size over the default's (17 pt).
-        let traits = UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(typeSize))
-        let scale = UIFontMetrics(forTextStyle: .body).scaledValue(for: 17, compatibleWith: traits) / 17
-        host.send(Bridge.SetAppearance(theme: scheme == .dark ? "dark" : "light", text_scale: Double(scale)))
+        host.sendAppearance(scheme: scheme, typeSize: typeSize)
     }
 
     // MARK: Helpers

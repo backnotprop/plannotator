@@ -5,7 +5,8 @@ name: iPhone app
 # under a temp data dir, connects agents through `plannotator inbox mcp`, makes
 # one simulator and runs `xcodebuild test` (the PlannotatorKit tests and the
 # XCUITest flows: pair, list, picks, Send, Resolve, Delete, Remove; the
-# attachments, annotated by touch and sent) against that Inbox. M5: the relay runs under `wrangler dev` beside it with Apple played
+# attachments, annotated by touch and sent; a guided review read and its
+# sections marked reviewed) against that Inbox. M5: the relay runs under `wrangler dev` beside it with Apple played
 # locally, and the notification flow delivers the relay's exact push bodies
 # with `xcrun simctl push`. One macOS runner, one simulator destination, no matrix. Runs only
 # when the app, the Inbox files its device door and pairing live in, or the
@@ -25,6 +26,7 @@ on:
       - 'apps/hook/server/inbox*'
       - 'scripts/inbox-sim.ts'
       - 'packages/inbox/surface/**'
+      - 'packages/inbox/guide/**'
       - 'packages/inbox/attachments.ts'
       - 'apps/inbox/surface*'
       - 'apps/hook/hooks/mod/inbox*'
@@ -46,6 +48,7 @@ on:
       - 'apps/hook/server/inbox*'
       - 'scripts/inbox-sim.ts'
       - 'packages/inbox/surface/**'
+      - 'packages/inbox/guide/**'
       - 'packages/inbox/attachments.ts'
       - 'apps/inbox/surface*'
       - 'apps/hook/hooks/mod/inbox*'

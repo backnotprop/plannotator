@@ -215,6 +215,19 @@ public struct InboxMessage: Codable, Hashable, Sendable, Identifiable {
     public var delivery: InboxDelivery?
     public var to: InboxAddressee?
     public var questions: [InboxQuestion]?
+    /// The guided review this message carries (submit_guide), drawn as its tile in the thread.
+    public var guide: InboxGuideRef?
+    /// The person's reviewed tick per section, as last saved (absent until the first tick).
+    public var guideReviewed: [Bool]?
+}
+
+/// What a message keeps about its guided review (`InboxGuideRef` in core): the facts its tile draws.
+public struct InboxGuideRef: Codable, Hashable, Sendable {
+    public var title: String
+    public var sections: Int
+    public var files: Int
+    public var additions: Int
+    public var deletions: Int
 }
 
 public struct InboxThreadProject: Codable, Hashable, Sendable {

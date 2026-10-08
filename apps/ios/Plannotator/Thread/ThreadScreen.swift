@@ -13,6 +13,8 @@ struct ThreadScreen: View {
     @State private var openFile: OpenFile?
     @State private var showAnnotations = false
     @State private var fileAfterSheet: OpenFile?
+    /// The message whose guided review is open (6.1, 6.2).
+    @State private var openGuide: GuideOpen?
 
     private var thread: InboxThread? { session.threads[threadId] }
 
@@ -127,7 +129,7 @@ struct ThreadScreen: View {
                         .padding(.bottom, 16)
                 }
                 ForEach(thread.messages) { message in
-                    MessageView(message: message, thread: thread, session: session, onError: { problem = $0 }, openFile: { openFile = $0 })
+                    MessageView(message: message, thread: thread, session: session, onError: { problem = $0 }, openFile: { openFile = $0 }, openGuide: { openGuide = GuideOpen(id: message.id) })
                         .padding(.bottom, 18)
                 }
                 if let delivery = deliveryLine(thread) {
@@ -141,6 +143,9 @@ struct ThreadScreen: View {
             .padding(.top, 8)
         }
         .scrollDismissesKeyboard(.interactively)
+        .fullScreenCover(item: $openGuide) { open in
+            GuideCover(session: session, threadId: threadId, messageId: open.id)
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if thread.resolvedAt == nil {
                 ReplyBar(session: session, thread: thread, showAnnotations: { showAnnotations = true })
@@ -194,6 +199,7 @@ struct MessageView: View {
     let session: SourceSession
     let onError: (String) -> Void
     let openFile: (OpenFile) -> Void
+    let openGuide: () -> Void
 
     private var questions: [InboxQuestion] { (message.questions ?? []).sorted { $0.position < $1.position } }
 
@@ -209,8 +215,10 @@ struct MessageView: View {
                     MarkdownBlockView(block: block)
                 }
             }
-            if let files = session.files[thread.threadId], case let attachments = files.attachments.filter({ $0.messageId == message.id }), !attachments.isEmpty {
-                AttachmentTiles(attachments: attachments, annotations: files.annotations, open: openFile)
+            let files = session.files[thread.threadId]
+            let attachments = files?.attachments.filter { $0.messageId == message.id } ?? []
+            if !attachments.isEmpty || message.guide != nil {
+                AttachmentTiles(attachments: attachments, guide: message.guide, annotations: files?.annotations ?? [], open: openFile, openGuide: openGuide)
             }
         }
     }
@@ -248,4 +256,9 @@ struct MessageView: View {
         .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .combine)
     }
+}
+
+/// A guided review being opened: the message that carries it.
+struct GuideOpen: Identifiable, Hashable {
+    let id: String
 }

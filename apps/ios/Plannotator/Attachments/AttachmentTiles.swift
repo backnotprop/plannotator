@@ -11,17 +11,28 @@ struct OpenFile: Identifiable, Hashable {
 
 /// The files at the foot of a message (3.4A): a tile per file with its kind and
 /// annotation count, or the changed line when the file on disk is no longer what
-/// was sent. A tap opens it full screen.
+/// was sent; and the guided review the message carries (8.1). A tap opens it
+/// full screen.
 struct AttachmentTiles: View {
     let attachments: [InboxAttachmentState]
+    var guide: InboxGuideRef?
     let annotations: [InboxAnnotationRecord]
     let open: (OpenFile) -> Void
+    var openGuide: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(plural(attachments.count, "attachment"), systemImage: "paperclip")
+            Label(plural(attachments.count + (guide == nil ? 0 : 1), "attachment"), systemImage: "paperclip")
                 .font(.callout)
                 .foregroundStyle(Color.inkSecondary)
+            if let guide {
+                Button(action: openGuide) {
+                    row(symbol: "book", tinted: true, name: "Guided review: \(guide.title)", detail: Self.detail(guide), warn: false)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("guide-tile")
+                .accessibilityHint("Opens the guided review")
+            }
             ForEach(attachments) { attachment in
                 Button { open(OpenFile(attachmentId: attachment.id)) } label: { tile(attachment) }
                     .buttonStyle(.plain)
@@ -36,16 +47,22 @@ struct AttachmentTiles: View {
     private func tile(_ attachment: InboxAttachmentState) -> some View {
         let count = annotations.filter { $0.attachmentId == attachment.id }.count
         let detail = Self.detail(attachment, count: count)
-        return HStack(spacing: 14) {
-            Image(systemName: Self.symbol(attachment))
+        return row(symbol: Self.symbol(attachment), tinted: false, name: attachment.name, detail: detail.text, warn: detail.changed)
+            .accessibilityHint("Opens the file")
+    }
+
+    /// One tile: the mark, the name, the second line, the chevron. A guide's mark is tinted (8.1).
+    private func row(symbol: String, tinted: Bool, name: String, detail: String, warn: Bool) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: symbol)
                 .font(.system(size: 19, weight: .medium))
-                .foregroundStyle(Color.inkSecondary)
+                .foregroundStyle(tinted ? Color.tint : Color.inkSecondary)
                 .frame(width: 48, height: 48)
-                .background(Color.fill, in: .rect(cornerRadius: 12))
+                .background(tinted ? Color.tint.opacity(0.13) : Color.fill, in: .rect(cornerRadius: 12))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(attachment.name).font(.body.weight(.semibold)).foregroundStyle(Color.ink)
-                Text(detail.text).font(.subheadline).foregroundStyle(detail.changed ? Color.warning : Color.inkSecondary)
+                Text(name).font(.body.weight(.semibold)).foregroundStyle(Color.ink)
+                Text(detail).font(.subheadline).foregroundStyle(warn ? Color.warning : Color.inkSecondary)
             }
             Spacer(minLength: 4)
             Image(systemName: "chevron.right")
@@ -60,7 +77,11 @@ struct AttachmentTiles: View {
         .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(Color.hairline))
         .contentShape(.rect(cornerRadius: 20))
         .accessibilityElement(children: .combine)
-        .accessibilityHint("Opens the file")
+    }
+
+    /// A guide's second line, as 8.1 draws it: "4 sections, 6 files, +212 −38".
+    static func detail(_ guide: InboxGuideRef) -> String {
+        "\(plural(guide.sections, "section")), \(plural(guide.files, "file")), +\(guide.additions) −\(guide.deletions)"
     }
 
     /// The tile's second line, as the record draws it (3.4A).

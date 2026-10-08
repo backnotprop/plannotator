@@ -1,5 +1,6 @@
 import Foundation
 import PlannotatorKit
+import SwiftUI
 import UIKit
 import WebKit
 
@@ -15,12 +16,17 @@ enum SurfaceEvent {
     case draft(kind: String, label: String, draft: JSONValue)
     /// A saved mark was tapped.
     case annotation(id: String)
+    /// A guide's Reviewed tick: every section's tick (6.1, 6.2).
+    case reviewed(messageId: String, reviewed: [Bool])
+    /// The guide moved: a section is on screen, or the sections with nil (6.1, 6.2).
+    case section(messageId: String, section: Int?, sections: Int)
     case error(code: String, message: String)
 }
 
 /// Plannotator's surface (`apps/hook/dist/surface.html`, bundled) in one
-/// `WKWebView` the app keeps warm: the attachment screens (4.1 to 4.4) show
-/// it, and Send asks it for the annotations' feedback text.
+/// `WKWebView` the app keeps warm: the attachment screens (4.1 to 4.4) and
+/// the guided review (6.1, 6.2) show it, and Send asks it for the
+/// annotations' feedback text.
 ///
 /// - `plannotator-surface://app/surface.html` serves the bundled file.
 /// - `plannotator-asset://inbox/api/html-assets/<token>/<path>` serves the
@@ -184,6 +190,13 @@ final class SurfaceHost: NSObject {
         webView.callAsyncJavaScript("window.plannotatorSurface.receive(JSON.parse(m))", arguments: ["m": json], in: nil, in: .page) { _ in }
     }
 
+    /// The theme and the Dynamic Type size: the body size at this size over the default's (17 pt).
+    func sendAppearance(scheme: ColorScheme, typeSize: DynamicTypeSize) {
+        let traits = UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(typeSize))
+        let scale = UIFontMetrics(forTextStyle: .body).scaledValue(for: 17, compatibleWith: traits) / 17
+        send(Bridge.SetAppearance(theme: scheme == .dark ? "dark" : "light", text_scale: Double(scale)))
+    }
+
     /// Waits until the surface has painted what it was last sent (two animation frames).
     func drawn() async {
         _ = try? await webView.callAsyncJavaScript("await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))", contentWorld: .page)
@@ -247,6 +260,13 @@ final class SurfaceHost: NSObject {
             onEvent?(.draft(kind: body["target"]?["kind"]?.string ?? "block", label: body["target"]?["label"]?.string ?? "", draft: draft))
         case "annotation":
             if let id = body["id"]?.string { onEvent?(.annotation(id: id)) }
+        case "reviewed":
+            guard let id = body["message_id"]?.string, case .array(let values)? = body["reviewed"] else { return }
+            onEvent?(.reviewed(messageId: id, reviewed: values.map { $0 == .bool(true) }))
+        case "section":
+            guard let id = body["message_id"]?.string, case .number(let sections)? = body["sections"] else { return }
+            let section: Int? = if case .number(let n)? = body["section"] { Int(n) } else { nil }
+            onEvent?(.section(messageId: id, section: section, sections: Int(sections)))
         case "link":
             if let href = body["href"]?.string, let url = URL(string: href) { open(url) }
         case "feedback":
@@ -483,6 +503,46 @@ enum Bridge {
             try c.encode(annotations, forKey: .annotations)
             try c.encode(focus, forKey: .focus)
         }
+    }
+
+    /// A guided review opens on its sections (6.1). `guide` and `snapshot` are the door's JSON as it answered them (7.19).
+    struct OpenGuide: Encodable {
+        let v = 1, type = "open_guide"
+        var message_id: String
+        var guide: JSONValue
+        var snapshot: JSONValue
+        var reviewed: [Bool]?
+
+        enum CodingKeys: String, CodingKey { case v, type, message_id, guide, snapshot, reviewed }
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(v, forKey: .v)
+            try c.encode(type, forKey: .type)
+            try c.encode(message_id, forKey: .message_id)
+            try c.encode(guide, forKey: .guide)
+            try c.encode(snapshot, forKey: .snapshot)
+            try c.encode(reviewed, forKey: .reviewed) // null: no ticks kept yet
+        }
+    }
+
+    /// The bar's back button in 6.2: a section, or the sections with nil.
+    struct OpenSection: Encodable {
+        let v = 1, type = "open_section"
+        var section: Int?
+
+        enum CodingKeys: String, CodingKey { case v, type, section }
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(v, forKey: .v)
+            try c.encode(type, forKey: .type)
+            try c.encode(section, forKey: .section)
+        }
+    }
+
+    /// The wrap button in 6.2's bar: diffs wrapped, or one line per row for a sideways read.
+    struct SetWrap: Encodable {
+        let v = 1, type = "set_wrap"
+        var wrap: Bool
     }
 
     struct CommentSelection: Encodable {

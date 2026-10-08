@@ -36,6 +36,7 @@
 		BB36EB361F96F93C00B1A4A6 /* NearbyScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 609D222F2BF3C34763B18A1E /* NearbyScreen.swift */; };
 		BC97E4610AA7A0BD4ED1D8DC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 559DB35326954FAE3EDAFAE9 /* Assets.xcassets */; };
 		BD956C4C0F9DADC8935C3735 /* QuestionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA7E355D502DC8680C310B43 /* QuestionCard.swift */; };
+		C06488EBD4067D2B8DECBE64 /* GuideProofTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61F457636536F329E621CF67 /* GuideProofTests.swift */; };
 		C1B0510E8A529837E3A566F6 /* AttachmentCover.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15237F0C71537689906D3DC /* AttachmentCover.swift */; };
 		C41C48CD406A4C9A2A388A4D /* PlannotatorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58703DC1C0F8D410DA8B2261 /* PlannotatorApp.swift */; };
 		C87471AB2A0E526F89FA3FCE /* PlannotatorNotifications.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E9CA91EEE5343CB85949FE10 /* PlannotatorNotifications.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -45,6 +46,7 @@
 		CDE91262622C0CBB81753E25 /* DecisionsProofTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85BEAAAE32F2C59FEA56436B /* DecisionsProofTests.swift */; };
 		D1271AA242EEA609CB34D513 /* Colors.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CBEA43689480D730B4AC4D7F /* Colors.xcassets */; };
 		D5A54937EB306159D24FF67F /* SettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 259C44811B6CA3DF346CAEAD /* SettingsTab.swift */; };
+		DCC628F8C3A7D54E891A1D73 /* GuideCover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17F7FC2A413F8B402811AB33 /* GuideCover.swift */; };
 		E2AEE8DF24B2A9E2B1664CF1 /* ProofSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C4839632E4D1D6B4AB57C4E /* ProofSupport.swift */; };
 		E5BE09E3E3FBA5169295573B /* WarmUpLaunch.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0DACEC76DE13F00A557D486 /* WarmUpLaunch.swift */; };
 		E69B1BC67D0DEE64C6457A48 /* InboxTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67B6227C80FBE3869B1AD532 /* InboxTab.swift */; };
@@ -96,6 +98,7 @@
 		063C495C6C3BF0442EBE14B6 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		081FAF267E676DFEF28B65D4 /* PairingCover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingCover.swift; sourceTree = "<group>"; };
 		16F1299C93CAE54EF4AF4CEC /* WorkspacesAccount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspacesAccount.swift; sourceTree = "<group>"; };
+		17F7FC2A413F8B402811AB33 /* GuideCover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuideCover.swift; sourceTree = "<group>"; };
 		2126D82FAA5108CD5CC21287 /* SourceStates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceStates.swift; sourceTree = "<group>"; };
 		25783EB204BEC1769A9D3F31 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		259C44811B6CA3DF346CAEAD /* SettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTab.swift; sourceTree = "<group>"; };
@@ -105,6 +108,7 @@
 		58703DC1C0F8D410DA8B2261 /* PlannotatorApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlannotatorApp.swift; sourceTree = "<group>"; };
 		598B6A5629A31EDD2457B936 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		609D222F2BF3C34763B18A1E /* NearbyScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyScreen.swift; sourceTree = "<group>"; };
+		61F457636536F329E621CF67 /* GuideProofTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuideProofTests.swift; sourceTree = "<group>"; };
 		64F3CF367FE84AF2F4BE0D46 /* Notifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Notifications.swift; sourceTree = "<group>"; };
 		67B6227C80FBE3869B1AD532 /* InboxTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxTab.swift; sourceTree = "<group>"; };
 		6C4839632E4D1D6B4AB57C4E /* ProofSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProofSupport.swift; sourceTree = "<group>"; };
@@ -168,6 +172,7 @@
 			children = (
 				91508EC3F9DDD6F97197858D /* AttachmentProofTests.swift */,
 				85BEAAAE32F2C59FEA56436B /* DecisionsProofTests.swift */,
+				61F457636536F329E621CF67 /* GuideProofTests.swift */,
 				6C4839632E4D1D6B4AB57C4E /* ProofSupport.swift */,
 				F46914B8F633116D2FBECDB4 /* ProofTests.swift */,
 				AFEA26793561E1B1E8ADEF69 /* RelayPushTests.swift */,
@@ -249,6 +254,14 @@
 			name = Packages;
 			sourceTree = "<group>";
 		};
+		D26696F337EB16D7E970204E /* Guides */ = {
+			isa = PBXGroup;
+			children = (
+				17F7FC2A413F8B402811AB33 /* GuideCover.swift */,
+			);
+			path = Guides;
+			sourceTree = "<group>";
+		};
 		D8291E6B244DBFD5B1DC4009 /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -292,6 +305,7 @@
 				FE63721F949D4E7E7EB3F4C7 /* App */,
 				7990D16261F6E0254FC28472 /* Attachments */,
 				79DBCABF60F99BB24A82A66C /* Decisions */,
+				D26696F337EB16D7E970204E /* Guides */,
 				EB54E46BBE545BBFA65B5E04 /* Inbox */,
 				750B4BC97A453EC943BAE4DC /* Pairing */,
 				6C39865E5EE56A268FDB9C6B /* Settings */,
@@ -522,6 +536,7 @@
 				EF8E4620AD813608FDB0C30B /* DecisionSheet.swift in Sources */,
 				7C072511124EDF3244533DFB /* DecisionsTab.swift in Sources */,
 				CAE3FABDB78EE260B36B9C84 /* DocumentRow.swift in Sources */,
+				DCC628F8C3A7D54E891A1D73 /* GuideCover.swift in Sources */,
 				7EEA4E2F6EBFBB80E12B02DD /* InboxList.swift in Sources */,
 				E69B1BC67D0DEE64C6457A48 /* InboxTab.swift in Sources */,
 				A1C18368BADB3BBDC35FB596 /* LinkViews.swift in Sources */,
@@ -559,6 +574,7 @@
 			files = (
 				93FE80030A6D48845239FD0D /* AttachmentProofTests.swift in Sources */,
 				CDE91262622C0CBB81753E25 /* DecisionsProofTests.swift in Sources */,
+				C06488EBD4067D2B8DECBE64 /* GuideProofTests.swift in Sources */,
 				E2AEE8DF24B2A9E2B1664CF1 /* ProofSupport.swift in Sources */,
 				7EDF141F1FB9321AE7EBA951 /* ProofTests.swift in Sources */,
 				594CA27509F2F48BE7D56418 /* RelayPushTests.swift in Sources */,

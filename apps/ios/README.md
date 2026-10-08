@@ -18,7 +18,8 @@ meta repo.
   cache); `Inbox/`, `Thread/`, `Pairing/` and `Settings/` hold the screens;
   `Attachments/` holds the surface host (one `WKWebView` with Plannotator's
   bundled surface, its two URL schemes and the bridge) and the attachment
-  screens (4.1 to 4.4, the "N annotations" sheet).
+  screens (4.1 to 4.4, the "N annotations" sheet); `Guides/` holds the
+  guided review's cover (6.1, 6.2), on the same surface.
 - The surface: a build phase runs `apps/inbox`'s `build:surface` when its
   sources are newer than `apps/inbox/dist/surface.html`, and copies that file
   into the app as `surface.html`. It needs `bun` on the PATH Xcode gives
@@ -82,7 +83,13 @@ with none), and attachments (`AttachmentProofTests`: an agent sends
 `scripts/fixtures`' plan, ticket page and Mermaid flow; a comment on each by
 touch; the changed line and the sent version; links; Share; the page's forged
 bridge messages and its embed's beacons dropped; the "3 annotations" sheet
-opening a file at its mark; Send, with the agent's feedback naming all three).
+opening a file at its mark; Send, with the agent's feedback naming all three),
+and a guided review (`GuideProofTests`: Pi sends `scripts/fixtures`' ledger
+export guide through `submit_guide`; it opens from the thread, two sections
+are marked reviewed and the Inbox keeps both ticks, read as the desktop window
+reads them; a tick with the computer out of reach reads off again; Previous
+and Next with the bar's title following; the wrap button; the largest Dynamic
+Type size).
 Every proof class ends by clearing the app's stored sources. The live sessions are the Claude Code mod's own code on real
 processes (`apps/hook/hooks/mod/testing/claude-session.ts`), started by the
 script in the projects the test writes to. Light and dark screenshots of each

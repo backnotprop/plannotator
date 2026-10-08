@@ -121,7 +121,10 @@
 }
 .sf-gtitle {
   margin: 0 0 10px;
-  font-size: 1.65em;
+  /* 28px at the default size, growing by the points the body grows by, as a
+     native title does: a multiple of the body runs to 100px at the largest
+     Dynamic Type size. */
+  font-size: calc(1em + 11px);
   line-height: 1.18;
   font-weight: 700;
   letter-spacing: -0.01em;
@@ -235,6 +238,8 @@
   height: 16px;
 }
 .sf-gfoot {
+  /* A control at the thumb, as the shell's bars: it stops growing at the largest non-accessibility size. */
+  font-size: min(calc(17px * var(--sf-text-scale)), 23px);
   position: fixed;
   /* Above the document (Viewer's own layer is z-50). */
   z-index: 100;
@@ -269,11 +274,21 @@
 .sf-gpage {
   padding: 6px 10px calc(110px + env(safe-area-inset-bottom));
 }
-/* Plannotator's section card, at a phone's reading size. */
+/* Plannotator's section card, at a phone's reading size and the Dynamic
+   Type size. iOS WebKit lays the card out zoomed but keeps its letters at
+   their own size, so the text takes the same factor through
+   text-size-adjust, as the document's does above (desktop WebKit ignores it
+   and zooms the letters itself).
+   The card's layout zoom stops at the largest non-accessibility size
+   (23 / 17), so its padding does not eat a phone's width at the
+   accessibility sizes; its text keeps growing. */
 .sf-gcard {
-  zoom: calc(var(--sf-text-scale) * 1.12);
+  zoom: calc(min(var(--sf-text-scale), 1.35) * 1.12);
+  -webkit-text-size-adjust: var(--sf-guide-adjust, 112%);
 }
 .sf-gnav {
+  /* As .sf-gfoot: Previous, Reviewed and Next stop growing with the shell's bars. */
+  font-size: min(calc(17px * var(--sf-text-scale)), 23px);
   position: fixed;
   /* Above the document (Viewer's own layer is z-50). */
   z-index: 100;
