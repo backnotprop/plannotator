@@ -215,6 +215,48 @@ final class ProofTests: XCTestCase {
         try await control.shot("thread-deleted")
         app.buttons["Back to Inbox"].firstMatch.tap()
 
+        // A pairing link inside an agent's message is plain text: content never
+        // reaches the app's URL handler, so a tap pairs nothing.
+        let linkThread = try await control.post("/link-message")
+        try await openRow(try XCTUnwrap(linkThread["thread"] as? String))
+        let linkText = app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'open the diff'")).firstMatch
+        XCTAssertTrue(linkText.waitForExistence(timeout: 30))
+        XCTAssertFalse(app.links["open the diff"].exists, "a plannotator:// link in content is tappable")
+        linkText.tap()
+        XCTAssertFalse(app.alerts.firstMatch.waitForExistence(timeout: 3))
+        let devices1 = try await deviceCount()
+        XCTAssertEqual(devices1, 1, "nothing redeemed")
+        try await control.shot("link-in-message")
+        back()
+
+        // A pairing link opened from outside the app asks first, naming the
+        // address it will contact; nothing is redeemed until Pair.
+        let external = try await control.post("/pair-link")
+        let pairURL = try XCTUnwrap(external["url"] as? String)
+        let pairAddress = try XCTUnwrap(external["address"] as? String)
+        let confirm = app.alerts.matching(NSPredicate(format: "label CONTAINS %@", pairAddress)).firstMatch
+        try await control.post("/open-url", ["url": pairURL])
+        allowSystemOpenPrompt()
+        XCTAssertTrue(confirm.waitForExistence(timeout: 30))
+        try await control.shot("pair-link-confirm")
+        let devices2 = try await deviceCount()
+        XCTAssertEqual(devices2, 1, "nothing redeemed")
+        confirm.buttons["Cancel"].tap()
+        try await Task.sleep(for: .seconds(2))
+        let devices3 = try await deviceCount()
+        XCTAssertEqual(devices3, 1, "nothing redeemed")
+        try await control.post("/open-url", ["url": pairURL])
+        allowSystemOpenPrompt()
+        XCTAssertTrue(confirm.waitForExistence(timeout: 30))
+        confirm.buttons["Pair"].tap()
+        var paired = 1
+        for _ in 0..<30 where paired == 1 {
+            try await Task.sleep(for: .seconds(1))
+            paired = try await deviceCount()
+        }
+        XCTAssertEqual(paired, 2, "Pair redeems the link")
+        XCTAssertTrue(anyRow().waitForExistence(timeout: 30))
+
         // 9.1 and 9.2.
         tab("Settings")
         let source = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'source-'")).firstMatch
@@ -268,6 +310,16 @@ final class ProofTests: XCTestCase {
     private func pullToRefresh() {
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
         start.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)))
+    }
+
+    private func deviceCount() async throws -> Int {
+        (try await control.get("/devices")["devices"] as? [Any])?.count ?? -1
+    }
+
+    /// The simulator asks "Open in Plannotator?" before handing a URL to the app.
+    private func allowSystemOpenPrompt() {
+        let open = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Open"]
+        if open.waitForExistence(timeout: 8) { open.tap() }
     }
 
     private func back() {

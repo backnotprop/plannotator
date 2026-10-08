@@ -17,7 +17,9 @@ public struct PairLink: Equatable, Sendable {
     }
 
     public static func parse(_ text: String) -> Result<PairLink, Failure> {
-        guard let components = URLComponents(string: text.trimmingCharacters(in: .whitespacesAndNewlines)),
+        // A `+` in the query is a space, as URLSearchParams writes it ("MacBook+Pro");
+        // a literal plus arrives as %2B.
+        guard let components = URLComponents(string: text.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "+", with: "%20")),
               components.scheme == "plannotator", components.host == "pair" else { return .failure(.notALink) }
         var query: [String: String] = [:]
         for item in components.queryItems ?? [] { query[item.name] = item.value }

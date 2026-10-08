@@ -40,6 +40,11 @@ on:
 permissions:
   contents: read
 
+# A new push to the same PR or branch cancels the run it makes stale.
+concurrency:
+  group: ios-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ios-app:
     name: iPhone app (XCUITest against the compiled binary)

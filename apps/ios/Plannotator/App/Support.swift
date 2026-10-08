@@ -136,6 +136,16 @@ extension String {
 }
 
 /// Inline markdown (emphasis, links, code) as an attributed string; plain text when it does not parse.
+///
+/// Agent text is content: only https and mailto links stay tappable. Any other
+/// scheme, `plannotator://` above all, is drawn as plain text, so a message can
+/// never reach the app's own URL handler (a pairing link in a message would
+/// otherwise pair the phone with whatever host it names).
 func inlineMarkdown(_ text: String) -> AttributedString {
-    (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+    var string = (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+    for run in string.runs {
+        guard let url = run.link else { continue }
+        if !["https", "mailto"].contains(url.scheme?.lowercased() ?? "") { string[run.range].link = nil }
+    }
+    return string
 }

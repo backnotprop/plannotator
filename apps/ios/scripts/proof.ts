@@ -210,6 +210,31 @@ const control = Bun.serve({
           const answer = (await (await windowRoute(`/api/inbox/threads/${body.thread}`)).json()) as { thread: { messages: { author: { kind: string } }[] } };
           return Response.json({ count: answer.thread.messages.filter((m) => m.author.kind === 'person').length });
         }
+        case '/pair-link': {
+          // A live offer's own link, pointed at the proxy: what the Camera app would open.
+          const answer = await windowRoute('/api/inbox/pairing', { method: 'POST', body: '{}' });
+          const offer = (await answer.json()) as { link: string; computer: { name: string } };
+          if (!answer.ok) throw new Error(`pairing offer: ${answer.status}`);
+          const link = new URL(offer.link);
+          link.searchParams.set('tailnet', `127.0.0.1:${proxy.port}`);
+          link.searchParams.delete('lan');
+          link.searchParams.delete('fp');
+          return Response.json({ url: link.toString(), address: `127.0.0.1:${proxy.port}`, name: offer.computer.name });
+        }
+        case '/link-message': {
+          // An agent's message carrying a live pairing link as a markdown link.
+          const answer = await windowRoute('/api/inbox/pairing', { method: 'POST', body: '{}' });
+          const offer = (await answer.json()) as { link: string };
+          const link = new URL(offer.link);
+          link.searchParams.set('tailnet', `127.0.0.1:${proxy.port}`);
+          const writer = await agent('Claude Code', 'claude-code');
+          newsAgents.push(writer);
+          const sent = await writer.send({ project_path: projects['ledger']!, subject: 'The export diff is ready', body: `The export changed in two files. [open the diff](${link.toString()}) when you can.` });
+          return Response.json({ thread: sent.thread_id });
+        }
+        case '/open-url':
+          run('xcrun', ['simctl', 'openurl', udid, body.url ?? '']);
+          return Response.json({ ok: true });
         case '/text-size':
           // The simulator's Dynamic Type size, e.g. accessibility-extra-extra-extra-large, then large.
           run('xcrun', ['simctl', 'ui', udid, 'content_size', body.size ?? 'large']);

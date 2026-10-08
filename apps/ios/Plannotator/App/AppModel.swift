@@ -29,6 +29,8 @@ final class AppModel {
     private(set) var session: SourceSession?
     /// The pairing cover (1.2) is up.
     var pairing = false
+    /// A pairing link opened from outside the app, waiting for the person's yes.
+    var offered: PairLink?
 
     private let defaults = UserDefaults.standard
 

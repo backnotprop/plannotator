@@ -12,6 +12,11 @@ import Testing
         #expect(link.code == "482913")
     }
 
+    @Test func aFormEncodedNameReadsWithItsSpaces() throws {
+        let link = try PairLink.parse("plannotator://pair?v=1&name=Michael%E2%80%99s+MacBook+Pro+%282%29&secret=AAAA&code=482913").get()
+        #expect(link.name == "Michael\u{2019}s MacBook Pro (2)")
+    }
+
     @Test func anUnknownVersionAsksForAnUpdate() {
         #expect(PairLink.parse("plannotator://pair?v=2&secret=x&code=123456") == .failure(.newerVersion))
         #expect(PairLink.parse("https://example.com") == .failure(.notALink))
