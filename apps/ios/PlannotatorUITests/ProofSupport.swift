@@ -16,16 +16,20 @@ class ProofCase: XCTestCase {
             throw XCTSkip("Run through apps/ios/scripts/proof.ts, which starts the Inbox this test talks to.")
         }
         control = Control(base: url)
+        // Every proof class starts from a cold install, whatever the class before it
+        // left behind (a class that failed partway leaves the app paired).
+        try await control.post("/reset-app")
         app = XCUIApplication()
         app.launchArguments = ["-PlannotatorProof"]
     }
 
-    /// Every proof class leaves the app as a fresh install finds it, whatever
-    /// happened in it: a failure in one class never starts the next one paired.
-    /// (The app clears its Keychain items when it starts with no sources.)
+    /// A class that failed partway leaves the app as a cold install has it too, for
+    /// the classes after it that do not reset themselves.
     override func tearDown() async throws {
-        app?.terminate()
-        try? await control?.post("/reset-app")
+        if testRun?.hasSucceeded == false {
+            app?.terminate()
+            try? await control?.post("/reset-app")
+        }
         try await super.tearDown()
     }
 

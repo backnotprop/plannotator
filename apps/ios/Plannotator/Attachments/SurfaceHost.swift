@@ -53,6 +53,7 @@ final class SurfaceHost: NSObject {
     @ObservationIgnored private var loads = 0
     @ObservationIgnored private var terminations = 0
     @ObservationIgnored private var rules = "pending"
+    @ObservationIgnored private var readyWatch: Task<Void, Never>?
     /// An agent's HTML page is open: its pins and selections are page-reported
     /// (contract section 5), so one counts only right after the person's own touch.
     @ObservationIgnored var pageReported = false
@@ -149,7 +150,22 @@ final class SurfaceHost: NSObject {
     func whenReady() async {
         warm()
         if isReady || isUnavailable || loadError != nil { return }
+        watchReady()
         await withCheckedContinuation { readyWaiters.append($0) }
+    }
+
+    /// Someone is waiting on a loaded surface that has said nothing for 30 s (seen
+    /// on a CI simulator: loaded, no failure, no "ready"): load it again, twice at most.
+    private func watchReady() {
+        guard readyWatch == nil else { return }
+        readyWatch = Task { [weak self] in
+            for _ in 0..<2 {
+                try? await Task.sleep(for: .seconds(30))
+                guard let self, !Task.isCancelled, !self.isReady, !self.isUnavailable, self.loadError == nil, self.rules == "ok" else { break }
+                self.load()
+            }
+            self?.readyWatch = nil
+        }
     }
 
     /// Sends a message to the surface (`window.plannotatorSurface.receive`),
@@ -210,6 +226,8 @@ final class SurfaceHost: NSObject {
         switch type {
         case "ready":
             isReady = true
+            readyWatch?.cancel()
+            readyWatch = nil
             updateTrace()
             let queued = outbox
             outbox = []
