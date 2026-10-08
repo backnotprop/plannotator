@@ -74,7 +74,7 @@ Pass several file paths to review them together:
 plannotator annotate spec.md ui/mock.html notes.md
 ```
 
-They open as one review, in the order you gave them. The first file opens right away. A switcher in the header ("2 of 3 · mock.html") and the Files tab list them in that order, and each file renders as it would alone (markdown, raw HTML, diagram files). There is one decision for all of them: Send Feedback sends one message with a section per file, in the same order, and with `--gate` one Approve covers every file. Each file's comments are also saved under that file, so they come back when you open it again on its own or in another review.
+They open as one review, in the order you gave them. The first file opens right away. A switcher in the header ("2 of 3 · mock.html") and the Files tab list them in that order, and each file renders as it would alone (markdown, raw HTML, diagram files). There is one decision for all of them: Send Feedback sends one message with a section per file, in the same order, and with `--gate` one Approve covers every file. Each file's comments are also saved under that file, so they come back when you open it again on its own or in another review. Edit Mode works on each file it would work on alone (`.md`, `.mdx` and `.txt`): your edits save back to that file. Documents the files link to open read-only.
 
 Every argument must be an existing file named by its path. If anything else is mixed in (a word, a URL, a folder, or a bare name Plannotator would have to search the project for), the command keeps its usual behavior: one file among plain words opens that file, and several targets are an error that names them. Agents with the `plannotator` tool pass the files as a list in `target`.
 

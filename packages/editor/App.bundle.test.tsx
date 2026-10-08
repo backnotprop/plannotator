@@ -170,6 +170,153 @@ afterAll(() => {
 
 const docRequests = () => requests.filter((r) => r.path === "/api/doc").map((r) => r.search.get("path"));
 
+// --- Edit Mode against a real annotate server -------------------------------
+//
+// The capability comes from the server (`sourceSave` on /api/doc), so these
+// tests run the real Bun annotate server in bundle mode over temp files, as a
+// child process (testing/annotateBundleServer.ts) under a temp
+// PLANNOTATOR_DATA_DIR, and route the page's requests to it.
+
+interface RealBundle {
+  dir: string;
+  first: string;
+  second: string;
+  stop: () => Promise<void>;
+}
+
+async function startRealBundle(): Promise<RealBundle> {
+  const { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-bundle-edit-")));
+  mkdirSync(join(dir, "work/docs"), { recursive: true });
+  const first = join(dir, "work/docs/first.md");
+  const second = join(dir, "work/second.md");
+  writeFileSync(first, "# First\n\nFirst body text.\n");
+  writeFileSync(second, "# Second\n\nSecond body text.\n");
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && !key.startsWith("PLANNOTATOR_") && key !== "DOM_TESTS") env[key] = value;
+  }
+  env.PLANNOTATOR_DATA_DIR = join(dir, "data");
+  env.PLANNOTATOR_REMOTE = "0";
+  env.PLANNOTATOR_AI = "disabled";
+  env.PLANNOTATOR_FEEDBACK_HISTORY = "0";
+  const child = Bun.spawn(
+    [process.execPath, join(import.meta.dir, "testing/annotateBundleServer.ts"), join(dir, "work"), first, second],
+    { env, stdout: "pipe", stderr: "inherit" },
+  );
+  const reader = child.stdout.getReader();
+  let buffered = "";
+  while (!buffered.includes("\n")) {
+    const { value, done } = await reader.read();
+    if (done) throw new Error("the annotate server exited before it was ready");
+    buffered += new TextDecoder().decode(value);
+  }
+  reader.releaseLock();
+  const server = JSON.parse(buffered.slice(0, buffered.indexOf("\n"))) as { url: string };
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const rawUrl = input instanceof Request ? input.url : String(input);
+    if (rawUrl.startsWith("https://")) return new Response(null, { status: 404 });
+    const url = new URL(rawUrl, "http://localhost");
+    const method = (init?.method ?? "GET").toUpperCase();
+    const body = typeof init?.body === "string" ? init.body : undefined;
+    requests.push({ method, path: url.pathname, search: url.searchParams, body });
+    // Bun's own fetch: happy-dom replaces the global one.
+    const answer = await Bun.fetch(`${server.url}${url.pathname}${url.search}`, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body,
+    });
+    return new Response(await answer.text(), { status: answer.status, headers: { "Content-Type": answer.headers.get("Content-Type") ?? "application/json" } });
+  }) as typeof fetch;
+  return {
+    dir,
+    first,
+    second,
+    stop: async () => {
+      child.kill("SIGTERM");
+      await child.exited;
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
+async function mountAgainstRealServer(): Promise<void> {
+  setStorageBackend(memoryBackend);
+  seedAnnouncementsSeen();
+  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
+  globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
+  host = document.createElement("div");
+  document.body.appendChild(host);
+  root = createRoot(host);
+  await act(async () => { root?.render(<App />); });
+  await waitFor(() => switcherText().includes("1 of 2"), "the first file to open");
+}
+
+const findButton = (label: string): HTMLButtonElement | undefined =>
+  Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === label);
+
+/** The Save control carries a width-reserving "Saving" ghost span in front of its live label. */
+const saveButton = (): HTMLButtonElement | undefined =>
+  Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.startsWith("Saving"));
+
+/** The mounted CodeMirror view, from its DOM back-reference (see App.editModeShortcut.test.tsx). */
+function editorView(): { state: { doc: { toString(): string } }; dispatch(spec: unknown): void } {
+  const content = document.querySelector<HTMLElement>(".cm-editor .cm-content");
+  if (!content) throw new Error("CodeMirror content DOM did not render");
+  const backRef = content as unknown as {
+    cmTile?: { view?: ReturnType<typeof editorView> };
+    cmView?: { view?: ReturnType<typeof editorView> };
+  };
+  const view = backRef.cmTile?.view ?? backRef.cmView?.view;
+  if (!view) throw new Error("EditorView not found from CodeMirror DOM back-reference");
+  return view;
+}
+
+describe.if(hasDom)("annotate bundle Edit Mode", () => {
+  let bundle: RealBundle | null = null;
+
+  afterEach(async () => {
+    if (root) await act(async () => root?.unmount());
+    root = null;
+    await bundle?.stop();
+    bundle = null;
+  });
+
+  test("Edit Mode is offered on a bundle file and saves back to that file", async () => {
+    bundle = await startRealBundle();
+    const { readFileSync } = await import("node:fs");
+    await mountAgainstRealServer();
+
+    await waitFor(() => !!findButton("Edit"), "Edit Mode to be offered on the first file");
+    await act(async () => { findButton("Edit")!.click(); });
+    await waitFor(() => !!document.querySelector(".cm-editor"), "the editor");
+
+    const view = editorView();
+    await act(async () => {
+      view.dispatch({ changes: { from: view.state.doc.toString().trimEnd().length, insert: " Edited." } });
+    });
+    await waitFor(() => !!saveButton()?.textContent?.includes("Save") && !saveButton()?.disabled, "the Save control");
+    await act(async () => { saveButton()!.click(); });
+    await waitFor(() => readFileSync(bundle!.first, "utf-8").includes("Edited."), "the save to reach the file");
+    expect(readFileSync(bundle.first, "utf-8")).toBe("# First\n\nFirst body text. Edited.\n");
+    expect(readFileSync(bundle.second, "utf-8")).toBe("# Second\n\nSecond body text.\n");
+    const saveRequest = requests.find((r) => r.path === "/api/source/save");
+    expect(JSON.parse(saveRequest?.body ?? "{}").path).toBe(bundle.first);
+  });
+
+  test("its switcher sibling is editable too", async () => {
+    bundle = await startRealBundle();
+    await mountAgainstRealServer();
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('[aria-label="Next file"]')!.click();
+    });
+    await waitFor(() => switcherText().includes("2 of 2"), "the second file");
+    await waitFor(() => !!findButton("Edit"), "Edit Mode to be offered on the second file");
+  });
+});
+
 describe.if(hasDom)("annotate bundle", () => {
   test("the first file opens by itself; the switcher and the file list keep the given order", async () => {
     await mount();
