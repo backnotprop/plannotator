@@ -8,7 +8,8 @@
  * image the agent reads, and the person's comments. Pure and browser-safe.
  */
 
-import type { Collection, Rect, Snapshot } from "./types";
+import type { Collection, Rect, Snapshot, SnapshotSource } from "./types";
+import { displayUrl } from "./validate";
 
 export interface ComposeSnapshot {
   snapshot: Snapshot;
@@ -50,20 +51,32 @@ function formatRect(rect: Rect): string {
   return `[${x}, ${y}, ${w}×${h}]`;
 }
 
-function quoted(text: string): string {
-  return `"${text.replace(/\s+/g, " ").trim()}"`;
+/** One line of screen text as a JSON string: quotes, newlines and control characters escaped, so it reads as data. */
+function quoted(text: string, max = 300): string {
+  const line = text.replace(/\s+/g, " ").trim();
+  return JSON.stringify(line.length > max ? `${line.slice(0, max - 1)}…` : line);
 }
 
-/** "## 2. App Capture — Figma — "Checkout v3" — https://…" */
+/** "## 2. App Capture" / "## 1. Screen Capture" / "## 3. Screen": our words only; what came from the screen goes below it. */
 function headingFor(index: number, snapshot: Snapshot): string {
-  const parts: string[] = [];
-  if (snapshot.kind === "app") parts.push("App Capture");
-  const source = snapshot.source ?? {};
-  if (source.app) parts.push(source.app);
-  if (source.windowTitle) parts.push(quoted(source.windowTitle));
-  if (source.url) parts.push(source.url);
-  if (parts.length === 0) parts.push(snapshot.kind === "display" ? "Screen" : "Screen Capture");
-  return `## ${index + 1}. ${parts.join(" — ")}`;
+  const kind = snapshot.kind === "app" ? "App Capture" : snapshot.kind === "display" ? "Screen" : snapshot.kind === "window" ? "Window" : "Screen Capture";
+  return `## ${index + 1}. ${kind}`;
+}
+
+/**
+ * Where a snapshot came from, one field per line, every value JSON-quoted:
+ * app names, window titles and URLs are screen content (a page can title
+ * itself anything), so they never sit in the heading as prose. URLs keep
+ * only their origin and path; a query or fragment can carry tokens.
+ */
+export function sourceLines(source: SnapshotSource | undefined): string[] {
+  if (!source) return [];
+  const lines: string[] = [];
+  if (source.app) lines.push(`App: ${quoted(source.app, 120)}`);
+  if (source.windowTitle) lines.push(`Window title: ${quoted(source.windowTitle)}`);
+  const url = displayUrl(source.url);
+  if (url) lines.push(`URL: ${quoted(url, 500)}`);
+  return lines;
 }
 
 function strokeSummary(snapshot: Snapshot): string | null {
@@ -104,7 +117,7 @@ export function composeSnapshotsMessage(input: ComposeInput): string {
   if (note) lines.push("", note);
 
   input.snapshots.forEach(({ snapshot, dir, sentTextChars }, index) => {
-    lines.push("", headingFor(index, snapshot));
+    lines.push("", headingFor(index, snapshot), ...sourceLines(snapshot.source));
     const agent = snapshot.agent ?? { file: "original.png", width: snapshot.original.width, height: snapshot.original.height };
     const resized = agent.width !== snapshot.original.width || agent.height !== snapshot.original.height;
     const size = `${agent.width}×${agent.height}${resized ? `, from ${snapshot.original.width}×${snapshot.original.height}` : ""}`;
@@ -144,7 +157,7 @@ export function composeSnapshotsSidecar(input: ComposeInput): unknown {
         id: snapshot.id,
         kind: snapshot.kind,
         capturedAt: snapshot.capturedAt,
-        source: snapshot.source,
+        source: snapshot.source ? { ...snapshot.source, url: displayUrl(snapshot.source.url) } : undefined,
         image: { path: join(dir, agent.file), size: [agent.width, agent.height] },
         originalSize: [snapshot.original.width, snapshot.original.height],
         displayScale: snapshot.display?.scale,

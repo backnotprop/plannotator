@@ -85,14 +85,24 @@ jobs:
   # APPLE_NOTARY_ISSUER_ID.
   snapshots-macos:
     runs-on: macos-latest
+    # Never ahead of the eligibility gate. Signing happens only after
+    # release-eligibility PASSED (a v* tag contained in main, a real release
+    # run); every other run (pull requests, branches, dry-run dispatches, where
+    # the gate is skipped) builds the ad-hoc signed app. A failed gate stops it.
+    needs: release-eligibility
+    if: ${{ !cancelled() && (needs.release-eligibility.result == 'success' || needs.release-eligibility.result == 'skipped') }}
     # The Apple secrets live in the protected environment apple-signing (see
-    # snapshots-sign-check.yml, which proves them without a release).
-    environment: apple-signing
+    # snapshots-sign-check.yml, which proves them without a release). That
+    # environment admits only main and v* tags, and this job enters it ONLY
+    # once the gate passed: other runs get no environment (an empty name), and
+    # every secret below reads empty (each one is behind the same check, which
+    # short-circuits).
+    environment: ${{ needs.release-eligibility.result == 'success' && startsWith(github.ref, 'refs/tags/v') && 'apple-signing' || '' }}
     permissions:
       contents: read
     env:
-      HAS_SIGNING: ${{ secrets.APPLE_DEVELOPER_ID_P12 != '' && startsWith(github.ref, 'refs/tags/v') }}
-      HAS_NOTARY: ${{ secrets.APPLE_NOTARY_KEY_P8 != '' && startsWith(github.ref, 'refs/tags/v') }}
+      HAS_SIGNING: ${{ needs.release-eligibility.result == 'success' && startsWith(github.ref, 'refs/tags/v') && secrets.APPLE_DEVELOPER_ID_P12 != '' }}
+      HAS_NOTARY: ${{ needs.release-eligibility.result == 'success' && startsWith(github.ref, 'refs/tags/v') && secrets.APPLE_NOTARY_KEY_P8 != '' }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -112,6 +122,8 @@ jobs:
           security unlock-keychain -p "$password" "$keychain"
           security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain"
+          # The existing keychains, one word each (split on purpose).
+          # shellcheck disable=SC2046
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
           rm -f "$RUNNER_TEMP/cert.p12"
 
@@ -119,8 +131,8 @@ jobs:
         env:
           SNAPSHOTS_SIGN_IDENTITY: ${{ env.HAS_SIGNING == 'true' && secrets.APPLE_DEVELOPER_ID_IDENTITY || '' }}
           NOTARY_KEY_P8: ${{ env.HAS_NOTARY == 'true' && secrets.APPLE_NOTARY_KEY_P8 || '' }}
-          SNAPSHOTS_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
-          SNAPSHOTS_NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          SNAPSHOTS_NOTARY_KEY_ID: ${{ env.HAS_NOTARY == 'true' && secrets.APPLE_NOTARY_KEY_ID || '' }}
+          SNAPSHOTS_NOTARY_ISSUER: ${{ env.HAS_NOTARY == 'true' && secrets.APPLE_NOTARY_ISSUER_ID || '' }}
         run: |
           VERSION=$(jq -r .version package.json)
           if [ -n "$NOTARY_KEY_P8" ] && [ -n "$SNAPSHOTS_SIGN_IDENTITY" ]; then
@@ -142,6 +154,9 @@ jobs:
 
   build:
     needs: [test, snapshots-macos]
+    # release-eligibility is an ancestor (through snapshots-macos) and is skipped
+    # outside releases; a skipped ancestor must not skip this job, a failed one must.
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
     # Build job has NO id-token / attestations permissions. Compilation
     # itself doesn't need OIDC minting — those capabilities live in the
@@ -266,6 +281,9 @@ jobs:
 
   smoke-binaries:
     needs: build
+    # release-eligibility is an ancestor (through snapshots-macos) and is skipped
+    # outside releases; a skipped ancestor must not skip this job, a failed one must.
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -964,6 +982,9 @@ jobs:
 
   install-script-smoke:
     needs: build
+    # release-eligibility is an ancestor (through snapshots-macos) and is skipped
+    # outside releases; a skipped ancestor must not skip this job, a failed one must.
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -1263,6 +1284,9 @@ jobs:
       - smoke-binaries
       - pi-extension-ai-runtime-windows
       - install-script-smoke
+    # release-eligibility is an ancestor (through snapshots-macos) and is skipped
+    # outside releases; a skipped ancestor must not skip this job, a failed one must.
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1318,6 +1342,9 @@ jobs:
     needs:
       - build
       - npm-package
+    # release-eligibility is an ancestor (through snapshots-macos) and is skipped
+    # outside releases; a skipped ancestor must not skip this job, a failed one must.
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

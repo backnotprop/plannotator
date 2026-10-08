@@ -348,7 +348,7 @@ export class PlannotatorMod {
   ) {
     this.instanceId = host.randomHex(8)
     this.snapshots = session.snapshots
-      ? new SnapshotsLink({ host, dataDir: session.dataDir, sessionId: session.sessionId, processId: session.snapshots.processId, turns: this.turns, ...(session.snapshots.replaces ? { replaces: session.snapshots.replaces } : {}) })
+      ? new SnapshotsLink({ host, dataDir: session.dataDir, sessionId: session.sessionId, processId: session.snapshots.processId, instanceId: this.instanceId, turns: this.turns, ...(session.snapshots.replaces ? { replaces: session.snapshots.replaces } : {}) })
       : null
     this.inbox = session.inboxTools
       ? new InboxLink({

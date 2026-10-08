@@ -8,6 +8,7 @@
     "./snapshots/compose": "./snapshots/compose.ts",
     "./snapshots/registry": "./snapshots/registry.ts",
     "./snapshots/store": "./snapshots/store.ts",
+    "./snapshots/validate": "./snapshots/validate.ts",
     "./snapshots/agent-link": "./snapshots/agent-link.ts",
     "./annotatable": "./annotatable.ts",
     "./annotate-bundle": "./annotate-bundle.ts",

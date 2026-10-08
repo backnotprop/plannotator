@@ -7,7 +7,11 @@
  * `/api/connections/:id/poll`. Over that one link the hub sends
  *  - the existing Ask commands (`ask` / `cancel` / `interrupt`), so "Ask this
  *    session" from the HUD is a real turn of that session, and
- *  - `deliver`: a send, re-sent every 5 s until the host reports `delivered`.
+ *  - `deliver`: a send, re-sent every 5 s until the host takes it
+ *    (`deliver_accepted`), then not again: the host claims it once across its
+ *    processes and reports `delivered`. A hello (the session's process
+ *    changed, or the link came back) hands every unfinished send out again;
+ *    the host's claim keeps that from being a second turn.
  *
  * A connection is identified by (host, session id). `/clear` in Claude Code
  * starts a new session id in the same process: the host's hello names the id
@@ -100,7 +104,7 @@ export class Connection {
   private provider: SessionBridgeProvider | null = null;
   private deliveries = new Map<string, Delivery>();
 
-  constructor(id: string, hello: HelloBody, token: string, onDelivery: (connection: Connection, event: DeliveryEvent) => void) {
+  constructor(id: string, hello: HelloBody, token: string, onDelivery: (connection: Connection, event: DeliveryEvent) => void, now?: () => number) {
     this.id = id;
     this.host = hello.host;
     this.sessionId = hello.sessionId;
@@ -115,9 +119,12 @@ export class Connection {
       // A waiting command never answers questions; the bridge host only labels Ask.
       host: (hello.host === "cli-wait" ? "claude-code" : hello.host) as SessionBridgeHost,
       modes: hello.ask,
+      ...(now ? { now } : {}),
       extraCommands: (now) => {
         const due: Array<{ type: string } & Record<string, unknown>> = [];
         for (const delivery of this.deliveries.values()) {
+          // Taken: the host delivers it (or says it failed); re-sending would only race it.
+          if (delivery.accepted) continue;
           if (delivery.sentAt !== 0 && now - delivery.sentAt < DELIVER_RESEND_MS) continue;
           delivery.sentAt = now;
           due.push({ type: "deliver", sendId: delivery.send.sendId, text: delivery.send.text, files: delivery.send.files });
@@ -166,6 +173,13 @@ export class Connection {
     this.lastHumanInputAt = Math.max(this.lastHumanInputAt, hello.lastHumanInputAt);
     this.ask = hello.ask;
     this.successorSessionId = undefined;
+    // A hello means the process on the other end may be a different one (two Claude Code
+    // processes on one session, or one that restarted): what was accepted but never
+    // delivered goes out again, and the host's claim decides who delivers it.
+    for (const delivery of this.deliveries.values()) {
+      delivery.accepted = false;
+      delivery.sentAt = 0;
+    }
   }
 
   /** The Ask provider over this connection's bridge, made on first use. */

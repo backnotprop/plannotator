@@ -1,4 +1,5 @@
 import AppKit
+import SnapshotsSecurity
 
 enum SelfTest {
     /// How varied an image is (0 = one flat color): a wallpaper-only or blank capture scores low.
@@ -11,6 +12,18 @@ enum SelfTest {
         for i in stride(from: 0, to: pixels.count, by: 4) { lum.append(0.299 * Double(pixels[i]) + 0.587 * Double(pixels[i + 1]) + 0.114 * Double(pixels[i + 2])) }
         let mean = lum.reduce(0, +) / Double(lum.count)
         return (lum.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(lum.count)).squareRoot()
+    }
+
+    /// The URL scheme and the HUD's origin checks, as the shipped binary decides them.
+    static func securityChecks() -> Bool {
+        let hostile = "plannotator-snapshots://show?dataDir=/tmp/x&cli=%5B%22/bin/sh%22,%22-c%22,%22id%22%5D"
+        let hub = HubOrigin(hubURL: "http://127.0.0.1:51234", port: 51234)
+        return URLCommand.parse(hostile) == .show
+            && URLCommand.parse("plannotator-snapshots://capture?kind=app") == .capture(kind: "app")
+            && HubOrigin(hubURL: "http://evil.example:51234", port: 51234) == nil
+            && NavigationPolicy.decide(url: URL(string: "https://example.com"), isMainFrame: true, isLinkActivation: false, origin: hub) == .cancel
+            && NavigationPolicy.decide(url: URL(string: "http://127.0.0.1:51234/hud"), isMainFrame: true, isLinkActivation: false, origin: hub) == .allow
+            && TrustedCLI.validate(["/bin/sh", "-c", "id"]) == nil
     }
 
     /// The App Capture tree decisions for well-known apps, checked with no app running.
@@ -39,11 +52,13 @@ enum SelfTest {
     /// Returns false when a check failed.
     static func run(into dir: String, axApp: String? = nil) -> Bool {
         let outcome = Outcome()
+        let secure = securityChecks()
+        print("security checks: \(secure ? "ok" : "FAILED")")
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         print("screen recording (preflight): \(Capture.hasPermission)")
         print("accessibility (preflight): \(AXText.isTrusted)")
         let failures = enablementChecks()
-        outcome.failed = !failures.isEmpty
+        outcome.failed = !failures.isEmpty || !secure
         print(failures.isEmpty ? "app text decisions: ok" : "FAIL app text decisions: \(failures.joined(separator: "; "))")
         print("displays: \(NSScreen.screens.map { "\(Int($0.frame.width))×\(Int($0.frame.height))@\($0.backingScaleFactor)x" }.joined(separator: ", "))")
         let done = DispatchSemaphore(value: 0)

@@ -1,4 +1,5 @@
 import Foundation
+import SnapshotsSecurity
 
 /// The app's client for the Plannotator Snapshots hub (`plannotator snapshot hub`):
 /// reads `snapshots/hub.json`, starts the hub when it is not running, and
@@ -11,7 +12,9 @@ final class Hub {
         let url: String
         let token: String
         let serverSession: String
-        let cli: [String]?
+
+        /// The hub's origin; `readEntry` drops an entry that names anything but loopback.
+        var origin: HubOrigin? { HubOrigin(hubURL: url, port: port) }
     }
 
     struct Attached {
@@ -29,13 +32,21 @@ final class Hub {
 
     private(set) var attached: Attached?
 
+    /// The registry entry, only when it names the hub on loopback: the HUD panel loads its page
+    /// from this URL and hands it a HUD token, so a planted entry must never point anywhere else.
     func readEntry() -> Entry? {
-        guard let data = FileManager.default.contents(atPath: Config.registryPath) else { return nil }
-        return try? JSONDecoder().decode(Entry.self, from: data)
+        guard let data = FileManager.default.contents(atPath: Config.registryPath),
+              let entry = try? JSONDecoder().decode(Entry.self, from: data)
+        else { return nil }
+        guard entry.origin != nil else {
+            log("ignoring a hub registry that does not name loopback")
+            return nil
+        }
+        return entry
     }
 
     private func healthy(_ entry: Entry) async -> Bool {
-        guard let url = URL(string: "\(entry.url)/api/snapshots/health") else { return false }
+        guard let origin = entry.origin, let url = URL(string: "\(origin.base)/api/snapshots/health") else { return false }
         var request = URLRequest(url: url)
         request.timeoutInterval = 1.5
         guard let (data, response) = try? await URLSession.shared.data(for: request),
@@ -48,7 +59,9 @@ final class Hub {
     /// The running hub, started if needed. Throws when it cannot be reached.
     func ensureRunning() async throws -> Entry {
         if let entry = readEntry(), await healthy(entry) { return entry }
-        guard let cli = Config.cli ?? readEntry()?.cli else {
+        // Never the registry's own `cli`: only the argv the CLI saved in this app's
+        // defaults, or a trusted binary in the usual install locations (Config.cli).
+        guard let cli = Config.cli else {
             throw HubError.message("Plannotator Snapshots does not know where the plannotator CLI is yet. Run `plannotator snapshot` once.")
         }
         let process = Process()
@@ -105,7 +118,7 @@ final class Hub {
     }
 
     private func postData(entry: Entry, token: String, path: String, json: [String: Any]) async throws -> Data {
-        guard let url = URL(string: "\(entry.url)\(path)") else { throw HubError.message("Bad hub URL") }
+        guard let origin = entry.origin, let url = URL(string: "\(origin.base)\(path)") else { throw HubError.message("Bad hub URL") }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "content-type")

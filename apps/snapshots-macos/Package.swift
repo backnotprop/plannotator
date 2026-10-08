@@ -12,8 +12,11 @@ let package = Package(
         .executable(name: "PlannotatorSnapshots", targets: ["PlannotatorSnapshots"]),
     ],
     targets: [
+        // The trust decisions (URL commands, the hub origin, the CLI's location), pure and unit tested.
+        .target(name: "SnapshotsSecurity"),
         .executableTarget(
             name: "PlannotatorSnapshots",
+            dependencies: ["SnapshotsSecurity"],
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("Carbon"),
@@ -23,6 +26,7 @@ let package = Package(
                 .linkedFramework("ApplicationServices"),
             ]
         ),
+        .testTarget(name: "SnapshotsSecurityTests", dependencies: ["SnapshotsSecurity"]),
         // `swift test`: the pure decisions (which apps are asked for their tree,
         // with which attribute, how long to wait). build.sh never builds it.
         .testTarget(

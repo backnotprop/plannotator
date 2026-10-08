@@ -17,12 +17,14 @@
  *   plannotator snapshot status              hub, app and connected sessions
  *   plannotator snapshot hub [--background]  run the hub here, or detached
  *   plannotator snapshot stop                stop the hub
- *   plannotator snapshot install-app         install the embedded app into ~/Applications
+ *   plannotator snapshot install-app [--force]
+ *                                            install the embedded app into ~/Applications
+ *                                            (never over a newer build unless --force)
  */
 
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, hostname, tmpdir } from "node:os";
+import { closeSync, existsSync, mkdirSync, openSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import {
@@ -36,22 +38,14 @@ import { startSnapshotsHubServer } from "@plannotator/server/snapshots/server";
 import { openBrowser } from "@plannotator/server/browser";
 import { detectProjectName } from "@plannotator/server/project";
 import { getCliVersion } from "./cli";
+import { installedAppPath, installEmbeddedApp, rememberForApp, resolveSnapshotsApp, SNAPSHOTS_APP_NAME, snapshotsAppUrl } from "./snapshots-app";
 
 // @ts-ignore - Bun import attribute for text
 import hudHtml from "../dist/snapshots-hud.html" with { type: "text" };
 const hudHtmlContent = hudHtml as unknown as string;
 
-export const SNAPSHOTS_APP_NAME = "Plannotator Snapshots";
-export const SNAPSHOTS_BUNDLE_ID = "ai.plannotator.snapshots";
 const HUB_START_TIMEOUT_MS = 15_000;
 
-declare global {
-  // Set by the darwin entry (index-darwin.ts): the embedded, zipped app and its build stamp.
-  // eslint-disable-next-line no-var
-  var __PLANNOTATOR_SNAPSHOTS_APP_ZIP__: string | undefined;
-  // eslint-disable-next-line no-var
-  var __PLANNOTATOR_SNAPSHOTS_APP_BUILD__: string | undefined;
-}
 
 function fail(message: string, code = 1): never {
   process.stderr.write(`${message}\n`);
@@ -151,60 +145,8 @@ async function hubFetch(entry: SnapshotsHubEntry, path: string, body?: unknown, 
   });
 }
 
-// --- The app ---------------------------------------------------------------------
+// --- The app (snapshots-app.ts) -------------------------------------------------------
 
-/** `~/Applications/Plannotator Snapshots.app`, where the CLI installs the embedded app. */
-export function installedAppPath(): string {
-  return join(homedir(), "Applications", `${SNAPSHOTS_APP_NAME}.app`);
-}
-
-function bundleBuildOf(appPath: string): string | null {
-  const result = spawnSync("/usr/libexec/PlistBuddy", ["-c", "Print :CFBundleVersion", join(appPath, "Contents", "Info.plist")], { encoding: "utf8" });
-  return result.status === 0 ? result.stdout.trim() : null;
-}
-
-/** Install (or update) the embedded app when its build differs from the installed one. Returns the app path, or null without an embedded app. */
-export function installEmbeddedApp(): string | null {
-  const zip = globalThis.__PLANNOTATOR_SNAPSHOTS_APP_ZIP__;
-  const build = globalThis.__PLANNOTATOR_SNAPSHOTS_APP_BUILD__;
-  if (!zip) return null;
-  const target = installedAppPath();
-  if (existsSync(target) && build && bundleBuildOf(target) === build) return target;
-  const staging = mkdtempSync(join(tmpdir(), "plannotator-snapshots-"));
-  try {
-    const zipFile = join(staging, "app.zip");
-    writeFileSync(zipFile, readFileSync(zip));
-    const unzip = spawnSync("/usr/bin/ditto", ["-x", "-k", zipFile, staging], { encoding: "utf8" });
-    if (unzip.status !== 0) throw new Error(`Could not unpack ${SNAPSHOTS_APP_NAME}: ${unzip.stderr.trim()}`);
-    const staged = join(staging, `${SNAPSHOTS_APP_NAME}.app`);
-    if (!existsSync(staged)) throw new Error(`The embedded ${SNAPSHOTS_APP_NAME} archive has no app.`);
-    mkdirSync(join(homedir(), "Applications"), { recursive: true });
-    if (existsSync(target)) {
-      // A running app is asked to quit first (never launched just to be told so);
-      // the old bundle is moved aside, never half-replaced.
-      const running = spawnSync("/usr/bin/pgrep", ["-f", join(target, "Contents", "MacOS")], { encoding: "utf8" });
-      if (running.status === 0) spawnSync("/usr/bin/open", ["-g", "-a", target, "plannotator-snapshots://quit"], { stdio: "ignore" });
-      const aside = `${target}.old-${process.pid}`;
-      renameSync(target, aside);
-      renameSync(staged, target);
-      rmSync(aside, { recursive: true, force: true });
-    } else {
-      renameSync(staged, target);
-    }
-    return target;
-  } finally {
-    rmSync(staging, { recursive: true, force: true });
-  }
-}
-
-/** The app to launch: a dev build named by PLANNOTATOR_SNAPSHOTS_APP, the embedded one, or one already installed. */
-export function resolveSnapshotsApp(): string | null {
-  const dev = process.env.PLANNOTATOR_SNAPSHOTS_APP?.trim();
-  if (dev && existsSync(dev)) return resolve(dev);
-  const installed = installEmbeddedApp();
-  if (installed) return installed;
-  return existsSync(installedAppPath()) ? installedAppPath() : null;
-}
 
 /**
  * Hand the app a command through its URL scheme. LaunchServices starts the
@@ -212,9 +154,9 @@ export function resolveSnapshotsApp(): string | null {
  * of this terminal), so its Screen Recording grant is its own and nothing
  * running in this terminal inherits it.
  */
-function openSnapshotsApp(app: string, action: "capture" | "show", params: Record<string, string>): void {
-  const query = new URLSearchParams(params).toString();
-  const result = spawnSync("/usr/bin/open", ["-g", "-a", app, `plannotator-snapshots://${action}?${query}`], { encoding: "utf8" });
+function openSnapshotsApp(app: string, action: "capture" | "show", kind: "app" | "region", dataDir: string): void {
+  rememberForApp(dataDir, selfCommand(), { version: getCliVersion(), execPath: process.execPath });
+  const result = spawnSync("/usr/bin/open", ["-g", "-a", app, snapshotsAppUrl(action, kind)], { encoding: "utf8" });
   if (result.status !== 0) throw new Error(`Could not open ${SNAPSHOTS_APP_NAME}: ${result.stderr.trim() || `exit ${result.status}`}`);
 }
 
@@ -341,9 +283,16 @@ export async function runSnapshotCommand(args: string[]): Promise<never> {
     process.exit(0);
   }
   if (sub === "install-app") {
-    const app = installEmbeddedApp();
+    let app: ReturnType<typeof installEmbeddedApp>;
+    try {
+      app = installEmbeddedApp({ force: args.includes("--force") });
+    } catch (error) {
+      fail(error instanceof Error ? error.message : String(error));
+    }
     if (!app) fail(`This build of plannotator has no embedded ${SNAPSHOTS_APP_NAME} app.`);
-    process.stdout.write(`${app}\n`);
+    if (app.outcome === "newer-installed") process.stderr.write(`A newer ${SNAPSHOTS_APP_NAME} is installed; kept it (--force replaces it).\n`);
+    else if (app.outcome === "current") process.stderr.write(`${SNAPSHOTS_APP_NAME} is up to date.\n`);
+    process.stdout.write(`${app.path}\n`);
     process.exit(0);
   }
   if (sub === "status") {
@@ -404,11 +353,7 @@ export async function runSnapshotCommand(args: string[]): Promise<never> {
     );
   }
   try {
-    openSnapshotsApp(app, capture ? "capture" : "show", {
-      kind: appCapture ? "app" : "region",
-      dataDir,
-      cli: JSON.stringify(selfCommand()),
-    });
+    openSnapshotsApp(app, capture ? "capture" : "show", appCapture ? "app" : "region", dataDir);
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }
