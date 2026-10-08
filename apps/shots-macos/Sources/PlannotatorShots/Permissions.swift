@@ -27,7 +27,16 @@ final class PermissionFlow {
     private(set) var kind: Kind?
     private var pending: Pending?
     /// Calls the page (`shotsHud.permission({ kind, state })`).
-    var show: (([String: Any]) -> Void)?
+    /// Draws the card in the HUD. A state set before the HUD is wired (the URL command that
+    /// launches the app arrives before didFinishLaunching) is kept and drawn once it is.
+    var show: (([String: Any]) -> Void)? {
+        didSet { if let show, let card = lastCard { show(card) } }
+    }
+    private var lastCard: [String: Any]?
+    private func draw(_ card: [String: Any]) {
+        lastCard = (card["state"] as? String) == "done" ? nil : card
+        show?(card)
+    }
     /// Runs the shot the user asked for once the permission is there.
     var resume: ((Pending?) -> Void)?
     /// Snapshots without text, for this session ("Not now").
@@ -71,7 +80,7 @@ final class PermissionFlow {
         // A shot started before macOS made the app quit and reopen resumes after it.
         if let pending { defaults.set(["action": pending.rawValue, "kind": kind.rawValue, "at": Date().timeIntervalSince1970, "pid": Int(ProcessInfo.processInfo.processIdentifier)], forKey: "pendingShot") }
         log("permission \(kind.rawValue): ask (pending \(pending?.rawValue ?? "none"))")
-        show?(["kind": kind.rawValue, "state": State.ask.rawValue])
+        draw(["kind": kind.rawValue, "state": State.ask.rawValue])
         startChecking()
     }
 
@@ -97,7 +106,7 @@ final class PermissionFlow {
                 openPane(kind)
             }
         }
-        show?(["kind": kind.rawValue, "state": State.waiting.rawValue])
+        draw(["kind": kind.rawValue, "state": State.waiting.rawValue])
     }
 
     func openPane(_ kind: Kind) {
@@ -150,7 +159,7 @@ final class PermissionFlow {
                 // The switch is on, but this process cannot capture yet.
                 reopenShown = true
                 log("permission screen: switch on, capture refused in this process: reopen")
-                show?(["kind": kind.rawValue, "state": State.reopen.rawValue])
+                draw(["kind": kind.rawValue, "state": State.reopen.rawValue])
             }
         case .accessibility:
             if AXIsProcessTrusted() { granted() }
@@ -164,7 +173,7 @@ final class PermissionFlow {
         let pending = self.pending
         finish(showCheck: true)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
-            self?.show?(["kind": kind.rawValue, "state": "done"])
+            self?.draw(["kind": kind.rawValue, "state": "done"])
             self?.resume?(pending)
         }
     }
@@ -172,8 +181,8 @@ final class PermissionFlow {
     private func finish(showCheck: Bool) {
         timer?.invalidate()
         timer = nil
-        if showCheck, let kind { show?(["kind": kind.rawValue, "state": State.granted.rawValue]) }
-        if !showCheck { show?(["kind": kind?.rawValue ?? "", "state": "done"]) }
+        if showCheck, let kind { draw(["kind": kind.rawValue, "state": State.granted.rawValue]) }
+        if !showCheck { draw(["kind": kind?.rawValue ?? "", "state": "done"]) }
         kind = nil
         pending = nil
         reopenShown = false
@@ -209,7 +218,7 @@ final class PermissionFlow {
         log("permission: resuming a \(action.rawValue) shot after relaunch")
         self.kind = kind
         self.pending = action
-        show?(["kind": kind.rawValue, "state": State.waiting.rawValue])
+        draw(["kind": kind.rawValue, "state": State.waiting.rawValue])
         startChecking()
     }
 }

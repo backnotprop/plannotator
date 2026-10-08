@@ -57,6 +57,7 @@ final class PanelController: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         super.init()
         config.userContentController.add(self, name: "shots")
         webView.navigationDelegate = self
+        webView.navigationDelegate = self
         webView.autoresizingMask = [.width, .height]
         glass.addSubview(webView)
         panel.contentView = glass
@@ -92,12 +93,22 @@ final class PanelController: NSObject, WKScriptMessageHandler, WKNavigationDeleg
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any] else { return }
         if body["type"] as? String == "ready" {
+            log("HUD ready")
             isReady = true
             for script in pendingScripts { webView.evaluateJavaScript(script) }
             pendingScripts = []
         }
         if body["type"] as? String == "layout" { applyLayout(body) }
         onMessage?(body)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        log("HUD page loaded")
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        log("HUD web content process ended")
+        loadedSession = nil
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -113,6 +124,7 @@ final class PanelController: NSObject, WKScriptMessageHandler, WKNavigationDeleg
 
     private func applyLayout(_ body: [String: Any]) {
         let next = Mode(rawValue: body["mode"] as? String ?? "") ?? .hidden
+        log("HUD layout: \(next)")
         let width = CGFloat(body["width"] as? Double ?? 0)
         let height = CGFloat(body["height"] as? Double ?? 46)
         let focus = body["focus"] as? Bool ?? false
