@@ -1,0 +1,110 @@
+# Manual check that the Apple secrets sign and notarize Plannotator Snapshots
+# before a release depends on them. Run it from the Actions tab (Run workflow);
+# it builds the app from the chosen ref, signs it with the Developer ID,
+# notarizes and staples it, verifies all three, and uploads the zip. It makes
+# no release and pushes nothing. The release job in release.yml does the same
+# signing on tag pushes.
+#
+# Secrets: APPLE_DEVELOPER_ID_P12 (base64 .p12), APPLE_DEVELOPER_ID_P12_PASSWORD,
+# APPLE_DEVELOPER_ID_IDENTITY (name or SHA-1 of "Developer ID Application: …"),
+# APPLE_NOTARY_KEY_P8 (base64 App Store Connect API key), APPLE_NOTARY_KEY_ID,
+# APPLE_NOTARY_ISSUER_ID.
+name: Snapshots sign check
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to build
+        required: true
+        default: feat/shots-macos
+
+permissions:
+  contents: read
+
+concurrency:
+  group: snapshots-sign-check
+  cancel-in-progress: true
+
+jobs:
+  sign-and-notarize:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Require the Apple secrets
+        env:
+          P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+          P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_IDENTITY }}
+          NOTARY_KEY_P8: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          missing=""
+          for name in P12 P12_PASSWORD IDENTITY NOTARY_KEY_P8 NOTARY_KEY_ID NOTARY_ISSUER; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing Apple secrets:$missing"
+            exit 1
+          fi
+          test -x apps/snapshots-macos/build.sh || { echo "::error::apps/snapshots-macos/build.sh not found at ${{ inputs.ref }}"; exit 1; }
+
+      - name: Import the Developer ID certificate
+        env:
+          P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+          P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/snapshots.keychain-db"
+          password="$(openssl rand -hex 16)"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain"
+          # The existing keychains, one argument each (word splitting intended).
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security find-identity -v -p codesigning "$keychain" | grep -c "Developer ID Application" | xargs -I{} echo "Developer ID identities in the keychain: {}"
+
+      - name: Build, sign and notarize Plannotator Snapshots.app
+        env:
+          SNAPSHOTS_SIGN_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_IDENTITY }}
+          NOTARY_KEY_P8: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
+          SNAPSHOTS_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          SNAPSHOTS_NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          echo "$NOTARY_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          export SNAPSHOTS_NOTARY_KEY="$RUNNER_TEMP/notary.p8"
+          VERSION=$(jq -r .version package.json)
+          SNAPSHOTS_BUILD="$VERSION.$GITHUB_RUN_NUMBER" apps/snapshots-macos/build.sh "$VERSION"
+          rm -f "$RUNNER_TEMP/notary.p8"
+
+      - name: Verify the signature, notarization and staple
+        run: |
+          app="apps/snapshots-macos/dist/Plannotator Snapshots.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -dv --verbose=2 "$app" 2>&1 | grep -E "Identifier|Authority|TeamIdentifier|flags"
+          spctl --assess --type execute -vv "$app" 2>&1 | tee "$RUNNER_TEMP/spctl.txt"
+          grep -q "Notarized Developer ID" "$RUNNER_TEMP/spctl.txt" || { echo "::error::Gatekeeper does not see a notarized Developer ID app"; exit 1; }
+          xcrun stapler validate "$app"
+
+      - name: Remove the temporary keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/snapshots.keychain-db" 2>/dev/null || true
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: snapshots-signed
+          path: |
+            apps/snapshots-macos/dist/PlannotatorSnapshots.zip
+            apps/snapshots-macos/dist/build.txt
+          if-no-files-found: error
+          retention-days: 7
