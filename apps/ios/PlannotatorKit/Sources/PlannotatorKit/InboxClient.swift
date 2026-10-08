@@ -40,11 +40,16 @@ public enum InboxError: Error, Equatable, Sendable {
 /// plain HTTP (the simulator reaches the Mac's own Inbox); every other address
 /// is the tailnet publication, which `tailscale serve` answers over HTTPS.
 ///
-/// A host and an optional port, nothing else: no user info (`a@b` would show
-/// `a` and dial `b`), no path, no query. `hostPort` is rebuilt from the parsed
-/// host and port, so what a screen shows is exactly what the client dials.
+/// The host is a plain host name (letters, digits, dots, hyphens), an IPv4
+/// literal, or a bracketed IPv6 literal, and nothing else: no `%`, no `@`, no
+/// user info, path or query. The host and port are kept as fields; `baseURL`
+/// is built from those fields and `hostPort` is written from the same ones,
+/// so what a screen shows and what the client dials are one value. Nothing
+/// is parsed a second time.
 public struct InboxAddress: Hashable, Sendable, Codable {
-    public private(set) var hostPort: String
+    public let host: String
+    public let port: Int?
+    public let baseURL: URL
 
     public init?(_ text: String) {
         var value = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -52,18 +57,50 @@ public struct InboxAddress: Hashable, Sendable, Codable {
             value = String(value.dropFirst(prefix.count))
         }
         while value.hasSuffix("/") { value.removeLast() }
-        guard !value.isEmpty, !value.contains("@"), !value.contains("/"), !value.contains(" "),
+        guard !value.isEmpty, !value.contains(where: { "%@/?#\\ ".contains($0) }),
               let parts = URLComponents(string: "https://\(value)"),
               parts.user == nil, parts.password == nil, parts.path.isEmpty, parts.query == nil, parts.fragment == nil,
-              let host = parts.host, !host.isEmpty else { return nil }
-        hostPort = parts.port.map { "\(host):\($0)" } ?? host
+              let host = parts.percentEncodedHost, Self.isPlainHost(host) else { return nil }
+        if let port = parts.port, !(1...65_535).contains(port) { return nil }
+        var url = URLComponents()
+        url.scheme = Self.loopbackHosts.contains(host.lowercased()) ? "http" : "https"
+        url.percentEncodedHost = host
+        url.port = parts.port
+        guard let base = url.url else { return nil }
+        self.host = host
+        self.port = parts.port
+        self.baseURL = base
     }
 
-    public var host: String { URLComponents(string: "https://\(hostPort)")?.host ?? hostPort }
+    /// `host:port`, written from the fields the client dials.
+    public var hostPort: String { port.map { "\(host):\($0)" } ?? host }
 
-    public var isLoopback: Bool { ["127.0.0.1", "localhost", "::1"].contains(host) }
+    public var isLoopback: Bool { Self.loopbackHosts.contains(host.lowercased()) }
 
-    public var baseURL: URL { URL(string: "\(isLoopback ? "http" : "https")://\(hostPort)")! }
+    static let loopbackHosts: Set<String> = ["127.0.0.1", "localhost", "[::1]"]
+
+    static func isPlainHost(_ host: String) -> Bool {
+        if host.hasPrefix("[") {
+            // A bracketed IPv6 literal: hex digits, colons and dots (an embedded IPv4) only.
+            guard host.hasSuffix("]"), host.count > 2 else { return false }
+            return host.dropFirst().dropLast().allSatisfy { $0.isHexDigit || $0 == ":" || $0 == "." } && host.contains(":")
+        }
+        return !host.isEmpty && host.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "." || $0 == "-") }
+    }
+
+    // Kept on disk as the `host:port` string and read back through the same checks.
+    public init(from decoder: Decoder) throws {
+        let text = try decoder.singleValueContainer().decode(String.self)
+        guard let address = InboxAddress(text) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Not an Inbox address: \(text)"))
+        }
+        self = address
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(hostPort)
+    }
 }
 
 /// The device door, `/api/inbox/device/*`, as one paired phone calls it.
