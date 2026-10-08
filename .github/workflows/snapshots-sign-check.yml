@@ -5,7 +5,7 @@
 # no release and pushes nothing. The release job in release.yml does the same
 # signing on tag pushes.
 #
-# Secrets: APPLE_DEVELOPER_ID_P12 (base64 .p12), APPLE_DEVELOPER_ID_P12_PASSWORD,
+# Secrets, in the protected GitHub Environment `apple-signing`: APPLE_DEVELOPER_ID_P12 (base64 .p12), APPLE_DEVELOPER_ID_P12_PASSWORD,
 # APPLE_DEVELOPER_ID_IDENTITY (name or SHA-1 of "Developer ID Application: …"),
 # APPLE_NOTARY_KEY_P8 (base64 App Store Connect API key), APPLE_NOTARY_KEY_ID,
 # APPLE_NOTARY_ISSUER_ID.
@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: Branch, tag or commit to build
+        description: Branch or tag of this repository to build
         required: true
         default: feat/shots-macos
 
@@ -30,10 +30,33 @@ jobs:
   sign-and-notarize:
     runs-on: macos-latest
     timeout-minutes: 45
+    # The Apple secrets live in this protected environment, not as repo secrets.
+    environment: apple-signing
     steps:
+      - name: Accept only a branch or tag of this repository
+        id: ref
+        env:
+          REF: ${{ inputs.ref }}
+          REPO: ${{ github.repository }}
+        run: |
+          case "$REF" in
+            ""|-*|*[!A-Za-z0-9._/-]*) echo "::error::Not a branch or tag name: $REF"; exit 1 ;;
+          esac
+          # A tag's peeled line (^{}) names the commit; a branch line already does.
+          lines=$(git ls-remote --heads --tags "https://github.com/$REPO.git" "refs/heads/$REF" "refs/tags/$REF" "refs/tags/$REF^{}")
+          sha=$(printf '%s\n' "$lines" | awk '$2 ~ /\^\{\}$/ {print $1; exit}')
+          [ -n "$sha" ] || sha=$(printf '%s\n' "$lines" | awk 'NF {print $1; exit}')
+          if [ -z "$sha" ]; then
+            echo "::error::$REF is not a branch or tag of $REPO"
+            exit 1
+          fi
+          echo "Building $REF at $sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ inputs.ref }}
+          # The commit the first step resolved, so the ref cannot move in between.
+          ref: ${{ steps.ref.outputs.sha }}
           persist-credentials: false
 
       - name: Require the Apple secrets
@@ -44,6 +67,7 @@ jobs:
           NOTARY_KEY_P8: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
           NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
           NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          REF: ${{ inputs.ref }}
         run: |
           missing=""
           for name in P12 P12_PASSWORD IDENTITY NOTARY_KEY_P8 NOTARY_KEY_ID NOTARY_ISSUER; do
@@ -53,7 +77,7 @@ jobs:
             echo "::error::Missing Apple secrets:$missing"
             exit 1
           fi
-          test -x apps/snapshots-macos/build.sh || { echo "::error::apps/snapshots-macos/build.sh not found at ${{ inputs.ref }}"; exit 1; }
+          test -x apps/snapshots-macos/build.sh || { echo "::error::apps/snapshots-macos/build.sh not found at $REF"; exit 1; }
 
       - name: Import the Developer ID certificate
         env:
@@ -62,6 +86,7 @@ jobs:
         run: |
           keychain="$RUNNER_TEMP/snapshots.keychain-db"
           password="$(openssl rand -hex 16)"
+          trap 'rm -f "$RUNNER_TEMP/cert.p12"' EXIT
           echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
           security create-keychain -p "$password" "$keychain"
           security set-keychain-settings -lut 3600 "$keychain"
@@ -81,6 +106,7 @@ jobs:
           SNAPSHOTS_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
           SNAPSHOTS_NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
         run: |
+          trap 'rm -f "$RUNNER_TEMP/notary.p8"' EXIT
           echo "$NOTARY_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
           export SNAPSHOTS_NOTARY_KEY="$RUNNER_TEMP/notary.p8"
           VERSION=$(jq -r .version package.json)
