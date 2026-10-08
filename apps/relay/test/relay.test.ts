@@ -310,6 +310,20 @@ describe("the relay with an Inbox, under wrangler dev", () => {
     expect(((await (await atRelay("GET", `/devices/${phone.id}/items?after=0`)).json()) as Json).code).toBe("not_found");
   });
 
+  test("creation is the Worker's alone: a client's /create neither replaces a mailbox's hash nor makes one under an id it picks", async () => {
+    const attacker = "attacker-bearer";
+    const before = readMailbox(relay, mailbox.mailbox_id).mailbox;
+    for (const id of [mailbox.mailbox_id, "mbx_QQQQQQQQQQQQQQQQQQQQQQ"]) {
+      const probe = await fetch(`${relay.url}/v1/mailboxes/${id}/create`, { method: "POST", body: JSON.stringify({ secret_sha256: sha256(attacker) }) });
+      expect(probe.status).toBe(404);
+    }
+    expect(readMailbox(relay, mailbox.mailbox_id).mailbox).toEqual(before!);
+    expect(readMailbox(relay, "mbx_QQQQQQQQQQQQQQQQQQQQQQ").mailbox).toBeNull();
+    const push = await atRelay("POST", "/push", { device_id: phone.id, collapse_id: "msg_00000000000000000000000000", ciphertext: "AAAAexample" }, attacker);
+    expect(push.status).toBe(401);
+    expect((await atRelay("PUT", "/devices/dev_EVIL", { secret_sha256: sha256(attacker), cursor: 0 }, attacker)).status).toBe(401);
+  });
+
   test("7.35: the phone's relay switch reaches the Inbox over its socket and flips carriage in the device record", async () => {
     expect((await atRelay("PUT", `/devices/${phone.id}/carriage`, { on: false })).status).toBe(204);
     await until(() => device(phone.id), (d) => d.carriage === false, "carriage off");

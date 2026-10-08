@@ -17,7 +17,7 @@
  * Owner-deployed (`wrangler deploy` from this folder, never from CI); lanes
  * run it under `wrangler dev` only.
  */
-import { Mailbox, json, refuse, type Env } from "./mailbox";
+import { HASH, Mailbox, json, refuse, type Env } from "./mailbox";
 
 export { Mailbox };
 
@@ -63,9 +63,17 @@ export default {
       if (req.method !== "POST") return refuse(404, "not_found");
       const brake = await braked(req, env.MAILBOX_CREATE_LIMITER);
       if (brake) return brake;
+      let hash: unknown;
+      try {
+        hash = ((await req.json()) as { secret_sha256?: unknown } | null)?.secret_sha256;
+      } catch {
+        hash = undefined;
+      }
+      if (typeof hash !== "string" || !HASH.test(hash)) return refuse(400, "bad_request", "secret_sha256: 64 lowercase hex.");
+      // Made through an RPC on the object, never a fetchable path: a client cannot reach creation under an id it picks.
       const id = mailboxId();
-      const made = await env.MAILBOX.get(env.MAILBOX.idFromName(id)).fetch("https://mailbox/create", { method: "POST", body: await req.text() });
-      return made.status === 201 ? json({ mailbox_id: id }, 201) : made;
+      if (!(await env.MAILBOX.get(env.MAILBOX.idFromName(id)).create(hash))) return refuse(500, "internal_error", "The mailbox could not be made.");
+      return json({ mailbox_id: id }, 201);
     }
     const match = /^\/v1\/mailboxes\/([^/]+)(\/.+)$/.exec(url.pathname);
     if (!match) return refuse(404, "not_found");

@@ -54,7 +54,7 @@ export async function sha256Hex(value: string): Promise<string> {
   return [...digest].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-const HASH = /^[0-9a-f]{64}$/;
+export const HASH = /^[0-9a-f]{64}$/;
 const DEVICE_ID = /^dev_[A-Za-z0-9]+$/;
 const APNS_TOKEN = /^[0-9a-fA-F]+$/;
 const ENVELOPE = /^[A-Za-z0-9_-]+$/;
@@ -123,8 +123,6 @@ export class Mailbox extends DurableObject<Env> {
 
   async fetch(req: Request): Promise<Response> {
     const path = new URL(req.url).pathname;
-    if (path === "/create" && req.method === "POST") return this.create(req);
-
     const secretHash = this.secretHash();
     if (!secretHash) return refuse(404, "mailbox_not_found");
     const inbox = async () => {
@@ -166,18 +164,19 @@ export class Mailbox extends DurableObject<Env> {
     return refuse(404, "not_found");
   }
 
-  /** `POST /v1/mailboxes` (7.26), through the Worker, which named this object. */
-  private async create(req: Request): Promise<Response> {
-    const input = await body(req);
-    const hash = input?.secret_sha256;
-    if (typeof hash !== "string" || !HASH.test(hash)) return refuse(400, "bad_request", "secret_sha256: 64 lowercase hex.");
+  /**
+   * `POST /v1/mailboxes` (7.26): an RPC the Worker calls on the object it
+   * named with a fresh random id, never a path `fetch` serves, so no client
+   * request reaches it. A mailbox that already has its hash keeps it: false.
+   */
+  async create(hash: string): Promise<boolean> {
+    if (!HASH.test(hash) || this.secretHash() !== null) return false;
     this.sql.exec("CREATE TABLE IF NOT EXISTS mailbox (secret_sha256 TEXT NOT NULL)");
     this.sql.exec(
       "CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, secret_sha256 TEXT NOT NULL, carriage INTEGER NOT NULL, cursor INTEGER NOT NULL, apns_token TEXT, apns_environment TEXT)",
     );
-    this.sql.exec("DELETE FROM mailbox");
     this.sql.exec("INSERT INTO mailbox (secret_sha256) VALUES (?)", hash);
-    return new Response(null, { status: 201 });
+    return true;
   }
 
   /** `PUT .../devices/:dev` (7.27): the same hash again changes nothing; another hash starts the device over. */
