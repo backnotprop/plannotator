@@ -238,6 +238,15 @@ export interface PlannotatorConfig {
    */
   claudeCodeMod?: boolean;
   /**
+   * Plannotator Snapshots (the capture HUD) in the agent integrations: the
+   * `/plannotator-snapshot` command and each session's link to the Snapshots
+   * hub, in the Claude Code mod, Pi and OpenCode 2. On by default; `false`
+   * turns it off (nothing registered, no hub contacted). PLANNOTATOR_SNAPSHOTS
+   * wins over this key. Read once when a session (Pi) or the process (Claude
+   * Code, OpenCode) starts. Default: true.
+   */
+  snapshots?: boolean;
+  /**
    * The `plannotator` agent tool (packages/shared/plannotator-tool.ts) on the
    * hosts that register it: the Claude Code mod, Pi and OpenCode 2. `true`
    * puts it in the agent's tool list, `false` keeps it out (the slash commands
@@ -911,6 +920,37 @@ export function resolveClaudeCodeMod(
   if (v === "1" || v === "true" || v === "on") return true;
   if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
   return coerceConfigBoolean(config.claudeCodeMod, true);
+}
+
+/** Whether Plannotator Snapshots is on when nothing is set (the owner's call: on for every agent). */
+export const SNAPSHOTS_DEFAULT = true;
+
+/** The PLANNOTATOR_SNAPSHOTS override, or undefined when it does not decide. */
+export function parseSnapshotsEnv(env: NodeJS.ProcessEnv = process.env): boolean | undefined {
+  const v = env.PLANNOTATOR_SNAPSHOTS?.trim().toLowerCase();
+  if (v === "1" || v === "true" || v === "on") return true;
+  if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
+  return undefined;
+}
+
+/**
+ * Resolve whether Plannotator Snapshots is on for the agent integrations
+ * (the Claude Code mod, Pi, OpenCode 2): the `/plannotator-snapshot` command
+ * and the session's link to the Snapshots hub. One switch for every host.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_SNAPSHOTS env var  ->  config.snapshots  ->  SNAPSHOTS_DEFAULT (on)
+ *
+ * Env `1` / `true` / `on` turn it on and `0` / `false` / `off` / `disabled`
+ * turn it off; an empty or unrecognized value counts as unset. The mod's
+ * mirror (`resolveSnapshotsEnabled` in apps/hook/hooks/mod/enabled.ts) is kept
+ * equal by enabled.test.ts.
+ */
+export function resolveSnapshotsEnabled(
+  config: PlannotatorConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return parseSnapshotsEnv(env) ?? parseConfigBoolean(config.snapshots) ?? SNAPSHOTS_DEFAULT;
 }
 
 /** The hosts that register the `plannotator` agent tool. */

@@ -83,6 +83,7 @@ import { classifyAnnotateOutcome } from "./annotate-outcome.ts";
 import { classifyReviewOutcome } from "./review-outcome.ts";
 import { createPiSessionBridgeHub } from "./pi-session-bridge.ts";
 import { setupPiInbox } from "./inbox.ts";
+import { setupPiSnapshots } from "./snapshots.ts";
 import type { BrowserDecisionSession, PlanReviewBrowserSession, PlanReviewDecision } from "./plannotator-browser.ts";
 import type { AnnotateBundleFile } from "./generated/annotate-bundle.ts";
 import {
@@ -2555,6 +2556,11 @@ Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the
 			keepModelWhenPhaseUnchanged: true,
 		});
 	});
+
+	// Plannotator Snapshots (`/plannotator-snapshot`, the link to the Snapshots
+	// hub, snapshots.ts): on unless PLANNOTATOR_SNAPSHOTS / `snapshots` turn it
+	// off. Ask from the HUD goes through the same session bridge as the reviews.
+	setupPiSnapshots(pi, { createBridge: (ctx, origin) => sessionBridgeHub.createBridge(ctx, origin) });
 
 	// The Plannotator Inbox (`plannotator_inbox` and the reply wake, inbox.ts):
 	// only where the inbox tool switch allows it for Pi and an Inbox was found.
