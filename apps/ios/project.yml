@@ -27,6 +27,16 @@ targets:
       - path: Plannotator
     dependencies:
       - package: PlannotatorKit
+      # M5: the notification service extension, embedded in the app.
+      - target: PlannotatorNotifications
+    # M5: push (the development APNs environment; signing for distribution
+    # switches it) and the app group shared with the extension, which is also
+    # the Keychain access group the device credentials live in.
+    entitlements:
+      path: Plannotator/Plannotator.entitlements
+      properties:
+        aps-environment: development
+        com.apple.security.application-groups: [group.ai.plannotator.app]
     info:
       path: Plannotator/Info.plist
       properties:
@@ -52,6 +62,32 @@ targets:
         SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
         SWIFT_APPROACHABLE_CONCURRENCY: YES
         ENABLE_PREVIEWS: YES
+  # M5: opens a relay push with the device key and writes renders 7.1 and 7.2.
+  PlannotatorNotifications:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: PlannotatorNotifications
+    dependencies:
+      - package: PlannotatorKit
+    entitlements:
+      path: PlannotatorNotifications/PlannotatorNotifications.entitlements
+      properties:
+        com.apple.security.application-groups: [group.ai.plannotator.app]
+    info:
+      path: PlannotatorNotifications/Info.plist
+      properties:
+        CFBundleDisplayName: Plannotator Notifications
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.plannotator.app.notifications
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_APPROACHABLE_CONCURRENCY: YES
   PlannotatorUITests:
     type: bundle.ui-testing
     platform: iOS

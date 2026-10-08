@@ -187,13 +187,30 @@ public struct InboxClient: Sendable {
     public struct SendQuestion: Encodable, Sendable {
         public var key: String
         public var revision: Int
-        public init(key: String, revision: Int) { self.key = key; self.revision = revision }
+        /// The pick inside the Send, for the lock-screen answer (7.11); nil sends the saved pick.
+        public var answer: QuestionAnswer?
+        public init(key: String, revision: Int, answer: QuestionAnswer? = nil) {
+            self.key = key
+            self.revision = revision
+            self.answer = answer
+        }
+    }
+
+    /// The body of `POST messages/:id/reply`, also what a Send through the relay seals.
+    public struct ReplyBody: Encodable, Sendable {
+        public var idempotencyKey: String
+        public var words: String?
+        public var questions: [SendQuestion]
+        public init(idempotencyKey: String, words: String?, questions: [SendQuestion]) {
+            self.idempotencyKey = idempotencyKey
+            self.words = words
+            self.questions = questions
+        }
     }
 
     /// `POST messages/:id/reply`: the person's Send. The key is the caller's, kept across retries.
-    public func reply(message id: String, idempotencyKey: String, words: String, questions: [SendQuestion]) async throws(InboxError) -> InboxQuestionsResponse {
-        struct Body: Encodable { var idempotencyKey: String; var words: String; var questions: [SendQuestion] }
-        return try await post("messages/\(id)/reply", Body(idempotencyKey: idempotencyKey, words: words, questions: questions))
+    public func reply(message id: String, idempotencyKey: String, words: String?, questions: [SendQuestion]) async throws(InboxError) -> InboxQuestionsResponse {
+        try await post("messages/\(id)/reply", ReplyBody(idempotencyKey: idempotencyKey, words: words, questions: questions))
     }
 
     public func resolve(message id: String, resolved: Bool) async throws(InboxError) {
@@ -245,6 +262,16 @@ public struct InboxClient: Sendable {
     }
 
     static func send<T: Decodable>(_ request: URLRequest) async throws(InboxError) -> T {
+        let data = try await body(of: request)
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            throw .unreadable
+        }
+    }
+
+    /// The answer's bytes after a 2xx; an error body (`{ error, code }`) becomes `refused`.
+    static func body(of request: URLRequest) async throws(InboxError) -> Data {
         let data: Data
         let response: URLResponse
         do {
@@ -259,10 +286,6 @@ public struct InboxClient: Sendable {
             }
             throw status >= 500 || status == 0 ? .unreachable : .unreadable
         }
-        do {
-            return try decoder.decode(T.self, from: data)
-        } catch {
-            throw .unreadable
-        }
+        return data
     }
 }

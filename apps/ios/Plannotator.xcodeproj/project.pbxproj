@@ -8,17 +8,22 @@
 
 /* Begin PBXBuildFile section */
 		0A745ED7E033F3F3D754E540 /* MarkdownBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D8E1B3EBB2AB11C7E6E27B /* MarkdownBlockView.swift */; };
+		594CA27509F2F48BE7D56418 /* RelayPushTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFEA26793561E1B1E8ADEF69 /* RelayPushTests.swift */; };
+		615FB270BEE2B0A8ED990393 /* PlannotatorKit in Frameworks */ = {isa = PBXBuildFile; productRef = BEA38BAFE5E93B8DB94585CA /* PlannotatorKit */; };
 		69CED55597F6832AE2A22F48 /* Support.swift in Sources */ = {isa = PBXBuildFile; fileRef = E39E0503FC6505B9D44219B1 /* Support.swift */; };
 		7EDF141F1FB9321AE7EBA951 /* ProofTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F46914B8F633116D2FBECDB4 /* ProofTests.swift */; };
 		7EEA4E2F6EBFBB80E12B02DD /* InboxList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 729DFDA227BB573B45C51ABA /* InboxList.swift */; };
 		816B34352561832D2EC37193 /* SourceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = D94B0997D360DDF87495584C /* SourceSession.swift */; };
+		9C69E7C68268E0358F1EA5A2 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 063C495C6C3BF0442EBE14B6 /* NotificationService.swift */; };
 		AC40C5EB1D7BA9B0779543F9 /* ThreadScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FB104AD044FE8C2A168C00B /* ThreadScreen.swift */; };
+		AF3B4BE063CB1B126B06C87D /* Notifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64F3CF367FE84AF2F4BE0D46 /* Notifications.swift */; };
 		B6BCD6AF399C0B0C289D9E25 /* PlannotatorKit in Frameworks */ = {isa = PBXBuildFile; productRef = DA85D7B174B599E575DE6DFB /* PlannotatorKit */; };
 		B6FABC29603721A20786EEA5 /* ReplyBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E9351CAE37AE10982C5DE /* ReplyBar.swift */; };
 		BB36EB361F96F93C00B1A4A6 /* NearbyScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 609D222F2BF3C34763B18A1E /* NearbyScreen.swift */; };
 		BC97E4610AA7A0BD4ED1D8DC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 559DB35326954FAE3EDAFAE9 /* Assets.xcassets */; };
 		BD956C4C0F9DADC8935C3735 /* QuestionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA7E355D502DC8680C310B43 /* QuestionCard.swift */; };
 		C41C48CD406A4C9A2A388A4D /* PlannotatorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58703DC1C0F8D410DA8B2261 /* PlannotatorApp.swift */; };
+		C87471AB2A0E526F89FA3FCE /* PlannotatorNotifications.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E9CA91EEE5343CB85949FE10 /* PlannotatorNotifications.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		CD90DF7B85015262889A9741 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03FE93863969F83918318159 /* AppModel.swift */; };
 		D1271AA242EEA609CB34D513 /* Colors.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CBEA43689480D730B4AC4D7F /* Colors.xcassets */; };
 		D5A54937EB306159D24FF67F /* SettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 259C44811B6CA3DF346CAEAD /* SettingsTab.swift */; };
@@ -27,6 +32,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		BB8A5A0705F680A9B9A9EB09 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 02D43E6FCBFC6CEF91A36C1E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 328B75112F7853C0AD3F1307;
+			remoteInfo = PlannotatorNotifications;
+		};
 		EA0BA8A864C72CED00C801FB /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 02D43E6FCBFC6CEF91A36C1E /* Project object */;
@@ -36,30 +48,59 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		3EA86492791B8F3401D7FFCC /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				C87471AB2A0E526F89FA3FCE /* PlannotatorNotifications.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		03FE93863969F83918318159 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		063C495C6C3BF0442EBE14B6 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		081FAF267E676DFEF28B65D4 /* PairingCover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingCover.swift; sourceTree = "<group>"; };
 		25783EB204BEC1769A9D3F31 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		259C44811B6CA3DF346CAEAD /* SettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTab.swift; sourceTree = "<group>"; };
+		3D5C9E105CCF7A9F7C9D6F69 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		559DB35326954FAE3EDAFAE9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		58703DC1C0F8D410DA8B2261 /* PlannotatorApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlannotatorApp.swift; sourceTree = "<group>"; };
 		609D222F2BF3C34763B18A1E /* NearbyScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyScreen.swift; sourceTree = "<group>"; };
+		64F3CF367FE84AF2F4BE0D46 /* Notifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Notifications.swift; sourceTree = "<group>"; };
 		67B6227C80FBE3869B1AD532 /* InboxTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxTab.swift; sourceTree = "<group>"; };
 		6FB104AD044FE8C2A168C00B /* ThreadScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadScreen.swift; sourceTree = "<group>"; };
 		70D85F4E93F5586925DB1552 /* PlannotatorUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PlannotatorUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		729DFDA227BB573B45C51ABA /* InboxList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxList.swift; sourceTree = "<group>"; };
+		9533C33C3337AC046895F24A /* PlannotatorNotifications.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PlannotatorNotifications.entitlements; sourceTree = "<group>"; };
+		A75FC4A447CD8F81BA524A07 /* Plannotator.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Plannotator.entitlements; sourceTree = "<group>"; };
 		AA5E9351CAE37AE10982C5DE /* ReplyBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplyBar.swift; sourceTree = "<group>"; };
+		AFEA26793561E1B1E8ADEF69 /* RelayPushTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayPushTests.swift; sourceTree = "<group>"; };
 		BA7E355D502DC8680C310B43 /* QuestionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionCard.swift; sourceTree = "<group>"; };
 		C0D8E1B3EBB2AB11C7E6E27B /* MarkdownBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownBlockView.swift; sourceTree = "<group>"; };
 		CBEA43689480D730B4AC4D7F /* Colors.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Colors.xcassets; sourceTree = "<group>"; };
 		D94B0997D360DDF87495584C /* SourceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceSession.swift; sourceTree = "<group>"; };
 		E39E0503FC6505B9D44219B1 /* Support.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support.swift; sourceTree = "<group>"; };
 		E749D4EC2D60D348C66E4721 /* PlannotatorKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = PlannotatorKit; path = PlannotatorKit; sourceTree = SOURCE_ROOT; };
+		E9CA91EEE5343CB85949FE10 /* PlannotatorNotifications.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = PlannotatorNotifications.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		F372FCD08C903FF6080BE00E /* Plannotator.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Plannotator.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F46914B8F633116D2FBECDB4 /* ProofTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProofTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		1943FB821B6F7E46A9576F09 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				615FB270BEE2B0A8ED990393 /* PlannotatorKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D985AA4949FA4AD9C8FBE8C6 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -75,6 +116,7 @@
 			isa = PBXGroup;
 			children = (
 				F46914B8F633116D2FBECDB4 /* ProofTests.swift */,
+				AFEA26793561E1B1E8ADEF69 /* RelayPushTests.swift */,
 			);
 			path = PlannotatorUITests;
 			sourceTree = "<group>";
@@ -101,6 +143,7 @@
 			children = (
 				CBE7AF15135A1488794A453F /* Packages */,
 				F5ED9DC8DA9DB8BF42092E44 /* Plannotator */,
+				D883DDF186ACA4212D18224D /* PlannotatorNotifications */,
 				1A5764E77DB1F73720E0176C /* PlannotatorUITests */,
 				D8291E6B244DBFD5B1DC4009 /* Products */,
 			);
@@ -129,9 +172,20 @@
 			isa = PBXGroup;
 			children = (
 				F372FCD08C903FF6080BE00E /* Plannotator.app */,
+				E9CA91EEE5343CB85949FE10 /* PlannotatorNotifications.appex */,
 				70D85F4E93F5586925DB1552 /* PlannotatorUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		D883DDF186ACA4212D18224D /* PlannotatorNotifications */ = {
+			isa = PBXGroup;
+			children = (
+				3D5C9E105CCF7A9F7C9D6F69 /* Info.plist */,
+				063C495C6C3BF0442EBE14B6 /* NotificationService.swift */,
+				9533C33C3337AC046895F24A /* PlannotatorNotifications.entitlements */,
+			);
+			path = PlannotatorNotifications;
 			sourceTree = "<group>";
 		};
 		EB54E46BBE545BBFA65B5E04 /* Inbox */ = {
@@ -149,6 +203,7 @@
 				559DB35326954FAE3EDAFAE9 /* Assets.xcassets */,
 				CBEA43689480D730B4AC4D7F /* Colors.xcassets */,
 				25783EB204BEC1769A9D3F31 /* Info.plist */,
+				A75FC4A447CD8F81BA524A07 /* Plannotator.entitlements */,
 				FE63721F949D4E7E7EB3F4C7 /* App */,
 				EB54E46BBE545BBFA65B5E04 /* Inbox */,
 				750B4BC97A453EC943BAE4DC /* Pairing */,
@@ -162,6 +217,7 @@
 			isa = PBXGroup;
 			children = (
 				03FE93863969F83918318159 /* AppModel.swift */,
+				64F3CF367FE84AF2F4BE0D46 /* Notifications.swift */,
 				58703DC1C0F8D410DA8B2261 /* PlannotatorApp.swift */,
 				D94B0997D360DDF87495584C /* SourceSession.swift */,
 				E39E0503FC6505B9D44219B1 /* Support.swift */,
@@ -179,10 +235,12 @@
 				1901EF9F4B5277154E34C0BE /* Sources */,
 				01CA5957E04EC37EE3D1273A /* Resources */,
 				D985AA4949FA4AD9C8FBE8C6 /* Frameworks */,
+				3EA86492791B8F3401D7FFCC /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				7E86C4A5900CEBF9AB15E827 /* PBXTargetDependency */,
 			);
 			name = Plannotator;
 			packageProductDependencies = (
@@ -191,6 +249,25 @@
 			productName = Plannotator;
 			productReference = F372FCD08C903FF6080BE00E /* Plannotator.app */;
 			productType = "com.apple.product-type.application";
+		};
+		328B75112F7853C0AD3F1307 /* PlannotatorNotifications */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 73F7C0FBDB47600A1D8C8D9B /* Build configuration list for PBXNativeTarget "PlannotatorNotifications" */;
+			buildPhases = (
+				4464ECE299CFDE1EC0790BAD /* Sources */,
+				1943FB821B6F7E46A9576F09 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PlannotatorNotifications;
+			packageProductDependencies = (
+				BEA38BAFE5E93B8DB94585CA /* PlannotatorKit */,
+			);
+			productName = PlannotatorNotifications;
+			productReference = E9CA91EEE5343CB85949FE10 /* PlannotatorNotifications.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 		8E5BA44496E181DD2B22ABB9 /* PlannotatorUITests */ = {
 			isa = PBXNativeTarget;
@@ -223,6 +300,10 @@
 						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
+					328B75112F7853C0AD3F1307 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
 					8E5BA44496E181DD2B22ABB9 = {
 						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
@@ -248,6 +329,7 @@
 			projectRoot = "";
 			targets = (
 				1AA408E9F45C3153112D60D0 /* Plannotator */,
+				328B75112F7853C0AD3F1307 /* PlannotatorNotifications */,
 				8E5BA44496E181DD2B22ABB9 /* PlannotatorUITests */,
 			);
 		};
@@ -275,6 +357,7 @@
 				E69B1BC67D0DEE64C6457A48 /* InboxTab.swift in Sources */,
 				0A745ED7E033F3F3D754E540 /* MarkdownBlockView.swift in Sources */,
 				BB36EB361F96F93C00B1A4A6 /* NearbyScreen.swift in Sources */,
+				AF3B4BE063CB1B126B06C87D /* Notifications.swift in Sources */,
 				FEE83117B4BC2659269D7F63 /* PairingCover.swift in Sources */,
 				C41C48CD406A4C9A2A388A4D /* PlannotatorApp.swift in Sources */,
 				BD956C4C0F9DADC8935C3735 /* QuestionCard.swift in Sources */,
@@ -286,11 +369,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		4464ECE299CFDE1EC0790BAD /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9C69E7C68268E0358F1EA5A2 /* NotificationService.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		F3B41F98530B91981CE90E99 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				7EDF141F1FB9321AE7EBA951 /* ProofTests.swift in Sources */,
+				594CA27509F2F48BE7D56418 /* RelayPushTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -301,6 +393,11 @@
 			isa = PBXTargetDependency;
 			target = 1AA408E9F45C3153112D60D0 /* Plannotator */;
 			targetProxy = EA0BA8A864C72CED00C801FB /* PBXContainerItemProxy */;
+		};
+		7E86C4A5900CEBF9AB15E827 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 328B75112F7853C0AD3F1307 /* PlannotatorNotifications */;
+			targetProxy = BB8A5A0705F680A9B9A9EB09 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -321,6 +418,23 @@
 				TEST_TARGET_NAME = Plannotator;
 			};
 			name = Debug;
+		};
+		1DB8844547DD8CDEDC529239 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = PlannotatorNotifications/PlannotatorNotifications.entitlements;
+				INFOPLIST_FILE = PlannotatorNotifications/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.plannotator.app.notifications;
+				SDKROOT = iphoneos;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
 		};
 		2AD8ABDC10CF4614E8070390 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -394,6 +508,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Plannotator/Plannotator.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = Plannotator/Info.plist;
@@ -491,6 +606,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Plannotator/Plannotator.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = Plannotator/Info.plist;
@@ -506,6 +622,23 @@
 			};
 			name = Debug;
 		};
+		F8848E45A4272F94EAC10CB8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = PlannotatorNotifications/PlannotatorNotifications.entitlements;
+				INFOPLIST_FILE = PlannotatorNotifications/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.plannotator.app.notifications;
+				SDKROOT = iphoneos;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -514,6 +647,15 @@
 			buildConfigurations = (
 				0FDA10DF626119D3F6734532 /* Debug */,
 				D02BB4F7F081E548CE0558E8 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		73F7C0FBDB47600A1D8C8D9B /* Build configuration list for PBXNativeTarget "PlannotatorNotifications" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F8848E45A4272F94EAC10CB8 /* Debug */,
+				1DB8844547DD8CDEDC529239 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
@@ -546,6 +688,10 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		BEA38BAFE5E93B8DB94585CA /* PlannotatorKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PlannotatorKit;
+		};
 		DA85D7B174B599E575DE6DFB /* PlannotatorKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = PlannotatorKit;

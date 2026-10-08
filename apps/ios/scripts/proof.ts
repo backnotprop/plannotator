@@ -18,16 +18,20 @@
  *
  *   bun apps/ios/scripts/proof.ts --binary .local/plannotator \
  *     [--device "iPhone 17"] [--shots .local/proof/ios] [--derived <DerivedData>] [--keep-simulator]
+ *     [--only PlannotatorUITests/RelayPushTests]
  *
  * Every process runs with PLANNOTATOR_BROWSER=none and its own data dir; the
  * person's ~/.plannotator is never read.
  */
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import http2 from 'node:http2';
 import { tmpdir } from 'node:os';
+import { Database } from 'bun:sqlite';
 import { dirname, join, resolve } from 'node:path';
 import { DEMO_MESSAGES, SimAgent, scratchProject } from '../../../scripts/inbox-sim.ts';
+import { GUIDE_BRIEF_EXAMPLE } from '../../../packages/server/inbox-guides.ts';
 
 const args = process.argv.slice(2);
 const flag = (name: string, fallback?: string) => {
@@ -40,6 +44,8 @@ const deviceType = flag('--device', 'iPhone 17')!;
 const shots = resolve(flag('--shots', join(repo, '.local/proof/ios'))!);
 const derived = resolve(flag('--derived', join(tmpdir(), 'plannotator-ios-derived'))!);
 const keepSimulator = args.includes('--keep-simulator');
+/** Run one test class or method (`PlannotatorUITests/RelayPushTests`), for a reviewer re-running a part. */
+const only = flag('--only');
 
 const tmp = mkdtempSync(join(tmpdir(), 'plannotator-ios-proof-'));
 const dataDir = join(tmp, 'data');
@@ -60,8 +66,88 @@ function run(cmd: string, argv: string[], options: { env?: Record<string, string
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// ─── M5: the relay under wrangler dev, and Apple played locally ───
+//
+// The Inbox posts its pushes to the relay (apps/relay under `wrangler dev`,
+// as R1's proof runs it); the relay sends them over HTTP/2 to a local server
+// standing in for APNs, which keeps each body. The notification test hands
+// that exact body to `xcrun simctl push`. The APNs key is made for this run
+// and lives only in the relay's env file under the temp dir.
+
+interface Pushed { path: string; collapseId: string; body: string }
+const pushes: Pushed[] = [];
+/** The file holding each thread's latest push body, for `simctl push`. */
+const pushFiles = new Map<string, string>();
+const apple = http2.createServer();
+apple.on('stream', (stream: http2.ServerHttp2Stream, headers) => {
+  let body = '';
+  stream.on('data', (chunk) => (body += chunk));
+  stream.on('end', () => {
+    pushes.push({ path: String(headers[':path']), collapseId: String(headers['apns-collapse-id']), body });
+    stream.respond({ ':status': 200, 'apns-id': crypto.randomUUID() });
+    stream.end();
+  });
+});
+await new Promise<void>((ready) => apple.listen(0, '127.0.0.1', () => ready()));
+
+const freePort = () => {
+  const server = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data() {} } });
+  const port = server.port;
+  server.stop(true);
+  return port;
+};
+const relayDir = join(repo, 'apps/relay');
+const relayState = join(tmp, 'relay');
+mkdirSync(relayState, { recursive: true });
+const apnsKey = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+writeFileSync(
+  join(relayState, 'relay.env'),
+  [
+    `APNS_KEY=${Buffer.from(await crypto.subtle.exportKey('pkcs8', apnsKey.privateKey)).toString('base64')}`,
+    'APNS_KEY_ID=KEY0000000',
+    'APNS_TEAM_ID=TEAM000000',
+    `APNS_ORIGIN=http://127.0.0.1:${(apple.address() as { port: number }).port}`,
+  ].join('\n') + '\n',
+  { mode: 0o600 },
+);
+const relayPort = freePort();
+const relayUrl = `http://127.0.0.1:${relayPort}`;
+const relayLog: string[] = [];
+const relay = spawn(
+  join(relayDir, 'node_modules/.bin/wrangler'),
+  ['dev', '--local', '--ip', '127.0.0.1', '--port', String(relayPort), '--inspector-port', String(freePort()), '--persist-to', relayState, '--env-file', join(relayState, 'relay.env'), '--show-interactive-dev-session=false'],
+  { cwd: relayDir, env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: '1' }, stdio: ['ignore', 'pipe', 'pipe'] },
+);
+for (const stream of [relay.stdout, relay.stderr]) stream?.on('data', (chunk) => relayLog.push(String(chunk)));
+for (let tries = 0; ; tries++) {
+  const status = await fetch(`${relayUrl}/v1/nothing`).then((r) => r.status).catch(() => 0);
+  if (status === 404) break;
+  if (tries > 600) throw new Error(`wrangler dev did not start:\n${relayLog.join('')}`);
+  await sleep(100);
+}
+env.PLANNOTATOR_RELAY_URL = relayUrl;
+
+/** The relay's stored devices, read from its Durable Object's SQLite file (as R1's proof reads them). */
+function relayDevices(): Record<string, unknown>[] {
+  const dir = join(relayState, 'v3', 'do', 'plannotator-relay-Mailbox');
+  if (!existsSync(dir)) return [];
+  const rows: Record<string, unknown>[] = [];
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.sqlite') && f !== 'metadata.sqlite')) {
+    const db = new Database(join(dir, file), { readonly: true });
+    try {
+      const tables = (db.query("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((t) => t.name);
+      if (tables.includes('devices')) rows.push(...(db.query('SELECT id, carriage, apns_token, apns_environment FROM devices').all() as Record<string, unknown>[]));
+    } finally {
+      db.close();
+    }
+  }
+  return rows;
+}
+
 // ─── The Inbox and its agents ───
 
+// A harness proves its data dir before it spawns (row 5109): a temp path, never ~/.plannotator.
+if (!realpathSync(dataDir.replace(/\/data$/, '')).startsWith(realpathSync(tmpdir()))) throw new Error(`not a temp data dir: ${dataDir}`);
 run(binary, ['inbox', '--background'], { env });
 const registry = JSON.parse(readFileSync(join(dataDir, 'inbox', 'inbox.json'), 'utf8')) as { port: number; token: string };
 const inbox = `http://127.0.0.1:${registry.port}`;
@@ -136,7 +222,8 @@ async function more(): Promise<Record<string, string>> {
 
 // ─── The door, through a proxy the test can break ───
 
-let proxyMode: 'pass' | 'down' | 'drop-reply' = 'pass';
+// 'gone': what `tailscale serve` answers when nothing listens behind it (502), for M5's lock-screen answer.
+let proxyMode: 'pass' | 'down' | 'drop-reply' | 'gone' = 'pass';
 /** A response that never completes: the connection dies, as a network drop does. */
 const dropped = () => new Response(new ReadableStream({ start: (controller) => controller.error(new Error('dropped')) }));
 const proxy = Bun.serve({
@@ -146,6 +233,7 @@ const proxy = Bun.serve({
   async fetch(request) {
     const url = new URL(request.url);
     if (proxyMode === 'down') return dropped();
+    if (proxyMode === 'gone') return new Response('Bad Gateway', { status: 502 });
     const forwarded = await fetch(`${inbox}${url.pathname}${url.search}`, {
       method: request.method,
       headers: [...request.headers].filter(([name]) => !['host', 'connection', 'content-length'].includes(name.toLowerCase())),
@@ -273,6 +361,56 @@ const control = Bun.serve({
           await new Promise((r) => (video ? video.once('exit', r) : r(null)));
           video = null;
           return Response.json({ ok: true });
+        // ── M5: the relay and the pushes ──
+        case '/relay':
+          // The relay's stored devices: registered at pairing, then the APNs token.
+          return Response.json({ devices: relayDevices() });
+        case '/ask': {
+          // An agent's message lands; the Inbox pushes through the relay to Apple, played
+          // locally. Answers the thread and the exact body Apple received for it.
+          const before = pushes.length;
+          const writer = await agent(body.agent ?? 'Claude Code', body.host ?? 'claude-code');
+          newsAgents.push(writer);
+          let sent: Record<string, unknown>;
+          if (body.kind === 'guide') {
+            sent = await writer.submitGuide({ ...GUIDE_BRIEF_EXAMPLE, project_path: projects['ledger']!, subject: 'Run finished. A guided review of the export change is attached.' });
+          } else if (body.kind === 'ship') {
+            sent = await writer.send({ project_path: projects['checkout-web']!, subject: 'Ship the dark ticket page behind a flag?', body: question('Ship the dark ticket page behind a flag?', ['Yes', 'No']) });
+          } else {
+            sent = await writer.send({ project_path: projects['billing-svc']!, subject: 'Run the retry tests against the Stripe test clock?', body: ['The retry worker is ready.', '', question('Run the retry tests against the Stripe test clock?', ['Yes', 'No'], ['They take about four minutes against the test key.'])].join('\n') });
+          }
+          const thread = sent.thread_id as string;
+          replies.set(thread, waitForPersonReply(writer, thread));
+          for (let tries = 0; pushes.length === before; tries++) {
+            if (tries > 300) throw new Error(`no push reached Apple for ${thread}`);
+            await sleep(100);
+          }
+          const pushed = pushes.at(-1)!;
+          // Files named by this script, never by the request: the nth push, kept for /push and for the record.
+          const file = join(tmp, `push-${pushes.length}.json`);
+          writeFileSync(file, pushed.body);
+          writeFileSync(join(shots, `M5-push-${pushes.length}.json`), pushed.body);
+          pushFiles.set(thread, file);
+          return Response.json({ thread, bytes: pushed.body.length, collapse_id: pushed.collapseId, device_token: pushed.path.split('/').at(-1) });
+        }
+        case '/relay-log':
+          // How many commands the relay queued: a lock-screen answer that went up through it.
+          return Response.json({ queued: relayLog.join('').split('relay: command ').filter((line) => line.includes(' queued')).length });
+        case '/push': {
+          // The exact body Apple received for that thread, delivered to the simulator.
+          const file = pushFiles.get(body.thread ?? '');
+          if (!file) return Response.json({ error: 'no push for that thread' }, { status: 404 });
+          run('xcrun', ['simctl', 'push', udid, 'ai.plannotator.app', file]);
+          return Response.json({ ok: true });
+        }
+        case '/shot-one':
+          // One frame as the screen is now (the lock screen cannot be re-themed mid-test).
+          run('xcrun', ['simctl', 'io', udid, 'screenshot', join(shots, `${body.name ?? 'shot'}.png`)]);
+          return Response.json({ ok: true });
+        case '/appearance':
+          run('xcrun', ['simctl', 'ui', udid, 'appearance', body.mode ?? 'light']);
+          await sleep(1200);
+          return Response.json({ ok: true });
         default:
           return Response.json({ error: 'unknown' }, { status: 404 });
       }
@@ -288,7 +426,7 @@ let status = 1;
 try {
   const test = spawn(
     'xcodebuild',
-    ['test', '-project', join(repo, 'apps/ios/Plannotator.xcodeproj'), '-scheme', 'Plannotator', '-destination', `id=${udid}`, '-derivedDataPath', derived, '-resultBundlePath', join(tmp, 'Proof.xcresult')],
+    ['test', '-project', join(repo, 'apps/ios/Plannotator.xcodeproj'), '-scheme', 'Plannotator', '-destination', `id=${udid}`, '-derivedDataPath', derived, '-resultBundlePath', join(tmp, 'Proof.xcresult'), ...(only ? [`-only-testing:${only}`] : [])],
     { stdio: 'inherit', env: { ...process.env, TEST_RUNNER_PROOF_CONTROL: `http://127.0.0.1:${control.port}` } },
   );
   status = await new Promise<number>((r) => test.once('exit', (code) => r(code ?? 1)));
@@ -296,6 +434,9 @@ try {
   video?.kill('SIGINT');
   control.stop(true);
   proxy.stop(true);
+  relay.kill();
+  apple.close();
+  if (status !== 0) writeFileSync(join(shots, 'relay-wrangler.log'), relayLog.join(''));
   await Promise.allSettled([claude, ...Object.values(others), ...newsAgents].map((a) => a.close()));
   await fetch(`${inbox}/api/inbox/control/stop`, { method: 'POST', headers: { Authorization: `Bearer ${registry.token}` } }).catch(() => {});
   if (status !== 0) {

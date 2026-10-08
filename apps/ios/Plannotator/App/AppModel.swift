@@ -11,6 +11,8 @@ struct Source: Codable, Hashable, Identifiable {
     /// The address this phone reaches it at: the tailnet publication (or loopback in the simulator).
     var address: InboxAddress
     var pairedAt: Date
+    /// The computer's relay mailbox, from the pairing answer: where this phone's APNs token goes.
+    var relay: InboxRelayRef?
 }
 
 /// A computer the phone has seen in a QR link or paired with, listed under
@@ -31,6 +33,10 @@ final class AppModel {
     var pairing = false
     /// A pairing link opened from outside the app, waiting for the person's yes.
     var offered: PairLink?
+    /// Notifications: the permission, the APNs token, 9.1's switches.
+    let notifier = Notifier()
+    /// A thread a notification opened, for the Inbox tab to push.
+    var opening: ThreadRoute?
 
     private let defaults = UserDefaults.standard
 
@@ -70,7 +76,7 @@ final class AppModel {
     private func redeem(at address: InboxAddress, secret: String?, code: String?) async throws(InboxError) {
         let answer = try await InboxClient.pair(at: address, secret: secret, code: code, name: UIDevice.current.name)
         Keychain.save(DeviceCredential(token: answer.token, secret: answer.secret), device: answer.device.id)
-        let source = Source(id: answer.device.id, name: answer.computer.name, address: address, pairedAt: .now)
+        let source = Source(id: answer.device.id, name: answer.computer.name, address: address, pairedAt: .now, relay: answer.relay)
         // Pairing again with a computer this phone was removed from replaces the old source.
         for old in sources where old.address == address { forget(old, showNext: false) }
         sources.append(source)
@@ -80,6 +86,7 @@ final class AppModel {
         session = nil
         show(source)
         pairing = false
+        await notifier.paired(source)
     }
 
     // MARK: Removing
