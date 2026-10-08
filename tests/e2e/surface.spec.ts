@@ -235,6 +235,23 @@ function ticketFrame(): FrameLocator {
   return world.page.frameLocator('[data-surface-attachment] iframe').first();
 }
 
+/** Wait for the frame's bridge to arm pins (1) or stand down (0); a failure says what the frame and the page reported. */
+async function armed(frame: FrameLocator, count: 0 | 1): Promise<void> {
+  try {
+    await expect(frame.locator('body[data-plannotator-pinpoint-cursor]')).toHaveCount(count);
+  } catch (error) {
+    const state = await htmlFrame()
+      .evaluate(() => ({
+        ready: document.readyState,
+        bridge: typeof (window as any).__plannotatorBridgeInternals,
+        body: document.body ? [...document.body.attributes].map((a) => a.name) : null,
+        probe: document.getElementById('probe')?.textContent,
+      }))
+      .catch((e) => String(e));
+    throw new Error(`the frame's bridge did not ${count ? 'arm' : 'stand down'}: ${JSON.stringify(state)}; page errors: ${JSON.stringify(world.errors)}; frames: ${world.page.frames().map((f) => f.url()).join(', ')}`, { cause: error });
+  }
+}
+
 function htmlFrame(): Frame {
   const frame = world.page.frames().find((f) => f !== world.page.mainFrame());
   expect(frame, 'the HTML page frame').toBeTruthy();
@@ -452,7 +469,7 @@ test('HTML: a pin steps to its parent and back to its child, is saved and drawn;
   await expect(frame.locator('h1')).toContainText('LOW');
   await send({ type: 'set_mode', mode: 'annotate' });
   // The frame's bridge is ready and armed for pins (it marks the page's body).
-  await expect(frame.locator('body[data-plannotator-pinpoint-cursor]')).toHaveCount(1);
+  await armed(frame, 1);
 
   let from = mark();
   await frame.locator('#buy span').click();
@@ -488,7 +505,7 @@ test('HTML: a pin steps to its parent and back to its child, is saved and drawn;
 
   // Interact: the click reaches the page; no pin goes to the shell.
   await send({ type: 'set_mode', mode: 'interact' });
-  await expect(frame.locator('body[data-plannotator-pinpoint-cursor]')).toHaveCount(0);
+  await armed(frame, 0);
   from = mark();
   await frame.locator('.tier.pick').click();
   // The saved marker sits on the button's top right; the press lands on its left.
@@ -498,7 +515,7 @@ test('HTML: a pin steps to its parent and back to its child, is saved and drawn;
   expect(world.inbox.slice(from).filter((m) => m.main && m.message.type === 'pin')).toEqual([]);
   // Annotate again: the next tap pins.
   await send({ type: 'set_mode', mode: 'annotate' });
-  await expect(frame.locator('body[data-plannotator-pinpoint-cursor]')).toHaveCount(1);
+  await armed(frame, 1);
   from = mark();
   await frame.locator('.chip.on').click();
   expect((await next('pin', from)).draft.originalText).toBe('Sat 18 Oct · 21:00');
@@ -528,7 +545,7 @@ test("the agent's HTML frame cannot reach the bridge", async () => {
   // either. The markdown test proves a link in the surface's own document goes out.
   await expect(frame.locator('#forged')).toHaveText('forged');
   await send({ type: 'set_mode', mode: 'interact' });
-  await expect(frame.locator('body[data-plannotator-pinpoint-cursor]')).toHaveCount(0);
+  await armed(frame, 0);
   await frame.locator('#venue').click();
   await send({ type: 'set_mode', mode: 'annotate' });
   await world.page.waitForTimeout(300);
