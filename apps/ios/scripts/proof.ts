@@ -17,14 +17,14 @@
  * after the Inbox applied it.
  *
  *   bun apps/ios/scripts/proof.ts --binary .local/plannotator \
- *     [--device "iPhone 17"] [--shots .local/proof/ios] [--derived <DerivedData>] [--keep-simulator]
+ *     [--device "iPhone 17"] [--shots .local/proof/ios] [--derived <DerivedData>] [--keep-simulator] [--only <test>]
  *
  * Every process runs with PLANNOTATOR_BROWSER=none and its own data dir; the
  * person's ~/.plannotator is never read.
  */
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { DEMO_MESSAGES, SimAgent, scratchProject } from '../../../scripts/inbox-sim.ts';
@@ -40,6 +40,8 @@ const deviceType = flag('--device', 'iPhone 17')!;
 const shots = resolve(flag('--shots', join(repo, '.local/proof/ios'))!);
 const derived = resolve(flag('--derived', join(tmpdir(), 'plannotator-ios-derived'))!);
 const keepSimulator = args.includes('--keep-simulator');
+// One test while working on it, e.g. --only PlannotatorUITests/AttachmentProofTests.
+const only = flag('--only');
 
 const tmp = mkdtempSync(join(tmpdir(), 'plannotator-ios-proof-'));
 const dataDir = join(tmp, 'data');
@@ -51,6 +53,10 @@ const env: Record<string, string> = {
   PLANNOTATOR_DATA_DIR: dataDir,
   PLANNOTATOR_BROWSER: 'none',
 };
+// Every plannotator process this script starts gets exactly this env: a temp data dir, never ~/.plannotator.
+if (!env.PLANNOTATOR_DATA_DIR.startsWith(tmpdir()) || env.PLANNOTATOR_DATA_DIR.includes('/.plannotator')) {
+  throw new Error(`Refusing to start an Inbox on ${env.PLANNOTATOR_DATA_DIR}: the proof runs on a temp data dir only.`);
+}
 
 function run(cmd: string, argv: string[], options: { env?: Record<string, string>; quiet?: boolean } = {}): string {
   const result = spawnSync(cmd, argv, { env: options.env ?? (process.env as Record<string, string>), encoding: 'utf8' });
@@ -134,6 +140,32 @@ async function more(): Promise<Record<string, string>> {
   return { ship: ship.thread_id as string, keep: keep.thread_id as string };
 }
 
+// M2: one message with three files to comment on (the record's 4.1, 4.3 and 4.4).
+const fixtures = join(repo, 'apps/ios/scripts/fixtures');
+let filesAgent: SimAgent | null = null;
+let planPath = '';
+
+async function attach(): Promise<Record<string, string>> {
+  const project = projects['billing-svc']!;
+  mkdirSync(join(project, 'plans'), { recursive: true });
+  planPath = join(project, 'plans', 'retry-plan.md');
+  for (const [from, to] of [
+    ['retry-plan.md', planPath],
+    ['ticket-page.html', join(project, 'ticket-page.html')],
+    ['install-flow.mmd', join(project, 'install-flow.mmd')],
+  ] as const) copyFileSync(join(fixtures, from), to);
+  filesAgent = await agent('Claude Code', 'claude-code');
+  const sent = await filesAgent.send({
+    project_path: project,
+    subject: 'Three files for the retry work',
+    body: 'The retry plan, the ticket page and the install flow are attached. Comment on anything that looks wrong.',
+    attachments: ['plans/retry-plan.md', 'ticket-page.html', 'install-flow.mmd'],
+  });
+  const thread = sent.thread_id as string;
+  replies.set(thread, waitForPersonReply(filesAgent, thread));
+  return { thread };
+}
+
 // ─── The door, through a proxy the test can break ───
 
 let proxyMode: 'pass' | 'down' | 'drop-reply' = 'pass';
@@ -198,6 +230,14 @@ const control = Bun.serve({
           return Response.json(await seed());
         case '/more':
           return Response.json(await more());
+        case '/attach':
+          return Response.json(await attach());
+        case '/edit-plan': {
+          // The agent edits the plan after the person commented: the file on disk is no longer what was sent.
+          const text = readFileSync(planPath, 'utf8').replace('at the end of the first week.', 'at the end of the first two weeks.');
+          writeFileSync(planPath, text);
+          return Response.json({ ok: true });
+        }
         case '/proxy':
           proxyMode = body.mode as typeof proxyMode;
           return Response.json({ mode: proxyMode });
@@ -288,7 +328,7 @@ let status = 1;
 try {
   const test = spawn(
     'xcodebuild',
-    ['test', '-project', join(repo, 'apps/ios/Plannotator.xcodeproj'), '-scheme', 'Plannotator', '-destination', `id=${udid}`, '-derivedDataPath', derived, '-resultBundlePath', join(tmp, 'Proof.xcresult')],
+    ['test', '-project', join(repo, 'apps/ios/Plannotator.xcodeproj'), '-scheme', 'Plannotator', '-destination', `id=${udid}`, '-derivedDataPath', derived, '-resultBundlePath', join(tmp, 'Proof.xcresult'), ...(only ? [`-only-testing:${only}`] : [])],
     { stdio: 'inherit', env: { ...process.env, TEST_RUNNER_PROOF_CONTROL: `http://127.0.0.1:${control.port}` } },
   );
   status = await new Promise<number>((r) => test.once('exit', (code) => r(code ?? 1)));
@@ -296,7 +336,7 @@ try {
   video?.kill('SIGINT');
   control.stop(true);
   proxy.stop(true);
-  await Promise.allSettled([claude, ...Object.values(others), ...newsAgents].map((a) => a.close()));
+  await Promise.allSettled([claude, ...Object.values(others), ...newsAgents, ...(filesAgent ? [filesAgent] : [])].map((a) => a.close()));
   await fetch(`${inbox}/api/inbox/control/stop`, { method: 'POST', headers: { Authorization: `Bearer ${registry.token}` } }).catch(() => {});
   if (status !== 0) {
     // A crash of the app leaves its report with the simulator's host; keep it with the frames.

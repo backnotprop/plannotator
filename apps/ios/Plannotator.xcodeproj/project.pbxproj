@@ -8,20 +8,27 @@
 
 /* Begin PBXBuildFile section */
 		0A745ED7E033F3F3D754E540 /* MarkdownBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D8E1B3EBB2AB11C7E6E27B /* MarkdownBlockView.swift */; };
+		58D305472817FAC5D67A30FE /* AttachmentTiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADC9F5E0C9F44390E786FB45 /* AttachmentTiles.swift */; };
 		69CED55597F6832AE2A22F48 /* Support.swift in Sources */ = {isa = PBXBuildFile; fileRef = E39E0503FC6505B9D44219B1 /* Support.swift */; };
 		7EDF141F1FB9321AE7EBA951 /* ProofTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F46914B8F633116D2FBECDB4 /* ProofTests.swift */; };
 		7EEA4E2F6EBFBB80E12B02DD /* InboxList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 729DFDA227BB573B45C51ABA /* InboxList.swift */; };
 		816B34352561832D2EC37193 /* SourceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = D94B0997D360DDF87495584C /* SourceSession.swift */; };
+		85FAD82CBE66483A47FC4E7E /* SurfaceHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF7598CE5AA360901F9F333E /* SurfaceHost.swift */; };
+		8E5E610C599984FE7D71CA3A /* AnnotationsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABEDB760A51B1C72EAB9FE7A /* AnnotationsSheet.swift */; };
+		93FE80030A6D48845239FD0D /* AttachmentProofTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91508EC3F9DDD6F97197858D /* AttachmentProofTests.swift */; };
+		A1C18368BADB3BBDC35FB596 /* LinkViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CB7B7015D5AEEFE5AD4D8AC /* LinkViews.swift */; };
 		AC40C5EB1D7BA9B0779543F9 /* ThreadScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FB104AD044FE8C2A168C00B /* ThreadScreen.swift */; };
 		B6BCD6AF399C0B0C289D9E25 /* PlannotatorKit in Frameworks */ = {isa = PBXBuildFile; productRef = DA85D7B174B599E575DE6DFB /* PlannotatorKit */; };
 		B6FABC29603721A20786EEA5 /* ReplyBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E9351CAE37AE10982C5DE /* ReplyBar.swift */; };
 		BB36EB361F96F93C00B1A4A6 /* NearbyScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 609D222F2BF3C34763B18A1E /* NearbyScreen.swift */; };
 		BC97E4610AA7A0BD4ED1D8DC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 559DB35326954FAE3EDAFAE9 /* Assets.xcassets */; };
 		BD956C4C0F9DADC8935C3735 /* QuestionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA7E355D502DC8680C310B43 /* QuestionCard.swift */; };
+		C1B0510E8A529837E3A566F6 /* AttachmentCover.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15237F0C71537689906D3DC /* AttachmentCover.swift */; };
 		C41C48CD406A4C9A2A388A4D /* PlannotatorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58703DC1C0F8D410DA8B2261 /* PlannotatorApp.swift */; };
 		CD90DF7B85015262889A9741 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03FE93863969F83918318159 /* AppModel.swift */; };
 		D1271AA242EEA609CB34D513 /* Colors.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CBEA43689480D730B4AC4D7F /* Colors.xcassets */; };
 		D5A54937EB306159D24FF67F /* SettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 259C44811B6CA3DF346CAEAD /* SettingsTab.swift */; };
+		E2AEE8DF24B2A9E2B1664CF1 /* ProofSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C4839632E4D1D6B4AB57C4E /* ProofSupport.swift */; };
 		E69B1BC67D0DEE64C6457A48 /* InboxTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67B6227C80FBE3869B1AD532 /* InboxTab.swift */; };
 		FEE83117B4BC2659269D7F63 /* PairingCover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 081FAF267E676DFEF28B65D4 /* PairingCover.swift */; };
 /* End PBXBuildFile section */
@@ -41,22 +48,29 @@
 		081FAF267E676DFEF28B65D4 /* PairingCover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingCover.swift; sourceTree = "<group>"; };
 		25783EB204BEC1769A9D3F31 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		259C44811B6CA3DF346CAEAD /* SettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTab.swift; sourceTree = "<group>"; };
+		4CB7B7015D5AEEFE5AD4D8AC /* LinkViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkViews.swift; sourceTree = "<group>"; };
 		559DB35326954FAE3EDAFAE9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		58703DC1C0F8D410DA8B2261 /* PlannotatorApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlannotatorApp.swift; sourceTree = "<group>"; };
 		609D222F2BF3C34763B18A1E /* NearbyScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyScreen.swift; sourceTree = "<group>"; };
 		67B6227C80FBE3869B1AD532 /* InboxTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxTab.swift; sourceTree = "<group>"; };
+		6C4839632E4D1D6B4AB57C4E /* ProofSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProofSupport.swift; sourceTree = "<group>"; };
 		6FB104AD044FE8C2A168C00B /* ThreadScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadScreen.swift; sourceTree = "<group>"; };
 		70D85F4E93F5586925DB1552 /* PlannotatorUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PlannotatorUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		729DFDA227BB573B45C51ABA /* InboxList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxList.swift; sourceTree = "<group>"; };
+		91508EC3F9DDD6F97197858D /* AttachmentProofTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentProofTests.swift; sourceTree = "<group>"; };
 		AA5E9351CAE37AE10982C5DE /* ReplyBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplyBar.swift; sourceTree = "<group>"; };
+		ABEDB760A51B1C72EAB9FE7A /* AnnotationsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationsSheet.swift; sourceTree = "<group>"; };
+		ADC9F5E0C9F44390E786FB45 /* AttachmentTiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentTiles.swift; sourceTree = "<group>"; };
 		BA7E355D502DC8680C310B43 /* QuestionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionCard.swift; sourceTree = "<group>"; };
 		C0D8E1B3EBB2AB11C7E6E27B /* MarkdownBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownBlockView.swift; sourceTree = "<group>"; };
 		CBEA43689480D730B4AC4D7F /* Colors.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Colors.xcassets; sourceTree = "<group>"; };
+		D15237F0C71537689906D3DC /* AttachmentCover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentCover.swift; sourceTree = "<group>"; };
 		D94B0997D360DDF87495584C /* SourceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceSession.swift; sourceTree = "<group>"; };
 		E39E0503FC6505B9D44219B1 /* Support.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support.swift; sourceTree = "<group>"; };
 		E749D4EC2D60D348C66E4721 /* PlannotatorKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = PlannotatorKit; path = PlannotatorKit; sourceTree = SOURCE_ROOT; };
 		F372FCD08C903FF6080BE00E /* Plannotator.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Plannotator.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F46914B8F633116D2FBECDB4 /* ProofTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProofTests.swift; sourceTree = "<group>"; };
+		FF7598CE5AA360901F9F333E /* SurfaceHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceHost.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -74,6 +88,8 @@
 		1A5764E77DB1F73720E0176C /* PlannotatorUITests */ = {
 			isa = PBXGroup;
 			children = (
+				91508EC3F9DDD6F97197858D /* AttachmentProofTests.swift */,
+				6C4839632E4D1D6B4AB57C4E /* ProofSupport.swift */,
 				F46914B8F633116D2FBECDB4 /* ProofTests.swift */,
 			);
 			path = PlannotatorUITests;
@@ -94,6 +110,18 @@
 				081FAF267E676DFEF28B65D4 /* PairingCover.swift */,
 			);
 			path = Pairing;
+			sourceTree = "<group>";
+		};
+		7990D16261F6E0254FC28472 /* Attachments */ = {
+			isa = PBXGroup;
+			children = (
+				ABEDB760A51B1C72EAB9FE7A /* AnnotationsSheet.swift */,
+				D15237F0C71537689906D3DC /* AttachmentCover.swift */,
+				ADC9F5E0C9F44390E786FB45 /* AttachmentTiles.swift */,
+				4CB7B7015D5AEEFE5AD4D8AC /* LinkViews.swift */,
+				FF7598CE5AA360901F9F333E /* SurfaceHost.swift */,
+			);
+			path = Attachments;
 			sourceTree = "<group>";
 		};
 		A2EEFCFE772A5C11B529CB2F = {
@@ -150,6 +178,7 @@
 				CBEA43689480D730B4AC4D7F /* Colors.xcassets */,
 				25783EB204BEC1769A9D3F31 /* Info.plist */,
 				FE63721F949D4E7E7EB3F4C7 /* App */,
+				7990D16261F6E0254FC28472 /* Attachments */,
 				EB54E46BBE545BBFA65B5E04 /* Inbox */,
 				750B4BC97A453EC943BAE4DC /* Pairing */,
 				6C39865E5EE56A268FDB9C6B /* Settings */,
@@ -179,6 +208,7 @@
 				1901EF9F4B5277154E34C0BE /* Sources */,
 				01CA5957E04EC37EE3D1273A /* Resources */,
 				D985AA4949FA4AD9C8FBE8C6 /* Frameworks */,
+				BB5313C5FCADA328ECDD0A0B /* Bundle the surface */,
 			);
 			buildRules = (
 			);
@@ -265,14 +295,41 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		BB5313C5FCADA328ECDD0A0B /* Bundle the surface */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Bundle the surface";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/surface.html",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\nexport PATH=\"$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"\nrepo=\"$SRCROOT/../..\"\nbuilt=\"$repo/apps/inbox/dist/surface.html\"\nif [ ! -f \"$built\" ] || [ -n \"$(find \"$repo/packages/inbox\" \"$repo/packages/ui\" \"$repo/packages/core\" \"$repo/packages/guide-viewer\" \"$repo/apps/inbox\" -newer \"$built\" -type f -not -path '*/node_modules/*' -not -path '*/dist/*' -print -quit)\" ]; then\n  bun run --cwd \"$repo/apps/inbox\" build:surface\nfi\ncp \"$built\" \"$BUILT_PRODUCTS_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/surface.html\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		1901EF9F4B5277154E34C0BE /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8E5E610C599984FE7D71CA3A /* AnnotationsSheet.swift in Sources */,
 				CD90DF7B85015262889A9741 /* AppModel.swift in Sources */,
+				C1B0510E8A529837E3A566F6 /* AttachmentCover.swift in Sources */,
+				58D305472817FAC5D67A30FE /* AttachmentTiles.swift in Sources */,
 				7EEA4E2F6EBFBB80E12B02DD /* InboxList.swift in Sources */,
 				E69B1BC67D0DEE64C6457A48 /* InboxTab.swift in Sources */,
+				A1C18368BADB3BBDC35FB596 /* LinkViews.swift in Sources */,
 				0A745ED7E033F3F3D754E540 /* MarkdownBlockView.swift in Sources */,
 				BB36EB361F96F93C00B1A4A6 /* NearbyScreen.swift in Sources */,
 				FEE83117B4BC2659269D7F63 /* PairingCover.swift in Sources */,
@@ -282,6 +339,7 @@
 				D5A54937EB306159D24FF67F /* SettingsTab.swift in Sources */,
 				816B34352561832D2EC37193 /* SourceSession.swift in Sources */,
 				69CED55597F6832AE2A22F48 /* Support.swift in Sources */,
+				85FAD82CBE66483A47FC4E7E /* SurfaceHost.swift in Sources */,
 				AC40C5EB1D7BA9B0779543F9 /* ThreadScreen.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -290,6 +348,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				93FE80030A6D48845239FD0D /* AttachmentProofTests.swift in Sources */,
+				E2AEE8DF24B2A9E2B1664CF1 /* ProofSupport.swift in Sources */,
 				7EDF141F1FB9321AE7EBA951 /* ProofTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -396,6 +456,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				INFOPLIST_FILE = Plannotator/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -493,6 +554,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				INFOPLIST_FILE = Plannotator/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

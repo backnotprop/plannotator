@@ -58,6 +58,13 @@
 .sf-docscroll > * {
   zoom: var(--sf-zoom);
 }
+/* iOS WebKit does not apply zoom to font sizes (the spacing grows, the
+   letters keep their size: seen in the iPhone app, M2), so on a phone the
+   text is scaled by the same factor through text-size-adjust, which desktop
+   WebKit ignores. */
+.sf-docscroll {
+  -webkit-text-size-adjust: var(--sf-text-adjust, 100%);
+}
 .sf-docscroll [data-print-region="article"] {
   padding-left: 14px;
   padding-right: 14px;

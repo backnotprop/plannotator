@@ -110,7 +110,42 @@ export interface SurfaceRemoveAnnotation {
   id: string;
 }
 
+/**
+ * Send asks for the annotations as Plannotator's feedback text (the window's
+ * `attachmentFeedback`): the reply's `feedback` field (exchange 7.11). The
+ * text is built here because only Plannotator's parser can number the lines
+ * the person read; nothing is drawn.
+ */
+export interface SurfaceExportFeedback {
+  v: 1;
+  type: "export_feedback";
+  /** Echoed by the answer. */
+  id: string;
+  /** The annotations riding the Send. */
+  annotations: InboxAnnotationRecord[];
+  /** The thread's attachments (exchange 7.14). */
+  attachments: InboxAttachmentState[];
+  /** Each annotated file version's text, read through `view` just before the Send. */
+  texts: { attachment_id: string; version: string; text: string }[];
+  /** The thread's project root, so a path inside it reads relative. */
+  project_root: string;
+}
+
+/**
+ * Comment in the edit menu (4.1): the text selected in a markdown or text
+ * file becomes a draft now, answered by `selection` (both fields null when
+ * nothing is selected). On a touch screen the surface does not paint a
+ * selection as it settles: that would replace the system selection and close
+ * its edit menu before the person reached Comment.
+ */
+export interface SurfaceCommentSelection {
+  v: 1;
+  type: "comment_selection";
+}
+
 export type SurfaceShellMessage =
+  | SurfaceCommentSelection
+  | SurfaceExportFeedback
   | SurfaceOpenAttachment
   | SurfaceOpenGuide
   | SurfaceOpenSection
@@ -187,6 +222,14 @@ export interface SurfaceLink {
   href: string;
 }
 
+/** The answer to `export_feedback`. */
+export interface SurfaceFeedback {
+  v: 1;
+  type: "feedback";
+  id: string;
+  text: string;
+}
+
 /** The surface could not draw what it was given. */
 export interface SurfaceError {
   v: 1;
@@ -211,9 +254,12 @@ export type SurfaceMessage =
   | SurfaceReviewed
   | SurfaceSection
   | SurfaceLink
+  | SurfaceFeedback
   | SurfaceError;
 
 const SHELL_TYPES: ReadonlySet<string> = new Set<SurfaceShellMessage["type"]>([
+  "comment_selection",
+  "export_feedback",
   "open_attachment",
   "open_guide",
   "open_section",
@@ -238,6 +284,10 @@ export function readSurfaceShellMessage(value: unknown): { ok: true; message: Su
   if (!SHELL_TYPES.has(value.type)) return { ok: false, code: "bad_message", message: `Unknown message type "${value.type}".` };
   const bad = (what: string) => ({ ok: false as const, code: "bad_message" as const, message: `${value.type}: ${what}` });
   switch (value.type) {
+    case "export_feedback":
+      if (typeof value.id !== "string" || typeof value.project_root !== "string") return bad("id and project_root are strings.");
+      if (!Array.isArray(value.annotations) || !Array.isArray(value.attachments) || !Array.isArray(value.texts)) return bad("annotations, attachments and texts are lists.");
+      break;
     case "open_attachment":
       if (!isObject(value.attachment) || typeof value.attachment.kind !== "string") return bad("attachment is missing.");
       if (typeof value.text !== "string" || typeof value.version !== "string") return bad("text and version are strings.");

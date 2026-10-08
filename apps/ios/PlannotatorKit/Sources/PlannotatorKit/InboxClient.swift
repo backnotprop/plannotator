@@ -191,9 +191,10 @@ public struct InboxClient: Sendable {
     }
 
     /// `POST messages/:id/reply`: the person's Send. The key is the caller's, kept across retries.
-    public func reply(message id: String, idempotencyKey: String, words: String, questions: [SendQuestion]) async throws(InboxError) -> InboxQuestionsResponse {
-        struct Body: Encodable { var idempotencyKey: String; var words: String; var questions: [SendQuestion] }
-        return try await post("messages/\(id)/reply", Body(idempotencyKey: idempotencyKey, words: words, questions: questions))
+    /// Annotations ride it as Plannotator's feedback text with their ids (7.11).
+    public func reply(message id: String, idempotencyKey: String, words: String, questions: [SendQuestion], feedback: String? = nil, annotationIds: [String]? = nil) async throws(InboxError) -> InboxQuestionsResponse {
+        struct Body: Encodable { var idempotencyKey: String; var words: String; var questions: [SendQuestion]; var feedback: String?; var annotationIds: [String]? }
+        return try await post("messages/\(id)/reply", Body(idempotencyKey: idempotencyKey, words: words, questions: questions, feedback: feedback, annotationIds: annotationIds))
     }
 
     public func resolve(message id: String, resolved: Bool) async throws(InboxError) {
@@ -236,15 +237,15 @@ public struct InboxClient: Sendable {
         try await Self.send(request(path, query: query))
     }
 
-    func post<T: Decodable>(_ path: String, _ body: some Encodable) async throws(InboxError) -> T {
+    func post<T: Decodable>(_ path: String, _ body: some Encodable, encoder: JSONEncoder = encoder, decoder: JSONDecoder = decoder) async throws(InboxError) -> T {
         var request = request(path)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? Self.encoder.encode(body)
-        return try await Self.send(request)
+        request.httpBody = try? encoder.encode(body)
+        return try await Self.send(request, decoder: decoder)
     }
 
-    static func send<T: Decodable>(_ request: URLRequest) async throws(InboxError) -> T {
+    static func send<T: Decodable>(_ request: URLRequest, decoder: JSONDecoder = decoder) async throws(InboxError) -> T {
         let data: Data
         let response: URLResponse
         do {
@@ -254,7 +255,7 @@ public struct InboxClient: Sendable {
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
-            if let body = try? decoder.decode(InboxErrorBody.self, from: data) {
+            if let body = try? Self.decoder.decode(InboxErrorBody.self, from: data) {
                 throw .refused(status: status, code: body.code, message: body.error, triesLeft: body.triesLeft)
             }
             throw status >= 500 || status == 0 ? .unreachable : .unreadable

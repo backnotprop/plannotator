@@ -784,6 +784,8 @@ export interface UseAnnotationHighlighterReturn {
   removeHighlight: (id: string) => void;
   clearAllHighlights: () => void;
   applyAnnotations: (annotations: Annotation[]) => void;
+  /** For a host that composes on a touch screen: the page selection as a draft now (see `ViewerHandle.takeSelection`). */
+  takeSelection?: () => boolean;
 }
 
 /**
@@ -851,6 +853,14 @@ export function useAnnotationHighlighter({
     applyMathAnnotationClass(source.element, 'pending-math', AnnotationType.COMMENT, source.displayMode);
     pendingMathElementRef.current = source.element;
   }, []);
+
+  // A host that composes (onHostDraft) on a touch screen takes the selection
+  // itself, from its own Comment action (`takeSelection`): painting it as it
+  // settles would replace the system selection, and its edit menu with it.
+  const hostComposesRef = useRef(false);
+  hostComposesRef.current = onHostDraft !== undefined;
+  const takeTouchSelectionRef = useRef<() => boolean>(() => false);
+  const takeSelection = useCallback(() => takeTouchSelectionRef.current(), []);
 
   // Track mouse position for quick label picker
   useEffect(() => {
@@ -1610,7 +1620,11 @@ export function useAnnotationHighlighter({
     container.addEventListener('mouseup', handlePointerEndCapture, true);
     container.addEventListener('touchend', handlePointerEndCapture, true);
 
-    highlighter.run();
+    // On a touch screen a host that composes takes the selection when the
+    // person chooses its Comment (takeSelection); the library painting it at
+    // touchend would end the system selection and its edit menu first.
+    const isTouchPrimary = window.matchMedia('(pointer: coarse)').matches;
+    if (!(isTouchPrimary && hostComposesRef.current)) highlighter.run();
 
     const handleMathMouseDown = (event: MouseEvent) => {
       mouseDownMathRef.current = closestMathElement(event.target as Node, containerRef.current);
@@ -1700,28 +1714,33 @@ export function useAnnotationHighlighter({
     containerRef.current.addEventListener('mouseup', handleMathMouseUp, true);
 
     // Mobile bridge
-    const isTouchPrimary = window.matchMedia('(pointer: coarse)').matches;
     let selectionTimer: ReturnType<typeof setTimeout>;
+    // The page's selection, painted as a pending highlight; false when there is none to take.
+    const takeTouchSelection = (): boolean => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return false;
+      if (!containerRef.current?.contains(sel.anchorNode)) return false;
+      const range = sel.getRangeAt(0).cloneRange();
+      // Same fail-closed rule as the pointer-end guard (#881): touch
+      // selections settle on block boundaries just as often.
+      if (isBlankQuote(sel.toString()) || !isSerializableRange(range)) return false;
+      snapRangeStartPastExcluded(range);
+      pendingRangeRunsRef.current = rangeTextPieces(range);
+      try {
+        highlighter.fromRange(range);
+        return true;
+      } catch (error) {
+        pendingRangeRunsRef.current = null;
+        warnHighlighterFailure('painting a touch selection', error);
+        return false;
+      }
+    };
+    takeTouchSelectionRef.current = takeTouchSelection;
     const handleSelectionChange = isTouchPrimary
       ? () => {
           clearTimeout(selectionTimer);
-          selectionTimer = setTimeout(() => {
-            const sel = window.getSelection();
-            if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
-            if (!containerRef.current?.contains(sel.anchorNode)) return;
-            const range = sel.getRangeAt(0).cloneRange();
-            // Same fail-closed rule as the pointer-end guard (#881): touch
-            // selections settle on block boundaries just as often.
-            if (isBlankQuote(sel.toString()) || !isSerializableRange(range)) return;
-            snapRangeStartPastExcluded(range);
-            pendingRangeRunsRef.current = rangeTextPieces(range);
-            try {
-              highlighter.fromRange(range);
-            } catch (error) {
-              pendingRangeRunsRef.current = null;
-              warnHighlighterFailure('painting a touch selection', error);
-            }
-          }, 400);
+          if (hostComposesRef.current) return;
+          selectionTimer = setTimeout(takeTouchSelection, 400);
         }
       : null;
 
@@ -2128,5 +2147,6 @@ export function useAnnotationHighlighter({
     removeHighlight,
     clearAllHighlights,
     applyAnnotations: applyAnnotationsInternal,
+    takeSelection,
   };
 }

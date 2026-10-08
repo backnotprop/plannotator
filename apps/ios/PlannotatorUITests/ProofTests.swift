@@ -4,20 +4,7 @@ import XCTest
 /// which starts the compiled Inbox, connects the agents and answers this
 /// test's control calls (`PROOF_CONTROL`). Without it the test is skipped.
 @MainActor
-final class ProofTests: XCTestCase {
-    // Waits are long: a shared CI runner can take tens of seconds to find an
-    // element that a local simulator finds at once.
-    private var app: XCUIApplication!
-    private var control: Control!
-
-    override func setUp() async throws {
-        continueAfterFailure = false
-        guard let base = ProcessInfo.processInfo.environment["PROOF_CONTROL"], let url = URL(string: base) else {
-            throw XCTSkip("Run through apps/ios/scripts/proof.ts, which starts the Inbox this test talks to.")
-        }
-        control = Control(base: url)
-        app = XCUIApplication()
-    }
+final class ProofTests: ProofCase {
 
     func testPairPickSendResolveDeleteRemove() async throws {
         app.launch()
@@ -318,16 +305,7 @@ final class ProofTests: XCTestCase {
         XCTAssertTrue(element("connect-computer").waitForExistence(timeout: 30))
     }
 
-    // MARK: Helpers
-
-    private func element(_ id: String) -> XCUIElement {
-        app.descendants(matching: .any).matching(identifier: id).firstMatch
-    }
-
-    private func pullToRefresh() {
-        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
-        start.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)))
-    }
+    // MARK: Helpers of this flow
 
     private func deviceCount() async throws -> Int {
         (try await control.get("/devices")["devices"] as? [Any])?.count ?? -1
@@ -337,86 +315,5 @@ final class ProofTests: XCTestCase {
     private func allowSystemOpenPrompt() {
         let open = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Open"]
         if open.waitForExistence(timeout: 8) { open.tap() }
-    }
-
-    private func back() {
-        app.navigationBars.buttons.element(boundBy: 0).tap()
-    }
-
-    /// Opens a list row, scrolling to it (the list draws lazily).
-    private func openRow(_ thread: String) async throws {
-        let row = element("row-\(thread)")
-        app.swipeDown()
-        app.swipeDown()
-        scrollTo(row)
-        XCTAssertTrue(row.exists, "row \(thread)")
-        row.tap()
-    }
-
-    /// The tab bar minimizes on scroll (iOS 26); scrolling back up brings its items back.
-    private func tab(_ name: String) {
-        let button = app.tabBars.buttons[name]
-        var tries = 0
-        while !button.exists, tries < 4 {
-            app.swipeDown(velocity: .fast)
-            tries += 1
-        }
-        button.tap()
-    }
-
-    private func anyRow() -> XCUIElement {
-        app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'row-'")).firstMatch
-    }
-
-    private func questionKeys() -> [String] {
-        app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'question-'")).allElementsBoundByIndex
-            .map { String($0.identifier.dropFirst("question-".count)) }
-    }
-
-    private func scrollTo(_ target: XCUIElement) {
-        var tries = 0
-        while !(target.exists && target.isHittable), tries < 8 {
-            app.swipeUp(velocity: .slow)
-            tries += 1
-        }
-    }
-
-    private func waitForLabel(_ target: XCUIElement, _ text: String) -> Bool {
-        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", text), object: target)
-        return XCTWaiter().wait(for: [expectation], timeout: 30) == .completed
-    }
-}
-
-/// The proof script's loopback control server.
-struct Control {
-    let base: URL
-
-    @discardableResult
-    func post(_ path: String, _ body: [String: String] = [:]) async throws -> [String: Any] {
-        var request = URLRequest(url: base.appending(path: path))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        return try await send(request)
-    }
-
-    func get(_ path: String) async throws -> [String: Any] {
-        try await send(URLRequest(url: base.appending(path: path)))
-    }
-
-    func shot(_ name: String) async throws {
-        try await Task.sleep(for: .milliseconds(700)) // let motion settle
-        try await post("/shot", ["name": name])
-    }
-
-    private func send(_ request: URLRequest) async throws -> [String: Any] {
-        var request = request
-        request.timeoutInterval = 120
-        let (data, response) = try await URLSession.shared.data(for: request)
-        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            throw NSError(domain: "Control", code: 1, userInfo: [NSLocalizedDescriptionKey: "\(request.url!.path): \(json)"])
-        }
-        return json
     }
 }

@@ -461,6 +461,8 @@ export const BRIDGE_SCRIPT = `(function() {
   // marker buttons keep their own clicks. BOTH surface kinds start ARMED —
   // Esc (or the header pen) drops to Interact.
   var annotateModeActive = true;
+  // A native host decides link navigations itself (HtmlViewer hostNavigates).
+  var hostNavigates = false;
   function updatePinpointCursor() {
     if (!document.body) return;
     if (annotateModeActive && currentInputMethod === 'pinpoint') {
@@ -814,6 +816,10 @@ export const BRIDGE_SCRIPT = `(function() {
       }
       updatePinpointCursor(); // cursor affordance is mode-gated: never in Interact
       if (vimEnabled) updateVimUi();
+    }
+
+    else if (type === PREFIX + 'set-host-navigates') {
+      hostNavigates = e.data.active === true;
     }
 
     else if (type === PREFIX + 'set-annotate-mode') {
@@ -3945,6 +3951,16 @@ export const BRIDGE_SCRIPT = `(function() {
         return;
       }
       e.preventDefault();
+      // A native host decides links itself: a person's tap opens the link as a
+      // new window, which the host's web view hands to its own delegate (the
+      // frame never navigates; the host page's CSP would refuse it anyway).
+      if (hostNavigates) {
+        if (e.isTrusted && !(annotateModeActive && currentInputMethod === 'pinpoint')) {
+          var target = (e.target && e.target.closest) ? e.target.closest('a,area') : null;
+          try { window.open(target && target.href ? target.href : raw, '_blank', 'noopener'); } catch (ex) {}
+        }
+        return;
+      }
       // Armed pinpoint: the click belongs to annotation, and the capture-phase
       // pinpoint handler below is about to pin this element. Navigation is
       // already suppressed above, which is all this surface owes the click.

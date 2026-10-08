@@ -24,6 +24,8 @@ const SurfaceDiagram = lazy(() => import('./SurfaceDiagram'));
 
 export interface SurfaceDocumentHandle {
   stepPin: (direction: 'parent' | 'child') => void;
+  /** Comment in the shell's edit menu: the selection becomes a draft; false when there is none. */
+  takeSelection: () => boolean;
   commit: (record: InboxAnnotationRecord) => void;
   remove: (id: string) => void;
 }
@@ -92,6 +94,7 @@ export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function
 
   useImperativeHandle(ref, () => ({
     stepPin: (direction) => viewerRef.current?.stepPin?.(direction),
+    takeSelection: () => (isText ? (viewerRef.current?.takeSelection?.() ?? false) : false),
     commit: (record) => {
       if (record.attachment_id !== attachment.id || record.version !== version) return;
       dropDraft();
@@ -182,8 +185,9 @@ export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function
   return (
     <div className={`sf-doc${isHtml ? ' sf-doc-html' : ''}${isDiagram ? ' sf-doc-diagram' : ''}`} data-surface-attachment={attachment.id} data-kind={attachment.kind}>
       {/* No onOpenLink: a link in the agent's page never becomes a bridge `link`
-          (its script could forge the frame's message); the shell decides that
-          navigation itself (contract section 5). */}
+          (its script could forge the frame's message). With hostNavigates the
+          tap navigates the frame and the shell's navigation delegate decides
+          it as a real tap (contract section 5). */}
       {isHtml && open.html !== null && (
         <HtmlViewer
           ref={viewerRef}
@@ -200,6 +204,7 @@ export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function
           hideControls
           maxAdditionalTargets={0}
           onHostDraft={onHostDraft}
+          hostNavigates
         />
       )}
       {isDiagram && (

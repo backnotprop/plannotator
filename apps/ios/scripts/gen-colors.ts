@@ -38,6 +38,8 @@ const COLORS: Record<string, Source> = {
   Fill: { token: 'muted' },
   Hairline: { token: 'border' },
   Success: { token: 'success' },
+  Warning: { token: 'warning' },
+  Accent: { token: 'accent' },
   Destructive: { token: 'destructive' },
   QuestionCard: { mix: ['card', 'background'], amount: 0.5 },
   Screen: { light: 'card', dark: 'background' },

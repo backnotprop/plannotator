@@ -336,6 +336,17 @@ export interface HtmlViewerProps {
    * `applySharedAnnotations`. Ignored when `readOnly`. Absent → unchanged.
    */
   onHostDraft?: (draft: HostDraft | null) => void;
+  /**
+   * Opt-in host capability for a native shell whose web view decides every
+   * navigation itself (the Inbox surface in the iPhone app). A link the
+   * person taps in Interact opens as a new window (`window.open`, the sandbox
+   * gains `allow-popups`) instead of being reported through the frame
+   * protocol (`onOpenLink` does not fire for it); the host's web view hands
+   * that window to its own delegate, which decides it. A scripted click opens
+   * nothing. In-page `#` links still scroll here, and an armed pinpoint tap
+   * still pins. Absent → unchanged.
+   */
+  hostNavigates?: boolean;
 }
 
 /**
@@ -389,6 +400,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onBridgeUnavailable,
       bridgeErrorDisplay = "banner",
       onHostDraft,
+      hostNavigates = false,
     },
     ref,
   ) => {
@@ -934,6 +946,12 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       );
     }, [iframeReadyVersion, annotateModeActive]);
 
+    // A native host decides link navigations itself (`hostNavigates`).
+    useEffect(() => {
+      if (iframeReadyVersion === 0 || !hostNavigates) return;
+      postToBridge({ type: `${PREFIX}set-host-navigates`, active: true });
+    }, [iframeReadyVersion, hostNavigates]);
+
     // Parent-side Esc rung: with focus outside the iframe the bridge never
     // sees the keydown. Any open composer/toolbar/picker still closes first —
     // their state is read from this render's closure, so an Esc that closed
@@ -1186,7 +1204,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
                 same-origin XHR) and no srcdoc. Srcdoc mode is unchanged. */}
             <iframe
               ref={iframeRef}
-              {...(src ? { src } : { srcDoc: srcdoc, sandbox: "allow-scripts" })}
+              {...(src ? { src } : { srcDoc: srcdoc, sandbox: hostNavigates ? "allow-scripts allow-popups" : "allow-scripts" })}
               style={{
                 width: "100%",
                 height: fullViewport ? "100%" : `${iframeHeight}px`,

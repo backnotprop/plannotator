@@ -211,6 +211,8 @@ public struct InboxMessage: Codable, Hashable, Sendable, Identifiable {
 public struct InboxThreadProject: Codable, Hashable, Sendable {
     public var id: String
     public var name: String
+    /// The project's folder: a path inside it reads relative in the feedback text.
+    public var root: String?
 }
 
 public struct InboxThread: Codable, Hashable, Sendable {

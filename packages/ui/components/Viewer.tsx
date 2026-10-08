@@ -305,6 +305,11 @@ export interface ViewerHandle {
    *  (`'parent'`) or back in (`'child'`), for a host that composes
    *  (`onHostDraft`). The markdown `Viewer` does not implement it. */
   stepPin?: (direction: 'parent' | 'child') => void;
+  /** Markdown `Viewer` only, for a host that composes (`onHostDraft`) on a
+   *  touch screen: make the page's text selection a draft now (the host's own
+   *  Comment action), reported through `onHostDraft` as `'selection'`.
+   *  Returns false when nothing in the document is selected. */
+  takeSelection?: () => boolean;
 }
 
 interface CodeBlockToolbarTarget {
@@ -793,6 +798,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     removeHighlight: hookRemoveHighlight,
     clearAllHighlights,
     applyAnnotations,
+    takeSelection,
   } = useAnnotationHighlighter({
     containerRef,
     annotations,
@@ -1196,7 +1202,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     },
     clearAllHighlights,
     applySharedAnnotations: applyAnnotations,
-  }), [hookRemoveHighlight, clearAllHighlights, applyAnnotations, blocks]);
+    takeSelection,
+  }), [hookRemoveHighlight, clearAllHighlights, applyAnnotations, blocks, takeSelection]);
 
   // --- Viewer-specific: code block annotation ---
 

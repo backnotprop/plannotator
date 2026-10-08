@@ -27,6 +27,22 @@ targets:
       - path: Plannotator
     dependencies:
       - package: PlannotatorKit
+    postBuildScripts:
+      # Plannotator's surface (contract section 5): apps/inbox's build:surface,
+      # bundled as surface.html. Built again only when its sources are newer.
+      - name: Bundle the surface
+        basedOnDependencyAnalysis: false
+        outputFiles:
+          - $(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/surface.html
+        script: |
+          set -euo pipefail
+          export PATH="$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+          repo="$SRCROOT/../.."
+          built="$repo/apps/inbox/dist/surface.html"
+          if [ ! -f "$built" ] || [ -n "$(find "$repo/packages/inbox" "$repo/packages/ui" "$repo/packages/core" "$repo/packages/guide-viewer" "$repo/apps/inbox" -newer "$built" -type f -not -path '*/node_modules/*' -not -path '*/dist/*' -print -quit)" ]; then
+            bun run --cwd "$repo/apps/inbox" build:surface
+          fi
+          cp "$built" "$BUILT_PRODUCTS_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/surface.html"
     info:
       path: Plannotator/Info.plist
       properties:
@@ -52,6 +68,8 @@ targets:
         SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
         SWIFT_APPROACHABLE_CONCURRENCY: YES
         ENABLE_PREVIEWS: YES
+        # The surface build phase runs Vite over the repo's packages, which a sandboxed script cannot read.
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
   PlannotatorUITests:
     type: bundle.ui-testing
     platform: iOS

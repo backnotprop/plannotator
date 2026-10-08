@@ -1,0 +1,9 @@
+flowchart TD
+  A[Open the install page] --> B[Detect installed agents]
+  B --> C{More than one?}
+  C -- no --> D[Show its install line]
+  C -- yes --> E[Pick a host]
+  D --> F[Copy the command]
+  E --> F
+  F --> G[Run it in a terminal]
+  G --> H[Restart the agent]

@@ -14,6 +14,10 @@ extension Color {
     static let fill = Color("Fill")
     static let hairline = Color("Hairline")
     static let success = Color("Success")
+    /// The changed line (4.1) and a changed file's tile (3.4A).
+    static let warning = Color("Warning")
+    /// Plannotator's annotation accent: a comment's mark and its quote rule (4.2, 4.3).
+    static let accent = Color("Accent")
     static let destructive = Color("Destructive")
     static let questionCard = Color("QuestionCard")
     /// A plain screen: white in light, the theme's ground in dark.

@@ -4,10 +4,11 @@ name: iPhone app
 # plannotator binary is built first, then apps/ios/scripts/proof.ts starts it
 # under a temp data dir, connects agents through `plannotator inbox mcp`, makes
 # one simulator and runs `xcodebuild test` (the PlannotatorKit tests and the
-# XCUITest flow: pair, list, picks, Send, Resolve, Delete, Remove) against that
-# Inbox. One macOS runner, one simulator destination, no matrix. Runs only
-# when the app, or the Inbox files its device door and pairing live in, could
-# have changed. No signing, provisioning or TestFlight material is used.
+# XCUITest flows: pair, list, picks, Send, Resolve, Delete, Remove; then the
+# attachments, annotated by touch and sent) against that Inbox. One macOS
+# runner, one simulator destination, no matrix. Runs only when the app, the
+# Inbox files its device door and pairing live in, or the surface the app
+# bundles could have changed. No signing, provisioning or TestFlight material is used.
 
 on:
   pull_request:
@@ -22,6 +23,9 @@ on:
       - 'apps/hook/server/index.ts'
       - 'apps/hook/server/inbox*'
       - 'scripts/inbox-sim.ts'
+      - 'packages/inbox/surface/**'
+      - 'packages/inbox/attachments.ts'
+      - 'apps/inbox/surface*'
       - '.github/workflows/ios.yml'
   push:
     branches:
@@ -35,6 +39,9 @@ on:
       - 'apps/hook/server/index.ts'
       - 'apps/hook/server/inbox*'
       - 'scripts/inbox-sim.ts'
+      - 'packages/inbox/surface/**'
+      - 'packages/inbox/attachments.ts'
+      - 'apps/inbox/surface*'
       - '.github/workflows/ios.yml'
 
 permissions:

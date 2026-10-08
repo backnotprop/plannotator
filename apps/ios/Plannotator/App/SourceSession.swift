@@ -31,6 +31,8 @@ final class SourceSession {
     /// per question id, until it is saved. Send reads these too, so words
     /// still in a field are never lost.
     var drafts: [String: FieldDraft] = [:]
+    /// Each open thread's files and the person's annotations waiting for a Send (7.14).
+    private(set) var files: [String: InboxThreadAttachments] = [:]
 
     private var onScreen: [String: Int] = [:]
     private var stream: Task<Void, Never>?
@@ -90,7 +92,10 @@ final class SourceSession {
 
     private func refreshAll() async {
         await refresh()
-        for id in onScreen.keys { await loadThread(id) }
+        for id in onScreen.keys {
+            await loadThread(id)
+            await loadFiles(id)
+        }
     }
 
     private func fail(_ error: InboxError) {
@@ -158,7 +163,9 @@ final class SourceSession {
     func open(thread id: String) async {
         onScreen[id, default: 0] += 1
         if threads[id] == nil { threads[id] = cache.read(InboxThread.self, "thread-\(id)") }
+        if files[id] == nil { files[id] = cache.read(InboxThreadAttachments.self, "files-\(id)") }
         await loadThread(id)
+        await loadFiles(id)
         try? await client.seen(thread: id)
     }
 
@@ -232,20 +239,25 @@ final class SourceSession {
         commitDrafts(thread: id)
         await pickChains[id]?.value
         guard let thread = threads[id] else { return }
+        let annotations = pendingAnnotations(thread: id)
         var targets: [(message: InboxMessage, questions: [InboxClient.SendQuestion])] = thread.messages.compactMap { message in
             let picked = (message.questions ?? []).filter(\.isPicked)
             guard message.author.isAgent, !picked.isEmpty else { return nil }
             return (message, picked.map { .init(key: $0.key, revision: $0.revision) })
         }
         if targets.isEmpty {
-            guard !words.trimmed.isEmpty, let last = thread.messages.last(where: \.author.isAgent) ?? thread.messages.first else { return }
+            guard !words.trimmed.isEmpty || !annotations.isEmpty, let last = thread.messages.last(where: \.author.isAgent) ?? thread.messages.first else { return }
             targets.append((last, []))
         }
+        // The annotations ride the last reply, after its picks, as Plannotator's feedback text.
+        let feedback = annotations.isEmpty ? nil : try await feedbackText(annotations, thread: thread)
         for (index, target) in targets.enumerated() {
             let key = SendKeys.key(source: source.id, message: target.message.id)
             let repliesBefore = replies(to: target.message.id, in: thread)
+            let last = index == targets.count - 1
             do {
-                let answer = try await client.reply(message: target.message.id, idempotencyKey: key, words: index == targets.count - 1 ? words.trimmed : "", questions: target.questions)
+                let answer = try await client.reply(message: target.message.id, idempotencyKey: key, words: last ? words.trimmed : "", questions: target.questions,
+                                                    feedback: last ? feedback : nil, annotationIds: last && feedback != nil ? annotations.map(\.id) : nil)
                 SendKeys.clear(source: source.id, message: target.message.id)
                 replace(answer.questions, message: answer.messageId, thread: id)
             } catch {
@@ -263,6 +275,7 @@ final class SourceSession {
             }
         }
         await loadThread(id)
+        await loadFiles(id)
         await refresh()
     }
 
@@ -277,6 +290,57 @@ final class SourceSession {
         threads[id] = nil
         cache.remove("thread-\(id)")
         await refresh()
+    }
+
+    // MARK: Files and annotations (3.6, 4.1 to 4.4)
+
+    /// Reads a thread's files and the annotations waiting for its next Send.
+    func loadFiles(_ id: String) async {
+        do {
+            let answer = try await client.attachments(thread: id)
+            files[id] = answer
+            cache.write(answer, "files-\(id)")
+        } catch {
+            if error.code == "thread_not_found" {
+                files[id] = nil
+                cache.remove("files-\(id)")
+            }
+        }
+    }
+
+    func pendingAnnotations(thread id: String) -> [InboxAnnotationRecord] {
+        files[id]?.annotations ?? []
+    }
+
+    /// Saves the person's comment (a new one, or an edit under the same id).
+    func saveAnnotation(thread id: String, attachment: String, version: String, annotation: JSONValue) async throws(InboxError) -> InboxAnnotationRecord {
+        let record = try await client.saveAnnotation(attachment: attachment, version: version, annotation: annotation)
+        if var current = files[id] {
+            current.annotations.removeAll { $0.id == record.id }
+            current.annotations.append(record)
+            files[id] = current
+        }
+        return record
+    }
+
+    func removeAnnotation(thread id: String, annotation: String) async throws(InboxError) {
+        try await client.removeAnnotation(annotation)
+        files[id]?.annotations.removeAll { $0.id == annotation }
+    }
+
+    /// The annotations as Plannotator's feedback text, each file version's
+    /// text read now so line numbers name what the person read (as the window does).
+    private func feedbackText(_ annotations: [InboxAnnotationRecord], thread: InboxThread) async throws(InboxError) -> String {
+        let attachments = files[thread.threadId]?.attachments ?? []
+        var texts: [Bridge.Text] = []
+        for record in annotations where !texts.contains(where: { $0.attachment_id == record.attachmentId && $0.version == record.version }) {
+            let view = try await client.view(attachment: record.attachmentId, sent: record.version != "current")
+            texts.append(.init(attachment_id: record.attachmentId, version: record.version, text: view.text))
+        }
+        guard let text = await SurfaceHost.shared.feedback(annotations: annotations, attachments: attachments, texts: texts, projectRoot: thread.project.root ?? ""), !text.isEmpty else {
+            throw .refused(status: 0, code: "feedback_unavailable", message: "Your annotations could not be written into the reply. Try Send again.", triesLeft: nil)
+        }
+        return text
     }
 
     private func replies(to message: String, in thread: InboxThread) -> Int {

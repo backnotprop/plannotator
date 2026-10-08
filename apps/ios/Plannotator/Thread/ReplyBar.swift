@@ -8,6 +8,8 @@ import UIKit
 struct ReplyBar: View {
     let session: SourceSession
     let thread: InboxThread
+    /// The "3 annotations" chip opens the list (3.6).
+    let showAnnotations: () -> Void
     @State private var composing = false
     @State private var words = ""
     @State private var sending = false
@@ -17,7 +19,8 @@ struct ReplyBar: View {
 
     private var asker: String { thread.messages.first?.author.agentName ?? "the agent" }
     private var picked: [InboxQuestion] { thread.messages.flatMap { ($0.questions ?? []).filter(\.isPicked) } }
-    private var canSend: Bool { !picked.isEmpty || !words.trimmed.isEmpty || session.hasTypedAnswers(thread: thread.threadId) }
+    private var annotationCount: Int { session.pendingAnnotations(thread: thread.threadId).count }
+    private var canSend: Bool { !picked.isEmpty || annotationCount > 0 || !words.trimmed.isEmpty || session.hasTypedAnswers(thread: thread.threadId) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -40,24 +43,31 @@ struct ReplyBar: View {
 
     private var bar: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            Button(action: open) {
-                HStack(spacing: 6) {
-                    if picked.isEmpty && words.trimmed.isEmpty {
-                        Text("Reply to \(asker)").foregroundStyle(Color.inkSecondary).lineLimit(1).padding(.leading, 8)
-                    } else if !words.trimmed.isEmpty {
-                        Text(words).foregroundStyle(Color.ink).lineLimit(1).padding(.leading, 8)
+            HStack(spacing: 6) {
+                Button(action: open) {
+                    HStack(spacing: 6) {
+                        if picked.isEmpty && annotationCount == 0 && words.trimmed.isEmpty {
+                            Text("Reply to \(asker)").foregroundStyle(Color.inkSecondary).lineLimit(1).padding(.leading, 8)
+                        } else if !words.trimmed.isEmpty {
+                            Text(words).foregroundStyle(Color.ink).lineLimit(1).padding(.leading, 8)
+                        }
+                        if !picked.isEmpty { picksChip }
                     }
-                    if !picked.isEmpty { picksChip }
-                    Spacer(minLength: 0)
+                    .frame(minWidth: 44, minHeight: 48)
+                    .contentShape(.rect)
                 }
-                .padding(.horizontal, 8)
-                .frame(minHeight: 48)
-                .contentShape(.capsule)
+                .buttonStyle(.plain)
+                .accessibilityLabel(picked.isEmpty ? "Reply to \(asker)" : "Reply to \(asker), \(plural(picked.count, "pick")) waiting")
+                .accessibilityIdentifier("reply-field")
+                if annotationCount > 0 { annotationsChip }
+                Spacer(minLength: 0)
             }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 8)
+            .frame(minHeight: 48)
+            .contentShape(.capsule)
+            // The field's empty part opens the composer too.
+            .onTapGesture(perform: open)
             .glassEffect(.regular.interactive(), in: .capsule)
-            .accessibilityLabel(picked.isEmpty ? "Reply to \(asker)" : "Reply to \(asker), \(plural(picked.count, "pick")) waiting")
-            .accessibilityIdentifier("reply-field")
             sendButton
         }
     }
@@ -74,6 +84,7 @@ struct ReplyBar: View {
                 .accessibilityIdentifier("reply-text")
             HStack(spacing: 6) {
                 if !picked.isEmpty { picksChip }
+                if annotationCount > 0 { annotationsChip }
                 Spacer(minLength: 0)
                 sendButton
             }
@@ -104,6 +115,28 @@ struct ReplyBar: View {
         .background(Color.fill, in: .capsule)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("picks-chip")
+    }
+
+    /// "3 annotations": they ride the next Send; a tap lists them (3.6).
+    private var annotationsChip: some View {
+        Button(action: showAnnotations) {
+            HStack(spacing: 6) {
+                Image(systemName: "text.bubble").foregroundStyle(Color.inkSecondary).imageScale(.small)
+                Text(plural(annotationCount, "annotation"))
+                    .contentTransition(.numericText(value: Double(annotationCount)))
+                    .animation(reduceMotion ? nil : .snappy, value: annotationCount)
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Color.ink)
+            .padding(.leading, 9)
+            .padding(.trailing, 11)
+            .padding(.vertical, 6)
+            .background(Color.fill, in: .capsule)
+            .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(plural(annotationCount, "annotation")), ride your next Send")
+        .accessibilityIdentifier("annotations-chip")
     }
 
     private var sendButton: some View {

@@ -17,6 +17,7 @@ import type { InboxAnnotationRecord, SurfaceOpenAttachment, SurfaceOpenGuide, Su
 import { ThemeProvider, useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { configStore } from '@plannotator/ui/config';
 import { configurePlannotatorUI } from '@plannotator/ui/configure';
+import { attachmentFeedback } from '../attachments';
 import { SurfaceDocument, type SurfaceDocumentHandle } from './SurfaceDocument';
 import { SurfaceGuide } from './SurfaceGuide';
 import { listenToShell, postToShell } from './bridge';
@@ -67,6 +68,14 @@ function Surface() {
   const receive = useCallback(
     (message: SurfaceShellMessage) => {
       switch (message.type) {
+        case 'comment_selection':
+          if (!documentRef.current?.takeSelection()) postToShell({ type: 'selection', quote: null, draft: null });
+          break;
+        case 'export_feedback': {
+          const texts = new Map(message.texts.map((t) => [`${t.attachment_id}\0${t.version}`, t.text]));
+          postToShell({ type: 'feedback', id: message.id, text: attachmentFeedback(message.annotations, message.attachments, texts, message.project_root) });
+          break;
+        }
         case 'open_attachment':
           seq.current += 1;
           setRecords(message.annotations);
@@ -90,6 +99,7 @@ function Surface() {
         case 'set_appearance':
           setMode(message.theme);
           document.documentElement.style.setProperty('--sf-text-scale', String(message.text_scale));
+          document.documentElement.style.setProperty('--sf-text-adjust', `${((message.text_scale * 17) / 15) * 100}%`);
           break;
         case 'commit_annotation':
           setRecords((current) => upsert(current, message.annotation));

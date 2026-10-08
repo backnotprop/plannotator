@@ -10,6 +10,9 @@ struct ThreadScreen: View {
     @State private var confirmDelete = false
     @State private var problem: String?
     @State private var retrying = false
+    @State private var openFile: OpenFile?
+    @State private var showAnnotations = false
+    @State private var fileAfterSheet: OpenFile?
 
     private var thread: InboxThread? { session.threads[threadId] }
 
@@ -92,6 +95,19 @@ struct ThreadScreen: View {
         } message: {
             Text(problem ?? "")
         }
+        .fullScreenCover(item: $openFile) { file in
+            AttachmentCover(session: session, threadId: threadId, file: file)
+        }
+        .sheet(isPresented: $showAnnotations, onDismiss: {
+            // A file name in the list: the file opens once the sheet has gone.
+            openFile = fileAfterSheet
+            fileAfterSheet = nil
+        }) {
+            AnnotationsSheet(session: session, threadId: threadId, current: nil) { file in
+                fileAfterSheet = file
+                showAnnotations = false
+            }
+        }
         .task { await session.open(thread: threadId) }
         .onDisappear { session.close(thread: threadId) }
     }
@@ -105,7 +121,7 @@ struct ThreadScreen: View {
                     .padding(.bottom, 14)
                     .accessibilityAddTraits(.isHeader)
                 ForEach(thread.messages) { message in
-                    MessageView(message: message, thread: thread, session: session, onError: { problem = $0 })
+                    MessageView(message: message, thread: thread, session: session, onError: { problem = $0 }, openFile: { openFile = $0 })
                         .padding(.bottom, 18)
                 }
                 if let delivery = deliveryLine(thread) {
@@ -121,7 +137,7 @@ struct ThreadScreen: View {
         .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if thread.resolvedAt == nil {
-                ReplyBar(session: session, thread: thread)
+                ReplyBar(session: session, thread: thread, showAnnotations: { showAnnotations = true })
             } else {
                 HStack {
                     Text("Resolved").foregroundStyle(Color.inkSecondary)
@@ -171,6 +187,7 @@ struct MessageView: View {
     let thread: InboxThread
     let session: SourceSession
     let onError: (String) -> Void
+    let openFile: (OpenFile) -> Void
 
     private var questions: [InboxQuestion] { (message.questions ?? []).sorted { $0.position < $1.position } }
 
@@ -185,6 +202,9 @@ struct MessageView: View {
                 } else {
                     MarkdownBlockView(block: block)
                 }
+            }
+            if let files = session.files[thread.threadId], case let attachments = files.attachments.filter({ $0.messageId == message.id }), !attachments.isEmpty {
+                AttachmentTiles(attachments: attachments, annotations: files.annotations, open: openFile)
             }
         }
     }
