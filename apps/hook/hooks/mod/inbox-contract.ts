@@ -225,6 +225,27 @@ export function mcpAnswerOf(text: string): { result?: unknown; error?: { message
   return null
 }
 
+/**
+ * The one bound on a request body the Inbox reads, `/mcp` included: Bun's own
+ * default for `Bun.serve`, made explicit, and handed to the MCP SDK, whose
+ * default (4 MiB) refused ordinary large messages. A body is read whole and
+ * parsed in memory, so the long-lived Inbox that holds every thread keeps a
+ * bound; under it a message works, over it the request is refused at once
+ * with {@link inboxRequestTooLargeMessage}, never left to time out.
+ */
+export const INBOX_MAX_REQUEST_BYTES = 128 * 1024 * 1024
+
+/** The refusal for a request over {@link INBOX_MAX_REQUEST_BYTES}, naming the bound. */
+export function inboxRequestTooLargeMessage(bytes?: number): string {
+  const size = bytes === undefined ? '' : ` (${bytes} bytes)`
+  return `The message is too large for the Plannotator Inbox${size}: one request may carry at most ${INBOX_MAX_REQUEST_BYTES} bytes (128 MiB). Send a smaller message, or attach the content as a file.`
+}
+
+/** {@link mcpAnswerOf} with the HTTP status: an unreadable 413 (the server's own refusal, no body) is the request bound. */
+export function mcpAnswerOfResponse(status: number, text: string): { result?: unknown; error?: { message?: string } } | null {
+  return mcpAnswerOf(text) ?? (status === 413 ? { error: { message: inboxRequestTooLargeMessage() } } : null)
+}
+
 /** The registry fields a connection reads (`inbox/inbox.json`), re-read on every call. */
 export interface InboxRegistryView {
   pid: number

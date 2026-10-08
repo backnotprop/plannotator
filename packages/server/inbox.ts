@@ -64,6 +64,7 @@ import {
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_MAX_MS,
   INBOX_BRIDGE_POLL_PATH,
+  INBOX_MAX_REQUEST_BYTES,
   type InboxReplyCommand,
 } from "@plannotator/shared/inbox/connection";
 import {
@@ -286,7 +287,7 @@ async function probeBinaryVersion(binaryPath: string): Promise<string | null> {
 
 function startOnLoopback(fetch: Parameters<typeof Bun.serve>[0]["fetch"], preferred: number | null): { server: ReturnType<typeof Bun.serve>; portChanged: boolean } {
   const serve = (port: number) =>
-    Bun.serve({ hostname: LOOPBACK, port, idleTimeout: 0, fetch } as Parameters<typeof Bun.serve>[0]);
+    Bun.serve({ hostname: LOOPBACK, port, idleTimeout: 0, maxRequestBodySize: INBOX_MAX_REQUEST_BYTES, fetch } as Parameters<typeof Bun.serve>[0]);
   let portChanged = false;
   if (preferred && preferred !== INBOX_FORBIDDEN_PORT) {
     try {
@@ -342,7 +343,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         recordAttachments: (paths, project, base) =>
           recordInboxAttachments(store.dir, paths, { base, projectRoot: project.root, at: new Date().toISOString() }),
       }),
-    { legacy: "stateless" },
+    { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES },
   );
 
   const health = (): InboxHealth => ({ ok: true, app: INBOX_APP_ID, version, serverSession, pid: process.pid, update });
