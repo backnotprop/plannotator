@@ -14,6 +14,7 @@
   var beacon = '__PROOF_BEACON__';
   new Image().src = beacon + '?via=image';
   fetch(beacon + '?via=fetch', { mode: 'no-cors' }).catch(function () {});
+  try { new WebSocket(beacon.replace(/^http/, 'ws') + '?via=websocket'); } catch (e) {}
   document.getElementById('note').textContent = 'Lift to the roof from the Pier 9 lobby. Notes ran.';
 </script>
 </body>

@@ -38,6 +38,8 @@ final class SurfaceHost: NSObject {
     @ObservationIgnored let webView: SurfaceWebView
     @ObservationIgnored let assets = AssetSchemeHandler()
     private(set) var isReady = false
+    /// The offline rule list could not be compiled, so the surface is never loaded.
+    private(set) var isUnavailable = false
     /// Bridge messages that came from a frame other than the main one, dropped.
     private(set) var droppedFrameMessages = 0
     /// Pins and selections reported for an agent's HTML page with no touch of the person's just before, dropped.
@@ -88,34 +90,40 @@ final class SurfaceHost: NSObject {
     }
 
     /// Loads the surface once; later calls do nothing. The web view never
-    /// reaches the network: every http and https load is blocked by a content
-    /// rule list before the surface loads (Safari View Controller, a separate
-    /// view, opens links).
+    /// reaches the network: every http, https, ws and wss load is blocked by a
+    /// content rule list before the surface loads (Safari View Controller, a
+    /// separate view, opens links). Without the rule list the surface is never
+    /// loaded and files cannot be opened (`isUnavailable`).
     func warm() {
         guard !loaded else { return }
         loaded = true
         Task {
-            if let rules = try? await WKContentRuleListStore.default().compileContentRuleList(
-                forIdentifier: "plannotator-surface-offline", encodedContentRuleList: Self.offlineRules) {
-                webView.configuration.userContentController.add(rules)
+            guard let rules = try? await WKContentRuleListStore.default().compileContentRuleList(
+                forIdentifier: "plannotator-surface-offline", encodedContentRuleList: Self.offlineRules) else {
+                isUnavailable = true
+                readyWaiters.forEach { $0.resume() }
+                readyWaiters = []
+                return
             }
+            webView.configuration.userContentController.add(rules)
             webView.load(URLRequest(url: Self.surfaceURL))
         }
     }
 
-    /// Every http and https load is blocked, except the request to open a new
-    /// window: that is how a tapped link in an agent's page reaches
-    /// `createWebViewWith`, which never makes a web view for it.
-    static let offlineRules = #"[{"trigger":{"url-filter":"^https?://"},"action":{"type":"block"}},{"trigger":{"url-filter":"^https?://","resource-type":["popup"]},"action":{"type":"ignore-previous-rules"}}]"#
+    /// Every http, https, ws and wss load is blocked, except an http or https
+    /// request to open a new window: that is how a tapped link in an agent's
+    /// page reaches `createWebViewWith`, which never makes a web view for it.
+    static let offlineRules = #"[{"trigger":{"url-filter":"^(https?|wss?)://"},"action":{"type":"block"}},{"trigger":{"url-filter":"^https?://","resource-type":["popup"]},"action":{"type":"ignore-previous-rules"}}]"#
 
     /// The policy every file of an agent's page folder is served under: the
     /// surface's own (`apps/inbox/surface.html`), so a page the agent's page
     /// embeds from its folder is as offline as the page itself.
     static let assetPolicy = "default-src 'none'; script-src 'unsafe-inline' plannotator-asset:; style-src 'unsafe-inline' plannotator-asset: data:; img-src plannotator-asset: data: blob:; font-src plannotator-asset: data:; media-src plannotator-asset: data: blob:; frame-src plannotator-asset: about: data: blob:; worker-src blob:; connect-src 'none'; base-uri plannotator-asset:; form-action 'none'"
 
+    /// Waits for the surface, or returns at once when it cannot load (`isUnavailable`).
     func whenReady() async {
         warm()
-        if isReady { return }
+        if isReady || isUnavailable { return }
         await withCheckedContinuation { readyWaiters.append($0) }
     }
 
@@ -144,6 +152,7 @@ final class SurfaceHost: NSObject {
     /// `export_feedback`): Plannotator's own export, as the window writes it.
     func feedback(annotations: [InboxAnnotationRecord], attachments: [InboxAttachmentState], texts: [Bridge.Text], projectRoot: String) async -> String? {
         await whenReady()
+        guard !isUnavailable else { return nil }
         let id = UUID().uuidString
         return await withCheckedContinuation { continuation in
             feedbackWaiters[id] = continuation

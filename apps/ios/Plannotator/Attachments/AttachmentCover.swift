@@ -422,9 +422,13 @@ struct AttachmentCover: View {
             let sent = file.sent || attachment?.unavailable != nil
             let next = try await session.client.view(attachment: file.attachmentId, sent: sent)
             if sent != file.sent { file.sent = sent }
+            await host.whenReady()
+            guard !host.isUnavailable else {
+                loadProblem = "Files can't be shown on this iPhone right now."
+                return
+            }
             view = next
             shareFile = Self.writeShareFile(next)
-            await host.whenReady()
             present(next)
             await host.drawn()
             painted = true

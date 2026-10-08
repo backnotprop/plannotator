@@ -96,7 +96,7 @@ final class AttachmentProofTests: ProofCase {
         expect(tickets, "the ticket page")
         // The page's own folder: photos named with a space ("dj tern.png") and an accent ("joão.png") load.
         expect(app.webViews.staticTexts["Photos: 3 of 3"], "all three photos from the page's folder")
-        // A page it embeds from its folder runs, and its image beacon and fetch reach nothing.
+        // A page it embeds from its folder runs, and its image beacon, fetch and WebSocket reach nothing.
         expect(app.webViews.staticTexts["Lift to the roof from the Pier 9 lobby. Notes ran."], "the embedded page's script")
         try await Task.sleep(for: .seconds(4))
         XCTAssertFalse(element("comment-panel").exists, "a forged message opened a composer")
