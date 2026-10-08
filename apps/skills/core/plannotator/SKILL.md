@@ -88,7 +88,7 @@ Targets:
 - URLs (`https://...`): fetched and converted via Jina Reader by default; `--no-jina` uses plain fetch plus Turndown instead.
 - Running local apps: a loopback `http://localhost:PORT/` URL whose probe returns HTML opens in live-app mode (annotate the real running page). `--app` forces live mode and fails loudly when it cannot apply; `--static` forces the classic conversion pipeline. Non-loopback URLs always use the conversion pipeline.
 - Folders: `plannotator annotate docs/` opens a file browser over the folder's supported files.
-- Several files: `plannotator annotate spec.md mock.html notes.md` opens them as one review, in the order given, with one decision. Every argument must be an existing file named by its path (no prose, URLs or folders among them). With the `plannotator` tool, pass the list as `target`.
+- Several files: `plannotator annotate spec.md mock.html notes.md` opens them as one review, in the order given, with one decision. Every argument must be an existing file named by its path (no prose, URLs or folders among them). With the `plannotator` tool, pass the list as `target`. This review has no Edit Mode. When the user wants to edit the documents directly in the browser, open their folder instead (`plannotator annotate docs/`), which saves edits back to each file.
 
 Single files are capped at 2MB. Files are read from disk at stable project paths; keep the reviewed source where it lives.
 

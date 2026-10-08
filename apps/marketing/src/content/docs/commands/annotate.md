@@ -78,6 +78,8 @@ They open as one review, in the order you gave them. The first file opens right 
 
 Every argument must be an existing file named by its path. If anything else is mixed in (a word, a URL, a folder, or a bare name Plannotator would have to search the project for), the command keeps its usual behavior: one file among plain words opens that file, and several targets are an error that names them. Agents with the `plannotator` tool pass the files as a list in `target`.
 
+A review of several files has no Edit Mode. To edit documents directly in the browser, open their folder instead (`plannotator annotate docs/`), where edits save back to each file.
+
 ## URLs
 
 Fetching a URL converts the page to markdown before opening it in the annotation editor. Loopback `http` URLs are the exception: they open your running app live instead, covered in [Local apps](#local-apps) below.
