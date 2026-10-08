@@ -78,13 +78,16 @@ jobs:
   # notarization run only on tag pushes AND when the Apple secrets exist;
   # otherwise the app is ad-hoc signed (fine for PR dry runs and for curl
   # installs, which carry no quarantine; TCC grants then reset on update).
-  # Secrets: APPLE_DEVELOPER_ID_P12 (base64 .p12 of the Developer ID
+  # Secrets, in the environment apple-signing: APPLE_DEVELOPER_ID_P12 (base64 .p12 of the Developer ID
   # Application certificate + key), APPLE_DEVELOPER_ID_P12_PASSWORD,
   # APPLE_DEVELOPER_ID_IDENTITY ("Developer ID Application: Name (TEAMID)"),
   # APPLE_NOTARY_KEY_P8 (base64 App Store Connect API key), APPLE_NOTARY_KEY_ID,
   # APPLE_NOTARY_ISSUER_ID.
   snapshots-macos:
     runs-on: macos-latest
+    # The Apple secrets live in the protected environment apple-signing (see
+    # snapshots-sign-check.yml, which proves them without a release).
+    environment: apple-signing
     permissions:
       contents: read
     env:
