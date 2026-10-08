@@ -107,13 +107,25 @@ final class RelayPushTests: XCTestCase {
         // 7.2, drawn: a long press shows the choices, recommended first. (The
         // simulator does not draw an expanded notification on its lock screen,
         // so the frame is taken from the banner; the answer below is tapped locked.)
+        // A banner stays a few seconds; on a slow runner it can leave before the
+        // press lands (or the press lands as a tap and opens the thread). Then
+        // the frame is skipped, the push delivered again for the lock screen,
+        // and the order of the choices is checked there.
         banner.press(forDuration: 1.2)
-        XCTAssertTrue(springboard.buttons["Yes"].waitForExistence(timeout: 30))
-        let order = springboard.buttons.allElementsBoundByIndex.map(\.label).filter { $0 == "Yes" || $0 == "No" }
-        XCTAssertEqual(order, ["Yes", "No"])
-        try await control.shot("7.2")
-        springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)).tap()
-        sleep(1)
+        if springboard.buttons["Yes"].waitForExistence(timeout: 10) {
+            let order = springboard.buttons.allElementsBoundByIndex.map(\.label).filter { $0 == "Yes" || $0 == "No" }
+            XCTAssertEqual(order, ["Yes", "No"])
+            try await control.shot("7.2")
+            springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)).tap()
+            sleep(1)
+        } else {
+            print("RelayPushTests: the banner left before the long press; no 7.2 frame on this run")
+            for _ in 0..<2 where !app.tabBars.buttons["Settings"].exists && app.navigationBars.buttons.firstMatch.exists {
+                app.navigationBars.buttons.element(boundBy: 0).tap()
+            }
+            try await control.post("/push", ["thread": thread])
+            XCTAssertTrue(notification(containing: subject).waitForExistence(timeout: 30))
+        }
 
         // Locked: the subject as the title, "<agent> in <project>: <context>" as the body.
         try await control.post("/video/start", ["name": "M5-lock-screen-answer"])
@@ -124,10 +136,11 @@ final class RelayPushTests: XCTestCase {
         // The guided review sits in the stack under it (the system groups an app's notifications).
         try await control.shot("7.1")
 
-        // Locked, Yes picks and sends at once.
+        // Locked, the choices recommended first; Yes picks and sends at once.
         expand(question)
         let yes = springboard.buttons["Yes"]
         XCTAssertTrue(yes.waitForExistence(timeout: 30))
+        XCTAssertEqual(springboard.buttons.allElementsBoundByIndex.map(\.label).filter { $0 == "Yes" || $0 == "No" }, ["Yes", "No"])
         yes.tap()
         let reply = try await control.post("/reply", ["thread": thread])
         XCTAssertTrue("\(reply)".contains("Yes"), "\(reply)")
@@ -144,8 +157,7 @@ final class RelayPushTests: XCTestCase {
         let shipBanner = notification(containing: "Ship the dark ticket page")
         XCTAssertTrue(shipBanner.waitForExistence(timeout: 30))
         try await control.post("/proxy", ["mode": "gone"])
-        shipBanner.press(forDuration: 1.2)
-        XCTAssertTrue(springboard.buttons["No"].waitForExistence(timeout: 30))
+        XCTAssertTrue(expandUnlocked(shipBanner, containing: "Ship the dark ticket page", choice: "No"))
         springboard.buttons["No"].tap()
         let carried = try await control.post("/reply", ["thread": shipThread])
         XCTAssertTrue("\(carried)".contains("Answer: No"), "\(carried)")
@@ -244,6 +256,25 @@ final class RelayPushTests: XCTestCase {
         let view = springboard.buttons["View"]
         if view.waitForExistence(timeout: 5) { view.tap() } else { notification.press(forDuration: 1.5) }
         sleep(1)
+    }
+
+    /// A notification's choices while unlocked: a long press on its banner, or,
+    /// when the banner has left (a slow runner), on the notification in the
+    /// Notification Center.
+    private func expandUnlocked(_ banner: XCUIElement, containing text: String, choice: String, forceCenter: Bool = false) -> Bool {
+        if !forceCenter, banner.exists {
+            banner.press(forDuration: 1.2)
+            if springboard.buttons[choice].waitForExistence(timeout: 10) { return true }
+        }
+        for _ in 0..<2 where !app.tabBars.buttons["Settings"].exists && app.navigationBars.buttons.firstMatch.exists {
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+        }
+        let top = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.005))
+        top.press(forDuration: 0.1, thenDragTo: springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.7)))
+        let listed = springboard.descendants(matching: .any).matching(identifier: "NotificationShortLookView").matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+        guard listed.waitForExistence(timeout: 15) else { return false }
+        listed.press(forDuration: 1.5)
+        return springboard.buttons[choice].waitForExistence(timeout: 15)
     }
 
     /// Settings > Apps > Plannotator > Notifications > Show Previews (the
