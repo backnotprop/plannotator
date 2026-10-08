@@ -1,6 +1,7 @@
 export {
   getPlanDir,
   generateSlug,
+  resolvePlanHistorySlug,
   savePlan,
   saveAnnotations,
   saveFinalSnapshot,

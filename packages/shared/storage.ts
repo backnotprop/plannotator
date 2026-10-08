@@ -41,16 +41,109 @@ function extractFirstHeading(markdown: string): string | null {
 }
 
 /**
- * Generate a slug from plan content.
- * Format: {sanitized-heading}-YYYY-MM-DD
+ * The date-free part of a plan slug: the sanitized first heading, or `plan`
+ * when the plan has none.
  */
-export function generateSlug(plan: string): string {
-  const date = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
-
+function planSlugBase(plan: string): string {
   const heading = extractFirstHeading(plan);
-  const slug = heading ? sanitizeTag(heading) : null;
+  return (heading ? sanitizeTag(heading) : null) || "plan";
+}
 
-  return slug ? `${slug}-${date}` : `plan-${date}`;
+/**
+ * Generate a slug from plan content.
+ * Format: {sanitized-heading}-YYYY-MM-DD (UTC date of `now`).
+ *
+ * This is the ARCHIVE name: decision snapshots in `plans/` are named by it, and
+ * parseArchiveFilename / listArchivedPlans read the date back out. Version
+ * history does not use it directly; see resolvePlanHistorySlug.
+ */
+export function generateSlug(plan: string, now: Date = new Date()): string {
+  const date = now.toISOString().split("T")[0]; // YYYY-MM-DD
+  return `${planSlugBase(plan)}-${date}`;
+}
+
+/**
+ * How recently a plan's history chain must have been written to for a plan
+ * with the same heading, arriving on a later date, to continue it (#1679).
+ *
+ * 48 hours covers a plan revised across midnight (UTC or local) and a review
+ * resumed the next day, including the reported case (v1 at 20:02Z, revision
+ * ~39h later). A same-heading plan after two days of silence starts a fresh
+ * chain, so generic headings such as "Implementation Plan" are not merged
+ * across unrelated work indefinitely. Every saved revision refreshes the
+ * window, so an actively iterated plan keeps one chain however long it runs.
+ */
+export const PLAN_HISTORY_CONTINUE_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+const HISTORY_DATE_SUFFIX = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Newest NNN.md mtime in a history directory, or 0 when it has no versions. */
+function latestVersionMtime(historyDir: string): number {
+  let latest = 0;
+  try {
+    for (const entry of readdirSync(historyDir)) {
+      if (!/^\d+\.md$/.test(entry)) continue;
+      try {
+        const mtime = statSync(join(historyDir, entry)).mtimeMs;
+        if (mtime > latest) latest = mtime;
+      } catch { /* skip */ }
+    }
+  } catch { /* missing dir */ }
+  return latest;
+}
+
+/**
+ * Resolve the version-history slug (`history/{project}/{slug}/`) for a plan.
+ *
+ * The directory is named `{heading}-{date}` like the archive slug, but the date
+ * records when the chain STARTED, not today (#1679). Rule, in order:
+ *
+ * 1. `current` (the slug an open review server is already writing to) is kept
+ *    when the plan's heading still names it, so revisions inside one session
+ *    never change chains.
+ * 2. Today's `{heading}-{date}` directory, when it already holds versions:
+ *    same-day behavior is unchanged.
+ * 3. The most recently written existing `{heading}-YYYY-MM-DD` directory for
+ *    this project, when its newest version is within
+ *    PLAN_HISTORY_CONTINUE_WINDOW_MS of `now`: a plan revised across midnight
+ *    continues its chain. Recency is the saved file's mtime, so the UTC date
+ *    in the directory name plays no part.
+ * 4. Otherwise today's directory: a new chain.
+ *
+ * Nothing on disk is renamed or migrated; existing dated directories are
+ * simply continued.
+ */
+export function resolvePlanHistorySlug(
+  project: string,
+  plan: string,
+  options: { now?: Date; current?: string } = {},
+): string {
+  const now = options.now ?? new Date();
+  const base = planSlugBase(plan);
+  const isChainOf = (name: string): boolean =>
+    name.startsWith(`${base}-`) && HISTORY_DATE_SUFFIX.test(name.slice(base.length + 1));
+
+  if (options.current && isChainOf(options.current)) return options.current;
+
+  const today = generateSlug(plan, now);
+  const projectDir = join(getPlannotatorDataDir(), "history", project);
+  if (latestVersionMtime(join(projectDir, today)) > 0) return today;
+
+  let best: string | null = null;
+  let bestMtime = 0;
+  try {
+    for (const entry of readdirSync(projectDir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !isChainOf(entry.name)) continue;
+      const mtime = latestVersionMtime(join(projectDir, entry.name));
+      if (mtime > bestMtime) {
+        best = entry.name;
+        bestMtime = mtime;
+      }
+    }
+  } catch { /* no history for this project yet */ }
+
+  if (best && now.getTime() - bestMtime <= PLAN_HISTORY_CONTINUE_WINDOW_MS) return best;
+  return today;
 }
 
 /**

@@ -11,6 +11,7 @@ import { createRequestHostGuard } from "./request-host-guard.ts";
 import {
 	type ArchivedPlan,
 	generateSlug,
+	resolvePlanHistorySlug,
 	getPlanVersion,
 	getPlanVersionPath,
 	getVersionCount,
@@ -171,21 +172,25 @@ export async function startPlanReviewServer(options: {
 	// since replaced is refused (409) instead of approving unseen text.
 	let planRevision = 0;
 	const repoInfo = options.mode !== "archive" ? getRepoInfo() : null;
+	// Two names for one plan (#1679): `slug` names the dated decision snapshots
+	// in plans/ (today's date, as always); `historySlug` names the version
+	// history chain in history/{project}/, which continues across midnight.
 	let slug = options.mode !== "archive" ? generateSlug(options.plan) : "";
 	const project = options.mode !== "archive" ? detectProjectName() : "";
+	let historySlug = options.mode !== "archive" ? resolvePlanHistorySlug(project, options.plan) : "";
 	let historyResult =
 		options.mode !== "archive"
-			? saveToHistory(project, slug, options.plan)
+			? saveToHistory(project, historySlug, options.plan)
 			: { version: 0, path: "", isNew: false };
 	let previousPlan =
 		options.mode !== "archive" && historyResult.version > 1
-			? getPlanVersion(project, slug, historyResult.version - 1)
+			? getPlanVersion(project, historySlug, historyResult.version - 1)
 			: null;
 	let versionInfo =
 		options.mode !== "archive"
 			? {
 					version: historyResult.version,
-					totalVersions: getVersionCount(project, slug),
+					totalVersions: getVersionCount(project, historySlug),
 					project,
 				}
 			: null;
@@ -211,11 +216,11 @@ export async function startPlanReviewServer(options: {
 			surface: "plan",
 			decision,
 			target: {
-				slug,
+				slug: historySlug,
 				...(version > 0
 					? {
 							planVersion: version,
-							planVersionFile: getPlanVersionPath(project, slug, version) ?? undefined,
+							planVersionFile: getPlanVersionPath(project, historySlug, version) ?? undefined,
 						}
 					: {}),
 			},
@@ -338,7 +343,7 @@ export async function startPlanReviewServer(options: {
 				json(res, { error: "Invalid version number" }, 400);
 				return;
 			}
-			const content = getPlanVersion(project, slug, v);
+			const content = getPlanVersion(project, historySlug, v);
 			if (content === null) {
 				json(res, { error: "Version not found" }, 404);
 				return;
@@ -347,7 +352,7 @@ export async function startPlanReviewServer(options: {
 		} else if (url.pathname === "/api/plan/revision" && req.method === "GET" && options.mode !== "archive") {
 			json(res, { revision: planRevision, decided: decisionSettled });
 		} else if (url.pathname === "/api/plan/versions") {
-			json(res, { project, slug, versions: listVersions(project, slug) });
+			json(res, { project, slug: historySlug, versions: listVersions(project, historySlug) });
 		} else if (url.pathname === "/api/plan") {
 			if (options.mode === "archive") {
 				json(res, {
@@ -459,7 +464,7 @@ export async function startPlanReviewServer(options: {
 					json(res, { error: "Missing baseVersion" }, 400);
 					return;
 				}
-				const basePath = getPlanVersionPath(project, slug, baseVersion);
+				const basePath = getPlanVersionPath(project, historySlug, baseVersion);
 				if (!basePath) {
 					json(res, { error: `Version ${baseVersion} not found` }, 404);
 					return;
@@ -678,13 +683,15 @@ export async function startPlanReviewServer(options: {
 			}
 			// Same bookkeeping a resubmission gets from a fresh server: slug from
 			// the revised heading, a new history version, and the previous
-			// version of that slug as the diff base.
+			// version of that slug as the diff base. A revision that keeps its
+			// heading stays on this session's history chain.
 			slug = generateSlug(plan);
-			historyResult = saveToHistory(project, slug, plan);
-			previousPlan = historyResult.version > 1 ? getPlanVersion(project, slug, historyResult.version - 1) : null;
+			historySlug = resolvePlanHistorySlug(project, plan, { current: historySlug });
+			historyResult = saveToHistory(project, historySlug, plan);
+			previousPlan = historyResult.version > 1 ? getPlanVersion(project, historySlug, historyResult.version - 1) : null;
 			versionInfo = {
 				version: historyResult.version,
-				totalVersions: getVersionCount(project, slug),
+				totalVersions: getVersionCount(project, historySlug),
 				project,
 			};
 			currentPlan = plan;
