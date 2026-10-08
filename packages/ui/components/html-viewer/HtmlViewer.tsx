@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -694,7 +695,12 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       [hook.draftTargets],
     );
 
-    useEffect(() => {
+    // Registered in the commit that inserts the iframe (a layout effect), so
+    // the bridge's `ready` can never arrive before anyone listens: a passive
+    // effect can run after a fast srcdoc frame has already posted it, and a
+    // lost ready leaves the bridge unconfigured for good (seen on a Linux
+    // WebKit runner, the Inbox surface's proof).
+    useLayoutEffect(() => {
       function handler(e: MessageEvent<unknown>) {
         if (e.source !== iframeRef.current?.contentWindow) return;
         // Live sessions verify origin + token before reading anything.

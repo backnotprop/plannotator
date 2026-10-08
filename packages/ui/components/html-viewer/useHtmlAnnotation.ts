@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, type RefObject } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, type RefObject } from "react";
 import { AnnotationType, type Annotation, type EditorMode, type HostDraft, type HtmlAnnotationTarget, type HtmlElementAnchor, type HtmlElementContext, type ImageAttachment } from "../../types";
 import { THUMBS_UP_LABEL, type QuickLabel } from "../../utils/quickLabels";
 import { getIdentity } from "../../utils/identity";
@@ -637,7 +637,9 @@ export function useHtmlAnnotation({
     [iframeRef, getOrCreateAnchor],
   );
 
-  useEffect(() => {
+  // A layout effect, like HtmlViewer's own listener: listening from the
+  // commit that inserts the iframe, before its document can post anything.
+  useLayoutEffect(() => {
     function handler(e: MessageEvent<unknown>) {
       if (e.source !== iframeRef.current?.contentWindow) return;
       // Live sessions verify origin + session token BEFORE parsing. The

@@ -1742,6 +1742,7 @@ Additive, all opt-in; Plannotator passes none of it, so its render is unchanged.
 - **`ViewerHandle.stepPin?: (direction: 'parent' | 'child') => void`**, implemented by `HtmlViewer` only: moves a pinned draft to the element around it, or back the way it came (then the first element child), by posting the new bridge message `plannotator-bridge-step-pin`. The bridge re-pins through its own pinpoint path, so the parent sees an ordinary pinpoint selection. Additive to the protocol: an older bridge asset (`bridgeScriptUrl`) ignores it, so `BRIDGE_PROTOCOL_VERSION` is unchanged.
 - **`DiagramViewer` `onHostDraft?: (draft: DiagramHostDraft | null) => void`**: a click on a part reports `{ anchor, cancel }` (the ring stays drawn) and no `DiagramComposer` is rendered; the host passes the saved comment back in `comments`. Counts as being able to comment, like `onCreateComment`. `DiagramHostDraft` is exported from `components/diagram`.
 - **`AnnotationToolstrip` `hideRedline?: boolean`**: omits only the Redline action, as `hideQuickLabel` omits Label.
+- **Fix, `HtmlViewer` and `useHtmlAnnotation`:** both register their frame-message listeners in a layout effect instead of a passive one. A passive effect can run after a fast srcdoc frame has already posted the bridge's `ready`; the lost ready left the bridge with no input method or mode, so no pin could land (seen on a Linux WebKit CI runner in the surface's proof). Listening from the commit that inserts the iframe closes that race; nothing else changes.
 
 ## Publishing & versioning
 
