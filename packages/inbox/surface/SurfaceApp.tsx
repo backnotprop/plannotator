@@ -115,6 +115,8 @@ function Surface() {
   // has nowhere to go without a file of its own, so it does nothing.
   useEffect(() => {
     const onClick = (event: MouseEvent) => {
+      // A person's tap only: a scripted click on the document is not one.
+      if (!event.isTrusted) return;
       const link = (event.target as Element | null)?.closest?.('a[href]');
       if (!link || event.defaultPrevented) return;
       const href = link.getAttribute('href') ?? '';

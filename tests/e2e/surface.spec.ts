@@ -131,7 +131,8 @@ const TICKET_PAGE = `<!doctype html>
   parent.postMessage({ type: 'plannotator-bridge-link-click', href: 'https://evil.example/forged' }, '*');
   parent.postMessage({ type: 'plannotator-bridge-link-click', href: 'mailto:evil@evil.example' }, '*');
   document.getElementById('forged').textContent = 'forged';
-  fetch('http://127.0.0.1:1/').then(function () { out.push('fetch: reached'); }, function () { out.push('fetch: refused'); }).then(function () {
+  // The live Inbox, no-cors: only the inherited CSP can refuse it.
+  fetch('__INBOX_THREADS__', { mode: 'no-cors' }).then(function () { out.push('fetch: reached'); }, function () { out.push('fetch: refused'); }).then(function () {
     document.getElementById('probe').textContent = out.join(' | ');
   });
 </script>
@@ -167,6 +168,8 @@ interface World {
   inbox: ShellMessage[];
   attachments: { plan: any; ticket: any; flow: any };
   guide: { thread_id: string; message_id: string };
+  /** The comment the markdown test saved, for the focus test. */
+  savedMarkId: string;
 }
 
 let world: World;
@@ -195,7 +198,7 @@ async function inboxJson(path: string, init?: { method: string; body: unknown })
 }
 
 /** What the shell does to open a file: read its view through the door (here, the window's route) and hand it over. */
-async function openAttachment(attachment: any): Promise<void> {
+async function openAttachment(attachment: any, focus: string | null = null): Promise<void> {
   const view = await inboxJson(`/api/inbox/attachments/${attachment.id}/view`);
   const html = view.html === null ? null : String(view.html).replace(/<base href="\/api\/html-assets\/([^"/]+)\//, '<base href="plannotator-asset://inbox/api/html-assets/$1/');
   const thread = await inboxJson(`/api/inbox/threads/${view.attachment.message_id}/attachments`);
@@ -206,7 +209,7 @@ async function openAttachment(attachment: any): Promise<void> {
     text: view.text,
     html,
     annotations: thread.annotations.filter((r: any) => r.attachment_id === attachment.id),
-    focus: null,
+    focus,
   });
 }
 
@@ -311,7 +314,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const docs = scratchProject(join(root, 'src'), 'docs-site');
   const ledger = scratchProject(join(root, 'src'), 'ledger');
   writeFileSync(join(billing, 'retry-plan.md'), PLAN);
-  writeFileSync(join(checkout, 'ticket-page.html'), TICKET_PAGE);
+  writeFileSync(join(checkout, 'ticket-page.html'), TICKET_PAGE.replace('__INBOX_THREADS__', new URL('/api/inbox/threads', url).href));
   writeFileSync(join(docs, 'install-flow.mmd'), FLOW);
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const codex = await SimAgent.connect({ binary, env, name: 'Codex', host: 'codex' });
@@ -358,6 +361,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     inbox,
     attachments: { plan: plan.attachments[0], ticket: ticket.attachments[0], flow: flow.attachments[0] },
     guide: { thread_id: guide.thread_id, message_id: guide.message_id },
+    savedMarkId: '',
   };
 });
 
@@ -466,6 +470,12 @@ test('markdown: a selection becomes a draft with its quote; saved, it is drawn; 
   await page.locator('[data-surface-attachment] a', { hasText: 'the Stripe docs' }).click();
   expect(await next('link', from)).toMatchObject({ href: 'https://docs.stripe.com/error-low-level#idempotency' });
   expect(page.url()).toContain('surface.html');
+  // A scripted click on the same link is not a tap: nothing goes to the shell.
+  from = mark();
+  await page.evaluate(() => (document.querySelector('[data-surface-attachment] a[href^="https://docs.stripe.com"]') as HTMLElement).click());
+  await page.waitForTimeout(300);
+  expect(world.inbox.slice(from).filter((m) => m.main && m.message.type === 'link')).toEqual([]);
+  world.savedMarkId = again.draft.id;
 });
 
 test('HTML: a pin steps to its parent and back to its child, is saved and drawn; Interact and Annotate switch', async () => {
@@ -609,6 +619,13 @@ test('a guided review: sections, a tick, Continue, one section with Reviewed; th
   expect(await next('section', from)).toMatchObject({ message_id: world.guide.message_id, section: 1, sections: 2 });
   await expect(page.locator('[data-section-page="1"]')).toBeVisible();
   await expect(page.locator('[data-section-page="1"] .sf-gnavbtn', { hasText: '01' })).toBeVisible();
+  // The diff box fits its diff: no blank band under a short diff at a phone's width.
+  await expect(page.locator('[data-section-page="1"] diffs-container').first()).toBeVisible();
+  const slack = await page.evaluate(() => {
+    const box = document.querySelector('[data-section-page="1"] [data-guide-code-view-mounted]')!;
+    return box.getBoundingClientRect().height - box.querySelector('diffs-container')!.getBoundingClientRect().height;
+  });
+  expect(slack).toBeLessThan(60);
   await shot('09-guide-section');
 
   from = mark();
@@ -623,6 +640,20 @@ test('a guided review: sections, a tick, Continue, one section with Reviewed; th
   const thread = await inboxJson(`/api/inbox/threads/${world.guide.thread_id}`);
   const message = thread.thread.messages.find((m: any) => m.id === world.guide.message_id);
   expect(message.guide_reviewed).toEqual([true, true]);
+});
+
+test("a file opened at one of its marks (the shell's annotations sheet) scrolls that mark into view", async () => {
+  const { page } = world;
+  // Large text, so the mark starts well below the first screen.
+  await appearance('light', 2.5);
+  await openAttachment(world.attachments.plan, world.savedMarkId);
+  const markEl = page.locator(`[data-surface-attachment] [data-highlight-id="${world.savedMarkId}"]`).first();
+  await expect(markEl).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.querySelector('.sf-docscroll')!.scrollTop)).toBeGreaterThan(0);
+  const box = (await markEl.boundingBox())!;
+  expect(box.y).toBeGreaterThan(0);
+  expect(box.y + box.height).toBeLessThan(852);
+  await appearance('light', 1);
 });
 
 test('theme and text size apply as the shell sends them', async () => {

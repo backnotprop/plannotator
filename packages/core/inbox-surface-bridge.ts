@@ -143,7 +143,7 @@ export interface SurfaceSelection {
 export interface SurfacePin {
   v: 1;
   type: "pin";
-  /** `label` is the element as the sheet names it ("div.btnx"); `selector` finds it again. */
+  /** `label` is the element as the sheet names it (Plannotator's pinpoint label: "Button", a heading's words); `selector` finds it again. */
   target: { label: string; selector: string };
   draft: SurfaceAnnotation;
 }

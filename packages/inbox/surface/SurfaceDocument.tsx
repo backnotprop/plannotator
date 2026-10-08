@@ -69,13 +69,21 @@ export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function
   const blocks = useMemo(() => attachmentBlocks(attachment.kind, open.text, attachment.name), [attachment.kind, attachment.name, open.text]);
 
   // Paint the stored highlights once the document is drawn; later ones arrive through commit.
+  // The shell's "3 annotations" sheet opens a file at one mark (`focus`):
+  // once the marks are painted, that one is brought to the middle of the screen.
   const painted = useRef(false);
   useEffect(() => {
     if (!isText || painted.current) return;
-    painted.current = true;
-    const id = requestAnimationFrame(() => viewerRef.current?.applySharedAnnotations(annotations.filter(annotationOwnsHighlight)));
+    const id = requestAnimationFrame(() => {
+      painted.current = true;
+      viewerRef.current?.applySharedAnnotations(annotations.filter(annotationOwnsHighlight));
+      if (open.focus) {
+        const mark = document.querySelector(`[data-highlight-id="${CSS.escape(open.focus)}"], [data-bind-id="${CSS.escape(open.focus)}"]`);
+        mark?.scrollIntoView({ block: 'center' });
+      }
+    });
     return () => cancelAnimationFrame(id);
-  }, [isText, annotations]);
+  }, [isText, annotations, open.focus]);
 
   const dropDraft = () => {
     draft.current?.cancel();

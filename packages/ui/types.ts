@@ -537,7 +537,7 @@ export interface HostDraft {
    * tap, Comment mode, an HTML pin).
    */
   intent: 'selection' | 'compose';
-  /** What it is on, as a composer names it ("div.btnx"). Absent for text. */
+  /** What it is on, as a composer names it (Plannotator's pinpoint label: "Button", a heading's words). Absent for text. */
   label?: string;
   /**
    * Drop the draft: its pending highlight or pin goes. The host calls it when
