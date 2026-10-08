@@ -40,7 +40,7 @@
   ],
   "dependencies": {
     "@modelcontextprotocol/server": "2.2.0",
-    "@pierre/diffs": "1.3.6",
+    "@pierre/diffs": "1.5.1",
     "@plannotator/ai": "workspace:*",
     "@plannotator/core": "workspace:*",
     "@plannotator/shared": "workspace:*",
@@ -48,7 +48,7 @@
     "chokidar": "^5.0.0",
     "jsonc-parser": "^3.3.1",
     "uqr": "^0.1.3",
-    "zod": "4.5.4"
+    "zod": "4.6.5"
   },
   "peerDependencies": {
     "bun": ">=1.0.0"
