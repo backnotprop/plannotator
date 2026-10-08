@@ -5,6 +5,7 @@ import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolst
 import { HtmlSurfaceControls } from '@plannotator/ui/components/HtmlSurfaceControls';
 import { HtmlViewer } from '@plannotator/ui/components/html-viewer';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
+import { useConfigValue } from '@plannotator/ui/config';
 import type { Annotation, EditorMode, InputMethod } from '@plannotator/ui/types';
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
 import { groupAnnotationsByDocument, type AnnotationScope } from '@plannotator/ui/utils/annotationScope';
@@ -56,6 +57,8 @@ export function AttachmentPane(props: AttachmentPaneProps) {
   const [armed, setArmed] = useState(true);
   const [scope, setScope] = useState<AnnotationScope>('all');
   const viewerRef = useRef<ViewerHandle>(null);
+  // Plannotator's plan look (Settings, "Grid" or "Clean"), read from the same registry and cookie as its windows.
+  const gridEnabled = useConfigValue('gridEnabled');
 
   // The current file cannot be read (gone, or no longer the file that was sent): the sent version opens.
   const currentUnavailable = attachment.unavailable !== null;
@@ -269,29 +272,28 @@ export function AttachmentPane(props: AttachmentPaneProps) {
             </div>
           )}
           {view && !isHtml && (
-            <div className="ib-docscroll">
-              <div className="ib-doccard">
-                <Viewer
-                  key={`${attachment.id}:${view.version}:${view.attachment.current?.sha256 ?? ''}`}
-                  ref={viewerRef}
-                  blocks={blocks}
-                  markdown={view.text}
-                  annotations={annotations}
-                  onAddAnnotation={(annotation) => void save(annotation)}
-                  onSelectAnnotation={setSelectedId}
-                  selectedAnnotationId={selectedId}
-                  mode={isText ? mode : 'comment'}
-                  inputMethod={isText ? inputMethod : 'drag'}
-                  taterMode={false}
-                  maxWidth={null}
-                  stickyActions={false}
-                  disableCodePathValidation
-                  copyLabel="Copy file"
-                  allowImages={false}
-                  readOnly={props.readOnly}
-                  onRestoreReport={(report) => setUnanchored(new Set(report.unanchored))}
-                />
-              </div>
+            <div className={`ib-docscroll ${gridEnabled ? 'bg-grid' : 'bg-card'}`} data-look={gridEnabled ? 'grid' : 'clean'}>
+              <Viewer
+                key={`${attachment.id}:${view.version}:${view.attachment.current?.sha256 ?? ''}`}
+                ref={viewerRef}
+                blocks={blocks}
+                markdown={view.text}
+                annotations={annotations}
+                onAddAnnotation={(annotation) => void save(annotation)}
+                onSelectAnnotation={setSelectedId}
+                selectedAnnotationId={selectedId}
+                mode={isText ? mode : 'comment'}
+                inputMethod={isText ? inputMethod : 'drag'}
+                taterMode={false}
+                gridEnabled={gridEnabled}
+                maxWidth={props.full ? 760 : 640}
+                stickyActions={false}
+                disableCodePathValidation
+                copyLabel="Copy file"
+                allowImages={false}
+                readOnly={props.readOnly}
+                onRestoreReport={(report) => setUnanchored(new Set(report.unanchored))}
+              />
             </div>
           )}
           {props.full && (

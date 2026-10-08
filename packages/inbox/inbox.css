@@ -356,10 +356,9 @@ button.ib-drow:hover { background: color-mix(in oklch, var(--muted) 35%, transpa
 .pn-inbox .ib-vlink { color: var(--primary); font-weight: 550; }
 .ib-vbody { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 0; }
 .ib-docarea { position: relative; overflow: hidden; background: var(--background); min-height: 0; }
-.ib-docscroll { position: absolute; inset: 0; overflow-y: auto; padding: 58px 24px 24px; }
+/* Plannotator's plan look: Grid is its card on the grid paper, Clean the document on the card colour (bg-grid or bg-card, Viewer's gridEnabled). */
+.ib-docscroll { position: absolute; inset: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; padding: 58px 24px 24px; }
 .ib-full .ib-docscroll { padding-bottom: 80px; }
-.ib-doccard { max-width: 640px; margin: 0 auto; padding: 0 40px; background: var(--card); border-radius: 10px; box-shadow: var(--card-shadow); }
-.ib-full .ib-doccard { max-width: 760px; padding: 0 56px; }
 .ib-toolstrip { position: absolute; top: 14px; left: 16px; z-index: 3; padding: 3px; border-radius: 9px; background: var(--card); box-shadow: var(--card-shadow); }
 .ib-htmlframe { position: absolute; inset: 0; }
 .ib-full .ib-htmlframe { bottom: 56px; }

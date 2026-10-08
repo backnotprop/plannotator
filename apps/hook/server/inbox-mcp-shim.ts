@@ -18,6 +18,7 @@
 
 import { inboxId } from "@plannotator/core/inbox-types";
 import { inboxStatus, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
+import { INBOX_MAX_REQUEST_BYTES, inboxRequestTooLargeMessage } from "@plannotator/shared/inbox/connection";
 
 const FILLED_TOOLS = new Set(["send_message", "read_thread", "wait_for_reply", "list_decisions", "record_decision", "submit_guide"]);
 /** The 2026-07-28 per-request envelope's protocol-version key. */
@@ -91,6 +92,13 @@ export async function runInboxMcpShim(options: InboxMcpShimOptions): Promise<voi
       if (isRequest) write(rpcError(message.id, `Plannotator Inbox is not running: ${error instanceof Error ? error.message : String(error)}`));
       return;
     }
+    // Refused before anything is sent: the Inbox would answer 413 to it anyway.
+    const body = JSON.stringify(outgoing);
+    const bytes = Buffer.byteLength(body);
+    if (bytes > INBOX_MAX_REQUEST_BYTES) {
+      if (isRequest) write(rpcError(message.id, inboxRequestTooLargeMessage(bytes), -32600));
+      return;
+    }
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
@@ -104,7 +112,7 @@ export async function runInboxMcpShim(options: InboxMcpShimOptions): Promise<voi
       response = await fetch(`http://127.0.0.1:${target.port}/mcp`, {
         method: "POST",
         headers,
-        body: JSON.stringify(outgoing),
+        body,
       });
     } catch (error) {
       if (isRequest) write(rpcError(message.id, `Plannotator Inbox did not answer: ${error instanceof Error ? error.message : String(error)}`));
@@ -122,7 +130,15 @@ export async function runInboxMcpShim(options: InboxMcpShimOptions): Promise<voi
       } catch {
         continue;
       }
-      for (const item of Array.isArray(parsed) ? parsed : [parsed]) {
+      for (const raw of Array.isArray(parsed) ? parsed : [parsed]) {
+        // An HTTP-level refusal (413, 400, 406, ...) is a JSON-RPC error the
+        // server could not tie to a request, so it carries `id: null`, which
+        // a client never matches: it would wait for its request until its own
+        // timeout. The error answers this request, so it gets this id.
+        const item =
+          isRequest && !response.ok && raw && typeof raw === "object" && (raw as { id?: unknown }).id == null && "error" in raw
+            ? { ...(raw as object), id: message.id }
+            : raw;
         const reply = item as JsonRpc;
         if (outgoing.method === "initialize" && typeof reply?.result?.protocolVersion === "string") {
           negotiatedVersion = reply.result.protocolVersion as string;
@@ -131,13 +147,17 @@ export async function runInboxMcpShim(options: InboxMcpShimOptions): Promise<voi
         wrote = true;
       }
     }
-    if (!wrote && isRequest) write(rpcError(message.id, `Plannotator Inbox answered HTTP ${response.status}.`));
+    if (!wrote && isRequest) {
+      write(
+        response.status === 413
+          ? rpcError(message.id, inboxRequestTooLargeMessage(bytes), -32600)
+          : rpcError(message.id, `Plannotator Inbox answered HTTP ${response.status}.`),
+      );
+    }
   };
 
   const input = options.input ?? (Bun.stdin.stream() as ReadableStream<Uint8Array>);
-  const decoder = new TextDecoder();
   const inFlight = new Set<Promise<void>>();
-  let buffer = "";
   const dispatch = (line: string) => {
     if (!line.trim()) return;
     const task = forward(line).catch((error) => {
@@ -146,14 +166,27 @@ export async function runInboxMcpShim(options: InboxMcpShimOptions): Promise<voi
     inFlight.add(task);
     void task.finally(() => inFlight.delete(task));
   };
+  // Lines are split on bytes and decoded once each, so a line's cost is linear
+  // in its length however many chunks it arrives in (a 4 MiB message is ~64
+  // pipe reads; re-scanning the whole pending text on every read was quadratic).
+  const decoder = new TextDecoder();
+  let pending: Uint8Array[] = [];
+  const takeLine = (tail: Uint8Array) => {
+    pending.push(tail);
+    const line = pending.length === 1 ? pending[0]! : Buffer.concat(pending);
+    pending = [];
+    dispatch(decoder.decode(line));
+  };
   for await (const chunk of input) {
-    buffer += decoder.decode(chunk, { stream: true });
+    let start = 0;
     let newline: number;
-    while ((newline = buffer.indexOf("\n")) !== -1) {
-      dispatch(buffer.slice(0, newline));
-      buffer = buffer.slice(newline + 1);
+    while ((newline = chunk.indexOf(0x0a, start)) !== -1) {
+      takeLine(chunk.subarray(start, newline));
+      start = newline + 1;
     }
+    // A copy: a stream may reuse its chunk buffer.
+    if (start < chunk.length) pending.push(chunk.slice(start));
   }
-  dispatch(buffer + decoder.decode());
+  if (pending.length > 0) takeLine(new Uint8Array(0));
   await Promise.all([...inFlight]);
 }

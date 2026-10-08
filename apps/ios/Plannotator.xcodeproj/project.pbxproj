@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		0A745ED7E033F3F3D754E540 /* MarkdownBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D8E1B3EBB2AB11C7E6E27B /* MarkdownBlockView.swift */; };
+		5867DBD02A3FF373C9836CED /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = EC927CEFE2B6FC8A8A657308 /* PrivacyInfo.xcprivacy */; };
+		5944E4D916A50A99BDA389C1 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 598B6A5629A31EDD2457B936 /* PrivacyInfo.xcprivacy */; };
 		594CA27509F2F48BE7D56418 /* RelayPushTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFEA26793561E1B1E8ADEF69 /* RelayPushTests.swift */; };
 		615FB270BEE2B0A8ED990393 /* PlannotatorKit in Frameworks */ = {isa = PBXBuildFile; productRef = BEA38BAFE5E93B8DB94585CA /* PlannotatorKit */; };
 		69CED55597F6832AE2A22F48 /* Support.swift in Sources */ = {isa = PBXBuildFile; fileRef = E39E0503FC6505B9D44219B1 /* Support.swift */; };
@@ -71,6 +73,7 @@
 		3D5C9E105CCF7A9F7C9D6F69 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		559DB35326954FAE3EDAFAE9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		58703DC1C0F8D410DA8B2261 /* PlannotatorApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlannotatorApp.swift; sourceTree = "<group>"; };
+		598B6A5629A31EDD2457B936 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		609D222F2BF3C34763B18A1E /* NearbyScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyScreen.swift; sourceTree = "<group>"; };
 		64F3CF367FE84AF2F4BE0D46 /* Notifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Notifications.swift; sourceTree = "<group>"; };
 		67B6227C80FBE3869B1AD532 /* InboxTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxTab.swift; sourceTree = "<group>"; };
@@ -88,6 +91,7 @@
 		E39E0503FC6505B9D44219B1 /* Support.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support.swift; sourceTree = "<group>"; };
 		E749D4EC2D60D348C66E4721 /* PlannotatorKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = PlannotatorKit; path = PlannotatorKit; sourceTree = SOURCE_ROOT; };
 		E9CA91EEE5343CB85949FE10 /* PlannotatorNotifications.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = PlannotatorNotifications.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		EC927CEFE2B6FC8A8A657308 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		F372FCD08C903FF6080BE00E /* Plannotator.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Plannotator.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F46914B8F633116D2FBECDB4 /* ProofTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProofTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -184,6 +188,7 @@
 				3D5C9E105CCF7A9F7C9D6F69 /* Info.plist */,
 				063C495C6C3BF0442EBE14B6 /* NotificationService.swift */,
 				9533C33C3337AC046895F24A /* PlannotatorNotifications.entitlements */,
+				EC927CEFE2B6FC8A8A657308 /* PrivacyInfo.xcprivacy */,
 			);
 			path = PlannotatorNotifications;
 			sourceTree = "<group>";
@@ -204,6 +209,7 @@
 				CBEA43689480D730B4AC4D7F /* Colors.xcassets */,
 				25783EB204BEC1769A9D3F31 /* Info.plist */,
 				A75FC4A447CD8F81BA524A07 /* Plannotator.entitlements */,
+				598B6A5629A31EDD2457B936 /* PrivacyInfo.xcprivacy */,
 				FE63721F949D4E7E7EB3F4C7 /* App */,
 				EB54E46BBE545BBFA65B5E04 /* Inbox */,
 				750B4BC97A453EC943BAE4DC /* Pairing */,
@@ -255,6 +261,7 @@
 			buildConfigurationList = 73F7C0FBDB47600A1D8C8D9B /* Build configuration list for PBXNativeTarget "PlannotatorNotifications" */;
 			buildPhases = (
 				4464ECE299CFDE1EC0790BAD /* Sources */,
+				B2F76E0490EB6626FA5099B0 /* Resources */,
 				1943FB821B6F7E46A9576F09 /* Frameworks */,
 			);
 			buildRules = (
@@ -342,6 +349,15 @@
 			files = (
 				BC97E4610AA7A0BD4ED1D8DC /* Assets.xcassets in Resources */,
 				D1271AA242EEA609CB34D513 /* Colors.xcassets in Resources */,
+				5944E4D916A50A99BDA389C1 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B2F76E0490EB6626FA5099B0 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5867DBD02A3FF373C9836CED /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

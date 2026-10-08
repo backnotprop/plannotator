@@ -7,7 +7,8 @@
  * and Chromium drives the window.
  *
  * Proves: the tiles at the foot of the thread; the markdown plan beside the
- * thread with Full screen, a selection comment listed in the reply box's
+ * thread with Full screen, drawn in Plannotator's plan look (Grid by default,
+ * Clean under the `plannotator-grid-enabled=false` cookie), a selection comment listed in the reply box's
  * annotations chip; the HTML prototype full screen with its relative image
  * resolved, its iframe loading the sibling page (never the Inbox, #1554), the
  * frame unable to read the Inbox API, a marker pinned on "Retry all"; a node
@@ -159,7 +160,7 @@ function composer(page: Page) {
 /** Drag-select `text` inside the open markdown document with the real mouse. */
 async function selectText(page: Page, text: string): Promise<void> {
   const box = await page.evaluate((needle) => {
-    const root = document.querySelector('[data-attachment-pane] .ib-doccard');
+    const root = document.querySelector('[data-attachment-pane] .ib-docscroll');
     if (!root) return null;
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
@@ -345,12 +346,43 @@ test('the thread shows its attachments at the foot; the plan opens beside the th
   const pane = page.locator(`[data-attachment-pane="${world.attachments.plan}"]`);
   await expect(pane).toBeVisible();
   await expect(pane.getByRole('button', { name: 'Full screen' })).toBeVisible();
-  await expect(pane.locator('.ib-doccard')).toContainText('Retry worker for Stripe 409s');
+  await expect(pane.locator('.ib-docscroll')).toContainText('Retry worker for Stripe 409s');
   // The list and the sidebar fold away; the thread stays beside the file.
   await expect(page.getByRole('complementary', { name: 'Inbox navigation' })).toBeHidden();
   await expect(page.locator('.ib-pane.ib-withfile')).toBeVisible();
   await expect(page.locator('[data-changed-line]')).toHaveCount(0);
   expect(page.url()).toContain(`file=${world.attachments.plan}`);
+});
+
+test("the plan follows Plannotator's look: Grid (the default) is the card on the grid paper, Clean the document edge to edge", async () => {
+  const page = world.page;
+  const pane = page.locator(`[data-attachment-pane="${world.attachments.plan}"]`);
+  const scroll = pane.locator('.ib-docscroll');
+  const article = scroll.locator('article');
+  // No choice made: the registry's default, Grid (the store writes the default back as the cookie on first read), drawn with plan review's classes.
+  const seeded = (await world.context.cookies()).find((c) => c.name === 'plannotator-grid-enabled');
+  expect(seeded?.value ?? 'true').toBe('true');
+  await expect(scroll).toHaveAttribute('data-look', 'grid');
+  await expect(scroll).toHaveClass(/\bbg-grid\b/);
+  await expect(article).toHaveClass(/\bshadow-xl\b/);
+  await expect(article).toHaveClass(/\bborder\b/);
+  await shot('2.1b-plan-look-grid');
+
+  // The cookie Plannotator's Settings writes for "Clean": the same pane draws the flat document on the card colour.
+  await world.context.addCookies([{ name: 'plannotator-grid-enabled', value: 'false', url: world.url }]);
+  await page.reload();
+  await expect(scroll).toHaveAttribute('data-look', 'clean');
+  await expect(scroll).toHaveClass(/\bbg-card\b/);
+  await expect(article).not.toHaveClass(/\bshadow-xl\b/);
+  await expect(article).toContainText('Retry worker for Stripe 409s');
+  const [scrollBg, articleBg] = await Promise.all([scroll, article].map((l) => l.evaluate((el) => getComputedStyle(el).backgroundColor)));
+  expect(articleBg).toBe(scrollBg);
+  await shot('2.1c-plan-look-clean');
+
+  // Back to the default for the rest of the proof.
+  await world.context.clearCookies({ name: 'plannotator-grid-enabled' });
+  await page.reload();
+  await expect(scroll).toHaveAttribute('data-look', 'grid');
 });
 
 test('a selection comment on the plan is saved and listed in the reply box chip', async () => {
@@ -480,19 +512,19 @@ test('the agent edits the plan on disk: the changed line, the annotations surviv
   const line = pane.locator('[data-changed-line]');
   await expect(line).toContainText('Changed since Claude Code sent it at');
   await expect(line).toContainText('Edited');
-  await expect(pane.locator('.ib-doccard')).toContainText('How long does Stripe keep a key in flight?');
+  await expect(pane.locator('.ib-docscroll')).toContainText('How long does Stripe keep a key in flight?');
   // Both comments still sit on their text in the edited file.
   await expect(pane.locator('.ib-apanel')).toContainText('One by one is right');
   await expect(pane.locator('.ib-apanel')).toContainText('Does Stripe say');
   await expect(pane.locator('.ib-apanel')).not.toContainText('Unanchored');
-  await expect(pane.locator('.ib-doccard mark, .ib-doccard [data-highlight-id]').first()).toBeVisible();
+  await expect(pane.locator('.ib-docscroll mark, .ib-docscroll [data-highlight-id]').first()).toBeVisible();
   await shot('2.2-changed-line');
 
   await line.getByRole('button', { name: 'Open the version it sent' }).click();
   await expect(pane).toHaveAttribute('data-version', 'sent');
   await expect(pane.locator('[data-changed-line]')).toContainText('The version Claude Code sent at');
-  await expect(pane.locator('.ib-doccard')).toContainText('Refund handling and the 402 path stay as they are.');
-  await expect(pane.locator('.ib-doccard')).not.toContainText('How long does Stripe keep a key in flight?');
+  await expect(pane.locator('.ib-docscroll')).toContainText('Refund handling and the 402 path stay as they are.');
+  await expect(pane.locator('.ib-docscroll')).not.toContainText('How long does Stripe keep a key in flight?');
   expect(page.url()).toContain('v=sent');
   // Byte for byte: the sent version is the file as it was, the current one is the edit.
   expect(await (await inboxFetch(`/api/inbox/attachments/${world.attachments.plan}?version=sent`)).text()).toBe(PLAN);
