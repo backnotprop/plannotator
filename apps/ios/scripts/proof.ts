@@ -84,9 +84,14 @@ let stoppedThread = '';
 const newsAgents: SimAgent[] = [];
 let reply: Promise<Record<string, unknown>> | null = null;
 
+// As an agent waits: call again after each "waiting", and after a client
+// timeout (a slow CI runner can hold a call past the SDK's 60 s default).
 async function waitForPersonReply(threadId: string): Promise<Record<string, unknown>> {
   for (;;) {
-    const result = await claude.waitForReply(threadId, 50);
+    const result = await claude.waitForReply(threadId, 25).catch((error: unknown) => {
+      if (String(error).includes('timed out')) return { status: 'waiting' };
+      throw error;
+    });
     if (result.status !== 'waiting') return result;
   }
 }
