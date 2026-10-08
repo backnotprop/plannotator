@@ -32,6 +32,13 @@ Pairing needs the phone to reach the computer once, over the same Wi-Fi or the t
 
 "Reach from my tailnet" publishes the loopback port with `tailscale serve --bg --https=8443 http://127.0.0.1:<port>`: serve, never funnel. The HTTPS port is 8443, kept in `inbox.json` as `tailnet: { https_port: 8443 }`, so the address a phone holds survives the local port moving; the mapping is pointed at the current local port at each start, and the served name is allowed through `allowServedHostname`. When another serve mapping already holds 8443, the window says so and the switch stays off: the Inbox never overwrites a mapping it did not make. `buildServeArgs` gains this two-port form in P1.
 
+The mapping is the Inbox's own when its proxy target is `http://127.0.0.1:<port>` for this run's port or the last run's (the registry's `port` before the start); only that one is re-pointed or taken down. It is kept when the Inbox exits (Tailscale's `--bg` persistence), so a restart to update never races its own teardown; the next start re-points it.
+
+The switch's window route (added in P1; the first draft named the switch but no route):
+
+- `GET /api/inbox/tailnet`: `{ tailnet: { on, address, error } }`. `on` is the person's switch as `inbox.json` keeps it; `address` is the published `host:port`, null while the publication does not work; `error` says why, in the window's words (Tailscale stopped or signed out at start, for example).
+- `POST /api/inbox/tailnet` (window guards) `{ serverSession?, on }`: `{ tailnet }`. Turning it on publishes at once: `409 tailnet_port_taken` when another mapping holds 8443, `409 tailnet_unavailable` when Tailscale cannot publish (not installed, not running, signed out), and the switch stays off. Turning it off takes the Inbox's own mapping down and clears `tailnet` from `inbox.json`.
+
 How the phone finds a computer on the tailnet (1.3, "On your tailnet"): it does not discover one. Bonjour does not cross a tailnet and an iOS app cannot ask Tailscale for its peers, as the record's own caption for 1.3 says. The section lists the tailnet address of each computer this phone already knows (from a QR it scanned) and a row to type the `host:port` the Inbox prints; either way the person then types the six digits.
 
 ### The link
@@ -89,7 +96,9 @@ The first redemption makes the mailbox when there is none yet (section 4).
 ### Listing and revoking
 
 - `GET /api/inbox/devices` (window route): `{ devices: [device without token_sha256] }`, the devices not revoked, newest first.
-- `POST /api/inbox/devices/:id/revoke` (window route, window guards) `{ serverSession? }`: `{ device }`. Deletes the device's secret file and its relay registration.
+- `POST /api/inbox/devices/:id/revoke` (window route, window guards) `{ serverSession? }`: `{ device }`. Deletes the device's secret file and its relay registration, and ends the device's open event streams. An unknown id is `404 device_not_found`.
+
+Every `device` a route answers (7.2, 7.25, 7.36, 7.37) is the record without `token_sha256`, `carriage` included; 7.2 and 7.25 below leave `carriage` out of their examples for brevity.
 - `POST /api/inbox/device/revoke` (door route, the phone's own token): revokes the calling device, for "Remove this source" (9.2), with the same effects as the window's revoke. `{ device }`. Revoking twice changes nothing.
 
 ### The door
@@ -103,7 +112,9 @@ Every phone request goes to `/api/inbox/device/*`. The door's checks, in order:
 5. A POST in the allowlist carries `idempotency_key` in its body (section 6), else `422 validation_error`. The two exceptions are `pair` and `revoke`, which change nothing when repeated.
 6. The request is handed to the window's own handler under the window's path. The door adds nothing and strips nothing; the phone sends no `serverSession`, which the window's guard accepts (`checkServerSession`: absent passes).
 
-Where the door answers. On the loopback listener, the door sits beside the window. A request whose Host is not a loopback name reaches the door and nothing else: through `tailscale serve` the Host is the MagicDNS name (allowed by `allowServedHostname`), and every other path, the window's included, answers `403 forbidden_host`. On the LAN listener only the door exists (section 3).
+Where the door answers. On the loopback listener, the door sits beside the window. A request under the tailnet name reaches the door and nothing else: through `tailscale serve` the Host is the MagicDNS name (allowed by `allowServedHostname`), and every other path, the window's included, answers `403 forbidden_host`. On the LAN listener only the door exists (section 3).
+
+Corrected in P1: the first draft read "a Host that is not a loopback name". A name the person added through `PLANNOTATOR_ALLOWED_HOSTS` (a reverse proxy of their own, or the DAST scan's target name) still reaches the window, as it does today; only the name the Inbox published itself is held to the door.
 
 The allowlist. Each row is the window's handler as it is today, with the request and answer the window uses (`CLAUDE.md`, "Inbox Server"). Exchange numbers point at section 7.
 
@@ -135,7 +146,7 @@ The allowlist. Each row is the window's handler as it is today, with the request
 
 Door routes are written relative to `/api/inbox/device/`; window routes keep their full paths.
 
-What the door never answers, by construction (none is in the allowlist, and a non-loopback Host reaches nothing else): `/`, `/favicon.png`, `/mcp`, `/api/inbox/bridge/*`, `/api/inbox/control/*`, `/api/inbox/attachments/:id` (raw bytes; every attachment kind is text and `view` carries it), `/api/inbox/settings`, `/api/inbox/restart`, `/api/inbox/projects/:id/delete`, `/api/inbox/decisions/:id/retire` and `replace`, `/api/inbox/pairing`, `/api/inbox/devices*`. The computer chores stay on the computer (decision 5). The bridge and control routes keep their own guards and refuse a device token like any other wrong token (`401 unauthorized`).
+What the door never answers, by construction (none is in the allowlist, and a non-loopback Host reaches nothing else): `/`, `/favicon.png`, `/mcp`, `/api/inbox/bridge/*`, `/api/inbox/control/*`, `/api/inbox/attachments/:id` (raw bytes; every attachment kind is text and `view` carries it), `/api/inbox/settings`, `/api/inbox/restart`, `/api/inbox/projects/:id/delete`, `/api/inbox/decisions/:id/retire` and `replace`, `/api/inbox/pairing`, `/api/inbox/devices*`, `/api/inbox/tailnet`. The computer chores stay on the computer (decision 5). The bridge and control routes keep their own guards and refuse a device token like any other wrong token (`401 unauthorized`).
 
 ### Error codes
 
@@ -152,6 +163,9 @@ The door answers in the window's shape, `{ error, code, ...details }`, with thes
 | 410 | `offer_expired` | redemption with no open offer matching |
 | 401 | `pairing_code_wrong` | a wrong six-digit code, with `tries_left` |
 | 409 | `idempotency_key_reused` | a key this device already used on another route (section 6) |
+| 404 | `device_not_found` | the window's revoke names no device (window route) |
+| 409 | `tailnet_port_taken` | the window's tailnet switch: another mapping holds 8443 (window route) |
+| 409 | `tailnet_unavailable` | the window's tailnet switch: Tailscale cannot publish (window route) |
 
 ## 3. The LAN listener
 

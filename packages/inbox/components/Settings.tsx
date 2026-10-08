@@ -4,6 +4,7 @@ import { formatBytes, plural, tildePath } from '../format';
 import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon } from '../icons';
 import { ConnectPicker } from './ConnectPicker';
+import { PhonesBlock } from './Phones';
 
 const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'claude-code', name: 'Claude Code' },
@@ -169,7 +170,7 @@ function StoreTable({
   );
 }
 
-/** Settings (record 7.1, 7.2): the agent tool knob, Connect an agent, the store on disk, notifications. */
+/** Settings (record 7.1, 7.2): the agent tool knob, Connect an agent, phones (not in the record), the store on disk, notifications. */
 export function SettingsPage({
   settings,
   context,
@@ -224,6 +225,7 @@ export function SettingsPage({
           <p>Local only: the Inbox listens on 127.0.0.1 and keeps its port between runs when it can.</p>
           {context && <ConnectPicker harnesses={HARNESSES} initial="other" context={context} compact />}
         </div>
+        {settings && <PhonesBlock />}
         {settings && (
           <div className="ib-sblock">
             <h2>Stored on this machine</h2>

@@ -1,7 +1,7 @@
 /**
  * Plannotator Inbox registry: `${dataDir}/inbox/inbox.json`.
  *
- * `{ v, pid, port, url, version, token, serverSession, startedAt }`, mode
+ * `{ v, pid, port, url, version, token, serverSession, startedAt, tailnet? }`, mode
  * 0600, written by the Inbox server when it starts and LEFT IN PLACE when it
  * exits, so a person who ran the Inbox once has it found by every agent
  * session, and a caller can start it again on the port it last had.
@@ -41,6 +41,12 @@ export interface InboxRegistryEntry {
   token: string;
   serverSession: string;
   startedAt: string;
+  /**
+   * "Reach from my tailnet" is on (adr/implementation/inbox-mobile.md,
+   * section 1): the tailnet HTTPS port, kept across starts and re-pointed at
+   * each start's loopback port. Absent: off.
+   */
+  tailnet?: { https_port: number };
 }
 
 export function inboxRegistryPath(dataDir: string): string {

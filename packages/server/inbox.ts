@@ -3,13 +3,17 @@
  * (`plannotator inbox`), Bun-only. Pi and OpenCode are its clients; it needs
  * no node:http mirror.
  *
- * LOCAL ONLY in v1: it always binds 127.0.0.1 and ignores PLANNOTATOR_REMOTE,
- * PLANNOTATOR_PORT and --tailscale. It holds tokens and everything agents
- * sent, so a wide bind with no auth is not acceptable. Port: the last one it
- * had (from the registry) first, else random; never 19432.
+ * LOCAL ONLY by default: it always binds 127.0.0.1 and ignores
+ * PLANNOTATOR_REMOTE, PLANNOTATOR_PORT and --tailscale. It holds tokens and
+ * everything agents sent, so a wide bind with no auth is not acceptable. A
+ * paired phone reaches it through the device door only, over a path the
+ * person switched on ("Reach from my tailnet": inbox-devices.ts). Port: the
+ * last one it had (from the registry) first, else random; never 19432.
  *
  * Security, on every request, in order:
- *  1. The Host allowlist (request-host-guard.ts), local rule: loopback names.
+ *  1. The Host allowlist (request-host-guard.ts), local rule: loopback names
+ *     (and the published tailnet name, which reaches only the device door,
+ *     `/api/inbox/device/*`: no Origin, a phone's bearer token, an allowlist).
  *  2. `/mcp`: any Origin is refused (a browser is never an MCP client here).
  *  3. Connection routes (`/api/inbox/control/*`, `/api/inbox/bridge/*`): a
  *     loopback Host naming this port, no Origin, and the registry's bearer
@@ -81,6 +85,7 @@ import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
 import { createInboxLiveSessions } from "./inbox-sessions";
+import { createInboxDevices, DOOR_PREFIX } from "./inbox-devices";
 
 const LOOPBACK = "127.0.0.1";
 /** Remote mode's fixed port: the Inbox never takes it. */
@@ -130,6 +135,8 @@ export interface InboxServerOptions {
    * else `plannotator`.
    */
   selfCommand?: readonly string[];
+  /** The phone door's clock (packages/server/inbox-devices.ts): the pairing offer's expiry. Default: the wall clock. */
+  now?: () => Date;
 }
 
 export interface InboxServer {
@@ -631,6 +638,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let stopRequested = false;
   let server: ReturnType<typeof Bun.serve>;
   let attachmentRoutes: ReturnType<typeof createInboxAttachmentRoutes>;
+  let phones: ReturnType<typeof createInboxDevices>;
 
   const readBody = async (req: Request): Promise<Record<string, unknown>> => {
     try {
@@ -654,6 +662,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     const path = url.pathname;
     const origin = req.headers.get("origin");
+
+    // Phones (packages/server/inbox-devices.ts): the device door, and the
+    // tailnet name answering nothing else.
+    if (path === "/api/inbox/device" || path.startsWith(DOOR_PREFIX)) return phones.door(req, url);
+    const offTailnet = phones.servedHostRefusal(req, path);
+    if (offTailnet) return offTailnet;
 
     if (path === "/mcp") {
       if (origin !== null) {
@@ -828,6 +842,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const attached = await attachmentRoutes(req, url);
       if (attached) return attached;
 
+      // Phones: pairing, the device list and revoke, the tailnet switch.
+      const phoneRoute = await phones.windowRoute(req, url);
+      if (phoneRoute) return phoneRoute;
+
       if (path.startsWith("/api/")) return json({ error: "Not found", code: "not_found" }, 404);
       return new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8", "X-Content-Type-Options": "nosniff" } });
     } catch (error) {
@@ -851,8 +869,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     token,
     serverSession,
     startedAt: new Date().toISOString(),
+    ...(previous?.tailnet ? { tailnet: previous.tailnet } : {}),
   };
   writeInboxRegistry(dataDir, registry);
+  phones = createInboxDevices({
+    dataDir,
+    serverSession,
+    port: () => port,
+    previousPort: previous?.port ?? null,
+    registry: () => registry,
+    readBody,
+    dispatch: fetch,
+    now: options.now,
+  });
+  phones.startTailnet();
 
   const binaryPath = options.binaryPath !== undefined ? options.binaryPath : version !== "dev" ? process.execPath : null;
   let tick: ReturnType<typeof setInterval> | null = null;

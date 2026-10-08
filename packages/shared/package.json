@@ -111,6 +111,7 @@
     "./inbox/store": "./inbox/store.ts",
     "./inbox/list": "./inbox/list.ts",
     "./inbox/registry": "./inbox/registry.ts",
+    "./inbox/devices": "./inbox/devices.ts",
     "./inbox/attachments": "./inbox/attachments.ts",
     "./inbox/connection": "./inbox/connection.ts",
     "./inbox/agent-link": "./inbox/agent-link.ts"

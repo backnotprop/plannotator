@@ -261,6 +261,22 @@
 .ib-stbl .ib-fold { display: inline-flex; align-items: center; gap: 6px; }
 .pn-inbox .ib-del-l { font-size: 12.5px; color: var(--destructive); font-weight: 500; }
 .pn-inbox .ib-del-l:disabled { opacity: 0.45; }
+/* Phones in Settings (not in the record: OWNER-ITEMS item 23, built on Settings' own rows and tokens). */
+.ib-pair { display: flex; gap: 22px; align-items: flex-start; padding: 16px; margin: 6px 0 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+.ib-qr-wrap { flex: none; width: 196px; height: 196px; border-radius: 8px; overflow: hidden; box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); }
+.ib-qr-wrap.ib-stale { opacity: 0.25; }
+.ib-qr { display: block; width: 100%; height: 100%; }
+.ib-pair-t { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
+.ib-pair-t h3 { font-size: 15px; font-weight: 600; margin: 0; }
+.ib-pair-t > p { margin: 0; font-size: 13.5px; color: var(--muted-foreground); }
+.ib-pair-code { font-family: var(--font-mono); font-size: 30px; font-weight: 600; letter-spacing: 0.12em; font-variant-numeric: tabular-nums; margin: 6px 0 2px; }
+.ib-pair-foot { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-pair-foot > span { margin-right: 4px; }
+.ib-devices { margin-top: 4px; border-top: 1px solid color-mix(in oklch, var(--border) 45%, transparent); }
+.ib-devices .ib-srow { border-bottom: 1px solid color-mix(in oklch, var(--border) 45%, transparent); }
+.ib-srow > .ib-ic { color: var(--muted-foreground); }
+.ib-srow .ib-paired { display: inline-flex; align-items: center; gap: 5px; }
+.ib-srow .ib-paired .ib-ic { color: var(--primary); }
 
 /* "Waiting on this answer" at the foot of the asking message */
 .ib-waitfoot { margin-top: 18px; border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); padding: 10px 0; display: flex; align-items: center; gap: 10px; font-size: 13.5px; }

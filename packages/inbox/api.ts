@@ -129,6 +129,32 @@ export interface LiveSessionsModel {
   sessions: LiveSession[];
 }
 
+/** A paired phone as the window lists it (adr/implementation/inbox-mobile.md, 7.36). */
+export interface PairedDevice {
+  id: string;
+  name: string;
+  platform: string;
+  created_at: string;
+  last_seen_at: string;
+  revoked_at: string | null;
+  carriage: boolean;
+}
+
+/** An open pairing offer (7.1): the QR link and the six digits. */
+export interface PairingOffer {
+  offer: { code: string; expires_at: string };
+  link: string;
+  computer: { name: string };
+  addresses: { tailnet: string | null; lan: string | null; fingerprint: string | null };
+}
+
+/** "Reach from my tailnet": the switch, the address while it works, and why not when it does not. */
+export interface TailnetState {
+  on: boolean;
+  address: string | null;
+  error: string | null;
+}
+
 export class InboxApiError extends Error {
   constructor(
     readonly status: number,
@@ -226,6 +252,12 @@ export const inboxApi = {
   sessions: (threadId: string) => get<LiveSessionsModel>(`/api/inbox/threads/${encodeURIComponent(threadId)}/sessions`),
   newMessage: (threadId: string, input: { session: string; body: string; idempotency_key: string }) =>
     post<{ message: InboxMessage; replayed: boolean }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/message`, input),
+  // Phones: pairing, the paired devices, the tailnet switch (packages/server/inbox-devices.ts).
+  pairPhone: () => post<PairingOffer>('/api/inbox/pairing', {}),
+  devices: () => get<{ devices: PairedDevice[] }>('/api/inbox/devices'),
+  removeDevice: (id: string) => post<{ device: PairedDevice }>(`/api/inbox/devices/${encodeURIComponent(id)}/revoke`, {}),
+  tailnet: () => get<{ tailnet: TailnetState }>('/api/inbox/tailnet'),
+  setTailnet: (on: boolean) => post<{ tailnet: TailnetState }>('/api/inbox/tailnet', { on }),
   deleteProject: (projectId: string) => post<{ store: SettingsModel['store'] }>(`/api/inbox/projects/${encodeURIComponent(projectId)}/delete`, {}),
 };
 

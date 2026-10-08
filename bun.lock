@@ -274,6 +274,7 @@
         "@plannotator/ui": "workspace:*",
         "react": "^19.2.8",
         "react-dom": "^19.2.8",
+        "uqr": "^0.1.3",
       },
       "devDependencies": {
         "@types/react": "^19.2.18",

@@ -1807,9 +1807,13 @@ One long-lived local server per machine. Agents leave messages, `:::question` bl
 - The Inbox never registers in `sessions/` and never arms auto-update, so it never holds an update back.
 - The help text's `inbox mcp` line names all eight MCP tools (see "MCP"); keep it in step with `packages/server/inbox-mcp.ts`.
 
-**Local only.**
+**Local only by default; each wider path is a switch.**
 - It always binds `127.0.0.1` and ignores `PLANNOTATOR_REMOTE`, `PLANNOTATOR_PORT` and `--tailscale`, because it holds tokens and everything agents sent.
 - Port: the last one (from the registry) comes first, so the browser's notification permission holds. When something else holds that port, the Inbox takes a random port and shows a one-time notice (stderr and the list model's `notice`). It never uses 19432.
+- A paired phone reaches it only through the device door (see "Phones"), and only over a path the person switched on in Settings:
+  - "Reach from my tailnet" (off by default): `tailscale serve --bg --https=8443 http://127.0.0.1:<port>`, serve and never funnel. The switch is kept in `inbox.json` as `tailnet: { https_port: 8443 }` and the mapping is re-pointed at the current port at each start. A mapping on 8443 that the Inbox did not make (its target is not this run's or the last run's loopback port) is never overwritten: the switch stays off and Settings says so. The mapping survives the Inbox's exit (Tailscale's `--bg` persistence) and is taken down when the switch goes off. Under that tailnet name only the door answers; the window, `/mcp`, the bridge and every other route are `403 forbidden_host`.
+  - "Reach from this Wi-Fi" (mobile step P2, not built): a TLS listener serving only the door.
+  - The relay (R1, R2, not built).
 
 **Registry** `${dataDir}/inbox/inbox.json` (`packages/shared/inbox/registry.ts`).
 - Shape: `{ v, pid, port, url, version, token, serverSession, startedAt }`, mode 0600, written atomically at every start and kept after exit. "Found" means the file exists. The token rotates every start.
@@ -2035,7 +2039,15 @@ Sorting and the rest:
 
 **Server routes** are listed under "Inbox Server" in "Server API".
 
-**On a phone** (planned, not built): `adr/implementation/inbox-mobile.md` is the wire contract the iPhone app and its server steps build against: the pairing offer, the device token door `/api/inbox/device/*`, the LAN listener, the relay, the surface bridge and the idempotency rule.
+**On a phone**: `adr/implementation/inbox-mobile.md` is the wire contract the iPhone app and its server steps build against: the pairing offer, the device token door `/api/inbox/device/*`, the LAN listener, the relay, the surface bridge and the idempotency rule. Built (P1): pairing, the door and the tailnet path. Not built: the LAN listener (P2), the relay (R1, R2), the app (`apps/ios`, M1 on).
+
+**Phones** (`packages/server/inbox-devices.ts`, records in `packages/shared/inbox/devices.ts`; contract sections 1, 2 and 6).
+- Pairing: Settings' "Pair a phone" calls `POST /api/inbox/pairing`, which opens one offer: a `plannotator://pair` link (drawn as a QR code with `uqr`, `packages/inbox/qr.ts`) carrying the computer's name, the tailnet address when it is on, a 32-byte secret and six digits. One offer is open at a time, in memory only. It closes when redeemed, when the window makes another, 10 minutes after it was made, or after 5 wrong codes: the two limits pairing needs, and the only ones. The phone redeems the secret or the digits at `POST /api/inbox/device/pair` for its own `tok_` bearer token, returned once.
+- Records under `inbox/`: `devices.jsonl` (the store's line rules; `dev_` id, name, platform, the token's SHA-256 and never the token, created, last seen, revoked, `carriage`), `device-secrets/<dev id>` (the pairing secret, 0600 in a 0700 folder, for the relay's keys; deleted on revoke) and `device-commands.jsonl` (the door's answers by key). Last seen is kept in memory on each request and written when its UTC day changes.
+- The door, `/api/inbox/device/*`, in order: any `Origin` is `403 origin_not_allowed`; `pair` takes no token; then `Authorization: Bearer tok_…` (`401 device_token_missing`, `device_token_invalid`, `device_revoked`); then the explicit allowlist (`ALLOWLIST`: health, threads, projects, a thread, seen, events, picks, reply, resolve, delete thread, attachments, view, the HTML asset route, annotations and remove, the guide and its ticks, the decision switch, decisions, live sessions, New message; anything else `404 device_route_not_found`); then a POST needs `idempotency_key` (`422`). The request then goes to the window's own handler through the server's own `fetch` on loopback, adding and stripping nothing. `/mcp`, the bridge, control, settings, restart, raw attachment bytes, project delete, decision retire and replace, pairing, the device list and the tailnet switch are never on it.
+- Idempotency: a POST's status and JSON body are kept per device and key and read at start. The same key on the same route answers them again with `Idempotent-Replayed: true` and writes nothing; on another route it is `409 idempotency_key_reused`; a 5xx is not kept.
+- Remove: Settings' Remove (`POST /api/inbox/devices/:id/revoke`) or the phone's own `POST /api/inbox/device/revoke` marks the record revoked, deletes its secret and ends its open event streams. Its next request is `401 device_revoked`.
+- Settings' Phones block (`packages/inbox/components/Phones.tsx`; not in the window's design record, OWNER-ITEMS item 23, built in Settings' own rows): the tailnet switch with the served address, Pair a phone (the QR, the digits, the countdown, New code; it watches the device list while open and closes when the phone appears), the paired phones with platform, last seen and Remove (asked twice).
 
 **Security**, on every request:
 - The Host allowlist (`createRequestHostGuard({ localOnly: true })`).
@@ -2045,7 +2057,8 @@ Sorting and the rest:
 - No CORS headers on the Inbox's routes. The one exception is annotate's asset route for an attached HTML page's folder.
 - The window's CSP: `default-src 'self'`, inline script and style, `connect-src 'self'`, `frame-ancestors 'none'`, `base-uri 'self'`, `form-action 'none'`.
 - Agent text reaches the page only through React and Plannotator's markdown renderer.
-- DAST (`.github/workflows/dast.yml`) scans a seeded Inbox on port 19435.
+- The device door (`/api/inbox/device/*`): no Origin, the phone's bearer token, the allowlist (see "Phones"). Under the published tailnet name only the door answers.
+- DAST (`.github/workflows/dast.yml`) scans a seeded Inbox on port 19435, the door's refusals included.
 
 **Proofs.** Every proof runs under a temp data dir, against a real server, with no mocks.
 - Server and store:
@@ -2054,12 +2067,14 @@ Sorting and the rest:
   - `packages/shared/inbox/store.test.ts`: fast-check properties, including routing determinism against an independent oracle.
   - `apps/hook/server/inbox-cli.test.ts`: the subcommand as processes, the shim through the SDK's stdio client, and uninstall.
   - `packages/server/inbox-decisions.test.ts`, `inbox-attachments.test.ts` and `inbox-bridge.test.ts`.
+  - `packages/server/inbox-devices.test.ts`: every pairing and door exchange of the mobile contract (7.1 to 7.25, 7.36, 7.37) replayed with real fetch against `plannotator inbox --background`, a phone's pick and Send reaching the agent's `wait_for_reply`, the refusals, a key replayed across a restart; on the compiled binary in the inbox-e2e job.
 - The window: Playwright 1.63.0 headless Chromium against the compiled binary (`bun run test:e2e:inbox`, `.github/workflows/inbox-e2e.yml`), with agents writing through `plannotator inbox mcp` (`scripts/inbox-sim.ts`):
   - `tests/e2e/inbox.spec.ts`
   - `inbox-decisions.spec.ts`
   - `notifications.spec.ts`
   - `inbox-attachments.spec.ts`
   - `inbox-guides.spec.ts`
+  - `inbox-phones.spec.ts` (Pair a phone, the device list and Remove; with `PLANNOTATOR_E2E_TAILNET=1` on a Mac signed in to Tailscale, the door at the MagicDNS name on 8443)
 
   PNGs land in `.local/proof/`.
 - The connections:
@@ -2282,6 +2297,11 @@ Not covered, by design: the live-app proxy (`live-proxy-core.ts` has its own Hos
 | `/api/inbox/annotations/:id/remove` | POST | `{ serverSession? }`: remove one still waiting |
 | `/api/inbox/threads/:id/delete` | POST | `{ serverSession? }`: delete the thread and the blobs no other record uses; returns `{ ok, store }` |
 | `/api/inbox/projects/:id/delete` | POST | `{ serverSession? }`: delete the project's folder and its unused blobs; returns `{ ok, store }` |
+| `/api/inbox/pairing` | POST | `{ serverSession? }`: open the one pairing offer, `201 { offer: { code, expires_at }, link, computer: { name }, addresses: { tailnet, lan, fingerprint } }` (mobile contract 7.1) |
+| `/api/inbox/devices` | GET | `{ devices: [{ id, name, platform, created_at, last_seen_at, revoked_at, carriage }] }`: the paired phones not revoked, newest first |
+| `/api/inbox/devices/:id/revoke` | POST | `{ serverSession? }`: remove a phone, `{ device }`; `404 device_not_found` |
+| `/api/inbox/tailnet` | GET / POST | `{ tailnet: { on, address, error } }`; POST `{ serverSession?, on }` switches "Reach from my tailnet" (`409 tailnet_port_taken`, `409 tailnet_unavailable`) |
+| `/api/inbox/device/*` | GET / POST | The phone door: `pair` (no token), `revoke`, and the allowlist mapped onto the routes above (see "Phones" and `adr/implementation/inbox-mobile.md` section 2) |
 
 ### Host session control
 

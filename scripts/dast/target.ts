@@ -143,6 +143,10 @@ const inboxForwardedPaths = new Set([
   "/api/inbox/threads",
   `/api/inbox/threads/${inboxThread.message.thread_id}`,
   "/api/definitely-missing",
+  // The phone door (mobile contract section 2): with no token it refuses every route.
+  "/api/inbox/device/health",
+  "/api/inbox/device/threads",
+  "/api/inbox/device/settings",
 ]);
 const inboxScanTarget = Bun.serve({
   hostname: "0.0.0.0",

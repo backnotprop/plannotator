@@ -5,8 +5,10 @@ name: Inbox window e2e
 # under a temp data dir while agents write through `plannotator inbox mcp`.
 # The binary is built first, with the flags release.yml compiles with.
 # tests/e2e/inbox.spec.ts (the window), notifications.spec.ts,
-# inbox-guides.spec.ts (guided reviews) and inbox-new-message.spec.ts (New
-# message) say what they prove. Runs only when the
+# inbox-guides.spec.ts (guided reviews), inbox-new-message.spec.ts (New
+# message) and inbox-phones.spec.ts (pairing a phone) say what they prove;
+# packages/server/inbox-devices.test.ts replays the phone door's contract
+# exchanges on the same binary. Runs only when the
 # Inbox, the ui and the guide viewer it composes, the binary entry or the build
 # could have changed.
 
@@ -22,6 +24,9 @@ on:
       - 'packages/core/inbox*'
       - 'packages/shared/config.ts'
       - 'packages/server/html-assets.ts'
+      - 'packages/server/tailscale-serve.ts'
+      - 'packages/server/request-host-guard.ts'
+      - 'packages/shared/tailscale.ts'
       - 'packages/shared/html-assets.ts'
       - 'packages/shared/html-assets-node.ts'
       - 'packages/ui/**'
@@ -48,6 +53,9 @@ on:
       - 'packages/core/inbox*'
       - 'packages/shared/config.ts'
       - 'packages/server/html-assets.ts'
+      - 'packages/server/tailscale-serve.ts'
+      - 'packages/server/request-host-guard.ts'
+      - 'packages/shared/tailscale.ts'
       - 'packages/shared/html-assets.ts'
       - 'packages/shared/html-assets-node.ts'
       - 'packages/ui/**'
@@ -111,6 +119,11 @@ jobs:
 
       - name: Run the Inbox window proof
         run: bun run test:e2e:inbox
+
+      - name: Replay the phone door's contract exchanges on the binary
+        run: |
+          export PLANNOTATOR_DATA_DIR="$(mktemp -d)"
+          PLANNOTATOR_INBOX_TEST_BINARY="$PWD/.local/plannotator" bun test packages/server/inbox-devices.test.ts
 
       - name: Keep the screenshots
         if: always()

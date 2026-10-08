@@ -46,7 +46,7 @@ export function ulid(now: number = Date.now()): string {
   return timePart + randomPart;
 }
 
-export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec";
+export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev";
 
 export function inboxId(prefix: InboxIdPrefix, now?: number): string {
   return `${prefix}_${ulid(now)}`;
@@ -57,6 +57,8 @@ const ID_RE: Record<InboxIdPrefix, RegExp> = {
   prj: /^prj_[0-9A-HJKMNP-TV-Z]{26}$/,
   ses: /^ses_[0-9A-HJKMNP-TV-Z]{26}$/,
   dec: /^dec_[0-9A-HJKMNP-TV-Z]{26}$/,
+  /** A paired phone (adr/implementation/inbox-mobile.md, section 2). */
+  dev: /^dev_[0-9A-HJKMNP-TV-Z]{26}$/,
 };
 
 export function isInboxId(prefix: InboxIdPrefix, value: unknown): value is string {
