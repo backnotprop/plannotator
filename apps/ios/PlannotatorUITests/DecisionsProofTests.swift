@@ -178,8 +178,20 @@ final class DecisionsProofTests: XCTestCase {
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Start Pi in ' AND label CONTAINS 'search-indexer and press New message again'")).firstMatch.exists)
         try await control.shot("8.3")
         try await darkFrame("8.3", open: { newMessage.tap() }, shown: app.staticTexts["Pi is not running in search-indexer"])
-        element("reply-instead").tap()
+
+        // At the largest text size the words wrap and scroll in a sheet, and Reply instead stays reachable.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+        XCTAssertTrue(app.staticTexts["Pi is not running in search-indexer"].waitForNonExistence(timeout: 10))
+        try await control.post("/text-size", ["size": "accessibility-extra-extra-extra-large"])
+        newMessage.tap()
+        let replyInstead = element("reply-instead")
+        XCTAssertTrue(replyInstead.waitForExistence(timeout: 30))
+        try await control.shot("ax-8.3")
+        if !replyInstead.isHittable { app.swipeUp() }
+        XCTAssertTrue(replyInstead.isHittable, "Reply instead reachable at the largest text size")
+        replyInstead.tap()
         XCTAssertTrue(element("reply-text").waitForExistence(timeout: 30))
+        try await control.post("/text-size", ["size": "large"])
         try await control.post("/video/stop")
         back()
 
@@ -209,22 +221,29 @@ final class DecisionsProofTests: XCTestCase {
         try await control.post("/m3-dark", ["on": "false", "snap": name])
     }
 
+    /// How long the opening screens may take. This test runs first, so it carries the
+    /// app's first launch on the simulator: on a cold macOS CI runner the launch took
+    /// 42 to 46 s to idle, the pairing cover then did not appear within 30 s, and the
+    /// first list after pairing did not either (run 37799098038, both attempts). Local
+    /// runs take a few seconds. 30 s was the wrong bound for that launch, not a slow app.
+    private let firstLaunch: TimeInterval = 120
+
     private func pairByCode() async throws {
-        XCTAssertTrue(element("connect-computer").waitForExistence(timeout: 30))
+        XCTAssertTrue(element("connect-computer").waitForExistence(timeout: firstLaunch))
         element("connect-computer").tap()
-        XCTAssertTrue(element("find-nearby").waitForExistence(timeout: 30))
+        XCTAssertTrue(element("find-nearby").waitForExistence(timeout: firstLaunch))
         element("find-nearby").tap()
         let offer = try await control.post("/offer")
         let field = element("address-field")
-        XCTAssertTrue(field.waitForExistence(timeout: 30))
+        XCTAssertTrue(field.waitForExistence(timeout: firstLaunch))
         field.tap()
         field.typeText(try XCTUnwrap(offer["address"] as? String))
         element("address-next").tap()
         let code = element("pairing-code")
-        XCTAssertTrue(code.waitForExistence(timeout: 30))
+        XCTAssertTrue(code.waitForExistence(timeout: firstLaunch))
         code.tap()
         code.typeText(try XCTUnwrap(offer["code"] as? String))
-        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'row-'")).firstMatch.waitForExistence(timeout: 30))
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'row-'")).firstMatch.waitForExistence(timeout: firstLaunch))
     }
 
     private func element(_ id: String) -> XCUIElement {

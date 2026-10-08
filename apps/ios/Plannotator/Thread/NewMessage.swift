@@ -19,6 +19,7 @@ struct NewMessageButton: View {
     @State private var notRunning = false
     @State private var replyAfter = false
     @State private var reading = false
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private var sessions: [InboxLiveSession] { live?.sessions ?? [] }
 
@@ -57,7 +58,9 @@ struct NewMessageButton: View {
                 replyAfter = true
                 notRunning = false
             }
-            .presentationCompactAdaptation(.popover)
+            // At the accessibility text sizes the words outgrow a popover: a full-height sheet that scrolls.
+            .presentationCompactAdaptation(typeSize.isAccessibilitySize ? .sheet : .popover)
+            .presentationDetents([.large])
         }
         .onChange(of: notRunning) { _, shown in
             if !shown, replyAfter {
@@ -151,7 +154,17 @@ private struct NotRunningCard: View {
     /// Hosts whose Plannotator connection can wake a session (the desktop's list).
     private var connected: Bool { ["claude-code", "claude", "pi", "opencode"].contains(asker?.host ?? "") }
 
+    @Environment(\.dynamicTypeSize) private var typeSize
+
     var body: some View {
+        if typeSize.isAccessibilitySize {
+            ScrollView { card.frame(maxWidth: .infinity, alignment: .leading) }
+        } else {
+            card.frame(width: 330, alignment: .leading)
+        }
+    }
+
+    private var card: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(connected ? "\(name) is not running in \(project)" : "No agent is running in \(project)")
                 .font(.headline)
@@ -167,7 +180,7 @@ private struct NotRunningCard: View {
                 Label("Reply instead", systemImage: "arrowshape.turn.up.left")
                     .font(.body.weight(.semibold))
                     .padding(.horizontal, 6)
-                    .frame(minHeight: 36)
+                    .frame(minHeight: 44)
             }
             .buttonStyle(.bordered)
             .tint(Color.ink)
@@ -175,7 +188,6 @@ private struct NotRunningCard: View {
             .accessibilityIdentifier("reply-instead")
         }
         .padding(18)
-        .frame(width: 330, alignment: .leading)
     }
 }
 
