@@ -120,9 +120,23 @@ final class WorkspacesProofTests: XCTestCase {
         flag.tap()
         XCTAssertTrue(waitForLabel(element("reply-field"), "2 picks"))
         try await control.shot("3.2-workspaces")
-        element("reply-field").tap()
+
+        // A retried pick replays: the first pick sent again with the key the app
+        // derives answers its first result; under another key it is a conflict.
+        XCUIDevice.shared.press(.home) // the cookie store writes its file in the background
+        let replayed = try await control.post("/replay-pick", ["thread": thread, "key": first, "revision": "0", "choice": "Yes", "prompt": "Run the retry tests against the Stripe test clock?"])
+        app.activate()
+        let replay = try XCTUnwrap(replayed["replay"] as? [String: Any], "\(replayed)")
+        XCTAssertEqual(replay["status"] as? Int, 200, "\(replayed)")
+        XCTAssertEqual(replay["revision"] as? Int, 1, "the replay answers the first pick's result: \(replayed)")
+        XCTAssertEqual((replayed["other"] as? [String: Any])?["code"] as? String, "question_revision_conflict", "\(replayed)")
+        XCTAssertTrue(waitForLabel(element("reply-field"), "2 picks"))
         let text = element("reply-text")
-        XCTAssertTrue(text.waitForExistence(timeout: 30))
+        for _ in 0..<3 where !text.exists {
+            element("reply-field").tap()
+            _ = text.waitForExistence(timeout: 10)
+        }
+        XCTAssertTrue(text.exists)
         text.typeText("Go ahead.")
         element("send").tap()
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Sent '")).firstMatch.waitForExistence(timeout: 30))

@@ -171,6 +171,28 @@ async function shot(name: string): Promise<void> {
 
 /** The session cookie the app holds, from its own cookie store in the simulator
  * (written to disk a moment after the app leaves the front, so it is polled). */
+/** Every cookie the app holds for the origin, by name (read once, after the app wrote them). */
+async function appCookies(): Promise<Record<string, string>> {
+  const container = run('xcrun', ['simctl', 'get_app_container', udid, 'ai.plannotator.app', 'data']).trim();
+  const dir = join(container, 'Library/Cookies');
+  const host = new URL(origin).hostname;
+  const jar: Record<string, string> = {};
+  for (let i = 0; i < 30 && !jar.session; i++) {
+    for (const file of existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.binarycookies')) : []) {
+      for (const c of readBinaryCookies(readFileSync(join(dir, file)))) if (c.domain.replace(/^\./, '') === host) jar[c.name] = c.value;
+    }
+    if (!jar.session) await sleep(500);
+  }
+  return jar;
+}
+
+/** The app's pick key (WorkspacesSource.pickKey): the comment, question, revision and answer, hashed. */
+function pickKey(message: string, key: string, revision: number, answer: Record<string, unknown>): string {
+  const sorted = JSON.stringify(Object.fromEntries(Object.entries(answer).sort(([a], [b]) => (a < b ? -1 : 1))));
+  const digest = new Bun.CryptoHasher('sha256').update(`${message}|${key}|${revision}|${sorted}`).digest('hex');
+  return `pick-${digest.slice(0, 32)}`;
+}
+
 async function appSessionCookie(want: 'present' | 'gone' = 'present'): Promise<string | null> {
   const container = run('xcrun', ['simctl', 'get_app_container', udid, 'ai.plannotator.app', 'data']).trim();
   const host = new URL(origin).hostname;
@@ -275,6 +297,28 @@ const control = Bun.serve({
           // Keep the session cookie the app holds now, to try it after sign-out.
           sessionCookie = await appSessionCookie();
           return Response.json({ held: sessionCookie !== null });
+        case '/replay-pick': {
+          // The phone's pick sent again as its retry would be, with the app's own
+          // session and the key the app derives: W2 answers the first result
+          // (a replay). The same pick under another key is a conflict.
+          const jar = await appCookies();
+          const cookie = Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ');
+          const [ws, doc, annotation] = (body.thread ?? '').split('/');
+          const revision = Number(body.revision);
+          const answer = { v: 1, key: body.key, kind: 'single', prompt: body.prompt, selected: [body.choice] };
+          const send = async (key: string) => {
+            const response = await fetch(`${origin}/v1/workspaces/${ws}/documents/${doc}/answers`, {
+              method: 'POST',
+              headers: { Cookie: cookie, 'X-CSRF-Token': jar.csrf ?? '', 'Content-Type': 'application/json', 'Idempotency-Key': key },
+              body: JSON.stringify({ annotation_id: annotation, questions: [{ key: body.key, revision, answer }] }),
+            });
+            const json = (await response.json().catch(() => ({}))) as { questions?: { key: string; revision: number; state: string }[]; error?: { code: string } };
+            return { status: response.status, revision: json.questions?.find((q) => q.key === body.key)?.revision ?? null, code: json.error?.code ?? null };
+          };
+          const replay = await send(pickKey(body.thread!, body.key!, revision, answer));
+          const other = await send(`pick-${crypto.randomUUID().replaceAll('-', '')}`);
+          return Response.json({ replay, other });
+        }
         case '/app-session-gone':
           // After sign-out the app's own store holds no session cookie.
           return Response.json({ gone: (await appSessionCookie('gone')) === null });

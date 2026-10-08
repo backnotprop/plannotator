@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 // The Workspaces source: its doors mapped onto the Inbox's wire models, so the
@@ -164,13 +165,30 @@ public actor WorkspacesSource: SourceClient {
         }
         struct Body: Encodable { var annotationId: String; var questions: [Pick] }
         let (workspace, document, annotation) = try Self.parse(id)
-        // A keyed pick replays its first answer, so a pick whose answer was lost can be retried.
-        let result: AnswerResult = try await client.send(
-            "POST", "v1/workspaces/\(workspace)/documents/\(document)/answers",
-            Body(annotationId: annotation, questions: [Pick(key: key, revision: revision, answer: answer)]),
-            idempotencyKey: UUID().uuidString.lowercased()
-        )
+        // One key per pick, the same on every retry of it (the rule M1 keeps for
+        // Send): W2 replays a keyed pick's first answer, so a pick whose answer was
+        // lost is retried once and reads its own tap instead of a conflict.
+        let pickKey = Self.pickKey(message: id, key: key, revision: revision, answer: answer)
+        let body = Body(annotationId: annotation, questions: [Pick(key: key, revision: revision, answer: answer)])
+        let path = "v1/workspaces/\(workspace)/documents/\(document)/answers"
+        let result: AnswerResult
+        do {
+            result = try await client.send("POST", path, body, idempotencyKey: pickKey)
+        } catch .workspacesUnreachable {
+            result = try await client.send("POST", path, body, idempotencyKey: pickKey)
+        }
         return answered(result, message: id)
+    }
+
+    /// A pick's key: the comment, the question, the revision it was made on and
+    /// the answer, hashed. A retry of the same pick has the same key; the next
+    /// pick is on a new revision, so it has a new one.
+    public static func pickKey(message: String, key: String, revision: Int, answer: QuestionAnswer?) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let answerJSON = answer.flatMap { try? encoder.encode($0) }.map { String(decoding: $0, as: UTF8.self) } ?? "null"
+        let digest = SHA256.hash(data: Data("\(message)|\(key)|\(revision)|\(answerJSON)".utf8))
+        return "pick-" + digest.prefix(16).map { String(format: "%02x", $0) }.joined()
     }
 
     public func reply(message id: String, idempotencyKey: String, words: String, questions: [InboxClient.SendQuestion]) async throws(InboxError) -> InboxQuestionsResponse {
