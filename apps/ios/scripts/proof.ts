@@ -445,7 +445,14 @@ const xcodebuild = (args: string[]) =>
 const warmUp = 'PlannotatorUITests/WarmUpLaunch';
 try {
   status = await xcodebuild(['build-for-testing']);
-  if (status === 0) status = await xcodebuild(['test-without-building', `-only-testing:${warmUp}`, '-resultBundlePath', join(tmp, 'WarmUp.xcresult')]);
+  // The warm-up pays a cost, it proves nothing: it never fails the proof. On a cold
+  // runner its first try can itself time out inside XCTest (run 37815033252 attempt 2:
+  // the pairing cover took over 120 s to first appear), so it gets a second try.
+  for (let attempt = 1; status === 0 && attempt <= 2; attempt++) {
+    const warm = await xcodebuild(['test-without-building', `-only-testing:${warmUp}`, '-resultBundlePath', join(tmp, `WarmUp-${attempt}.xcresult`)]);
+    process.stdout.write(`\nWarm-up ${attempt}: ${warm === 0 ? 'done' : 'did not finish, the app is still warming'}\n`);
+    if (warm === 0) break;
+  }
   if (status === 0) status = await xcodebuild(['test-without-building', ...(only ? [`-only-testing:${only}`] : [`-skip-testing:${warmUp}`]), '-resultBundlePath', join(tmp, 'Proof.xcresult')]);
 } finally {
   video?.kill('SIGINT');

@@ -15,7 +15,11 @@ enum ProofWait {
 /// of the app on the fresh simulator, one pairing with the proof's Inbox (the
 /// first Keychain write, the first door requests, the first list drawn), Remove
 /// this source, quit. Every proof class then starts on a warm simulator from a
-/// fresh app. Without the proof script it is skipped.
+/// fresh app. The script gives it two tries and never fails the proof on it:
+/// a first try on a cold runner can time out inside XCTest while the app is
+/// still loading. A warm-up that stops partway may leave the app paired, so a
+/// try starts by removing a source left by the try before. Without the proof
+/// script it is skipped.
 @MainActor
 final class WarmUpLaunch: XCTestCase {
     func testFirstLaunch() async throws {
@@ -27,6 +31,10 @@ final class WarmUpLaunch: XCTestCase {
         let app = XCUIApplication()
         let element = { (id: String) in app.descendants(matching: .any).matching(identifier: id).firstMatch }
         app.launch()
+        if !element("connect-computer").waitForExistence(timeout: ProofWait.opening) {
+            // Paired by a try that stopped partway: remove that source first.
+            removeSource(app, element)
+        }
         XCTAssertTrue(element("connect-computer").waitForExistence(timeout: ProofWait.opening))
         element("connect-computer").tap()
         XCTAssertTrue(element("find-nearby").waitForExistence(timeout: ProofWait.opening))
@@ -43,6 +51,11 @@ final class WarmUpLaunch: XCTestCase {
         code.typeText(try XCTUnwrap(offer["code"] as? String))
         // The Inbox has no thread yet: the list's empty state is the paired screen.
         XCTAssertTrue(app.staticTexts["Nothing waiting"].waitForExistence(timeout: ProofWait.opening))
+        removeSource(app, element)
+        app.terminate()
+    }
+
+    private func removeSource(_ app: XCUIApplication, _ element: (String) -> XCUIElement) {
         app.tabBars.buttons["Settings"].tap()
         let source = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'source-'")).firstMatch
         XCTAssertTrue(source.waitForExistence(timeout: ProofWait.opening))
@@ -51,6 +64,6 @@ final class WarmUpLaunch: XCTestCase {
         element("remove-source").tap()
         app.sheets.buttons["Remove This Source"].firstMatch.tap()
         XCTAssertTrue(element("add-source").waitForExistence(timeout: ProofWait.opening))
-        app.terminate()
+        app.tabBars.buttons["Inbox"].tap()
     }
 }
