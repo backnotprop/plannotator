@@ -1,6 +1,7 @@
 import AppKit
 import Carbon
 import ScreenCaptureKit
+import SnapshotsSecurity
 
 /// What a capture request asks for. The raw values are the wire names the CLI's
 /// URL command (`kind=`) and the HUD page (`{ type: 'capture', kind }`) use.
@@ -44,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.startCapture(pending)
         }
         setUpStatusItem()
+        attachedDataDir = Config.dataDir
         connect()
         permissions.resumeAfterLaunch()
         // The hub restarts (an update, a crash): attach again and reload the page.
@@ -67,30 +69,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // MARK: Commands from the CLI (plannotator-snapshots://capture?kind=…&dataDir=…&cli=…)
+    // MARK: Commands from the CLI (plannotator-snapshots://capture?kind=…)
 
+    /// The data dir the hub attachment was made for: the CLI may have saved another one
+    /// (`defaults write`) before this command.
+    private var attachedDataDir: String?
+
+    /// Any process or web page can open this URL scheme, so a command carries only an
+    /// action and a capture kind (URLCommand); the data dir and the CLI come from this
+    /// app's defaults, which the CLI writes before it opens the app.
     @objc private func handleURL(_ event: NSAppleEventDescriptor, reply: NSAppleEventDescriptor) {
         guard let text = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue,
-              let url = URLComponents(string: text) else { return }
-        let query = Dictionary((url.queryItems ?? []).map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { $1 })
-        if let dataDir = query["dataDir"], !dataDir.isEmpty, dataDir != Config.dataDir {
-            Config.setDataDir(dataDir)
-            hub.resetAttachment()
-        }
-        if let cli = query["cli"], let data = cli.data(using: .utf8), let argv = try? JSONSerialization.jsonObject(with: data) as? [String], !argv.isEmpty {
-            Config.setCli(argv)
-        }
-        switch url.host {
-        case "capture":
+              let command = URLCommand.parse(text) else { return }
+        let dataDir = Config.dataDir
+        if let attachedDataDir, attachedDataDir != dataDir { hub.resetAttachment() }
+        attachedDataDir = dataDir
+        switch command {
+        case .capture(let kind):
             connect()
-            startCapture(CaptureKind(rawValue: query["kind"] ?? "") ?? .region)
-        case "show":
+            startCapture(CaptureKind(rawValue: kind) ?? .region)
+        case .show:
             connect()
             panel.call("toggle")
-        case "quit":
+        case .quit:
             NSApp.terminate(nil)
-        default:
-            break
         }
     }
 

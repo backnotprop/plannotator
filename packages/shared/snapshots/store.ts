@@ -24,21 +24,29 @@ import { randomBytes } from "node:crypto";
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
-import { basename, extname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { snapshotsDir } from "./registry";
 import type { Collection, Destination, SendState, Snapshot, SnapshotKind, SnapshotSource } from "./types";
+import { isSendId } from "./validate";
 
 export const SENT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export const DISCARD_UNDO_MS = 10_000;
+/** The largest capture taken in (bytes), and the largest side in pixels. */
+export const MAX_CAPTURE_BYTES = 200 * 1024 * 1024;
+export const MAX_CAPTURE_SIDE = 32_768;
+/** The largest window text taken in. */
+export const MAX_TEXT_BYTES = 16 * 1024 * 1024;
 
 export interface PendingSend {
   v: 1;
@@ -84,20 +92,34 @@ function readJson<T>(path: string): T | null {
   }
 }
 
-/** Width and height of a PNG or JPEG from its header; null when neither. */
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+/** The image type from its magic bytes (never from a file name). */
+export function imageType(bytes: Uint8Array): "png" | "jpg" | null {
+  if (bytes.length > 24 && PNG_SIGNATURE.every((byte, index) => bytes[index] === byte)) return "png";
+  if (bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "jpg";
+  return null;
+}
+
+/** Width and height of a PNG (full signature, IHDR first) or JPEG from its header; null when neither. */
 export function imageSize(bytes: Uint8Array): { width: number; height: number } | null {
-  if (bytes.length > 24 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+  const type = imageType(bytes);
+  if (type === "png") {
+    // IHDR is the first chunk: its type at 12, width and height at 16 and 20.
+    if (bytes[12] !== 0x49 || bytes[13] !== 0x48 || bytes[14] !== 0x44 || bytes[15] !== 0x52) return null;
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    return { width: view.getUint32(16), height: view.getUint32(20) };
+    const size = { width: view.getUint32(16), height: view.getUint32(20) };
+    return size.width > 0 && size.height > 0 ? size : null;
   }
-  if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+  if (type === "jpg") {
     let offset = 2;
     while (offset + 9 < bytes.length) {
       if (bytes[offset] !== 0xff) return null;
       const marker = bytes[offset + 1]!;
       const length = (bytes[offset + 2]! << 8) | bytes[offset + 3]!;
       if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
-        return { height: (bytes[offset + 5]! << 8) | bytes[offset + 6]!, width: (bytes[offset + 7]! << 8) | bytes[offset + 8]! };
+        const size = { height: (bytes[offset + 5]! << 8) | bytes[offset + 6]!, width: (bytes[offset + 7]! << 8) | bytes[offset + 8]! };
+        return size.width > 0 && size.height > 0 ? size : null;
       }
       offset += 2 + length;
     }
@@ -255,12 +277,27 @@ export class SnapshotsStore {
     return collection;
   }
 
-  /** Register a capture as the next snapshot of `collection`. */
+  /**
+   * Register a capture as the next snapshot of `collection`. The file must be
+   * a PNG or JPEG by its own bytes, whatever the caller says about it: a
+   * width and height given with it must match the header, never replace it.
+   * Window text is taken only from `incoming/`, where the native app writes it.
+   */
   addSnapshot(collection: Collection, input: CaptureInput): Snapshot {
+    const stat = lstatSync(input.file);
+    if (!stat.isFile()) throw new Error("Not a regular file.");
+    if (stat.size > MAX_CAPTURE_BYTES) throw new Error("The image is too large.");
     const bytes = readFileSync(input.file);
-    const size = input.width && input.height ? { width: input.width, height: input.height } : imageSize(bytes);
-    if (!size) throw new Error("Not a PNG or JPEG image.");
-    const ext = extname(input.file).toLowerCase() === ".jpg" || extname(input.file).toLowerCase() === ".jpeg" ? ".jpg" : ".png";
+    const type = imageType(bytes);
+    const size = imageSize(bytes);
+    if (!type || !size) throw new Error("Not a PNG or JPEG image.");
+    if (size.width > MAX_CAPTURE_SIDE || size.height > MAX_CAPTURE_SIDE) throw new Error("The image is too large.");
+    if ((input.width !== undefined || input.height !== undefined) && (input.width !== size.width || input.height !== size.height)) {
+      throw new Error("The image's size does not match its header.");
+    }
+    const textFile = input.textFile ? this.incomingFile(input.textFile, MAX_TEXT_BYTES) : null;
+    if (input.textFile && !textFile) throw new Error("Window text is taken only from the incoming folder.");
+    const ext = type === "jpg" ? ".jpg" : ".png";
     const id = `s-${String(collection.snapshots.length + 1).padStart(2, "0")}-${hex(2)}`;
     const snapshot: Snapshot = {
       v: 1,
@@ -281,8 +318,8 @@ export class SnapshotsStore {
     const dir = this.snapshotDir(snapshot);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     this.moveIn(input.file, join(dir, snapshot.original.file));
-    if (input.textFile && existsSync(input.textFile)) {
-      this.moveIn(input.textFile, join(dir, "app-text.raw.txt"));
+    if (textFile) {
+      this.moveIn(textFile, join(dir, "app-text.raw.txt"));
       const raw = readFileSync(join(dir, "app-text.raw.txt"), "utf8");
       snapshot.text = { chars: raw.length, include: raw.trim().length > 0, removedLines: [], source: "accessibility" };
     } else if (input.kind === "app") {
@@ -291,6 +328,18 @@ export class SnapshotsStore {
     this.saveSnapshot(snapshot);
     this.updateCollection(collection, { snapshots: [...collection.snapshots, id] });
     return snapshot;
+  }
+
+  /** A regular file directly inside incoming/ (not a symlink), within `maxBytes`; null otherwise. */
+  private incomingFile(path: string, maxBytes: number): string | null {
+    try {
+      const stat = lstatSync(path);
+      if (!stat.isFile() || stat.size > maxBytes) return null;
+      const real = realpathSync(path);
+      return dirname(real) === realpathSync(this.incomingDir) ? join(this.incomingDir, basename(real)) : null;
+    } catch {
+      return null;
+    }
   }
 
   /** Files the native app dropped under incoming/ are moved; anything else (a tool's own file) is copied. */
@@ -365,19 +414,32 @@ export class SnapshotsStore {
 
   // --- Sends ---------------------------------------------------------------------
 
+  /** `sends/<sendId>.json`, only for a well-formed id (never a path outside sends/). */
+  sendPath(sendId: string): string {
+    if (!isSendId(sendId)) throw new Error("A bad send id.");
+    const path = join(this.sendsDir, `${sendId}.json`);
+    if (dirname(path) !== this.sendsDir) throw new Error("A bad send id.");
+    return path;
+  }
+
   savePendingSend(send: PendingSend): void {
-    writeJson(join(this.sendsDir, `${send.sendId}.json`), send);
+    writeJson(this.sendPath(send.sendId), send);
   }
 
   removePendingSend(sendId: string): void {
-    rmSync(join(this.sendsDir, `${basename(sendId)}.json`), { force: true });
+    if (!isSendId(sendId)) return;
+    rmSync(this.sendPath(sendId), { force: true });
   }
 
+  /** Sends not yet delivered, as saved (a file whose name is not its own well-formed id is ignored). */
   pendingSends(): PendingSend[] {
-    return safeList(this.sendsDir)
-      .filter((name) => name.endsWith(".json"))
-      .map((name) => readJson<PendingSend>(join(this.sendsDir, name)))
-      .filter((send): send is PendingSend => !!send && send.v === 1);
+    const sends: PendingSend[] = [];
+    for (const name of safeList(this.sendsDir)) {
+      if (!name.endsWith(".json")) continue;
+      const send = readJson<PendingSend>(join(this.sendsDir, name));
+      if (send && send.v === 1 && isSendId(send.sendId) && name === `${send.sendId}.json`) sends.push(send);
+    }
+    return sends;
   }
 
   setSendState(collection: Collection, send: SendState): void {

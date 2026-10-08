@@ -86,13 +86,17 @@ jobs:
   snapshots-macos:
     runs-on: macos-latest
     # The Apple secrets live in the protected environment apple-signing (see
-    # snapshots-sign-check.yml, which proves them without a release).
-    environment: apple-signing
+    # snapshots-sign-check.yml, which proves them without a release). That
+    # environment admits only main and v* tags, and this job enters it ONLY on
+    # a tag run: pull requests and branch runs get no environment (an empty
+    # name), so they build the ad-hoc signed app and every secret below reads
+    # empty (each one is behind the tag check, which short-circuits).
+    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'apple-signing' || '' }}
     permissions:
       contents: read
     env:
-      HAS_SIGNING: ${{ secrets.APPLE_DEVELOPER_ID_P12 != '' && startsWith(github.ref, 'refs/tags/v') }}
-      HAS_NOTARY: ${{ secrets.APPLE_NOTARY_KEY_P8 != '' && startsWith(github.ref, 'refs/tags/v') }}
+      HAS_SIGNING: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.APPLE_DEVELOPER_ID_P12 != '' }}
+      HAS_NOTARY: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.APPLE_NOTARY_KEY_P8 != '' }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -112,6 +116,8 @@ jobs:
           security unlock-keychain -p "$password" "$keychain"
           security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain"
+          # The existing keychains, one word each (split on purpose).
+          # shellcheck disable=SC2046
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
           rm -f "$RUNNER_TEMP/cert.p12"
 
@@ -119,8 +125,8 @@ jobs:
         env:
           SNAPSHOTS_SIGN_IDENTITY: ${{ env.HAS_SIGNING == 'true' && secrets.APPLE_DEVELOPER_ID_IDENTITY || '' }}
           NOTARY_KEY_P8: ${{ env.HAS_NOTARY == 'true' && secrets.APPLE_NOTARY_KEY_P8 || '' }}
-          SNAPSHOTS_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
-          SNAPSHOTS_NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          SNAPSHOTS_NOTARY_KEY_ID: ${{ env.HAS_NOTARY == 'true' && secrets.APPLE_NOTARY_KEY_ID || '' }}
+          SNAPSHOTS_NOTARY_ISSUER: ${{ env.HAS_NOTARY == 'true' && secrets.APPLE_NOTARY_ISSUER_ID || '' }}
         run: |
           VERSION=$(jq -r .version package.json)
           if [ -n "$NOTARY_KEY_P8" ] && [ -n "$SNAPSHOTS_SIGN_IDENTITY" ]; then

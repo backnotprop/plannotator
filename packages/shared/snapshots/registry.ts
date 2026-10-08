@@ -30,7 +30,7 @@ export interface SnapshotsHubEntry {
   token: string;
   serverSession: string;
   startedAt: string;
-  /** The argv that runs this CLI (the native app uses it to start the hub again). */
+  /** The argv that runs this CLI. Informational: the native app never runs it (it uses the argv the CLI saved in its defaults, after checking it). */
   cli: string[];
 }
 

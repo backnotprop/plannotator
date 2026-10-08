@@ -357,7 +357,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Usage:",
     "  plannotator snapshot [--app] [--wait] [--session <host>:<id>] [--no-capture]",
     "  plannotator snapshot add <image | - | --screen>",
-    "  plannotator snapshot open | status | stop | install-app",
+    "  plannotator snapshot open | status | stop | install-app [--force]",
     "  plannotator snapshot hub [--background]",
     "",
     "Plannotator Snapshots (macOS): freeze the screen, drag a box around what you",

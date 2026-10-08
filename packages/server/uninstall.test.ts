@@ -2064,3 +2064,73 @@ describe("host and platform integrations", () => {
     });
   });
 });
+
+describe("Plannotator Snapshots", () => {
+  test("removes the app (macOS) and the plannotator-snapshot skill from every scope it installs to", async () => {
+    const fixture = createFixture({ platform: "darwin" });
+    const { homeDir } = fixture;
+    const app = join(homeDir, "Applications", "Plannotator Snapshots.app");
+    writeText(join(app, "Contents", "Info.plist"), "<plist/>");
+    const installed = [
+      join(homeDir, ".claude", "skills", "plannotator-snapshot", "SKILL.md"),
+      join(homeDir, ".agents", "skills", "plannotator-snapshot", "SKILL.md"),
+      join(homeDir, ".kiro", "skills", "plannotator-snapshot", "SKILL.md"),
+      join(homeDir, ".vibe", "skills", "plannotator-snapshot", "SKILL.md"),
+      join(homeDir, ".gemini", "commands", "plannotator-snapshot.toml"),
+      join(homeDir, ".config", "opencode", "commands", "plannotator-snapshot.md"),
+    ];
+    for (const path of installed) writeText(path);
+    // Not ours: a user's own Claude command of the same name, and another app in ~/Applications.
+    const userCommand = join(homeDir, ".claude", "commands", "plannotator-snapshot.md");
+    const otherApp = join(homeDir, "Applications", "Other.app", "Contents", "Info.plist");
+    writeText(userCommand, "the user's own file");
+    writeText(otherApp, "<plist/>");
+
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
+
+    expect(result.ok).toBe(true);
+    expect(existsSync(app)).toBe(false);
+    for (const path of installed) expect(existsSync(path), `${path} should have been removed`).toBe(false);
+    expect(readFileSync(userCommand, "utf8")).toBe("the user's own file");
+    expect(existsSync(otherApp)).toBe(true);
+  });
+
+  test("leaves ~/Applications alone off macOS", async () => {
+    const fixture = createFixture();
+    const app = join(fixture.homeDir, "Applications", "Plannotator Snapshots.app", "Contents", "Info.plist");
+    writeText(app, "<plist/>");
+    await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
+    expect(existsSync(app)).toBe(true);
+  });
+
+  test("purge stops a running hub and removes snapshots/", async () => {
+    const fixture = createFixture();
+    const { startSnapshotsHubServer } = await import("./snapshots/server");
+    let stops = 0;
+    const server = startSnapshotsHubServer({ dataDir: fixture.dataDir, version: "test", cli: [], onStop: () => (stops += 1) });
+    try {
+      writeText(join(fixture.dataDir, "snapshots", "collections", "hc-1", "collection.json"), "{}");
+      const result = await runPlannotatorUninstall({ purge: true, dryRun: false }, fixture.environment);
+      expect(result.ok).toBe(true);
+      expect(stops).toBe(1);
+      expect(result.removed.some((line) => line.startsWith("Stopped the Plannotator Snapshots hub"))).toBe(true);
+      expect(existsSync(join(fixture.dataDir, "snapshots"))).toBe(false);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("a dry-run purge leaves the hub running", async () => {
+    const fixture = createFixture();
+    const { startSnapshotsHubServer } = await import("./snapshots/server");
+    let stops = 0;
+    const server = startSnapshotsHubServer({ dataDir: fixture.dataDir, version: "test", cli: [], onStop: () => (stops += 1) });
+    try {
+      await runPlannotatorUninstall({ purge: true, dryRun: true }, fixture.environment);
+      expect(stops).toBe(0);
+      expect(existsSync(join(fixture.dataDir, "snapshots", "hub.json"))).toBe(true);
+    } finally {
+      server.stop();
+    }
+  });
+});

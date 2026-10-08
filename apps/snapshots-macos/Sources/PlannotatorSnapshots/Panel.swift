@@ -1,5 +1,6 @@
 import AppKit
 import WebKit
+import SnapshotsSecurity
 
 /// The HUD: ONE non-activating floating panel hosting the shared web UI (the
 /// hub's /hud page), resized between the 46 pt strip, the panel (760 × 540 by
@@ -59,7 +60,6 @@ final class PanelController: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         super.init()
         config.userContentController.add(self, name: "snapshots")
         webView.navigationDelegate = self
-        webView.navigationDelegate = self
         webView.autoresizingMask = [.width, .height]
         glass.addSubview(webView)
         panel.contentView = glass
@@ -76,15 +76,44 @@ final class PanelController: NSObject, WKScriptMessageHandler, WKNavigationDeleg
     /// Load (or reload, after the hub restarted) the HUD with its token injected before any page script runs.
     func load(_ attached: Hub.Attached) {
         guard loadedSession != attached.entry.serverSession else { return }
+        // Only ever the hub on loopback (Hub.readEntry already refused anything else).
+        guard let origin = attached.entry.origin, let url = URL(string: "\(origin.base)/hud") else {
+            log("refusing to load the HUD from a hub that is not on loopback")
+            return
+        }
         loadedSession = attached.entry.serverSession
+        hubOrigin = origin
         isReady = false
         let controller = webView.configuration.userContentController
         controller.removeAllUserScripts()
         let boot = "window.__SNAPSHOTS__ = { token: \(jsString(attached.hudToken)), native: true };"
         controller.addUserScript(WKUserScript(source: boot, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        if let url = URL(string: "\(attached.entry.url)/hud") {
-            webView.load(URLRequest(url: url))
-            log("loading the HUD from \(attached.entry.url)")
+        webView.load(URLRequest(url: url))
+        log("loading the HUD from \(origin.base)")
+    }
+
+    /// The hub the HUD page was loaded from: the only origin it may navigate to or message from.
+    private var hubOrigin: HubOrigin?
+
+    /// Only the hub's pages load here (the page holds a HUD token and the `snapshots` handler).
+    /// A link the person follows to a web page opens in their browser instead.
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void) {
+        let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+        let decision = NavigationPolicy.decide(
+            url: navigationAction.request.url,
+            isMainFrame: isMainFrame,
+            isLinkActivation: navigationAction.navigationType == .linkActivated || navigationAction.targetFrame == nil,
+            origin: hubOrigin
+        )
+        switch decision {
+        case .allow:
+            decisionHandler(.allow)
+        case .openExternally:
+            if let url = navigationAction.request.url { NSWorkspace.shared.open(url) }
+            decisionHandler(.cancel)
+        case .cancel:
+            log("HUD navigation refused")
+            decisionHandler(.cancel)
         }
     }
 
@@ -99,6 +128,16 @@ final class PanelController: NSObject, WKScriptMessageHandler, WKNavigationDeleg
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        // Messages only from the HUD page itself: the main frame, on the hub's origin.
+        let source = message.frameInfo.securityOrigin
+        guard message.frameInfo.isMainFrame,
+              let hubOrigin,
+              hubOrigin.matches(protocol: source.protocol, host: source.host, port: source.port),
+              hubOrigin.contains(message.frameInfo.request.url ?? webView.url)
+        else {
+            log("ignoring a message from outside the HUD page")
+            return
+        }
         guard let body = message.body as? [String: Any] else { return }
         if body["type"] as? String == "ready" {
             log("HUD ready")

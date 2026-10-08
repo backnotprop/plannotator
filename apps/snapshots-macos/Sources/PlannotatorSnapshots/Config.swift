@@ -1,31 +1,26 @@
 import AppKit
 import Foundation
+import SnapshotsSecurity
 
 /// Where Plannotator keeps its data and how to run its CLI. The app is started
 /// by LaunchServices (never as a child of a terminal), so it has no shell
-/// environment: the CLI hands both over in the launch URL and they are kept in
-/// UserDefaults for launches that come from elsewhere (login, a hotkey later).
+/// environment. The CLI tells it both with `defaults write ai.plannotator.snapshots`
+/// (keys `dataDir` and `cli`) before it opens the app; never through the URL
+/// scheme, which any process or web page can open (SnapshotsSecurity).
 enum Config {
     private static let defaults = UserDefaults.standard
 
-    /// Mirrors getPlannotatorDataDir(): an existing ~/.plannotator wins, else
-    /// $XDG_DATA_HOME/plannotator, else ~/.plannotator. A data dir passed by
-    /// the CLI overrides both and is remembered.
+    /// `--data-dir` (this run only), else the data dir the CLI saved, else the
+    /// getPlannotatorDataDir() rules: an existing ~/.plannotator, else
+    /// $XDG_DATA_HOME/plannotator, else ~/.plannotator.
     static var dataDir: String {
         if let given = argument("--data-dir") { return given }
-        if let saved = defaults.string(forKey: "dataDir"), !saved.isEmpty { return saved }
-        let home = NSHomeDirectory()
-        let legacy = (home as NSString).appendingPathComponent(".plannotator")
-        if FileManager.default.fileExists(atPath: legacy) { return legacy }
-        if let xdg = ProcessInfo.processInfo.environment["XDG_DATA_HOME"], xdg.hasPrefix("/") {
-            return (xdg as NSString).appendingPathComponent("plannotator")
-        }
-        return legacy
-    }
-
-    static func setDataDir(_ path: String) {
-        if argument("--data-dir") != nil { return }
-        defaults.set(path, forKey: "dataDir")
+        return DataDirRule.resolve(
+            saved: defaults.string(forKey: "dataDir"),
+            home: NSHomeDirectory(),
+            xdgDataHome: ProcessInfo.processInfo.environment["XDG_DATA_HOME"],
+            exists: { FileManager.default.fileExists(atPath: $0) }
+        )
     }
 
     /// `--data-dir <path>` / `--cli "<argv>"` on the command line: used for this run only, never saved (development, sandboxed runs).
@@ -35,15 +30,12 @@ enum Config {
         return args[index + 1]
     }
 
-    /// The argv that runs `plannotator` (the compiled binary, or bun + script in development).
+    /// The argv that runs `plannotator` (the compiled binary, or bun + script in development):
+    /// `--cli` for this run, else the one the CLI saved, else the usual install locations.
+    /// Every element must be a regular file owned by this user (or root) that nobody else can write.
     static var cli: [String]? {
-        if let given = argument("--cli") { return given.split(separator: " ").map(String.init) }
-        if let saved = defaults.array(forKey: "cli") as? [String], !saved.isEmpty { return saved }
-        return nil
-    }
-
-    static func setCli(_ argv: [String]) {
-        defaults.set(argv, forKey: "cli")
+        if let given = argument("--cli") { return TrustedCLI.validate(given.split(separator: " ").map(String.init)) }
+        return TrustedCLI.resolve(saved: defaults.array(forKey: "cli") as? [String], home: NSHomeDirectory())
     }
 
     static var snapshotsDir: String { (dataDir as NSString).appendingPathComponent("snapshots") }
