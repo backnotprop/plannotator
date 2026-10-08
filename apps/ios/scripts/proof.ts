@@ -32,6 +32,7 @@ import { Database } from 'bun:sqlite';
 import { dirname, join, resolve } from 'node:path';
 import { DEMO_MESSAGES, SimAgent, scratchProject } from '../../../scripts/inbox-sim.ts';
 import { GUIDE_BRIEF_EXAMPLE } from '../../../packages/server/inbox-guides.ts';
+import { deriveRelayKeys } from '../../../packages/core/crypto.ts';
 
 const args = process.argv.slice(2);
 const flag = (name: string, fallback?: string) => {
@@ -408,6 +409,28 @@ const control = Bun.serve({
           if (!file) return Response.json({ error: 'no push for that thread' }, { status: 404 });
           run('xcrun', ['simctl', 'push', udid, 'ai.plannotator.app', file]);
           return Response.json({ ok: true });
+        }
+        case '/relay-token-stand-in': {
+          // A simulator that cannot reach APNs (a CI runner) never gets a token:
+          // register a stand-in for each paired phone at the relay, as the phone
+          // would (7.29, its relay secret derived from the pairing secret the
+          // computer keeps), so the pushes still go out. The brief allows a fake
+          // token for the registration call; the test says which it used.
+          const mailbox = JSON.parse(readFileSync(join(dataDir, 'inbox', 'relay.json'), 'utf8')) as { url: string; mailbox_id: string };
+          const token = 'a'.repeat(64);
+          let registered = 0;
+          for (const device of relayDevices()) {
+            const id = String(device.id);
+            const secret = readFileSync(join(dataDir, 'inbox', 'device-secrets', id.replace(/[^A-Za-z0-9_]/g, '')), 'utf8').trim();
+            const { relaySecret } = await deriveRelayKeys(secret, id);
+            const answer = await fetch(`${mailbox.url}/v1/mailboxes/${mailbox.mailbox_id}/devices/${id}/apns`, {
+              method: 'PUT',
+              headers: { Authorization: `Bearer ${relaySecret}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token, environment: 'sandbox' }),
+            });
+            if (answer.status === 204) registered += 1;
+          }
+          return Response.json({ registered, token });
         }
         case '/push-unopenable': {
           // A push this phone holds no key for (as from a computer it was removed from):
