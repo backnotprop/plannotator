@@ -401,19 +401,19 @@ export function createInboxDevices(context: InboxDevicesContext) {
 
   // ── The Wi-Fi (contract section 3): the same door-only handler, over TLS on every interface. ──
 
-  /** Keep "Reach from this Wi-Fi" in inbox.json (and this run's entry): `lan: { port }` while on. */
-  const saveLan = (port: number | null) => {
+  /** Keep "Reach from this Wi-Fi" in inbox.json (and this run's entry): `lan: { port, on }`, the port kept while off. */
+  const saveLan = (value: { port: number; on: boolean }) => {
     const entry = { ...(readInboxRegistry(context.dataDir) ?? context.registry()) };
-    for (const target of [entry, context.registry()]) {
-      if (port) target.lan = { port };
-      else delete target.lan;
-    }
+    for (const target of [entry, context.registry()]) target.lan = { ...value };
     writeInboxRegistry(context.dataDir, entry);
   };
   const lan = createInboxLan({
     dataDir: context.dataDir,
-    savedPort: () => context.registry().lan?.port ?? null,
-    savePort: saveLan,
+    saved: () => {
+      const kept = context.registry().lan;
+      return kept ? { port: kept.port, on: kept.on !== false } : null;
+    },
+    save: saveLan,
     name: () => computer().name,
     fetch: doorOnly(true),
   });

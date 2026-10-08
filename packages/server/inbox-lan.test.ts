@@ -120,7 +120,7 @@ describe("Reach from this Wi-Fi, on the binary", () => {
     expect(lan.fingerprint).toMatch(/^[0-9a-f]{64}$/);
     const port = Number(lan.address.split(":")[1]);
     expect(port).not.toBe(registry(w).port);
-    expect((registry(w) as Json).lan).toEqual({ port });
+    expect((registry(w) as Json).lan).toEqual({ port, on: true });
 
     const tls = join(w.dataDir, "inbox", "tls");
     const cert = readFileSync(join(tls, "cert.pem"), "utf8");
@@ -260,6 +260,25 @@ describe("Reach from this Wi-Fi, on the binary", () => {
     expect(plain).not.toBe(200);
   });
 
+  test("an absolute-form request line and a WebSocket upgrade reach nothing outside the door on the LAN listener", async () => {
+    const windowPort = registry(w).port;
+    const auth = { Authorization: `Bearer ${token}` };
+    // Absolute-form (as a proxy would send it), naming the window's own origin.
+    for (const target of [`http://127.0.0.1:${windowPort}/api/inbox/threads`, `http://localhost:${windowPort}/mcp`, `https://${lan.address}/api/inbox/settings`, `http://localhost:${windowPort}/api/inbox/device/../threads`]) {
+      for (const method of ["GET", "POST"]) {
+        const answer = await phone(target, { method, headers: auth, body: method === "POST" ? {} : undefined });
+        expect([method, target, answer.status, JSON.parse(answer.text).code]).toEqual([method, target, 404, "device_route_not_found"]);
+      }
+    }
+    // A WebSocket upgrade: the LAN listener never upgrades; outside the door, and on a door path off the allowlist, it is a 404.
+    const upgrade = { Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": "AAAAAAAAAAAAAAAAAAAAAA==" };
+    for (const path of ["/", "/mcp", "/api/inbox/threads", "/api/inbox/events", "/api/inbox/device/socket", "/api/inbox/device/bridge/poll"]) {
+      const answer = await phone(path, { headers: { ...upgrade, ...auth } });
+      expect([path, answer.status, JSON.parse(answer.text).code]).toEqual([path, 404, "device_route_not_found"]);
+      expect(answer.headers.upgrade).toBeUndefined();
+    }
+  });
+
   test.skipIf(!canBrowse)("the Bonjour record: _plannotator-inbox._tcp under the computer's name, with the listener's port and fp", async () => {
     const lookup = await bonjourLookup(computerName);
     expect(lookup).toContain(`:${lan.address.split(":")[1]} `);
@@ -268,19 +287,27 @@ describe("Reach from this Wi-Fi, on the binary", () => {
     expect(await bonjourBrowse()).toContain(computerName);
   }, 15_000);
 
-  test("off: the listener and the record go, and inbox.json forgets the switch", async () => {
+  test("off: the listener and the record go, inbox.json keeps the port with the switch off; on again opens the same port with the same certificate", async () => {
     const before = lan;
+    const port = Number(before.address.split(":")[1]);
     const off = await setLan(false);
     expect(off).toEqual({ on: false, address: null, fingerprint: null, bonjour: false, error: null });
     expect(await pinnedRequest(before.address, before.fingerprint, { path: "/api/inbox/device/health" }).then(() => "answered", () => "closed")).toBe("closed");
-    expect(registry(w)).not.toHaveProperty("lan");
+    expect((registry(w) as Json).lan).toEqual({ port, on: false });
     if (canBrowse) {
       await Bun.sleep(500);
       expect(await bonjourBrowse()).not.toContain(computerName);
     }
-    // The certificate stays: on again, the same fingerprint, so a paired phone's pin still holds.
+    // A start with the switch off opens nothing.
+    process.kill(registry(w).pid, "SIGTERM");
+    await Bun.sleep(500);
+    await restart();
+    expect(((await (await win("/api/inbox/lan")).json()) as Json).lan).toEqual({ on: false, address: null, fingerprint: null, bonjour: false, error: null });
+    // The certificate and the port stay: on again, the same address and fingerprint, so a paired phone's pin and a written-down address still hold.
     lan = await setLan(true);
     expect(lan.fingerprint).toBe(before.fingerprint);
+    expect(lan.address).toBe(before.address);
+    expect((registry(w) as Json).lan).toEqual({ port, on: true });
   }, 15_000);
 
   test("a clean stop takes the listener and the record down; the next start opens the same port with the same certificate", async () => {
@@ -288,7 +315,7 @@ describe("Reach from this Wi-Fi, on the binary", () => {
     process.kill(registry(w).pid, "SIGTERM");
     await Bun.sleep(500);
     expect(await pinnedRequest(before.address, before.fingerprint, { path: "/api/inbox/device/health" }).then(() => "answered", () => "closed")).toBe("closed");
-    expect((registry(w) as Json).lan).toEqual({ port: Number(before.address.split(":")[1]) });
+    expect((registry(w) as Json).lan).toEqual({ port: Number(before.address.split(":")[1]), on: true });
     if (canBrowse) expect(await bonjourBrowse()).not.toContain(computerName);
 
     await restart();
@@ -328,6 +355,38 @@ describe("Reach from this Wi-Fi, in process", () => {
       expect(JSON.parse(readFileSync(join(root, "data", "inbox", "inbox.json"), "utf8"))).not.toHaveProperty("lan");
       const bad = await fetch(`${main}/api/inbox/lan`, { method: "POST", body: JSON.stringify({ on: "yes" }) });
       expect(bad.status).toBe(422);
+    } finally {
+      process.env.PATH = path;
+      inbox.stop();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a listener that cannot open at start shows the switch on with the reason, and turning it off works", async () => {
+    const root = mkdtempSync(join(tmpdir(), "plannotator-inbox-lan-startfail-"));
+    const dataDir = join(root, "data");
+    const first = await startInboxServer({ dataDir, binaryPath: null });
+    const on = await fetch(`http://127.0.0.1:${first.port}/api/inbox/lan`, { method: "POST", body: JSON.stringify({ on: true }) });
+    const port = Number((((await on.json()) as Json).lan.address ?? ":0").split(":")[1]);
+    first.stop();
+    // The certificate is gone and openssl fails: the next start cannot open the listener.
+    rmSync(join(dataDir, "inbox", "tls"), { recursive: true, force: true });
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "openssl"), "#!/bin/sh\nexit 1\n");
+    chmodSync(join(bin, "openssl"), 0o755);
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path ?? ""}`;
+    const inbox = await startInboxServer({ dataDir, binaryPath: null });
+    try {
+      const main = `http://127.0.0.1:${inbox.port}`;
+      const state = ((await (await fetch(`${main}/api/inbox/lan`)).json()) as Json).lan;
+      expect(state).toMatchObject({ on: true, address: null, fingerprint: null, bonjour: false });
+      expect(state.error).toContain("could not make its certificate");
+      const off = await fetch(`${main}/api/inbox/lan`, { method: "POST", body: JSON.stringify({ on: false }) });
+      expect(off.status).toBe(200);
+      expect(((await off.json()) as Json).lan).toEqual({ on: false, address: null, fingerprint: null, bonjour: false, error: null });
+      expect(JSON.parse(readFileSync(join(dataDir, "inbox", "inbox.json"), "utf8")).lan).toEqual({ port, on: false });
     } finally {
       process.env.PATH = path;
       inbox.stop();

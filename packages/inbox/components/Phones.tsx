@@ -182,8 +182,8 @@ export function PhonesBlock() {
   const left = offer ? Date.parse(offer.offer.expires_at) - now : 0;
   const expired = offer !== null && left <= 0;
   const tailnetOn = tailnet?.on === true && tailnet.address !== null;
-  // On while the listener runs, even with no network address for a moment (the error says so).
-  const lanOn = lan?.on === true && lan.fingerprint !== null;
+  // The person's switch as the Inbox keeps it: on even when the listener could not open (the error says why), so a click turns it off.
+  const lanOn = lan?.on === true;
 
   return (
     <div className="ib-sblock" data-settings-phones="">
@@ -192,7 +192,7 @@ export function PhonesBlock() {
       <div className="ib-srow" data-lan={lanOn ? 'on' : 'off'}>
         Reach from this Wi-Fi
         <span className="ib-d" data-lan-address={lan?.address ?? ''}>
-          {lanOn ? (lan!.address ?? 'No network address') : 'Phones on the same network, over an encrypted connection they check'}
+          {lanOn ? (lan!.address ?? (lan!.fingerprint ? 'No network address' : 'Not reachable')) : 'Phones on the same network, over an encrypted connection they check'}
         </span>
         <span className="ib-r">
           <button
@@ -206,12 +206,12 @@ export function PhonesBlock() {
           />
         </span>
       </div>
-      {lanOn && (
+      {lanOn && lan!.fingerprint && (
         <div className="ib-fp" data-lan-fingerprint={lan!.fingerprint!}>
           Certificate SHA-256 <span>{grouped(lan!.fingerprint!)}</span>
         </div>
       )}
-      {lanOn && !lan!.bonjour && (
+      {lanOn && lan!.fingerprint && !lan!.bonjour && (
         <div className="ib-note" data-lan-no-bonjour="">
           <Icon name="info" />
           Phones will not see this computer in their nearby list (no dns-sd or avahi-publish). Scanning the code still pairs them.

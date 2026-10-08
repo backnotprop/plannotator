@@ -63,7 +63,7 @@ function decodeChunked(body: Buffer): Buffer {
 
 /**
  * One request through the pinned socket. `headers` are sent as given; Host
- * defaults to the address and `Connection: close` is added.
+ * defaults to the address and `Connection` to `close`.
  */
 export async function pinnedRequest(
   address: string,
@@ -72,26 +72,37 @@ export async function pinnedRequest(
 ): Promise<PinnedAnswer> {
   const socket = await pinnedSocket(address, fingerprint);
   const presented = createHash("sha256").update(socket.getPeerCertificate().raw).digest("hex");
-  const headers: Record<string, string> = { Host: address, ...init.headers, Connection: "close" };
+  // Connection: close unless the caller sends its own (a WebSocket upgrade's `Connection: Upgrade`).
+  const headers: Record<string, string> = { Host: address, Connection: "close", ...init.headers };
   if (init.body !== undefined) headers["Content-Length"] = String(Buffer.byteLength(init.body));
   const head = [`${init.method ?? "GET"} ${init.path} HTTP/1.1`, ...Object.entries(headers).map(([k, v]) => `${k}: ${v}`), "", ""].join("\r\n");
+  const parse = (raw: Buffer) => {
+    const split = raw.indexOf("\r\n\r\n");
+    if (split < 0) return null;
+    const [statusLine, ...lines] = raw.subarray(0, split).toString("latin1").split("\r\n");
+    const answerHeaders: Record<string, string> = {};
+    for (const line of lines) {
+      const colon = line.indexOf(":");
+      answerHeaders[line.slice(0, colon).trim().toLowerCase()] = line.slice(colon + 1).trim();
+    }
+    let body = raw.subarray(split + 4);
+    if (answerHeaders["transfer-encoding"]?.toLowerCase() === "chunked") body = decodeChunked(body);
+    const length = answerHeaders["content-length"];
+    return { complete: length !== undefined && body.length >= Number(length), answer: { status: Number(statusLine!.split(" ")[1]), headers: answerHeaders, text: body.toString("utf8"), presented } };
+  };
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    socket.on("data", (chunk: Buffer) => chunks.push(chunk));
+    // A whole answer (by Content-Length) ends the exchange even when the server keeps the socket open.
+    socket.on("data", (chunk: Buffer) => {
+      chunks.push(chunk);
+      if (parse(Buffer.concat(chunks))?.complete) socket.destroy();
+    });
     socket.once("error", reject);
     socket.once("close", () => {
       const raw = Buffer.concat(chunks);
-      const split = raw.indexOf("\r\n\r\n");
-      if (split < 0) return reject(new Error(`No HTTP answer: ${raw.toString("latin1").slice(0, 200)}`));
-      const [statusLine, ...lines] = raw.subarray(0, split).toString("latin1").split("\r\n");
-      const answerHeaders: Record<string, string> = {};
-      for (const line of lines) {
-        const colon = line.indexOf(":");
-        answerHeaders[line.slice(0, colon).trim().toLowerCase()] = line.slice(colon + 1).trim();
-      }
-      let body = raw.subarray(split + 4);
-      if (answerHeaders["transfer-encoding"]?.toLowerCase() === "chunked") body = decodeChunked(body);
-      resolve({ status: Number(statusLine!.split(" ")[1]), headers: answerHeaders, text: body.toString("utf8"), presented });
+      const parsed = parse(raw);
+      if (!parsed) return reject(new Error(`No HTTP answer: ${raw.toString("latin1").slice(0, 200)}`));
+      resolve(parsed.answer);
     });
     socket.write(init.body === undefined ? head : head + init.body);
   });

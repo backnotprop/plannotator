@@ -126,10 +126,10 @@ function publishBonjour(name: string, port: number, fingerprint: string): ChildP
 
 export interface InboxLanContext {
   dataDir: string;
-  /** The port inbox.json kept, or null. */
-  savedPort: () => number | null;
-  /** Keep the switch in inbox.json: the port while on, null when off. */
-  savePort: (port: number | null) => void;
+  /** The port and the switch inbox.json kept, or null when it was never on. */
+  saved: () => { port: number; on: boolean } | null;
+  /** Keep the port and the switch in inbox.json; the port stays when the switch goes off. */
+  save: (value: { port: number; on: boolean }) => void;
   /** The computer's name: the Bonjour instance name. */
   name: () => string;
   /** The door, and nothing else (inbox-devices.ts `doorOnly`). */
@@ -163,7 +163,7 @@ export function createInboxLan(context: InboxLanContext) {
     const tls = ensureInboxCertificate(context.dataDir);
     const serve = (port: number) =>
       Bun.serve({ hostname: "0.0.0.0", port, idleTimeout: 0, tls: { cert: tls.cert, key: tls.key }, fetch: context.fetch } as Parameters<typeof Bun.serve>[0]);
-    const last = context.savedPort();
+    const last = context.saved()?.port;
     try {
       server = last ? serve(last) : serve(0);
     } catch {
@@ -173,14 +173,17 @@ export function createInboxLan(context: InboxLanContext) {
     bonjour = publishBonjour(context.name(), server.port as number, tls.fingerprint);
   };
 
-  /** At start: the switch was on, so open again. A failure keeps the switch on and says why. */
+  /**
+   * At start: the switch was on, so open again. A failure keeps the switch on
+   * (the window shows it on with the reason, and turning it off works).
+   */
   const start = () => {
-    if (context.savedPort() === null) return;
+    if (!context.saved()?.on) return;
     on = true;
     try {
       open();
       error = null;
-      context.savePort(server!.port as number);
+      context.save({ port: server!.port as number, on: true });
     } catch (cause) {
       close();
       error = cause instanceof Error ? cause.message : String(cause);
@@ -201,12 +204,13 @@ export function createInboxLan(context: InboxLanContext) {
       }
       on = true;
       error = null;
-      context.savePort(server!.port as number);
+      context.save({ port: server!.port as number, on: true });
     } else {
+      const port = (server?.port as number | undefined) ?? context.saved()?.port;
       close();
       on = false;
       error = null;
-      context.savePort(null);
+      if (port) context.save({ port, on: false });
     }
     return state();
   };

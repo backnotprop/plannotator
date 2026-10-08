@@ -48,11 +48,12 @@ export interface InboxRegistryEntry {
    */
   tailnet?: { https_port: number; door_port?: number };
   /**
-   * "Reach from this Wi-Fi" is on (adr/implementation/inbox-mobile.md,
-   * section 3): the LAN listener's port, reused at the next start when free.
-   * Absent: off.
+   * "Reach from this Wi-Fi" (adr/implementation/inbox-mobile.md, section 3):
+   * the LAN listener's port, kept when the switch goes off so on again and
+   * the next start reuse it when free, and the switch (`on: false` once
+   * switched off; absent means on, as P2 wrote it). Absent: never switched on.
    */
-  lan?: { port: number };
+  lan?: { port: number; on?: boolean };
 }
 
 export function inboxRegistryPath(dataDir: string): string {

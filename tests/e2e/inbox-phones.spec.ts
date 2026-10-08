@@ -16,7 +16,9 @@
  * the QR gains `lan` and `fp`; the row shows the address and the
  * certificate's SHA-256; a phone pins it and pairs over the LAN address; off
  * closes it. A second Inbox whose PATH has no dns-sd or avahi-publish draws
- * the no-Bonjour note, and an `openssl` that fails draws the error. Over the
+ * the no-Bonjour note, an `openssl` that fails draws the error, and a
+ * listener that cannot open at start shows the switch on with the reason
+ * and turns off in one click. Over the
  * Wi-Fi the phone pairs by the QR only: the LAN door refuses the six digits.
  *
  * With PLANNOTATOR_E2E_TAILNET=1 on a Mac signed in to Tailscale, one more
@@ -297,6 +299,32 @@ test('Reach from this Wi-Fi where nothing can announce it (no Bonjour) and where
     await expect(phones.locator('.ib-error')).toContainText('The Inbox could not make its certificate');
     await expect(toggle).toHaveAttribute('aria-checked', 'false');
     await shot('settings-phones-lan-unavailable');
+
+    // On, then a stop; the certificate goes and openssl fails: the next start cannot open the listener.
+    // The switch shows what the Inbox keeps (on), the reason under it, and one click turns it off.
+    writeFileSync(join(root, 'mode'), 'ok');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+    const kept = () => JSON.parse(readFileSync(join(root, 'data', 'inbox', 'inbox.json'), 'utf8'));
+    const port = kept().lan.port;
+    const pid = kept().pid;
+    process.kill(pid, 'SIGTERM');
+    await expect.poll(() => { try { process.kill(pid, 0); return 'running'; } catch { return 'gone'; } }).toBe('gone');
+    rmSync(join(root, 'data', 'inbox', 'tls'), { recursive: true, force: true });
+    writeFileSync(join(root, 'mode'), 'broken');
+    const again = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
+    expect(again.status, again.stderr).toBe(0);
+    // Same port as before: leave the page first, or a same-URL goto keeps the old state.
+    await other.goto('about:blank');
+    await other.goto(`${again.stdout.trim()}#settings`);
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+    await expect(phones.locator('[data-lan-address]')).toHaveText('Not reachable');
+    await expect(phones.locator('.ib-error')).toContainText('The Inbox could not make its certificate');
+    await shot('settings-phones-lan-start-failed');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await expect(phones.locator('.ib-error')).toHaveCount(0);
+    expect(kept().lan).toEqual({ port, on: false });
   } finally {
     world.page = page;
     await other.close();
