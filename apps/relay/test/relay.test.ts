@@ -611,6 +611,8 @@ describe("the carriage: a phone reads and answers the Inbox through the relay al
     mkdirSync(join(w.project, "pages", "images"), { recursive: true });
     writeFileSync(join(w.project, "pages", "ticket.html"), '<!doctype html><html><head><title>Low Tide</title></head><body><img src="images/sun.png" alt="sun"></body></html>');
     writeFileSync(join(w.project, "pages", "images", "sun.png"), PNG);
+    // Past Cloudflare's 32 MiB WebSocket message once sealed (base64 twice): its result is a 413 in its place.
+    writeFileSync(join(w.project, "pages", "images", "tide.png"), Buffer.concat([PNG.subarray(0, 8), Buffer.alloc(26_000_000, 9)]));
     startTheInbox();
     agent = await SimAgent.connect({ binary: join(w.bin, "plannotator"), env, name: "Claude Code", host: "claude-code", cwd: w.project });
     say(`relay: wrangler dev at ${relay.url}; Wi-Fi and tailnet switches off (a fresh data dir); the phone reaches the Inbox only through the relay`);
@@ -720,6 +722,15 @@ describe("the carriage: a phone reads and answers the Inbox through the relay al
     expect(a.seen.some((s) => s.id === "reflected-1")).toBe(false);
     expect(((await (await fetch(`${base}/api/inbox/threads`)).json()) as Json).cursor).toBe(cursorBefore);
     say("a held down item posted back as a command: refused (no result item, store cursor unchanged), and deleted at the relay");
+
+    // A relay that relabels a command: sealed with one id, posted under another. No result under either id.
+    const ciphertext = await encryptWithKey(JSON.stringify({ v: 1, id: "sealed-id-y", method: "GET", path: "/api/inbox/device/threads" }), a.upKey);
+    expect((await atRelay(a, "POST", "/commands", { id: "frame-label-x", ciphertext })).status).toBe(202);
+    await until(inboxLog, (log) => log.includes(`command ${a.id} refused: its sealed id is not the frame's`), "the relabelled command refused");
+    await until(() => rows("commands").length, (n) => n === 0, "the relabelled command let go");
+    await fetchItems(a);
+    expect(a.seen.some((s) => s.id === "frame-label-x" || s.id === "sealed-id-y")).toBe(false);
+    say("a command sealed with one id and posted under another: refused, no result under either id, deleted at the relay");
   }, 60_000);
 
   test("an attachment's view and an HTML asset's bytes arrive by request", async () => {
@@ -736,6 +747,13 @@ describe("the carriage: a phone reads and answers the Inbox through the relay al
     expect(sun.bytes.equals(PNG)).toBe(true);
     // Its envelope is held in more than one row: the relay sets no item size of its own.
     expect(rows("items").some((row) => row.part > 0)).toBe(true);
+
+    // An answer past the platform's WebSocket message limit comes back as a 413, and the next command is still answered.
+    const tide = await ask(a, "GET", `html-assets/${baseHref}/images/tide.png`);
+    expect(tide.status).toBe(413);
+    expect(tide.json()).toMatchObject({ code: "result_too_large", limit_bytes: 32 * 1024 * 1024 });
+    expect((await ask(a, "GET", "threads")).status).toBe(200);
+    say("html-assets/<token>/images/tide.png (26 MB, past the 32 MiB WebSocket message once sealed): result 413 result_too_large; the next GET threads: 200");
     say(`attachments/${plan.id}/view?version=sent: the plan's text as sent; html-assets/<token>/images/sun.png: ${sun.bytes.length} bytes, equal to the file, image/png`);
   }, 60_000);
 

@@ -51,6 +51,13 @@ export const INBOX_RELAY_FILE = "relay.json";
 const RELAY_REQUEST_MS = 10_000;
 /** Apple's ceiling on a push body (section 4, "Push"). */
 const APNS_BODY_LIMIT = 4096;
+/**
+ * Cloudflare's WebSocket message limit (32 MiB), the platform's, not ours: a
+ * result whose item frame would pass it is answered with a small 413 result
+ * instead, so one oversized answer never stops the relay for every command
+ * queued behind it (contract section 4).
+ */
+const WEBSOCKET_MESSAGE_LIMIT = 32 * 1024 * 1024;
 /** Reconnect delays for the socket, doubling from the first to the last. */
 const RECONNECT_FIRST_MS = 1_000;
 const RECONNECT_LAST_MS = 60_000;
@@ -319,25 +326,42 @@ export function createInboxRelay(context: InboxRelayContext) {
     }
   };
 
-  /** One command: opened with the phone's up key, applied through the door, answered with a result item, then reported applied. */
+  /** The result item for a command, sealed under the phone's key; past the WebSocket message limit, a 413 in its place. */
+  const resultFrame = async (deviceId: string, id: string, answer: Response, key: string): Promise<string> => {
+    const seal = async (status: number, contentType: string, bytes: Buffer) => {
+      const result = { v: 1, type: "result", id, status, content_type: contentType, body_b64: bytes.toString("base64") };
+      return JSON.stringify({ type: "item", device_id: deviceId, cursor: null, ciphertext: await encryptWithKey(JSON.stringify(result), key) });
+    };
+    const bytes = Buffer.from(await answer.arrayBuffer());
+    const frame = await seal(answer.status, answer.headers.get("content-type") ?? "application/octet-stream", bytes);
+    if (Buffer.byteLength(frame) <= WEBSOCKET_MESSAGE_LIMIT) return frame;
+    log(`command ${deviceId} result too large: ${bytes.length} bytes`);
+    const refusal = {
+      error: "This answer is too large to carry through the relay. Open it over the Wi-Fi or the tailnet.",
+      code: "result_too_large",
+      limit_bytes: WEBSOCKET_MESSAGE_LIMIT,
+    };
+    return seal(413, "application/json; charset=utf-8", Buffer.from(JSON.stringify(refusal)));
+  };
+
+  /**
+   * One command: opened with the phone's up key, applied through the door,
+   * answered with a result item under the id sealed inside it, then reported
+   * applied. A sealed id that is not the relay's frame id is refused: the
+   * relay must not be able to file one command's result under another's id.
+   */
   const onCommand = async (frame: CommandFrame): Promise<void> => {
     const secret = devices.secret(frame.device_id);
     const keys = secret ? await deriveRelayKeys(secret, frame.device_id) : null;
-    const command = keys ? await openCommand(frame, keys.upKey) : null;
+    const opened = keys ? await openCommand(frame, keys.upKey) : null;
+    const command = opened && opened.id === frame.id ? opened : null;
+    if (opened && !command) log(`command ${frame.device_id} refused: its sealed id is not the frame's`);
     if (keys && command) {
       const answer = await context.apply(frame.device_id, { method: command.method, path: command.path, body: command.body });
-      const bytes = Buffer.from(await answer.arrayBuffer());
       log(`command ${frame.device_id} ${command.method} ${answer.status}`);
       if (devices.get(frame.device_id)?.carriage) {
-        const result = {
-          v: 1,
-          type: "result",
-          id: frame.id,
-          status: answer.status,
-          content_type: answer.headers.get("content-type") ?? "application/octet-stream",
-          body_b64: bytes.toString("base64"),
-        };
-        send({ type: "item", device_id: frame.device_id, cursor: null, ciphertext: await encryptWithKey(JSON.stringify(result), keys.key) });
+        const item = await resultFrame(frame.device_id, command.id, answer, keys.key);
+        if (socket && socket.readyState === WebSocket.OPEN) socket.send(item);
       }
     } else {
       // Refused the same way whatever the reason: reported applied, so the relay lets it go.
