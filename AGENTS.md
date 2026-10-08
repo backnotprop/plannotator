@@ -1965,6 +1965,7 @@ Sorting and the rest:
   - Open puts the file beside the thread, with Full screen. HTML opens full screen by default.
   - Viewers: markdown and text through `Viewer` with the annotation toolstrip, diagrams through `DiagramViewer` (node comments), and HTML through `HtmlViewer` (pinpoint, pen, Esc to Interact).
   - `AnnotationPanel` sits at the right.
+  - Markdown, text and diagrams follow Plannotator's plan look, the `gridEnabled` setting (its cookie `plannotator-grid-enabled`, default Grid): Grid is plan review's card on `bg-grid` (`Viewer`'s `gridEnabled`), Clean the document on `bg-card`, edge to edge in the pane. The Inbox's Settings has no look rows; the switch is Plannotator's Settings.
   - The changed line reads "Changed since <agent> sent it at 10:42 AM. Edited 11:05 AM. Open the version it sent".
 - Annotations live in `annotations.jsonl`, keyed by the file's path and version (`current` or the sent sha256). A draft on `current` survives the agent's edit and re-anchors by its text.
 - Send carries the annotations as Plannotator's feedback text (`exportLinkedDocAnnotations`, under "Feedback on the attached files", one section per file and version) and marks them sent with the reply.
