@@ -29,8 +29,12 @@ import { useConfigValue } from '@plannotator/ui/config';
 const NO_ANNOTATIONS: never[] = [];
 const noop = () => {};
 
-/** The read-only diff renderer, configured from Plannotator's diff settings like guides.show's (the surface's reader draws with it too). */
-export const ReadOnlyDiff: FC<GuideDiffRendererProps> = (props) => {
+/**
+ * The read-only diff renderer, configured from Plannotator's diff settings like guides.show's (the surface's reader draws with it too).
+ * `compactTouchLayout` is the review app's own phone header (the surface passes it): the full path, its ellipsis at the leading edge
+ * only when it does not fit, and 44 pt targets.
+ */
+export const ReadOnlyDiff: FC<GuideDiffRendererProps & { compactTouchLayout?: boolean }> = (props) => {
   const diffStyle = useConfigValue('diffStyle');
   const diffOverflow = useConfigValue('diffOverflow');
   const diffIndicators = useConfigValue('diffIndicators');

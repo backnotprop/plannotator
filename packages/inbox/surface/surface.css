@@ -285,6 +285,21 @@
 .sf-gcard {
   zoom: calc(min(var(--sf-text-scale), 1.35) * 1.12);
   -webkit-text-size-adjust: var(--sf-guide-adjust, 112%);
+  /* The diff renderer's own list (SF Mono, Monaco, ... Courier New) reaches
+     Courier New on iOS, where web content cannot name SF Mono: the system
+     monospace instead. The variable crosses the renderer's shadow root. */
+  --diffs-font-family: var(--font-mono);
+}
+/* The phone's diff header (the review app's compact touch layout) keeps the
+   whole path, its ellipsis at the leading edge only when it does not fit;
+   a path that fits starts at the left, under the chevron. */
+.sf-gcard [data-pn-compact-file-path] {
+  text-align: left;
+}
+/* One section is the whole screen: collapsing it would leave the screen
+   empty, so the section's collapse chevron is not drawn here. */
+.sf-gcard button[aria-label="Collapse section"] {
+  display: none;
 }
 .sf-gnav {
   /* As .sf-gfoot: Previous, Reviewed and Next stop growing with the shell's bars. */

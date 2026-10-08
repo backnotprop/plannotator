@@ -45,6 +45,9 @@ final class SourceSession {
     private var pendingRefresh: Task<Void, Never>?
     private var pickChains: [String: Task<Void, Never>] = [:]
     private var tickChains: [String: Task<Void, Never>] = [:]
+    /// Per guide while taps are in flight: how many, and the ticks the Inbox last confirmed.
+    private var ticksInFlight: [String: Int] = [:]
+    private var confirmedTicks: [String: [Bool]?] = [:]
     private let cache: Cache
 
     init(source: Source, token: String) {
@@ -448,20 +451,41 @@ final class SourceSession {
     /// The person's reviewed ticks on a guide, kept at once on screen and saved
     /// through the door. Ticks on one guide go out one after another, each with
     /// every section's tick as the person left them, so the last tap wins.
-    /// When one is refused or cannot reach the computer, the thread is read
-    /// again and `onError` hands back the ticks the Inbox keeps.
+    /// When one is refused or cannot reach the computer, the ticks go back to
+    /// what the Inbox keeps: read again when the computer answers, else the
+    /// ticks it last confirmed. `onError` hands those back for the surface to draw.
     func saveTicks(_ reviewed: [Bool], message: String, thread id: String, onError: @escaping (_ message: String, _ kept: [Bool]?) -> Void) {
+        if ticksInFlight[message, default: 0] == 0 {
+            confirmedTicks[message] = .some(threads[id]?.messages.first { $0.id == message }?.guideReviewed)
+        }
+        ticksInFlight[message, default: 0] += 1
         editMessage(message, thread: id) { $0.guideReviewed = reviewed }
         let previous = tickChains[message]
         tickChains[message] = Task { [weak self] in
             await previous?.value
             guard let self else { return }
+            defer {
+                self.ticksInFlight[message, default: 1] -= 1
+                if self.ticksInFlight[message] == 0 {
+                    self.ticksInFlight[message] = nil
+                    self.confirmedTicks[message] = nil
+                }
+            }
             do throws(InboxError) {
-                _ = try await self.client.saveGuideReviewed(message: message, reviewed: reviewed)
+                let saved = try await self.filesDoor().saveGuideReviewed(message: message, reviewed: reviewed)
+                self.confirmedTicks[message] = .some(saved)
+                // The last tap in flight: the phone holds what the Inbox answered.
+                if self.ticksInFlight[message] == 1 { self.editMessage(message, thread: id) { $0.guideReviewed = saved } }
             } catch {
-                await self.loadThread(id)
+                if await self.loadThread(id) {
+                    self.confirmedTicks[message] = .some(self.threads[id]?.messages.first { $0.id == message }?.guideReviewed)
+                } else {
+                    // The computer cannot say what it keeps: back to what it last confirmed.
+                    let confirmed = self.confirmedTicks[message] ?? nil
+                    self.editMessage(message, thread: id) { $0.guideReviewed = confirmed }
+                }
                 let kept = self.threads[id]?.messages.first { $0.id == message }?.guideReviewed
-                onError("Not marked. \(error.message)", kept)
+                onError(error.message, kept)
             }
         }
     }

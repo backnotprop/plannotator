@@ -20,7 +20,8 @@ import { ReadOnlyDiff } from './GuideReader';
 import type { SurfaceGuideReaderProps } from './types';
 import type ReaderShape from './surface-reader-module';
 
-const noRendererProps = (): Record<string, never> => ({});
+// A phone's diff header: the review app's compact touch layout (the whole path, 44 pt targets).
+const phoneRendererProps = () => ({ compactTouchLayout: true });
 const two = (n: number) => String(n + 1).padStart(2, '0');
 
 interface Page {
@@ -72,7 +73,7 @@ export default function SurfaceGuideReader({ snapshot, reviewed, onReviewedChang
   const ticks = useMemo(() => guide.sections.map((_, i) => reviewed[i] ?? guide.reviewed[i] ?? false), [guide.sections, guide.reviewed, reviewed]);
   const toggle = useCallback((index: number) => onReviewedChange(ticks.map((v, i) => (i === index ? !v : v))), [ticks, onReviewedChange]);
   const go = useCallback((next: number | null) => onSection(next, pages.length), [onSection, pages.length]);
-  const host = useMemo(() => ({ files, DiffRenderer: ReadOnlyDiff, getDiffRendererProps: noRendererProps }), [files]);
+  const host = useMemo(() => ({ files, DiffRenderer: ReadOnlyDiff, getDiffRendererProps: phoneRendererProps }), [files]);
   const [focusedFile, setFocusedFile] = useState<string | null>(null);
 
   const page = section === null ? null : pages[section] ?? null;

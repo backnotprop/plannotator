@@ -6,7 +6,8 @@ import XCTest
 /// (6.1), marks the first section reviewed in the sections, continues to the
 /// second (6.2) and marks it there; both ticks reach the Inbox, read the way
 /// the desktop window reads them. Previous and Next move the sections and the
-/// app's bar title follows; the wrap button turns wrapping off and on; back
+/// app's bar title follows; a tick made with the computer out of reach
+/// reads off again after "Not saved"; the wrap button turns wrapping off and on; back
 /// returns to the sections; and a section is drawn at the largest Dynamic
 /// Type size.
 @MainActor
@@ -63,6 +64,20 @@ final class GuideProofTests: ProofCase {
         surfaceControl("Next: 03").tap()
         XCTAssertTrue(waitForLabel(title, "03 of 04"), title.label)
         expect(web("A failed write leaves no partial file"), "the third section")
+
+        // A tick that cannot reach the computer is not drawn as saved: "Not saved", and Reviewed reads off again.
+        try await control.post("/proxy", ["mode": "down"])
+        surfaceControl("Reviewed").tap()
+        let notSaved = app.alerts["Not saved"]
+        expect(notSaved, "the Not saved alert")
+        try await control.shot("6.2-not-saved")
+        notSaved.buttons["OK"].tap()
+        try await control.post("/proxy", ["mode": "pass"])
+        let reviewedAgain = surfaceControl("Reviewed")
+        expect(reviewedAgain, "Reviewed, drawn again")
+        XCTAssertTrue(waitForValue(reviewedAgain, "0"), "Reviewed reads \(String(describing: reviewedAgain.value)) after a save that failed")
+        XCTAssertTrue(waitForLabel(title, "03 of 04"), title.label)
+        try await expectTicks(thread: thread, message: message, "true,true,false,false")
         surfaceControl("Previous: 02").tap()
         XCTAssertTrue(waitForLabel(title, "02 of 04"), title.label)
 

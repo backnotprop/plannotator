@@ -151,9 +151,18 @@ struct GuideCover: View {
     private func load() async {
         loadProblem = nil
         do throws(InboxError) {
-            let next = try await session.client.guide(message: messageId)
-            view = next
+            // Guided reviews come from a computer's Inbox (submit_guide); a Workspaces source has none here.
+            guard let door = session.inboxClient else {
+                loadProblem = "Guided reviews open from a computer's Inbox."
+                return
+            }
+            let next = try await door.guide(message: messageId)
             await host.whenReady()
+            guard !host.isUnavailable, host.loadError == nil else {
+                loadProblem = "Guided reviews can't be shown on this iPhone right now."
+                return
+            }
+            view = next
             present(next, reviewed: message?.guideReviewed)
             await host.drawn()
             painted = true
