@@ -7780,6 +7780,9 @@ const App: React.FC = () => {
           position="top-right"
           offset={64}
           toastOptions={{
+            // Sonner aborts a swipe-to-dismiss once any text is selected, so a
+            // mouse drag across selectable toast text never dismisses it.
+            className: 'select-none',
             style: {
               '--normal-bg': 'var(--card)',
               '--normal-border': 'var(--border)',
