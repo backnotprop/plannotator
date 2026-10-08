@@ -285,7 +285,8 @@ final class RelayPushTests: XCTestCase {
         let button = app.tabBars.buttons[name]
         var tries = 0
         while !button.waitForExistence(timeout: 3), tries < 6 {
-            app.swipeDown(velocity: .fast)
+            // Minimized, the bar shows only the selected tab: a tap on it opens it again.
+            if tries % 2 == 0, app.tabBars.buttons.firstMatch.exists { app.tabBars.buttons.firstMatch.tap() } else { app.swipeDown(velocity: .fast) }
             tries += 1
         }
         button.tap()

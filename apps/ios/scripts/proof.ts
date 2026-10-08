@@ -126,6 +126,10 @@ for (let tries = 0; ; tries++) {
   if (tries > 600) throw new Error(`wrangler dev did not start:\n${relayLog.join('')}`);
   await sleep(100);
 }
+// Warm the relay: the first request to a Durable Object under wrangler dev
+// builds it, which on a CI runner can hold the Inbox's first pairing (it
+// registers the phone at the relay before it answers) past the test's waits.
+await fetch(`${relayUrl}/v1/mailboxes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ secret_sha256: '0'.repeat(64) }) }).catch(() => {});
 env.PLANNOTATOR_RELAY_URL = relayUrl;
 
 /** The relay's stored devices, read from its Durable Object's SQLite file (as R1's proof reads them). */
