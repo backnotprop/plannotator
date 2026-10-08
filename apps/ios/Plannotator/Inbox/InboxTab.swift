@@ -32,6 +32,12 @@ struct InboxTab: View {
             }
         }
         .onChange(of: model.session?.id) { path = [] }
+        // A tapped notification's thread, after any change of source above.
+        .onChange(of: model.opening, initial: true) {
+            guard let route = model.opening else { return }
+            model.opening = nil
+            path = [route]
+        }
     }
 
 }

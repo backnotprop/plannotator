@@ -20,6 +20,10 @@
     {
       "plaintext": "Café, naïve, ✓ 日本",
       "envelope": "AAAAAAAAAAAAAAACS3xyZIFuro9vPMGn8XW2hOSszCVtzFJgKCXLMeHANdchNLSUaYR7Yls"
+    },
+    {
+      "plaintext": "{\"v\":1,\"type\":\"push\",\"thread_id\":\"msg_00000000000000000000000000\",\"message_id\":\"msg_00000000000000000000000000\",\"subject\":\"Run the retry tests against the test clock?\",\"project\":\"billing-svc\",\"agent\":\"Claude Code\",\"question\":{\"key\":\"q-00000000\",\"revision\":0,\"prompt\":\"Run the retry tests against the test clock?\",\"context\":\"They take about four minutes.\",\"choices\":[{\"label\":\"Yes\",\"recommended\":true},{\"label\":\"No\",\"recommended\":false}]}}",
+      "envelope": "AAAAAAAAAAAAAAAEAFSmsAX_yG9DktR-4SqayJw-cl_3VVOsd6De9jbYTbXaDH_DYzIykrqk9WXGdUjbkDD7im0CJEw-g2iigwBPeTem7GXpFMZHRCI8kn1yxdpbIp1QX-yI-jMuBmzMNXR95cCI-EvuDpxK3NNPZv2tanSv8KLa4sCwL4OrS28uXkZPcxMHOQRjUsRIzjXfPHpbCJWlYIssGdOm20cbRziU80ixou7l6joShMk_hliEEy0khSS3ZwZ0sJuLig1CSiZFs5hqlNWDjLh7c4bDwMLWjwQ_WNKbJur97JIeE7sUTQ-OPJLwJnHi9vdJBP4qe6VZcgGWyRvdjPLN8bfJ_U8TNV41MAIhmy0ZNvf0X9xUK_lEOfjw0_i8atw86J28wlHYJ9zro1YsUrFvCfLn5al0XLBbAwlUPD2s--Fr1_lfj45WBSfJKA0k4fxQbaVUkJA5ew2VfOt_IeHOoBjggC7qNhQOo_m83u4lL6k8yFm9Z4o83yWfHifSURAeQw0PE5vJJNDSOxgPrtM_h3myMwN49Ma8GZV8LStFH2-O8tK6GyWpNsSBGM9Q5NFLvi3BRuaSu_1n6PuRoOms8dqKpGESGf6MvtxdyQ"
     }
   ],
   "up_envelopes": [

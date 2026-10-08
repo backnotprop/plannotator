@@ -3,8 +3,8 @@ import SwiftUI
 
 @main
 struct PlannotatorApp: App {
-    @State private var model = AppModel()
-    @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    @UIApplicationDelegateAdaptor private var delegate: AppDelegate
+    private var model: AppModel { delegate.model }
     @Environment(\.scenePhase) private var phase
     @AppStorage("appearance") private var appearance = Appearance.system
 
@@ -27,12 +27,12 @@ struct PlannotatorApp: App {
                 .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
                     if let url = activity.webpageURL { _ = model.receiveSignInReturn(url) }
                 }
-                .onReceive(NotificationCenter.default.publisher(for: .pushToken)) { model.pushToken = $0.object as? Data }
         }
         .onChange(of: phase) { _, phase in
             // The event stream runs in the foreground; on return it catches up from the cursor.
             if phase == .active {
                 model.session?.start()
+                Task { await model.notifier.refresh() }
                 Task { await model.registerForPushIfAllowed() }
             } else if phase == .background {
                 model.session?.stop()
@@ -54,17 +54,21 @@ enum Appearance: String, CaseIterable, Identifiable {
     }
 }
 
+enum RootTab: Hashable { case inbox, decisions, settings }
+
 struct RootView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         @Bindable var model = model
-        TabView {
-            Tab("Inbox", systemImage: "tray") { InboxTab() }
-            Tab("Decisions", systemImage: "diamond") { DecisionsTab() }
-            Tab("Settings", systemImage: "gearshape") { SettingsTab() }
+        TabView(selection: $tab) {
+            Tab("Inbox", systemImage: "tray", value: RootTab.inbox) { InboxTab() }
+            Tab("Decisions", systemImage: "diamond", value: RootTab.decisions) { DecisionsTab() }
+            Tab("Settings", systemImage: "gearshape", value: RootTab.settings) { SettingsTab() }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
+        // A notification opened a thread: it shows in the Inbox tab.
+        .onChange(of: model.opening) { if model.opening != nil { tab = .inbox } }
         .fullScreenCover(isPresented: $model.pairing) { PairingCover() }
         .alert(offerTitle, isPresented: Binding(get: { model.offered != nil }, set: { if !$0 { model.offered = nil } }), presenting: model.offered) { link in
             Button("Cancel", role: .cancel) {}
@@ -103,6 +107,7 @@ struct RootView: View {
     }
 
     @State private var pairProblem: String?
+    @State private var tab = RootTab.inbox
 
     /// The title names no one: the address the phone will contact is the message's first line.
     private var offerTitle: String { "Pair with this computer?" }

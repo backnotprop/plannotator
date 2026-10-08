@@ -10,5 +10,14 @@
 		<string>applinks:$(WORKSPACES_HOST)</string>
 		<string>webcredentials:$(WORKSPACES_HOST)</string>
 	</array>
+	<!-- Push and the app group the notification extension shares (M5): the
+	     development APNs environment for Debug and TestFlight; the App Store
+	     build signs with Plannotator.entitlements, production. -->
+	<key>aps-environment</key>
+	<string>development</string>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.ai.plannotator.app</string>
+	</array>
 </dict>
 </plist>

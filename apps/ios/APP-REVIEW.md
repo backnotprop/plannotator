@@ -164,11 +164,11 @@ What the owner answers in App Privacy (App Store Connect):
   token, all linked to the person, App Functionality only. The manifest's
   `NSPrivacyCollectedDataTypes` gains the same entries in that release.
 
-When the notification service extension lands (M5), the app and the
-extension share the App Group's defaults: the app's manifest adds reason
-`1C8F.1`, and the extension carries its own `PrivacyInfo.xcprivacy` with the
-same entry, because Apple wants a manifest in every bundle whose executable
-uses a required-reason API.
+The app and the notification service extension (M5) share the App Group's
+defaults (the two notification switches): the app's manifest carries reason
+`1C8F.1` beside `CA92.1`, and the extension carries its own
+`PlannotatorNotifications/PrivacyInfo.xcprivacy` with `1C8F.1`, because Apple
+wants a manifest in every bundle whose executable uses a required-reason API.
 
 ## 8. Other App Store Connect answers
 
