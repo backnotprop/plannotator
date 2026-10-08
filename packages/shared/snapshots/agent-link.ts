@@ -27,10 +27,19 @@
  *        by the host's own session bridge as a real turn.
  *    Every poll carries when a person last typed into the session, which is
  *    how a hotkey-started collection picks it.
+ *    Nothing is spawned, watched or probed until a hub is found: the project
+ *    name (`git rev-parse`) and the host's Ask bridge are made when the link
+ *    connects, and the bridge is handed back when the connection ends.
+ *    Two host processes on one session (`pi -c` twice, two OpenCode servers)
+ *    share ONE hub connection, so only the holder of the session's lease
+ *    (`snapshots/leases/<host>-<session>.json`, the Inbox wake's rule: the
+ *    process the person used last, renewed every 5 s, free after 20 s,
+ *    released on exit) says hello, polls and delivers; the other waits.
  */
 
 import { execFile, spawn } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -45,6 +54,13 @@ const CLAIM_STALE_MS = 10 * 60_000;
 const CLAIM_KEEP_MS = 7 * 24 * 60 * 60_000;
 const SUMMON_TIMEOUT_MS = 30_000;
 const TITLE_MAX = 60;
+/** How often a connected link renews (or re-reads) its session's lease (the Inbox wake's 5 s). */
+export const SNAPSHOTS_LEASE_EVERY_MS = 5_000;
+/** A lease not renewed for this long belongs to a process that exited, slept or hung (the Inbox wake's 20 s). */
+export const SNAPSHOTS_LEASE_STALE_MS = 20_000;
+/** What a plannotator from before Snapshots answers `plannotator snapshot` with. */
+const OLDER_CLI = /unknown (sub)?command|no plan content in hook event/i;
+export const SNAPSHOTS_UPDATE_TEXT = "The plannotator on this machine has no Snapshots (an older version); update Plannotator.";
 
 export const SNAPSHOTS_MACOS_ONLY_TEXT =
   "Plannotator Snapshots captures the screen on macOS only for now. Here you can add an image with `plannotator snapshot add <file>` and open the HUD in a browser with `plannotator snapshot open`; a send from it still arrives in this session.";
@@ -85,19 +101,32 @@ export interface SnapshotsAgentLinkOptions<B> {
   cwd: string;
   /** The session's first words, shown in the HUD's picker. */
   title?: string;
-  /** The host's "Ask this session" bridge for this session. */
-  bridge: B;
+  /**
+   * The host's "Ask this session" bridge for this session, made only while
+   * connected to a hub (a bridge may watch the session) and handed back to
+   * `releaseBridge` when the connection ends.
+   */
+  createBridge: () => B;
+  releaseBridge?: (bridge: B) => void;
   ask: { turn: boolean; transient: boolean };
   target: SnapshotsLinkTarget;
   runClient: SnapshotsPullClient<B>;
   log?: (line: string) => void;
-  /** Test seam: how long to wait for a hub that is not there. */
+  /** Test seams: how long to wait for a hub that is not there, and the lease renewal. */
   retryMs?: number;
+  leaseEveryMs?: number;
 }
 
 interface HubEntry {
   url: string;
   token: string;
+  port: number;
+  serverSession: string;
+}
+
+/** One session's lease on one host: which of its processes polls and delivers. */
+export function snapshotsLeaseFileOf(dataDir: string, host: string, sessionId: string): string {
+  return join(dataDir, "snapshots", "leases", `${host}-${sessionId.replace(/[^A-Za-z0-9._-]/g, "_")}.json`);
 }
 
 export function snapshotsRegistryFileOf(dataDir: string): string {
@@ -113,8 +142,9 @@ export function readSnapshotsHubEntry(dataDir: string): HubEntry | null {
   try {
     const value = JSON.parse(readFileSync(snapshotsRegistryFileOf(dataDir), "utf8")) as Record<string, unknown>;
     if (value.v !== 1 || typeof value.url !== "string" || typeof value.token !== "string") return null;
-    if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(value.url)) return null;
-    return { url: value.url, token: value.token };
+    const port = /^http:\/\/127\.0\.0\.1:(\d+)$/.exec(value.url);
+    if (!port) return null;
+    return { url: value.url, token: value.token, port: Number(port[1]), serverSession: typeof value.serverSession === "string" ? value.serverSession : "" };
   } catch {
     return null;
   }
@@ -127,6 +157,19 @@ export function snapshotsTitleOf(text: string): string {
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** The hub is up: its registry names a port that answers health with the registry's serverSession. */
+export async function isSnapshotsHubRunning(dataDir: string): Promise<boolean> {
+  const entry = readSnapshotsHubEntry(dataDir);
+  if (!entry) return false;
+  try {
+    const response = await fetch(`${entry.url}/api/snapshots/health`, { signal: AbortSignal.timeout(1_500) });
+    if (!response.ok) return false;
+    return ((await response.json()) as { serverSession?: unknown }).serverSession === entry.serverSession;
+  } catch {
+    return false;
+  }
 }
 
 /** The repository (or folder) name the HUD shows for a session. */
@@ -204,7 +247,7 @@ export async function summonSnapshots(input: {
     if (run.missing) continue;
     const output = (run.stderr || run.stdout).trim();
     if (run.exitCode !== 0) {
-      if (/unknown (sub)?command/i.test(output)) return { ok: false, text: "The plannotator on this machine has no Snapshots (an older version); update Plannotator." };
+      if (OLDER_CLI.test(output)) return { ok: false, text: SNAPSHOTS_UPDATE_TEXT };
       return { ok: false, text: `Plannotator Snapshots could not start: ${output || `exit ${run.exitCode}`}` };
     }
     return { ok: true, text: run.stdout.trim() || "Plannotator Snapshots is open." };
@@ -217,16 +260,25 @@ export class SnapshotsAgentLink<B> {
   private disposed = false;
   private started = false;
   private readonly controller = new AbortController();
+  /** Aborts the current connection (the lease moved to another process). */
+  private runController: AbortController | null = null;
   private hub: HubEntry | null = null;
   private connectionId: string | null = null;
   private lastHumanInputAt = 0;
   private title: string;
-  private project = "";
+  private project: string | null = null;
   private readonly delivering = new Set<string>();
   private wakeSleep: (() => void) | null = null;
+  /** Names this link in the session's lease. */
+  private readonly instanceId = randomUUID();
+  private readonly leaseFile: string;
+  private leader = false;
+  /** When the person last acted in this process; the most recent touch wins the lease. */
+  private touchedAt = 0;
 
   constructor(private readonly options: SnapshotsAgentLinkOptions<B>) {
     this.title = options.title ? snapshotsTitleOf(options.title) : "";
+    this.leaseFile = snapshotsLeaseFileOf(options.dataDir, options.host, options.sessionId);
   }
 
   get sessionId(): string {
@@ -237,16 +289,29 @@ export class SnapshotsAgentLink<B> {
     return this.connectionId !== null;
   }
 
+  /** Whether this process holds the session's lease (the one that polls and delivers). */
+  get isLeader(): boolean {
+    return this.leader;
+  }
+
+  /** Start looking for the hub. The person is in this process now. */
   start(): void {
     if (this.started || this.disposed) return;
     this.started = true;
+    this.touchedAt = Date.now();
     this.pruneClaims();
-    void this.loop();
+    void this.loop().catch((error) => this.log(`link stopped: ${errorText(error)}`));
+  }
+
+  /** The hub went away: end the connection (and the host's bridge) now rather than after the poll gives up. */
+  dropConnection(): void {
+    this.runController?.abort();
   }
 
   /** Look for the hub now (`/plannotator-snapshot` may have just started it). */
   kick(): void {
     this.start();
+    this.touch();
     this.wakeSleep?.();
   }
 
@@ -255,16 +320,46 @@ export class SnapshotsAgentLink<B> {
     this.disposed = true;
     this.controller.abort();
     this.wakeSleep?.();
+    // Let another process of this session take over at once.
+    if (this.leader) writeLease(this.leaseFile, { owner: null, at: 0, touchedAt: 0 });
+    this.leader = false;
     const { hub, connectionId } = this;
     if (hub && connectionId) {
       void fetch(`${hub.url}/api/connections/${connectionId}/bye`, { method: "POST", headers: this.headers(hub), body: "{}" }).catch(() => undefined);
     }
   }
 
-  /** A person typed into this session. */
+  /** A person typed into this session: sends and Ask follow them to this process. */
   noteHumanInput(text?: string): void {
     this.lastHumanInputAt = Date.now();
     if (!this.title && text && text.trim() && !text.trimStart().startsWith("/")) this.title = snapshotsTitleOf(text);
+    this.touch();
+  }
+
+  /** The person acted in this process: it takes the session's lease (the Inbox wake's rule). */
+  touch(): void {
+    this.touchedAt = Date.now();
+    if (this.disposed || !this.started) return;
+    const wasLeader = this.leader;
+    this.holdLease(this.touchedAt);
+    if (!wasLeader && this.leader) this.wakeSleep?.();
+  }
+
+  /**
+   * Whether this process polls and delivers: it holds the session's lease
+   * unless another live process does and the person touched that one at
+   * least as recently. A lease not renewed for 20 s is free.
+   */
+  private holdLease(now: number): boolean {
+    const lease = parseLease(readText(this.leaseFile));
+    const foreign = !!lease?.owner && lease.owner !== this.instanceId && Math.abs(now - lease.at) < SNAPSHOTS_LEASE_STALE_MS;
+    if (foreign && lease && lease.touchedAt >= this.touchedAt) {
+      this.leader = false;
+      return false;
+    }
+    writeLease(this.leaseFile, { owner: this.instanceId, at: now, touchedAt: this.touchedAt });
+    this.leader = true;
+    return true;
   }
 
   private log(line: string): void {
@@ -291,13 +386,21 @@ export class SnapshotsAgentLink<B> {
 
   private async loop(): Promise<void> {
     const retryMs = this.options.retryMs ?? SNAPSHOTS_NO_HUB_RETRY_MS;
-    this.project = await projectOf(this.options.cwd);
+    const leaseEveryMs = this.options.leaseEveryMs ?? SNAPSHOTS_LEASE_EVERY_MS;
     while (!this.disposed) {
+      // A file read: nothing is spawned, watched or probed until there is a hub.
       const hub = readSnapshotsHubEntry(this.options.dataDir);
       if (!hub) {
         await this.sleep(retryMs);
         continue;
       }
+      // Another process of this session holds it: that one polls and delivers.
+      if (!this.holdLease(Date.now())) {
+        await this.sleep(leaseEveryMs);
+        continue;
+      }
+      this.project ??= await projectOf(this.options.cwd);
+      if (this.disposed) break;
       let connectionId: string | null = null;
       try {
         const hello = await fetch(`${hub.url}/api/connections/hello`, {
@@ -329,21 +432,42 @@ export class SnapshotsAgentLink<B> {
       this.hub = hub;
       this.connectionId = connectionId;
       this.log(`connected to ${hub.url} as ${connectionId}`);
-      await this.options
-        .runClient({
+      const run = new AbortController();
+      this.runController = run;
+      const onDispose = () => run.abort();
+      this.controller.signal.addEventListener("abort", onDispose, { once: true });
+      // Renew the lease while connected; losing it ends this connection.
+      const leaseTimer = setInterval(() => {
+        if (!this.holdLease(Date.now())) {
+          this.log("another process of this session took the link");
+          run.abort();
+        }
+      }, leaseEveryMs);
+      (leaseTimer as { unref?: () => void }).unref?.();
+      // The session's Ask bridge exists only while connected.
+      const bridge = this.options.createBridge();
+      try {
+        await this.options.runClient({
           baseUrl: hub.url,
           token: hub.token,
-          bridge: this.options.bridge,
-          signal: this.controller.signal,
+          bridge,
+          signal: run.signal,
           pollPath: `/api/connections/${connectionId}/poll`,
           eventPath: `/api/connections/${connectionId}/event`,
           pollExtras: () => ({ lastHumanInputAt: this.lastHumanInputAt, ...(this.title ? { title: this.title } : {}) }),
           onExtraCommand: (command, post) => this.onCommand(command, post),
           supersededWaitMs: () => 10_000 + Math.floor(Math.random() * 5_000),
           log: (message) => this.options.log?.(message),
-        })
-        .catch((error) => this.log(`link failed: ${errorText(error)}`));
-      this.connectionId = null;
+        });
+      } catch (error) {
+        this.log(`link failed: ${errorText(error)}`);
+      } finally {
+        clearInterval(leaseTimer);
+        this.controller.signal.removeEventListener("abort", onDispose);
+        this.runController = null;
+        this.connectionId = null;
+        this.options.releaseBridge?.(bridge);
+      }
       if (this.disposed) break;
       // A hub that restarted (new token) or forgot us answers 401/404: say hello again soon.
       await this.sleep(1_000);
@@ -409,6 +533,12 @@ export class SnapshotsAgentLink<B> {
     if (command.type !== "deliver" || typeof command.sendId !== "string" || typeof command.text !== "string") return;
     const { sendId, text } = command;
     if (this.delivering.has(sendId)) return;
+    // The person may have moved to another process since the last renewal:
+    // say nothing, and the hub re-sends to the process that holds the lease.
+    if (!this.holdLease(Date.now())) {
+      this.runController?.abort();
+      return;
+    }
     const claim = this.claim(sendId);
     if (claim === "delivered") {
       post({ type: "delivered", sendId });
@@ -434,5 +564,44 @@ export class SnapshotsAgentLink<B> {
         post({ type: "deliver_failed", sendId, reason: errorText(error) });
       })
       .finally(() => this.delivering.delete(sendId));
+  }
+}
+
+interface SnapshotsLease {
+  owner: string | null;
+  at: number;
+  touchedAt: number;
+}
+
+function parseLease(text: string | null): SnapshotsLease | null {
+  try {
+    const value = JSON.parse(text ?? "") as Record<string, unknown>;
+    if (typeof value.at !== "number") return null;
+    return {
+      owner: typeof value.owner === "string" && value.owner ? value.owner : null,
+      at: value.at,
+      touchedAt: typeof value.touchedAt === "number" ? value.touchedAt : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function readText(path: string): string | null {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+function writeLease(file: string, lease: SnapshotsLease): void {
+  try {
+    mkdirSync(join(file, ".."), { recursive: true, mode: 0o700 });
+    const tmp = `${file}.${process.pid}.${Math.random().toString(16).slice(2, 8)}.tmp`;
+    writeFileSync(tmp, JSON.stringify(lease), { mode: 0o600 });
+    renameSync(tmp, file);
+  } catch {
+    // Unwritable: the claim still keeps every delivery once.
   }
 }

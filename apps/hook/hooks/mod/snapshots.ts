@@ -28,6 +28,9 @@ export const STORE_SNAPSHOTS_DELIVERED = 'plannotator-snapshots-delivered'
 const DELIVERED_KEEP = 200
 const NO_HUB_RETRY_MS = 5_000
 const TITLE_MAX = 60
+/** What a plannotator from before Snapshots answers `plannotator snapshot` with. */
+const OLDER_CLI = /unknown (sub)?command|no plan content in hook event/i
+export const SNAPSHOTS_UPDATE_TEXT = 'The plannotator on this machine has no Snapshots (an older version); update Plannotator.'
 
 interface HubEntry {
   url: string
@@ -120,7 +123,12 @@ export class SnapshotsLink {
       .catch((error: unknown) => ({ exitCode: 1, stdout: '', stderr: error instanceof Error ? error.message : String(error) }))
     // The hub may have just started: connect now rather than at the next registry check.
     this.start()
-    if (result.exitCode !== 0) return `Plannotator Snapshots could not start: ${(result.stderr || result.stdout).trim() || `exit ${result.exitCode}`}`
+    if (result.exitCode !== 0) {
+      const output = (result.stderr || result.stdout).trim()
+      // A binary from before Snapshots: `Unknown command: snapshot`, or (before 0.27.11) the classic hook's refusal.
+      if (OLDER_CLI.test(output)) return SNAPSHOTS_UPDATE_TEXT
+      return `Plannotator Snapshots could not start: ${output || `exit ${result.exitCode}`}`
+    }
     return result.stdout.trim()
   }
 
@@ -153,12 +161,17 @@ export class SnapshotsLink {
 
   private async loop(): Promise<void> {
     const { host } = this.options
-    await this.identify()
+    let identified = false
     while (!this.disposed) {
       const hub = await this.readHub()
       if (!hub) {
         await host.sleep(NO_HUB_RETRY_MS)
         continue
+      }
+      // Nothing is spawned until there is a hub to connect to.
+      if (!identified) {
+        identified = true
+        await this.identify()
       }
       const hello = await host
         .fetch(`${hub.url}/api/connections/hello`, {

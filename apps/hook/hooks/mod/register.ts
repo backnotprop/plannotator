@@ -158,6 +158,8 @@ interface Allowed {
   agentTool: boolean
   /** Plannotator Snapshots: `/plannotator-snapshot` and the link to the Snapshots hub (on by default; PLANNOTATOR_SNAPSHOTS=0 turns it off). */
   snapshots: boolean
+  /** Snapshots is on and this is macOS: every session links to the hub at start (elsewhere only on /plannotator-snapshot). */
+  snapshotsAutoLink: boolean
   /** Connect to the Plannotator Inbox when one is found (the inbox tool switch, on by default). */
   inboxTool: boolean
 }
@@ -215,7 +217,8 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
     })
     mod = instance
     await instance.restore().catch(() => undefined)
-    instance.snapshots?.start()
+    // Capture is macOS only: elsewhere a session links only when /plannotator-snapshot runs there.
+    if (settings.snapshotsAutoLink) instance.snapshots?.start()
     return instance
   })()
   try {
@@ -246,11 +249,14 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
     return null
   }
   const debug = await $.env.get('PLANNOTATOR_MOD_DEBUG')
+  const snapshots = resolveSnapshotsEnabled(await $.env.get('PLANNOTATOR_SNAPSHOTS'), configText)
   return {
     dataDir,
     debugPath: debug && debug !== '0' ? `${dataDir}/claude-code-mod/debug.log` : null,
     agentTool: resolveAgentToolEnabled(await $.env.get('PLANNOTATOR_AGENT_TOOL'), configText),
-    snapshots: resolveSnapshotsEnabled(await $.env.get('PLANNOTATOR_SNAPSHOTS'), configText),
+    snapshots,
+    // macOS, told by a file only macOS has (no process spawned).
+    snapshotsAutoLink: snapshots && (await $.fs.exists('/System/Library/CoreServices/SystemVersion.plist').catch(() => false)) === true,
     inboxTool: resolveInboxToolEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
   }
 }

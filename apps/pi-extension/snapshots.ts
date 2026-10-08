@@ -12,17 +12,21 @@
  * Non-blocking, like `/plannotator-review`: the command runs
  * `plannotator snapshot --session pi:<id>` (starts the hub and the app, latches
  * this session, opens the capture overlay) and returns. The person's Send
- * arrives later as `pi.sendUserMessage(text, { deliverAs: "followUp" })`, the
- * text the hub composed (`packages/shared/snapshots/compose.ts`, identical on
- * every host), and counts as delivered when Pi starts that user message.
+ * arrives later as a `followUp` message carrying the text the hub composed
+ * (`packages/shared/snapshots/compose.ts`, identical on every host): a custom
+ * message (`plannotator-snapshots`, user role to the model) whose
+ * `details.sendId` confirms delivery when Pi starts it.
  * "Ask this session" from the HUD is a real turn of this session through the
  * same Pi session bridge the review servers use (`pi-session-bridge.ts`).
  *
- * Every interactive session links (a registry file check every 5 s, no
- * process), so a hotkey-started collection can go to the session the person
- * typed into last (`input` not from an extension). Capture is macOS only:
- * elsewhere the command explains and points at `plannotator snapshot add`;
- * Windows does not link at all.
+ * On macOS every interactive session links (a registry file check every 5 s;
+ * nothing is spawned or watched until a hub is up), so a hotkey-started
+ * collection can go to the session the person typed into last (`input` not
+ * from an extension). Two Pi processes on one session: the one the person
+ * used last holds the session's lease and alone polls and delivers. Capture
+ * is macOS only: elsewhere the command explains, points at
+ * `plannotator snapshot add`, and links that session on demand; Windows does
+ * not link at all.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -38,7 +42,10 @@ export const PI_SNAPSHOTS_COMMAND = "plannotator-snapshot";
 /** A send that has not entered the session after this long, while the session is idle, did not reach it. */
 const DELIVERY_WATCHDOG_MS = 15_000;
 
-type SnapshotsPi = Pick<ExtensionAPI, "registerCommand" | "sendUserMessage"> & {
+/** The custom message a Send arrives as; `details.sendId` is how its delivery is confirmed. */
+export const PI_SNAPSHOTS_MESSAGE_TYPE = "plannotator-snapshots";
+
+type SnapshotsPi = Pick<ExtensionAPI, "registerCommand" | "sendMessage"> & {
 	on(event: string, handler: (event: any, ctx?: any) => unknown): unknown;
 };
 
@@ -49,15 +56,6 @@ export interface PiSnapshotsOptions {
 	platform?: NodeJS.Platform;
 	env?: NodeJS.ProcessEnv;
 	retryMs?: number;
-}
-
-function userText(message: { content?: unknown } | undefined): string {
-	const content = message?.content;
-	if (typeof content === "string") return content;
-	if (!Array.isArray(content)) return "";
-	return content
-		.map((part: { type?: string; text?: unknown } | null) => (part?.type === "text" && typeof part.text === "string" ? part.text : ""))
-		.join("");
 }
 
 /** Called once at extension load. Returns whether Snapshots is on for this Pi. */
@@ -71,7 +69,7 @@ export function setupPiSnapshots(pi: SnapshotsPi, options: PiSnapshotsOptions): 
 	let ctx: ExtensionContext | null = null;
 	let link: SnapshotsAgentLink<SessionBridge> | null = null;
 	/** Sends waiting to show up as a user message in the session. */
-	const waiting = new Map<string, { text: string; resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+	const waiting = new Map<string, { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
 
 	const endWaiting = (sendId: string, error?: Error) => {
 		const entry = waiting.get(sendId);
@@ -92,6 +90,7 @@ export function setupPiSnapshots(pi: SnapshotsPi, options: PiSnapshotsOptions): 
 
 	const linkFor = (current: ExtensionContext): SnapshotsAgentLink<SessionBridge> | null => {
 		if (platform === "win32") return null;
+		const origin = getPiSessionIdentity(current);
 		const sessionId = current.sessionManager.getSessionId();
 		if (link && link.sessionId === sessionId) return link;
 		link?.dispose();
@@ -102,7 +101,8 @@ export function setupPiSnapshots(pi: SnapshotsPi, options: PiSnapshotsOptions): 
 			processId,
 			cwd: current.cwd,
 			title: current.sessionManager.getSessionName() ?? undefined,
-			bridge: options.createBridge(current, getPiSessionIdentity(current)),
+			// Made only once a hub is up (the link connects).
+			createBridge: () => options.createBridge(current, origin),
 			ask: { turn: true, transient: false },
 			runClient: runPullSessionBridgeClient,
 			...(options.retryMs ? { retryMs: options.retryMs } : {}),
@@ -124,9 +124,14 @@ export function setupPiSnapshots(pi: SnapshotsPi, options: PiSnapshotsOptions): 
 							}
 							endWaiting(sendId, new Error("the message did not reach the session"));
 						};
-						waiting.set(sendId, { text: text.trim(), resolve, reject, timer: setTimeout(watchdog, DELIVERY_WATCHDOG_MS) });
+						waiting.set(sendId, { resolve, reject, timer: setTimeout(watchdog, DELIVERY_WATCHDOG_MS) });
 						try {
-							pi.sendUserMessage(text, { deliverAs: "followUp" });
+							// A user-role message to the model, starting a turn when idle and
+							// following the running one otherwise; `details.sendId` confirms it.
+							pi.sendMessage(
+								{ customType: PI_SNAPSHOTS_MESSAGE_TYPE, content: text, display: true, details: { sendId, source: "plannotator" } },
+								{ triggerTurn: true, deliverAs: "followUp" },
+							);
 						} catch (error) {
 							endWaiting(sendId, error instanceof Error ? error : new Error(String(error)));
 						}
@@ -163,8 +168,10 @@ export function setupPiSnapshots(pi: SnapshotsPi, options: PiSnapshotsOptions): 
 
 	pi.on("session_start", (_event, startCtx: ExtensionContext) => {
 		ctx = startCtx;
-		// Only a session with a person at it: a print/JSON run could never take a send later.
-		if (startCtx.hasUI) linkFor(startCtx);
+		// Only a session with a person at it (a print/JSON run could never take a
+		// send later), and only on macOS, where capture runs: elsewhere a session
+		// links when /plannotator-snapshot runs in it.
+		if (startCtx.hasUI && platform === "darwin") linkFor(startCtx);
 	});
 
 	pi.on("session_shutdown", () => {
@@ -180,15 +187,9 @@ export function setupPiSnapshots(pi: SnapshotsPi, options: PiSnapshotsOptions): 
 	});
 
 	pi.on("message_start", (event) => {
-		const message = event?.message as { role?: string; content?: unknown } | undefined;
-		if (message?.role !== "user" || waiting.size === 0) return;
-		const text = userText(message).trim();
-		for (const [sendId, entry] of waiting) {
-			if (entry.text === text) {
-				endWaiting(sendId);
-				return;
-			}
-		}
+		const message = event?.message as { role?: string; customType?: string; details?: { sendId?: unknown } } | undefined;
+		if (message?.role !== "custom" || message.customType !== PI_SNAPSHOTS_MESSAGE_TYPE) return;
+		if (typeof message.details?.sendId === "string") endWaiting(message.details.sendId);
 	});
 
 	return true;

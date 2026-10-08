@@ -132,6 +132,9 @@ const serverPlugin = {
         console.error(`[Plannotator] Could not set up Plannotator Snapshots: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+    // Unloading the plugin ends Snapshots' hub watch, links and bridges.
+    // Undefined when there is nothing to clean up (OpenCode 1, Snapshots off).
+    const cleanup = snapshots ? () => snapshots?.dispose() : undefined;
     const nativeDeps: NativeCommandDeps = {
       ctx: v2,
       getAgents,
@@ -269,7 +272,7 @@ const serverPlugin = {
       });
     }
 
-    if (!hasToolTransform || !shouldRegisterSubmitPlan(workflowOptions)) return;
+    if (!hasToolTransform || !shouldRegisterSubmitPlan(workflowOptions)) return cleanup;
 
     await ctx.tool.transform((tools) => {
       tools.add({
@@ -380,6 +383,7 @@ const serverPlugin = {
         },
       });
     });
+    return cleanup;
   },
 } satisfies Plugin.Plugin;
 

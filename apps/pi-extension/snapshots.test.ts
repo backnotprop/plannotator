@@ -66,7 +66,7 @@ function stubPlannotator(): { bin: string; calls: () => string[] } {
 function createPi() {
 	const handlers = new Map<string, Array<(event: any, ctx?: any) => unknown>>();
 	const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
-	const userMessages: Array<{ text: string; options: unknown }> = [];
+	const deliveries: Array<{ content: string; details: unknown; options: unknown }> = [];
 	const askMessages: Array<{ content: string }> = [];
 	const notices: Array<{ message: string; type: string }> = [];
 	const emit = (event: string, payload: unknown = {}) => {
@@ -91,13 +91,17 @@ function createPi() {
 			handlers.set(event, [...(handlers.get(event) ?? []), handler]);
 		},
 		registerCommand: (name: string, command: { handler: (args: string, ctx: unknown) => Promise<void> }) => commands.set(name, command),
-		// Pi starts the user message (at once when idle; after the run for a followUp otherwise).
-		sendUserMessage: (text: string, options: unknown) => {
-			userMessages.push({ text, options });
-			queueMicrotask(() => emit("message_start", { message: { role: "user", content: text } }));
-		},
-		// A triggering custom message: Pi runs a turn that answers it.
-		sendMessage: (message: { content: string; details: { askId: string } }) => {
+		// A triggering custom message: Pi starts it (at once when idle; after the
+		// run for a followUp), and for Ask runs a turn that answers it.
+		sendMessage: (message: { customType: string; content: string; details: any }, options: unknown) => {
+			if (message.customType === "plannotator-snapshots") {
+				deliveries.push({ content: message.content, details: message.details, options });
+				// Pi may render the content its own way: delivery is confirmed by the id, never the text.
+				queueMicrotask(() =>
+					emit("message_start", { message: { role: "custom", customType: message.customType, content: `${message.content.trim()}\n`, details: message.details } }),
+				);
+				return;
+			}
 			askMessages.push({ content: message.content });
 			setTimeout(() => {
 				emit("message_start", { message: { role: "custom", customType: "plannotator-ask", details: message.details } });
@@ -107,14 +111,14 @@ function createPi() {
 			}, 10);
 		},
 	};
-	return { pi, ctx, handlers, commands, userMessages, askMessages, notices, emit };
+	return { pi, ctx, handlers, commands, deliveries, askMessages, notices, emit };
 }
 
-function setup(fake: ReturnType<typeof createPi>, env: NodeJS.ProcessEnv) {
+function setup(fake: ReturnType<typeof createPi>, env: NodeJS.ProcessEnv, platform: NodeJS.Platform = "darwin") {
 	const bridges = createPiSessionBridgeHub(fake.pi as never);
 	const on = setupPiSnapshots(fake.pi as never, {
 		createBridge: (ctx, origin) => bridges.createBridge(ctx, origin),
-		platform: "darwin",
+		platform,
 		env,
 		retryMs: 50,
 	});
@@ -133,7 +137,7 @@ describe("Plannotator Snapshots on Pi", () => {
 		await fake.commands.get(PI_SNAPSHOTS_COMMAND)!.handler("--app", fake.ctx);
 		expect(stub.calls()).toEqual([`snapshot --session pi:${SESSION_ID} --app`]);
 		expect(fake.notices.at(-1)?.message).toStartWith("Plannotator Snapshots is open");
-		expect(fake.userMessages).toHaveLength(0);
+		expect(fake.deliveries).toHaveLength(0);
 
 		// What the real `plannotator snapshot --session` does on the hub.
 		await hub.summon("pi", SESSION_ID);
@@ -143,7 +147,12 @@ describe("Plannotator Snapshots on Pi", () => {
 		await hub.waitForState((state) => state.lastSent?.send?.state === "delivered");
 		// Past a re-send: still one message.
 		await new Promise((resolve) => setTimeout(resolve, 200));
-		expect(fake.userMessages).toEqual([{ text: sent.text, options: { deliverAs: "followUp" } }]);
+		expect(fake.deliveries).toEqual([
+			{ content: sent.text, details: { sendId: sent.sendId, source: "plannotator" }, options: { triggerTurn: true, deliverAs: "followUp" } },
+		]);
+		// Confirmed by its id: the hub never hears `deliver_failed`.
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		expect((await hub.state()).lastSent.send.state).toBe("delivered");
 	});
 
 	test("Ask from the HUD is a real turn of this Pi session", async () => {
@@ -181,15 +190,17 @@ describe("Plannotator Snapshots on Pi", () => {
 		expect((await hub.state()).connections).toEqual([]);
 	});
 
-	test("off macOS the command explains and points at snapshot add, without running plannotator", async () => {
-		await world();
+	test("off macOS: no session links at start; the command explains, runs no plannotator, and links this session on demand", async () => {
+		const { hub } = await world();
 		const stub = stubPlannotator();
 		const fake = createPi();
-		const bridges = createPiSessionBridgeHub(fake.pi as never);
-		setupPiSnapshots(fake.pi as never, { createBridge: (ctx, origin) => bridges.createBridge(ctx, origin), platform: "linux", env: { ...process.env, PLANNOTATOR_BIN: stub.bin }, retryMs: 50 });
-		cleanups.push(() => fake.emit("session_shutdown"));
+		setup(fake, { ...process.env, PLANNOTATOR_BIN: stub.bin }, "linux");
+		fake.emit("session_start", { reason: "startup" });
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		expect((await hub.state()).connections).toEqual([]);
 		await fake.commands.get(PI_SNAPSHOTS_COMMAND)!.handler("", fake.ctx);
 		expect(stub.calls()).toEqual([]);
 		expect(fake.notices.at(-1)?.message).toContain("plannotator snapshot add");
+		await hub.waitForState((state) => state.connections.some((c: { sessionId: string }) => c.sessionId === SESSION_ID));
 	});
 });

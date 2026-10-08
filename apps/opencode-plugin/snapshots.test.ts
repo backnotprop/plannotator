@@ -1,16 +1,17 @@
 /**
  * Plannotator Snapshots on OpenCode 2 (snapshots.ts) against a REAL Snapshots
- * hub in this process (tests/helpers/snapshots-hub.ts), through the real
- * plugin setup (server.ts) over a fake OpenCode 2 context whose session
- * domain records prompts and notices and whose event stream the test drives.
- * The person is played through the hub's HUD routes.
+ * hub in this process (tests/helpers/snapshots-hub.ts), over a fake OpenCode 2
+ * context whose session domain records prompts and notices and whose event
+ * stream the test drives (the plugin setup itself for the wiring). The person
+ * is played through the hub's HUD routes.
  *
  * What regresses if this fails:
  *  - `/plannotator-snapshot` stops being a native command that summons with
  *    the root session (`--session opencode:<root>`) and returns;
- *  - a Send stops arriving as ONE queued prompt with the hub's text;
+ *  - a Send stops arriving as ONE queued prompt with the hub's text, or a
+ *    notice of ours is left to be promoted alone ahead of it (#1515);
  *  - Ask from the HUD stops being a turn of the session;
- *  - the command's line starts reaching the model;
+ *  - an unused OpenCode starts subscribing, bridging or probing before a hub runs;
  *  - the switch off stops leaving OpenCode untouched (no command, no link).
  */
 
@@ -19,8 +20,8 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startTestSnapshotsHub, tempSnapshotsDataDir, type TestSnapshotsHub } from "../../tests/helpers/snapshots-hub";
-import serverPlugin from "./server";
-import { SNAPSHOTS_COMMAND } from "./snapshots";
+import serverPlugin, { resolveRootSession } from "./server";
+import { createOpenCodeSnapshots, SNAPSHOTS_COMMAND } from "./snapshots";
 import { dropSessionUrlNotices } from "./v2-client";
 
 const ROOT = "ses_root";
@@ -148,65 +149,120 @@ function fakeOpenCode() {
       }),
     },
   };
-  return { ctx, prompts, synthetics, commands, contextHooks, emit };
+  return { ctx, prompts, synthetics, commands, contextHooks, emit, get subscribers() { return listeners.size; } };
 }
 
+function snapshotsFor(fake: ReturnType<typeof fakeOpenCode>, platform: NodeJS.Platform) {
+  const snapshots = createOpenCodeSnapshots(fake.ctx, {
+    resolveRoot: (sessionID) => resolveRootSession(fake.ctx, sessionID),
+    platform,
+    retryMs: 50,
+    hubWatchMs: 50,
+  });
+  if (!snapshots) throw new Error("Snapshots is off");
+  cleanups.push(() => snapshots.dispose());
+  return snapshots;
+}
+
+const snapshotSends = (fake: ReturnType<typeof fakeOpenCode>) => fake.prompts.filter((prompt) => prompt.metadata?.source === "plannotator-snapshots");
+
 describe("Plannotator Snapshots on OpenCode 2", () => {
-  test("/plannotator-snapshot summons for the root session and returns; the Send arrives once as a queued prompt", async () => {
+  test("the plugin adds /plannotator-snapshot beside the review commands and hands OpenCode a cleanup", async () => {
+    await world();
+    const fake = fakeOpenCode();
+    const cleanup = await serverPlugin.setup(fake.ctx as never);
+    expect([...fake.commands.keys()]).toEqual(["plannotator-review", "plannotator-annotate", "plannotator-last", SNAPSHOTS_COMMAND]);
+    expect(typeof cleanup).toBe("function");
+    (cleanup as () => void)();
+  });
+
+  // #1515: a pending notice row is promoted ALONE ahead of a queued prompt and
+  // runs a model step of its own. A successful command therefore posts none.
+  test("/plannotator-snapshot summons for the root session and returns, posting no notice; the Send arrives once, queued", async () => {
     const hub = await world();
     const calls = stubPlannotator();
     const fake = fakeOpenCode();
-    await serverPlugin.setup(fake.ctx as never);
-    const command = fake.commands.get(SNAPSHOTS_COMMAND);
-    expect(command).toBeDefined();
+    const snapshots = snapshotsFor(fake, "darwin");
 
     // From a subagent's session: the root session is the destination.
-    await command!.execute({ sessionID: CHILD, prompt: { text: "--app" } });
-    if (process.platform === "darwin") {
-      expect(calls()).toEqual([`snapshot --session opencode:${ROOT} --app`]);
-      expect(fake.synthetics.at(-1)).toMatchObject({ sessionID: CHILD, resume: false, description: expect.stringMatching(/^Plannotator Snapshots is open/) });
-    } else {
-      expect(calls()).toEqual([]);
-      expect(fake.synthetics.at(-1)?.description).toContain("plannotator snapshot add");
-    }
-    // The line is for the person: the model never reads it.
-    const messages: unknown[] = [{ role: "assistant", content: "ok" }, { role: "user", content: fake.synthetics.at(-1).text }, { role: "user", content: "next" }];
-    dropSessionUrlNotices(messages);
-    expect(messages).toHaveLength(2);
+    await snapshots.command.execute({ sessionID: CHILD, prompt: { text: "--app" } });
+    expect(calls()).toEqual([`snapshot --session opencode:${ROOT} --app`]);
+    expect(fake.synthetics).toEqual([]);
     expect(fake.prompts).toHaveLength(0);
 
     // What the real `plannotator snapshot --session` does on the hub.
     await hub.summon("opencode", ROOT);
     await hub.waitForState((state) => state.connections.some((c: { host: string; sessionId: string }) => c.host === "opencode" && c.sessionId === ROOT));
-    const { collectionId } = await hub.capture();
-    const sent = await hub.send(collectionId);
+    const sent = await hub.send((await hub.capture()).collectionId);
     await hub.waitForState((state) => state.lastSent?.send?.state === "delivered");
     await new Promise((resolve) => setTimeout(resolve, 200));
-    const deliveries = fake.prompts.filter((prompt) => prompt.metadata?.source === "plannotator-snapshots");
-    expect(deliveries).toHaveLength(1);
-    expect(deliveries[0]).toMatchObject({ sessionID: ROOT, text: sent.text, delivery: "queue" });
+    expect(snapshotSends(fake)).toHaveLength(1);
+    expect(snapshotSends(fake)[0]).toMatchObject({ sessionID: ROOT, text: sent.text, delivery: "queue" });
+    expect(fake.synthetics).toEqual([]);
   });
 
-  test("a session that runs here links on its own, and Ask from the HUD is a real turn of it", async () => {
+  test("a command that fails shows why; a Send while that notice is pending is steered with it, never after it alone", async () => {
     const hub = await world();
+    const calls = stubPlannotator();
     const fake = fakeOpenCode();
-    await serverPlugin.setup(fake.ctx as never);
+    // Off macOS the command explains (`plannotator snapshot add` / `open` still send) and links on demand.
+    const snapshots = snapshotsFor(fake, "linux");
+    await snapshots.command.execute({ sessionID: ROOT, prompt: { text: "" } });
+    expect(calls()).toEqual([]);
+    expect(fake.synthetics).toHaveLength(1);
+    expect(fake.synthetics[0]).toMatchObject({ sessionID: ROOT, resume: false, delivery: "steer" });
+    expect(fake.synthetics[0].description).toContain("plannotator snapshot add");
+    // The notice is for the person: the model never reads it.
+    const messages: unknown[] = [{ role: "assistant", content: "ok" }, { role: "user", content: fake.synthetics[0].text }, { role: "user", content: "next" }];
+    dropSessionUrlNotices(messages);
+    expect(messages).toHaveLength(2);
+
+    await hub.waitForState((state) => state.connections.some((c: { sessionId: string }) => c.sessionId === ROOT));
+    await hub.summon("opencode", ROOT);
+    const sent = await hub.send((await hub.capture()).collectionId);
+    await hub.waitForState((state) => state.lastSent?.send?.state === "delivered");
+    expect(snapshotSends(fake)).toEqual([expect.objectContaining({ sessionID: ROOT, text: sent.text, delivery: "steer" })]);
+  });
+
+  test("costs nothing until a hub runs: then a running session links itself and Ask is a real turn; the hub going away ends it", async () => {
+    const dataDir = tempSnapshotsDataDir();
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    cleanups.push(() => rmSync(dataDir, { recursive: true, force: true }));
+    const fake = fakeOpenCode();
+    const snapshots = snapshotsFor(fake, "darwin");
+    fake.emit("session.execution.started", { sessionID: ROOT });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(snapshots.subscribed).toBe(false);
+    expect(fake.subscribers).toBe(0);
+    expect(snapshots.liveBridges).toBe(0);
+
+    const hub = await startTestSnapshotsHub(dataDir);
+    let stopped = false;
+    cleanups.push(() => {
+      if (!stopped) hub.stop();
+    });
+    await waitUntil(() => snapshots.subscribed);
     fake.emit("session.execution.started", { sessionID: ROOT });
     fake.emit("session.execution.succeeded", { sessionID: ROOT });
     await hub.waitForState((state) => state.connections.some((c: { sessionId: string; canAsk: boolean }) => c.sessionId === ROOT && c.canAsk));
+    expect(snapshots.liveBridges).toBe(1);
     const answer = await hub.ask("What is this button?", { host: "opencode", sessionId: ROOT });
     expect(answer.text).toBe("That is the Save button.");
     const asks = fake.prompts.filter((prompt) => prompt.metadata?.source === "plannotator-ask");
     expect(asks).toHaveLength(1);
     expect(asks[0].text).toContain("What is this button?");
     expect(asks[0].text).toContain("Plannotator Snapshots");
+
+    hub.stop();
+    stopped = true;
+    await waitUntil(() => !snapshots.subscribed && snapshots.liveBridges === 0 && fake.subscribers === 0);
   });
 
   test("switched off: no command, and no session links to the hub", async () => {
     const hub = await world();
     process.env.PLANNOTATOR_SNAPSHOTS = "0";
     const fake = fakeOpenCode();
-    await serverPlugin.setup(fake.ctx as never);
+    expect(await serverPlugin.setup(fake.ctx as never)).toBeUndefined();
     expect(fake.commands.has(SNAPSHOTS_COMMAND)).toBe(false);
     expect([...fake.commands.keys()]).toEqual(["plannotator-review", "plannotator-annotate", "plannotator-last"]);
     fake.emit("session.execution.started", { sessionID: ROOT });
@@ -214,3 +270,11 @@ describe("Plannotator Snapshots on OpenCode 2", () => {
     expect((await hub.state()).connections).toEqual([]);
   });
 });
+
+async function waitUntil(check: () => boolean, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error("timed out");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
