@@ -1205,7 +1205,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
                 same-origin XHR) and no srcdoc. Srcdoc mode is unchanged. */}
             <iframe
               ref={iframeRef}
-              {...(src ? { src } : { srcDoc: srcdoc, sandbox: hostNavigates ? "allow-scripts allow-popups" : "allow-scripts" })}
+              {...(src ? { src } : { srcDoc: srcdoc, sandbox: "allow-scripts" + (hostNavigates ? " allow-popups" : "") })}
               style={{
                 width: "100%",
                 height: fullViewport ? "100%" : `${iframeHeight}px`,

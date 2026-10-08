@@ -220,10 +220,20 @@ final class AttachmentProofTests: ProofCase {
     }
 
     /// Scrolls the document (inside the web view) until the element is on screen.
+    /// Scrolls the document (inside the web view) until the element is on screen and in the
+    /// upper part of it, clear of the floating toolstrip at the thumb (a fast runner and a slow
+    /// one stop a swipe at different places).
     private func swipeWeb(until target: XCUIElement) {
         var tries = 0
         while !(target.exists && target.isHittable), tries < 10 {
             app.webViews.firstMatch.swipeUp(velocity: .slow)
+            tries += 1
+        }
+        let limit = app.frame.height * 0.6
+        tries = 0
+        while target.exists, target.frame.midY > limit, tries < 6 {
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
+            start.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)), withVelocity: .slow, thenHoldForDuration: 0.3)
             tries += 1
         }
     }
