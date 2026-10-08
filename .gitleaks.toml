@@ -28,3 +28,23 @@ regexTarget = "line"
 regexes = [
   '''guides\.show/g/[A-Za-z0-9_-]+#key=[A-Za-z0-9_-]+''',
 ]
+
+[[allowlists]]
+# Disposition: public, non-secret test vectors; reviewed 2026-10-08.
+# The Inbox relay's key derivation and envelope (adr/implementation/inbox-mobile.md,
+# section 4) from ALL-ZERO inputs: a zero pairing secret and a zero device id give
+# these three HKDF outputs, which TypeScript and the iPhone app's Swift tests both
+# check. They protect nothing; publishing them is the point. Anchored to the three
+# exact values in the one fixture file, so anything else there still trips the rule.
+# Owner: Plannotator maintainers. Re-review by 2027-10-08 or when the fixture changes.
+description = "Inbox relay test vectors from all-zero inputs"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = [
+  '''^packages/core/fixtures/inbox-relay-vectors\.json$''',
+]
+regexes = [
+  '''^EWmqHqbdwPC6kxOAZoGZpQiyudtOsYa_Vf1fUDAn-Wk$''',
+  '''^Z-gLD9fMyL1FP8urppXEy76cfRANNu3KzK7WVnGOd9I$''',
+  '''^2dd0e6dc8b7e933117fe89ad28217652c08ce3389c29b81fa212bc31d9e7b43a$''',
+]

@@ -79,6 +79,8 @@ export function worldEnv(w: InboxWorld): Record<string, string> {
     PLANNOTATOR_DATA_DIR: w.dataDir,
     PLANNOTATOR_BROWSER: "none",
     PLANNOTATOR_BIN: "",
+    // Never the hosted relay (tests/setup/feedback-archive-off.ts says why).
+    PLANNOTATOR_RELAY_URL: process.env.PLANNOTATOR_RELAY_URL || "http://127.0.0.1:9",
     TMPDIR: tmpdir(),
   };
 }

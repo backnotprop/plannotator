@@ -197,6 +197,21 @@ export class InboxDevices {
     return this.write({ ...device, revoked_at: at }, at);
   }
 
+  /** The device's pairing secret (base64url), for its relay keys; null once revoked. */
+  secret(id: string): string | null {
+    try {
+      return readFileSync(join(this.secretsDir, id), "utf8").trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** The phone's relay switch, as the relay reports it (contract section 4). A line only when it changes. */
+  setCarriage(id: string, on: boolean, at: string): void {
+    const device = this.devices.get(id);
+    if (device && device.carriage !== on) this.write({ ...device, carriage: on }, at);
+  }
+
   /** A request from this device: in memory always, on disk when the UTC day changed. */
   touch(id: string, at: string): void {
     const device = this.devices.get(id);
