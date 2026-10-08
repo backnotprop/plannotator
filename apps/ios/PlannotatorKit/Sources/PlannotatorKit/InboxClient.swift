@@ -11,6 +11,10 @@ public enum InboxError: Error, Equatable, Sendable {
     /// A Send got no answer and the thread could not be read after it: it may
     /// or may not have landed. A retry with the same key is applied once.
     case sendUnconfirmed
+    /// Workspaces could not be reached (no network, or the service failed).
+    case workspacesUnreachable
+    /// Workspaces answered 401: the session ended (signed out here or elsewhere).
+    case signedOut
 
     public var message: String {
         switch self {
@@ -18,8 +22,13 @@ public enum InboxError: Error, Equatable, Sendable {
         case .unreachable: "Your computer can't be reached right now."
         case .unreadable: "Your computer sent an answer this app can't read. Update Plannotator on both."
         case .sendUnconfirmed: "Your computer can't be reached, so it is not certain this was sent. Tap Send again; it is sent once either way."
+        case .workspacesUnreachable: "Workspaces can't be reached right now."
+        case .signedOut: "You were signed out of Workspaces. Sign in again to keep answering."
         }
     }
+
+    /// The source could not be reached: the computer, or Workspaces.
+    public var isUnreachable: Bool { self == .unreachable || self == .workspacesUnreachable }
 
     public var code: String? {
         if case .refused(_, let code, _, _) = self { return code }
@@ -27,12 +36,13 @@ public enum InboxError: Error, Equatable, Sendable {
     }
 
     /// The phone was removed on the computer, or its token is no longer known: pair again.
-    public var isUnpaired: Bool { code == "device_revoked" || code == "device_token_invalid" }
+    /// For Workspaces: the session ended; sign in again.
+    public var isUnpaired: Bool { code == "device_revoked" || code == "device_token_invalid" || self == .signedOut }
 
     /// A definite answer (any 4xx): an idempotency key can be dropped after it (contract section 6).
     public var isDefinite: Bool {
         if case .refused(let status, _, _, _) = self { return (400..<500).contains(status) }
-        return false
+        return self == .signedOut
     }
 }
 
@@ -192,7 +202,11 @@ public struct InboxClient: Sendable {
 
     /// `POST messages/:id/reply`: the person's Send. The key is the caller's, kept across retries.
     /// Annotations ride it as Plannotator's feedback text with their ids (7.11).
-    public func reply(message id: String, idempotencyKey: String, words: String, questions: [SendQuestion], feedback: String? = nil, annotationIds: [String]? = nil) async throws(InboxError) -> InboxQuestionsResponse {
+    public func reply(message id: String, idempotencyKey: String, words: String, questions: [SendQuestion]) async throws(InboxError) -> InboxQuestionsResponse {
+        try await reply(message: id, idempotencyKey: idempotencyKey, words: words, questions: questions, feedback: nil, annotationIds: nil)
+    }
+
+    public func reply(message id: String, idempotencyKey: String, words: String, questions: [SendQuestion], feedback: String?, annotationIds: [String]?) async throws(InboxError) -> InboxQuestionsResponse {
         struct Body: Encodable { var idempotencyKey: String; var words: String; var questions: [SendQuestion]; var feedback: String?; var annotationIds: [String]? }
         return try await post("messages/\(id)/reply", Body(idempotencyKey: idempotencyKey, words: words, questions: questions, feedback: feedback, annotationIds: annotationIds))
     }

@@ -2,14 +2,20 @@ import Foundation
 import Observation
 import PlannotatorKit
 
-/// One paired computer's Inbox while it is shown: the list, the open threads,
-/// the event stream in the foreground, and the person's commands.
+/// The shown source while it is shown (a paired computer's Inbox, or
+/// Workspaces): the list, the open threads, the live changes in the
+/// foreground, and the person's commands.
 @Observable
 final class SourceSession {
     enum Status { case connecting, connected, unreachable, removed }
+    enum Kind: Equatable { case inbox(Source), workspaces }
 
-    let source: Source
-    let client: InboxClient
+    /// The cache's and Send keys' name for this source: a computer's device id, or "workspaces".
+    let id: String
+    /// "MacBook Pro", or "Workspaces".
+    let name: String
+    let kind: Kind
+    let client: any SourceClient
 
     private(set) var status: Status = .connecting
     /// The list on screen. It draws from the cache first, then refreshes.
@@ -41,11 +47,24 @@ final class SourceSession {
     private let cache: Cache
 
     init(source: Source, token: String) {
-        self.source = source
-        self.client = InboxClient(address: source.address, token: token)
-        self.cache = Cache(source: source.id)
+        id = source.id
+        name = source.name
+        kind = .inbox(source)
+        client = InboxClient(address: source.address, token: token)
+        cache = Cache(source: source.id)
         list = cache.read(InboxListModel.self, "list")
     }
+
+    init(workspaces: WorkspacesSource) {
+        id = WorkspacesAccount.sourceId
+        name = "Workspaces"
+        kind = .workspaces
+        client = workspaces
+        cache = Cache(source: id)
+        list = cache.read(InboxListModel.self, "list")
+    }
+
+    var isWorkspaces: Bool { kind == .workspaces }
 
     // MARK: The stream (foreground only)
 
@@ -102,7 +121,7 @@ final class SourceSession {
         if error.isUnpaired {
             status = .removed
             stop()
-        } else if error == .unreachable {
+        } else if error.isUnreachable {
             status = .unreachable
         }
     }
@@ -216,7 +235,7 @@ final class SourceSession {
                 self.replace(saved.questions, message: saved.messageId, thread: id)
             } catch {
                 await self.loadThread(id)
-                onError(error.code == "question_revision_conflict" ? "That question changed on your computer. Pick again." : "The pick was not saved. \(error.message)")
+                onError(error.code == "question_revision_conflict" ? self.changedElsewhere : "The pick was not saved. \(error.message)")
             }
         }
     }
@@ -252,17 +271,22 @@ final class SourceSession {
         // The annotations ride the last reply, after its picks, as Plannotator's feedback text.
         let feedback = annotations.isEmpty ? nil : try await feedbackText(annotations, thread: thread)
         for (index, target) in targets.enumerated() {
-            let key = SendKeys.key(source: source.id, message: target.message.id)
+            let key = SendKeys.key(source: self.id, message: target.message.id)
             let repliesBefore = replies(to: target.message.id, in: thread)
             let last = index == targets.count - 1
             do {
-                let answer = try await client.reply(message: target.message.id, idempotencyKey: key, words: last ? words.trimmed : "", questions: target.questions,
-                                                    feedback: last ? feedback : nil, annotationIds: last && feedback != nil ? annotations.map(\.id) : nil)
-                SendKeys.clear(source: source.id, message: target.message.id)
+                let answer: InboxQuestionsResponse
+                if last, let feedback, let inbox = inboxClient {
+                    answer = try await inbox.reply(message: target.message.id, idempotencyKey: key, words: words.trimmed, questions: target.questions,
+                                                   feedback: feedback, annotationIds: annotations.map(\.id))
+                } else {
+                    answer = try await client.reply(message: target.message.id, idempotencyKey: key, words: last ? words.trimmed : "", questions: target.questions)
+                }
+                SendKeys.clear(source: self.id, message: target.message.id)
                 replace(answer.questions, message: answer.messageId, thread: id)
             } catch {
                 if error.isDefinite {
-                    SendKeys.clear(source: source.id, message: target.message.id)
+                    SendKeys.clear(source: self.id, message: target.message.id)
                     await loadThread(id)
                     throw error
                 }
@@ -271,7 +295,7 @@ final class SourceSession {
                 // is applied once either way.
                 guard await loadThread(id) else { throw .sendUnconfirmed }
                 guard let now = threads[id], replies(to: target.message.id, in: now) > repliesBefore else { throw error }
-                SendKeys.clear(source: source.id, message: target.message.id)
+                SendKeys.clear(source: self.id, message: target.message.id)
             }
         }
         await loadThread(id)
@@ -294,10 +318,20 @@ final class SourceSession {
 
     // MARK: Files and annotations (3.6, 4.1 to 4.4)
 
+    /// Files and annotations come from a computer's Inbox; a Workspaces source has none here.
+    var inboxClient: InboxClient? { client as? InboxClient }
+
+    /// The door for a file: only a computer's Inbox serves files.
+    private func filesDoor() throws(InboxError) -> InboxClient {
+        guard let inboxClient else { throw .refused(status: 0, code: "files_unavailable", message: "Files open from a computer's Inbox.", triesLeft: nil) }
+        return inboxClient
+    }
+
     /// Reads a thread's files and the annotations waiting for its next Send.
     func loadFiles(_ id: String) async {
+        guard let inbox = inboxClient else { return }
         do {
-            let answer = try await client.attachments(thread: id)
+            let answer = try await inbox.attachments(thread: id)
             files[id] = answer
             cache.write(answer, "files-\(id)")
         } catch {
@@ -314,7 +348,7 @@ final class SourceSession {
 
     /// Saves the person's comment (a new one, or an edit under the same id).
     func saveAnnotation(thread id: String, attachment: String, version: String, annotation: JSONValue) async throws(InboxError) -> InboxAnnotationRecord {
-        let record = try await client.saveAnnotation(attachment: attachment, version: version, annotation: annotation)
+        let record = try await filesDoor().saveAnnotation(attachment: attachment, version: version, annotation: annotation)
         if var current = files[id] {
             current.annotations.removeAll { $0.id == record.id }
             current.annotations.append(record)
@@ -324,7 +358,7 @@ final class SourceSession {
     }
 
     func removeAnnotation(thread id: String, annotation: String) async throws(InboxError) {
-        try await client.removeAnnotation(annotation)
+        try await filesDoor().removeAnnotation(annotation)
         files[id]?.annotations.removeAll { $0.id == annotation }
     }
 
@@ -332,10 +366,11 @@ final class SourceSession {
     /// text read now so line numbers name what the person read (as the window does).
     private func feedbackText(_ annotations: [InboxAnnotationRecord], thread: InboxThread) async throws(InboxError) -> String {
         let attachments = files[thread.threadId]?.attachments ?? []
+        let door = try filesDoor()
         var texts: [Bridge.Text] = []
         for record in annotations where !texts.contains(where: { $0.attachment_id == record.attachmentId && $0.version == record.version }) {
             // A file that can no longer be read (deleted or moved on the computer) goes with no text, as the window sends it.
-            let text = (try? await client.view(attachment: record.attachmentId, sent: record.version != "current"))?.text ?? ""
+            let text = (try? await door.view(attachment: record.attachmentId, sent: record.version != "current"))?.text ?? ""
             texts.append(.init(attachment_id: record.attachmentId, version: record.version, text: text))
         }
         guard let text = await SurfaceHost.shared.feedback(annotations: annotations, attachments: attachments, texts: texts, projectRoot: thread.project.root ?? ""), !text.isEmpty else {

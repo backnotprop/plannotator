@@ -420,7 +420,11 @@ struct AttachmentCover: View {
         shown = nil
         do throws(InboxError) {
             let sent = file.sent || attachment?.unavailable != nil
-            let next = try await session.client.view(attachment: file.attachmentId, sent: sent)
+            guard let door = session.inboxClient else {
+                loadProblem = "Files open from a computer's Inbox."
+                return
+            }
+            let next = try await door.view(attachment: file.attachmentId, sent: sent)
             if sent != file.sent { file.sent = sent }
             await host.whenReady()
             guard !host.isUnavailable else {
@@ -440,7 +444,7 @@ struct AttachmentCover: View {
     /// Hands the file to the surface: the theme, Annotate, the page with its base on the asset scheme.
     private func present(_ view: InboxAttachmentView) {
         let html = view.html.map(Self.assetBase)
-        host.assets.client = session.client
+        host.assets.client = session.inboxClient
         host.assets.token = html.flatMap(Self.assetToken)
         host.webView.onComment = isText ? { commentOnSelection() } : nil
         host.pageReported = view.attachment.isHTML

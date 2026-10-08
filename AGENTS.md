@@ -43,7 +43,7 @@ plannotator/
 │   │   ├── stores/               # Storage backends (fs, kv, s3)
 │   │   └── targets/              # Deployment entries (bun.ts, cloudflare.ts)
 │   ├── inbox/                    # The Plannotator Inbox window's Vite single-file build (packages/inbox); build:hook copies it to apps/hook/dist/inbox.html, and the phone's surface (build:surface) to apps/hook/dist/surface.html
-│   ├── ios/                      # The Plannotator iPhone app (SwiftUI, bundle id ai.plannotator.app, iOS 26): project.yml for XcodeGen and the generated Plannotator.xcodeproj (both committed), Plannotator/ (the app; Attachments/ holds the surface host and the attachment screens), PlannotatorKit/ (local Swift package: the device-door client, models, event stream, pairing link, Keychain, markdown splitter), PlannotatorUITests/ (the XCUITest proofs), scripts/proof.ts (runs them against a compiled Inbox; scripts/fixtures holds the files the attachments proof's agent sends) and scripts/gen-colors.ts (Colors.xcassets from packages/ui/themes/plannotator.css, `--check` for drift), Plannotator/PrivacyInfo.xcprivacy (the privacy manifest), APP-REVIEW.md (the App Review notes and privacy and export answers) and RELEASE.md (the release runbook the owner runs himself). Private; its own version line is MARKETING_VERSION in project.yml, outside the release-bumped files. See apps/ios/README.md
+│   ├── ios/                      # The Plannotator iPhone app (SwiftUI, bundle id ai.plannotator.app, iOS 26): project.yml for XcodeGen and the generated Plannotator.xcodeproj (both committed), Plannotator/ (the app; Attachments/ holds the surface host and the attachment screens), PlannotatorKit/ (local Swift package: the device-door client, models, event stream, pairing link, Keychain, markdown splitter, and the Workspaces source: WorkspacesClient, WorkspacesSource, both behind SourceClient), PlannotatorUITests/ (the XCUITest proofs), scripts/proof.ts (runs the Inbox proofs against a compiled Inbox; scripts/fixtures holds the files the attachments proof's agent sends), scripts/workspaces-proof.ts (the Workspaces proof against staging with a test account, local only) and scripts/gen-colors.ts (Colors.xcassets from packages/ui/themes/plannotator.css, `--check` for drift), Plannotator/PrivacyInfo.xcprivacy (the privacy manifest), APP-REVIEW.md (the App Review notes and privacy and export answers) and RELEASE.md (the release runbook the owner runs himself). Private; its own version line is MARKETING_VERSION in project.yml, outside the release-bumped files. See apps/ios/README.md
 │   ├── review/                   # Standalone review server (for development)
 │   │   ├── index.html
 │   │   ├── index.tsx
@@ -1876,7 +1876,7 @@ More rules:
 8. Anything else: Quiet.
 
 Sorting and the rest:
-- Stopped and Waiting sort oldest waiting first. Holding sorts most held-up first. Sent, New and Quiet sort newest activity first.
+- Every section sorts newest first by the thread's latest message (`last_at`, the time the row shows); ties on the thread id (owner ruling 2026-10-08).
 - `unread` (bold) means Stopped, Holding, Waiting or New.
 - "Looked" is `POST /api/inbox/threads/:id/seen`, sent when a thread opens. The person's own reply also counts.
 - "The agent read it" is recorded when `wait_for_reply` returns the person's reply or `read_thread` reads the thread, which moves a Sent row to Quiet. Any agent's read counts.
@@ -2043,7 +2043,7 @@ Sorting and the rest:
 
 **Server routes** are listed under "Inbox Server" in "Server API".
 
-**On a phone**: `adr/implementation/inbox-mobile.md` is the wire contract the iPhone app and its server steps build against: the pairing offer, the device token door `/api/inbox/device/*`, the LAN listener, the relay, the surface bridge and the idempotency rule. Built (P1, P2, R1, R2): pairing, the door, the tailnet path, the LAN listener, and the relay's mailboxes, push and carriage; the iPhone app `apps/ios` (M1: pairing by QR or typed address and six digits, the list, threads, picks, Send, Resolve, Delete, Settings with the tailnet row; M2: attachments full screen in the bundled surface with comments by touch, the "N annotations" sheet, the changed line, Share, and annotations riding the next Send; its proof is `bun apps/ios/scripts/proof.ts --binary <compiled plannotator>`, run by `.github/workflows/ios.yml`). Not built: the app's Wi-Fi path (pinned TLS and Bonjour).
+**On a phone**: `adr/implementation/inbox-mobile.md` is the wire contract the iPhone app and its server steps build against: the pairing offer, the device token door `/api/inbox/device/*`, the LAN listener, the relay, the surface bridge and the idempotency rule. Built (P1, P2, R1, R2): pairing, the door, the tailnet path, the LAN listener, and the relay's mailboxes, push and carriage; the iPhone app `apps/ios` (M1: pairing by QR or typed address and six digits, the list, threads, picks, Send, Resolve, Delete, Settings with the tailnet row; M2: attachments full screen in the bundled surface with comments by touch, the "N annotations" sheet, the changed line, Share, and annotations riding the next Send; its proof is `bun apps/ios/scripts/proof.ts --binary <compiled plannotator>`, run by `.github/workflows/ios.yml`; M7: Workspaces as a second source behind the `WORKSPACES_HOST` build setting (Debug and TestFlight on, Release off), see `apps/ios/README.md`). Not built: the app's Wi-Fi path (pinned TLS and Bonjour).
 
 **Phones** (`packages/server/inbox-devices.ts`, records in `packages/shared/inbox/devices.ts`; contract sections 1, 2 and 6).
 - Pairing: Settings' "Pair a phone" calls `POST /api/inbox/pairing`, which opens one offer: a `plannotator://pair` link (drawn as a QR code with `uqr`, `packages/inbox/qr.ts`) carrying the computer's name, the tailnet address when it is on, the LAN address and the certificate's SHA-256 (`lan`, `fp`) when the Wi-Fi is on, a 32-byte secret and six digits. One offer is open at a time, in memory only. It closes when redeemed, when the window makes another, 10 minutes after it was made, or after 5 wrong codes: the two limits pairing needs, and the only ones. The phone redeems the secret or the digits at `POST /api/inbox/device/pair` for its own `tok_` bearer token, returned once.
@@ -2096,6 +2096,7 @@ Sorting and the rest:
   - `notifications.spec.ts`
   - `inbox-attachments.spec.ts`
   - `inbox-guides.spec.ts`
+  - `inbox-order.spec.ts` (three agents' questions read newest first in Waiting on you; a reply moves its row to Sent)
   - `inbox-phones.spec.ts` (Pair a phone, the device list and Remove; Reach from this Wi-Fi with a pinned phone pairing over the LAN, the no-Bonjour note and `openssl` failing; with `PLANNOTATOR_E2E_TAILNET=1` on a Mac signed in to Tailscale, the door at the MagicDNS name on 8443)
 
   PNGs land in `.local/proof/`.

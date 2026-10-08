@@ -222,6 +222,17 @@ public struct InboxThread: Codable, Hashable, Sendable {
     public var threadName: String?
     public var resolvedAt: String?
     public var messages: [InboxMessage]
+    /// Workspaces only: the document the thread's comment is anchored to. The Inbox never sends it.
+    public var document: InboxThreadDocument?
+}
+
+/// A Workspaces comment's document: where it lives and the passage it is pinned to.
+public struct InboxThreadDocument: Codable, Hashable, Sendable {
+    public var workspaceId: String
+    public var workspaceName: String?
+    public var documentId: String
+    public var path: String?
+    public var quote: String?
 }
 
 /// `GET threads/:id` (exchange 7.7).

@@ -20,9 +20,9 @@ struct ThreadScreen: View {
         Group {
             if session.status == .removed {
                 ContentUnavailableView {
-                    Label("This phone was removed", systemImage: "iphone.slash")
+                    Label(session.removedTitle, systemImage: session.removedSymbol)
                 } description: {
-                    Text("It was removed from the Inbox on \(session.source.name). Pair it again to keep answering.")
+                    Text(session.removedHelp)
                 }
             } else if let thread {
                 content(thread)
@@ -31,16 +31,16 @@ struct ThreadScreen: View {
                 ContentUnavailableView {
                     Label("This thread was deleted", systemImage: "trash")
                 } description: {
-                    Text("It was deleted in the Inbox on \(session.source.name).")
+                    Text(session.goneHelp)
                 } actions: {
                     Button("Back to Inbox") { dismiss() }
                 }
                 .accessibilityIdentifier("thread-gone")
             } else if session.threadProblems[threadId] == .unreachable, !retrying {
                 ContentUnavailableView {
-                    Label("Can't reach \(session.source.name)", systemImage: "wifi.slash")
+                    Label("Can't reach \(session.name)", systemImage: "wifi.slash")
                 } description: {
-                    Text("This thread has not been read on this phone yet. Check that the Inbox is running on your computer and that Tailscale is on.")
+                    Text(session.unreadThreadHelp)
                 } actions: {
                     Button("Try Again") {
                         retrying = true
@@ -68,13 +68,15 @@ struct ThreadScreen: View {
                     }
                     .accessibilityIdentifier("thread-resolve")
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button("Delete Thread", systemImage: "trash", role: .destructive) { confirmDelete = true }
-                    } label: {
-                        Label("More", systemImage: "ellipsis")
+                if session.canDelete {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            Button("Delete Thread", systemImage: "trash", role: .destructive) { confirmDelete = true }
+                        } label: {
+                            Label("More", systemImage: "ellipsis")
+                        }
+                        .accessibilityIdentifier("thread-more")
                     }
-                    .accessibilityIdentifier("thread-more")
                 }
             }
         }
@@ -120,6 +122,10 @@ struct ThreadScreen: View {
                     .foregroundStyle(Color.ink)
                     .padding(.bottom, 14)
                     .accessibilityAddTraits(.isHeader)
+                if let document = thread.document, let workspaces = session.client as? WorkspacesSource {
+                    DocumentRow(document: document, client: workspaces.client)
+                        .padding(.bottom, 16)
+                }
                 ForEach(thread.messages) { message in
                     MessageView(message: message, thread: thread, session: session, onError: { problem = $0 }, openFile: { openFile = $0 })
                         .padding(.bottom, 18)
@@ -224,7 +230,8 @@ struct MessageView: View {
                         .font(.callout)
                     Text("to you").font(.footnote).foregroundStyle(Color.inkSecondary)
                 } else {
-                    Text("You").font(.callout.weight(.semibold))
+                    // A person's own words read as "You"; a teammate's (Workspaces) by their name.
+                    Text(message.author.name ?? "You").font(.callout.weight(.semibold))
                     Text("to \(message.to.map { InboxAuthor.hostNames[$0.host] ?? $0.host } ?? (thread.messages.first?.author.agentName ?? "the agent"))")
                         .font(.footnote).foregroundStyle(Color.inkSecondary)
                 }

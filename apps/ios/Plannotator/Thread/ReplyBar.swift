@@ -198,7 +198,7 @@ struct ReplyBar: View {
             } catch {
                 Haptics.error()
                 problem = switch error {
-                case .sendUnconfirmed: error.message
+                case .sendUnconfirmed: session.sendUnconfirmed
                 case _ where error.isDefinite: error.message
                 default: "Not sent. \(error.message) Tap Send to try again."
                 }

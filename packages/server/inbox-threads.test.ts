@@ -199,7 +199,7 @@ describe("the list: per-thread sections across projects", () => {
     const web = gitProject(root, "web");
     const server = await start(join(root, "data"));
     const client = await mcpClient(server);
-    // A few ms apart, so "oldest first" and "newest first" have distinct times to order by.
+    // A few ms apart, so "newest first" has distinct times to order by.
     const send = async (repo: string, session: string, body: string, subject: string) => {
       await Bun.sleep(3);
       return structured<Sent>(await client.callTool({ name: "send_message", arguments: { project_path: repo, agent_session: session, body, subject } }));
@@ -245,7 +245,7 @@ describe("the list: per-thread sections across projects", () => {
     expect(placed(all)).toEqual({
       stopped: ["Stopped worker"],
       holding: ["Export queue"],
-      waiting: ["Header", "Flag name"], // oldest waiting first
+      waiting: ["Flag name", "Header"], // newest first, as every section
       sent: ["Web PR"],
       new: ["SDK bump", "Nightly build"], // newest first
       quiet: ["Finished"],

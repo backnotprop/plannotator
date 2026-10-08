@@ -20,7 +20,7 @@ There are two builds:
   ours holding readable data.
 - **TestFlight builds** add a second source, Workspaces
   (`staging.workspaces.plannotator.ai`), with a sign-in. One build setting
-  decides it (`WORKSPACES_ORIGIN`, section 4 of `RELEASE.md`); the App Store
+  decides it (`WORKSPACES_HOST`, section 4 of `RELEASE.md`); the App Store
   build leaves it empty and the Workspaces source does not appear.
 
 The app reaches the computer in three ways, in this order: the same Wi-Fi, the

@@ -84,6 +84,50 @@ same command (`.github/workflows/ios.yml`).
 - `RELEASE.md`: the release runbook the owner runs himself (the Apple account,
   the keys, the archive, the upload, TestFlight, the submission).
 
+## The Workspaces source
+
+The app reads Workspaces beside a computer's Inbox, one source at a time (the
+title menu). `PlannotatorKit/WorkspacesClient.swift` speaks Workspaces' live
+contract (`<origin>/v1/openapi.yaml`); `WorkspacesSource.swift` maps its doors
+onto the Inbox's wire models (a comment thread is a thread, a notification row
+is a list row), so the same list, thread, cards and reply bar draw both.
+`SourceClient.swift` is the one protocol both sources fill.
+
+- **Sign in** opens the sign-in door (`/auth/desktop/login`) in the system
+  browser sheet (ephemeral, so nothing is shared with Safari). A signed build
+  returns through `https://<origin>/auth/mobile/return/<nonce>`, which needs the
+  associated domain (below) and the Team ID. The simulator has neither, so a simulator build returns through the
+  door's loopback shape: a one-request listener on 127.0.0.1 hands the return
+  to the sheet's `plannotator` scheme. Only a return carrying the sign-in's own
+  `state` is redeemed. The session cookies live in the app's own cookie store;
+  mutations echo the `csrf` cookie as `X-CSRF-Token`.
+- **The build setting** `WORKSPACES_HOST` decides whether a build has the
+  source at all. Debug and the TestFlight configuration name staging; Release,
+  the App Store build, leaves it empty (the first App Store release is local
+  only), so it has no Workspaces source and no associated domain. The host
+  gives both the origin the app signs in to and the associated domain the
+  `https` return needs (`Plannotator/Workspaces.entitlements`: `applinks:` and
+  `webcredentials:` for that host). A TestFlight build is
+  `xcodebuild archive -configuration TestFlight ...`; for production, set
+  `WORKSPACES_HOST=workspaces.plannotator.ai`. The simulator ignores the
+  entitlement; a signed build also needs the Team ID in the server's
+  association file (owner item 1).
+
+Its proof runs against staging with a test account (never a person's own) and
+an API key of that account for the asking agent, locally only:
+
+```bash
+WORKSPACES_PROOF_EMAIL=... WORKSPACES_PROOF_PASSWORD=... WORKSPACES_PROOF_AGENT_KEY=... \
+  bun apps/ios/scripts/workspaces-proof.ts --binary .local/plannotator
+```
+
+It pairs a real Inbox too (so the switcher has both), signs in through the real
+AuthKit page, has the agent ask in a comment over MCP, picks, ticks a decision
+and sends on the phone, reads the reply back with `list_annotations`, waits for
+a row to arrive live, opens the document, and signs out (the session the app
+held then answers 401). Without its variables the XCUITest skips itself, so CI
+runs only the Inbox proof.
+
 ## Version
 
 `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `project.yml`. The app is

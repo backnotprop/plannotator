@@ -8,6 +8,12 @@ options:
     iOS: "26.0"
   createIntermediateGroups: true
   generateEmptyDirectories: false
+# TestFlight is a Release build with the Workspaces source; Release is the App
+# Store build without it (the first App Store release is local only).
+configs:
+  Debug: debug
+  TestFlight: release
+  Release: release
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -60,6 +66,9 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: ai.plannotator.app.pair
             CFBundleURLSchemes: [plannotator]
+        # The Workspaces source (M7): the origin this build signs in to, or
+        # empty for no Workspaces source at all. See WORKSPACES_HOST below.
+        WorkspacesOrigin: $(WORKSPACES_ORIGIN)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.plannotator.app
@@ -70,6 +79,24 @@ targets:
         ENABLE_PREVIEWS: YES
         # The surface build phase runs Vite over the repo's packages, which a sandboxed script cannot read.
         ENABLE_USER_SCRIPT_SANDBOXING: NO
+      # The Workspaces source: WORKSPACES_HOST is the one switch. Debug and
+      # TestFlight name the host; Release (the App Store build) leaves it empty,
+      # so that build has no Workspaces source and no associated domain. The
+      # host gives the origin the app signs in to and the associated domain the
+      # https sign-in return needs (applinks and webcredentials, Workspaces.entitlements).
+      # Production: set WORKSPACES_HOST to workspaces.plannotator.ai.
+      configs:
+        Debug:
+          WORKSPACES_HOST: staging.workspaces.plannotator.ai
+          WORKSPACES_ORIGIN: https://$(WORKSPACES_HOST)
+          CODE_SIGN_ENTITLEMENTS: Plannotator/Workspaces.entitlements
+        TestFlight:
+          WORKSPACES_HOST: staging.workspaces.plannotator.ai
+          WORKSPACES_ORIGIN: https://$(WORKSPACES_HOST)
+          CODE_SIGN_ENTITLEMENTS: Plannotator/Workspaces.entitlements
+        Release:
+          WORKSPACES_HOST: ""
+          WORKSPACES_ORIGIN: ""
   PlannotatorUITests:
     type: bundle.ui-testing
     platform: iOS

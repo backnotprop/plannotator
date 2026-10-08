@@ -4,6 +4,7 @@ import SwiftUI
 @main
 struct PlannotatorApp: App {
     @State private var model = AppModel()
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @Environment(\.scenePhase) private var phase
     @AppStorage("appearance") private var appearance = Appearance.system
 
@@ -14,16 +15,28 @@ struct PlannotatorApp: App {
                 .tint(.tint)
                 .preferredColorScheme(appearance.scheme)
                 .onOpenURL { url in
+                    // A Workspaces sign-in return finishes only the sign-in in
+                    // progress with the same state; any other is dropped.
+                    if model.receiveSignInReturn(url) { return }
                     // A pairing QR read by the Camera app (or any other app) opens
                     // here. It pairs only after the person confirms, with the
                     // address it will contact in front of them.
                     guard case .success(let link) = PairLink.parse(url.absoluteString) else { return }
                     model.offered = link
                 }
+                .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+                    if let url = activity.webpageURL { _ = model.receiveSignInReturn(url) }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .pushToken)) { model.pushToken = $0.object as? Data }
         }
         .onChange(of: phase) { _, phase in
             // The event stream runs in the foreground; on return it catches up from the cursor.
-            if phase == .active { model.session?.start() } else if phase == .background { model.session?.stop() }
+            if phase == .active {
+                model.session?.start()
+                Task { await model.registerForPushIfAllowed() }
+            } else if phase == .background {
+                model.session?.stop()
+            }
         }
     }
 }
@@ -80,6 +93,11 @@ struct RootView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(pairProblem ?? "")
+        }
+        .alert("Not signed in", isPresented: Binding(get: { model.signInProblem != nil }, set: { if !$0 { model.signInProblem = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.signInProblem ?? "")
         }
     }
 
