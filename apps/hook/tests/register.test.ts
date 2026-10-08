@@ -469,6 +469,9 @@ describe('register', () => {
     expect(first?.body.params).toEqual({
       name: 'send_message',
       arguments: { body: 'Ship it?', project_path: '/work', agent_session: 'session-1', agent_host: 'claude-code', agent_name: 'Claude Code' },
+      // The mod's wake delivers the reply as a turn, so it marks the call (#1771):
+      // the send tools then say to end the turn instead of waiting with wait_for_reply.
+      _meta: { 'ai.plannotator/inbox-wakes': true },
     })
 
     await $.session.end({ reason: 'clear', sessionId: 'session-1' })
@@ -476,6 +479,7 @@ describe('register', () => {
     await $.tool.call({ tool: INBOX_TOOL, action: 'send_message', body: 'And now?' })
     const second = calls.filter((c) => c.body?.method === 'tools/call').at(-1)
     expect(second?.body.params.arguments.agent_session).toBe('session-2')
+    expect(second?.body.params._meta).toEqual({ 'ai.plannotator/inbox-wakes': true })
   })
 
   test("the person's Send arrives as one plugin turn: the stable header, the fixed line, the reply verbatim, then acknowledged", async ($: any, on: any) => {
