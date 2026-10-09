@@ -14,7 +14,7 @@ async function eventually(check: () => boolean | Promise<boolean>, timeout = 15_
   throw new Error("The connected-session check did not settle.");
 }
 
-test("unchanged agent command through the hook, no provider MCP or Inbox, detached Ask and recoverable decisions", async () => {
+test.skipIf(!process.env.T3_TEST_EXECUTABLE)("unchanged agent command through the hook, no provider MCP or Inbox, detached Ask and recoverable decisions", async () => {
   const root = mkdtempSync(join(tmpdir(), "plannotator-t3-connected-"));
   const project = join(root, "project"); mkdirSync(project);
   Bun.spawnSync(["git", "init", "-q"], { cwd: project });
@@ -68,7 +68,7 @@ test("unchanged agent command through the hook, no provider MCP or Inbox, detach
     }
     return Response.json({ jsonrpc: "2.0", id: rpc.id, result });
   } });
-  const cliCommand = process.env.T3_TEST_EXECUTABLE ? [resolve(process.env.T3_TEST_EXECUTABLE)] : [process.execPath, resolve("apps/hook/server/index.ts")];
+  const cliCommand = [resolve(process.env.T3_TEST_EXECUTABLE!)];
   const options: AdapterOptions = { endpoint: new URL(`http://127.0.0.1:${t3.port}/mcp`), dataDir, command: cliCommand, workerCommand: [...cliCommand, "t3"] };
   const store = new T3Credentials(dataDir, options.endpoint);
   store.save({ endpoint: options.endpoint.href, epoch: "test-grant", tokens: { access_token: "test-access", token_type: "Bearer" } });

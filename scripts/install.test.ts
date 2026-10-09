@@ -2382,8 +2382,9 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
   "install.sh optional T3 hook",
   () => {
     const args = ["--version", "v99.9.9", "--non-interactive", "--skip-skills"];
-    const sourceCli = join(scriptsDir, "..", "apps", "hook", "server", "index.ts");
-    const binary = `#!/bin/sh\nexec ${quoteHookWord(process.execPath)} ${quoteHookWord(sourceCli)} "$@"\n`;
+    const sourceHook = join(scriptsDir, "..", "apps", "t3-code", "hook.ts");
+    const helper = `import { runT3Hook } from ${JSON.stringify(sourceHook)}; await runT3Hook(Bun.argv.slice(2), [process.execPath]);`;
+    const binary = `#!/bin/sh\nexec ${quoteHookWord(process.execPath)} --eval ${quoteHookWord(helper)} "$@"\n`;
     const fixture = () => setupInstallSandbox({ gh: "pass-all", binary });
     const settingsFile = (home: string) => join(home, ".claude", "settings.json");
 
