@@ -2023,9 +2023,10 @@ Plannotator passes none of them, so its cards render exactly as before.
   function of the question, called per question card, so it can read your
   store by `question.question.key`). It applies only to a question carrying
   `Decision: when answered` (`decisionOnAnswer`) whose decision is not
-  already recorded. Off draws the same "Records a decision" tag dimmed (in
-  the theme's `--muted-foreground`, not by opacity, so it stays as legible as
-  any secondary text) with a dotted outline and no fill (never different
+  already recorded. Off draws the same "Records a decision" tag dimmed (since
+  the eyebrow fix below: `--muted-foreground` mixed 55% with transparent, so
+  it reads as off beside the "Open" tag, which is plain `--muted-foreground`)
+  with a dotted outline and no fill (never different
   words), and hides the "Answering this
   records a decision" row (`[data-question-decision-row]`). A recorded
   decision (`Decision: [statement](url)`) and a question with no decision line
@@ -2114,8 +2115,9 @@ a 0.52.0 host returning a boolean for every question).
    it is off) is the host's call. Tab order is switch, then words, both with
    the `ring-2 ring-primary` focus ring the 0.52.0 toggle uses (a ring, not
    an outline, because the dotted outline draws the off state, which is now
-   on the wrapping tag). The off look is unchanged: muted-foreground text and
-   a dotted outline (#1744's contrast fix). Without `onOpenDecision` the
+   on the wrapping tag). The off look was unchanged here: muted-foreground
+   text and a dotted outline (#1744's contrast fix); see "Question card
+   eyebrow" below for the fade it has since. Without `onOpenDecision` the
    whole tag is the toggle exactly as in 0.52.0.
 3. **Read-only cards are never interactive.** No answer handler (or
    `Viewer` `readOnly`, which also drops `onOpenQuestionDecision`) draws the
@@ -2143,6 +2145,35 @@ toggle's arguments and the row on/off, the switch and the opener as sibling
 buttons with the anchor element, tab order, the opener without a toggle
 handler, 0.52.0 behavior without `onOpenDecision`, read-only cards, `Viewer`
 threading, and no-prop markup.
+
+## Question card eyebrow: the off decision tag reads as off; the pills align (unreleased; styling only)
+
+No prop, attribute or markup change; a host that passes nothing renders the
+same elements with new classes on the eyebrow's pills.
+
+- **The off tag fades.** `muted-foreground` alone was exactly the color of
+  the "Open" tag beside it (8.98:1 light, 7.37:1 dark against the card in
+  the default theme), so an off tag read as barely dimmer than an on one.
+  The off color is now `color-mix(in oklab, var(--muted-foreground) 55%,
+  transparent)`: text, icon and dotted outline (all `currentColor`) at the
+  strength `opacity: 0.55` would give, measured at 2.76:1 (light) and
+  3.06:1 (dark). It is deliberately not `opacity`, which would also fade
+  the `ring-primary` focus ring on the switch and the words; the ring stays
+  at full strength. Still inline, still on `[data-question-decision-tag]`
+  (split tag) or the toggle / static tag.
+- **One pill box.** Every pill in the eyebrow (Open / Answered / Settled /
+  Skipped, "Decision", "Records a decision" in all three forms) is 18 px
+  tall (`h-[18px]`, `leading-4`) with a 1 px border, transparent except on
+  "Open", so the dashed tag is no longer 2 px taller. The pill group is an
+  `inline-flex items-center gap-1` row, so the split tag (whose inline-flex
+  baseline came from its icon-only switch) no longer sits higher than the
+  status tag. Measured in Chromium in the Inbox: every pair now shares
+  height (18 px) and centre in every state, where "Open" and "Skipped" were
+  1.6 px lower and "Open" 2 px taller.
+- **guides.show viewer unchanged.** The viewer's stylesheet scans
+  `packages/ui/components`, so only classes it already ships are used, and
+  `align-[1px]` (now inert inside the flex row) is kept because it is its
+  only use; `check:manifest` stays in sync, no deploy.
 
 ---
 
