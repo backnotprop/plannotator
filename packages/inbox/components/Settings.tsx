@@ -5,6 +5,7 @@ import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon } from '../icons';
 import { ConnectPicker } from './ConnectPicker';
 import { PhonesBlock } from './Phones';
+import { SidebarTrigger } from '../shell/sidebar';
 
 const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'claude-code', name: 'Claude Code' },
@@ -185,7 +186,10 @@ export function SettingsPage({
   return (
     <div className="ib-spage" aria-label="Settings">
       <div className="ib-spage-in">
-        <h1>Settings</h1>
+        <div className="ib-shead">
+          <SidebarTrigger />
+          <h1>Settings</h1>
+        </div>
         <div className="ib-sblock">
           <h2>The Inbox in your agent's tools</h2>
           <p>

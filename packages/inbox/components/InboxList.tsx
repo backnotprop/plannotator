@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { agentName, questionCount, shortTime } from '../format';
 import { AuthorMark, Icon } from '../icons';
+import { SidebarTrigger } from '../shell/sidebar';
 
 export interface InboxListProps {
   title: string;
@@ -104,6 +105,7 @@ export function InboxList(props: InboxListProps) {
       aria-label={props.title}
     >
       <div className="ib-lhead">
+        <SidebarTrigger />
         <h1>{props.title}</h1>
         {props.path && <span className="ib-path">{props.path}</span>}
       </div>

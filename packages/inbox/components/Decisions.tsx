@@ -3,6 +3,7 @@ import type { InboxDecision } from '@plannotator/core/inbox-types';
 import { InboxApiError, type DecisionsModel, type ProjectFolder, type WaitingDecision } from '../api';
 import { agentName, dateTime, dayWords, shortTime } from '../format';
 import { DecisionDiamond, Icon } from '../icons';
+import { SidebarTrigger } from '../shell/sidebar';
 
 /**
  * The project's decisions (the window record's 3.2): a project switch, then
@@ -280,6 +281,7 @@ export function DecisionsPage(props: DecisionsPageProps) {
     <>
       <section className={`ib-dpage${narrow ? ' ib-narrow' : ''}`} aria-label="Decisions">
         <div className="ib-dh">
+          <SidebarTrigger />
           <h1>Decisions</h1>
           <select className="ib-select" aria-label="Project" value={project.id} onChange={(event) => props.onProject(event.target.value)}>
             {props.projects.map((p) => (

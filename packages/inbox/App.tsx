@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { configurePlannotatorUI } from '@plannotator/ui/configure';
+import { configStore, useConfigValue } from '@plannotator/ui/config';
 import type { InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import {
   InboxApiError,
@@ -28,6 +29,7 @@ import { filterSections, heldNotice, refreshHeldRows, waitingCount } from './hel
 import { tildePath } from './format';
 import type { ConnectContext } from './harnesses';
 import { Sidebar } from './components/Sidebar';
+import { SidebarShell } from './shell/SidebarShell';
 import { InboxList } from './components/InboxList';
 import { ThreadPane } from './components/Thread';
 import { EmptyState } from './components/EmptyState';
@@ -399,6 +401,8 @@ function Inbox() {
   const filterProject = route.page === 'inbox' && route.project ? projects.find((p) => p.id === route.project) ?? null : null;
   const notice = shown && latest ? heldNotice(filterSections(shown, route.project), filterSections(latest.sections, route.project)).text : null;
   const firstRun = latest !== null && projects.length === 0;
+  // Open or closed as the person left it (⌘B or the toggle), remembered in a cookie like the Grid/Clean look.
+  const sidebarOpen = useConfigValue('inboxSidebarOpen');
   // A file beside the thread takes the list's and the sidebar's room (record 2.2).
   const fileOpen = route.page === 'inbox' && !!route.thread && !!route.file;
   const guideMessage =
@@ -477,24 +481,31 @@ function Inbox() {
 
   return (
     <div className="pn-inbox">
-      <div className={`ib-shell${fileOpen ? ' ib-fileopen' : ''}`}>
-        <Sidebar
-          page={route.page}
-          projectId={route.project}
-          inboxCount={waitingCount(latestSections)}
-          decisionsCount={latest?.decisions_waiting ?? 0}
-          projects={projects}
-          projectCounts={projectCounts}
-          updateReady={update !== null}
-          restarting={restarting}
-          onInbox={() => go({ page: 'inbox', project: null, thread: null })}
-          onProject={(projectId) => go({ page: 'inbox', project: projectId, thread: null })}
-          onSettings={() => go({ page: 'settings', project: null, thread: null })}
-          onDecisions={() => go({ page: 'decisions', project: null, thread: null })}
-          onRestart={() => void restart()}
-        />
+      {/* A file beside the thread takes the sidebar's room (record 2.2): it closes on the same spring, and the person's choice stays as it was. */}
+      <SidebarShell
+        className="ib-shell"
+        open={sidebarOpen && !fileOpen}
+        onOpenChange={(next) => configStore.set('inboxSidebarOpen', next)}
+        navigation={
+          <Sidebar
+            page={route.page}
+            projectId={route.project}
+            inboxCount={waitingCount(latestSections)}
+            decisionsCount={latest?.decisions_waiting ?? 0}
+            projects={projects}
+            projectCounts={projectCounts}
+            updateReady={update !== null}
+            restarting={restarting}
+            onInbox={() => go({ page: 'inbox', project: null, thread: null })}
+            onProject={(projectId) => go({ page: 'inbox', project: projectId, thread: null })}
+            onSettings={() => go({ page: 'settings', project: null, thread: null })}
+            onDecisions={() => go({ page: 'decisions', project: null, thread: null })}
+            onRestart={() => void restart()}
+          />
+        }
+      >
         <main className="ib-main">{main}</main>
-      </div>
+      </SidebarShell>
       {guideMessage && thread && (
         <GuidePane
           thread={thread}

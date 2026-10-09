@@ -1,5 +1,6 @@
 import type { ProjectFolder } from '../api';
 import { Icon } from '../icons';
+import { useSidebar } from '../shell/sidebar';
 import { TaterMark } from './TaterMark';
 
 export interface SidebarProps {
@@ -22,8 +23,18 @@ export interface SidebarProps {
   onRestart: () => void;
 }
 
+/**
+ * The Inbox's navigation: the Tater mark, the sections, the projects and
+ * Settings. Drawn inside Workspaces' sidebar primitive (`../shell`): docked,
+ * in the hover peek, and as the sheet on a phone width, which a pick closes.
+ */
 export function Sidebar(props: SidebarProps) {
   const firstRun = props.projects.length === 0;
+  const { setOpenMobile } = useSidebar();
+  const pick = (go: () => void) => () => {
+    setOpenMobile(false);
+    go();
+  };
   return (
     <aside className="ib-side" aria-label="Inbox navigation">
       <div className="ib-brand">
@@ -34,7 +45,7 @@ export function Sidebar(props: SidebarProps) {
       <button
         type="button"
         className={`ib-nav${props.page === 'inbox' && props.projectId === null ? ' ib-on' : ''}`}
-        onClick={props.onInbox}
+        onClick={pick(props.onInbox)}
         aria-current={props.page === 'inbox' && props.projectId === null ? 'page' : undefined}
       >
         <Icon name="inbox" />
@@ -44,7 +55,7 @@ export function Sidebar(props: SidebarProps) {
       <button
         type="button"
         className={`ib-nav${props.page === 'decisions' ? ' ib-on' : ''}`}
-        onClick={props.onDecisions}
+        onClick={pick(props.onDecisions)}
         disabled={firstRun}
         aria-current={props.page === 'decisions' ? 'page' : undefined}
       >
@@ -65,7 +76,7 @@ export function Sidebar(props: SidebarProps) {
                 key={project.id}
                 type="button"
                 className={`ib-proj${n === 0 ? ' ib-q' : ''}${on ? ' ib-on' : ''}`}
-                onClick={() => props.onProject(project.id)}
+                onClick={pick(() => props.onProject(project.id))}
                 aria-current={on ? 'page' : undefined}
                 title={project.root}
               >
@@ -91,7 +102,7 @@ export function Sidebar(props: SidebarProps) {
         <button
           type="button"
           className={`ib-nav${props.page === 'settings' ? ' ib-on' : ''}`}
-          onClick={props.onSettings}
+          onClick={pick(props.onSettings)}
           aria-current={props.page === 'settings' ? 'page' : undefined}
         >
           <Icon name="settings" />

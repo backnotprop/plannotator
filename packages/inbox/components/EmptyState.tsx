@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { hostMcpSnippet, OTHER_HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark } from '../icons';
 import { CodeBox, ConnectPicker } from './ConnectPicker';
+import { SidebarTrigger } from '../shell/sidebar';
 
 type PlannotatorHost = 'claude-code' | 'pi' | 'opencode';
 
@@ -22,6 +23,7 @@ export function EmptyState({ context }: { context: ConnectContext | null }) {
   return (
     <section className="ib-listcol" aria-label="Inbox">
       <div className="ib-lhead">
+        <SidebarTrigger />
         <h1>Inbox</h1>
       </div>
       <div className="ib-lbody">

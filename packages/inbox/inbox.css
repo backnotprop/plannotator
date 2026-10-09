@@ -71,7 +71,7 @@
 .ib-mk.ib-big > svg, .ib-mk.ib-big > img { width: 17px; height: 17px; }
 
 /* shell */
-.ib-shell { display: grid; height: 100%; grid-template-columns: 232px 1fr; }
+.ib-shell { display: flex; height: 100%; width: 100%; overflow: hidden; }
 .ib-shell > * { min-height: 0; overflow: hidden; }
 .ib-side { background: var(--background); border-right: 1px solid var(--ib-line); display: flex; flex-direction: column; padding: 14px 10px 12px; }
 .ib-brand { display: flex; align-items: center; gap: 9px; padding: 0 6px 10px; }
@@ -105,7 +105,7 @@
 .ib-restart b { font-weight: 550; color: var(--primary); margin-left: auto; }
 
 /* main list */
-.ib-main { background: var(--card); display: flex; min-width: 0; height: 100%; }
+.ib-main { background: var(--card); display: flex; flex: 1; min-width: 0; height: 100%; }
 .ib-listcol { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .ib-listcol.ib-narrow { flex: none; width: 380px; border-right: 1px solid var(--ib-line); }
 .ib-lhead { height: 60px; display: flex; align-items: center; gap: 12px; padding: 0 22px; flex: none; }
@@ -238,7 +238,8 @@
 /* settings */
 .ib-spage { padding: 28px 44px; flex: 1; overflow-y: auto; min-width: 0; }
 .ib-spage-in { max-width: 812px; }
-.ib-spage h1 { font-size: 22px; font-weight: 650; margin: 0 0 22px; letter-spacing: -0.01em; }
+.ib-spage h1 { font-size: 22px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+.ib-shead { display: flex; align-items: center; gap: 12px; margin: 0 0 22px; }
 .ib-sblock { padding: 0 0 20px; margin-bottom: 20px; border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
 .ib-sblock:last-child { border-bottom: 0; }
 .ib-sblock h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
@@ -337,8 +338,6 @@ button.ib-drow:hover { background: color-mix(in oklch, var(--muted) 35%, transpa
 
 /* attachments (step 2, record 2.1 to 2.8) */
 .ib-att-t .ib-ch { font-size: 12px; color: var(--warning); }
-.ib-shell.ib-fileopen { grid-template-columns: 1fr; }
-.ib-shell.ib-fileopen > .ib-side { display: none; }
 .ib-pane.ib-withfile { flex: none; width: 440px; border-right: 1px solid var(--ib-line); z-index: 2; }
 .ib-pane.ib-withfile .ib-annpop { width: 400px; }
 .ib-pane.ib-withfile .ib-pbody { padding: 16px 20px 0; }
@@ -453,3 +452,54 @@ pre code.pn-code[data-keep-layout] {
 .ib-state h5 { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
 .ib-state p { margin: 0 0 10px; font-size: 13px; line-height: 1.55; color: var(--muted-foreground); }
 .pn-inbox .ib-menu:hover .ib-mi.ib-on:not(:hover) { background: transparent; }
+
+/* The sidebar: Workspaces' primitive (packages/inbox/shell, the owner 2026-10-09),
+   its geometry from apps/web/src/components/ui/sidebar.tsx, SidebarPeek.tsx,
+   CollapsibleEdge.tsx and ResizeHandle.tsx, on the Inbox's skin (.ib-side above).
+   The open and close ride one spring on MotionValues (shell/shell-motion.ts);
+   only the peek's slide is CSS, as it is in Workspaces. The tokens sit on :root
+   because the edge's tooltip portals to the body. */
+:root {
+  --ib-ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
+  --ib-shadow-sheet: 0 0 0 1px oklch(0.90 0.02 260 / 0.13), 0 9px 22px rgb(0 0 0 / 0.15), 0 28px 72px -12px rgb(0 0 0 / 0.16);
+  --ib-shadow-tooltip: 0 0 0 1px oklch(0.90 0.02 260 / 0.09), 0 1px 2px rgb(0 0 0 / 0.12), 0 2px 6px rgb(0 0 0 / 0.10);
+}
+:root.light {
+  --ib-shadow-sheet: 0 0 0 1px oklch(0.35 0.02 260 / 0.13), 0 8px 22px oklch(0.20 0.02 260 / 0.09), 0 24px 64px -12px oklch(0.20 0.02 260 / 0.15);
+  --ib-shadow-tooltip: 0 0 0 1px oklch(0.35 0.02 260 / 0.12), 0 1px 2px oklch(0.20 0.02 260 / 0.05), 0 2px 6px oklch(0.20 0.02 260 / 0.04);
+}
+.ib-sb { flex: none; }
+.ib-sb-gap { position: relative; height: 100%; }
+.ib-sb-panel { position: fixed; top: 0; bottom: 0; left: 0; z-index: 10; display: flex; overflow: hidden; }
+/* Settled closed: inert already, and invisible as a whole, so the window holds one navigation. */
+.ib-sb-panel[data-hidden] { visibility: hidden; }
+.ib-sb-inner { display: flex; flex-direction: column; flex-shrink: 0; height: 100%; }
+.ib-sb-inner > .ib-side, .ib-peek-in > .ib-side, .ib-sb-sheet-in > .ib-side { flex: 1; min-height: 0; }
+.pn-inbox .ib-sb-trigger { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 32px; height: 32px; border-radius: 7px; color: var(--muted-foreground); }
+.pn-inbox .ib-sb-trigger:hover { background: var(--muted); color: var(--foreground); }
+.ib-sb-trigger svg { width: 16px; height: 16px; }
+/* Phone widths: the sheet, on the same spring (opacity and x ride it). */
+.ib-sb-scrim { position: fixed; inset: 0; z-index: 50; background-color: rgb(0 0 0 / 0.45); backdrop-filter: blur(2px); }
+.ib-sb-sheet { position: fixed; top: 0; bottom: 0; left: 0; z-index: 50; display: flex; flex-direction: column; width: var(--sidebar-width); box-shadow: var(--ib-shadow-sheet); outline: none; }
+.ib-sb-sheet-in { display: flex; flex-direction: column; width: 100%; height: 100%; }
+.ib-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (prefers-reduced-transparency: reduce) {
+  .ib-sb-scrim { backdrop-filter: none; background-color: rgb(0 0 0 / 0.65); }
+}
+/* The peek: a 20 px hover strip on the left edge, then the panel slides in (300 ms, enter easing). */
+.ib-peek-strip { position: fixed; top: 0; bottom: 0; left: 0; z-index: 10; width: 20px; }
+.ib-peek { position: fixed; top: 0; bottom: 0; left: 0; z-index: 50; width: var(--sidebar-width); box-shadow: var(--ib-shadow-sheet); transform: translateX(-100%); visibility: hidden; will-change: transform; transition: transform 300ms var(--ib-ease-enter), visibility 0s linear 300ms; }
+.ib-peek[data-visible] { transform: translateX(0); visibility: visible; transition: transform 300ms var(--ib-ease-enter); }
+.ib-peek-in { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+@media (prefers-reduced-motion: reduce) {
+  .ib-peek, .ib-peek[data-visible] { transition: none; }
+}
+/* The edge: click to collapse, drag to resize, a separator for the keyboard. */
+.ib-shell > .ib-edge-pos { position: fixed; top: 0; bottom: 0; z-index: 30; display: flex; overflow: visible; }
+.ib-edge { position: relative; display: flex; width: 0; flex-shrink: 0; outline: none; }
+.ib-handle { position: relative; z-index: 10; width: 0; flex-shrink: 0; cursor: col-resize; }
+.ib-handle-track { position: absolute; top: 0; bottom: 0; left: -2px; right: -2px; transition: background-color 150ms; }
+.ib-handle-hit { position: absolute; top: 0; bottom: 0; left: -8px; right: -8px; }
+.ib-edge:focus-visible [data-resize-track] { background-color: var(--ring); }
+.ib-edge-tip-pos { z-index: 50; }
+.ib-edge-tip { background: var(--popover); color: var(--muted-foreground); box-shadow: var(--ib-shadow-tooltip); border-radius: 6px; padding: 4px 8px; font-family: var(--font-sans); font-size: 11px; font-weight: 500; }

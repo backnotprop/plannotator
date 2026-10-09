@@ -172,6 +172,20 @@ export const SETTINGS = {
   },
 
   /**
+   * Whether the Plannotator Inbox window's sidebar is open (`packages/inbox`,
+   * ⌘B or the toggle). Default open. Cookie-only, like `gridEnabled`.
+   */
+  inboxSidebarOpen: {
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-inbox-sidebar-open');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) => storage.setItem('plannotator-inbox-sidebar-open', String(v)),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
+  /**
    * How strong the drop shadow under Mermaid diagram nodes is, 0..100, where
    * 100 is Mermaid 12's own default geometry. Default 70: the shipped neo look
    * with its halo toned down (the colour is always derived from the palette,
