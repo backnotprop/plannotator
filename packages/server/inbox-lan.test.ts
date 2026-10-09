@@ -95,7 +95,7 @@ describe("Reach from this Wi-Fi, on the binary", () => {
 
   beforeAll(async () => {
     stubs = stubBuiltHtml();
-    w = createInboxWorld("plannotator-inbox-lan-", "lan-listener", "lan-listener");
+    w = createInboxWorld("plannotator-inbox-lan-", "lan-listener", "lan-listener", { phones: true });
     await restart();
     computerName = ((await (await win("/api/inbox/pairing", { serverSession })).json()) as Json).computer.name;
   }, 60_000);
@@ -344,7 +344,7 @@ describe("Reach from this Wi-Fi, in process", () => {
     chmodSync(join(bin, "openssl"), 0o755);
     const path = process.env.PATH;
     process.env.PATH = `${bin}:${path ?? ""}`;
-    const inbox = await startInboxServer({ dataDir: join(root, "data"), binaryPath: null });
+    const inbox = await startInboxServer({ dataDir: join(root, "data"), binaryPath: null, phones: true });
     try {
       const main = `http://127.0.0.1:${inbox.port}`;
       const on = await fetch(`${main}/api/inbox/lan`, { method: "POST", body: JSON.stringify({ on: true }) });
@@ -365,7 +365,7 @@ describe("Reach from this Wi-Fi, in process", () => {
   test("a listener that cannot open at start shows the switch on with the reason, and turning it off works", async () => {
     const root = mkdtempSync(join(tmpdir(), "plannotator-inbox-lan-startfail-"));
     const dataDir = join(root, "data");
-    const first = await startInboxServer({ dataDir, binaryPath: null });
+    const first = await startInboxServer({ dataDir, binaryPath: null, phones: true });
     const on = await fetch(`http://127.0.0.1:${first.port}/api/inbox/lan`, { method: "POST", body: JSON.stringify({ on: true }) });
     const port = Number((((await on.json()) as Json).lan.address ?? ":0").split(":")[1]);
     first.stop();
@@ -377,7 +377,7 @@ describe("Reach from this Wi-Fi, in process", () => {
     chmodSync(join(bin, "openssl"), 0o755);
     const path = process.env.PATH;
     process.env.PATH = `${bin}:${path ?? ""}`;
-    const inbox = await startInboxServer({ dataDir, binaryPath: null });
+    const inbox = await startInboxServer({ dataDir, binaryPath: null, phones: true });
     try {
       const main = `http://127.0.0.1:${inbox.port}`;
       const state = ((await (await fetch(`${main}/api/inbox/lan`)).json()) as Json).lan;
@@ -396,7 +396,7 @@ describe("Reach from this Wi-Fi, in process", () => {
 
   test("the switch's route keeps the window's guards: a foreign page and a stale tab are refused", async () => {
     const root = mkdtempSync(join(tmpdir(), "plannotator-inbox-lan-guards-"));
-    const inbox = await startInboxServer({ dataDir: join(root, "data"), binaryPath: null });
+    const inbox = await startInboxServer({ dataDir: join(root, "data"), binaryPath: null, phones: true });
     try {
       const main = `http://127.0.0.1:${inbox.port}`;
       const foreign = await fetch(`${main}/api/inbox/lan`, { method: "POST", headers: { Origin: "https://evil.example" }, body: JSON.stringify({ on: true }) });

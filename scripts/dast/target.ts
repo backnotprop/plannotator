@@ -118,6 +118,8 @@ const scanTarget = Bun.serve({
 const inbox = await startInboxServer({
   version: "dast",
   binaryPath: null,
+  // The door's refusals are scanned too: phones on, as the iPhone app's proofs run them.
+  phones: true,
   // The real window, built by build:hook like the plan page above.
   htmlContent: readFileSync(resolve("apps/hook/dist/inbox.html"), "utf8"),
 });

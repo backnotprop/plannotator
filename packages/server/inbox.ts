@@ -9,7 +9,9 @@
  * paired phone reaches it through the device door only, over a path the
  * person switched on ("Reach from my tailnet": a door-only listener that
  * `tailscale serve` points at, inbox-devices.ts; "Reach from this Wi-Fi": a
- * door-only TLS listener on every interface, inbox-lan.ts). Port: the
+ * door-only TLS listener on every interface, inbox-lan.ts). All of the phone
+ * surface exists only when PLANNOTATOR_INBOX_PHONES (or config.json
+ * `inboxPhones`) turns it on, until the iPhone app ships. Port: the
  * last one it had (from the registry) first, else random; never 19432.
  *
  * Security, on every request, in order:
@@ -48,6 +50,7 @@ import {
   INBOX_TOOL_HOSTS,
   loadConfig,
   parseInboxToolEnv,
+  resolveInboxPhones,
   resolveInboxTool,
   saveConfig,
   configuredInboxTool,
@@ -145,6 +148,14 @@ export interface InboxServerOptions {
   now?: () => Date;
   /** How "Reach from my tailnet" runs the `tailscale` CLI. Default: the CLI on PATH. */
   tailscale?: TailscaleRunner;
+  /**
+   * Phones: pairing, the device door, the tailnet and Wi-Fi listeners, the
+   * relay and Settings' Phones block. Default: `resolveInboxPhones`
+   * (PLANNOTATOR_INBOX_PHONES, then config.json `inboxPhones`, else off).
+   * Off, none of it exists: its routes answer the unknown-route 404 and
+   * nothing listens, connects, spawns or makes a certificate.
+   */
+  phones?: boolean;
 }
 
 export interface InboxServer {
@@ -311,6 +322,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const store = InboxStore.open(dataDir);
   const serverSession = createServerSessionNonce();
   const token = createInboxToken();
+  // Read once per start: the phone surface stays hidden until the iPhone app ships.
+  const phonesOn = options.phones ?? resolveInboxPhones(loadConfig());
   const hostGuard = createRequestHostGuard({ localOnly: true });
   const previous = readInboxRegistry(dataDir);
   let port = 0;
@@ -457,6 +470,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     inbox_tool: inboxToolState(),
     notifications: notificationsState(),
     store: store.diskUsage(),
+    /** Whether this Inbox serves phones; the window shows the Phones block only then. */
+    phones: phonesOn,
   });
 
   /** Save the knob for the hosts named, keeping the others as they are. */
@@ -646,8 +661,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let stopRequested = false;
   let server: ReturnType<typeof Bun.serve>;
   let attachmentRoutes: ReturnType<typeof createInboxAttachmentRoutes>;
-  let phones: ReturnType<typeof createInboxDevices>;
-  let relay: ReturnType<typeof createInboxRelay>;
+  // Null while phones are off (the default): no door, no window routes, no listeners, no relay.
+  let phones: ReturnType<typeof createInboxDevices> | null = null;
+  let relay: ReturnType<typeof createInboxRelay> | null = null;
 
   const readBody = async (req: Request): Promise<Record<string, unknown>> => {
     try {
@@ -674,7 +690,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
     // Phones (packages/server/inbox-devices.ts): the device door. The tailnet
     // reaches the door only, through its own listener, never this port.
-    if (path === "/api/inbox/device" || path.startsWith(DOOR_PREFIX)) return phones.door(req, url);
+    // Off, the door's paths fall through to the unknown-route 404 below.
+    if (phones && (path === "/api/inbox/device" || path.startsWith(DOOR_PREFIX))) return phones.door(req, url);
 
     if (path === "/mcp") {
       if (origin !== null) {
@@ -850,7 +867,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (attached) return attached;
 
       // Phones: pairing, the device list and revoke, the tailnet and Wi-Fi switches.
-      const phoneRoute = await phones.windowRoute(req, url);
+      const phoneRoute = phones ? await phones.windowRoute(req, url) : null;
       if (phoneRoute) return phoneRoute;
 
       if (path.startsWith("/api/")) return json({ error: "Not found", code: "not_found" }, 404);
@@ -880,23 +897,26 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...(previous?.lan ? { lan: previous.lan } : {}),
   };
   writeInboxRegistry(dataDir, registry);
-  phones = createInboxDevices({
-    dataDir,
-    serverSession,
-    port: () => port,
-    registry: () => registry,
-    readBody,
-    dispatch: fetch,
-    now: options.now,
-    tailscale: options.tailscale,
-    relay: { paired: (device) => relay.paired(device), revoked: (device) => relay.revoked(device) },
-  });
-  // The relay (packages/server/inbox-relay.ts): the mailbox socket while a phone is paired, the pushes, and the
-  // carriage: store lines down as the event stream writes them, commands up through the door in-process.
-  relay = createInboxRelay({ dataDir, store, devices: phones.devices, payload: eventPayload, apply: phones.asDevice });
-  relay.start();
-  phones.startTailnet();
-  phones.startLan();
+  if (phonesOn) {
+    const devices = createInboxDevices({
+      dataDir,
+      serverSession,
+      port: () => port,
+      registry: () => registry,
+      readBody,
+      dispatch: fetch,
+      now: options.now,
+      tailscale: options.tailscale,
+      relay: { paired: async (device) => (relay ? relay.paired(device) : null), revoked: (device) => relay?.revoked(device) },
+    });
+    phones = devices;
+    // The relay (packages/server/inbox-relay.ts): the mailbox socket while a phone is paired, the pushes, and the
+    // carriage: store lines down as the event stream writes them, commands up through the door in-process.
+    relay = createInboxRelay({ dataDir, store, devices: devices.devices, payload: eventPayload, apply: devices.asDevice });
+    relay.start();
+    devices.startTailnet();
+    devices.startLan();
+  }
 
   const binaryPath = options.binaryPath !== undefined ? options.binaryPath : version !== "dev" ? process.execPath : null;
   let tick: ReturnType<typeof setInterval> | null = null;
@@ -937,9 +957,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     server.stop(true);
     // The tailnet mapping and the door listener, the Wi-Fi listener and its
     // Bonjour record, before a restart starts the new run.
-    phones.stopTailnet();
-    phones.stopLan();
-    relay.stop();
+    phones?.stopTailnet();
+    phones?.stopLan();
+    relay?.stop();
   };
 
   return { port, url: baseUrl, token, serverSession, portChanged, store, registry, stop };

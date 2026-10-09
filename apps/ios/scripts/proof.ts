@@ -65,7 +65,8 @@ const env: Record<string, string> = {
   PATH: process.env.PATH ?? '',
   HOME: join(tmp, 'home'),
   PLANNOTATOR_DATA_DIR: dataDir,
-  PLANNOTATOR_BROWSER: 'none',
+  PLANNOTATOR_BROWSER: 'none',  // Phones are hidden in releases until the iPhone app ships; the app's proofs turn them on.
+  PLANNOTATOR_INBOX_PHONES: '1',
 };
 // Every plannotator process this script starts gets exactly this env: a temp data dir, never ~/.plannotator.
 if (!env.PLANNOTATOR_DATA_DIR.startsWith(tmpdir()) || env.PLANNOTATOR_DATA_DIR.includes('/.plannotator')) {

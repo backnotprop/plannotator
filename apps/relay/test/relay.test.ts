@@ -278,7 +278,7 @@ describe("the relay with an Inbox, under wrangler dev", () => {
     apple = await fakeApns(key.publicKey);
     relay = await startRelay("inbox", { APNS_KEY: key.pkcs8, APNS_KEY_ID: "KEY0000000", APNS_TEAM_ID: "TEAM000000", APNS_ORIGIN: `http://127.0.0.1:${apple.port}` });
     stubs = stubBuiltHtml();
-    w = createInboxWorld("plannotator-relay-", "relay", "relay");
+    w = createInboxWorld("plannotator-relay-", "relay", "relay", { phones: true });
     env = { ...(process.env as Record<string, string>), ...worldEnv(w), PLANNOTATOR_RELAY_URL: relay.url };
     startTheInbox();
     agent = await SimAgent.connect({ binary: join(w.bin, "plannotator"), env, name: "Claude Code", host: "claude-code", cwd: w.project });
@@ -604,7 +604,7 @@ describe("the carriage: a phone reads and answers the Inbox through the relay al
   beforeAll(async () => {
     relay = await startRelay("carriage", {});
     stubs = stubBuiltHtml();
-    w = createInboxWorld("plannotator-relay-carriage-", "carriage", "R2");
+    w = createInboxWorld("plannotator-relay-carriage-", "carriage", "R2", { phones: true });
     if (proofDir) mkdirSync(proofDir, { recursive: true });
     env = { ...(process.env as Record<string, string>), ...worldEnv(w), PLANNOTATOR_RELAY_URL: relay.url };
     // The files an agent attaches: a plan, and an HTML page with an image beside it (1.4 MB: its envelope passes one storage row).

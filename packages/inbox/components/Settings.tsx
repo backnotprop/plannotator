@@ -222,10 +222,13 @@ export function SettingsPage({
         </div>
         <div className="ib-sblock">
           <h2>Connect an agent</h2>
-          <p>Agents on this computer reach the Inbox at 127.0.0.1, and it keeps its port between runs when it can. Phones reach it only on a path you turn on below.</p>
+          <p>
+            Agents on this computer reach the Inbox at 127.0.0.1, and it keeps its port between runs when it can.
+            {settings?.phones && ' Phones reach it only on a path you turn on below.'}
+          </p>
           {context && <ConnectPicker harnesses={HARNESSES} initial="other" context={context} compact />}
         </div>
-        {settings && <PhonesBlock />}
+        {settings?.phones && <PhonesBlock />}
         {settings && (
           <div className="ib-sblock">
             <h2>Stored on this machine</h2>

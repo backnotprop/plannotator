@@ -61,7 +61,8 @@ const env: Record<string, string> = {
   PATH: process.env.PATH ?? '',
   HOME: join(tmp, 'home'),
   PLANNOTATOR_DATA_DIR: join(tmp, 'data'),
-  PLANNOTATOR_BROWSER: 'none',
+  PLANNOTATOR_BROWSER: 'none',  // Phones are hidden in releases until the iPhone app ships; the app's proofs turn them on.
+  PLANNOTATOR_INBOX_PHONES: '1',
 };
 // The Inbox runs on a temp data dir, never the person's own (row 5109).
 if (!env.PLANNOTATOR_DATA_DIR!.startsWith(tmpdir()) || env.PLANNOTATOR_DATA_DIR!.includes('.plannotator')) throw new Error('not a temp data dir');

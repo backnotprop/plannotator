@@ -95,6 +95,8 @@ export interface SettingsModel {
   data_dir: string;
   inbox_tool: { hosts: Record<AgentToolHost, boolean>; env: boolean | null };
   notifications: NotificationSettings;
+  /** Whether this Inbox serves phones (PLANNOTATOR_INBOX_PHONES): the Phones block shows only then. */
+  phones: boolean;
   store: {
     dir: string;
     bytes: number;

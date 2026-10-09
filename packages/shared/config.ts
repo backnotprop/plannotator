@@ -270,6 +270,14 @@ export interface PlannotatorConfig {
     allowedOrigin?: string | null;
   };
   /**
+   * The Plannotator Inbox's phone surface: pairing, the device door
+   * (`/api/inbox/device/*`), the tailnet and Wi-Fi listeners, the relay and
+   * Settings' Phones block. Hidden until the iPhone app ships, so `true` is
+   * for the app's own development and proofs. PLANNOTATOR_INBOX_PHONES wins
+   * over this key. Read once when the Inbox starts. Default: false.
+   */
+  inboxPhones?: boolean;
+  /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
    * callouts, tables, diagrams, task lists, and the other PFM extensions.
@@ -1009,6 +1017,27 @@ export function resolveInboxTool(
   host: AgentToolHost,
 ): boolean {
   return parseInboxToolEnv(env) ?? configuredInboxTool(config, host) ?? INBOX_TOOL_DEFAULTS[host];
+}
+
+/**
+ * Resolve whether the Plannotator Inbox serves phones (pairing, the device
+ * door, the tailnet and Wi-Fi listeners, the relay, Settings' Phones block).
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_INBOX_PHONES env var  →  config.inboxPhones  →  default false
+ *
+ * Env `1` / `true` / `on` turn it on and `0` / `false` / `off` / `disabled`
+ * turn it off; an empty or unrecognized value counts as unset. Off until the
+ * iPhone app ships: the Inbox then does nothing phone-related at all.
+ */
+export function resolveInboxPhones(
+  config: PlannotatorConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const v = env.PLANNOTATOR_INBOX_PHONES?.trim().toLowerCase();
+  if (v === "1" || v === "true" || v === "on") return true;
+  if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
+  return coerceConfigBoolean(config.inboxPhones, false);
 }
 
 /**

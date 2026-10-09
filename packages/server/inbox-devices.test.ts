@@ -105,7 +105,7 @@ describe("the device door, on the binary", () => {
 
   beforeAll(async () => {
     stubs = stubBuiltHtml();
-    w = createInboxWorld("plannotator-inbox-devices-", "device-door", "device-door");
+    w = createInboxWorld("plannotator-inbox-devices-", "device-door", "device-door", { phones: true });
     const entry = startInbox(w);
     base = `http://127.0.0.1:${entry.port}`;
     serverSession = ((await (await fetch(`${base}/api/inbox/health`)).json()) as Json).serverSession;
@@ -538,7 +538,7 @@ describe("the device door, in process", () => {
     const dataDir = mkdtempSync(join(tmpdir(), "plannotator-inbox-devices-clock-"));
     roots.push(dataDir);
     let clock = Date.parse("2026-10-08T10:00:00.000Z");
-    const inbox = await startInboxServer({ dataDir, binaryPath: null, now: () => new Date(clock) });
+    const inbox = await startInboxServer({ dataDir, binaryPath: null, phones: true, now: () => new Date(clock) });
     try {
       const base = `http://127.0.0.1:${inbox.port}`;
       const made = (await (await fetch(`${base}/api/inbox/pairing`, { method: "POST", body: "{}" })).json()) as Json;
@@ -582,7 +582,7 @@ describe("the device door, in process", () => {
     };
     const refused = async (response: Response) => [response.status, ((await response.json()) as Json).code];
     try {
-      const inbox = await startInboxServer({ dataDir, binaryPath: null, tailscale });
+      const inbox = await startInboxServer({ dataDir, binaryPath: null, phones: true, tailscale });
       const main = `http://127.0.0.1:${inbox.port}`;
       const on = await fetch(`${main}/api/inbox/tailnet`, { method: "POST", body: JSON.stringify({ on: true }) });
       expect(((await on.json()) as Json).tailnet).toMatchObject({ on: true, address: "macbook-pro.tail0000.ts.net:8443" });
@@ -649,7 +649,7 @@ describe("the device door, in process", () => {
       expect(serve.has(8443)).toBe(false);
       expect(JSON.parse(readFileSync(join(dataDir, "inbox", "inbox.json"), "utf8")).tailnet.https_port).toBe(8443);
       let atRestart: string | undefined = "not called";
-      const next = await startInboxServer({ dataDir, binaryPath: null, tailscale, onRestartRequested: () => (atRestart = serve.get(8443)) });
+      const next = await startInboxServer({ dataDir, binaryPath: null, phones: true, tailscale, onRestartRequested: () => (atRestart = serve.get(8443)) });
       expect(serve.get(8443)).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
       expect(serve.get(8443)).not.toBe(`http://127.0.0.1:${next.port}`);
       // Restart to update takes the mapping down before the new run starts (no race with its publish).
@@ -658,13 +658,13 @@ describe("the device door, in process", () => {
       expect(atRestart).toBeUndefined();
 
       // After a crash (kill -9): the mapping still points at the dead run's door listener.
-      const crashed = await startInboxServer({ dataDir, binaryPath: null, tailscale });
+      const crashed = await startInboxServer({ dataDir, binaryPath: null, phones: true, tailscale });
       const deadDoor = serve.get(8443)!;
       crashed.stop();
       serve.set(8443, deadDoor);
       // The next start that cannot publish takes that leftover down rather than leave it.
       down.serve = true;
-      const unpublished = await startInboxServer({ dataDir, binaryPath: null, tailscale });
+      const unpublished = await startInboxServer({ dataDir, binaryPath: null, phones: true, tailscale });
       expect(serve.has(8443)).toBe(false);
       unpublished.stop();
       down.serve = false;
@@ -676,7 +676,7 @@ describe("the device door, in process", () => {
       expect(takeDownInboxTailnet(dataDir, tailscale)).toBe("none");
 
       // A mapping someone else put on 8443 is never taken down.
-      const third = await startInboxServer({ dataDir, binaryPath: null, tailscale });
+      const third = await startInboxServer({ dataDir, binaryPath: null, phones: true, tailscale });
       serve.set(8443, "http://127.0.0.1:3000");
       third.stop();
       expect(serve.get(8443)).toBe("http://127.0.0.1:3000");

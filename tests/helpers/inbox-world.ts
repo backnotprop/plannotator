@@ -25,6 +25,8 @@ export interface InboxWorld {
   path: string;
   /** Where the transcript goes, when INBOX_PROOF_DIR is set. */
   proof: (line: string) => void;
+  /** The Inbox serves phones (PLANNOTATOR_INBOX_PHONES=1); off otherwise, as released. */
+  phones: boolean;
 }
 
 export function inboxBinary(): string | undefined {
@@ -40,7 +42,7 @@ export function stubBuiltHtml(): string[] {
   return made;
 }
 
-export function createInboxWorld(prefix: string, name: string, proofSubdir: string): InboxWorld {
+export function createInboxWorld(prefix: string, name: string, proofSubdir: string, options: { phones?: boolean } = {}): InboxWorld {
   const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
   const home = join(root, "home");
   const dataDir = join(home, ".plannotator");
@@ -68,6 +70,7 @@ export function createInboxWorld(prefix: string, name: string, proofSubdir: stri
     proof: (line) => {
       if (proofFile) appendFileSync(proofFile, `${line}\n`);
     },
+    phones: options.phones === true,
   };
 }
 
@@ -81,6 +84,8 @@ export function worldEnv(w: InboxWorld): Record<string, string> {
     PLANNOTATOR_BIN: "",
     // Never the hosted relay (tests/setup/feedback-archive-off.ts says why).
     PLANNOTATOR_RELAY_URL: process.env.PLANNOTATOR_RELAY_URL || "http://127.0.0.1:9",
+    // Phones are hidden until the iPhone app ships; only the phone proofs turn them on.
+    PLANNOTATOR_INBOX_PHONES: w.phones ? "1" : "0",
     TMPDIR: tmpdir(),
   };
 }

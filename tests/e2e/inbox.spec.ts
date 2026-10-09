@@ -488,6 +488,9 @@ test('Settings: the agent tool knob applies to the next session, the compact pic
   await expect(piSwitch).toHaveAttribute('aria-checked', 'false');
   await expect(page.getByRole('switch', { name: 'The Inbox tool in OpenCode' })).toHaveAttribute('aria-checked', 'false');
   await expect(page.getByText('Applies to the next session. Sessions already running keep what they started with.')).toBeVisible();
+  // Phones stay hidden until the iPhone app ships (PLANNOTATOR_INBOX_PHONES is unset here): no block, no mention.
+  await expect(page.locator('[data-settings-phones]')).toHaveCount(0);
+  await expect(page.getByText('Phones reach it only on a path you turn on below.')).toHaveCount(0);
 
   const binary = realpathSync(world.binary);
   const other = page.getByRole('tabpanel', { name: 'Other MCP client' });
