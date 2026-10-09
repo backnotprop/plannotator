@@ -18,7 +18,7 @@
  * after the Inbox applied it.
  *
  *   bun apps/ios/scripts/proof.ts --binary .local/plannotator \
- *     [--device "iPhone 17"] [--shots .local/proof/ios] [--derived <DerivedData>] [--keep-simulator] [--only <test>]
+ *     [--device "iPhone 17"] [--shots .local/proof/ios] [--derived <DerivedData>] [--keep-simulator] [--only <test>] [--prebuilt]
  *
  * M6 adds a proxy in front of the relay (the Inbox's socket and the phone's
  * calls both go through it, so the test can replay a command the phone sent
@@ -54,6 +54,8 @@ const derived = resolve(flag('--derived', join(tmpdir(), 'plannotator-ios-derive
 const keepSimulator = args.includes('--keep-simulator');
 // One test while working on it, e.g. --only PlannotatorUITests/AttachmentProofTests.
 const only = flag('--only');
+// The products are already in --derived (CI builds once and hands them to each shard): skip build-for-testing.
+const prebuilt = args.includes('--prebuilt');
 
 const tmp = mkdtempSync(join(tmpdir(), 'plannotator-ios-proof-'));
 const dataDir = join(tmp, 'data');
@@ -954,7 +956,7 @@ const xcodebuild = (args: string[]) =>
   );
 const warmUp = 'PlannotatorUITests/WarmUpLaunch';
 try {
-  status = await xcodebuild(['build-for-testing']);
+  status = prebuilt ? 0 : await xcodebuild(['build-for-testing']);
   // The warm-up pays a cost, it proves nothing: it never fails the proof. On a cold
   // runner its first try can itself time out inside XCTest (run 37815033252 attempt 2:
   // the pairing cover took over 120 s to first appear), so it gets a second try.

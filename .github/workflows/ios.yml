@@ -8,9 +8,16 @@ name: iPhone app
 # attachments, annotated by touch and sent; a guided review read and its
 # sections marked reviewed) against that Inbox. M5: the relay runs under `wrangler dev` beside it with Apple played
 # locally, and the notification flow delivers the relay's exact push bodies
-# with `xcrun simctl push`. One macOS runner, one simulator destination, no matrix. Runs only
-# when the app, the Inbox files its device door and pairing live in, or the
-# surface the app bundles could have changed. No signing, provisioning or TestFlight material is used.
+# with `xcrun simctl push`. Runs only when the app, the Inbox files its device
+# door and pairing live in, or the surface the app bundles could have changed.
+# No signing, provisioning or TestFlight material is used.
+#
+# Build once, prove in shards: the `build` job compiles the binary and runs
+# `xcodebuild build-for-testing` once; each `proof` shard takes those products,
+# makes its own simulator, runs the warm-up and then its own proof classes with
+# `test-without-building` (proof.ts --prebuilt --only), and deletes the
+# simulator. Every proof class is in exactly one shard (the build job checks).
+# The `iPhone app (XCUITest against the compiled binary)` job is the one verdict.
 
 on:
   pull_request:
@@ -69,10 +76,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ios-app:
-    name: iPhone app (XCUITest against the compiled binary)
+  build:
+    name: iPhone app build (binary and build-for-testing)
     runs-on: macos-latest
-    timeout-minutes: 75
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -102,6 +109,24 @@ jobs:
       - name: Colours match plannotator.css
         run: bun apps/ios/scripts/gen-colors.ts --check
 
+      - name: Every proof class is in a shard
+        # WarmUpLaunch runs first in every shard (proof.ts); ProofCase is the
+        # base class. Any other UI test class must be named in the proof matrix.
+        run: |
+          set -euo pipefail
+          missing=0
+          for class in $(sed -nE 's/^(final )?class ([A-Za-z0-9_]+): *(ProofCase|XCTestCase).*/\2/p' apps/ios/PlannotatorUITests/*.swift); do
+            case "$class" in WarmUpLaunch|ProofCase) continue ;; esac
+            if ! grep -qE "PlannotatorUITests/${class}(,|$)" .github/workflows/ios.yml; then
+              echo "::error::PlannotatorUITests/$class is in no proof shard (.github/workflows/ios.yml)"
+              missing=1
+            fi
+          done
+          for target in PlannotatorKitTests PlannotatorTests; do
+            grep -qE "only: (.*,)?${target}(,|$)" .github/workflows/ios.yml || { echo "::error::$target is in no proof shard"; missing=1; }
+          done
+          exit "$missing"
+
       - name: Build the apps and compile the binary
         run: >-
           bun run build:review && bun run build:hook &&
@@ -117,13 +142,112 @@ jobs:
           key: ios-derived-${{ runner.os }}-${{ hashFiles('apps/ios/**/*.swift', 'apps/ios/Plannotator.xcodeproj/project.pbxproj', 'apps/ios/PlannotatorKit/Package.swift') }}
           restore-keys: ios-derived-${{ runner.os }}-
 
+      - name: Build for testing
+        # The destination is a simulator like the one proof.ts makes (the
+        # newest iOS runtime, an iPhone 17), so the products match the shards'.
+        run: |
+          set -euo pipefail
+          runtime=$(xcrun simctl list runtimes -j | jq -r '[.runtimes[] | select(.platform == "iOS" and .isAvailable)] | sort_by(.version | split(".") | map(tonumber)) | last | .identifier')
+          udid=$(xcrun simctl create "plannotator-build-$GITHUB_RUN_ID" "iPhone 17" "$runtime")
+          status=0
+          xcodebuild build-for-testing -project apps/ios/Plannotator.xcodeproj -scheme Plannotator \
+            -destination "id=$udid" -derivedDataPath ~/ios-derived || status=$?
+          xcrun simctl delete "$udid"
+          exit "$status"
+
+      - name: Pack the products and the binary
+        # tar keeps the executable bits and symlinks an artifact upload drops.
+        run: tar -czf "$RUNNER_TEMP/ios-build.tgz" -C ~/ios-derived Build/Products -C "$GITHUB_WORKSPACE" .local/plannotator
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ios-build
+          path: ${{ runner.temp }}/ios-build.tgz
+          retention-days: 1
+          if-no-files-found: error
+
+  proof:
+    name: iPhone proof (${{ matrix.shard }})
+    needs: build
+    runs-on: macos-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Sized from run 37888395408 (passing, M1 to M6): each shard holds
+          # 15 to 17 minutes of proof classes, plus setup and the warm-up.
+          - shard: relay-transport
+            only: PlannotatorUITests/RelayTransportTests
+          - shard: pair-and-push
+            only: PlannotatorUITests/ProofTests,PlannotatorUITests/RelayPushTests
+          - shard: attachments-decisions-guides
+            only: PlannotatorKitTests,PlannotatorTests,PlannotatorUITests/AttachmentProofTests,PlannotatorUITests/DecisionsProofTests,PlannotatorUITests/GuideProofTests,PlannotatorUITests/WorkspacesProofTests
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Select Xcode 26
+        run: |
+          set -euo pipefail
+          xcode=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n 1 || true)
+          if [ -z "$xcode" ]; then
+            echo "This runner image has no Xcode 26; the app needs the iOS 26 SDK." >&2
+            ls -d /Applications/Xcode*.app >&2 || true
+            exit 1
+          fi
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ios-build
+          path: ${{ runner.temp }}
+
+      - name: Unpack the products and the binary
+        run: |
+          set -euo pipefail
+          mkdir -p ~/ios-derived
+          tar -xzf "$RUNNER_TEMP/ios-build.tgz" -C "$RUNNER_TEMP"
+          mv "$RUNNER_TEMP/Build" ~/ios-derived/Build
+          mkdir -p .local
+          mv "$RUNNER_TEMP/.local/plannotator" .local/plannotator
+
       - name: Run the iPhone proof
-        run: bun apps/ios/scripts/proof.ts --binary .local/plannotator --device "iPhone 17" --derived ~/ios-derived --shots .local/proof/ios
+        env:
+          ONLY: ${{ matrix.only }}
+        run: bun apps/ios/scripts/proof.ts --binary .local/plannotator --device "iPhone 17" --derived ~/ios-derived --shots .local/proof/ios --prebuilt --only "$ONLY"
 
       - name: Keep the screenshots and the recording
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ios-proof
+          name: ios-proof-${{ matrix.shard }}
           path: .local/proof/ios/
           if-no-files-found: ignore
+
+  ios-app:
+    # The one verdict, under the name the single job had: green only when the
+    # build and every shard passed.
+    name: iPhone app (XCUITest against the compiled binary)
+    needs: [build, proof]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every shard passed
+        env:
+          BUILD: ${{ needs.build.result }}
+          PROOF: ${{ needs.proof.result }}
+        run: |
+          echo "build: $BUILD, proof shards: $PROOF"
+          [ "$BUILD" = success ] && [ "$PROOF" = success ]
