@@ -1894,7 +1894,7 @@ Sorting and the rest:
   - Decisions, with the count of questions that record a decision once sent.
   - Settings.
   - "A new version is ready, Restart" when health reports `update`. Restart is `POST /api/inbox/restart`: the server stops, the binary on disk starts detached, and the page reloads on the new `serverSession`.
-  - The frame is Workspaces' sidebar primitive, copied by the owner's word (2026-10-09) into `packages/inbox/shell/` (each file names its Workspaces source and commit): the toggle at the head of each page and ⌘B / Ctrl+B close and open it on Workspaces' one spring (`shell-motion.ts`, MotionValues from `motion`, reduced motion lands without travel); the state is ui's `inboxSidebarOpen` setting (cookie `plannotator-inbox-sidebar-open`, as `gridEnabled`). Closed, a 600 ms rest on the left edge peeks it (1024 px and wider). The edge collapses on a click and resizes on a drag (200 to 520 px, 232 by default, cookie `plannotator-inbox-sidebar-width`), closing past 100 px and reopening if the held pointer comes back. Below 768 px it is a sheet. A file beside a thread closes it on the same spring without changing the stored choice.
+  - The frame is Workspaces' sidebar primitive, copied by the owner's word (2026-10-09) into `packages/inbox/shell/` (each file names its Workspaces source and commit): the toggle at the head of each page and ⌘B / Ctrl+B close and open it on Workspaces' one spring (`shell-motion.ts`, MotionValues from `motion`, reduced motion lands without travel); ⌘B does nothing in an input, a textarea or an editor; the state is the Inbox's own cookie `plannotator-inbox-sidebar-open` (open when absent). Closed, a 600 ms rest on the left edge peeks it (1024 px and wider). The edge collapses on a click and resizes on a drag (200 to 520 px, 232 by default, cookie `plannotator-inbox-sidebar-width`), closing past 100 px and reopening if the held pointer comes back. Below 768 px it is a sheet. A file beside a thread closes it on the same spring without changing the stored choice.
 - A wide row shows:
   - the project label
   - the badge ("Stopped", "Holds up N")
@@ -2100,7 +2100,7 @@ Sorting and the rest:
   - `inbox-attachments.spec.ts`
   - `inbox-guides.spec.ts`
   - `inbox-order.spec.ts` (three agents' questions read newest first in Waiting on you; a reply moves its row to Sent)
-  - `inbox-sidebar.spec.ts` (the sidebar's close and open sampled every frame, ⌘B and Ctrl+B, the reload, the peek, the edge's click, drag, snap-close and keyboard, reduced motion, the phone sheet; its PNGs, video and curves in `.local/proof/sidebar/`)
+  - `inbox-sidebar.spec.ts` (the sidebar's close and open sampled every frame, ⌘B and Ctrl+B, ⌘B left to the reply box, the reload, the peek, the edge's click, drag, snap-close and keyboard, reduced motion, the phone sheet; its PNGs, video and curves in `.local/proof/sidebar/`)
   - `inbox-phones.spec.ts` (Pair a phone, the device list and Remove; Reach from this Wi-Fi with a pinned phone pairing over the LAN, the no-Bonjour note and `openssl` failing; with `PLANNOTATOR_E2E_TAILNET=1` on a Mac signed in to Tailscale, the door at the MagicDNS name on 8443)
 
   PNGs land in `.local/proof/`.

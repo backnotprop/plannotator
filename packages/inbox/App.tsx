@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { configurePlannotatorUI } from '@plannotator/ui/configure';
-import { configStore, useConfigValue } from '@plannotator/ui/config';
+import { storage } from '@plannotator/ui/utils/storage';
 import type { InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import {
   InboxApiError,
@@ -55,6 +55,8 @@ configurePlannotatorUI({
     },
   },
 });
+
+const SIDEBAR_OPEN_COOKIE = 'plannotator-inbox-sidebar-open';
 
 interface Route {
   page: 'inbox' | 'settings' | 'decisions';
@@ -124,6 +126,12 @@ function hasRows(sections: readonly InboxListSection[] | null): boolean {
 
 function Inbox() {
   const [route, setRoute] = useState<Route>(readRoute);
+  // Open or closed as the person left it (⌘B or the toggle): a cookie of the Inbox's own, open when absent.
+  const [sidebarOpen, setSidebarOpen] = useState(() => storage.getItem(SIDEBAR_OPEN_COOKIE) !== 'false');
+  const changeSidebar = useCallback((next: boolean) => {
+    setSidebarOpen(next);
+    storage.setItem(SIDEBAR_OPEN_COOKIE, String(next));
+  }, []);
   const [latest, setLatest] = useState<ListModel | null>(null);
   /** The list on screen: held until the person acts (the "N new" notice). */
   const [shown, setShown] = useState<InboxListSection[] | null>(null);
@@ -401,8 +409,6 @@ function Inbox() {
   const filterProject = route.page === 'inbox' && route.project ? projects.find((p) => p.id === route.project) ?? null : null;
   const notice = shown && latest ? heldNotice(filterSections(shown, route.project), filterSections(latest.sections, route.project)).text : null;
   const firstRun = latest !== null && projects.length === 0;
-  // Open or closed as the person left it (⌘B or the toggle), remembered in a cookie like the Grid/Clean look.
-  const sidebarOpen = useConfigValue('inboxSidebarOpen');
   // A file beside the thread takes the list's and the sidebar's room (record 2.2).
   const fileOpen = route.page === 'inbox' && !!route.thread && !!route.file;
   const guideMessage =
@@ -485,7 +491,7 @@ function Inbox() {
       <SidebarShell
         className="ib-shell"
         open={sidebarOpen && !fileOpen}
-        onOpenChange={(next) => configStore.set('inboxSidebarOpen', next)}
+        onOpenChange={changeSidebar}
         navigation={
           <Sidebar
             page={route.page}

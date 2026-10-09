@@ -9,8 +9,9 @@
 // spring. What changed in the port:
 // - Tailwind classes became `ib-` classes in inbox.css, in the Inbox's skin.
 // - The provider does not read or write localStorage: the Inbox drives `open`
-//   from its settings store (`inboxSidebarOpen`, cookie
-//   `plannotator-inbox-sidebar-open`), as it does the Grid/Clean look.
+//   from its own cookie (`plannotator-inbox-sidebar-open`).
+// - ⌘/Ctrl+B leaves an input, a textarea or contentEditable alone (and is
+//   always prevented, so Firefox's bookmarks sidebar never opens).
 // - Left out: the icon-mode and `none` collapsibles, the floating and inset
 //   variants, the right side, SidebarRail and the menu, group and skeleton
 //   parts (the Inbox draws its own rows), and the TooltipProvider.
@@ -83,6 +84,12 @@ function renderMotionDiv(motionStyle: MotionStyleValues, staticStyle?: React.CSS
 	};
 }
 
+/** An input, a textarea or contentEditable: where ⌘B belongs to the text. */
+function isEditable(target: EventTarget | undefined): boolean {
+	if (!(target instanceof HTMLElement)) return false;
+	return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target.isContentEditable;
+}
+
 function useSidebar() {
 	const context = React.useContext(SidebarContext);
 	if (!context) {
@@ -144,7 +151,10 @@ function SidebarProvider({
 	React.useEffect(() => {
 		const handleKeyDown = (event: KeyboardEvent) => {
 			if (event.key === SIDEBAR_KEYBOARD_SHORTCUT && (event.metaKey || event.ctrlKey)) {
+				// Always ours: Firefox's Ctrl+B would open its bookmarks sidebar.
 				event.preventDefault();
+				// Typing stays typing: the reply box, a field or an editor keeps the sidebar where it is.
+				if (isEditable(event.composedPath()[0])) return;
 				toggleSidebar();
 			}
 		};

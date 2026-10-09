@@ -2,7 +2,7 @@
  * The Inbox sidebar is Workspaces' sidebar primitive (packages/inbox/shell),
  * proved in a real Chromium against the compiled binary under a temp
  * PLANNOTATOR_DATA_DIR: the toggle closes and opens it on the shell spring
- * (the width sampled every frame), ⌘B / Ctrl+B toggles it, the choice
+ * (the width sampled every frame), ⌘B / Ctrl+B toggles it (not while typing), the choice
  * survives a reload, the hover peek shows the navigation while it is closed,
  * the edge collapses on a click and resizes on a drag (and closes past half
  * the minimum, reopening when the held pointer comes back), reduced motion
@@ -183,6 +183,24 @@ test('⌘B and Ctrl+B toggle it, and the choice survives a reload', async () => 
   expect(opening.at(-1)?.[1]).toBe(WIDTH);
   await expect(side(page)).toBeVisible();
   await page.reload();
+  await expect(side(page)).toBeVisible();
+});
+
+test('⌘B in the reply box is typing: the sidebar stays', async () => {
+  const { page, url } = world;
+  await page.locator('.ib-lbody [data-thread-id]').first().click();
+  await page.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
+  const reply = page.locator('textarea.ib-rtext');
+  await reply.fill('Retry with the same key');
+  await reply.focus();
+  await page.keyboard.press('ControlOrMeta+b');
+  await page.waitForTimeout(700);
+  await expect(side(page)).toBeVisible();
+  await expect(page.locator('.ib-sb')).toHaveAttribute('data-state', 'expanded');
+  await expect(reply).toBeFocused();
+  await expect(reply).toHaveValue('Retry with the same key');
+  expect(await cookie(page, 'plannotator-inbox-sidebar-open')).toBe('true');
+  await page.goto(url);
   await expect(side(page)).toBeVisible();
 });
 
