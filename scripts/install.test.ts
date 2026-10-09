@@ -20,6 +20,7 @@ import {
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { quoteHookWord } from "../packages/shared/t3-hook-command";
 
 const scriptsDir = import.meta.dir;
 
@@ -2273,6 +2274,7 @@ function setupInstallSandbox(opts: {
   git?: GitBehavior;
   codexHome?: boolean;
   plannotatorConfig?: string;
+  binary?: string;
 }) {
   const root = mkdtempSync(join(tmpdir(), "plannotator-install-test-"));
   const home = join(root, "home");
@@ -2299,7 +2301,9 @@ for a in "$@"; do
 done
 case "$url" in
   *".sha256") printf '%s  plannotator\\n' "$STUB_CHECKSUM" ;;
-  */releases/download/*) printf 'fake plannotator binary\\n' > "$out" ;;
+  */releases/download/*)
+    if [ -n "$STUB_BINARY_SOURCE" ]; then cat "$STUB_BINARY_SOURCE" > "$out"
+    else printf 'fake plannotator binary\\n' > "$out"; fi ;;
   */attestations/sha256:*) cat "$STUB_ATT_JSON" ;;
   *) exit 22 ;;
 esac
@@ -2339,11 +2343,14 @@ exit 1`
     mkdirSync(join(home, ".plannotator"), { recursive: true });
     writeFileSync(join(home, ".plannotator", "config.json"), opts.plannotatorConfig);
   }
-  return { home, stub };
+  const binarySource = opts.binary ? join(root, "binary-fixture") : undefined;
+  if (binarySource) writeFileSync(binarySource, opts.binary!);
+  const binaryChecksum = opts.binary ? createHash("sha256").update(opts.binary).digest("hex") : FAKE_BINARY_SHA256;
+  return { home, stub, binarySource, binaryChecksum };
 }
 
 function runInstallSh(
-  sandbox: { home: string; stub: string },
+  sandbox: { home: string; stub: string; binarySource?: string; binaryChecksum?: string },
   args: string[],
   extraEnv: Record<string, string> = {},
 ) {
@@ -2354,7 +2361,8 @@ function runInstallSh(
         HOME: sandbox.home,
         TMPDIR: join(sandbox.home, "tmp"),
         PATH: `${sandbox.stub}:/usr/bin:/bin`,
-        STUB_CHECKSUM: FAKE_BINARY_SHA256,
+        STUB_CHECKSUM: sandbox.binaryChecksum ?? FAKE_BINARY_SHA256,
+        STUB_BINARY_SOURCE: sandbox.binarySource ?? "",
         STUB_ATT_JSON: ATTESTATION_FIXTURE,
         PLANNOTATOR_SKIP_SEM_INSTALL: "1",
         PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL: "1",
@@ -2369,6 +2377,124 @@ function runInstallSh(
     out: r.stdout.toString() + r.stderr.toString(),
   };
 }
+
+describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
+  "install.sh optional T3 hook",
+  () => {
+    const args = ["--version", "v99.9.9", "--non-interactive", "--skip-skills"];
+    const sourceCli = join(scriptsDir, "..", "apps", "hook", "server", "index.ts");
+    const binary = `#!/bin/sh\nexec ${quoteHookWord(process.execPath)} ${quoteHookWord(sourceCli)} "$@"\n`;
+    const fixture = () => setupInstallSandbox({ gh: "pass-all", binary });
+    const settingsFile = (home: string) => join(home, ".claude", "settings.json");
+
+    test("default installation adds no T3 hook or Claude settings file", () => {
+      const sandbox = fixture();
+      const result = runInstallSh(sandbox, args);
+      expect(result.code).toBe(0);
+      expect(existsSync(settingsFile(sandbox.home))).toBe(false);
+      expect(result.out).not.toContain("T3 hook installed");
+    });
+
+    test("opt-in uses the chosen profile, safely pins the binary and data directory, and remains idempotent", () => {
+      const sandbox = fixture();
+      const profile = join(sandbox.home, "Claude work's profile");
+      const dataDir = join(sandbox.home, "T3 session's data");
+      const file = join(profile, "settings.json");
+      const customHook = { matcher: "Bash", hooks: [{ type: "command", command: "my-custom-hook" }] };
+      mkdirSync(profile);
+      writeFileSync(file, JSON.stringify({ theme: "dark", hooks: { PreToolUse: [customHook] } }));
+      const env = { CLAUDE_CONFIG_DIR: profile, PLANNOTATOR_DATA_DIR: dataDir };
+      const installed = runInstallSh(sandbox, [...args, "--with-t3"], env);
+      expect(installed.code).toBe(0);
+      const settings = JSON.parse(readFileSync(file, "utf8"));
+      expect(settings.theme).toBe("dark");
+      expect(settings.hooks.PreToolUse).toHaveLength(2);
+      expect(settings.hooks.PreToolUse[0]).toEqual(customHook);
+      expect(existsSync(settingsFile(sandbox.home))).toBe(false);
+      const command = settings.hooks.PreToolUse[1].hooks[0].command;
+      const invoked = Bun.spawnSync(["/bin/sh", "-c", command], {
+        env: { HOME: sandbox.home, PATH: "/usr/bin:/bin" },
+        stdin: Buffer.from(JSON.stringify({
+          hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: "toolu_fixture", session_id: "fixture",
+          cwd: sandbox.home, tool_input: { command: "plannotator annotate notes.md --gate" },
+        })),
+        stdout: "pipe", stderr: "pipe",
+      });
+      expect(invoked.exitCode).toBe(0);
+      expect(JSON.parse(invoked.stdout.toString())).toEqual({});
+      expect(JSON.parse(readFileSync(join(dataDir, "install-flags.json"), "utf8"))).toEqual({ v: 1, flags: ["with-t3", "skip-skills"] });
+      const before = readFileSync(file, "utf8");
+      expect(runInstallSh(sandbox, [...args, "--with-t3"], env).code).toBe(0);
+      expect(readFileSync(file, "utf8")).toBe(before);
+      expect(runInstallSh(sandbox, args, env).code).toBe(0);
+      expect(readFileSync(file, "utf8")).toBe(before);
+    });
+
+    test("removal preserves other hooks and the saved connection", () => {
+      const sandbox = fixture();
+      const file = settingsFile(sandbox.home);
+      const customHook = { matcher: "Bash", hooks: [{ type: "command", command: "my-custom-hook" }] };
+      mkdirSync(join(sandbox.home, ".claude"));
+      writeFileSync(file, JSON.stringify({ theme: "dark", hooks: { PreToolUse: [customHook] } }));
+      expect(runInstallSh(sandbox, [...args, "--with-t3"]).code).toBe(0);
+      const credential = join(sandbox.home, ".plannotator", "t3-code", "connection", "oauth.json");
+      mkdirSync(join(credential, ".."), { recursive: true });
+      writeFileSync(credential, "private fixture connection");
+      expect(runInstallSh(sandbox, [...args, "--without-t3"]).code).toBe(0);
+      expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ theme: "dark", hooks: { PreToolUse: [customHook] } });
+      expect(readFileSync(credential, "utf8")).toBe("private fixture connection");
+      const before = readFileSync(file, "utf8");
+      expect(runInstallSh(sandbox, [...args, "--without-t3"]).code).toBe(0);
+      expect(readFileSync(file, "utf8")).toBe(before);
+      expect(JSON.parse(readFileSync(join(sandbox.home, ".plannotator", "install-flags.json"), "utf8"))).toEqual({ v: 1, flags: ["without-t3", "skip-skills"] });
+    });
+
+    test("malformed settings are preserved and the requested installation fails visibly", () => {
+      const sandbox = fixture();
+      const file = settingsFile(sandbox.home);
+      mkdirSync(join(file, ".."), { recursive: true });
+      writeFileSync(file, "{invalid settings");
+      const result = runInstallSh(sandbox, [...args, "--with-t3"]);
+      expect(result.code).not.toBe(0);
+      expect(result.out).not.toContain("T3 hook installed");
+      expect(readFileSync(file, "utf8")).toBe("{invalid settings");
+    });
+
+    test("minimal stays binary-only even when T3 is requested", () => {
+      const sandbox = fixture();
+      const result = runInstallSh(sandbox, [...args, "--minimal", "--with-t3"]);
+      expect(result.code).toBe(0);
+      expect(existsSync(settingsFile(sandbox.home))).toBe(false);
+      expect(result.out).not.toContain("T3 hook installed");
+    });
+
+    test("conflicting choices fail before downloading a binary", () => {
+      const sandbox = fixture();
+      const result = runInstallSh(sandbox, [...args, "--with-t3", "--without-t3"]);
+      expect(result.code).not.toBe(0);
+      expect(result.out).toContain("mutually exclusive");
+      expect(existsSync(join(sandbox.home, ".local", "bin", "plannotator"))).toBe(false);
+    });
+
+    test("the optional Bash hook causes no false plan-plugin warning, but a native plan hook still does", () => {
+      const sandbox = fixture();
+      const plugin = join(sandbox.home, ".claude", "plugins", "marketplaces", "plannotator", "apps", "hook", "hooks", "hooks.json");
+      mkdirSync(join(plugin, ".."), { recursive: true });
+      writeFileSync(plugin, readFileSync(join(scriptsDir, "..", "apps", "hook", "hooks", "hooks.json")));
+      const installed = runInstallSh(sandbox, [...args, "--with-t3"]);
+      expect(installed.code).toBe(0);
+      expect(installed.out).not.toContain("DUPLICATE HOOK DETECTED");
+      const file = settingsFile(sandbox.home);
+      const settings = JSON.parse(readFileSync(file, "utf8"));
+      settings.hooks.PermissionRequest = [{ matcher: "ExitPlanMode", hooks: [{ type: "command", command: "plannotator" }] }];
+      writeFileSync(file, JSON.stringify(settings));
+      const repeated = runInstallSh(sandbox, args);
+      expect(repeated.code).toBe(0);
+      expect(repeated.out).toContain("DUPLICATE HOOK DETECTED");
+      expect(readFileSync(plugin)).toEqual(readFileSync(join(scriptsDir, "..", "apps", "hook", "hooks", "hooks.json")));
+    });
+  },
+);
 
 describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
   "install.sh functional (stubbed PATH, sandbox HOME)",

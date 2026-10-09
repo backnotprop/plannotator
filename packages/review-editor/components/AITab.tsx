@@ -62,6 +62,7 @@ export const AITab: React.FC<AITabProps> = ({
   hasAISession = false,
   onSessionAskAction,
 }) => {
+  const hasT3Session = aiProviders.some(provider => provider.sessionBridge?.host === 't3');
   const scrollRef = useRef<HTMLDivElement>(null);
   // File chat groups default to expanded; this tracks the ones the user has
   // explicitly collapsed (inverted set), so a freshly-shown file's chat is
@@ -183,7 +184,7 @@ export const AITab: React.FC<AITabProps> = ({
           onReasoningEffortChange={(effort) => onAIConfigChange?.({ reasoningEffort: effort })}
           hasSession={hasAISession}
         />
-        {onAskGeneral && <GeneralInput value={generalInput} onChange={setGeneralInput} onSubmit={handleGeneralSubmit} disabled={isStreaming} isStreaming={isStreaming} onStop={onStop} />}
+        {onAskGeneral && <GeneralInput value={generalInput} onChange={setGeneralInput} onSubmit={handleGeneralSubmit} disabled={isStreaming} isStreaming={isStreaming} onStop={onStop} observationOnly={hasT3Session} />}
       </div>
     );
   }
@@ -223,7 +224,7 @@ export const AITab: React.FC<AITabProps> = ({
               {isExpanded && (
                 <div className="ml-3 border-l border-border/30 pl-2 space-y-2 mt-1">
                   {fileMessages.map(({ question, response }) => (
-                    <QAPair key={question.id} question={question} response={response} onScrollToLines={onScrollToLines} onSessionAskAction={onSessionAskAction} />
+                    <QAPair key={question.id} question={question} response={response} canInterrupt={!hasT3Session} onScrollToLines={onScrollToLines} onSessionAskAction={onSessionAskAction} />
                   ))}
                 </div>
               )}
@@ -243,7 +244,7 @@ export const AITab: React.FC<AITabProps> = ({
             )}
             <div className="space-y-2">
               {generalMessages.map(({ question, response }) => (
-                <QAPair key={question.id} question={question} response={response} onScrollToLines={onScrollToLines} onSessionAskAction={onSessionAskAction} />
+                <QAPair key={question.id} question={question} response={response} canInterrupt={!hasT3Session} onScrollToLines={onScrollToLines} onSessionAskAction={onSessionAskAction} />
               ))}
             </div>
           </div>
@@ -283,7 +284,7 @@ export const AITab: React.FC<AITabProps> = ({
       />
 
       {/* General question input */}
-      {onAskGeneral && <GeneralInput value={generalInput} onChange={setGeneralInput} onSubmit={handleGeneralSubmit} disabled={isStreaming} isStreaming={isStreaming} onStop={onStop} />}
+      {onAskGeneral && <GeneralInput value={generalInput} onChange={setGeneralInput} onSubmit={handleGeneralSubmit} disabled={isStreaming} isStreaming={isStreaming} onStop={onStop} observationOnly={hasT3Session} />}
     </div>
   );
 };
@@ -296,7 +297,8 @@ const GeneralInput: React.FC<{
   disabled?: boolean;
   isStreaming?: boolean;
   onStop?: () => void;
-}> = ({ value, onChange, onSubmit, disabled, isStreaming, onStop }) => {
+  observationOnly?: boolean;
+}> = ({ value, onChange, onSubmit, disabled, isStreaming, onStop, observationOnly = false }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const autoResize = useCallback(() => {
@@ -332,9 +334,10 @@ const GeneralInput: React.FC<{
           <button
             onClick={onStop}
             className="p-1.5 mb-px rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex-shrink-0"
-            title="Stop generating"
-            aria-label="Stop generating"
+            title={observationOnly ? 'Stop listening; the question can continue in T3' : 'Stop generating'}
+            aria-label={observationOnly ? 'Stop listening' : 'Stop generating'}
           >
+            {observationOnly && <span className="text-[10px] mr-1">Stop listening</span>}
             <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
               <rect x="6" y="6" width="12" height="12" rx="2" />
             </svg>
@@ -362,7 +365,8 @@ const QAPair = memo<{
   response: AIChatEntry['response'];
   onScrollToLines: AITabProps['onScrollToLines'];
   onSessionAskAction?: AITabProps['onSessionAskAction'];
-}>(({ question, response, onScrollToLines, onSessionAskAction }) => {
+  canInterrupt?: boolean;
+}>(({ question, response, onScrollToLines, onSessionAskAction, canInterrupt }) => {
   const scope = getQuestionScope(question);
   const renderedResponse = useMemo(
     () => response.text ? renderChatMarkdown(response.text) : null,
@@ -401,6 +405,7 @@ const QAPair = memo<{
             <p className={`text-xs ${sessionAskErrorTone(response)}`}>{response.error}</p>
             <SessionAskActions
               response={response}
+              canInterrupt={canInterrupt}
               onAction={onSessionAskAction ? (action) => onSessionAskAction(question.id, action) : undefined}
             />
           </>

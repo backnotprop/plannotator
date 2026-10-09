@@ -56,6 +56,7 @@
     "./improvement-hooks": "./improvement-hooks.ts",
     "./pfm-reminder": "./pfm-reminder.ts",
     "./plannotator-tool": "./plannotator-tool.ts",
+    "./t3-hook-command": "./t3-hook-command.ts",
     "./worktree": "./worktree.ts",
     "./worktree-pool": "./worktree-pool.ts",
     "./html-to-markdown": "./html-to-markdown.ts",

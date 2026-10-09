@@ -1,0 +1,21 @@
+{
+  "name": "@plannotator/t3-code",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun build ../hook/server/index.ts --target bun --compile --outfile dist/plannotator",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "~5.8.2"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.2.0",
+    "@plannotator/ai": "workspace:*",
+    "@plannotator/core": "workspace:*",
+    "@plannotator/server": "workspace:*",
+    "@plannotator/shared": "workspace:*",
+    "zod": "4.5.4"
+  }
+}

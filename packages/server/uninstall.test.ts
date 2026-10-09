@@ -17,6 +17,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, parse } from "node:path";
+import { t3HookCommand } from "@plannotator/shared/t3-hook-command";
 import {
   formatPurgeWarning,
   runPlannotatorUninstall,
@@ -250,6 +251,29 @@ function snapshotTree(root: string): string[] {
 }
 
 describe("default uninstall", () => {
+  test("removes the optional T3 hook only for the installed binary, preserving other Bash hooks", async () => {
+    const fixture = createFixture();
+    const binary = join(fixture.homeDir, ".local", "bin", "plannotator");
+    writeText(binary);
+    const settings = join(fixture.homeDir, ".claude", "settings.json");
+    const customHooks = [
+      { type: "command", command: "my-custom-hook" },
+      { type: "command", command: t3HookCommand("/custom/plannotator", fixture.dataDir) },
+    ];
+    writeJson(settings, {
+      theme: "dark",
+      hooks: { PreToolUse: [{ matcher: "Bash", hooks: [
+        { type: "command", command: t3HookCommand(binary, fixture.dataDir), timeout: 10 },
+        ...customHooks,
+      ] }] },
+    });
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
+    expect(result.ok).toBe(true);
+    expect(readJson(settings)).toEqual({
+      theme: "dark", hooks: { PreToolUse: [{ matcher: "Bash", hooks: customHooks }] },
+    });
+  });
+
   test("removes recognized installer components and preserves local data", async () => {
     const fixture = createFixture();
     const { homeDir, dataDir } = fixture;
