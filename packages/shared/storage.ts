@@ -400,3 +400,48 @@ export function listProjectPlans(
     return [];
   }
 }
+
+/**
+ * Resolve which history directory a plan under review should append to.
+ *
+ * `generateSlug` stamps the current date into the slug, because the archive
+ * filenames under `~/.plannotator/plans/` are keyed by it: `parseArchiveFilename`
+ * reads the date back out and `listArchivedPlans` sorts on it. Version history
+ * wants the opposite, a key that stays put, so a review spanning midnight keeps
+ * appending to the chain it started instead of opening a second one that looks
+ * like a plan with no history at all (empty Versions tab, no diff).
+ *
+ * The date in a history directory name therefore records when the chain
+ * *started*, not when it was last touched. Given today's dated slug, adopt the
+ * newest existing `{base}-YYYY-MM-DD` directory for this project that is not
+ * dated in the future, and fall back to today's when the plan has no history
+ * yet. ISO dates sort lexicographically, so plain string comparison is enough.
+ *
+ * Directories holding no `NNN.md` are skipped by `listProjectPlans`, so an empty
+ * one left behind by an interrupted run cannot hijack the chain. A candidate has
+ * to match the date shape exactly, which keeps two plans apart when one slug is
+ * a prefix of another (`wave-s2` vs `wave-s2-inference-capacity`) and leaves the
+ * content-hashed slugs from annotate mode alone.
+ */
+export function resolveHistorySlug(project: string, datedSlug: string): string {
+  const dateSuffix = datedSlug.match(/-(\d{4}-\d{2}-\d{2})$/);
+  if (!dateSuffix) return datedSlug;
+
+  const startedOn = dateSuffix[1];
+  const base = datedSlug.slice(0, -dateSuffix[0].length);
+
+  let chain: string | null = null;
+  let chainDate = "";
+  for (const plan of listProjectPlans(project)) {
+    if (!plan.slug.startsWith(`${base}-`)) continue;
+    const candidate = plan.slug.slice(base.length + 1);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(candidate)) continue;
+    if (candidate > startedOn) continue;
+    if (candidate > chainDate) {
+      chainDate = candidate;
+      chain = plan.slug;
+    }
+  }
+
+  return chain ?? datedSlug;
+}
