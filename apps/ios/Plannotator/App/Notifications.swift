@@ -113,6 +113,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     /// relay's generic words.
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         let content = notification.request.content
+        // A push is one of the moments the app reads again (on the relay path the
+        // only one besides the person's own). On a phone the extension has already
+        // dressed it, which replaces the envelope `e` with the summary; a push it
+        // did not dress (the simulator never runs extensions) still carries `e`.
+        if PushNotification.read(content.userInfo) != nil || content.userInfo["e"] != nil, let session = model.session {
+            Task { await session.reconnect() }
+        }
         guard PushNotification.isUndressed(content.userInfo), let mutable = content.mutableCopy() as? UNMutableNotificationContent else { return [.banner, .list, .sound] }
         // Answer the system at once; the dressed copy follows as its own notification.
         let identifier = notification.request.identifier
@@ -148,11 +155,15 @@ extension AppModel {
     }
 
     /// A choice tapped on a notification (7.2): one Send with the pick inside
-    /// it (exchange 7.11), straight to the computer, else through the relay's
-    /// command path with the same idempotency key (section 6), so it is
-    /// applied once either way. A Send that lands nowhere says so in a
-    /// notification of its own, so the person never believes an answer went
-    /// that did not.
+    /// it (exchange 7.11), to the computer directly when the Wi-Fi or the
+    /// tailnet answers (both asked at once, 3 s), else up through the relay
+    /// with the same idempotency key (section 6), so it is applied once either
+    /// way. Each step has a short wait, so the whole answer fits well inside
+    /// the background time iOS gives an action (about 30 s): 3 s, then 5 s
+    /// directly or 5 s to the relay. One the relay holds for an offline
+    /// computer waits there, and its thread says so (owner item 26). A Send
+    /// that lands nowhere says so in a notification of its own, so the person
+    /// never believes an answer went that did not.
     func answer(_ summary: PushSummary, choice index: Int, device: String) async {
         guard let question = summary.question, question.choices.indices.contains(index),
               let source = sources.first(where: { $0.id == device }), let credential = Keychain.load(device: device) else { return }
@@ -165,28 +176,35 @@ extension AppModel {
             words: "",
             questions: [.init(key: question.key, revision: question.revision, answer: pick)]
         )
-        do throws(InboxError) {
-            _ = try await InboxClient(address: source.address, token: credential.token)
-                .reply(message: summary.messageId, idempotencyKey: send.idempotencyKey, words: send.words, questions: send.questions)
-            SendKeys.clear(source: device, message: keyName)
-            if session?.id == device {
-                await session?.refresh()
-                await session?.loadThread(summary.threadId)
-            }
-        } catch where error.isDefinite {
-            SendKeys.clear(source: device, message: keyName)
-            await tell(summary, device: device, "“\(label)” was not sent. \(error.message)")
-        } catch {
-            guard let relay = source.relay.flatMap({ RelayClient(relay: $0, device: device, secret: credential.secret) }),
-                  let carried = try? await relay.reply(message: summary.messageId, send) else {
-                // No definite answer from the computer: the Send may have landed before the connection died.
-                await tell(summary, device: device, "“\(label)” may not have been sent: your computer can't be reached. Open the thread to check.")
+        if let direct = await InboxClient.firstReachable(source.directClients(token: credential.token)).client {
+            do throws(InboxError) {
+                _ = try await direct.reply(message: summary.messageId, send, timeout: 5)
+                SendKeys.clear(source: device, message: keyName)
+                if session?.id == device {
+                    await session?.refresh()
+                    await session?.loadThread(summary.threadId)
+                }
                 return
+            } catch where error.isDefinite {
+                SendKeys.clear(source: device, message: keyName)
+                let words = session?.id == device ? session?.notSent(error) : nil
+                await tell(summary, device: device, words.map { "“\(label)”: \($0)" } ?? "“\(label)” was not sent. \(error.message)")
+                return
+            } catch {
+                // No answer directly: the relay next, with the same key.
             }
-            // The relay holds it under its key until the Inbox applies it.
-            SendKeys.clear(source: device, message: keyName)
-            if !carried.inboxOnline { await tell(summary, device: device, "“\(label)” sent. Waiting for your computer.") }
         }
+        guard relayOn(source), let relay = source.relay.flatMap({ RelayClient(relay: $0, device: device, secret: credential.secret) }),
+              let carried = try? await relay.reply(message: summary.messageId, send, timeout: 5) else {
+            // No definite answer from the computer or the relay: the Send may have landed before the connection died.
+            await tell(summary, device: device, "“\(label)” may not have been sent: your computer can't be reached. Open the thread to check.")
+            return
+        }
+        // The relay holds it under its key until the Inbox applies it; the thread shows it waiting until the reply lands.
+        SendKeys.clear(source: device, message: keyName)
+        PendingSend.add(PendingSend(source: device, thread: summary.threadId, message: summary.messageId, key: send.idempotencyKey, words: label, body: send))
+        if session?.id == device { session?.reloadPending() }
+        if !carried.inboxOnline { await tell(summary, device: device, "“\(label)” sent. Waiting for your computer.") }
     }
 
     /// A word about a lock-screen answer, as a notification that opens its thread.

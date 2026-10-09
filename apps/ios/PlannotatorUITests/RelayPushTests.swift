@@ -340,7 +340,7 @@ final class RelayPushTests: XCTestCase {
             let source = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'source-'")).firstMatch
             guard source.waitForExistence(timeout: 5) else { break }
             source.tap()
-            element("remove-source").tap()
+            app.reveal("remove-source").tap()
             app.sheets.buttons["Remove This Source"].firstMatch.tap()
             XCTAssertTrue(element("add-source").waitForExistence(timeout: 30))
         }

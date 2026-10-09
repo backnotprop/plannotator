@@ -63,6 +63,8 @@ targets:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSCameraUsageDescription: Plannotator reads the pairing code your computer shows.
+        # M6: the Wi-Fi path dials the computer's listener on this network (contract section 3).
+        NSLocalNetworkUsageDescription: Plannotator reaches the Inbox on your computer over this Wi-Fi.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         CFBundleURLTypes:

@@ -3,7 +3,8 @@ import Observation
 import PlannotatorKit
 
 /// The shown source while it is shown (a paired computer's Inbox, or
-/// Workspaces): the list, the open threads, the live changes in the
+/// Workspaces): the list, the open threads, the path a computer is reached
+/// on (the Wi-Fi, the tailnet, then the relay), the live changes in the
 /// foreground, and the person's commands.
 @Observable
 final class SourceSession {
@@ -15,9 +16,27 @@ final class SourceSession {
     /// "MacBook Pro", or "Workspaces".
     let name: String
     let kind: Kind
-    let client: any SourceClient
-
+    /// The client on the path in use. Every call goes through it, so a call is
+    /// the same request on the Wi-Fi, the tailnet and the relay; for
+    /// Workspaces, its doors.
+    private(set) var client: any SourceClient
     private(set) var status: Status = .connecting
+    /// The path in use, nil while none answers.
+    private(set) var path: InboxPath?
+    /// Through the relay: the computer's Inbox is connected to it now. When it
+    /// is not, the phone shows what it last received and its answers wait.
+    private(set) var inboxOnline = true
+    /// Sends the relay holds for this computer (owner item 26).
+    private(set) var pending: [PendingSend] = []
+    /// A held Send the computer refused when it came online, by thread.
+    var sendProblems: [String: String] = [:]
+    /// Messages too large for the relay to carry, and threads whose read
+    /// through it was too large: drawn as "Too large to show here" until a
+    /// direct path reads them. Kept apart because a thread's id is its root
+    /// message's id.
+    private(set) var tooLargeMessages: Set<String> = []
+    private(set) var tooLargeThreads: Set<String> = []
+
     /// The list on screen. It draws from the cache first, then refreshes.
     private(set) var list: InboxListModel?
     /// Threads that arrived while the list was scrolled, held behind the "N new" pill (2.3).
@@ -41,6 +60,7 @@ final class SourceSession {
     private(set) var files: [String: InboxThreadAttachments] = [:]
 
     private var onScreen: [String: Int] = [:]
+    private var connecting: Task<Void, Never>?
     private var stream: Task<Void, Never>?
     private var pendingRefresh: Task<Void, Never>?
     private var pickChains: [String: Task<Void, Never>] = [:]
@@ -49,14 +69,26 @@ final class SourceSession {
     private var ticksInFlight: [String: Int] = [:]
     private var confirmedTicks: [String: [Bool]?] = [:]
     private let cache: Cache
+    private let directs: [InboxClient]
+    private var relay: RelayChannel?
+    /// The relay switch is on and the relay holds it on (the app model knows).
+    private let relayCarries: () -> Bool
 
-    init(source: Source, token: String) {
+    init(source: Source, credential: DeviceCredential, relayCarries: @escaping () -> Bool) {
         id = source.id
         name = source.name
         kind = .inbox(source)
-        client = InboxClient(address: source.address, token: token)
         cache = Cache(source: source.id)
+        self.relayCarries = relayCarries
+        directs = source.directClients(token: credential.token)
+        client = directs.first ?? InboxClient(address: source.address, token: credential.token)
         list = cache.read(InboxListModel.self, "list")
+        pending = PendingSend.all().filter { $0.source == source.id }
+        if let ref = source.relay, let relayClient = RelayClient(relay: ref, device: source.id, secret: credential.secret) {
+            relay = RelayChannel(client: relayClient, through: SourceState.load(source.id).relayThrough) { [weak self] batch in
+                await self?.apply(batch)
+            }
+        }
     }
 
     init(workspaces: WorkspacesSource) {
@@ -65,6 +97,8 @@ final class SourceSession {
         kind = .workspaces
         client = workspaces
         cache = Cache(source: id)
+        directs = []
+        relayCarries = { false }
         list = cache.read(InboxListModel.self, "list")
     }
 
@@ -74,38 +108,119 @@ final class SourceSession {
     /// decision card's words, the Decisions tab, New message); nil for Workspaces.
     var inbox: InboxClient? { client as? InboxClient }
 
-    // MARK: The stream (foreground only)
+    /// The relay carries this computer now (its switch on, and the relay holding it on).
+    var relayOn: Bool { relayCarries() }
 
-    /// Connects: refreshes what is on screen, then follows the event stream from
-    /// the list's cursor, reconnecting after a drop. Called when the app comes
-    /// to the front; `stop()` when it leaves.
+    /// The paired computer this session shows; nil for Workspaces.
+    var source: Source? {
+        if case .inbox(let source) = kind { return source }
+        return nil
+    }
+
+    // MARK: The path (9.2)
+
+    /// Comes to the front: chooses the path and reads. Called when the app
+    /// comes to the front; `stop()` when it leaves.
     func start() {
-        guard stream == nil, status != .removed else { return }
-        stream = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
-                await self.refreshAll()
-                if self.status == .removed { return }
-                do {
-                    for try await event in self.client.events(after: self.list?.cursor) {
-                        switch event {
-                        case .hello: self.status = .connected
-                        case .record: self.scheduleRefresh()
-                        }
-                    }
-                } catch let error as InboxError {
-                    self.fail(error)
-                } catch {}
-                if self.status == .removed { return }
-                try? await Task.sleep(for: .seconds(2))
-            }
+        guard connecting == nil, stream == nil, status != .removed else { return }
+        connecting = Task { [weak self] in
+            await self?.connect()
+            self?.connecting = nil
         }
     }
 
     func stop() {
+        connecting?.cancel()
+        connecting = nil
         stream?.cancel()
         stream = nil
         pendingRefresh?.cancel()
+    }
+
+    /// The person pulled to refresh, tapped Try Again, or a push arrived: the
+    /// paths are asked again and what is on screen is read.
+    func reconnect() async {
+        guard status != .removed else { return }
+        await connect()
+    }
+
+    /// The relay switch changed on this phone (9.2).
+    func relayChanged() async {
+        if path == .relay || path == nil { await connect() }
+    }
+
+    /// Chooses the path: the Wi-Fi, then the tailnet, each asked for `health`
+    /// with a short wait; then the relay while its switch is on. A direct path
+    /// reads what is on screen and follows the event stream; the relay reads
+    /// what it holds after this phone's last item, then the list when the
+    /// computer is online.
+    private func connect() async {
+        if isWorkspaces {
+            // One path: Workspaces' doors, then its live changes by ticket.
+            await refreshAll()
+            if status == .connected, stream == nil { follow() }
+            return
+        }
+        if let direct = await reachableDirect() {
+            use(direct)
+            await refreshAll()
+            if path != nil, status == .connected, stream == nil { follow() }
+            await settleHeld()
+            ackRelayByCursor()
+            return
+        }
+        if status == .removed { return }
+        if let relay, let source, relayCarries() {
+            use(InboxClient(relay: relay, address: source.address, token: ""))
+            await readRelay()
+            return
+        }
+        stream?.cancel()
+        stream = nil
+        path = nil
+        status = .unreachable
+    }
+
+    /// The first direct path that answers, the Wi-Fi before the tailnet, both
+    /// asked at once so one that does not answer costs only its short wait.
+    private func reachableDirect() async -> InboxClient? {
+        let found = await InboxClient.firstReachable(directs)
+        if let unpaired = found.unpaired, found.client == nil { fail(unpaired) }
+        return found.client
+    }
+
+    private func use(_ next: InboxClient) {
+        if next.path != path || next.address != (client as? InboxClient)?.address {
+            stream?.cancel()
+            stream = nil
+        }
+        client = next
+        path = next.path
+    }
+
+    /// The event stream on a direct path, from the list's cursor. When it
+    /// drops, one reconnect with the cursor after the stream's own retry
+    /// interval: the paths are asked again, and on the relay nothing follows.
+    private func follow() {
+        let streamClient = client
+        stream = Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await event in streamClient.events(after: self.list?.cursor) {
+                    switch event {
+                    case .hello: self.status = .connected
+                    case .record: self.scheduleRefresh()
+                    }
+                }
+            } catch let error as InboxError {
+                self.fail(error)
+            } catch {}
+            guard !Task.isCancelled, self.status != .removed else { return }
+            self.stream = nil
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            await self.connect()
+        }
     }
 
     private func scheduleRefresh() {
@@ -134,19 +249,228 @@ final class SourceSession {
         }
     }
 
+    /// Runs one call on the path in use. When a direct path gets no answer,
+    /// the paths are chosen again once and the call runs on the new one; the
+    /// caller made its idempotency key before, so it is applied once.
+    private func perform<T>(_ call: (any SourceClient) async throws(InboxError) -> T) async throws(InboxError) -> T {
+        let first = client
+        let firstPath = path
+        let firstAddress = (client as? InboxClient)?.address
+        do {
+            return try await call(first)
+        } catch where error == .unreachable && !isWorkspaces && firstPath != .relay {
+            await connect()
+            guard path != nil, path != firstPath || (client as? InboxClient)?.address != firstAddress else { throw error }
+            return try await call(client)
+        }
+    }
+
+    // MARK: The relay as the path
+
+    /// Reads what the relay holds after this phone's last item (one reconnect
+    /// with the cursor when the relay does not answer), then, with the
+    /// computer online, the list and the open threads through it.
+    private func readRelay() async {
+        guard let relay else { return }
+        var batch: RelayBatch?
+        do throws(InboxError) {
+            batch = try await relay.read()
+        } catch {
+            if error.isUnpaired { return fail(error) }
+            batch = try? await relay.read()
+        }
+        guard let batch else {
+            status = .unreachable
+            return
+        }
+        status = .connected
+        inboxOnline = batch.inboxOnline
+        guard batch.inboxOnline else { return }
+        await refreshAll()
+    }
+
+    /// A batch of down items, in seq order: each store line this phone has not
+    /// seen goes into the threads it keeps. Any batch with records has the
+    /// list and the open threads read again while the computer is online,
+    /// which also covers an item delayed or dropped (an `after` past the last
+    /// seq seen), so no separate gap check is kept. Results settle the Sends
+    /// the relay held.
+    private func apply(_ batch: RelayBatch) async {
+        var state = SourceState.load(self.id)
+        var touched = Set<String>()
+        for record in batch.records.sorted(by: { $0.seq < $1.seq }) {
+            guard record.seq > state.seq else { continue }
+            state.seq = record.seq
+            if record.tooLarge {
+                // A message too large for the relay: drawn in its thread, or noted for the thread it turns out to be in.
+                tooLargeMessages.insert(record.kind == "question" ? String(record.id.prefix { $0 != "/" }) : record.id)
+                continue
+            }
+            switch record.record {
+            case .message(let message): if applyRecord(message) { touched.insert(message.threadId) }
+            case .question(let question): if let thread = applyRecord(question) { touched.insert(thread) }
+            case .project(let project): projectNames[project.id] = project.name
+            case .other, nil: break
+            }
+        }
+        for id in touched {
+            if let thread = threads[id] { cache.write(thread, "thread-\(id)") }
+        }
+        for result in batch.results { settle(result) }
+        SourceState.update(self.id) {
+            $0.seq = max($0.seq, state.seq)
+            $0.relayThrough = max($0.relayThrough, batch.through)
+        }
+        inboxOnline = batch.inboxOnline
+        if !batch.records.isEmpty, batch.inboxOnline, path == .relay {
+            scheduleRefresh()
+        }
+    }
+
+    private var projectNames: [String: String] = [:]
+
+    /// A message line into its thread; a new thread's root starts one, and the
+    /// list shows it until the computer answers a list read.
+    private func applyRecord(_ message: InboxMessage) -> Bool {
+        if let key = message.idempotencyKey { settlePending { $0.key == key } }
+        if var thread = threads[message.threadId] ?? cache.read(InboxThread.self, "thread-\(message.threadId)") {
+            thread.apply(message)
+            threads[message.threadId] = thread
+            return true
+        }
+        guard message.id == message.threadId else { return false }
+        let projectId = message.projectId ?? ""
+        let name = projectNames[projectId] ?? list?.projects.first { $0.id == projectId }?.name ?? ""
+        let thread = InboxThread(root: message, projectName: name)
+        threads[message.threadId] = thread
+        if list != nil, project == nil || project == projectId { list?.add(thread) }
+        return true
+    }
+
+    /// A question line into the thread holding its message; answers that thread.
+    private func applyRecord(_ question: InboxQuestion) -> String? {
+        for (id, var thread) in threads where thread.contains(message: question.messageId) {
+            thread.apply(question)
+            threads[id] = thread
+            return id
+        }
+        return nil
+    }
+
+    // MARK: Sends the relay holds
+
+    func pending(thread id: String) -> [PendingSend] {
+        pending.filter { $0.thread == id }
+    }
+
+    private func hold(_ send: PendingSend) {
+        PendingSend.add(send)
+        pending = PendingSend.all().filter { $0.source == self.id }
+    }
+
+    /// The lock-screen answer queued one for this source: show it.
+    func reloadPending() {
+        pending = PendingSend.all().filter { $0.source == self.id }
+    }
+
+    private func settlePending(_ match: (PendingSend) -> Bool) {
+        guard pending.contains(where: match) else { return }
+        PendingSend.remove { $0.source == self.id && match($0) }
+        pending = PendingSend.all().filter { $0.source == self.id }
+    }
+
+    /// A held Send's result: it landed (the thread is read again) or the
+    /// computer refused it (the thread says why).
+    private func settle(_ result: RelayResult) {
+        guard let send = pending.first(where: { $0.key == result.id }) else { return }
+        settlePending { $0.key == result.id }
+        if !(200..<300).contains(result.answer.status) {
+            sendProblems[send.thread] = notSent(InboxClient.refusal(status: result.answer.status, data: result.answer.data))
+        }
+        Task { await loadThread(send.thread) }
+    }
+
+    /// Back on the Wi-Fi or the tailnet with Sends the relay held: what became
+    /// of each. A landed one is settled by its key in the thread read; the
+    /// rest by their result items, read once from the relay (a refusal never
+    /// shows in the thread). With the relay switch off no result comes down,
+    /// so each is asked again directly with its own key: the door answers from
+    /// its log, or applies it now and answers the relay's copy from the log
+    /// later; either way once.
+    private func settleHeld() async {
+        guard !pending.isEmpty, path != .relay else { return }
+        for id in Set(pending.map(\.thread)) where threads[id] == nil || !onScreen.keys.contains(id) {
+            await loadThread(id)
+        }
+        guard !pending.isEmpty else { return }
+        if relayCarries(), let relay {
+            _ = try? await relay.read()
+            return
+        }
+        for send in pending {
+            guard let body = send.body else { continue }
+            do throws(InboxError) {
+                if let inbox = client as? InboxClient {
+                    _ = try await inbox.reply(message: send.message, body)
+                } else {
+                    _ = try await client.reply(message: send.message, idempotencyKey: send.key, words: body.words, questions: body.questions)
+                }
+                settlePending { $0.key == send.key }
+            } catch where error.isDefinite {
+                settlePending { $0.key == send.key }
+                sendProblems[send.thread] = notSent(error)
+            } catch {
+                return
+            }
+            await loadThread(send.thread)
+        }
+    }
+
+    /// A refused Send in the person's words: the door's own text names a question key.
+    func notSent(_ error: InboxError) -> String {
+        switch error.code {
+        case "question_revision_conflict": "Not sent. \(changedElsewhere)"
+        case "question_already_sent": "Not sent. That question was already answered\(isWorkspaces ? " in Workspaces" : " on your computer")."
+        case "question_not_found": "Not sent. That question is no longer there."
+        default: "Not sent. \(error.message)"
+        }
+    }
+
     // MARK: The list
 
     func refresh() async {
+        if path == .relay, !inboxOnline { return }
         do {
             let model = try await client.list(project: project)
             status = .connected
             apply(model)
             if project == nil { cache.write(model, "list") }
+            seen(cursor: model.cursor)
+        } catch where error == .queued {
+            inboxOnline = false
         } catch {
             fail(error)
         }
         // The Decisions tab, once it was opened, follows the same events.
         if decisionsProject != nil { await loadDecisions() }
+    }
+
+    /// The store seq this phone has read up to.
+    private func seen(cursor: Int) {
+        SourceState.update(self.id) { $0.seq = max($0.seq, cursor) }
+    }
+
+    /// Read directly, the relay is told by cursor once per connect, so it holds
+    /// only what this phone missed (section 4). Once, not after every read: one
+    /// mailbox answers its requests one at a time, and a push waits behind them.
+    private func ackRelayByCursor() {
+        guard path != .relay, relayCarries(), let relay else { return }
+        let state = SourceState.load(self.id)
+        guard state.seq > state.ackedSeq else { return }
+        Task {
+            guard (try? await relay.client.ack(cursor: state.seq)) != nil else { return }
+            SourceState.update(self.id) { $0.ackedSeq = max($0.ackedSeq, state.seq) }
+        }
     }
 
     func filter(project: String?) async {
@@ -195,7 +519,8 @@ final class SourceSession {
         if files[id] == nil { files[id] = cache.read(InboxThreadAttachments.self, "files-\(id)") }
         await loadThread(id)
         await loadFiles(id)
-        try? await client.seen(thread: id)
+        let key = InboxClient.newKey()
+        _ = try? await perform { client throws(InboxError) in try await client.seen(thread: id, idempotencyKey: key) }
     }
 
     func close(thread id: String) {
@@ -206,13 +531,34 @@ final class SourceSession {
     /// Reads a thread. Answers false when it could not be read.
     @discardableResult
     func loadThread(_ id: String) async -> Bool {
+        if path == .relay, !inboxOnline {
+            if threads[id] == nil { threadProblems[id] = .unreachable }
+            return false
+        }
         do {
             let answer = try await client.thread(id)
             threads[id] = answer.thread
             threadProblems[id] = nil
             cache.write(answer.thread, "thread-\(id)")
+            // Read whole: what the relay could not carry is here now, and a held Send that landed shows as sent.
+            tooLargeMessages.subtract(answer.thread.messages.map(\.id))
+            tooLargeThreads.remove(id)
+            let keys = Set(answer.thread.messages.compactMap(\.idempotencyKey))
+            settlePending { $0.thread == id && keys.contains($0.key) }
+            if path != .relay { seen(cursor: answer.cursor) }
             return true
         } catch {
+            if error.code == "result_too_large" {
+                // The relay cannot carry this thread whole: what this phone has, and the words.
+                tooLargeThreads.insert(id)
+                if threads[id] == nil { threadProblems[id] = .unreachable }
+                return false
+            }
+            if error == .queued {
+                inboxOnline = false
+                if threads[id] == nil { threadProblems[id] = .unreachable }
+                return false
+            }
             if error.code == "thread_not_found" {
                 threads[id] = nil
                 threadProblems[id] = .gone
@@ -228,6 +574,9 @@ final class SourceSession {
     /// One tap is one pick, saved at once and drawn before the Inbox answers.
     /// Picks in a thread go out one after another, each on the revision the
     /// last answer left (a stale one is `409 question_revision_conflict`).
+    /// One the relay holds for an offline computer moves the revision on by
+    /// one, as the Inbox will when it applies it, so the next pick and the
+    /// Send line up behind it.
     func pick(_ question: InboxQuestion, answer: QuestionAnswer?, thread id: String, onError: @escaping (String) -> Void) {
         let cleared = answer.map(\.isEmpty) ?? true
         edit(thread: id, question: question) { q in
@@ -236,13 +585,19 @@ final class SourceSession {
             q.pickedAt = cleared ? nil : ISO8601DateFormatter().string(from: .now)
         }
         let previous = pickChains[id]
+        let key = InboxClient.newKey()
         pickChains[id] = Task { [weak self] in
             await previous?.value
             guard let self else { return }
             let revision = self.question(question, in: id)?.revision ?? question.revision
             do throws(InboxError) {
-                let saved = try await self.client.pick(message: question.messageId, key: question.key, revision: revision, answer: cleared ? nil : answer)
+                let saved = try await self.perform { client throws(InboxError) in
+                    try await client.pick(message: question.messageId, key: question.key, revision: revision, answer: cleared ? nil : answer, idempotencyKey: key)
+                }
                 self.replace(saved.questions, message: saved.messageId, thread: id)
+            } catch where error == .queued {
+                self.inboxOnline = false
+                self.edit(thread: id, question: question) { $0.revision = revision + 1 }
             } catch {
                 await self.loadThread(id)
                 onError(error.code == "question_revision_conflict" ? self.changedElsewhere : "The pick was not saved. \(error.message)")
@@ -252,9 +607,14 @@ final class SourceSession {
 
     func setRecording(_ question: InboxQuestion, on: Bool, thread id: String) async throws(InboxError) {
         edit(thread: id, question: question) { $0.decisionRecording = on }
+        let key = InboxClient.newKey()
         do {
-            let saved = try await client.setDecisionRecording(message: question.messageId, key: question.key, recording: on)
+            let saved = try await perform { client throws(InboxError) in
+                try await client.setDecisionRecording(message: question.messageId, key: question.key, recording: on, idempotencyKey: key)
+            }
             replace([saved], message: question.messageId, thread: id)
+        } catch where error == .queued {
+            inboxOnline = false
         } catch {
             await loadThread(id)
             throw error
@@ -316,10 +676,14 @@ final class SourceSession {
 
     /// The person's Send: every picked, unsent answer, per message, with the
     /// words on the last. Each message's idempotency key is kept until the
-    /// Inbox gives a definite answer, across retries and app restarts.
+    /// Inbox gives a definite answer, across retries, a change of path and app
+    /// restarts. One the relay holds for an offline computer is sent as far
+    /// as this phone is concerned: the thread says "Sent. Waiting for your
+    /// computer" until the reply lands (owner item 26).
     func send(thread id: String, words: String) async throws(InboxError) {
         commitDrafts(thread: id)
         await pickChains[id]?.value
+        sendProblems[id] = nil
         guard let thread = threads[id] else { return }
         let annotations = pendingAnnotations(thread: id)
         var targets: [(message: InboxMessage, questions: [InboxClient.SendQuestion])] = thread.messages.compactMap { message in
@@ -333,20 +697,31 @@ final class SourceSession {
         }
         // The annotations ride the last reply, after its picks, as Plannotator's feedback text.
         let feedback = annotations.isEmpty ? nil : try await feedbackText(annotations, thread: thread)
+        var held = false
         for (index, target) in targets.enumerated() {
             let key = SendKeys.key(source: self.id, message: target.message.id)
             let repliesBefore = replies(to: target.message.id, in: thread)
             let last = index == targets.count - 1
+            let text = last ? words.trimmed : ""
+            let body = InboxClient.ReplyBody(idempotencyKey: key, words: text, questions: target.questions,
+                                             feedback: last ? feedback : nil, annotationIds: annotations.map(\.id))
             do {
-                let answer: InboxQuestionsResponse
-                if last, let feedback, let inbox = inboxClient {
-                    answer = try await inbox.reply(message: target.message.id, idempotencyKey: key, words: words.trimmed, questions: target.questions,
-                                                   feedback: feedback, annotationIds: annotations.map(\.id))
-                } else {
-                    answer = try await client.reply(message: target.message.id, idempotencyKey: key, words: last ? words.trimmed : "", questions: target.questions)
+                let answer = try await perform { client throws(InboxError) in
+                    if let inbox = client as? InboxClient { return try await inbox.reply(message: target.message.id, body) }
+                    return try await client.reply(message: target.message.id, idempotencyKey: key, words: text, questions: target.questions)
                 }
                 SendKeys.clear(source: self.id, message: target.message.id)
                 replace(answer.questions, message: answer.messageId, thread: id)
+            } catch where error == .queued {
+                // The relay holds it under its key; a later Send to this message is a new one.
+                SendKeys.clear(source: self.id, message: target.message.id)
+                hold(PendingSend(source: self.id, thread: id, message: target.message.id, key: key, words: text.isEmpty ? nil : text, body: body))
+                for sent in target.questions {
+                    guard let question = question(key: sent.key, message: target.message.id, in: id) else { continue }
+                    edit(thread: id, question: question) { $0.state = "sent" }
+                }
+                inboxOnline = false
+                held = true
             } catch {
                 if error.isDefinite {
                     SendKeys.clear(source: self.id, message: target.message.id)
@@ -361,19 +736,39 @@ final class SourceSession {
                 SendKeys.clear(source: self.id, message: target.message.id)
             }
         }
+        if held {
+            if let thread = threads[id] { cache.write(thread, "thread-\(id)") }
+            return
+        }
         await loadThread(id)
         await loadFiles(id)
         await refresh()
     }
 
     func resolve(thread id: String, resolved: Bool) async throws(InboxError) {
-        try await client.resolve(message: id, resolved: resolved)
+        let key = InboxClient.newKey()
+        do {
+            try await perform { client throws(InboxError) in try await client.resolve(message: id, resolved: resolved, idempotencyKey: key) }
+        } catch where error == .queued {
+            inboxOnline = false
+            threads[id]?.resolvedAt = resolved ? ISO8601DateFormatter().string(from: .now) : nil
+            return
+        }
         await loadThread(id)
         await refresh()
     }
 
     func delete(thread id: String) async throws(InboxError) {
-        try await client.delete(thread: id)
+        let key = InboxClient.newKey()
+        do {
+            try await perform { client throws(InboxError) in try await client.delete(thread: id, idempotencyKey: key) }
+        } catch where error == .queued {
+            inboxOnline = false
+            if var model = list {
+                for index in model.sections.indices { model.sections[index].threads.removeAll { $0.threadId == id } }
+                list = model
+            }
+        }
         threads[id] = nil
         cache.remove("thread-\(id)")
         await refresh()
@@ -521,7 +916,11 @@ final class SourceSession {
     // MARK: Local edits
 
     private func question(_ question: InboxQuestion, in thread: String) -> InboxQuestion? {
-        threads[thread]?.messages.first { $0.id == question.messageId }?.questions?.first { $0.key == question.key }
+        self.question(key: question.key, message: question.messageId, in: thread)
+    }
+
+    private func question(key: String, message: String, in thread: String) -> InboxQuestion? {
+        threads[thread]?.messages.first { $0.id == message }?.questions?.first { $0.key == key }
     }
 
     private func edit(thread id: String, question: InboxQuestion, _ change: (inout InboxQuestion) -> Void) {

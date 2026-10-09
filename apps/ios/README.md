@@ -56,7 +56,15 @@ xcodebuild -project apps/ios/Plannotator.xcodeproj -scheme Plannotator \
 
 The simulator reaches the Mac's own Inbox at `127.0.0.1:<port>` (Find it
 nearby, then type the address and the six digits the Inbox shows under Pair a
-phone). A phone reaches it over the tailnet once "Reach from my tailnet" is on.
+phone). A phone reaches a paired computer by the paths of 9.2, tried in order
+when the app comes to the front, on pull to refresh and on a push: the same
+Wi-Fi (the QR's `lan` address, its certificate pinned to the QR's `fp`), the
+tailnet, then the Plannotator relay while its switch is on (on by default from
+pairing; Allow notifications registers the push token only). Through the relay the app reads the items held
+after the last one it read, applies their store lines to the threads it keeps,
+reads the list and open threads as commands while the computer is online, and
+sends its commands sealed with the same idempotency keys; a Send held for an
+offline computer reads "Sent. Waiting for your computer" until it lands.
 
 ## The proof
 
@@ -109,6 +117,22 @@ notification service extension, so in the simulator a push that arrives while
 the app is in front is dressed by the app with the extension's code; the
 extension under a real push and Face ID before a choice need a signed build
 on a phone. `--only PlannotatorUITests/RelayPushTests` runs that flow alone.
+
+The relay path (`RelayTransportTests`) runs the Inbox's Wi-Fi listener
+(dialled at loopback, pinned), the tailnet's stand-in proxy and a proxy in
+front of the relay that keeps what the phone posts: a wrong pin pairs nothing;
+pairing by the QR's link goes over the Wi-Fi; 9.2 shows the Wi-Fi, then the
+tailnet, then the relay in use as each one goes away; an agent's thread is
+read, picked and sent through the relay and reaches `wait_for_reply`; the
+pick's and the Send's commands posted again write nothing; a draft and a note survive a change
+of path both ways; with the Inbox stopped a Send and a lock-screen answer wait
+("Sent. Waiting for your computer") and reach the agents once it starts; a
+held Send the computer refuses reads "Not sent" in plain words once the phone
+is back on the tailnet; a push dressed as the extension leaves it makes the
+app read again (the simulator never runs the extension); a
+25 MiB store line draws "Too large to show here"; the relay switch off brings
+nothing and says so. `--only PlannotatorUITests/RelayTransportTests` runs it
+alone.
 
 ## Release and App Review
 

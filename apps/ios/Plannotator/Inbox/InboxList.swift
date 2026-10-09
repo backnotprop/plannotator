@@ -36,7 +36,7 @@ struct InboxList: View {
                     ContentUnavailableView("Nothing waiting", systemImage: "tray", description: Text(session.emptyHelp))
                         .padding(.top, 80)
                 }
-                .refreshable { await session.refresh() }
+                .refreshable { await session.reconnect() }
                 .background(Color.screen)
             } else {
                 rows(list)
@@ -76,7 +76,7 @@ struct InboxList: View {
             .listSectionSpacing(.compact)
             .scrollContentBackground(.hidden)
             .background(Color.ground)
-            .refreshable { await session.refresh() }
+            .refreshable { await session.reconnect() }
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 geometry.contentOffset.y + geometry.contentInsets.top > 24
             } action: { _, scrolled in

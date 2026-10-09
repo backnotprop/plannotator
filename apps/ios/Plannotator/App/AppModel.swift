@@ -9,11 +9,97 @@ struct Source: Codable, Hashable, Identifiable {
     /// The device id the computer gave this phone (`dev_...`); the Keychain item's name.
     var id: String
     var name: String
-    /// The address this phone reaches it at: the tailnet publication (or loopback in the simulator).
+    /// The address this phone paired at: the tailnet publication (or loopback
+    /// in the simulator), or the Wi-Fi listener when the code carried only that.
     var address: InboxAddress
     var pairedAt: Date
-    /// The computer's relay mailbox, from the pairing answer: where this phone's APNs token goes.
+    /// The computer's relay mailbox, from the pairing answer: where this phone's
+    /// APNs token goes, and the fallback path (9.2).
     var relay: InboxRelayRef?
+    /// The Wi-Fi listener and its certificate's SHA-256, from the QR code
+    /// (contract section 3): the fingerprint comes from the computer's screen.
+    var lan: LanAddress?
+
+    /// The tailnet row's address (9.2): none when the phone paired over the Wi-Fi alone.
+    var tailnet: InboxAddress? { address == lan?.address ? nil : address }
+
+    /// The direct paths, in the order the phone tries them: the Wi-Fi, then the tailnet.
+    func directClients(token: String) -> [InboxClient] {
+        [lan.map { InboxClient(address: $0.address, token: token, pin: $0.fingerprint) }, tailnet.map { InboxClient(address: $0, token: token) }].compactMap(\.self)
+    }
+}
+
+/// The Wi-Fi listener's address and the certificate the phone pins there.
+struct LanAddress: Codable, Hashable {
+    var address: InboxAddress
+    var fingerprint: String
+}
+
+/// What the app keeps per source between launches: the store seq it has
+/// read up to, the last relay item it read, the relay switch, and the
+/// carriage the relay holds for this phone (contract section 4).
+struct SourceState: Codable {
+    /// The highest store seq this phone has applied, directly or through the relay.
+    var seq = 0
+    /// The last relay item number read (`items?after=`).
+    var relayThrough = 0
+    /// The store seq last acknowledged at the relay after reading directly.
+    var ackedSeq = 0
+    /// The person's own relay switch; nil until they touch it: on, the
+    /// fallback by default from pairing (pick 5 of the iPhone record).
+    var relayChoice: Bool?
+    /// The carriage the relay holds for this phone, as last set: on from pairing.
+    var carriage = true
+
+    static func load(_ source: String) -> SourceState {
+        UserDefaults.standard.data(forKey: key(source)).flatMap { try? JSONDecoder().decode(SourceState.self, from: $0) } ?? SourceState()
+    }
+
+    static func update(_ source: String, _ change: (inout SourceState) -> Void) {
+        var state = load(source)
+        change(&state)
+        UserDefaults.standard.set(try? JSONEncoder().encode(state), forKey: key(source))
+    }
+
+    static func clear(_ source: String) {
+        UserDefaults.standard.removeObject(forKey: key(source))
+    }
+
+    private static func key(_ source: String) -> String { "sourceState.\(source)" }
+}
+
+/// A Send the relay holds for a computer it cannot reach: its thread says
+/// "Sent. Waiting for your computer" until the reply lands (owner item 26).
+/// Kept across launches; settled by the reply's key in the thread, by the
+/// command's result, or (the relay switch off) by asking the door again
+/// directly with the same key.
+struct PendingSend: Codable, Hashable {
+    var source: String
+    var thread: String
+    var message: String
+    /// The Send's idempotency key, which is also its relay command id.
+    var key: String
+    var words: String?
+    /// The Send as posted, so it can be asked again directly by its key.
+    var body: InboxClient.ReplyBody?
+
+    private static let name = "pendingSends"
+
+    static func all() -> [PendingSend] {
+        UserDefaults.standard.data(forKey: name).flatMap { try? JSONDecoder().decode([PendingSend].self, from: $0) } ?? []
+    }
+
+    static func add(_ send: PendingSend) {
+        save(all().filter { $0.key != send.key } + [send])
+    }
+
+    static func remove(where match: (PendingSend) -> Bool) {
+        save(all().filter { !match($0) })
+    }
+
+    private static func save(_ sends: [PendingSend]) {
+        UserDefaults.standard.set(try? JSONEncoder().encode(sends), forKey: name)
+    }
 }
 
 /// A computer the phone has seen in a QR link or paired with, listed under
@@ -47,6 +133,8 @@ final class AppModel {
     var pushToken: Data? {
         didSet { registerPushDevice() }
     }
+    /// The person's relay switch per source (9.2), once touched.
+    private(set) var relayChoices: [String: Bool] = [:]
 
     private let defaults = UserDefaults.standard
     private let signIn = WorkspacesSignInFlow()
@@ -57,6 +145,7 @@ final class AppModel {
         if WorkspacesAccount.origin != nil { workspaces = load(WorkspacesAccount.self, "workspacesAccount") }
         // iOS keeps Keychain items when an app is deleted; a fresh install starts clean.
         if sources.isEmpty { Keychain.deleteAll() } else { Keychain.migrate() }
+        for source in sources { relayChoices[source.id] = SourceState.load(source.id).relayChoice }
         let active = defaults.string(forKey: "activeSource")
         if active == WorkspacesAccount.sourceId, workspaces != nil {
             showWorkspaces()
@@ -76,7 +165,7 @@ final class AppModel {
     func show(_ source: Source) {
         guard session?.id != source.id, let credential = Keychain.load(device: source.id) else { return }
         session?.stop()
-        session = SourceSession(source: source, token: credential.token)
+        session = SourceSession(source: source, credential: credential) { [weak self] in self?.relayCarries(source) ?? false }
         defaults.set(source.id, forKey: "activeSource")
         session?.start()
     }
@@ -171,24 +260,76 @@ final class AppModel {
         Task { try? await WorkspacesClient(origin: account.origin).registerDevice(id: account.deviceId, token: hex, environment: environment) }
     }
 
+    // MARK: The relay switch (9.2)
+
+    /// The switch as drawn: the person's choice, else on (the fallback by default
+    /// from pairing). Allowing notifications registers the push token only.
+    func relayOn(_ source: Source) -> Bool {
+        source.relay != nil && (relayChoices[source.id] ?? true)
+    }
+
+    /// The relay carries this source now: the switch is on and the relay holds it on.
+    private func relayCarries(_ source: Source) -> Bool {
+        relayOn(source) && SourceState.load(source.id).carriage
+    }
+
+    func setRelay(_ source: Source, on: Bool) async {
+        relayChoices[source.id] = on
+        SourceState.update(source.id) { $0.relayChoice = on }
+        await syncRelay(source)
+    }
+
+    /// Tells each relay the switch as drawn, where it differs from what the relay
+    /// holds (on from pairing); a change the relay did not hear is told again here.
+    func syncRelays() async {
+        for source in sources { await syncRelay(source) }
+    }
+
+    private func syncRelay(_ source: Source) async {
+        guard let relay = source.relay, let credential = Keychain.load(device: source.id),
+              let client = RelayClient(relay: relay, device: source.id, secret: credential.secret) else { return }
+        let want = relayOn(source)
+        let state = SourceState.load(source.id)
+        guard want != state.carriage else { return }
+        do throws(InboxError) {
+            try await client.setCarriage(on: want, cursor: state.seq)
+            SourceState.update(source.id) { $0.carriage = want }
+            if session?.id == source.id { await session?.relayChanged() }
+        } catch {
+            // Told again at the next return to the front.
+        }
+    }
+
     // MARK: Pairing (contract section 2, "Redeeming an offer")
 
-    /// Redeems a scanned link: its secret at the first address that answers.
+    /// Redeems a scanned link: its secret over the Wi-Fi first, the certificate
+    /// pinned to the code's fingerprint, then over the tailnet (section 1, "The link").
     func pair(link: PairLink) async throws(InboxError) {
-        // The LAN address needs the pinned certificate (P2); the tailnet is what this build reaches.
-        guard let address = link.tailnet else { throw .refused(status: 0, code: "no_address", message: "This code has no address your phone can reach. On your computer, turn on Reach from my tailnet, then show the code again.", triesLeft: nil) }
-        try await redeem(at: address, secret: link.secret, code: nil)
+        let lan = link.lanAddress
+        guard let first = lan?.address ?? link.tailnet else {
+            throw .refused(status: 0, code: "no_address", message: "This code has no address your phone can reach. On your computer, turn on Reach from my tailnet or Reach from this Wi-Fi, then show the code again.", triesLeft: nil)
+        }
+        let address = link.tailnet ?? first
+        if let lan {
+            do {
+                try await redeem(at: lan.address, pin: lan.fingerprint, secret: link.secret, code: nil, address: address, lan: lan)
+                return
+            } catch where !error.isDefinite && link.tailnet != nil {
+                // No answer over the Wi-Fi: the tailnet next.
+            }
+        }
+        try await redeem(at: address, pin: nil, secret: link.secret, code: nil, address: address, lan: lan)
     }
 
     /// Redeems the six digits typed for a computer found on the tailnet or typed in (1.3).
     func pair(address: InboxAddress, code: String) async throws(InboxError) {
-        try await redeem(at: address, secret: nil, code: code)
+        try await redeem(at: address, pin: nil, secret: nil, code: code, address: address, lan: nil)
     }
 
-    private func redeem(at address: InboxAddress, secret: String?, code: String?) async throws(InboxError) {
-        let answer = try await InboxClient.pair(at: address, secret: secret, code: code, name: UIDevice.current.name)
+    private func redeem(at dial: InboxAddress, pin: String?, secret: String?, code: String?, address: InboxAddress, lan: LanAddress?) async throws(InboxError) {
+        let answer = try await InboxClient.pair(at: dial, pin: pin, secret: secret, code: code, name: UIDevice.current.name)
         Keychain.save(DeviceCredential(token: answer.token, secret: answer.secret), device: answer.device.id)
-        let source = Source(id: answer.device.id, name: answer.computer.name, address: address, pairedAt: .now, relay: answer.relay)
+        let source = Source(id: answer.device.id, name: answer.computer.name, address: address, pairedAt: .now, relay: answer.relay, lan: lan)
         // Pairing again with a computer this phone was removed from replaces the old source.
         for old in sources where old.address == address { forget(old, showNext: false) }
         sources.append(source)
@@ -199,6 +340,7 @@ final class AppModel {
         show(source)
         pairing = false
         await notifier.paired(source)
+        await syncRelay(source)
     }
 
     // MARK: Removing
@@ -207,11 +349,20 @@ final class AppModel {
     /// Returns the error when the computer could not be told; the caller may remove anyway.
     func remove(_ source: Source, force: Bool = false) async -> InboxError? {
         if !force, let credential = Keychain.load(device: source.id) {
-            do {
-                try await InboxClient(address: source.address, token: credential.token).revoke()
-            } catch where !error.isDefinite {
-                return error
-            } catch {}
+            var unanswered: InboxError?
+            for client in source.directClients(token: credential.token) {
+                do {
+                    try await client.revoke()
+                    unanswered = nil
+                    break
+                } catch where !error.isDefinite {
+                    unanswered = error
+                } catch {
+                    unanswered = nil
+                    break
+                }
+            }
+            if let unanswered { return unanswered }
         }
         forget(source)
         save()
@@ -225,6 +376,9 @@ final class AppModel {
         }
         Keychain.delete(device: source.id)
         Cache.clear(source: source.id)
+        SourceState.clear(source.id)
+        PendingSend.remove { $0.source == source.id }
+        relayChoices[source.id] = nil
         sources.removeAll { $0.id == source.id }
         if showNext, session == nil {
             if let next = sources.first { show(next) } else { showWorkspaces() }
@@ -260,5 +414,16 @@ final class AppModel {
         init(from decoder: Decoder) throws {
             value = try? T(from: decoder)
         }
+    }
+}
+
+extension PairLink {
+    /// The addresses pairing contacts, in order: the Wi-Fi listener (with its pin), then the tailnet.
+    var addresses: [InboxAddress] { [lanAddress?.address, tailnet].compactMap(\.self) }
+
+    /// The Wi-Fi listener and its pin, when the code carries both and the pin is a SHA-256.
+    var lanAddress: LanAddress? {
+        guard let lan, let fingerprint, fingerprint.count == 64, fingerprint.allSatisfy(\.isHexDigit) else { return nil }
+        return LanAddress(address: lan, fingerprint: fingerprint.lowercased())
     }
 }

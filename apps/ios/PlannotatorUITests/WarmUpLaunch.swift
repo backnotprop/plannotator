@@ -60,7 +60,7 @@ final class WarmUpLaunch: XCTestCase {
         let source = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'source-'")).firstMatch
         XCTAssertTrue(source.waitForExistence(timeout: ProofWait.opening))
         source.tap()
-        XCTAssertTrue(element("remove-source").waitForExistence(timeout: ProofWait.opening))
+        XCTAssertTrue(app.reveal("remove-source", timeout: ProofWait.opening).exists)
         element("remove-source").tap()
         app.sheets.buttons["Remove This Source"].firstMatch.tap()
         XCTAssertTrue(element("add-source").waitForExistence(timeout: ProofWait.opening))

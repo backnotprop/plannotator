@@ -16,7 +16,7 @@ public struct InboxGuideView: Decodable, Sendable {
 extension InboxClient {
     /// `GET messages/:id/guide` (7.19).
     public func guide(message id: String) async throws(InboxError) -> InboxGuideView {
-        try await Self.send(request("messages/\(id)/guide"), decoder: Self.plainDecoder)
+        try await send(request("messages/\(id)/guide"), decoder: Self.plainDecoder)
     }
 
     /// `POST messages/:id/guide/reviewed` (7.20): every section's tick, as the

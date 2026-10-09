@@ -42,11 +42,14 @@ struct ThreadScreen: View {
                 ContentUnavailableView {
                     Label("Can't reach \(session.name)", systemImage: "wifi.slash")
                 } description: {
-                    Text(session.unreadThreadHelp)
+                    Text(session.path == .relay
+                        ? "This thread has not been read on this phone yet. It opens once your computer is back online."
+                        : session.unreadThreadHelp)
                 } actions: {
                     Button("Try Again") {
                         retrying = true
                         Task {
+                            await session.reconnect()
                             await session.loadThread(threadId)
                             retrying = false
                         }
@@ -132,7 +135,13 @@ struct ThreadScreen: View {
                     MessageView(message: message, thread: thread, session: session, onError: { problem = $0 }, openFile: { openFile = $0 }, openGuide: { openGuide = GuideOpen(id: message.id) })
                         .padding(.bottom, 18)
                 }
-                if let delivery = deliveryLine(thread) {
+                if session.tooLargeThreads.contains(threadId) {
+                    TooLargeNote().padding(.bottom, 18)
+                }
+                ForEach(session.pending(thread: threadId), id: \.key) { send in
+                    WaitingNote(send: send).padding(.bottom, 12)
+                }
+                if session.pending(thread: threadId).isEmpty, let delivery = deliveryLine(thread) {
                     Label(delivery, systemImage: "checkmark.circle")
                         .font(.footnote)
                         .foregroundStyle(Color.inkSecondary)
@@ -162,7 +171,10 @@ struct ThreadScreen: View {
                 .padding(.bottom, 8)
             }
         }
-        .refreshable { await session.loadThread(threadId) }
+        .refreshable {
+            await session.reconnect()
+            await session.loadThread(threadId)
+        }
     }
 
     /// The last message is the person's: say where it is (the desktop's words).
@@ -191,6 +203,42 @@ struct ThreadScreen: View {
     }
 }
 
+/// A Send the relay holds for a computer it cannot reach (owner item 26):
+/// it reads as sent, and says it waits, until the reply lands.
+struct WaitingNote: View {
+    let send: PendingSend
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label("Sent. Waiting for your computer", systemImage: "clock")
+                .font(.footnote)
+                .foregroundStyle(Color.inkSecondary)
+            if let words = send.words {
+                Text(words).font(.subheadline).foregroundStyle(Color.ink).lineLimit(3)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("send-waiting")
+    }
+}
+
+/// What the relay could not carry (a store line or an answer past the
+/// platform's WebSocket message limit): the words, until the Wi-Fi or the
+/// tailnet reads it.
+struct TooLargeNote: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Too large to show here").font(.callout.weight(.semibold)).foregroundStyle(Color.ink)
+            Text("It opens over the Wi-Fi or the tailnet.").font(.footnote).foregroundStyle(Color.inkSecondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Color.fill, in: .rect(cornerRadius: 14))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("too-large")
+    }
+}
+
 /// One message: the sender row, then the body drawn natively with its
 /// question blocks as cards.
 struct MessageView: View {
@@ -206,6 +254,9 @@ struct MessageView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 13) {
             sender
+            if session.tooLargeMessages.contains(message.id) {
+                TooLargeNote()
+            }
             ForEach(Array(MessageBlock.parse(message.body).enumerated()), id: \.offset) { _, block in
                 if case .question(let index) = block {
                     if index < questions.count {

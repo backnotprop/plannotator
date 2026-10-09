@@ -32,7 +32,10 @@ struct PlannotatorApp: App {
             // The event stream runs in the foreground; on return it catches up from the cursor.
             if phase == .active {
                 model.session?.start()
-                Task { await model.notifier.refresh() }
+                Task {
+                    await model.notifier.refresh()
+                    await model.syncRelays()
+                }
                 Task { await model.registerForPushIfAllowed() }
             } else if phase == .background {
                 model.session?.stop()
@@ -72,7 +75,7 @@ struct RootView: View {
         .fullScreenCover(isPresented: $model.pairing) { PairingCover() }
         .alert(offerTitle, isPresented: Binding(get: { model.offered != nil }, set: { if !$0 { model.offered = nil } }), presenting: model.offered) { link in
             Button("Cancel", role: .cancel) {}
-            if link.tailnet != nil {
+            if !link.addresses.isEmpty {
                 Button("Pair") {
                     Task {
                         do throws(InboxError) {
@@ -86,12 +89,13 @@ struct RootView: View {
                 }
             }
         } message: { link in
-            // The address the client will dial, alone on the first line; the
-            // name, which the link chooses, comes after it and is marked as a name.
-            if let address = link.tailnet {
-                Text("\(address.hostPort)\nNamed “\(link.name)”\n\nThis phone will read and answer the Inbox at that address. Pair only with a computer you know.")
+            // The addresses the client will dial, in the order it tries them, each
+            // alone on a line; the name, which the link chooses, comes after them
+            // and is marked as a name.
+            if link.addresses.isEmpty {
+                Text("This code has no address your phone can reach. On your computer, turn on Reach from my tailnet or Reach from this Wi-Fi, then show the code again.")
             } else {
-                Text("This code has no address your phone can reach. On your computer, turn on Reach from my tailnet, then show the code again.")
+                Text("\(link.addresses.map(\.hostPort).joined(separator: "\n"))\nNamed “\(link.name)”\n\nThis phone will read and answer the Inbox at \(link.addresses.count == 1 ? "that address" : "those addresses"). Pair only with a computer you know.")
             }
         }
         .alert("Not paired", isPresented: Binding(get: { pairProblem != nil }, set: { if !$0 { pairProblem = nil } })) {

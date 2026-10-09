@@ -204,6 +204,7 @@ public struct InboxAddressee: Codable, Hashable, Sendable {
 
 public struct InboxMessage: Codable, Hashable, Sendable, Identifiable {
     public var id: String
+    public var projectId: String?
     public var threadId: String
     public var replyTo: String?
     public var author: InboxAuthor
@@ -219,6 +220,9 @@ public struct InboxMessage: Codable, Hashable, Sendable, Identifiable {
     public var guide: InboxGuideRef?
     /// The person's reviewed tick per section, as last saved (absent until the first tick).
     public var guideReviewed: [Bool]?
+    /// The sender's key: on the person's reply, the Send's idempotency key.
+    public var idempotencyKey: String?
+    public var threadName: String?
 }
 
 /// What a message keeps about its guided review (`InboxGuideRef` in core): the facts its tile draws.

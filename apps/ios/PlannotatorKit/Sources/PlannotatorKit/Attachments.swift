@@ -202,28 +202,21 @@ public struct InboxAttachmentView: Codable, Hashable, Sendable {
 
 extension InboxClient {
     public func attachments(thread id: String) async throws(InboxError) -> InboxThreadAttachments {
-        try await Self.send(request("threads/\(id)/attachments"), decoder: Self.plainDecoder)
+        try await send(request("threads/\(id)/attachments"), decoder: Self.plainDecoder)
     }
 
     /// `GET attachments/:id/view`: the file as it is now, or the version the agent sent.
     public func view(attachment id: String, sent: Bool) async throws(InboxError) -> InboxAttachmentView {
-        try await Self.send(request("attachments/\(id)/view", query: sent ? [URLQueryItem(name: "version", value: "sent")] : []), decoder: Self.plainDecoder)
+        try await send(request("attachments/\(id)/view", query: sent ? [URLQueryItem(name: "version", value: "sent")] : []), decoder: Self.plainDecoder)
     }
 
-    /// `GET html-assets/<token>/<path>` (7.16): one file of an HTML page's folder, as bytes and type.
+    /// `GET html-assets/<token>/<path>` (7.16): one file of an HTML page's folder, as bytes and type,
+    /// on whichever path the client is on (through the relay, the GET's result carries them, section 4).
     public func htmlAsset(_ path: String) async throws(InboxError) -> (data: Data, mimeType: String) {
-        let request = request("html-assets/\(path)")
-        do {
-            let (data, response) = try await Self.session.data(for: request)
-            let http = response as? HTTPURLResponse
-            guard http?.statusCode == 200 else { throw InboxError.refused(status: http?.statusCode ?? 0, code: "asset_not_found", message: "Not found.", triesLeft: nil) }
-            let type = http?.value(forHTTPHeaderField: "Content-Type")?.components(separatedBy: ";").first ?? "application/octet-stream"
-            return (data, type)
-        } catch let error as InboxError {
-            throw error
-        } catch {
-            throw .unreachable
-        }
+        let answer = try await exchange(request("html-assets/\(path)"))
+        guard answer.status == 200 else { throw InboxError.refused(status: answer.status, code: "asset_not_found", message: "Not found.", triesLeft: nil) }
+        let type = answer.contentType?.components(separatedBy: ";").first ?? "application/octet-stream"
+        return (answer.data, type)
     }
 
     /// `POST annotations` (7.17): save a new annotation, or an edit under the same id.

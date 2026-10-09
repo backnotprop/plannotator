@@ -30,7 +30,7 @@ struct SourceUnreachable: View {
         } description: {
             Text(session.unreachableHelp)
         } actions: {
-            Button("Try Again") { Task { await session.refresh() } }
+            Button("Try Again") { Task { await session.reconnect() } }
         }
         .background(Color.screen)
     }

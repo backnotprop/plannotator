@@ -267,7 +267,7 @@ final class ProofTests: ProofCase {
         XCTAssertTrue(source.waitForExistence(timeout: 30))
         try await control.shot("9.1")
         source.tap()
-        XCTAssertTrue(element("remove-source").waitForExistence(timeout: 30))
+        XCTAssertTrue(app.reveal("remove-source").exists)
         try await control.shot("9.2")
         app.navigationBars.buttons.element(boundBy: 0).tap() // back to Settings
 
@@ -294,7 +294,7 @@ final class ProofTests: ProofCase {
         // Remove this source (9.2): the computer no longer lists the phone.
         tab("Settings")
         source.tap()
-        element("remove-source").tap()
+        app.reveal("remove-source").tap()
         app.sheets.buttons["Remove This Source"].firstMatch.tap()
         XCTAssertTrue(element("add-source").waitForExistence(timeout: 30))
         XCTAssertFalse(source.exists)

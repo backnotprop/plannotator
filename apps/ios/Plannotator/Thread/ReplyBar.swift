@@ -25,7 +25,7 @@ struct ReplyBar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let problem {
+            if let problem = problem ?? session.sendProblems[thread.threadId] {
                 Label(problem, systemImage: "exclamationmark.circle.fill")
                     .accessibilityLabel(problem)
                     .font(.footnote)

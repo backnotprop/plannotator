@@ -10,16 +10,18 @@ public enum InboxEvent: Equatable, Sendable {
 extension InboxClient {
     /// The event stream after `cursor`: the lines the phone missed first, then
     /// live ones. It ends when the connection drops; the caller reconnects
-    /// from the last seq it saw.
+    /// from the last seq it saw. Direct paths only: through the relay the
+    /// down items are the stream (section 4).
     public func events(after cursor: Int?) -> AsyncThrowingStream<InboxEvent, Error> {
-        var events = request("events", query: cursor.map { [URLQueryItem(name: "cursor", value: String($0))] } ?? [])
+        var events = urlRequest(for: request("events", query: cursor.map { [URLQueryItem(name: "cursor", value: String($0))] } ?? []))
         events.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         events.timeoutInterval = 60 // the Inbox sends a heartbeat every 15 s
         let request = events
+        let session = urlSession
         let stream = AsyncThrowingStream<InboxEvent, Error> { continuation in
             let task = Task {
                 do {
-                    let (bytes, response) = try await Self.session.bytes(for: request)
+                    let (bytes, response) = try await session.bytes(for: request)
                     let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                     guard status == 200 else {
                         var data = Data()

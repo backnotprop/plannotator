@@ -204,7 +204,7 @@ final class DecisionsProofTests: XCTestCase {
         let source = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'source-'")).firstMatch
         XCTAssertTrue(source.waitForExistence(timeout: 30))
         source.tap()
-        element("remove-source").tap()
+        app.reveal("remove-source").tap()
         app.sheets.buttons["Remove This Source"].firstMatch.tap()
         XCTAssertTrue(element("add-source").waitForExistence(timeout: 30))
         tab("Inbox")

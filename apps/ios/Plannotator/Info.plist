@@ -40,6 +40,8 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Plannotator reads the pairing code your computer shows.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Plannotator reaches the Inbox on your computer over this Wi-Fi.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

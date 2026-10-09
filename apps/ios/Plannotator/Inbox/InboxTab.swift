@@ -51,8 +51,12 @@ struct SourceMenu: View {
     static func subtitle(_ session: SourceSession?) -> Text {
         guard let session else { return Text("No source yet") }
         switch session.status {
-        case .unreachable: return Text("\(session.name) · Not reachable")
+        case .unreachable:
+            let relayOff = session.source != nil && !session.relayOn
+            return Text("\(session.name) · Not reachable\(relayOff ? ", relay off" : "")")
         case .removed: return Text("\(session.name) · \(session.isWorkspaces ? "Signed out" : "Removed")")
+        case .connected where session.path == .relay:
+            return Text("\(session.name) · \(session.inboxOnline ? "Through the relay" : "Waiting for your computer")")
         default: return Text(session.name)
         }
     }

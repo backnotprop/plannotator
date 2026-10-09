@@ -20,6 +20,12 @@
  *   bun apps/ios/scripts/proof.ts --binary .local/plannotator \
  *     [--device "iPhone 17"] [--shots .local/proof/ios] [--derived <DerivedData>] [--keep-simulator] [--only <test>]
  *
+ * M6 adds a proxy in front of the relay (the Inbox's socket and the phone's
+ * calls both go through it, so the test can replay a command the phone sent
+ * and count which path carried a Send), the Inbox's Wi-Fi listener, and the
+ * Inbox stopped and started with the agents' waits paused meanwhile (a tool
+ * call starts a stopped Inbox).
+ *
  * Every process runs with PLANNOTATOR_BROWSER=none and its own data dir; the
  * person's ~/.plannotator is never read.
  */
@@ -65,6 +71,11 @@ if (!env.PLANNOTATOR_DATA_DIR.startsWith(tmpdir()) || env.PLANNOTATOR_DATA_DIR.i
 }
 
 function run(cmd: string, argv: string[], options: { env?: Record<string, string>; quiet?: boolean } = {}): string {
+  // A harness proves its data dir before it spawns (row 5109), on every spawn of the binary.
+  const dir = options.env?.PLANNOTATOR_DATA_DIR ?? '';
+  if (cmd === binary && (!dir.startsWith(tmpdir()) || dir.includes('/.plannotator'))) {
+    throw new Error(`Refusing to start an Inbox on ${dir || 'no data dir'}: the proof runs on a temp data dir only.`);
+  }
   const result = spawnSync(cmd, argv, { env: options.env ?? (process.env as Record<string, string>), encoding: 'utf8' });
   if (result.status !== 0) throw new Error(`${cmd} ${argv.join(' ')} failed (${result.status}): ${result.stderr || result.stdout}`);
   return result.stdout;
@@ -135,7 +146,75 @@ for (let tries = 0; ; tries++) {
 // builds it, which on a CI runner can hold the Inbox's first pairing (it
 // registers the phone at the relay before it answers) past the test's waits.
 await fetch(`${relayUrl}/v1/mailboxes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ secret_sha256: '0'.repeat(64) }) }).catch(() => {});
-env.PLANNOTATOR_RELAY_URL = relayUrl;
+
+// ─── M6: a proxy in front of the relay ───
+//
+// The Inbox's socket and the phone's calls reach the relay through it. It
+// keeps each command the phone posts (id and ciphertext, which it cannot
+// open) so the test can post one again, and counts the phone's reads of its
+// items, which say the phone is on the relay path.
+
+interface PostedCommand { url: string; auth: string; body: string }
+const relayCommands: PostedCommand[] = [];
+const relayHits = { items: 0, commands: 0, applied: 0 };
+/** The Inbox's socket to the relay refused while true (the computer cut off from the relay), and the open ones. */
+let relaySocketBlocked = false;
+const inboxSockets = new Set<{ close(code?: number): void }>();
+const relayProxy = Bun.serve<{ target: string; auth: string; up?: WebSocket; queue: string[] }, never>({
+  hostname: '127.0.0.1',
+  port: 0,
+  idleTimeout: 120,
+  async fetch(request, server) {
+    const url = new URL(request.url);
+    const target = `${relayUrl}${url.pathname}${url.search}`;
+    if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
+      if (relaySocketBlocked) return new Response('blocked', { status: 503 });
+      const upgraded = server.upgrade(request, { data: { target: target.replace(/^http/, 'ws'), auth: request.headers.get('authorization') ?? '', queue: [] } });
+      return upgraded ? undefined : new Response('upgrade failed', { status: 500 });
+    }
+    const body = request.method === 'GET' ? undefined : await request.text();
+    if (url.pathname.endsWith('/items')) relayHits.items++;
+    if (url.pathname.endsWith('/commands') && body) {
+      relayHits.commands++;
+      relayCommands.push({ url: target, auth: request.headers.get('authorization') ?? '', body });
+    }
+    // nosemgrep: plannotator.web.request-to-network -- a loopback proof harness: the target is always this run's own `wrangler dev` relay origin.
+    const forwarded = await fetch(target, {
+      method: request.method,
+      headers: [...request.headers].filter(([name]) => !['host', 'connection', 'content-length'].includes(name.toLowerCase())),
+      body,
+    });
+    // fetch has already decoded the body: its encoding and length headers no longer describe it.
+    const headers = new Headers(forwarded.headers);
+    headers.delete('content-encoding');
+    headers.delete('content-length');
+    return new Response(forwarded.body, { status: forwarded.status, headers });
+  },
+  websocket: {
+    open(ws) {
+      inboxSockets.add(ws);
+      const up = new WebSocket(ws.data.target, { headers: { Authorization: ws.data.auth } } as unknown as string[]);
+      ws.data.up = up;
+      up.onopen = () => {
+        for (const message of ws.data.queue) up.send(message);
+        ws.data.queue = [];
+      };
+      up.onmessage = (event) => ws.send(event.data as string);
+      up.onclose = (event) => ws.close(event.code >= 4000 || event.code === 1000 ? event.code : 1011, event.reason);
+    },
+    message(ws, message) {
+      const text = typeof message === 'string' ? message : Buffer.from(message).toString('utf8');
+      if (text.includes('"type":"applied"')) relayHits.applied++;
+      if (ws.data.up?.readyState === WebSocket.OPEN) ws.data.up.send(text);
+      else ws.data.queue.push(text);
+    },
+    close(ws) {
+      inboxSockets.delete(ws);
+      ws.data.up?.close();
+    },
+  },
+});
+env.PLANNOTATOR_RELAY_URL = `http://127.0.0.1:${relayProxy.port}`;
 
 /** The relay's stored devices, read from its Durable Object's SQLite file (as R1's proof reads them). */
 function relayDevices(): Record<string, unknown>[] {
@@ -160,11 +239,29 @@ function relayDevices(): Record<string, unknown>[] {
   return rows;
 }
 
+/**
+ * How many down items the relay holds for each paired phone, as the relay
+ * answers the phone's own read (7.32, `items?after=0`): the bearer derived
+ * from the computer's copy of the pairing secret in the temp data dir (M6:
+ * none while the phone's relay switch is off).
+ */
+async function relayItemCount(): Promise<number> {
+  const inboxFiles = join(dataDir, 'inbox');
+  const mailbox = JSON.parse(readFileSync(join(inboxFiles, 'relay.json'), 'utf8')) as { mailbox_id: string };
+  let count = 0;
+  for (const device of readdirSync(join(inboxFiles, 'device-secrets'))) {
+    const { relaySecret } = await deriveRelayKeys(readFileSync(join(inboxFiles, 'device-secrets', device), 'utf8').trim(), device);
+    const answer = await fetch(`${relayUrl}/v1/mailboxes/${mailbox.mailbox_id}/devices/${device}/items?after=0`, { headers: { Authorization: `Bearer ${relaySecret}` } });
+    if (answer.ok) count += ((await answer.json()) as { items: unknown[] }).items.length;
+  }
+  return count;
+}
+
 // ─── The Inbox and its agents ───
 
 run(binary, ['inbox', '--background'], { env });
-const registry = JSON.parse(readFileSync(join(dataDir, 'inbox', 'inbox.json'), 'utf8')) as { port: number; token: string };
-const inbox = `http://127.0.0.1:${registry.port}`;
+let registry = JSON.parse(readFileSync(join(dataDir, 'inbox', 'inbox.json'), 'utf8')) as { port: number; token: string };
+let inbox = `http://127.0.0.1:${registry.port}`;
 const windowRoute = (path: string, init: RequestInit = {}) =>
   fetch(`${inbox}${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) } });
 
@@ -193,14 +290,29 @@ const newsAgents: SimAgent[] = [];
 /** What each asking agent's wait_for_reply received, by thread. */
 const replies = new Map<string, Promise<Record<string, unknown>>>();
 
+// M6: while the test has the Inbox stopped, no agent calls (a tool call
+// starts a stopped Inbox). `pauseAgents` waits for the calls in flight.
+let agentsPaused: Promise<void> | null = null;
+let resumeAgents = () => {};
+let agentCalls = 0;
+async function pauseAgents(): Promise<void> {
+  agentsPaused = new Promise((resolve) => (resumeAgents = resolve));
+  while (agentCalls > 0) await sleep(200);
+}
+
 // As an agent waits: call again after each "waiting", and after a client
 // timeout (a slow CI runner can hold a call past the SDK's 60 s default).
 async function waitForPersonReply(asker: SimAgent, threadId: string): Promise<Record<string, unknown>> {
   for (;;) {
-    const result = await asker.waitForReply(threadId, 25).catch((error: unknown) => {
-      if (String(error).includes('timed out')) return { status: 'waiting' };
-      throw error;
-    });
+    if (agentsPaused) await agentsPaused;
+    agentCalls++;
+    const result = await asker
+      .waitForReply(threadId, 25)
+      .catch((error: unknown) => {
+        if (String(error).includes('timed out')) return { status: 'waiting' };
+        throw error;
+      })
+      .finally(() => agentCalls--);
     if (result.status !== 'waiting') return result;
   }
 }
@@ -415,6 +527,11 @@ async function guide(): Promise<Record<string, string>> {
 
 // 'gone': what `tailscale serve` answers when nothing listens behind it (502), for M5's lock-screen answer.
 let proxyMode: 'pass' | 'down' | 'drop-reply' | 'gone' = 'pass';
+/** Requests passing through now (the event stream among them), cut when the path goes down (M6). */
+const passing = new Set<AbortController>();
+/** Sends, and all requests, that reached the door through this proxy, the tailnet's stand-in (M6). */
+let doorReplies = 0;
+let doorRequests = 0;
 /** A response that never completes: the connection dies, as a network drop does. */
 const dropped = () => new Response(new ReadableStream({ start: (controller) => controller.error(new Error('dropped')) }));
 const proxy = Bun.serve({
@@ -425,11 +542,22 @@ const proxy = Bun.serve({
     const url = new URL(request.url);
     if (proxyMode === 'down') return dropped();
     if (proxyMode === 'gone') return new Response('Bad Gateway', { status: 502 });
+    if (request.method === 'POST' && url.pathname.endsWith('/reply')) doorReplies++;
+    doorRequests++;
+    const abort = new AbortController();
+    passing.add(abort);
+    // nosemgrep: plannotator.web.request-to-network -- a loopback proof harness: the target is always this run's own Inbox origin.
     const forwarded = await fetch(`${inbox}${url.pathname}${url.search}`, {
       method: request.method,
       headers: [...request.headers].filter(([name]) => !['host', 'connection', 'content-length'].includes(name.toLowerCase())),
       body: request.method === 'POST' ? await request.arrayBuffer() : undefined,
-    });
+      signal: abort.signal,
+    }).catch(() => null);
+    if (!forwarded) {
+      passing.delete(abort);
+      return new Response('Bad Gateway', { status: 502 });
+    }
+    if (!forwarded.body || !(forwarded.headers.get('content-type') ?? '').includes('event-stream')) passing.delete(abort);
     if (proxyMode === 'drop-reply' && request.method === 'POST' && url.pathname.endsWith('/reply')) {
       // The Inbox applied the Send; the phone never hears the answer.
       proxyMode = 'pass';
@@ -515,6 +643,11 @@ const control = Bun.serve({
         }
         case '/proxy':
           proxyMode = body.mode as typeof proxyMode;
+          // The tailnet going away ends the event stream that was open over it, as a dropped connection does.
+          if (proxyMode === 'down' || proxyMode === 'gone') {
+            for (const abort of passing) abort.abort();
+            passing.clear();
+          }
           return Response.json({ mode: proxyMode });
         case '/delete-on-computer': {
           const answer = await windowRoute(`/api/inbox/threads/${body.thread}/delete`, { method: 'POST', body: '{}' });
@@ -625,8 +758,14 @@ const control = Bun.serve({
           }
           const thread = sent.thread_id as string;
           replies.set(thread, waitForPersonReply(writer, thread));
+          // M6: with the phone's relay switch off, no push goes out; say whether one did.
+          if (body.nopush) {
+            await sleep(3000);
+            return Response.json({ thread, pushed: pushes.length > before });
+          }
+          // 60 s: on a CI runner the relay answers each request in turn, and a push can wait behind a phone's reads.
           for (let tries = 0; pushes.length === before; tries++) {
-            if (tries > 300) throw new Error(`no push reached Apple for ${thread}`);
+            if (tries > 600) throw new Error(`no push reached Apple for ${thread}`);
             await sleep(100);
           }
           const pushed = pushes.at(-1)!;
@@ -656,20 +795,23 @@ const control = Bun.serve({
           const mailbox = JSON.parse(readFileSync(join(dataDir, 'inbox', 'relay.json'), 'utf8')) as { url: string; mailbox_id: string };
           const token = 'a'.repeat(64);
           let registered = 0;
+          const answers: string[] = [];
           // The paired phones as the computer lists them (the relay's storage file can miss a read while wrangler writes it).
           const { devices } = (await (await windowRoute('/api/inbox/devices')).json()) as { devices: { id: string }[] };
           for (const device of devices) {
             const id = device.id;
             const secret = readFileSync(join(dataDir, 'inbox', 'device-secrets', id.replace(/[^A-Za-z0-9_]/g, '')), 'utf8').trim();
             const { relaySecret } = await deriveRelayKeys(secret, id);
-            const answer = await fetch(`${mailbox.url}/v1/mailboxes/${mailbox.mailbox_id}/devices/${id}/apns`, {
+            // Straight to the relay (M6's proxy in front of it is for the phone's and the Inbox's calls).
+            const answer = await fetch(`${relayUrl}/v1/mailboxes/${mailbox.mailbox_id}/devices/${id}/apns`, {
               method: 'PUT',
               headers: { Authorization: `Bearer ${relaySecret}`, 'Content-Type': 'application/json' },
               body: JSON.stringify({ token, environment: 'sandbox' }),
             });
             if (answer.status === 204) registered += 1;
+            answers.push(`${id}: ${answer.status} ${answer.status === 204 ? '' : (await answer.text()).slice(0, 200)}`);
           }
-          return Response.json({ registered, token });
+          return Response.json({ registered, token, devices: devices.length, answers });
         }
         case '/push-unopenable': {
           // A push this phone holds no key for (as from a computer it was removed from):
@@ -688,6 +830,106 @@ const control = Bun.serve({
           run('xcrun', ['simctl', 'ui', udid, 'appearance', body.mode ?? 'light']);
           await sleep(1200);
           return Response.json({ ok: true });
+        // ── M6: the relay as the fallback path ──
+        case '/lan': {
+          // The computer's "Reach from this Wi-Fi". The simulator dials its port on loopback (it listens on every interface).
+          const answer = await windowRoute('/api/inbox/lan', { method: 'POST', body: JSON.stringify({ on: body.on === '1' }) });
+          if (!answer.ok) throw new Error(`lan switch: ${answer.status} ${await answer.text()}`);
+          return Response.json(await answer.json());
+        }
+        case '/pair-link-lan': {
+          // A live offer's link as the QR carries it with the Wi-Fi on: `lan` (at loopback) and `fp`, then the tailnet's stand-in.
+          // `wrong`: a pin that is not the listener's, and no tailnet.
+          const answer = await windowRoute('/api/inbox/pairing', { method: 'POST', body: '{}' });
+          const offer = (await answer.json()) as { link: string };
+          if (!answer.ok) throw new Error(`pairing offer: ${answer.status}`);
+          const link = new URL(offer.link);
+          const fp = link.searchParams.get('fp');
+          const lanPort = (JSON.parse(readFileSync(join(dataDir, 'inbox', 'inbox.json'), 'utf8')) as { lan?: { port: number } }).lan?.port;
+          if (!fp || !lanPort) throw new Error(`the offer has no Wi-Fi listener: ${offer.link.replace(/secret=[^&]+/, 'secret=…')}`);
+          link.searchParams.set('lan', `127.0.0.1:${lanPort}`);
+          if (body.wrong) {
+            link.searchParams.set('fp', fp.replace(/^./, fp[0] === '0' ? '1' : '0'));
+            link.searchParams.delete('tailnet');
+          } else {
+            link.searchParams.set('tailnet', `127.0.0.1:${proxy.port}`);
+          }
+          return Response.json({ url: link.toString(), lan: `127.0.0.1:${lanPort}`, tailnet: `127.0.0.1:${proxy.port}` });
+        }
+        case '/hits':
+          // Which path carried what: Sends at the door through the tailnet's stand-in, the phone's commands and reads at the relay.
+          return Response.json({ door_requests: doorRequests, door_replies: doorReplies, relay_commands: relayHits.commands, relay_reads: relayHits.items, applied: relayHits.applied });
+        case '/relay-items':
+          return Response.json({ items: await relayItemCount() });
+        case '/replay-commands': {
+          // Every command the phone posted (the Send and the pick among them, which this script cannot open), posted again byte for byte after the Inbox applied them.
+          const seen = new Set<string>();
+          let held = 0;
+          for (const command of relayCommands) {
+            if (seen.has(command.body)) continue;
+            seen.add(command.body);
+            const answer = await fetch(command.url, { method: 'POST', headers: { Authorization: command.auth, 'Content-Type': 'application/json' }, body: command.body });
+            if (answer.status === 202) held++;
+          }
+          return Response.json({ replayed: seen.size, held });
+        }
+        case '/store-cursor': {
+          const answer = (await (await windowRoute('/api/inbox/threads')).json()) as { cursor: number };
+          return Response.json({ cursor: answer.cursor });
+        }
+        case '/relay-socket': {
+          // Cut the Inbox off from the relay, or let it connect again; `applied` counts the commands it has reported applied.
+          relaySocketBlocked = body.blocked === '1';
+          if (relaySocketBlocked) for (const socket of inboxSockets) socket.close(1011);
+          return Response.json({ blocked: relaySocketBlocked, applied: relayHits.applied });
+        }
+        case '/window-pick': {
+          // The person picks on the computer: the thread's first question, its first choice, at its current revision.
+          const read = (await (await windowRoute(`/api/inbox/threads/${body.thread}`)).json()) as { thread: { messages: { id: string; questions?: { key: string; revision: number; prompt: string; kind: string; choices: { label: string }[] }[] }[] } };
+          const message = read.thread.messages.find((m) => m.questions?.length)!;
+          const q = message.questions![0]!;
+          const answer = await windowRoute(`/api/inbox/messages/${message.id}/picks`, {
+            method: 'POST',
+            body: JSON.stringify({ questions: [{ key: q.key, revision: q.revision, answer: { v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: [q.choices[0]!.label] } }] }),
+          });
+          if (!answer.ok) throw new Error(`window pick: ${answer.status} ${await answer.text()}`);
+          return Response.json({ revision: q.revision + 1 });
+        }
+        case '/push-dressed': {
+          // A push as the notification service extension leaves it on a phone (the summary in place of
+          // the envelope); the simulator never runs the extension, so this is how the app's read-on-push is proved.
+          const thread = (await (await windowRoute(`/api/inbox/threads/${body.thread}`)).json()) as { thread: { subject: string | null } };
+          const { devices } = (await (await windowRoute('/api/inbox/devices')).json()) as { devices: { id: string }[] };
+          const summary = { v: 1, type: 'push', thread_id: body.thread, message_id: body.thread, subject: thread.thread.subject, project: 'checkout-web', agent: 'Codex', question: null };
+          const file = join(tmp, `dressed-${Date.now()}.json`);
+          writeFileSync(file, JSON.stringify({ aps: { alert: { title: thread.thread.subject ?? 'Plannotator', body: 'Codex in checkout-web' }, category: 'message', 'thread-id': body.thread }, device: devices[0]!.id, summary: JSON.stringify(summary) }));
+          run('xcrun', ['simctl', 'push', udid, 'ai.plannotator.app', file]);
+          return Response.json({ ok: true });
+        }
+        case '/inbox-stop': {
+          await pauseAgents();
+          await fetch(`${inbox}/api/inbox/control/stop`, { method: 'POST', headers: { Authorization: `Bearer ${registry.token}` } }).catch(() => {});
+          for (let tries = 0; await fetch(`${inbox}/api/inbox/health`).then(() => true).catch(() => false); tries++) {
+            if (tries > 100) throw new Error('the Inbox did not stop');
+            await sleep(100);
+          }
+          return Response.json({ stopped: true });
+        }
+        case '/inbox-start': {
+          run(binary, ['inbox', '--background'], { env });
+          registry = JSON.parse(readFileSync(join(dataDir, 'inbox', 'inbox.json'), 'utf8')) as { port: number; token: string };
+          inbox = `http://127.0.0.1:${registry.port}`;
+          agentsPaused = null;
+          resumeAgents();
+          return Response.json({ started: true });
+        }
+        case '/too-large': {
+          // The person writes a 25 MiB reply on the computer: its store line passes the relay's WebSocket message limit.
+          const words = 'x'.repeat(25 * 1024 * 1024);
+          const answer = await windowRoute(`/api/inbox/messages/${body.thread}/reply`, { method: 'POST', body: JSON.stringify({ idempotency_key: crypto.randomUUID(), words }) });
+          if (!answer.ok) throw new Error(`reply: ${answer.status} ${(await answer.text()).slice(0, 200)}`);
+          return Response.json({ ok: true });
+        }
         default:
           return Response.json({ error: 'unknown' }, { status: 404 });
       }
@@ -728,6 +970,7 @@ try {
   control.stop(true);
   proxy.stop(true);
   relay.kill();
+  relayProxy.stop(true);
   apple.close();
   if (status !== 0) writeFileSync(join(shots, 'relay-wrangler.log'), relayLog.join(''));
   await Promise.allSettled([claude, ...Object.values(others), ...newsAgents, ...(filesAgent ? [filesAgent] : [])].map((a) => a.close()));

@@ -142,7 +142,7 @@ public actor WorkspacesSource: SourceClient {
 
     /// Opening a thread marks its rows seen, and opened (which closes a row that
     /// was only new; a row that waits on an answer stays until the answer).
-    public func seen(thread id: String) async throws(InboxError) {
+    public func seen(thread id: String, idempotencyKey _: String) async throws(InboxError) {
         guard let ids = rows[id]?.notifications, !ids.isEmpty else { return }
         struct Body: Encodable { var seenIds: [String]; var openedIds: [String] }
         let _: WorkspacesClient.Ignored = try await client.send("POST", "v1/notifications/mark", Body(seenIds: ids, openedIds: ids))
@@ -150,7 +150,7 @@ public actor WorkspacesSource: SourceClient {
 
     // MARK: Picks, Send, the tick, resolve
 
-    public func pick(message id: String, key: String, revision: Int, answer: QuestionAnswer?) async throws(InboxError) -> InboxQuestionsResponse {
+    public func pick(message id: String, key: String, revision: Int, answer: QuestionAnswer?, idempotencyKey _: String) async throws(InboxError) -> InboxQuestionsResponse {
         struct Pick: Encodable {
             var key: String
             var revision: Int
@@ -217,20 +217,20 @@ public actor WorkspacesSource: SourceClient {
         return answered(result, message: id)
     }
 
-    public func resolve(message id: String, resolved: Bool) async throws(InboxError) {
+    public func resolve(message id: String, resolved: Bool, idempotencyKey _: String) async throws(InboxError) {
         struct Body: Encodable { var state: String }
         let (workspace, document, annotation) = try Self.parse(id)
         let _: WorkspacesClient.Ignored = try await client.send("PATCH", "v1/workspaces/\(workspace)/documents/\(document)/annotations/\(annotation)", Body(state: resolved ? "resolved" : "open"))
     }
 
     /// A comment is the team's: the phone does not delete it (the screens offer no Delete here).
-    public func delete(thread id: String) async throws(InboxError) {
+    public func delete(thread id: String, idempotencyKey _: String) async throws(InboxError) {
         throw .refused(status: 405, code: "not_supported", message: "Comments are deleted in Workspaces on the web.", triesLeft: nil)
     }
 
     /// The card's switch. Workspaces records the decision with the Send, so the
     /// phone keeps the tick until then.
-    public func setDecisionRecording(message id: String, key: String, recording: Bool) async throws(InboxError) -> InboxQuestion {
+    public func setDecisionRecording(message id: String, key: String, recording: Bool, idempotencyKey _: String) async throws(InboxError) -> InboxQuestion {
         Ticks.set(recording, "\(id)/\(key)")
         guard var question = lastThreads[id]?.messages.first?.questions?.first(where: { $0.key == key }) else { throw .unreadable }
         question.decisionRecording = recording
