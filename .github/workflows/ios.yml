@@ -175,14 +175,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Sized from run 37888395408 (passing, M1 to M6): each shard holds
-          # 15 to 17 minutes of proof classes, plus setup and the warm-up.
+          # Sized from runs 37888395408 and 37942225127: each shard pays about
+          # 7 to 12 minutes of setup and warm-up, then 10 to 18 minutes of
+          # proof classes. RelayTransportTests is one test and the longest.
           - shard: relay-transport
             only: PlannotatorUITests/RelayTransportTests
           - shard: pair-and-push
             only: PlannotatorUITests/ProofTests,PlannotatorUITests/RelayPushTests
-          - shard: attachments-decisions-guides
-            only: PlannotatorKitTests,PlannotatorTests,PlannotatorUITests/AttachmentProofTests,PlannotatorUITests/DecisionsProofTests,PlannotatorUITests/GuideProofTests,PlannotatorUITests/WorkspacesProofTests
+          - shard: attachments
+            only: PlannotatorKitTests,PlannotatorTests,PlannotatorUITests/AttachmentProofTests,PlannotatorUITests/WorkspacesProofTests
+          - shard: decisions-guides
+            only: PlannotatorUITests/DecisionsProofTests,PlannotatorUITests/GuideProofTests
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
