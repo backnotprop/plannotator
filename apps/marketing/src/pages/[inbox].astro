@@ -82,6 +82,30 @@ const steps = [
           </div>
         </div>
 
+        <!-- The Inbox film: voice-led, so it never autoplays. Until it plays the
+             frame shows the poster and one play button over it; the script then
+             hands over to the native controls (sound, seeking, full screen).
+             Without the script the native controls are there from the start. -->
+        <figure class="ib-film" data-film>
+          <video
+            class="ib-film-video"
+            controls
+            playsinline
+            preload="metadata"
+            poster="/assets/inbox-film-poster.jpg"
+            width="1920"
+            height="1080"
+            aria-label="The Plannotator Inbox film"
+          >
+            <source src="/assets/inbox-film.mp4" type="video/mp4" />
+          </video>
+          <button type="button" class="ib-film-play" aria-label="Play the Inbox film" data-film-play hidden>
+            <span class="ib-film-play-dot" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+            </span>
+          </button>
+        </figure>
+
         <InboxShot
           name="1.1"
           alt="The Inbox list with threads grouped by what each one needs"
@@ -302,6 +326,23 @@ const steps = [
           });
         });
 
+        // The film: the poster and one play button until it plays, then the
+        // native controls.
+        const film = document.querySelector('[data-film]');
+        const filmVideo = film?.querySelector('video');
+        const filmPlay = film?.querySelector('[data-film-play]');
+        if (filmVideo && filmPlay) {
+          filmVideo.controls = false;
+          filmPlay.hidden = false;
+          filmPlay.addEventListener('click', () => {
+            filmVideo.play().catch(() => {});
+          });
+          filmVideo.addEventListener('play', () => {
+            filmPlay.hidden = true;
+            filmVideo.controls = true;
+          });
+        }
+
         // Lightbox: the 2x render of the mode on screen.
         const lb = document.querySelector('[data-lightbox-modal]');
         const img = lb?.querySelector('.ib-lightbox-img');
@@ -460,6 +501,79 @@ const steps = [
 
   .ib-hero :global(.ib-hero-shot) {
     margin-top: 3.5rem;
+  }
+
+  /* ── The film (InboxShot's large frame, around a 16:9 player) ── */
+  .ib-film {
+    position: relative;
+    margin: 3.5rem 0 0;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: #000;
+    box-shadow:
+      0 30px 80px -20px color-mix(in oklab, #000 45%, transparent),
+      0 1px 2px color-mix(in oklab, var(--foreground) 6%, transparent);
+  }
+
+  :global(.light) .ib-film {
+    box-shadow: 0 30px 70px -24px color-mix(in oklab, var(--foreground) 22%, transparent);
+  }
+
+  .ib-film-video {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 9;
+  }
+
+  /* The whole poster is the button; the dot is code-review.astro's
+     cr-demo-play, larger. */
+  .ib-film-play {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+  }
+
+  .ib-film-play[hidden] { display: none; }
+
+  .ib-film-play-dot {
+    width: 76px;
+    height: 76px;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--primary) 92%, transparent);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+    transition: background-color 0.15s;
+  }
+
+  .ib-film-play-dot svg {
+    width: 34px;
+    height: 34px;
+    margin-left: 4px;
+  }
+
+  .ib-film-play:hover .ib-film-play-dot { background: var(--primary); }
+
+  .ib-film-play:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: -4px;
+    border-radius: 12px;
+  }
+
+  @media (max-width: 639px) {
+    .ib-film { margin-top: 2.5rem; }
+    .ib-film-play-dot { width: 56px; height: 56px; }
+    .ib-film-play-dot svg { width: 26px; height: 26px; margin-left: 3px; }
   }
 
   /* ── Chapter markers (cr-arc) ── */
