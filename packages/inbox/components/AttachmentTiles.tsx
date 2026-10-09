@@ -11,7 +11,7 @@ function iconOf(attachment: InboxAttachmentState): IconName {
 /**
  * The files at the foot of a message (record 2.1): a tile per file with its
  * kind and annotation count, or the changed line when the file on disk is no
- * longer what was sent, and Open.
+ * longer what was sent. The whole tile opens the file; Open is its cue.
  */
 export function AttachmentTiles({
   attachments,
@@ -43,19 +43,32 @@ export function AttachmentTiles({
           } else {
             detail = `${inboxAttachmentKindLabel(attachment.kind, attachment.name)}${count > 0 ? `, ${plural(count, 'annotation')}` : ''}`;
           }
+          const detailId = `ib-att-detail-${attachment.id}`;
+          // The whole tile is the one control (record 2.1): a click on the
+          // icon, the name or the type line opens the file exactly as Open
+          // does. "Open" stays as the visual cue inside it.
           return (
-            <div className="ib-att-t" key={attachment.id} data-attachment-id={attachment.id} data-attachment-name={attachment.name}>
+            <button
+              type="button"
+              className="ib-att-t"
+              key={attachment.id}
+              onClick={() => onOpen(attachment)}
+              aria-label={`Open ${attachment.name}`}
+              aria-describedby={detailId}
+              data-attachment-id={attachment.id}
+              data-attachment-name={attachment.name}
+            >
               <span className="ib-fi">
                 <Icon name={iconOf(attachment)} size={16} />
               </span>
-              <span>
-                <div className="ib-nm">{attachment.name}</div>
-                <div className={changed ? 'ib-ch' : 'ib-kd'}>{detail}</div>
+              <span className="ib-att-text">
+                <span className="ib-nm">{attachment.name}</span>
+                <span className={changed ? 'ib-ch' : 'ib-kd'} id={detailId}>
+                  {detail}
+                </span>
               </span>
-              <button type="button" className="ib-open" onClick={() => onOpen(attachment)} aria-label={`Open ${attachment.name}`}>
-                Open
-              </button>
-            </div>
+              <span className="ib-open">Open</span>
+            </button>
           );
         })}
       </div>

@@ -502,6 +502,22 @@ test('a Mermaid diagram opens beside its thread and takes a node comment', async
   await page.keyboard.press('Escape');
 });
 
+test('a click on the tile itself, its name rather than Open, opens the file', async () => {
+  const page = world.page;
+  await page.goto(`${world.url}#thread=${world.threads.docs}`);
+  const tile = page.locator(`.ib-att-t[data-attachment-id="${world.attachments.flow}"]`);
+  // The tile is the one control, named for the file, with nothing interactive nested in it.
+  await expect(tile).toHaveRole('button');
+  await expect(tile).toHaveAccessibleName('Open install-flow.mmd');
+  await expect(tile.locator('button, a, [role="button"]')).toHaveCount(0);
+  await tile.locator('.ib-nm').click();
+  const pane = page.locator(`[data-attachment-pane="${world.attachments.flow}"]`);
+  await expect(pane).toBeVisible();
+  expect(page.url()).toContain(`file=${world.attachments.flow}`);
+  await pane.getByRole('button', { name: 'Close install-flow.mmd' }).click();
+  await expect(pane).toHaveCount(0);
+});
+
 test('the agent edits the plan on disk: the changed line, the annotations survive, and "Open the version it sent" shows the bytes sent', async () => {
   const page = world.page;
   appendFileSync(join(world.billing, 'docs', 'retry-plan.md'), '\n## Open questions\n\nHow long does Stripe keep a key in flight?\n');

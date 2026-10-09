@@ -175,12 +175,12 @@
 .ib-msg { padding-left: 41px; }
 .ib-attach-h { font-size: 12.5px; color: var(--muted-foreground); margin: 16px 0 8px; display: flex; align-items: center; gap: 6px; }
 .ib-atts { display: flex; flex-wrap: wrap; gap: 8px; }
-.ib-att-t { display: flex; align-items: center; gap: 10px; min-width: 250px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--card); }
+/* The whole tile is one button (AttachmentTiles, GuideCard): the bare button reset gives it the pointer, .pn-inbox :focus-visible its ring. */
+.ib-att-t { display: flex; align-items: center; gap: 10px; min-width: 250px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--card); text-align: left; }
 .ib-att-t .ib-fi { width: 30px; height: 30px; border-radius: 7px; background: var(--muted); display: flex; align-items: center; justify-content: center; color: var(--muted-foreground); }
 .ib-att-t .ib-nm { font-size: 13.5px; font-weight: 550; }
 .ib-att-t .ib-kd { font-size: 12px; color: var(--muted-foreground); }
 .ib-att-t .ib-open { margin-left: auto; font-size: 12.5px; color: var(--primary); font-weight: 550; padding-left: 14px; }
-.ib-att-t .ib-open:disabled { opacity: 0.5; }
 .ib-pfoot { flex: none; border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); padding: 12px 30px 14px; background: var(--card); position: relative; }
 .ib-acts { display: flex; align-items: center; gap: 8px; }
 .ib-acts .ib-st { font-size: 13px; color: var(--muted-foreground); margin-right: 4px; }
@@ -415,7 +415,7 @@ pre code.pn-code[data-keep-layout] {
 }
 
 /* a guided review: the card at the foot of its message (the record's 4.1) and the guide open over the window (4.2) */
-.ib-att-t.ib-guide { min-width: 420px; padding: 12px 14px; text-align: left; }
+.ib-att-t.ib-guide { min-width: 420px; padding: 12px 14px; }
 .ib-att-t.ib-guide .ib-fi { width: 38px; height: 38px; color: var(--primary); background: color-mix(in oklch, var(--primary) 12%, transparent); }
 .ib-att-text { display: flex; flex-direction: column; min-width: 0; }
 .ib-add { color: var(--success); }
