@@ -364,11 +364,6 @@
   filter: invert(1);
 }
 
-/* Pi icon — white by default, invert in light mode */
-.light .icon-pi {
-  filter: invert(1);
-}
-
 /* Copilot icon — white by default, invert in light mode */
 .light .icon-copilot {
   filter: invert(1);

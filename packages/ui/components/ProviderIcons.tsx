@@ -14,11 +14,17 @@ export const CodexIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h
   <img src={codexPng} alt="" className={`${className} rounded-sm`} />
 );
 
-/** Pi icon — extracted from apps/marketing/public/assets/icon-pi.svg */
+/**
+ * Pi icon: the pi.dev logo (https://pi.dev/logo.svg), the same file as
+ * apps/marketing/public/assets/icon-pi.svg. It keeps its own three colours in
+ * every theme; the viewBox crops pi.dev's 800-unit canvas to the mark plus an
+ * even margin so it sits level with the other marks.
+ */
 export const PiIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" className={className}>
-    <path fill="currentColor" fillRule="evenodd" d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z"/>
-    <path fill="currentColor" d="M517.36 400H634.72V634.72H517.36Z"/>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="130 130 540 540" className={className}>
+    <path fill="#F09082" d="M165.29 165.29H517.36V400H400V282.65H165.29Z"/>
+    <path fill="#4D9ABF" d="M165.29 282.65H282.65V400H400V517.36H282.65V634.72H165.29Z"/>
+    <path fill="#F1BE58" d="M517.36 400H634.72V634.72H517.36Z"/>
   </svg>
 );
 
