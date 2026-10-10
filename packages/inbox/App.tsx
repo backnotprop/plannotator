@@ -1,6 +1,6 @@
 /**
- * The Plannotator Inbox window (`plannotator inbox`): the design of record is
- * `.product/approved/plannotator-inbox-window-2026-10-07/`. A mail client for
+ * The Plannotator Inbox window (`plannotator inbox`), built to its design of
+ * record (kept privately, not in this repo). A mail client for
  * what agents send: the list in the approved sections (a row is a thread),
  * the thread read as an email with Plannotator's question cards, pick then
  * Send, the project's decisions, and Settings.

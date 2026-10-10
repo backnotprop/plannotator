@@ -1,8 +1,8 @@
-// Ported from Workspaces apps/web/src/components/CollapsibleEdge.tsx
-// (68afaf421) and apps/web/src/components/ResizeHandle.tsx (227b573f2) for the
-// Inbox sidebar (the owner, 2026-10-09: the same component and motion). Port:
-// Base UI's Tooltip directly (Workspaces wraps it in its ui kit), Tailwind
-// classes became `ib-` classes in inbox.css, and only the left side is kept.
+// Ported from the Workspaces app's CollapsibleEdge and ResizeHandle components
+// for the Inbox sidebar (the owner, 2026-10-09: the same component and
+// motion). Port: Base UI's Tooltip directly (Workspaces wraps it in its ui
+// kit), Tailwind classes became `ib-` classes in inbox.css, and only the left
+// side is kept.
 
 import { Tooltip } from "@base-ui/react/tooltip";
 import type { KeyboardEvent, ReactNode } from "react";

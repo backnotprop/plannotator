@@ -1,6 +1,6 @@
-// Ported from Workspaces apps/web/src/components/ui/sidebar.tsx (cd4a9bfd1) for
-// the Inbox sidebar (the owner, 2026-10-09: "use that same exact sidebar
-// experience ... the same exact smooth animation"). What came across as is:
+// Ported from the Workspaces app's sidebar component for the Inbox sidebar
+// (the owner, 2026-10-09: "use that same exact sidebar experience ... the
+// same exact smooth animation"). What came across as is:
 // the provider and its open/closed and mobile state, the ⌘/Ctrl+B toggle, the
 // accepted-width MotionValue, the docked offcanvas motion (one spring on a
 // progress value, allocation = width × progress on the spacer and the
@@ -331,9 +331,8 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<"
 }
 
 /**
- * The sidebar-toggle glyph, from Workspaces
- * apps/web/src/components/icons/PanelLeftIcon.tsx (0219b4694), which copied it
- * from the Plannotator app sidebar reference.
+ * The sidebar-toggle glyph, from the Workspaces app's PanelLeftIcon, which
+ * copied it from the Plannotator app sidebar reference.
  */
 function PanelLeftIcon(props: React.SVGProps<SVGSVGElement>) {
 	return (

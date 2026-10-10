@@ -1,5 +1,5 @@
-// Copied from Workspaces apps/web/src/hooks/useResizablePanel.ts (a15a2839b) for
-// the Inbox sidebar (the owner, 2026-10-09: the same component and motion).
+// Copied from the Workspaces app's useResizablePanel hook for the Inbox
+// sidebar (the owner, 2026-10-09: the same component and motion).
 // Port: the width persists through Plannotator's cookie storage instead of
 // localStorage, as every Plannotator setting does (a session's port changes).
 

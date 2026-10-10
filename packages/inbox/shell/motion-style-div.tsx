@@ -1,6 +1,6 @@
-// Copied from Workspaces apps/web/src/components/ui/motion-style-div.tsx
-// (cd4a9bfd1) for the Inbox sidebar (the owner, 2026-10-09: the same component
-// and motion). Port: imports from `motion/react` (the same framer-motion 12.43.0).
+// Copied from the Workspaces app's motion-style div component for the Inbox
+// sidebar (the owner, 2026-10-09: the same component and motion). Port:
+// imports from `motion/react` (the same framer-motion 12.43.0).
 
 import * as React from "react";
 import { cancelFrame, frame, type MotionValue } from "motion/react";

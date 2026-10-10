@@ -6,8 +6,8 @@
  * filter, so a filtered list keeps the same sections and only drops rows.
  *
  * The sections and their order are Workspaces' approved inbox model
- * (`.product/approved/inbox-by-workspace-2026-10-05/`, the Sent band of
- * `inbox-sent-section-2026-10-06/`), read per thread here. The strongest
+ * (including its Sent band; design record, not in this repo), read per
+ * thread here. The strongest
  * reason wins:
  *
  *   quiet     the thread is resolved (done)

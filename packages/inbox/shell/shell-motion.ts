@@ -1,12 +1,12 @@
-// Copied from Workspaces apps/web/src/lib/shell-motion.ts (cd4a9bfd1) for the
-// Inbox sidebar (the owner, 2026-10-09: the same component and motion). Port:
+// Copied from the Workspaces app's shell motion module for the Inbox
+// sidebar (the owner, 2026-10-09: the same component and motion). Port:
 // imports from `motion/react` (the same framer-motion 12.43.0); the document
 // rail's `useRailMotion` is left out (the Inbox has no rail).
 
 import { useEffect, useLayoutEffect, useState } from "react";
 
 // The MotionValue core and the frame loop only. framer's `animate` rides its
-// own chunk (lib/shell-animate.ts, loaded once the shell mounts, and on
+// own chunk (shell-animate.ts, loaded once the shell mounts, and on
 // demand) and its
 // `useTransform` (which pulls the interpolate and colour mixers even for a
 // function transform) is replaced by `useCombinedMotionValue` below: the

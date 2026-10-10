@@ -4,9 +4,8 @@
  * (owner decision 7), light and dark from the shell. The shell draws every
  * bar and sheet, so nothing here is chrome: the document, its marks, the
  * annotation toolstrip and the guide's own controls. Classes carry an `sf-`
- * prefix so they never meet ui's. The iPhone design of record is
- * .product/approved/plannotator-mobile-iphone-2026-10-07/ (3.6, 4.1 to 4.4,
- * 6.1, 6.2).
+ * prefix so they never meet ui's. Built to the iPhone design of record
+ * (renders 3.6, 4.1 to 4.4, 6.1, 6.2; design record, not in this repo).
  */
 
 :root {

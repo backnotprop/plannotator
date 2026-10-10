@@ -1,7 +1,7 @@
 /**
  * "Connect an agent": one verified way to add the Inbox's MCP server per
- * harness, from research/findings/MCP-ADD-METHODS-2026-10-07.md (vendor docs
- * read 2026-10-07), in the shape of Workspaces' ConnectAgentSheet. Every
+ * harness, from each vendor's docs (read 2026-10-07), in the shape of the
+ * Workspaces app's connect-an-agent sheet. Every
  * artefact names the stdio entry with the CLI's absolute path, which the
  * server reports (`mcp_command`), so apps started from the Dock that do not
  * see the shell PATH still find it. Pure.

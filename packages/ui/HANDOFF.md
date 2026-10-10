@@ -99,19 +99,19 @@ Pass any subset of these to `configurePlannotatorUI({ ... })`. Anything omitted 
 
 ### Interface details worth knowing
 
-**`StorageBackend`** — must be **synchronous** (`getItem`/`setItem`/`removeItem` return immediately). If Workspaces' real store is async (KV, D1, a Durable Object), back this with an in-memory cache that you hydrate before mounting the UI, and write through asynchronously. That's also what `loadSettingsFromBackend: true` is for — it re-reads settings from your backend right after install, once it's in place.
+**`StorageBackend`** — must be **synchronous** (`getItem`/`setItem`/`removeItem` return immediately). If the host's real store is async (a key-value store, a database, a server round trip), back this with an in-memory cache that you hydrate before mounting the UI, and write through asynchronously. That's also what `loadSettingsFromBackend: true` is for — it re-reads settings from your backend right after install, once it's in place.
 
 **No cookies on a configured host.** Settings resolution is **lazy** (first settings access, not module import). Plannotator's default backend is cookies (its servers run on random ports, so cookies are the only storage that survives across sessions there), and on first resolution the store seeds missing defaults — including a generated identity — into whatever backend is live. Because `configurePlannotatorUI` installs your `storageBackend` before anything reads a setting, a host that configures at startup gets **zero `plannotator-*` cookies** written to its origin, ever: all reads and seeding writes go to your backend. (Covered by `config/configStore.lazyInit.seam.test.ts`.) Only an unconfigured consumer — or one that reads settings before calling configure — falls back to cookie writes.
 
 > **⚠️ Ordering is load-bearing and nothing enforces it.** Call `configurePlannotatorUI` only **after** your settings hydration has completed. If you configure while the cache is still empty, `loadSettingsFromBackend` finds nothing, **seeds generated defaults into your backend via `setItem`** (including a freshly generated random display name), and nothing ever re-runs hydration — so the junk defaults can win over the user's real settings, and if your `setItem` writes through to durable storage they persist. The sync-and-prehydrated rule is a contract, not a runtime check. (For `localStorage`, which is already synchronous, none of this bites.)
 
-**`IdentityProvider`** — `getIdentity(): string` (display name), `isCurrentUser(author): boolean`, and optional `isEditable(): boolean` (default editable). For Workspaces this is your auth'd user. **Return `isEditable() => false`** for logged-in users: Workspaces stamps the author from the server-side account id and users can't rename themselves, so the UI must hide its rename/regenerate controls — otherwise a locally-chosen name diverges from the server-stamped author (the "split author" hazard). Two things to know from the Workspaces side: (1) the current `Me` projection (`GET /v1/me`) carries only `user_id` + `email` — **no display name** — so until the backend adds a name field, `getIdentity()` can only return the email or id; (2) free-text author names *are* accepted for anonymous commenters on open docs, so `isEditable()` may return `true` for that branch.
+**`IdentityProvider`** — `getIdentity(): string` (display name), `isCurrentUser(author): boolean`, and optional `isEditable(): boolean` (default editable). For Workspaces this is your auth'd user. **Return `isEditable() => false`** for logged-in users: Workspaces stamps the author from the server-side account id and users can't rename themselves, so the UI must hide its rename/regenerate controls — otherwise a locally-chosen name diverges from the server-stamped author (the "split author" hazard). Two things to know: (1) when the host's user record carries no display name, `getIdentity()` can only return the email or id until the backend adds one; (2) free-text author names *are* accepted for anonymous commenters on open docs, so `isEditable()` may return `true` for that branch.
 
-**`UploadTransport`** — `upload(file: File): Promise<{ path: string; originalName? }>`. The default does Plannotator's `POST /api/upload` and returns the server path. For Workspaces, send the bytes to your asset API (`PUT /v1/workspaces/:wsId/assets/:assetPath`) and return the content-addressed URL (or an opaque ref) in `path`. Notes from the Workspaces asset layer: your API makes the **caller choose the asset path** and 409s if a document owns it, so your adapter — not the UI — owns path selection (namespace uploads, e.g. an `assets/` prefix); it enforces a **10 MiB cap + content-type allowlist**, so surface upload failures; and because asset URLs need **no signing** (content-addressed, served from the cookieless `tot.page` origin), `imageSrcResolver` can be a pass-through — returning a full URL in `path` renders directly (the default resolver passes http(s) URLs through).
+**`UploadTransport`** — `upload(file: File): Promise<{ path: string; originalName? }>`. The default does Plannotator's `POST /api/upload` and returns the server path. For a host, send the bytes to your asset API and return the content-addressed URL (or an opaque ref) in `path`. Things a host asset layer commonly does that the adapter must handle: if the API makes the **caller choose the asset path** (and refuses a path a document owns), your adapter — not the UI — owns path selection (namespace uploads, e.g. an `assets/` prefix); if it enforces a **size cap or content-type allowlist**, surface upload failures; and when asset URLs need **no signing** (content-addressed, served from a cookieless origin), `imageSrcResolver` can be a pass-through — returning a full URL in `path` renders directly (the default resolver passes http(s) URLs through).
 
 **`DraftTransport`** — `load()`, `save(body, { keepalive })`, `remove(generation, { keepalive })`. The generation-gated tombstone and keepalive retry logic stay inside the hook; you only provide the three transport calls. `keepalive: true` means "best-effort deliver this even though the page is closing" (maps to `fetch(..., { keepalive: true })` or `navigator.sendBeacon`). One non-obvious contract on `load()`: it returns `{ data, generation }`, where `generation` is the **deletion tombstone counter** for the no-draft case — Plannotator's server encodes it in the 404 body so a stale tab can't resurrect a deleted draft. If your backend tracks draft deletions, return the tombstone generation with `data: null`; if it doesn't, return `{ data, generation: null }` and the hook still works (you just lose stale-tab deletion protection). Optionally, `save()` may resolve `{ staleGeneration }` when your store refused the body as stale (Plannotator's server answers `409 { draftGeneration }`); the hook then raises its counter above that generation and saves once more. Resolving nothing (the old `Promise<void>`) keeps the previous behavior.
 
-**`ExternalAnnotationTransport<T>`** — `subscribe(onEvent, onError) => unsubscribe`, `getSnapshot(since) => { annotations, version } | null` (return `null` for "no changes", i.e. the 304 case), plus `add/remove/update/clear`. For Workspaces this is your realtime layer — a Durable Object WebSocket or SSE fanning out comment events. `T` extends `{ id: string; source?: string }`; if your annotation type adds fields, call `setExternalAnnotationTransport<YourType>()` directly for full type safety (the `configure` front door pins the base type for ergonomics).
+**`ExternalAnnotationTransport<T>`** — `subscribe(onEvent, onError) => unsubscribe`, `getSnapshot(since) => { annotations, version } | null` (return `null` for "no changes", i.e. the 304 case), plus `add/remove/update/clear`. For a host this is your realtime layer — a WebSocket or SSE channel fanning out comment events. `T` extends `{ id: string; source?: string }`; if your annotation type adds fields, call `setExternalAnnotationTransport<YourType>()` directly for full type safety (the `configure` front door pins the base type for ergonomics).
 
 **`AITransport`** and **`FileTreeBackend`** currently return `Response` objects** (the raw `fetch` response) rather than parsed domain types — `session/query` return `Promise<Response>`, `loadTree/loadVaultTree` return `Promise<Response>` whose JSON is a known shape. **This is a known rough edge** (see "Known rough edges"). To satisfy these today, Workspaces has to hand back something `Response`-shaped (status, `.json()`, and for `query`, an SSE body stream). It works, but it leaks the old HTTP contract. We deliberately left it as-is for the first cut (move-don't-rewrite); expect to clean it up in a v2 driven by what's actually painful when you wire it.
 
@@ -137,12 +137,12 @@ configurePlannotatorUI({
   storageBackend,                 // your settings store (localStorage is already sync)
   identityProvider,               // your auth'd user (isEditable:false for logged-in users)
   imageSrcResolver,               // your asset URL scheme (pass-through for content-addressed URLs)
-  uploadTransport,                // upload pasted images to your R2 asset API
+  uploadTransport,                // upload pasted images to your asset API
   docPreviewFetcher,              // your doc store
   fileTreeBackend,                // your workspace file tree + realtime watch
   draftTransport,                 // your draft store
-  externalAnnotationTransport,    // adapt your Yjs/WebSocket realtime onto this
-  // aiTransport,                 // omit — Workspaces has no AI backend yet (stays default/off)
+  externalAnnotationTransport,    // adapt your realtime (WebSocket, SSE) onto this
+  // aiTransport,                 // omit unless you have an AI backend (stays default/off)
   serverSync,                     // your settings push
   loadSettingsFromBackend: true,  // re-hydrate settings from storageBackend after install
 });
@@ -155,24 +155,24 @@ import { Viewer } from "@plannotator/ui/components/Viewer";
 
 A few component-specific behaviors (e.g. an "open this diff in the editor" action) are passed as **props** at the render site rather than through `configure` — those are local to one component, not app-global.
 
-### Mapping the seams to Workspaces' actual stack
+### Mapping the seams to a host backend
 
-Grounded in a read of the Workspaces repo (`apps/app`, `apps/usercontent`, `apps/web`, the DocumentDO). The web app doesn't import this UI yet, so this is the greenfield wiring plan.
+What each seam asks of a host, and how much adapter work it usually takes. The host app's own routes and storage are its business; this table only names the shape the seam needs.
 
-| Seam | Workspaces backing | Effort |
+| Seam | What the host provides | Effort |
 |---|---|---|
-| `storageBackend` | `window.localStorage` — already synchronous, matches the seam as-is. (Server-syncing prefs later is optional; not needed for the seam.) | trivial |
-| `identityProvider` | Read the already-hydrated `me` from `SessionContext` (`GET /v1/me`). `getIdentity()` returns email/id (no name field yet), `isCurrentUser(a) = a === me.user_id`, `isEditable() => false` for logged-in users. | thin adapter |
-| `imageSrcResolver` | Pass-through — asset URLs are content-addressed and need no signing. | trivial |
-| `uploadTransport` | `PUT /v1/workspaces/:wsId/assets/:assetPath` → R2 (`AssetBytes` interface). Adapter owns asset-path selection. | new adapter |
-| `docPreviewFetcher` | `GET /v1/workspaces/:wsId/documents/:docId` (D1 + git content store). | thin adapter |
-| `fileTreeBackend` | `GET /v1/workspaces/:wsId/documents` (D1 doc list); live-watch via the DocumentDO. | thin adapter |
-| `draftTransport` | KV or a per-doc Durable Object; `sendBeacon` for keepalive. | thin adapter |
-| `externalAnnotationTransport` | **Transport kind differs** — Workspaces realtime is Yjs-over-WebSocket (DocumentDO), and comments are REST with no live push. Adapt comment events onto the DO awareness channel (or add an SSE endpoint). | biggest adapter |
-| `aiTransport` | **No AI backend exists** in Workspaces. Leave at default/off until one is built. | new infra (later) |
-| `serverSync` | A Worker endpoint that persists the settings delta. | thin adapter |
+| `storageBackend` | A synchronous settings store (`window.localStorage` already matches as-is; an async store needs a prehydrated in-memory cache, see "Interface details"). | trivial |
+| `identityProvider` | The signed-in user the host already holds. `getIdentity()` returns whatever display value the host has (an email or id when there is no name), `isCurrentUser(a)` compares against the user's id, `isEditable() => false` for signed-in users. | thin adapter |
+| `imageSrcResolver` | Pass-through when asset URLs are content-addressed and need no signing; otherwise the host's URL mapping. | trivial |
+| `uploadTransport` | A call to the host's asset upload API. The adapter owns asset-path selection. | new adapter |
+| `docPreviewFetcher` | A read of one document from the host's document store. | thin adapter |
+| `fileTreeBackend` | The host's document list, plus its own live-watch if it has one. | thin adapter |
+| `draftTransport` | Any per-document store the host has; `sendBeacon` (or `fetch` keepalive) for the close path. | thin adapter |
+| `externalAnnotationTransport` | **The transport kind may differ.** A host whose realtime is a WebSocket channel, or whose comments are REST with no live push, adapts its comment events onto `subscribe` (or adds an SSE endpoint). | biggest adapter |
+| `aiTransport` | Only if the host has an AI backend. Leave at default/off until it does. | new infra (later) |
+| `serverSync` | An endpoint that persists the settings delta. | thin adapter |
 
-**Backend follow-up (Workspaces side, not a UI change):** if you want readable author names instead of raw `user_…` ids in comments, the `Me`/annotation projections need to start carrying a display-name field (WorkOS has `first_name`/`last_name`; the current `Me` projection drops them).
+**Backend follow-up (host side, not a UI change):** readable author names instead of raw user ids in comments need the host's user and annotation data to carry a display-name field.
 
 ---
 

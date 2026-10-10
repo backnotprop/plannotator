@@ -18,7 +18,8 @@
  * is the DATA frames as text.
  *
  * No imports beyond `cloudflare:sockets`: this file is meant to be copied as
- * it is by another Worker that sends to APNs (Workspaces' push sender).
+ * it is by another Worker that sends to APNs (such as the Workspaces app's
+ * own push sender).
  * Apache 2.0, as the rest of this repository allows.
  */
 import { connect } from "cloudflare:sockets";

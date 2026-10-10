@@ -57,8 +57,8 @@ function RemoveLink({ name, onRemove }: { name: string; onRemove: () => Promise<
 }
 
 /**
- * Phones (not in the window's design record: OWNER-ITEMS item 23, built in
- * Settings' own style): "Reach from this Wi-Fi" and "Reach from my tailnet",
+ * Phones (not in the window's design record; built in Settings' own
+ * style): "Reach from this Wi-Fi" and "Reach from my tailnet",
  * in the order the iPhone's 9.2 lists them, "Pair a phone" with the QR
  * code and the six digits (the panel the iPhone's 1.2 render points at), and
  * the paired phones with Remove.

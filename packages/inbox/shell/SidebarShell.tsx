@@ -1,6 +1,5 @@
-// Ported from the sidebar half of Workspaces apps/web/src/app/AppShell.tsx
-// (e2c77711d) for the Inbox (the owner, 2026-10-09: the same component and
-// motion): the resizable width as an element-scoped MotionValue, the
+// Ported from the sidebar half of the Workspaces app's AppShell for the Inbox
+// (the owner, 2026-10-09: the same component and motion): the resizable width as an element-scoped MotionValue, the
 // reversible resize-to-dismiss, click-to-collapse on the edge, the peek, and
 // `--sidebar-width` as the committed at-rest width. Port: the open state is
 // the Inbox's (`open` / `onOpenChange`, from its settings store), so the

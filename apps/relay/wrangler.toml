@@ -12,8 +12,9 @@ name = "plannotator-relay"
 main = "src/index.ts"
 compatibility_date = "2026-09-01"
 
-# Custom domain (top-level: must precede any [table] in TOML). OWNER-ITEMS
-# item 20: recommended, not yet deployed.
+# Custom domain (top-level: must precede any [table] in TOML). Pending before
+# release: the relay.plannotator.ai custom domain is recommended but not yet
+# deployed.
 routes = [
   { pattern = "relay.plannotator.ai", custom_domain = true }
 ]
