@@ -21,7 +21,10 @@ import { INBOX_MCP_TOOLS } from "@plannotator/server/inbox-mcp";
 import { GUIDE_BRIEF_EXAMPLE } from "../../../packages/server/inbox-guides";
 import { runPlannotatorUninstall } from "@plannotator/server/uninstall";
 import { INBOX_MAX_REQUEST_BYTES } from "@plannotator/shared/inbox/connection";
-import { runInboxMcpShim } from "./inbox-mcp-shim";
+import { INBOX_BRIDGE_POLL_PATH, parseInboxBridgeCommands } from "@plannotator/shared/inbox/connection";
+import { INBOX_AGENT_NAME, INBOX_HOST } from "../hooks/mod/inbox";
+import { OPENCODE_INBOX_AGENT_NAME, OPENCODE_INBOX_HOST } from "../../opencode-plugin/inbox";
+import { fillInboxToolArguments, inboxHostSessionFromEnv, INBOX_SESSION_HOST_NAMES, runInboxMcpShim } from "./inbox-mcp-shim";
 
 const entry = resolve(import.meta.dir, "index.ts");
 const distDir = resolve(import.meta.dir, "../dist");
@@ -310,6 +313,171 @@ describe("plannotator inbox mcp (the stdio shim)", () => {
     expect(guide.project.root).toBe(project);
     const mineNow = (await client.callTool({ name: "read_thread", arguments: {} })).structuredContent as { threads: { thread_id: string }[] };
     expect(mineNow.threads.map((t) => t.thread_id)).toContain(guide.thread_id);
+  }, 90_000);
+});
+
+describe("plannotator inbox mcp inside an agent session", () => {
+  const CLAUDE_SESSION = "0f3c2a51-7d4e-4b8a-9e21-5c6d7e8f9a0b";
+
+  async function shim(box: Sandbox, cwd: string, extraEnv: Record<string, string>): Promise<Client> {
+    const client = new Client({ name: "shim-session", version: "1.0.0" });
+    await client.connect(
+      new StdioClientTransport({ command: process.execPath, args: ["run", entry, "inbox", "mcp"], cwd, env: { ...box.env, ...extraEnv }, stderr: "pipe" }),
+    );
+    cleanups.push(() => client.close());
+    return client;
+  }
+
+  async function author(port: number, threadId: string, index: number) {
+    const { thread } = await (await fetch(`http://127.0.0.1:${port}/api/inbox/threads/${threadId}`)).json();
+    return thread.messages[index].author as { kind: string; host: string | null; session: string | null; name: string | null };
+  }
+
+  test("the names it fills are the ones each host's own plannotator_inbox tool sends", () => {
+    expect(INBOX_SESSION_HOST_NAMES[INBOX_HOST]).toBe(INBOX_AGENT_NAME);
+    expect(INBOX_SESSION_HOST_NAMES[OPENCODE_INBOX_HOST]).toBe(OPENCODE_INBOX_AGENT_NAME);
+    expect(Object.keys(INBOX_SESSION_HOST_NAMES).sort()).toEqual(["claude-code", "opencode", "pi"]);
+  });
+
+  test("the session tag is read strictly; anything malformed is ignored", () => {
+    expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: `claude-code:${CLAUDE_SESSION}` })).toEqual({ host: "claude-code", session: CLAUDE_SESSION, name: "Claude Code" });
+    expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: "opencode:ses_01ABC" })).toEqual({ host: "opencode", session: "ses_01ABC", name: "OpenCode" });
+    expect(inboxHostSessionFromEnv({ PI_SESSION_ID: "019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5b" })).toEqual({
+      host: "pi",
+      session: "019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5b",
+      name: "Pi",
+    });
+    // The Plannotator tag wins over Pi's own variable.
+    expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: `claude-code:${CLAUDE_SESSION}`, PI_SESSION_ID: "abc" })?.host).toBe("claude-code");
+    for (const tag of [
+      "",
+      "claude-code",
+      "claude-code:",
+      ":abc",
+      "codex:abc",
+      "Claude-Code:abc",
+      "claude-code:a b",
+      "claude-code:../x",
+      "claude-code:a/b",
+      "claude-code:-abc",
+      "claude-code:abc\n",
+      "claude-code:a:b",
+      `claude-code:${"a".repeat(129)}`,
+      "__proto__:abc",
+      "constructor:abc",
+      "toString:abc",
+    ]) {
+      expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: tag })).toBeNull();
+    }
+    expect(inboxHostSessionFromEnv({ PI_SESSION_ID: "" })).toBeNull();
+    expect(inboxHostSessionFromEnv({ PI_SESSION_ID: "a;b" })).toBeNull();
+    expect(inboxHostSessionFromEnv({})).toBeNull();
+  });
+
+  test("host and name are filled only on the tools that record an author, and only when the agent left them out", () => {
+    const hostSession = { host: "claude-code", session: CLAUDE_SESSION, name: "Claude Code" };
+    const call = (name: string, args: Record<string, unknown>) =>
+      fillInboxToolArguments({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, "/work", hostSession).params!.arguments as Record<string, unknown>;
+    expect(call("send_message", { body: "hi" })).toEqual({ body: "hi", project_path: "/work", agent_session: CLAUDE_SESSION, agent_host: "claude-code", agent_name: "Claude Code" });
+    // read_thread and wait_for_reply have strict schemas without agent_host.
+    expect(call("read_thread", {})).toEqual({ project_path: "/work", agent_session: CLAUDE_SESSION });
+    expect(call("wait_for_reply", {})).toEqual({ project_path: "/work", agent_session: CLAUDE_SESSION });
+    // The agent's own choices stand.
+    expect(call("send_message", { body: "hi", agent_session: "mine" })).toEqual({ body: "hi", project_path: "/work", agent_session: "mine" });
+    expect(call("send_message", { body: "hi", agent_host: "codex" })).toEqual({ body: "hi", project_path: "/work", agent_session: CLAUDE_SESSION, agent_host: "codex" });
+    expect(call("send_message", { body: "hi", agent_name: "Helper" })).toMatchObject({ agent_host: "claude-code", agent_name: "Helper" });
+  });
+
+  test("a command a Claude Code session runs sends as that session: the tool's author, its thread, and the reply wakes it", async () => {
+    const box = sandbox();
+    const project = gitProject(box);
+    const registry = (await background(box)).registry!;
+    const tag = { PLANNOTATOR_SESSION_TAG: `claude-code:${CLAUDE_SESSION}` };
+
+    const first = await shim(box, project, tag);
+    const sent = (await first.callTool({ name: "send_message", arguments: { body: "Ship the worker today?", idempotency_key: "tag-1" } })).structuredContent as {
+      message_id: string;
+      thread_id: string;
+    };
+    expect(await author(registry.port, sent.thread_id, 0)).toEqual({ kind: "agent", host: "claude-code", session: CLAUDE_SESSION, name: "Claude Code" });
+
+    // The mod's plannotator_inbox tool fills exactly these (apps/hook/hooks/mod/inbox.ts): its message joins the
+    // same default thread with a byte-identical author, so the store reads both as one session.
+    const viaTool = await fetch(`http://127.0.0.1:${registry.port}/mcp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
+          name: "send_message",
+          arguments: { body: "From the tool.", project_path: project, agent_session: CLAUDE_SESSION, agent_host: INBOX_HOST, agent_name: INBOX_AGENT_NAME },
+        },
+      }),
+    });
+    expect(viaTool.status).toBe(200);
+    expect(await viaTool.text()).toContain(sent.thread_id);
+
+    // A second process with the same tag (another command of the same session) joins the same thread.
+    const second = await shim(box, join(project, "worker"), tag);
+    const again = (await second.callTool({ name: "send_message", arguments: { body: "And the migration?", idempotency_key: "tag-2" } })).structuredContent as {
+      message_id: string;
+      thread_id: string;
+    };
+    expect(again.thread_id).toBe(sent.thread_id);
+    const authors = await Promise.all([0, 1, 2].map((i) => author(registry.port, sent.thread_id, i)));
+    expect(authors[1]).toEqual(authors[0]);
+    expect(authors[2]).toEqual(authors[0]);
+    const mine = (await second.callTool({ name: "read_thread", arguments: {} })).structuredContent as { threads: { thread_id: string }[] };
+    expect(mine.threads.map((t) => t.thread_id)).toEqual([sent.thread_id]);
+
+    // The person replies; the session's wake (the bridge poll for that session id) gets it, another session's does not.
+    const reply = await fetch(`http://127.0.0.1:${registry.port}/api/inbox/messages/${again.message_id}/reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idempotency_key: "person-1", words: "Ship it." }),
+    });
+    expect(reply.status).toBe(200);
+    const replyId = ((await reply.json()) as { reply: { id: string } }).reply.id;
+    const poll = async (session: string) => {
+      const response = await fetch(`http://127.0.0.1:${registry.port}${INBOX_BRIDGE_POLL_PATH}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${registry.token}` },
+        body: JSON.stringify({ session, host: "claude-code", waitMs: 0 }),
+      });
+      expect(response.status).toBe(200);
+      return parseInboxBridgeCommands(await response.text());
+    };
+    const commands = await poll(CLAUDE_SESSION);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatchObject({ type: "reply", id: replyId, reply_to: again.message_id, thread_id: sent.thread_id });
+    expect(await poll("another-session")).toEqual([]);
+  }, 90_000);
+
+  test("an explicit agent_session wins; a malformed tag is ignored (one fresh id per process); Pi's PI_SESSION_ID is that session", async () => {
+    const box = sandbox();
+    const project = gitProject(box);
+    const registry = (await background(box)).registry!;
+
+    const tagged = await shim(box, project, { PLANNOTATOR_SESSION_TAG: `claude-code:${CLAUDE_SESSION}` });
+    const explicit = (await tagged.callTool({ name: "send_message", arguments: { body: "Mine.", agent_session: "my-own-session", idempotency_key: "own-1" } }))
+      .structuredContent as { thread_id: string };
+    expect(await author(registry.port, explicit.thread_id, 0)).toEqual({ kind: "agent", host: null, session: "my-own-session", name: null });
+
+    const malformed = await shim(box, project, { PLANNOTATOR_SESSION_TAG: "claude-code:../../etc" });
+    const fresh = (await malformed.callTool({ name: "send_message", arguments: { body: "Who am I?", idempotency_key: "bad-1" } })).structuredContent as {
+      thread_id: string;
+    };
+    const freshAuthor = await author(registry.port, fresh.thread_id, 0);
+    expect(freshAuthor.session).toMatch(/^ses_[0-9A-Z]{26}$/);
+    expect(freshAuthor.host).toBeNull();
+    expect(fresh.thread_id).not.toBe(explicit.thread_id);
+
+    const piSession = "019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5b";
+    const pi = await shim(box, project, { PI_SESSION_ID: piSession });
+    const fromPi = (await pi.callTool({ name: "send_message", arguments: { body: "From Pi's bash.", idempotency_key: "pi-1" } })).structuredContent as { thread_id: string };
+    expect(await author(registry.port, fromPi.thread_id, 0)).toEqual({ kind: "agent", host: "pi", session: piSession, name: "Pi" });
   }, 90_000);
 });
 

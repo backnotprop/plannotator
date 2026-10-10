@@ -2,7 +2,8 @@
  * Plannotator Inbox: the MCP tools, served statelessly on the Inbox's `/mcp`
  * (packages/server/inbox.ts) and reached by agents through the stdio shim
  * `plannotator inbox mcp`, which fills `project_path` from its working folder
- * and `agent_session` with its own `ses_` id.
+ * and `agent_session` with the agent host session it runs inside, else its own
+ * `ses_` id.
  *
  * The tool list is fixed. Success is `structuredContent` plus one line of
  * text (the reply's text in full for wait_for_reply); a refusal is `isError`

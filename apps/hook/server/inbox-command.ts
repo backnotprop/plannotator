@@ -34,7 +34,7 @@ import { exposureWarning, type InboxTailscaleState } from "@plannotator/server/i
 import { openBrowser } from "@plannotator/server/browser";
 import { writeUrlQr } from "@plannotator/server/qr";
 import { getCliVersion } from "./cli";
-import { runInboxMcpShim } from "./inbox-mcp-shim";
+import { inboxHostSessionFromEnv, runInboxMcpShim } from "./inbox-mcp-shim";
 
 export const INBOX_LOG_FILE = "inbox.log";
 /** Set by a starter that holds the start lock for the detached Inbox it spawns. */
@@ -261,6 +261,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
       dataDir,
       cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
       ensureRunning: () => ensureInboxRunning(dataDir),
+      hostSession: inboxHostSessionFromEnv(process.env),
     });
     process.exit(0);
   }

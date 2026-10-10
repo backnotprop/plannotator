@@ -121,7 +121,7 @@ The Inbox also answers MCP over Streamable HTTP at `http://127.0.0.1:<port>/mcp`
 
 `plannotator inbox --help` prints a full guide for agents in markdown: when to use the Inbox, each tool and its arguments, how threads and replies work, the question syntax, and the setup line for each client above with your binary's path. An agent with no Plannotator skill can read it once and use the Inbox.
 
-The stdio command fills in the project (its working folder) and a session id for the agent. Without one of the three connections, nothing wakes the agent when you reply. The agent calls `wait_for_reply`, which returns your reply as soon as you send it, or a cursor to wait again after 50 seconds.
+The stdio command fills in the project (its working folder) and a session id for the agent. When a Claude Code or Pi session runs it (a script or command the agent starts), that id is the session's own, so the message joins the session's thread and your reply reaches that session as with its tool. Otherwise the id lasts as long as the command's process; an agent that passes its own `agent_session` keeps its threads across restarts. Without one of the three connections, nothing wakes the agent when you reply. The agent calls `wait_for_reply`, which returns your reply as soon as you send it, or a cursor to wait again after 50 seconds.
 
 ### The tools
 
