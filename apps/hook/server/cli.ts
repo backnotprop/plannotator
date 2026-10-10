@@ -164,6 +164,8 @@ export function formatTopLevelHelp(): string {
     "  plannotator improve-context",
     "",
     "Run 'plannotator <command> --help' for command-specific usage.",
+    "Agents: run 'plannotator inbox --help' for the full guide to the Plannotator Inbox",
+    "(what it is, when to use it, its MCP tools, threads, questions, connecting agents).",
     "",
     "Note:",
     "  running 'plannotator' without arguments is for hook integration and expects JSON on stdin",
@@ -183,6 +185,35 @@ export function formatTopLevelHelp(): string {
  * Empty: `inbox` (the Plannotator Inbox) was the last one, and launched.
  */
 export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>();
+
+/**
+ * `plannotator inbox`'s commands and flags. `plannotator inbox --help` prints
+ * the full agent guide (inbox-help.ts), which carries this block as its
+ * "Commands and flags" section; it is also the `inbox` entry of
+ * SUBCOMMAND_HELP, so the skill freshness test reads the same flags.
+ * The parser is `runInboxCommand` in inbox-command.ts.
+ */
+export const INBOX_COMMAND_USAGE = [
+  "Usage:",
+  "  plannotator inbox [--background | --no-open] [--tailscale]",
+  "  plannotator inbox mcp",
+  "",
+  "  plannotator inbox               Start the Inbox and open it in the browser,",
+  "                                  or open the one already running",
+  "  plannotator inbox --background  Start it detached without opening a browser,",
+  "                                  print its URL and exit",
+  "  plannotator inbox --no-open     Run it here without opening a browser",
+  "  plannotator inbox --tailscale   Also publish it over the person's tailnet for this",
+  "                                  run (tailscale serve, HTTPS, never funnel), for the",
+  "                                  Tailscale login that owns this machine only. With",
+  "                                  an Inbox already running, asks it to publish.",
+  "  plannotator inbox mcp           The stdio MCP server for agents. Starts a stopped",
+  "                                  Inbox in the background (no browser tab).",
+  "",
+  "Over the tailnet at every start: the Inbox's Settings, PLANNOTATOR_INBOX_TAILSCALE=1,",
+  "or { \"inboxTailscale\": true } in config.json. Agents and MCP stay on this computer;",
+  "another Tailscale login is let in only when config.json inboxTailscaleAllow names it.",
+].join("\n");
 
 // Per-subcommand usage text. Keyed by the canonical subcommand token; aliases
 // (e.g. `last` → `annotate-last`) are resolved in formatSubcommandHelp().
@@ -330,37 +361,8 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "  --clean       Remove stale session entries",
     "  --json        Print the sessions as a JSON array on stdout (index, mode, reviewId, target, url, ...)",
   ].join("\n"),
-  inbox: [
-    "Usage:",
-    "  plannotator inbox [--background | --no-open] [--tailscale]",
-    "  plannotator inbox mcp",
-    "",
-    "The Plannotator Inbox: one local window, per machine, where agents leave",
-    "messages and questions for you and you answer when you can. It binds",
-    "127.0.0.1 only and keeps its data under <data dir>/inbox/.",
-    "",
-    "  plannotator inbox               Start the Inbox and open it in the browser,",
-    "                                  or open the one already running",
-    "  plannotator inbox --background  Start it detached without opening a browser,",
-    "                                  print its URL and exit (what agents run)",
-    "  plannotator inbox --no-open     Run it here without opening a browser",
-    "  plannotator inbox --tailscale   Also publish it over your tailnet for this run",
-    "                                  (tailscale serve, HTTPS, never funnel), for the",
-    "                                  Tailscale login that owns this machine only. With",
-    "                                  an Inbox already running, asks it to publish.",
-    "  plannotator inbox mcp           Stdio MCP server for agents: messages, questions,",
-    "                                  files, decisions and guided reviews (send_message,",
-    "                                  read_thread, wait_for_reply, resolve_message,",
-    "                                  list_decisions, record_decision, get_guide_brief,",
-    "                                  submit_guide). Starts a stopped Inbox (no browser tab).",
-    "",
-    "Register the MCP entry with an agent, e.g.:",
-    "  claude mcp add plannotator-inbox -- plannotator inbox mcp",
-    "",
-    "Over your tailnet at every start: the Inbox's Settings, PLANNOTATOR_INBOX_TAILSCALE=1,",
-    "or { \"inboxTailscale\": true } in config.json. Agents and MCP stay on this computer;",
-    "another Tailscale login is let in only when config.json inboxTailscaleAllow names it.",
-  ].join("\n"),
+  // `inbox --help` prints the full agent guide instead (index.ts, inbox-help.ts).
+  inbox: INBOX_COMMAND_USAGE,
   uninstall: [
     "Usage:",
     "  plannotator uninstall [--purge] [--yes | -y] [--dry-run]",

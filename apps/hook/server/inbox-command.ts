@@ -42,8 +42,12 @@ const LOCK_HELD_ENV = "PLANNOTATOR_INBOX_LOCK_HELD";
 /** How long a starter waits for a detached Inbox to answer its health check. */
 const START_TIMEOUT_MS = 20_000;
 
-/** The argv that runs this same CLI: the compiled binary alone, or bun plus the entry script. */
-function selfCommand(): string[] {
+/**
+ * The argv that runs this same CLI: the compiled binary alone, or bun plus the
+ * entry script. Exported for `plannotator inbox --help`, whose agent guide
+ * names it, as the window's connect snippets do (`mcp_command`).
+ */
+export function selfCommand(): string[] {
   const script = process.argv[1];
   if (script && /\.(?:[cm]?[jt]s)$/.test(script) && existsSync(script)) return [process.execPath, script];
   return [process.execPath];
