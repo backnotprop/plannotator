@@ -41,6 +41,8 @@ export interface ListModel {
   version: string;
   cursor: number;
   update: InboxHealth['update'];
+  /** This Inbox started on a newer version than the one before it: "What's new in X" for this run. Absent from an older Inbox. */
+  updated?: string | null;
   notice: string | null;
   projects: ProjectFolder[];
   project: string | null;
@@ -84,6 +86,38 @@ export interface ReplyResult {
   decisions_refused: { key: string; code: string; message: string }[];
 }
 
+export interface UpdateSwitches {
+  update_check: { on: boolean; env: boolean | null };
+  auto_update: { on: boolean; env: boolean | null };
+}
+
+/** GET /api/inbox/update: what the update dialogs and Settings → About read (packages/server/inbox-updates.ts). */
+export interface UpdateDetails {
+  update: InboxHealth['update'];
+  current: string;
+  updated: string | null;
+  latest: { version: string; fetched_at: string; published_at: string | null } | null;
+  check: { on: boolean; env: boolean | null; last_attempt_at: string | null; error: string | null };
+  auto_update: { on: boolean; env: boolean | null; supported: boolean };
+  summary: string;
+  flags: string[];
+  command: string;
+  plugin_command: string | null;
+  sessions: { mode: string; project: string; label: string; started_at: string }[];
+  failure: { exit_code: number; log: string } | null;
+  log: string;
+  snoozed_until: string | null;
+}
+
+export interface WhatsNewModel {
+  version: string;
+  current: string;
+  published_at: string | null;
+  release_url: string;
+  notes: string;
+  skipped: { version: string; text: string }[];
+}
+
 /** "Over your tailnet" (packages/server/inbox-tailscale.ts): the switch, the address or why not, and who may open it. */
 export interface TailscaleSettings {
   on: boolean;
@@ -114,6 +148,8 @@ export interface SettingsModel {
   data_dir: string;
   inbox_tool: { hosts: Record<AgentToolHost, boolean>; env: boolean | null };
   notifications: NotificationSettings;
+  /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */
+  updates?: UpdateSwitches;
   /** Whether this Inbox serves phones (PLANNOTATOR_INBOX_PHONES): the Phones block shows only then. */
   phones: boolean;
   store: {
@@ -266,6 +302,14 @@ export const inboxApi = {
   saveGuideReviewed: (messageId: string, reviewed: boolean[]) =>
     post<{ message_id: string; reviewed: boolean[] }>(`/api/inbox/messages/${encodeURIComponent(messageId)}/guide/reviewed`, { reviewed }),
   restart: () => post<{ ok: true }>('/api/inbox/restart', {}),
+  // The update control: the dialogs' facts, Update now, Remind me tomorrow, Check now, What's new.
+  updateDetails: () => get<UpdateDetails>('/api/inbox/update'),
+  updateNow: () => post<{ ok: true; version: string; update: InboxHealth['update'] }>('/api/inbox/update', {}),
+  snoozeUpdate: () => post<{ ok: true; update: InboxHealth['update'] }>('/api/inbox/update/snooze', {}),
+  checkForUpdate: () => post<UpdateDetails & { checked: { ok: boolean; error?: string } }>('/api/inbox/update/check', {}),
+  whatsNew: (version: string) => get<WhatsNewModel>(`/api/inbox/whats-new?version=${encodeURIComponent(version)}`),
+  saveUpdateSwitches: (change: { update_check?: boolean; auto_update?: boolean }) =>
+    post<{ updates: UpdateSwitches }>('/api/inbox/settings', change),
   saveInboxTool: (hosts: Partial<Record<AgentToolHost, boolean>>) =>
     post<{ inbox_tool: SettingsModel['inbox_tool'] }>('/api/inbox/settings', { inbox_tool: hosts }),
   saveNotifications: (change: Partial<NotificationSettings>) =>

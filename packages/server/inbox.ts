@@ -37,7 +37,6 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
-import { spawn } from "node:child_process";
 import { realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
@@ -58,7 +57,11 @@ import { extractDirName, extractRepoName } from "@plannotator/core/project";
 import {
   INBOX_TOOL_HOSTS,
   loadConfig,
+  parseAutoUpdateEnv,
   parseInboxToolEnv,
+  parseUpdateCheckEnv,
+  resolveAutoUpdate,
+  resolveUpdateCheck,
   resolveInboxPhones,
   resolveInboxTool,
   saveConfig,
@@ -106,6 +109,7 @@ import { createInboxDevices, DOOR_PREFIX } from "./inbox-devices";
 import { createInboxRelay } from "./inbox-relay";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { createInboxTailscale, PHONES_TAILNET_HTTPS_PORT, type InboxTailscale } from "./inbox-tailscale";
+import { createInboxUpdates, type InboxUpdatesOptions } from "./inbox-updates";
 
 /** Where a request came in: the window's loopback port, or the tailnet-only listener `tailscale serve` points at. */
 type RequestVia = "local" | "tailnet";
@@ -148,6 +152,12 @@ export interface InboxServerOptions {
    * disk in its place and ends this process. Absent: Restart answers 409.
    */
   onRestartRequested?: () => void;
+  /**
+   * The update control's seams (packages/server/inbox-updates.ts): the
+   * release fetch, the installer, whether the binary is the install script's,
+   * the sessions list and the clock. Defaults: the real ones. Tests inject.
+   */
+  updates?: Pick<InboxUpdatesOptions, "fetchRelease" | "launchInstaller" | "isManaged" | "listSessions" | "now" | "probeVersion">;
   /**
    * The window: the built single-file app (`apps/hook/dist/inbox.html`, which
    * the binary embeds). Absent (a source run before `build:hook`, the server
@@ -298,37 +308,6 @@ export async function resolveInboxProjectRoot(path: string): Promise<{ root: str
   return { root, name };
 }
 
-/** The installed binary's version (`plannotator X` on stdout), or null. */
-async function probeBinaryVersion(binaryPath: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    let out = "";
-    let settled = false;
-    const finish = (value: string | null) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(value);
-    };
-    let child: ReturnType<typeof spawn>;
-    try {
-      child = spawn(binaryPath, ["--version"], { stdio: ["ignore", "pipe", "ignore"] });
-    } catch {
-      resolve(null);
-      return;
-    }
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      finish(null);
-    }, 5000);
-    child.stdout?.on("data", (chunk) => (out += chunk));
-    child.on("error", () => finish(null));
-    child.on("close", (code) => {
-      const match = /^plannotator\s+(\S+)/.exec(out.trim());
-      finish(code === 0 && match ? match[1]! : null);
-    });
-  });
-}
-
 function startOnLoopback(fetch: Parameters<typeof Bun.serve>[0]["fetch"], preferred: number | null): { server: ReturnType<typeof Bun.serve>; portChanged: boolean } {
   const serve = (port: number) =>
     Bun.serve({ hostname: LOOPBACK, port, idleTimeout: 0, maxRequestBodySize: INBOX_MAX_REQUEST_BYTES, fetch } as Parameters<typeof Bun.serve>[0]);
@@ -366,9 +345,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const previous = readInboxRegistry(dataDir);
   let port = 0;
   let baseUrl = "";
-  let update: InboxHealth["update"] = null;
   let portChanged = false;
   const statusListeners = new Set<() => void>();
+  const binaryPath = options.binaryPath !== undefined ? options.binaryPath : version !== "dev" ? process.execPath : null;
+  // The sidebar's Update button (packages/server/inbox-updates.ts): the daily
+  // release check, the binary on disk, Update now, Remind me tomorrow.
+  const updates = createInboxUpdates({
+    dataDir,
+    version,
+    binaryPath,
+    healthTickMs: options.healthTickMs ?? DEFAULT_HEALTH_TICK_MS,
+    ...options.updates,
+    onChange: () => {
+      for (const listener of statusListeners) listener();
+    },
+  });
 
   const projectLocks = new Map<string, Promise<InboxProject>>();
   const resolveProject = async (path: string): Promise<InboxProject> => {
@@ -397,7 +388,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES },
   );
 
-  const health = (): InboxHealth => ({ ok: true, app: INBOX_APP_ID, version, serverSession, pid: process.pid, update });
+  const health = (): InboxHealth => ({ ok: true, app: INBOX_APP_ID, version, serverSession, pid: process.pid, update: updates.current() });
 
   /** The sidebar's folders: every project, with its thread and unread counts. */
   const projectFolders = (rows: readonly InboxListRow[] = store.listRows()) => {
@@ -419,7 +410,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       serverSession,
       version,
       cursor: store.cursor(),
-      update,
+      update: updates.current(),
+      /** This Inbox started on a newer version than the last one: the sidebar's "What's new in X" link. */
+      updated: updates.updated(),
       notice: portChanged ? "The Inbox moved to a new port: allow notifications again on this page." : null,
       projects: projectFolders(rows),
       project: projectFilter,
@@ -495,6 +488,32 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return notificationsState();
   };
 
+  /** The two update switches (PLANNOTATOR_UPDATE_CHECK, PLANNOTATOR_AUTO_UPDATE): the effective value and whether the env decides. */
+  const updatesState = () => {
+    const config = loadConfig();
+    return {
+      update_check: { on: resolveUpdateCheck(config), env: parseUpdateCheckEnv() ?? null },
+      auto_update: { on: resolveAutoUpdate(config), env: parseAutoUpdateEnv() ?? null },
+    };
+  };
+
+  /** Save `update_check` / `auto_update` (booleans) into config.json. `validateOnly`: check and write nothing. */
+  const saveUpdateSwitches = (body: Record<string, unknown>, validateOnly = false) => {
+    const toSave: { updateCheck?: boolean; autoUpdate?: boolean } = {};
+    for (const [field, key] of [["update_check", "updateCheck"], ["auto_update", "autoUpdate"]] as const) {
+      if (body[field] === undefined) continue;
+      if (typeof body[field] !== "boolean") throw new InboxError("validation_error", `${field}: must be a boolean.`, { field });
+      toSave[key] = body[field] as boolean;
+    }
+    if (validateOnly || Object.keys(toSave).length === 0) return updatesState();
+    saveConfig(toSave);
+    const saved = loadConfig();
+    if ((toSave.updateCheck !== undefined && saved.updateCheck !== toSave.updateCheck) || (toSave.autoUpdate !== undefined && saved.autoUpdate !== toSave.autoUpdate)) {
+      throw new InboxError("config_not_saved", "config.json could not be written; nothing changed.");
+    }
+    return updatesState();
+  };
+
   /** What Settings and the connect snippets read. */
   const settingsModel = (via: RequestVia) => ({
     serverSession,
@@ -512,6 +531,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     data_dir: dataDir,
     inbox_tool: inboxToolState(),
     notifications: notificationsState(),
+    /** Settings → About: update notices and automatic updates. */
+    updates: updatesState(),
     store: store.diskUsage(),
     /** Whether this Inbox serves phones; the window shows the Phones block only then. */
     phones: phonesOn,
@@ -584,7 +605,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         send(`retry: 2000\nevent: hello\ndata: ${JSON.stringify({ serverSession, cursor: store.cursor() })}\n\n`);
         if (cursor !== null) for (const line of store.changesSince(cursor)) sendLine(line);
         const unsubscribe = store.subscribe(sendLine);
-        const onStatus = () => send(`event: status\ndata: ${JSON.stringify({ update })}\n\n`);
+        const onStatus = () => send(`event: status\ndata: ${JSON.stringify({ update: updates.current() })}\n\n`);
         statusListeners.add(onStatus);
         const heartbeat = setInterval(() => send(": ping\n\n"), SSE_HEARTBEAT_MS);
         cleanup = () => {
@@ -838,14 +859,52 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         return json({ ok: true, restarting: true });
       }
+      // The update control (packages/server/inbox-updates.ts). Updating changes
+      // this computer, so none of it answers a page that came through the tailnet.
+      if (path === "/api/inbox/update" || path.startsWith("/api/inbox/update/") || path === "/api/inbox/whats-new") {
+        if (via === "tailnet") return localOnly();
+        if (path === "/api/inbox/whats-new") {
+          if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+          const notes = updates.whatsNew(url.searchParams.get("version") ?? "");
+          return notes ? json(notes) : json({ error: "No release notes for that version.", code: "notes_not_found" }, 404);
+        }
+        if (path === "/api/inbox/update" && req.method === "GET") return json(updates.details());
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        if (path === "/api/inbox/update") {
+          const result = updates.updateNow();
+          if (result.outcome === "launched") return json({ ok: true, version: result.version, update: updates.current() });
+          const refused: Record<string, string> = {
+            locked: "An update is already running.",
+            unmanaged: "This copy of Plannotator was not installed by the install script, so it can't update itself.",
+            "dev-build": "This is a development build; there is nothing to update.",
+            "no-release": "No newer release is known yet.",
+            "up-to-date": "Plannotator is up to date.",
+            "launch-failed": "The install script could not be started; see update.log.",
+          };
+          return json({ error: refused[result.outcome] ?? "The update could not start.", code: `update_${result.outcome.replace(/-/g, "_")}`, update: updates.current() }, 409);
+        }
+        if (path === "/api/inbox/update/snooze") {
+          return updates.snooze() ? json({ ok: true, update: updates.current() }) : json({ error: "No update to put off.", code: "update_not_available" }, 409);
+        }
+        if (path === "/api/inbox/update/check") {
+          const checked = await updates.checkNow();
+          return json({ ...updates.details(), checked });
+        }
+        return json({ error: "Not found", code: "not_found" }, 404);
+      }
       if (path === "/api/inbox/settings") {
         if (req.method === "GET") return json(settingsModel(via));
         if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-        if (body.inbox_tool === undefined && body.notifications === undefined && body.tailscale === undefined) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications or tailscale is required.");
+        const updateSwitches = body.update_check !== undefined || body.auto_update !== undefined;
+        if (body.inbox_tool === undefined && body.notifications === undefined && body.tailscale === undefined && !updateSwitches) {
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, tailscale, update_check or auto_update is required.");
         }
+        // Updating changes this computer: never from a page that came through the tailnet.
+        if (updateSwitches && via === "tailnet") return localOnly();
         let tailscaleChange: { on: boolean; replaceExposed: boolean } | undefined;
         if (body.tailscale !== undefined) {
           const value = body.tailscale as { on?: unknown; replace_exposed?: unknown } | null;
@@ -868,10 +927,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // goes first, so a refusal never leaves the others half saved.
         if (body.notifications !== undefined) saveNotifications(body.notifications, true);
         if (body.inbox_tool !== undefined) saveInboxTool(body.inbox_tool, true);
+        if (updateSwitches) saveUpdateSwitches(body, true);
         const tailnet = tailscaleChange === undefined ? tailscale.state() : tailscale.set(tailscaleChange.on, { via, replaceExposed: tailscaleChange.replaceExposed });
         const notifications = body.notifications === undefined ? notificationsState() : saveNotifications(body.notifications);
         const inboxTool = body.inbox_tool === undefined ? inboxToolState() : saveInboxTool(body.inbox_tool);
-        return json({ inbox_tool: inboxTool, notifications, tailscale: tailnet });
+        const updateState = updateSwitches ? saveUpdateSwitches(body) : updatesState();
+        if (updateSwitches) updates.refresh();
+        return json({ inbox_tool: inboxTool, notifications, tailscale: tailnet, updates: updateState });
       }
 
       const threadMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)$/.exec(path);
@@ -1060,41 +1122,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     devices.startLan();
   }
 
-  const binaryPath = options.binaryPath !== undefined ? options.binaryPath : version !== "dev" ? process.execPath : null;
-  let tick: ReturnType<typeof setInterval> | null = null;
-  // Running the compiled binary costs ~0.2 s of CPU and a ~440 MB peak RSS
-  // (it parses the embedded apps), so it runs only when the file on disk
-  // changed since the last probe; an unchanged file keeps its last answer.
-  let probedSignature: string | null = null;
-  const checkUpdate = async () => {
-    if (!binaryPath) return;
-    let signature: string;
-    try {
-      const stat = statSync(binaryPath);
-      signature = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`;
-    } catch {
-      return;
-    }
-    if (signature === probedSignature) return;
-    probedSignature = signature;
-    const onDisk = await probeBinaryVersion(binaryPath);
-    if (onDisk === null) probedSignature = null;
-    const next = onDisk && onDisk !== version ? { available: true as const, version: onDisk } : null;
-    if (JSON.stringify(next) !== JSON.stringify(update)) {
-      update = next;
-      for (const listener of statusListeners) listener();
-    }
-  };
-  if (binaryPath) {
-    void checkUpdate();
-    tick = setInterval(() => void checkUpdate(), options.healthTickMs ?? DEFAULT_HEALTH_TICK_MS);
-  }
+  updates.start();
 
   let stopped = false;
   const stop = () => {
     if (stopped) return;
     stopped = true;
-    if (tick) clearInterval(tick);
+    updates.stop();
     void mcp.close().catch(() => {});
     server.stop(true);
     // The tailnet mapping and the door listener, the Wi-Fi listener and its

@@ -539,8 +539,30 @@ export interface InboxHealth {
   version: string;
   serverSession: string;
   pid: number;
-  /** Set when the binary on disk reports a different version: restart to update. */
-  update: { available: true; version: string } | null;
+  /**
+   * The sidebar's update button (packages/server/inbox-updates.ts), or null.
+   * `available` and `version` keep the older `{ available, version }` shape.
+   */
+  update: InboxUpdate | null;
+}
+
+/** The Inbox's update control: what the button says and does. */
+export interface InboxUpdate {
+  available: true;
+  /**
+   * `available`: a newer release exists, nothing installed yet. `updating`:
+   * the install script runs. `ready`: a different binary is on disk (restart
+   * to update). `failed`: an install the person started exited non-zero.
+   */
+  state: "available" | "updating" | "ready" | "failed";
+  /** The version the button names. */
+  version: string;
+  /** The version this Inbox runs. */
+  current: string;
+  /** `script`: Update now runs the install script. `copy`: the binary is not the script's; the dialog shows the command. */
+  action: "script" | "copy";
+  releaseUrl: string;
+  publishedAt?: string;
 }
 
 export function isInboxHealth(value: unknown): value is InboxHealth {

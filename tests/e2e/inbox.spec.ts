@@ -528,7 +528,7 @@ test('no page errors and no CSP refusals along the way', async () => {
   expect(world.errors).toEqual([]);
 });
 
-test('"A new version is ready, Restart" follows health, and Restart brings the new binary up', async () => {
+test('the Update button follows health ("ready"), and pressing it brings the new binary up', async () => {
   test.setTimeout(200_000);
   const { page } = world;
   const before = registry();
@@ -537,18 +537,19 @@ test('"A new version is ready, Restart" follows health, and Restart brings the n
   renameSync(world.binary, real);
   writeFileSync(world.binary, '#!/bin/sh\necho "plannotator 9.9.9"\n', { mode: 0o755 });
   // The health tick (60 s) stats the file, sees it changed, and asks it.
-  await expect(page.locator('.ib-restart')).toBeVisible({ timeout: 90_000 });
-  await expect(page.locator('.ib-restart')).toContainText('A new version is ready');
+  const button = page.locator('.ib-upd[data-update-state="ready"]');
+  await expect(button).toBeVisible({ timeout: 90_000 });
+  await expect(button.getByRole('button', { name: 'Update to Plannotator 9.9.9' })).toBeVisible();
   await shot('1.6-restart-to-update');
 
   // The real binary goes back on disk, then Restart starts it in this one's place.
   renameSync(real, world.binary);
-  await page.locator('.ib-restart').getByRole('button', { name: 'Restart' }).click();
+  await button.getByRole('button', { name: 'Update to Plannotator 9.9.9' }).click();
   await expect.poll(() => registry().serverSession, { timeout: 60_000 }).not.toBe(before.serverSession);
   const after = registry();
   expect(after.pid).not.toBe(before.pid);
   expect(after.port).toBe(before.port);
   // The page reloaded onto the new Inbox: the same store (the holding row, unfolded; named is Quiet now), the update line gone.
   await expect(page.locator(`[data-thread-id="${world.threads.holding}"]`)).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator('.ib-restart')).toHaveCount(0);
+  await expect(page.locator('.ib-upd')).toHaveCount(0);
 });

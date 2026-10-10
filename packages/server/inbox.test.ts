@@ -247,7 +247,7 @@ describe("startup, registry and health", () => {
       update = (await health()).update;
       await Bun.sleep(50);
     }
-    expect(update).toEqual({ available: true, version: "1.1.0" });
+    expect(update).toMatchObject({ available: true, state: "ready", version: "1.1.0" });
   });
 });
 

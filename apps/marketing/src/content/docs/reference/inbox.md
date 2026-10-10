@@ -216,9 +216,15 @@ The Pi or OpenCode connection could not find a `plannotator` binary to start a s
 
 The Inbox moved to another port, because the old one was taken when it restarted, and browsers grant notifications per address. The Inbox shows "The Inbox moved to a new address. Allow notifications again." once. Turn them on again there or in **Settings**.
 
-### "A new version is ready"
+### Update
 
-The `plannotator` binary on disk was updated while the Inbox kept running. Click **Restart** in the sidebar: the Inbox restarts on the new binary, and the page reloads.
+When a newer Plannotator release is out, the sidebar shows an **Update** button above **Settings**. The machine checks GitHub once a day (never your browser); turn this off in **Settings → About** ("Tell me when a new version is out"), with `{ "updateCheck": false }` in `~/.plannotator/config.json`, or `PLANNOTATOR_UPDATE_CHECK=0`.
+
+Click **Update** to see what's new and what will happen, then **Update now**: the install script runs for that version with the choices from your last install, the button reads **Updating…**, and when the new binary is in, the Inbox restarts on it and the page reloads. Open reviews keep running on the old version until you finish them. **Remind me tomorrow** hides the button for that version for a day. Tick **Install new versions automatically** to let Plannotator do this by itself from then on.
+
+If the binary was already updated (by auto-update, `plannotator update`, or the install script), the button restarts the Inbox at once; if you are typing a reply, it asks first. If an update you started fails, the button reads **Update failed** and shows the exit code and the log. After an update, **What's new in X** sits above Settings for that run.
+
+A copy of Plannotator that the install script did not install cannot update itself: the dialog shows the command to run instead.
 
 ### The Inbox does not start
 

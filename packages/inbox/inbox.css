@@ -100,9 +100,62 @@
 .ib-proj.ib-on { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); font-weight: 550; }
 .ib-side-empty { font-size: 13px; color: var(--muted-foreground); padding: 2px 9px; line-height: 1.5; }
 .ib-side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
-.ib-restart { display: flex; align-items: center; gap: 8px; margin: 0 2px 2px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); font-size: 13px; background: var(--card); }
-.ib-restart .ib-ic { color: var(--primary); }
-.ib-restart b { font-weight: 550; color: var(--primary); margin-left: auto; }
+/* The update control (.product/approved/plannotator-updates): one full-width filled primary button above
+   Settings, 32 px, no motion, never a percentage, never the error colour. */
+.ib-upd { position: relative; margin: 0 2px 2px; }
+.pn-inbox .ib-upd-btn { width: 100%; height: 32px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-size: 13px; font-weight: 550; background: var(--primary); color: var(--primary-foreground); border: 1px solid var(--primary); }
+.pn-inbox .ib-upd-btn:hover:not(:disabled) { background: color-mix(in oklch, var(--primary) 88%, var(--foreground)); }
+.pn-inbox .ib-upd-btn:disabled { opacity: 0.55; cursor: default; }
+.pn-inbox .ib-upd-btn.ib-outline { background: transparent; color: var(--foreground); border-color: color-mix(in oklch, var(--foreground) 35%, transparent); }
+.pn-inbox .ib-upd-btn.ib-outline:hover { background: color-mix(in oklch, var(--muted) 55%, transparent); }
+.ib-upd-tip { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); white-space: nowrap; padding: 5px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--popover); color: var(--popover-foreground, var(--foreground)); font-size: 12.5px; opacity: 0; pointer-events: none; z-index: 5; }
+.ib-upd:hover .ib-upd-tip, .ib-upd:focus-within .ib-upd-tip { opacity: 1; }
+.ib-spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: ib-spin 0.9s linear infinite; }
+@keyframes ib-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ib-spin { animation: none; border-right-color: currentColor; opacity: 0.6; } }
+.ib-nav.ib-quiet { color: var(--muted-foreground); }
+
+/* The update dialogs: native <dialog> (focus stays inside, Escape closes). */
+.pn-inbox .ib-dlg, dialog.ib-dlg { position: fixed; inset: 0; margin: auto; height: fit-content; width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); color: var(--foreground); box-shadow: 0 24px 60px -20px oklch(0 0 0 / 0.55); overflow-y: auto; }
+dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
+.ib-dlg-in { padding: 20px 22px 18px; font-size: 13.5px; }
+.ib-dlg h2 { margin: 0; font-size: 16px; font-weight: 650; }
+.ib-dlg .ib-sub { color: var(--muted-foreground); font-size: 13px; margin: 3px 0 0; }
+.ib-dlg .ib-sum, .ib-wn .ib-sum { margin: 14px 0 4px; font-size: 13.5px; line-height: 1.55; }
+.ib-dlg .ib-quietline { color: var(--muted-foreground); font-size: 12.5px; margin-top: 12px; }
+.pn-inbox .ib-lnk, .ib-dlg .ib-lnk { color: var(--primary); font-size: 13px; font-weight: 550; display: inline-flex; align-items: center; gap: 5px; margin-top: 4px; background: none; border: 0; padding: 0; cursor: pointer; }
+.ib-dlg .ib-lnk:hover { text-decoration: underline; }
+.ib-dlg h3 { font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted-foreground); margin: 18px 0 8px; }
+.ib-what { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; font-size: 13px; line-height: 1.5; }
+.ib-what > li { display: grid; grid-template-columns: 16px 1fr; gap: 9px; }
+.ib-what svg.ib-ic { width: 16px; height: 16px; margin-top: 2px; color: var(--muted-foreground); }
+.ib-sess { margin: 5px 0 0; padding: 0 0 0 2px; list-style: none; color: var(--muted-foreground); font-size: 12.5px; }
+.ib-sess li::before { content: "· "; }
+.ib-dlg code, .ib-wn code { font-family: var(--font-mono); font-size: 12px; }
+.ib-dlg .ib-quietline code { white-space: nowrap; }
+.ib-cmd { display: flex; align-items: center; gap: 8px; margin-top: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); padding: 6px 6px 6px 10px; }
+.ib-cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; }
+.ib-opt { display: flex; gap: 9px; align-items: flex-start; margin-top: 16px; font-size: 13px; cursor: pointer; }
+.ib-opt input { margin: 2px 0 0; accent-color: var(--primary); }
+.ib-opt small { display: block; color: var(--muted-foreground); font-size: 12px; }
+.ib-acts-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; flex-wrap: wrap; }
+.ib-acts-row .ib-left { margin-right: auto; }
+
+/* What's new: the release notes in the main pane, read-only. */
+.ib-wn { flex: 1; min-width: 0; overflow-y: auto; padding: 4px 40px 48px; outline: none; }
+.ib-wn-in { max-width: 760px; margin: 0 auto; }
+.ib-wn-head { display: flex; align-items: flex-start; gap: 12px; padding: 22px 0 18px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+.ib-wn-head h1 { margin: 0 0 4px; font-size: 22px; font-weight: 650; letter-spacing: -0.01em; }
+.ib-wn-head .ib-meta { color: var(--muted-foreground); font-size: 13px; }
+.ib-wn-head .ib-acts { margin-left: auto; display: flex; gap: 8px; flex: none; }
+.ib-wn-skipped { margin: 14px 0 6px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
+.ib-wn-skipped h2 { font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted-foreground); margin: 0 0 6px; }
+.ib-wn-skipped ul { margin: 0; padding-left: 18px; font-size: 13.5px; line-height: 1.6; }
+@media (max-width: 720px) {
+  .ib-wn { padding: 4px 18px 40px; }
+  .ib-wn-head { flex-wrap: wrap; }
+  .ib-wn-head .ib-acts { margin-left: 0; }
+}
 
 /* main list */
 .ib-main { background: var(--card); display: flex; flex: 1; min-width: 0; height: 100%; }

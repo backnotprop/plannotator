@@ -1,10 +1,12 @@
+import type { InboxHealth } from '@plannotator/core/inbox-types';
 import type { ProjectFolder } from '../api';
 import { Icon } from '../icons';
 import { useSidebar } from '../shell/sidebar';
 import { TaterMark } from './TaterMark';
+import { UpdateButton } from './Updates';
 
 export interface SidebarProps {
-  page: 'inbox' | 'settings' | 'decisions';
+  page: 'inbox' | 'settings' | 'decisions' | 'whats-new';
   projectId: string | null;
   /** Rows waiting on the person, all projects. */
   inboxCount: number;
@@ -13,14 +15,17 @@ export interface SidebarProps {
   projects: readonly ProjectFolder[];
   /** Rows waiting on the person, per project id. */
   projectCounts: ReadonlyMap<string, number>;
-  /** A newer binary is on disk: "A new version is ready, Restart". */
-  updateReady: boolean;
+  /** The update control's model (packages/server/inbox-updates.ts): the Update button above Settings. */
+  update: InboxHealth['update'];
   restarting: boolean;
+  /** This run started on a newer version: "What's new in X" above Settings. */
+  updated: string | null;
   onInbox: () => void;
   onProject: (projectId: string) => void;
   onSettings: () => void;
   onDecisions: () => void;
-  onRestart: () => void;
+  onUpdate: () => void;
+  onWhatsNew: (version: string) => void;
 }
 
 /**
@@ -88,17 +93,13 @@ export function Sidebar(props: SidebarProps) {
         )}
       </div>
       <div className="ib-side-foot">
-        {props.updateReady && (
-          <div className="ib-restart" role="status">
-            <Icon name="restart" size={15} />
-            A new version is ready
-            <b>
-              <button type="button" onClick={props.onRestart} disabled={props.restarting}>
-                {props.restarting ? 'Restarting' : 'Restart'}
-              </button>
-            </b>
-          </div>
-        )}
+        <UpdateButton
+          update={props.update}
+          restarting={props.restarting}
+          updated={props.updated}
+          onPress={pick(props.onUpdate)}
+          onWhatsNew={(version) => pick(() => props.onWhatsNew(version))()}
+        />
         <button
           type="button"
           className={`ib-nav${props.page === 'settings' ? ' ib-on' : ''}`}

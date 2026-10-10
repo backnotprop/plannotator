@@ -84,6 +84,8 @@ export function worldEnv(w: InboxWorld): Record<string, string> {
     PLANNOTATOR_BIN: "",
     // Never the hosted relay (tests/setup/feedback-archive-off.ts says why).
     PLANNOTATOR_RELAY_URL: process.env.PLANNOTATOR_RELAY_URL || "http://127.0.0.1:9",
+    // Never GitHub: a release build's daily update check refuses at once.
+    PLANNOTATOR_UPDATE_API_URL: process.env.PLANNOTATOR_UPDATE_API_URL || "http://127.0.0.1:9/releases/latest",
     // Phones are hidden until the iPhone app ships; only the phone proofs turn them on.
     PLANNOTATOR_INBOX_PHONES: w.phones ? "1" : "0",
     TMPDIR: tmpdir(),

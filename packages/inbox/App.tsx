@@ -24,6 +24,8 @@ import {
   type DecisionsModel,
   type ListModel,
   type SettingsModel,
+  type UpdateDetails,
+  type WhatsNewModel,
 } from './api';
 import { filterSections, heldNotice, refreshHeldRows, waitingCount } from './held';
 import { tildePath } from './format';
@@ -39,6 +41,8 @@ import { NotificationAsk } from './components/NotificationAsk';
 import { useInboxNotifications } from './notify';
 import { DecisionsPage } from './components/Decisions';
 import { GuidePane } from './components/GuidePane';
+import { AboutBlock, FailedDialog, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
+import { unsentReply } from './unsent';
 
 // The Inbox has no /api/config and no browser-agent tools: settings stay in
 // the page's own cookies, and WebMCP is off.
@@ -62,7 +66,9 @@ configurePlannotatorUI({
 const SIDEBAR_OPEN_COOKIE = 'plannotator-inbox-sidebar-open';
 
 interface Route {
-  page: 'inbox' | 'settings' | 'decisions';
+  page: 'inbox' | 'settings' | 'decisions' | 'whats-new';
+  /** The release whose notes the What's new page shows (`#whats-new=0.28.12`). */
+  version?: string | null;
   project: string | null;
   thread: string | null;
   /** The decision open beside the Decisions list. */
@@ -77,6 +83,7 @@ function readRoute(): Route {
   const hash = window.location.hash.replace(/^#/, '');
   if (hash === 'settings') return { page: 'settings', project: null, thread: null };
   const params = new URLSearchParams(hash);
+  if (params.has('whats-new')) return { page: 'whats-new', project: null, thread: null, version: params.get('whats-new') };
   if (params.has('decisions')) {
     return { page: 'decisions', project: params.get('decisions') || null, thread: null, decision: params.get('decision') };
   }
@@ -94,6 +101,7 @@ function readRoute(): Route {
 function writeRoute(route: Route): void {
   let hash = '';
   if (route.page === 'settings') hash = 'settings';
+  else if (route.page === 'whats-new') hash = new URLSearchParams({ 'whats-new': route.version ?? '' }).toString();
   else if (route.page === 'decisions') {
     const params = new URLSearchParams();
     params.set('decisions', route.project ?? '');
@@ -146,6 +154,18 @@ function Inbox() {
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [update, setUpdate] = useState<InboxHealth['update']>(null);
   const [restarting, setRestarting] = useState(false);
+  /** This run started on a newer version: the sidebar's "What's new in X" link. */
+  const [updated, setUpdated] = useState<string | null>(null);
+  /** The update control's dialogs and what they read (GET /api/inbox/update). */
+  const [updateDialog, setUpdateDialog] = useState<null | 'update' | 'restart' | 'failed'>(null);
+  const [updateDetails, setUpdateDetails] = useState<UpdateDetails | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [checking, setChecking] = useState(false);
+  /** The person pressed Update now in this tab: once the new binary is in, the Inbox restarts itself. */
+  const restartWhenReady = useRef(false);
+  const [whatsNew, setWhatsNew] = useState<WhatsNewModel | null>(null);
+  const [whatsNewError, setWhatsNewError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const routeRef = useRef(route);
   routeRef.current = route;
@@ -182,6 +202,7 @@ function Inbox() {
       setPageSession(next.serverSession);
       setLatest(next);
       setUpdate(next.update);
+      setUpdated(next.updated ?? null);
       // Held: the order waits for an action, but each row's own state (a delivery, an agent's read) follows at once.
       setShown((current) => (adopt || current === null || !hasRows(current) ? next.sections : refreshHeldRows(current, next.sections)));
       setLoadError(null);
@@ -231,6 +252,16 @@ function Inbox() {
       setSettings(await inboxApi.settings());
     } catch (cause) {
       setSettingsError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, []);
+
+  const loadUpdateDetails = useCallback(async () => {
+    try {
+      const next = await inboxApi.updateDetails();
+      setUpdateDetails(next);
+      return next;
+    } catch {
+      return null;
     }
   }, []);
 
@@ -284,8 +315,11 @@ function Inbox() {
   }, [route.thread, refreshThread, refreshList]);
 
   useEffect(() => {
-    if (route.page === 'settings') void refreshSettings();
-  }, [route.page, refreshSettings]);
+    if (route.page === 'settings') {
+      void refreshSettings();
+      void loadUpdateDetails();
+    }
+  }, [route.page, refreshSettings, loadUpdateDetails]);
 
   const decisionsProject = route.page === 'decisions' ? decisionsProjectOf(route, latest) : null;
   useEffect(() => {
@@ -351,6 +385,114 @@ function Inbox() {
     }
     setRestarting(false);
   };
+
+  /** Restart onto the binary on disk, after saying what an unsent reply would lose. */
+  const requestRestart = () => {
+    if (unsentReply()) setUpdateDialog('restart');
+    else void restart();
+  };
+
+  /** The sidebar button (and What's new's Update): what a press does depends on the state. */
+  const pressUpdate = () => {
+    if (!update || restarting) return;
+    setUpdateError(null);
+    if (update.state === 'ready') requestRestart();
+    else if (update.state === 'available') {
+      setUpdateDialog('update');
+      void loadUpdateDetails();
+    } else if (update.state === 'failed') {
+      setUpdateDialog('failed');
+      void loadUpdateDetails();
+    }
+  };
+
+  /** Update now: the install script runs on the server; the button shows Updating… until the binary is in. */
+  const updateNow = async () => {
+    setUpdateBusy(true);
+    setUpdateError(null);
+    try {
+      const result = await inboxApi.updateNow();
+      restartWhenReady.current = true;
+      setUpdate(result.update);
+      setUpdateDialog(null);
+    } catch (cause) {
+      setUpdateError(cause instanceof Error ? cause.message : 'The update could not start.');
+    } finally {
+      setUpdateBusy(false);
+    }
+  };
+
+  // The update the person started is in: restart onto it (asking first when a reply would be lost).
+  useEffect(() => {
+    if (update?.state !== 'ready' || !restartWhenReady.current) return;
+    restartWhenReady.current = false;
+    if (unsentReply()) setUpdateDialog('restart');
+    else void restart();
+    // restart() reads only refs and setters it closes over each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [update?.state]);
+
+  const remindTomorrow = async () => {
+    try {
+      const result = await inboxApi.snoozeUpdate();
+      setUpdate(result.update);
+    } catch {
+      // Nothing changes; the button stays.
+    }
+    setUpdateDialog(null);
+  };
+
+  const saveUpdateSwitches = async (change: { update_check?: boolean; auto_update?: boolean }) => {
+    setSettingsError(null);
+    setUpdateError(null);
+    try {
+      const saved = await inboxApi.saveUpdateSwitches(change);
+      setSettings((current) => (current ? { ...current, updates: saved.updates } : current));
+      setUpdateDetails((current) =>
+        current ? { ...current, auto_update: { ...current.auto_update, on: saved.updates.auto_update.on }, check: { ...current.check, on: saved.updates.update_check.on } } : current,
+      );
+      void refreshList(false);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'The setting was not saved.';
+      setSettingsError(message);
+      setUpdateError(message);
+    }
+  };
+
+  const checkNow = async () => {
+    setChecking(true);
+    setSettingsError(null);
+    try {
+      const result = await inboxApi.checkForUpdate();
+      setUpdateDetails(result);
+      setUpdate(result.update);
+      if (!result.checked.ok) setSettingsError(`Could not reach GitHub: ${result.checked.error ?? 'the check failed'}.`);
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The check failed.');
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const openWhatsNew = (version: string) => {
+    setUpdateDialog(null);
+    go({ page: 'whats-new', project: null, thread: null, version });
+  };
+
+  const whatsNewVersion = route.page === 'whats-new' ? (route.version ?? null) : null;
+  useEffect(() => {
+    if (!whatsNewVersion) return;
+    let cancelled = false;
+    setWhatsNew(null);
+    setWhatsNewError(null);
+    inboxApi
+      .whatsNew(whatsNewVersion)
+      .then((model) => !cancelled && setWhatsNew(model))
+      .catch((cause) => !cancelled && setWhatsNewError(cause instanceof Error ? cause.message : String(cause)));
+    return () => {
+      cancelled = true;
+    };
+  }, [whatsNewVersion]);
 
   const toggleTool = async (host: AgentToolHost, next: boolean) => {
     setSettingsError(null);
@@ -448,6 +590,27 @@ function Inbox() {
         onToggleNotifications={(next) => void notifications.setEnabled(next)}
         onDeleteThread={deleteThread}
         onDeleteProject={deleteProject}
+        about={
+          <AboutBlock
+            version={latest?.version ?? settings?.version ?? 'dev'}
+            details={updateDetails}
+            switches={settings?.updates}
+            checking={checking}
+            error={null}
+            onCheckNow={() => void checkNow()}
+            onToggle={(change) => void saveUpdateSwitches(change)}
+          />
+        }
+      />
+    );
+  } else if (route.page === 'whats-new') {
+    main = (
+      <WhatsNewPage
+        model={whatsNew}
+        error={whatsNewError}
+        update={update}
+        onBack={() => go({ page: 'inbox', project: null, thread: null })}
+        onUpdate={pressUpdate}
       />
     );
   } else if (route.page === 'decisions' && decisionsFolder) {
@@ -521,18 +684,53 @@ function Inbox() {
             decisionsCount={latest?.decisions_waiting ?? 0}
             projects={projects}
             projectCounts={projectCounts}
-            updateReady={update !== null}
+            update={update}
             restarting={restarting}
+            updated={updated}
             onInbox={() => go({ page: 'inbox', project: null, thread: null })}
             onProject={(projectId) => go({ page: 'inbox', project: projectId, thread: null })}
             onSettings={() => go({ page: 'settings', project: null, thread: null })}
             onDecisions={() => go({ page: 'decisions', project: null, thread: null })}
-            onRestart={() => void restart()}
+            onUpdate={pressUpdate}
+            onWhatsNew={openWhatsNew}
           />
         }
       >
         <main className="ib-main">{main}</main>
       </SidebarShell>
+      {updateDialog === 'update' && update && (
+        <UpdateDialog
+          details={updateDetails}
+          update={update}
+          error={updateError}
+          busy={updateBusy}
+          onUpdateNow={() => void updateNow()}
+          onRemindTomorrow={() => void remindTomorrow()}
+          onCancel={() => setUpdateDialog(null)}
+          onWhatsNew={() => openWhatsNew(update.version)}
+          onAutoUpdate={(next) => void saveUpdateSwitches({ auto_update: next })}
+        />
+      )}
+      {updateDialog === 'restart' && update && (
+        <RestartDialog
+          update={update}
+          subject={unsentReply()?.subject ?? 'this thread'}
+          onRestart={() => {
+            setUpdateDialog(null);
+            void restart();
+          }}
+          onCancel={() => setUpdateDialog(null)}
+        />
+      )}
+      {updateDialog === 'failed' && update && (
+        <FailedDialog
+          update={update}
+          details={updateDetails}
+          home={settings?.home ?? null}
+          onRetry={() => void updateNow()}
+          onClose={() => setUpdateDialog(null)}
+        />
+      )}
       {guideMessage && thread && (
         <GuidePane
           thread={thread}

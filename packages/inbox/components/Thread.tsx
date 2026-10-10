@@ -17,6 +17,7 @@ import { AuthorMark, DecisionDiamond, Icon } from '../icons';
 import { DecisionCard } from './DecisionCard';
 import { GuideCard } from './GuideCard';
 import { inboxMessageImageBase } from '../images';
+import { reportUnsentReply } from '../unsent';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
 
 const noop = () => {};
@@ -310,6 +311,14 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   useEffect(() => {
     if (box.open) textRef.current?.focus();
   }, [box.open]);
+
+  // The update control's restart guard: an unsent reply is the one thing a
+  // restart (a page reload) would lose.
+  const unsentSubject = box.open && box.text.trim() ? (thread.subject ?? 'this thread') : null;
+  useEffect(() => {
+    reportUnsentReply(unsentSubject ? { subject: unsentSubject } : null);
+    return () => reportUnsentReply(null);
+  }, [unsentSubject]);
 
   const questionById = (id: string): InboxQuestion | undefined => {
     for (const message of threadRef.current.messages) {

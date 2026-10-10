@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { AgentToolHost, SettingsModel, TailscaleSettings } from '../api';
 import { formatBytes, plural, tildePath } from '../format';
 import { HARNESSES, type ConnectContext } from '../harnesses';
@@ -29,6 +29,8 @@ export interface SettingsPageProps {
   /** Delete a thread or a project with its files as they were sent (blobs no other thread uses). */
   onDeleteThread: (threadId: string) => Promise<void>;
   onDeleteProject: (projectId: string) => Promise<void>;
+  /** Settings → About: the version, Check now and the two update switches (components/Updates.tsx). */
+  about?: ReactNode;
 }
 
 const PERMISSION_LABEL: Record<NotificationPermission | 'unsupported', string> = {
@@ -276,6 +278,7 @@ export function SettingsPage({
   onToggleNotifications,
   onDeleteThread,
   onDeleteProject,
+  about,
 }: SettingsPageProps) {
   const env = settings?.inbox_tool.env ?? null;
   return (
@@ -331,6 +334,7 @@ export function SettingsPage({
           <TailscaleBlock state={settings.tailscale} via={settings.via ?? 'local'} busy={tailscaleBusy} onToggle={onToggleTailscale} />
         )}
         {settings?.phones && <PhonesBlock />}
+        {about}
         {settings && (
           <div className="ib-sblock">
             <h2>Stored on this machine</h2>

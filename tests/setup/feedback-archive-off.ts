@@ -38,3 +38,10 @@ process.env.PLANNOTATOR_RELAY_URL = "http://127.0.0.1:9";
 // who set it in their shell must not make every Inbox test run the real
 // `tailscale` CLI. Tests that need it inject a scripted runner.
 delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
+
+// The update check asks GitHub once a day from a release build (the Inbox with
+// an X.Y.Z version, the compiled CLI). Tests never reach GitHub: a closed
+// loopback port refuses at once, so an unintended check fails fast and is
+// cached as a failure. Tests that need an answer inject `fetchRelease` or
+// serve a fake API and set this in their own bodies or spawned env.
+process.env.PLANNOTATOR_UPDATE_API_URL = "http://127.0.0.1:9/releases/latest";
