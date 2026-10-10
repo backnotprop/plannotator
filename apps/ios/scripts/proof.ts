@@ -584,6 +584,21 @@ run('xcrun', ['simctl', 'ui', udid, 'appearance', 'light']);
 
 let video: ChildProcess | null = null;
 
+/**
+ * Ends the recording, if one is running. A class that failed before its own
+ * stop leaves one running; simctl then cannot start the next class's, which
+ * exits at once, and waiting on an exit that already happened hung /video/stop
+ * past the test's request timeout (runs 37973911538 and 38010716662).
+ */
+async function stopVideo(): Promise<void> {
+  const recorder = video;
+  video = null;
+  if (!recorder || recorder.exitCode !== null || recorder.signalCode !== null) return;
+  const exited = new Promise((r) => recorder.once('exit', r));
+  recorder.kill('SIGINT');
+  await exited;
+}
+
 async function shot(name: string): Promise<void> {
   run('xcrun', ['simctl', 'io', udid, 'screenshot', join(shots, `${name}-light.png`)]);
   run('xcrun', ['simctl', 'ui', udid, 'appearance', 'dark']);
@@ -733,13 +748,12 @@ const control = Bun.serve({
           await shot(body.name ?? 'shot');
           return Response.json({ ok: true });
         case '/video/start':
+          await stopVideo();
           video = spawn('xcrun', ['simctl', 'io', udid, 'recordVideo', '--codec', 'h264', '--force', join(shots, `${body.name ?? 'flow'}.mp4`)], { stdio: 'ignore' });
           await sleep(1500);
           return Response.json({ ok: true });
         case '/video/stop':
-          video?.kill('SIGINT');
-          await new Promise((r) => (video ? video.once('exit', r) : r(null)));
-          video = null;
+          await stopVideo();
           return Response.json({ ok: true });
         // ── M5: the relay and the pushes ──
         case '/relay':
@@ -968,7 +982,7 @@ try {
   }
   if (status === 0) status = await xcodebuild(['test-without-building', ...(only ? only.split(',').map((test) => `-only-testing:${test}`) : [`-skip-testing:${warmUp}`]), '-resultBundlePath', join(tmp, 'Proof.xcresult')]);
 } finally {
-  video?.kill('SIGINT');
+  await stopVideo();
   await m3Close();
   control.stop(true);
   proxy.stop(true);

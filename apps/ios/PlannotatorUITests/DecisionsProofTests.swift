@@ -4,22 +4,11 @@ import XCTest
 /// the decision switch and its sheet (5.1), the Decisions tab (5.2), and New
 /// message (8.1 to 8.3) to live Claude Code sessions, which are the Claude
 /// Code mod's own code polling the Inbox from their projects. Without the
-/// script the test is skipped. It leaves the app as a fresh install finds it
-/// and deletes its threads on the computer, so the M1 flow after it starts clean.
+/// script the test is skipped. It starts from a cold install (ProofCase), and
+/// leaves the app as a fresh install finds it and deletes its threads on the
+/// computer.
 @MainActor
-final class DecisionsProofTests: XCTestCase {
-    private var app: XCUIApplication!
-    private var control: Control!
-
-    override func setUp() async throws {
-        continueAfterFailure = false
-        guard let base = ProcessInfo.processInfo.environment["PROOF_CONTROL"], let url = URL(string: base) else {
-            throw XCTSkip("Run through apps/ios/scripts/proof.ts, which starts the Inbox this test talks to.")
-        }
-        control = Control(base: url)
-        app = XCUIApplication()
-    }
-
+final class DecisionsProofTests: ProofCase {
     func testDecisionsAndNewMessage() async throws {
         app.launch()
         let seeded = try await control.post("/m3-seed")
@@ -59,7 +48,7 @@ final class DecisionsProofTests: XCTestCase {
         XCTAssertEqual(statement.value as? String, "Retry with the same idempotency key.")
         XCTAssertEqual(element("decision-reason").value as? String, "Asked by Claude Code: Which way should the worker go on a Stripe 409?")
         element("decision-cancel").tap()
-        XCTAssertFalse(statement.waitForExistence(timeout: 2))
+        XCTAssertTrue(statement.waitForNonExistence(timeout: 30), "Cancel closes the sheet")
         XCTAssertFalse(isOn(row), "Cancel keeps the switch off")
 
         // On again; Done keeps the words and turns recording on.
@@ -70,6 +59,8 @@ final class DecisionsProofTests: XCTestCase {
         try await control.shot("ax-5.1")
         try await control.post("/text-size", ["size": "large"])
         element("decision-done").tap()
+        // The sheet is gone before Back: while it slides away its Cancel is the first bar button.
+        XCTAssertTrue(statement.waitForNonExistence(timeout: 30), "Done closes the sheet")
         XCTAssertTrue(waitForLabel(row, "Answering this records a decision"))
         XCTAssertTrue(isOn(row))
         back()
@@ -129,7 +120,7 @@ final class DecisionsProofTests: XCTestCase {
         words.typeText("Before you merge, write the header row first so an empty ledger still exports a valid CSV.")
         try await control.shot("8.2")
         element("new-message-send").tap()
-        XCTAssertFalse(words.waitForExistence(timeout: 3) && words.exists, "the sheet closes once delivered")
+        XCTAssertTrue(words.waitForNonExistence(timeout: 30), "the sheet closes once delivered")
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'write the header row first'")).firstMatch.waitForExistence(timeout: 30))
 
         // The live session takes it as a turn and answers in the same thread.
@@ -169,6 +160,7 @@ final class DecisionsProofTests: XCTestCase {
         XCTAssertTrue(words.waitForExistence(timeout: 30))
         words.typeText("Add a header row to the CSV export too.")
         element("new-message-send").tap()
+        XCTAssertTrue(words.waitForNonExistence(timeout: 30), "the sheet closes once delivered")
         let picked = try await control.post("/m3-turn", ["who": "ledger-other"])
         XCTAssertEqual(picked["submits"] as? [String: Int], ["gateway": 1, "ledger-writer": 0, "ledger-other": 1], "only the picked session: \(picked)")
         back()
@@ -224,70 +216,11 @@ final class DecisionsProofTests: XCTestCase {
         try await control.post("/m3-dark", ["on": "false", "snap": name])
     }
 
-    private func pairByCode() async throws {
-        XCTAssertTrue(element("connect-computer").waitForExistence(timeout: ProofWait.opening))
-        element("connect-computer").tap()
-        XCTAssertTrue(element("find-nearby").waitForExistence(timeout: ProofWait.opening))
-        element("find-nearby").tap()
-        let offer = try await control.post("/offer")
-        let field = element("address-field")
-        XCTAssertTrue(field.waitForExistence(timeout: ProofWait.opening))
-        field.tap()
-        field.typeText(try XCTUnwrap(offer["address"] as? String))
-        element("address-next").tap()
-        let code = element("pairing-code")
-        XCTAssertTrue(code.waitForExistence(timeout: ProofWait.opening))
-        code.tap()
-        code.typeText(try XCTUnwrap(offer["code"] as? String))
-        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'row-'")).firstMatch.waitForExistence(timeout: ProofWait.opening))
-    }
-
-    private func element(_ id: String) -> XCUIElement {
-        app.descendants(matching: .any).matching(identifier: id).firstMatch
-    }
-
     private func isOn(_ row: XCUIElement) -> Bool {
         (row.switches.firstMatch.value as? String ?? row.value as? String) == "1"
     }
 
     private func sentLine() -> XCUIElement {
         app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Sent '")).firstMatch
-    }
-
-    private func back() {
-        app.navigationBars.buttons.element(boundBy: 0).tap()
-    }
-
-    private func openRow(_ thread: String) async throws {
-        let row = element("row-\(thread)")
-        app.swipeDown()
-        app.swipeDown()
-        var tries = 0
-        while !(row.exists && row.isHittable), tries < 8 {
-            app.swipeUp(velocity: .slow)
-            tries += 1
-        }
-        XCTAssertTrue(row.exists, "row \(thread)")
-        row.tap()
-    }
-
-    private func tab(_ name: String) {
-        let button = app.tabBars.buttons[name]
-        var tries = 0
-        while !button.exists, tries < 4 {
-            app.swipeDown(velocity: .fast)
-            tries += 1
-        }
-        button.tap()
-    }
-
-    private func questionKeys() -> [String] {
-        app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'question-'")).allElementsBoundByIndex
-            .map { String($0.identifier.dropFirst("question-".count)) }
-    }
-
-    private func waitForLabel(_ target: XCUIElement, _ text: String) -> Bool {
-        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", text), object: target)
-        return XCTWaiter().wait(for: [expectation], timeout: 30) == .completed
     }
 }
