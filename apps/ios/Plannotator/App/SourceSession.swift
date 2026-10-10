@@ -64,6 +64,11 @@ final class SourceSession {
     private var stream: Task<Void, Never>?
     private var pendingRefresh: Task<Void, Never>?
     private var pickChains: [String: Task<Void, Never>] = [:]
+    /// Counts thread reads as they start and this phone's changes to a thread's
+    /// questions (a pick drawn, the Inbox's answer to a pick or a Send), so a
+    /// read that started before a change cannot draw the thread as it was.
+    private var threadClock = 0
+    private var questionsChanged: [String: Int] = [:]
     private var tickChains: [String: Task<Void, Never>] = [:]
     /// Per guide while taps are in flight: how many, and the ticks the Inbox last confirmed.
     private var ticksInFlight: [String: Int] = [:]
@@ -535,8 +540,17 @@ final class SourceSession {
             if threads[id] == nil { threadProblems[id] = .unreachable }
             return false
         }
+        threadClock += 1
+        let started = threadClock
         do {
             let answer = try await client.thread(id)
+            // Read before this phone changed the thread's questions: on a slow path its answer
+            // can land after the pick's own, and would take the pick off the screen (the Send
+            // then had nothing to send). The read after the change brings both.
+            guard questionsChanged[id, default: 0] < started else {
+                threadProblems[id] = nil
+                return true
+            }
             threads[id] = answer.thread
             threadProblems[id] = nil
             cache.write(answer.thread, "thread-\(id)")
@@ -929,6 +943,7 @@ final class SourceSession {
               let q = thread.messages[m].questions?.firstIndex(where: { $0.key == question.key }) else { return }
         change(&thread.messages[m].questions![q])
         threads[id] = thread
+        changedQuestions(thread: id)
     }
 
     private func editMessage(_ message: String, thread id: String, _ change: (inout InboxMessage) -> Void) {
@@ -945,6 +960,12 @@ final class SourceSession {
         }
         thread.messages[m].questions = current
         threads[id] = thread
+        changedQuestions(thread: id)
+    }
+
+    private func changedQuestions(thread id: String) {
+        threadClock += 1
+        questionsChanged[id] = threadClock
     }
 }
 
