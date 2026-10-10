@@ -13,14 +13,14 @@ Rules for every step:
 
 ## 1. Install or update Plannotator
 
-Run `plannotator --version`. If `plannotator` is not found, try `~/.local/bin/plannotator --version` (Windows: `%LOCALAPPDATA%\plannotator\plannotator.exe --version`). If that works, use that path for every command below.
+Run `plannotator --version`. If `plannotator` is not found, try `~/.local/bin/plannotator --version` (PowerShell: `& "$env:LOCALAPPDATA\plannotator\plannotator.exe" --version`). If that works, use that path for every command below.
 
-Install Plannotator when it is missing. Update it when `plannotator inbox --help` prints the top-level help or "Unknown command" (a release older than the Inbox). The same command does both:
+Install Plannotator when it is missing. Update it when the output of `plannotator inbox --help` does not start with `# Plannotator Inbox: a guide for agents` (an older release). The same command does both:
 
 - macOS, Linux, WSL: `curl -fsSL https://plannotator.ai/install.sh | bash -s -- --non-interactive`
 - Windows PowerShell: `& ([scriptblock]::Create((irm https://plannotator.ai/install.ps1))) -NonInteractive`
 
-The installer needs `git`. If `git` is missing, add `--minimal` (PowerShell: `-Minimal`) to install the binary alone. The binary goes to `~/.local/bin/plannotator`. If that folder is not on `PATH` in your shell, call the binary by its full path.
+The installer needs `git` for the slash-command skills. If `git` is missing, add `--skip-skills` (PowerShell: `-SkipSkills`); everything else still installs. The binary goes to `~/.local/bin/plannotator`. If that folder is not on `PATH` in your shell, call the binary by its full path.
 
 Note the absolute path of the binary: `command -v plannotator` (PowerShell: `(Get-Command plannotator).Source`).
 
@@ -31,17 +31,15 @@ Note the absolute path of the binary: `command -v plannotator` (PowerShell: `(Ge
 
 ## 3. Read the guide and connect yourself
 
-Run `plannotator inbox --help` and read all of it. It is the installed release's guide for agents: the tools, threads, questions, and how each agent connects. Then connect yourself the way it says for your own host (Claude Code, Pi, OpenCode, Codex, Cursor or another MCP client; ask the person if you cannot tell which you are). Use the absolute path from step 1 wherever a command names `plannotator`. Tell the person when a restart is needed.
-
-If the help does not cover your host, register a stdio MCP server named `plannotator-inbox` whose command is the absolute path from step 1 followed by `inbox mcp`.
+Run `plannotator inbox --help` and read all of it. It is the installed release's guide for agents: the tools, threads and questions. Then follow its "Connecting yourself" section for your host (Claude Code, Pi, OpenCode, Codex, Cursor or another MCP client; ask the person if you cannot tell which you are). Use the absolute path from step 1 wherever a command names `plannotator`. Tell the person when a restart is needed.
 
 A connection takes effect when a session starts, never in the session that is running now. Do not wait for it: step 4 works without it.
 
 ## 4. Send the first message
 
-If you have a tool whose name ends in `plannotator_inbox`, call it with `action: "send_message"` and the `arguments` object below. Otherwise send through the stdio MCP command, which works from any shell:
+If you have a tool whose name ends in `plannotator_inbox`, call it with `action: "send_message"` plus the fields of the `arguments` object below as top-level fields, leaving out `agent_name` and `agent_host` (the tool fills them). Every later call in this setup (`read_thread`, `wait_for_reply`, `resolve_message`) works the same way: `action` set to the MCP tool's name, its fields beside it. Otherwise send through the stdio MCP command, which works from any shell:
 
-1. Write the JSON below to a temporary file as ONE line, for example `/tmp/plannotator-inbox-first.json`. Use your file-writing tool, not `echo` (some shells rewrite `\n`). Replace `AGENT_NAME` (how the person knows you, e.g. "Codex") and `AGENT_HOST` (e.g. `codex`).
+1. Write the JSON below to a temporary file as ONE line, for example `/tmp/plannotator-inbox-first.json`. Use your file-writing tool, not `echo` (some shells rewrite `\n`). Replace `AGENT_NAME` (how the person knows you, e.g. "Codex") and `AGENT_HOST` (e.g. `codex`; also in the `idempotency_key`).
 2. From the person's project folder, run `plannotator inbox mcp < /tmp/plannotator-inbox-first.json` (PowerShell: `Get-Content /path/to/file | plannotator inbox mcp`). It prints one JSON-RPC answer. Keep `result.structuredContent.thread_id`.
 
 ```json

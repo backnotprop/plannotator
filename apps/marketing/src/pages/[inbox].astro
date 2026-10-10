@@ -41,8 +41,12 @@ const agents = [
   { id: 'ot', label: 'Other MCP agent' },
 ];
 const codexCommand = 'codex mcp add plannotator-inbox -- plannotator inbox mcp';
-const opencodeConfig = '{ "plugin": ["@plannotator/opencode@latest"] }';
-const cursorConfig = '{ "mcpServers": { "plannotator-inbox": { "command": "plannotator", "args": ["inbox", "mcp"] } } }';
+// OpenCode 2 reads `plugins` (objects), OpenCode 1 `plugin` (strings):
+// apps/opencode-plugin/README.md.
+const opencodeConfigs = [
+  { label: 'opencode.json (OpenCode 2)', config: '{ "plugins": [{ "package": "@plannotator/opencode@latest" }] }' },
+  { label: 'opencode.json (OpenCode 1)', config: '{ "plugin": ["@plannotator/opencode@latest"] }' },
+];const cursorConfig = '{ "mcpServers": { "plannotator-inbox": { "command": "plannotator", "args": ["inbox", "mcp"] } } }';
 const testRequest = 'Send me a test question in the Plannotator Inbox, then wait for my answer.';
 const steps = [
   {
@@ -177,7 +181,7 @@ const steps = [
                       <button type="button" class="copy-btn" data-copy="pi install npm:@plannotator/pi-extension" aria-label="Copy the command" set:html={copyIcon} />
                     </div>
                     <p>
-                      Then turn on <b>Pi</b> under the inbox tool in the Inbox's <b>Settings</b>, and start a new Pi
+                      Then turn on <b>Pi</b> under <b>The Inbox in your agent's tools</b> in the Inbox's Settings, and start a new Pi
                       session or run <code>/reload</code>. Your replies arrive as Pi's next message once it is idle.
                     </p>
                     <p class="ib-step-note">
@@ -185,14 +189,18 @@ const steps = [
                     </p>
                   </div>
                   <div class="ib-panel" role="tabpanel" id="ib-p-oc" aria-labelledby="ib-t-oc" hidden>
-                    <span class="ib-box-label">opencode.json</span>
-                    <div class="hero-install ib-box">
-                      <code>{opencodeConfig}</code>
-                      <button type="button" class="copy-btn" data-copy={opencodeConfig} aria-label="Copy the config" set:html={copyIcon} />
-                    </div>
+                    {opencodeConfigs.map((c) => (
+                      <Fragment>
+                        <span class="ib-box-label">{c.label}</span>
+                        <div class="hero-install ib-box">
+                          <code>{c.config}</code>
+                          <button type="button" class="copy-btn" data-copy={c.config} aria-label="Copy the config" set:html={copyIcon} />
+                        </div>
+                      </Fragment>
+                    ))}
                     <p>
-                      Then turn on <b>OpenCode</b> under the inbox tool in the Inbox's <b>Settings</b>, and restart
-                      OpenCode. On OpenCode 2 your replies arrive as the session's next turn.
+                      Then turn on <b>OpenCode</b> under <b>The Inbox in your agent's tools</b> in the Inbox's Settings,
+                      and restart OpenCode. On OpenCode 2 your replies arrive as the session's next turn.
                     </p>
                   </div>
                   <div class="ib-panel" role="tabpanel" id="ib-p-cx" aria-labelledby="ib-t-cx" hidden>
@@ -202,6 +210,7 @@ const steps = [
                       <button type="button" class="copy-btn" data-copy={codexCommand} aria-label="Copy the command" set:html={copyIcon} />
                     </div>
                     <p>Then restart Codex. Codex reads your reply when it calls <code>wait_for_reply</code>.</p>
+                    <p class="ib-step-note">If it can't find plannotator, use the full path from <code>command -v plannotator</code>.</p>
                   </div>
                   <div class="ib-panel" role="tabpanel" id="ib-p-cu" aria-labelledby="ib-t-cu" hidden>
                     <span class="ib-box-label">~/.cursor/mcp.json</span>
@@ -210,6 +219,7 @@ const steps = [
                       <button type="button" class="copy-btn" data-copy={cursorConfig} aria-label="Copy the config" set:html={copyIcon} />
                     </div>
                     <p>Cursor reads your reply when it calls <code>wait_for_reply</code>.</p>
+                    <p class="ib-step-note">If it can't find plannotator, use the full path from <code>command -v plannotator</code>.</p>
                   </div>
                   <div class="ib-panel" role="tabpanel" id="ib-p-ot" aria-labelledby="ib-t-ot" hidden>
                     <div class="hero-install ib-box">
