@@ -37,6 +37,12 @@ export interface AttachmentPaneProps {
   onClose: () => void;
   /** Full screen's strip: what rides the next Send, and the way back. */
   strip: { picks: number; annotations: number; onBack: () => void; onWriteReply: () => void };
+  /**
+   * Bumped each time the person opens a file (its tile, or a link to it in
+   * a message): keyboard focus moves into the pane, so a file opened full
+   * screen is not left behind the control that opened it.
+   */
+  focusRequest?: number;
 }
 
 const recordKey = (path: string, version: string) => (version === 'current' ? path : `${path}#${version.slice(0, 12)}`);
@@ -84,6 +90,11 @@ export function AttachmentPane(props: AttachmentPaneProps) {
   }, [attachment.id, effectiveVersion, attachment.current?.sha256]);
 
   useEffect(() => setSelectedId(props.focusId), [props.focusId, attachment.id]);
+
+  const sectionRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (props.focusRequest) sectionRef.current?.focus({ preventScroll: true });
+  }, [props.focusRequest]);
 
   const annotationVersion = view?.version ?? (effectiveVersion === 'sent' ? attachment.sent_sha256 : 'current');
   const fileRecords = useMemo(
@@ -199,6 +210,8 @@ export function AttachmentPane(props: AttachmentPaneProps) {
 
   return (
     <section
+      ref={sectionRef}
+      tabIndex={-1}
       className={`ib-view${props.full ? ' ib-full' : ''}`}
       aria-label={attachment.name}
       data-attachment-pane={attachment.id}

@@ -360,11 +360,17 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
     expect(tools.tools.map((t) => t.name).sort()).toEqual([...INBOX_MCP_TOOLS].sort());
     // Claude Code hands a model an MCP description up to its first 2,048
     // characters ("… [truncated]" after). The question guide is longer than
-    // that by itself, so what must survive the cut is pinned: the syntax and
-    // the rules on what to ask, through "Ask only what you cannot decide alone".
+    // that by itself, so what must survive the cut is pinned: the syntax, the
+    // context rules (what to give a reader who switches in cold, images and
+    // linked files) and the rules on what to ask, through "Ask only what you
+    // cannot decide alone".
     const sendDescription = tools.tools.find((t) => t.name === "send_message")!.description!;
     const reachesModel = sendDescription.slice(0, 2048 - "… [truncated]".length);
     expect(reachesModel).toContain(":::question-text");
+    expect(reachesModel).toContain("without opening anything else");
+    expect(reachesModel).toContain("no jargon");
+    expect(reachesModel).toContain("`![alt](path)`");
+    expect(reachesModel).toContain("`[the mock](mock.html)`");
     expect(reachesModel).toContain("Do not ask rhetorical questions or questions the codebase answers.");
     // The guided-review tools reach the model whole, their worked example pointer included.
     for (const name of ["get_guide_brief", "submit_guide"]) {

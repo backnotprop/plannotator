@@ -139,6 +139,8 @@ describe("the guide against what it describes", () => {
     expect(question!.holds_up).toEqual(["webhook-retries", "delivery-dashboard"]);
     expect(question!.decision_on_answer).toBe(true);
     expect(question!.parsed.choices.map((choice) => choice.label)).toEqual(["The existing jobs queue", "A dedicated retries queue"]);
+    // The example models the context rule: what the choice affects, plus a link to an attached file.
+    expect(question!.parsed.context).toContain("[The load test](load-test.html)");
   });
 
   // Deliberate: the top-level help is where an agent learns this guide exists.

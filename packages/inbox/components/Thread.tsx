@@ -4,7 +4,9 @@ import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import type { InboxDecision, InboxDecisionDraft, InboxMessageWire, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import type { IndexedQuestion, QuestionAnswer } from '@plannotator/core/question-block';
 import { inboxDecisionWords } from '@plannotator/core/inbox-questions';
-import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
+import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentState } from '@plannotator/core/inbox-types';
+import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
+import { NOT_ATTACHED_TITLE, attachmentForLink, openAttachmentTitle } from '../links';
 import { InboxApiError, inboxApi, type AttachmentsModel } from '../api';
 import { annotationOf, attachmentFeedback } from '../attachments';
 import { AttachmentTiles } from './AttachmentTiles';
@@ -29,8 +31,11 @@ function answerWords(answer: QuestionAnswer): string {
   return parts.join(', ');
 }
 
-function MessageBody({
+/** One message's text, with its question cards (exported for its DOM test). */
+export function MessageBody({
   message,
+  projectRoot,
+  onOpenAttachment,
   readOnly,
   answers,
   onPick,
@@ -40,6 +45,10 @@ function MessageBody({
   onOpenDecision,
 }: {
   message: InboxMessageWire;
+  /** The thread's project root: relative links start there or at the message's own folder. */
+  projectRoot: string;
+  /** A link in the body to one of this message's attachments was followed. */
+  onOpenAttachment: (attachment: InboxAttachment) => void;
   readOnly: boolean;
   answers: ReadonlyMap<string, QuestionAnswer>;
   onPick: (key: string, answer: QuestionAnswer | null) => void;
@@ -50,6 +59,19 @@ function MessageBody({
   onOpenDecision: (key: string, anchor: HTMLElement) => void;
 }) {
   const blocks = useMemo(() => parseMarkdownToBlocks(message.body, { frontmatter: false }), [message.body]);
+  // A link to a file this message attached opens it beside the thread; any
+  // other local link is inert text (links.ts). Kept stable across renders,
+  // so raw-HTML blocks do not redraw their links on every pick.
+  const openRef = useRef(onOpenAttachment);
+  openRef.current = onOpenAttachment;
+  const resolveLocalLink = useCallback<LocalLinkResolver>(
+    (href) => {
+      const attachment = attachmentForLink(href, { attachments: message.attachments ?? [], root: projectRoot, base: message.base_path ?? null });
+      if (!attachment) return { kind: 'unavailable', title: NOT_ATTACHED_TITLE };
+      return { kind: 'open', title: openAttachmentTitle(attachment.name), open: () => openRef.current(attachment) };
+    },
+    [message.attachments, message.base_path, projectRoot],
+  );
   const renderFooter = useCallback(
     (question: IndexedQuestion) => {
       const text = footerFor(question.question.key);
@@ -90,6 +112,7 @@ function MessageBody({
         stickyActions={false}
         disableCodePathValidation
         imageBaseDir={inboxMessageImageBase(message.id)}
+        resolveLocalLink={resolveLocalLink}
         answerOnly
         readOnly={readOnly}
         questionAnswers={answers}
@@ -204,9 +227,16 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   const attachments: InboxAttachmentState[] = files?.attachments ?? [];
   const records = files?.annotations ?? [];
   const [full, setFull] = useState(false);
-  const openFile = (attachment: InboxAttachmentState, version: 'current' | 'sent' = 'current', focus: string | null = null) => {
+  /** Bumped when the person opens a file, so focus moves into its pane. */
+  const [paneFocus, setPaneFocus] = useState(0);
+  const openFile = (attachment: Pick<InboxAttachmentState, 'id' | 'kind'>, version: 'current' | 'sent' = 'current', focus: string | null = null) => {
     setFull(attachment.kind === 'html');
     onOpenFile({ id: attachment.id, version, focus });
+  };
+  /** A tile, or a link in a message: the file as it is now, focus in its pane. */
+  const openFromMessage = (attachment: Pick<InboxAttachmentState, 'id' | 'kind'>) => {
+    openFile(attachment);
+    setPaneFocus((n) => n + 1);
   };
   const openRecord = (record: InboxAnnotationRecord) => {
     const attachment = attachments.find((a) => a.id === record.attachment_id);
@@ -530,6 +560,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
               <div className="ib-msg">
                 <MessageBody
                   message={message}
+                  projectRoot={thread.project.root}
+                  onOpenAttachment={openFromMessage}
                   readOnly={!isAgent || resolved || questions.length === 0 || allSent}
                   answers={answersOf(message)}
                   onPick={(key, answer) => pick(message.id, key, answer)}
@@ -563,7 +595,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                   <AttachmentTiles
                     attachments={attachments.filter((a) => a.message_id === message.id)}
                     annotationCounts={countsByPath}
-                    onOpen={(attachment) => openFile(attachment)}
+                    onOpen={openFromMessage}
                   />
                 )}
                 {message.guide && <GuideCard guide={message.guide} onOpen={() => onOpenGuide(message.id)} />}
@@ -719,6 +751,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         full={full}
         onToggleFull={() => setFull((v) => !v)}
         focusId={file!.focus}
+        focusRequest={paneFocus}
         readOnly={resolved}
         onSaved={saveRecord}
         onRemoved={dropRecord}

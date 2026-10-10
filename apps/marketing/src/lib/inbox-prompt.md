@@ -62,7 +62,7 @@ It returns the reply as soon as the person sends it, or `{ "status": "waiting", 
 
 When the reply arrives, quote it back to the person to show the round trip worked. Then resolve the first thread with `resolve_message` (`message_id` = its `thread_id`). It moves to Quiet and nothing is deleted. Your next message starts a new thread.
 
-- **Yes:** send one or two real messages from what you and the person are actually working on in this project: an open decision written as a `:::question` block (the syntax is in `plannotator inbox --help`), and, if there is one, a plan or document you wrote, attached with `attachments: ["path"]` so they can annotate it. Keep them short and real. Never invent work, and never send secrets or `.env` files. If this session has no work to draw on, say so and send nothing more.
+- **Yes:** send one or two real messages from what you and the person are actually working on in this project: an open decision written as a `:::question` block (the syntax is in `plannotator inbox --help`), and, if there is one, a plan or document you wrote, attached with `attachments: ["path"]` so they can annotate it. Never send a bare question: give it one to three plain sentences of context (what it affects, what you know, why you recommend what you do), attach the files it points to and link them from it (`[the mock](mock.html)` opens the file beside the thread), and add a screenshot (`![alt](path)`) when it is about something visual. Keep them short and real. Never invent work, and never send secrets or `.env` files. If this session has no work to draw on, say so and send nothing more.
 - **No:** do nothing more.
 
 ## 6. Tell the person, in plain words

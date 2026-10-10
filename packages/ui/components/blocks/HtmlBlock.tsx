@@ -3,6 +3,7 @@ import { isCodeFilePath } from "@plannotator/core/code-file";
 import type { Block } from "../../types";
 import { sanitizeBlockHtml } from "../../utils/sanitizeHtml";
 import { getImageSrc } from "../ImageThumbnail";
+import { isLocalLinkTarget, useLocalLinkResolver, type LocalLinkResolver } from "../LocalLinkContext";
 
 interface HtmlBlockProps {
   block: Block;
@@ -25,6 +26,7 @@ function rewriteRelativeRefs(
   onOpenLinkedDoc?: (path: string) => void,
   onOpenCodeFile?: (path: string) => void,
   onNavigateAnchor?: (hash: string) => void,
+  resolveLocalLink?: LocalLinkResolver | null,
 ): (() => void) {
   const cleanups: (() => void)[] = [];
 
@@ -59,6 +61,36 @@ function rewriteRelativeRefs(
       cleanups.push(() => a.removeEventListener('click', handler));
       return;
     }
+    // A host's resolver (Viewer `resolveLocalLink`) decides local paths
+    // first, as InlineMarkdown does; null keeps the rules below.
+    const localLink = resolveLocalLink && isLocalLinkTarget(href) ? resolveLocalLink(href) : null;
+    if (localLink?.kind === 'open') {
+      const openLink = localLink.open;
+      const handler = (e: Event) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openLink();
+      };
+      if (localLink.title) a.setAttribute('title', localLink.title);
+      a.setAttribute('data-local-link', 'open');
+      // A middle click would open the path on the host's own origin in a new tab.
+      const aux = (e: Event) => e.preventDefault();
+      a.addEventListener('click', handler);
+      a.addEventListener('auxclick', aux);
+      cleanups.push(() => {
+        a.removeEventListener('click', handler);
+        a.removeEventListener('auxclick', aux);
+      });
+      return;
+    }
+    if (localLink?.kind === 'unavailable') {
+      // Inert: without an href the browser neither follows nor fetches it.
+      a.removeAttribute('href');
+      a.removeAttribute('target');
+      a.setAttribute('title', localLink.title);
+      a.setAttribute('data-local-link', 'unavailable');
+      return;
+    }
     if (onOpenCodeFile && isCodeFilePath(href)) {
       const handler = (e: Event) => {
         e.preventDefault();
@@ -89,6 +121,7 @@ function rewriteRelativeRefs(
 // stops re-rendering unless the block content actually changes.
 const HtmlBlockImpl: React.FC<HtmlBlockProps> = ({ block, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor }) => {
   const ref = useRef<HTMLDivElement>(null);
+  const resolveLocalLink = useLocalLinkResolver();
   const sanitized = React.useMemo(
     () => sanitizeBlockHtml(block.content),
     [block.content],
@@ -98,9 +131,9 @@ const HtmlBlockImpl: React.FC<HtmlBlockProps> = ({ block, imageBaseDir, onOpenLi
     if (ref.current.innerHTML !== sanitized) {
       ref.current.innerHTML = sanitized;
     }
-    const cleanup = rewriteRelativeRefs(ref.current, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor);
+    const cleanup = rewriteRelativeRefs(ref.current, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink);
     return cleanup;
-  }, [sanitized, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor]);
+  }, [sanitized, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink]);
   return (
     <div
       ref={ref}

@@ -1726,6 +1726,12 @@ Additive, one optional `Viewer` prop; Plannotator passes none, so its render is 
 - Inside, `Viewer` computes `authoringOff = readOnly || answerOnly` and uses it wherever it used `readOnly` for authoring; the question and checkbox handlers still read `readOnly`. Absent or false, every path is the one it was.
 - The article keeps its card padding; a host that wants the bare text (as the Inbox does) overrides it from its own CSS on `[data-print-region="article"]`.
 
+## Viewer `resolveLocalLink` (unreleased)
+
+Additive, one optional `Viewer` prop; Plannotator's plan review and annotate pass none, so their render is unchanged. Added for the Plannotator Inbox, where a link in a message to a file the message attached opens that file beside the thread.
+
+- **`resolveLocalLink?: (href: string) => LocalLinkResolution | null`** (`components/LocalLinkContext.tsx`): asked about every markdown link and raw-HTML `<a href>` whose target is a local path (`isLocalLinkTarget`: not `#anchor`, not `//host`, no URL scheme). `{ kind: 'open', open, title? }` draws a real link whose click (and Enter) calls `open` and never follows the href; a middle click is suppressed. `{ kind: 'unavailable', title }` draws the link text as an inert span (raw HTML: the `<a>` loses its `href`), so nothing is fetched. `null` keeps the renderer's default for that link. External links are never passed to it.
+
 ## Viewer `questionDecisionLocked` (unreleased)
 
 Additive, one optional `Viewer` prop; Plannotator passes none, so its render is unchanged. Added for the Plannotator Inbox (step 3, decisions), where one message can hold a sent question and an open one.

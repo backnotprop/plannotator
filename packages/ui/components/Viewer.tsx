@@ -17,6 +17,7 @@ import { TableBlock } from './blocks/TableBlock';
 import { TableToolbar } from './blocks/TableToolbar';
 import { TablePopout } from './blocks/TablePopout';
 import { CodePathValidationContext } from './CodePathValidationContext';
+import { LocalLinkContext, type LocalLinkResolver } from './LocalLinkContext';
 import { useValidatedCodePaths } from '../hooks/useValidatedCodePaths';
 import { AnnotationToolbar } from './AnnotationToolbar';
 import { FloatingQuickLabelPicker } from './FloatingQuickLabelPicker';
@@ -145,6 +146,14 @@ export interface ViewerProps {
   gridEnabled?: boolean;
   onOpenLinkedDoc?: (path: string) => void;
   onOpenCodeFile?: (path: string) => void;
+  /**
+   * Opt-in host capability: decide what a link to a local path does
+   * (`[the mock](mock.html)`, markdown and raw-HTML `<a href>` alike; never
+   * `#anchors`, `//host` or a URL with a scheme). Return `{ kind: 'open' }`
+   * to open it yourself, `{ kind: 'unavailable', title }` to draw it as
+   * inert text, or null for the default. Absent → unchanged.
+   */
+  resolveLocalLink?: LocalLinkResolver;
   imageBaseDir?: string;
   /** Directory the active document lives in — used by the code-path validator
    *  so out-of-tree relative references (e.g. `../foo.ts` in a linked doc)
@@ -640,6 +649,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   maxWidth,
   onOpenLinkedDoc,
   onOpenCodeFile,
+  resolveLocalLink,
   linkedDocInfo,
   imageBaseDir,
   codePathBaseDir,
@@ -1401,6 +1411,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 
   return (
     <CodePathValidationContext.Provider value={codePathValidation}>
+    <LocalLinkContext.Provider value={resolveLocalLink ?? null}>
     <DiagramAnchorClaimsContext.Provider value={diagramClaims}>
     <div className="relative z-50 w-full" style={maxWidth === null ? undefined : { maxWidth: maxWidth ?? 832 }}>
       {taterMode && <TaterSpriteSitting />}
@@ -1878,6 +1889,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       )}
     </div>
     </DiagramAnchorClaimsContext.Provider>
+    </LocalLinkContext.Provider>
     </CodePathValidationContext.Provider>
   );
 });
