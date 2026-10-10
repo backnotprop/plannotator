@@ -373,3 +373,8 @@
   max-height: 70vh;
   contain: none;
 }
+
+/* A kind the surface does not draw (an image, a PDF, any other file): the shell shows it natively. */
+.sf-file { margin: 32px 20px; padding: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+.sf-file-name { font-weight: 600; font-size: calc(17px * var(--sf-text-scale, 1)); overflow-wrap: anywhere; }
+.sf-file-kind { margin-top: 4px; color: var(--muted-foreground); font-size: calc(15px * var(--sf-text-scale, 1)); }

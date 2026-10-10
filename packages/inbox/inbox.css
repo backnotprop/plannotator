@@ -175,6 +175,8 @@
 .ib-msg { padding-left: 41px; }
 .ib-attach-h { font-size: 12.5px; color: var(--muted-foreground); margin: 16px 0 8px; display: flex; align-items: center; gap: 6px; }
 .ib-atts { display: flex; flex-wrap: wrap; gap: 8px; }
+.ib-atts.ib-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.ib-atts.ib-tiles .ib-att-t { min-width: 0; }
 /* The whole tile is one button (AttachmentTiles, GuideCard): the bare button reset gives it the pointer, .pn-inbox :focus-visible its ring. */
 .ib-att-t { display: flex; align-items: center; gap: 10px; min-width: 250px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--card); text-align: left; }
 .ib-att-t .ib-fi { width: 30px; height: 30px; border-radius: 7px; background: var(--muted); display: flex; align-items: center; justify-content: center; color: var(--muted-foreground); }
@@ -507,3 +509,65 @@ pre code.pn-code[data-keep-layout] {
 .ib-edge:focus-visible [data-resize-track] { background-color: var(--ring); }
 .ib-edge-tip-pos { z-index: 50; }
 .ib-edge-tip { background: var(--popover); color: var(--muted-foreground); box-shadow: var(--ib-shadow-tooltip); border-radius: 6px; padding: 4px 8px; font-family: var(--font-sans); font-size: 11px; font-weight: 500; }
+
+/* attachments of any kind: the image gallery in a message, thumbnail and
+   download tiles, and the image and code panes (inbox-attachments design,
+   2026-10-10). Every tile, image and chip is one control. */
+.ib-att-t { color: inherit; text-decoration: none; transition: border-color 120ms ease, background-color 120ms ease, transform 80ms ease; }
+.ib-att-t:hover { border-color: color-mix(in oklch, var(--primary) 45%, var(--border)); background: color-mix(in oklch, var(--primary) 4%, var(--card)); }
+.ib-att-t:active { background: color-mix(in oklch, var(--primary) 9%, var(--card)); transform: translateY(0.5px); }
+.ib-att-t .ib-att-text { min-width: 0; }
+.ib-att-t .ib-fi { flex: none; }
+.ib-att-t .ib-fi.ib-thumb { overflow: hidden; background: color-mix(in oklch, var(--muted) 70%, transparent); border: 1px solid color-mix(in oklch, var(--border) 70%, transparent); }
+.ib-att-t .ib-fi.ib-thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
+.ib-att-t .ib-nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-gallery { display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 12px; }
+.ib-gal-item { display: flex; flex-direction: column; gap: 6px; min-width: 0; text-align: left; color: inherit; }
+.ib-gal-frame { position: relative; display: block; width: 100%; max-height: 240px; overflow: hidden; border-radius: 9px; border: 1px solid var(--border); background-color: var(--muted); transition: border-color 120ms ease, box-shadow 120ms ease; }
+.ib-gal-frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+.ib-gal-frame.ib-tall img { object-fit: cover; object-position: top center; }
+.ib-gal-frame.ib-tall::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 40px; background: linear-gradient(to bottom, transparent, color-mix(in oklch, var(--muted) 92%, transparent)); pointer-events: none; }
+.ib-gal-item:hover .ib-gal-frame { border-color: color-mix(in oklch, var(--primary) 55%, var(--border)); box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 12%, transparent); }
+.ib-gal-item:active .ib-gal-frame { transform: translateY(0.5px); }
+.pn-inbox .ib-gal-item:focus-visible { outline: none; }
+.pn-inbox .ib-gal-item:focus-visible .ib-gal-frame { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ib-gal-cap { display: flex; flex-direction: column; min-width: 0; padding: 0 2px; }
+.ib-gal-cap .ib-nm { font-size: 13px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-gal-cap .ib-kd { font-size: 12px; color: var(--muted-foreground); }
+.ib-gal-cap .ib-ch { font-size: 12px; color: var(--warning); }
+.ib-gal-count { position: absolute; top: 8px; right: 8px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; background: var(--primary); color: var(--primary-foreground); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); }
+.ib-gal-fail { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font-size: 12px; color: var(--muted-foreground); text-align: center; padding: 8px; }
+
+/* the image pane: the image on a quiet stage, a composer under it */
+.ib-imgview { position: absolute; inset: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; }
+.ib-full .ib-imgview { bottom: 56px; }
+.ib-imgstage { position: relative; overflow: auto; display: flex; justify-content: center; align-items: flex-start; padding: 28px; background: color-mix(in oklch, var(--muted) 55%, var(--background)); }
+.ib-imgstage img { display: block; border-radius: 4px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 8px 28px rgba(0, 0, 0, 0.14); background: var(--card); }
+.ib-imgstage[data-fit="fit"] { align-items: center; }
+.ib-imgstage[data-fit="fit"] img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; }
+.ib-imgstage[data-fit="fit"][data-tall="true"] { align-items: flex-start; }
+.ib-imgstage[data-fit="fit"][data-tall="true"] img { max-height: none; }
+.ib-imgstage[data-fit="actual"] img { max-width: none; max-height: none; cursor: zoom-out; margin: auto; }
+.ib-imgstage[data-fit="fit"] img.ib-noup { cursor: default; }
+.ib-imgbar { position: absolute; top: 12px; right: 14px; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 9px; background: var(--card); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15); z-index: 3; }
+.ib-imgbar .ib-btn { height: 28px; }
+.ib-imgbar .ib-sep { width: 1px; height: 18px; background: var(--border); margin: 0 3px; }
+.ib-imgshowing { position: absolute; top: 12px; left: 14px; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; font-size: 12.5px; background: var(--card); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15); }
+.ib-imgcompose { display: flex; align-items: flex-end; gap: 10px; padding: 12px 16px; background: var(--card); border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
+.pn-inbox .ib-imgcompose .ib-ta { flex: 1; margin: 0; min-height: 40px; max-height: 160px; }
+.ib-imgcompose .ib-markup { position: relative; width: 56px; height: 40px; flex: none; border-radius: 6px; overflow: hidden; border: 1px solid var(--border); }
+.ib-imgcompose .ib-markup img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ib-imgcompose .ib-markup button { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: color-mix(in oklch, var(--foreground) 75%, transparent); color: var(--background); }
+.ib-imgcompose .ib-col { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+.ib-imgcompose .ib-hint { font-size: 12px; color: var(--muted-foreground); }
+.ib-imgcompose .ib-row { display: flex; align-items: flex-end; gap: 8px; }
+
+/* the code pane: Pierre's File on the page's own background */
+.ib-codeview { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.ib-full .ib-codeview { bottom: 56px; }
+.ib-codehint { flex: none; display: flex; align-items: center; gap: 8px; padding: 7px 16px; font-size: 12.5px; color: var(--muted-foreground); border-bottom: 1px solid color-mix(in oklch, var(--border) 50%, transparent); background: var(--card); }
+.ib-codebody { flex: 1; min-height: 0; }
+.ib-att-t.ib-dlcard { max-width: 620px; width: 100%; padding: 14px 16px; gap: 14px; cursor: default; }
+.ib-att-t.ib-dlcard:hover, .ib-att-t.ib-dlcard:active { border-color: var(--border); background: var(--card); transform: none; }
+.ib-att-t.ib-dlcard .ib-kd { white-space: normal; }
+.ib-imgbar .ib-imgsize { font-size: 12px; color: var(--muted-foreground); padding: 0 8px; font-variant-numeric: tabular-nums; }

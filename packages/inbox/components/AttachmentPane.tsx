@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
+import { inboxAttachmentKindLabel, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachmentState } from '@plannotator/core/inbox-types';
+import { CodeFileView } from '@plannotator/ui/components/CodeFilePopout';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
 import { HtmlSurfaceControls } from '@plannotator/ui/components/HtmlSurfaceControls';
@@ -10,8 +11,19 @@ import type { Annotation, EditorMode, InputMethod } from '@plannotator/ui/types'
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
 import { groupAnnotationsByDocument, type AnnotationScope } from '@plannotator/ui/utils/annotationScope';
 import { InboxApiError, inboxApi, type AttachmentView } from '../api';
-import { annotationOf, attachmentBlocks, attachmentLabel } from '../attachments';
-import { clockTime } from '../format';
+import {
+  annotationOf,
+  attachmentBlocks,
+  attachmentDownloadUrl,
+  CODE_HIGHLIGHT_MAX_CHARS,
+  attachmentLabel,
+  codeAnnotationOf,
+  codeCommentAnnotation,
+  codeCommentBlocks,
+  codeRangeOf,
+} from '../attachments';
+import { clockTime, formatBytes } from '../format';
+import { ImageAttachmentView } from './ImageAttachmentView';
 import { Icon } from '../icons';
 
 export interface AttachmentPaneProps {
@@ -69,12 +81,16 @@ export function AttachmentPane(props: AttachmentPaneProps) {
   // The current file cannot be read (gone, or no longer the file that was sent): the sent version opens.
   const currentUnavailable = attachment.unavailable !== null;
   const effectiveVersion = currentUnavailable ? 'sent' : version;
+  const kind = readInboxAttachmentKind(attachment.kind);
+  // Text kinds read through the view route; an image draws from its own route, a PDF or a file downloads.
+  const readsText = isInboxTextKind(kind);
 
   useEffect(() => {
     let cancelled = false;
     setView(null);
     setError(null);
     setUnanchored(new Set());
+    if (!readsText) return;
     inboxApi
       .view(attachment.id, effectiveVersion)
       .then((next) => {
@@ -87,7 +103,7 @@ export function AttachmentPane(props: AttachmentPaneProps) {
       cancelled = true;
     };
     // A changed file on disk (a new hash) reads again.
-  }, [attachment.id, effectiveVersion, attachment.current?.sha256]);
+  }, [attachment.id, effectiveVersion, attachment.current?.sha256, readsText]);
 
   useEffect(() => setSelectedId(props.focusId), [props.focusId, attachment.id]);
 
@@ -97,17 +113,42 @@ export function AttachmentPane(props: AttachmentPaneProps) {
   }, [props.focusRequest]);
 
   const annotationVersion = view?.version ?? (effectiveVersion === 'sent' ? attachment.sent_sha256 : 'current');
+  const isHtml = kind === 'html';
+  const isText = kind === 'markdown' || kind === 'text';
+  const isCode = kind === 'code';
+  const isImage = kind === 'image';
+  // A PDF, any other file, and a kind this window does not know: offered as a download.
+  const isDownload = kind === 'pdf' || kind === 'file';
   const fileRecords = useMemo(
     () => props.records.filter((r) => r.path === attachment.path && r.version === annotationVersion),
     [props.records, attachment.path, annotationVersion],
   );
   const annotations = useMemo(() => fileRecords.map(annotationOf), [fileRecords]);
-  const blocks = useMemo(() => (view ? attachmentBlocks(attachment.kind, view.text, attachment.name) : []), [view, attachment.kind, attachment.name]);
+  // The document's blocks keep their identity across saves (the Viewer re-renders on a new array);
+  // only code comments, which carry their own lines, derive blocks from the annotations.
+  const documentBlocks = useMemo(() => (view && !isCode ? attachmentBlocks(kind, view.text, attachment.name) : []), [view, kind, isCode, attachment.name]);
+  const commentBlocks = useMemo(() => (isCode ? codeCommentBlocks(annotations) : []), [isCode, annotations]);
+  const blocks = isCode ? commentBlocks : documentBlocks;
+  // Code comments drawn under their lines; one whose lines no longer read as they did is unanchored.
+  const codeAnnotations = useMemo(
+    () => (isCode ? annotations.map((a) => codeAnnotationOf(a, attachment.name)).filter((a): a is NonNullable<typeof a> => a !== null) : []),
+    [isCode, annotations, attachment.name],
+  );
+  useEffect(() => {
+    if (!isCode || !view) return;
+    const lines = view.text.split('\n');
+    const moved = new Set<string>();
+    for (const annotation of annotations) {
+      const range = codeRangeOf(annotation);
+      if (range && lines.slice(range.lineStart - 1, range.lineEnd).join('\n') !== range.code) moved.add(annotation.id);
+    }
+    setUnanchored(moved);
+  }, [isCode, view, annotations]);
 
   // Paint the stored text highlights once per document read; a new comment paints itself.
   const painted = useRef<string | null>(null);
   useEffect(() => {
-    if (!view || attachment.kind === 'html') return;
+    if (!view || isHtml || isCode) return;
     const key = `${attachment.id}\0${view.version}\0${view.text.length}`;
     if (painted.current === key) return;
     painted.current = key;
@@ -116,12 +157,14 @@ export function AttachmentPane(props: AttachmentPaneProps) {
   }, [view, attachment.kind, attachment.id, annotations]);
 
   const save = useCallback(
-    async (annotation: Annotation) => {
+    async (annotation: Annotation): Promise<boolean> => {
       try {
         const result = await inboxApi.saveAnnotation(attachment.id, annotationVersion, annotation);
         props.onSaved(result.annotation);
+        return true;
       } catch (cause) {
         setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not saved.');
+        return false;
       }
     },
     [attachment.id, annotationVersion, props.onSaved],
@@ -197,10 +240,6 @@ export function AttachmentPane(props: AttachmentPaneProps) {
     );
   }
 
-  const isHtml = attachment.kind === 'html';
-  const isText = attachment.kind === 'markdown' || attachment.kind === 'text';
-  // Code is shown read-only: one code block, no comments on it (the panel still lists other files').
-  const isCode = attachment.kind === 'code';
   const chipText = [
     props.strip.picks > 0 ? `${props.strip.picks} pick${props.strip.picks === 1 ? '' : 's'}` : null,
     `${props.strip.annotations} annotation${props.strip.annotations === 1 ? '' : 's'}`,
@@ -224,6 +263,16 @@ export function AttachmentPane(props: AttachmentPaneProps) {
         </span>
         <span className="ib-sp" />
         {isHtml && <HtmlSurfaceControls armed={armed} onToggleArmed={props.readOnly ? undefined : () => setArmed((v) => !v)} />}
+        <a
+          className="ib-btn ib-sm ib-ghost"
+          href={attachmentDownloadUrl(attachment, effectiveVersion)}
+          download={attachment.name}
+          title={`Download ${attachment.name}${effectiveVersion === 'sent' ? ' (the version it sent)' : ''}`}
+          data-attachment-download=""
+        >
+          <Icon name="download" size={14} />
+          Download
+        </a>
         <button type="button" className="ib-btn ib-sm" onClick={props.onToggleFull}>
           <Icon name={props.full ? 'collapse' : 'expand'} size={14} />
           {props.full ? 'Exit full screen' : 'Full screen'}
@@ -286,7 +335,69 @@ export function AttachmentPane(props: AttachmentPaneProps) {
               />
             </div>
           )}
-          {view && !isHtml && (
+          {isImage && (
+            <ImageAttachmentView
+              attachment={attachment}
+              version={effectiveVersion}
+              annotations={annotations}
+              selectedId={selectedId}
+              readOnly={props.readOnly}
+              onSave={save}
+              onError={setError}
+            />
+          )}
+          {isDownload && (
+            <div className="ib-docscroll" data-download-card="">
+              <div className="ib-att-t ib-dlcard">
+                <span className="ib-fi">
+                  <Icon name={kind === 'pdf' ? 'doc' : 'cube'} size={18} />
+                </span>
+                <span className="ib-att-text">
+                  <span className="ib-nm">{attachment.name}</span>
+                  <span className="ib-kd">
+                    {inboxAttachmentKindLabel(attachment.kind, attachment.name, attachment.media_type)}, {formatBytes(attachment.current?.size ?? attachment.size)}. Plannotator does not show this kind of file; download it to open it.
+                  </span>
+                </span>
+                <a className="ib-btn ib-pri" href={attachmentDownloadUrl(attachment, effectiveVersion)} download={attachment.name}>
+                  <Icon name="download" size={14} />
+                  Download
+                </a>
+              </div>
+            </div>
+          )}
+          {view && isCode && (
+            <div className="ib-codeview" data-code-view="">
+              {!props.readOnly && <div className="ib-codehint">Click a line number, drag across lines, or select code to comment.</div>}
+              <CodeFileView
+                key={`${attachment.id}:${view.version}:${view.attachment.current?.sha256 ?? ''}`}
+                filepath={attachment.name}
+                contents={view.text}
+                annotations={codeAnnotations}
+                selectedAnnotationId={selectedId}
+                onSelectAnnotation={setSelectedId}
+                onAddAnnotation={
+                  props.readOnly
+                    ? undefined
+                    : (input) =>
+                        void save(
+                          codeCommentAnnotation({
+                            id: `ann-code-${typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : Date.now().toString(36)}`,
+                            lineStart: input.lineStart,
+                            lineEnd: input.lineEnd,
+                            text: input.text,
+                            code: input.originalCode,
+                          }),
+                        )
+                }
+                onEditAnnotation={props.readOnly ? undefined : (id, updates) => edit(id, { text: updates.text })}
+                onDeleteAnnotation={props.readOnly ? undefined : (id) => void remove(id)}
+                allowImages={false}
+                lang={view.text.length > CODE_HIGHLIGHT_MAX_CHARS ? 'text' : undefined}
+                className="ib-codebody"
+              />
+            </div>
+          )}
+          {view && !isHtml && !isCode && (
             <div className={`ib-docscroll ${gridEnabled ? 'bg-grid' : 'bg-card'}`} data-look={gridEnabled ? 'grid' : 'clean'}>
               <Viewer
                 key={`${attachment.id}:${view.version}:${view.attachment.current?.sha256 ?? ''}`}
@@ -306,7 +417,7 @@ export function AttachmentPane(props: AttachmentPaneProps) {
                 disableCodePathValidation
                 copyLabel="Copy file"
                 allowImages={false}
-                readOnly={props.readOnly || isCode}
+                readOnly={props.readOnly}
                 onRestoreReport={(report) => setUnanchored(new Set(report.unanchored))}
               />
             </div>
@@ -332,6 +443,7 @@ export function AttachmentPane(props: AttachmentPaneProps) {
         </div>
         <div className="ib-apanel">
           <AnnotationPanel
+            emptyHint={isImage ? 'Comment below the image' : isCode ? 'Click a line to comment' : undefined}
             isOpen
             annotations={annotations}
             blocks={blocks}

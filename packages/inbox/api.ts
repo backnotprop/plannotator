@@ -279,6 +279,15 @@ export const inboxApi = {
   saveAnnotation: (attachmentId: string, version: string, annotation: object) =>
     post<{ annotation: InboxAnnotationRecord }>('/api/inbox/annotations', { attachment_id: attachmentId, version, annotation }),
   removeAnnotation: (id: string) => post<{ annotation: InboxAnnotationRecord }>(`/api/inbox/annotations/${encodeURIComponent(id)}/remove`, {}),
+  /** Keep a marked-up image (a comment drawn on an image attachment): its path rides the comment's `images`. */
+  uploadMarkup: async (image: Blob) =>
+    readJson<{ path: string; name: string; url: string }>(
+      await fetch(`/api/inbox/markups${pageSession ? `?serverSession=${encodeURIComponent(pageSession)}` : ''}`, {
+        method: 'POST',
+        headers: { 'Content-Type': image.type || 'image/png', Accept: 'application/json' },
+        body: image,
+      }),
+    ),
   deleteThread: (threadId: string) => post<{ store: SettingsModel['store'] }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/delete`, {}),
   // Step 8: New message to a live session of the thread's project.
   sessions: (threadId: string) => get<LiveSessionsModel>(`/api/inbox/threads/${encodeURIComponent(threadId)}/sessions`),

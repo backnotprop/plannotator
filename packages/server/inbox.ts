@@ -221,6 +221,9 @@ const ERROR_STATUS: Record<string, number> = {
   attachment_not_found: 404,
   attachment_missing: 404,
   attachment_changed_type: 409,
+  attachment_not_text: 415,
+  attachment_not_image: 415,
+  annotation_not_allowed: 422,
   annotation_not_found: 404,
   annotation_closed: 409,
   // New message (step 8).
@@ -386,7 +389,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         baseUrl: () => baseUrl,
         resolveProject,
         recordAttachments: (paths, project, base) =>
-          recordInboxAttachments(store.dir, paths, { base, projectRoot: project.root, at: new Date().toISOString() }),
+          recordInboxAttachments(store.dir, paths, { base, at: new Date().toISOString() }),
       }),
     { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES },
   );

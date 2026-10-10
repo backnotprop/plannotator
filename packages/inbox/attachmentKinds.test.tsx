@@ -1,0 +1,181 @@
+/**
+ * Attachments of any kind in the window (DOM_TESTS=1 for the rendering
+ * tests): an image shows inline in the message AND as a tile with its
+ * thumbnail, both from the attachment's own image route; a PDF, a plain
+ * file and a kind this window does not know are Download links; the image
+ * pane draws the image and a comment box. And the feedback a Send carries:
+ * an image comment names its marked-up copy, a code comment its lines.
+ */
+import { afterEach, expect, test } from 'bun:test';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
+import { attachmentFeedback, codeCommentAnnotation, imageCommentAnnotation } from './attachments';
+import { inboxImageSrcResolver } from './images';
+
+const hasDom = typeof document !== 'undefined';
+const { AttachmentPane } = (hasDom ? await import('./components/AttachmentPane') : {}) as typeof import('./components/AttachmentPane');
+const { AttachmentTiles } = (hasDom ? await import('./components/AttachmentTiles') : {}) as typeof import('./components/AttachmentTiles');
+
+let root: Root | null = null;
+let host: HTMLElement | null = null;
+const realFetch = globalThis.fetch;
+
+afterEach(() => {
+  act(() => root?.unmount());
+  host?.remove();
+  root = null;
+  host = null;
+  globalThis.fetch = realFetch;
+});
+
+async function render(node: React.ReactNode) {
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  await act(async () => {
+    root = createRoot(host!);
+    root.render(node);
+  });
+}
+
+const base = {
+  named_path: null,
+  sent_sha256: 'a'.repeat(64),
+  sent_at: '2026-10-10T10:00:00.000Z',
+  sent_mtime: '2026-10-10T10:00:00.000Z',
+  message_id: 'msg_01K7ZZZZZZZZZZZZZZZZZZZZZZ',
+  changed_since_sent: false,
+  unavailable: null,
+};
+
+function file(id: string, name: string, kind: string, extra: Partial<InboxAttachmentState> = {}): InboxAttachmentState {
+  return {
+    ...base,
+    id,
+    name,
+    path: `/work/api/${name}`,
+    kind: kind as InboxAttachmentState['kind'],
+    size: 81_000,
+    current: { sha256: 'a'.repeat(64), size: 81_000, mtime: base.sent_mtime },
+    ...extra,
+  };
+}
+
+const shot = file('att_01K7AAAAAAAAAAAAAAAAAAAAAA', 'checkout.png', 'image', { media_type: 'image/png', width: 1280, height: 800 });
+const spec = file('att_01K7BBBBBBBBBBBBBBBBBBBBBB', 'payments-api.pdf', 'pdf', { media_type: 'application/pdf' });
+const zip = file('att_01K7CCCCCCCCCCCCCCCCCCCCCC', 'fixtures.zip', 'file');
+// A kind a newer Inbox might write: this window treats it as a file to download.
+const future = file('att_01K7DDDDDDDDDDDDDDDDDDDDDD', 'clip.mov', 'video');
+
+test.skipIf(!hasDom)('an image shows inline in the message and as a tile with its thumbnail, both from its image route', async () => {
+  const opened: string[] = [];
+  await render(<AttachmentTiles attachments={[shot, spec]} annotationCounts={new Map([[shot.path, 2]])} onOpen={(a) => opened.push(a.id)} />);
+  const route = `/api/inbox/attachments/${shot.id}/image`;
+  const inline = host!.querySelector<HTMLButtonElement>(`[data-gallery-image="${shot.id}"]`)!;
+  expect(inline).not.toBeNull();
+  // (happy-dom fails every image load, so the frame's src is read off the frame.)
+  expect(inline.querySelector('.ib-gal-frame')!.getAttribute('data-src')).toBe(route);
+  expect(inline.getAttribute('aria-label')).toBe('View checkout.png, PNG image, 2 comments');
+  expect(inline.textContent).toContain('1280 × 800');
+  const tile = host!.querySelector<HTMLButtonElement>(`button[data-attachment-id="${shot.id}"]`)!;
+  expect(tile.querySelector('.ib-thumb img')!.getAttribute('src')).toBe(route);
+  await act(async () => inline.click());
+  await act(async () => tile.click());
+  expect(opened).toEqual([shot.id, shot.id]);
+});
+
+test.skipIf(!hasDom)('a PDF, a plain file and an unknown kind are Download links, never opened in the window', async () => {
+  await render(<AttachmentTiles attachments={[spec, zip, future]} annotationCounts={new Map()} onOpen={() => {}} />);
+  for (const attachment of [spec, zip, future]) {
+    const link = host!.querySelector<HTMLAnchorElement>(`[data-attachment-id="${attachment.id}"]`)!;
+    expect(link.tagName).toBe('A');
+    expect(link.getAttribute('href')).toBe(`/api/inbox/attachments/${attachment.id}/download`);
+    expect(link.getAttribute('download')).toBe(attachment.name);
+    expect(link.getAttribute('data-attachment-kind')).toBe(attachment === spec ? 'pdf' : 'file');
+  }
+  expect(host!.querySelector('[data-image-gallery]')).toBeNull();
+  // A changed or missing current file downloads the version that was sent.
+  act(() => root!.unmount());
+  host!.remove();
+  await render(<AttachmentTiles attachments={[{ ...zip, unavailable: { code: 'attachment_missing', message: 'gone' }, current: null }]} annotationCounts={new Map()} onOpen={() => {}} />);
+  expect(host!.querySelector(`[data-attachment-id="${zip.id}"]`)!.getAttribute('href')).toBe(`/api/inbox/attachments/${zip.id}/download?version=sent`);
+});
+
+test.skipIf(!hasDom)('the image pane draws the image from its route and offers a comment box with Mark up; no text is fetched', async () => {
+  const fetched: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    fetched.push(String(input));
+    return new Response('{}', { status: 404 });
+  }) as unknown as typeof fetch;
+  const noop = () => {};
+  await render(
+    <AttachmentPane
+      attachment={shot}
+      attachments={[shot]}
+      records={[]}
+      agent="Claude Code"
+      projectName="api"
+      projectRoot="/work/api"
+      version="current"
+      onVersion={noop}
+      full={false}
+      onToggleFull={noop}
+      focusId={null}
+      readOnly={false}
+      onSaved={noop}
+      onRemoved={noop}
+      onOpenAt={noop}
+      onClose={noop}
+      strip={{ picks: 0, annotations: 0, onBack: noop, onWriteReply: noop }}
+    />,
+  );
+  expect(host!.querySelector('.ib-imgstage')!.getAttribute('data-src')).toBe(`/api/inbox/attachments/${shot.id}/image`);
+  expect(host!.querySelector('[data-image-composer] textarea')).not.toBeNull();
+  expect(host!.querySelector('[data-markup-open]')).not.toBeNull();
+  expect(host!.querySelector('[data-attachment-download]')!.getAttribute('href')).toBe(`/api/inbox/attachments/${shot.id}/download`);
+  // An image is never read as text.
+  expect(fetched.filter((url) => url.includes('/view'))).toEqual([]);
+});
+
+function record(attachment: InboxAttachmentState, annotation: object, id: string): InboxAnnotationRecord {
+  return {
+    id,
+    project_id: 'prj_x',
+    thread_id: 'msg_x',
+    message_id: attachment.message_id,
+    attachment_id: attachment.id,
+    path: attachment.path,
+    version: 'current',
+    annotation: annotation as Record<string, unknown>,
+    created_at: base.sent_at,
+    updated_at: base.sent_at,
+    removed_at: null,
+    sent_reply_id: null,
+  };
+}
+
+test('the Send feedback carries an image comment with its marked-up copy, and a code comment with its lines', () => {
+  const markupPath = `/home/me/.plannotator/inbox/markups/${'b'.repeat(64)}.png`;
+  const code = file('att_01K7EEEEEEEEEEEEEEEEEEEEEE', 'retry.mjs', 'code');
+  const outside = file('att_01K7FFFFFFFFFFFFFFFFFFFFFF', 'shot.png', 'image', { path: '/tmp/shots/shot.png' });
+  const records = [
+    record(shot, imageCommentAnnotation({ id: 'ann-img', name: 'checkout.png', text: 'The Pay button is cut off.', markup: { path: markupPath, name: 'checkout, marked up' } }), 'ann-img'),
+    record(code, codeCommentAnnotation({ id: 'ann-code', lineStart: 12, lineEnd: 14, text: 'Five retries is too many.', code: 'export const MAX_ATTEMPTS = 5;\nexport const DELAY = 30;\nexport const JITTER = true;' }), 'ann-code'),
+    record(outside, imageCommentAnnotation({ id: 'ann-out', name: 'shot.png', text: 'Wrong colour.' }), 'ann-out'),
+  ];
+  const feedback = attachmentFeedback(records, [shot, code, outside], new Map(), '/work/api');
+  expect(feedback).toContain('## checkout.png');
+  expect(feedback).toContain('The Pay button is cut off.');
+  expect(feedback).toContain(`- [checkout, marked up] \`${markupPath}\``);
+  expect(feedback).toContain('## retry.mjs');
+  expect(feedback).toContain('(lines 12–14) Feedback on: "export const MAX_ATTEMPTS = 5; …"');
+  expect(feedback).toContain('> Five retries is too many.');
+  // A file attached from outside the project is named by its absolute path.
+  expect(feedback).toContain('## /tmp/shots/shot.png');
+});
+
+test('a marked-up copy shows back through the Inbox route by its name only', () => {
+  const name = `${'c'.repeat(64)}.png`;
+  expect(inboxImageSrcResolver(`/home/me/.plannotator/inbox/markups/${name}`)).toBe(`/api/inbox/markups/${name}`);
+  expect(inboxImageSrcResolver('/etc/passwd')).toBe('/api/image?path=%2Fetc%2Fpasswd');
+});

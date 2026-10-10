@@ -4,7 +4,7 @@ import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import type { InboxDecision, InboxDecisionDraft, InboxMessageWire, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import type { IndexedQuestion, QuestionAnswer } from '@plannotator/core/question-block';
 import { inboxDecisionWords } from '@plannotator/core/inbox-questions';
-import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentState } from '@plannotator/core/inbox-types';
+import { isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, attachmentForLink, openAttachmentTitle } from '../links';
 import { InboxApiError, inboxApi, type AttachmentsModel } from '../api';
@@ -281,6 +281,9 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       if (!attachment) continue;
       const key = `${attachment.id}\0${record.version}`;
       if (texts.has(key)) continue;
+      // Code comments carry their own lines and an image has none: only documents need their text read.
+      const kind = readInboxAttachmentKind(attachment.kind);
+      if (!isInboxTextKind(kind) || kind === 'code') continue;
       try {
         texts.set(key, (await inboxApi.view(attachment.id, record.version === 'current' ? 'current' : 'sent')).text);
       } catch {

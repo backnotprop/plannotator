@@ -277,15 +277,10 @@ test('agents attach a markdown plan, an HTML prototype and a Mermaid diagram; bl
   expect(raw.headers.get('content-security-policy')).toBe('sandbox');
 });
 
-test('refused: a path outside the project, .env, a symlink retargeted to a directory, and a request by path', async () => {
-  const outside = join(world.root, 'outside.md');
-  writeFileSync(outside, '# not in the project\n');
-  await expect(world.claude.send({ project_path: world.billing, body: 'One more file.', attachments: [outside] })).rejects.toThrow(
-    /validation_error: attachments\[0\]: .*outside the project/,
-  );
-  await expect(world.claude.send({ project_path: world.billing, body: 'One more file.', attachments: ['../docs-site/install-flow.mmd'] })).rejects.toThrow(
-    /outside the project/,
-  );
+test('refused: .env, a folder, a symlink retargeted to a directory, and a request by path (a file outside the project is taken: inbox-attachments-kinds.spec.ts)', async () => {
+  await expect(world.claude.send({ project_path: world.billing, body: 'A folder.', attachments: ['docs'] })).rejects.toThrow(/a folder/);
+  writeFileSync(join(world.billing, '.env.local'), 'SECRET=placeholder\n');
+  await expect(world.claude.send({ project_path: world.billing, body: 'The local env file.', attachments: ['.env.local'] })).rejects.toThrow(/\.env files are never attached/);
   writeFileSync(join(world.billing, '.env'), 'SECRET=placeholder\n');
   await expect(world.claude.send({ project_path: world.billing, body: 'The env file.', attachments: ['.env'] })).rejects.toThrow(/\.env files are never attached/);
   // A symlink whose target is .env is refused by the target's name too.
@@ -494,7 +489,7 @@ test('a Mermaid diagram opens beside its thread and takes a node comment', async
   expect(model.annotations[0]!.annotation.diagramAnchor?.label).toBe('Detect installed agents');
   // The tile counts it; the reply box's chip lists it with the node it names.
   await pane.getByRole('button', { name: 'Close install-flow.mmd' }).click();
-  await expect(page.locator('.ib-att-t')).toContainText('Mermaid, 1 annotation');
+  await expect(page.locator('.ib-att-t')).toContainText(/Mermaid, [0-9.]+ [KMG]?B, 1 annotation/);
   await page.getByRole('button', { name: 'Reply', exact: true }).click();
   await page.locator('[data-annotations-chip]').click();
   await expect(page.locator('[data-annotation-row]')).toContainText('node');

@@ -14,6 +14,8 @@
 import type { ImageSrcResolver } from '@plannotator/ui/configure';
 
 const MESSAGE_BASE_PREFIX = 'inbox-message:';
+/** `<data dir>/inbox/markups/<sha256>.<ext>`, the path a marked-up image comment carries. */
+const INBOX_MARKUP_PATH_RE = /[\\/]inbox[\\/]markups[\\/]([0-9a-f]{64}\.(?:png|jpg|webp))$/;
 const MESSAGE_ID_RE = /^msg_[0-9A-Za-z]+$/;
 
 /** The `imageBaseDir` a message body is drawn with. */
@@ -33,6 +35,10 @@ export function inboxMessageImageUrl(messageId: string, src: string): string {
  */
 export const inboxImageSrcResolver: ImageSrcResolver = (path, base) => {
   if (/^https?:\/\//i.test(path)) return path;
+  // A marked-up image the person drew on an image attachment: kept in the
+  // Inbox's data dir, shown back by its file name only.
+  const markup = INBOX_MARKUP_PATH_RE.exec(path);
+  if (markup) return `/api/inbox/markups/${markup[1]}`;
   if (base?.startsWith(MESSAGE_BASE_PREFIX)) {
     const id = base.slice(MESSAGE_BASE_PREFIX.length);
     if (MESSAGE_ID_RE.test(id)) return inboxMessageImageUrl(id, path);

@@ -36,7 +36,7 @@ export const INBOX_MCP_INSTRUCTIONS = [
   "",
   "- send_message posts markdown to the person. Your messages land in one thread, your session's, until the person resolves it; pass `thread` (a short name) to keep separate work in its own thread, or to join another session's thread of that name; reply_to answers one message. Ask what you cannot decide alone as question blocks (:::question, :::question-multi, :::question-text); send_message's description has the syntax. Pass an idempotency_key so a retry never posts twice.",
   "- After sending, either go on with other work or call wait_for_reply with the thread_id. It returns the person's reply as soon as it lands, or { status: \"waiting\", cursor } after about 50 seconds; call it again with that cursor to keep waiting.",
-  "- To show the person files (a plan, an HTML prototype, a diagram), pass them in send_message's attachments, e.g. [\"docs/plan.md\"]. They open and annotate them in the Inbox; their annotations come back in the reply after the answers. A link to one in your message (`[the mock](mock.html)`) opens it beside the thread.",
+  "- To show the person files (a plan, a screenshot, an HTML prototype, a diagram, a PDF, any file), pass their paths in send_message's attachments, e.g. [\"docs/plan.md\", \"/tmp/shot.png\"]. They open and annotate them in the Inbox; their annotations come back in the reply after the answers. A link to one in your message (`[the mock](mock.html)`) opens it beside the thread.",
   "- read_thread reads one thread (thread_id) or lists the threads you sent in, in this project.",
   "- resolve_message closes a thread once you have what you needed.",
   "- list_decisions reads what holds in this project: decisions the person recorded from answers, or agents recorded. record_decision records one you settled with the person. Add `Decision: when answered` to a question block to have its answer recorded.",
@@ -89,7 +89,7 @@ export interface InboxMcpContext {
   /** The project for a path an agent named (realpath, git toplevel), created on first use. */
   resolveProject: (path: string) => Promise<InboxProject>;
   /**
-   * Record the files a message attaches (realpath, inside the project, the
+   * Record the files a message attaches (realpath, from anywhere on disk, the
    * file rules, a blob of the bytes): `base` resolves relative paths. Absent:
    * attachments are refused.
    */
@@ -319,7 +319,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             .array(z.string())
             .optional()
             .describe(
-              "Files for the person to open and annotate beside your message, e.g. [\"docs/plan.md\", \"proto/admin.html\", \"flow.mmd\"]: absolute, or relative to project_path, inside the project. Markdown, plain text, config and data files, Mermaid and Graphviz sources, HTML (its relative images and frames load from its folder), and source code and scripts (e.g. .ts, .mjs, .py, .sh, .swift, Makefile; shown read-only as text, binary content refused); .env is refused. The Inbox keeps the version you sent and shows the file as it is now, saying when it changed. The person's annotations come back in their reply. A markdown link to an attached file in the body, e.g. [the mock](proto/admin.html), opens it beside the thread.",
+              "Files to show the person beside your message, e.g. [\"docs/plan.md\", \"/tmp/checkout.png\", \"src/retry.mjs\"]: absolute (anywhere you can read) or relative to project_path. Any regular file, any size. Markdown, plain text, config and data files, Mermaid and Graphviz sources and HTML (its relative images and frames load from its folder) open in Plannotator's viewers; images (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP, ICO) show in the message; source code, scripts and other text open as code with line comments; PDFs and anything else are offered as a download. Folders and .env files are refused. The Inbox keeps the version you sent and shows the file as it is now, saying when it changed. The person's annotations, including comments on images and code lines, come back in their reply. Each attachment's kind in the result is markdown, text, html, mermaid, graphviz, code, image, pdf or file; treat any other as file. A markdown link to an attached file in the body, e.g. [the mock](proto/admin.html), opens it beside the thread.",
             ),
         })
         .strict(),

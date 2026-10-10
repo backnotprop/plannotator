@@ -176,7 +176,7 @@ plannotator inbox [--background | --no-open] [--tailscale]
 plannotator inbox mcp
 ```
 
-The Plannotator Inbox is one local window per machine where agents leave the person messages: `:::question` blocks (the syntax below) they answer with a click, files to read and annotate (`attachments`, paths inside the project), project decisions, and guided reviews of a diff. Nothing blocks: you send and keep working or end your turn, and the person answers when they can.
+The Plannotator Inbox is one local window per machine where agents leave the person messages: `:::question` blocks (the syntax below) they answer with a click, files to see and annotate (`attachments`: any file you can read, by its absolute path or one relative to `project_path`; images show in the message, code and documents open with comments, anything else downloads; `.env` files are refused), project decisions, and guided reviews of a diff. Nothing blocks: you send and keep working or end your turn, and the person answers when they can.
 
 Run `plannotator inbox --help` for the full guide: when to use the Inbox, every tool and its arguments, how threads route, where replies arrive, the question syntax, and how to connect other agents.
 

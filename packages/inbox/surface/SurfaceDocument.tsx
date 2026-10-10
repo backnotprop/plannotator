@@ -8,14 +8,14 @@
 
 import { forwardRef, lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { diagramTargetName, diagramTargetText, type DiagramAnchor } from '@plannotator/core/diagram-anchor';
-import type { InboxAnnotationRecord, SurfaceOpenAttachment } from '@plannotator/core/inbox-types';
+import { inboxAttachmentKindLabel, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type SurfaceOpenAttachment } from '@plannotator/core/inbox-types';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
 import { HtmlViewer } from '@plannotator/ui/components/html-viewer';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { AnnotationType, type Annotation, type EditorMode, type HostDraft, type InputMethod } from '@plannotator/ui/types';
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
 import { getIdentity } from '@plannotator/ui/utils/identity';
-import { annotationOf, attachmentBlocks } from '../attachments';
+import { annotationOf, attachmentBlocks, codeRangeOf } from '../attachments';
 import { postToShell } from './bridge';
 import type { DiagramHostDraft } from '@plannotator/ui/components/diagram/DiagramViewer';
 
@@ -60,11 +60,15 @@ export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function
   // The draft the shell holds, so a commit or a cancel drops it.
   const draft = useRef<{ id: string; intent: HostDraft['intent'] | 'diagram'; cancel: () => void } | null>(null);
 
-  const isHtml = attachment.kind === 'html';
-  const isDiagram = attachment.kind === 'mermaid' || attachment.kind === 'graphviz';
-  const isText = !isHtml && !isDiagram;
-  // Code is shown read-only (one code block; the Inbox refuses annotations on it).
-  const isCode = attachment.kind === 'code';
+  const kind = readInboxAttachmentKind(attachment.kind);
+  const isHtml = kind === 'html';
+  const isDiagram = kind === 'mermaid' || kind === 'graphviz';
+  // An image, a PDF, any other file and a kind this surface does not know are
+  // the shell's to show natively (its image viewer, PDFKit, Quick Look); the
+  // surface draws a plain card for them and never reads their bytes as text.
+  const isText = isInboxTextKind(kind) && !isHtml && !isDiagram;
+  // Code is shown read-only here (one code block); its line comments are made in the window.
+  const isCode = kind === 'code';
   const fileRecords = useMemo(
     () => records.filter((r) => r.attachment_id === attachment.id && r.version === version),
     [records, attachment.id, version],
@@ -80,7 +84,7 @@ export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function
     if (!isText || painted.current) return;
     const id = requestAnimationFrame(() => {
       painted.current = true;
-      viewerRef.current?.applySharedAnnotations(annotations.filter(annotationOwnsHighlight));
+      viewerRef.current?.applySharedAnnotations(annotations.filter((a) => annotationOwnsHighlight(a) && codeRangeOf(a) === null));
       if (open.focus) {
         const mark = document.querySelector(`[data-highlight-id="${CSS.escape(open.focus)}"], [data-bind-id="${CSS.escape(open.focus)}"]`);
         mark?.scrollIntoView({ block: 'center' });
@@ -233,6 +237,12 @@ export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function
             onHostDraft={onDiagramDraft}
           />
         </Suspense>
+      )}
+      {!isText && !isHtml && !isDiagram && (
+        <div className="sf-file" data-surface-file={kind}>
+          <div className="sf-file-name">{attachment.name}</div>
+          <div className="sf-file-kind">{inboxAttachmentKindLabel(attachment.kind, attachment.name, attachment.media_type)}</div>
+        </div>
       )}
       {isText && (
         <>

@@ -5,13 +5,14 @@
  */
 
 import { shouldStripFrontmatter } from '@plannotator/core/annotatable';
-import type { InboxAnnotationRecord, InboxAttachmentKind, InboxAttachmentState } from '@plannotator/core/inbox-types';
-import type { Annotation, Block } from '@plannotator/ui/types';
+import { readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
+import { AnnotationType, type Annotation, type Block, type CodeAnnotation, type ImageAttachment } from '@plannotator/ui/types';
 import { diagramDocumentBlocks, exportLinkedDocAnnotations, parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 
-/** Plannotator's blocks for a file: one diagram block for a diagram source, one code block for code, the markdown pipeline for text, none for HTML. */
-export function attachmentBlocks(kind: InboxAttachmentKind, text: string, name: string): Block[] {
-  if (kind === 'html') return [];
+/** Plannotator's blocks for a file: one diagram block for a diagram source, one code block for code, the markdown pipeline for text, none for HTML or a binary kind. */
+export function attachmentBlocks(kindValue: InboxAttachmentKind | string, text: string, name: string): Block[] {
+  const kind = readInboxAttachmentKind(kindValue);
+  if (kind === 'html' || kind === 'image' || kind === 'pdf' || kind === 'file') return [];
   if (kind === 'mermaid' || kind === 'graphviz') return diagramDocumentBlocks(text, kind);
   if (kind === 'code') return codeDocumentBlocks(text, name);
   return parseMarkdownToBlocks(text, shouldStripFrontmatter(name) ? undefined : { frontmatter: false });
@@ -80,11 +81,114 @@ export function annotationQuote(annotation: Annotation): string {
   return annotation.originalText ?? '';
 }
 
-/** A file's path as the agent knows it: relative to its project when inside it. */
+/** A file's path as the agent knows it: relative to its project when inside it, else the absolute path it attached. */
 export function attachmentLabel(attachment: Pick<InboxAttachmentState, 'path' | 'name'>, projectRoot: string): string {
   const root = projectRoot.replace(/[\\/]+$/, '');
   if (attachment.path.startsWith(`${root}/`) || attachment.path.startsWith(`${root}\\`)) return attachment.path.slice(root.length + 1);
-  return attachment.name;
+  return attachment.path || attachment.name;
+}
+
+/** Where an attachment's bytes are served: an image for `<img src>`, and any kind as a download. By id only. */
+export function attachmentImageUrl(attachment: Pick<InboxAttachmentState, 'id'>, version: 'current' | 'sent' = 'current'): string {
+  return `/api/inbox/attachments/${encodeURIComponent(attachment.id)}/image${version === 'sent' ? '?version=sent' : ''}`;
+}
+
+export function attachmentDownloadUrl(attachment: Pick<InboxAttachmentState, 'id'>, version: 'current' | 'sent' = 'current'): string {
+  return `/api/inbox/attachments/${encodeURIComponent(attachment.id)}/download${version === 'sent' ? '?version=sent' : ''}`;
+}
+
+/** The version a thumbnail or download should read: the sent one when the file on disk cannot be read. */
+export function readableVersion(attachment: Pick<InboxAttachmentState, 'unavailable'>): 'current' | 'sent' {
+  return attachment.unavailable ? 'sent' : 'current';
+}
+
+/** What a comment on code lines keeps beside Plannotator's annotation fields. */
+export interface InboxCodeRange {
+  lineStart: number;
+  lineEnd: number;
+  /** The lines as they read when the comment was made. */
+  code: string;
+}
+
+type CodeCommentAnnotation = Annotation & { inboxCode?: InboxCodeRange };
+
+/** The line range a code comment is on, or null for any other annotation. */
+export function codeRangeOf(annotation: Annotation): InboxCodeRange | null {
+  const range = (annotation as CodeCommentAnnotation).inboxCode;
+  if (!range || !Number.isInteger(range.lineStart) || !Number.isInteger(range.lineEnd) || range.lineStart < 1 || range.lineEnd < range.lineStart) return null;
+  return range;
+}
+
+/** A line comment made in the code view, as the annotation the Inbox stores: the export reads its lines from `blockId` and `inboxCode`. */
+export function codeCommentAnnotation(input: { id: string; lineStart: number; lineEnd: number; text: string; code: string; author?: string; createdA?: number }): CodeCommentAnnotation {
+  const lines = input.code.split('\n');
+  const first = lines.find((line) => line.trim() !== '')?.trim() ?? '';
+  const quote = `${first.length > 120 ? `${first.slice(0, 119)}…` : first}${lines.length > 1 ? ' …' : ''}`;
+  return {
+    id: input.id,
+    blockId: `code-L${input.lineStart}-${input.lineEnd}`,
+    startOffset: 0,
+    endOffset: 0,
+    type: AnnotationType.COMMENT,
+    text: input.text,
+    originalText: quote,
+    createdA: input.createdA ?? Date.now(),
+    ...(input.author ? { author: input.author } : {}),
+    inboxCode: { lineStart: input.lineStart, lineEnd: input.lineEnd, code: input.code },
+  };
+}
+
+/** A stored code comment as the code view draws it inline. */
+export function codeAnnotationOf(annotation: Annotation, filePath: string): CodeAnnotation | null {
+  const range = codeRangeOf(annotation);
+  if (!range) return null;
+  return {
+    id: annotation.id,
+    type: 'comment',
+    scope: 'line',
+    filePath,
+    lineStart: range.lineStart,
+    lineEnd: range.lineEnd,
+    side: 'new',
+    text: annotation.text,
+    originalCode: range.code,
+    createdAt: annotation.createdA,
+    ...(annotation.author ? { author: annotation.author } : {}),
+  } as CodeAnnotation;
+}
+
+/** One block per code comment's lines, so the export labels each "(line 12)" / "(lines 12–14)". */
+export function codeCommentBlocks(annotations: readonly Annotation[]): Block[] {
+  const blocks: Block[] = [];
+  for (const annotation of annotations) {
+    const range = codeRangeOf(annotation);
+    if (!range || blocks.some((b) => b.id === annotation.blockId)) continue;
+    blocks.push({
+      id: annotation.blockId,
+      type: 'paragraph',
+      content: range.code,
+      order: blocks.length + 1,
+      startLine: range.lineStart,
+      sourceLineCount: range.lineEnd - range.lineStart + 1,
+    });
+  }
+  return blocks;
+}
+
+/** A comment on a whole image, with the person's marked-up copy when they drew on it. */
+export function imageCommentAnnotation(input: { id: string; name: string; text: string; markup?: ImageAttachment | null; author?: string; createdA?: number }): Annotation {
+  return {
+    id: input.id,
+    blockId: 'image',
+    startOffset: 0,
+    endOffset: 0,
+    type: AnnotationType.COMMENT,
+    text: input.text,
+    originalText: input.name,
+    createdA: input.createdA ?? Date.now(),
+    ...(input.author ? { author: input.author } : {}),
+    ...(input.markup ? { images: [input.markup] } : {}),
+  };
 }
 
 export const ATTACHMENT_FEEDBACK_HEADING = {
@@ -114,10 +218,16 @@ export function attachmentFeedback(
     let group = groups.get(label);
     if (!group) {
       const text = texts.get(`${attachment.id}\0${record.version}`) ?? '';
-      group = { annotations: [], blocks: attachmentBlocks(attachment.kind, text, attachment.name) };
+      // Code comments name their own lines; an image has no lines.
+      const kind = readInboxAttachmentKind(attachment.kind);
+      group = { annotations: [], blocks: kind === 'code' ? [] : attachmentBlocks(kind, text, attachment.name) };
       groups.set(label, group);
     }
     group.annotations.push(annotationOf(record));
+  }
+  for (const group of groups.values()) {
+    const code = codeCommentBlocks(group.annotations);
+    if (code.length > 0) group.blocks = [...group.blocks, ...code];
   }
   const entries = new Map([...groups].map(([label, group]) => [label, { annotations: group.annotations, globalAttachments: [], blocks: group.blocks }]));
   return exportLinkedDocAnnotations(entries, ATTACHMENT_FEEDBACK_HEADING).trim();

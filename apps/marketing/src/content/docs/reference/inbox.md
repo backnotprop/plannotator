@@ -38,7 +38,7 @@ You never need to keep the Inbox running yourself. When an agent calls it and it
 - **Projects.** The sidebar lists each project an agent wrote from: the repository, or the folder when there is none. Click a project to see only its threads.
 - **A thread.** It reads like email. Questions render as cards, and a click saves your pick at once. **Send** carries your picks, your words and your annotations as one reply. **Mod+Enter** sends. After a Send the reply reads "Saved for <agent>" until the agent reads it, then "Delivered to <agent>, <time>".
 - **New message.** Next to Reply, **New message** writes to an agent session that is running now in the thread's project (Claude Code, Pi or OpenCode 2 with the inbox tool; Pi and OpenCode 2 sessions are listed once they have written in that project). With one session running, the message goes to it; with several, you pick one. The session takes it as its next turn. The message belongs only to the session you picked: another agent session reading the thread does not take it. When no session is running, the button says so and offers Reply instead.
-- **Files.** Files an agent attached open beside the thread: markdown, text, HTML, Mermaid and Graphviz, and source code and scripts (`.ts`, `.py`, `.sh`, `Makefile` and the like), which show read-only with syntax highlighting. Annotate the others as in Plannotator, and the annotations ride your next Send. If the agent changes a file after it sent it, the Inbox says so and can still show the version it sent. A link in the message to a file it attached, such as `[the mock](mock.html)`, opens that file beside the thread; a link to a file it did not attach shows as plain text, and hovering it says "Not attached".
+- **Files.** An agent can attach any file it can read, from the project or anywhere else on your computer (a screenshot in a temp folder, say), except `.env` files. Images (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP, ICO) show in the message, the way an email shows them, and as tiles. Markdown, text, HTML, Mermaid and Graphviz open beside the thread with Plannotator's viewers; source code, scripts and other text open in the code view with syntax highlighting. PDFs and every other file are a Download. Comment on documents as in Plannotator, on code by clicking a line or dragging across lines, and on an image by writing under it and, with **Mark up**, drawing on it (pen, arrow, circle): the agent gets the marked-up copy's path. The annotations ride your next Send. If the agent changes a file after it sent it, the Inbox says so and can still show the version it sent. A link in the message to a file it attached, such as `[the mock](mock.html)`, opens that file beside the thread; a link to a file it did not attach shows as plain text, and hovering it says "Not attached".
 - **Images.** An image in a message, `![alt](path)` or `<img src="path">`, shows when the file is in the message's project: a path relative to the folder the agent sent from (the project root for your own replies), or an absolute one inside the project. PNG, JPEG, GIF, WebP, SVG, AVIF, BMP and ICO up to 10 MB. Images from the web (`https://…`) do not load.
 - **Decisions.** A question can record your answer as a project decision. The switch on the card is on by default when the agent wrote `Decision: when answered`. The **Decisions** page lists what is waiting, what is settled, and what was replaced or retired.
 - **Guided reviews.** An agent can send a guided review of a code change. It opens as sections, files and the diff, and you can tick sections as reviewed.
@@ -127,7 +127,7 @@ The stdio command fills in the project (its working folder) and a session id for
 
 | Tool | What it does |
 |------|--------------|
-| `send_message` | Send you a message. It can carry `:::question` blocks and `attachments` (files inside the project). `thread` names a thread to join, and `reply_to` answers one of your replies |
+| `send_message` | Send you a message. It can carry `:::question` blocks and `attachments` (any file it can read, absolute or relative to the project; `.env` refused). `thread` names a thread to join, and `reply_to` answers one of your replies |
 | `read_thread` | Read one thread, or list the threads this session wrote in |
 | `wait_for_reply` | Wait for your reply, up to 50 seconds per call |
 | `resolve_message` | Resolve or reopen a thread |
@@ -176,6 +176,7 @@ Everything lives under `~/.plannotator/inbox/` (or `$PLANNOTATOR_DATA_DIR/inbox/
 | `inbox.log` | The output of an Inbox started with `--background` |
 | `projects/<name>-<hash>/` | One folder per project: `project.json`, plus `messages.jsonl`, `questions.jsonl`, `decisions.jsonl` and `annotations.jsonl`, which grow by appending lines |
 | `blobs/<sha256>` | The version of each attached file as it was sent, and each guided review |
+| `markups/<sha256>.png` | The images you marked up when commenting on an image attachment |
 | `seq.json` | The highest event number ever written, kept across deletions |
 | `claims/`, `leases/` and `connection-tools.json` | Bookkeeping for the Pi and OpenCode connections |
 

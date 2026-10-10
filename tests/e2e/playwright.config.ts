@@ -11,7 +11,7 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: '.',
-  testMatch: ['inbox.spec.ts', 'notifications.spec.ts', 'inbox-decisions.spec.ts', 'inbox-attachments.spec.ts', 'inbox-guides.spec.ts', 'inbox-new-message.spec.ts', 'inbox-order.spec.ts', 'inbox-phones.spec.ts', 'inbox-sidebar.spec.ts', 'inbox-message-images.spec.ts', 'inbox-message-links.spec.ts', 'inbox-tailscale.spec.ts', 'surface.spec.ts'],
+  testMatch: ['inbox.spec.ts', 'notifications.spec.ts', 'inbox-decisions.spec.ts', 'inbox-attachments.spec.ts', 'inbox-attachments-kinds.spec.ts', 'inbox-guides.spec.ts', 'inbox-new-message.spec.ts', 'inbox-order.spec.ts', 'inbox-phones.spec.ts', 'inbox-sidebar.spec.ts', 'inbox-message-images.spec.ts', 'inbox-message-links.spec.ts', 'inbox-tailscale.spec.ts', 'surface.spec.ts'],
   outputDir: '../../.local/test-results',
   fullyParallel: false,
   workers: 1,

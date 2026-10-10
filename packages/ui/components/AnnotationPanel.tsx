@@ -101,6 +101,8 @@ interface DirectEditsPanelItem {
 }
 
 interface PanelProps {
+  /** The second line of the empty state. Default "Select text to annotate"; a host whose document is an image or code says how to comment there. */
+  emptyHint?: string;
   isOpen: boolean;
   annotations: Annotation[];
   blocks: Block[];
@@ -192,6 +194,7 @@ interface PanelProps {
 }
 
 export const AnnotationPanel: React.FC<PanelProps> = ({
+  emptyHint = 'Select text to annotate',
   isOpen,
   annotations,
   onSelect,
@@ -557,7 +560,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                 No annotations yet
               </p>
               <p className="mt-1 text-[11px] text-muted-foreground/40">
-                Select text to annotate
+                {emptyHint}
               </p>
               {scopeEnabled && otherGroupCount > 0 && (
                 <button
