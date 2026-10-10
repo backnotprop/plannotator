@@ -2507,7 +2507,7 @@ if command -v omp >/dev/null 2>&1; then
     echo ""
     echo "  omp plugin install @plannotator/pi-extension"
     echo ""
-    echo "Then open reviews with /plannotator-review, /plannotator-annotate and"
+    echo "Then restart OMP and open reviews with /plannotator-review, /plannotator-annotate and"
     echo "/plannotator-last. Reviews opened that way can use Ask this session."
 fi
 if [ -d "$HOME/.gemini" ]; then

@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import { getProviderMeta } from '@plannotator/ui/components/ProviderIcons';
 import { findSessionBridge, type AIProviderOption } from '@plannotator/ui/utils/aiProvider';
 import { ModelSourceHint, modelSourceToolForProvider } from '@plannotator/ui/components/ModelSourceHint';
+import { AskSessionSetupHint } from '@plannotator/ui/components/ai/AskSessionSetupHint';
 
 interface AIConfigBarProps {
   providers: AIProviderOption[];
@@ -16,13 +17,6 @@ interface AIConfigBarProps {
   /** Optional muted line on how to get "Ask this session" (askSessionSetupHint). */
   setupHint?: string | null;
 }
-
-const SetupHint: React.FC<{ text?: string | null }> = ({ text }) =>
-  text ? (
-    <div className="-mt-1 px-2 pb-1.5 text-[10px] text-muted-foreground/70" data-ai-ask-session-setup-hint>
-      {text}
-    </div>
-  ) : null;
 
 export const AIConfigBar: React.FC<AIConfigBarProps> = ({
   providers: offeredProviders,
@@ -72,7 +66,7 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
       <div className="border-t border-border/50 px-2 py-1.5 text-[11px] text-muted-foreground/50">
         No AI providers available
       </div>
-      <SetupHint text={setupHint} />
+      <AskSessionSetupHint text={setupHint} />
       </>
     );
   }
@@ -298,7 +292,7 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
       info={currentProvider}
       className="-mt-1 px-2 pb-1.5 text-[10px] text-muted-foreground/50"
     />
-    <SetupHint text={setupHint} />
+    <AskSessionSetupHint text={setupHint} />
     </>
   );
 };

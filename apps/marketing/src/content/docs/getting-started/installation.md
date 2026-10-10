@@ -437,7 +437,9 @@ Open reviews with the extension's commands: `/plannotator-review`, `/plannotator
 
 Reviews started by the `plannotator` CLI from OMP's shell do not get Ask this session. This includes the `/skill:plannotator-*` skills and the agent running `plannotator` with its bash tool. The CLI has no connection back to OMP. Ask AI then offers only the separate AI providers it can find, and the header badge reads "Oh My Pi" instead of "Pi". To let the agent open reviews with Ask this session, turn on the extension's `plannotator` tool with `PLANNOTATOR_AGENT_TOOL=1` or `{ "agentTool": true }`. OMP lists extension tools as `xd://` devices, so the agent finds it as `xd://plannotator`.
 
-Checked with OMP 18.8.9. OMP's own `--plan` flag selects a plan model, so start Plannotator's plan mode with `/plannotator-plan-mode`.
+Start plan mode with `omp --plan` or `/plannotator-plan-mode`. With the extension loaded, `--plan` starts Plannotator's plan mode instead of choosing a plan model.
+
+Checked with OMP 18.8.9.
 
 ## Amp
 

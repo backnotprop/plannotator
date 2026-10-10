@@ -1853,7 +1853,7 @@ if ($ompDetected) {
     Write-Host ""
     Write-Host "  omp plugin install @plannotator/pi-extension"
     Write-Host ""
-    Write-Host "Then open reviews with /plannotator-review, /plannotator-annotate and"
+    Write-Host "Then restart OMP and open reviews with /plannotator-review, /plannotator-annotate and"
     Write-Host "/plannotator-last. Reviews opened that way can use Ask this session."
 }
 if ($kiroAvailable) {

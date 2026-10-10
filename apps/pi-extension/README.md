@@ -87,9 +87,12 @@ this session, turn on the [`plannotator` tool](#the-plannotator-tool).
 OMP lists extension tools as `xd://` devices, so the agent finds it as
 `xd://plannotator`.
 
+Start plan mode with `omp --plan` or `/plannotator-plan-mode`. With the
+extension loaded, `--plan` starts Plannotator's plan mode instead of choosing a
+plan model.
+
 Checked with OMP 18.8.9 (commands, plan mode, the `plannotator` tool, and Ask
-this session). OMP's own `--plan` flag selects a plan model, so start plan mode
-with `/plannotator-plan-mode` instead of `--plan`.
+this session).
 
 ## Build from source
 
