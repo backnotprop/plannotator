@@ -33,3 +33,8 @@ delete process.env.PLANNOTATOR_AGENT_TOOL;
 // refuses at once, so a pairing answers `relay: null`. The relay's own proof
 // (apps/relay/test) sets its `wrangler dev` URL in the env it spawns.
 process.env.PLANNOTATOR_RELAY_URL = "http://127.0.0.1:9";
+
+// The Inbox publishes itself over the tailnet when this is on: a contributor
+// who set it in their shell must not make every Inbox test run the real
+// `tailscale` CLI. Tests that need it inject a scripted runner.
+delete process.env.PLANNOTATOR_INBOX_TAILSCALE;

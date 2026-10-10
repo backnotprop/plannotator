@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { AgentToolHost, SettingsModel } from '../api';
+import type { AgentToolHost, SettingsModel, TailscaleSettings } from '../api';
 import { formatBytes, plural, tildePath } from '../format';
 import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon } from '../icons';
@@ -21,6 +21,9 @@ export interface SettingsPageProps {
   context: ConnectContext | null;
   error: string | null;
   onToggleTool: (host: AgentToolHost, next: boolean) => void;
+  /** Over your tailnet: the switch, and whether a change is in flight. */
+  onToggleTailscale: (next: boolean) => void;
+  tailscaleBusy: boolean;
   permission: NotificationPermission | 'unsupported';
   onToggleNotifications: (next: boolean) => void;
   /** Delete a thread or a project with its files as they were sent (blobs no other thread uses). */
@@ -73,6 +76,84 @@ function NotificationsBlock({
           This browser blocks notifications for this page: allow them in its site settings.
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Over your tailnet: one switch, saved to config.json and applied at once.
+ * The switch shows the person's choice even while publishing fails (the
+ * error says why), so a click turns it off. It cannot be turned on from a
+ * page that came through the tailnet, and the env var locks it.
+ */
+function TailscaleBlock({
+  state,
+  via,
+  busy,
+  onToggle,
+}: {
+  state: TailscaleSettings;
+  via: 'local' | 'tailnet';
+  busy: boolean;
+  onToggle: (next: boolean) => void;
+}) {
+  const remote = via === 'tailnet';
+  const who = state.allowed.length > 0 ? state.allowed.join(', ') : 'the Tailscale login that owns this computer';
+  const locked = state.env !== null;
+  return (
+    <div className="ib-sblock" data-settings-tailscale={state.on ? 'on' : 'off'}>
+      <h2>Over your tailnet</h2>
+      <p>
+        Open the Inbox from your other devices through Tailscale, over HTTPS, without opening this computer to the internet. Only{' '}
+        {who} can open it there; agents stay on this computer.
+      </p>
+      <div className="ib-srow">
+        Reach the Inbox over Tailscale
+        <span className="ib-d" data-tailscale-url={state.url ?? ''}>
+          {state.url ? (
+            <a href={state.url} target="_blank" rel="noreferrer">
+              {state.url}
+            </a>
+          ) : state.on ? (
+            'Not published'
+          ) : (
+            'Off'
+          )}
+        </span>
+        <span className="ib-r">
+          <button
+            type="button"
+            role="switch"
+            className="ib-sw"
+            aria-checked={state.on}
+            aria-label="Reach the Inbox over Tailscale"
+            disabled={busy || locked || (remote && !state.on)}
+            onClick={() => onToggle(!state.on)}
+          />
+        </span>
+      </div>
+      {state.on && state.error && (
+        <div className="ib-error" data-tailscale-error="">
+          {state.error}
+        </div>
+      )}
+      <div className="ib-note">
+        <Icon name="info" />
+        {locked
+          ? `PLANNOTATOR_INBOX_TAILSCALE is set in this Inbox's environment, so it stays ${state.env ? 'on' : 'off'}.`
+          : remote
+            ? 'You opened this page over your tailnet. Turning this off ends that connection; turn it on again from this computer.'
+            : state.source === 'flag'
+              ? (
+                  <span>
+                    On for this run (plannotator inbox --tailscale).{' '}
+                    <button type="button" className="ib-fold" data-tailscale-keep="" disabled={busy} onClick={() => onToggle(true)}>
+                      Keep it on at every start
+                    </button>
+                  </span>
+                )
+              : 'Applies now and at every start. Notifications are allowed per address, so each device asks once.'}
+      </div>
     </div>
   );
 }
@@ -177,6 +258,8 @@ export function SettingsPage({
   context,
   error,
   onToggleTool,
+  onToggleTailscale,
+  tailscaleBusy,
   permission,
   onToggleNotifications,
   onDeleteThread,
@@ -232,6 +315,9 @@ export function SettingsPage({
           </p>
           {context && <ConnectPicker harnesses={HARNESSES} initial="other" context={context} compact />}
         </div>
+        {settings?.tailscale && (
+          <TailscaleBlock state={settings.tailscale} via={settings.via ?? 'local'} busy={tailscaleBusy} onToggle={onToggleTailscale} />
+        )}
         {settings?.phones && <PhonesBlock />}
         {settings && (
           <div className="ib-sblock">

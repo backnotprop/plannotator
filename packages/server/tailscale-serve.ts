@@ -187,6 +187,26 @@ export function removeTailscaleServe(httpsPort: number, run: TailscaleRunner = r
 }
 
 /**
+ * Take down the mapping on `httpsPort` only when it points at one of
+ * `targets` (proxy targets this caller made): someone else's mapping on that
+ * port is never touched. "none" when there is no such mapping, "failed" when
+ * Tailscale could not say or could not remove it.
+ */
+export function takeDownOwnServeMapping(
+  run: TailscaleRunner,
+  httpsPort: number,
+  targets: readonly string[],
+): "removed" | "none" | "failed" {
+  if (targets.length === 0) return "none";
+  const status = run(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
+  if (status.error || status.status !== 0) return "failed";
+  const existing = serveStatusProxy(status.stdout, httpsPort);
+  if (existing.state === "malformed") return "failed";
+  if (existing.state !== "mapped" || !targets.includes(existing.proxy)) return "none";
+  return runServeOff(httpsPort, run) ? "removed" : "failed";
+}
+
+/**
  * Tear down one mapping this process created. No-op for unknown ports. The
  * port is only forgotten after a successful off; a persistent failure warns
  * with the manual command and leaves the port registered so the exit-time

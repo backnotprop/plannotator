@@ -278,6 +278,21 @@ export interface PlannotatorConfig {
    */
   inboxPhones?: boolean;
   /**
+   * Publish the Plannotator Inbox over the tailnet (`tailscale serve`, HTTPS,
+   * never funnel) at every start, for the Tailscale login that owns this
+   * machine. Written by the Inbox's Settings ("Over your tailnet");
+   * PLANNOTATOR_INBOX_TAILSCALE wins over this key, and `plannotator inbox
+   * --tailscale` turns it on for one run. Default: false.
+   */
+  inboxTailscale?: boolean;
+  /**
+   * Extra Tailscale logins (`Tailscale-User-Login`, e.g. "me@example.com")
+   * the tailnet-published Inbox lets in besides the machine's owner: for a
+   * shared tailnet where you sign in as another login on another device, or
+   * a tagged machine, which has no owner. Config only. Default: none.
+   */
+  inboxTailscaleAllow?: string[];
+  /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
    * callouts, tables, diagrams, task lists, and the other PFM extensions.
@@ -1038,6 +1053,58 @@ export function resolveInboxPhones(
   if (v === "1" || v === "true" || v === "on") return true;
   if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
   return coerceConfigBoolean(config.inboxPhones, false);
+}
+
+/** The PLANNOTATOR_INBOX_TAILSCALE override, or undefined when it does not decide. */
+export function parseInboxTailscaleEnv(env: NodeJS.ProcessEnv = process.env): boolean | undefined {
+  const v = env.PLANNOTATOR_INBOX_TAILSCALE?.trim().toLowerCase();
+  if (v === "1" || v === "true" || v === "on") return true;
+  if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
+  return undefined;
+}
+
+export type InboxTailscaleSource = "flag" | "env" | "config" | "default";
+
+/**
+ * Resolve whether the Plannotator Inbox publishes itself over the tailnet.
+ *
+ * Priority (highest wins):
+ *   `plannotator inbox --tailscale` (this run)  →  PLANNOTATOR_INBOX_TAILSCALE
+ *   →  config.inboxTailscale  →  default false
+ *
+ * The flag only turns it on. Env `1` / `true` / `on` and `0` / `false` /
+ * `off` / `disabled` decide; an empty or unrecognized value counts as unset.
+ */
+export function resolveInboxTailscale(
+  config: PlannotatorConfig,
+  env: NodeJS.ProcessEnv = process.env,
+  flag = false,
+): { on: boolean; source: InboxTailscaleSource } {
+  if (flag) return { on: true, source: "flag" };
+  const fromEnv = parseInboxTailscaleEnv(env);
+  if (fromEnv !== undefined) return { on: fromEnv, source: "env" };
+  const fromConfig = parseConfigBoolean(config.inboxTailscale);
+  if (fromConfig !== undefined) return { on: fromConfig, source: "config" };
+  return { on: false, source: "default" };
+}
+
+/**
+ * config.inboxTailscaleAllow, normalized: trimmed, lower-cased (logins are
+ * compared case-insensitively), deduplicated. Entries that are not strings,
+ * are empty, or carry whitespace or control characters are dropped: a login
+ * is one token.
+ */
+export function resolveInboxTailscaleAllow(config: PlannotatorConfig): string[] {
+  const value = config.inboxTailscaleAllow;
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string") continue;
+    const login = entry.trim().toLowerCase();
+    if (login === "" || /[\s\u0000-\u001f\u007f]/.test(login) || out.includes(login)) continue;
+    out.push(login);
+  }
+  return out;
 }
 
 /**

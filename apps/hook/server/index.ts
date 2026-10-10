@@ -309,7 +309,9 @@ if (browserIdx !== -1 && args[browserIdx + 1]) {
 // --tailscale + PLANNOTATOR_REMOTE combination; it also restores the random
 // local port, so simultaneous sessions get distinct serve mappings.
 const TAILSCALE_COMMANDS = new Set(["review", "annotate", "annotate-last", "last"]);
-const tailscaleIdx = args.indexOf("--tailscale");
+// `plannotator inbox --tailscale` is the Inbox's own flag (inbox-command.ts):
+// a long-lived, owner-only publication, never this per-session transport.
+const tailscaleIdx = args[0] === "inbox" ? -1 : args.indexOf("--tailscale");
 const tailscaleFlag = tailscaleIdx !== -1;
 if (tailscaleFlag) {
   args.splice(tailscaleIdx, 1);

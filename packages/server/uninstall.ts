@@ -30,6 +30,7 @@ import {
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { inboxStatus, readInboxRegistry, stopInbox } from "@plannotator/shared/inbox/registry";
 import { INBOX_TAILNET_HTTPS_PORT, takeDownInboxTailnet } from "./inbox-devices";
+import { takeDownInboxTailscale } from "./inbox-tailscale";
 import {
   applyEdits,
   createScanner,
@@ -410,6 +411,17 @@ export async function runPlannotatorUninstall(
         const tailnet = takeDownInboxTailnet(state.dataDir);
         if (tailnet === "removed") state.removed.push(`Took down the Plannotator Inbox's tailnet address (tailscale serve --https=${INBOX_TAILNET_HTTPS_PORT})`);
         if (tailnet === "failed") state.warnings.push(`Could not check or remove the Inbox's tailnet address; run: tailscale serve --https=${INBOX_TAILNET_HTTPS_PORT} off`);
+      }
+    }
+    // "Over your tailnet": the window's mapping a crashed Inbox left behind (a clean stop, including the stop above, takes its own down).
+    const kept = inboxBlocksPurge ? undefined : readInboxRegistry(state.dataDir)?.tailscale;
+    if (kept?.https_port && kept.proxy_port) {
+      if (request.dryRun) {
+        state.planned.push(`Take down the Plannotator Inbox's tailnet address (tailscale serve --https=${kept.https_port})`);
+      } else {
+        const result = takeDownInboxTailscale(state.dataDir);
+        if (result === "removed") state.removed.push(`Took down the Plannotator Inbox's tailnet address (tailscale serve --https=${kept.https_port})`);
+        if (result === "failed") state.warnings.push(`Could not check or remove the Inbox's tailnet address; run: tailscale serve --https=${kept.https_port} off`);
       }
     }
   }

@@ -1,7 +1,7 @@
 /**
  * Plannotator Inbox registry: `${dataDir}/inbox/inbox.json`.
  *
- * `{ v, pid, port, url, version, token, serverSession, startedAt, tailnet?, lan? }`, mode
+ * `{ v, pid, port, url, version, token, serverSession, startedAt, tailnet?, lan?, tailscale? }`, mode
  * 0600, written by the Inbox server when it starts and LEFT IN PLACE when it
  * exits, so a person who ran the Inbox once has it found by every agent
  * session, and a caller can start it again on the port it last had.
@@ -54,6 +54,16 @@ export interface InboxRegistryEntry {
    * switched off; absent means on, as P2 wrote it). Absent: never switched on.
    */
   lan?: { port: number; on?: boolean };
+  /**
+   * "Over your tailnet" (`plannotator inbox --tailscale`, PLANNOTATOR_INBOX_TAILSCALE,
+   * config.json `inboxTailscale`): present while publishing is on.
+   * `url` is the tailnet address while the publication works, `error` why
+   * not when it does not. `https_port` + `proxy_port` name the serve mapping
+   * this Inbox made (the HTTPS port is the Inbox's own port, the proxy port
+   * its tailnet-only loopback listener), kept after a stop whose take-down
+   * failed so the next start or `uninstall --purge` can take it down.
+   */
+  tailscale?: { url: string | null; error: string | null; https_port?: number; proxy_port?: number };
 }
 
 export function inboxRegistryPath(dataDir: string): string {

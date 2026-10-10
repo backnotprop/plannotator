@@ -114,6 +114,7 @@
     "./inbox/devices": "./inbox/devices.ts",
     "./inbox/attachments": "./inbox/attachments.ts",
     "./inbox/connection": "./inbox/connection.ts",
+    "./inbox/tailnet": "./inbox/tailnet.ts",
     "./inbox/agent-link": "./inbox/agent-link.ts"
   },
   "dependencies": {

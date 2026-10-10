@@ -4,8 +4,13 @@
  * no node:http mirror.
  *
  * LOCAL ONLY by default: it always binds 127.0.0.1 and ignores
- * PLANNOTATOR_REMOTE, PLANNOTATOR_PORT and --tailscale. It holds tokens and
- * everything agents sent, so a wide bind with no auth is not acceptable. A
+ * PLANNOTATOR_REMOTE and PLANNOTATOR_PORT. It holds tokens and everything
+ * agents sent, so a wide bind with no auth is not acceptable. "Over your
+ * tailnet" (`plannotator inbox --tailscale`, PLANNOTATOR_INBOX_TAILSCALE,
+ * config.json `inboxTailscale`; inbox-tailscale.ts) publishes the window
+ * through `tailscale serve` to a second loopback listener that lets in only
+ * the Tailscale login that owns this machine, and hands it no connection
+ * route, no `/mcp` and no device door (`via: "tailnet"` below). A
  * paired phone reaches it through the device door only, over a path the
  * person switched on ("Reach from my tailnet": a door-only listener that
  * `tailscale serve` points at, inbox-devices.ts; "Reach from this Wi-Fi": a
@@ -19,7 +24,11 @@
  *     The device door, `/api/inbox/device/*` (no Origin, a phone's bearer
  *     token, an allowlist), sits beside the window here; the tailnet and the
  *     Wi-Fi reach it through their own door-only listeners, never here.
- *  2. `/mcp`: any Origin is refused (a browser is never an MCP client here).
+ *     The tailnet listener checks its own Host (the served MagicDNS name),
+ *     the owner's `Tailscale-User-Login` and `Sec-Fetch-Site` instead, then
+ *     hands the request here marked `tailnet`.
+ *  2. `/mcp`: any Origin and any non-loopback Host is refused (a browser is
+ *     never an MCP client here), and the tailnet never reaches it.
  *  3. Connection routes (`/api/inbox/control/*`, `/api/inbox/bridge/*`): a
  *     loopback Host naming this port, no Origin, and the registry's bearer
  *     token (the pull-bridge pattern).
@@ -95,6 +104,10 @@ import { createInboxLiveSessions } from "./inbox-sessions";
 import { createInboxDevices, DOOR_PREFIX } from "./inbox-devices";
 import { createInboxRelay } from "./inbox-relay";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
+import { createInboxTailscale, PHONES_TAILNET_HTTPS_PORT, type InboxTailscale } from "./inbox-tailscale";
+
+/** Where a request came in: the window's loopback port, or the tailnet-only listener `tailscale serve` points at. */
+type RequestVia = "local" | "tailnet";
 
 const LOOPBACK = "127.0.0.1";
 /** Remote mode's fixed port: the Inbox never takes it. */
@@ -156,6 +169,12 @@ export interface InboxServerOptions {
    * nothing listens, connects, spawns or makes a certificate.
    */
   phones?: boolean;
+  /**
+   * `plannotator inbox --tailscale`: publish over the tailnet for this run
+   * whatever PLANNOTATOR_INBOX_TAILSCALE / config.json `inboxTailscale` say
+   * (packages/server/inbox-tailscale.ts). Default false.
+   */
+  publishTailnet?: boolean;
 }
 
 export interface InboxServer {
@@ -167,6 +186,8 @@ export interface InboxServer {
   portChanged: boolean;
   store: InboxStore;
   registry: InboxRegistryEntry;
+  /** "Over your tailnet": its state, the window's switch and the run's flag. */
+  tailscale: InboxTailscale;
   stop: () => void;
 }
 
@@ -200,6 +221,10 @@ const ERROR_STATUS: Record<string, number> = {
   annotation_closed: 409,
   // New message (step 8).
   session_not_live: 409,
+  // Over your tailnet (packages/server/inbox-tailscale.ts).
+  tailscale_env_decides: 409,
+  tailscale_unavailable: 409,
+  local_only: 403,
 };
 
 /**
@@ -300,7 +325,10 @@ function startOnLoopback(fetch: Parameters<typeof Bun.serve>[0]["fetch"], prefer
   const serve = (port: number) =>
     Bun.serve({ hostname: LOOPBACK, port, idleTimeout: 0, maxRequestBodySize: INBOX_MAX_REQUEST_BYTES, fetch } as Parameters<typeof Bun.serve>[0]);
   let portChanged = false;
-  if (preferred && preferred !== INBOX_FORBIDDEN_PORT) {
+  // Never remote mode's port, and never Phones' tailnet HTTPS port: the
+  // window's tailnet mapping uses the Inbox's own port, so the two never meet.
+  const forbidden = (port: number) => port === INBOX_FORBIDDEN_PORT || port === PHONES_TAILNET_HTTPS_PORT;
+  if (preferred && !forbidden(preferred)) {
     try {
       return { server: serve(preferred), portChanged: false };
     } catch (error) {
@@ -310,7 +338,7 @@ function startOnLoopback(fetch: Parameters<typeof Bun.serve>[0]["fetch"], prefer
   }
   for (;;) {
     const server = serve(0);
-    if (server.port !== INBOX_FORBIDDEN_PORT) return { server, portChanged };
+    if (!forbidden(server.port as number)) return { server, portChanged };
     server.stop(true);
   }
 }
@@ -457,8 +485,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /** What Settings and the connect snippets read. */
-  const settingsModel = () => ({
+  const settingsModel = (via: RequestVia) => ({
     serverSession,
+    /** Over your tailnet: the switch, the address or why not, and who may open it. */
+    tailscale: tailscale.state(),
+    /** Whether this page reached the Inbox through the tailnet (the switch cannot be turned on from there). */
+    via,
     version,
     port,
     url: baseUrl,
@@ -664,6 +696,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Null while phones are off (the default): no door, no window routes, no listeners, no relay.
   let phones: ReturnType<typeof createInboxDevices> | null = null;
   let relay: ReturnType<typeof createInboxRelay> | null = null;
+  // Over your tailnet (packages/server/inbox-tailscale.ts), made once the port is known.
+  let tailscale: InboxTailscale;
 
   const readBody = async (req: Request): Promise<Record<string, unknown>> => {
     try {
@@ -674,9 +708,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
   };
 
-  const fetch = async (req: Request): Promise<Response> => {
-    const refused = hostGuard.check(req);
-    if (refused) return refused;
+  /** A route the tailnet never reaches: it would hand a tailnet peer this machine's agent surface, or widen the Inbox's exposure. */
+  const localOnly = () =>
+    json({ error: "This answers only on this computer, not over the tailnet.", code: "local_only" }, 403);
+
+  const handle = async (req: Request, via: RequestVia): Promise<Response> => {
+    // The tailnet listener checked its own Host (the served MagicDNS name)
+    // and the owner's Tailscale login before handing the request here.
+    if (via === "local") {
+      const refused = hostGuard.check(req);
+      if (refused) return refused;
+    }
     // An HTTP/1.0 request with no Host passes the guard (a non-browser client)
     // but leaves Bun a relative req.url; read it against this server.
     let url: URL;
@@ -691,9 +733,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Phones (packages/server/inbox-devices.ts): the device door. The tailnet
     // reaches the door only, through its own listener, never this port.
     // Off, the door's paths fall through to the unknown-route 404 below.
-    if (phones && (path === "/api/inbox/device" || path.startsWith(DOOR_PREFIX))) return phones.door(req, url);
+    if (path === "/api/inbox/device" || path.startsWith(DOOR_PREFIX)) {
+      if (via === "tailnet") return localOnly();
+      if (phones) return phones.door(req, url);
+    }
 
     if (path === "/mcp") {
+      // MCP has no token: only agents on this computer, never the tailnet,
+      // and never a non-loopback Host (PLANNOTATOR_ALLOWED_HOSTS cannot widen it).
+      if (via === "tailnet") return localOnly();
+      const host = req.headers.get("host");
+      if (host !== null && !isLoopbackHostHeader(host, port)) {
+        return json({ error: "/mcp answers only this machine.", code: "forbidden_host" }, 403);
+      }
       if (origin !== null) {
         return json({ error: "Browser requests are not accepted on /mcp.", code: "origin_not_allowed" }, 403);
       }
@@ -701,6 +753,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
 
     if (path.startsWith("/api/inbox/control/") || path.startsWith("/api/inbox/bridge/")) {
+      // A tailnet peer can claim a loopback Host (serve passes it through, and
+      // the tailnet HTTPS port is this port), so the listener decides.
+      if (via === "tailnet") return localOnly();
       if (!isLoopbackHostHeader(req.headers.get("host"), port)) {
         return json({ error: "Connection routes answer only this machine.", code: "forbidden_host" }, 403);
       }
@@ -720,6 +775,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         return json({ ok: true, stopping: true });
       }
+      // `plannotator inbox --tailscale` while this Inbox runs: publish for this run.
+      if (path === "/api/inbox/control/tailscale") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        return json({ tailscale: tailscale.enableForRun() });
+      }
       if (path === INBOX_BRIDGE_POLL_PATH || path === INBOX_BRIDGE_EVENT_PATH) {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         try {
@@ -731,10 +791,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       return json({ error: "Not found", code: "not_found" }, 404);
     }
 
-    if (req.method === "POST" && path.startsWith("/api/")) {
+    // Through the tailnet every method but a read is state-changing.
+    const writes = via === "tailnet" ? req.method !== "GET" && req.method !== "HEAD" : req.method === "POST";
+    if (writes && path.startsWith("/api/")) {
       if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
         return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
       }
+    }
+    // The tailnet never widens the Inbox's exposure: pairing a phone and
+    // Phones' tailnet and Wi-Fi switches answer only on this computer (the
+    // window's own switch refuses `on` below).
+    if (via === "tailnet" && req.method === "POST" && (path === "/api/inbox/pairing" || path === "/api/inbox/tailnet" || path === "/api/inbox/lan")) {
+      return localOnly();
     }
 
     try {
@@ -759,16 +827,27 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ ok: true, restarting: true });
       }
       if (path === "/api/inbox/settings") {
-        if (req.method === "GET") return json(settingsModel());
+        if (req.method === "GET") return json(settingsModel(via));
         if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-        if (body.inbox_tool === undefined && body.notifications === undefined) {
-          throw new InboxError("validation_error", "body: inbox_tool or notifications is required.");
+        if (body.inbox_tool === undefined && body.notifications === undefined && body.tailscale === undefined) {
+          throw new InboxError("validation_error", "body: inbox_tool, notifications or tailscale is required.");
+        }
+        let tailscaleOn: boolean | undefined;
+        if (body.tailscale !== undefined) {
+          const value = body.tailscale as { on?: unknown } | null;
+          if (!value || typeof value !== "object" || Array.isArray(value) || typeof value.on !== "boolean" || Object.keys(value).some((key) => key !== "on")) {
+            throw new InboxError("validation_error", "tailscale: { on: boolean }.", { field: "tailscale" });
+          }
+          // Turning tailnet publishing on is a decision made on this computer.
+          if (value.on && via === "tailnet") return localOnly();
+          tailscaleOn = value.on;
         }
         const notifications = body.notifications === undefined ? notificationsState() : saveNotifications(body.notifications);
         const inboxTool = body.inbox_tool === undefined ? inboxToolState() : saveInboxTool(body.inbox_tool);
-        return json({ inbox_tool: inboxTool, notifications });
+        const tailnet = tailscaleOn === undefined ? tailscale.state() : tailscale.set(tailscaleOn);
+        return json({ inbox_tool: inboxTool, notifications, tailscale: tailnet });
       }
 
       const threadMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)$/.exec(path);
@@ -877,6 +956,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
   };
 
+  /** The window's own port: everything here came from this computer. */
+  const fetch = (req: Request): Promise<Response> => handle(req, "local");
+
   attachmentRoutes = createInboxAttachmentRoutes({ store, serverSession, readBody });
   const started = startOnLoopback(fetch, previous?.port ?? null);
   server = started.server;
@@ -895,8 +977,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     startedAt: new Date().toISOString(),
     ...(previous?.tailnet ? { tailnet: previous.tailnet } : {}),
     ...(previous?.lan ? { lan: previous.lan } : {}),
+    // The mapping the last run made (its ports), so this start re-points or takes down its own.
+    ...(previous?.tailscale ? { tailscale: previous.tailscale } : {}),
   };
   writeInboxRegistry(dataDir, registry);
+  tailscale = createInboxTailscale({
+    dataDir,
+    port: () => port,
+    registry: () => registry,
+    dispatch: (req) => handle(req, "tailnet"),
+    tailscale: options.tailscale,
+    flag: options.publishTailnet === true,
+    maxRequestBodySize: INBOX_MAX_REQUEST_BYTES,
+    // A terminal closing a foreground Inbox while published: the clean stop (both tailnet mappings), then exit.
+    onHangup: () => {
+      stop();
+      process.exit(129);
+    },
+  });
+  tailscale.start();
   if (phonesOn) {
     const devices = createInboxDevices({
       dataDir,
@@ -960,9 +1059,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     phones?.stopTailnet();
     phones?.stopLan();
     relay?.stop();
+    // Over your tailnet: the mapping and the tailnet-only listener, before a restart starts the new run.
+    tailscale.stop();
   };
 
-  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, stop };
+  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, stop };
 }
 
 /** Print where the Inbox is, and open it when a person asked for it. */

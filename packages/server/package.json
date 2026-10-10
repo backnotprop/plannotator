@@ -32,6 +32,7 @@
     "./guide-cli": "./guide/guide-cli.ts",
     "./live-proxy": "./live-proxy.ts",
     "./inbox": "./inbox.ts",
+    "./inbox-tailscale": "./inbox-tailscale.ts",
     "./inbox-mcp": "./inbox-mcp.ts"
   },
   "files": [

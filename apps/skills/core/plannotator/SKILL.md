@@ -172,7 +172,7 @@ Lists active Plannotator server sessions, each with its full target (absolute pa
 ## plannotator inbox
 
 ```bash
-plannotator inbox [--background | --no-open]
+plannotator inbox [--background | --no-open] [--tailscale]
 plannotator inbox mcp
 ```
 
@@ -183,7 +183,7 @@ The Plannotator Inbox is one local window per machine where agents leave the per
 - Any other agent uses the stdio MCP server `plannotator inbox mcp` (for example `claude mcp add plannotator-inbox -- plannotator inbox mcp`). Tools: `send_message`, `read_thread`, `wait_for_reply`, `resolve_message`, `list_decisions`, `record_decision`, `get_guide_brief`, `submit_guide`. Nothing wakes you there: call `wait_for_reply`, which returns the reply as soon as it is sent, or a cursor to wait again after 50 seconds.
 - Your messages join one thread per session; pass `thread` (a name) to group related messages, or `reply_to` to answer the person's reply.
 - Calls start a stopped Inbox in the background without opening a tab, so never run `plannotator inbox` just to send. Bare `plannotator inbox` is for the person: it opens the window. `--background` starts it detached and prints the URL; `--no-open` runs it in the foreground without a browser.
-- It is local only: it binds `127.0.0.1` and ignores `PLANNOTATOR_REMOTE` and `PLANNOTATOR_PORT`.
+- It binds `127.0.0.1` and ignores `PLANNOTATOR_REMOTE` and `PLANNOTATOR_PORT`. `--tailscale` (or `PLANNOTATOR_INBOX_TAILSCALE=1`, or the Settings switch) also publishes the window over the tailnet for the person's own Tailscale login only; it is the person's choice, so do not add it to the `--background` start you run. MCP and agent tools answer only on this computer.
 
 ## Other subcommands
 

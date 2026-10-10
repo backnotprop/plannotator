@@ -84,8 +84,25 @@ export interface ReplyResult {
   decisions_refused: { key: string; code: string; message: string }[];
 }
 
+/** "Over your tailnet" (packages/server/inbox-tailscale.ts): the switch, the address or why not, and who may open it. */
+export interface TailscaleSettings {
+  on: boolean;
+  /** What decides it: `flag` (this run's `--tailscale`), `env` (PLANNOTATOR_INBOX_TAILSCALE), `config` (this switch), `default`. */
+  source: 'flag' | 'env' | 'config' | 'default';
+  /** PLANNOTATOR_INBOX_TAILSCALE when set: the switch is locked. */
+  env: boolean | null;
+  url: string | null;
+  error: string | null;
+  owner: string | null;
+  allowed: string[];
+}
+
 export interface SettingsModel {
   serverSession: string;
+  /** Absent from an Inbox that predates "Over your tailnet". */
+  tailscale?: TailscaleSettings;
+  /** This page reached the Inbox through the tailnet (the switch cannot be turned on from there). */
+  via?: 'local' | 'tailnet';
   version: string;
   port: number;
   url: string;
@@ -251,6 +268,7 @@ export const inboxApi = {
     post<{ inbox_tool: SettingsModel['inbox_tool'] }>('/api/inbox/settings', { inbox_tool: hosts }),
   saveNotifications: (change: Partial<NotificationSettings>) =>
     post<{ notifications: NotificationSettings }>('/api/inbox/settings', { notifications: change }),
+  saveTailscale: (on: boolean) => post<{ tailscale: TailscaleSettings }>('/api/inbox/settings', { tailscale: { on } }),
   // Step 2: attachments (by id only), annotations, deleting.
   attachments: (threadId: string) => get<AttachmentsModel>(`/api/inbox/threads/${encodeURIComponent(threadId)}/attachments`),
   view: (attachmentId: string, version: 'current' | 'sent') =>

@@ -50,7 +50,23 @@ export type AskKind = 'ask' | 'moved';
  */
 export function askKind(settings: NotificationSettings, permission: NotificationPermission, origin: string): AskKind | null {
   if (permission !== 'default' || !settings.enabled || settings.dismissed) return null;
-  return settings.allowed_origin && settings.allowed_origin !== origin ? 'moved' : 'ask';
+  return settings.allowed_origin && settings.allowed_origin !== origin && sameHost(settings.allowed_origin, origin) ? 'moved' : 'ask';
+}
+
+/**
+ * "Moved" is the Inbox's port changing under the same name. Another name
+ * (the tailnet address on another device, or localhost after the tailnet)
+ * is another place the Inbox is open, with its own permission: the plain ask.
+ */
+function sameHost(a: string, b: string): boolean {
+  const loopback = (host: string) => host === 'localhost' || host === '[::1]' || /^127\./.test(host);
+  try {
+    const left = new URL(a).hostname;
+    const right = new URL(b).hostname;
+    return left === right || (loopback(left) && loopback(right));
+  } catch {
+    return false;
+  }
 }
 
 /** The Inbox tab is in front (record 6.3). */
