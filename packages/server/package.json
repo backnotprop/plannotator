@@ -40,8 +40,8 @@
     "*.mjs"
   ],
   "dependencies": {
-    "@modelcontextprotocol/server": "2.2.0",
-    "@pierre/diffs": "1.3.6",
+    "@modelcontextprotocol/server": "2.3.0",
+    "@pierre/diffs": "1.5.1",
     "@plannotator/ai": "workspace:*",
     "@plannotator/core": "workspace:*",
     "@plannotator/shared": "workspace:*",
@@ -49,13 +49,13 @@
     "chokidar": "^5.0.0",
     "jsonc-parser": "^3.3.1",
     "uqr": "^0.1.3",
-    "zod": "4.5.4"
+    "zod": "4.6.5"
   },
   "peerDependencies": {
     "bun": ">=1.0.0"
   },
   "devDependencies": {
-    "@modelcontextprotocol/client": "2.2.0",
+    "@modelcontextprotocol/client": "2.3.0",
     "glimpseui": "^0.8.0"
   }
 }
