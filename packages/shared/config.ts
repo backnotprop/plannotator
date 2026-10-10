@@ -239,6 +239,15 @@ export interface PlannotatorConfig {
    */
   autoUpdate?: boolean;
   /**
+   * Update notices: whether Plannotator asks GitHub (once a day per machine,
+   * from the machine, never the browser) whether a newer stable release
+   * exists, and tells you in the Inbox, the review windows and the terminal.
+   * `false` makes no automatic request at all, which also stops auto-update;
+   * `plannotator update` and the Inbox's Check now still ask when you run them.
+   * PLANNOTATOR_UPDATE_CHECK wins over this key. Default: true.
+   */
+  updateCheck?: boolean;
+  /**
    * The Claude Code mod (apps/hook/hooks/mod/): non-blocking plan review,
    * annotate, code review and annotate-last, plus "Ask this session", where
    * Claude Code runs hooks modules. On by default; `false` turns it off.
@@ -690,6 +699,8 @@ export function getServerConfig(gitUser: string | null, agentToolIntegration?: s
   agentTerminalDefaultAgent?: string;
   autoUpdate: boolean;
   autoUpdateEnv?: boolean;
+  updateCheck: boolean;
+  updateCheckEnv?: boolean;
   agentTool?: boolean;
   agentToolConfigured?: boolean;
   agentToolEnv?: boolean;
@@ -698,6 +709,7 @@ export function getServerConfig(gitUser: string | null, agentToolIntegration?: s
 } {
   const cfg = loadConfig();
   const autoUpdateEnv = parseAutoUpdateEnv();
+  const updateCheckEnv = parseUpdateCheckEnv();
   const agentToolEnv = parseAgentToolEnv();
   const agentToolHost = agentToolHostOf(agentToolIntegration);
   return {
@@ -725,6 +737,10 @@ export function getServerConfig(gitUser: string | null, agentToolIntegration?: s
     // autoUpdateEnv carries PLANNOTATOR_AUTO_UPDATE when it overrides the file.
     autoUpdate: coerceConfigBoolean(cfg.autoUpdate, false),
     ...(autoUpdateEnv !== undefined && { autoUpdateEnv }),
+    // Same shape for update notices (default true); updateCheckEnv carries
+    // PLANNOTATOR_UPDATE_CHECK when it overrides the file.
+    updateCheck: coerceConfigBoolean(cfg.updateCheck, true),
+    ...(updateCheckEnv !== undefined && { updateCheckEnv }),
     ...agentToolAdvert(cfg, agentToolEnv, agentToolHost),
   };
 }
@@ -921,6 +937,34 @@ export function resolveAutoUpdate(
   const fromEnv = parseAutoUpdateEnv(env);
   if (fromEnv !== undefined) return fromEnv;
   return coerceConfigBoolean(config.autoUpdate, false);
+}
+
+/**
+ * Resolve whether Plannotator checks for a newer release and shows update
+ * notices (default on; this is the opt-out). Off also stops auto-update,
+ * which needs the check.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_UPDATE_CHECK env var  →  config.updateCheck  →  default true
+ *
+ * Env `0` / `false` / `off` / `disabled` turn it off and `1` / `true` / `on`
+ * turn it on; an empty or unrecognized value counts as unset.
+ */
+export function resolveUpdateCheck(
+  config: PlannotatorConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const fromEnv = parseUpdateCheckEnv(env);
+  if (fromEnv !== undefined) return fromEnv;
+  return coerceConfigBoolean(config.updateCheck, true);
+}
+
+/** The PLANNOTATOR_UPDATE_CHECK override, or undefined when it does not decide. */
+export function parseUpdateCheckEnv(env: NodeJS.ProcessEnv = process.env): boolean | undefined {
+  const v = env.PLANNOTATOR_UPDATE_CHECK?.trim().toLowerCase();
+  if (v === "1" || v === "true" || v === "on") return true;
+  if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
+  return undefined;
 }
 
 /**

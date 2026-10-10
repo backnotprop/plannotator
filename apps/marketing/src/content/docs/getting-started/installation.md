@@ -141,6 +141,20 @@ The install script also updates the Claude Code plugin when it is already instal
 - **Claude Code:** refreshing the marketplace alone does not update an installed plugin. Run `claude plugin marketplace update plannotator`, then `claude plugin update plannotator@plannotator`, then restart Claude Code. Inside Claude Code you can run `/plugin marketplace update plannotator`, then open `/plugin`, go to **Installed**, select **plannotator** and choose **Update now**.
 - **Pi:** run `pi update --extensions`. A plain `pi update` updates only Pi itself.
 
+### `plannotator update`
+
+`plannotator update` does the same thing in one command: it asks GitHub for the newest stable release and, if it is newer, runs the install script for it with the choices from your last install (the flags recorded in `~/.plannotator/install-flags.json`), showing the installer's output as it goes. `plannotator update --check` only says whether a newer release exists. Open reviews keep running on the old version; new ones start on the new one.
+
+### Update notices
+
+Plannotator tells you when a new version is out. Once a day, the machine (never your browser) asks GitHub for the latest stable release and caches the answer. When a newer one exists:
+
+- the Inbox shows an **Update** button above Settings, which opens a dialog with what's new and **Update now**;
+- plan review, annotate and code review show a short toast at most once every three days, and the Options menu shows the right update command for your agent (`pi update --extensions` for Pi);
+- a review you started yourself in a terminal ends with one line: `Plannotator X is available (you have Y). Update: plannotator update`.
+
+Turn notices off with **Settings → General → Tell me when a new version is out**, `{ "updateCheck": false }` in `~/.plannotator/config.json`, or `PLANNOTATOR_UPDATE_CHECK=0`. Off makes no automatic request to GitHub at all (and stops auto-update, which needs the check).
+
 ### Automatic updates (opt-in)
 
 Plannotator can do this for you. Turn on **Settings → General → Keep Plannotator up to date**, or set it yourself:

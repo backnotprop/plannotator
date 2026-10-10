@@ -86,6 +86,8 @@ import {
   handleReviewServerReady,
 } from "@plannotator/server/review";
 import { runGuideCli } from "@plannotator/server/guide-cli";
+import { runUpdateCommand } from "./update-command";
+import { takeUpdateHint } from "@plannotator/shared/update-check";
 import {
   startAnnotateServer as startAnnotateServerUnguarded,
   handleAnnotateServerReady,
@@ -96,7 +98,7 @@ import {
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
-import { loadConfig, resolveDefaultDiffType, resolveSharingEnabled } from "@plannotator/shared/config";
+import { loadConfig, resolveDefaultDiffType, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
 import { formatIgnoredReviewWords, parseReviewArgs, resolveReviewTarget, withReviewDirectory, type ParsedReviewArgs } from "@plannotator/shared/review-args";
 import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
 import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
@@ -633,6 +635,13 @@ if (args[0] === "uninstall") {
   process.exit(result.ok ? 0 : 1);
 }
 
+// `plannotator update [--check]`: the install script for the newest release,
+// in the foreground (update-command.ts). Before the session registry and the
+// auto-update trigger: it is not a session.
+if (args[0] === "update") {
+  process.exit(await runUpdateCommand(rawArgs.slice(rawArgs.indexOf("update") + 1), { currentVersion: getCliVersion() }));
+}
+
 if (args[0] === "install-runtime") {
   const runtime = args[1];
   if (runtime !== "agent-terminal" && runtime !== "call-flow") {
@@ -665,7 +674,28 @@ process.on("exit", () => unregisterSession());
 // OpenCode and Pi servers never do. Both calls are no-ops for a dev/source run
 // (no __CLI_VERSION__), and the check itself is scheduled, never awaited.
 enableAutoUpdateNotice(getCliVersion());
+// One stderr line after an interactive session when the machine knows of a
+// newer release (update-check.ts, read from the cache: no network here), at
+// most once a day. Only for a person at a terminal: never under --json or
+// --hook, never when stderr is not a TTY (an agent's Bash call, a hook, the
+// Claude Code mod's detached launch), and never inside an agent session.
+let updateHintArmed = false;
+process.on("exit", () => {
+  if (!updateHintArmed || !process.stderr.isTTY) return;
+  if (rawArgs.includes("--json") || rawArgs.includes("--hook")) return;
+  if (process.env.CLAUDECODE || process.env.PLANNOTATOR_SESSION_TAG) return;
+  try {
+    const line = takeUpdateHint({
+      current: getCliVersion(),
+      enabled: resolveUpdateCheck(loadConfig()),
+      now: Date.now(),
+    });
+    if (line) process.stderr.write(`${line}\n`);
+  } catch {}
+});
+
 function registerCliSession(info: SessionInfo): void {
+  updateHintArmed = ["review", "annotate", "annotate-last", "last", "archive"].includes(args[0] ?? "");
   // The Claude Code mod tags its session (`claude-code:<session id>`) in the
   // environment every process it starts inherits, so a session it launched can
   // be matched back to it.

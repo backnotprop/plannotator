@@ -192,11 +192,13 @@ Run `plannotator inbox --help` for the full guide: when to use the Inbox, every 
 
 ```bash
 plannotator setup-goal <interview|facts> <bundle.json | -> [--json]
+plannotator update [--check]
 plannotator uninstall [--purge] [--yes] [--dry-run]
 plannotator improve-context
 ```
 
 - `setup-goal` opens the interview or facts-acceptance UI for /goal workflows; it is driven by the `plannotator-setup-goal` skill and takes a bundle JSON (`-` reads stdin). Do not hand-build bundles.
+- `update` installs the newest release now (the install script, with the choices from the last install); `--check` only reports whether one exists. Run it only when the person asks you to update Plannotator: it replaces the binary. Exit 0 up to date or updated, 1 failed, 2 usage.
 - `uninstall` removes Plannotator-installed components (`--purge` also deletes local data; `--yes` is required without a TTY; `--dry-run` previews).
 - `improve-context` and `install-runtime` are internal integration commands (hook plumbing and managed runtime install). Never run `improve-context` directly; `plannotator install-runtime agent-terminal` exists for reinstalling the optional annotate-terminal runtime and is normally run by the installer.
 - Additional host-internal subcommands (the `opencode-*` and `copilot-plan` family) are invoked by their plugins, not by you.
@@ -212,6 +214,7 @@ plannotator improve-context
 | `PLANNOTATOR_SHARE=disabled` | Disable URL sharing, including guide share links. |
 | `PLANNOTATOR_DATA_DIR` | Move the data directory (default `~/.plannotator`): plans, history, drafts, config. |
 | `PLANNOTATOR_BROWSER` | Open sessions in a specific browser. |
+| `PLANNOTATOR_UPDATE_CHECK=0` | No automatic check for a newer release (and no update notices or auto-update). `plannotator update` still checks when run. |
 
 ## Posting annotations into a live session
 

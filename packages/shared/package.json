@@ -52,6 +52,7 @@
     "./agent-terminal": "./agent-terminal.ts",
     "./config": "./config.ts",
     "./data-dir": "./data-dir.ts",
+    "./update-check": "./update-check.ts",
     "./prompts": "./prompts.ts",
     "./improvement-hooks": "./improvement-hooks.ts",
     "./pfm-reminder": "./pfm-reminder.ts",

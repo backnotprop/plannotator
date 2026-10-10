@@ -17,6 +17,7 @@ import {
   managedBinaryPath,
   readAutoUpdateState,
   runAutoUpdateCheck,
+  startManualUpdate,
   type AutoUpdateDeps,
   type InstallerLaunch,
 } from "./auto-update";
@@ -394,4 +395,78 @@ describe.skipIf(process.platform !== "win32" || !Bun.which("powershell.exe"))("W
       server.stop(true);
     }
   }, 60_000);
+});
+
+describe("update checks off", () => {
+  test("auto-update needs the check: off means no request and no install", async () => {
+    expect(await runAutoUpdateCheck(deps({ checksEnabled: () => false }))).toBe("checks-off");
+    expect(fetches).toBe(0);
+    expect(launches).toHaveLength(0);
+  });
+
+  test("auto-update answers from the release the shared check already cached", async () => {
+    writeFileSync(
+      autoUpdatePaths(dataDir).state,
+      JSON.stringify({ latestRelease: { tag: "0.28.0", fetchedAt: NOW - 1000 } }),
+    );
+    expect(await runAutoUpdateCheck(deps())).toBe("launched");
+    expect(fetches).toBe(0);
+  });
+});
+
+describe("Update now (the person asked)", () => {
+  const manual = (overrides: Partial<Parameters<typeof startManualUpdate>[0]> = {}) =>
+    startManualUpdate({
+      currentVersion: "0.27.22",
+      dataDir,
+      now: () => NOW,
+      platform: "linux",
+      isManaged: () => true,
+      launchInstaller: (launch) => {
+        launches.push(launch);
+      },
+      ...overrides,
+    });
+  const seed = () =>
+    writeFileSync(autoUpdatePaths(dataDir).state, JSON.stringify({ latestRelease: { tag: "0.28.0", fetchedAt: NOW - 1000 } }));
+
+  test("runs the installer once: a second press while it runs finds the lock", () => {
+    seed();
+    expect(manual()).toEqual({ outcome: "launched", version: "0.28.0" });
+    expect(manual()).toEqual({ outcome: "locked" });
+    expect(launches).toHaveLength(1);
+    expect(launches[0].version).toBe("v0.28.0");
+    expect(readAutoUpdateState(dataDir).pending).toEqual({ version: "0.28.0", fromVersion: "0.27.22", startedAt: NOW, by: "person" });
+  });
+
+  test("ignores the sessions gate and the 24h window that auto-update keeps", () => {
+    writeFileSync(
+      autoUpdatePaths(dataDir).state,
+      JSON.stringify({ lastCheckAt: NOW - 10, latestRelease: { tag: "0.28.0", fetchedAt: NOW - 1000 } }),
+    );
+    expect(manual().outcome).toBe("launched");
+  });
+
+  test("only the known newer release, never a dev build or an unmanaged binary", () => {
+    expect(manual().outcome).toBe("no-release");
+    seed();
+    expect(manual({ currentVersion: "0.28.0" }).outcome).toBe("up-to-date");
+    expect(manual({ currentVersion: undefined }).outcome).toBe("dev-build");
+    expect(manual({ isManaged: () => false }).outcome).toBe("unmanaged");
+    expect(launches).toHaveLength(0);
+  });
+
+  test("a launch that throws releases the lock and records the failure", () => {
+    seed();
+    expect(
+      manual({
+        launchInstaller: () => {
+          throw new Error("spawn EACCES");
+        },
+      }).outcome,
+    ).toBe("launch-failed");
+    expect(existsSync(autoUpdatePaths(dataDir).lock)).toBe(false);
+    expect(JSON.parse(readFileSync(autoUpdatePaths(dataDir).result, "utf-8")).exitCode).toBe(-1);
+    expect(manual().outcome).toBe("launched");
+  });
 });

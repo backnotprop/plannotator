@@ -160,6 +160,7 @@ export function formatTopLevelHelp(): string {
     "  plannotator sessions",
     "  plannotator inbox [--background | --no-open] [--tailscale]",
     "  plannotator inbox mcp",
+    "  plannotator update [--check]",
     "  plannotator uninstall [--purge] [--yes] [--dry-run]",
     "  plannotator improve-context",
     "",
@@ -213,6 +214,23 @@ export const INBOX_COMMAND_USAGE = [
   "Over the tailnet at every start: the Inbox's Settings, PLANNOTATOR_INBOX_TAILSCALE=1,",
   "or { \"inboxTailscale\": true } in config.json. Agents and MCP stay on this computer;",
   "another Tailscale login is let in only when config.json inboxTailscaleAllow names it.",
+].join("\n");
+
+/** `plannotator update`'s usage; the command is update-command.ts. */
+export const UPDATE_COMMAND_USAGE = [
+  "Usage:",
+  "  plannotator update [--check]",
+  "",
+  "Install the newest Plannotator release now, the way the install script does,",
+  "with the choices from your last install (install-flags.json). Open reviews keep",
+  "running on the old version; new ones start on the new one.",
+  "",
+  "Options:",
+  "  --check       Only ask GitHub whether a newer release exists; install nothing",
+  "",
+  "Asks GitHub even when automatic update checks are off (PLANNOTATOR_UPDATE_CHECK=0",
+  "or { \"updateCheck\": false }), because you asked. Exit codes: 0 up to date or",
+  "updated, 1 the update failed or could not run, 2 usage.",
 ].join("\n");
 
 // Per-subcommand usage text. Keyed by the canonical subcommand token; aliases
@@ -363,6 +381,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   ].join("\n"),
   // `inbox --help` prints the full agent guide instead (index.ts, inbox-help.ts).
   inbox: INBOX_COMMAND_USAGE,
+  update: UPDATE_COMMAND_USAGE,
   uninstall: [
     "Usage:",
     "  plannotator uninstall [--purge] [--yes | -y] [--dry-run]",
@@ -417,6 +436,7 @@ export function formatInteractiveNoArgClarification(): string {
     "  plannotator archive",
     "  plannotator sessions",
     "  plannotator inbox",
+    "  plannotator update",
     "  plannotator uninstall",
     "",
     "Run 'plannotator --help' for top-level usage.",
