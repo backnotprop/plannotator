@@ -48,7 +48,7 @@ final class DecisionsProofTests: ProofCase {
         XCTAssertEqual(statement.value as? String, "Retry with the same idempotency key.")
         XCTAssertEqual(element("decision-reason").value as? String, "Asked by Claude Code: Which way should the worker go on a Stripe 409?")
         element("decision-cancel").tap()
-        XCTAssertTrue(statement.waitForNonExistence(timeout: 30), "Cancel closes the sheet")
+        try require(statement.waitForNonExistence(timeout: 30), "Cancel closes the sheet")
         XCTAssertFalse(isOn(row), "Cancel keeps the switch off")
 
         // On again; Done keeps the words and turns recording on.
@@ -60,7 +60,7 @@ final class DecisionsProofTests: ProofCase {
         try await control.post("/text-size", ["size": "large"])
         element("decision-done").tap()
         // The sheet is gone before Back: while it slides away its Cancel is the first bar button.
-        XCTAssertTrue(statement.waitForNonExistence(timeout: 30), "Done closes the sheet")
+        try require(statement.waitForNonExistence(timeout: 30), "Done closes the sheet")
         XCTAssertTrue(waitForLabel(row, "Answering this records a decision"))
         XCTAssertTrue(isOn(row))
         back()
@@ -120,7 +120,7 @@ final class DecisionsProofTests: ProofCase {
         words.typeText("Before you merge, write the header row first so an empty ledger still exports a valid CSV.")
         try await control.shot("8.2")
         element("new-message-send").tap()
-        XCTAssertTrue(words.waitForNonExistence(timeout: 30), "the sheet closes once delivered")
+        try require(words.waitForNonExistence(timeout: 30), "the sheet closes once delivered")
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'write the header row first'")).firstMatch.waitForExistence(timeout: 30))
 
         // The live session takes it as a turn and answers in the same thread.
@@ -160,7 +160,7 @@ final class DecisionsProofTests: ProofCase {
         XCTAssertTrue(words.waitForExistence(timeout: 30))
         words.typeText("Add a header row to the CSV export too.")
         element("new-message-send").tap()
-        XCTAssertTrue(words.waitForNonExistence(timeout: 30), "the sheet closes once delivered")
+        try require(words.waitForNonExistence(timeout: 30), "the sheet closes once delivered")
         let picked = try await control.post("/m3-turn", ["who": "ledger-other"])
         XCTAssertEqual(picked["submits"] as? [String: Int], ["gateway": 1, "ledger-writer": 0, "ledger-other": 1], "only the picked session: \(picked)")
         back()

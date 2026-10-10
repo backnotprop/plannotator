@@ -22,7 +22,7 @@ final class GuideProofTests: ProofCase {
         // The guide's tile at the foot of Pi's message (8.1).
         try await openRow(thread)
         let tile = element("guide-tile")
-        expect(tile, "the guide's tile")
+        try expect(tile, "the guide's tile")
         XCTAssertTrue(tile.label.contains("Guided review: Stream ledger exports instead of building them in memory"), tile.label)
         XCTAssertTrue(tile.label.contains("4 sections, 6 files"), tile.label)
         try await control.shot("8.1-guide-tile")
@@ -32,7 +32,9 @@ final class GuideProofTests: ProofCase {
         // 6.1: the title, the summary, the sections with their marks, Continue.
         tile.tap()
         let title = element("guide-title")
-        expect(web("Stream ledger exports instead of building them in memory"), "the guide's title")
+        // The first web view this shard opens: WebKit's first start on the simulator is paid here
+        // (before the shards, AttachmentProofTests paid it), so it waits as long as an opening screen.
+        try expect(web("Stream ledger exports instead of building them in memory"), "the guide's title", timeout: ProofWait.opening)
         XCTAssertTrue(waitForLabel(title, "Guided review"))
         XCTAssertTrue(waitForLabel(title, "Pi in ledger, sent"))
         XCTAssertTrue(element("guide-close").exists, "6.1 closes")
@@ -45,17 +47,17 @@ final class GuideProofTests: ProofCase {
 
         // Continue picks up at the first section not yet reviewed: 02, one section per screen.
         let continueButton = surfaceControl("Continue with 02")
-        expect(continueButton, "Continue with 02")
+        try expect(continueButton, "Continue with 02")
         continueButton.tap()
         XCTAssertTrue(waitForLabel(title, "02 of 04"), title.label)
         XCTAssertTrue(waitForLabel(title, "Guided review · Pi in ledger"), title.label)
-        expect(web("The streaming writer"), "the second section")
+        try expect(web("The streaming writer"), "the second section")
         XCTAssertTrue(element("guide-back").exists, "6.2 goes back to the sections")
         try await control.shot("6.2")
 
         // Reviewed at the thumb: the second tick reaches the Inbox too.
         let reviewed = surfaceControl("Reviewed")
-        expect(reviewed, "Reviewed")
+        try expect(reviewed, "Reviewed")
         reviewed.tap()
         try await expectTicks(thread: thread, message: message, "true,true,false,false")
         try await control.shot("6.2-reviewed")
@@ -63,18 +65,18 @@ final class GuideProofTests: ProofCase {
         // Next and Previous move the sections; the bar's title follows.
         surfaceControl("Next: 03").tap()
         XCTAssertTrue(waitForLabel(title, "03 of 04"), title.label)
-        expect(web("A failed write leaves no partial file"), "the third section")
+        try expect(web("A failed write leaves no partial file"), "the third section")
 
         // A tick that cannot reach the computer is not drawn as saved: "Not saved", and Reviewed reads off again.
         try await control.post("/proxy", ["mode": "down"])
         surfaceControl("Reviewed").tap()
         let notSaved = app.alerts["Not saved"]
-        expect(notSaved, "the Not saved alert")
+        try expect(notSaved, "the Not saved alert")
         try await control.shot("6.2-not-saved")
         notSaved.buttons["OK"].tap()
         try await control.post("/proxy", ["mode": "pass"])
         let reviewedAgain = surfaceControl("Reviewed")
-        expect(reviewedAgain, "Reviewed, drawn again")
+        try expect(reviewedAgain, "Reviewed, drawn again")
         XCTAssertTrue(waitForValue(reviewedAgain, "0"), "Reviewed reads \(String(describing: reviewedAgain.value)) after a save that failed")
         XCTAssertTrue(waitForLabel(title, "03 of 04"), title.label)
         try await expectTicks(thread: thread, message: message, "true,true,false,false")
@@ -98,7 +100,7 @@ final class GuideProofTests: ProofCase {
         // Back to the sections: the bar reads 6.1 again and both marks are there.
         element("guide-back").tap()
         XCTAssertTrue(waitForLabel(title, "Guided review"))
-        expect(surfaceControl("Continue with 03"), "Continue with 03")
+        try expect(surfaceControl("Continue with 03"), "Continue with 03")
         try await control.shot("ax-6.1")
         try await control.post("/text-size", ["size": "large"])
         try await control.shot("6.1-two-reviewed")
@@ -122,10 +124,10 @@ final class GuideProofTests: ProofCase {
         app.webViews.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", text, text)).firstMatch
     }
 
-    private func expect(_ target: XCUIElement, _ what: String, timeout: TimeInterval = 30, file: StaticString = #filePath, line: UInt = #line) {
+    private func expect(_ target: XCUIElement, _ what: String, timeout: TimeInterval = 30, file: StaticString = #filePath, line: UInt = #line) throws {
         if !target.waitForExistence(timeout: timeout) {
             print("— \(what) not found. The screen:\n\(app.debugDescription)")
-            XCTFail("\(what) not found", file: file, line: line)
+            try require(false, "\(what) not found", file: file, line: line)
         }
     }
 

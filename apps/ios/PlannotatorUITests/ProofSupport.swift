@@ -88,11 +88,24 @@ class ProofCase: XCTestCase {
         }
     }
 
+    /// A step that must hold, or the test ends here. An async test runs on past an
+    /// XCTFail and into its own tearDown at the same time, and the two together hung
+    /// the shard until the job timeout (runs 37958261402 and 38017849289); a thrown
+    /// error ends the test body first.
+    func require(_ holds: Bool, _ message: @autoclosure () -> String, file: StaticString = #filePath, line: UInt = #line) throws {
+        guard !holds else { return }
+        XCTFail(message(), file: file, line: line)
+        throw ProofStop()
+    }
+
     func waitForLabel(_ target: XCUIElement, _ text: String) -> Bool {
         let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", text), object: target)
         return XCTWaiter().wait(for: [expectation], timeout: 30) == .completed
     }
 }
+
+/// Thrown by `require`: the failure is already recorded.
+struct ProofStop: Error {}
 
 /// The proof script's loopback control server.
 struct Control {
@@ -131,29 +144,29 @@ struct Control {
 extension ProofCase {
     /// Pairs with the proof's Inbox by its loopback address and six digits (1.3).
     func pairByCode() async throws {
-        opened(element("connect-computer"), "the first run")
+        try opened(element("connect-computer"), "the first run")
         element("connect-computer").tap()
-        opened(element("find-nearby"), "the pairing cover")
+        try opened(element("find-nearby"), "the pairing cover")
         element("find-nearby").tap()
         let offer = try await control.post("/offer")
         let field = element("address-field")
-        opened(field, "the address field")
+        try opened(field, "the address field")
         field.tap()
         field.typeText(try XCTUnwrap(offer["address"] as? String))
         element("address-next").tap()
         let codeField = element("pairing-code")
-        opened(codeField, "the code boxes")
+        try opened(codeField, "the code boxes")
         codeField.tap()
         codeField.typeText(try XCTUnwrap(offer["code"] as? String))
         // A refused code or an unreachable address stays on the code screen, in its message: the screen is printed.
-        opened(anyRow(), "the list after pairing")
+        try opened(anyRow(), "the list after pairing")
     }
 
     /// A screen of the pairing flow; when it never opens, the failure carries the screen as it was.
-    private func opened(_ target: XCUIElement, _ what: String, file: StaticString = #filePath, line: UInt = #line) {
+    private func opened(_ target: XCUIElement, _ what: String, file: StaticString = #filePath, line: UInt = #line) throws {
         if !target.waitForExistence(timeout: ProofWait.opening) {
             print("— \(what) not found. The screen:\n\(app.debugDescription)")
-            XCTFail("\(what) not found", file: file, line: line)
+            try require(false, "\(what) not found", file: file, line: line)
         }
     }
 
