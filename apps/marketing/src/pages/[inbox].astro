@@ -4,6 +4,7 @@ import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
 import InboxShot from '../components/inbox/InboxShot.astro';
 import { INBOX_LAUNCHED, INBOX_POST_ID } from '../lib/inbox-launch';
+import installPrompt from '../lib/inbox-prompt.md?raw';
 
 // /inbox/ is generated only once the Inbox launches: until then the deployed
 // site has no such page (src/lib/inbox-launch.ts).
@@ -23,6 +24,26 @@ const copyIcon =
   '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
 const btn =
   'inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-border text-sm text-foreground font-medium hover:bg-muted/50 transition-colors';
+// The hero's "Copy install prompt": the same file /inbox/prompt.md serves
+// ([inbox]/prompt.md.ts), inlined so the copy needs no fetch. Escaped for a
+// <script type="application/json"> body.
+const promptJson = JSON.stringify(installPrompt).replace(/</g, '\\u003c');
+const systems = [
+  { id: 'unix', label: 'macOS / Linux / WSL', prompt: '$', command: install },
+  { id: 'win', label: 'Windows', prompt: '>', command: 'irm https://plannotator.ai/install.ps1 | iex' },
+];
+const agents = [
+  { id: 'cc', label: 'Claude Code' },
+  { id: 'pi', label: 'Pi' },
+  { id: 'oc', label: 'OpenCode' },
+  { id: 'cx', label: 'Codex' },
+  { id: 'cu', label: 'Cursor' },
+  { id: 'ot', label: 'Other MCP agent' },
+];
+const codexCommand = 'codex mcp add plannotator-inbox -- plannotator inbox mcp';
+const opencodeConfig = '{ "plugin": ["@plannotator/opencode@latest"] }';
+const cursorConfig = '{ "mcpServers": { "plannotator-inbox": { "command": "plannotator", "args": ["inbox", "mcp"] } } }';
+const testRequest = 'Send me a test question in the Plannotator Inbox, then wait for my answer.';
 const steps = [
   {
     title: 'An agent writes to the Inbox while it works.',
@@ -66,20 +87,159 @@ const steps = [
 
           <p class="ib-trust">Local. Claude Code and Pi and OpenCode and any MCP agent. Open source.</p>
 
-          <div class="hero-install ib-install flex items-center px-5 pr-12 py-3.5 text-sm max-w-xl w-full">
-            <span class="text-muted-foreground select-none mr-2" aria-hidden="true">$</span>
-            <code class="text-foreground select-all">{install}</code>
-            <button type="button" class="copy-btn" data-copy={install} aria-label="Copy install command" set:html={copyIcon} />
-          </div>
-          <p class="ib-then">then <code>plannotator inbox</code></p>
+          <!-- Setup (approved design: .product/approved/inbox-copy-install-prompt).
+               One row: the prompt for the person's agent, and the manual steps
+               behind a disclosure. Nothing else here. -->
+          <section class="ib-setup" aria-labelledby="ib-setup-h">
+            <h2 class="sr-only" id="ib-setup-h">Set up the Inbox</h2>
+            <div class="ib-copy-row">
+              <button type="button" class="ib-copy-prompt" data-copy-prompt>
+                <svg class="ib-ico-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" /></svg>
+                <svg class="ib-ico-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>
+                <span data-label>Copy install prompt</span>
+              </button>
+              <button type="button" class="ib-manual-toggle" aria-expanded="false" aria-controls="ib-manual" data-manual-toggle>
+                Prefer to do it yourself?
+              </button>
+            </div>
 
-          <div class="flex flex-wrap gap-3">
-            <a href={github} target="_blank" rel="noopener noreferrer" class={btn}>GitHub</a>
-            <a href="#how" class={btn}>
-              How it works
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14m0 0l-6-6m6 6l6-6" /></svg>
-            </a>
-          </div>
+            <div class="ib-manual" id="ib-manual" hidden>
+              <div class="ib-step">
+                <span class="ib-step-n" aria-hidden="true">01</span>
+                <div>
+                  <h3>Install Plannotator</h3>
+                  <div class="ib-tabs" role="tablist" aria-label="Your system">
+                    {systems.map((s, i) => (
+                      <button type="button" class="ib-tab" role="tab" id={`ib-t-${s.id}`} aria-controls={`ib-p-${s.id}`} aria-selected={i === 0 ? 'true' : 'false'} tabindex={i === 0 ? undefined : '-1'}>{s.label}</button>
+                    ))}
+                  </div>
+                  {systems.map((s, i) => (
+                    <div class="ib-panel" role="tabpanel" id={`ib-p-${s.id}`} aria-labelledby={`ib-t-${s.id}`} hidden={i !== 0}>
+                      <div class="hero-install ib-box">
+                        <span class="ib-dollar" aria-hidden="true">{s.prompt}</span>
+                        <code>{s.command}</code>
+                        <button type="button" class="copy-btn" data-copy={s.command} aria-label="Copy the install command" set:html={copyIcon} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div class="ib-step">
+                <span class="ib-step-n" aria-hidden="true">02</span>
+                <div>
+                  <h3>Start the Inbox</h3>
+                  <div class="hero-install ib-box">
+                    <span class="ib-dollar" aria-hidden="true">$</span>
+                    <code>plannotator inbox</code>
+                    <button type="button" class="copy-btn" data-copy="plannotator inbox" aria-label="Copy the command" set:html={copyIcon} />
+                  </div>
+                  <p>
+                    It opens in your browser. You only run this once: from then on, agents start the Inbox in the
+                    background when they write to it.
+                  </p>
+                </div>
+              </div>
+
+              <div class="ib-step">
+                <span class="ib-step-n" aria-hidden="true">03</span>
+                <div>
+                  <h3>Connect your agent</h3>
+                  <div class="ib-tabs" role="tablist" aria-label="Your agent">
+                    {agents.map((a, i) => (
+                      <button type="button" class="ib-tab" role="tab" id={`ib-t-${a.id}`} aria-controls={`ib-p-${a.id}`} aria-selected={i === 0 ? 'true' : 'false'} tabindex={i === 0 ? undefined : '-1'}>{a.label}</button>
+                    ))}
+                  </div>
+                  <div class="ib-panel" role="tabpanel" id="ib-p-cc" aria-labelledby="ib-t-cc">
+                    {[
+                      'claude plugin marketplace add backnotprop/plannotator',
+                      'claude plugin install plannotator@plannotator',
+                    ].map((command) => (
+                      <div class="hero-install ib-box">
+                        <span class="ib-dollar" aria-hidden="true">$</span>
+                        <code>{command}</code>
+                        <button type="button" class="copy-btn" data-copy={command} aria-label="Copy the command" set:html={copyIcon} />
+                      </div>
+                    ))}
+                    <p>
+                      Then quit Claude Code and start it again. The plugin adds a <code>plannotator_inbox</code> tool
+                      when Claude Code starts, once the Inbox has run, and your replies arrive as Claude's next turn.
+                    </p>
+                    <p class="ib-step-note">
+                      Claude Code 2.1.287 or newer on macOS or Linux. On Windows, use the MCP command under Other MCP
+                      agent.
+                    </p>
+                  </div>
+                  <div class="ib-panel" role="tabpanel" id="ib-p-pi" aria-labelledby="ib-t-pi" hidden>
+                    <div class="hero-install ib-box">
+                      <span class="ib-dollar" aria-hidden="true">$</span>
+                      <code>pi install npm:@plannotator/pi-extension</code>
+                      <button type="button" class="copy-btn" data-copy="pi install npm:@plannotator/pi-extension" aria-label="Copy the command" set:html={copyIcon} />
+                    </div>
+                    <p>
+                      Then turn on <b>Pi</b> under the inbox tool in the Inbox's <b>Settings</b>, and start a new Pi
+                      session or run <code>/reload</code>. Your replies arrive as Pi's next message once it is idle.
+                    </p>
+                    <p class="ib-step-note">
+                      The tool is off by default on Pi because Pi sends every tool's definition with each request.
+                    </p>
+                  </div>
+                  <div class="ib-panel" role="tabpanel" id="ib-p-oc" aria-labelledby="ib-t-oc" hidden>
+                    <span class="ib-box-label">opencode.json</span>
+                    <div class="hero-install ib-box">
+                      <code>{opencodeConfig}</code>
+                      <button type="button" class="copy-btn" data-copy={opencodeConfig} aria-label="Copy the config" set:html={copyIcon} />
+                    </div>
+                    <p>
+                      Then turn on <b>OpenCode</b> under the inbox tool in the Inbox's <b>Settings</b>, and restart
+                      OpenCode. On OpenCode 2 your replies arrive as the session's next turn.
+                    </p>
+                  </div>
+                  <div class="ib-panel" role="tabpanel" id="ib-p-cx" aria-labelledby="ib-t-cx" hidden>
+                    <div class="hero-install ib-box">
+                      <span class="ib-dollar" aria-hidden="true">$</span>
+                      <code>{codexCommand}</code>
+                      <button type="button" class="copy-btn" data-copy={codexCommand} aria-label="Copy the command" set:html={copyIcon} />
+                    </div>
+                    <p>Then restart Codex. Codex reads your reply when it calls <code>wait_for_reply</code>.</p>
+                  </div>
+                  <div class="ib-panel" role="tabpanel" id="ib-p-cu" aria-labelledby="ib-t-cu" hidden>
+                    <span class="ib-box-label">~/.cursor/mcp.json</span>
+                    <div class="hero-install ib-box">
+                      <code>{cursorConfig}</code>
+                      <button type="button" class="copy-btn" data-copy={cursorConfig} aria-label="Copy the config" set:html={copyIcon} />
+                    </div>
+                    <p>Cursor reads your reply when it calls <code>wait_for_reply</code>.</p>
+                  </div>
+                  <div class="ib-panel" role="tabpanel" id="ib-p-ot" aria-labelledby="ib-t-ot" hidden>
+                    <div class="hero-install ib-box">
+                      <span class="ib-dollar" aria-hidden="true">$</span>
+                      <code>plannotator inbox mcp</code>
+                      <button type="button" class="copy-btn" data-copy="plannotator inbox mcp" aria-label="Copy the command" set:html={copyIcon} />
+                    </div>
+                    <p>
+                      Add it to your agent as a stdio MCP server named <code>plannotator-inbox</code>. The Inbox's first
+                      screen gives the exact step for VS Code, Gemini CLI, Windsurf, Zed, Goose, Amp, Cline, Kiro,
+                      JetBrains and the Claude app, with the full path to <code>plannotator</code>.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="ib-step">
+                <span class="ib-step-n" aria-hidden="true">04</span>
+                <div>
+                  <h3>Send yourself a test message</h3>
+                  <p>Ask your agent, in a session started after step 3:</p>
+                  <div class="hero-install ib-box">
+                    <code>{testRequest}</code>
+                    <button type="button" class="copy-btn" data-copy={testRequest} aria-label="Copy the request" set:html={copyIcon} />
+                  </div>
+                  <p>Pick an answer in the Inbox and press <b>Send</b>. The thread then reads "Delivered to" your agent.</p>
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
 
         <!-- The Inbox film: voice-led, so it never autoplays. Until it plays the
@@ -291,10 +451,10 @@ const steps = [
         </div>
         <div class="flex flex-wrap gap-3">
           <a
-            href="https://docs.plannotator.ai/open-source/start/installation"
+            href="https://docs.plannotator.ai/open-source/inbox"
             class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground border border-primary text-sm font-medium hover:bg-primary/90 transition-colors"
           >
-            Install guide
+            Inbox docs
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
           </a>
           <a href={github} target="_blank" rel="noopener noreferrer" class={btn}>GitHub</a>
@@ -311,17 +471,125 @@ const steps = [
       </div>
     </div>
 
+    <p class="sr-only" aria-live="polite" data-copy-live></p>
+    <script is:inline type="application/json" id="ib-install-prompt" set:html={promptJson} />
+
     <script is:inline>
       (() => {
-        // Copy buttons in the install and command blocks.
+        const live = document.querySelector('[data-copy-live]');
+        const announce = (message) => {
+          if (!live) return;
+          live.textContent = '';
+          setTimeout(() => { live.textContent = message; }, 50);
+        };
+
+        // The clipboard API, else a selected off-screen textarea (plain http,
+        // older browsers, a denied permission).
+        const copyText = (text) => {
+          const fallback = () =>
+            new Promise((resolve, reject) => {
+              const ta = document.createElement('textarea');
+              ta.value = text;
+              ta.setAttribute('readonly', '');
+              ta.setAttribute('aria-hidden', 'true');
+              ta.style.position = 'fixed';
+              ta.style.top = '0';
+              ta.style.left = '0';
+              ta.style.opacity = '0';
+              document.body.appendChild(ta);
+              const focused = document.activeElement;
+              ta.select();
+              try {
+                document.execCommand('copy') ? resolve() : reject(new Error('copy failed'));
+              } catch (e) {
+                reject(e);
+              } finally {
+                ta.remove();
+                if (focused && focused.focus) focused.focus();
+              }
+            });
+          if (navigator.clipboard && window.isSecureContext) {
+            return navigator.clipboard.writeText(text).catch(fallback);
+          }
+          return fallback();
+        };
+
+        // Copy buttons in the command blocks.
         const check =
           '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>';
         document.querySelectorAll('[data-copy]').forEach((b) => {
           const icon = b.innerHTML;
           b.addEventListener('click', () => {
-            navigator.clipboard.writeText(b.getAttribute('data-copy') || '').then(() => {
+            copyText(b.getAttribute('data-copy') || '').then(() => {
               b.innerHTML = check;
+              announce('Copied.');
               setTimeout(() => { b.innerHTML = icon; }, 1500);
+            }, () => announce('Copy failed. Select the command and copy it by hand.'));
+          });
+        });
+
+        // "Copy install prompt": the text /inbox/prompt.md serves, inlined.
+        const promptNode = document.getElementById('ib-install-prompt');
+        const prompt = promptNode ? JSON.parse(promptNode.textContent || '""') : '';
+        document.querySelectorAll('[data-copy-prompt]').forEach((b) => {
+          const label = b.querySelector('[data-label]');
+          let timer;
+          const reset = () => {
+            b.removeAttribute('data-copied');
+            if (label) label.textContent = 'Copy install prompt';
+          };
+          b.addEventListener('click', () => {
+            clearTimeout(timer);
+            copyText(prompt).then(
+              () => {
+                b.setAttribute('data-copied', '');
+                if (label) label.textContent = 'Copied. Paste it into your agent';
+                announce('Install prompt copied. Paste it into your agent.');
+                timer = setTimeout(reset, 3500);
+              },
+              () => {
+                announce('Copy failed. The prompt is at plannotator.ai/inbox/prompt.md.');
+              },
+            );
+          });
+        });
+
+        // "Prefer to do it yourself?": the four manual steps.
+        const manual = document.getElementById('ib-manual');
+        document.querySelectorAll('[data-manual-toggle]').forEach((t) =>
+          t.addEventListener('click', () => {
+            if (!manual) return;
+            const open = manual.hidden;
+            manual.hidden = !open;
+            t.setAttribute('aria-expanded', String(open));
+          }),
+        );
+
+        // Tabs: click, or arrow keys / Home / End within a tablist.
+        document.querySelectorAll('.ib-setup [role="tablist"]').forEach((list) => {
+          const tabs = Array.from(list.querySelectorAll('[role="tab"]'));
+          const select = (tab, focus) => {
+            tabs.forEach((t) => {
+              const on = t === tab;
+              t.setAttribute('aria-selected', String(on));
+              t.tabIndex = on ? 0 : -1;
+              const panel = document.getElementById(t.getAttribute('aria-controls') || '');
+              if (panel) panel.hidden = !on;
+            });
+            if (focus) tab.focus();
+          };
+          tabs.forEach((t, i) => {
+            t.addEventListener('click', () => select(t, false));
+            t.addEventListener('keydown', (e) => {
+              let j = null;
+              if (e.key === 'ArrowRight') j = (i + 1) % tabs.length;
+              else if (e.key === 'ArrowLeft') j = (i - 1 + tabs.length) % tabs.length;
+              else if (e.key === 'Home') j = 0;
+              else if (e.key === 'End') j = tabs.length - 1;
+              if (j !== null) {
+                e.preventDefault();
+                select(tabs[j], true);
+              }
             });
           });
         });
@@ -488,15 +756,216 @@ const steps = [
     }
   }
 
-  .ib-then {
-    font-size: 0.75rem;
-    color: var(--muted-foreground);
-    margin-top: -0.5rem;
+  /* ── Setup: "Copy install prompt" and the manual steps (approved
+     prototype, .product/approved/inbox-copy-install-prompt) ── */
+  .ib-setup {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-top: 0.5rem;
   }
 
-  .ib-then code {
-    font-size: 0.95em;
+  .ib-copy-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1.25rem;
+  }
+
+  .ib-copy-prompt {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.8rem 1.25rem;
+    border-radius: 10px;
+    border: 1px solid var(--primary);
+    background: var(--primary);
+    color: var(--primary-foreground);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    cursor: pointer;
+    transition:
+      background-color 150ms ease-out,
+      border-color 150ms ease-out,
+      transform 120ms ease-out;
+  }
+
+  .ib-copy-prompt:hover { background: color-mix(in oklab, var(--primary) 90%, var(--foreground)); }
+  .ib-copy-prompt:active { transform: scale(0.98); }
+  .ib-copy-prompt svg { width: 17px; height: 17px; flex: 0 0 auto; }
+  .ib-copy-prompt .ib-ico-check { display: none; }
+  .ib-copy-prompt[data-copied] { background: var(--success); border-color: var(--success); }
+  :global(.light) .ib-copy-prompt[data-copied] { color: #fff; }
+  .ib-copy-prompt[data-copied] .ib-ico-copy { display: none; }
+  .ib-copy-prompt[data-copied] .ib-ico-check { display: block; }
+
+  .ib-copy-prompt:focus-visible,
+  .ib-manual-toggle:focus-visible,
+  .ib-tab:focus-visible,
+  .ib-box :global(.copy-btn:focus-visible) {
+    outline: 2px solid var(--primary);
+    outline-offset: 3px;
+  }
+
+  .ib-manual-toggle {
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: var(--muted-foreground);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-color: color-mix(in oklab, currentColor 35%, transparent);
+    border-radius: 2px;
+    transition: color 150ms ease-out;
+  }
+
+  .ib-manual-toggle:hover { color: var(--foreground); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ib-copy-prompt,
+    .ib-manual-toggle { transition: none; }
+    .ib-copy-prompt:active { transform: none; }
+  }
+
+  @media (max-width: 639px) {
+    .ib-copy-prompt { width: 100%; justify-content: center; }
+  }
+
+  .ib-manual[hidden] { display: none; }
+
+  .ib-manual {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--card);
+    padding: 0.5rem 1.5rem;
+  }
+
+  .ib-step {
+    display: grid;
+    grid-template-columns: 2.25rem minmax(0, 1fr);
+    gap: 0 0.5rem;
+    padding: 1.25rem 0;
+  }
+
+  .ib-step + .ib-step { border-top: 1px solid color-mix(in oklab, var(--border) 60%, transparent); }
+
+  .ib-step-n {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--primary);
+    letter-spacing: 0.05em;
+    padding-top: 0.2rem;
+  }
+
+  .ib-step h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin-bottom: 0.375rem;
+  }
+
+  .ib-step p {
+    font-size: 0.875rem;
+    line-height: 1.6;
+    color: var(--ib-dim);
+  }
+
+  .ib-step p b { color: var(--foreground); font-weight: 600; }
+
+  .ib-step p + .ib-box,
+  .ib-step .ib-box + p,
+  .ib-step .ib-tabs + .ib-panel,
+  .ib-step p + p { margin-top: 0.625rem; }
+
+  .ib-step .ib-box + .ib-box { margin-top: 0.5rem; }
+
+  .ib-step p code {
+    font-size: 0.85em;
+    padding: 0.05em 0.35em;
+    border-radius: 5px;
+    background: color-mix(in oklab, var(--foreground) 8%, transparent);
     color: var(--foreground);
+  }
+
+  .ib-step .ib-step-note {
+    font-size: 0.8125rem;
+    color: var(--ib-subtle);
+  }
+
+  /* Command boxes: global.css .hero-install, wrapping. */
+  .ib-box {
+    display: flex;
+    align-items: flex-start;
+    padding: 0.7rem 3rem 0.7rem 1rem;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+  }
+
+  .ib-box code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--foreground);
+  }
+
+  .ib-dollar {
+    color: var(--muted-foreground);
+    margin-right: 0.5rem;
+    user-select: none;
+  }
+
+  .ib-setup .ib-box :global(.copy-btn) {
+    top: 0.5rem;
+    right: 0.5rem;
+    transform: none;
+    display: inline-flex;
+  }
+
+  .ib-box-label {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--ib-subtle);
+    margin: 0.625rem 0 0.25rem;
+  }
+
+  .ib-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-top: 0.625rem;
+  }
+
+  .ib-tab {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.35rem 0.7rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: none;
+    font-size: 0.8125rem;
+    color: var(--ib-dim);
+    cursor: pointer;
+  }
+
+  .ib-tab:hover { color: var(--foreground); }
+
+  .ib-tab[aria-selected='true'] {
+    color: var(--foreground);
+    border-color: color-mix(in oklab, var(--primary) 60%, var(--border));
+    background: color-mix(in oklab, var(--primary) 12%, transparent);
+  }
+
+  .ib-panel[hidden] { display: none; }
+
+  @media (max-width: 639px) {
+    .ib-manual { padding: 0.25rem 1rem; }
+    .ib-step { grid-template-columns: 1.75rem minmax(0, 1fr); }
+    .ib-box { font-size: 0.75rem; padding: 0.65rem 2.75rem 0.65rem 0.875rem; }
   }
 
   .ib-hero :global(.ib-hero-shot) {
