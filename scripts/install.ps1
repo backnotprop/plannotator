@@ -825,7 +825,7 @@ try { Repair-LegacyPluginHooks -Clone $pluginMarketplaceDir } catch { }
 # at user scope), run the two commands this script used to only print. Runs
 # after the repair above, so a repaired clone is what gets copied. It never
 # installs the plugin, never touches another marketplace or plugin, never
-# prompts (stdin is an empty file), and never fails the install: each command
+# prompts (stdin is a pipe closed at once), and never fails the install: each command
 # is time-bounded and a failure prints the manual commands. Opt out with
 # -SkipClaudePlugin, PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE=1 or
 # skipInstall.claudePlugin; -Minimal exits before this. Same steps as
@@ -859,46 +859,60 @@ function Get-ClaudePluginFingerprint {
 }
 
 # Run claude with arguments and a time limit. Returns "" on success, else why
-# it failed.
+# it failed. The process is started directly (not Start-Process, whose
+# -RedirectStandardInput copies a file into the pipe after the start and throws
+# "Broken pipe" when claude exits first): stdin is a pipe closed right away in
+# its own try/catch, so a claude that exits before that is not an error, and
+# only a failing start is reported as "could not run claude".
 function Invoke-ClaudeWithTimeLimit {
     param([string]$ClaudePath, [string[]]$Arguments, [int]$Seconds)
-    $out = [System.IO.Path]::GetTempFileName()
-    $err = [System.IO.Path]::GetTempFileName()
-    $in = [System.IO.Path]::GetTempFileName()
+    $info = New-Object System.Diagnostics.ProcessStartInfo
+    $info.FileName = $ClaudePath
+    $info.Arguments = ($Arguments -join " ")
+    $info.UseShellExecute = $false
+    $info.RedirectStandardInput = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $info.CreateNoWindow = $true
     try {
-        $p = Start-Process -FilePath $ClaudePath -ArgumentList $Arguments -NoNewWindow -PassThru `
-            -RedirectStandardOutput $out -RedirectStandardError $err -RedirectStandardInput $in
-        # Cache the handle so ExitCode is readable after the wait (PS 5.1).
-        $null = $p.Handle
-        if (-not $p.WaitForExit($Seconds * 1000)) {
-            try { $p.Kill($true) } catch { try { $null = & taskkill /T /F /PID $p.Id 2>$null } catch { }; try { $p.Kill() } catch { } }
-            return "timed out after ${Seconds}s"
-        }
-        $p.WaitForExit()
-        if ($p.ExitCode -ne 0) {
-            # The last non-empty line claude printed, stderr first.
-            $last = $null
-            foreach ($file in @($err, $out)) {
-                $last = @(Get-Content -LiteralPath $file -ErrorAction SilentlyContinue) |
-                    ForEach-Object { ($_ -replace '[^\x20-\x7E]', '').Trim() } |
-                    Where-Object { $_ } | Select-Object -Last 1
-                if ($last) { break }
-            }
-            # The plannotator marketplace itself is gone (removed by hand):
-            # updating cannot work, re-adding it does.
-            foreach ($line in @(Get-Content -LiteralPath $err, $out -ErrorAction SilentlyContinue)) {
-                if ($line -match 'marketplace' -and $line -match 'not found|not exist|no such|unknown') { $script:claudeMarketplaceMissing = $true }
-            }
-            if ($last -and $last.Length -gt 200) { $last = $last.Substring(0, 200) }
-            if ($last) { return "claude exited $($p.ExitCode): $last" }
-            return "claude exited $($p.ExitCode)"
-        }
-        return ""
+        $p = [System.Diagnostics.Process]::Start($info)
     } catch {
         return "could not run claude: $($_.Exception.Message)"
-    } finally {
-        Remove-Item -Force -LiteralPath $out, $err, $in -ErrorAction SilentlyContinue
     }
+    try { $p.StandardInput.Close() } catch { }
+    # Read both pipes asynchronously so a chatty claude can never fill one and
+    # block while we wait.
+    $outTask = $p.StandardOutput.ReadToEndAsync()
+    $errTask = $p.StandardError.ReadToEndAsync()
+    if (-not $p.WaitForExit($Seconds * 1000)) {
+        try { $p.Kill($true) } catch { try { $null = & taskkill /T /F /PID $p.Id 2>$null } catch { }; try { $p.Kill() } catch { } }
+        return "timed out after ${Seconds}s"
+    }
+    $p.WaitForExit()
+    if ($p.ExitCode -eq 0) { return "" }
+    # A process claude left behind may keep a pipe open; never wait long.
+    $texts = @()
+    foreach ($task in @($errTask, $outTask)) {
+        $text = ""
+        try { if ($task.Wait(5000)) { $text = [string]$task.Result } } catch { }
+        $texts += $text
+    }
+    # The last non-empty line claude printed, stderr first.
+    $last = $null
+    foreach ($text in $texts) {
+        $last = @($text -split "\r?\n") |
+            ForEach-Object { ($_ -replace '[^\x20-\x7E]', '').Trim() } |
+            Where-Object { $_ } | Select-Object -Last 1
+        if ($last) { break }
+    }
+    # The plannotator marketplace itself is gone (removed by hand): updating
+    # cannot work, re-adding it does.
+    foreach ($line in @($texts | ForEach-Object { $_ -split "\r?\n" })) {
+        if ($line -match 'marketplace' -and $line -match 'not found|not exist|no such|unknown') { $script:claudeMarketplaceMissing = $true }
+    }
+    if ($last -and $last.Length -gt 200) { $last = $last.Substring(0, 200) }
+    if ($last) { return "claude exited $($p.ExitCode): $last" }
+    return "claude exited $($p.ExitCode)"
 }
 
 # --scope user always: `claude plugin update` auto-detects the scope on current

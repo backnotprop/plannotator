@@ -3983,6 +3983,24 @@ describe.skipIf(!pwshBin || process.platform === "win32")(
         expect(r.out).toContain("Claude Code plugin: could not update it (timed out after 1s).");
       }, PWSH_SCANNER_TIMEOUT_MS);
 
+      test(`${runner}: a claude that exits at once without reading stdin is a normal run, every time`, () => {
+        // Start-Process -RedirectStandardInput wrote into the pipe after the
+        // start and threw "Broken pipe" when claude had already exited (CI on
+        // Linux, run 38076200627). Repeat to make that race show if it is back.
+        for (let i = 0; i < 5; i++) {
+          const s = setupClaudePluginSandbox({});
+          writeFileSync(
+            join(s.sandbox.stub, "claude"),
+            `#!/bin/sh\nprintf '%s\\n' "$*" >> "$FAKE_CLAUDE_LOG"\nexit 0\n`,
+            { mode: 0o755 },
+          );
+          const r = runWindowsClaudePluginUpdate(runner, s);
+          expect(r.out).not.toContain("could not run claude");
+          expectState(runner, r, "current");
+          expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+        }
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
       test(`${runner}: a --version pin skips the update`, () => {
         const s = setupClaudePluginSandbox({});
         const r = runWindowsClaudePluginUpdate(runner, s, { pinned: "v0.27.0" });
