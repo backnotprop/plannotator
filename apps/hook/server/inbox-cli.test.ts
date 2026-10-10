@@ -336,6 +336,13 @@ describe("plannotator inbox mcp inside an agent session", () => {
   test("the names it fills are the ones each host's own plannotator_inbox tool sends", () => {
     expect(INBOX_SESSION_HOST_NAMES[INBOX_HOST]).toBe(INBOX_AGENT_NAME);
     expect(INBOX_SESSION_HOST_NAMES[OPENCODE_INBOX_HOST]).toBe(OPENCODE_INBOX_AGENT_NAME);
+    // Pi's constants, read from source: apps/pi-extension/inbox.ts imports its generated/ folder, which exists only after vendor.sh.
+    const piSource = readFileSync(resolve(import.meta.dir, "../../pi-extension/inbox.ts"), "utf8");
+    const piHost = /export const PI_INBOX_HOST = "([^"]+)";/.exec(piSource)?.[1];
+    const piName = /export const PI_INBOX_AGENT_NAME = "([^"]+)";/.exec(piSource)?.[1];
+    expect(piHost).toBe("pi");
+    expect(piName).toBeDefined();
+    expect(INBOX_SESSION_HOST_NAMES[piHost!]).toBe(piName!);
     expect(Object.keys(INBOX_SESSION_HOST_NAMES).sort()).toEqual(["claude-code", "opencode", "pi"]);
   });
 
@@ -377,14 +384,29 @@ describe("plannotator inbox mcp inside an agent session", () => {
   test("host and name are filled only on the tools that record an author, and only when the agent left them out", () => {
     const hostSession = { host: "claude-code", session: CLAUDE_SESSION, name: "Claude Code" };
     const call = (name: string, args: Record<string, unknown>) =>
-      fillInboxToolArguments({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, "/work", hostSession).params!.arguments as Record<string, unknown>;
+      fillInboxToolArguments({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, "/work", "ses_OWN", hostSession).params!
+        .arguments as Record<string, unknown>;
     expect(call("send_message", { body: "hi" })).toEqual({ body: "hi", project_path: "/work", agent_session: CLAUDE_SESSION, agent_host: "claude-code", agent_name: "Claude Code" });
     // read_thread and wait_for_reply have strict schemas without agent_host.
     expect(call("read_thread", {})).toEqual({ project_path: "/work", agent_session: CLAUDE_SESSION });
     expect(call("wait_for_reply", {})).toEqual({ project_path: "/work", agent_session: CLAUDE_SESSION });
     // The agent's own choices stand.
     expect(call("send_message", { body: "hi", agent_session: "mine" })).toEqual({ body: "hi", project_path: "/work", agent_session: "mine" });
-    expect(call("send_message", { body: "hi", agent_host: "codex" })).toEqual({ body: "hi", project_path: "/work", agent_session: CLAUDE_SESSION, agent_host: "codex" });
+    // An agent that names another host is not this session: it gets the shim's own id, so a reply to it never wakes the session.
+    expect(call("send_message", { body: "hi", agent_host: "codex" })).toEqual({ body: "hi", project_path: "/work", agent_session: "ses_OWN", agent_host: "codex" });
+    expect(call("send_message", { body: "hi", agent_host: "claude-code" })).toEqual({
+      body: "hi",
+      project_path: "/work",
+      agent_session: CLAUDE_SESSION,
+      agent_host: "claude-code",
+      agent_name: "Claude Code",
+    });
+    expect(call("read_thread", { agent_host: "codex" })).toEqual({ project_path: "/work", agent_session: "ses_OWN", agent_host: "codex" });
+    // Without a host session, the shim's own id.
+    expect(
+      fillInboxToolArguments({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "send_message", arguments: { body: "hi" } } }, "/work", "ses_OWN", null).params!
+        .arguments,
+    ).toEqual({ body: "hi", project_path: "/work", agent_session: "ses_OWN" });
     expect(call("send_message", { body: "hi", agent_name: "Helper" })).toMatchObject({ agent_host: "claude-code", agent_name: "Helper" });
   });
 

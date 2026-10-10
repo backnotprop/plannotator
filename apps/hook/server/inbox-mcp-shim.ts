@@ -91,25 +91,27 @@ function rpcError(id: string | number | null | undefined, message: string, code 
 
 /**
  * Fill `project_path` and `agent_session` on the Inbox's tools when absent.
- * `session` is a string (the shim's own `ses_` id) or the host session the
- * shim runs inside, whose host and name are filled too on the tools that
- * record an author, when the agent left both the session and the host out.
+ * `own` is the shim's own `ses_` id; `hostSession` the agent host session the
+ * shim runs inside, if any. The host session is adopted only when the agent
+ * named no host or that same host (an agent that says it is another host is
+ * not that session, and a reply to it must not wake the session), and then its
+ * host and name are filled too on the tools that record an author.
  */
-export function fillInboxToolArguments(message: JsonRpc, cwd: string, session: string | InboxHostSession): JsonRpc {
+export function fillInboxToolArguments(message: JsonRpc, cwd: string, own: string, hostSession?: InboxHostSession | null): JsonRpc {
   if (message.method !== "tools/call" || !message.params) return message;
   const name = message.params.name;
   if (typeof name !== "string" || !FILLED_TOOLS.has(name)) return message;
   const args = { ...((message.params.arguments as Record<string, unknown> | undefined) ?? {}) };
   if (args.project_path === undefined && args.reply_to === undefined) args.project_path = cwd;
   if (args.agent_session === undefined) {
-    if (typeof session === "string") {
-      args.agent_session = session;
-    } else {
-      args.agent_session = session.session;
-      if (AUTHOR_TOOLS.has(name) && args.agent_host === undefined) {
-        args.agent_host = session.host;
-        if (args.agent_name === undefined) args.agent_name = session.name;
+    if (hostSession && (args.agent_host === undefined || args.agent_host === hostSession.host)) {
+      args.agent_session = hostSession.session;
+      if (AUTHOR_TOOLS.has(name)) {
+        args.agent_host = hostSession.host;
+        if (args.agent_name === undefined) args.agent_name = hostSession.name;
       }
+    } else {
+      args.agent_session = own;
     }
   }
   return { ...message, params: { ...message.params, arguments: args } };
@@ -130,7 +132,8 @@ function sseMessages(text: string): string[] {
 }
 
 export async function runInboxMcpShim(options: InboxMcpShimOptions): Promise<void> {
-  const session: string | InboxHostSession = options.hostSession ?? inboxId("ses");
+  const own = inboxId("ses");
+  const hostSession = options.hostSession ?? null;
   const write = options.write ?? ((line: string) => void process.stdout.write(`${line}\n`));
   let negotiatedVersion: string | null = null;
 
@@ -149,7 +152,7 @@ export async function runInboxMcpShim(options: InboxMcpShimOptions): Promise<voi
       return;
     }
     const isRequest = message && typeof message === "object" && "id" in message && typeof message.method === "string";
-    const outgoing = fillInboxToolArguments(message, options.cwd, session);
+    const outgoing = fillInboxToolArguments(message, options.cwd, own, hostSession);
     let target: InboxRegistryEntry;
     try {
       target = await entry();
