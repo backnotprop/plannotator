@@ -3,7 +3,7 @@ import { isCodeFilePath } from "@plannotator/core/code-file";
 import type { Block } from "../../types";
 import { sanitizeBlockHtml } from "../../utils/sanitizeHtml";
 import { getImageSrc } from "../ImageThumbnail";
-import { isLocalLinkTarget, useLocalLinkResolver, type LocalLinkResolver } from "../LocalLinkContext";
+import { isLocalLinkTarget, isNewTabClick, useLocalLinkResolver, type LocalLinkResolver } from "../LocalLinkContext";
 
 interface HtmlBlockProps {
   block: Block;
@@ -66,15 +66,24 @@ function rewriteRelativeRefs(
     const localLink = resolveLocalLink && isLocalLinkTarget(href) ? resolveLocalLink(href) : null;
     if (localLink?.kind === 'open') {
       const openLink = localLink.open;
+      const hostHref = localLink.href;
       const handler = (e: Event) => {
+        // With the host's own address, a new-tab click goes there.
+        if (hostHref && e instanceof MouseEvent && isNewTabClick(e)) return;
         e.preventDefault();
         e.stopPropagation();
         openLink();
       };
+      if (hostHref) {
+        a.setAttribute('href', hostHref);
+        a.removeAttribute('target');
+      }
       if (localLink.title) a.setAttribute('title', localLink.title);
       a.setAttribute('data-local-link', 'open');
-      // A middle click would open the path on the host's own origin in a new tab.
-      const aux = (e: Event) => e.preventDefault();
+      // Without it, a middle click would open the path on the host's own origin.
+      const aux = (e: Event) => {
+        if (!hostHref) e.preventDefault();
+      };
       a.addEventListener('click', handler);
       a.addEventListener('auxclick', aux);
       cleanups.push(() => {

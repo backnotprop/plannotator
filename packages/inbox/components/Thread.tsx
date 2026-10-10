@@ -6,7 +6,7 @@ import type { IndexedQuestion, QuestionAnswer } from '@plannotator/core/question
 import { inboxDecisionWords } from '@plannotator/core/inbox-questions';
 import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentState } from '@plannotator/core/inbox-types';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
-import { NOT_ATTACHED_TITLE, attachmentForLink, openAttachmentTitle } from '../links';
+import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, attachmentForLink, openAttachmentTitle } from '../links';
 import { InboxApiError, inboxApi, type AttachmentsModel } from '../api';
 import { annotationOf, attachmentFeedback } from '../attachments';
 import { AttachmentTiles } from './AttachmentTiles';
@@ -68,9 +68,14 @@ export function MessageBody({
     (href) => {
       const attachment = attachmentForLink(href, { attachments: message.attachments ?? [], root: projectRoot, base: message.base_path ?? null });
       if (!attachment) return { kind: 'unavailable', title: NOT_ATTACHED_TITLE };
-      return { kind: 'open', title: openAttachmentTitle(attachment.name), open: () => openRef.current(attachment) };
+      return {
+        kind: 'open',
+        title: openAttachmentTitle(attachmentDisplayPath(attachment, projectRoot)),
+        href: attachmentDeepLink(message.thread_id, attachment.id),
+        open: () => openRef.current(attachment),
+      };
     },
-    [message.attachments, message.base_path, projectRoot],
+    [message.attachments, message.base_path, message.thread_id, projectRoot],
   );
   const renderFooter = useCallback(
     (question: IndexedQuestion) => {

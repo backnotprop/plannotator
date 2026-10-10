@@ -8,7 +8,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAttachment, InboxMessageWire } from '@plannotator/core/inbox-types';
-import { attachmentForLink, normalizeLinkPath } from './links';
+import { attachmentDeepLink, attachmentDisplayPath, attachmentForLink, normalizeLinkPath } from './links';
 
 const hasDom = typeof document !== 'undefined';
 // Viewer pulls in web-highlighter, which reads `window` at module-eval time.
@@ -59,6 +59,17 @@ test('a percent-encoded link and a Windows path still match', () => {
   const win = attachment('att_win', 'C:\\work\\app\\mock.html');
   expect(attachmentForLink('mock.html', { attachments: [win], root: 'C:\\work\\app' })?.id).toBe('att_win');
   expect(normalizeLinkPath('C:\\a\\b\\..\\c')).toBe('c:/a/c');
+});
+
+test("an attachment's display path is relative to the project, its deep link the window's own route", () => {
+  expect(attachmentDisplayPath(MOCK, ROOT)).toBe('design/mock.html');
+  expect(attachmentDisplayPath(PLAN, `${ROOT}/`)).toBe('docs/current-plan.md');
+  expect(attachmentDisplayPath(attachment('att_out', '/elsewhere/x.md'), ROOT)).toBe('/elsewhere/x.md');
+  const link = attachmentDeepLink('msg_1', 'att_2');
+  expect(link).toBe('#thread=msg_1&file=att_2');
+  // App.tsx reads the route from the hash with URLSearchParams.
+  const params = new URLSearchParams(link.slice(1));
+  expect([params.get('thread'), params.get('file')]).toEqual(['msg_1', 'att_2']);
 });
 
 test('two attachments with one name: a bare name picks neither', () => {
@@ -124,7 +135,7 @@ test.skipIf(!hasDom)('in a message, an attached file opens beside the thread; an
     ].join('\n');
     await mount(
       <MessageBody
-        message={message(body, [attachment('att_mock', `${ROOT}/mock.html`)])}
+        message={message(body, [MOCK])}
         projectRoot={ROOT}
         onOpenAttachment={(a) => opened.push(a.id)}
         readOnly={false}
@@ -140,13 +151,27 @@ test.skipIf(!hasDom)('in a message, an attached file opens beside the thread; an
     // The link inside the question's context is a real, focusable link that opens the pane.
     const mock = [...host!.querySelectorAll<HTMLAnchorElement>('a[data-local-link="open"]')].find((a) => a.textContent?.includes('the mock'))!;
     expect(mock).toBeDefined();
-    expect(mock.getAttribute('href')).toBe('mock.html');
+    // Its href is the window's own deep link to the file, so a new tab opens it there.
+    expect(mock.getAttribute('href')).toBe('#thread=msg_01K7ZZZZZZZZZZZZZZZZZZZZZZ&file=att_mock');
+    // The tooltip names the file by its path in the project, not its bare name.
+    expect(mock.getAttribute('title')).toBe('Open design/mock.html beside the thread');
     await act(async () => mock.click());
     expect(opened).toEqual(['att_mock']);
 
     // A raw-HTML link to the same attachment opens it too.
     const rawMock = [...host!.querySelectorAll<HTMLAnchorElement>('a[data-local-link="open"]')].find((a) => a.textContent === 'raw mock')!;
+    expect(rawMock.getAttribute('href')).toBe('#thread=msg_01K7ZZZZZZZZZZZZZZZZZZZZZZ&file=att_mock');
     await act(async () => rawMock.click());
+    expect(opened).toEqual(['att_mock', 'att_mock']);
+
+    // A Cmd/Ctrl click is the browser's (a new tab at the deep link), never the pane.
+    for (const link of [mock, rawMock]) {
+      const modified = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true });
+      await act(async () => {
+        link.dispatchEvent(modified);
+      });
+      expect(modified.defaultPrevented).toBe(false);
+    }
     expect(opened).toEqual(['att_mock', 'att_mock']);
 
     // Not attached: no href anywhere, so a click goes nowhere and nothing is fetched.

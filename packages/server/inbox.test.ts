@@ -362,16 +362,18 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
     // characters ("… [truncated]" after). The question guide is longer than
     // that by itself, so what must survive the cut is pinned: the syntax, the
     // context rules (what to give a reader who switches in cold, images and
-    // linked files) and the rules on what to ask, through "Ask only what you
-    // cannot decide alone".
+    // linked files), the rules on what to ask, and the `- [x]` settled rule
+    // whole.
     const sendDescription = tools.tools.find((t) => t.name === "send_message")!.description!;
     const reachesModel = sendDescription.slice(0, 2048 - "… [truncated]".length);
     expect(reachesModel).toContain(":::question-text");
+    expect(reachesModel).toContain("does not know what you know");
     expect(reachesModel).toContain("without opening anything else");
     expect(reachesModel).toContain("no jargon");
     expect(reachesModel).toContain("`![alt](path)`");
     expect(reachesModel).toContain("`[the mock](mock.html)`");
     expect(reachesModel).toContain("Do not ask rhetorical questions or questions the codebase answers.");
+    expect(reachesModel).toContain("or drop the block and state the decision in prose.");
     // The guided-review tools reach the model whole, their worked example pointer included.
     for (const name of ["get_guide_brief", "submit_guide"]) {
       expect(tools.tools.find((t) => t.name === name)!.description!.length).toBeLessThan(2048);

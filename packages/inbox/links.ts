@@ -98,9 +98,32 @@ export function attachmentForLink<T extends LinkableAttachment>(
   return null;
 }
 
-/** The tooltip of a link that opens an attachment. */
-export function openAttachmentTitle(name: string): string {
-  return `Open ${name} beside the thread`;
+/**
+ * Where an attachment is, as the person knows it: the path the agent named
+ * (else its realpath), relative to the project root when it lies inside it.
+ */
+export function attachmentDisplayPath(attachment: Pick<LinkableAttachment, 'path' | 'named_path'>, root: string): string {
+  const path = normalizeLinkPath(attachment.named_path || attachment.path);
+  const base = normalizeLinkPath(root);
+  if (base && path.startsWith(`${base.replace(/\/$/, '')}/`)) return path.slice(base.replace(/\/$/, '').length + 1);
+  return path;
+}
+
+/** The tooltip of a link that opens an attachment: its path in the project, so a match by bare name shows which file. */
+export function openAttachmentTitle(displayPath: string): string {
+  return `Open ${displayPath} beside the thread`;
+}
+
+/**
+ * The window's own address of an attachment open beside its thread, the
+ * route the window reads (`#thread=…&file=…`), so "Open in new tab", drag
+ * and copy land on the file rather than on a path the Inbox does not serve.
+ */
+export function attachmentDeepLink(threadId: string, attachmentId: string): string {
+  const params = new URLSearchParams();
+  params.set('thread', threadId);
+  params.set('file', attachmentId);
+  return `#${params.toString()}`;
 }
 
 /** The tooltip of a local link that names no attachment of the message. */

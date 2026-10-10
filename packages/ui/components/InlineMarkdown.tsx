@@ -8,7 +8,7 @@ import { transformPlainText } from "../utils/inlineTransforms";
 import { hasLinkedDocExtension } from "../utils/markdownExtensions";
 import { getImageSrc } from "./ImageThumbnail";
 import { useCodePathValidation, type CodePathValidationContextValue } from "./CodePathValidationContext";
-import { isLocalLinkTarget, useLocalLinkResolver } from "./LocalLinkContext";
+import { isLocalLinkTarget, isNewTabClick, useLocalLinkResolver } from "./LocalLinkContext";
 import type { ValidationEntry } from "../hooks/useValidatedCodePaths";
 import { CodeFilePicker } from "./CodeFilePicker";
 import { normalizeMathTex, renderMathToHtml } from "../utils/math";
@@ -1051,17 +1051,20 @@ export const InlineMarkdown: React.FC<{
 
       if (localLink?.kind === 'open') {
         const openLink = localLink.open;
+        const hostHref = localLink.href;
         parts.push(
           <a
             key={key++}
-            href={safeLinkUrl}
+            href={hostHref ?? safeLinkUrl}
             onClick={(e) => {
+              // With the host's own address, a new-tab click goes there.
+              if (hostHref && isNewTabClick(e)) return;
               e.preventDefault();
               e.stopPropagation();
               openLink();
             }}
-            // A middle click would open the path on the host's own origin in a new tab.
-            onAuxClick={(e) => e.preventDefault()}
+            // Without it, a middle click would open the path on the host's own origin.
+            onAuxClick={hostHref ? undefined : (e) => e.preventDefault()}
             className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1 cursor-pointer"
             title={localLink.title}
             data-local-link="open"
@@ -1087,7 +1090,7 @@ export const InlineMarkdown: React.FC<{
         parts.push(
           <span
             key={key++}
-            className="text-muted-foreground underline decoration-dotted underline-offset-2 cursor-help"
+            className="text-muted-foreground underline decoration-dotted underline-offset-2"
             title={localLink.title}
             data-local-link="unavailable"
           >

@@ -124,6 +124,7 @@ jobs:
           packages/ui/components/ImageLightbox.test.tsx
           packages/inbox/images.test.tsx
           packages/inbox/codeAttachment.test.tsx
+          packages/inbox/links.test.tsx
           packages/ui/components/blocks/QuestionBlock.test.tsx
           packages/ui/components/blocks/QuestionBlock.host.test.tsx
           packages/ui/components/blocks/QuestionBlock.decisionToggle.test.tsx

@@ -1156,7 +1156,7 @@ export const buildQuestionAnswerAnnotation = (
  */
 export const QUESTION_AUTHORING_GUIDE = `## Asking the reviewer questions
 
-When a decision needs the reviewer (a trade-off the code or conversation cannot settle), write a question block. They answer in place; answers come back at the top of their feedback under "Answers to your questions", open ones under "Unanswered".
+Ask what only the reviewer can decide as a question block. Answers come back at the top of their feedback ("Answers to your questions", then "Unanswered").
 
 \`\`\`markdown
 :::question
@@ -1173,15 +1173,15 @@ Recommended: Local only, purged after 30 days
 \`\`\`
 
 - \`:::question\` picks one choice, \`:::question-multi\` any number, \`:::question-text\` free text (so does a block with no choices).
-- The first line is the question; the lines after it are context. Never send a bare question: the reviewer switches in cold and works at a higher level.
+- The first line is the question; the lines after it are context. Never send a bare question: the reviewer switches in cold, thinks at the level of the product, and does not know what you know.
   - Say what the choice affects, what you know or tried, and why you recommend it, so they can decide without opening anything else.
   - Be terse: one to three short sentences, plain words, no jargon or internal names they would not know.
   - Add a screenshot (\`![alt](path)\`) for anything visual.
   - Link a file that shows it better (a plan, an HTML mock): \`[the mock](mock.html)\`. In the Inbox, attach it too; the link opens it beside the thread.
-- Choices are task-list items: \`- [ ] label\`, optionally \`- [ ] label — why\`. They can always answer "Other", add a note, or skip.
-- \`Recommended: <label>\` marks your recommendation. Text that matches no choice is offered as a suggested answer.
-- Ask only what you cannot decide alone, about 8 questions a round at most. Do not ask rhetorical questions or questions the codebase answers.
-- \`- [x]\` means already settled. When you resubmit, keep an answered question with its choice checked, or remove the block and write the decision into the prose.
+- Choices: \`- [ ] label\`, optionally \`- [ ] label — why\`. The reviewer can also answer "Other", add a note, or skip.
+- \`Recommended: <label>\` marks yours; text matching no choice shows as a suggested answer.
+- Ask only what you cannot decide alone, about 8 a round at most. Do not ask rhetorical questions or questions the codebase answers.
+- \`- [x]\` marks a settled choice. On resubmit, check the chosen answer, or drop the block and state the decision in prose.
 - Leave blank lines between the parts so the block reads well on GitHub.
 - Each answer comes back under its question (\`### Q2. <question> (line N)\`) as \`Answer: <choice>\`, marked \`(your recommendation)\` when the reviewer took yours, or as \`Other: …\`, free text in a quote, or \`Skipped\`, plus any \`Note:\`. A question you marked \`- [x]\` is settled and only comes back if the reviewer changed it or added a note.
 `;

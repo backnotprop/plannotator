@@ -346,6 +346,8 @@ button.ib-drow:hover { background: color-mix(in oklch, var(--muted) 35%, transpa
 .ib-pane.ib-withfile .ib-att-t { min-width: 0; flex: 1 1 250px; }
 .ib-view { position: relative; z-index: 1; flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-rows: 46px auto minmax(0, 1fr); background: var(--background); }
 .ib-view.ib-full { position: fixed; inset: 0; z-index: 40; }
+/* A local link to a file the message did not attach: its tooltip says why. */
+[data-local-link="unavailable"] { cursor: help; }
 /* The pane takes focus when a file opens (a region, not a control): no ring. */
 .ib-view:focus { outline: none; }
 .ib-vhead { display: flex; align-items: center; gap: 12px; padding: 0 14px 0 16px; background: var(--card); border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); min-width: 0; }

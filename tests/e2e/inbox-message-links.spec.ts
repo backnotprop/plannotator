@@ -3,17 +3,20 @@
  * against the compiled binary. Nothing is mocked: `plannotator inbox
  * --background` runs under a temp PLANNOTATOR_DATA_DIR and HOME, an agent
  * sends through `plannotator inbox mcp` (scripts/inbox-sim.ts) a question
- * whose context links `mock.html`, which it attached, and Chromium opens the
- * thread: the link opens the mock beside the thread (HTML, so full screen) from
- * a click and from Enter; a link to a file it did not attach is inert text and
- * the window never requests it; an external link keeps opening in a new tab.
+ * whose context links `design/mock.html`, which it attached, by its bare name,
+ * and Chromium opens the thread: the link's tooltip names the file's path in
+ * the project, its href is the window's deep link to the file (a new tab opens
+ * it there), and it opens the mock beside the thread (HTML, so full screen)
+ * from a click and from Enter; a link to a file it did not attach is inert text
+ * and the window never requests it; an external link keeps opening in a new
+ * tab.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
 
 import { expect, test } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
@@ -32,7 +35,8 @@ test('a link to an attached file opens it beside the thread; an unattached one i
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
   const project = scratchProject(join(root, 'src'), 'shop');
-  writeFileSync(join(project, 'mock.html'), MOCK);
+  mkdirSync(join(project, 'design'));
+  writeFileSync(join(project, 'design', 'mock.html'), MOCK);
   writeFileSync(join(project, 'notes.md'), '# notes\n');
   const agent = await SimAgent.connect({ binary, env, name: 'Claude', host: 'claude-code' });
   const context = await browser.newContext();
@@ -40,7 +44,7 @@ test('a link to an attached file opens it beside the thread; an unattached one i
     const sent = await agent.send({
       project_path: project,
       subject: 'Settings layout',
-      attachments: ['mock.html'],
+      attachments: ['design/mock.html'],
       body: [
         ':::question',
         'Which layout should the settings page use?',
@@ -66,6 +70,15 @@ test('a link to an attached file opens it beside the thread; an unattached one i
     // Attached: a real link; a click opens the mock in the side pane.
     const mock = body.getByRole('link', { name: 'the mock' });
     await expect(mock).toHaveAttribute('data-local-link', 'open');
+    // The tooltip names the file by its path in the project.
+    await expect(mock).toHaveAttribute('title', 'Open design/mock.html beside the thread');
+    // Its href is the window's deep link to the file: a new tab opens the same file there.
+    const deepLink = await mock.getAttribute('href');
+    expect(deepLink).toMatch(new RegExp(`^#thread=${sent.thread_id}&file=att_[0-9A-Z]+$`));
+    const tab = await context.newPage();
+    await tab.goto(new URL(deepLink!, url).href);
+    await expect(tab.locator('[data-attachment-pane]')).toHaveAttribute('aria-label', 'mock.html');
+    await tab.close();
     await mock.click();
     const pane = page.locator('[data-attachment-pane]');
     await expect(pane).toBeVisible();
