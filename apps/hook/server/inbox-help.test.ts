@@ -17,9 +17,11 @@ import { join, resolve } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { HARNESSES, harnessPanel, shellLine } from "@plannotator/inbox/harnesses";
+import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
 import { startInboxServer } from "@plannotator/server/inbox";
+import { INBOX_FILLED_ARGUMENTS } from "@plannotator/shared/inbox/connection";
 import { formatTopLevelHelp } from "./cli";
-import { formatInboxHelp, INBOX_HELP_MCP_URL, TOOL_GUIDE } from "./inbox-help";
+import { formatInboxHelp, INBOX_HELP_MCP_URL, INBOX_QUESTION_EXAMPLE, TOOL_GUIDE } from "./inbox-help";
 
 const entry = resolve(import.meta.dir, "index.ts");
 const distDir = resolve(import.meta.dir, "../dist");
@@ -64,8 +66,18 @@ describe("the guide against what it describes", () => {
       for (const tool of tools) {
         expect(help).toContain(`\n### ${tool.name}\n`);
         const properties = Object.keys((tool.inputSchema as { properties?: Record<string, unknown> }).properties ?? {});
-        for (const arg of TOOL_GUIDE[tool.name as keyof typeof TOOL_GUIDE].args) {
+        const guide = TOOL_GUIDE[tool.name as keyof typeof TOOL_GUIDE];
+        for (const arg of guide.args) {
           expect(properties, `${tool.name} has no argument ${arg}`).toContain(arg);
+        }
+        // And the reverse: every served argument is named, filled for the agent, or explained in the tool's lines.
+        const text = guide.lines.join("\n");
+        for (const property of properties) {
+          const covered =
+            guide.args.includes(property) ||
+            (INBOX_FILLED_ARGUMENTS as readonly string[]).includes(property) ||
+            text.includes(`\`${property}\``);
+          expect(covered, `${tool.name}'s argument ${property} is not in the guide`).toBe(true);
         }
       }
     } finally {
@@ -105,7 +117,19 @@ describe("the guide against what it describes", () => {
   });
 
   test("names the data dir it was given", () => {
-    expect(help).toContain(`${DATA_DIR}/inbox/`);
+    expect(help).toContain(`\`${join(DATA_DIR, "inbox")}\``);
+    expect(help).toContain(`\`${join(DATA_DIR, "config.json")}\``);
+  });
+
+  test("its Inbox-only question example reads as Stopped, Holds up and a decision to record", () => {
+    expect(help).toContain(`\`\`\`markdown\n${INBOX_QUESTION_EXAMPLE}\n\`\`\``);
+    const [question, ...rest] = parseInboxQuestionBlocks(INBOX_QUESTION_EXAMPLE);
+    expect(rest).toEqual([]);
+    expect(question!.prompt).toBe("Which queue should failed webhook deliveries retry on?");
+    expect(question!.stopped).toBe("the retry worker cannot start until this is settled");
+    expect(question!.holds_up).toEqual(["webhook-retries", "delivery-dashboard"]);
+    expect(question!.decision_on_answer).toBe(true);
+    expect(question!.parsed.choices.map((choice) => choice.label)).toEqual(["The existing jobs queue", "A dedicated retries queue"]);
   });
 
   // Deliberate: the top-level help is where an agent learns this guide exists.
@@ -134,7 +158,7 @@ describe("plannotator inbox --help as a process", () => {
       expect(stdout).toContain("\n### send_message\n");
       // The stdio entry it names is this CLI: bun plus the entry script, from source.
       expect(stdout).toContain(`${shellLine([entry])} inbox mcp`);
-      expect(stdout).toContain(`${dataDir}/inbox/`);
+      expect(stdout).toContain(`\`${join(dataDir, "inbox")}\``);
     }
     expect(existsSync(join(dataDir, "inbox"))).toBe(false);
   }, 30_000);

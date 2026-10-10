@@ -24,7 +24,8 @@
 import { INBOX_SECTIONS, INBOX_THREAD_NAME_MAX, type InboxSectionId } from "@plannotator/core/inbox-types";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { HARNESSES, harnessPanel, shellLine, type ConnectContext, type Harness } from "@plannotator/inbox/harnesses";
-import { INBOX_MCP_TOOLS, INBOX_WAIT_MAX_SECONDS } from "@plannotator/server/inbox-mcp";
+import { join } from "node:path";
+import { INBOX_MCP_TOOLS, INBOX_WAIT_DEFAULT_MS, INBOX_WAIT_MAX_SECONDS } from "@plannotator/server/inbox-mcp";
 import { INBOX_TOOL_DEFAULTS, INBOX_TOOL_HOSTS } from "@plannotator/shared/config";
 import { INBOX_FILLED_ARGUMENTS, INBOX_TOOL_NAME } from "@plannotator/shared/inbox/connection";
 import { INBOX_COMMAND_USAGE } from "./cli";
@@ -39,6 +40,27 @@ export interface InboxToolGuide {
 
 /** The `http://127.0.0.1:<port>/mcp` address with the port left open: it changes. */
 export const INBOX_HELP_MCP_URL = "http://127.0.0.1:<port>/mcp";
+
+/**
+ * The guide's example of the Inbox-only lines, as a whole block.
+ * inbox-help.test.ts parses it with the store's own parser.
+ */
+export const INBOX_QUESTION_EXAMPLE = [
+  ":::question",
+  "Which queue should failed webhook deliveries retry on?",
+  "",
+  "Stopped: the retry worker cannot start until this is settled",
+  "",
+  "Holds up: webhook-retries; delivery-dashboard",
+  "",
+  "Decision: when answered",
+  "",
+  "- [ ] The existing jobs queue - no new infrastructure",
+  "- [ ] A dedicated retries queue - isolates slow retries",
+  "",
+  "Recommended: A dedicated retries queue",
+  ":::",
+].join("\n");
 
 /** One block per MCP tool, in INBOX_MCP_TOOLS order. */
 export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
@@ -68,7 +90,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
   wait_for_reply: {
     args: ["thread_id", "message_id", "cursor", "timeout_seconds"],
     lines: [
-      `Wait for the person's reply in a thread (\`thread_id\` or \`message_id\`), or in any open thread you asked when neither is given. It returns the reply as soon as it lands. Otherwise, after about ${INBOX_WAIT_MAX_SECONDS} seconds (\`timeout_seconds\`, at most ${INBOX_WAIT_MAX_SECONDS}), it returns \`{ status: "waiting", cursor }\`: call it again with that \`cursor\` to keep waiting. A resolved thread answers \`status: "resolved"\` at once.`,
+      `Wait for the person's reply in a thread (\`thread_id\` or \`message_id\`), or in any open thread you asked when neither is given. It returns the reply as soon as it lands. Otherwise, after about ${Math.round(INBOX_WAIT_DEFAULT_MS / 1000)} seconds (\`timeout_seconds\`, at most ${INBOX_WAIT_MAX_SECONDS}), it returns \`{ status: "waiting", cursor }\`: call it again with that \`cursor\` to keep waiting. A resolved thread answers \`status: "resolved"\` at once.`,
       "Without a cursor, any reply after your last message in the thread counts.",
     ],
   },
@@ -171,7 +193,8 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
   const mcp = shellLine(mcpCommand);
   const self = shellLine(options.command);
   const ctx: ConnectContext = { command: mcpCommand, mcpUrl: INBOX_HELP_MCP_URL, platform: options.platform ?? inboxHelpPlatform() };
-  const dataDir = options.dataDir.replace(/[/\\]+$/, "");
+  const inboxPath = join(options.dataDir, "inbox");
+  const configPath = join(options.dataDir, "config.json");
   const on = INBOX_TOOL_HOSTS.filter((host) => INBOX_TOOL_DEFAULTS[host]).map(hostLabel);
   const off = INBOX_TOOL_HOSTS.filter((host) => !INBOX_TOOL_DEFAULTS[host]).map(hostLabel);
   const defaults = [on.length ? `on by default in ${on.join(" and ")}` : "", off.length ? `off by default in ${off.join(" and ")}` : ""]
@@ -185,7 +208,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     "## What it is",
     "",
-    `The Plannotator Inbox is one local window per machine where you leave the person messages, questions, files to annotate, guided reviews and decisions. It listens on 127.0.0.1 only. Its data lives in ${code(`${dataDir}/inbox/`)} (the data dir is \`~/.plannotator\` unless \`PLANNOTATOR_DATA_DIR\` names another). The person reads your message there and answers when they can. Nothing holds your session open: you send, then keep working or end your turn.`,
+    `The Plannotator Inbox is one local window per machine where you leave the person messages, questions, files to annotate, guided reviews and decisions. It binds 127.0.0.1; the person may publish the window over their tailnet, but the MCP server and agent tools answer only on this computer. Its data lives in ${code(inboxPath)} (the data dir is set by \`PLANNOTATOR_DATA_DIR\`). The person reads your message there and answers when they can. Nothing holds your session open: you send, then keep working or end your turn.`,
     "",
     "## When to use it",
     "",
@@ -204,13 +227,23 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     "## How to reach it",
     "",
-    `1. If you have a tool named \`${INBOX_TOOL_NAME}\` (Claude Code, Pi, OpenCode), use it: set \`action\` to one of the tool names below and pass that tool's fields.`,
+    `1. If you have a tool named \`${INBOX_TOOL_NAME}\` (Claude Code, Pi, OpenCode), use it: set \`action\` to one of the tool names below and pass that tool's fields. It can be listed with a prefix (in Claude Code: \`mcp__plannotator__${INBOX_TOOL_NAME}\`) and may need loading through tool search first.`,
     `2. Otherwise use the stdio MCP server: ${code(mcp)}. "Connecting other agents" below shows how to register it.`,
     `3. Only as a fallback: Streamable HTTP at ${code(INBOX_HELP_MCP_URL)}. The port can change when the Inbox restarts; ${code(`${self} inbox --background`)} prints the current URL. A request that carries an \`Origin\` header is refused.`,
     "",
     `The \`${INBOX_TOOL_NAME}\` tool fills ${INBOX_FILLED_ARGUMENTS.map(code).join(", ")} for you. The stdio server fills \`project_path\` (its working folder, or \`PLANNOTATOR_CWD\`) and \`agent_session\` (one id per process). Over HTTP, pass \`project_path\` (the absolute path of the repository or folder you work in) and \`agent_session\` yourself.`,
     "",
     "Every call starts a stopped Inbox in the background, without a browser tab, so never run `plannotator inbox` just to send. Bare `plannotator inbox` is for the person: it opens the window.",
+    "",
+    "## Connecting yourself",
+    "",
+    "Set up the connection for the host you run in:",
+    "",
+    `- **Claude Code** with the Plannotator plugin: nothing else to do. Check \`claude plugin list\` for \`plannotator@plannotator\`; if it is missing, run \`claude plugin marketplace add backnotprop/plannotator\` and \`claude plugin install plannotator@plannotator\`. The \`${INBOX_TOOL_NAME}\` tool appears after Claude Code restarts (\`claude --continue\` returns to this conversation). It needs Claude Code 2.1.287 or later, on macOS or Linux, in an interactive session (not \`claude -p\`).`,
+    `- **Pi** with the Plannotator extension (\`pi install npm:@plannotator/pi-extension\` if it is missing), or **OpenCode** with the Plannotator plugin (\`@plannotator/opencode@latest\` in opencode.json: \`"plugin": [...]\` on OpenCode 1, \`"plugins": [{ "package": ... }]\` on OpenCode 2): the inbox tool is off by default there. Turn it on for your host by merging ${code(`{ "inboxTool": { "pi": true } }`)} (or \`"opencode"\`) into ${code(configPath)}, keeping its other keys, or with the switch in the Inbox's Settings. Then start a new Pi session (or \`/reload\`), or restart OpenCode.`,
+    "- **Anything else**: register the stdio server; \"Connecting other agents\" below has the line for your host.",
+    "",
+    `A connection takes effect in the next session, never in the one already running. Until then, send through the stdio server directly: ${code(mcp)}.`,
     "",
     "## Tools",
     "",
@@ -235,13 +268,19 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     QUESTION_AUTHORING_GUIDE.trimEnd(),
     "",
+    "(In the Inbox the person's words come before the answers.)",
+    "",
     "### Only in the Inbox",
     "",
-    "Three more lines a question block can carry, each on its own line inside the block:",
+    "Three more lines a question block can carry, each on its own line after the question (the first line is always the question):",
     "",
     `- \`Stopped: <why>\`: you cannot go on until this is answered. The person's list shows the thread first, under "${SECTION_LABEL("stopped")}".`,
     `- \`Holds up: <name>; <name>\`: you go on, and these pieces of work wait. The list shows it under "${SECTION_LABEL("holding")}", the most held-up first.`,
     "- `Decision: when answered` (at the start of a line): when the person sends their answer, it is recorded as a project decision (list_decisions). The person can turn that off on the card.",
+    "",
+    "```markdown",
+    INBOX_QUESTION_EXAMPLE,
+    "```",
     "",
     "## Connecting other agents",
     "",
@@ -261,9 +300,9 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     "## Data and removal",
     "",
-    `- Everything lives in ${code(`${dataDir}/inbox/`)}: threads by project, the versions of the files you sent, decisions, and \`inbox.json\` (where the running Inbox is).`,
+    `- Everything lives in ${code(inboxPath)}: threads by project, the versions of the files you sent, decisions, and \`inbox.json\` (where the running Inbox is).`,
     "- The person deletes a thread or a project in the window's Settings.",
-    "- `plannotator uninstall` keeps the data. `plannotator uninstall --purge` stops a running Inbox and deletes it.",
+    "- `plannotator uninstall` keeps the data. `plannotator uninstall --purge` stops a running Inbox, then deletes it (if it cannot stop it, it says so and keeps the data).",
     "- Never run uninstall, delete threads or projects, or edit these files for the person.",
     "",
   ].join("\n");
