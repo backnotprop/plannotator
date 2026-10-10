@@ -32,6 +32,8 @@ interface AITabProps {
   hasAISession?: boolean;
   /** "Ask this session": the reviewer's choice on a busy answer. */
   onSessionAskAction?: (questionId: string, action: SessionAskAction) => void;
+  /** Optional note on how to get "Ask this session" (askSessionSetupHint). */
+  askSessionSetupHint?: string | null;
 }
 
 interface FileGroup {
@@ -61,6 +63,7 @@ export const AITab: React.FC<AITabProps> = ({
   onAIConfigChange,
   hasAISession = false,
   onSessionAskAction,
+  askSessionSetupHint,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   // File chat groups default to expanded; this tracks the ones the user has
@@ -182,6 +185,7 @@ export const AITab: React.FC<AITabProps> = ({
           selectedReasoningEffort={aiConfig?.reasoningEffort ?? null}
           onReasoningEffortChange={(effort) => onAIConfigChange?.({ reasoningEffort: effort })}
           hasSession={hasAISession}
+          setupHint={askSessionSetupHint}
         />
         {onAskGeneral && <GeneralInput value={generalInput} onChange={setGeneralInput} onSubmit={handleGeneralSubmit} disabled={isStreaming} isStreaming={isStreaming} onStop={onStop} />}
       </div>
@@ -280,6 +284,7 @@ export const AITab: React.FC<AITabProps> = ({
         selectedReasoningEffort={aiConfig?.reasoningEffort ?? null}
         onReasoningEffortChange={(effort) => onAIConfigChange?.({ reasoningEffort: effort })}
         hasSession={hasAISession}
+        setupHint={askSessionSetupHint}
       />
 
       {/* General question input */}

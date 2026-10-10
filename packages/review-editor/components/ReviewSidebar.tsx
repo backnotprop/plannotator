@@ -80,6 +80,8 @@ interface ReviewSidebarProps {
   hasAISession?: boolean;
   /** "Ask this session": the reviewer's choice on a busy answer. */
   onSessionAskAction?: (questionId: string, action: SessionAskAction) => void;
+  /** Optional note on how to get "Ask this session" (askSessionSetupHint). */
+  askSessionSetupHint?: string | null;
   // Agent props
   agentJobs?: AgentJobInfo[];
   agentCapabilities?: AgentCapabilities | null;
@@ -280,6 +282,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   onAIConfigChange,
   hasAISession,
   onSessionAskAction,
+  askSessionSetupHint,
   agentJobs,
   agentCapabilities,
   onAgentLaunch,
@@ -791,6 +794,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
               onAIConfigChange={onAIConfigChange}
               hasAISession={hasAISession}
               onSessionAskAction={onSessionAskAction}
+              askSessionSetupHint={askSessionSetupHint}
              
             />
           )}

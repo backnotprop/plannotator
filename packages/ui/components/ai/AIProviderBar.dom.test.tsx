@@ -94,3 +94,38 @@ describe.if(hasDom)('AIProviderBar with "Ask this session"', () => {
     expect(host.querySelector('[data-ai-provider-session-bridge]')?.textContent).toContain('Ask this session · Claude Code');
   });
 });
+
+describe.if(hasDom)('AIProviderBar setup hint (#1814)', () => {
+  const render = async (providers: AIProviderOption[], setupHint?: string | null) => {
+    const { AIProviderBar } = barModule!;
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () =>
+      root!.render(
+        <AIProviderBar
+          providers={providers}
+          selectedProviderId={null}
+          selectedModel={null}
+          onProviderChange={() => {}}
+          onModelChange={() => {}}
+          setupHint={setupHint}
+        />,
+      ),
+    );
+    return host.querySelector('[data-ai-ask-session-setup-hint]');
+  };
+
+  // Sentinel text: what matters is that the line appears in both states and is
+  // absent without a hint, not its wording (askSessionSetupHint owns that).
+  test('renders under the provider picker and under the empty state', async () => {
+    expect((await render([providerWithEffort], 'HINT-SENTINEL'))?.textContent).toBe('HINT-SENTINEL');
+    act(() => root?.unmount());
+    host?.remove();
+    expect((await render([], 'HINT-SENTINEL'))?.textContent).toBe('HINT-SENTINEL');
+  });
+
+  test('renders nothing extra without a hint', async () => {
+    expect(await render([providerWithEffort])).toBeNull();
+  });
+});

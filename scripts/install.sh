@@ -2494,6 +2494,22 @@ if [ "$pi_detected" -eq 1 ]; then
     echo ""
     echo "  pi install npm:@plannotator/pi-extension"
 fi
+# Oh My Pi (OMP) loads the Pi extension as an OMP plugin (#1814). This run
+# installs nothing into OMP: the section says how, because "Ask this session"
+# in OMP comes only from the extension, never from the CLI run in OMP's shell.
+if command -v omp >/dev/null 2>&1; then
+    echo ""
+    echo "=========================================="
+    echo "  OH MY PI (OMP) USERS"
+    echo "=========================================="
+    echo ""
+    echo "Install or update the Plannotator extension in OMP:"
+    echo ""
+    echo "  omp plugin install @plannotator/pi-extension"
+    echo ""
+    echo "Then open reviews with /plannotator-review, /plannotator-annotate and"
+    echo "/plannotator-last. Reviews opened that way can use Ask this session."
+fi
 if [ -d "$HOME/.gemini" ]; then
     echo ""
     echo "=========================================="

@@ -2496,10 +2496,11 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
 // universal. Every run is a full install into a temp HOME with a stubbed PATH;
 // the git shim supplies a local checkout, so nothing reaches the network.
 // ---------------------------------------------------------------------------
-type SummaryAgent = "pi" | "gemini" | "codex" | "kiro";
+type SummaryAgent = "pi" | "omp" | "gemini" | "codex" | "kiro";
 
 const SUMMARY_HEADERS: Record<SummaryAgent, string> = {
   pi: "  PI USERS",
+  omp: "  OH MY PI (OMP) USERS",
   gemini: "  GEMINI CLI USERS",
   codex: "  CODEX USERS",
   kiro: "  KIRO CLI USERS",
@@ -2516,6 +2517,9 @@ function runSummaryInstall(detected: SummaryAgent[], extraArgs: string[] = []) {
   // A no-op `pi` on PATH is exactly what the Pi detection leg checks; the
   // installer's `pi install` call against it succeeds without doing anything.
   if (detected.includes("pi")) writeFileSync(join(sandbox.stub, "pi"), "#!/bin/bash\nexit 0\n", { mode: 0o755 });
+  // OMP is detected by `omp` on PATH. The installer never runs it (the stub
+  // exits 1 so a call would show up as a failure), it only prints how to install.
+  if (detected.includes("omp")) writeFileSync(join(sandbox.stub, "omp"), "#!/bin/bash\nexit 1\n", { mode: 0o755 });
   const r = runInstallSh(sandbox, ["--version", "v99.9.9", "--non-interactive", "--no-extras", ...extraArgs]);
   return { ...r, home: sandbox.home };
 }
@@ -2553,7 +2557,7 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
     }
 
     test("all detected: every agent section prints, in the original order", () => {
-      const all: SummaryAgent[] = ["pi", "gemini", "codex", "kiro"];
+      const all: SummaryAgent[] = ["pi", "omp", "gemini", "codex", "kiro"];
       const { code, out } = runSummaryInstall(all);
       expect(code).toBe(0);
       expectOnlySections(out, all);
@@ -2563,6 +2567,8 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
       expect([...order].sort((a, b) => a - b)).toEqual(order);
       expect(out).toContain("Launch it: kiro-cli chat --agent plannotator");
       expect(out).toContain("Plan review is configured through the Codex Stop hook.");
+      // The OMP section names the plugin install command (#1814).
+      expect(out).toContain("  omp plugin install @plannotator/pi-extension");
     });
 
     test("a detected-but-skipped agent keeps its honest skipped section", () => {
@@ -2582,7 +2588,7 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
     });
 
     test("--minimal prints no agent sections at all, detected or not", () => {
-      const { code, out } = runSummaryInstall(["pi", "gemini", "codex", "kiro"], ["--minimal"]);
+      const { code, out } = runSummaryInstall(["pi", "omp", "gemini", "codex", "kiro"], ["--minimal"]);
       expect(code).toBe(0);
       expect(out).toContain("Minimal install complete");
       expect(out).not.toContain(" USERS");
@@ -2933,6 +2939,10 @@ describe("closing summary sections are gated on detection (Windows installers)",
     expect(kiroGate).toBeGreaterThan(piGate);
     // Each header sits inside its gate, not before it.
     expect(region.indexOf('Write-Host "  PI USERS"')).toBeGreaterThan(piGate);
+    const ompGate = region.indexOf("if ($ompDetected) {");
+    expect(region).toContain("$ompDetected = [bool](Get-Command omp -ErrorAction SilentlyContinue)");
+    expect(ompGate).toBeGreaterThan(piGate);
+    expect(region.indexOf('Write-Host "  OH MY PI (OMP) USERS"')).toBeGreaterThan(ompGate);
     expect(region.indexOf('Write-Host "  KIRO CLI USERS"')).toBeGreaterThan(kiroGate);
     expect(region).not.toContain("Kiro was not detected");
     // The Claude Code block stays universal.
@@ -2953,13 +2963,14 @@ describe("closing summary sections are gated on detection (Windows installers)",
   });
 });
 
-function runPs1ClosingSummary(opts: { pi: boolean; kiro: boolean; skipKiro?: boolean; skipSkills?: boolean }) {
+function runPs1ClosingSummary(opts: { pi: boolean; kiro: boolean; omp?: boolean; skipKiro?: boolean; skipSkills?: boolean }) {
   const root = mkdtempSync(join(tmpdir(), "plannotator-ps1-summary-test-"));
   const home = join(root, "home");
   const stub = join(root, "stub-bin");
   mkdirSync(home, { recursive: true });
   mkdirSync(stub, { recursive: true });
   if (opts.pi) writeFileSync(join(stub, "pi"), "#!/bin/bash\nexit 0\n", { mode: 0o755 });
+  if (opts.omp) writeFileSync(join(stub, "omp"), "#!/bin/bash\nexit 1\n", { mode: 0o755 });
   const driver = [
     `$ErrorActionPreference = "Stop"`,
     `$skipOpencodeResolved = $false`,
@@ -2997,6 +3008,7 @@ describe.skipIf(!pwshBin || process.platform === "win32")(
       const { code, out } = runPs1ClosingSummary({ pi: false, kiro: false });
       expect(code).toBe(0);
       expect(out).not.toContain("PI USERS");
+      expect(out).not.toContain("OH MY PI (OMP) USERS");
       expect(out).not.toContain("KIRO CLI USERS");
       expect(out).not.toContain("was not detected");
       expect(out).toContain("OPENCODE USERS");
@@ -3009,6 +3021,14 @@ describe.skipIf(!pwshBin || process.platform === "win32")(
       expect(out).toContain("  PI USERS");
       expect(out).toContain("  KIRO CLI USERS");
       expect(out).toContain("Launch it: kiro-cli chat --agent plannotator");
+    }, PWSH_SCANNER_TIMEOUT_MS);
+
+    test("omp detected: the OMP section names the plugin install command", () => {
+      const { code, out } = runPs1ClosingSummary({ pi: false, kiro: false, omp: true });
+      expect(code).toBe(0);
+      expect(out).toContain("  OH MY PI (OMP) USERS");
+      expect(out).toContain("  omp plugin install @plannotator/pi-extension");
+      expect(out.split("\n")).not.toContain("  PI USERS");
     }, PWSH_SCANNER_TIMEOUT_MS);
 
     test("detected-but-skipped Kiro keeps its honest skipped section", () => {

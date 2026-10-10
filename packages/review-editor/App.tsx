@@ -66,6 +66,7 @@ import {
   connectedAskSessionAgent,
   markAskSessionAnnouncementSeen,
 } from '@plannotator/ui/utils/askSessionAnnouncement';
+import { askSessionSetupHint } from '@plannotator/ui/utils/askSessionSetupHint';
 import { useFirstRunAnnouncementWindow } from '@plannotator/ui/hooks/useFirstRunAnnouncementWindow';
 import { AgentToolAnnouncementDialog } from '@plannotator/ui/components/AgentToolAnnouncementDialog';
 import {
@@ -5779,6 +5780,7 @@ const ReviewApp: React.FC = () => {
                 {...(hasSessionBridge && {
                   onSessionAskAction: handleSessionAskAction,
                 })}
+                askSessionSetupHint={askSessionSetupHint(origin, aiProviders)}
                 agentJobs={agentJobs.jobs}
                 agentCapabilities={agentJobs.capabilities}
                 onAgentLaunch={agentJobs.launchJob}

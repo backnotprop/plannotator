@@ -91,6 +91,7 @@ import {
   connectedAskSessionAgent,
   markAskSessionAnnouncementSeen,
 } from '@plannotator/ui/utils/askSessionAnnouncement';
+import { askSessionSetupHint } from '@plannotator/ui/utils/askSessionSetupHint';
 import { useFirstRunAnnouncementWindow } from '@plannotator/ui/hooks/useFirstRunAnnouncementWindow';
 import { AgentToolAnnouncementDialog } from '@plannotator/ui/components/AgentToolAnnouncementDialog';
 import {
@@ -6849,6 +6850,7 @@ const App: React.FC = () => {
       {...(hasSessionBridge && !isAgentTerminalReady && {
         onSessionAskAction: handleSessionAskAction,
       })}
+      askSessionSetupHint={isAgentTerminalReady ? null : askSessionSetupHint(origin, aiProviders)}
     />
   );
 

@@ -2177,6 +2177,12 @@ same elements with new classes on the eyebrow's pills.
 
 ---
 
+## Ask AI setup hint for Oh My Pi (unreleased; additive, no core change)
+
+New module `utils/askSessionSetupHint` (`askSessionSetupHint(origin, providers)`, `OMP_EXTENSION_INSTALL_COMMAND`) returns a one-line note when origin is `oh-my-pi` and no session-bridge provider is offered (#1814): the `plannotator` CLI run from OMP's shell has no "Ask this session", while the Plannotator extension loaded into OMP does. `AIProviderBar` gains an optional `setupHint` prop and `DocumentAIChatPanel` an optional `askSessionSetupHint` prop, rendered as a muted line under the provider bar (also under "No AI providers available"). Both are absent by default, so a host that passes neither renders exactly as before.
+
+---
+
 ## Stale-tab guard: `serverSession` (ui 0.52.0, core 0.25.12; additive)
 
 Plannotator's servers issue one random `serverSession` nonce per process (new `@plannotator/core/server-session`) and refuse a decision that echoes a different one with `409 { code: "session_mismatch" }`, so a tab left open on a reused port cannot decide a new session. The client half is `utils/serverSession` (`adoptServerSession`, `withServerSession`, `withServerSessionQuery`, `noteServerSessionMismatch`, `useServerSessionReplaced`) plus `components/ServerSessionReplacedBanner`. Hosts that post decisions to their own backend need none of it: nothing in the shared components sends the field on its own, and a request without it is always accepted.

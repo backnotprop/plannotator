@@ -23,6 +23,8 @@ pi install ./plannotator/apps/pi-extension
 pi -e npm:@plannotator/pi-extension
 ```
 
+**In Oh My Pi (OMP):** OMP loads this extension as an OMP plugin. See [Oh My Pi](#oh-my-pi-omp) below.
+
 ## Update
 
 ```bash
@@ -57,6 +59,37 @@ pi remove npm:@plannotator/pi-extension
 
 If Pi was configured by the full Plannotator installer, `plannotator uninstall`
 also detects and removes the extension through Pi.
+
+## Oh My Pi (OMP)
+
+[Oh My Pi](https://omp.sh) loads Pi extensions as OMP plugins, so this
+extension runs in OMP too. Install it, then restart OMP:
+
+```bash
+omp plugin install @plannotator/pi-extension
+```
+
+Update with `omp plugin upgrade @plannotator/pi-extension`. Remove with
+`omp plugin uninstall @plannotator/pi-extension`.
+
+Open reviews with the extension's commands: `/plannotator-review`,
+`/plannotator-annotate`, `/plannotator-last`, and `/plannotator-plan-mode`.
+Reviews opened this way get [Ask this session](#ask-this-session): Ask AI sends
+the question to the OMP session and streams the answer back. The label reads
+"Ask this session · Pi".
+
+Reviews started by the `plannotator` CLI from OMP's shell do not get Ask this
+session. This includes the `/skill:plannotator-*` skills from the CLI installer
+and the agent running `plannotator` with its bash tool. The CLI has no
+connection back to OMP, so Ask AI offers only separate AI providers, and the
+header badge reads "Oh My Pi" instead of "Pi". For agent-opened reviews with Ask
+this session, turn on the [`plannotator` tool](#the-plannotator-tool).
+OMP lists extension tools as `xd://` devices, so the agent finds it as
+`xd://plannotator`.
+
+Checked with OMP 18.8.9 (commands, plan mode, the `plannotator` tool, and Ask
+this session). OMP's own `--plan` flag selects a plan model, so start plan mode
+with `/plannotator-plan-mode` instead of `--plan`.
 
 ## Build from source
 

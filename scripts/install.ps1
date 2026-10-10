@@ -1839,6 +1839,23 @@ if ($piDetected) {
     Write-Host ""
     Write-Host "  pi install npm:@plannotator/pi-extension"
 }
+# Oh My Pi (OMP) loads the Pi extension as an OMP plugin (#1814). This run
+# installs nothing into OMP: the section says how, because "Ask this session"
+# in OMP comes only from the extension, never from the CLI run in OMP's shell.
+$ompDetected = [bool](Get-Command omp -ErrorAction SilentlyContinue)
+if ($ompDetected) {
+    Write-Host ""
+    Write-Host "=========================================="
+    Write-Host "  OH MY PI (OMP) USERS"
+    Write-Host "=========================================="
+    Write-Host ""
+    Write-Host "Install or update the Plannotator extension in OMP:"
+    Write-Host ""
+    Write-Host "  omp plugin install @plannotator/pi-extension"
+    Write-Host ""
+    Write-Host "Then open reviews with /plannotator-review, /plannotator-annotate and"
+    Write-Host "/plannotator-last. Reviews opened that way can use Ask this session."
+}
 if ($kiroAvailable) {
     Write-Host ""
     Write-Host "=========================================="

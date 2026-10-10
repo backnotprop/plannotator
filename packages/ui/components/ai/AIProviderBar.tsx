@@ -11,7 +11,19 @@ interface AIProviderBarProps {
   onProviderChange: (providerId: string) => void;
   onModelChange: (model: string) => void;
   onReasoningEffortChange?: (effort: string | null) => void;
+  /**
+   * Optional muted line under the bar saying how to get "Ask this session"
+   * (see askSessionSetupHint). Absent: the bar renders exactly as before.
+   */
+  setupHint?: string | null;
 }
+
+const SetupHint: React.FC<{ text?: string | null }> = ({ text }) =>
+  text ? (
+    <div className="-mt-1 px-2 pb-1.5 text-[10px] text-muted-foreground/70" data-ai-ask-session-setup-hint>
+      {text}
+    </div>
+  ) : null;
 
 export const AIProviderBar: React.FC<AIProviderBarProps> = ({
   providers,
@@ -21,12 +33,16 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
   onProviderChange,
   onModelChange,
   onReasoningEffortChange,
+  setupHint,
 }) => {
   if (providers.length === 0) {
     return (
+      <>
       <div className="border-t border-border/50 px-2 py-1.5 text-[11px] text-muted-foreground/50">
         No AI providers available
       </div>
+      <SetupHint text={setupHint} />
+      </>
     );
   }
 
@@ -115,6 +131,7 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
       info={currentProvider}
       className="-mt-1 px-2 pb-1.5 text-[10px] text-muted-foreground/50"
     />
+    <SetupHint text={setupHint} />
     </>
   );
 };

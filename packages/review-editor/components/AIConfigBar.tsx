@@ -13,7 +13,16 @@ interface AIConfigBarProps {
   onModelChange: (model: string) => void;
   onReasoningEffortChange: (effort: string | null) => void;
   hasSession: boolean;
+  /** Optional muted line on how to get "Ask this session" (askSessionSetupHint). */
+  setupHint?: string | null;
 }
+
+const SetupHint: React.FC<{ text?: string | null }> = ({ text }) =>
+  text ? (
+    <div className="-mt-1 px-2 pb-1.5 text-[10px] text-muted-foreground/70" data-ai-ask-session-setup-hint>
+      {text}
+    </div>
+  ) : null;
 
 export const AIConfigBar: React.FC<AIConfigBarProps> = ({
   providers: offeredProviders,
@@ -24,6 +33,7 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
   onModelChange,
   onReasoningEffortChange,
   hasSession,
+  setupHint,
 }) => {
   // "Ask this session": the session that opened Plannotator is the only thing
   // Ask AI talks to, so the bar shows just its label (one provider, no models).
@@ -58,9 +68,12 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
 
   if (providers.length === 0) {
     return (
+      <>
       <div className="border-t border-border/50 px-2 py-1.5 text-[11px] text-muted-foreground/50">
         No AI providers available
       </div>
+      <SetupHint text={setupHint} />
+      </>
     );
   }
 
@@ -285,6 +298,7 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
       info={currentProvider}
       className="-mt-1 px-2 pb-1.5 text-[10px] text-muted-foreground/50"
     />
+    <SetupHint text={setupHint} />
     </>
   );
 };

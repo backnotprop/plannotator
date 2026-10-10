@@ -22,6 +22,8 @@ interface DocumentAIChatPanelProps {
   onAIConfigChange?: (config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => void;
   /** "Ask this session": the reviewer's choice on a busy answer. */
   onSessionAskAction?: (questionId: string, action: SessionAskAction) => void;
+  /** Optional note under the provider bar on how to get "Ask this session" (askSessionSetupHint). */
+  askSessionSetupHint?: string | null;
 }
 
 function truncate(text: string, max = 180): string {
@@ -68,6 +70,7 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
   aiConfig,
   onAIConfigChange,
   onSessionAskAction,
+  askSessionSetupHint,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [generalInput, setGeneralInput] = useState('');
@@ -144,6 +147,7 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
         onProviderChange={(providerId) => onAIConfigChange?.({ providerId })}
         onModelChange={(model) => onAIConfigChange?.({ model })}
         onReasoningEffortChange={(reasoningEffort) => onAIConfigChange?.({ reasoningEffort })}
+        setupHint={askSessionSetupHint}
       />
 
       {onAskGeneral && (
