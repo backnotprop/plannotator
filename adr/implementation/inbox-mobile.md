@@ -2,7 +2,7 @@
 
 Date: 2026-10-08. Step C1 of the mobile plan. The records it follows: the owner's thirteen mobile decisions (`.product/approved/plannotator-mobile-decisions-2026-10-07/approval.md`), the iPhone design of record (`.product/approved/plannotator-mobile-iphone-2026-10-07/`, renders 1.1 to 9.2) and the build plan (`research/plans/plannotator-mobile-2026-10-07/PLAN.md`), all in the Workspaces meta repo.
 
-This document is the contract the iPhone app, the Inbox's device door, the LAN listener, the relay Worker and the surface bridge build against: P1, P2, S1, R1, R2 and M1 to M6. Names below are final. A later change edits this file first. A bare number such as 1.3 or 4.3 names a render of the iPhone record; "exchange 7.x" and the Exchange columns name section 7.
+This document is the contract the iPhone app (and, by section 10, the Android app), the Inbox's device door, the LAN listener, the relay Worker and the surface bridge build against: P1, P2, S1, R1, R2 and M1 to M6. Names below are final. A later change edits this file first. A bare number such as 1.3 or 4.3 names a render of the iPhone record; "exchange 7.x" and the Exchange columns name section 7.
 
 The posture, in one paragraph. The Inbox stays a loopback server. A phone pairs once and gets its own random bearer token. Three paths carry the same requests: the tailnet (`tailscale serve` in front of the loopback port), the same Wi-Fi (a TLS listener whose certificate the phone pins), and the relay (a Cloudflare Worker that holds only ciphertext under keys made at pairing). Every phone request goes through one door, `/api/inbox/device/*`, which maps an explicit allowlist onto the window's existing handlers. Nothing else answers a phone.
 
@@ -969,7 +969,7 @@ curl -sS -X POST http://127.0.0.1:52817/api/inbox/devices/dev_01K700000000000000
 
 ## 8. What this contract leaves out
 
-The Workspaces source (W0 to W2 have their own contract), FCM and Android, the iPad, pairing through the relay, deleting a mailbox, a retention sweep at the relay, rates beyond the reused creation brake, raw attachment bytes on the door, device attestation, request signing, re-authentication, and any Settings, restart or storage route on the phone.
+The Workspaces source (W0 to W2 have their own contract), the iPad, pairing through the relay, deleting a mailbox, a retention sweep at the relay, rates beyond the reused creation brake, raw attachment bytes on the door, device attestation, request signing, re-authentication, and any Settings, restart or storage route on the phone.
 
 ## 9. Rulings written in (2026-10-08)
 
@@ -983,3 +983,55 @@ The coordinator ruled the eight questions the first draft left open; each is now
 6. Mailbox creation reuses guides.show's per-IP brake, with no new number (section 4, Routes).
 7. The certificate and the Bonjour record come from `openssl` and `dns-sd` (`avahi-publish` on Linux) as child processes, with no dependency (section 3).
 8. The tailnet HTTPS port is 8443, kept in `inbox.json`. A mapping held by something else is reported, never overwritten (section 1).
+
+## 10. The Android addendum (C2, 2026-10-10)
+
+The Android app (`ai.plannotator.app`, the same name as the iPhone bundle; Android 13, API 33, and later) builds against sections 1 to 7 unchanged: the same door, routes, errors, idempotency keys, envelopes, vectors and bridge messages. This section names only what differs. Android's own ceilings apply where Android sets them (an FCM data payload of 4096 bytes, three notification actions); there are no other limits.
+
+### The platform
+
+The redemption body (section 2, exchanges 7.2 and 7.3) carries `platform: "android"`, and the device record keeps it: `platform` is `"ios"` or `"android"`. The window's device list and the relay's push route read it; nothing else branches on it.
+
+### Push through FCM
+
+- **The token route:** `PUT /v1/mailboxes/:mbx/devices/:dev/fcm`, device bearer, `{ token }`; `token: null` removes it; `204`. A device holds at most one push token: registering an FCM token clears any APNs token and the reverse. The relay keeps the FCM token plain, as it keeps the APNs token (Google needs it), and deletes it with the device (7.28).
+- **`hello`** lists `"fcm": boolean` beside `"apns"` for each device.
+- **`POST .../push`** is unchanged on the Inbox's side: the relay sends to whichever token the device holds. Its answers gain `200 { sent: false, reason: "no_fcm_key" }` (the relay holds no FCM service account), `200 { sent: false, reason: "fcm_gone" }`, and `502 fcm_failed` with `fcm_status` and `fcm_reason` (FCM's `errorCode`, or null). A device with neither token answers `no_push_token`, which replaces R1's `no_apns_token` (the Inbox only logs the reason, `packages/server/inbox-relay.ts`).
+- **What the relay sends:** FCM HTTP v1, `POST https://fcm.googleapis.com/v1/projects/<project>/messages:send`, with an OAuth token the relay mints from the service account it holds as a Worker secret and reuses for 50 minutes. Plain `fetch`: FCM accepts HTTP/1.1, so the `connect()` path APNs needs is not used. The body is data only, so the app draws every notification itself from the decrypted summary:
+
+  ```json
+  { "message": { "token": "<fcm token>", "data": { "e": "<envelope>" }, "android": { "priority": "high", "collapse_key": "<collapse_id>" } } }
+  ```
+
+- **The summary and its sizes:** the push plaintext, `type: "push"`, the `collapse_id` and the size ladder are section 4's, byte for byte. The ladder stays measured against the APNs body: `{"e":"<envelope>"}` is smaller than the APNs body around the same envelope, so an envelope that fits Apple's 4096 bytes fits FCM's, and the last rung (`{ v, type, thread_id, message_id }`) is the push's form of the `too_large` placeholder: the phone reads the rest by `thread_id`. R3 tests that the two measures agree. `collapse_key` only replaces messages FCM still holds for an offline phone (FCM keeps four keys per device); on screen a thread's newer notification replaces its older one because the app posts it with the thread id as its tag.
+- **Refresh and `UNREGISTERED`:** the app registers its token when the person allows notifications, again from `FirebaseMessagingService.onNewToken`, and at each start when `getToken()` differs from the token it last registered. Turning notifications off sends `token: null`. FCM's `UNREGISTERED` (404) deletes the token and answers `fcm_gone`, as Apple's 410 does; the app registers again on its next token. Allowing notifications changes nothing about carriage, as on iOS.
+
+### The notification on Android
+
+The messaging service, in the app's own process, opens `e` with the device key and posts on one "Questions" channel at high importance, with section 4's words: the title `subject`, the body `<agent> in <project>`, then `: <context>`. Every data push posts a notification, a push no key opens included ("Plannotator", "Question from an agent"): Android lowers the priority of an app whose high-priority messages show nothing. The lock screen shows the public version, "Question from an agent", so it never shows a subject or an agent's text with previews hidden.
+
+Actions: a summary `question` with up to three choices gets one action per choice, recommended first, named `choice.<n>` by the index in `choices`, each with `setAuthenticationRequired(true)` (the Android form of `authenticationRequired`). A question with four choices gets one "Answer" action that opens the thread. That is the default; the owner's ruling on the four-choice layout is pending (a custom four-button layout is the alternative), and a ruling for it edits this paragraph. A tapped choice is one Send by a `BroadcastReceiver` under `goAsync()`, with section 4's paths, waits (3 s, then 5 s), key and outcome words.
+
+### The surface bridge on Android
+
+- **The origin:** the shell serves `surface.html` and every asset from `shouldInterceptRequest` on `https://appassets.androidplatform.net`, the virtual origin AndroidX's `WebViewAssetLoader` reserves, never fetched: the surface at `/surface/surface.html`, assets at `/inbox/api/html-assets/<token>/<path>`, and the `<base href>` rewrite of section 5 points there. Not a custom scheme: Android's web view gives a custom scheme no standard origin, so relative and base URLs resolve unreliably, and `addWebMessageListener`'s origin rules match only `http` and `https`; the one alternative, the `*` rule, would also hand the bridge to the agent's opaque-origin frame. With this origin the rule names one origin and that frame matches nothing.
+- **The channel:** `WebViewCompat.addWebMessageListener(webView, "plannotatorShell", setOf("https://appassets.androidplatform.net"), listener)` injects `window.plannotatorShell`; S2's `postToShell` posts `JSON.stringify(message)` there when `window.webkit` is absent (the object takes strings). The shell takes a message only when the listener's `isMainFrame` is true, so a page embedded on the same origin cannot reach it. Shell to surface stays `window.plannotatorSurface.receive(message)`, called with `evaluateJavascript` and the message as a JSON literal. No web message listener (`WebViewFeature.WEB_MESSAGE_LISTENER` unsupported): the surface does not load.
+- **No network, by two means:** every response the shell serves carries the surface's policy as its `Content-Security-Policy`, with `https://appassets.androidplatform.net` where iOS says `plannotator-asset:` (S2 settles how the build carries the origin; the meta tag carries the same words, since both policies apply); and the web view runs with `setBlockNetworkLoads(true)` while `shouldInterceptRequest` answers every http and https request off the virtual origin with a refusal, never `null` (which would load it). WebSockets do not pass through `shouldInterceptRequest`, so ws and wss rest on `connect-src 'none'` and the blocked network loads; the device spike proves a socket from the surface and from an agent's page fails.
+- **Links and the touch window:** `window.open` reaches `WebChromeClient.onCreateWindow`, which makes no web view and opens the URL only within 1.2 s of the shell's touch (a touch listener that observes without consuming), only for `https` (a Custom Tab) or `mailto` (the mail app). `shouldOverrideUrlLoading` cancels every navigation away from the surface, as `decidePolicyFor` does. `pin`, `selection` and `draft` from an HTML attachment follow the same touch window. Comment comes through the selection's `ActionMode` menu, and `set_appearance.text_scale` is `Configuration.fontScale`.
+
+### Platform notes on sections 1 to 7
+
+- The Keychain (this device only, a group shared with the extension) is the Android Keystore: a non-exportable AES key sealing the token, the pairing secret and the source's cookies in app-private storage, excluded from backup and device transfer. No shared group: the messaging service runs in the app's process. Readable after the first unlock, so a push opens on a locked phone.
+- The notification service extension is the `FirebaseMessagingService`; `SFSafariViewController` is Custom Tabs; the mail sheet is a `mailto` intent; the content rule list is the interception above.
+- Section 1's tailnet rule holds: the app cannot ask the Tailscale app for its peers. The Wi-Fi pin is a trust manager on the Wi-Fi client only, comparing the leaf certificate's DER SHA-256; Android's own pinning hashes a public key for a domain and does not fit.
+- The Workspaces side serves assetlinks.json for the App Link return and sends FCM for its own source.
+
+### 10.1 Register the FCM token
+
+```sh
+curl -sS -X PUT "$RELAY/v1/mailboxes/mbx_AAAAAAAAAAAAAAAAAAAAAA/devices/dev_01K70000000000000000000001/fcm" \
+  -H 'Authorization: Bearer CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC' -H 'Content-Type: application/json' \
+  -d '{"token":"fcm-token-example"}'
+```
+
+`204`. Exchange 7.30 to this device then answers `202 { "sent": true }`; after FCM answers `UNREGISTERED`, `200 { "sent": false, "reason": "fcm_gone" }`.
