@@ -175,8 +175,7 @@ final class DecisionsProofTests: ProofCase {
         try await darkFrame("8.3", open: { newMessage.tap() }, shown: app.staticTexts["Pi is not running in search-indexer"])
 
         // At the largest text size the words wrap and scroll in a sheet, and Reply instead stays reachable.
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
-        XCTAssertTrue(app.staticTexts["Pi is not running in search-indexer"].waitForNonExistence(timeout: 10))
+        try closeByTappingOutside(app.staticTexts["Pi is not running in search-indexer"], "the 8.3 words")
         try await control.post("/text-size", ["size": "accessibility-extra-extra-extra-large"])
         newMessage.tap()
         let replyInstead = element("reply-instead")
@@ -208,13 +207,23 @@ final class DecisionsProofTests: ProofCase {
 
     /// The dark frame of a menu or popover: closed, the simulator turned dark, opened again, then light again and open.
     private func darkFrame(_ name: String, open: () -> Void, shown: XCUIElement) async throws {
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap() // a tap outside closes it
-        XCTAssertTrue(shown.waitForNonExistence(timeout: 10))
+        try closeByTappingOutside(shown, "the \(name) menu")
         try await control.post("/m3-dark", ["on": "true"])
         open()
         XCTAssertTrue(shown.waitForExistence(timeout: 30))
         try await Task.sleep(for: .milliseconds(700))
         try await control.post("/m3-dark", ["on": "false", "snap": name])
+    }
+
+    /// A tap outside closes a menu or popover. On a slow runner the first tap can land
+    /// before it takes touches (run 38027139806 attempt 2), so up to three taps.
+    private func closeByTappingOutside(_ shown: XCUIElement, _ what: String) throws {
+        var closed = false
+        for _ in 0..<3 where !closed {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+            closed = shown.waitForNonExistence(timeout: 5)
+        }
+        try require(closed, "\(what) close on a tap outside")
     }
 
     private func isOn(_ row: XCUIElement) -> Bool {
