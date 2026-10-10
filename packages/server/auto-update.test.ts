@@ -279,6 +279,17 @@ describe("remembered install flags", () => {
     expect(parseInstallFlags({ flags: ["verify-attestation", "skip-attestation"] }).flags).toEqual([]);
   });
 
+  test("skip-claude-plugin is replayed with each installer's spelling", () => {
+    // Recorded by install.sh / install.ps1 / install.cmd for --skip-claude-plugin
+    // (-SkipClaudePlugin), so an auto-update keeps a plugin opt-out. A binary
+    // that predates the id drops it as unrecognized (the test above).
+    const r = parseInstallFlags({ v: 1, flags: ["skip-claude-plugin", "skip-codex", "skip-future-thing"] });
+    expect(r.flags).toEqual(["skip-codex", "skip-claude-plugin"]);
+    expect(r.problem).toContain("dropped 1");
+    expect(installerFlagArgs(["skip-claude-plugin"], "linux")).toEqual(["--skip-claude-plugin"]);
+    expect(installerFlagArgs(["skip-claude-plugin"], "win32")).toEqual(["-SkipClaudePlugin"]);
+  });
+
   test("flags are spelled for each installer", () => {
     const flags = ["minimal", "with-call-flow", "skip-opencode"] as const;
     expect(installerFlagArgs(flags, "linux")).toEqual(["--minimal", "--with-call-flow", "--skip-opencode"]);

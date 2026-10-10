@@ -427,7 +427,7 @@ describe("install.sh", () => {
     expect(script).toContain("continue # explicit false is a veto, never a skip");
     // skills rides the same loop: not an agent, but the same three layers
     // and the same skipInstall key region.
-    expect(script).toContain("for _agent in codex gemini kiro vibe opencode skills; do");
+    expect(script).toContain("for _agent in codex gemini kiro vibe opencode skills claudePlugin; do");
     // The old whole-file grep form is gone.
     expect(script).not.toContain('grep -q \'"codex"[[:space:]]*:[[:space:]]*true\' "$_config_dir/config.json"');
     // Precedence by textual layering (later assignment wins): config grep,
@@ -1114,7 +1114,7 @@ describe("install.cmd", () => {
     // findstr - so a "codex": true under some OTHER key can never opt
     // anyone out and an explicit false inside skipInstall is honored.
     expect(script).toContain("$c.skipInstall.$k");
-    expect(script).toContain("@('codex','gemini','kiro','vibe','opencode','skills')");
+    expect(script).toContain("@('codex','gemini','kiro','vibe','opencode','skills','claudePlugin')");
     expect(script).toContain("$v -is [bool] -and $v");
     expect(script).toContain("PLN_CONFIG_JSON");
     expect(script).toContain("skipInstall.codex");
@@ -2184,6 +2184,7 @@ describe("PlannotatorConfig schema", () => {
     expect(match![1]).toContain("gemini?: boolean");
     expect(match![1]).toContain("kiro?: boolean");
     expect(match![1]).toContain("opencode?: boolean");
+    expect(match![1]).toContain("claudePlugin?: boolean");
   });
 });
 
@@ -2649,7 +2650,7 @@ describe("install-flags.json is written by every installer", () => {
   test("install.ps1 and install.cmd record the same neutral ids after both exits", () => {
     const ps = readScript("install.ps1");
     const cmd = readScript("install.cmd");
-    for (const id of ["minimal", "no-minimal", "verify-attestation", "skip-attestation", "with-call-flow", "skip-codex", "skip-gemini", "skip-kiro", "skip-vibe", "skip-opencode", "skip-skills"]) {
+    for (const id of ["minimal", "no-minimal", "verify-attestation", "skip-attestation", "with-call-flow", "skip-codex", "skip-gemini", "skip-kiro", "skip-vibe", "skip-opencode", "skip-skills", "skip-claude-plugin"]) {
       expect(ps).toContain(`$ids += "${id}"`);
       expect(cmd).toContain(`call :AddInstallFlag ${id}`);
     }
@@ -2967,6 +2968,12 @@ function runPs1ClosingSummary(opts: { pi: boolean; kiro: boolean; skipKiro?: boo
     `$skipKiroResolved = $${opts.skipKiro ? "true" : "false"}`,
     `$skipKiroSource = "-SkipKiro"`,
     `$extrasChoice = "no"`,
+    // The Claude Code block reads the plugin-update state and prints the
+    // manual commands through the installer's own helper.
+    `$claudePluginState = "none"`,
+    `$claudePluginVersion = ""`,
+    `$claudePluginId = "plannotator@plannotator"`,
+    extractPs1Function("Write-ClaudePluginManualUpdate"),
     `Write-Host ""`,
     `Write-Host "=========================================="`,
     extractPs1ClosingSummaryRegion(),
@@ -3396,3 +3403,492 @@ describe("Windows installers clear the OpenCode 2 plugin cache (source scan)", (
     expect(script).not.toContain('"%USERPROFILE%\\.cache\\opencode\\node_modules\\@plannotator"');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Claude Code plugin update. The plugin comes from a GitHub marketplace, which
+// Claude Code does not auto-update, so every installer runs
+// `claude plugin marketplace update plannotator` and
+// `claude plugin update plannotator@plannotator` when (and only when) the
+// claude CLI is on PATH and the plugin is already installed at user scope.
+// Every run uses a FAKE `claude` that logs its argv; nothing reaches the real
+// CLI, ~/.claude or the network.
+// ---------------------------------------------------------------------------
+
+const CLAUDE_PLUGIN_COMMANDS = [
+  "plugin marketplace update plannotator",
+  "plugin update plannotator@plannotator",
+];
+
+/** A v2 installed_plugins.json, as Claude Code writes it. */
+function claudePluginRegistry(
+  records: Array<{ scope?: string; version: string; sha?: string }>,
+  id = "plannotator@plannotator",
+): string {
+  return JSON.stringify(
+    {
+      version: 2,
+      plugins: {
+        "other@elsewhere": [{ scope: "user", installPath: "/x/other", version: "9.9.9" }],
+        [id]: records.map((r) => ({
+          ...(r.scope ? { scope: r.scope } : {}),
+          installPath: `/x/cache/plannotator/plannotator/${r.version}`,
+          version: r.version,
+          installedAt: "2026-09-01T00:00:00.000Z",
+          lastUpdated: "2026-09-01T00:00:00.000Z",
+          gitCommitSha: r.sha ?? "aaaaaaa",
+        })),
+      },
+    },
+    null,
+    2,
+  );
+}
+
+// The fake logs one line per call; on `plugin marketplace update` it also notes
+// whether the marketplace clone's hooks.json already carries the mod (proves
+// the update runs after the repair). `plugin update` rewrites the registry to
+// FAKE_CLAUDE_NEW_VERSION when that is set, as the real command records the
+// new install. FAKE_CLAUDE_FAIL=<marketplace|plugin> fails that step;
+// FAKE_CLAUDE_HANG=1 never returns.
+const FAKE_CLAUDE = `#!/bin/bash
+printf '%s\\n' "$*" >> "$FAKE_CLAUDE_LOG"
+if [ -n "$CLAUDECODE" ]; then echo "CLAUDECODE was set" >> "$FAKE_CLAUDE_LOG"; fi
+if [ "$FAKE_CLAUDE_HANG" = "1" ]; then exec sleep 30; fi
+step=""
+[ "$1 $2 $3" = "plugin marketplace update" ] && step="marketplace"
+[ "$1 $2" = "plugin update" ] && step="plugin"
+if [ -n "$FAKE_CLAUDE_FAIL" ] && [ "$FAKE_CLAUDE_FAIL" = "$step" ]; then
+  echo "Updating marketplace..."
+  echo "Error: failed to reach github.com" >&2
+  exit 3
+fi
+if [ "$step" = "marketplace" ] && [ -n "$FAKE_CLAUDE_HOOKS" ]; then
+  if grep -q '"modules"' "$FAKE_CLAUDE_HOOKS" 2>/dev/null; then
+    echo "hooks-at-marketplace-update: repaired" >> "$FAKE_CLAUDE_LOG"
+  else
+    echo "hooks-at-marketplace-update: legacy" >> "$FAKE_CLAUDE_LOG"
+  fi
+fi
+if [ "$step" = "plugin" ] && [ -n "$FAKE_CLAUDE_NEW_VERSION" ]; then
+  sed "s/0\\.28\\.7/$FAKE_CLAUDE_NEW_VERSION/g; s/aaaaaaa/bbbbbbb/g" "$FAKE_CLAUDE_REGISTRY" > "$FAKE_CLAUDE_REGISTRY.new"
+  mv "$FAKE_CLAUDE_REGISTRY.new" "$FAKE_CLAUDE_REGISTRY"
+fi
+exit 0
+`;
+
+function setupClaudePluginSandbox(opts: {
+  registry?: string | null;
+  claude?: boolean;
+  configDir?: boolean;
+  git?: GitBehavior;
+  plannotatorConfig?: string;
+}) {
+  const sandbox = setupInstallSandbox({
+    gh: "pass-all",
+    git: opts.git,
+    plannotatorConfig: opts.plannotatorConfig,
+  });
+  const configDir = opts.configDir ? join(sandbox.home, "claude-config") : join(sandbox.home, ".claude");
+  const registryPath = join(configDir, "plugins", "installed_plugins.json");
+  if (opts.registry !== null) {
+    mkdirSync(join(configDir, "plugins"), { recursive: true });
+    writeFileSync(registryPath, opts.registry ?? claudePluginRegistry([{ scope: "user", version: "0.28.7" }]));
+  }
+  if (opts.claude !== false) writeFileSync(join(sandbox.stub, "claude"), FAKE_CLAUDE, { mode: 0o755 });
+  const log = join(sandbox.home, "claude-calls.log");
+  const env: Record<string, string> = {
+    // As in an auto-update started from a Claude Code session; the installers
+    // clear it for the claude commands (the fake logs it if it leaks through).
+    CLAUDECODE: "1",
+    FAKE_CLAUDE_LOG: log,
+    FAKE_CLAUDE_REGISTRY: registryPath,
+    ...(opts.configDir ? { CLAUDE_CONFIG_DIR: configDir } : {}),
+  };
+  const calls = () => (existsSync(log) ? readFileSync(log, "utf-8").split("\n").filter(Boolean) : []);
+  return { sandbox, configDir, registryPath, env, calls };
+}
+
+const PLUGIN_INSTALL_ARGS = ["--version", "v99.9.9", "--non-interactive", "--no-extras", "--skip-skills"];
+const MANUAL_PLUGIN_COMMANDS =
+  "  claude plugin marketplace update plannotator\n  claude plugin update plannotator@plannotator\n";
+
+describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
+  "install.sh updates an installed Claude Code plugin (fake claude, sandbox HOME)",
+  () => {
+    test("installed: both update commands run, in order, and the new version is reported", () => {
+      const s = setupClaudePluginSandbox({});
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+        ...s.env,
+        FAKE_CLAUDE_NEW_VERSION: "0.28.11",
+      });
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+      expect(out).toContain(
+        "Updating the Claude Code plugin...\nClaude Code plugin: updated to 0.28.11 (restart Claude Code to load it).\n",
+      );
+      expect(out).toContain("The Claude Code plugin was updated to 0.28.11. Restart Claude Code to load it.");
+      // An installed plugin needs neither install instructions nor manual commands.
+      expect(out).not.toContain("/plugin marketplace add backnotprop/plannotator");
+      expect(out).not.toContain(MANUAL_PLUGIN_COMMANDS);
+    });
+
+    test("installed and already current: says so, with the version", () => {
+      const s = setupClaudePluginSandbox({});
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+      expect(out).toContain("Claude Code plugin: already up to date (0.28.7).");
+      expect(out).toContain("The Claude Code plugin is up to date (0.28.7).");
+    });
+
+    test("runs after the legacy hooks.json repair, against CLAUDE_CONFIG_DIR", () => {
+      const s = setupClaudePluginSandbox({ configDir: true, git: "real-no-clone" });
+      const clone = makeMarketplaceClone(s.sandbox.home, s.configDir);
+      const hooks = join(clone, "apps", "hook", "hooks", "hooks.json");
+      writeFileSync(hooks, LEGACY_REWRITES["install.sh #689"]!);
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+        ...s.env,
+        FAKE_CLAUDE_HOOKS: hooks,
+        FAKE_CLAUDE_NEW_VERSION: "0.28.11",
+      });
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual([
+        CLAUDE_PLUGIN_COMMANDS[0],
+        "hooks-at-marketplace-update: repaired",
+        CLAUDE_PLUGIN_COMMANDS[1],
+      ]);
+      expect(out.indexOf("Restored ")).toBeGreaterThan(-1);
+      expect(out.indexOf("Restored ")).toBeLessThan(out.indexOf("Updating the Claude Code plugin..."));
+    });
+
+    test("a v1 registry record (no scope) counts as the user install", () => {
+      const s = setupClaudePluginSandbox({
+        registry: JSON.stringify({
+          version: 1,
+          plugins: { "plannotator@plannotator": { version: "0.28.7", installPath: "/x/p", gitCommitSha: "aaaaaaa" } },
+        }),
+      });
+      const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+    });
+
+    const notInstalled: Array<[string, string | null]> = [
+      ["no registry", null],
+      ["a registry without the plugin", claudePluginRegistry([{ scope: "user", version: "1.0.0" }], "something@else")],
+      ["only a project-scope install", claudePluginRegistry([{ scope: "project", version: "0.28.7" }])],
+      ["an empty install list", JSON.stringify({ version: 2, plugins: { "plannotator@plannotator": [] } })],
+    ];
+    for (const [name, registry] of notInstalled) {
+      test(`not installed (${name}): no claude command runs, install instructions stay`, () => {
+        const s = setupClaudePluginSandbox({ registry });
+        const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, s.env);
+        expect(code).toBe(0);
+        expect(s.calls()).toEqual([]);
+        expect(out).not.toMatch(/^Claude Code plugin:/m);
+        expect(out).toContain("/plugin marketplace add backnotprop/plannotator");
+        expect(out).toContain(
+          `Updating the plugin? Run these in a terminal, then restart Claude Code:\n${MANUAL_PLUGIN_COMMANDS}`,
+        );
+      });
+    }
+
+    const optOuts: Array<[string, string[], Record<string, string>, string | undefined, string]> = [
+      ["the flag", ["--skip-claude-plugin"], {}, undefined, "--skip-claude-plugin"],
+      ["the env var", [], { PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE: "1" }, undefined, "PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE"],
+      ["the config key", [], {}, '{"skipInstall":{"claudePlugin":true}}\n', "config skipInstall.claudePlugin"],
+      ["the flag over env 0", ["--skip-claude-plugin"], { PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE: "0" }, undefined, "--skip-claude-plugin"],
+    ];
+    for (const [name, args, env, config, source] of optOuts) {
+      test(`opted out by ${name}: nothing runs, the manual commands are printed`, () => {
+        const s = setupClaudePluginSandbox({ plannotatorConfig: config });
+        const { code, out } = runInstallSh(s.sandbox, [...PLUGIN_INSTALL_ARGS, ...args], { ...s.env, ...env });
+        expect(code).toBe(0);
+        expect(s.calls()).toEqual([]);
+        expect(out).toContain(`Claude Code plugin: not updated (${source}).`);
+        expect(out).toContain(
+          `Update the Claude Code plugin: run these in a terminal, then restart Claude Code:\n${MANUAL_PLUGIN_COMMANDS}`,
+        );
+      });
+    }
+
+    test("env var 0 overrides a config opt-out", () => {
+      const s = setupClaudePluginSandbox({ plannotatorConfig: '{"skipInstall":{"claudePlugin":true}}\n' });
+      const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+        ...s.env,
+        PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE: "0",
+      });
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+    });
+
+    test("--minimal runs no claude command and says nothing about the plugin", () => {
+      const s = setupClaudePluginSandbox({});
+      const { code, out } = runInstallSh(s.sandbox, [...PLUGIN_INSTALL_ARGS, "--minimal"], s.env);
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual([]);
+      expect(out).not.toContain("Claude Code plugin");
+    });
+
+    test("a failing marketplace update stops there, keeps the install green and prints the manual commands", () => {
+      const s = setupClaudePluginSandbox({});
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+        ...s.env,
+        FAKE_CLAUDE_FAIL: "marketplace",
+      });
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual([CLAUDE_PLUGIN_COMMANDS[0]]);
+      expect(out).toContain(
+        `Claude Code plugin: could not update it (claude exited 3: Error: failed to reach github.com). Run these, then restart Claude Code:\n${MANUAL_PLUGIN_COMMANDS}`,
+      );
+      expect(out).toContain("Update the Claude Code plugin: run these in a terminal, then restart Claude Code:");
+    });
+
+    test("a failing plugin update is reported the same way", () => {
+      const s = setupClaudePluginSandbox({});
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, { ...s.env, FAKE_CLAUDE_FAIL: "plugin" });
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+      expect(out).toContain(
+        "Claude Code plugin: could not update it (claude exited 3: Error: failed to reach github.com).",
+      );
+    });
+
+    test("a hanging claude is stopped at the time limit and the install still succeeds", () => {
+      const s = setupClaudePluginSandbox({});
+      const started = Date.now();
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+        ...s.env,
+        FAKE_CLAUDE_HANG: "1",
+        PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT: "1",
+      });
+      expect(code).toBe(0);
+      expect(Date.now() - started).toBeLessThan(15_000);
+      expect(s.calls()).toEqual([CLAUDE_PLUGIN_COMMANDS[0]]);
+      expect(out).toContain(
+        "Claude Code plugin: could not update it (timed out after 1s). Run these, then restart Claude Code:",
+      );
+    }, 30_000);
+
+    test("no claude on PATH: nothing runs, the banner keeps the manual commands", () => {
+      const s = setupClaudePluginSandbox({ claude: false });
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual([]);
+      expect(out).not.toContain("Updating the Claude Code plugin");
+      expect(out).not.toMatch(/^Claude Code plugin:/m);
+      expect(out).toContain(
+        `Update the Claude Code plugin: run these in a terminal, then restart Claude Code:\n${MANUAL_PLUGIN_COMMANDS}`,
+      );
+    });
+
+    test("--skip-claude-plugin is remembered in install-flags.json", () => {
+      const s = setupClaudePluginSandbox({});
+      const { code } = runInstallSh(s.sandbox, [...PLUGIN_INSTALL_ARGS, "--skip-claude-plugin"], s.env);
+      expect(code).toBe(0);
+      expect(
+        JSON.parse(readFileSync(join(s.sandbox.home, ".plannotator", "install-flags.json"), "utf-8")),
+      ).toEqual({ v: 1, flags: ["skip-skills", "skip-claude-plugin"] });
+    });
+  },
+);
+
+describe("Claude Code plugin update: every installer (source scan)", () => {
+  test("each installer takes the opt-out flag, env var and config key", () => {
+    const sh = readScript("install.sh");
+    const ps = readScript("install.ps1");
+    const cmd = readScript("install.cmd");
+    expect(sh).toContain("        --skip-claude-plugin)");
+    expect(sh).toContain('case "${PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE:-}" in');
+    expect(sh).toContain("for _agent in codex gemini kiro vibe opencode skills claudePlugin; do");
+    expect(ps).toContain("[switch]$SkipClaudePlugin");
+    expect(ps).toContain("$env:PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE -match");
+    expect(ps).toContain("$cfg.skipInstall.claudePlugin -is [bool]");
+    expect(cmd).toContain('if /i "%~1"=="--skip-claude-plugin" (');
+    expect(cmd).toContain('if /i "!PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE!"=="%%V"');
+    expect(cmd).toContain("'skills','claudePlugin'");
+  });
+
+  test("each installer runs the update after the legacy hooks.json repair", () => {
+    const pairs: Array<[string, string, string]> = [
+      ["install.sh", 'repair_legacy_plugin_hooks "$PLUGIN_MARKETPLACE_DIR" || true', "update_claude_plugin_if_installed || true"],
+      ["install.ps1", "try { Repair-LegacyPluginHooks -Clone $pluginMarketplaceDir } catch { }", "try { Update-ClaudePluginIfInstalled } catch { }"],
+      ["install.cmd", 'if exist "!PLUGIN_HOOKS!" call :RepairLegacyPluginHooks', "\ncall :UpdateClaudePlugin\n"],
+    ];
+    for (const [name, repair, update] of pairs) {
+      const script = readScript(name);
+      const r = script.indexOf(repair);
+      const u = script.indexOf(update);
+      expect({ name, repair: r > 0, update: u > r }).toEqual({ name, repair: true, update: true });
+    }
+  });
+
+  test("install.cmd's PowerShell carries nothing cmd.exe would reinterpret", () => {
+    expect(extractCmdClaudePluginCommand()).not.toMatch(/["%!]/);
+  });
+});
+
+/** The PowerShell install.cmd runs inside :UpdateClaudePlugin. */
+function extractCmdClaudePluginCommand(): string {
+  const cmd = readScript("install.cmd");
+  const sub = cmd.slice(cmd.indexOf("\n:UpdateClaudePlugin\n"));
+  const m = /^powershell -NoProfile -ExecutionPolicy Bypass -Command "(.*)"$/m.exec(sub);
+  if (!m) throw new Error("could not locate the :UpdateClaudePlugin PowerShell in install.cmd");
+  return m[1];
+}
+
+/** One top-level function of install.ps1, by name, through its closing brace. */
+function extractPs1Function(name: string): string {
+  const ps = readScript("install.ps1");
+  const start = ps.indexOf(`function ${name} {`);
+  const end = ps.indexOf("\n}\n", start);
+  if (start < 0 || end < 0) throw new Error(`could not locate function ${name} in install.ps1`);
+  return ps.slice(start, end + 2);
+}
+
+function extractPs1ClaudePluginRegion(): string {
+  const ps = readScript("install.ps1");
+  const start = ps.indexOf('$claudePluginId = "plannotator@plannotator"');
+  const marker = "try { Update-ClaudePluginIfInstalled } catch { }";
+  const end = ps.indexOf(marker);
+  if (start < 0 || end < 0 || end <= start) {
+    throw new Error("could not locate the Claude Code plugin region in install.ps1");
+  }
+  return ps.slice(start, end + marker.length);
+}
+
+type PluginRunner = "install.ps1" | "install.cmd";
+
+/**
+ * Drive the Windows installers' plugin update under PowerShell: install.ps1's
+ * region (extracted like the other ps1 regions), or the exact PowerShell
+ * command install.cmd hands to `powershell -Command`. On Unix PowerShell a
+ * backslash is an ordinary separator character, so the registry path is
+ * handed in directly: CLAUDE_CONFIG_DIR is overridden after extraction for
+ * ps1, and PLN_CP_REGISTRY is what install.cmd passes.
+ */
+function runWindowsClaudePluginUpdate(
+  runner: PluginRunner,
+  s: ReturnType<typeof setupClaudePluginSandbox>,
+  opts: { skipSource?: string; env?: Record<string, string> } = {},
+) {
+  const root = mkdtempSync(join(tmpdir(), "plannotator-ps-plugin-test-"));
+  const driverPath = join(root, "driver.ps1");
+  const body =
+    runner === "install.ps1"
+      ? [
+          `$ErrorActionPreference = "Stop"`,
+          `$skipClaudePluginResolved = $${opts.skipSource ? "true" : "false"}`,
+          `$skipClaudePluginSource = "${opts.skipSource ?? ""}"`,
+          extractPs1ClaudePluginRegion().replace(
+            /^\$claudePluginRegistry = .*$/m,
+            "$claudePluginRegistry = $env:PLN_CP_REGISTRY",
+          ),
+          `Write-Host ("STATE=" + $claudePluginState + " VERSION=" + $claudePluginVersion)`,
+          `exit 0`,
+        ]
+      : [extractCmdClaudePluginCommand()];
+  writeFileSync(driverPath, body.join("\n"));
+  const r = Bun.spawnSync([pwshBin!, "-NoProfile", "-File", driverPath], {
+    env: {
+      PATH: `${s.sandbox.stub}:/usr/bin:/bin`,
+      HOME: s.sandbox.home,
+      USERPROFILE: s.sandbox.home,
+      TMPDIR: join(s.sandbox.home, "tmp"),
+      PLN_CP_REGISTRY: s.registryPath,
+      ...(runner === "install.cmd" && opts.skipSource ? { PLN_CP_SKIP: opts.skipSource } : {}),
+      ...s.env,
+      ...opts.env,
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return { code: r.exitCode, out: r.stdout.toString() + r.stderr.toString() };
+}
+
+describe.skipIf(!pwshBin || process.platform === "win32")(
+  "Windows installers update an installed Claude Code plugin (PowerShell, fake claude)",
+  () => {
+    // install.cmd's PowerShell reports its state as its exit code.
+    const CMD_STATE = { none: 0, manual: 20, skipped: 21, updated: 22, current: 23, failed: 24 };
+    const expectState = (
+      runner: PluginRunner,
+      r: { code: number; out: string },
+      expected: keyof typeof CMD_STATE,
+    ) => {
+      if (runner === "install.cmd") {
+        expect({ code: r.code, out: r.out }).toMatchObject({ code: CMD_STATE[expected] });
+      } else {
+        expect(r.code).toBe(0);
+        expect(r.out).toContain(`STATE=${expected} `);
+      }
+    };
+
+    for (const runner of ["install.ps1", "install.cmd"] as const) {
+      test(`${runner}: installed - both commands run in order and the new version is reported`, () => {
+        const s = setupClaudePluginSandbox({});
+        const r = runWindowsClaudePluginUpdate(runner, s, { env: { FAKE_CLAUDE_NEW_VERSION: "0.28.11" } });
+        expectState(runner, r, "updated");
+        expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+        expect(r.out).toContain(
+          "Updating the Claude Code plugin...\nClaude Code plugin: updated to 0.28.11 (restart Claude Code to load it).\n",
+        );
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      test(`${runner}: already current`, () => {
+        const s = setupClaudePluginSandbox({});
+        const r = runWindowsClaudePluginUpdate(runner, s);
+        expectState(runner, r, "current");
+        expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+        expect(r.out).toContain("Claude Code plugin: already up to date (0.28.7).");
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      test(`${runner}: a project-scope-only install is left alone`, () => {
+        const s = setupClaudePluginSandbox({
+          registry: claudePluginRegistry([{ scope: "project", version: "0.28.7" }]),
+        });
+        const r = runWindowsClaudePluginUpdate(runner, s);
+        expectState(runner, r, "none");
+        expect(s.calls()).toEqual([]);
+        expect(r.out).not.toContain("Claude Code plugin");
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      test(`${runner}: opted out - nothing runs`, () => {
+        const s = setupClaudePluginSandbox({});
+        const r = runWindowsClaudePluginUpdate(runner, s, { skipSource: "-SkipClaudePlugin" });
+        expectState(runner, r, "skipped");
+        expect(s.calls()).toEqual([]);
+        expect(r.out).toContain("Claude Code plugin: not updated (-SkipClaudePlugin).");
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      test(`${runner}: a failing claude never fails the run and prints the manual commands`, () => {
+        const s = setupClaudePluginSandbox({});
+        const r = runWindowsClaudePluginUpdate(runner, s, { env: { FAKE_CLAUDE_FAIL: "marketplace" } });
+        expectState(runner, r, "failed");
+        expect(s.calls()).toEqual([CLAUDE_PLUGIN_COMMANDS[0]]);
+        expect(r.out).toContain(
+          `Claude Code plugin: could not update it (claude exited 3: Error: failed to reach github.com). Run these, then restart Claude Code:\n${MANUAL_PLUGIN_COMMANDS}`,
+        );
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      test(`${runner}: a hanging claude is stopped at the time limit`, () => {
+        const s = setupClaudePluginSandbox({});
+        const started = Date.now();
+        const r = runWindowsClaudePluginUpdate(runner, s, {
+          env: { FAKE_CLAUDE_HANG: "1", PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT: "1" },
+        });
+        expectState(runner, r, "failed");
+        expect(Date.now() - started).toBeLessThan(20_000);
+        expect(r.out).toContain("Claude Code plugin: could not update it (timed out after 1s).");
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      test(`${runner}: no claude on PATH - nothing runs`, () => {
+        const s = setupClaudePluginSandbox({ claude: false });
+        const r = runWindowsClaudePluginUpdate(runner, s);
+        expectState(runner, r, "manual");
+        expect(s.calls()).toEqual([]);
+        expect(r.out).not.toContain("Updating the Claude Code plugin");
+      }, PWSH_SCANNER_TIMEOUT_MS);
+    }
+  },
+);

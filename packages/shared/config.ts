@@ -162,7 +162,13 @@ export interface PlannotatorConfig {
    * PLANNOTATOR_SKIP_OPENCODE_INSTALL env vars, which are in turn overridden
    * by the --skip-codex / --skip-gemini / --skip-kiro / --skip-vibe /
    * --skip-opencode flags. OpenCode has no detection leg, so its entry is a
-   * plain do-not-write switch. Default: all off.
+   * plain do-not-write switch. `skills` skips the skills/slash-command
+   * checkout for every scope (PLANNOTATOR_SKIP_SKILLS_INSTALL / --skip-skills).
+   * `claudePlugin` stops the installers from updating an already-installed
+   * Claude Code plugin (`claude plugin marketplace update plannotator` +
+   * `claude plugin update plannotator@plannotator`);
+   * PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE / --skip-claude-plugin
+   * (-SkipClaudePlugin). Default: all off.
    */
   skipInstall?: {
     codex?: boolean;
@@ -170,6 +176,8 @@ export interface PlannotatorConfig {
     kiro?: boolean;
     vibe?: boolean;
     opencode?: boolean;
+    skills?: boolean;
+    claudePlugin?: boolean;
   };
   /**
    * Enable Jina Reader for URL-to-markdown conversion during annotation.

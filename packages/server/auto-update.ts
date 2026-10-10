@@ -294,6 +294,7 @@ export const INSTALL_FLAG_SPELLINGS = {
   "skip-vibe": { posix: "--skip-vibe", powershell: "-SkipVibe" },
   "skip-opencode": { posix: "--skip-opencode", powershell: "-SkipOpencode" },
   "skip-skills": { posix: "--skip-skills", powershell: "-SkipSkills" },
+  "skip-claude-plugin": { posix: "--skip-claude-plugin", powershell: "-SkipClaudePlugin" },
 } as const;
 
 export type InstallFlagId = keyof typeof INSTALL_FLAG_SPELLINGS;

@@ -25,7 +25,10 @@ param(
     # the whole fetch into a no-op for every scope it writes (Claude,
     # ~/.agents, OpenCode, Gemini, Kiro), including the extras and the
     # skill-scope cleanup sweeps. Mirrors install.sh's --skip-skills.
-    [switch]$SkipSkills
+    [switch]$SkipSkills,
+    # Do not update an installed Claude Code plugin (see
+    # Update-ClaudePluginIfInstalled). Mirrors install.sh's --skip-claude-plugin.
+    [switch]$SkipClaudePlugin
 )
 
 $ErrorActionPreference = "Stop"
@@ -229,6 +232,7 @@ function Write-InstallFlags {
     if ($SkipVibe) { $ids += "skip-vibe" }
     if ($SkipOpencode) { $ids += "skip-opencode" }
     if ($SkipSkills) { $ids += "skip-skills" }
+    if ($SkipClaudePlugin) { $ids += "skip-claude-plugin" }
     $quoted = ($ids | ForEach-Object { '"' + $_ + '"' }) -join ","
     $path = Join-Path $configDir "install-flags.json"
     $tmp = "$path.tmp.$PID"
@@ -404,6 +408,8 @@ $skipOpencodeResolved = $false; $skipOpencodeSource = ""
 # skipInstall.skills is not an agent - it opts out of the skills/slash-command
 # checkout for every scope at once - but it shares the same three layers.
 $skipSkillsResolved = $false; $skipSkillsSource = ""
+# skipInstall.claudePlugin opts out of updating an installed Claude Code plugin.
+$skipClaudePluginResolved = $false; $skipClaudePluginSource = ""
 if ($cfg -and $cfg.skipInstall) {
     if ($cfg.skipInstall.codex -is [bool] -and $cfg.skipInstall.codex) {
         $skipCodexResolved = $true; $skipCodexSource = "config skipInstall.codex"
@@ -422,6 +428,9 @@ if ($cfg -and $cfg.skipInstall) {
     }
     if ($cfg.skipInstall.skills -is [bool] -and $cfg.skipInstall.skills) {
         $skipSkillsResolved = $true; $skipSkillsSource = "config skipInstall.skills"
+    }
+    if ($cfg.skipInstall.claudePlugin -is [bool] -and $cfg.skipInstall.claudePlugin) {
+        $skipClaudePluginResolved = $true; $skipClaudePluginSource = "config skipInstall.claudePlugin"
     }
 }
 if ($env:PLANNOTATOR_SKIP_CODEX_INSTALL -match '^(1|true|yes)$') {
@@ -454,12 +463,18 @@ if ($env:PLANNOTATOR_SKIP_SKILLS_INSTALL -match '^(1|true|yes)$') {
 } elseif ($env:PLANNOTATOR_SKIP_SKILLS_INSTALL -match '^(0|false|no)$') {
     $skipSkillsResolved = $false; $skipSkillsSource = ""
 }
+if ($env:PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE -match '^(1|true|yes)$') {
+    $skipClaudePluginResolved = $true; $skipClaudePluginSource = "PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE"
+} elseif ($env:PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE -match '^(0|false|no)$') {
+    $skipClaudePluginResolved = $false; $skipClaudePluginSource = ""
+}
 if ($SkipCodex)  { $skipCodexResolved = $true;  $skipCodexSource = "-SkipCodex" }
 if ($SkipGemini) { $skipGeminiResolved = $true; $skipGeminiSource = "-SkipGemini" }
 if ($SkipKiro)   { $skipKiroResolved = $true;   $skipKiroSource = "-SkipKiro" }
 if ($SkipVibe)   { $skipVibeResolved = $true;   $skipVibeSource = "-SkipVibe" }
 if ($SkipOpencode) { $skipOpencodeResolved = $true; $skipOpencodeSource = "-SkipOpencode" }
 if ($SkipSkills) { $skipSkillsResolved = $true; $skipSkillsSource = "-SkipSkills" }
+if ($SkipClaudePlugin) { $skipClaudePluginResolved = $true; $skipClaudePluginSource = "-SkipClaudePlugin" }
 
 # Pre-flight: if verification is requested, reject tags older than the first
 # attested release before we download anything. Uses PowerShell's [version]
@@ -800,6 +815,138 @@ function Repair-LegacyPluginHooks {
     }
 }
 try { Repair-LegacyPluginHooks -Clone $pluginMarketplaceDir } catch { }
+
+# Claude Code plugin: update it when it is already installed.
+#
+# The plugin comes from a GitHub marketplace, which Claude Code does not
+# auto-update by default, so a binary update used to leave an old plugin
+# behind. When the claude CLI is on PATH and plannotator@plannotator is in
+# Claude Code's plugin registry (<claude config>\plugins\installed_plugins.json,
+# at user scope), run the two commands this script used to only print. Runs
+# after the repair above, so a repaired clone is what gets copied. It never
+# installs the plugin, never touches another marketplace or plugin, never
+# prompts (stdin is an empty file), and never fails the install: each command
+# is time-bounded and a failure prints the manual commands. Opt out with
+# -SkipClaudePlugin, PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE=1 or
+# skipInstall.claudePlugin; -Minimal exits before this. Same steps as
+# install.sh and install.cmd (keep the three in step).
+$claudePluginId = "plannotator@plannotator"
+$claudePluginRegistry = if ($env:CLAUDE_CONFIG_DIR) { "$env:CLAUDE_CONFIG_DIR\plugins\installed_plugins.json" } else { "$env:USERPROFILE\.claude\plugins\installed_plugins.json" }
+# none | manual (installed, no claude CLI) | skipped | updated | current | failed
+$claudePluginState = "none"
+$claudePluginVersion = ""
+
+# The user-scope install record for plannotator@plannotator, or $null. A record
+# without a scope (the v1 registry) counts as the user install; a project- or
+# local-scope-only install is left alone (`claude plugin update` works on the
+# user scope by default).
+function Get-ClaudePluginUserRecord {
+    if (-not (Test-Path -LiteralPath $claudePluginRegistry -PathType Leaf)) { return $null }
+    try {
+        $registry = Get-Content -LiteralPath $claudePluginRegistry -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    } catch { return $null }
+    if ($null -eq $registry -or $null -eq $registry.plugins) { return $null }
+    $entry = $registry.plugins.$claudePluginId
+    if ($null -eq $entry) { return $null }
+    return @($entry) | Where-Object { $null -ne $_ -and ((-not $_.scope) -or ($_.scope -eq "user")) } | Select-Object -First 1
+}
+
+function Get-ClaudePluginFingerprint {
+    param($Record)
+    if ($null -eq $Record) { return "||" }
+    return "$($Record.version)|$($Record.gitCommitSha)|$($Record.installPath)"
+}
+
+# Run claude with arguments and a time limit. Returns "" on success, else why
+# it failed.
+function Invoke-ClaudeWithTimeLimit {
+    param([string]$ClaudePath, [string[]]$Arguments, [int]$Seconds)
+    $out = [System.IO.Path]::GetTempFileName()
+    $err = [System.IO.Path]::GetTempFileName()
+    $in = [System.IO.Path]::GetTempFileName()
+    try {
+        $p = Start-Process -FilePath $ClaudePath -ArgumentList $Arguments -NoNewWindow -PassThru `
+            -RedirectStandardOutput $out -RedirectStandardError $err -RedirectStandardInput $in
+        # Cache the handle so ExitCode is readable after the wait (PS 5.1).
+        $null = $p.Handle
+        if (-not $p.WaitForExit($Seconds * 1000)) {
+            try { $p.Kill($true) } catch { try { $null = & taskkill /T /F /PID $p.Id 2>$null } catch { }; try { $p.Kill() } catch { } }
+            return "timed out after ${Seconds}s"
+        }
+        $p.WaitForExit()
+        if ($p.ExitCode -ne 0) {
+            # The last non-empty line claude printed, stderr first.
+            $last = $null
+            foreach ($file in @($err, $out)) {
+                $last = @(Get-Content -LiteralPath $file -ErrorAction SilentlyContinue) |
+                    ForEach-Object { ($_ -replace '[^\x20-\x7E]', '').Trim() } |
+                    Where-Object { $_ } | Select-Object -Last 1
+                if ($last) { break }
+            }
+            if ($last -and $last.Length -gt 200) { $last = $last.Substring(0, 200) }
+            if ($last) { return "claude exited $($p.ExitCode): $last" }
+            return "claude exited $($p.ExitCode)"
+        }
+        return ""
+    } catch {
+        return "could not run claude: $($_.Exception.Message)"
+    } finally {
+        Remove-Item -Force -LiteralPath $out, $err, $in -ErrorAction SilentlyContinue
+    }
+}
+
+function Write-ClaudePluginManualUpdate {
+    Write-Host "  claude plugin marketplace update plannotator"
+    Write-Host "  claude plugin update $claudePluginId"
+}
+
+function Update-ClaudePluginIfInstalled {
+    $local:ErrorActionPreference = 'Continue'
+    $record = Get-ClaudePluginUserRecord
+    if ($null -eq $record) { return }
+    $claude = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $claude) {
+        $script:claudePluginState = "manual"
+        return
+    }
+    if ($skipClaudePluginResolved) {
+        $script:claudePluginState = "skipped"
+        Write-Host "Claude Code plugin: not updated ($skipClaudePluginSource)."
+        return
+    }
+    # Seconds per command. Internal knob for the tests; the default covers a
+    # slow git fetch of the marketplace clone.
+    $seconds = 120
+    if ($env:PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT -match '^[1-9][0-9]*$') { $seconds = [int]$env:PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT }
+    $before = Get-ClaudePluginFingerprint $record
+    # CLAUDECODE is cleared for these commands: an auto-update started from a
+    # Claude Code session inherits it, and it marks a nested Claude Code.
+    Remove-Item Env:CLAUDECODE -ErrorAction SilentlyContinue
+    Write-Host "Updating the Claude Code plugin..."
+    $failed = Invoke-ClaudeWithTimeLimit -ClaudePath $claude.Source -Arguments @("plugin", "marketplace", "update", "plannotator") -Seconds $seconds
+    if (-not $failed) {
+        $failed = Invoke-ClaudeWithTimeLimit -ClaudePath $claude.Source -Arguments @("plugin", "update", $claudePluginId) -Seconds $seconds
+    }
+    if ($failed) {
+        $script:claudePluginState = "failed"
+        Write-Host "Claude Code plugin: could not update it ($failed). Run these, then restart Claude Code:"
+        Write-ClaudePluginManualUpdate
+        return
+    }
+    $record = Get-ClaudePluginUserRecord
+    $after = Get-ClaudePluginFingerprint $record
+    $script:claudePluginVersion = if ($record -and $record.version) { "$($record.version)" } else { "" }
+    if ($after -eq "||" -or $before -ne $after) {
+        $script:claudePluginState = "updated"
+        $to = if ($script:claudePluginVersion) { " to $($script:claudePluginVersion)" } else { "" }
+        Write-Host "Claude Code plugin: updated$to (restart Claude Code to load it)."
+    } else {
+        $script:claudePluginState = "current"
+        $at = if ($script:claudePluginVersion) { " ($($script:claudePluginVersion))" } else { "" }
+        Write-Host "Claude Code plugin: already up to date$at."
+    }
+}
+try { Update-ClaudePluginIfInstalled } catch { }
 
 # Codex hooks on Windows are still experimental upstream. Do not mutate
 # the Codex home automatically from the Windows installer until that
@@ -1698,13 +1845,28 @@ if ($skipSkillsResolved) {
 }
 Write-Host "=========================================="
 Write-Host ""
-Write-Host "Install the Claude Code plugin:"
-Write-Host "  /plugin marketplace add backnotprop/plannotator"
-Write-Host "  /plugin install plannotator@plannotator"
-Write-Host ""
-Write-Host "Updating the plugin? Run these in a terminal, then restart Claude Code:"
-Write-Host "  claude plugin marketplace update plannotator"
-Write-Host "  claude plugin update plannotator@plannotator"
+switch ($claudePluginState) {
+    "updated" {
+        $to = if ($claudePluginVersion) { " to $claudePluginVersion" } else { "" }
+        Write-Host "The Claude Code plugin was updated$to. Restart Claude Code to load it."
+    }
+    "current" {
+        $at = if ($claudePluginVersion) { " ($claudePluginVersion)" } else { "" }
+        Write-Host "The Claude Code plugin is up to date$at."
+    }
+    { $_ -in @("skipped", "failed", "manual") } {
+        Write-Host "Update the Claude Code plugin: run these in a terminal, then restart Claude Code:"
+        Write-ClaudePluginManualUpdate
+    }
+    default {
+        Write-Host "Install the Claude Code plugin:"
+        Write-Host "  /plugin marketplace add backnotprop/plannotator"
+        Write-Host "  /plugin install plannotator@plannotator"
+        Write-Host ""
+        Write-Host "Updating the plugin? Run these in a terminal, then restart Claude Code:"
+        Write-ClaudePluginManualUpdate
+    }
+}
 Write-Host ""
 if ($skipSkillsResolved) {
     Write-Host "Skills were skipped ($skipSkillsSource), so the /plannotator-review,"

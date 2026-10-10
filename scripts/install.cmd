@@ -41,6 +41,9 @@ REM than one agent's home: --skip-skills turns the whole fetch into a no-op for
 REM every scope it writes (Claude, .agents, OpenCode, Gemini, Kiro), including
 REM the extras and the skill-scope cleanup sweeps.
 set "SKIP_SKILLS_FLAG=0"
+REM Do not update an installed Claude Code plugin (see :UpdateClaudePlugin).
+REM Same three layers; mirrors install.sh's --skip-claude-plugin.
+set "SKIP_CLAUDE_PLUGIN_FLAG=0"
 
 :parse_args
 if "%~1"=="" goto args_done
@@ -177,6 +180,11 @@ if /i "%~1"=="--skip-skills" (
     shift
     goto parse_args
 )
+if /i "%~1"=="--skip-claude-plugin" (
+    set "SKIP_CLAUDE_PLUGIN_FLAG=1"
+    shift
+    goto parse_args
+)
 REM Reject any other dash-prefixed token as an unknown option, so a typoed
 REM flag like --verify-attesttion fails fast instead of being interpreted as
 REM a version tag (which would 404 on releases/download/v--verify-attesttion/...).
@@ -191,7 +199,7 @@ REM unquoted arg containing `&` would re-trigger metacharacter interpretation.
 set "CURRENT_ARG=%~1"
 if "!CURRENT_ARG:~0,1!"=="-" (
     echo Unknown option: "%~1" >&2
-    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--with-call-flow] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--minimal ^| --no-minimal] [--skip-codex] [--skip-gemini] [--skip-kiro] [--skip-vibe] [--skip-opencode] [--skip-skills] [--non-interactive] [--reconfigure] >&2
+    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--with-call-flow] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--minimal ^| --no-minimal] [--skip-codex] [--skip-gemini] [--skip-kiro] [--skip-vibe] [--skip-opencode] [--skip-skills] [--skip-claude-plugin] [--non-interactive] [--reconfigure] >&2
     exit /b 1
 )
 REM Positional form: install.cmd vX.Y.Z (legacy interface).
@@ -506,9 +514,12 @@ REM skipInstall.skills is not an agent - it opts out of the skills/slash-command
 REM checkout for every scope at once - but it shares the same three layers.
 set "SKIP_SKILLS=0"
 set "SKIP_SKILLS_SOURCE="
+REM skipInstall.claudePlugin opts out of updating an installed Claude Code plugin.
+set "SKIP_CLAUDE_PLUGIN=0"
+set "SKIP_CLAUDE_PLUGIN_SOURCE="
 if exist "!_CONFIG_DIR!\config.json" (
     set "PLN_CONFIG_JSON=!_CONFIG_DIR!\config.json"
-    for /f "usebackq delims=" %%K in (`powershell -NoProfile -Command "try { $c = Get-Content $env:PLN_CONFIG_JSON -Raw | ConvertFrom-Json } catch { exit 0 }; if (-not $c.skipInstall) { exit 0 }; foreach ($k in @('codex','gemini','kiro','vibe','opencode','skills')) { $v = $c.skipInstall.$k; if ($v -is [bool] -and $v) { $k } }"`) do (
+    for /f "usebackq delims=" %%K in (`powershell -NoProfile -Command "try { $c = Get-Content $env:PLN_CONFIG_JSON -Raw | ConvertFrom-Json } catch { exit 0 }; if (-not $c.skipInstall) { exit 0 }; foreach ($k in @('codex','gemini','kiro','vibe','opencode','skills','claudePlugin')) { $v = $c.skipInstall.$k; if ($v -is [bool] -and $v) { $k } }"`) do (
         if /i "%%K"=="codex" (
             set "SKIP_CODEX=1"
             set "SKIP_CODEX_SOURCE=config skipInstall.codex"
@@ -532,6 +543,10 @@ if exist "!_CONFIG_DIR!\config.json" (
         if /i "%%K"=="skills" (
             set "SKIP_SKILLS=1"
             set "SKIP_SKILLS_SOURCE=config skipInstall.skills"
+        )
+        if /i "%%K"=="claudePlugin" (
+            set "SKIP_CLAUDE_PLUGIN=1"
+            set "SKIP_CLAUDE_PLUGIN_SOURCE=config skipInstall.claudePlugin"
         )
     )
     set "PLN_CONFIG_JSON="
@@ -584,6 +599,14 @@ for %%V in (0 false no) do if /i "!PLANNOTATOR_SKIP_SKILLS_INSTALL!"=="%%V" (
     set "SKIP_SKILLS=0"
     set "SKIP_SKILLS_SOURCE="
 )
+for %%V in (1 true yes) do if /i "!PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE!"=="%%V" (
+    set "SKIP_CLAUDE_PLUGIN=1"
+    set "SKIP_CLAUDE_PLUGIN_SOURCE=PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE"
+)
+for %%V in (0 false no) do if /i "!PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE!"=="%%V" (
+    set "SKIP_CLAUDE_PLUGIN=0"
+    set "SKIP_CLAUDE_PLUGIN_SOURCE="
+)
 if "!SKIP_CODEX_FLAG!"=="1" (
     set "SKIP_CODEX=1"
     set "SKIP_CODEX_SOURCE=--skip-codex"
@@ -607,6 +630,10 @@ if "!SKIP_OPENCODE_FLAG!"=="1" (
 if "!SKIP_SKILLS_FLAG!"=="1" (
     set "SKIP_SKILLS=1"
     set "SKIP_SKILLS_SOURCE=--skip-skills"
+)
+if "!SKIP_CLAUDE_PLUGIN_FLAG!"=="1" (
+    set "SKIP_CLAUDE_PLUGIN=1"
+    set "SKIP_CLAUDE_PLUGIN_SOURCE=--skip-claude-plugin"
 )
 
 REM Pre-flight: reject verification requests for tags older than the first
@@ -918,6 +945,18 @@ if defined CLAUDE_CONFIG_DIR (
 )
 set "PLUGIN_HOOKS=!PLUGIN_MARKETPLACE_DIR!\apps\hook\hooks\hooks.json"
 if exist "!PLUGIN_HOOKS!" call :RepairLegacyPluginHooks
+
+REM Claude Code plugin: update it when it is already installed. The plugin
+REM comes from a GitHub marketplace, which Claude Code does not auto-update by
+REM default, so a binary update used to leave an old plugin behind. When the
+REM claude CLI is on PATH and plannotator@plannotator is in Claude Code's plugin
+REM registry (at user scope), :UpdateClaudePlugin runs the two commands this
+REM script used to only print, after the repair above so a repaired clone is
+REM what gets copied. It never installs the plugin, never prompts, and never
+REM fails the install. Opt out with --skip-claude-plugin,
+REM PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE=1 or skipInstall.claudePlugin.
+set "CLAUDE_PLUGIN_STATE=none"
+call :UpdateClaudePlugin
 
 REM Codex hooks on Windows are still experimental upstream. Do not mutate
 REM the Codex home automatically from the cmd installer until that path
@@ -1634,13 +1673,23 @@ echo.
 echo Test the install:
 echo   echo {"tool_input":{"plan":"# Test Plan\\n\\nHello world"}} ^| plannotator
 echo.
-echo Then install the Claude Code plugin:
-echo   /plugin marketplace add backnotprop/plannotator
-echo   /plugin install plannotator@plannotator
-echo.
-echo Updating the plugin? Run these in a terminal, then restart Claude Code:
-echo   claude plugin marketplace update plannotator
-echo   claude plugin update plannotator@plannotator
+if "!CLAUDE_PLUGIN_STATE!"=="updated" (
+    echo The Claude Code plugin was updated. Restart Claude Code to load it.
+) else if "!CLAUDE_PLUGIN_STATE!"=="current" (
+    echo The Claude Code plugin is up to date.
+) else if "!CLAUDE_PLUGIN_STATE!"=="none" (
+    echo Then install the Claude Code plugin:
+    echo   /plugin marketplace add backnotprop/plannotator
+    echo   /plugin install plannotator@plannotator
+    echo.
+    echo Updating the plugin? Run these in a terminal, then restart Claude Code:
+    echo   claude plugin marketplace update plannotator
+    echo   claude plugin update plannotator@plannotator
+) else (
+    echo Update the Claude Code plugin: run these in a terminal, then restart Claude Code:
+    echo   claude plugin marketplace update plannotator
+    echo   claude plugin update plannotator@plannotator
+)
 echo.
 REM Never claim the /plannotator-* skills are ready when nothing was installed -
 REM that false banner is exactly what the skills-checkout guard exists to prevent.
@@ -1709,6 +1758,7 @@ if "!SKIP_KIRO_FLAG!"=="1" call :AddInstallFlag skip-kiro
 if "!SKIP_VIBE_FLAG!"=="1" call :AddInstallFlag skip-vibe
 if "!SKIP_OPENCODE_FLAG!"=="1" call :AddInstallFlag skip-opencode
 if "!SKIP_SKILLS_FLAG!"=="1" call :AddInstallFlag skip-skills
+if "!SKIP_CLAUDE_PLUGIN_FLAG!"=="1" call :AddInstallFlag skip-claude-plugin
 if not exist "!_CONFIG_DIR!" mkdir "!_CONFIG_DIR!" >nul 2>&1
 >"!_CONFIG_DIR!\install-flags.json.tmp" echo {"v":1,"flags":[!IFL!]}
 if exist "!_CONFIG_DIR!\install-flags.json.tmp" move /y "!_CONFIG_DIR!\install-flags.json.tmp" "!_CONFIG_DIR!\install-flags.json" >nul 2>&1
@@ -1734,6 +1784,48 @@ set "PLN_HOOKS_RE=\A\{\x22hooks\x22:\{(\x22PreToolUse\x22:\[\{\x22matcher\x22:\x
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$c = $env:PLN_PLUGIN_CLONE; $r = 'apps/hook/hooks/hooks.json'; $f = Join-Path $c 'apps\hook\hooks\hooks.json'; if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { exit 0 }; git -C $c cat-file -e ('HEAD:' + $r) 2>$null; if ($LASTEXITCODE -ne 0) { exit 0 }; git -C $c diff --quiet HEAD -- $r 2>$null; if ($LASTEXITCODE -ne 1) { exit 0 }; $t = Get-Content -LiteralPath $f -Raw; if ($null -eq $t) { exit 0 }; if (($t -replace '[\s\uFEFF]', '') -notmatch $env:PLN_HOOKS_RE) { exit 0 }; git -C $c checkout -q -- $r 2>$null; if ($LASTEXITCODE -eq 0) { Write-Output ('Restored ' + $f + ' from its git checkout (an earlier installer had rewritten it).') }"
 set "PLN_PLUGIN_CLONE="
 set "PLN_HOOKS_RE="
+goto :eof
+
+REM ======================================================================
+REM :UpdateClaudePlugin - update an installed Claude Code plugin (see the call
+REM site). Same steps as update_claude_plugin_if_installed in install.sh and
+REM Update-ClaudePluginIfInstalled in install.ps1 (keep the three in step):
+REM read the user-scope plannotator@plannotator record from
+REM <claude config>\plugins\installed_plugins.json; without one do nothing;
+REM without a claude CLI on PATH, or when opted out, run nothing; otherwise run
+REM `claude plugin marketplace update plannotator` then `claude plugin update
+REM plannotator@plannotator`, each with stdin from an empty file and a time
+REM limit (PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT seconds, default 120, an internal
+REM knob for the tests), and report updated / already up to date from the
+REM record, or the manual commands on failure. The PowerShell reports its state
+REM as its exit code (0 none, 20 no CLI, 21 skipped, 22 updated, 23 current,
+REM 24 failed). Inputs travel in PLN_CP_REGISTRY / PLN_CP_SKIP, never
+REM interpolated; the command carries no double quote, percent sign or
+REM exclamation mark for cmd.exe to parse. Called outside any parenthesized
+REM block. Best effort: never fails the install.
+REM ======================================================================
+:UpdateClaudePlugin
+if defined CLAUDE_CONFIG_DIR (
+    set "PLN_CP_REGISTRY=%CLAUDE_CONFIG_DIR%\plugins\installed_plugins.json"
+) else (
+    set "PLN_CP_REGISTRY=%USERPROFILE%\.claude\plugins\installed_plugins.json"
+)
+if not exist "!PLN_CP_REGISTRY!" (
+    set "PLN_CP_REGISTRY="
+    goto :eof
+)
+set "PLN_CP_SKIP="
+if "!SKIP_CLAUDE_PLUGIN!"=="1" set "PLN_CP_SKIP=!SKIP_CLAUDE_PLUGIN_SOURCE!"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Continue'; $id = 'plannotator@plannotator'; $reg = $env:PLN_CP_REGISTRY; function Rec { if (-not (Test-Path -LiteralPath $reg -PathType Leaf)) { return $null }; try { $j = Get-Content -LiteralPath $reg -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop } catch { return $null }; if ($null -eq $j -or $null -eq $j.plugins) { return $null }; $e = $j.plugins.$id; if ($null -eq $e) { return $null }; return @($e) | Where-Object { $null -ne $_ -and ((-not $_.scope) -or ($_.scope -eq 'user')) } | Select-Object -First 1 }; function Fp($r) { if ($null -eq $r) { return '||' }; return [string]$r.version + '|' + [string]$r.gitCommitSha + '|' + [string]$r.installPath }; function Run($a) { $o = [IO.Path]::GetTempFileName(); $e2 = [IO.Path]::GetTempFileName(); $i = [IO.Path]::GetTempFileName(); try { $p = Start-Process -FilePath $cl -ArgumentList $a -NoNewWindow -PassThru -RedirectStandardOutput $o -RedirectStandardError $e2 -RedirectStandardInput $i; $null = $p.Handle; if (-not $p.WaitForExit($secs * 1000)) { try { $p.Kill($true) } catch { try { $null = & taskkill /T /F /PID $p.Id 2>$null } catch { }; try { $p.Kill() } catch { } }; return 'timed out after ' + $secs + 's' }; $p.WaitForExit(); if ($p.ExitCode -ne 0) { $l = $null; foreach ($f in @($e2, $o)) { $l = @(Get-Content -LiteralPath $f -ErrorAction SilentlyContinue) | ForEach-Object { ($_ -replace '[^\x20-\x7E]', '').Trim() } | Where-Object { $_ } | Select-Object -Last 1; if ($l) { break } }; if ($l -and $l.Length -gt 200) { $l = $l.Substring(0, 200) }; if ($l) { return 'claude exited ' + $p.ExitCode + ': ' + $l }; return 'claude exited ' + $p.ExitCode }; return '' } catch { return 'could not run claude: ' + $_.Exception.Message } finally { Remove-Item -Force -LiteralPath $o, $e2, $i -ErrorAction SilentlyContinue } }; function Manual { Write-Output '  claude plugin marketplace update plannotator'; Write-Output ('  claude plugin update ' + $id) }; $r = Rec; if ($null -eq $r) { exit 0 }; $c = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1; if (-not $c) { exit 20 }; $cl = $c.Source; if ($env:PLN_CP_SKIP) { Write-Output ('Claude Code plugin: not updated (' + $env:PLN_CP_SKIP + ').'); exit 21 }; $secs = 120; if ($env:PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT -match '^[1-9][0-9]*$') { $secs = [int]$env:PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT }; $b = Fp $r; Remove-Item Env:CLAUDECODE -ErrorAction SilentlyContinue; Write-Output 'Updating the Claude Code plugin...'; $x = Run @('plugin', 'marketplace', 'update', 'plannotator'); if (-not $x) { $x = Run @('plugin', 'update', $id) }; if ($x) { Write-Output ('Claude Code plugin: could not update it (' + $x + '). Run these, then restart Claude Code:'); Manual; exit 24 }; $r = Rec; $a = Fp $r; $v = ''; if ($r -and $r.version) { $v = [string]$r.version }; if ($a -eq '||' -or $b -ne $a) { if ($v) { $v = ' to ' + $v }; Write-Output ('Claude Code plugin: updated' + $v + ' (restart Claude Code to load it).'); exit 22 }; if ($v) { $v = ' (' + $v + ')' }; Write-Output ('Claude Code plugin: already up to date' + $v + '.'); exit 23"
+set "PLN_CP_RC=!ERRORLEVEL!"
+if "!PLN_CP_RC!"=="20" set "CLAUDE_PLUGIN_STATE=manual"
+if "!PLN_CP_RC!"=="21" set "CLAUDE_PLUGIN_STATE=skipped"
+if "!PLN_CP_RC!"=="22" set "CLAUDE_PLUGIN_STATE=updated"
+if "!PLN_CP_RC!"=="23" set "CLAUDE_PLUGIN_STATE=current"
+if "!PLN_CP_RC!"=="24" set "CLAUDE_PLUGIN_STATE=failed"
+set "PLN_CP_RC="
+set "PLN_CP_REGISTRY="
+set "PLN_CP_SKIP="
 goto :eof
 
 :AddInstallFlag
