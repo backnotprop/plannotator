@@ -15,13 +15,13 @@
     "@plannotator/server": "workspace:*",
     "@plannotator/shared": "workspace:*",
     "@plannotator/ui": "workspace:*",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "tailwindcss": "^4.1.18",
     "@tailwindcss/vite": "^4.3.3"
   },
   "devDependencies": {
-    "@modelcontextprotocol/client": "2.2.0",
+    "@modelcontextprotocol/client": "2.3.0",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
