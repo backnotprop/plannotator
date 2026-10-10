@@ -220,6 +220,68 @@ export function serveStatusProxy(stdout: string, port: number): { state: "free" 
 }
 
 /**
+ * Every serve route in `tailscale serve status --json`, background and
+ * foreground: each web handler's proxy target (`Web["host:port"].Handlers`,
+ * every path) and each raw TCP forward (`TCP[port].TCPForward`). Undefined
+ * when the output is not recognizable.
+ */
+export function serveStatusRoutes(stdout: string): { port: number; target: string }[] | undefined {
+  const trimmed = stdout.trim();
+  if (trimmed === "") return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return undefined;
+  }
+  if (parsed === null) return [];
+  if (typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  const routes: { port: number; target: string }[] = [];
+  const foreground = (parsed as { Foreground?: unknown }).Foreground;
+  const configs = [parsed, ...(foreground && typeof foreground === "object" ? Object.values(foreground as Record<string, unknown>) : [])];
+  for (const config of configs) {
+    if (!config || typeof config !== "object") continue;
+    const tcp = (config as { TCP?: unknown }).TCP;
+    if (tcp && typeof tcp === "object") {
+      for (const [port, entry] of Object.entries(tcp as Record<string, unknown>)) {
+        const forward = (entry as { TCPForward?: unknown } | null)?.TCPForward;
+        if (typeof forward === "string" && /^\d+$/.test(port)) routes.push({ port: Number(port), target: `tcp://${forward}` });
+      }
+    }
+    const web = (config as { Web?: unknown }).Web;
+    if (web && typeof web === "object") {
+      for (const [hostPort, entry] of Object.entries(web as Record<string, unknown>)) {
+        const port = /:(\d+)$/.exec(hostPort)?.[1];
+        const handlers = (entry as { Handlers?: unknown } | null)?.Handlers;
+        if (!port || !handlers || typeof handlers !== "object") continue;
+        for (const handler of Object.values(handlers as Record<string, unknown>)) {
+          const proxy = (handler as { Proxy?: unknown } | null)?.Proxy;
+          if (typeof proxy === "string") routes.push({ port: Number(port), target: proxy });
+        }
+      }
+    }
+  }
+  return routes;
+}
+
+/**
+ * A serve target that lands on `port` on this machine's loopback:
+ * `http://127.0.0.1:<port>`, `http://localhost:<port>/x`, `https+insecure://…`,
+ * or a TCP forward `tcp://127.0.0.1:<port>`.
+ */
+export function serveTargetIsLoopbackPort(target: string, port: number): boolean {
+  let url: URL;
+  try {
+    url = new URL(target.replace(/^https\+insecure:/, "https:"));
+  } catch {
+    return false;
+  }
+  const host = url.hostname.toLowerCase();
+  const loopback = host === "localhost" || host === "[::1]" || host === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+  return loopback && url.port !== "" && Number(url.port) === port;
+}
+
+/**
  * First https URL in `tailscale serve --bg` output whose port matches the
  * port we asked to publish, sans trailing slash. Serve output is
  * version-dependent, so an https URL for a DIFFERENT port (some other
@@ -315,7 +377,9 @@ export function decodeTailscaleHeaderValue(value: string): string | null {
       return null;
     }
   }
-  return out;
+  // Serve encodes only non-ASCII values; an all-ASCII encoded word is not
+  // what serve writes, so it is compared as it came, never as a login.
+  return /^[\x00-\x7f]*$/.test(out) ? trimmed : out;
 }
 
 /**

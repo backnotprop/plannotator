@@ -1069,20 +1069,21 @@ export type InboxTailscaleSource = "flag" | "env" | "config" | "default";
  * Resolve whether the Plannotator Inbox publishes itself over the tailnet.
  *
  * Priority (highest wins):
- *   `plannotator inbox --tailscale` (this run)  →  PLANNOTATOR_INBOX_TAILSCALE
- *   →  config.inboxTailscale  →  default false
+ *   PLANNOTATOR_INBOX_TAILSCALE  →  `plannotator inbox --tailscale` (this run,
+ *   also the control route)  →  config.inboxTailscale  →  default false
  *
- * The flag only turns it on. Env `1` / `true` / `on` and `0` / `false` /
- * `off` / `disabled` decide; an empty or unrecognized value counts as unset.
+ * The env var is a hard switch: `0` / `false` / `off` / `disabled` keeps it
+ * off even against the flag, `1` / `true` / `on` keeps it on; an empty or
+ * unrecognized value counts as unset. The flag only turns it on.
  */
 export function resolveInboxTailscale(
   config: PlannotatorConfig,
   env: NodeJS.ProcessEnv = process.env,
   flag = false,
 ): { on: boolean; source: InboxTailscaleSource } {
-  if (flag) return { on: true, source: "flag" };
   const fromEnv = parseInboxTailscaleEnv(env);
   if (fromEnv !== undefined) return { on: fromEnv, source: "env" };
+  if (flag) return { on: true, source: "flag" };
   const fromConfig = parseConfigBoolean(config.inboxTailscale);
   if (fromConfig !== undefined) return { on: fromConfig, source: "config" };
   return { on: false, source: "default" };

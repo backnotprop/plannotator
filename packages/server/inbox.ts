@@ -109,6 +109,9 @@ import { createInboxTailscale, PHONES_TAILNET_HTTPS_PORT, type InboxTailscale } 
 /** Where a request came in: the window's loopback port, or the tailnet-only listener `tailscale serve` points at. */
 type RequestVia = "local" | "tailnet";
 
+/** Headers `tailscale serve` sets on every proxied request (X-Forwarded-For always; the identity for a user's device). */
+const SERVE_HEADERS = ["tailscale-headers-info", "tailscale-user-login", "x-forwarded-for"] as const;
+
 const LOOPBACK = "127.0.0.1";
 /** Remote mode's fixed port: the Inbox never takes it. */
 export const INBOX_FORBIDDEN_PORT = 19432;
@@ -452,8 +455,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     };
   };
 
-  /** Save the fields named, keeping the others as they are. */
-  const saveNotifications = (input: unknown) => {
+  /** Save the fields named, keeping the others as they are. `validateOnly`: check the input and write nothing. */
+  const saveNotifications = (input: unknown, validateOnly = false) => {
     if (!input || typeof input !== "object" || Array.isArray(input)) {
       throw new InboxError("validation_error", "notifications: an object.", { field: "notifications" });
     }
@@ -477,6 +480,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           throw new InboxError("validation_error", `notifications.${field}: not a setting (enabled, dismissed, allowed_origin).`, { field: `notifications.${field}` });
       }
     }
+    if (validateOnly) return notificationsState();
     saveConfig({ inboxNotifications: next });
     if (JSON.stringify(loadConfig().inboxNotifications) !== JSON.stringify(next)) {
       throw new InboxError("config_not_saved", "config.json could not be written; nothing changed.");
@@ -506,8 +510,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     phones: phonesOn,
   });
 
-  /** Save the knob for the hosts named, keeping the others as they are. */
-  const saveInboxTool = (input: unknown) => {
+  /** Save the knob for the hosts named, keeping the others as they are. `validateOnly`: check the input and write nothing. */
+  const saveInboxTool = (input: unknown, validateOnly = false) => {
     if (!input || typeof input !== "object" || Array.isArray(input)) {
       throw new InboxError("validation_error", "inbox_tool: an object of host to boolean.", { field: "inbox_tool" });
     }
@@ -526,6 +530,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
       next[host as AgentToolHost] = value;
     }
+    if (validateOnly) return inboxToolState();
     saveConfig({ inboxTool: next });
     const saved = loadConfig();
     for (const [host, value] of Object.entries(next)) {
@@ -834,19 +839,31 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.inbox_tool === undefined && body.notifications === undefined && body.tailscale === undefined) {
           throw new InboxError("validation_error", "body: inbox_tool, notifications or tailscale is required.");
         }
-        let tailscaleOn: boolean | undefined;
+        let tailscaleChange: { on: boolean; replaceExposed: boolean } | undefined;
         if (body.tailscale !== undefined) {
-          const value = body.tailscale as { on?: unknown } | null;
-          if (!value || typeof value !== "object" || Array.isArray(value) || typeof value.on !== "boolean" || Object.keys(value).some((key) => key !== "on")) {
-            throw new InboxError("validation_error", "tailscale: { on: boolean }.", { field: "tailscale" });
+          const value = body.tailscale as { on?: unknown; replace_exposed?: unknown } | null;
+          if (
+            !value ||
+            typeof value !== "object" ||
+            Array.isArray(value) ||
+            typeof value.on !== "boolean" ||
+            (value.replace_exposed !== undefined && typeof value.replace_exposed !== "boolean") ||
+            Object.keys(value).some((key) => key !== "on" && key !== "replace_exposed")
+          ) {
+            throw new InboxError("validation_error", "tailscale: { on: boolean, replace_exposed?: boolean }.", { field: "tailscale" });
           }
           // Turning tailnet publishing on is a decision made on this computer.
           if (value.on && via === "tailnet") return localOnly();
-          tailscaleOn = value.on;
+          tailscaleChange = { on: value.on, replaceExposed: value.replace_exposed === true };
         }
+        // Every part is checked before anything is written, and the tailnet
+        // change (the one that can be refused: the env var, Tailscale itself)
+        // goes first, so a refusal never leaves the others half saved.
+        if (body.notifications !== undefined) saveNotifications(body.notifications, true);
+        if (body.inbox_tool !== undefined) saveInboxTool(body.inbox_tool, true);
+        const tailnet = tailscaleChange === undefined ? tailscale.state() : tailscale.set(tailscaleChange.on, { via, replaceExposed: tailscaleChange.replaceExposed });
         const notifications = body.notifications === undefined ? notificationsState() : saveNotifications(body.notifications);
         const inboxTool = body.inbox_tool === undefined ? inboxToolState() : saveInboxTool(body.inbox_tool);
-        const tailnet = tailscaleOn === undefined ? tailscale.state() : tailscale.set(tailscaleOn);
         return json({ inbox_tool: inboxTool, notifications, tailscale: tailnet });
       }
 
@@ -956,8 +973,22 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
   };
 
-  /** The window's own port: everything here came from this computer. */
-  const fetch = (req: Request): Promise<Response> => handle(req, "local");
+  /**
+   * The window's own port: everything here came from this computer. A
+   * request carrying what `tailscale serve` always adds (and a local client
+   * never sends) came through a serve mapping pointed straight at this port,
+   * such as a hand-made `tailscale serve --https=<port> http://127.0.0.1:<port>`.
+   * Such a mapping hands the tailnet the whole Inbox, `/mcp` included (serve
+   * passes a peer's own Host through), so the request is refused and Settings
+   * offers the owner-only address instead.
+   */
+  const fetch = (req: Request): Promise<Response> => {
+    if (SERVE_HEADERS.some((name) => req.headers.has(name))) {
+      tailscale.noteServedRequest();
+      return Promise.resolve(localOnly());
+    }
+    return handle(req, "local");
+  };
 
   attachmentRoutes = createInboxAttachmentRoutes({ store, serverSession, readBody });
   const started = startOnLoopback(fetch, previous?.port ?? null);

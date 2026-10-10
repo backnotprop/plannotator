@@ -9,8 +9,8 @@
  * `tailscale` never runs and ~/.plannotator is never touched.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { isPidAlive } from "@plannotator/shared/inbox/registry";
 import { createInboxWorld, destroyInboxWorld, registry, stubBuiltHtml, waitFor, worldEnv, type InboxWorld } from "../../../tests/helpers/inbox-world";
 
@@ -142,13 +142,14 @@ describe("plannotator inbox --tailscale (processes, a fake tailscale on PATH)", 
   });
 
   test("Tailscale missing never stops the Inbox: it starts locally and says why", async () => {
-    // A PATH of only the world's wrapper and bun: no tailscale at all (never the
-    // machine's real one, which a system PATH directory may hold).
+    // A PATH of one folder holding only the world's wrapper and a link to bun:
+    // no tailscale at all, even where bun and tailscale share a directory.
     const bare = join(w.root, "no-tailscale");
     mkdirSync(bare, { recursive: true });
     writeFileSync(join(bare, "plannotator"), readFileSync(join(w.bin, "plannotator")));
     chmodSync(join(bare, "plannotator"), 0o755);
-    const PATH = `${bare}:${dirname(process.execPath)}`;
+    symlinkSync(process.execPath, join(bare, "bun"));
+    const PATH = bare;
     expect(Bun.which("tailscale", { PATH })).toBeNull();
     const env = { ...worldEnv(w), PATH };
     const result = Bun.spawnSync([join(bare, "plannotator"), "inbox", "--background", "--tailscale"], { env: { ...process.env, ...env }, cwd: w.root });

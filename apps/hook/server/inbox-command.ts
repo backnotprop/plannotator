@@ -30,7 +30,7 @@ import {
   type InboxRegistryEntry,
 } from "@plannotator/shared/inbox/registry";
 import { handleInboxServerReady, startInboxServer } from "@plannotator/server/inbox";
-import type { InboxTailscaleState } from "@plannotator/server/inbox-tailscale";
+import { exposureWarning, type InboxTailscaleState } from "@plannotator/server/inbox-tailscale";
 import { openBrowser } from "@plannotator/server/browser";
 import { writeUrlQr } from "@plannotator/server/qr";
 import { getCliVersion } from "./cli";
@@ -118,9 +118,14 @@ export async function ensureInboxRunning(dataDir: string, options: { tailscale?:
 }
 
 /** Where the Inbox is on the tailnet, or why it is not there; the Inbox runs locally either way. Stderr only. */
-function reportTailnet(state: { url: string | null; error: string | null; allowed?: readonly string[] } | undefined, requested: boolean): void {
+function reportTailnet(state: Partial<InboxTailscaleState> & { url: string | null; error: string | null } | undefined, requested: boolean): void {
   if (!state) {
     if (requested) process.stderr.write("Over your tailnet: not published.\n");
+    return;
+  }
+  if (state.exposed?.length) process.stderr.write(`Warning: ${exposureWarning(state.exposed)} Open Settings > Over your tailnet to replace it.\n`);
+  if (requested && state.on === false && state.source === "env") {
+    process.stderr.write("Not published over your tailnet: PLANNOTATOR_INBOX_TAILSCALE turns it off in the Inbox's environment.\n");
     return;
   }
   if (state.url) {
@@ -225,8 +230,9 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
   process.once("SIGTERM", () => shutdown(143));
   await handleInboxServerReady(inbox, { open });
   const tailnet = inbox.tailscale.state();
-  if (tailnet.on) {
-    reportTailnet(tailnet, tailscale);
+  if (tailnet.on || tailscale) {
+    // This process's stderr already carries the server's own exposure warning.
+    reportTailnet({ ...tailnet, exposed: [] }, tailscale);
     if (tailnet.url && tailnet.source === "flag") reportFlagScope();
   }
   return new Promise<never>(() => {});

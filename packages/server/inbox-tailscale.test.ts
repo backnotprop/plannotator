@@ -369,6 +369,147 @@ describe("Inbox over your tailnet", () => {
     expect(ts.serve.get(port)).toBe("http://127.0.0.1:3000");
   });
 
+  test("switch off, Tailscale down at start: a leftover mapping and its record are kept (never forgotten), then removed by the next start or uninstall --purge", async () => {
+    const dataDir = world({ inboxTailscale: true });
+    const ts = fakeTailscale();
+    const crashed = await start(dataDir, ts.run);
+    const port = crashed.port;
+    const deadTarget = ts.serve.get(port)!;
+    const deadRegistry = registryOf(dataDir);
+    crashed.stop();
+    servers.splice(0);
+    // kill -9 left both; the person then turned the switch off; Tailscale is down at the next start.
+    ts.serve.set(port, deadTarget);
+    writeFileSync(join(dataDir, "inbox", "inbox.json"), JSON.stringify(deadRegistry));
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: false }));
+    ts.down.status = true;
+    const down = await start(dataDir, ts.run);
+    expect(ts.serve.get(port)).toBe(deadTarget);
+    expect(registryOf(dataDir).tailscale).toMatchObject({ https_port: port, proxy_port: deadRegistry.tailscale.proxy_port });
+    expect(down.tailscale.state().error).toContain(`tailscale serve --https=${port} off`);
+    // A clean stop while it is still down keeps the record too.
+    down.stop();
+    servers.splice(0);
+    expect(registryOf(dataDir).tailscale).toMatchObject({ https_port: port, proxy_port: deadRegistry.tailscale.proxy_port });
+    // uninstall --purge finds it by the record.
+    ts.down.status = false;
+    expect(takeDownInboxTailscale(dataDir, ts.run)).toBe("removed");
+    expect(ts.serve.has(port)).toBe(false);
+    // And the next start (Tailscale up) removes a kept one and forgets the record.
+    ts.serve.set(port, deadTarget);
+    const up = await start(dataDir, ts.run);
+    expect(ts.serve.has(port)).toBe(false);
+    expect(registryOf(dataDir).tailscale).toBeUndefined();
+    expect(up.tailscale.state().error).toBeNull();
+  });
+
+  test("the record is written before the mapping is made, and every start removes a recorded mapping whose proxy port is not this run's before it publishes", async () => {
+    const dataDir = world({ inboxTailscale: true });
+    const ts = fakeTailscale();
+    const atServe: (number | undefined)[] = [];
+    const order: string[] = [];
+    const run: TailscaleRunner = (args, timeout) => {
+      if (args.includes("--bg")) atServe.push(JSON.parse(readFileSync(join(dataDir, "inbox", "inbox.json"), "utf8")).tailscale?.proxy_port);
+      if (args[0] === "serve" && args.includes("off")) order.push(`off ${ts.serve.get(Number(/--https=(\d+)/.exec(args.join(" "))![1]))}`);
+      if (args.includes("--bg")) order.push(`bg ${args.at(-1)}`);
+      return ts.run(args, timeout);
+    };
+    const first = await start(dataDir, run);
+    expect(atServe).toEqual([first.tailscale.listenerPort()!]);
+    const deadTarget = ts.serve.get(first.port)!;
+    const deadRegistry = registryOf(dataDir);
+    first.stop();
+    servers.splice(0);
+    ts.serve.set(first.port, deadTarget);
+    writeFileSync(join(dataDir, "inbox", "inbox.json"), JSON.stringify(deadRegistry));
+    order.length = 0;
+    const next = await start(dataDir, run);
+    // The dead proxy port's mapping goes first, then the new one is made.
+    expect(order).toEqual([`off ${deadTarget}`, `bg http://127.0.0.1:${next.tailscale.listenerPort()}`]);
+    expect(ts.serve.get(next.port)).not.toBe(deadTarget);
+  });
+
+  test("a hand-made mapping onto the window's own port: every request through it is refused, Settings says it exposes the whole Inbox, and replacing it publishes the owner-only address", async () => {
+    const dataDir = world();
+    const ts = fakeTailscale();
+    const inbox = await start(dataDir, ts.run);
+    const main = `http://127.0.0.1:${inbox.port}`;
+    // The user's workaround: `tailscale serve --https=<P> http://127.0.0.1:<P>`, and another mapping of theirs on 443.
+    ts.serve.set(inbox.port, `http://127.0.0.1:${inbox.port}`);
+    ts.serve.set(443, "http://127.0.0.1:5274");
+    expect(inbox.tailscale.state().exposed).toEqual([]);
+
+    // What serve always adds (a local client never sends it): refused on the window's port, /mcp included, whatever Host is claimed.
+    for (const header of ["Tailscale-Headers-Info", "Tailscale-User-Login", "X-Forwarded-For"]) {
+      for (const path of ["/api/inbox/threads", "/mcp", "/"]) {
+        const response = await fetch(`${main}${path}`, { method: path === "/mcp" ? "POST" : "GET", headers: { [header]: "100.64.0.9", Host: `127.0.0.1:${inbox.port}` } });
+        expect([header, path, response.status]).toEqual([header, path, 403]);
+      }
+    }
+    expect((await fetch(`${main}/api/inbox/threads`)).status).toBe(200);
+    const settings = (await (await fetch(`${main}/api/inbox/settings`)).json()) as Json;
+    expect(settings.tailscale.exposed).toEqual([{ https_port: inbox.port, target: `http://127.0.0.1:${inbox.port}` }]);
+
+    // Turning the switch on does not take it over silently.
+    const set = (body: Json) => fetch(`${main}/api/inbox/settings`, { method: "POST", body: JSON.stringify({ tailscale: body }) });
+    const plain = (await (await set({ on: true })).json()) as Json;
+    expect(plain.tailscale.error).toContain("exposes the whole Inbox");
+    expect(ts.serve.get(inbox.port)).toBe(`http://127.0.0.1:${inbox.port}`);
+
+    // Replace: the exposing mapping goes, the owner-only one takes its port; the other mapping is untouched.
+    const replaced = (await (await set({ on: true, replace_exposed: true })).json()) as Json;
+    expect(replaced.tailscale).toMatchObject({ on: true, url: `https://${MAGIC}:${inbox.port}/`, error: null, exposed: [] });
+    expect(ts.serve.get(inbox.port)).toBe(`http://127.0.0.1:${inbox.tailscale.listenerPort()}`);
+    expect(ts.serve.get(443)).toBe("http://127.0.0.1:5274");
+    expect((await throughServe(inbox, "/api/inbox/threads")).status).toBe(200);
+    expect(await codeOf(await throughServe(inbox, "/mcp", { method: "POST", body: "{}" }))).toEqual([403, "local_only"]);
+  });
+
+  test("turning the switch off through the tailnet answers before the listener closes", async () => {
+    const dataDir = world({ inboxTailscale: true });
+    const ts = fakeTailscale();
+    const inbox = await start(dataDir, ts.run);
+    const listener = inbox.tailscale.listenerPort()!;
+    const own = { Origin: `https://${MAGIC}:${inbox.port}`, "Content-Type": "application/json" };
+    const off = await throughServe(inbox, "/api/inbox/settings", { method: "POST", headers: own, body: JSON.stringify({ tailscale: { on: false } }) });
+    expect(off.status).toBe(200);
+    expect(((await off.json()) as Json).tailscale).toMatchObject({ on: false, url: null });
+    expect(ts.serve.size).toBe(0);
+    await Bun.sleep(400);
+    expect(await fetch(`http://127.0.0.1:${listener}/`).then(() => "answered", () => "closed")).toBe("closed");
+  });
+
+  test("a Settings change the Inbox refuses saves nothing else in the same request", async () => {
+    const dataDir = world();
+    const inbox = await start(dataDir, fakeTailscale().run);
+    setEnv("PLANNOTATOR_INBOX_TAILSCALE", "0");
+    const response = await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/settings`, {
+      method: "POST",
+      body: JSON.stringify({ notifications: { enabled: false }, inbox_tool: { pi: true }, tailscale: { on: true } }),
+    });
+    expect(await codeOf(response)).toEqual([409, "tailscale_env_decides"]);
+    const config = JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8"));
+    expect(config.inboxNotifications).toBeUndefined();
+    expect(config.inboxTool).toBeUndefined();
+    // A bad part is refused before the tailnet change runs.
+    setEnv("PLANNOTATOR_INBOX_TAILSCALE", undefined);
+    const bad = await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/settings`, { method: "POST", body: JSON.stringify({ notifications: { nope: 1 }, tailscale: { on: true } }) });
+    expect(bad.status).toBe(422);
+    expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxTailscale).toBeUndefined();
+  });
+
+  test("PLANNOTATOR_INBOX_TAILSCALE=0 is a hard off: it beats --tailscale and the control route", async () => {
+    const dataDir = world();
+    setEnv("PLANNOTATOR_INBOX_TAILSCALE", "0");
+    const ts = fakeTailscale();
+    const inbox = await start(dataDir, ts.run, { publishTailnet: true });
+    expect(inbox.tailscale.state()).toMatchObject({ on: false, source: "env", env: false, url: null });
+    const answer = (await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/control/tailscale`, { method: "POST", headers: { Authorization: `Bearer ${inbox.token}` } })).json()) as Json;
+    expect(answer.tailscale).toMatchObject({ on: false, source: "env" });
+    expect(ts.calls).toEqual([]);
+    expect(ts.serve.size).toBe(0);
+  });
+
   test("with Phones on, the two publications never meet: Phones on 8443 to its door, the window on its own port to its own listener", async () => {
     const dataDir = world({ inboxTailscale: true });
     const ts = fakeTailscale();

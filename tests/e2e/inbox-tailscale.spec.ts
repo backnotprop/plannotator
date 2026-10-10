@@ -9,7 +9,8 @@
  * own port pointed at another loopback port), off takes it down; with
  * Tailscale stopped the switch stays on and the error says why; an Inbox
  * started with `--tailscale` says "On for this run" and "Keep it on at
- * every start" saves the switch.
+ * every start" saves the switch; a hand-made mapping onto the window's own
+ * port is refused, named in Settings, and replaced on request.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  * PNGs, light and dark at 1440 by 900, land in .local/proof/tailscale/.
@@ -192,5 +193,31 @@ test('started with --tailscale: on for this run, and "Keep it on at every start"
   await expect(block).toContainText('Applies now and at every start.');
   await expect.poll(() => config().inboxTailscale).toBe(true);
   expect(Object.keys(serveConfig())).toEqual([String(registry().port)]);
+  expect(world.errors).toEqual([]);
+});
+
+test("a hand-made mapping onto the window's own port: Settings says it exposes the whole Inbox, and Replace publishes the owner-only address", async () => {
+  const { page } = world;
+  const { port } = registry();
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#settings`);
+  const block = page.locator('[data-settings-tailscale]');
+  const toggle = block.getByRole('switch', { name: 'Reach the Inbox over Tailscale' });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  // The user's workaround, then a request through it as serve sends it.
+  writeFileSync(join(world.root, 'serve.json'), JSON.stringify({ [String(port)]: `http://127.0.0.1:${port}` }));
+  const through = await fetch(`http://127.0.0.1:${port}/api/inbox/threads`, { headers: { 'X-Forwarded-For': '100.64.0.9', 'Tailscale-User-Login': 'someone@example.com' } });
+  expect(through.status).toBe(403);
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#settings`);
+  await expect(block.locator('[data-tailscale-exposed]')).toContainText('exposes the whole Inbox');
+  await shot('settings-tailscale-exposed');
+  await block.getByRole('button', { name: 'Replace it with the owner-only address' }).click();
+  await expect(block.locator('[data-tailscale-url]')).toHaveAttribute('data-tailscale-url', `https://${MAGIC}:${port}/`);
+  await expect(block.locator('[data-tailscale-exposed]')).toHaveCount(0);
+  const target = serveConfig()[String(port)];
+  expect(target).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+  expect(target).not.toBe(`http://127.0.0.1:${port}`);
   expect(world.errors).toEqual([]);
 });

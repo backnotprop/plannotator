@@ -95,6 +95,8 @@ export interface TailscaleSettings {
   error: string | null;
   owner: string | null;
   allowed: string[];
+  /** Serve routes pointing at the Inbox's own port (a hand-made mapping): each exposes the whole Inbox. Absent from an older Inbox. */
+  exposed?: { https_port: number | null; target: string | null }[];
 }
 
 export interface SettingsModel {
@@ -268,7 +270,8 @@ export const inboxApi = {
     post<{ inbox_tool: SettingsModel['inbox_tool'] }>('/api/inbox/settings', { inbox_tool: hosts }),
   saveNotifications: (change: Partial<NotificationSettings>) =>
     post<{ notifications: NotificationSettings }>('/api/inbox/settings', { notifications: change }),
-  saveTailscale: (on: boolean) => post<{ tailscale: TailscaleSettings }>('/api/inbox/settings', { tailscale: { on } }),
+  saveTailscale: (on: boolean, replaceExposed = false) =>
+    post<{ tailscale: TailscaleSettings }>('/api/inbox/settings', { tailscale: replaceExposed ? { on, replace_exposed: true } : { on } }),
   // Step 2: attachments (by id only), annotations, deleting.
   attachments: (threadId: string) => get<AttachmentsModel>(`/api/inbox/threads/${encodeURIComponent(threadId)}/attachments`),
   view: (attachmentId: string, version: 'current' | 'sent') =>

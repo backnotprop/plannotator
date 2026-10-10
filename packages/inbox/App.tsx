@@ -365,11 +365,11 @@ function Inbox() {
 
   // "Over your tailnet": saved to config.json and applied at once; the answer carries the address or why not.
   const [tailscaleBusy, setTailscaleBusy] = useState(false);
-  const toggleTailscale = async (next: boolean) => {
+  const toggleTailscale = async (next: boolean, replaceExposed = false) => {
     setSettingsError(null);
     setTailscaleBusy(true);
     try {
-      const saved = await inboxApi.saveTailscale(next);
+      const saved = await inboxApi.saveTailscale(next, replaceExposed);
       setSettings((current) => (current ? { ...current, tailscale: saved.tailscale } : current));
     } catch (cause) {
       setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
@@ -439,7 +439,7 @@ function Inbox() {
         context={context}
         error={settingsError}
         onToggleTool={toggleTool}
-        onToggleTailscale={(next) => void toggleTailscale(next)}
+        onToggleTailscale={(next, replaceExposed) => void toggleTailscale(next, replaceExposed)}
         tailscaleBusy={tailscaleBusy}
         permission={notifications.permission}
         onToggleNotifications={(next) => void notifications.setEnabled(next)}

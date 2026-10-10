@@ -22,7 +22,7 @@ export interface SettingsPageProps {
   error: string | null;
   onToggleTool: (host: AgentToolHost, next: boolean) => void;
   /** Over your tailnet: the switch, and whether a change is in flight. */
-  onToggleTailscale: (next: boolean) => void;
+  onToggleTailscale: (next: boolean, replaceExposed?: boolean) => void;
   tailscaleBusy: boolean;
   permission: NotificationPermission | 'unsupported';
   onToggleNotifications: (next: boolean) => void;
@@ -95,8 +95,9 @@ function TailscaleBlock({
   state: TailscaleSettings;
   via: 'local' | 'tailnet';
   busy: boolean;
-  onToggle: (next: boolean) => void;
+  onToggle: (next: boolean, replaceExposed?: boolean) => void;
 }) {
+  const exposedPorts = (state.exposed ?? []).map((e) => e.https_port).filter((p): p is number => p !== null);
   const remote = via === 'tailnet';
   const who = state.allowed.length > 0 ? state.allowed.join(', ') : 'the Tailscale login that owns this computer';
   const locked = state.env !== null;
@@ -105,7 +106,7 @@ function TailscaleBlock({
       <h2>Over your tailnet</h2>
       <p>
         Open the Inbox from your other devices through Tailscale, over HTTPS, without opening this computer to the internet. Only{' '}
-        {who} can open it there; agents stay on this computer.
+        {who} can open it there. What you send from there, a reply or a New message, becomes a turn in an agent session on this computer.
       </p>
       <div className="ib-srow">
         Reach the Inbox over Tailscale
@@ -132,7 +133,18 @@ function TailscaleBlock({
           />
         </span>
       </div>
-      {state.on && state.error && (
+      {(state.exposed?.length ?? 0) > 0 && (
+        <div className="ib-error" data-tailscale-exposed="">
+          A tailscale serve mapping{exposedPorts.length ? ` on port ${exposedPorts.join(', ')}` : ''} points at the Inbox&apos;s own port. It exposes the whole
+          Inbox, agent tools included, to everyone on your tailnet, so the Inbox refuses every request that comes through it.{' '}
+          {!remote && !locked && (
+            <button type="button" className="ib-fold" style={{ textDecoration: 'underline' }} data-tailscale-replace="" disabled={busy} onClick={() => onToggle(true, true)}>
+              Replace it with the owner-only address
+            </button>
+          )}
+        </div>
+      )}
+      {state.on && state.error && !(state.exposed?.length) && (
         <div className="ib-error" data-tailscale-error="">
           {state.error}
         </div>

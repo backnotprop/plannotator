@@ -6,7 +6,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { resolveInboxTailscale, resolveInboxTailscaleAllow } from "../config";
-import { decodeTailscaleHeaderValue, parseTailscaleSelfIdentity } from "../tailscale";
+import { decodeTailscaleHeaderValue, parseTailscaleSelfIdentity, serveStatusRoutes, serveTargetIsLoopbackPort } from "../tailscale";
 import { checkTailnetIdentity, isServedTailnetHost, tailnetFetchSiteAllowed } from "./tailnet";
 
 const status = (self: Record<string, unknown>, users: Record<string, unknown> = { "42": { LoginName: "me@example.com" } }) =>
@@ -37,6 +37,10 @@ describe("decodeTailscaleHeaderValue", () => {
   test("RFC 2047 Q-encoded words (Go's mime.QEncoding) decode, adjacent words joined", () => {
     expect(decodeTailscaleHeaderValue("=?utf-8?q?j=C3=BCrgen@example.com?=")).toBe("jürgen@example.com");
     expect(decodeTailscaleHeaderValue("=?UTF-8?Q?J=C3=BCrgen_M?= =?utf-8?q?=C3=BCller?=")).toBe("Jürgen Müller");
+  });
+  test("an encoded word that decodes to ASCII is not what serve writes: it is kept raw, so it never matches a login", () => {
+    expect(decodeTailscaleHeaderValue("=?utf-8?q?me@example.com?=")).toBe("=?utf-8?q?me@example.com?=");
+    expect(checkTailnetIdentity(new Headers({ "Tailscale-User-Login": "=?utf-8?q?me@example.com?=" }), ["me@example.com"])).toMatchObject({ ok: false, code: "tailnet_identity_refused" });
   });
   test("a malformed or non-UTF-8 encoded word is null, never a guess", () => {
     expect(decodeTailscaleHeaderValue("=?utf-8?q?bad=ZZ?=")).toBeNull();
@@ -97,14 +101,48 @@ describe("tailnetFetchSiteAllowed", () => {
   });
 });
 
+describe("serve routes that land on the window's port", () => {
+  const status = JSON.stringify({
+    TCP: { "443": { HTTPS: true }, "52817": { HTTPS: true }, "7000": { TCPForward: "127.0.0.1:52817" } },
+    Web: {
+      "mac.ts.net:443": { Handlers: { "/": { Proxy: "http://127.0.0.1:5274" } } },
+      "mac.ts.net:52817": { Handlers: { "/": { Proxy: "http://127.0.0.1:52817" }, "/x": { Proxy: "http://localhost:9" } } },
+    },
+    Foreground: { s1: { Web: { "mac.ts.net:8080": { Handlers: { "/": { Proxy: "https+insecure://localhost:52817" } } } } } },
+  });
+  test("every web handler and TCP forward, background and foreground", () => {
+    expect(serveStatusRoutes(status)?.sort((a, b) => a.port - b.port || a.target.localeCompare(b.target))).toEqual([
+      { port: 443, target: "http://127.0.0.1:5274" },
+      { port: 7000, target: "tcp://127.0.0.1:52817" },
+      { port: 8080, target: "https+insecure://localhost:52817" },
+      { port: 52817, target: "http://127.0.0.1:52817" },
+      { port: 52817, target: "http://localhost:9" },
+    ]);
+    expect(serveStatusRoutes("null")).toEqual([]);
+    expect(serveStatusRoutes("")).toBeUndefined();
+    expect(serveStatusRoutes("[1]")).toBeUndefined();
+  });
+  test("a loopback target on the port, in any spelling; nothing else", () => {
+    for (const target of ["http://127.0.0.1:52817", "http://localhost:52817/", "https+insecure://localhost:52817", "tcp://127.0.0.1:52817", "http://[::1]:52817"]) {
+      expect([target, serveTargetIsLoopbackPort(target, 52817)]).toEqual([target, true]);
+    }
+    for (const target of ["http://127.0.0.1:5274", "http://10.0.0.2:52817", "http://127.0.0.1.evil.example:52817", "http://localhost", "not a url"]) {
+      expect([target, serveTargetIsLoopbackPort(target, 52817)]).toEqual([target, false]);
+    }
+  });
+});
+
 describe("resolveInboxTailscale", () => {
-  test("flag, then env, then config, then off", () => {
+  test("env (a hard switch, both ways), then the flag, then config, then off", () => {
+    expect(resolveInboxTailscale({ inboxTailscale: true }, { PLANNOTATOR_INBOX_TAILSCALE: "0" }, true)).toEqual({ on: false, source: "env" });
+    expect(resolveInboxTailscale({}, { PLANNOTATOR_INBOX_TAILSCALE: "1" }, true)).toEqual({ on: true, source: "env" });
+    expect(resolveInboxTailscale({ inboxTailscale: false }, {}, true)).toEqual({ on: true, source: "flag" });
     expect(resolveInboxTailscale({}, {})).toEqual({ on: false, source: "default" });
     expect(resolveInboxTailscale({ inboxTailscale: true }, {})).toEqual({ on: true, source: "config" });
     expect(resolveInboxTailscale({ inboxTailscale: "true" as never }, {})).toEqual({ on: true, source: "config" });
     expect(resolveInboxTailscale({ inboxTailscale: true }, { PLANNOTATOR_INBOX_TAILSCALE: "off" })).toEqual({ on: false, source: "env" });
     expect(resolveInboxTailscale({}, { PLANNOTATOR_INBOX_TAILSCALE: " ON " })).toEqual({ on: true, source: "env" });
-    expect(resolveInboxTailscale({ inboxTailscale: false }, { PLANNOTATOR_INBOX_TAILSCALE: "disabled" }, true)).toEqual({ on: true, source: "flag" });
+    expect(resolveInboxTailscale({ inboxTailscale: false }, { PLANNOTATOR_INBOX_TAILSCALE: "disabled" }, true)).toEqual({ on: false, source: "env" });
   });
   test("an empty or unrecognized env value counts as unset", () => {
     expect(resolveInboxTailscale({ inboxTailscale: true }, { PLANNOTATOR_INBOX_TAILSCALE: "" })).toEqual({ on: true, source: "config" });

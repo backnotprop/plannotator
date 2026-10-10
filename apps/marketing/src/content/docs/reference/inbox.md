@@ -147,13 +147,21 @@ The command prints an address such as `https://studio.tail1234.ts.net:52817/`. O
 
 - **Only you can open it.** The Inbox lets in only the Tailscale login that owns this computer. Other people on your tailnet, and tagged devices, get "403". To let in another login (for example, your own login on a shared tailnet), add it to `~/.plannotator/config.json`: `{ "inboxTailscaleAllow": ["you@example.com"] }`.
 - **Nothing is public.** The Inbox stays bound to `127.0.0.1`. Tailscale's `tailscale serve` gives the address HTTPS inside your tailnet. The Inbox never uses `tailscale funnel`.
-- **Agents stay local.** Over the tailnet you can read and answer. MCP and the agent connections answer only on this computer.
+- **Agents stay local, but your answers reach them.** MCP and the agent connections answer only on this computer. A reply, and above all a **New message**, becomes a turn in a live agent session on this computer. So anyone who can open the address can drive agents that run commands here: any login in `inboxTailscaleAllow`, and anyone holding your unlocked phone while it is signed in to Tailscale. Allow only logins you would let use this computer.
 
-`--tailscale` publishes until the Inbox stops. To publish at every start, also when an agent starts the Inbox, turn on **Over your tailnet** in **Settings**. You can also set `PLANNOTATOR_INBOX_TAILSCALE=1`, or put `{ "inboxTailscale": true }` in `~/.plannotator/config.json`. When the environment variable is set, it decides and the switch is disabled. You can turn the switch on only from this computer.
+`--tailscale` publishes until the Inbox stops. To publish at every start, also when an agent starts the Inbox, turn on **Over your tailnet** in **Settings**. You can also set `PLANNOTATOR_INBOX_TAILSCALE=1`, or put `{ "inboxTailscale": true }` in `~/.plannotator/config.json`. When the environment variable is set, it decides and the switch is disabled. `PLANNOTATOR_INBOX_TAILSCALE=0` keeps it off, even with `--tailscale`. You can turn the switch on only from this computer.
 
 The address uses the Inbox's own port. The Inbox removes it when it stops or restarts. If Tailscale is not installed, stopped or signed out, the Inbox still runs on this computer. **Settings** shows the reason.
 
+If the Inbox is killed (for example by `kill -9`, the system running out of memory, or a restart of the computer), the address stays in Tailscale and points at a port nothing uses any more. Until the Inbox starts again, a different program that takes that port is reachable from your tailnet. The Inbox removes the old address first thing at its next start. To remove it at once, run `tailscale serve --https=<port> off`, or `plannotator uninstall --purge`. `review --tailscale` and `annotate --tailscale` sessions have the same window.
+
+While the Inbox is published, closing the terminal it runs in stops it, even under `nohup`. Use `plannotator inbox --background --tailscale` to keep it running.
+
+If you published the Inbox yourself with `tailscale serve --https=<port> http://127.0.0.1:<port>`, that mapping gives everyone on your tailnet the whole Inbox, including its agent tools. The Inbox now refuses every request that comes through it. **Settings** names the mapping and offers to replace it with the owner-only address.
+
 Browsers allow notifications per address. Each device asks once.
+
+The Inbox's MCP address (`/mcp`) now answers only when the request names `127.0.0.1` or `localhost` with the Inbox's own port. An `ssh -L` forward to a different local port is refused. Forward the same port number, or run `plannotator inbox mcp` on the Inbox's computer.
 
 ## Data on disk
 
