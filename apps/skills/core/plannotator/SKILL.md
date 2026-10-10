@@ -178,6 +178,8 @@ plannotator inbox mcp
 
 The Plannotator Inbox is one local window per machine where agents leave the person messages: `:::question` blocks (the syntax below) they answer with a click, files to read and annotate (`attachments`, paths inside the project), project decisions, and guided reviews of a diff. Nothing blocks: you send and keep working or end your turn, and the person answers when they can.
 
+Run `plannotator inbox --help` for the full guide: when to use the Inbox, every tool and its arguments, how threads route, where replies arrive, the question syntax, and how to connect other agents.
+
 - Use the Inbox for what can wait: a question that does not hold up everything, status to read, a file to look at later. Use a review (plan review, `annotate`, `review`) when you need a decision on this document or diff before you go on.
 - If you have a `plannotator_inbox` tool, use it; its `action` names one of the tools below. Claude Code has it with the Plannotator mod (on by default); Pi and OpenCode only when `PLANNOTATOR_INBOX_TOOL=1` or `{ "inboxTool": true }` was set before the session started. The person's reply then arrives in your session as a new message once you are idle (OpenCode 1 excepted), so end your turn if you need the answer.
 - Any other agent uses the stdio MCP server `plannotator inbox mcp` (for example `claude mcp add plannotator-inbox -- plannotator inbox mcp`). Tools: `send_message`, `read_thread`, `wait_for_reply`, `resolve_message`, `list_decisions`, `record_decision`, `get_guide_brief`, `submit_guide`. Nothing wakes you there: call `wait_for_reply`, which returns the reply as soon as it is sent, or a cursor to wait again after 50 seconds.

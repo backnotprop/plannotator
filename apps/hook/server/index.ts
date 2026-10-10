@@ -216,7 +216,9 @@ import {
 } from "./cli";
 import { exitOnUnknownSubcommand } from "./unknown-subcommand";
 import { completeAnnotateCommand } from "./annotate-command";
-import { runInboxCommand } from "./inbox-command";
+import { runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
+import { formatInboxHelp } from "./inbox-help";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import {
   annotateStartupFailureExitCode,
   isStrictAnnotateInvocation,
@@ -530,7 +532,12 @@ if (isTopLevelHelpInvocation(args)) {
 // spawning a stray tab whose close injects a bogus "no feedback" signal.
 const helpSubcommand = isSubcommandHelpInvocation(args);
 if (helpSubcommand) {
-  console.log(formatSubcommandHelp(helpSubcommand));
+  // `inbox --help` is the Plannotator Inbox guide for agents (inbox-help.ts).
+  console.log(
+    helpSubcommand === "inbox"
+      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir() })
+      : formatSubcommandHelp(helpSubcommand),
+  );
   process.exit(0);
 }
 
