@@ -1,12 +1,13 @@
 // Ported from the sidebar half of the Workspaces app's AppShell for the Inbox
-// (the owner, 2026-10-09: the same component and motion): the resizable width as an element-scoped MotionValue, the
-// reversible resize-to-dismiss, click-to-collapse on the edge, the peek, and
-// `--sidebar-width` as the committed at-rest width. Port: the open state is
-// the Inbox's (`open` / `onOpenChange`, from its settings store), so the
-// snap-close and the edge click call `onOpenChange` directly instead of
-// Workspaces' close and open refs; the width range is the Inbox's (232 px is
-// the record's width; Workspaces runs 275 in 240 to 520); the page frame,
-// search, assistant and the rest of AppShell stay in Workspaces.
+// (the owner, 2026-10-09: the same component and motion): the resizable
+// width as an element-scoped MotionValue, the reversible resize-to-dismiss,
+// click-to-collapse on the edge, the peek, and `--sidebar-width` as the
+// committed at-rest width. Port: the open state is the Inbox's (`open` /
+// `onOpenChange`, from its settings store), so the snap-close and the edge
+// click call `onOpenChange` directly instead of Workspaces' close and open
+// refs; the width range is the Inbox's (232 px is the record's width;
+// Workspaces runs 275 in 240 to 520); the page frame, search, assistant and
+// the rest of AppShell stay in Workspaces.
 
 import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { useMotionValue, type MotionValue } from "motion/react";

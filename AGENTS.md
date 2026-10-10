@@ -1510,10 +1510,11 @@ follows the announcement shell (portal, `z-[100]`, Escape / Tab wrap / focus res
 dismiss, capture-phase `Mod+Enter` swallow) but collects a decision. Approved design ("Loop";
 design record, not in this repo): a theme-token SVG of the round trip over the question
 "Do you use Plannotator as a skill?", two example requests, one line of why, the token cost,
-and the buttons "No, I’ll just use slash commands" (initial focus) and "Yes, turn it on"; change
-copy there first. The dialog cannot close while a save is in flight, a failure shows the reason
-with "Try again", success says when it starts and offers Done. Declining, Escape, the backdrop
-and a successful save write the cookie; a failed
+and the buttons "No, I’ll just use slash commands" (initial focus) and "Yes, turn it on". The
+copy is the approved design's; agree a change with the maintainer before editing it. The
+dialog cannot close while a save is in flight, a failure shows the reason with "Try again",
+success says when it starts and offers Done. Declining, Escape, the backdrop and a successful
+save write the cookie; a failed
 save does not. It shows only for a Pi / OpenCode 2 host whose next-session value is off, never
 chosen in config.json (`agentToolConfigured`), and not set by the env. Ordering: LAST in each
 app's chain, after terminal tools (latched, `agentToolAnnouncementPendingThisLoad`) and after
@@ -2099,7 +2100,7 @@ Sorting and the rest:
 - The door, `/api/inbox/device/*`, in order: any `Origin` is `403 origin_not_allowed`; `pair` takes no token; then `Authorization: Bearer tok_…` (`401 device_token_missing`, `device_token_invalid`, `device_revoked`); then the explicit allowlist (`ALLOWLIST`: health, threads, projects, a thread, seen, events, picks, reply, resolve, delete thread, attachments, view, the HTML asset route, annotations and remove, the guide and its ticks, the decision switch, decisions, live sessions, New message; anything else `404 device_route_not_found`); then a POST needs `idempotency_key` (`422`). The request then goes to the window's own handler through the server's own `fetch` on loopback, adding and stripping nothing. `/mcp`, the bridge, control, settings, restart, raw attachment bytes, project delete, decision retire and replace, pairing, the device list and the tailnet and Wi-Fi switches are never on it.
 - Idempotency: a POST's status and JSON body are kept per device and key and read at start. The same key on the same route answers them again with `Idempotent-Replayed: true` and writes nothing; on another route it is `409 idempotency_key_reused`; a 5xx is not kept.
 - Remove: Settings' Remove (`POST /api/inbox/devices/:id/revoke`) or the phone's own `POST /api/inbox/device/revoke` marks the record revoked, deletes its secret and ends its open event streams. Its next request is `401 device_revoked`.
-- Settings' Phones block (`packages/inbox/components/Phones.tsx`; not in the window's design record; built in Settings' own rows: the Wi-Fi switch with the LAN address, the certificate's SHA-256 in groups of four and, where nothing can publish Bonjour, a note that phones will not list it but the scan still pairs; the pairing panel says "or enter the code" only while the tailnet is on; the tailnet switch with the served address (the two in the order the iPhone's 9.2 lists them); Pair a phone (with neither path on, its note offers "Turn on Reach from this Wi-Fi" in place) (the QR, the digits, the countdown, New code; it watches the device list while open and closes when the phone appears), the paired phones with platform, last seen and Remove (asked twice).
+- Settings' Phones block (`packages/inbox/components/Phones.tsx`; not in the window's design record; built in Settings' own rows): the Wi-Fi switch with the LAN address, the certificate's SHA-256 in groups of four and, where nothing can publish Bonjour, a note that phones will not list it but the scan still pairs; the pairing panel says "or enter the code" only while the tailnet is on; the tailnet switch with the served address (the two in the order the iPhone's 9.2 lists them); Pair a phone (with neither path on, its note offers "Turn on Reach from this Wi-Fi" in place) (the QR, the digits, the countdown, New code; it watches the device list while open and closes when the phone appears), the paired phones with platform, last seen and Remove (asked twice).
 
 **The surface** (PLAN step S1; contract section 5). `apps/inbox`'s `build:surface` (`vite.surface.config.ts`, entry `surface.html`) builds `packages/inbox/surface` into one file, which `build:hook` copies to `apps/hook/dist/surface.html`; the iPhone app bundles it.
 - It mounts only `Viewer` with the annotation toolstrip, `HtmlViewer` with pins, `DiagramViewer` (lazy) and the guide (`packages/inbox/guide/SurfaceGuideReader.tsx` behind `#surface-guide-reader`, lazy: the sections, then one `GuideSectionCard` per screen).

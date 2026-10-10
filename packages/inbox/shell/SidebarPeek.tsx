@@ -2,8 +2,9 @@
 // useIsDesktopLg hook for the Inbox sidebar (the owner, 2026-10-09: the same
 // component and motion). Port: the panel shows the Inbox's own navigation,
 // handed in as `children` (Workspaces renders AppSidebarContent here);
-// Tailwind classes became `ib-` classes in inbox.css; the hidden panel also turns `visibility: hidden` once
-// its slide-out ends (inbox.css), so the page holds one visible navigation.
+// Tailwind classes became `ib-` classes in inbox.css; the hidden panel also
+// turns `visibility: hidden` once its slide-out ends (inbox.css), so the page
+// holds one visible navigation.
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useSidebar } from "./sidebar";

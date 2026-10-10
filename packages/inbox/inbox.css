@@ -1,7 +1,8 @@
 /*
- * Plannotator Inbox window. The values are the design of record's (the
- * window's approved design, not in this repo) on Plannotator's own theme tokens (packages/ui/theme.css); classes carry an
- * `ib-` prefix so they never meet ui's. Plannotator's components (the
+ * Plannotator Inbox window. The values are the window's approved design
+ * (not in this repo), set on Plannotator's own theme tokens
+ * (packages/ui/theme.css); classes carry an `ib-` prefix so they never meet
+ * ui's. Plannotator's components (the
  * question card inside Viewer) are drawn by ui itself, untouched.
  */
 
