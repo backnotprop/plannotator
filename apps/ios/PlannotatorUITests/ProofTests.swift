@@ -80,11 +80,14 @@ final class ProofTests: ProofCase {
         let ticketRow = app.buttons.containing(NSPredicate(format: "label CONTAINS 'Which ticket page should I take forward'")).firstMatch
         scrollTo(ticketRow)
         ticketRow.tap()
-        XCTAssertTrue(element("thread-unreachable").waitForExistence(timeout: 30))
+        try require(element("thread-unreachable").waitForExistence(timeout: 30), "Can't reach, with the computer out of reach")
         try await control.shot("thread-unreachable")
+        // Nothing listens while the path is down, so the app stays on "Can't reach" until Try Again.
         try await control.post("/proxy", ["mode": "pass"])
-        app.buttons["Try Again"].firstMatch.tap()
-        XCTAssertTrue(app.buttons["choice-The dark one"].waitForExistence(timeout: 30))
+        let tryAgain = app.buttons["Try Again"].firstMatch
+        try require(tryAgain.wait(for: \.isHittable, toEqual: true, timeout: 30), "Try Again on Can't reach")
+        tryAgain.tap()
+        try require(app.buttons["choice-The dark one"].waitForExistence(timeout: 30), "the thread after Try Again")
         back()
         app.swipeDown()
         app.swipeDown()

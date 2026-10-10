@@ -529,21 +529,25 @@ async function guide(): Promise<Record<string, string>> {
 // ─── The door, through a proxy the test can break ───
 
 // 'gone': what `tailscale serve` answers when nothing listens behind it (502), for M5's lock-screen answer.
+// 'down': the computer out of reach. Nothing listens on the proxy's port (a call is refused, and
+// the connections open over it close), and the Inbox's socket to the relay is cut. A Response
+// cannot stand in for that: Bun ends one whose body errors as a clean, empty 200, which the app's
+// health probe read as reachable, so the app read again every 2 s through the outage and opened
+// the thread by itself the moment the path came back, under the test's Try Again tap (runs
+// 37987495244, 38013707345 attempt 3, 38031955782).
 let proxyMode: 'pass' | 'down' | 'drop-reply' | 'gone' = 'pass';
 /** Requests passing through now (the event stream among them), cut when the path goes down (M6). */
 const passing = new Set<AbortController>();
 /** Sends, and all requests, that reached the door through this proxy, the tailnet's stand-in (M6). */
 let doorReplies = 0;
 let doorRequests = 0;
-/** A response that never completes: the connection dies, as a network drop does. */
+/** The answer to a Send the Inbox applied, lost: Bun ends this as an empty 200, which the phone cannot read. */
 const dropped = () => new Response(new ReadableStream({ start: (controller) => controller.error(new Error('dropped')) }));
-const proxy = Bun.serve({
+const proxyOptions = {
   hostname: '127.0.0.1',
-  port: 0,
   idleTimeout: 120,
-  async fetch(request) {
+  async fetch(request: Request) {
     const url = new URL(request.url);
-    if (proxyMode === 'down') return dropped();
     if (proxyMode === 'gone') return new Response('Bad Gateway', { status: 502 });
     if (request.method === 'POST' && url.pathname.endsWith('/reply')) doorReplies++;
     doorRequests++;
@@ -569,7 +573,10 @@ const proxy = Bun.serve({
     }
     return new Response(forwarded.body, { status: forwarded.status, headers: forwarded.headers });
   },
-});
+};
+let proxy = Bun.serve({ ...proxyOptions, port: 0 });
+/** Kept across 'down': the proxy listens on this port again when the path comes back. */
+const proxyPort = proxy.port;
 
 // ─── The simulator ───
 
@@ -659,14 +666,26 @@ const control = Bun.serve({
           writeFileSync(planPath, text);
           return Response.json({ ok: true });
         }
-        case '/proxy':
+        case '/proxy': {
+          const wasMode = proxyMode;
           proxyMode = body.mode as typeof proxyMode;
           // The tailnet going away ends the event stream that was open over it, as a dropped connection does.
           if (proxyMode === 'down' || proxyMode === 'gone') {
             for (const abort of passing) abort.abort();
             passing.clear();
           }
+          if (proxyMode === 'down') {
+            proxy.stop(true);
+            // Out of reach on every path: the phone is paired with the relay on, and an Inbox
+            // still on its relay socket would answer through it.
+            relaySocketBlocked = true;
+            for (const socket of inboxSockets) socket.close(1011);
+          } else if (wasMode === 'down') {
+            proxy = Bun.serve({ ...proxyOptions, port: proxyPort });
+            relaySocketBlocked = false;
+          }
           return Response.json({ mode: proxyMode });
+        }
         case '/delete-on-computer': {
           const answer = await windowRoute(`/api/inbox/threads/${body.thread}/delete`, { method: 'POST', body: '{}' });
           return Response.json({ ok: answer.ok }, { status: answer.ok ? 200 : 500 });
@@ -684,18 +703,18 @@ const control = Bun.serve({
           const link = new URL(offer.link);
           // The test may stand in a hostile link: a name that reads like an
           // address, or an address with user info in it.
-          link.searchParams.set('tailnet', body.tailnet ?? `127.0.0.1:${proxy.port}`);
+          link.searchParams.set('tailnet', body.tailnet ?? `127.0.0.1:${proxyPort}`);
           if (body.name) link.searchParams.set('name', body.name);
           link.searchParams.delete('lan');
           link.searchParams.delete('fp');
-          return Response.json({ url: link.toString(), address: `127.0.0.1:${proxy.port}`, name: offer.computer.name });
+          return Response.json({ url: link.toString(), address: `127.0.0.1:${proxyPort}`, name: offer.computer.name });
         }
         case '/link-message': {
           // An agent's message carrying a live pairing link as a markdown link.
           const answer = await windowRoute('/api/inbox/pairing', { method: 'POST', body: '{}' });
           const offer = (await answer.json()) as { link: string };
           const link = new URL(offer.link);
-          link.searchParams.set('tailnet', `127.0.0.1:${proxy.port}`);
+          link.searchParams.set('tailnet', `127.0.0.1:${proxyPort}`);
           const writer = await agent('Claude Code', 'claude-code');
           newsAgents.push(writer);
           const sent = await writer.send({ project_path: projects['ledger']!, subject: 'The export diff is ready', body: `The export changed in two files. [open the diff](${link.toString()}) when you can.` });
@@ -713,11 +732,13 @@ const control = Bun.serve({
           const answer = await windowRoute('/api/inbox/pairing', { method: 'POST', body: '{}' });
           const offer = (await answer.json()) as { offer: { code: string } };
           if (!answer.ok) throw new Error(`pairing offer: ${answer.status} ${JSON.stringify(offer)}`);
-          return Response.json({ address: `127.0.0.1:${proxy.port}`, code: offer.offer.code });
+          return Response.json({ address: `127.0.0.1:${proxyPort}`, code: offer.offer.code });
         }
         case '/reply': {
           // What the asking agent's wait_for_reply received for that thread.
           const result = await Promise.race([replies.get(body.thread ?? '') ?? Promise.resolve(null), sleep(90_000).then(() => null)]);
+          // What the phone shows when no reply came: the thread, and whether its Send went out.
+          if (!result) await shot('no-reply');
           return Response.json(result ?? { error: 'no reply within 90 s' }, { status: result ? 200 : 504 });
         }
         case '/devices':
@@ -869,9 +890,9 @@ const control = Bun.serve({
             link.searchParams.set('fp', fp.replace(/^./, fp[0] === '0' ? '1' : '0'));
             link.searchParams.delete('tailnet');
           } else {
-            link.searchParams.set('tailnet', `127.0.0.1:${proxy.port}`);
+            link.searchParams.set('tailnet', `127.0.0.1:${proxyPort}`);
           }
-          return Response.json({ url: link.toString(), lan: `127.0.0.1:${lanPort}`, tailnet: `127.0.0.1:${proxy.port}` });
+          return Response.json({ url: link.toString(), lan: `127.0.0.1:${lanPort}`, tailnet: `127.0.0.1:${proxyPort}` });
         }
         case '/hits':
           // Which path carried what: Sends at the door through the tailnet's stand-in, the phone's commands and reads at the relay.
@@ -989,7 +1010,11 @@ try {
   relay.kill();
   relayProxy.stop(true);
   apple.close();
-  if (status !== 0) writeFileSync(join(shots, 'relay-wrangler.log'), relayLog.join(''));
+  if (status !== 0) {
+    writeFileSync(join(shots, 'relay-wrangler.log'), relayLog.join(''));
+    // The Inbox's own log: each relay command it applied and the door's answer to it.
+    if (existsSync(join(dataDir, 'inbox', 'inbox.log'))) copyFileSync(join(dataDir, 'inbox', 'inbox.log'), join(shots, 'inbox.log'));
+  }
   await Promise.allSettled([claude, ...Object.values(others), ...newsAgents, ...(filesAgent ? [filesAgent] : [])].map((a) => a.close()));
   await fetch(`${inbox}/api/inbox/control/stop`, { method: 'POST', headers: { Authorization: `Bearer ${registry.token}` } }).catch(() => {});
   if (status !== 0) {
