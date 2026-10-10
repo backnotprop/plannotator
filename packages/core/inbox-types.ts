@@ -227,6 +227,13 @@ export interface InboxMessage {
    * message and on records older than step 8.
    */
   to?: InboxAddressee | null;
+  /**
+   * On an agent's message: the realpath of the `project_path` it was sent
+   * from, when that is a folder inside the project other than its root.
+   * Relative image paths in the body start there (#1813); absent, they start
+   * at the project root. Added after step 8: older records lack it.
+   */
+  base_path?: string | null;
 }
 
 /** The agent session a person's New message is addressed to (`InboxMessage.to`). */

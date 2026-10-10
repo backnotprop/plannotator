@@ -122,6 +122,7 @@ jobs:
           packages/ui/components/DiagramBlock.askAI.test.tsx
           packages/ui/components/Viewer.askAISelectionLine.test.tsx
           packages/ui/components/ImageLightbox.test.tsx
+          packages/inbox/images.test.tsx
           packages/ui/components/blocks/QuestionBlock.test.tsx
           packages/ui/components/blocks/QuestionBlock.host.test.tsx
           packages/ui/components/blocks/QuestionBlock.decisionToggle.test.tsx

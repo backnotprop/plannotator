@@ -103,6 +103,8 @@ export interface InboxSendInput {
   attachments?: InboxAttachment[];
   /** A guided review the message carries (submit_guide); its blob is written once the message lands. */
   guide?: InboxGuideRef | null;
+  /** The folder inside the project the agent sent from, when not its root (`InboxMessage.base_path`). */
+  base_path?: string | null;
 }
 
 export interface InboxSendResult {
@@ -808,6 +810,7 @@ export class InboxStore {
         ? { attachments: input.attachments.map((attachment) => ({ ...attachment, sent_at: at })) }
         : {}),
       ...(input.guide ? { guide: input.guide } : {}),
+      ...(input.base_path ? { base_path: input.base_path } : {}),
     };
     this.appendMessage(message, at);
     for (const question of parsed) {

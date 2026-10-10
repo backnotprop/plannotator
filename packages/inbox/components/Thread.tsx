@@ -14,6 +14,7 @@ import { agentName, clockTime, plural } from '../format';
 import { AuthorMark, DecisionDiamond, Icon } from '../icons';
 import { DecisionCard } from './DecisionCard';
 import { GuideCard } from './GuideCard';
+import { inboxMessageImageBase } from '../images';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
 
 const noop = () => {};
@@ -88,6 +89,7 @@ function MessageBody({
         maxWidth={null}
         stickyActions={false}
         disableCodePathValidation
+        imageBaseDir={inboxMessageImageBase(message.id)}
         answerOnly
         readOnly={readOnly}
         questionAnswers={answers}

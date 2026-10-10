@@ -8,7 +8,7 @@
  * Temp PLANNOTATOR_DATA_DIR only; the real `tailscale` never runs.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
@@ -183,6 +183,38 @@ describe("Inbox over your tailnet", () => {
     expect(await codeOf(on)).toEqual([403, "local_only"]);
     expect(await codeOf(await throughServe(inbox, "/api/inbox/pairing", { method: "POST", headers: own, body: "{}" }))).toEqual([403, "local_only"]);
     expect(((await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/settings`)).json()) as Json).via).toBe("local");
+  });
+
+  test("a message's image (#1813) reads through the tailnet for the owner like the other read routes; a wrong login, no login and another site are refused", async () => {
+    const dataDir = world({ inboxTailscale: true });
+    const project = join(dataDir, "api");
+    mkdirSync(join(project, "shots"), { recursive: true });
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 2, 0, 0, 0, 3, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    writeFileSync(join(project, "shots", "after.png"), png);
+    const inbox = await start(dataDir, fakeTailscale().run);
+    const projectRecord = inbox.store.ensureProject({ name: "api", root: project });
+    const { message } = inbox.store.sendMessage({
+      project_id: projectRecord.id,
+      author: { kind: "agent", host: "test", session: "ses_tailnet", name: null },
+      body: "The page after the fix:\n\n![after](shots/after.png)",
+    });
+    const messageId = message.id;
+    const path = `/api/inbox/messages/${messageId}/image?path=${encodeURIComponent("shots/after.png")}`;
+
+    // The owner's page through the tailnet: its <img> is same-origin.
+    const ok = await throughServe(inbox, path, { headers: { "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Dest": "image" } });
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("content-type")).toBe("image/png");
+    expect(ok.headers.get("cross-origin-resource-policy")).toBe("same-origin");
+    expect(new Uint8Array(await ok.arrayBuffer())).toEqual(png);
+
+    expect(await codeOf(await throughServe(inbox, path, { login: "someone@example.com" }))).toEqual([403, "tailnet_identity_refused"]);
+    expect(await codeOf(await throughServe(inbox, path, { login: null }))).toEqual([403, "tailnet_identity_required"]);
+    expect(await codeOf(await throughServe(inbox, path, { headers: { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": "image" } }))).toEqual([403, "cross_site"]);
+    // The route's own Sec-Fetch-Site refusal is intact on the window's port.
+    const local = await fetch(`http://127.0.0.1:${inbox.port}${path}`, { headers: { "Sec-Fetch-Site": "cross-site" } });
+    expect(await codeOf(local)).toEqual([403, "cross_origin"]);
+    expect((await fetch(`http://127.0.0.1:${inbox.port}${path}`)).status).toBe(200);
   });
 
   test("/mcp answers only a loopback Host, even when PLANNOTATOR_ALLOWED_HOSTS widens the window", async () => {
