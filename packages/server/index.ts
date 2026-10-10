@@ -45,7 +45,7 @@ import {
 import { getRepoInfo } from "./repo";
 import { detectProjectName } from "./project";
 import { agentToolSaveFailed, loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveFeedbackHistory } from "./config";
-import { getAutoUpdateAdvert } from "./auto-update";
+import { getAutoUpdateAdvert, getUpdateAdvert, handleUpdateRoute } from "./auto-update";
 import { appendFeedbackRecord, type FeedbackDecision } from "@plannotator/shared/feedback-archive";
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { readImprovementHook, getImprovementHookExpectedPath } from "@plannotator/shared/improvement-hooks";
@@ -445,9 +445,10 @@ export async function startPlannotatorServer(
                 isWSL: wslFlag,
                 serverConfig: getServerConfig(gitUser, agentToolHostForServer(options.sessionBridge, options.opencodeToolCapable)),
                 ...getAutoUpdateAdvert(),
+                ...getUpdateAdvert(origin),
               });
             }
-            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, serverSession, ...(options.planRevisions ? { planRevision } : {}), projectRoot: process.cwd(), planDir: planFile?.dir, isWSL: wslFlag, serverConfig: getServerConfig(gitUser, agentToolHostForServer(options.sessionBridge, options.opencodeToolCapable)), ...getAutoUpdateAdvert() });
+            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, serverSession, ...(options.planRevisions ? { planRevision } : {}), projectRoot: process.cwd(), planDir: planFile?.dir, isWSL: wslFlag, serverConfig: getServerConfig(gitUser, agentToolHostForServer(options.sessionBridge, options.opencodeToolCapable)), ...getAutoUpdateAdvert(), ...getUpdateAdvert(origin) });
           }
 
           // API: The live plan revision (open reviews that receive revised plans)
@@ -485,6 +486,13 @@ export async function startPlannotatorServer(
               composedLength: composed?.length ?? null,
             });
           }
+
+          // API: Update now (the update toast and the Options menu): the install script, once.
+
+          const updateRoute = handleUpdateRoute(req, url);
+
+          if (updateRoute) return updateRoute;
+
 
           // API: Update user config (write-back to ~/.plannotator/config.json)
           if (url.pathname === "/api/config" && req.method === "POST") {

@@ -137,7 +137,7 @@ import {
   type MarkerEngineId,
 } from "./marker-review";
 import { agentToolSaveFailed, loadConfig, saveConfig, detectGitUser, getServerConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolveClaudeSandbox, resolveCursorSandbox, resolveFeedbackHistory, resolveGuideHistory, resolveGitRemoteCheck, resolveReviewProgress } from "./config";
-import { getAutoUpdateAdvert } from "./auto-update";
+import { getAutoUpdateAdvert, getUpdateAdvert, handleUpdateRoute } from "./auto-update";
 import { appendFeedbackRecord, countChangedFiles, deriveFeedbackProject, type FeedbackDecision, type FeedbackReviewTarget } from "@plannotator/shared/feedback-archive";
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { type PRMetadata, type PRRef, type PRReviewFileComment, type PRStackTree, type PRListItem, fetchPR, fetchPRFileContent, fetchPRFileBytes, fetchPRContext, submitPRReview, parseFileLevelComments, parsePRReviewAction, fetchPRViewedFiles, markPRFilesViewed, fetchPRStack, fetchPRList, getPRUser, parsePRUrl, prRefFromMetadata, isSameProject, getDisplayRepo, getMRLabel, getMRNumberLabel, getPRNumber, prCommandRuntime } from "./pr";
@@ -2361,6 +2361,7 @@ export async function startReviewServer(
               callFlow: await getCallFlowAdvert(servedDiffType as DiffType),
               serverConfig: getServerConfig(gitUser, agentToolHostForServer(options.sessionBridge)),
               ...getAutoUpdateAdvert(),
+              ...getUpdateAdvert(origin),
             });
           }
 
@@ -3692,6 +3693,13 @@ export async function startReviewServer(
               return Response.json({ error: message }, { status: 500 });
             }
           }
+
+          // API: Update now (the update toast and the Options menu): the install script, once.
+
+          const updateRoute = handleUpdateRoute(req, url);
+
+          if (updateRoute) return updateRoute;
+
 
           // API: Update user config (write-back to ~/.plannotator/config.json)
           if (url.pathname === "/api/config" && req.method === "POST") {

@@ -1,3 +1,4 @@
+import { piUpdateAdvert } from "./update-advert.ts";
 import { isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
 import { annotateDiagramRenderKind } from "../generated/annotatable.ts";
 import { likelyAppHtmlEncoding, prewarmAppHtml } from "../generated/app-html.ts";
@@ -904,6 +905,7 @@ export async function startAnnotateServer(options: {
 				repoInfo,
 				projectRoot: process.cwd(),
 				serverConfig: getServerConfig(gitUser, "pi"),
+				...piUpdateAdvert(options.origin),
 				agentTerminal: agentTerminalCapability,
 				feedbackTemplates: {
 					fileFeedback: getAnnotateFileFeedbackTemplate(
@@ -979,6 +981,7 @@ export async function startAnnotateServer(options: {
 				markdownExtensions: getExtraMarkdownExtensions(),
 				...(annotateDrafts.documentsEnabled ? { documentDrafts: true } : {}),
 				serverConfig: getServerConfig(gitUser, "pi"),
+				...piUpdateAdvert(options.origin),
 				agentTerminal: agentTerminalCapability,
 				...(options.recentMessages ? { recentMessages: options.recentMessages } : {}),
 				// Resolved copy-wrapper templates (config-aware, placeholders

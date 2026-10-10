@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { getItem, setItem } from '../utils/storage';
+import type { UpdateAction, UpdateAdvert } from '../utils/updateNotice';
 
 declare const __APP_VERSION__: string;
 
@@ -12,120 +13,59 @@ export interface UpdateInfo {
   currentVersion: string;
   latestVersion: string;
   updateAvailable: boolean;
+  /** The Options dot was seen for this version (opening the menu dismisses it). */
   dismissed: boolean;
   releaseUrl: string;
   featureHighlight?: FeatureHighlight;
+  /** What updating means here: `script` (Update now), `copy`, `pi`, `opencode`. */
+  action?: UpdateAction;
+  /** The command for this host, with the remembered install flags. */
+  command?: string;
   dismiss: () => void;
 }
 
-interface VersionCheckResult {
-  currentVersion: string;
-  latestVersion: string;
-  updateAvailable: boolean;
-  releaseUrl: string;
-  featureHighlight?: FeatureHighlight;
-}
-
-const GITHUB_API = 'https://api.github.com/repos/backnotprop/plannotator/releases/latest';
-
 const DISMISSED_VERSION_KEY = 'update-dismissed-version';
-
-// Feature highlights for milestone releases
-const FEATURE_HIGHLIGHTS: Record<string, FeatureHighlight> = {
-  '0.5.0': {
-    title: 'Code Review is here!',
-    description: 'Review git diffs with inline annotations. Run /plannotator-review to try it.',
-  },
-};
-
-function compareVersions(current: string, latest: string): boolean {
-  const cleanVersion = (v: string) => v.replace(/^v/, '');
-  const currentParts = cleanVersion(current).split('.').map(Number);
-  const latestParts = cleanVersion(latest).split('.').map(Number);
-
-  for (let i = 0; i < Math.max(currentParts.length, latestParts.length); i++) {
-    const curr = currentParts[i] || 0;
-    const lat = latestParts[i] || 0;
-    if (lat > curr) return true;
-    if (lat < curr) return false;
-  }
-  return false;
-}
 
 function isDismissedVersion(latestVersion: string): boolean {
   const dismissed = getItem(DISMISSED_VERSION_KEY);
   if (!dismissed) return false;
-  const cleanLatest = latestVersion.replace(/^v/, '');
-  const cleanDismissed = dismissed.replace(/^v/, '');
-  return cleanLatest === cleanDismissed;
+  return latestVersion.replace(/^v/, '') === dismissed.replace(/^v/, '');
 }
 
-export function useUpdateCheck(): UpdateInfo | null {
-  const [checkResult, setCheckResult] = useState<VersionCheckResult | null>(null);
-  const [dismissed, setDismissed] = useState(false);
+/**
+ * The Options menu's update state, from the server's advert (`updateAvailable`
+ * on /api/plan and /api/diff). The browser never asks GitHub: the machine
+ * checks once a day (packages/shared/update-check.ts) and the server passes
+ * the answer on, or nothing when update checks are off, in a dev build, or on
+ * a surface with no server.
+ *
+ * `?preview-update=0.29.0` still simulates an update, for screenshots.
+ */
+export function useUpdateCheck(advert?: UpdateAdvert | null): UpdateInfo | null {
+  const preview = useMemo(() => {
+    if (typeof window === 'undefined') return null;
+    const version = new URLSearchParams(window.location.search).get('preview-update');
+    return version ? version.replace(/^v/, '') : null;
+  }, []);
+  const latestVersion = preview ?? advert?.version ?? null;
+  const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
 
   const dismiss = useCallback(() => {
-    if (!checkResult?.latestVersion) return;
-    const clean = checkResult.latestVersion.replace(/^v/, '');
-    setItem(DISMISSED_VERSION_KEY, clean);
-    setDismissed(true);
-  }, [checkResult?.latestVersion]);
+    if (!latestVersion) return;
+    setItem(DISMISSED_VERSION_KEY, latestVersion);
+    setDismissedVersion(latestVersion);
+  }, [latestVersion]);
 
-  useEffect(() => {
-    const checkForUpdates = async () => {
-      try {
-        const currentVersion = typeof __APP_VERSION__ !== 'undefined'
-          ? __APP_VERSION__
-          : '0.0.0';
-
-        // Debug: ?preview-update=0.5.0 simulates an update to that version
-        const urlParams = new URLSearchParams(window.location.search);
-        const previewVersion = urlParams.get('preview-update');
-
-        if (previewVersion) {
-          const cleanPreview = previewVersion.replace(/^v/, '');
-          setDismissed(isDismissedVersion(cleanPreview));
-          setCheckResult({
-            currentVersion,
-            latestVersion: previewVersion,
-            updateAvailable: true,
-            releaseUrl: `https://github.com/backnotprop/plannotator/releases/tag/v${cleanPreview}`,
-            featureHighlight: FEATURE_HIGHLIGHTS[cleanPreview],
-          });
-          return;
-        }
-
-        const response = await fetch(GITHUB_API);
-        if (!response.ok) return;
-
-        const release = await response.json();
-        const latestVersion = release.tag_name;
-
-        const updateAvailable = compareVersions(currentVersion, latestVersion);
-
-        const cleanLatest = latestVersion.replace(/^v/, '');
-        const featureHighlight = FEATURE_HIGHLIGHTS[cleanLatest];
-
-        setDismissed(isDismissedVersion(latestVersion));
-        setCheckResult({
-          currentVersion,
-          latestVersion,
-          updateAvailable,
-          releaseUrl: release.html_url,
-          featureHighlight,
-        });
-      } catch {
-      }
-    };
-
-    checkForUpdates();
-  }, []);
-
-  if (!checkResult) return null;
-
+  if (!latestVersion) return null;
+  const currentVersion = advert?.current ?? (typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0');
   return {
-    ...checkResult,
-    dismissed,
+    currentVersion,
+    latestVersion,
+    updateAvailable: true,
+    dismissed: dismissedVersion === latestVersion || isDismissedVersion(latestVersion),
+    releaseUrl: advert?.releaseUrl ?? `https://github.com/backnotprop/plannotator/releases/tag/v${latestVersion}`,
+    action: advert?.action ?? 'script',
+    command: advert?.command ?? 'curl -fsSL https://plannotator.ai/install.sh | bash',
     dismiss,
   };
 }

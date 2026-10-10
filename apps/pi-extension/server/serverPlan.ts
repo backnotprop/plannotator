@@ -1,3 +1,4 @@
+import { piUpdateAdvert } from "./update-advert.ts";
 import { isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
 import { randomUUID } from "node:crypto";
 import { likelyAppHtmlEncoding, prewarmAppHtml } from "../generated/app-html.ts";
@@ -376,6 +377,7 @@ export async function startPlanReviewServer(options: {
 					repoInfo,
 					projectRoot: process.cwd(),
 					serverConfig: getServerConfig(gitUser, "pi"),
+					...piUpdateAdvert(options.origin),
 				});
 			}
 		} else if (url.pathname === "/api/hooks/status" && req.method === "GET") {

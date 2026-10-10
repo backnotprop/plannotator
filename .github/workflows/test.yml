@@ -127,6 +127,7 @@ jobs:
           packages/inbox/links.test.tsx
           packages/inbox/attachmentKinds.test.tsx
           packages/inbox/updates.test.tsx
+          packages/ui/components/MenuVersionSection.test.tsx
           packages/ui/components/blocks/QuestionBlock.test.tsx
           packages/ui/components/blocks/QuestionBlock.host.test.tsx
           packages/ui/components/blocks/QuestionBlock.decisionToggle.test.tsx

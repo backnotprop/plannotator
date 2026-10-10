@@ -1,3 +1,4 @@
+import { piUpdateAdvert } from "./update-advert.ts";
 import { isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
 import { spawn } from "node:child_process";
 import { likelyAppHtmlEncoding, prewarmAppHtml } from "../generated/app-html.ts";
@@ -2354,6 +2355,7 @@ export async function startReviewServer(options: {
 				semanticDiff: await getSemanticDiffAdvert(servedDiffType as DiffType),
 				callFlow: await getCallFlowAdvert(servedDiffType as DiffType),
 				serverConfig: getServerConfig(gitUser, "pi"),
+				...piUpdateAdvert(options.origin),
 			});
 		} else if (url.pathname === "/api/fetch-base" && req.method === "POST") {
 			// Fetch the remote default branch so the local baseline catches up

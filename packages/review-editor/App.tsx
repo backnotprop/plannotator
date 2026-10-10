@@ -26,6 +26,8 @@ import {
   resolveReviewDecisionAction,
 } from './reviewDecision';
 import { useUpdateCheck } from '@plannotator/ui/hooks/useUpdateCheck';
+import { useUpdateToast } from '@plannotator/ui/hooks/useUpdateToast';
+import { parseUpdateAdvert, type UpdateAdvert } from '@plannotator/ui/utils/updateNotice';
 import { claimAutoUpdateNotice, describeAutoUpdateNotice, parseAutoUpdateNotice, type AutoUpdateNotice } from '@plannotator/ui/utils/autoUpdateNotice';
 import { storage } from '@plannotator/ui/utils/storage';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
@@ -832,28 +834,15 @@ const ReviewApp: React.FC = () => {
       ? `You can't request changes on your own pull request on ${platformLabel}.`
       : undefined;
   const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0';
-  const updateInfo = useUpdateCheck();
-  const updateToastShown = useRef(false);
+  // The server's update advert (the machine's once-a-day check): the Options
+  // dot, the menu's command and the toast. The browser never asks GitHub.
+  const [updateAdvert, setUpdateAdvert] = useState<UpdateAdvert | null>(null);
+  const updateInfo = useUpdateCheck(updateAdvert);
   // True when the compiled CLI will install new releases itself (#1634); the
-  // "new version available" toast is then redundant and stays hidden. The
-  // payload lands long before the GitHub answer plus the toast delay, and a
-  // late flip still cancels the pending toast through the effect cleanup.
+  // "new version available" toast is then redundant and stays hidden.
   const [autoUpdateActive, setAutoUpdateActive] = useState(false);
-  useEffect(() => {
-    if (autoUpdateActive) return;
-    if (updateInfo?.updateAvailable && !updateInfo.dismissed && !updateToastShown.current) {
-      updateToastShown.current = true;
-      const t = setTimeout(() => {
-        toast('A new version of Plannotator is available', {
-          description: 'Open the Options menu to update.',
-          duration: 4000,
-          position: 'top-right',
-          classNames: { toast: '!w-auto', description: '!text-foreground/70' },
-        });
-      }, 1500);
-      return () => clearTimeout(t);
-    }
-  }, [updateInfo?.updateAvailable, updateInfo?.dismissed, autoUpdateActive]);
+  // The update-notice switch for Settings: present when the server reports it.
+  const [updateCheckSetting, setUpdateCheckSetting] = useState<{ env?: boolean } | undefined>();
   // One-time notice after a background auto-update (#1634); the compiled
   // CLI's server attaches it to the initial payload.
   const [autoUpdateNotice, setAutoUpdateNotice] = useState<AutoUpdateNotice | undefined>();
@@ -2322,8 +2311,9 @@ const ReviewApp: React.FC = () => {
         baseBehindRemote?: boolean;
         openStatePinned?: boolean;
         snapshotId?: string;
-        serverConfig?: Record<string, unknown> & { displayName?: string; gitUser?: string; autoUpdate?: boolean; autoUpdateEnv?: boolean };
+        serverConfig?: Record<string, unknown> & { displayName?: string; gitUser?: string; autoUpdate?: boolean; autoUpdateEnv?: boolean; updateCheck?: boolean; updateCheckEnv?: boolean };
         autoUpdateNotice?: unknown;
+        updateAvailable?: unknown;
         autoUpdateSupported?: boolean;
         autoUpdateActive?: boolean;
       }) => {
@@ -2338,6 +2328,8 @@ const ReviewApp: React.FC = () => {
         agentTool.adopt(data.serverConfig);
         setAutoUpdateActive(data.autoUpdateActive === true);
         setAutoUpdateNotice(parseAutoUpdateNotice(data.autoUpdateNotice));
+        setUpdateAdvert(parseUpdateAdvert(data.updateAvailable));
+        setUpdateCheckSetting(typeof data.serverConfig?.updateCheck === 'boolean' ? { env: data.serverConfig.updateCheckEnv as boolean | undefined } : undefined);
         setSnapshotId(data.snapshotId);
         setAiEnabled(data.aiEnabled !== false);
         const apiFiles = orderFilesBySections(parseDiffToFiles(data.rawPatch), data.sections);
@@ -2821,6 +2813,23 @@ const ReviewApp: React.FC = () => {
       },
     });
   }, [guideOpen, guideIntroVisible, showLookAndFeel, editModeIntroVisible, tokenHoverIntroVisible, terminalToolsIntroVisible, askSessionIntroVisible, agentToolIntroVisible]);
+  // The update toast waits behind the guide takeover and every first-run
+  // dialog of this load (useUpdateToast).
+  useUpdateToast({
+    advert: updateAdvert,
+    blocked:
+      isLoading
+      || guideOpen
+      || guideIntroVisible
+      || showLookAndFeel
+      || editModeIntroVisible
+      || tokenHoverIntroVisible
+      || terminalToolsIntroVisible
+      || askSessionIntroVisible
+      || agentToolIntroVisible,
+    autoUpdateActive,
+    position: 'top-right',
+  });
   const { handleReadingFileChange: handleAutoViewReadingFile, handleFileScrolledPast } = useAutoViewed({
     enabled: autoViewedEnabled,
     // Rule 4 — only the review target. The guide takeover CSS-hides the dock
@@ -5843,6 +5852,7 @@ const ReviewApp: React.FC = () => {
             aiProviders={aiProviders}
             gitUser={gitUser}
             autoUpdateSetting={autoUpdateSetting}
+            updateCheckSetting={updateCheckSetting}
             agentToolSetting={agentTool.setting}
             onAgentToolChange={agentTool.save}
             externalOpen={openSettingsMenu}

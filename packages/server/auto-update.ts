@@ -69,6 +69,7 @@ import {
   type UpdateAdvert,
   type UpdateState,
 } from "@plannotator/shared/update-check";
+import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { listSessions, type SessionInfo } from "./sessions";
 
 // The version helpers and the install-flag allowlist moved to
@@ -165,7 +166,8 @@ export function deriveAutoUpdateNotice(
 export function managedBinaryPath(
   platform: NodeJS.Platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,
-  home: string = homedir(),
+  // HOME as the environment says it now (os.homedir() may be fixed at startup).
+  home: string = (platform !== "win32" && env.HOME) || homedir(),
 ): string {
   // Join with the TARGET platform's separator, not the host's.
   if (platform === "win32") {
@@ -179,7 +181,8 @@ export function isManagedBinary(
   execPath: string,
   platform: NodeJS.Platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,
-  home: string = homedir(),
+  // HOME as the environment says it now (os.homedir() may be fixed at startup).
+  home: string = (platform !== "win32" && env.HOME) || homedir(),
 ): boolean {
   const target = managedBinaryPath(platform, env, home);
   const canon = (p: string) => {
@@ -768,6 +771,11 @@ export function enableAutoUpdateNotice(currentVersion: string | undefined): void
   if (currentVersion && parseStableVersion(currentVersion)) noticeVersion = currentVersion;
 }
 
+/** Tests only: set or clear the version enableAutoUpdateNotice recorded (restore it in finally). */
+export function setCliNoticeVersionForTests(version: string | undefined): void {
+  noticeVersion = version;
+}
+
 /** The release version the compiled CLI runs, once enableAutoUpdateNotice saw it. */
 export function cliNoticeVersion(): string | undefined {
   return noticeVersion;
@@ -858,3 +866,31 @@ export function getUpdateAdvert(origin?: string | null): { updateAvailable?: Upd
   }
 }
 
+
+/**
+ * POST /api/update on the compiled CLI's plan, review and annotate servers:
+ * the review toast's (and the Options menu's) Update. The same Update now as
+ * the Inbox: the install script for the newest known release, detached, once
+ * (update.lock). Same-origin only. Null for any other path.
+ */
+export function handleUpdateRoute(req: Request, url: URL): Response | null {
+  if (url.pathname !== "/api/update") return null;
+  if (req.method !== "POST") return Response.json({ error: "Use POST." }, { status: 405 });
+  if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) {
+    return Response.json({ error: "Cross-origin requests are not accepted." }, { status: 403 });
+  }
+  const result = startManualUpdateForThisBinary(noticeVersion);
+  if (result.outcome === "launched") return Response.json({ ok: true, version: result.version });
+  const refused: Record<string, string> = {
+    locked: "An update is already running.",
+    unmanaged: "This copy of Plannotator was not installed by the install script, so it can't update itself.",
+    "dev-build": "This is a development build; there is nothing to update.",
+    "no-release": "No newer release is known yet.",
+    "up-to-date": "Plannotator is up to date.",
+    "launch-failed": "The install script could not be started; see update.log.",
+  };
+  return Response.json(
+    { error: refused[result.outcome] ?? "The update could not start.", code: `update_${result.outcome.replace(/-/g, "_")}` },
+    { status: 409 },
+  );
+}
