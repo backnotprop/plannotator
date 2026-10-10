@@ -1,11 +1,11 @@
 /**
- * Images in an agent's message (#1813): a message body drawn by ui's Viewer
+ * Images in a message (#1813): a message body drawn by ui's Viewer
  * the way the thread draws it (images based on the message) asks the Inbox's
  * per-message route for a relative or absolute image, markdown and HTML
  * alike, and never the bare `/api/image` the Inbox does not serve.
  */
 import { afterEach, expect, test } from 'bun:test';
-import React, { act } from 'react';
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { resetImageSrcResolver, setImageSrcResolver } from '@plannotator/ui/components/ImageThumbnail';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';

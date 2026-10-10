@@ -1,6 +1,6 @@
 /**
  * Plannotator Inbox: `GET /api/inbox/messages/<id>/image?path=<src>`, the
- * images an agent's message shows (#1813). Mounted in the Inbox server's
+ * images a message shows (#1813). Mounted in the Inbox server's
  * route table (packages/server/inbox.ts), behind its Host allowlist; it sets
  * no CORS headers.
  *
@@ -61,6 +61,10 @@ export function inboxMessageImageRoute(req: Request, url: URL, store: InboxStore
       "Content-Type": result.contentType,
       "Content-Length": String(result.bytes.byteLength),
       "Cache-Control": "private, no-cache",
+      // As code review's image route: the header's size, when it parses.
+      ...(result.width !== undefined && result.height !== undefined
+        ? { "X-Image-Width": String(result.width), "X-Image-Height": String(result.height) }
+        : {}),
     },
   });
 }

@@ -1,5 +1,5 @@
 /**
- * Images in an agent's message (#1813), proved in a real browser against the
+ * Images in a message (#1813), proved in a real browser against the
  * compiled binary. Nothing is mocked: `plannotator inbox --background` runs
  * under a temp PLANNOTATOR_DATA_DIR and HOME, an agent writes through
  * `plannotator inbox mcp` (scripts/inbox-sim.ts) with a markdown image and an

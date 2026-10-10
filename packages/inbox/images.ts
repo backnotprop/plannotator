@@ -1,5 +1,5 @@
 /**
- * Images in an agent's message (#1813). A message body is drawn by ui's
+ * Images in a message (#1813). A message body is drawn by ui's
  * Viewer with `imageBaseDir` set to `inboxMessageImageBase(message.id)`, and
  * the window installs `inboxImageSrcResolver` (configurePlannotatorUI), which
  * turns that marker plus the src as written into the Inbox's own route:

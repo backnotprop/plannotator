@@ -1,8 +1,9 @@
 /**
- * Plannotator Inbox: images an agent's message shows (#1813).
+ * Plannotator Inbox: images a message shows (#1813).
  *
- * A message body can carry `![alt](shots/after.png)` or `<img src="…">`
- * naming an image in the sender's project. The window asks for it through
+ * A message body (an agent's, or the person's own) can carry
+ * `![alt](shots/after.png)` or `<img src="…">` naming an image in the
+ * message's project. The window asks for it through
  * `GET /api/inbox/messages/<id>/image?path=<the src as written>`
  * (packages/server/inbox-message-images.ts), and this module decides every
  * answer. The rules, in order:
@@ -15,15 +16,22 @@
  *  3. A relative path resolves against the folder the agent sent from
  *     (`base_path`, kept on the message when it is a subfolder of the
  *     project), else the project root; an absolute one is taken as it is.
- *     Both the resolved path and its realpath must sit inside the project
- *     root (a realpath itself), so `../` and a symlink that leaves the
- *     project are refused alike.
- *  4. A regular file of at most MAX_REVIEW_IMAGE_PREVIEW_BYTES (and
- *     MAX_REVIEW_IMAGE_PREVIEW_PIXELS), whose content type is sniffed from
- *     its magic bytes (code review's sniffer), never taken from the name.
+ *     Its realpath must sit inside the project root (a realpath itself), so
+ *     `../` and a symlink that leaves the project are refused alike, while
+ *     an absolute path spelled through a symlinked prefix (macOS `/tmp`,
+ *     really `/private/tmp`) is judged by where it really leads. A path
+ *     that is not on disk and lexically leaves the project is refused too.
+ *  4. The realpath is opened once, `O_RDONLY | O_NOFOLLOW | O_NONBLOCK`, and
+ *     everything after that reads the descriptor: `fstat` must say a regular
+ *     file of at most MAX_REVIEW_IMAGE_PREVIEW_BYTES, at most cap + 1 bytes
+ *     are read, and the path must still lead to that same file afterwards.
+ *     A swap to a symlink, a FIFO (a blocking open or read would hang the
+ *     Inbox's event loop on it) or a device is refused, never read. Then
+ *     MAX_REVIEW_IMAGE_PREVIEW_PIXELS, and the content type is sniffed from
+ *     the magic bytes (code review's sniffer), never taken from the name.
  */
 
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve, sep } from "node:path";
 import { MAX_REVIEW_IMAGE_PREVIEW_BYTES, MAX_REVIEW_IMAGE_PREVIEW_PIXELS, isReviewImagePath } from "../diff-paths";
 import { isLfsPointer, readImageDimensions, sniffImageContentType } from "../review-image";
@@ -143,29 +151,20 @@ export function readInboxMessageImage(input: { body: string; root: string; base?
 
   for (const candidate of candidates) {
     const named = isAbsolute(candidate) ? resolve(candidate) : resolve(base, candidate);
-    if (!isInside(named, root)) return refuse(403, "outside_project", "That image is outside the message's project.");
     let real: string;
     try {
       real = realpathSync(named);
     } catch {
+      // Not on disk under this spelling: one that leaves the project is
+      // refused as such; otherwise the next spelling is tried.
+      if (!isInside(named, root)) return refuse(403, "outside_project", "That image is outside the message's project.");
       continue;
     }
+    // Judged by where the path really leads, never by its spelling.
     if (!isInside(real, root)) return refuse(403, "outside_project", "That image leads outside the message's project.");
-    let stat;
-    try {
-      stat = statSync(real);
-    } catch {
-      continue;
-    }
-    if (!stat.isFile()) return refuse(404, "image_missing", "That image is not a file.");
-    if (stat.size > MAX_REVIEW_IMAGE_PREVIEW_BYTES) return refuse(413, "image_too_large", "That image is larger than 10 MB.");
-    let bytes: Buffer;
-    try {
-      bytes = readFileSync(real);
-    } catch {
-      return refuse(404, "image_missing", "That image could not be read.");
-    }
-    if (bytes.byteLength > MAX_REVIEW_IMAGE_PREVIEW_BYTES) return refuse(413, "image_too_large", "That image is larger than 10 MB.");
+    const read = readImageFile(real);
+    if (!read.ok) return read;
+    const bytes = read.bytes;
     if (isLfsPointer(bytes)) return refuse(415, "not_an_image", "That image is stored in Git LFS.");
     const contentType = sniffImageContentType(bytes);
     if (!contentType) return refuse(415, "not_an_image", "That file is not a recognized image.");
@@ -176,4 +175,54 @@ export function readInboxMessageImage(input: { body: string; root: string; base?
     return { ok: true, bytes, contentType, ...(dims ? { width: dims.width, height: dims.height } : {}) };
   }
   return refuse(404, "image_missing", "That image is not on disk.");
+}
+
+const OPEN_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
+const TOO_LARGE = "That image is larger than 10 MB.";
+const CHANGED = "That image changed while it was read.";
+
+/**
+ * Read a realpath through one descriptor: never follows a final symlink,
+ * never blocks on a FIFO, never buffers more than the cap + 1 bytes, and
+ * refuses when the path no longer leads to the file that was read.
+ */
+function readImageFile(real: string): { ok: true; bytes: Buffer } | Extract<InboxMessageImageResult, { ok: false }> {
+  const fail = (status: number, code: string, error: string) => ({ ok: false as const, status, code, error });
+  let fd: number;
+  try {
+    fd = openSync(real, OPEN_FLAGS);
+  } catch (error) {
+    // ELOOP: the last component became a symlink after it was resolved.
+    if ((error as NodeJS.ErrnoException).code === "ELOOP") return fail(409, "image_changed", CHANGED);
+    return fail(404, "image_missing", "That image could not be opened.");
+  }
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) return fail(404, "image_missing", "That image is not a file.");
+    if (stat.size > MAX_REVIEW_IMAGE_PREVIEW_BYTES) return fail(413, "image_too_large", TOO_LARGE);
+    // One byte past what fstat said, so a file that grew meanwhile is seen.
+    const buffer = Buffer.alloc(Math.min(stat.size, MAX_REVIEW_IMAGE_PREVIEW_BYTES) + 1);
+    let total = 0;
+    while (total < buffer.length) {
+      const n = readSync(fd, buffer, total, buffer.length - total, null);
+      if (n === 0) break;
+      total += n;
+    }
+    if (total > MAX_REVIEW_IMAGE_PREVIEW_BYTES) return fail(413, "image_too_large", TOO_LARGE);
+    if (total === buffer.length) return fail(409, "image_changed", CHANGED);
+    // The path must still lead to the file this descriptor read, so a parent
+    // folder swapped for a symlink in between is caught.
+    let again: ReturnType<typeof statSync> | null = null;
+    try {
+      if (realpathSync(real) === real) again = statSync(real);
+    } catch {
+      again = null;
+    }
+    if (!again || again.dev !== stat.dev || again.ino !== stat.ino) return fail(409, "image_changed", CHANGED);
+    return { ok: true, bytes: buffer.subarray(0, total) };
+  } catch {
+    return fail(404, "image_missing", "That image could not be read.");
+  } finally {
+    closeSync(fd);
+  }
 }
