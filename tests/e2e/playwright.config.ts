@@ -3,7 +3,7 @@
  * binary (`plannotator inbox`), under a temp PLANNOTATOR_DATA_DIR: the window
  * (inbox.spec.ts), notifications, decisions (inbox-decisions.spec.ts) and
  * guided reviews (inbox-guides.spec.ts), New message
- * (inbox-new-message.spec.ts), the order inside a section (inbox-order.spec.ts), phones (inbox-phones.spec.ts), the sidebar (inbox-sidebar.spec.ts), and the
+ * (inbox-new-message.spec.ts), the order inside a section (inbox-order.spec.ts), phones (inbox-phones.spec.ts), the sidebar (inbox-sidebar.spec.ts), images in messages (inbox-message-images.spec.ts), and the
  * surface a phone hosts, in WebKit (surface.spec.ts). Build the binary
  * first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
@@ -11,7 +11,7 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: '.',
-  testMatch: ['inbox.spec.ts', 'notifications.spec.ts', 'inbox-decisions.spec.ts', 'inbox-attachments.spec.ts', 'inbox-guides.spec.ts', 'inbox-new-message.spec.ts', 'inbox-order.spec.ts', 'inbox-phones.spec.ts', 'inbox-sidebar.spec.ts', 'surface.spec.ts'],
+  testMatch: ['inbox.spec.ts', 'notifications.spec.ts', 'inbox-decisions.spec.ts', 'inbox-attachments.spec.ts', 'inbox-guides.spec.ts', 'inbox-new-message.spec.ts', 'inbox-order.spec.ts', 'inbox-phones.spec.ts', 'inbox-sidebar.spec.ts', 'inbox-message-images.spec.ts', 'surface.spec.ts'],
   outputDir: '../../.local/test-results',
   fullyParallel: false,
   workers: 1,

@@ -27,6 +27,7 @@ import {
 } from './api';
 import { filterSections, heldNotice, refreshHeldRows, waitingCount } from './held';
 import { tildePath } from './format';
+import { inboxImageSrcResolver } from './images';
 import type { ConnectContext } from './harnesses';
 import { Sidebar } from './components/Sidebar';
 import { SidebarShell } from './shell/SidebarShell';
@@ -46,6 +47,8 @@ import { GuidePane } from './components/GuidePane';
 // posting nowhere.
 configurePlannotatorUI({
   serverSync: () => {},
+  // Images in a message load from the Inbox's per-message route (#1813).
+  imageSrcResolver: inboxImageSrcResolver,
   webmcp: { enabled: false, namePrefix: 'plannotator.' },
   // Skill references in comments read the host's skills; the Inbox has none to offer.
   skillCatalogTransport: async () => [],

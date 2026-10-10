@@ -10,7 +10,8 @@
  * question, approves or sends on the person's behalf.
  */
 
-import { isAbsolute } from "node:path";
+import { realpathSync } from "node:fs";
+import { isAbsolute, sep } from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
@@ -227,6 +228,22 @@ export async function sendProject(context: InboxMcpContext, input: { reply_to?: 
   return context.resolveProject(input.project_path);
 }
 
+/**
+ * The folder inside `project` an agent sent from, when it is not the root
+ * (`InboxMessage.base_path`): relative image paths in its body start there.
+ */
+function sendBasePath(projectPath: string | undefined, project: InboxProject): string | null {
+  if (!projectPath || !isAbsolute(projectPath)) return null;
+  let real: string;
+  try {
+    real = realpathSync(projectPath);
+  } catch {
+    return null;
+  }
+  const root = project.root.endsWith(sep) ? project.root : `${project.root}${sep}`;
+  return real !== project.root && real.startsWith(root) ? real : null;
+}
+
 /** An agent's message into `project`, routed by the store (send_message, submit_guide). */
 export function sendAgentMessage(
   context: InboxMcpContext,
@@ -256,6 +273,7 @@ export function sendAgentMessage(
     thread: input.thread ?? null,
     attachments,
     guide: guide ?? null,
+    base_path: sendBasePath(input.project_path, project),
   });
   const message = result.message;
   const landed = store.project(message.project_id)!;

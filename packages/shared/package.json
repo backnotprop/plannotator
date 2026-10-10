@@ -113,6 +113,7 @@
     "./inbox/registry": "./inbox/registry.ts",
     "./inbox/devices": "./inbox/devices.ts",
     "./inbox/attachments": "./inbox/attachments.ts",
+    "./inbox/message-images": "./inbox/message-images.ts",
     "./inbox/connection": "./inbox/connection.ts",
     "./inbox/agent-link": "./inbox/agent-link.ts"
   },

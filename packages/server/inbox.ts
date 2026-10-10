@@ -90,6 +90,7 @@ import {
 import { inboxGuideRoute } from "./inbox-guides";
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
+import { inboxMessageImageRoute } from "./inbox-message-images";
 import { recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
 import { createInboxLiveSessions } from "./inbox-sessions";
 import { createInboxDevices, DOOR_PREFIX } from "./inbox-devices";
@@ -860,6 +861,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Step 8: the live sessions of a thread's project, and New message.
       const newMessage = await live.route(req, path);
       if (newMessage) return newMessage;
+
+      // #1813: an image a message's body shows, read from its project
+      // (packages/server/inbox-message-images.ts).
+      const image = inboxMessageImageRoute(req, url, store);
+      if (image) return image;
 
       // Step 2: attachments by id, annotations, the HTML asset route, delete
       // thread and delete project (packages/server/inbox-attachments.ts).

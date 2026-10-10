@@ -1975,6 +1975,12 @@ Sorting and the rest:
 - Comments take no images.
 - Delete thread rewrites the project's files without the thread's lines. Delete project removes its folder. Both then remove every blob that no remaining record uses.
 
+**Images in a message** (#1813; `packages/shared/inbox/message-images.ts`, `packages/server/inbox-message-images.ts`, `packages/inbox/images.ts`).
+- A message body's `![alt](path)` and `<img src>` load through `GET /api/inbox/messages/:id/image?path=<src as written>`. The window draws each body with `imageBaseDir` = `inbox-message:<id>` and installs `inboxImageSrcResolver`, which maps that marker to the route. There is no route that takes a bare path.
+- The rules, in order: the path must appear in THAT message's body as an image reference (`inboxMessageImageRefs`: the markdown target as written, the `<img src>` value decoded), so the route cannot probe other project files; an image extension (png jpg jpeg gif webp svg avif bmp ico apng) before anything is read, else `415`; a relative path resolves against the message's `base_path` (the realpath of the agent's `project_path` when it is a subfolder of the project, recorded at send time, additive) else the project root; the resolved path AND its realpath must sit inside the project root, so `../` and symlink escapes are `403`; a regular file of at most 10 MB and 50 megapixels (`413`), its type sniffed from magic bytes (`sniffImageContentType`, `415` when not an image). `?query` / `#fragment` are dropped and `%xx` decoded as fallbacks.
+- Every answer carries `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'` and `Cross-Origin-Resource-Policy: same-origin`, no CORS; `Sec-Fetch-Site: cross-site` / `same-site` is refused (`403`).
+- Remote `http(s)` images stay as written and do not load: the window's CSP is `img-src 'self' data: blob:`. Images inside an attached markdown file are not served (only message bodies). The iPhone draws message bodies natively and shows no images; the device door has no image route.
+
 **Decisions** (`packages/server/inbox-decisions.ts`; records in `decisions.jsonl`, `InboxDecision` in `inbox-types.ts`).
 - Fields: `text`, `reason`, `source` `{ kind: answer | agent | person, … }`, `state` `current | replaced | retired`, `version` (a stale one is `409 decision_version_conflict`), `replaces_id`, `replacement_id`, and the dates.
 - The switch:
@@ -2320,6 +2326,7 @@ Not covered, by design: the live-app proxy (`live-proxy-core.ts` has its own Hos
 | `/mcp` | POST | MCP, stateless; any Origin refused |
 | `/api/inbox/threads/:id/attachments` | GET | `{ serverSession, attachments: [state], annotations }`: each attachment record with `message_id`, `current: { sha256, size, mtime } \| null`, `changed_since_sent`, `unavailable: { code, message } \| null`, and the thread's annotations waiting for a Send |
 | `/api/inbox/attachments/:id` | GET | The current file's bytes by id (`?version=sent`: the sent blob), always `text/plain`, CSP `sandbox`. `404 attachment_not_found` / `attachment_missing`, `409 attachment_changed_type`. No route takes a path |
+| `/api/inbox/messages/:id/image` | GET | `?path=<src as written>`: an image the message's body shows, read from its project (see "Images in a message"); sniffed `Content-Type`, nosniff, sandbox CSP, same-origin CORP. `403 image_not_referenced` / `outside_project` / `cross_origin`, `404 message_not_found` / `image_missing`, `413 image_too_large`, `415 not_an_image` |
 | `/api/inbox/attachments/:id/view` | GET | `{ attachment, version, text, html }`: one version's text (`version` is `current` or the sent sha256, the annotations' key); for HTML, `html` is the page with its `<base href>` at its folder's asset route |
 | `/api/html-assets/<token>/<path>` | GET | Annotate's asset route (`resolveHtmlAssetRoute`) for the folder of an attached HTML page |
 | `/api/inbox/annotations` | POST | `{ serverSession?, attachment_id, version, annotation }`: save a new annotation or edit one still waiting (`409 annotation_closed` once sent or removed) |
