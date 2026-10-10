@@ -183,7 +183,8 @@ final class DecisionsProofTests: ProofCase {
         XCTAssertTrue(replyInstead.waitForExistence(timeout: 30))
         try await control.shot("ax-8.3")
         if !replyInstead.isHittable { app.swipeUp() }
-        XCTAssertTrue(replyInstead.isHittable, "Reply instead reachable at the largest text size")
+        // Read once the swipe has settled.
+        try require(replyInstead.wait(for: \.isHittable, toEqual: true, timeout: 30), "Reply instead reachable at the largest text size")
         replyInstead.tap()
         XCTAssertTrue(element("reply-text").waitForExistence(timeout: 30))
         try await control.post("/text-size", ["size": "large"])

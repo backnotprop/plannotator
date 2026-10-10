@@ -17,22 +17,13 @@ class ProofCase: XCTestCase {
         }
         control = Control(base: url)
         // Every proof class starts from a cold install, whatever the class before it
-        // left behind (a class that failed partway leaves the app paired).
+        // left behind (a class that failed partway leaves the app paired). This is done
+        // here and not in a tearDown on failure: an async test runs on past a failure,
+        // and a tearDown that terminated and reinstalled the app under it hung the shard
+        // until the job timeout (runs 37958261402, 38017849289 and 38023662529).
         try await control.post("/reset-app")
         app = XCUIApplication()
         app.launchArguments = ["-PlannotatorProof"]
-    }
-
-    /// A class that failed partway leaves the app as a cold install has it too, for
-    /// the classes after it that do not reset themselves.
-    override func tearDown() async throws {
-        if testRun?.hasSucceeded == false {
-            // Its recording too: finished, so it shows the failure, and not left running into the next class.
-            _ = try? await control?.post("/video/stop")
-            app?.terminate()
-            _ = try? await control?.post("/reset-app")
-        }
-        try await super.tearDown()
     }
 
     // MARK: Helpers
@@ -88,10 +79,8 @@ class ProofCase: XCTestCase {
         }
     }
 
-    /// A step that must hold, or the test ends here. An async test runs on past an
-    /// XCTFail and into its own tearDown at the same time, and the two together hung
-    /// the shard until the job timeout (runs 37958261402 and 38017849289); a thrown
-    /// error ends the test body first.
+    /// A step that must hold, or the test ends here: an async test runs on past an
+    /// XCTFail, tapping a screen that is no longer the one it expects.
     func require(_ holds: Bool, _ message: @autoclosure () -> String, file: StaticString = #filePath, line: UInt = #line) throws {
         guard !holds else { return }
         XCTFail(message(), file: file, line: line)

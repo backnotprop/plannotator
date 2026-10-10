@@ -25,6 +25,8 @@ final class RelayPushTests: XCTestCase {
             throw XCTSkip("Run through apps/ios/scripts/proof.ts, which starts the Inbox and the relay this test talks to.")
         }
         control = Control(base: url)
+        // A cold install, whatever the class before it left (ProofCase does the same).
+        try await control.post("/reset-app")
         app = XCUIApplication()
     }
 
