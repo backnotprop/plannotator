@@ -288,6 +288,8 @@ export const INSTALL_FLAG_SPELLINGS = {
   "verify-attestation": { posix: "--verify-attestation", powershell: "-VerifyAttestation" },
   "skip-attestation": { posix: "--skip-attestation", powershell: "-SkipAttestation" },
   "with-call-flow": { posix: "--with-call-flow", powershell: "-WithCallFlow" },
+  "with-t3": { posix: "--with-t3", powershell: null },
+  "without-t3": { posix: "--without-t3", powershell: null },
   "skip-codex": { posix: "--skip-codex", powershell: "-SkipCodex" },
   "skip-gemini": { posix: "--skip-gemini", powershell: "-SkipGemini" },
   "skip-kiro": { posix: "--skip-kiro", powershell: "-SkipKiro" },
@@ -301,6 +303,7 @@ export type InstallFlagId = keyof typeof INSTALL_FLAG_SPELLINGS;
 const MUTUALLY_EXCLUSIVE: Array<[InstallFlagId, InstallFlagId]> = [
   ["minimal", "no-minimal"],
   ["verify-attestation", "skip-attestation"],
+  ["with-t3", "without-t3"],
 ];
 
 function isInstallFlagId(value: unknown): value is InstallFlagId {
@@ -361,7 +364,10 @@ export function readInstallFlags(dataDir?: string): InstallFlagsRead {
 /** The flags spelled for the installer the platform runs. */
 export function installerFlagArgs(flags: readonly InstallFlagId[], platform: NodeJS.Platform): string[] {
   const key = platform === "win32" ? "powershell" : "posix";
-  return flags.filter(isInstallFlagId).map((id) => INSTALL_FLAG_SPELLINGS[id][key]);
+  return flags.filter(isInstallFlagId).flatMap((id) => {
+    const spelling = INSTALL_FLAG_SPELLINGS[id][key];
+    return spelling === null ? [] : [spelling];
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -145,6 +145,9 @@ describe("isAllowedHostResultPath", () => {
   test("only a result.json inside <data dir>/claude-code-mod/", () => {
     const data = "/home/me/.plannotator";
     expect(isAllowedHostResultPath(`${data}/claude-code-mod/s/l/result.json`, data)).toBe(true);
+    expect(isAllowedHostResultPath(`${data}/t3-code/env/threads/thread/reviews/pn-aabbcc/result.json`, data)).toBe(true);
+    expect(isAllowedHostResultPath(`${data}/t3-code/../config.json`, data)).toBe(false);
+    expect(isAllowedHostResultPath(`${data}/t3-code-evil/result.json`, data)).toBe(false);
     expect(isAllowedHostResultPath("/home/me/.bashrc", data)).toBe(false);
     expect(isAllowedHostResultPath(`${data}/claude-code-mod/s/l/other.json`, data)).toBe(false);
     expect(isAllowedHostResultPath(`${data}/claude-code-mod/../config.json`, data)).toBe(false);

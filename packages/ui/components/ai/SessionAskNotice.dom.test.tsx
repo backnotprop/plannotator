@@ -42,6 +42,23 @@ function buttonsIn(container: Element, selector: string): HTMLButtonElement[] {
 }
 
 describe.if(hasDom)('Ask this session notices in the document chat panel', () => {
+  const t3Providers = [{ id: 'session-bridge', name: 'session-bridge', sessionBridge: { host: 't3', status: 'ready', modes: { turn: true, transient: false } } }];
+
+  test('T3 offers waiting and stops listening without claiming to stop its turn', () => {
+    const onSessionAskAction = mock((_questionId: string, _action: string) => {});
+    const onStop = mock(() => {});
+    const el = render({ messages: [entry({ error: 'busy', errorCode: 'agent_busy' })], onSessionAskAction,
+      aiProviders: t3Providers, onAskGeneral: mock(() => {}), isStreaming: true, onStop });
+    const choices = buttonsIn(el, '[data-session-ask-actions="busy"]');
+    expect(choices.map(button => button.textContent)).toEqual(['Ask when it finishes']);
+    act(() => choices[0].click());
+    expect(onSessionAskAction.mock.calls).toEqual([['q1', 'wait']]);
+    const stop = el.querySelector<HTMLButtonElement>('button[aria-label="Stop listening"]')!;
+    expect(stop.title).toContain('the question can continue in T3');
+    act(() => stop.click());
+    expect(onStop).toHaveBeenCalledTimes(1);
+  });
+
   test('busy: the two choices report wait and interrupt for that question', () => {
     const onSessionAskAction = mock((_questionId: string, _action: string) => {});
     const el = render({

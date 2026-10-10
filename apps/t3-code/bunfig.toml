@@ -1,0 +1,2 @@
+[test]
+preload = ["../../tests/setup/feedback-archive-off.ts", "../../packages/ui/test-setup/happy-dom.ts"]

@@ -264,6 +264,21 @@ takeHostMessagesPath();
 const hostReviewId = takeHostReviewId();
 
 const rawArgs = process.argv.slice(2);
+if (rawArgs[0] === "t3" || rawArgs[0] === "t3-hook") {
+  const script = process.argv[1];
+  const selfCommand = script && /\.(?:[cm]?[jt]s)$/.test(script) && existsSync(script) ? [process.execPath, script] : [process.execPath];
+  try {
+    if (rawArgs[0] === "t3-hook") {
+      const { runT3Hook } = await import("../../t3-code/hook");
+      await runT3Hook(rawArgs.slice(1), selfCommand);
+    } else {
+      const { runT3Command } = await import("../../t3-code/cli");
+      await runT3Command(rawArgs.slice(1), selfCommand);
+    }
+  }
+  catch (error) { console.error(error instanceof Error ? error.message : String(error)); process.exit(1); }
+  process.exit(0);
+}
 let parsedStrictAnnotateOptions;
 try {
   parsedStrictAnnotateOptions = parseStrictAnnotateOptions(

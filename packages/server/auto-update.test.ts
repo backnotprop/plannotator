@@ -277,12 +277,21 @@ describe("remembered install flags", () => {
   test("a mutually-exclusive pair drops both sides", () => {
     expect(parseInstallFlags({ flags: ["minimal", "no-minimal", "skip-kiro"] }).flags).toEqual(["skip-kiro"]);
     expect(parseInstallFlags({ flags: ["verify-attestation", "skip-attestation"] }).flags).toEqual([]);
+    expect(parseInstallFlags({ flags: ["with-t3", "without-t3", "skip-skills"] }).flags).toEqual(["skip-skills"]);
   });
 
   test("flags are spelled for each installer", () => {
     const flags = ["minimal", "with-call-flow", "skip-opencode"] as const;
     expect(installerFlagArgs(flags, "linux")).toEqual(["--minimal", "--with-call-flow", "--skip-opencode"]);
     expect(installerFlagArgs(flags, "win32")).toEqual(["-Minimal", "-WithCallFlow", "-SkipOpencode"]);
+  });
+
+  test("T3 hook choices survive updates only on the Bash installer platforms", () => {
+    const flags = parseInstallFlags({ flags: ["with-t3", "skip-skills"] }).flags;
+    expect(installerFlagArgs(flags, "darwin")).toEqual(["--with-t3", "--skip-skills"]);
+    expect(installerFlagArgs(flags, "linux")).toEqual(["--with-t3", "--skip-skills"]);
+    expect(installerFlagArgs(flags, "win32")).toEqual(["-SkipSkills"]);
+    expect(installerFlagArgs(parseInstallFlags({ flags: ["without-t3"] }).flags, "linux")).toEqual(["--without-t3"]);
   });
 
   test("the check passes the remembered flags to the installer and logs them", async () => {

@@ -204,6 +204,21 @@
         "vite-plugin-singlefile": "^2.0.3",
       },
     },
+    "apps/t3-code": {
+      "name": "@plannotator/t3-code",
+      "version": "0.0.1",
+      "dependencies": {
+        "@modelcontextprotocol/client": "2.2.0",
+        "@plannotator/ai": "workspace:*",
+        "@plannotator/core": "workspace:*",
+        "@plannotator/server": "workspace:*",
+        "@plannotator/shared": "workspace:*",
+        "zod": "4.5.4",
+      },
+      "devDependencies": {
+        "typescript": "~5.8.2",
+      },
+    },
     "apps/vscode-extension": {
       "name": "plannotator-webview",
       "version": "0.16.8",
@@ -1096,6 +1111,8 @@
     "@plannotator/server": ["@plannotator/server@workspace:packages/server"],
 
     "@plannotator/shared": ["@plannotator/shared@workspace:packages/shared"],
+
+    "@plannotator/t3-code": ["@plannotator/t3-code@workspace:apps/t3-code"],
 
     "@plannotator/ui": ["@plannotator/ui@workspace:packages/ui"],
 

@@ -40,7 +40,7 @@ import type {
  */
 export type SessionBridgeStatus = "ready" | "busy" | "blocked" | "gone";
 
-export type SessionBridgeHost = "pi" | "opencode" | "claude-code";
+export type SessionBridgeHost = "pi" | "opencode" | "claude-code" | "t3";
 
 export type SessionBridgeAskMode = "turn" | "transient";
 
@@ -135,6 +135,7 @@ const HOST_LABELS: Record<SessionBridgeHost, string> = {
 	pi: "Pi",
 	opencode: "OpenCode",
 	"claude-code": "Claude Code",
+	t3: "T3 Code",
 };
 
 export function sessionBridgeLabel(
