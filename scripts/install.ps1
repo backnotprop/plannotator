@@ -833,13 +833,14 @@ try { Repair-LegacyPluginHooks -Clone $pluginMarketplaceDir } catch { }
 $claudePluginId = "plannotator@plannotator"
 $claudePluginRegistry = if ($env:CLAUDE_CONFIG_DIR) { "$env:CLAUDE_CONFIG_DIR\plugins\installed_plugins.json" } else { "$env:USERPROFILE\.claude\plugins\installed_plugins.json" }
 # none | manual (installed, no claude CLI) | skipped | updated | current | failed
+# | no-marketplace (the plannotator marketplace is gone; re-add it)
 $claudePluginState = "none"
 $claudePluginVersion = ""
 
 # The user-scope install record for plannotator@plannotator, or $null. A record
 # without a scope (the v1 registry) counts as the user install; a project- or
-# local-scope-only install is left alone (`claude plugin update` works on the
-# user scope by default).
+# local-scope-only install is left alone (the update below targets
+# --scope user).
 function Get-ClaudePluginUserRecord {
     if (-not (Test-Path -LiteralPath $claudePluginRegistry -PathType Leaf)) { return $null }
     try {
@@ -883,6 +884,11 @@ function Invoke-ClaudeWithTimeLimit {
                     Where-Object { $_ } | Select-Object -Last 1
                 if ($last) { break }
             }
+            # The plannotator marketplace itself is gone (removed by hand):
+            # updating cannot work, re-adding it does.
+            foreach ($line in @(Get-Content -LiteralPath $err, $out -ErrorAction SilentlyContinue)) {
+                if ($line -match 'marketplace' -and $line -match 'not found|not exist|no such|unknown') { $script:claudeMarketplaceMissing = $true }
+            }
             if ($last -and $last.Length -gt 200) { $last = $last.Substring(0, 200) }
             if ($last) { return "claude exited $($p.ExitCode): $last" }
             return "claude exited $($p.ExitCode)"
@@ -895,9 +901,17 @@ function Invoke-ClaudeWithTimeLimit {
     }
 }
 
+# --scope user always: `claude plugin update` auto-detects the scope on current
+# Claude Code, and from inside a project with a project-scope install it would
+# update that record and leave the user install old.
 function Write-ClaudePluginManualUpdate {
     Write-Host "  claude plugin marketplace update plannotator"
-    Write-Host "  claude plugin update $claudePluginId"
+    Write-Host "  claude plugin update $claudePluginId --scope user"
+}
+
+function Write-ClaudePluginMarketplaceReadd {
+    Write-Host "  claude plugin marketplace add backnotprop/plannotator"
+    Write-Host "  claude plugin update $claudePluginId --scope user"
 }
 
 function Update-ClaudePluginIfInstalled {
@@ -914,6 +928,16 @@ function Update-ClaudePluginIfInstalled {
         Write-Host "Claude Code plugin: not updated ($skipClaudePluginSource)."
         return
     }
+    # A pinned install (-Version naming a tag) keeps the plugin it has: the
+    # plugin update always installs the newest plugin, which would not match
+    # an older binary. Background auto-update passes the newest release it
+    # just resolved as -Version and exports the same tag as
+    # PLANNOTATOR_UPDATE_VERSION, so that run is not pinned. No network call.
+    if (($Version -ne "latest") -and ($env:PLANNOTATOR_UPDATE_VERSION -ne $latestTag)) {
+        $script:claudePluginState = "skipped"
+        Write-Host "Claude Code plugin: not updated: pinned to $latestTag; updating would install the newest plugin."
+        return
+    }
     # Seconds per command. Internal knob for the tests; the default covers a
     # slow git fetch of the marketplace clone.
     $seconds = 120
@@ -923,9 +947,16 @@ function Update-ClaudePluginIfInstalled {
     # Claude Code session inherits it, and it marks a nested Claude Code.
     Remove-Item Env:CLAUDECODE -ErrorAction SilentlyContinue
     Write-Host "Updating the Claude Code plugin..."
+    $script:claudeMarketplaceMissing = $false
     $failed = Invoke-ClaudeWithTimeLimit -ClaudePath $claude.Source -Arguments @("plugin", "marketplace", "update", "plannotator") -Seconds $seconds
     if (-not $failed) {
-        $failed = Invoke-ClaudeWithTimeLimit -ClaudePath $claude.Source -Arguments @("plugin", "update", $claudePluginId) -Seconds $seconds
+        $failed = Invoke-ClaudeWithTimeLimit -ClaudePath $claude.Source -Arguments @("plugin", "update", $claudePluginId, "--scope", "user") -Seconds $seconds
+    }
+    if ($failed -and $script:claudeMarketplaceMissing) {
+        $script:claudePluginState = "no-marketplace"
+        Write-Host "Claude Code plugin: could not update it (the plannotator marketplace is not registered). Re-add it, then restart Claude Code:"
+        Write-ClaudePluginMarketplaceReadd
+        return
     }
     if ($failed) {
         $script:claudePluginState = "failed"
@@ -1853,6 +1884,10 @@ switch ($claudePluginState) {
     "current" {
         $at = if ($claudePluginVersion) { " ($claudePluginVersion)" } else { "" }
         Write-Host "The Claude Code plugin is up to date$at."
+    }
+    "no-marketplace" {
+        Write-Host "Re-add the Claude Code plugin's marketplace: run these in a terminal, then restart Claude Code:"
+        Write-ClaudePluginMarketplaceReadd
     }
     { $_ -in @("skipped", "failed", "manual") } {
         Write-Host "Update the Claude Code plugin: run these in a terminal, then restart Claude Code:"

@@ -2299,6 +2299,7 @@ for a in "$@"; do
   prev="$a"
 done
 case "$url" in
+  */releases/latest) printf '{"tag_name":"v99.9.9"}\\n200' ;;
   *".sha256") printf '%s  plannotator\\n' "$STUB_CHECKSUM" ;;
   */releases/download/*) printf 'fake plannotator binary\\n' > "$out" ;;
   */attestations/sha256:*) cat "$STUB_ATT_JSON" ;;
@@ -3408,7 +3409,7 @@ describe("Windows installers clear the OpenCode 2 plugin cache (source scan)", (
 // Claude Code plugin update. The plugin comes from a GitHub marketplace, which
 // Claude Code does not auto-update, so every installer runs
 // `claude plugin marketplace update plannotator` and
-// `claude plugin update plannotator@plannotator` when (and only when) the
+// `claude plugin update plannotator@plannotator --scope user` when (and only when) the
 // claude CLI is on PATH and the plugin is already installed at user scope.
 // Every run uses a FAKE `claude` that logs its argv; nothing reaches the real
 // CLI, ~/.claude or the network.
@@ -3416,7 +3417,7 @@ describe("Windows installers clear the OpenCode 2 plugin cache (source scan)", (
 
 const CLAUDE_PLUGIN_COMMANDS = [
   "plugin marketplace update plannotator",
-  "plugin update plannotator@plannotator",
+  "plugin update plannotator@plannotator --scope user",
 ];
 
 /** A v2 installed_plugins.json, as Claude Code writes it. */
@@ -3459,7 +3460,7 @@ step=""
 [ "$1 $2" = "plugin update" ] && step="plugin"
 if [ -n "$FAKE_CLAUDE_FAIL" ] && [ "$FAKE_CLAUDE_FAIL" = "$step" ]; then
   echo "Updating marketplace..."
-  echo "Error: failed to reach github.com" >&2
+  echo "\${FAKE_CLAUDE_FAIL_MESSAGE:-Error: failed to reach github.com}" >&2
   exit 3
 fi
 if [ "$step" = "marketplace" ] && [ -n "$FAKE_CLAUDE_HOOKS" ]; then
@@ -3508,9 +3509,15 @@ function setupClaudePluginSandbox(opts: {
   return { sandbox, configDir, registryPath, env, calls };
 }
 
-const PLUGIN_INSTALL_ARGS = ["--version", "v99.9.9", "--non-interactive", "--no-extras", "--skip-skills"];
+// No --version: the latest-release path, which the stub curl serves. A
+// --version pin skips the plugin update (see the pinned tests).
+const PLUGIN_INSTALL_ARGS = ["--non-interactive", "--no-extras", "--skip-skills"];
+const MISSING_MARKETPLACE =
+  "Error: Marketplace 'plannotator' not found. Available marketplaces: claude-plugins-official";
 const MANUAL_PLUGIN_COMMANDS =
-  "  claude plugin marketplace update plannotator\n  claude plugin update plannotator@plannotator\n";
+  "  claude plugin marketplace update plannotator\n  claude plugin update plannotator@plannotator --scope user\n";
+const READD_PLUGIN_COMMANDS =
+  "  claude plugin marketplace add backnotprop/plannotator\n  claude plugin update plannotator@plannotator --scope user\n";
 
 describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
   "install.sh updates an installed Claude Code plugin (fake claude, sandbox HOME)",
@@ -3690,6 +3697,75 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
         JSON.parse(readFileSync(join(s.sandbox.home, ".plannotator", "install-flags.json"), "utf-8")),
       ).toEqual({ v: 1, flags: ["skip-skills", "skip-claude-plugin"] });
     });
+
+    test("a --version pin skips the update: a pinned binary keeps the plugin it has", () => {
+      const s = setupClaudePluginSandbox({});
+      const { code, out } = runInstallSh(s.sandbox, [...PLUGIN_INSTALL_ARGS, "--version", "v0.27.0"], s.env);
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual([]);
+      expect(out).toContain(
+        "Claude Code plugin: not updated: pinned to v0.27.0; updating would install the newest plugin.\n",
+      );
+      expect(out).toContain(
+        `Update the Claude Code plugin: run these in a terminal, then restart Claude Code:\n${MANUAL_PLUGIN_COMMANDS}`,
+      );
+    });
+
+    test("auto-update's --version (the newest release, exported as PLANNOTATOR_UPDATE_VERSION) is not a pin", () => {
+      const s = setupClaudePluginSandbox({});
+      const { code } = runInstallSh(s.sandbox, [...PLUGIN_INSTALL_ARGS, "--version", "v99.9.9"], {
+        ...s.env,
+        PLANNOTATOR_UPDATE_VERSION: "v99.9.9",
+      });
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+    });
+
+    test("a missing plannotator marketplace prints the re-add command instead", () => {
+      const s = setupClaudePluginSandbox({});
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+        ...s.env,
+        FAKE_CLAUDE_FAIL: "marketplace",
+        FAKE_CLAUDE_FAIL_MESSAGE: MISSING_MARKETPLACE,
+      });
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual([CLAUDE_PLUGIN_COMMANDS[0]]);
+      expect(out).toContain(
+        `Claude Code plugin: could not update it (the plannotator marketplace is not registered). Re-add it, then restart Claude Code:\n${READD_PLUGIN_COMMANDS}`,
+      );
+      expect(out).toContain(
+        `Re-add the Claude Code plugin's marketplace: run these in a terminal, then restart Claude Code:\n${READD_PLUGIN_COMMANDS}`,
+      );
+      expect(out).not.toContain(MANUAL_PLUGIN_COMMANDS);
+    });
+
+    test("its temporary files live in a private mktemp directory that is removed afterwards", () => {
+      const s = setupClaudePluginSandbox({});
+      const tmp = join(s.sandbox.home, "tmp");
+      const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+        ...s.env,
+        FAKE_CLAUDE_HANG: "1",
+        PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT: "1",
+      });
+      expect(code).toBe(0);
+      expect(readdirSync(tmp).filter((n) => n.includes("claude-plugin") || n.includes("time-limit"))).toEqual([]);
+    }, 30_000);
+
+    test("no temporary directory: nothing runs, the manual commands are printed", () => {
+      const s = setupClaudePluginSandbox({});
+      // mktemp fails only for the plugin update's directory.
+      writeFileSync(
+        join(s.sandbox.stub, "mktemp"),
+        `#!/bin/bash\ncase "$*" in *claude-plugin*) exit 1 ;; esac\nexec /usr/bin/mktemp "$@"\n`,
+        { mode: 0o755 },
+      );
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual([]);
+      expect(out).toContain(
+        `Claude Code plugin: could not update it (no temporary directory). Run these, then restart Claude Code:\n${MANUAL_PLUGIN_COMMANDS}`,
+      );
+    });
   },
 );
 
@@ -3721,6 +3797,19 @@ describe("Claude Code plugin update: every installer (source scan)", () => {
       const u = script.indexOf(update);
       expect({ name, repair: r > 0, update: u > r }).toEqual({ name, repair: true, update: true });
     }
+  });
+
+  test("every installer updates, and tells people to update, the user scope", () => {
+    // `claude plugin update` auto-detects the scope on current Claude Code: from
+    // inside a project with a project-scope install it would update that one.
+    for (const name of ["install.sh", "install.ps1", "install.cmd"]) {
+      const script = readScript(name);
+      const bare = script.split("\n").filter((l) => /plugin update (plannotator@plannotator|\$\{CLAUDE_PLUGIN_ID\}|\$claudePluginId|' \+ \$id)/.test(l) && !l.includes("--scope user") && !/'--scope', 'user'|"--scope", "user"/.test(l) && !/^\s*(#|REM )/.test(l));
+      expect({ name, bare }).toEqual({ name, bare: [] });
+    }
+    expect(readScript("install.cmd")).toContain(
+      'if /i not "!VERSION!"=="latest" if not "!TAG!"=="!PLANNOTATOR_UPDATE_VERSION!" set "PLN_CP_PINNED=!TAG!"',
+    );
   });
 
   test("install.cmd's PowerShell carries nothing cmd.exe would reinterpret", () => {
@@ -3770,7 +3859,7 @@ type PluginRunner = "install.ps1" | "install.cmd";
 function runWindowsClaudePluginUpdate(
   runner: PluginRunner,
   s: ReturnType<typeof setupClaudePluginSandbox>,
-  opts: { skipSource?: string; env?: Record<string, string> } = {},
+  opts: { skipSource?: string; pinned?: string; env?: Record<string, string> } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "plannotator-ps-plugin-test-"));
   const driverPath = join(root, "driver.ps1");
@@ -3780,6 +3869,9 @@ function runWindowsClaudePluginUpdate(
           `$ErrorActionPreference = "Stop"`,
           `$skipClaudePluginResolved = $${opts.skipSource ? "true" : "false"}`,
           `$skipClaudePluginSource = "${opts.skipSource ?? ""}"`,
+          // As install.ps1 resolves them: -Version stays "latest" unless pinned.
+          `$Version = "${opts.pinned ?? "latest"}"`,
+          `$latestTag = "${opts.pinned ?? "v99.9.9"}"`,
           extractPs1ClaudePluginRegion().replace(
             /^\$claudePluginRegistry = .*$/m,
             "$claudePluginRegistry = $env:PLN_CP_REGISTRY",
@@ -3797,6 +3889,7 @@ function runWindowsClaudePluginUpdate(
       TMPDIR: join(s.sandbox.home, "tmp"),
       PLN_CP_REGISTRY: s.registryPath,
       ...(runner === "install.cmd" && opts.skipSource ? { PLN_CP_SKIP: opts.skipSource } : {}),
+      ...(runner === "install.cmd" && opts.pinned ? { PLN_CP_PINNED: opts.pinned } : {}),
       ...s.env,
       ...opts.env,
     },
@@ -3810,7 +3903,15 @@ describe.skipIf(!pwshBin || process.platform === "win32")(
   "Windows installers update an installed Claude Code plugin (PowerShell, fake claude)",
   () => {
     // install.cmd's PowerShell reports its state as its exit code.
-    const CMD_STATE = { none: 0, manual: 20, skipped: 21, updated: 22, current: 23, failed: 24 };
+    const CMD_STATE = {
+      none: 0,
+      manual: 20,
+      skipped: 21,
+      updated: 22,
+      current: 23,
+      failed: 24,
+      "no-marketplace": 25,
+    };
     const expectState = (
       runner: PluginRunner,
       r: { code: number; out: string },
@@ -3880,6 +3981,28 @@ describe.skipIf(!pwshBin || process.platform === "win32")(
         expectState(runner, r, "failed");
         expect(Date.now() - started).toBeLessThan(20_000);
         expect(r.out).toContain("Claude Code plugin: could not update it (timed out after 1s).");
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      test(`${runner}: a --version pin skips the update`, () => {
+        const s = setupClaudePluginSandbox({});
+        const r = runWindowsClaudePluginUpdate(runner, s, { pinned: "v0.27.0" });
+        expectState(runner, r, "skipped");
+        expect(s.calls()).toEqual([]);
+        expect(r.out).toContain(
+          "Claude Code plugin: not updated: pinned to v0.27.0; updating would install the newest plugin.\n",
+        );
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      test(`${runner}: a missing plannotator marketplace prints the re-add command`, () => {
+        const s = setupClaudePluginSandbox({});
+        const r = runWindowsClaudePluginUpdate(runner, s, {
+          env: { FAKE_CLAUDE_FAIL: "marketplace", FAKE_CLAUDE_FAIL_MESSAGE: MISSING_MARKETPLACE },
+        });
+        expectState(runner, r, "no-marketplace");
+        expect(s.calls()).toEqual([CLAUDE_PLUGIN_COMMANDS[0]]);
+        expect(r.out).toContain(
+          `Claude Code plugin: could not update it (the plannotator marketplace is not registered). Re-add it, then restart Claude Code:\n${READD_PLUGIN_COMMANDS}`,
+        );
       }, PWSH_SCANNER_TIMEOUT_MS);
 
       test(`${runner}: no claude on PATH - nothing runs`, () => {

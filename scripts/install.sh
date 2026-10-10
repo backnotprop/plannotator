@@ -73,7 +73,7 @@ SKIP_SKILLS_FLAG=0
 # Claude Code plugin update opt-out. Not an agent home: when the claude CLI is
 # on PATH and plannotator@plannotator is already installed, the installer runs
 # `claude plugin marketplace update plannotator` and `claude plugin update
-# plannotator@plannotator` (Claude Code does not auto-update GitHub
+# plannotator@plannotator --scope user` (Claude Code does not auto-update GitHub
 # marketplaces). --skip-claude-plugin turns that off. Same three layers.
 SKIP_CLAUDE_PLUGIN_FLAG=0
 
@@ -156,8 +156,9 @@ Options:
                          plannotator@plannotator plugin is installed, the
                          installer runs `claude plugin marketplace update
                          plannotator` and `claude plugin update
-                         plannotator@plannotator`. It never installs the
-                         plugin. Env var: PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE;
+                         plannotator@plannotator --scope user`. It never
+                         installs the plugin, and skips a --version pin. Env
+                         var: PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE;
                          config key: skipInstall.claudePlugin.
   --non-interactive      Never prompt, even in a terminal. Uses flags, then
                          saved answers from a previous run, then the defaults
@@ -1461,6 +1462,7 @@ repair_legacy_plugin_hooks "$PLUGIN_MARKETPLACE_DIR" || true
 CLAUDE_PLUGIN_ID="plannotator@plannotator"
 CLAUDE_PLUGIN_REGISTRY="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json"
 # none | manual (installed, no claude CLI) | skipped | updated | current | failed
+# | no-marketplace (the plannotator marketplace is gone; re-add it)
 claude_plugin_state="none"
 claude_plugin_version=""
 
@@ -1525,14 +1527,16 @@ claude_plugin_field() {
 }
 
 # Run a command with a time limit in plain shell (macOS has no timeout(1)).
-# Returns the command's status, or 124 when it ran out of time and was stopped.
+# $1 is the limit in seconds, $2 a path the watchdog creates on a timeout (in
+# a private mktemp directory), the rest the command. Returns the command's
+# status, or 124 when it ran out of time and was stopped.
 run_with_time_limit() {
     _rtl_secs="$1"
-    shift
+    _rtl_flag="$2"
+    shift 2
+    rm -f "$_rtl_flag" 2>/dev/null || true
     "$@" </dev/null &
     _rtl_pid=$!
-    _rtl_flag="${TMPDIR:-/tmp}/plannotator-time-limit.$$.$_rtl_pid"
-    rm -f "$_rtl_flag" 2>/dev/null || true
     # The watchdog sleeps in the background and waits for it, so stopping the
     # watchdog (TERM, below) runs its trap at once: the trap stops the sleep
     # and exits before anything is flagged or killed.
@@ -1555,15 +1559,22 @@ run_with_time_limit() {
     kill -TERM "$_rtl_dog" 2>/dev/null || true
     wait "$_rtl_dog" 2>/dev/null || true
     if [ -f "$_rtl_flag" ]; then
-        rm -f "$_rtl_flag" 2>/dev/null || true
         return 124
     fi
     return "$_rtl_rc"
 }
 
+# --scope user always: `claude plugin update` auto-detects the scope on current
+# Claude Code, and from inside a project with a project-scope install it would
+# update that record and leave the user install old.
 print_claude_plugin_manual_update() {
     echo "  claude plugin marketplace update plannotator"
-    echo "  claude plugin update ${CLAUDE_PLUGIN_ID}"
+    echo "  claude plugin update ${CLAUDE_PLUGIN_ID} --scope user"
+}
+
+print_claude_plugin_marketplace_readd() {
+    echo "  claude plugin marketplace add backnotprop/plannotator"
+    echo "  claude plugin update ${CLAUDE_PLUGIN_ID} --scope user"
 }
 
 update_claude_plugin_if_installed() {
@@ -1578,32 +1589,62 @@ update_claude_plugin_if_installed() {
         echo "Claude Code plugin: not updated (${skip_claude_plugin_source})."
         return 0
     fi
+    # A pinned install (--version naming a tag) keeps the plugin it has: the
+    # plugin update always installs the newest plugin, which would not match
+    # an older binary. Background auto-update passes the newest release it
+    # just resolved as --version and exports the same tag as
+    # PLANNOTATOR_UPDATE_VERSION, so that run is not pinned. No network call.
+    if [ "$VERSION_EXPLICIT" -eq 1 ] && [ "${PLANNOTATOR_UPDATE_VERSION:-}" != "$latest_tag" ]; then
+        claude_plugin_state="skipped"
+        echo "Claude Code plugin: not updated: pinned to ${latest_tag}; updating would install the newest plugin."
+        return 0
+    fi
     # Seconds per command. Internal knob for the tests; the default covers a
     # slow git fetch of the marketplace clone.
     _cp_secs="${PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT:-120}"
     case "$_cp_secs" in ''|*[!0-9]*|0) _cp_secs=120 ;; esac
+    # One private directory for claude's output and the timeout marker.
+    _cp_tmp=$(mktemp -d "${TMPDIR:-/tmp}/plannotator-claude-plugin.XXXXXX" 2>/dev/null) || _cp_tmp=""
+    if [ -z "$_cp_tmp" ] || [ ! -d "$_cp_tmp" ]; then
+        claude_plugin_state="failed"
+        echo "Claude Code plugin: could not update it (no temporary directory). Run these, then restart Claude Code:"
+        print_claude_plugin_manual_update
+        return 0
+    fi
+    _cp_log="$_cp_tmp/claude.log"
     _cp_before="$(claude_plugin_field "$_cp_record" version)|$(claude_plugin_field "$_cp_record" gitCommitSha)|$(claude_plugin_field "$_cp_record" installPath)"
-    _cp_log="${TMPDIR:-/tmp}/plannotator-claude-plugin.$$.log"
     # CLAUDECODE is cleared for these commands: an auto-update started from a
     # Claude Code session inherits it, and it marks a nested Claude Code.
     echo "Updating the Claude Code plugin..."
     _cp_failed=""
+    _cp_missing=0
     for _cp_step in marketplace plugin; do
         _cp_rc=0
         if [ "$_cp_step" = "marketplace" ]; then
-            run_with_time_limit "$_cp_secs" env -u CLAUDECODE claude plugin marketplace update plannotator >"$_cp_log" 2>&1 || _cp_rc=$?
+            run_with_time_limit "$_cp_secs" "$_cp_tmp/timed-out" env -u CLAUDECODE claude plugin marketplace update plannotator >"$_cp_log" 2>&1 || _cp_rc=$?
         else
-            run_with_time_limit "$_cp_secs" env -u CLAUDECODE claude plugin update "$CLAUDE_PLUGIN_ID" >"$_cp_log" 2>&1 || _cp_rc=$?
+            run_with_time_limit "$_cp_secs" "$_cp_tmp/timed-out" env -u CLAUDECODE claude plugin update "$CLAUDE_PLUGIN_ID" --scope user >"$_cp_log" 2>&1 || _cp_rc=$?
         fi
         if [ "$_cp_rc" -eq 124 ]; then
             _cp_failed="timed out after ${_cp_secs}s"
         elif [ "$_cp_rc" -ne 0 ]; then
+            # The plannotator marketplace itself is gone (removed by hand):
+            # updating cannot work, re-adding it does.
+            if grep -i 'marketplace' "$_cp_log" 2>/dev/null | grep -Eqi 'not found|not exist|no such|unknown'; then
+                _cp_missing=1
+            fi
             _cp_last=$(tr -cd '[:print:]\n' < "$_cp_log" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -n 1 | cut -c 1-200)
             _cp_failed="claude exited ${_cp_rc}${_cp_last:+: ${_cp_last}}"
         fi
         [ -z "$_cp_failed" ] || break
     done
-    rm -f "$_cp_log" 2>/dev/null || true
+    rm -rf "$_cp_tmp" 2>/dev/null || true
+    if [ "$_cp_missing" -eq 1 ]; then
+        claude_plugin_state="no-marketplace"
+        echo "Claude Code plugin: could not update it (the plannotator marketplace is not registered). Re-add it, then restart Claude Code:"
+        print_claude_plugin_marketplace_readd
+        return 0
+    fi
     if [ -n "$_cp_failed" ]; then
         claude_plugin_state="failed"
         echo "Claude Code plugin: could not update it (${_cp_failed}). Run these, then restart Claude Code:"
@@ -2563,6 +2604,10 @@ case "$claude_plugin_state" in
         ;;
     current)
         echo "The Claude Code plugin is up to date${claude_plugin_version:+ (${claude_plugin_version})}."
+        ;;
+    no-marketplace)
+        echo "Re-add the Claude Code plugin's marketplace: run these in a terminal, then restart Claude Code:"
+        print_claude_plugin_marketplace_readd
         ;;
     skipped|failed|manual)
         echo "Update the Claude Code plugin: run these in a terminal, then restart Claude Code:"
