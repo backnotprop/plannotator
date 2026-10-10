@@ -191,7 +191,7 @@ describe('decision recording on a question without a decision line', () => {
     expect(button !== null).toBe(true);
     expect(button.getAttribute('aria-pressed')).toBe('false');
     expect(button.style.outlineStyle).toBe('dotted');
-    expect(button.style.color).toBe('var(--muted-foreground)');
+    expect(plain.dataset.questionDecisionRecording).toBe('off');
     expect(decisionRow(plain) === null).toBe(true);
 
     await click(button);
@@ -250,7 +250,11 @@ describe('the separate opener for the host decision card', () => {
     // host decides what an off question's card does).
     const off = cards(el)[1];
     expect(toggle(off)!.parentElement!.style.outlineStyle).toBe('dotted');
-    expect(toggle(off)!.parentElement!.style.color).toBe('var(--muted-foreground)');
+    expect(off.dataset.questionDecisionRecording).toBe('off');
+    // The fade is in the color (a color-mix(), which happy-dom drops, so it is
+    // checked in Chromium), never `opacity` on the tag: that would also fade
+    // the focus ring its switch and words draw.
+    expect(toggle(off)!.parentElement!.style.opacity).toBe('');
     expect(decisionRow(off) === null).toBe(true);
     await click(opener(off)!);
     expect(opened.length).toBe(2);

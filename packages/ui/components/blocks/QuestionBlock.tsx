@@ -56,14 +56,25 @@ const now = (): number => (typeof performance !== 'undefined' ? performance.now(
 
 const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(' ');
 
+/** The box every pill in the eyebrow shares (the status tags, the decision
+ *  tags, the toggle and the split tag): one height, one line-height, and a
+ *  1px border on all of them (transparent unless the tone draws it), so the
+ *  dashed "Open" tag is no taller than the rest. The pill group itself is a
+ *  flex row centred on its axis, so no pill rides its own baseline (the split
+ *  tag's baseline came from its icon-only switch, which lifted it).
+ *  `align-[1px]` does nothing inside that flex row; it stays because it is
+ *  the only use of the class, and dropping it would change the stylesheet
+ *  the guides.show viewer pins (a deploy for no visible change). */
+const PILL = 'annotation-exclude select-none inline-flex h-[18px] items-center gap-1 whitespace-nowrap rounded border px-1.5 align-[1px] text-[10.5px] font-semibold leading-4 tracking-[0.03em]';
+
 const Tag: React.FC<{ tone: 'rec' | 'ok' | 'skip' | 'open'; children: React.ReactNode; className?: string; style?: React.CSSProperties }> = ({ tone, children, className, style }) => (
   <span
     className={cx(
-      'annotation-exclude select-none inline-flex items-center gap-1 whitespace-nowrap rounded px-1.5 py-px align-[1px] text-[10.5px] font-semibold tracking-[0.03em]',
-      tone === 'rec' && 'bg-primary/15 text-primary',
-      tone === 'ok' && 'bg-success/15 text-success',
-      tone === 'skip' && 'bg-muted text-muted-foreground',
-      tone === 'open' && 'border border-dashed border-border text-muted-foreground',
+      PILL,
+      tone === 'rec' && 'border-transparent bg-primary/15 text-primary',
+      tone === 'ok' && 'border-transparent bg-success/15 text-success',
+      tone === 'skip' && 'border-transparent bg-muted text-muted-foreground',
+      tone === 'open' && 'border-dashed border-border text-muted-foreground',
       className,
     )}
     style={style}
@@ -85,15 +96,18 @@ const DiamondGlyph = () => (
   </svg>
 );
 
-/** Draws a decision tag in its "off" state: the same words, dimmed, with a
- *  dotted outline instead of the tinted fill. Dimmed means the theme's
- *  muted-foreground, not opacity: 60% opacity on primary text dropped the
- *  default light theme under 3:1, while muted-foreground is the token every
- *  theme already tunes for secondary text. Inline so it adds no utility
- *  classes to the shared stylesheet and wins over the tag's `text-primary`. */
+/** Draws a decision tag in its "off" state: the same words with a dotted
+ *  outline instead of the tinted fill, faded. The theme's muted-foreground
+ *  alone is exactly the "Open" tag's color beside it, so the off tag read as
+ *  barely dimmer than an on one. Text, icon and outline (all `currentColor`)
+ *  are muted-foreground mixed 55% with transparent: the look of
+ *  `opacity: 0.55` on the tag, without `opacity`, which would also fade the
+ *  keyboard focus ring (a `ring-primary` box-shadow on the tag's buttons)
+ *  that must stay at full strength. Inline so it adds no utility classes to
+ *  the shared stylesheet and wins over the tag's `text-primary`. */
 const DECISION_OFF_STYLE: React.CSSProperties = {
   background: 'transparent',
-  color: 'var(--muted-foreground)',
+  color: 'color-mix(in oklab, var(--muted-foreground) 55%, transparent)',
   outline: '1px dotted currentColor',
   outlineOffset: '-1px',
 };
@@ -422,7 +436,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     >
       <div className="annotation-exclude select-none mb-1.5 flex items-center gap-2" data-pinpoint-ignore="">
         <span className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{eyebrow}</span>
-        <span className="ml-auto">
+        <span className="ml-auto inline-flex items-center gap-1">
           {question.decision && <><Tag tone="rec"><DiamondGlyph />Decision</Tag>{' '}</>}
           {decisionCapable && (decisionOpenable ? (
             // Two targets in one tag: the diamond switches recording, the
@@ -435,7 +449,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
             // meet the spacing exception: nothing else to click within 12 px
             // of their centre line.
             <><span
-              className="annotation-exclude select-none inline-flex items-stretch whitespace-nowrap rounded align-[1px] text-[10.5px] font-semibold tracking-[0.03em] bg-primary/15 text-primary"
+              className="annotation-exclude select-none inline-flex h-[18px] items-stretch whitespace-nowrap rounded border border-transparent text-[10.5px] font-semibold leading-4 tracking-[0.03em] bg-primary/15 text-primary"
               style={recordingOn ? undefined : DECISION_OFF_STYLE}
               data-pinpoint-ignore=""
               data-question-decision-tag=""
@@ -455,7 +469,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
               type="button"
               aria-haspopup="dialog"
               onClick={(event) => onOpenDecision!(question.key, event.currentTarget)}
-              className="relative cursor-pointer rounded py-px pl-0.5 pr-1.5 hover:underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className="relative cursor-pointer rounded pl-0.5 pr-1.5 hover:underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               data-question-decision-open=""
             >Records a decision</button></span>{' '}</>
           ) : decisionToggleable ? (
@@ -465,7 +479,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
               type="button"
               aria-pressed={recordingOn}
               onClick={() => onToggleDecisionRecording!(question.key, !recordingOn)}
-              className="annotation-exclude select-none inline-flex cursor-pointer items-center gap-1 whitespace-nowrap rounded px-1.5 py-px align-[1px] text-[10.5px] font-semibold tracking-[0.03em] bg-primary/15 text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className={cx(PILL, 'cursor-pointer border-transparent bg-primary/15 text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary')}
               style={recordingOn ? undefined : DECISION_OFF_STYLE}
               data-pinpoint-ignore=""
               data-question-decision-toggle=""

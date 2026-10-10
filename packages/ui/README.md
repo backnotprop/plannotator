@@ -386,7 +386,7 @@ See HANDOFF.md § "Question host seams (ui 0.49.0, core 0.25.9)".
 
 **Decision recording toggle and status tag (ui 0.52.0, unreleased).** Also optional on `Viewer`, also unused by Plannotator:
 
-- `questionDecisionRecording(question) => boolean | undefined`: false draws a `Decision: when answered` question's "Records a decision" tag dimmed with a dotted outline and hides its "Answering this records a decision" row. A recorded decision is never affected.
+- `questionDecisionRecording(question) => boolean | undefined`: false draws a `Decision: when answered` question's "Records a decision" tag faded (muted-foreground at 55%; the focus ring stays at full strength) with a dotted outline and hides its "Answering this records a decision" row. A recorded decision is never affected.
 - `onToggleQuestionDecisionRecording(key, next)`: makes that tag an `aria-pressed` toggle button; store `next` and return it from `questionDecisionRecording`. Not offered under `readOnly` or in a card without an answer handler.
 - `questionStatusTag: 'none'`: hides the card's own Open / Answered / Settled / Skipped tag so you can draw your own; the decision tags stay.
 
