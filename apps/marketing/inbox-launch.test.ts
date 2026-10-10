@@ -92,6 +92,18 @@ describe('Plannotator Inbox launch switch', () => {
     }
   });
 
+  // "Copy install prompt" copies the text inlined in the page; /inbox/prompt.md
+  // serves the file. Both come from src/lib/inbox-prompt.md and must not drift.
+  // ASCII only because S3 serves .md as text/markdown without a charset.
+  test('on: the install prompt is served and inlined from one source', async () => {
+    const source = await readFile(join(marketingRoot, 'src/lib/inbox-prompt.md'), 'utf8');
+    expect(source).toMatch(/^[\x09\x0a\x20-\x7e]*$/);
+    expect(await read(dist.on, 'inbox/prompt.md')).toBe(source);
+    const inbox = await read(dist.on, 'inbox/index.html');
+    const inlined = inbox.match(/<script type="application\/json" id="ib-install-prompt">([\s\S]*?)<\/script>/)?.[1];
+    expect(inlined && JSON.parse(inlined)).toBe(source);
+  });
+
   test('on: every image on the page and the post resolves', async () => {
     for (const path of ['inbox/index.html', postPath]) {
       const html = await read(dist.on, path);

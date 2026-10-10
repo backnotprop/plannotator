@@ -207,6 +207,15 @@ jobs:
       - name: Deploy to S3
         run: aws s3 sync apps/marketing/dist/ s3://plannotator-marketing/ --delete
 
+      # The sync guesses text/markdown with no charset for .md; re-upload the
+      # Inbox install prompt (/inbox/prompt.md) with an explicit charset.
+      - name: Set the Inbox prompt's content type
+        run: |
+          if [ -f apps/marketing/dist/inbox/prompt.md ]; then
+            aws s3 cp apps/marketing/dist/inbox/prompt.md s3://plannotator-marketing/inbox/prompt.md \
+              --content-type "text/markdown; charset=utf-8"
+          fi
+
       - name: Invalidate CloudFront
         run: |
           aws cloudfront create-invalidation \
