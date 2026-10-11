@@ -134,6 +134,10 @@ jobs:
           packages/inbox/sidebarQuiet.test.tsx
           packages/inbox/soundIntro.test.tsx
           packages/inbox/soundSettings.test.tsx
+          packages/inbox/attachmentStepping.test.tsx
+          packages/inbox/attachmentSteppingSave.test.tsx
+          packages/inbox/listColumn.test.tsx
+          packages/inbox/endedSession.test.tsx
           packages/ui/components/MenuVersionSection.test.tsx
           packages/ui/components/blocks/QuestionBlock.test.tsx
           packages/ui/components/blocks/QuestionBlock.host.test.tsx

@@ -233,8 +233,10 @@ export interface InboxMessage {
   /**
    * On a person's New message (plan step 8): the live agent session it is
    * addressed to. Such a message answers nothing (`reply_to` null) and is
-   * delivered to that session as a turn, like a reply. Absent on every other
-   * message and on records older than step 8.
+   * delivered to that session as a turn, like a reply. Also on a person's
+   * reply (`reply_to` set) when the session that asked had ended and the
+   * person chose another live session to take it: that session alone is
+   * handed it. Absent on every other message and on records older than step 8.
    */
   to?: InboxAddressee | null;
   /**
@@ -244,6 +246,14 @@ export interface InboxMessage {
    * at the project root. Added after step 8: older records lack it.
    */
   base_path?: string | null;
+  /**
+   * On an agent's message: it was sent through a connection that wakes its
+   * session with the person's reply (the Claude Code mod, Pi, OpenCode 2;
+   * `INBOX_WAKES_META_KEY`). Only such a session can be said to have ended
+   * when it stops polling; an MCP-only agent or OpenCode 1 never polls, so
+   * the window never calls it ended. Absent otherwise and on older records.
+   */
+  wakes?: boolean;
   /**
    * On an agent's message: the earlier questions it said it supersedes
    * (send_message's `supersedes`, as sent: `<message id>` for every open

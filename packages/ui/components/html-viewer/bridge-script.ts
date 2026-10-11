@@ -4069,6 +4069,25 @@ export const BRIDGE_SCRIPT = `(function() {
     postToParent({ type: PREFIX + message });
   }, true);
 
+  // A plain ] or [ while armed (Annotate): the host may step to its next or
+  // previous file (the Inbox steps through a thread's attachments). Never in
+  // Interact (the page owns its keys), never while the page's focus is in a
+  // text field, with a modifier, on auto-repeat or mid-composition. The page
+  // still receives the key; a host without a step handler ignores the
+  // message. Capture phase, like the chords above.
+  document.addEventListener('keydown', function(e) {
+    if (e.key !== ']' && e.key !== '[') return;
+    if (!annotateModeActive || vimEnabled) return;
+    if (e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.isComposing) return;
+    var t = e.target;
+    if (t && t.nodeType === 1) {
+      var tag = t.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable) return;
+      if (t.closest && t.closest('[contenteditable]:not([contenteditable="false"])')) return;
+    }
+    postToParent({ type: PREFIX + 'step', dir: e.key === ']' ? 1 : -1 });
+  }, true);
+
   // Author opt-in: a plain click on any element tagged [data-annotate] pops the
   // toolbar — no pinpoint mode. Lets an HTML doc (e.g. a flow graph) wire its own
   // nodes to Plannotator's toolbar. Bubble phase so the page's own click handlers

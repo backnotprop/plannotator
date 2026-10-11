@@ -4,7 +4,8 @@ import { attachmentDownloadUrl, attachmentImageUrl, readableVersion } from '../a
 import { clockTime, formatBytes, plural } from '../format';
 import { Icon, type IconName } from '../icons';
 
-function iconOf(attachment: InboxAttachmentState): IconName {
+/** The icon a tile (and the stepper's list) shows for a file of this kind. */
+export function iconOf(attachment: InboxAttachmentState): IconName {
   switch (readInboxAttachmentKind(attachment.kind)) {
     case 'html':
     case 'code':
@@ -29,7 +30,7 @@ function sizeLine(attachment: InboxAttachmentState): string {
 }
 
 /** The changed line a tile or caption shows, or null when the file on disk is what was sent. */
-function changedLine(attachment: InboxAttachmentState, short = false): string | null {
+export function changedLine(attachment: InboxAttachmentState, short = false): string | null {
   if (attachment.unavailable) {
     if (short) return attachment.unavailable.code === 'attachment_missing' ? 'No longer on disk' : 'Changed type';
     return attachment.unavailable.code === 'attachment_missing' ? 'No longer on disk; the sent version opens' : 'Changed type; the sent version opens';
@@ -137,10 +138,13 @@ export function AttachmentTiles({
   attachments,
   annotationCounts,
   onOpen,
+  openId = null,
 }: {
   attachments: readonly InboxAttachmentState[];
   annotationCounts: ReadonlyMap<string, number>;
   onOpen: (attachment: InboxAttachmentState) => void;
+  /** The file open beside the thread: its tile says "Open beside" (`aria-current`); the thread does not scroll to it. */
+  openId?: string | null;
 }) {
   if (attachments.length === 0) return null;
   const images = attachments.filter((a) => readInboxAttachmentKind(a.kind) === 'image');
@@ -200,13 +204,15 @@ export function AttachmentTiles({
           // The whole tile is the one control (record 2.1): a click on the
           // icon, the name or the type line opens the file exactly as Open
           // does. "Open" stays as the visual cue inside it.
+          const isOpen = attachment.id === openId;
           return (
             <button
               type="button"
-              className="ib-att-t"
+              className={`ib-att-t${isOpen ? ' ib-open-beside' : ''}`}
               key={attachment.id}
               onClick={() => onOpen(attachment)}
-              aria-label={`Open ${attachment.name}`}
+              aria-label={isOpen ? `${attachment.name}, open beside the thread` : `Open ${attachment.name}`}
+              aria-current={isOpen ? 'true' : undefined}
               aria-describedby={detailId}
               data-attachment-id={attachment.id}
               data-attachment-name={attachment.name}
@@ -215,7 +221,7 @@ export function AttachmentTiles({
               {icon}
               {text}
               <span className="ib-open" aria-hidden="true">
-                Open
+                {isOpen ? 'Open beside' : 'Open'}
               </span>
             </button>
           );

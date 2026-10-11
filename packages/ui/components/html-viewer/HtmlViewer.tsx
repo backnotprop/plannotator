@@ -182,6 +182,9 @@ function parseVimBridgeCopy(value: unknown): string | null {
 }
 
 /** Inputs for the sandboxed raw-HTML viewer and its parent-side annotation UI. */
+/** The fewest milliseconds between two honored `step` messages from the page. */
+export const STEP_MESSAGE_MIN_INTERVAL_MS = 150;
+
 export interface HtmlViewerProps {
   rawHtml: string;
   /** Live proxied-app mode: render `src` (no sandbox, no srcdoc) instead of
@@ -229,6 +232,13 @@ export interface HtmlViewerProps {
   /** Mod+Shift+X pressed while focus lived inside the iframe: show/hide the
    *  host's floating tools over the page. The host owns that state. */
   onToolsToggle?: () => void;
+  /** A plain `]` (1) or `[` (-1) pressed inside the page while the surface is
+   *  armed (Annotate) and the page's focus is not in a text field: the host's
+   *  next / previous file (the Inbox steps through a thread's attachments).
+   *  The bridge forwards nothing in Interact, and the page still gets the
+   *  key. Honored only while the frame holds focus, and at most once per
+   *  STEP_MESSAGE_MIN_INTERVAL_MS. Absent: the message is ignored, as before. */
+  onStep?: (dir: 1 | -1) => void;
   /** Opt-in Vim-style keyboard selection. Default false for compatibility. */
   vimModeEnabled?: boolean;
   /** Replace the iframe-local compact badge with the shared live key HUD. */
@@ -373,6 +383,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onAnnotateModeExit,
       onAnnotateModeToggle,
       onToolsToggle,
+      onStep,
       vimModeEnabled = false,
       vimHudEnabled = false,
       vimHudKeyPanelEnabled = true,
@@ -435,6 +446,12 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     onAnnotateModeToggleRef.current = onAnnotateModeToggle;
     const onToolsToggleRef = useRef(onToolsToggle);
     onToolsToggleRef.current = onToolsToggle;
+    const onStepRef = useRef(onStep);
+    onStepRef.current = onStep;
+    // The step message is honored only while the host has the surface armed.
+    const annotateModeActiveRef = useRef(annotateModeActive);
+    annotateModeActiveRef.current = annotateModeActive;
+    const lastStepAtRef = useRef(0);
 
     /** Single choke point for direct-to-bridge posts: live sessions get the
      *  token + concrete targetOrigin, srcdoc keeps "*" and no token. */
@@ -776,6 +793,20 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         }
         if (isRecord(e.data) && e.data.type === `${PREFIX}tools-toggle`) {
           onToolsToggleRef.current?.();
+          return;
+        }
+        if (isRecord(e.data) && e.data.type === `${PREFIX}step`) {
+          // The page itself can post this message, so it is honored only for
+          // a key the person pressed: the frame holds focus, the surface is
+          // armed, and at most one step per STEP_MESSAGE_MIN_INTERVAL_MS (a
+          // page cannot push itself out of view by posting in a loop).
+          const dir = e.data.dir;
+          if (!annotateModeActiveRef.current || (dir !== 1 && dir !== -1)) return;
+          if (document.activeElement !== iframeRef.current) return;
+          const now = Date.now();
+          if (now - lastStepAtRef.current < STEP_MESSAGE_MIN_INTERVAL_MS) return;
+          lastStepAtRef.current = now;
+          onStepRef.current?.(dir);
           return;
         }
         const vimCopy = parseVimBridgeCopy(e.data);
