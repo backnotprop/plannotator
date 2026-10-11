@@ -311,6 +311,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   const { model: files, load: reloadFiles, patch: patchRecords } = useThreadAttachments(thread.thread_id, thread);
   const attachments: InboxAttachmentState[] = files?.attachments ?? [];
   const records = files?.annotations ?? [];
+  /** Something here takes annotations: an attached file, or a guided review's diffs. */
+  const takesAnnotations = attachments.length > 0 || records.length > 0 || thread.messages.some((m) => m.guide);
   const [full, setFull] = useState(false);
   /** Bumped when the person opens a file, so focus moves into its pane. */
   const [paneFocus, setPaneFocus] = useState(0);
@@ -324,6 +326,11 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     setPaneFocus((n) => n + 1);
   };
   const openRecord = (record: InboxAnnotationRecord) => {
+    // A comment on a guided review's diff: open that guide.
+    if (record.guide) {
+      onOpenGuide(record.message_id);
+      return;
+    }
     const attachment = attachments.find((a) => a.id === record.attachment_id);
     if (attachment) openFile(attachment, record.version === 'current' ? 'current' : 'sent', record.id);
   };
@@ -339,7 +346,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   const dropRecord = useCallback((id: string) => patchRecords((list) => list.filter((r) => r.id !== id)), [patchRecords]);
   const editRecord = async (record: InboxAnnotationRecord, text: string) => {
     try {
-      const result = await inboxApi.saveAnnotation(record.attachment_id, record.version, { ...annotationOf(record), text });
+      const next = { ...annotationOf(record), text };
+      const result = record.guide ? await inboxApi.saveGuideAnnotation(record.message_id, next) : await inboxApi.saveAnnotation(record.attachment_id, record.version, next);
       saveRecord(result.annotation);
     } catch (cause) {
       setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not saved.');
@@ -357,6 +365,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   const buildFeedback = async (pending: readonly InboxAnnotationRecord[]): Promise<string> => {
     const texts = new Map<string, string>();
     for (const record of pending) {
+      // A guided-review comment carries its own file and lines.
+      if (record.guide) continue;
       const attachment = attachments.find((a) => a.id === record.attachment_id) ?? attachments.find((a) => a.path === record.path);
       if (!attachment) continue;
       const key = `${attachment.id}\0${record.version}`;
@@ -838,7 +848,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                   }
                 }}
               />
-              {(picksCount > 0 || dropped.length > 0 || attachments.length > 0) && (
+              {(picksCount > 0 || dropped.length > 0 || takesAnnotations) && (
                 <div className="ib-rfoot">
                   {picksCount > 0 && (
                     <span className="ib-rchip" data-picks-chip="">
@@ -851,7 +861,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                       {dropped.length} {dropped.length === 1 ? 'pick' : 'picks'} on a replaced question
                     </span>
                   )}
-                  {attachments.length > 0 && (
+                  {takesAnnotations && (
                     <AnnotationsChip records={records} attachments={attachments} onEdit={editRecord} onRemove={removeRecord} onOpen={openRecord} />
                   )}
                 </div>

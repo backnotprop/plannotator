@@ -353,6 +353,14 @@ export interface AllFilesCodeViewProps {
    * See adr/decisions/007-portable-guided-reviews-20260815.md (D2, D4).
    */
   readOnly?: boolean;
+  /**
+   * A host with no review server that still takes line comments (the Inbox's
+   * guide reader): line and range selection, the comment toolbar and the
+   * inline comments work as in the app, while the keyboard shortcuts and the
+   * header's open-in affordance stay off as for `readOnly`. Ignored when
+   * `readOnly` is set.
+   */
+  commentOnly?: boolean;
   /** EXPERIMENTAL flag-gated edit-to-suggestion mode. Only the plain all-files
    * dock panel passes this — Guided Review surfaces deliberately do NOT (the
    * GuideViewportManager evicts CodeViews beyond ~8 mounted, which would
@@ -631,6 +639,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   leadingContent,
   isActive = true,
   readOnly = false,
+  commentOnly = false,
   aiAvailable = false,
   onAskAIForFile,
   isAILoading = false,
@@ -2383,7 +2392,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   }, [scrollTargetAnnotation, filePathToItemId]);
 
   useEffect(() => {
-    if (!isActive || readOnly) return;
+    if (!isActive || readOnly || commentOnly) return;
     const handler = (e: KeyboardEvent) => {
       // composedPath()[0] pierces shadow DOM: window-level e.target retargets
       // to the shadow HOST (e.g. <diffs-container>), which would hide a
@@ -2475,6 +2484,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   }, [
     isActive,
     readOnly,
+    commentOnly,
     orderedItemIds,
     filePathToItemId,
     itemIdToFilePath,
@@ -2531,7 +2541,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       >
         <FileHeader
         compactTouchLayout={compactTouchLayout}
-        readOnly={readOnly}
+        readOnly={readOnly || commentOnly}
         filePath={filePath}
         patch={file.patch}
         status={file.status}

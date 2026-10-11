@@ -108,18 +108,42 @@ export interface InboxAttachmentState extends InboxAttachment {
 /** "current", or the sent blob's sha256. */
 export type InboxAnnotationVersion = string;
 
-/** One annotation of the person's on an attachment, stored until it rides a Send. */
+/**
+ * Where a comment on a guided review's diff sits: a file of the guide's
+ * patch, one side of it, and a line range in that side's numbering (the
+ * review app's line comment). Set on the record instead of an attachment.
+ */
+export interface InboxGuideCommentTarget {
+  /** The guided review's title, as the message carries it. */
+  title: string;
+  /** The file, as the guide's patch names it. */
+  file: string;
+  /** `new`: the changed file's lines; `old`: the original's. */
+  side: "old" | "new";
+  line_start: number;
+  line_end: number;
+}
+
+/**
+ * One annotation of the person's, stored until it rides a Send: on an
+ * attachment, or (with `guide`) on the diff of the guided review a message
+ * carries.
+ */
 export interface InboxAnnotationRecord {
   /** The annotation's own id (Plannotator's `Annotation.id`). */
   id: string;
   project_id: string;
   thread_id: string;
   message_id: string;
+  /** The attachment it is on; empty for a guided-review comment (`guide` set). */
   attachment_id: string;
-  /** The attachment's realpath: with `version`, the draft's key. */
+  /** The attachment's realpath, or a guided-review comment's file as the patch names it: with `version`, the draft's key. */
   path: string;
+  /** For a guided-review comment, the sha256 of the guide snapshot it was made on. */
   version: InboxAnnotationVersion;
-  /** Plannotator's `Annotation`, as the viewer made it (opaque to the store). */
+  /** Set on a comment on a guided review's diff (additive: an older reader sees a record whose attachment it cannot find). */
+  guide?: InboxGuideCommentTarget;
+  /** Plannotator's `Annotation` (attachments) or the review app's `CodeAnnotation` (guided reviews), as the viewer made it (opaque to the store beyond the checks). */
   annotation: Record<string, unknown>;
   created_at: string;
   updated_at: string;

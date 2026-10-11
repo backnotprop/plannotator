@@ -301,6 +301,9 @@ export const inboxApi = {
   /** The person's reviewed ticks on that guide, kept on the message. */
   saveGuideReviewed: (messageId: string, reviewed: boolean[]) =>
     post<{ message_id: string; reviewed: boolean[] }>(`/api/inbox/messages/${encodeURIComponent(messageId)}/guide/reviewed`, { reviewed }),
+  /** A comment on that guide's diff (the review app's line comment), new or edited; removed through `removeAnnotation`. */
+  saveGuideAnnotation: (messageId: string, annotation: object) =>
+    post<{ annotation: InboxAnnotationRecord }>(`/api/inbox/messages/${encodeURIComponent(messageId)}/guide/annotations`, { annotation }),
   restart: () => post<{ ok: true }>('/api/inbox/restart', {}),
   // The update control: the dialogs' facts, Update now, Remind me tomorrow, Check now, What's new.
   updateDetails: () => get<UpdateDetails>('/api/inbox/update'),

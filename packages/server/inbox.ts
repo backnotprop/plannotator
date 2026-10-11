@@ -241,6 +241,8 @@ const ERROR_STATUS: Record<string, number> = {
   annotation_not_allowed: 422,
   annotation_not_found: 404,
   annotation_closed: 409,
+  // A comment on a guided review's diff, on a message that carries none.
+  guide_not_found: 404,
   // New message (step 8).
   session_not_live: 409,
   // Over your tailnet (packages/server/inbox-tailscale.ts).

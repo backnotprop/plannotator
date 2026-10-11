@@ -191,6 +191,91 @@ export function imageCommentAnnotation(input: { id: string; name: string; text: 
   };
 }
 
+/** A comment on a guided review's diff, as the review app made it, or null for an attachment's annotation. */
+export function guideCommentOf(record: InboxAnnotationRecord): CodeAnnotation | null {
+  return record.guide ? (record.annotation as unknown as CodeAnnotation) : null;
+}
+
+/** "line 12" / "lines 12-14", as the review app's cards read. */
+function lineRangeLabel(start: number, end: number): string {
+  return start === end ? `line ${start}` : `lines ${start}-${end}`;
+}
+
+/** The small tag beside a row in the chip's list: the element, diagram part, or a guided-review comment's lines. */
+export function recordTag(record: InboxAnnotationRecord): string | null {
+  if (record.guide) return lineRangeLabel(record.guide.line_start, record.guide.line_end);
+  return annotationTag(annotationOf(record));
+}
+
+/** The quoted text a row shows: a guided-review comment's first commented line, else the annotation's quote. */
+export function recordQuote(record: InboxAnnotationRecord): string {
+  const comment = guideCommentOf(record);
+  if (!comment) return annotationQuote(annotationOf(record));
+  const lines = (comment.selectedText ?? comment.originalCode ?? '').split('\n');
+  const first = lines.find((line) => line.trim() !== '')?.trim() ?? '';
+  return `${first.length > 120 ? `${first.slice(0, 119)}…` : first}${lines.length > 1 && first ? ' …' : ''}`;
+}
+
+export const GUIDE_FEEDBACK_TITLE = 'Feedback on the guided review';
+
+/**
+ * One comment as the review app's export writes it (exportReviewFeedback in
+ * packages/review-editor/utils/exportFeedback.ts, line scope): the line range
+ * and side, the comment, the lines it is on, any suggested code. Kept equal
+ * to it by attachments.guide.test.ts.
+ */
+function guideCommentEntry(comment: CodeAnnotation, heading: string): string {
+  const range = comment.lineStart === comment.lineEnd ? `Line ${comment.lineStart}` : `Lines ${comment.lineStart}-${comment.lineEnd}`;
+  const token = comment.tokenText
+    ? ` — \`\`${comment.tokenText.replace(/`/g, '\\`')}\`\`${comment.charStart != null ? ` (chars ${comment.charStart}-${comment.charEnd})` : ''}`
+    : '';
+  const prefix = comment.conventionalLabel
+    ? `**${comment.conventionalLabel}${comment.decorations?.length ? ` (${comment.decorations.join(', ')})` : ''}:** `
+    : '';
+  let output = `${heading} ${range} (${comment.side})${token}\n`;
+  if (comment.text) output += `${prefix}${comment.text}\n`;
+  else if (prefix) output += `${prefix.trimEnd()}\n`;
+  if (comment.selectedText) output += `\n**Highlighted text:**\n\`\`\`\n${comment.selectedText}\n\`\`\`\n`;
+  if ((comment.suggestedCode || comment.text) && comment.originalCode) output += `\n**Replaces:**\n\`\`\`\n${comment.originalCode}\n\`\`\`\n`;
+  if (comment.suggestedCode) output += `\n**Suggested code:**\n\`\`\`\n${comment.suggestedCode}\n\`\`\`\n`;
+  return `${output}\n`;
+}
+
+/** The review app's per-file sections for a set of line comments: `## path`, then each comment by line. */
+export function guideCommentSections(comments: readonly CodeAnnotation[]): string {
+  const byFile = new Map<string, CodeAnnotation[]>();
+  for (const comment of comments) byFile.set(comment.filePath, [...(byFile.get(comment.filePath) ?? []), comment]);
+  let output = '';
+  for (const [file, list] of byFile) {
+    output += `## ${file}\n\n`;
+    for (const comment of [...list].sort((a, b) => a.lineStart - b.lineStart)) output += guideCommentEntry(comment, '###');
+  }
+  return output;
+}
+
+/**
+ * The comments on guided reviews' diffs, as the feedback text a Send carries:
+ * one section per guided review, under "Feedback on the guided review", with
+ * the review app's export of its comments (file path, line numbers and side,
+ * the comment, the commented lines).
+ */
+export function guideFeedback(records: readonly InboxAnnotationRecord[]): string {
+  const byMessage = new Map<string, { title: string; comments: CodeAnnotation[] }>();
+  for (const record of records) {
+    const comment = guideCommentOf(record);
+    if (!comment || !record.guide) continue;
+    const entry = byMessage.get(record.message_id) ?? { title: record.guide.title, comments: [] };
+    entry.comments.push(comment);
+    byMessage.set(record.message_id, entry);
+  }
+  return [...byMessage.values()]
+    .map(
+      ({ title, comments }) =>
+        `# ${GUIDE_FEEDBACK_TITLE}\n\nThe following comments are on the diffs of the guided review "${title}" you sent, one section per file. Line numbers are the file's own: (new) the changed file, (old) the original.\n\n${guideCommentSections(comments)}`.trim(),
+    )
+    .join('\n\n');
+}
+
 export const ATTACHMENT_FEEDBACK_HEADING = {
   title: 'Feedback on the attached files',
   intro: 'The following feedback is on the files you attached, one section per file and version.',
@@ -199,7 +284,8 @@ export const ATTACHMENT_FEEDBACK_HEADING = {
 /**
  * The feedback text a Send carries after the picks: Plannotator's export of
  * the annotations (the same entry renderer `exportAnnotations` uses), one
- * section per file and version. `texts` holds each version's text, keyed
+ * section per file and version, then the comments on guided reviews' diffs
+ * (`guideFeedback`). `texts` holds each version's text, keyed
  * `<attachment id>\0<version>`, so line numbers name the lines the person read.
  */
 export function attachmentFeedback(
@@ -211,6 +297,8 @@ export function attachmentFeedback(
   if (records.length === 0) return '';
   const groups = new Map<string, { annotations: Annotation[]; markdown?: string; blocks: Block[] }>();
   for (const record of records) {
+    // Comments on a guided review's diff go in their own section, after the files'.
+    if (record.guide) continue;
     const attachment = attachments.find((a) => a.id === record.attachment_id) ?? attachments.find((a) => a.path === record.path);
     if (!attachment) continue;
     const sent = record.version !== 'current';
@@ -230,5 +318,6 @@ export function attachmentFeedback(
     if (code.length > 0) group.blocks = [...group.blocks, ...code];
   }
   const entries = new Map([...groups].map(([label, group]) => [label, { annotations: group.annotations, globalAttachments: [], blocks: group.blocks }]));
-  return exportLinkedDocAnnotations(entries, ATTACHMENT_FEEDBACK_HEADING).trim();
+  const files = records.some((record) => !record.guide) ? exportLinkedDocAnnotations(entries, ATTACHMENT_FEEDBACK_HEADING).trim() : '';
+  return [files, guideFeedback(records)].filter(Boolean).join('\n\n');
 }

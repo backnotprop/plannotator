@@ -312,6 +312,105 @@ test('deleting a thread removes its guide blob only when no other record uses it
   expect(existsSync(join(world.dataDir, 'inbox', 'blobs', world.authored.guide.sha256 as string))).toBe(true);
 });
 
+test('a comment on the guide\'s diffs: a line and a range, listed beside the guide and in the reply\'s annotations, edited there, and sent as the review app\'s export', async () => {
+  const { claude, page } = world;
+  const guide = { ...FIXTURE_V1_LOCAL, guide: { ...FIXTURE_V1_LOCAL.guide, title: 'Comment on the diffs', reviewed: [false, false] } };
+  const sent = await claude.submitGuide({ project_path: world.ledger, snapshot: guide, thread: 'guide-comments', subject: 'A guided review to comment on.' });
+  await page.goto(`${world.url}#thread=${sent.thread_id}&guide=${sent.message_id}`);
+  const viewer = page.getByRole('region', { name: 'Guided review', exact: true });
+  const panel = viewer.locator('[data-guide-comments]');
+  await expect(panel).toContainText('No annotations yet');
+  const auth = viewer.locator('[data-guide-file-shell="src/auth.ts"]');
+  const added = (line: number) => auth.locator(`[data-line-type="change-addition"][data-column-number="${line}"]`);
+  await expect(added(2)).toBeVisible({ timeout: 30_000 });
+
+  // A range: drag across the new side's line numbers 2 to 3, as in the review app.
+  const from = (await added(2).boundingBox())!;
+  const to = (await added(3).boundingBox())!;
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 6 });
+  await page.mouse.up();
+  const composer = page.getByPlaceholder('Leave feedback...');
+  await expect(composer).toBeVisible();
+  await expect(page.getByText('Lines 2-3', { exact: true })).toBeVisible();
+  await composer.fill('Throw a typed error the caller can catch.');
+  await shot('4.3-guide-comment-composer');
+  await page.getByRole('button', { name: 'Add Comment' }).click();
+  await expect(panel).toHaveAttribute('data-guide-comments', '1');
+  await expect(auth.getByText('Throw a typed error the caller can catch.')).toBeVisible();
+
+  // A line on the other file: click its line number.
+  const pkg = viewer.locator('[data-guide-file-shell="package.json"]');
+  await pkg.hover();
+  await pkg.locator('[data-line-type="change-addition"][data-column-number="3"]').click();
+  await expect(composer).toBeVisible();
+  await composer.fill('Bump the minor, not the patch.');
+  await page.getByRole('button', { name: 'Add Comment' }).click();
+  await expect(panel).toHaveAttribute('data-guide-comments', '2');
+  await expect(panel).toContainText('auth.ts · lines 2-3');
+  await expect(panel).toContainText('package.json · line 3');
+  await expect(viewer.locator('[data-strip-chip]')).toHaveText('2 comments');
+  await shot('4.3-guide-comments-in-the-panel');
+
+  // Kept in the store with the thread's annotations, keyed to the message and the file.
+  const model = (await (await page.request.get(`${world.url}api/inbox/threads/${sent.thread_id}/attachments`)).json()) as { annotations: { message_id: string; path: string; guide: { side: string; line_start: number; line_end: number } }[] };
+  expect(model.annotations.map((r) => [r.message_id, r.path, r.guide.side, r.guide.line_start, r.guide.line_end])).toEqual([
+    [sent.message_id, 'src/auth.ts', 'new', 2, 3],
+    [sent.message_id, 'package.json', 'new', 3, 3],
+  ]);
+
+  // Reviewed ticks keep working beside the comments.
+  await viewer.getByRole('button', { name: 'Reviewed', exact: true }).first().click();
+  await expect(viewer.getByText(/1\/2 reviewed/)).toBeVisible();
+
+  // Back to the thread: the reply's chip counts them; edit one there.
+  await viewer.getByRole('button', { name: 'Back to the thread' }).click();
+  await expect(viewer).toHaveCount(0);
+  await page.getByRole('button', { name: 'Reply', exact: true }).click();
+  const chip = page.locator('[data-annotations-chip]');
+  await expect(chip).toHaveText('2 annotations');
+  await chip.click();
+  const pop = page.getByRole('dialog', { name: '2 annotations ride this reply' });
+  await expect(pop.locator('[data-annotation-row]').first()).toContainText('src/auth.ts (guided review)');
+  await expect(pop.locator('[data-annotation-row]').first()).toContainText('lines 2-3');
+  await pop.locator('[data-annotation-row]').nth(1).getByRole('button', { name: 'Edit' }).click();
+  await pop.getByRole('textbox', { name: 'Edit the comment' }).fill('Bump the minor version, not the patch.');
+  await pop.getByRole('button', { name: 'Save' }).click();
+  await expect(pop.locator('[data-annotation-row]').nth(1)).toContainText('Bump the minor version, not the patch.');
+  await shot('4.3-guide-comments-in-the-reply');
+  await page.keyboard.press('Escape');
+
+  // Send: the agent's wait_for_reply returns the comments as the review app's export.
+  const waiting = claude.waitForReply(sent.thread_id, 40);
+  await page.getByRole('textbox', { name: 'Reply to Claude Code' }).fill('Two notes on the diff.');
+  await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
+  const reply = await waiting;
+  expect(reply.status).toBe('replied');
+  const body = reply.reply.body as string;
+  expect(body.indexOf('Two notes on the diff.')).toBeLessThan(body.indexOf('# Feedback on the guided review'));
+  for (const part of [
+    '"Comment on the diffs"',
+    '## src/auth.ts',
+    '### Lines 2-3 (new)',
+    'Throw a typed error the caller can catch.',
+    '  if (!token) throw new Error("missing token");\n  const html = \'</script><!--\';',
+    '## package.json',
+    '### Line 3 (new)',
+    'Bump the minor version, not the patch.',
+    '  "version": "1.0.1"',
+  ]) {
+    expect(body).toContain(part);
+  }
+  // Sent with the reply: no longer waiting, and the guide's panel is empty again.
+  await expect(chip).toHaveCount(0);
+  const after = (await (await page.request.get(`${world.url}api/inbox/threads/${sent.thread_id}/attachments`)).json()) as { annotations: unknown[] };
+  expect(after.annotations).toHaveLength(0);
+  await page.locator('section.ib-pane [data-guide-card]').click();
+  await expect(page.getByRole('region', { name: 'Guided review', exact: true }).locator('[data-guide-comments]')).toHaveAttribute('data-guide-comments', '0');
+  await page.keyboard.press('Escape');
+});
+
 test('no page errors and no CSP refusals along the way', async () => {
   expect(world.errors).toEqual([]);
 });

@@ -72,7 +72,8 @@ import {
   type InboxAnnotationRecord,
   type InboxAttachment,
 } from "@plannotator/core/inbox-types";
-import { inboxBlobSizes, removeUnusedInboxBlobs } from "./attachments";
+import { parseDiffToFiles } from "@plannotator/core/diff-files";
+import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachments";
 import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
 import {
   ANNOTATIONS_FILE,
@@ -235,6 +236,8 @@ export class InboxStore {
   private readonly decisions = new Map<string, InboxDecision>();
   /** The person's annotations on attachments, by id. */
   private readonly annotations = new Map<string, InboxAnnotationRecord>();
+  /** A guided review's file paths by its snapshot's sha256 (a blob never changes). */
+  private readonly guideFileSets = new Map<string, ReadonlySet<string>>();
   private readonly tornFiles = new Set<string>();
   private readonly listeners = new Set<InboxListener>();
   private readonly now: () => Date;
@@ -1364,7 +1367,7 @@ export class InboxStore {
     const existing = this.annotations.get(id);
     // A draft's key is the file's path and the version, so an annotation
     // made through one attachment of a file edits from another of the same file.
-    if (existing && (existing.path !== hit.attachment.path || existing.version !== input.version || existing.thread_id !== hit.message.thread_id)) {
+    if (existing && (existing.guide || existing.path !== hit.attachment.path || existing.version !== input.version || existing.thread_id !== hit.message.thread_id)) {
       throw new InboxError("validation_error", "annotation.id: already used on another file or version.", { field: "annotation.id" });
     }
     if (existing && (existing.sent_reply_id !== null || existing.removed_at !== null)) {
@@ -1387,6 +1390,89 @@ export class InboxStore {
     };
     this.appendAnnotation(record, at);
     return record;
+  }
+
+  /**
+   * Save a comment on the diff of the guided review a message carries (a new
+   * one, or an edit of one still waiting): the review app's line comment
+   * (`CodeAnnotation`) on a file of the guide's patch, one side, a line range.
+   * Its key is the message and the file; `version` is the guide snapshot's
+   * sha256 and `attachment_id` is empty. Sent with the reply like an
+   * attachment's annotation, as the review app's export.
+   */
+  saveGuideAnnotation(messageId: string, annotation: unknown): InboxAnnotationRecord {
+    const message = this.messages.get(messageId);
+    if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
+    if (!message.guide) throw new InboxError("guide_not_found", "This message carries no guided review.");
+    if (!annotation || typeof annotation !== "object" || Array.isArray(annotation)) {
+      throw new InboxError("validation_error", "annotation: an object.", { field: "annotation" });
+    }
+    const fields = annotation as Record<string, unknown>;
+    const id = fields.id;
+    if (!isInboxAnnotationId(id)) throw new InboxError("validation_error", "annotation.id: a short id.", { field: "annotation.id" });
+    const file = fields.filePath;
+    if (typeof file !== "string" || file === "") throw new InboxError("validation_error", "annotation.filePath: a file of the guide's patch.", { field: "annotation.filePath" });
+    if (!this.guideFiles(message.guide.sha256).has(file)) {
+      throw new InboxError("validation_error", `annotation.filePath: ${file} is not in the guided review's patch.`, { field: "annotation.filePath" });
+    }
+    const side = fields.side;
+    if (side !== "old" && side !== "new") throw new InboxError("validation_error", 'annotation.side: "old" or "new".', { field: "annotation.side" });
+    const start = fields.lineStart;
+    const end = fields.lineEnd;
+    if (!Number.isInteger(start) || !Number.isInteger(end) || (start as number) < 1 || (end as number) < (start as number)) {
+      throw new InboxError("validation_error", "annotation.lineStart / lineEnd: line numbers, start first.", { field: "annotation.lineStart" });
+    }
+    if (fields.scope !== undefined && fields.scope !== "line") {
+      throw new InboxError("validation_error", 'annotation.scope: a guided-review comment is on lines ("line").', { field: "annotation.scope" });
+    }
+    if (fields.text !== undefined && typeof fields.text !== "string") throw new InboxError("validation_error", "annotation.text: a string.", { field: "annotation.text" });
+    if (this.isResolved(message.thread_id)) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to annotate.");
+    const existing = this.annotations.get(id);
+    if (existing && (!existing.guide || existing.message_id !== message.id || existing.path !== file)) {
+      throw new InboxError("validation_error", "annotation.id: already used on another file.", { field: "annotation.id" });
+    }
+    if (existing && (existing.sent_reply_id !== null || existing.removed_at !== null)) {
+      throw new InboxError("annotation_closed", "This annotation was already sent or removed.");
+    }
+    const at = this.stamp();
+    const record: InboxAnnotationRecord = {
+      id,
+      project_id: message.project_id,
+      thread_id: message.thread_id,
+      message_id: message.id,
+      attachment_id: "",
+      path: file,
+      version: message.guide.sha256,
+      guide: { title: message.guide.title, file, side, line_start: start as number, line_end: end as number },
+      annotation: fields,
+      created_at: existing?.created_at ?? at,
+      updated_at: at,
+      removed_at: null,
+      sent_reply_id: null,
+    };
+    this.appendAnnotation(record, at);
+    return record;
+  }
+
+  /** The files a guided review's patch names (new and old paths), read from its snapshot blob once. */
+  private guideFiles(sha256: string): ReadonlySet<string> {
+    const known = this.guideFileSets.get(sha256);
+    if (known) return known;
+    const files = new Set<string>();
+    try {
+      const snapshot = JSON.parse(readFileSync(inboxBlobPath(this.dir, sha256), "utf8")) as { review?: { rawPatch?: unknown } };
+      const patch = snapshot.review?.rawPatch;
+      if (typeof patch === "string") {
+        for (const file of parseDiffToFiles(patch)) {
+          files.add(file.path);
+          if (file.oldPath) files.add(file.oldPath);
+        }
+      }
+    } catch {
+      throw new InboxError("guide_not_found", "The guided review is missing from the store.");
+    }
+    this.guideFileSets.set(sha256, files);
+    return files;
   }
 
   /** Remove an annotation still waiting for a Send. Removing it again changes nothing. */

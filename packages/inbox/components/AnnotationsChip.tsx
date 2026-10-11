@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
-import { annotationOf, annotationQuote, annotationTag } from '../attachments';
+import { annotationOf, recordQuote, recordTag } from '../attachments';
 import { plural } from '../format';
 import { Icon } from '../icons';
 
@@ -50,7 +50,7 @@ export function AnnotationsChip({ records, attachments, onEdit, onRemove, onOpen
   }, [records.length]);
 
   const name = (record: InboxAnnotationRecord) =>
-    (attachments.find((a) => a.id === record.attachment_id) ?? attachments.find((a) => a.path === record.path))?.name ?? record.path;
+    record.guide ? record.path : (attachments.find((a) => a.id === record.attachment_id) ?? attachments.find((a) => a.path === record.path))?.name ?? record.path;
 
   const run = async (work: () => Promise<void>) => {
     setBusy(true);
@@ -87,8 +87,8 @@ export function AnnotationsChip({ records, attachments, onEdit, onRemove, onOpen
           </div>
           {records.map((record) => {
             const annotation = annotationOf(record);
-            const tag = annotationTag(annotation);
-            const quote = annotationQuote(annotation);
+            const tag = recordTag(record);
+            const quote = recordQuote(record);
             const isEditing = editing?.id === record.id;
             return (
               <div className={`ib-arow${isEditing ? ' ib-ed' : ''}`} key={record.id} data-annotation-row={record.id}>
@@ -102,7 +102,7 @@ export function AnnotationsChip({ records, attachments, onEdit, onRemove, onOpen
                     }}
                   >
                     {name(record)}
-                    {record.version !== 'current' ? ' (sent)' : ''}
+                    {record.guide ? ' (guided review)' : record.version !== 'current' ? ' (sent)' : ''}
                   </button>
                   {tag && <span className="ib-mini">{tag}</span>}
                   {!isEditing && (

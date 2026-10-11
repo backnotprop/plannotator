@@ -310,6 +310,17 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       return json({ annotation: record });
     }
 
+    // A comment on the diff of the guided review a message carries: the review
+    // app's line comment, kept with the attachments' annotations (removed by
+    // the same remove route, sent with the reply the same way).
+    const guideAnnotation = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/guide\/annotations$/.exec(path);
+    if (guideAnnotation) {
+      if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+      const body = await guardedBody(req);
+      if (body instanceof Response) return body;
+      return json({ annotation: store.saveGuideAnnotation(guideAnnotation[1]!, body.annotation) });
+    }
+
     const remove = /^\/api\/inbox\/annotations\/([A-Za-z0-9_.:-]+)\/remove$/.exec(path);
     if (remove) {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
