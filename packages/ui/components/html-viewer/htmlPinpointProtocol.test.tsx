@@ -1486,6 +1486,7 @@ describe.if(hasDom)('Interact/Annotate mode on static (srcdoc) surfaces', () => 
     annotateModeActive?: boolean;
     onAnnotateModeExit?: () => void;
     onAnnotateModeToggle?: () => void;
+    onStep?: (dir: 1 | -1) => void;
   } = {}) {
     if (!htmlViewerModule) throw new Error('DOM test environment is not registered');
     const HtmlViewer = htmlViewerModule.HtmlViewer;
@@ -1506,6 +1507,7 @@ describe.if(hasDom)('Interact/Annotate mode on static (srcdoc) surfaces', () => 
           annotateModeActive={options.annotateModeActive}
           onAnnotateModeExit={options.onAnnotateModeExit}
           onAnnotateModeToggle={options.onAnnotateModeToggle}
+          onStep={options.onStep}
         />,
       );
     });
@@ -1585,6 +1587,22 @@ describe.if(hasDom)('Interact/Annotate mode on static (srcdoc) surfaces', () => 
     });
     await post({ type: 'plannotator-bridge-annotate-toggle' });
     expect(toggles).toBe(1);
+  });
+
+  test('a bridge step message (a plain ] or [ in the page) reaches the host only while armed, and only as 1 or -1', async () => {
+    // The Inbox steps through a thread's attachments on it; in Interact the page owns its keys.
+    const armed: number[] = [];
+    const { post } = await mountModeViewer({ annotateModeActive: true, onStep: (dir) => armed.push(dir) });
+    await post({ type: 'plannotator-bridge-step', dir: 1 });
+    await post({ type: 'plannotator-bridge-step', dir: -1 });
+    await post({ type: 'plannotator-bridge-step', dir: 2 });
+    await post({ type: 'plannotator-bridge-step', dir: '1' });
+    expect(armed).toEqual([1, -1]);
+
+    const interact: number[] = [];
+    const second = await mountModeViewer({ annotateModeActive: false, onStep: (dir) => interact.push(dir) });
+    await second.post({ type: 'plannotator-bridge-step', dir: 1 });
+    expect(interact).toEqual([]);
   });
 });
 

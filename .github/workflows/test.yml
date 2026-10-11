@@ -132,6 +132,7 @@ jobs:
           packages/inbox/threadFolding.test.tsx
           packages/inbox/projectList.test.tsx
           packages/inbox/sidebarQuiet.test.tsx
+          packages/inbox/attachmentStepping.test.tsx
           packages/ui/components/MenuVersionSection.test.tsx
           packages/ui/components/blocks/QuestionBlock.test.tsx
           packages/ui/components/blocks/QuestionBlock.host.test.tsx

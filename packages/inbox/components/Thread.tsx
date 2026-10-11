@@ -10,7 +10,8 @@ import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, attachme
 import { InboxApiError, inboxApi, type AttachmentsModel } from '../api';
 import { annotationOf, attachmentFeedback } from '../attachments';
 import { AttachmentTiles } from './AttachmentTiles';
-import { AttachmentPane } from './AttachmentPane';
+import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
+import { attachmentSequence } from '../stepping';
 import { AnnotationsChip } from './AnnotationsChip';
 import { agentName, clockTime, dayWords, plural } from '../format';
 import { answerWords, foldSnippet, holdingsOf, isDelivered, lookBoundary, newSinceLook, planFolds, snippetText, type FoldSnippet, type Holding } from '../folding';
@@ -241,7 +242,8 @@ export interface ThreadPaneProps {
   onOpenDecisionPage: (decision: InboxDecision) => void;
   /** The attachment open beside the thread (`#…&file=att_…`), its version, and an annotation to show. */
   file: { id: string; version: 'current' | 'sent'; focus: string | null } | null;
-  onOpenFile: (file: { id: string; version: 'current' | 'sent'; focus: string | null } | null) => void;
+  /** `replace`: swap the history entry (stepping between files), so Back returns to the thread in one press. */
+  onOpenFile: (file: { id: string; version: 'current' | 'sent'; focus: string | null } | null, options?: { replace?: boolean }) => void;
   /** Open the guided review a message carries (the record's 4.2). */
   onOpenGuide: (messageId: string) => void;
   /**
@@ -252,6 +254,24 @@ export interface ThreadPaneProps {
    * the first thread it is given.
    */
   lookSeq?: number | null;
+}
+
+/**
+ * A narrow window (a phone, under 768 px, where Plannotator's annotation panel
+ * becomes an overlay): the open file takes the whole window.
+ */
+function useNarrowWindow(): boolean {
+  const query = '(max-width: 767px)';
+  const [narrow, setNarrow] = useState(() => typeof matchMedia === 'function' && matchMedia(query).matches);
+  useEffect(() => {
+    if (typeof matchMedia !== 'function') return;
+    const list = matchMedia(query);
+    const onChange = () => setNarrow(list.matches);
+    onChange();
+    list.addEventListener?.('change', onChange);
+    return () => list.removeEventListener?.('change', onChange);
+  }, []);
+  return narrow;
 }
 
 /** The thread's attachments as they are now and the annotations waiting for a Send, kept fresh. */
@@ -483,16 +503,26 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   /** Something here takes annotations: an attached file, or a guided review's diffs. */
   const takesAnnotations = attachments.length > 0 || records.length > 0 || thread.messages.some((m) => m.guide);
   const [full, setFull] = useState(false);
+  /** A narrow window (a phone): the open file is always full screen. */
+  const phone = useNarrowWindow();
   /** Bumped when the person opens a file, so focus moves into its pane. */
   const [paneFocus, setPaneFocus] = useState(0);
+  const paneRef = useRef<AttachmentPaneHandle>(null);
+  /** Every attachment of the thread in thread order: what the pane steps through. */
+  const steps = useMemo(() => attachmentSequence(thread.messages, attachments), [thread.messages, attachments]);
   const openFile = (attachment: Pick<InboxAttachmentState, 'id' | 'kind'>, version: 'current' | 'sent' = 'current', focus: string | null = null) => {
     setFull(attachment.kind === 'html');
     onOpenFile({ id: attachment.id, version, focus });
   };
-  /** A tile, or a link in a message: the file as it is now, focus in its pane. */
-  const openFromMessage = (attachment: Pick<InboxAttachmentState, 'id' | 'kind'>) => {
-    openFile(attachment);
-    setPaneFocus((n) => n + 1);
+  /** A tile, or a link in a message: the file as it is now, focus in its pane (a typed comment in the open file asks first). */
+  const openFromMessage = (attachment: Pick<InboxAttachmentState, 'id' | 'kind'> & { name?: string }) => {
+    const go = () => {
+      openFile(attachment);
+      setPaneFocus((n) => n + 1);
+    };
+    const pane = paneRef.current;
+    if (pane && file && file.id !== attachment.id) pane.leave(attachment.name ?? attachments.find((a) => a.id === attachment.id)?.name ?? 'that file', go);
+    else go();
   };
   const openRecord = (record: InboxAnnotationRecord) => {
     // A comment on a guided review's diff: open that guide.
@@ -501,7 +531,11 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       return;
     }
     const attachment = attachments.find((a) => a.id === record.attachment_id);
-    if (attachment) openFile(attachment, record.version === 'current' ? 'current' : 'sent', record.id);
+    if (!attachment) return;
+    const go = () => openFile(attachment, record.version === 'current' ? 'current' : 'sent', record.id);
+    // Another file than the one open: a typed comment in the open file asks first.
+    if (paneRef.current && file && file.id !== attachment.id) paneRef.current.leave(attachment.name, go);
+    else go();
   };
   const countsByPath = useMemo(() => {
     const counts = new Map<string, number>();
@@ -1179,6 +1213,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                     attachments={attachments.filter((a) => a.message_id === message.id)}
                     annotationCounts={countsByPath}
                     onOpen={openFromMessage}
+                    openId={file && !full && !phone ? file.id : null}
                   />
                 )}
                 {message.guide && <GuideCard guide={message.guide} onOpen={() => onOpenGuide(message.id)} />}
@@ -1363,6 +1398,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     </section>
     {openAttachment && (
       <AttachmentPane
+        ref={paneRef}
         attachment={openAttachment}
         attachments={attachments}
         // The files' annotations only: a guided-review comment is on the guide's diff, not on a file.
@@ -1373,14 +1409,18 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         repo={thread.project.repo ?? null}
         version={file!.version}
         onVersion={(version) => onOpenFile({ id: openAttachment.id, version, focus: null })}
-        full={full}
+        full={full || phone}
+        phone={phone}
+        steps={steps}
+        // A step keeps the frame the person is in, and replaces the route.
+        onStep={(attachmentId, version) => onOpenFile({ id: attachmentId, version, focus: null }, { replace: true })}
         onToggleFull={() => setFull((v) => !v)}
         focusId={file!.focus}
         focusRequest={paneFocus}
         readOnly={resolved}
         onSaved={saveRecord}
         onRemoved={dropRecord}
-        onOpenAt={(attachmentId, version, focus) => onOpenFile({ id: attachmentId, version, focus })}
+        onOpenAt={(attachmentId, version, focus) => onOpenFile({ id: attachmentId, version, focus }, { replace: true })}
         onClose={() => {
           setFull(false);
           onOpenFile(null);

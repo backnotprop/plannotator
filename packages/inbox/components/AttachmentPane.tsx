@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { inboxAttachmentKindLabel, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachmentState, type InboxProjectRepo } from '@plannotator/core/inbox-types';
 import { CodeFileView } from '@plannotator/ui/components/CodeFilePopout';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
@@ -25,6 +25,8 @@ import {
 import { clockTime, formatBytes } from '../format';
 import { useRefRepo } from '../links';
 import { ImageAttachmentView } from './ImageAttachmentView';
+import { AttachmentStepper, type StepSource } from './AttachmentStepper';
+import { FIRST_NOTE, LAST_NOTE, stepAnnouncement, stepKeyIntent, type AttachmentStep } from '../stepping';
 import { Icon } from '../icons';
 
 export interface AttachmentPaneProps {
@@ -58,6 +60,62 @@ export interface AttachmentPaneProps {
    * screen is not left behind the control that opened it.
    */
   focusRequest?: number;
+  /**
+   * Every attachment of the thread in thread order (stepping.ts). With two or
+   * more the bar under the file steps through them; one file keeps today's pane.
+   */
+  steps?: readonly AttachmentStep[];
+  /**
+   * Open another file of the thread in this pane, in the frame it is in now
+   * (full screen stays full screen). The route is replaced, not pushed, so
+   * Back returns to the thread in one press.
+   */
+  onStep?: (attachmentId: string, version: 'current' | 'sent') => void;
+  /** A narrow window (a phone): Previous / Next buttons, and a swipe on a fitted image. */
+  phone?: boolean;
+}
+
+/**
+ * What the thread asks of an open pane: leave it (open another file, or close
+ * it) once nothing unsaved would be lost. A typed comment raises the question
+ * row first; `go` runs after "Save it and go on" or "Discard".
+ */
+export interface AttachmentPaneHandle {
+  leave: (to: string | null, go: () => void) => void;
+}
+
+/** A composer in the open file with words (or a drawing) not yet saved: its textarea. */
+export function unsavedComposer(pane: HTMLElement | null): HTMLTextAreaElement | null {
+  const typed = (area: HTMLTextAreaElement) => area.value.trim() !== '';
+  // Plannotator's comment popover (text, HTML pinpoint, code lines) draws in a portal on the page.
+  for (const area of document.querySelectorAll<HTMLTextAreaElement>('[data-comment-popover] textarea')) {
+    if (typed(area)) return area;
+  }
+  if (!pane) return null;
+  for (const area of pane.querySelectorAll<HTMLTextAreaElement>('[data-diagram-composer] textarea, [data-image-composer] textarea')) {
+    if (typed(area)) return area;
+  }
+  // An image drawn on but not yet commented.
+  const drawn = pane.querySelector<HTMLElement>('[data-image-composer] .ib-markup');
+  if (drawn) return pane.querySelector<HTMLTextAreaElement>('[data-image-composer] textarea');
+  return null;
+}
+
+/** The element that scrolls the open file (a document, code, or an image at its own size). */
+function scrollerOf(pane: HTMLElement | null): HTMLElement | null {
+  if (!pane) return null;
+  const doc = pane.querySelector<HTMLElement>('.ib-docscroll');
+  if (doc) return doc;
+  const code = pane.querySelector('.ib-codeview diffs-container')?.shadowRoot?.querySelector<HTMLElement>('[data-code]');
+  if (code) return code;
+  return pane.querySelector<HTMLElement>('.ib-imgstage');
+}
+
+/** What the pane keeps per file until it closes: the version chosen, where it was read to, and the image's size. */
+interface FileMemory {
+  version?: 'current' | 'sent';
+  scroll?: { top: number; left: number };
+  fit?: 'fit' | 'actual';
 }
 
 const recordKey = (path: string, version: string) => (version === 'current' ? path : `${path}#${version.slice(0, 12)}`);
@@ -67,7 +125,7 @@ const recordKey = (path: string, version: string) => (version === 'current' ? pa
  * diagrams and code (read-only, one highlighted code block), full screen for
  * HTML, with Plannotator's viewers and its annotation panel. The changed line offers the version the agent sent.
  */
-export function AttachmentPane(props: AttachmentPaneProps) {
+export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPaneProps>(function AttachmentPane(props, ref) {
   const { attachment, version } = props;
   const [view, setView] = useState<AttachmentView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -119,6 +177,170 @@ export function AttachmentPane(props: AttachmentPaneProps) {
   useEffect(() => {
     if (props.focusRequest) sectionRef.current?.focus({ preventScroll: true });
   }, [props.focusRequest]);
+
+  // ── Stepping (design record "inbox-attachment-stepping", v2) ──────────────
+  const steps = props.steps ?? [];
+  const index = steps.findIndex((s) => s.attachment.id === attachment.id);
+  const multi = steps.length > 1 && index >= 0;
+  const phone = props.phone === true;
+  const [menuOpen, setMenuOpen] = useState(false);
+  /** Phones: the annotations panel is a sheet the header's button opens (Plannotator's panel is an overlay below 768 px). */
+  const [sheet, setSheet] = useState(false);
+  const [endNote, setEndNote] = useState<string | null>(null);
+  const endTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [announced, setAnnounced] = useState('');
+  const announce = useCallback((text: string) => {
+    setAnnounced('');
+    setTimeout(() => setAnnounced(text), 30);
+  }, []);
+  useEffect(
+    () => () => {
+      if (endTimer.current) clearTimeout(endTimer.current);
+    },
+    [],
+  );
+  /** The question row: a typed comment would be lost by what the person just did. */
+  const [guard, setGuard] = useState<{ to: string | null; go: () => void } | null>(null);
+  const guardRef = useRef<HTMLDivElement>(null);
+  const memory = useRef(new Map<string, FileMemory>());
+  const remember = (id: string, patch: FileMemory) => memory.current.set(id, { ...memory.current.get(id), ...patch });
+  /** How the last step was asked for, so focus lands in the right place once the next file is in. */
+  const pendingStep = useRef<StepSource | null>(null);
+
+  const rememberPlace = () => {
+    const scroller = scrollerOf(sectionRef.current);
+    if (scroller) remember(attachment.id, { scroll: { top: scroller.scrollTop, left: scroller.scrollLeft } });
+  };
+  /** Leave the open file for `to` (a name), or close it (null), unless a typed comment would be lost. */
+  const leave = (to: string | null, go: () => void) => {
+    if (!props.readOnly && unsavedComposer(sectionRef.current)) {
+      setMenuOpen(false);
+      setGuard({ to, go });
+      return;
+    }
+    rememberPlace();
+    go();
+  };
+  const leaveRef = useRef(leave);
+  leaveRef.current = leave;
+  useImperativeHandle(ref, () => ({ leave: (to, go) => leaveRef.current(to, go) }), []);
+
+  const showEnd = (text: string) => {
+    setEndNote(text);
+    announce(text);
+    if (endTimer.current) clearTimeout(endTimer.current);
+    endTimer.current = setTimeout(() => setEndNote(null), 1800);
+  };
+  const goTo = (target: number, source: StepSource) => {
+    const next = steps[target];
+    if (!next || target === index) {
+      setMenuOpen(false);
+      return;
+    }
+    leave(next.attachment.name, () => {
+      pendingStep.current = source;
+      setMenuOpen(false);
+      props.onStep?.(next.attachment.id, memory.current.get(next.attachment.id)?.version ?? 'current');
+    });
+  };
+  const step = (dir: 1 | -1, source: StepSource) => {
+    if (!multi) return;
+    const target = index + dir;
+    if (target < 0 || target >= steps.length) {
+      showEnd(dir > 0 ? LAST_NOTE : FIRST_NOTE);
+      return;
+    }
+    goTo(target, source);
+  };
+  const stepRef = useRef(step);
+  stepRef.current = step;
+
+  // Each file opens armed (Annotate) and without the last file's note; a step is announced once.
+  const stepsRef = useRef(steps);
+  stepsRef.current = steps;
+  useEffect(() => {
+    setArmed(true);
+    setEndNote(null);
+    setGuard(null);
+    setSheet(false);
+    const source = pendingStep.current;
+    pendingStep.current = null;
+    if (!source) return;
+    const at = stepsRef.current.findIndex((s) => s.attachment.id === attachment.id);
+    if (at >= 0) announce(stepAnnouncement(stepsRef.current, at));
+    // A key pressed in the document (or the HTML page) leaves focus on the pane; a bar button keeps it.
+    if (source === 'key') sectionRef.current?.focus({ preventScroll: true });
+  }, [attachment.id, announce]);
+
+  // `]` `[` `→` `←` (stepping.ts has the rules for when they stand down).
+  const full = props.full;
+  const blocked = guard !== null || menuOpen;
+  useEffect(() => {
+    if (!multi) return;
+    const onKey = (event: KeyboardEvent) => {
+      const pane = sectionRef.current;
+      // An image at its own size that overflows scrolls with the arrows.
+      if (event.key.startsWith('Arrow') && pane?.querySelector('[data-claims-arrows="true"]')) return;
+      const dir = stepKeyIntent(event, { full, pane, blocked });
+      if (dir === null) return;
+      event.preventDefault();
+      stepRef.current(dir, 'key');
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [multi, full, blocked]);
+
+  // The question row takes focus on its first choice.
+  useEffect(() => {
+    if (guard) guardRef.current?.querySelector<HTMLButtonElement>('[data-guard-save]')?.focus();
+  }, [guard]);
+  const keepWriting = () => {
+    setGuard(null);
+    const area = unsavedComposer(sectionRef.current);
+    if (area) {
+      area.focus();
+      area.setSelectionRange(area.value.length, area.value.length);
+    }
+  };
+  const saveAndGo = () => {
+    const pending = guard;
+    const area = unsavedComposer(sectionRef.current);
+    // Every composer saves on Cmd/Ctrl+Enter (the comment popover, the diagram's, the image's own).
+    area?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', metaKey: true, ctrlKey: true, bubbles: true, cancelable: true }));
+    setGuard(null);
+    if (pending) {
+      rememberPlace();
+      pending.go();
+    }
+  };
+  const discardAndGo = () => {
+    const pending = guard;
+    setGuard(null);
+    if (pending) {
+      rememberPlace();
+      pending.go();
+    }
+  };
+
+  // Back on a file read before in this pane: where it was read to.
+  useEffect(() => {
+    const saved = memory.current.get(attachment.id)?.scroll;
+    if (!saved || (readsText && !view)) return;
+    let frames = 0;
+    let id = 0;
+    const apply = () => {
+      const scroller = scrollerOf(sectionRef.current);
+      if (scroller && scroller.scrollHeight - scroller.clientHeight >= saved.top) {
+        scroller.scrollTop = saved.top;
+        scroller.scrollLeft = saved.left;
+        return;
+      }
+      if (++frames < 30) id = requestAnimationFrame(apply);
+      else if (scroller) scroller.scrollTop = saved.top;
+    };
+    id = requestAnimationFrame(apply);
+    return () => cancelAnimationFrame(id);
+  }, [attachment.id, view, readsText]);
 
   const annotationVersion = view?.version ?? (effectiveVersion === 'sent' ? attachment.sent_sha256 : 'current');
   const isHtml = kind === 'html';
@@ -217,8 +439,17 @@ export function AttachmentPane(props: AttachmentPaneProps) {
     const record = props.records.find((r) => r.id === id);
     if (!record) return;
     if (recordKey(record.path, record.version) === currentKey) setSelectedId(id);
-    else props.onOpenAt(record.attachment_id, record.version === 'current' ? 'current' : 'sent', id);
+    else {
+      const owner = props.attachments.find((a) => a.id === record.attachment_id);
+      leave(owner?.name ?? 'that file', () => props.onOpenAt(record.attachment_id, record.version === 'current' ? 'current' : 'sent', id));
+    }
   };
+
+  const chooseVersion = (next: 'current' | 'sent') => {
+    remember(attachment.id, { version: next });
+    props.onVersion(next);
+  };
+  const close = () => leave(null, props.onClose);
 
   const sentAt = clockTime(attachment.sent_at);
   let line: React.ReactNode = null;
@@ -232,7 +463,7 @@ export function AttachmentPane(props: AttachmentPaneProps) {
     line = (
       <>
         The version {props.agent} sent at {sentAt}.
-        <button type="button" className="ib-vlink" onClick={() => props.onVersion('current')}>
+        <button type="button" className="ib-vlink" onClick={() => chooseVersion('current')}>
           Open the file as it is now
         </button>
       </>
@@ -242,12 +473,18 @@ export function AttachmentPane(props: AttachmentPaneProps) {
     line = (
       <>
         Changed since {props.agent} sent it at {sentAt}.{current ? ` Edited ${clockTime(current.mtime)}.` : ''}
-        <button type="button" className="ib-vlink" onClick={() => props.onVersion('sent')}>
+        <button type="button" className="ib-vlink" onClick={() => chooseVersion('sent')}>
           Open the version it sent
         </button>
       </>
     );
   }
+
+  const annotationCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const record of props.records) counts.set(record.path, (counts.get(record.path) ?? 0) + 1);
+    return counts;
+  }, [props.records]);
 
   const chipText = [
     props.strip.picks > 0 ? `${props.strip.picks} pick${props.strip.picks === 1 ? '' : 's'}` : null,
@@ -260,13 +497,18 @@ export function AttachmentPane(props: AttachmentPaneProps) {
     <section
       ref={sectionRef}
       tabIndex={-1}
-      className={`ib-view${props.full ? ' ib-full' : ''}`}
-      aria-label={attachment.name}
+      className={`ib-view${props.full ? ' ib-full' : ''}${phone ? ' ib-phone' : ''}`}
+      aria-label={multi ? `${attachment.name}, attachment ${index + 1} of ${steps.length}` : attachment.name}
       data-attachment-pane={attachment.id}
       data-version={effectiveVersion}
     >
       <div className="ib-vhead">
-        <span className="ib-fn">{attachment.name}</span>
+        {/* With more than one file the bar under the file names it (a phone's bar has no room for the name). */}
+        {(!multi || phone) && (
+          <span className="ib-fn" data-header-name="">
+            {attachment.name}
+          </span>
+        )}
         <span className="ib-from">
           from {props.agent} in {props.projectName}
         </span>
@@ -282,11 +524,26 @@ export function AttachmentPane(props: AttachmentPaneProps) {
           <Icon name="download" size={14} />
           Download
         </a>
-        <button type="button" className="ib-btn ib-sm" onClick={props.onToggleFull}>
-          <Icon name={props.full ? 'collapse' : 'expand'} size={14} />
-          {props.full ? 'Exit full screen' : 'Full screen'}
-        </button>
-        <button type="button" className="ib-iconbtn" onClick={props.onClose} aria-label={`Close ${attachment.name}`} title="Close">
+        {phone && (
+          <button
+            type="button"
+            className="ib-iconbtn"
+            onClick={() => setSheet((v) => !v)}
+            aria-label={`Annotations, ${annotations.length}`}
+            aria-expanded={sheet}
+            title="Annotations"
+            data-annotations-sheet=""
+          >
+            <Icon name="comment" />
+          </button>
+        )}
+        {!phone && (
+          <button type="button" className="ib-btn ib-sm" onClick={props.onToggleFull}>
+            <Icon name={props.full ? 'collapse' : 'expand'} size={14} />
+            {props.full ? 'Exit full screen' : 'Full screen'}
+          </button>
+        )}
+        <button type="button" className="ib-iconbtn" onClick={close} aria-label={`Close ${attachment.name}`} title="Close">
           <Icon name="x" />
         </button>
       </div>
@@ -320,6 +577,8 @@ export function AttachmentPane(props: AttachmentPaneProps) {
               annotateModeActive={armed}
               onAnnotateModeExit={() => setArmed(false)}
               onAnnotateModeToggle={() => setArmed((v) => !v)}
+              // A plain ] or [ pressed in the page while armed (the bridge forwards nothing in Interact).
+              onStep={multi ? (dir) => armed && stepRef.current(dir, 'key') : undefined}
               onOpenLink={(href) => {
                 if (/^https?:\/\//i.test(href)) window.open(href, '_blank', 'noopener,noreferrer');
               }}
@@ -346,6 +605,8 @@ export function AttachmentPane(props: AttachmentPaneProps) {
           )}
           {isImage && (
             <ImageAttachmentView
+              // Its own comment box per file: typed text never carries over to the next image.
+              key={attachment.id}
               attachment={attachment}
               version={effectiveVersion}
               annotations={annotations}
@@ -353,6 +614,9 @@ export function AttachmentPane(props: AttachmentPaneProps) {
               readOnly={props.readOnly}
               onSave={save}
               onError={setError}
+              initialFit={memory.current.get(attachment.id)?.fit}
+              onFitChange={(fit) => remember(attachment.id, { fit })}
+              onSwipe={multi ? (dir) => step(dir, 'key') : undefined}
             />
           )}
           {isDownload && (
@@ -432,29 +696,12 @@ export function AttachmentPane(props: AttachmentPaneProps) {
               />
             </div>
           )}
-          {props.full && (
-            <div className="ib-vstrip">
-              <span className="ib-l">Reply to {props.agent}</span>
-              <span className="ib-rchip" data-strip-chip="">
-                {chipText}
-              </span>
-              <span className="ib-l">ride your next Send.</span>
-              <span className="ib-sp" />
-              <button type="button" className="ib-btn" onClick={props.strip.onBack}>
-                <Icon name="back" size={15} />
-                Back to the thread
-              </button>
-              <button type="button" className="ib-btn ib-pri" onClick={props.strip.onWriteReply}>
-                <Icon name="reply" size={15} />
-                Write the reply
-              </button>
-            </div>
-          )}
         </div>
         <div className="ib-apanel">
           <AnnotationPanel
             emptyHint={isImage ? 'Comment below the image' : isCode ? 'Click a line to comment' : undefined}
-            isOpen
+            isOpen={!phone || sheet}
+            onClose={phone ? () => setSheet(false) : undefined}
             annotations={annotations}
             blocks={blocks}
             onSelect={setSelectedId}
@@ -473,6 +720,92 @@ export function AttachmentPane(props: AttachmentPaneProps) {
           />
         </div>
       </div>
+      {guard ? (
+        <div
+          className="ib-stepguard"
+          role="group"
+          aria-labelledby="ib-guard-text"
+          ref={guardRef}
+          data-step-guard=""
+          onKeyDown={(event) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            event.stopPropagation();
+            keepWriting();
+          }}
+        >
+          <Icon name="comment" size={15} />
+          <span className="ib-gt" id="ib-guard-text">
+            Your comment on <b>{attachment.name}</b> is not saved yet.
+          </span>
+          <button type="button" className="ib-btn ib-sm ib-pri" onClick={saveAndGo} data-guard-save="">
+            {guard.to === null ? 'Save it and close' : 'Save it and go on'}
+          </button>
+          <button type="button" className="ib-btn ib-sm" onClick={discardAndGo} data-guard-discard="">
+            {guard.to === null ? 'Discard and close the file' : `Discard and go to ${guard.to}`}
+          </button>
+          <button type="button" className="ib-btn ib-sm ib-ghost" onClick={keepWriting} data-guard-keep="">
+            Keep writing
+          </button>
+        </div>
+      ) : (
+        <div />
+      )}
+      {props.full || multi || phone ? (
+        <div className={`ib-vfoot${phone ? ' ib-vfoot-phone' : ''}`} data-view-foot="">
+          {multi && (
+            <AttachmentStepper
+              steps={steps}
+              index={index}
+              phone={phone}
+              menuOpen={menuOpen}
+              onMenuOpenChange={setMenuOpen}
+              onStep={step}
+              onGo={(target) => goTo(target, 'menu')}
+              endNote={endNote}
+              annotationCounts={annotationCounts}
+            />
+          )}
+          {phone ? (
+            <div className="ib-vfoot-row" data-view-strip="">
+              <span className="ib-rchip" data-strip-chip="">
+                {chipText}
+              </span>
+              <span className="ib-l ib-sp">ride your next Send</span>
+              <button type="button" className="ib-btn ib-pri ib-sm" onClick={() => leave(null, props.strip.onWriteReply)}>
+                <Icon name="reply" size={14} />
+                Write the reply
+              </button>
+            </div>
+          ) : (
+            <>
+              <span className="ib-sp" />
+              {props.full && (
+                <span className="ib-vreply" data-view-strip="">
+                  <span className="ib-l">Reply to {props.agent}</span>
+                  <span className="ib-rchip" data-strip-chip="">
+                    {chipText}
+                  </span>
+                  <span className="ib-l">ride your next Send.</span>
+                  <button type="button" className="ib-btn" onClick={() => leave(null, props.strip.onBack)}>
+                    <Icon name="back" size={15} />
+                    Back to the thread
+                  </button>
+                  <button type="button" className="ib-btn ib-pri" onClick={() => leave(null, props.strip.onWriteReply)}>
+                    <Icon name="reply" size={15} />
+                    Write the reply
+                  </button>
+                </span>
+              )}
+            </>
+          )}
+        </div>
+      ) : (
+        <div />
+      )}
+      <div className="ib-sr" aria-live="polite" data-step-live="">
+        {announced}
+      </div>
     </section>
   );
-}
+});

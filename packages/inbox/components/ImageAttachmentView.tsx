@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
@@ -23,6 +23,12 @@ function stem(name: string): string {
  * the drawing is kept by the Inbox and rides the comment, so the agent can
  * open the marked-up copy. Selecting a comment with a drawing shows it on the
  * stage. The image is drawn only by `<img src>` from the attachment's route.
+ *
+ * The pane keys it by attachment, so the comment box is never carried to the
+ * next file. Stepping: the pane remembers Fit / Actual size per file
+ * (`initialFit`, `onFitChange`); an image at its own size that overflows
+ * keeps the arrow keys (`data-claims-arrows`); a horizontal swipe on the
+ * image shown fitted steps (`onSwipe`), nowhere else.
  */
 export function ImageAttachmentView({
   attachment,
@@ -32,6 +38,9 @@ export function ImageAttachmentView({
   readOnly,
   onSave,
   onError,
+  initialFit,
+  onFitChange,
+  onSwipe,
 }: {
   attachment: InboxAttachmentState;
   version: 'current' | 'sent';
@@ -40,8 +49,20 @@ export function ImageAttachmentView({
   readOnly: boolean;
   onSave: (annotation: Annotation) => Promise<boolean>;
   onError: (message: string) => void;
+  /** Fit or Actual size when it opens (the pane's memory of this file). */
+  initialFit?: 'fit' | 'actual';
+  onFitChange?: (fit: 'fit' | 'actual') => void;
+  /** A swipe across the fitted image: 1 next file, -1 previous. */
+  onSwipe?: (dir: 1 | -1) => void;
 }) {
-  const [fit, setFit] = useState<'fit' | 'actual'>('fit');
+  const [fit, setFitState] = useState<'fit' | 'actual'>(initialFit ?? 'fit');
+  const setFit = (update: 'fit' | 'actual' | ((v: 'fit' | 'actual') => 'fit' | 'actual')) => {
+    setFitState((current) => {
+      const next = typeof update === 'function' ? update(current) : update;
+      if (next !== current) onFitChange?.(next);
+      return next;
+    });
+  };
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const [failed, setFailed] = useState(false);
   const [text, setText] = useState('');
@@ -51,11 +72,35 @@ export function ImageAttachmentView({
   const textRef = useRef<HTMLTextAreaElement>(null);
   const src = attachmentImageUrl(attachment, version);
 
+  // Another version of the same file: fitted again.
+  const shownVersion = useRef(version);
   useEffect(() => {
+    if (shownVersion.current === version) return;
+    shownVersion.current = version;
     setFit('fit');
     setNatural(null);
     setFailed(false);
-  }, [attachment.id, version]);
+  }, [version]);
+
+  // At its own size and larger than the stage, the image scrolls with the arrows (they do not step).
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [overflows, setOverflows] = useState(false);
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || fit !== 'actual') {
+      setOverflows(false);
+      return;
+    }
+    const measure = () => setOverflows(stage.scrollWidth > stage.clientWidth + 1 || stage.scrollHeight > stage.clientHeight + 1);
+    measure();
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
+    observer?.observe(stage);
+    return () => observer?.disconnect();
+  }, [fit, natural]);
+
+  // A horizontal swipe on the fitted image: more than 60 px across, less than 40 px up or down.
+  const swipeStart = useRef<{ x: number; y: number } | null>(null);
+  const swipes = onSwipe !== undefined && fit === 'fit';
 
   // A selected comment that carries a drawing shows the drawing on the stage.
   const selected = selectedId ? annotations.find((a) => a.id === selectedId) : undefined;
@@ -89,7 +134,35 @@ export function ImageAttachmentView({
 
   return (
     <div className="ib-imgview" data-image-view={attachment.id}>
-      <div className="ib-imgstage" data-fit={fit} data-tall={tall ? 'true' : 'false'} data-src={stageSrc}>
+      <div
+        className={`ib-imgstage${swipes ? ' ib-swipes' : ''}`}
+        ref={stageRef}
+        data-fit={fit}
+        data-tall={tall ? 'true' : 'false'}
+        data-src={stageSrc}
+        data-claims-arrows={overflows ? 'true' : undefined}
+        onTouchStart={
+          swipes
+            ? (event) => {
+                const touch = event.touches[0];
+                swipeStart.current = event.touches.length === 1 && touch ? { x: touch.clientX, y: touch.clientY } : null;
+              }
+            : undefined
+        }
+        onTouchEnd={
+          swipes
+            ? (event) => {
+                const start = swipeStart.current;
+                swipeStart.current = null;
+                const touch = event.changedTouches[0];
+                if (!start || !touch) return;
+                const dx = touch.clientX - start.x;
+                const dy = touch.clientY - start.y;
+                if (Math.abs(dx) > 60 && Math.abs(dy) < 40) onSwipe!(dx < 0 ? 1 : -1);
+              }
+            : undefined
+        }
+      >
         {showingMarkup && (
           <div className="ib-imgshowing" data-showing-markup="">
             <Icon name="pen" size={13} />

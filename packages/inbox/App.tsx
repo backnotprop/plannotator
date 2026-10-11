@@ -99,7 +99,12 @@ function readRoute(): Route {
   };
 }
 
-function writeRoute(route: Route): void {
+/**
+ * Write the route to the hash. `replace` swaps the current history entry
+ * instead of adding one: stepping between a thread's attachments, so one
+ * Back returns to the thread rather than through every file.
+ */
+function writeRoute(route: Route, options: { replace?: boolean } = {}): void {
   let hash = '';
   if (route.page === 'settings') hash = 'settings';
   else if (route.page === 'whats-new') hash = new URLSearchParams({ 'whats-new': route.version ?? '' }).toString();
@@ -121,7 +126,10 @@ function writeRoute(route: Route): void {
     hash = params.toString();
   }
   const next = hash ? `#${hash}` : window.location.pathname + window.location.search;
-  if (`#${hash}` !== window.location.hash) window.history.pushState(null, '', next);
+  if (`#${hash}` !== window.location.hash) {
+    if (options.replace) window.history.replaceState(null, '', next);
+    else window.history.pushState(null, '', next);
+  }
   window.dispatchEvent(new HashChangeEvent('hashchange'));
 }
 
@@ -668,7 +676,7 @@ function Inbox() {
             decisions={threadDecisions}
             onOpenDecisionPage={(decision) => go({ page: 'decisions', project: decision.project_id, thread: null, decision: decision.id })}
             file={route.file ?? null}
-            onOpenFile={(file) => writeRoute({ ...routeRef.current, file })}
+            onOpenFile={(file, options) => writeRoute({ ...routeRef.current, file }, options)}
             onOpenGuide={(messageId) => go({ ...route, guide: messageId })}
             lookSeq={look?.threadId === thread.thread_id ? look.seq : undefined}
           />
