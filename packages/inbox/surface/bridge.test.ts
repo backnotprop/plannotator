@@ -7,8 +7,8 @@
 import { afterAll, afterEach, describe, expect, test } from 'bun:test';
 import { listenToShell, postToShell } from './bridge';
 
-// The bridge needs only a global `window`. The default run has no DOM
-// (happy-dom is opt-in with DOM_TESTS=1), so globalThis stands in for it here.
+// The bridge needs only a global `window`, not a DOM: the default run has no
+// happy-dom, so globalThis stands in for it here (this file runs in every sweep).
 const borrowed = typeof window === 'undefined';
 if (borrowed) (globalThis as { window?: unknown }).window = globalThis;
 afterAll(() => {
