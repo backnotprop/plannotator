@@ -4,12 +4,14 @@
  *
  * The remote is `origin`, parsed by the same `parseRemoteUrl` /
  * `parseRemoteHost` plan and code review use for `repoInfo`. It is resolved off
- * the request path: once per project at Inbox start and when a project is first
- * seen, then again in the background when a read finds it older than
- * `INBOX_REPO_TTL_MS`. A read never waits for git; it answers what the cache
- * holds (null until the first resolve lands). A folder that is not a git
+ * the request path: once per project just after the Inbox starts listening and
+ * when a project is first seen, then again in the background when a read finds
+ * it older than `INBOX_REPO_TTL_MS`, with at most `INBOX_REPO_MAX_CONCURRENT`
+ * gits at once. A read never waits for git; it answers what the cache holds
+ * (null until the first resolve lands). A folder that is not a git
  * repository, a repository without `origin`, an unparseable URL, a git that
- * fails or runs past the timeout: all null.
+ * fails or runs past the timeout: all null, cached like any answer until the
+ * TTL runs out.
  */
 
 import type { InboxProjectRepo } from "@plannotator/core/inbox-types";
@@ -20,6 +22,8 @@ import { runtime } from "./git";
 export const INBOX_REPO_TTL_MS = 5 * 60_000;
 /** One `git remote get-url origin` never runs longer than this. */
 export const INBOX_REPO_GIT_TIMEOUT_MS = 3_000;
+/** At most this many `git remote get-url` run at once. */
+export const INBOX_REPO_MAX_CONCURRENT = 4;
 
 /** The repository a project root's `origin` names, or null. Never throws. */
 export async function readInboxProjectRepo(root: string, timeoutMs = INBOX_REPO_GIT_TIMEOUT_MS): Promise<InboxProjectRepo | null> {
@@ -48,17 +52,36 @@ export function createInboxRepoCache(options: {
   ttlMs?: number;
   now?: () => number;
   read?: (root: string) => Promise<InboxProjectRepo | null>;
+  /** At most this many reads run at once; the rest wait their turn. */
+  maxConcurrent?: number;
 } = {}): InboxRepoCache {
   const ttlMs = options.ttlMs ?? INBOX_REPO_TTL_MS;
   const now = options.now ?? Date.now;
   const read = options.read ?? ((root: string) => readInboxProjectRepo(root));
+  const maxConcurrent = Math.max(1, options.maxConcurrent ?? INBOX_REPO_MAX_CONCURRENT);
   const entries = new Map<string, { repo: InboxProjectRepo | null; at: number }>();
   const pending = new Map<string, Promise<InboxProjectRepo | null>>();
+  let running = 0;
+  const waiting: (() => void)[] = [];
+
+  /** Run one read once a slot is free (an Inbox start with hundreds of projects never forks hundreds of gits). */
+  const limited = async (root: string): Promise<InboxProjectRepo | null> => {
+    // A finished read hands its slot straight to the next waiter, so the count never overshoots.
+    if (running >= maxConcurrent) await new Promise<void>((resolve) => waiting.push(resolve));
+    else running++;
+    try {
+      return await read(root);
+    } finally {
+      const next = waiting.shift();
+      if (next) next();
+      else running--;
+    }
+  };
 
   const refresh = (root: string): Promise<InboxProjectRepo | null> => {
-    const running = pending.get(root);
-    if (running) return running;
-    const job = read(root)
+    const inFlight = pending.get(root);
+    if (inFlight) return inFlight;
+    const job = limited(root)
       .catch(() => null)
       .then((repo) => {
         entries.set(root, { repo, at: now() });

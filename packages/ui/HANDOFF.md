@@ -2198,7 +2198,7 @@ New module `utils/askSessionSetupHint` (`askSessionSetupHint(origin, providers)`
 
 ## `Viewer` `refRepo` (unreleased; additive; needs no new core subpath)
 
-New optional `refRepo?: { display: string; host?: string } | null` on `Viewer`: the repository bare `#123` / `@user` refs link into (#1840), without the repo badge `repoInfo` also draws. It wins over `repoInfo` for links only; absent, links follow `repoInfo?.display` / `repoInfo?.host` exactly as before, so Plannotator's plan and review apps are unchanged. The Inbox passes it per message (a badge on every message would be noise).
+New optional `refRepo?: { display: string; host?: string } | null` on `Viewer`: the repository bare `#123` / `@user` refs link into (#1840), without the repo badge `repoInfo` also draws. It wins over `repoInfo` for links only; `null` and absent both fall back to `repoInfo`, so links follow `repoInfo?.display` / `repoInfo?.host` exactly as before, so Plannotator's plan and review apps are unchanged. The Inbox passes it per message (a badge on every message would be noise).
 
 ---
 

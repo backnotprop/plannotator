@@ -115,10 +115,40 @@ test("an Inbox that starts on an existing store resolves its projects' remotes; 
   first.stop();
   servers.splice(servers.indexOf(first), 1);
 
-  // A new process, no new message: the repo comes from the resolve at start.
-  const second = await startInboxServer({ dataDir });
+  // A new process, no new message and no thread read yet: the Inbox resolves
+  // the project by itself, and only once it is listening (after the start returned).
+  const reads: { root: string; afterStart: boolean }[] = [];
+  let returned = false;
+  const second = await startInboxServer({
+    dataDir,
+    readProjectRepo: (root) => {
+      reads.push({ root, afterStart: returned });
+      return readInboxProjectRepo(root);
+    },
+  });
+  returned = true;
   servers.push(second);
+  for (let i = 0; i < 100 && reads.length === 0; i++) await Bun.sleep(10);
+  expect(reads).toEqual([{ root: platform, afterStart: true }]);
   expect(await settledRepo(second, threadId)).toEqual({ display: "group/sub/platform", host: "gitlab.example.com" });
+});
+
+test("the cache runs at most four reads at once and queues the rest", async () => {
+  let active = 0;
+  let peak = 0;
+  const cache = createInboxRepoCache({
+    read: async (root) => {
+      active++;
+      peak = Math.max(peak, active);
+      await Bun.sleep(5);
+      active--;
+      return { display: `acme/${root.slice(1)}`, host: "github.com" };
+    },
+  });
+  const roots = Array.from({ length: 12 }, (_, i) => `/p${i}`);
+  const answers = await Promise.all(roots.map((root) => cache.refresh(root)));
+  expect(peak).toBe(4);
+  expect(answers.map((a) => a?.display)).toEqual(roots.map((root) => `acme/${root.slice(1)}`));
 });
 
 test("the cache answers without waiting, dedupes a running resolve, and refreshes a stale entry in the background", async () => {

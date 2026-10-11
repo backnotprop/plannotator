@@ -50,6 +50,7 @@ import {
   type InboxListRow,
   type InboxMessage,
   type InboxProject,
+  type InboxProjectRepo,
 } from "@plannotator/core/inbox-types";
 import { toInboxQuestion } from "@plannotator/core/inbox-questions";
 import { checkServerSession, createServerSessionNonce, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
@@ -190,6 +191,8 @@ export interface InboxServerOptions {
    * (packages/server/inbox-tailscale.ts). Default false.
    */
   publishTailnet?: boolean;
+  /** Tests: how a project root's `origin` is read (default `readInboxProjectRepo`, inbox-repos.ts). */
+  readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null>;
 }
 
 export interface InboxServer {
@@ -367,10 +370,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
 
   // Each project's git `origin` (#1840), for the window's `#123` links:
-  // resolved now for every known project and when a project is first seen,
-  // never while a request waits (inbox-repos.ts).
-  const repos = createInboxRepoCache();
-  for (const project of store.listProjects()) void repos.refresh(project.root);
+  // resolved for every known project once the server listens (below) and
+  // when a project is first seen, never while a request waits (inbox-repos.ts).
+  const repos = createInboxRepoCache(options.readProjectRepo ? { read: options.readProjectRepo } : {});
 
   const projectLocks = new Map<string, Promise<InboxProject>>();
   const resolveProject = async (path: string): Promise<InboxProject> => {
@@ -1136,6 +1138,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   }
 
   updates.start();
+  // Every known project's `origin`, after the server is listening; the cache
+  // runs at most a few gits at once and queues the rest.
+  setTimeout(() => {
+    if (stopped) return;
+    for (const project of store.listProjects()) void repos.refresh(project.root);
+  }, 0);
 
   let stopped = false;
   const stop = () => {

@@ -137,7 +137,7 @@ export interface ViewerProps {
    * The repository bare `#123` / `@user` refs link into, WITHOUT the repo
    * badge `repoInfo` also draws (a host that renders many small documents,
    * such as the Inbox's messages). Wins over `repoInfo` for links only;
-   * absent, links follow `repoInfo` as before.
+   * `null` and absent both fall back to `repoInfo`, as before.
    */
   refRepo?: { display: string; host?: string } | null;
   stickyActions?: boolean;
