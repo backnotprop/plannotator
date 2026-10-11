@@ -424,6 +424,38 @@ test('a pick is saved at once and the agent reads it through read_thread', async
   await expect(row).toHaveAttribute('data-section', 'new');
   await expect(row).toContainText('Answered, not sent');
   await shot('3.1-answered-not-sent');
+
+  // The wide rows: "Answered, not sent" is wider than the count column's
+  // 96px, and its text must end before the time's begins, in every project
+  // and in one project, at full and narrower widths. Measured on the text
+  // itself (a Range), since overflowing text spills past its cell's box.
+  const wide = page.locator(`.ib-row[data-thread-id="${world.threads.stopped}"]`);
+  const textGap = () =>
+    wide.evaluate((el) => {
+      const rect = (cell: Element) => {
+        const range = document.createRange();
+        range.selectNodeContents(cell);
+        return range.getBoundingClientRect();
+      };
+      const count = rect(el.querySelector('.ib-c')!);
+      const time = rect(el.querySelector('.ib-t')!);
+      return { text: el.querySelector('.ib-c')!.textContent, gap: time.left - count.right, sameLine: Math.abs(count.top - time.top) < 4 };
+    });
+  for (const folder of [/^Inbox/, /^billing-svc/]) {
+    await side(page).getByRole('button', { name: folder }).click();
+    for (const width of [1440, 1000, 820]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(wide).toBeVisible();
+      const measured = await textGap();
+      expect(measured.text).toBe('Answered, not sent');
+      expect(measured.sameLine).toBe(true);
+      expect(measured.gap, `count runs into the time at ${width}px (${folder})`).toBeGreaterThanOrEqual(8);
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await side(page).getByRole('button', { name: /^Inbox/ }).click();
+  await wide.click();
+  await expect(page.locator('.ib-pfoot').getByRole('button', { name: 'Edit the reply' })).toBeVisible();
 });
 
 test('Send carries the picks and the words, wait_for_reply returns them, and the thread says Delivered', async () => {
