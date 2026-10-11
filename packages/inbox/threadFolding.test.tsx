@@ -17,6 +17,7 @@ import type { InboxAuthor, InboxMessageWire, InboxProject, InboxQuestion, InboxT
 const hasDom = typeof document !== 'undefined';
 // Viewer pulls in web-highlighter, which reads `window` at module-eval time.
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
+type ThreadFoldMemory = import('./components/Thread').ThreadFoldMemory;
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'docs-site-abcdef', name: 'docs-site', root: '/work/docs-site', created_at: '2026-10-10T09:00:00.000Z' };
 const AGENT: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: 'Claude Code' };
@@ -62,6 +63,9 @@ const LATEST = [
   '- [ ] On every deploy',
   ':::',
 ].join('\n');
+
+/** The answers section the store writes into a reply (core's composeInboxReplyBody). */
+const ANSWERS_SECTION = '## Answers to your questions\n\n1. **Which search index should the docs site use?** Pagefind\n2. **Which sections go in the index?** Guides, API reference';
 
 function questionsOf(messageId: string, body: string): InboxQuestion[] {
   return parseInboxQuestionBlocks(body).map((q) => ({
@@ -129,7 +133,7 @@ function seven(options: { lookAt?: number } = {}): InboxThread {
       person_seen_seq: options.lookAt ?? 11,
       agent_checked_seq: 13,
     }),
-    message('msg_P1', PERSON, 5, 'Answered 2 questions.\n\nPagefind is fine. Keep the blog out for now.'),
+    message('msg_P1', PERSON, 5, `Answered 2 questions.\n\nPagefind is fine. Keep the blog out for now.\n\n${ANSWERS_SECTION}`),
     message('msg_A2', AGENT, 7, ONE_OPEN, {
       questions: [sentAs(shortcut!, ['/ and Cmd K'], 'msg_P2')],
       attachments: [{ id: 'att_1', path: '/work/docs-site/plan.md', named_path: null, kind: 'markdown', sent_sha256: '0'.repeat(64), size: 10, sent_at: '2026-10-10T12:00:00.000Z', sent_mtime: '2026-10-10T12:00:00.000Z' } as never],
@@ -182,7 +186,7 @@ async function settle() {
   });
 }
 
-function pane(thread: InboxThread, lookSeq?: number | null) {
+function pane(thread: InboxThread, lookSeq?: number | null, memory?: ThreadFoldMemory) {
   return (
     <div className="pn-inbox">
       <ThreadPane
@@ -197,17 +201,18 @@ function pane(thread: InboxThread, lookSeq?: number | null) {
         onOpenFile={() => {}}
         onOpenGuide={() => {}}
         lookSeq={lookSeq}
+        memory={memory}
       />
     </div>
   );
 }
 
-async function render(thread: InboxThread, lookSeq?: number | null) {
+async function render(thread: InboxThread, lookSeq?: number | null, memory?: ThreadFoldMemory) {
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
-    root.render(pane(thread, lookSeq));
+    root.render(pane(thread, lookSeq, memory));
   });
   await settle();
   return host;
@@ -257,11 +262,14 @@ test.skipIf(!hasDom)("a folded line's snippet is the person's answers when every
   act(() => (el.querySelector('[data-middle-fold] button') as HTMLButtonElement).click());
   const snippet = (id: string) => article(el, id)!.querySelector('[data-snippet]')!;
   expect(snippet('msg_A1').getAttribute('data-snippet')).toBe('answers');
-  expect(snippet('msg_A1').textContent).toBe('Which search index should the docs site use → Pagefind · Which sections go in the index → Guides, API reference');
+  // A prompt over 40 characters is cut at a word, so the answer stays on the line; the whole prompt is the title.
+  expect(snippet('msg_A1').textContent).toBe('Which search index should the docs site… → Pagefind · Which sections go in the index → Guides, API reference');
+  expect(snippet('msg_A1').getAttribute('title')).toBe('Which search index should the docs site use: Pagefind; Which sections go in the index: Guides, API reference');
   expect(snippet('msg_A3').getAttribute('data-snippet')).toBe('words');
   // Markdown marks gone, link text kept.
   expect(snippet('msg_A3').textContent).toBe('Both notes are in: results show the section path. Ready for a read.');
-  expect(snippet('msg_P1').textContent).toBe('Answered 2 questions. Pagefind is fine. Keep the blog out for now.');
+  // A reply: the person's own words, without the store's "Answered 2 questions." and the answers section.
+  expect(snippet('msg_P1').textContent).toBe('Pagefind is fine. Keep the blog out for now.');
   expect(holdings(el, 'msg_A1')).toEqual(['answered=2 answered']);
   expect(holdings(el, 'msg_A2')).toEqual(['answered=1 answered', 'files=1']);
   expect(holdings(el, 'msg_P2')).toEqual(['annotations=2', 'delivered=Delivered']);
@@ -452,4 +460,119 @@ test.skipIf(!hasDom)('a link to a replaced card in a folded message opens the me
   await new Promise((resolve) => setTimeout(resolve, 40));
   expect(article(el, ROOT)!.hasAttribute('data-open')).toBe(true);
   expect(document.activeElement?.getAttribute('data-question-key')).toBe(index!.key);
+});
+
+test.skipIf(!hasDom)('a reply the person sends during the visit is a look: everything above it stops being new (marks, divider, pill, meta, Fold all)', async () => {
+  // The window's boundary from before this look: msg_A4 is new.
+  const el = await render(seven(), 13);
+  expect(article(el, 'msg_A4')!.hasAttribute('data-new')).toBe(true);
+  // The person answers it; the thread is read again with their reply at the bottom.
+  const answered = seven({ lookAt: 15 });
+  answered.messages.push(message('msg_P4', PERSON, 16, 'On main and release tags.'));
+  act(() => root!.render(pane(answered, 13)));
+  expect(el.querySelector('[data-message-article][data-new]')).toBeNull();
+  expect(el.querySelector('.ib-newtag')).toBeNull();
+  expect(el.querySelector('[data-new-divider]')).toBeNull();
+  expect(el.querySelector('[data-new-pill]')).toBeNull();
+  expect(el.querySelector('[data-thread-meta]')!.textContent).not.toContain('new since you looked');
+  // Folded, the lines above the reply are not drawn as unread either.
+  act(() => (el.querySelector('[data-expand-all]') as HTMLButtonElement).click());
+  act(() => (el.querySelector('[data-expand-all]') as HTMLButtonElement).click());
+  expect(el.querySelector('[data-expand-all]')!.textContent).toBe('Expand all');
+  expect(el.querySelector('.ib-fl-unread')).toBeNull();
+  expect(el.querySelector('.ib-newtag')).toBeNull();
+  // The agent writes again after the reply: that one is new.
+  act(() => root!.render(pane({ ...answered, messages: [...answered.messages, message('msg_A5', AGENT, 18, 'Done.')] }, 13)));
+  expect([...el.querySelectorAll('[data-message-article][data-new]')].map((a) => a.getAttribute('data-message-article'))).toEqual(['msg_A5']);
+});
+
+test.skipIf(!hasDom)('a reply with no words of its own shows the answers it sent; a message that is only a question shows the question', async () => {
+  const thread = seven();
+  const only = ':::question\nWhich **shortcut** opens `search`?\n\n- [ ] /\n- [ ] Cmd K\n:::';
+  thread.messages[1] = { ...thread.messages[1]!, body: `Answered 2 questions.\n\n${ANSWERS_SECTION}` };
+  thread.messages[4] = { ...thread.messages[4]!, body: only, questions: questionsOf('msg_A3', only) };
+  const el = await render(thread);
+  act(() => (el.querySelector('[data-middle-fold] button') as HTMLButtonElement).click());
+  const reply = article(el, 'msg_P1')!.querySelector('[data-snippet]')!;
+  expect(reply.getAttribute('data-snippet')).toBe('answers');
+  expect(reply.textContent).toBe('Which search index should the docs site… → Pagefind · Which sections go in the index → Guides, API reference');
+  expect(article(el, 'msg_A3')!.querySelector('[data-snippet]')!.textContent).toBe('Which shortcut opens search');
+});
+
+test.skipIf(!hasDom)('the meta line says one time when the thread began and ended in the same minute; nothing inside a fold button is a div', async () => {
+  const thread = seven();
+  const at = thread.messages[0]!.created_at;
+  const el = await render({ ...thread, messages: thread.messages.map((m) => ({ ...m, created_at: at })) });
+  const span = el.querySelectorAll('[data-thread-meta] > span')[2]!.textContent!;
+  expect(span).not.toContain(' to ');
+  expect(span).toMatch(/\d{1,2}:\d{2} [AP]M$/);
+  expect(el.querySelectorAll('button div').length).toBe(0);
+});
+
+test.skipIf(!hasDom)("the window's memory keeps the fold, the landing and the scroll across the pane's remount (a guided review opened and closed)", async () => {
+  const memory: ThreadFoldMemory = { threadId: ROOT, fold: null, landed: false, scrollTop: 0 };
+  const el = await render(seven(), 13, memory);
+  act(() => (el.querySelector('[data-middle-fold] button') as HTMLButtonElement).click());
+  act(() => (article(el, 'msg_A2')!.querySelector('[data-fold-head]') as HTMLButtonElement).click());
+  const left = shown(el);
+  const body = el.querySelector<HTMLElement>('.ib-pbody')!;
+  body.scrollTop = 120;
+  act(() => void body.dispatchEvent(new Event('scroll')));
+  expect(memory.landed).toBe(true);
+  act(() => root!.unmount());
+  host!.remove();
+  // Back from the guided review: the same thread, the same boundary, the same memory.
+  const back = await render(seven({ lookAt: 15 }), 13, memory);
+  expect(shown(back)).toEqual(left);
+  expect(article(back, 'msg_A2')!.hasAttribute('data-open')).toBe(true);
+  expect(back.querySelector<HTMLElement>('.ib-pbody')!.scrollTop).toBe(120);
+});
+
+test.skipIf(!hasDom)('the pill shows while ANY new message is below the view, and goes to the first one below', async () => {
+  const grown = seven();
+  grown.messages.push(message('msg_A5', AGENT, 17, 'Merged.'));
+  stub(HTMLElement.prototype, 'getBoundingClientRect', {
+    value(this: HTMLElement) {
+      const id = this.getAttribute('data-message-article');
+      const y = this.classList.contains('ib-pbody') ? 0 : id === 'msg_A4' ? 300 : id === 'msg_A5' ? 2000 : 0;
+      const h = this.classList.contains('ib-pbody') ? 800 : 40;
+      return { top: y, bottom: y + h, left: 0, right: 0, width: 0, height: h, x: 0, y, toJSON() {} };
+    },
+  });
+  const scrolled: string[] = [];
+  stub(HTMLElement.prototype, 'scrollIntoView', {
+    value(this: HTMLElement) {
+      scrolled.push(this.hasAttribute('data-new-divider') ? 'divider' : (this.getAttribute('data-message-article') ?? this.className));
+    },
+  });
+  const el = await render(grown);
+  const pill = el.querySelector<HTMLButtonElement>('[data-new-pill]')!;
+  // The first new message is in view, the second is not.
+  expect(pill.textContent).toBe('2 new');
+  expect(pill.hasAttribute('data-off')).toBe(false);
+  act(() => pill.click());
+  expect(scrolled.at(-1)).toBe('msg_A5');
+  expect(document.activeElement).toBe(article(el, 'msg_A5')!.querySelector('[data-fold-head]'));
+});
+
+test.skipIf(!hasDom)('typing in the reply box measures nothing: the chrome and the anchor follow folds and the thread, not keystrokes', async () => {
+  const el = await render(seven());
+  act(() => ([...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Reply') as HTMLButtonElement).click());
+  const box = el.querySelector('textarea')!;
+  let measured = 0;
+  stub(HTMLElement.prototype, 'getBoundingClientRect', {
+    value(this: HTMLElement) {
+      if (this.classList.contains('ib-pbody')) measured += 1;
+      return { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON() {} };
+    },
+  });
+  const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+  for (const text of ['O', 'On', 'On m']) {
+    act(() => {
+      setValue.call(box, text);
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+  expect(box.value).toBe('On m');
+  expect(measured).toBe(0);
 });

@@ -34,7 +34,7 @@ import type { ConnectContext } from './harnesses';
 import { Sidebar } from './components/Sidebar';
 import { SidebarShell } from './shell/SidebarShell';
 import { InboxList } from './components/InboxList';
-import { ThreadPane } from './components/Thread';
+import { ThreadPane, type ThreadFoldMemory } from './components/Thread';
 import { EmptyState } from './components/EmptyState';
 import { SettingsPage } from './components/Settings';
 import { NotificationAsk } from './components/NotificationAsk';
@@ -151,6 +151,8 @@ function Inbox() {
   const [threadDecisions, setThreadDecisions] = useState<InboxDecision[]>([]);
   /** The open thread's "new since you looked" boundary (folding.ts), from before this look. */
   const [look, setLook] = useState<{ threadId: string; seq: number | null } | null>(null);
+  /** The open thread's fold state, landed flag and scroll, kept while a guided review takes the window. */
+  const foldMemory = useRef<ThreadFoldMemory | null>(null);
   const [decisions, setDecisions] = useState<DecisionsModel | null>(null);
   const [decisionsError, setDecisionsError] = useState<string | null>(null);
   const [settings, setSettings] = useState<SettingsModel | null>(null);
@@ -225,6 +227,7 @@ function Inbox() {
         // What is new since the last look, from the first read of this thread:
         // it lands before the window records the look, and is kept until the person leaves the thread.
         setLook((current) => (current?.threadId === threadId ? current : { threadId, seq: lookBoundary(next.thread) }));
+        if (foldMemory.current?.threadId !== threadId) foldMemory.current = { threadId, fold: null, landed: false, scrollTop: 0 };
       }
       return next.thread;
     } catch (cause) {
@@ -307,6 +310,7 @@ function Inbox() {
     if (!threadId) {
       setThread(null);
       setLook(null);
+      foldMemory.current = null;
       return;
     }
     let cancelled = false;
@@ -671,6 +675,7 @@ function Inbox() {
             onOpenFile={(file) => writeRoute({ ...routeRef.current, file })}
             onOpenGuide={(messageId) => go({ ...route, guide: messageId })}
             lookSeq={look?.threadId === thread.thread_id ? look.seq : undefined}
+            memory={foldMemory.current?.threadId === thread.thread_id ? foldMemory.current : undefined}
           />
         )}
       </>

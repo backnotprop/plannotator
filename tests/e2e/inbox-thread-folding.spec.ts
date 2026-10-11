@@ -28,6 +28,10 @@ const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'thread-folding');
 
+/** A 160-odd character prompt with inline markdown: its folded line must still show the answer. */
+const LONG_PROMPT = 'Which search index should the docs site use for its first public release, given the **1.6 MB** index, the `astro build` step in CI and the review deadline this Friday?';
+const LONG_PLAIN = 'Which search index should the docs site use for its first public release, given the 1.6 MB index, the astro build step in CI and the review deadline this Friday';
+
 const ASK = [
   'I looked at three ways to add search to the docs site. Short version: the site is static, about 240 pages, and every option works with the Astro build we already have.',
   '',
@@ -39,7 +43,7 @@ const ASK = [
   'Two calls before I start:',
   '',
   ':::question',
-  'Which search index should the docs site use?',
+  LONG_PROMPT,
   '',
   'Decision: when answered',
   '',
@@ -171,7 +175,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const [index, sections] = ask.questions;
   const r1 = await post(`/api/inbox/messages/${ask.message_id}/reply`, {
     idempotency_key: 'r1',
-    words: 'Pagefind is fine. Keep the blog out for now.',
+    // No words of its own: its folded line shows the answers it sent.
     questions: [answer(index!, ['Pagefind']), answer(sections!, ['Guides', 'API reference'])],
   });
   // 3. The plan as a file, one more question; 4. the person answers with two annotations on it.
@@ -242,7 +246,14 @@ test('the read run folds: first and last two as lines, the middle behind "3 earl
   await expect(pane().locator('[data-middle-fold]')).toHaveText('3 earlier messages');
   // Every question answered: the line shows the answers, not the first words.
   const first = article(ids[0]!);
-  await expect(first.locator('[data-snippet="answers"]')).toHaveText('Which search index should the docs site use → Pagefind · Which sections go in the index → Guides, API reference');
+  // A long prompt is cut at a word, so the answer stays on the line; the whole prompt is the line's title.
+  const answers = first.locator('[data-snippet="answers"]');
+  await expect(answers).toHaveText('Which search index should the docs site… → Pagefind · Which sections go in the index → Guides, API reference');
+  await expect(answers).toHaveAttribute('title', `${LONG_PLAIN}: Pagefind; Which sections go in the index: Guides, API reference`);
+  const line = (await answers.boundingBox())!;
+  const answer = (await answers.locator('b').first().boundingBox())!;
+  expect(answer.x).toBeGreaterThanOrEqual(line.x);
+  expect(answer.x + answer.width).toBeLessThanOrEqual(line.x + line.width);
   await expect(first.locator('[data-holding]')).toHaveText(['2 answered']);
   await expect(article(ids[4]!).locator('[data-snippet="words"]')).toHaveText(/^Both notes are in: results show the section path/);
   await expect(article(ids[4]!).locator('[data-holding]')).toHaveText(['Guided review']);
@@ -255,6 +266,9 @@ test('the read run folds: first and last two as lines, the middle behind "3 earl
   await expect(article(ids[2]!).locator('[data-holding="files"]')).toHaveText('1');
   await expect(article(ids[3]!).locator('[data-holding="annotations"]')).toHaveText('2');
   await expect(article(ids[3]!).locator('[data-holding="delivered"]')).toHaveText('Delivered');
+  // Replies: the person's own words, without "Answered N questions." and the answers section; with no words, the answers.
+  await expect(article(ids[3]!).locator('[data-snippet="words"]')).toHaveText('The plan is close. Two notes on the file.');
+  await expect(article(ids[1]!).locator('[data-snippet="answers"]')).toHaveText('Which search index should the docs site… → Pagefind · Which sections go in the index → Guides, API reference');
   await shot('2-middle-fold-opened');
 });
 
@@ -309,7 +323,7 @@ test("Expand all gives back today's fully open thread; scrolled up, the pill poi
   for (const id of ids) await expect(article(id)).toHaveAttribute('data-open', '');
   await expect(pane().locator('[data-folded]')).toHaveCount(0);
   await expect(pane().locator('[data-middle-fold]')).toHaveCount(0);
-  await expect(article(ids[0]!).getByText('Which search index should the docs site use?')).toBeVisible();
+  await expect(article(ids[0]!).getByText(/^Which search index should the docs site use for its first public release/)).toBeVisible();
   await expect(article(ids[3]!).locator('.ib-body')).toContainText('The plan is close.');
   await pane().locator('.ib-pbody').evaluate((el) => el.scrollTo({ top: 0 }));
   const pill = pane().locator('[data-new-pill]');
@@ -330,22 +344,32 @@ test("Expand all gives back today's fully open thread; scrolled up, the pill poi
   expect(world.errors).toEqual([]);
 });
 
-test('the "New" marks last until the person leaves the thread; reopened, nothing is new and the thread opens at the top', async () => {
+test('a pick folded says it is not sent; the reply that sends it is a look, so nothing above it is new any more; reopened, the thread opens at the top', async () => {
   const { page, ids } = world;
   // A pick on the new question: the list and the thread update, the marks stay.
   await article(ids[6]!).getByText('On main and release tags', { exact: true }).click();
   await expect(pane().locator('.ib-pfoot')).toContainText('Not sent');
   await expect(article(ids[6]!)).toHaveAttribute('data-new', '');
+  // Folded by hand, its line says the pick is not sent.
+  await article(ids[6]!).locator('[data-fold-head]').click();
+  await expect(article(ids[6]!).locator('[data-holding]')).toHaveText(['1 pick, not sent']);
+  await shot('5-pick-folded');
+  await article(ids[6]!).locator('[data-fold-head]').click();
+  // Send: the person's reply is a look at everything before it.
+  await pane().locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(pane().locator('[data-thread-meta]')).toHaveText(/^8 messages/);
+  await expect(pane().locator('[data-message-article][data-new]')).toHaveCount(0);
+  await expect(pane().locator('.ib-newtag')).toHaveCount(0);
+  await expect(pane().locator('[data-new-divider]')).toHaveCount(0);
+  await expect(pane().locator('[data-new-pill]')).toHaveCount(0);
+  await expect(pane().locator('[data-thread-meta]')).not.toContainText('new since you looked');
+  await shot('6-sent');
+  // Left and opened again: nothing new, the thread opens at the top.
   await pane().getByRole('button', { name: 'Close the thread' }).click();
   await expect(pane()).toHaveCount(0);
   await page.locator(`.ib-lbody [data-thread-id="${world.threadId}"]`).click();
+  await expect(pane().locator('[data-thread-meta]')).toHaveText(/^8 messages/);
   await expect(pane().locator('[data-new-divider]')).toHaveCount(0);
-  await expect(pane().locator('[data-thread-meta]')).toHaveText(/^7 messages/);
-  await expect(pane().locator('[data-thread-meta]')).not.toContainText('new since you looked');
   await expect(pane().locator('h2.ib-subject')).toBeInViewport();
-  // The message holding the unsent pick is the last one, open; folded, its line says the pick is not sent.
-  await article(ids[6]!).locator('[data-fold-head]').click();
-  await expect(article(ids[6]!).locator('[data-holding]')).toHaveText(['1 pick, not sent']);
-  await shot('5-reopened-pick-folded');
   expect(world.errors).toEqual([]);
 });

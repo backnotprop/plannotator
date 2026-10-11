@@ -224,6 +224,9 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-sender .ib-who { font-weight: 600; font-size: 14px; }
 .ib-sender .ib-who span { font-weight: 400; color: var(--muted-foreground); }
 .ib-sender .ib-to { font-size: 12.5px; color: var(--muted-foreground); }
+/* the sender's name and "to …" are spans (they sit inside the fold button), drawn as the lines they always were */
+.ib-whobox { display: block; min-width: 0; }
+.ib-whobox > .ib-who, .ib-whobox > .ib-to { display: block; }
 .ib-sender .ib-tm { margin-left: auto; font-size: 12.5px; color: var(--muted-foreground); display: flex; align-items: center; gap: 8px; }
 .ib-msg { padding-left: 41px; }
 .ib-attach-h { font-size: 12.5px; color: var(--muted-foreground); margin: 16px 0 8px; display: flex; align-items: center; gap: 6px; }

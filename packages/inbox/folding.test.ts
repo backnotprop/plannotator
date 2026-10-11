@@ -5,7 +5,8 @@
  */
 import { expect, test } from 'bun:test';
 import type { InboxAuthor, InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
-import { firstWords, lookBoundary, newSinceLook, planFolds } from './folding';
+import { QUESTION_ANSWERS_HEADING } from '@plannotator/core/question-block';
+import { SNIPPET_PROMPT_MAX, cleanInline, cutAtWord, firstWords, foldSnippet, lookBoundary, newSinceLook, planFolds, replyWords } from './folding';
 
 const AGENT: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: null };
 const PERSON: InboxAuthor = { kind: 'person' };
@@ -65,4 +66,41 @@ test("a folded line's first words: question blocks, fences, tables and images ou
   ].join('\n');
   expect(firstWords(body)).toBe('Search I looked at three ways: see the plan and docs-search. Built at deploy Quoted');
   expect(firstWords('word '.repeat(100), 40)).toBe(`${'word '.repeat(8).trim()}…`);
+});
+
+test('emphasis marks go only where they pair at word boundaries; snake_case, arithmetic and inline code keep their characters', () => {
+  expect(firstWords('Rename retry_count to max_retry_count in `queue_worker.ts`.')).toBe('Rename retry_count to max_retry_count in queue_worker.ts.');
+  expect(firstWords('It costs 2 * 3 = 6 seconds, and **this** is _the_ ~~old~~ *new* plan.')).toBe('It costs 2 * 3 = 6 seconds, and this is the old new plan.');
+  expect(cleanInline('The `**not bold**` stays, __a__ goes.')).toBe('The **not bold** stays, a goes.');
+});
+
+test("a person's reply snippet: its own words, without the store's 'Answered N questions.' and the answers section after them", () => {
+  const body = [
+    'Answered 2 questions.',
+    '',
+    'Pagefind is fine. Keep the blog out for now.',
+    '',
+    `## ${QUESTION_ANSWERS_HEADING}`,
+    '',
+    '1. **Which search index?** Pagefind',
+    '',
+    '# Feedback on the attached files',
+  ].join('\n');
+  expect(replyWords(body).trim()).toBe('Pagefind is fine. Keep the blog out for now.');
+  expect(replyWords('Read it, looks good.')).toBe('Read it, looks good.');
+});
+
+test('a long prompt is cut at a word near 40 characters, so the answer after it stays on the line', () => {
+  const prompt = 'Which of the **three** options in the `search` table should the docs site use for its first release, given the deploy cost?';
+  const message = msg('m1', AGENT, 2, {
+    body: `:::question\n${prompt}\n\n- [ ] Pagefind\n:::`,
+    questions: [{ key: 'q-1', prompt, state: 'sent', orphaned: false, answer: { v: 1, key: 'q-1', kind: 'single', prompt, selected: ['Pagefind'] } } as never],
+  });
+  const snippet = foldSnippet(message);
+  expect(snippet.kind).toBe('answers');
+  if (snippet.kind !== 'answers') return;
+  expect(snippet.parts[0]!.prompt).toBe('Which of the three options in the search…');
+  expect(snippet.parts[0]!.prompt.length).toBeLessThanOrEqual(SNIPPET_PROMPT_MAX + 1);
+  expect(snippet.parts[0]!.full).toBe('Which of the three options in the search table should the docs site use for its first release, given the deploy cost');
+  expect(cutAtWord('short', 40)).toBe('short');
 });

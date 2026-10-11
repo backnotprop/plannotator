@@ -28,7 +28,7 @@ const isSuperseded = (cause: unknown): boolean => cause instanceof InboxApiError
 const NO_ANNOTATIONS: never[] = [];
 
 /** The fold state of one open thread: in memory only, decided once when the thread opens. */
-interface FoldState {
+export interface FoldState {
   threadId: string;
   /** Messages shown as one line. A message that arrives later is not in it, so it shows open. */
   folded: Set<string>;
@@ -38,19 +38,38 @@ interface FoldState {
   revealed: Set<number>;
 }
 
+/**
+ * What the window keeps of an open thread across the pane's remounts (a
+ * guided review takes the window, then closes): the fold state, whether the
+ * thread already landed at "New since you looked", and where it was scrolled.
+ * One object per open thread, owned by App and written by the pane.
+ */
+export interface ThreadFoldMemory {
+  threadId: string;
+  fold: FoldState | null;
+  landed: boolean;
+  scrollTop: number;
+}
+
 /** "Today, 9:12 AM": a moment in the thread's meta line. */
 function momentWords(iso: string): string {
   const day = dayWords(iso);
   return day ? `${day.charAt(0).toUpperCase()}${day.slice(1)}, ${clockTime(iso)}` : '';
 }
 
-/** "Today, 9:12 AM to 5:48 PM", or both days when they differ. */
+/** "Today, 9:12 AM to 5:48 PM", both days when they differ, one moment when the times are the same. */
 function spanWords(from: string, to: string): string {
-  if (dayWords(from) === dayWords(to)) return `${momentWords(from)} to ${clockTime(to)}`;
+  if (dayWords(from) === dayWords(to)) return clockTime(from) === clockTime(to) ? momentWords(from) : `${momentWords(from)} to ${clockTime(to)}`;
   return `${momentWords(from)} to ${momentWords(to)}`;
 }
 
 const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** The first new message whose top is below the view (under the pill's band), or null. */
+function newBelow(body: HTMLElement): HTMLElement | null {
+  const bottom = body.getBoundingClientRect().bottom - 56;
+  return [...body.querySelectorAll<HTMLElement>('[data-message-article][data-new]')].find((a) => a.getBoundingClientRect().top > bottom) ?? null;
+}
 
 /** A folded line's snippet: the message's first words, or the person's answers. */
 function SnippetText({ snippet }: { snippet: FoldSnippet }) {
@@ -246,6 +265,8 @@ export interface ThreadPaneProps {
    * pane takes it from the first thread it is given.
    */
   lookSeq?: number | null;
+  /** The window's memory of this thread (fold state, landed, scroll), kept across remounts. */
+  memory?: ThreadFoldMemory;
 }
 
 /** The thread's attachments as they are now and the annotations waiting for a Send, kept fresh. */
@@ -277,7 +298,7 @@ function useThreadAttachments(threadId: string, revision: unknown) {
   return { model, load, patch };
 }
 
-export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile, onOpenGuide, lookSeq }: ThreadPaneProps) {
+export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile, onOpenGuide, lookSeq, memory }: ThreadPaneProps) {
   const root = thread.messages[0]!;
   const asker = agentName(root.author);
   const resolved = thread.resolved_at !== null;
@@ -340,18 +361,31 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   const one = thread.messages.length < 2;
   const lookRef = useRef<{ threadId: string; seq: number | null } | null>(null);
   if (!lookRef.current || lookRef.current.threadId !== thread.thread_id) lookRef.current = { threadId: thread.thread_id, seq: lookBoundary(thread) };
-  const boundary = lookSeq !== undefined ? lookSeq : lookRef.current.seq;
+  const opened = lookSeq !== undefined ? lookSeq : lookRef.current.seq;
+  // A reply the person sends during this visit is a look at everything before
+  // it (the list's rule), so what it answers stops being new at once.
+  const boundary = useMemo(
+    () => (opened === null ? null : Math.max(opened, ...thread.messages.filter((m) => m.author.kind === 'person').map((m) => m.seq ?? 0))),
+    [opened, thread.messages],
+  );
   const fresh = useMemo(() => newSinceLook(thread.messages, boundary), [thread.messages, boundary]);
   const showNew = !one && fresh.size > 0;
   // The fold is decided once, when the thread opens: opening a message never
   // makes others appear or disappear.
-  const [foldState, setFoldState] = useState<FoldState | null>(null);
+  // The window keeps it beside the boundary (`memory`), so a guided review
+  // opened from the thread and closed again finds the thread as it was left.
+  const memoryRef = useRef(memory);
+  memoryRef.current = memory?.threadId === thread.thread_id ? memory : undefined;
+  const [foldState, setFoldState] = useState<FoldState | null>(() => (memory?.threadId === thread.thread_id ? memory.fold : null));
   let fold = foldState;
   if (!fold || fold.threadId !== thread.thread_id) {
     const plan = planFolds(thread.messages, fresh, boundary);
     fold = { threadId: thread.thread_id, folded: plan.folded, hidden: plan.hidden, revealed: new Set() };
     setFoldState(fold);
   }
+  useEffect(() => {
+    if (memoryRef.current && foldState?.threadId === memoryRef.current.threadId) memoryRef.current.fold = foldState;
+  }, [foldState]);
   const foldRef = useRef(fold);
   foldRef.current = fold;
   const hiddenNow = new Set(fold.hidden.flatMap((ids, index) => (fold.revealed.has(index) ? [] : ids)));
@@ -562,38 +596,55 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     if (!body) return;
     const box = body.getBoundingClientRect();
     const subject = body.querySelector<HTMLElement>('.ib-subject');
-    const firstNew = body.querySelector<HTMLElement>('[data-message-article][data-new]');
     const next = {
       subject: subject !== null && subject.getBoundingClientRect().bottom < box.top + 4,
-      pill: firstNew !== null && firstNew.getBoundingClientRect().top > box.bottom - 56,
+      // Any new message below the view, not only the first.
+      pill: newBelow(body) !== null,
     };
     setChrome((current) => (current.subject === next.subject && current.pill === next.pill ? current : next));
   }, []);
   useEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
-    body.addEventListener('scroll', updateChrome, { passive: true });
+    const onScroll = () => {
+      if (memoryRef.current) memoryRef.current.scrollTop = body.scrollTop;
+      updateChrome();
+    };
+    body.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', updateChrome);
     return () => {
-      body.removeEventListener('scroll', updateChrome);
+      body.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', updateChrome);
     };
   }, [updateChrome]);
 
   // Where the thread opens: at the "New since you looked" divider with the
-  // last read line just above it, or at the top when nothing is new. Once per thread.
+  // last read line just above it, or at the top when nothing is new. Once per
+  // thread; a pane opened again on a thread that already landed (back from a
+  // guided review) goes back to where it was scrolled.
   const landed = useRef<string | null>(null);
   useLayoutEffect(() => {
     if (!foldState || foldState.threadId !== thread.thread_id || landed.current === thread.thread_id) return;
     landed.current = thread.thread_id;
     const body = bodyRef.current;
     if (!body) return;
+    const kept = memoryRef.current;
+    if (kept?.landed) {
+      body.scrollTop = kept.scrollTop;
+      return;
+    }
     const divider = body.querySelector<HTMLElement>('[data-new-divider]');
     const above = divider?.previousElementSibling as HTMLElement | null | undefined;
     body.scrollTop = divider ? Math.max(0, (above ? above.offsetTop : divider.offsetTop) - 6) : 0;
-  });
+    if (kept) {
+      kept.landed = true;
+      kept.scrollTop = body.scrollTop;
+    }
+  }, [foldState, thread.thread_id]);
 
-  // After a fold or an open: the message the person acted on stays where it was, and keeps focus.
+  // After a fold or an open: the message the person acted on stays where it
+  // was, and keeps focus. Then the header subject and the pill follow. Only
+  // when the fold, the thread or the file beside it changed (never on a keystroke in the reply box).
   useLayoutEffect(() => {
     const anchor = anchorRef.current;
     anchorRef.current = null;
@@ -614,16 +665,21 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       }
     }
     updateChrome();
-  });
+  }, [foldState, thread, file?.id, updateChrome]);
 
-  /** n, and the pill: the first new message, at the divider. */
-  const jumpNew = useCallback(() => {
+  /**
+   * n goes to the first new message (at the divider); the pill to the first
+   * new message below the view, which is the first new one unless the person
+   * has read past it.
+   */
+  const jumpNew = useCallback((below = false) => {
     const body = bodyRef.current;
     const first = body?.querySelector<HTMLElement>('[data-message-article][data-new]');
     if (!body || !first) return;
-    const divider = body.querySelector<HTMLElement>('[data-new-divider]');
-    (divider ?? first).scrollIntoView?.({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' });
-    first.querySelector<HTMLElement>('[data-fold-head]')?.focus({ preventScroll: true });
+    const target = below ? (newBelow(body) ?? first) : first;
+    const divider = target === first ? body.querySelector<HTMLElement>('[data-new-divider]') : null;
+    (divider ?? target).scrollIntoView?.({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' });
+    target.querySelector<HTMLElement>('[data-fold-head]')?.focus({ preventScroll: true });
   }, []);
 
   // j / k move between messages (and the middle fold), n goes to the first
@@ -1009,7 +1065,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                 return pending.has(id) ? pending.get(id) !== null : q.state === 'picked';
               },
             });
-            const snippet = foldSnippet(message);
+            const snippet = foldSnippet(message, thread.messages);
             const label = `${name}, ${time}${isNew ? ', new' : ''}${holdings.length > 0 ? `. ${holdings.map((h) => h.say).join(', ')}` : ''}. ${snippetText(snippet)}`;
             before.push(
               <article
@@ -1030,7 +1086,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                     </span>
                   )}
                   <span className="ib-fl-nm">{name}</span>
-                  <span className="ib-fl-sn" data-snippet={snippet.kind}>
+                  <span className="ib-fl-sn" data-snippet={snippet.kind} title={snippetText(snippet)}>
                     <SnippetText snippet={snippet} />
                   </span>
                   <HoldingChips holdings={holdings} />
@@ -1067,12 +1123,13 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                   <Icon name="reply" />
                 </span>
               )}
-              <div>
-                <div className="ib-who">
+              {/* Spans, not divs: in a multi-message thread this sits inside the fold button. */}
+              <span className="ib-whobox">
+                <span className="ib-who">
                   {name} <span>in {thread.project.name}</span>
-                </div>
-                <div className="ib-to">to {isAgent ? 'you' : message.to ? hostName(message.to.host) : asker}</div>
-              </div>
+                </span>
+                <span className="ib-to">to {isAgent ? 'you' : message.to ? hostName(message.to.host) : asker}</span>
+              </span>
             </>
           );
           before.push(
@@ -1187,7 +1244,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         {showNew && (
           // While new messages are below the view: a pill that goes to them.
           <div className="ib-npill-wrap">
-            <button type="button" className="ib-npill" data-new-pill="" data-off={chrome.pill ? undefined : ''} tabIndex={chrome.pill ? 0 : -1} aria-hidden={!chrome.pill} onClick={jumpNew}>
+            <button type="button" className="ib-npill" data-new-pill="" data-off={chrome.pill ? undefined : ''} tabIndex={chrome.pill ? 0 : -1} aria-hidden={!chrome.pill} onClick={() => jumpNew(true)}>
               <Icon name="arrowDown" size={15} />
               {fresh.size} new
             </button>
