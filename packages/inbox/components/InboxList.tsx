@@ -38,9 +38,17 @@ function countOf(row: InboxListRow): string {
   return questionCount(row.questions.open);
 }
 
-function WideRow({ row, onOpen }: { row: InboxListRow; onOpen: () => void }) {
+/**
+ * One row of the wide list. With every project shown it is five columns:
+ * project, badge, subject, count, time. In one project's list (`filtered`)
+ * the project and badge columns are not rendered at all: the badge, when the
+ * row has one, leads the subject cell, so a row starts at the list's left edge
+ * instead of after an empty block.
+ */
+function WideRow({ row, filtered, onOpen }: { row: InboxListRow; filtered: boolean; onOpen: () => void }) {
   const badge = badgeOf(row);
   const sent = row.section === 'sent';
+  const badgeEl = badge && <span className="ib-badge">{badge}</span>;
   return (
     <button
       type="button"
@@ -49,9 +57,10 @@ function WideRow({ row, onOpen }: { row: InboxListRow; onOpen: () => void }) {
       data-thread-id={row.thread_id}
       data-section={row.section}
     >
-      <span className="ib-p">{row.project.name}</span>
-      <span>{badge && <span className="ib-badge">{badge}</span>}</span>
+      {!filtered && <span className="ib-p">{row.project.name}</span>}
+      {!filtered && <span>{badgeEl}</span>}
       <span className="ib-subj">
+        {filtered && badgeEl}
         <AuthorMark author={row.author} />
         {row.thread_name && <span className="ib-key">{row.thread_name}</span>}
         <span className="ib-s">{subjectOf(row)}</span>
@@ -144,7 +153,7 @@ export function InboxList(props: InboxListProps) {
                       onOpen={() => props.onOpen(row)}
                     />
                   ) : (
-                    <WideRow key={row.thread_id} row={row} onOpen={() => props.onOpen(row)} />
+                    <WideRow key={row.thread_id} row={row} filtered={props.filtered} onOpen={() => props.onOpen(row)} />
                   ),
                 )}
             </div>

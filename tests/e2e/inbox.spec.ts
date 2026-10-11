@@ -322,8 +322,22 @@ test('agents write three threads in two projects; the rows land in the six secti
   await shot('1.1-list');
 });
 
+/** A row cell's left edge, in px. */
+async function leftOf(page: Page, selector: string): Promise<number> {
+  const box = await page.locator(selector).first().boundingBox();
+  expect(box, `no box for ${selector}`).not.toBeNull();
+  return Math.round(box!.x);
+}
+
 test('a project folder filters the list and the sections still apply', async () => {
   const { page } = world;
+  // Every project: the row starts with the project label, the agent mark sits two columns in.
+  const named = `.ib-row[data-thread-id="${world.threads.named}"]`;
+  const stoppedRow = `.ib-row[data-thread-id="${world.threads.stopped}"]`;
+  const labelLeft = await leftOf(page, `${named} .ib-p`);
+  expect(await leftOf(page, '.ib-band')).toBe(labelLeft - 12);
+  expect(await leftOf(page, `${named} .ib-mk`)).toBeGreaterThan(labelLeft + 200);
+
   await side(page).getByRole('button', { name: /^docs-site/ }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'docs-site' })).toBeVisible();
   await expect(page.locator('.ib-path')).toHaveText(new RegExp(`docs-site$`));
@@ -333,7 +347,14 @@ test('a project folder filters the list and the sections still apply', async () 
   await side(page).getByRole('button', { name: /^billing-svc/ }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'billing-svc' })).toBeVisible();
   await expect(page.locator('.ib-band')).toHaveText([/^Stopped on you\s*1$/, /^Waiting on you\s*1$/]);
-  await expect(page.locator('.ib-row .ib-p').first()).toBeHidden();
+  // One project: no project column at all, and no empty block where it was. The
+  // agent mark starts where the project label did; a badge, when a row has one,
+  // starts there instead and the mark follows it.
+  await expect(page.locator('.ib-row .ib-p')).toHaveCount(0);
+  expect(await leftOf(page, `${named} .ib-mk`)).toBe(labelLeft);
+  expect(await leftOf(page, `${stoppedRow} .ib-badge`)).toBe(labelLeft);
+  const badgeBox = (await page.locator(`${stoppedRow} .ib-badge`).boundingBox())!;
+  expect(await leftOf(page, `${stoppedRow} .ib-mk`)).toBeLessThan(Math.round(badgeBox.x + badgeBox.width) + 16);
   await shot('1.2-project-filter');
   await side(page).getByRole('button', { name: /^Inbox/ }).click();
   await expect(page.locator('.ib-lbody [data-thread-id]')).toHaveCount(3);
@@ -403,6 +424,38 @@ test('a pick is saved at once and the agent reads it through read_thread', async
   await expect(row).toHaveAttribute('data-section', 'new');
   await expect(row).toContainText('Answered, not sent');
   await shot('3.1-answered-not-sent');
+
+  // The wide rows: "Answered, not sent" is wider than the count column's
+  // 96px, and its text must end before the time's begins, in every project
+  // and in one project, at full and narrower widths. Measured on the text
+  // itself (a Range), since overflowing text spills past its cell's box.
+  const wide = page.locator(`.ib-row[data-thread-id="${world.threads.stopped}"]`);
+  const textGap = () =>
+    wide.evaluate((el) => {
+      const rect = (cell: Element) => {
+        const range = document.createRange();
+        range.selectNodeContents(cell);
+        return range.getBoundingClientRect();
+      };
+      const count = rect(el.querySelector('.ib-c')!);
+      const time = rect(el.querySelector('.ib-t')!);
+      return { text: el.querySelector('.ib-c')!.textContent, gap: time.left - count.right, sameLine: Math.abs(count.top - time.top) < 4 };
+    });
+  for (const folder of [/^Inbox/, /^billing-svc/]) {
+    await side(page).getByRole('button', { name: folder }).click();
+    for (const width of [1440, 1000, 820]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(wide).toBeVisible();
+      const measured = await textGap();
+      expect(measured.text).toBe('Answered, not sent');
+      expect(measured.sameLine).toBe(true);
+      expect(measured.gap, `count runs into the time at ${width}px (${folder})`).toBeGreaterThanOrEqual(8);
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await side(page).getByRole('button', { name: /^Inbox/ }).click();
+  await wide.click();
+  await expect(page.locator('.ib-pfoot').getByRole('button', { name: 'Edit the reply' })).toBeVisible();
 });
 
 test('Send carries the picks and the words, wait_for_reply returns them, and the thread says Delivered', async () => {

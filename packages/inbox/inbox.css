@@ -169,9 +169,10 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-group + .ib-group { margin-top: 12px; }
 .ib-band .ib-n { font-weight: 500; color: var(--muted-foreground); }
 .ib-band .ib-ic { margin-left: auto; color: var(--muted-foreground); }
-.ib-row { display: grid; grid-template-columns: 130px 104px minmax(0, 1fr) 96px 76px; align-items: center; gap: 0 10px; height: 50px; padding: 0 12px; border-bottom: 1px solid var(--ib-hair); font-size: 14px; width: 100%; text-align: left; }
-.ib-noproj .ib-row { grid-template-columns: 104px minmax(0, 1fr) 96px 76px; }
-.ib-noproj .ib-row .ib-p { display: none; }
+/* The count column is 96px unless its text is wider ("Answered, not sent"): then it grows, so it never runs into the time. */
+.ib-row { display: grid; grid-template-columns: 130px 104px minmax(0, 1fr) minmax(96px, max-content) 76px; align-items: center; gap: 0 10px; height: 50px; padding: 0 12px; border-bottom: 1px solid var(--ib-hair); font-size: 14px; width: 100%; text-align: left; }
+/* One project's list: no project or badge column (InboxList's WideRow); a badge leads the subject cell. */
+.ib-noproj .ib-row { grid-template-columns: minmax(0, 1fr) minmax(96px, max-content) 76px; }
 .ib-row:hover, .ib-nrow:hover { background: color-mix(in oklch, var(--muted) 35%, transparent); }
 .ib-row .ib-p { font-weight: 400; font-size: 13px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ib-row.ib-u .ib-s { font-weight: 600; }
