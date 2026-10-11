@@ -2196,6 +2196,12 @@ New module `utils/askSessionSetupHint` (`askSessionSetupHint(origin, providers)`
 
 ---
 
+## `Viewer` `refRepo` (unreleased; additive; needs no new core subpath)
+
+New optional `refRepo?: { display: string; host?: string } | null` on `Viewer`: the repository bare `#123` / `@user` refs link into (#1840), without the repo badge `repoInfo` also draws. It wins over `repoInfo` for links only; absent, links follow `repoInfo?.display` / `repoInfo?.host` exactly as before, so Plannotator's plan and review apps are unchanged. The Inbox passes it per message (a badge on every message would be noise).
+
+---
+
 ## Stale-tab guard: `serverSession` (ui 0.52.0, core 0.25.12; additive)
 
 Plannotator's servers issue one random `serverSession` nonce per process (new `@plannotator/core/server-session`) and refuse a decision that echoes a different one with `409 { code: "session_mismatch" }`, so a tab left open on a reused port cannot decide a new session. The client half is `utils/serverSession` (`adoptServerSession`, `withServerSession`, `withServerSessionQuery`, `noteServerSessionMismatch`, `useServerSessionReplaced`) plus `components/ServerSessionReplacedBanner`. Hosts that post decisions to their own backend need none of it: nothing in the shared components sends the field on its own, and a request without it is always accepted.

@@ -133,6 +133,13 @@ export interface ViewerProps {
   onAddGlobalAttachment?: (image: ImageAttachment) => void;
   onRemoveGlobalAttachment?: (path: string) => void;
   repoInfo?: { display: string; branch?: string; host?: string } | null;
+  /**
+   * The repository bare `#123` / `@user` refs link into, WITHOUT the repo
+   * badge `repoInfo` also draws (a host that renders many small documents,
+   * such as the Inbox's messages). Wins over `repoInfo` for links only;
+   * absent, links follow `repoInfo` as before.
+   */
+  refRepo?: { display: string; host?: string } | null;
   stickyActions?: boolean;
   /**
    * Render compact annotation controls and the existing document actions in
@@ -646,6 +653,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   onAddGlobalAttachment,
   onRemoveGlobalAttachment,
   repoInfo,
+  refRepo,
   stickyActions = true,
   annotationHeader,
   gridEnabled = false,
@@ -702,6 +710,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   const hostComposes = onHostDraft !== undefined && !authoringOff;
   const viewerAnnotationHeader = authoringOff ? undefined : annotationHeader;
   const hasViewerAnnotationHeader = viewerAnnotationHeader !== undefined;
+  // Where `#123` / `@user` link: `refRepo` when the host gave one, else `repoInfo`.
+  const linkRepo = refRepo ?? repoInfo;
   const [copied, setCopied] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
   const [locationHash, setLocationHash] = useState(() => window.location.hash);
@@ -1525,8 +1535,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                       onOpenCodeFile={onOpenCodeFile}
                       onToggleCheckbox={readOnly ? undefined : onToggleCheckbox}
                       checkboxOverrides={checkboxOverrides}
-                      githubRepo={repoInfo?.display}
-                      repoHost={repoInfo?.host}
+                      githubRepo={linkRepo?.display}
+                      repoHost={linkRepo?.host}
                       headingAnchorId={headingSlugMap.get(block.id)}
                       onNavigateAnchor={scrollToAnchor}
                     />
@@ -1570,8 +1580,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               onImageClick={(src, alt) => setLightbox({ src, alt })}
               onOpenLinkedDoc={onOpenLinkedDoc}
               onOpenCodeFile={onOpenCodeFile}
-              githubRepo={repoInfo?.display}
-              repoHost={repoInfo?.host}
+              githubRepo={linkRepo?.display}
+              repoHost={linkRepo?.host}
               onNavigateAnchor={scrollToAnchor}
               onHover={(element) => {
                 if (tableHoverTimeoutRef.current) {
@@ -1661,8 +1671,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   onNavigateAnchor={scrollToAnchor}
                   onToggleCheckbox={readOnly ? undefined : onToggleCheckbox}
                   checkboxOverrides={checkboxOverrides}
-                  githubRepo={repoInfo?.display}
-                  repoHost={repoInfo?.host}
+                  githubRepo={linkRepo?.display}
+                  repoHost={linkRepo?.host}
                   headingAnchorId={headingSlugMap.get(group.block.id)}
                   question={question}
                   questionTotal={questionIndex.total}
@@ -1788,8 +1798,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             onImageClick={(src, alt) => setLightbox({ src, alt })}
             onOpenLinkedDoc={onOpenLinkedDoc}
             onOpenCodeFile={onOpenCodeFile}
-            githubRepo={repoInfo?.display}
-            repoHost={repoInfo?.host}
+            githubRepo={linkRepo?.display}
+            repoHost={linkRepo?.host}
             onNavigateAnchor={scrollToAnchor}
           />
         )}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { inboxAttachmentKindLabel, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachmentState } from '@plannotator/core/inbox-types';
+import { inboxAttachmentKindLabel, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachmentState, type InboxProjectRepo } from '@plannotator/core/inbox-types';
 import { CodeFileView } from '@plannotator/ui/components/CodeFilePopout';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
@@ -23,6 +23,7 @@ import {
   codeRangeOf,
 } from '../attachments';
 import { clockTime, formatBytes } from '../format';
+import { useRefRepo } from '../links';
 import { ImageAttachmentView } from './ImageAttachmentView';
 import { Icon } from '../icons';
 
@@ -35,6 +36,8 @@ export interface AttachmentPaneProps {
   agent: string;
   projectName: string;
   projectRoot: string;
+  /** The project's git `origin`: bare `#123` refs in a markdown file link into it. */
+  repo?: InboxProjectRepo | null;
   version: 'current' | 'sent';
   onVersion: (version: 'current' | 'sent') => void;
   full: boolean;
@@ -134,6 +137,7 @@ export function AttachmentPane(props: AttachmentPaneProps) {
   const documentBlocks = useMemo(() => (view && !isCode ? attachmentBlocks(kind, view.text, attachment.name) : []), [view, kind, isCode, attachment.name]);
   const commentBlocks = useMemo(() => (isCode ? codeCommentBlocks(annotations) : []), [isCode, annotations]);
   const blocks = isCode ? commentBlocks : documentBlocks;
+  const refRepo = useRefRepo(props.repo);
   // Code comments drawn under their lines; one whose lines no longer read as they did is unanchored.
   const codeAnnotations = useMemo(
     () => (isCode ? annotations.map((a) => codeAnnotationOf(a, attachment.name)).filter((a): a is NonNullable<typeof a> => a !== null) : []),
@@ -422,6 +426,7 @@ export function AttachmentPane(props: AttachmentPaneProps) {
                 disableCodePathValidation
                 copyLabel="Copy file"
                 allowImages={false}
+                refRepo={refRepo}
                 readOnly={props.readOnly}
                 onRestoreReport={(report) => setUnanchored(new Set(report.unanchored))}
               />

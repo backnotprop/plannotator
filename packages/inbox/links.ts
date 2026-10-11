@@ -17,7 +17,8 @@
  * A local link that names no attachment of the message is drawn as inert
  * text titled "Not attached": the window never asks the server for it.
  */
-import type { InboxAttachment } from '@plannotator/core/inbox-types';
+import { useMemo } from 'react';
+import type { InboxAttachment, InboxProjectRepo } from '@plannotator/core/inbox-types';
 
 export type LinkableAttachment = Pick<InboxAttachment, 'id' | 'path' | 'named_path' | 'name' | 'kind'>;
 
@@ -128,3 +129,16 @@ export function attachmentDeepLink(threadId: string, attachmentId: string): stri
 
 /** The tooltip of a local link that names no attachment of the message. */
 export const NOT_ATTACHED_TITLE = 'Not attached to this message';
+
+/**
+ * Bare `#123` / `@user` refs (#1840): the project's `origin` as the Viewer's
+ * `refRepo`, so a ref links to that repository's issue on its forge (and
+ * opens in a new tab, as every external link does) instead of a styled span.
+ * Kept stable while the repo is the same, so a re-read thread does not redraw
+ * every message.
+ */
+export function useRefRepo(repo: InboxProjectRepo | null | undefined): { display: string; host?: string } | null {
+  const display = repo?.display ?? null;
+  const host = repo?.host ?? undefined;
+  return useMemo(() => (display ? { display, ...(host ? { host } : {}) } : null), [display, host]);
+}

@@ -100,6 +100,7 @@ import {
   waitingDecisions,
 } from "./inbox-decisions";
 import { inboxGuideRoute } from "./inbox-guides";
+import { createInboxRepoCache } from "./inbox-repos";
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { inboxMessageImageRoute } from "./inbox-message-images";
@@ -365,11 +366,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     },
   });
 
+  // Each project's git `origin` (#1840), for the window's `#123` links:
+  // resolved now for every known project and when a project is first seen,
+  // never while a request waits (inbox-repos.ts).
+  const repos = createInboxRepoCache();
+  for (const project of store.listProjects()) void repos.refresh(project.root);
+
   const projectLocks = new Map<string, Promise<InboxProject>>();
   const resolveProject = async (path: string): Promise<InboxProject> => {
     const { root, name } = await resolveInboxProjectRoot(path);
     const existing = store.projectByRoot(root);
     if (existing) return existing;
+    void repos.refresh(root);
     // One creation per root even when two calls race through the await above.
     let pending = projectLocks.get(root);
     if (!pending) {
@@ -945,7 +953,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const thread = store.thread(threadMatch[1]!);
         if (!thread) return json({ error: "No such thread.", code: "thread_not_found" }, 404);
         const decisionIds = thread.messages.flatMap((m) => (m.questions ?? []).map((q) => q.decision_id));
-        return json({ serverSession, cursor: store.cursor(), thread, decisions: threadDecisions(store, decisionIds) });
+        const withRepo = { ...thread, project: { ...thread.project, repo: repos.get(thread.project.root) } };
+        return json({ serverSession, cursor: store.cursor(), thread: withRepo, decisions: threadDecisions(store, decisionIds) });
       }
 
       const seenMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/seen$/.exec(path);

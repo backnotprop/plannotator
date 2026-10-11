@@ -128,6 +128,16 @@ export interface InboxProject {
   created_at: string;
 }
 
+/**
+ * The repository a project's git `origin` names (#1840): its path on the
+ * forge (`owner/repo`, or a GitLab `group/sub/project`) and the remote's host,
+ * null when the host did not parse. The window links bare `#123` refs with it.
+ */
+export interface InboxProjectRepo {
+  display: string;
+  host: string | null;
+}
+
 export type InboxAuthor =
   | { kind: "person" }
   | {
@@ -497,7 +507,12 @@ export interface InboxListSection {
 
 export interface InboxThread {
   thread_id: string;
-  project: InboxProject;
+  /**
+   * `repo` rides only on `GET /api/inbox/threads/:id` and is never stored:
+   * the project's `origin`, or null for a folder without one or until the
+   * Inbox has resolved it. Absent from an older Inbox.
+   */
+  project: InboxProject & { repo?: InboxProjectRepo | null };
   subject: string | null;
   /** The thread's name, or null for a session's default thread. */
   thread_name: string | null;

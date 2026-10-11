@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Viewer } from '@plannotator/ui/components/Viewer';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
-import type { InboxDecision, InboxDecisionDraft, InboxMessageWire, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxDecision, InboxDecisionDraft, InboxMessageWire, InboxProjectRepo, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import type { IndexedQuestion, QuestionAnswer } from '@plannotator/core/question-block';
 import { inboxDecisionWords } from '@plannotator/core/inbox-questions';
 import { isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
-import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, attachmentForLink, openAttachmentTitle } from '../links';
+import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, attachmentForLink, openAttachmentTitle, useRefRepo } from '../links';
 import { InboxApiError, inboxApi, type AttachmentsModel } from '../api';
 import { annotationOf, attachmentFeedback } from '../attachments';
 import { AttachmentTiles } from './AttachmentTiles';
@@ -39,6 +39,7 @@ function answerWords(answer: QuestionAnswer): string {
 export function MessageBody({
   message,
   projectRoot,
+  repo,
   onOpenAttachment,
   readOnly,
   answers,
@@ -53,6 +54,8 @@ export function MessageBody({
   message: InboxMessageWire;
   /** The thread's project root: relative links start there or at the message's own folder. */
   projectRoot: string;
+  /** The project's git `origin` (the thread payload's `project.repo`): bare `#123` refs link into it. */
+  repo?: InboxProjectRepo | null;
   /** A link in the body to one of this message's attachments was followed. */
   onOpenAttachment: (attachment: InboxAttachment) => void;
   readOnly: boolean;
@@ -69,6 +72,7 @@ export function MessageBody({
   renderReplacesLine?: (key: string) => React.ReactNode;
 }) {
   const blocks = useMemo(() => parseMarkdownToBlocks(message.body, { frontmatter: false }), [message.body]);
+  const refRepo = useRefRepo(repo);
   // A link to a file this message attached opens it beside the thread; any
   // other local link is inert text (links.ts). Kept stable across renders,
   // so raw-HTML blocks do not redraw their links on every pick.
@@ -144,6 +148,7 @@ export function MessageBody({
         disableCodePathValidation
         imageBaseDir={inboxMessageImageBase(message.id)}
         resolveLocalLink={resolveLocalLink}
+        refRepo={refRepo}
         answerOnly
         readOnly={readOnly}
         questionAnswers={answers}
@@ -704,6 +709,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                 <MessageBody
                   message={message}
                   projectRoot={thread.project.root}
+                  repo={thread.project.repo ?? null}
                   onOpenAttachment={openFromMessage}
                   readOnly={!isAgent || resolved || questions.length === 0 || allSent}
                   answers={answersOf(message)}
@@ -918,6 +924,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         agent={asker}
         projectName={thread.project.name}
         projectRoot={thread.project.root}
+        repo={thread.project.repo ?? null}
         version={file!.version}
         onVersion={(version) => onOpenFile({ id: openAttachment.id, version, focus: null })}
         full={full}
