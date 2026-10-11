@@ -427,6 +427,64 @@ test('a comment on the guide\'s diffs: a line and a range, listed beside the gui
   await page.keyboard.press('Escape');
 });
 
+test('a 120-character thread name plus the Guided review mark never pushes a row out of shape, in every project or one, at any width', async () => {
+  const { claude, page } = world;
+  // The longest name send_message takes (120 characters).
+  const name = `release-train-${'checkout-refunds-ledger-'.repeat(5)}`.slice(0, 120);
+  expect(name.length).toBe(120);
+  const long = await claude.submitGuide({
+    project_path: world.ledger,
+    snapshot: { ...FIXTURE_V1_LOCAL, guide: { ...FIXTURE_V1_LOCAL.guide, title: 'A long thread name' } },
+    thread: name,
+    subject: 'The refund worker retries on a Stripe 409 with the same idempotency key, and the ledger export follows it.',
+  });
+  const projects = (await (await page.request.get(`${world.url}api/inbox/projects`)).json()).projects as { id: string; name: string }[];
+  const ledger = projects.find((p) => p.name === 'ledger')!;
+  const row = page.locator(`.ib-row[data-thread-id="${long.thread_id}"]`);
+  for (const route of ['', `#project=${ledger.id}`]) {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${world.url}${route}`);
+    await expect(row).toBeVisible();
+    await expect(row.locator('.ib-key')).toHaveText(name);
+    await expect(row.locator('[data-guide-mark]')).toHaveCount(1);
+    for (const width of [556, 656, 820]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(row).toBeVisible();
+      // Measure the settled layout: below 768px the sidebar leaves the row
+      // (off-canvas) a moment after the resize; wait for the list to stop moving.
+      const listWidth = () => row.evaluate((el) => el.closest('.ib-lbody')!.clientWidth);
+      if (width < 768) await expect.poll(listWidth).toBe(width);
+      await expect
+        .poll(async () => {
+          const before = await listWidth();
+          await page.waitForTimeout(250);
+          return before === (await listWidth());
+        })
+        .toBe(true);
+      const measured = await row.evaluate((el) => {
+        const body = el.closest('.ib-lbody')!;
+        const box = (sel: string) => el.querySelector(sel)!.getBoundingClientRect();
+        const key = el.querySelector<HTMLElement>('.ib-key')!;
+        return {
+          listOverflow: body.scrollWidth - body.clientWidth,
+          rowOverflow: el.scrollWidth - el.clientWidth,
+          subjRight: box('.ib-subj').right,
+          countLeft: box('.ib-c').left,
+          keyRight: key.getBoundingClientRect().right,
+          keyTruncated: key.scrollWidth > key.clientWidth,
+        };
+      });
+      const where = `${route || 'every project'} at ${width}px`;
+      expect(measured.listOverflow, `the list scrolls sideways ${where}`).toBe(0);
+      expect(measured.rowOverflow, `the row spills ${where}`).toBe(0);
+      expect(measured.subjRight, `the subject cell runs into the count ${where}`).toBeLessThanOrEqual(measured.countLeft);
+      expect(measured.keyRight, `the thread chip leaves its cell ${where}`).toBeLessThanOrEqual(measured.subjRight + 0.5);
+      expect(measured.keyTruncated, `the thread chip keeps its ellipsis ${where}`).toBe(true);
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+});
+
 test('no page errors and no CSP refusals along the way', async () => {
   expect(world.errors).toEqual([]);
 });

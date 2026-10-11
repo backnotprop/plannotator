@@ -50,7 +50,7 @@ const SECTIONS: InboxListSection[] = [
   { id: 'stopped', label: 'Stopped on you', threads: [row('msg_stop', 'stopped')] },
   { id: 'holding', label: 'Holding up work', threads: [row('msg_hold', 'holding')] },
   { id: 'waiting', label: 'Waiting on you', threads: [row('msg_wait', 'waiting', { thread_name: 'refund-webhooks', guide: true })] },
-  { id: 'sent', label: 'Sent', threads: [row('msg_sent', 'sent', { unread: false, sent: { at: '2026-10-10T10:01:00.000Z', checked_at: null } })] },
+  { id: 'sent', label: 'Sent', threads: [row('msg_sent', 'sent', { author: { kind: 'agent', host: 'pi', session: 'ses_b', name: null }, unread: false, sent: { at: '2026-10-10T10:01:00.000Z', checked_at: null } })] },
 ];
 
 let root: Root | null = null;
@@ -135,10 +135,16 @@ describe.if(hasDom)('the wide list', () => {
     expect(wait.querySelector('[data-guide-mark]')).not.toBeNull();
   });
 
-  test('one project beside an open thread: the narrow rows name the agent where the project was', () => {
-    const el = render(true, true);
+  test("beside an open thread: a narrow row's first line names its agent in one project, the project in all", () => {
+    let el = render(true, true);
+    const l1 = (id: string) => el.querySelector<HTMLElement>(`.ib-nrow[data-thread-id="${id}"] .ib-l1 .ib-p`)!.textContent;
     expect(el.querySelectorAll('.ib-row').length).toBe(0);
-    const first = el.querySelector<HTMLElement>('.ib-nrow[data-thread-id="msg_wait"] .ib-l1 .ib-p')!;
-    expect(first.textContent).not.toBe('billing-svc');
+    expect(l1('msg_wait')).toBe('Claude Code');
+    expect(l1('msg_sent')).toBe('Pi');
+    act(() => root?.unmount());
+    host?.remove();
+    el = render(false, true);
+    expect(l1('msg_wait')).toBe('billing-svc');
+    expect(l1('msg_sent')).toBe('billing-svc');
   });
 });
