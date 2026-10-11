@@ -134,12 +134,18 @@ describe('review entry assets', () => {
   // boundary would be gone.
   // The surface a phone hosts (PLAN step S1) has no network at all: every
   // byte arrives over the bridge. Its policy is the boundary, so it is pinned.
+  // The one https origin it names is the Android shell's asset origin, the
+  // virtual host the shell intercepts and never fetches (contract section 10).
   test('the surface forbids every connection and loads nothing from outside', () => {
     const html = read('apps/inbox/surface.html');
     const csp = html.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/)?.[1] ?? '';
     expect(csp).toContain("default-src 'none'");
     expect(csp).toContain("connect-src 'none'");
-    expect(csp).not.toMatch(/https?:/);
+    expect(csp.replaceAll(' https://appassets.androidplatform.net;', ';').replaceAll(' https://appassets.androidplatform.net ', ' ')).not.toMatch(/https?:|wss?:|\*/);
+    // Wherever iOS's asset scheme is allowed, Android's asset origin is too, and nowhere else.
+    for (const directive of csp.split(';').map((d) => d.trim())) {
+      expect(directive.includes('https://appassets.androidplatform.net')).toBe(directive.includes('plannotator-asset:'));
+    }
   });
 
   test('the Inbox window mounts the guide viewer only through its dynamic import', () => {
