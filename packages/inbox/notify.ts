@@ -24,6 +24,25 @@ import { agentName, plural } from './format';
 /** The one tag every Inbox notification carries: a new one replaces the last. */
 export const NOTIFICATION_TAG = 'plannotator-inbox';
 
+/**
+ * `renotify` is in the Notifications API but not in TypeScript's DOM lib
+ * (5.8), so the options type is widened here rather than cast.
+ */
+export interface InboxNotificationOptions extends NotificationOptions {
+  renotify?: boolean;
+}
+
+/**
+ * The options every Inbox notification is raised with. One tag keeps one
+ * notice at a time; `renotify` makes the replacement alert again. Without it
+ * Chrome swaps the content of a notice that still carries the tag (one macOS
+ * never displayed, say) with no banner and no sound, so a new question would
+ * arrive silently.
+ */
+export function inboxNotificationOptions(text: { body: string }): InboxNotificationOptions {
+  return { body: text.body, tag: NOTIFICATION_TAG, renotify: true };
+}
+
 /** One thread's banner (record 6.2): "billing-svc: Claude Code stopped on you", then the subject. */
 export function threadNotificationText(input: { project: string; agent: string; subject: string; section: InboxSectionId | null }): {
   title: string;
@@ -207,7 +226,7 @@ export function useInboxNotifications(options: {
       open = () => openRef.current.list();
     }
     try {
-      const notification = new Notification(text.title, { body: text.body, tag: NOTIFICATION_TAG });
+      const notification = new Notification(text.title, inboxNotificationOptions(text));
       notification.onclick = () => {
         window.focus();
         notification.close();

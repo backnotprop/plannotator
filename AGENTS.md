@@ -2058,7 +2058,7 @@ Sorting and the rest:
 - Build notes: the window's strict typecheck reads the reader's shape from `packages/inbox/guide/reader-module.d.ts`, and the reader itself is checked by `packages/inbox/tsconfig.guide.json` (review-editor carries pre-existing type errors). `apps/inbox/index.css` scans `packages/guide-viewer` and `packages/review-editor/components` for Tailwind and imports `packages/review-editor/comments.css` (the review app's comment cards, toolbar and suggestion styles, also imported by review-editor's `index.css`). The `commentOnly` prop and that stylesheet change the guides.show viewer's bytes, so its pinned manifest was regenerated.
 
 **Notifications** (`packages/inbox/notify.ts`; the open page first, no Web Push, no service worker).
-- The page raises a browser `Notification` for each new question that the event stream brings in. News never notifies. Every notification carries one tag (`plannotator-inbox`).
+- The page raises a browser `Notification` for each new question that the event stream brings in. News never notifies. Every notification carries one tag (`plannotator-inbox`) and `renotify: true` (`inboxNotificationOptions`), so a new one replaces the last and still alerts; without `renotify` Chrome replaces a notice still holding the tag silently.
 - While the tab is away:
   - One thread: "<project>: <agent> stopped on you" or "is waiting on you", with the subject as the body. A click opens the thread.
   - A burst becomes one notice, "3 waiting in 2 projects". A click opens the list.

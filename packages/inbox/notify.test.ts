@@ -4,7 +4,7 @@
  * is another permission, so it gets the plain ask.
  */
 import { describe, expect, test } from 'bun:test';
-import { askKind } from './notify';
+import { askKind, inboxNotificationOptions, NOTIFICATION_TAG } from './notify';
 
 const saved = (allowed_origin: string | null) => ({ enabled: true, dismissed: false, allowed_origin });
 
@@ -22,5 +22,16 @@ describe('askKind', () => {
     expect(askKind({ ...saved(null), dismissed: true }, 'default', 'http://localhost:1')).toBeNull();
     expect(askKind({ ...saved(null), enabled: false }, 'default', 'http://localhost:1')).toBeNull();
     expect(askKind(saved(null), 'default', 'http://localhost:1')).toBe('ask');
+  });
+});
+
+describe('inboxNotificationOptions', () => {
+  // A new notice replaces the last (one tag) and still alerts (renotify): without
+  // renotify Chrome replaces a notice that carries the tag silently.
+  test('every notice carries the one tag and renotify', () => {
+    const options = inboxNotificationOptions({ body: 'Pick a retry policy' });
+    expect(options.tag).toBe(NOTIFICATION_TAG);
+    expect(options.renotify).toBe(true);
+    expect(options.body).toBe('Pick a retry policy');
   });
 });
