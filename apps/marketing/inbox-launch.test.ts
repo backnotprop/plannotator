@@ -66,7 +66,10 @@ describe('Plannotator Inbox launch switch', () => {
   test('on: the page, the post and the images are built and linked', async () => {
     expect(files(join(dist.on, 'assets/inbox')).length).toBe(33);
     const home = inboxLinks(await read(dist.on, 'index.html')).map(text);
-    expect(home).toEqual(['Inbox', 'Inbox']);
+    // Nav, the announcement bar (src/components/landing/AnnounceBar.astro), Footer.
+    expect(home).toHaveLength(3);
+    expect([home[0], home[2]]).toEqual(['Inbox', 'Inbox']);
+    expect(home[1]).toContain('See the Inbox');
     const inbox = await read(dist.on, 'inbox/index.html');
     expect(inboxLinks(inbox)[0]).toContain('text-foreground font-medium');
     expect(inbox).toContain('<title>Plannotator Inbox</title>');
