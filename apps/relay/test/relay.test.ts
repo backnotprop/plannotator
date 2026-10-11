@@ -23,7 +23,8 @@
  *
  * Then a second relay with no APNs key and no FCM service account (pushes
  * answer `no_apns_key`, `no_fcm_key`, or `no_push_token` with neither token),
- * where the token routes and `hello`'s flags are checked; then FCM (R3,
+ * where the token routes, `hello`'s flags, the push brake and a mailbox made
+ * under R2's schema are checked; then FCM (R3,
  * section 10) on its own relay and Inbox, an Android phone paired, with
  * Google's two hosts played locally (oauth2.googleapis.com checks the RS256
  * JWT against a throwaway RSA key made for this run; fcm.googleapis.com
@@ -157,6 +158,7 @@ interface FcmSent {
 async function fakeGoogle(publicKey: CryptoKey) {
   const exchanges: { header: Json; claims: Json; valid: boolean }[] = [];
   const minted = new Set<string>();
+  let mintedCount = 0;
   const sent: FcmSent[] = [];
   const oauth = Bun.serve({
     hostname: "127.0.0.1",
@@ -190,7 +192,7 @@ async function fakeGoogle(publicKey: CryptoKey) {
         c.aud === "https://oauth2.googleapis.com/token" &&
         c.exp - c.iat === 3600;
       if (!ok) return Response.json({ error: "invalid_grant", error_description: "Invalid JWT Signature." }, { status: 400 });
-      const token = `ya29.proof-${minted.size + 1}`;
+      const token = `ya29.proof-${++mintedCount}`;
       minted.add(token);
       return Response.json({ access_token: token, expires_in: 3599, token_type: "Bearer" });
     },
@@ -218,6 +220,8 @@ async function fakeGoogle(publicKey: CryptoKey) {
     fcmOrigin: `http://127.0.0.1:${fcm.port}`,
     exchanges,
     sent,
+    /** FCM stops accepting an access token it minted, as Google does for one revoked or expired early. */
+    revoke: (token: string) => minted.delete(token),
     close: () => {
       oauth.stop(true);
       fcm.stop(true);
@@ -246,13 +250,15 @@ interface Relay {
   url: string;
   persist: string;
   log: () => string;
-  stop: () => void;
+  /** Resolves once wrangler has exited, so its storage may be opened. */
+  stop: () => Promise<void>;
 }
 
-async function startRelay(name: string, vars: Record<string, string>): Promise<Relay> {
+async function startRelay(name: string, vars: Record<string, string>, options: { keep?: boolean } = {}): Promise<Relay> {
   const port = freePort();
   const persist = join(relayDir, ".wrangler", `proof-${name}`);
-  rmSync(persist, { recursive: true, force: true });
+  // `keep`: start again on the storage a stopped relay left (a mailbox made by an older schema).
+  if (!options.keep) rmSync(persist, { recursive: true, force: true });
   mkdirSync(persist, { recursive: true });
   // The throwaway key lives in this env file for the run only (.wrangler/ is not committed), never on a command line.
   const envFile = join(persist, "relay.env");
@@ -279,11 +285,12 @@ async function startRelay(name: string, vars: Record<string, string>): Promise<R
     url,
     persist,
     log: () => output,
-    stop: () => {
+    stop: async () => {
       child.kill();
       rmSync(envFile, { force: true });
       // The relay's own log, kept beside its storage for whoever reads the run (the workflow uploads it).
       writeFileSync(join(persist, "wrangler.log"), output);
+      await child.exited;
     },
   };
 }
@@ -980,14 +987,20 @@ describe("the carriage: a phone reads and answers the Inbox through the relay al
 describe("a relay without the APNs key or an FCM service account", () => {
   let relay: Relay;
   const tokenSecret = "mailbox-secret-for-the-token-proof";
+  const brakeSecret = "mailbox-secret-for-the-push-brake-proof";
   let tokenMailbox = "";
+  let brakeMailbox = "";
 
   beforeAll(async () => {
     relay = await startRelay("no-key", {});
     // Made before the brake test spends this minute's creations.
-    const made = await fetch(`${relay.url}/v1/mailboxes`, { method: "POST", body: JSON.stringify({ secret_sha256: sha256(tokenSecret) }) });
-    expect(made.status).toBe(201);
-    tokenMailbox = ((await made.json()) as Json).mailbox_id;
+    const make = async (secret: string) => {
+      const made = await fetch(`${relay.url}/v1/mailboxes`, { method: "POST", body: JSON.stringify({ secret_sha256: sha256(secret) }) });
+      expect(made.status).toBe(201);
+      return ((await made.json()) as Json).mailbox_id as string;
+    };
+    tokenMailbox = await make(tokenSecret);
+    brakeMailbox = await make(brakeSecret);
   }, 90_000);
   afterAll(() => relay?.stop());
 
@@ -1042,6 +1055,8 @@ describe("a relay without the APNs key or an FCM service account", () => {
     // The FCM token: kept plain, only the device's own bearer, a token that is not one refused.
     expect((await at("PUT", `/devices/${dev}/fcm`, { token: "fcm-ok:APA91bExample_token-1" }, secret)).status).toBe(401);
     expect((await at("PUT", `/devices/${dev}/fcm`, { token: "not a token" }, "phone")).status).toBe(400);
+    expect((await at("PUT", `/devices/${dev}/fcm`, { token: "f".repeat(4097) }, "phone")).status).toBe(400);
+    expect((await at("PUT", `/devices/${dev}/fcm`, { token: "f".repeat(4096) }, "phone")).status).toBe(204);
     expect((await at("PUT", `/devices/${dev}/fcm`, { token: "fcm-ok:APA91bExample_token-1" }, "phone")).status).toBe(204);
     expect(row()).toMatchObject({ apns_token: null, apns_environment: null, fcm_token: "fcm-ok:APA91bExample_token-1" });
     expect(await flags()).toEqual([{ apns: false, fcm: true }]);
@@ -1066,6 +1081,65 @@ describe("a relay without the APNs key or an FCM service account", () => {
     expect((await at("DELETE", `/devices/${dev}`, undefined, secret)).status).toBe(204);
     expect(readMailbox(relay, mailbox_id).devices).toEqual([]);
   }, 30_000);
+
+  test("pushes are braked per mailbox after the Inbox's bearer: 60 a minute, then 429 with Retry-After", async () => {
+    const at = (method: string, path: string, body: unknown, bearer: string, mailbox = brakeMailbox) =>
+      fetch(`${relay.url}/v1/mailboxes/${mailbox}${path}`, { method, headers: { Authorization: `Bearer ${bearer}` }, body: JSON.stringify(body) });
+    const dev = "dev_00000000000000000000000002";
+    expect((await at("PUT", `/devices/${dev}`, { secret_sha256: sha256("phone"), cursor: 0 }, brakeSecret)).status).toBe(200);
+    // A wrong bearer spends nothing: it is refused before the brake.
+    for (let i = 0; i < 70; i++) expect((await at("POST", "/push", { device_id: dev, collapse_id: "c".repeat(64), ciphertext: "AAAAexample" }, "not-the-inbox")).status).toBe(401);
+    const statuses: number[] = [];
+    for (let i = 0; i < 61; i++) {
+      const push = await at("POST", "/push", { device_id: dev, collapse_id: "c".repeat(64), ciphertext: "AAAAexample" }, brakeSecret);
+      statuses.push(push.status);
+      if (push.status === 429) {
+        expect(push.headers.get("retry-after")).toBe("60");
+        expect(await push.json()).toEqual({ error: "too many requests", code: "too_many_requests" });
+      } else {
+        expect(await push.json()).toEqual({ sent: false, reason: "no_push_token" });
+      }
+    }
+    expect(statuses.slice(0, 60).every((status) => status === 200)).toBe(true);
+    expect(statuses[60]).toBe(429);
+    // Another mailbox's count is its own: its push reaches the mailbox (no such device there), not the brake.
+    const other = await at("POST", "/push", { device_id: "dev_00000000000000000000000009", collapse_id: "c".repeat(64), ciphertext: "AAAAexample" }, tokenSecret, tokenMailbox);
+    expect(other.status).toBe(404);
+  }, 60_000);
+
+  test("a mailbox made before R3 (R2's devices table, no fcm_token) gains the column on its first request", async () => {
+    const at = (method: string, path: string, body: unknown, bearer: string) =>
+      fetch(`${relay.url}/v1/mailboxes/${tokenMailbox}${path}`, { method, headers: { Authorization: `Bearer ${bearer}` }, body: JSON.stringify(body) });
+    const dev = "dev_00000000000000000000000003";
+    expect((await at("PUT", `/devices/${dev}`, { secret_sha256: sha256("phone"), cursor: 5 }, tokenSecret)).status).toBe(200);
+    expect((await at("PUT", `/devices/${dev}/apns`, { token: TOKEN_OK, environment: "sandbox" }, "phone")).status).toBe(204);
+    await relay.stop();
+    // Rewrite the devices table exactly as R2 made it, keeping the row.
+    const file = mailboxFiles(relay).find((f) => {
+      const db = new Database(f, { readonly: true });
+      try {
+        return (db.query("SELECT name FROM __miniflare_do_name").get() as { name: string } | null)?.name === tokenMailbox;
+      } finally {
+        db.close();
+      }
+    })!;
+    const db = new Database(file);
+    try {
+      db.exec(
+        "BEGIN; CREATE TABLE devices_r2 (id TEXT PRIMARY KEY, secret_sha256 TEXT NOT NULL, carriage INTEGER NOT NULL, cursor INTEGER NOT NULL, apns_token TEXT, apns_environment TEXT, next_n INTEGER NOT NULL DEFAULT 1); " +
+          "INSERT INTO devices_r2 SELECT id, secret_sha256, carriage, cursor, apns_token, apns_environment, next_n FROM devices; DROP TABLE devices; ALTER TABLE devices_r2 RENAME TO devices; COMMIT;",
+      );
+    } finally {
+      db.close();
+    }
+    expect(Object.keys(readMailbox(relay, tokenMailbox).devices[0]!)).not.toContain("fcm_token");
+
+    relay = await startRelay("no-key", {}, { keep: true });
+    expect((await helloOf(relay.url, tokenMailbox, tokenSecret)).devices).toEqual([{ device_id: dev, cursor: 5, carriage: true, apns: true, fcm: false }]);
+    expect(readMailbox(relay, tokenMailbox).devices[0]).toMatchObject({ id: dev, apns_token: TOKEN_OK, fcm_token: null });
+    expect((await at("PUT", `/devices/${dev}/fcm`, { token: "fcm-ok-r2" }, "phone")).status).toBe(204);
+    expect(readMailbox(relay, tokenMailbox).devices[0]).toMatchObject({ id: dev, apns_token: null, fcm_token: "fcm-ok-r2" });
+  }, 120_000);
 });
 
 // ── FCM (R3, section 10) ──
@@ -1207,6 +1281,17 @@ describe("FCM: an Android phone gets its pushes through Google's hosts, played l
     }
   }, 60_000);
 
+  test("a 401 from FCM is 502 fcm_failed with fcm_status 401 and drops the access token; the next push mints a fresh one", async () => {
+    expect(google.exchanges).toHaveLength(1);
+    google.revoke("ya29.proof-1");
+    expect(await pushByHand()).toEqual({ status: 502, body: { error: "FCM answered 401.", code: "fcm_failed", fcm_status: 401, fcm_reason: null } });
+    expect(row().fcm_token).toBe(FCM_OK);
+    const before = google.sent.length;
+    expect(await pushByHand()).toEqual({ status: 202, body: { sent: true } });
+    expect(google.exchanges).toHaveLength(2);
+    expect(google.sent[before]!.authorization).toBe("Bearer ya29.proof-2");
+  }, 30_000);
+
   test("a 5xx from FCM is 502 fcm_failed with FCM's status and errorCode, and keeps the token", async () => {
     expect((await atRelay("PUT", `/devices/${phone.id}/fcm`, { token: "fcm-down-1" })).status).toBe(204);
     expect(await pushByHand()).toEqual({ status: 502, body: { error: "FCM answered 503 UNAVAILABLE.", code: "fcm_failed", fcm_status: 503, fcm_reason: "UNAVAILABLE" } });
@@ -1258,21 +1343,76 @@ describe("FCM with a service account Google refuses", () => {
     google?.close();
   });
 
-  test("a refused token exchange is 502 fcm_failed, nothing reaches FCM, and the token is kept", async () => {
+  test("concurrent pushes share one refused token exchange: 502 fcm_failed for each, nothing reaches FCM, the refusal is remembered, the tokens kept", async () => {
     const secret = "mailbox-secret-for-the-refused-proof";
     const { mailbox_id } = (await (await fetch(`${relay.url}/v1/mailboxes`, { method: "POST", body: JSON.stringify({ secret_sha256: sha256(secret) }) })).json()) as Json;
     const at = (method: string, path: string, body: unknown, bearer: string) =>
       fetch(`${relay.url}/v1/mailboxes/${mailbox_id}${path}`, { method, headers: { Authorization: `Bearer ${bearer}` }, body: JSON.stringify(body) });
-    const dev = "dev_00000000000000000000000000";
-    await at("PUT", `/devices/${dev}`, { secret_sha256: sha256("phone"), cursor: 0 }, secret);
-    expect((await at("PUT", `/devices/${dev}/fcm`, { token: "fcm-ok-1" }, "phone")).status).toBe(204);
-    const push = await at("POST", "/push", { device_id: dev, collapse_id: "c".repeat(64), ciphertext: "AAAAexample" }, secret);
-    expect(push.status).toBe(502);
-    expect(await push.json()).toEqual({ error: "Google's token endpoint answered 400 invalid_grant.", code: "fcm_failed" });
+    const devs = ["dev_00000000000000000000000000", "dev_00000000000000000000000001", "dev_00000000000000000000000002"];
+    for (const dev of devs) {
+      await at("PUT", `/devices/${dev}`, { secret_sha256: sha256(`phone-${dev}`), cursor: 0 }, secret);
+      expect((await at("PUT", `/devices/${dev}/fcm`, { token: `fcm-ok-${dev}` }, `phone-${dev}`)).status).toBe(204);
+    }
+    const push = async (dev: string) => {
+      const answer = await at("POST", "/push", { device_id: dev, collapse_id: "c".repeat(64), ciphertext: "AAAAexample" }, secret);
+      return { status: answer.status, body: (await answer.json()) as Json };
+    };
+    const refused = { status: 502, body: { error: "Google's token endpoint answered 400 invalid_grant.", code: "fcm_failed" } };
+    expect(await Promise.all(devs.map(push))).toEqual([refused, refused, refused]);
     expect(google.exchanges).toHaveLength(1);
     expect(google.exchanges[0]!.valid).toBe(false);
+    // Within the minute the refusal is answered from memory: Google is not asked again.
+    expect(await push(devs[0]!)).toEqual(refused);
+    expect(google.exchanges).toHaveLength(1);
     expect(google.sent).toEqual([]);
-    expect(readMailbox(relay, mailbox_id).devices[0]!.fcm_token).toBe("fcm-ok-1");
+    expect(readMailbox(relay, mailbox_id).devices.map((d) => d.fcm_token)).toEqual(devs.map((dev) => `fcm-ok-${dev}`));
+  }, 30_000);
+});
+
+describe("overrides that do not name a loopback host, and a private key that cannot be read", () => {
+  let relay: Relay;
+
+  beforeAll(async () => {
+    const broken = JSON.stringify({ type: "service_account", project_id: FCM_PROJECT, private_key_id: FCM_KEY_ID, private_key: "-----BEGIN PRIVATE KEY-----\nnot*a*key\n-----END PRIVATE KEY-----\n", client_email: FCM_CLIENT });
+    // Every host override names a host that is not loopback; the keys fail before any request, so nothing leaves the machine.
+    relay = await startRelay("fenced", {
+      FCM_SERVICE_ACCOUNT: broken,
+      FCM_ORIGIN: "http://fcm.example.invalid",
+      FCM_OAUTH_ORIGIN: "https://127.0.0.1.example.invalid",
+      APNS_KEY: "bm90IGEga2V5",
+      APNS_KEY_ID: "KEY0000000",
+      APNS_TEAM_ID: "TEAM000000",
+      APNS_ORIGIN: "http://apple.example.invalid:2197",
+    });
+  }, 90_000);
+  afterAll(() => relay?.stop());
+
+  test("each override is ignored with one log line; an unreadable private key is fcm_failed, not a transport failure", async () => {
+    const secret = "mailbox-secret-for-the-fenced-proof";
+    const { mailbox_id } = (await (await fetch(`${relay.url}/v1/mailboxes`, { method: "POST", body: JSON.stringify({ secret_sha256: sha256(secret) }) })).json()) as Json;
+    const at = (method: string, path: string, body: unknown, bearer: string) =>
+      fetch(`${relay.url}/v1/mailboxes/${mailbox_id}${path}`, { method, headers: { Authorization: `Bearer ${bearer}` }, body: JSON.stringify(body) });
+    const push = async (dev: string) => {
+      const answer = await at("POST", "/push", { device_id: dev, collapse_id: "c".repeat(64), ciphertext: "AAAAexample" }, secret);
+      return { status: answer.status, body: (await answer.json()) as Json };
+    };
+    const android = "dev_00000000000000000000000000";
+    const iphone = "dev_00000000000000000000000001";
+    for (const dev of [android, iphone]) await at("PUT", `/devices/${dev}`, { secret_sha256: sha256("phone"), cursor: 0 }, secret);
+    expect((await at("PUT", `/devices/${android}/fcm`, { token: "fcm-ok-1" }, "phone")).status).toBe(204);
+    expect((await at("PUT", `/devices/${iphone}/apns`, { token: TOKEN_OK, environment: "sandbox" }, "phone")).status).toBe(204);
+
+    const unreadable = { status: 502, body: { error: "the service account's private key could not be read", code: "fcm_failed" } };
+    expect(await push(android)).toEqual(unreadable);
+    expect(await push(android)).toEqual(unreadable);
+    expect(readMailbox(relay, mailbox_id).devices.find((d) => d.id === android)!.fcm_token).toBe("fcm-ok-1");
+    expect(await push(iphone)).toMatchObject({ status: 502, body: { code: "apns_failed" } });
+    await push(iphone);
+
+    for (const name of ["FCM_ORIGIN", "FCM_OAUTH_ORIGIN", "APNS_ORIGIN"]) {
+      await until(relay.log, (log) => log.includes(`relay: ${name} ignored (not loopback)`), `the ${name} log line`);
+      expect(relay.log().split(`relay: ${name} ignored (not loopback)`).length - 1).toBe(1);
+    }
   }, 30_000);
 });
 

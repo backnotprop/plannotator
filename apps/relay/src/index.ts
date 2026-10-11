@@ -6,7 +6,7 @@
  * an envelope under a key made at pairing on the computer and the phone.
  *
  * The routes, each JSON, errors `{ error, code }`:
- *   POST   /v1/mailboxes                                the Inbox, at its first pairing (the one braked route)
+ *   POST   /v1/mailboxes                                the Inbox, at its first pairing (braked per IP)
  *   PUT    /v1/mailboxes/:mbx/devices/:dev              Inbox bearer: register a phone
  *   DELETE /v1/mailboxes/:mbx/devices/:dev              Inbox bearer: remove it
  *   PUT    /v1/mailboxes/:mbx/devices/:dev/carriage     device bearer: the phone's relay switch
@@ -15,7 +15,7 @@
  *   GET    /v1/mailboxes/:mbx/devices/:dev/items        device bearer: the held down items after a number
  *   POST   /v1/mailboxes/:mbx/devices/:dev/ack          device bearer: delete them, by number or store cursor
  *   POST   /v1/mailboxes/:mbx/devices/:dev/commands     device bearer: a command up, held for the Inbox
- *   POST   /v1/mailboxes/:mbx/push                      Inbox bearer: one push to one phone, through APNs or FCM
+ *   POST   /v1/mailboxes/:mbx/push                      Inbox bearer: one push to one phone, through APNs or FCM (braked per mailbox)
  *   GET    /v1/mailboxes/:mbx/socket                    Inbox bearer, WebSocket: hello, carriage, command; item, applied
  *
  * Owner-deployed (`wrangler deploy` from this folder, never from CI); lanes
@@ -38,7 +38,8 @@ const MAILBOX_ID = /^mbx_[A-Za-z0-9_-]{22}$/;
  * The brake on mailbox creation, the anonymous write, as guides.show brakes
  * guide creation (apps/guides-show/worker/index.ts): keyed on the client's
  * IP, open wherever it cannot resolve (no binding, no CF-Connecting-IP, a
- * limiter that throws). No other route is braked.
+ * limiter that throws). The only other brake is on pushes, per mailbox,
+ * inside the mailbox after the Inbox's bearer (`PUSH_LIMITER`).
  */
 async function braked(req: Request, limiter: RateLimit | undefined): Promise<Response | null> {
   if (!limiter) return null;

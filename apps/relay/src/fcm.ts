@@ -9,8 +9,10 @@
  * (Google's tokens last an hour). Plain `fetch`: FCM accepts HTTP/1.1, so the
  * `connect()` path APNs needs is not used.
  *
- * No imports: the test suite reads `fcmMessage` from here to check the body.
+ * No Workers-only imports: the test suite reads `fcmMessage` from here to
+ * check the body.
  */
+import { loopbackOverride } from "./origin";
 
 /** The fields of a service account's JSON key file the relay uses. */
 export interface FcmServiceAccount {
@@ -20,7 +22,7 @@ export interface FcmServiceAccount {
   privateKeyId: string | null;
 }
 
-/** Google's hosts. Fixed: only the relay's own proof replaces them (FCM_ORIGIN, FCM_OAUTH_ORIGIN under `wrangler dev`). */
+/** Google's hosts. Fixed: only the relay's own proof replaces them (FCM_ORIGIN, FCM_OAUTH_ORIGIN under `wrangler dev`, loopback only). */
 export const FCM_ORIGIN = "https://fcm.googleapis.com";
 export const FCM_OAUTH_ORIGIN = "https://oauth2.googleapis.com";
 /** The JWT's audience: Google's token endpoint, whichever host the exchange is sent to. */
@@ -65,28 +67,41 @@ function base64url(bytes: Uint8Array): string {
 }
 
 const encoder = new TextEncoder();
+/** The access token this isolate holds, for one signer. */
 let cached: { signer: string; token: string; until: number } | null = null;
+/** The exchange in flight, per signer: concurrent pushes wait on one exchange instead of each signing their own. */
+const inflight = new Map<string, Promise<string>>();
+/** A refused exchange, per signer, remembered for a minute: a burst of pushes does not hammer Google with a key it refuses. */
+const refused = new Map<string, { error: FcmAuthError; until: number }>();
+const REFUSAL_MEMORY_MS = 60_000;
 
-/** Raised when Google's token endpoint refuses the service account or cannot be reached. */
+/** Raised when the service account's key cannot be read, or Google's token endpoint refuses it or cannot be reached. */
 export class FcmAuthError extends Error {}
 
-/** The OAuth access token, minted again after 50 minutes (sooner if Google says so) or when the account or the endpoint changes. */
-async function accessToken(account: FcmServiceAccount, oauthOrigin: string, now: number): Promise<string> {
-  const signer = `${oauthOrigin}\n${account.clientEmail}\n${account.privateKeyId ?? ""}`;
-  if (cached && cached.signer === signer && now < cached.until) return cached.token;
-  const der = Uint8Array.from(atob(account.privateKey.replace(/-----[^-]+-----/g, "").replace(/\s+/g, "")), (c) => c.charCodeAt(0));
-  const key = await crypto.subtle.importKey("pkcs8", der, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
+/** The signed JWT bearer grant. A key that cannot be read or used is an FcmAuthError, never a transport failure. */
+async function assertion(account: FcmServiceAccount, now: number): Promise<string> {
   const iat = Math.floor(now / 1000);
   const header = base64url(encoder.encode(JSON.stringify({ alg: "RS256", typ: "JWT", ...(account.privateKeyId ? { kid: account.privateKeyId } : {}) })));
   const claims = base64url(encoder.encode(JSON.stringify({ iss: account.clientEmail, scope: FCM_SCOPE, aud: FCM_OAUTH_AUDIENCE, iat, exp: iat + 3600 })));
-  const signature = new Uint8Array(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, encoder.encode(`${header}.${claims}`)));
-  const assertion = `${header}.${claims}.${base64url(signature)}`;
+  try {
+    const der = Uint8Array.from(atob(account.privateKey.replace(/-----[^-]+-----/g, "").replace(/\s+/g, "")), (c) => c.charCodeAt(0));
+    const key = await crypto.subtle.importKey("pkcs8", der, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
+    const signature = new Uint8Array(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, encoder.encode(`${header}.${claims}`)));
+    return `${header}.${claims}.${base64url(signature)}`;
+  } catch {
+    throw new FcmAuthError("the service account's private key could not be read");
+  }
+}
+
+/** One exchange at Google's token endpoint. */
+async function exchange(account: FcmServiceAccount, oauthOrigin: string, signer: string, now: number): Promise<string> {
+  const grant = await assertion(account, now);
   let answer: Response;
   try {
     answer = await fetch(`${oauthOrigin}/token`, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: `grant_type=${encodeURIComponent("urn:ietf:params:oauth:grant-type:jwt-bearer")}&assertion=${assertion}`,
+      body: `grant_type=${encodeURIComponent("urn:ietf:params:oauth:grant-type:jwt-bearer")}&assertion=${grant}`,
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (error) {
@@ -107,6 +122,33 @@ async function accessToken(account: FcmServiceAccount, oauthOrigin: string, now:
   return cached.token;
 }
 
+/**
+ * The OAuth access token, minted again after 50 minutes (sooner if Google
+ * says so) or when the account or the endpoint changes. Concurrent callers
+ * share one exchange; a refusal is answered from memory for a minute.
+ */
+async function accessToken(account: FcmServiceAccount, oauthOrigin: string, now: number): Promise<string> {
+  const signer = `${oauthOrigin}\n${account.clientEmail}\n${account.privateKeyId ?? ""}`;
+  if (cached && cached.signer === signer && now < cached.until) return cached.token;
+  const memory = refused.get(signer);
+  if (memory && now < memory.until) throw memory.error;
+  let pending = inflight.get(signer);
+  if (!pending) {
+    pending = exchange(account, oauthOrigin, signer, now)
+      .then((token) => {
+        refused.delete(signer);
+        return token;
+      })
+      .catch((error: unknown) => {
+        if (error instanceof FcmAuthError) refused.set(signer, { error, until: Date.now() + REFUSAL_MEMORY_MS });
+        throw error;
+      })
+      .finally(() => inflight.delete(signer));
+    inflight.set(signer, pending);
+  }
+  return pending;
+}
+
 export interface FcmResult {
   status: number;
   /** FCM's `errorCode` (`UNREGISTERED`, `INVALID_ARGUMENT`, `UNAVAILABLE`, ...) on a refusal, else null. */
@@ -115,8 +157,9 @@ export interface FcmResult {
 
 /**
  * Send one push. `origin` and `oauthOrigin` replace Google's hosts in the
- * relay's own proof only. Throws on a transport failure or a refused token
- * exchange; a refusal by FCM itself is a result.
+ * relay's own proof only, and only when they name a loopback host. Throws on
+ * a transport failure or a refused token exchange; a refusal by FCM itself is
+ * a result.
  */
 export async function sendFcm(input: {
   account: FcmServiceAccount;
@@ -126,8 +169,8 @@ export async function sendFcm(input: {
   origin?: string;
   oauthOrigin?: string;
 }): Promise<FcmResult> {
-  const origin = (input.origin || FCM_ORIGIN).replace(/\/+$/, "");
-  const oauthOrigin = (input.oauthOrigin || FCM_OAUTH_ORIGIN).replace(/\/+$/, "");
+  const origin = (loopbackOverride("FCM_ORIGIN", input.origin) || FCM_ORIGIN).replace(/\/+$/, "");
+  const oauthOrigin = (loopbackOverride("FCM_OAUTH_ORIGIN", input.oauthOrigin) || FCM_OAUTH_ORIGIN).replace(/\/+$/, "");
   const bearer = await accessToken(input.account, oauthOrigin, Date.now());
   const answer = await fetch(`${origin}/v1/projects/${input.account.projectId}/messages:send`, {
     method: "POST",
@@ -136,7 +179,8 @@ export async function sendFcm(input: {
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   const text = await answer.text();
-  if (answer.status === 401) cached = null;
+  // Drop the token only if it is still the one FCM refused: another push may have minted a fresh one meanwhile.
+  if (answer.status === 401 && cached?.token === bearer) cached = null;
   let reason: string | null = null;
   if (answer.status !== 200) {
     try {
