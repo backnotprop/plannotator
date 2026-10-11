@@ -180,4 +180,40 @@ describe.if(hasDom)('the wide list', () => {
       globalThis.ResizeObserver = saved;
     }
   });
+
+  test('a focused row keeps focus when the list crosses the two-line width, both ways', () => {
+    const saved = globalThis.ResizeObserver;
+    let resize: (width: number) => void = () => {};
+    // happy-dom lays nothing out: the stub reports the widths a browser's observer would.
+    globalThis.ResizeObserver = class {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe() {
+        resize = (width) => this.callback([{ contentRect: { width } } as ResizeObserverEntry], this as unknown as ResizeObserver);
+        resize(1200);
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+    try {
+      const el = render(false);
+      const wide = el.querySelector<HTMLElement>('.ib-row[data-thread-id="msg_hold"]')!;
+      wide.focus();
+      expect(document.activeElement).toBe(wide);
+      act(() => resize(800));
+      const narrow = el.querySelector<HTMLElement>('.ib-nrow[data-thread-id="msg_hold"]');
+      expect(narrow).not.toBeNull();
+      expect(document.activeElement).toBe(narrow);
+      act(() => resize(1000));
+      expect(document.activeElement).toBe(el.querySelector('.ib-row[data-thread-id="msg_hold"]'));
+      // Focus outside the list is left alone.
+      const outside = document.createElement('button');
+      document.body.append(outside);
+      outside.focus();
+      act(() => resize(800));
+      expect(document.activeElement).toBe(outside);
+      outside.remove();
+    } finally {
+      globalThis.ResizeObserver = saved;
+    }
+  });
 });

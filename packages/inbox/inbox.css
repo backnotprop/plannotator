@@ -186,11 +186,16 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
    to min(45%, 220px) or its own width, whichever is less (its width sets the
    floor through the automatic minimum while flex-basis: content keeps its
    natural size); then the chip shrinks; the line clips the rest. The guided
-   review mark keeps only its icon when the cell is narrow. */
+   review mark keeps only its icon when the cell is narrow (under 300px). */
 .ib-row .ib-subj { display: flex; align-items: center; gap: 9px; min-width: 0; overflow: hidden; container-type: inline-size; }
 .ib-row .ib-s, .ib-nrow .ib-l2 .ib-s { flex: 0 1000 content; width: min(45%, 220px); white-space: nowrap; }
 .ib-row .ib-s > .ib-st, .ib-nrow .ib-l2 .ib-s > .ib-st { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@container (max-width: 260px) { .ib-row .ib-att .ib-att-l { display: none; } }
+@container (max-width: 300px) { .ib-row .ib-att .ib-att-l { display: none; } }
+/* Where the chip would be squeezed to its bare border it is left out: a cell
+   under 160px (after the subject's floor, the marks and the gaps nothing is
+   left for it), or under 300px when a badge leads the cell. */
+@container (max-width: 160px) { .ib-row .ib-key { display: none; } }
+@container (max-width: 300px) { .ib-row .ib-badge ~ .ib-key { display: none; } }
 .ib-nrow .ib-att .ib-att-l { display: none; }
 .ib-row .ib-c { color: var(--muted-foreground); font-size: 13px; text-align: right; white-space: nowrap; }
 .ib-row .ib-t { color: var(--muted-foreground); font-size: 13px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }

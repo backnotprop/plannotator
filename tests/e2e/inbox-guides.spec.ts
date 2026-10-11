@@ -455,7 +455,8 @@ test('a long thread name plus the Guided review mark never pushes a row out of s
       await expect(row).toBeVisible();
       await expect(row.locator('.ib-key')).toHaveText(name);
       await expect(row.locator('[data-guide-mark]')).toHaveCount(1);
-      for (const width of [556, 656, 820]) {
+      // One project keeps the wide row down to phone widths: also 360, 500 and 520px there.
+      for (const width of route ? [360, 500, 520, 556, 656, 820] : [556, 656, 820]) {
         await page.setViewportSize({ width, height: 900 });
         await expect(row).toBeVisible();
         // Measure the settled layout: below 768px the sidebar leaves the row
@@ -485,6 +486,7 @@ test('a long thread name plus the Guided review mark never pushes a row out of s
             // What the line must end before: the count column, or the row's own edge.
             limit: wideRow ? box('.ib-c').left : el.getBoundingClientRect().right,
             keyRight: box('.ib-key').right,
+            keyWidth: box('.ib-key').width,
             keyTruncated: nameEl.scrollWidth > nameEl.clientWidth,
             markRight: box('[data-guide-mark]').right,
             subjectShown: Math.min(subject.right, line.right) - subject.left,
@@ -497,7 +499,9 @@ test('a long thread name plus the Guided review mark never pushes a row out of s
         expect(measured.listOverflow, `the list scrolls sideways ${where}`).toBe(0);
         expect(measured.rowOverflow, `the row spills ${where}`).toBe(0);
         expect(measured.lineRight, `the subject line runs into the count ${where}`).toBeLessThanOrEqual(measured.limit);
-        if (name.length === 120) expect(measured.keyTruncated, `the thread chip keeps its ellipsis ${where}`).toBe(true);
+        // The chip is shown with some of its name, or left out: never a bare border.
+        expect(measured.keyWidth === 0 || measured.keyWidth >= 24, `the thread chip is squeezed to its border (${measured.keyWidth}px) ${where}`).toBe(true);
+        if (name.length === 120 && measured.keyWidth > 0) expect(measured.keyTruncated, `the thread chip keeps its ellipsis ${where}`).toBe(true);
       }
     }
   }

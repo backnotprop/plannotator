@@ -75,20 +75,40 @@ export const WIDE_ROWS_MIN_LIST_WIDTH = 900;
 /**
  * Whether the list is narrower than `min`, read before paint and on every
  * resize. Unmeasured (no layout, no ResizeObserver) reads as wide.
+ *
+ * Crossing `min` swaps every row element for the other shape, which would
+ * drop keyboard focus: the row that held it is noted just before the swap and
+ * focused again (without scrolling) once the new rows are in the DOM.
  */
 function useNarrowerThan(min: number) {
   const ref = useRef<HTMLElement>(null);
   const [narrower, setNarrower] = useState(false);
+  const current = useRef(false);
+  const focusedThread = useRef<string | null>(null);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const read = (width: number) => setNarrower(width > 0 && width < min);
+    const read = (width: number) => {
+      const next = width > 0 && width < min;
+      if (next === current.current) return;
+      const active = document.activeElement;
+      focusedThread.current = active instanceof HTMLElement && el.contains(active) ? (active.closest('[data-thread-id]')?.getAttribute('data-thread-id') ?? null) : null;
+      current.current = next;
+      setNarrower(next);
+    };
     read(el.getBoundingClientRect().width);
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver((entries) => read(entries[0]?.contentRect.width ?? 0));
     observer.observe(el);
     return () => observer.disconnect();
   }, [min]);
+  useLayoutEffect(() => {
+    const id = focusedThread.current;
+    focusedThread.current = null;
+    if (!id || !ref.current) return;
+    const row = [...ref.current.querySelectorAll<HTMLElement>('[data-thread-id]')].find((r) => r.getAttribute('data-thread-id') === id);
+    row?.focus({ preventScroll: true });
+  }, [narrower]);
   return [ref, narrower] as const;
 }
 
