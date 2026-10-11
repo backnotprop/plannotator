@@ -147,9 +147,9 @@ export function heardRing(gate: RingGate, at: number): RingGate {
 export const SOUND_CHANNEL = 'plannotator-inbox-sound';
 /** How long a tab holds the ring lock: long enough that every tab has handled the same event. */
 export const RING_LOCK_MS = 3000;
-/** A tab that said "in front" counts for this long without saying it again (it repeats every 10 s). */
-const FRONT_FRESH_MS = 25_000;
-const FRONT_REPEAT_MS = 10_000;
+/** A tab that said "in front" counts for this long without saying it again (it repeats every 5 s while in front). */
+const FRONT_FRESH_MS = 15_000;
+const FRONT_REPEAT_MS = 5_000;
 
 type ChannelMessage =
   | { type: 'hello'; id: string }
@@ -237,6 +237,20 @@ export interface InboxSound {
   setVolume: (next: number) => Promise<boolean>;
 }
 
+/** The gestures a browser may count as a user activation. */
+const ARMING_EVENTS = ['pointerdown', 'pointerup', 'click', 'touchend', 'keydown'] as const;
+
+/**
+ * The browser counts this gesture (or an earlier one) as a user activation,
+ * so an AudioContext may start. Without `navigator.userActivation` (an older
+ * browser), any gesture counts.
+ */
+function userActivated(): boolean {
+  const activation = typeof navigator !== 'undefined' ? navigator.userActivation : undefined;
+  if (!activation) return true;
+  return activation.isActive || activation.hasBeenActive;
+}
+
 const DEFAULT_SETTINGS: InboxSoundSettings = { enabled: true, volume: INBOX_SOUND_DEFAULT_VOLUME, dialog_shown_for: null };
 
 function tabId(): string {
@@ -269,21 +283,22 @@ export function useInboxSound(options: {
   const others = useRef(new Map<string, { front: boolean; at: number }>());
   const channel = useRef<BroadcastChannel | null>(null);
 
-  // The first click or key press in the tab arms the sound.
+  // The first click or key press in the tab that the browser counts as a
+  // user activation arms the sound. Some never do (Escape, a modifier alone):
+  // the page keeps listening until one does.
   useEffect(() => {
     if (armed) {
       audio.current?.arm();
       return;
     }
     const arm = () => {
+      if (!userActivated()) return;
       audio.current?.arm();
       setArmed(true);
     };
-    window.addEventListener('pointerdown', arm, { capture: true, once: true });
-    window.addEventListener('keydown', arm, { capture: true, once: true });
+    for (const type of ARMING_EVENTS) window.addEventListener(type, arm, { capture: true });
     return () => {
-      window.removeEventListener('pointerdown', arm, { capture: true });
-      window.removeEventListener('keydown', arm, { capture: true });
+      for (const type of ARMING_EVENTS) window.removeEventListener(type, arm, { capture: true });
     };
   }, [armed]);
 

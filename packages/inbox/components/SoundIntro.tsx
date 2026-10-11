@@ -59,7 +59,7 @@ export function SoundIntroDialog({ line, playing, onPlay, onTurnOnNotifications,
     >
       <div className="ib-dlg-head" data-notif={line}>
         <h2 id="ib-sound-title">The Inbox can ring now</h2>
-        <button type="button" className="ib-btn ib-sm" aria-label="Play the sound" data-sound-play="" onClick={onPlay}>
+        <button type="button" className="ib-btn ib-sm" data-sound-play="" onClick={onPlay}>
           <Icon name="play" />
           <span>{playing ? 'Playing…' : 'Play'}</span>
         </button>

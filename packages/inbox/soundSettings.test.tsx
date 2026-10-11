@@ -298,6 +298,28 @@ describe.if(hasDom)('useInboxSound', () => {
     expect(rings()).toBe(1);
   });
 
+  test('a key press the browser does not count as an activation (Escape) does not arm; the next click that does, arms', () => {
+    const activation = { isActive: false, hasBeenActive: false };
+    const before = Object.getOwnPropertyDescriptor(navigator, 'userActivation');
+    Object.defineProperty(navigator, 'userActivation', { configurable: true, get: () => activation });
+    try {
+      const el = mount(<Probe />);
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      });
+      expect(el.querySelector('[data-armed]')?.getAttribute('data-armed')).toBe('no');
+      activation.isActive = true;
+      activation.hasBeenActive = true;
+      act(() => {
+        window.dispatchEvent(new Event('click'));
+      });
+      expect(el.querySelector('[data-armed]')?.getAttribute('data-armed')).toBe('yes');
+    } finally {
+      if (before) Object.defineProperty(navigator, 'userActivation', before);
+      else delete (navigator as unknown as Record<string, unknown>).userActivation;
+    }
+  });
+
   test('the tab in front: nothing rings; Play always plays, in front or not', () => {
     mount(<Probe />);
     act(() => {

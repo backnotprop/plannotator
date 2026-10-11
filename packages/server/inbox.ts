@@ -37,9 +37,9 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
-import { realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import {
@@ -73,6 +73,7 @@ import {
   type PlannotatorConfig,
 } from "@plannotator/shared/config";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { normalizeStableVersion, readUpdateState } from "@plannotator/shared/update-check";
 import { isLoopbackHostHeader } from "@plannotator/shared/loopback-host";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -87,6 +88,7 @@ import {
 } from "@plannotator/shared/inbox/connection";
 import {
   createInboxToken,
+  inboxRegistryPath,
   readInboxRegistry,
   writeInboxRegistry,
   type InboxRegistryEntry,
@@ -342,10 +344,36 @@ function startOnLoopback(fetch: Parameters<typeof Bun.serve>[0]["fetch"], prefer
   }
 }
 
+/**
+ * Whether an Inbox ran on this machine before this start, from evidence that
+ * predates it (read before this start writes the version, the store or the
+ * registry): the version an earlier Inbox recorded (0.28.12 and later), the
+ * registry every Inbox writes, a project in the store, or a setting the Inbox
+ * page wrote. Builds 0.28.7 to 0.28.11 recorded no version, so the version
+ * alone would call their people fresh.
+ */
+export function inboxUsedBefore(dataDir: string): boolean {
+  try {
+    if (readUpdateState(dataDir).inboxVersion) return true;
+  } catch {}
+  if (existsSync(inboxRegistryPath(dataDir))) return true;
+  try {
+    if (readdirSync(join(dataDir, "inbox", "projects")).length > 0) return true;
+  } catch {}
+  const config = loadConfig();
+  return config.inboxNotifications !== undefined || config.inboxTool !== undefined;
+}
+
 /** Start the Inbox server and write the registry. */
 export async function startInboxServer(options: InboxServerOptions = {}): Promise<InboxServer> {
   const dataDir = options.dataDir ?? getPlannotatorDataDir();
   const version = options.version ?? "dev";
+  // Read before the store, the update state and the registry are written below.
+  const usedBefore = inboxUsedBefore(dataDir);
+  let previousInboxVersion: string | null = null;
+  try {
+    previousInboxVersion = readUpdateState(dataDir).inboxVersion ?? null;
+  } catch {}
   const store = InboxStore.open(dataDir);
   // A send a crash interrupted leaves a temp blob; the next start removes it once it is stale.
   sweepStaleInboxSendTemps(store.dir);
@@ -509,15 +537,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /**
    * The question sound (the "Ding-dong"), resolved from config.json: on, at
    * 60, unless set. `dialog_shown_for`: the version the one-time dialog was
-   * shown for, or that a fresh install was marked with; null while it never was.
+   * shown for, or that a fresh install was marked with; null while it never
+   * was. `dialog_due`: the dialog waits for a page on this computer to claim it.
    */
   const soundState = () => {
     const value = loadConfig().inboxSound;
     const saved = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    const shownFor = typeof saved.dialogShownFor === "string" && saved.dialogShownFor !== "" ? saved.dialogShownFor : null;
     return {
       enabled: saved.enabled !== false,
       volume: isInboxSoundVolume(saved.volume) ? saved.volume : INBOX_SOUND_DEFAULT_VOLUME,
-      dialog_shown_for: typeof saved.dialogShownFor === "string" && saved.dialogShownFor !== "" ? saved.dialogShownFor : null,
+      dialog_shown_for: shownFor,
+      dialog_due: shownFor === null && typeof saved.dialogDueFor === "string" && saved.dialogDueFor !== "",
     };
   };
 
@@ -546,7 +577,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           next.volume = value;
           break;
         default:
-          // `dialog_shown_for` is the server's to write (the compare-and-set below), never the page's.
+          // The dialog's marks are the server's to write (below), never the page's.
           throw new InboxError("validation_error", `sound.${field}: not a setting (enabled, volume).`, { field: `sound.${field}` });
       }
     }
@@ -560,26 +591,33 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   /**
    * The one-time sound dialog, claimed by the page that will show it: a
-   * compare-and-set on `dialogShownFor`, so of several tabs (or a reload)
-   * only the first ever gets `show: true`. Only after an update (this run
-   * started on a newer version), and only on this computer: a page that came
-   * through the tailnet (a phone, most likely) never shows it and leaves it
-   * for the next page opened here. The server is one process and this runs
-   * with no await, so two claims cannot interleave.
+   * compare-and-set from `dialogDueFor` to `dialogShownFor`, so of several
+   * tabs (or a reload) only the first ever gets `show: true`. Only on this
+   * computer: a page that came through the tailnet (a phone, most likely)
+   * never shows it and leaves it for the next page opened here. The server is
+   * one process and this runs with no await, so two claims cannot interleave.
    */
   const claimSoundDialog = (via: RequestVia): boolean => {
-    const updatedTo = updates.updated();
-    if (via !== "local" || !updatedTo || soundState().dialog_shown_for !== null) return false;
-    saveConfig({ inboxSound: { ...savedSound(), dialogShownFor: updatedTo } });
+    if (via !== "local" || !soundState().dialog_due) return false;
+    const { dialogDueFor, ...rest } = savedSound();
+    saveConfig({ inboxSound: { ...rest, dialogShownFor: dialogDueFor } });
     // Not written (a read-only data dir): showing it anyway would show it on every load.
-    return loadConfig().inboxSound?.dialogShownFor === updatedTo;
+    return loadConfig().inboxSound?.dialogShownFor === dialogDueFor;
   };
 
-  // A fresh install (no Inbox ran here before): no dialog now, and none after
-  // a later update either. The sound is simply on, and the notification ask
-  // line says so.
-  if (updates.firstRun() && soundState().dialog_shown_for === null) {
-    saveConfig({ inboxSound: { ...savedSound(), dialogShownFor: version } });
+  // Release builds decide the dialog at start, from what was here before:
+  // - a fresh install (no Inbox ran here) never sees it: it is marked shown,
+  //   and the notification ask line says the sound is on;
+  // - someone who used an earlier Inbox, on this version for the first time
+  //   (or after a build that recorded no version), gets it due, kept in
+  //   config.json until a page on this computer claims it, so a start that
+  //   ends before any window opens (a --background start) does not lose it.
+  if (normalizeStableVersion(version) !== null) {
+    const sound = soundState();
+    if (sound.dialog_shown_for === null && !sound.dialog_due) {
+      if (!usedBefore) saveConfig({ inboxSound: { ...savedSound(), dialogShownFor: version } });
+      else if (previousInboxVersion !== version) saveConfig({ inboxSound: { ...savedSound(), dialogDueFor: version } });
+    }
   }
 
   /** The two update switches (PLANNOTATOR_UPDATE_CHECK, PLANNOTATOR_AUTO_UPDATE): the effective value and whether the env decides. */

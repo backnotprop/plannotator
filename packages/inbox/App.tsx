@@ -193,7 +193,8 @@ function Inbox() {
     settings: settings?.notifications ?? null,
     // New questions ring the doorbell on their own rules (sound.ts), whatever notifications say.
     onQuestions: sound.questionsArrived,
-    silent: () => sound.settings.enabled,
+    // Silent only when the bell can ring: on, and armed by a click in this tab.
+    silent: () => sound.settings.enabled && sound.armed,
     onSettings: (next) => setSettings((current) => (current ? { ...current, notifications: next } : current)),
     // A click on a notification: the thread opens, and the list on screen catches up.
     openThread: (threadId) => {
@@ -366,12 +367,13 @@ function Inbox() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // The one-time sound dialog: after an update only (the list's `updated`), never
-  // on a page that came through the tailnet, never on first paint. It waits
-  // while a reply is being typed and while an update dialog is open, then asks
-  // the Inbox, which says yes to the first page only (a compare-and-set).
-  const soundDialogDue =
-    !!latest?.updated && !!settings?.sound && settings.sound.dialog_shown_for === null && (settings.via ?? 'local') === 'local';
+  // The one-time sound dialog: due when the Inbox says so (the first start of
+  // this version found someone who used an earlier Inbox; kept until claimed),
+  // never on a page that came through the tailnet, never before the list has
+  // loaded. It waits while a reply is being typed and while an update dialog
+  // is open, then asks the Inbox, which says yes to the first page only (a
+  // compare-and-set).
+  const soundDialogDue = latest !== null && settings?.sound?.dialog_due === true && (settings.via ?? 'local') === 'local';
   const soundDialogBlocked = updateDialog !== null || restarting;
   useEffect(() => {
     if (!soundDialogDue || soundDialogBlocked || soundDialogAsked.current) return;

@@ -53,6 +53,9 @@ function render(props: SoundIntroDialogProps) {
 const button = (dialog: HTMLElement, name: string) =>
   [...dialog.querySelectorAll('button')].find((b) => (b.getAttribute('aria-label') ?? b.textContent?.trim()) === name) as HTMLButtonElement;
 
+/** The dialog's Play: named by its own words, "Play" or "Playing…". */
+const playButton = (dialog: HTMLElement) => dialog.querySelector('[data-sound-play]') as HTMLButtonElement;
+
 function key(target: Element, init: KeyboardEventInit) {
   act(() => {
     target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
@@ -71,7 +74,9 @@ describe.if(hasDom)('the sound dialog', () => {
     );
     expect(dialog.querySelector('[data-sound-nline]')).toBeNull();
     expect([...dialog.querySelectorAll('.ib-acts-row button')].map((b) => b.textContent)).toEqual(['Turn it off', 'Keep it on']);
-    expect(button(dialog, 'Play the sound').textContent).toBe('Play');
+    expect(playButton(dialog).textContent).toBe('Play');
+    // No aria-label: the words themselves ("Play", "Playing…") are what a screen reader announces.
+    expect(playButton(dialog).hasAttribute('aria-label')).toBe(false);
   });
 
   const lines: [NotificationLine, string, string | null][] = [
@@ -114,7 +119,7 @@ describe.if(hasDom)('the sound dialog', () => {
     const { props } = calls();
     const dialog = render({ ...props, line: 'off' });
     const keep = button(dialog, 'Keep it on');
-    const play = button(dialog, 'Play the sound');
+    const play = playButton(dialog);
     expect(document.activeElement).toBe(keep);
     key(keep, { key: 'Tab' });
     expect(document.activeElement).toBe(play);
@@ -125,11 +130,11 @@ describe.if(hasDom)('the sound dialog', () => {
   test('Turn it off and Play report to the page; Play reads Playing… while it plays', () => {
     const { seen, props } = calls();
     const dialog = render(props);
-    act(() => button(dialog, 'Play the sound').click());
+    act(() => playButton(dialog).click());
     act(() => button(dialog, 'Turn it off').click());
     expect(seen).toEqual(['play', 'off']);
     act(() => root!.render(<SoundIntroDialog {...props} playing />));
-    expect(button(dialog, 'Play the sound').textContent).toBe('Playing…');
+    expect(playButton(dialog).textContent).toBe('Playing…');
   });
 
   test('Allow answered: the line goes and focus moves to Keep it on; Block: the blocked line takes focus', () => {

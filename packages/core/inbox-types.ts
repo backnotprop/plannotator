@@ -659,6 +659,8 @@ export interface InboxSoundSettings {
   volume: number;
   /** The version the one-time "The Inbox can ring now" dialog was shown for (or a fresh install was marked with); null while never. */
   dialog_shown_for: string | null;
+  /** The one-time dialog waits for a page on this computer to claim it (POST /api/inbox/sound/dialog). Absent from an Inbox before it. */
+  dialog_due?: boolean;
 }
 
 export const INBOX_SOUND_DEFAULT_VOLUME = 60;

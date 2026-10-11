@@ -381,7 +381,7 @@ test('after an update the dialog shows once: in one of two tabs opened together,
 
   // Play previews; Turn it off saves it off and says so.
   const before = await rings(shown);
-  await dialog.getByRole('button', { name: 'Play the sound' }).click();
+  await dialog.getByRole('button', { name: 'Play', exact: true }).click();
   await expect.poll(() => rings(shown)).toBe(before + 1);
   await dialog.getByRole('button', { name: 'Turn it off' }).click();
   await expect(dialog).toHaveCount(0);

@@ -6,13 +6,14 @@
  * checkbox writes autoUpdate), What's new, and the pure state rules.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxUpdate } from "@plannotator/core/inbox-types";
 import { loadConfig, saveConfig } from "@plannotator/shared/config";
 import { readUpdateState, writeUpdateState, type FetchReleaseResult } from "@plannotator/shared/update-check";
-import { startInboxServer, type InboxServer } from "./inbox";
+import { InboxStore } from "@plannotator/shared/inbox/store";
+import { inboxUsedBefore, startInboxServer, type InboxServer } from "./inbox";
 import { deriveInboxUpdate } from "./inbox-updates";
 import type { InstallerLaunch } from "./auto-update";
 
@@ -251,7 +252,7 @@ describe("the question sound (config.json inboxSound)", () => {
   test("on at 60 unless set; saved field by field; anything else refused with nothing written", async () => {
     writeUpdateState({ inboxVersion: "0.28.9" }, dataDir);
     const server = await start();
-    expect(await settingsOf(server)).toEqual({ enabled: true, volume: 60, dialog_shown_for: null });
+    expect(await settingsOf(server)).toEqual({ enabled: true, volume: 60, dialog_shown_for: null, dialog_due: true });
     for (const bad of [
       { enabled: "yes" },
       { volume: 0 },
@@ -260,18 +261,19 @@ describe("the question sound (config.json inboxSound)", () => {
       { volume: 55.5 },
       { volume: "60" },
       { dialog_shown_for: "0.28.10" },
+      { dialog_due: false },
       { ring: true },
       [true],
     ]) {
       const refused = await postJson(server, "/api/inbox/settings", { serverSession: server.serverSession, sound: bad });
       expect([JSON.stringify(bad), refused.status]).toEqual([JSON.stringify(bad), 422]);
     }
-    expect(loadConfig().inboxSound).toBeUndefined();
+    expect(loadConfig().inboxSound).toEqual({ dialogDueFor: "0.28.10" });
     const saved = await postJson(server, "/api/inbox/settings", { serverSession: server.serverSession, sound: { volume: 30 } });
-    expect((await saved.json()).sound).toEqual({ enabled: true, volume: 30, dialog_shown_for: null });
+    expect((await saved.json()).sound).toEqual({ enabled: true, volume: 30, dialog_shown_for: null, dialog_due: true });
     await postJson(server, "/api/inbox/settings", { serverSession: server.serverSession, sound: { enabled: false } });
-    expect(await settingsOf(server)).toEqual({ enabled: false, volume: 30, dialog_shown_for: null });
-    expect(loadConfig().inboxSound).toEqual({ volume: 30, enabled: false });
+    expect(await settingsOf(server)).toEqual({ enabled: false, volume: 30, dialog_shown_for: null, dialog_due: true });
+    expect(loadConfig().inboxSound).toEqual({ dialogDueFor: "0.28.10", volume: 30, enabled: false });
   });
 
   test("after an update the dialog is claimed once: of two tabs asking together one shows it, and a reload never does", async () => {
@@ -280,12 +282,44 @@ describe("the question sound (config.json inboxSound)", () => {
     const answers = await Promise.all([claim(server), claim(server)]);
     expect(answers.sort()).toEqual([false, true]);
     expect(loadConfig().inboxSound).toEqual({ dialogShownFor: "0.28.10" });
+    expect((await settingsOf(server)).dialog_due).toBe(false);
     expect(await claim(server)).toBe(false);
     // The choice the page makes later keeps the mark.
     await postJson(server, "/api/inbox/settings", { serverSession: server.serverSession, sound: { enabled: false } });
     expect(loadConfig().inboxSound).toEqual({ dialogShownFor: "0.28.10", enabled: false });
     // A stale tab (another server's session) is refused before anything is claimed.
     expect((await postJson(server, "/api/inbox/sound/dialog", { serverSession: "stale" })).status).toBe(409);
+  });
+
+  test("due survives a start that ended before any window opened; once claimed it never comes back", async () => {
+    writeUpdateState({ inboxVersion: "0.28.9" }, dataDir);
+    const first = await start();
+    expect((await settingsOf(first)).dialog_due).toBe(true);
+    first.stop();
+    // The same version starts again: no update this run, but the dialog still waits for a page.
+    const second = await start();
+    expect((await (await fetch(`http://127.0.0.1:${second.port}/api/inbox/threads`)).json()).updated).toBeNull();
+    expect((await settingsOf(second)).dialog_due).toBe(true);
+    expect(await claim(second)).toBe(true);
+    second.stop();
+    const third = await start();
+    expect((await settingsOf(third)).dialog_due).toBe(false);
+    expect(await claim(third)).toBe(false);
+    third.stop();
+    const later = await start({ version: "0.28.12" });
+    expect(await claim(later)).toBe(false);
+    expect(loadConfig().inboxSound).toEqual({ dialogShownFor: "0.28.10" });
+  });
+
+  test("someone who used a 0.28.7–0.28.11 Inbox (no recorded version, but its registry and a project) gets the dialog", async () => {
+    // An Inbox from before versions were recorded: the registry it wrote and a project in its store.
+    const old = await start({ version: "dev" });
+    old.stop();
+    InboxStore.open(dataDir).ensureProject({ name: "billing-svc", root: dataDir });
+    expect(readUpdateState(dataDir).inboxVersion).toBeUndefined();
+    const server = await start();
+    expect((await settingsOf(server)).dialog_due).toBe(true);
+    expect(await claim(server)).toBe(true);
   });
 
   test("a fresh install marks it shown at start: no dialog now, and none after a later update", async () => {
@@ -304,6 +338,32 @@ describe("the question sound (config.json inboxSound)", () => {
     const server = await start();
     expect(await claim(server)).toBe(false);
     expect(loadConfig().inboxSound).toBeUndefined();
+  });
+});
+
+describe("inboxUsedBefore", () => {
+  test("any one piece of evidence an earlier Inbox left is enough; none is a fresh install", () => {
+    expect(inboxUsedBefore(dataDir)).toBe(false);
+    const evidence: [string, () => void][] = [
+      ["a recorded version", () => writeUpdateState({ inboxVersion: "0.28.12" }, dataDir)],
+      ["the registry", () => {
+        mkdirSync(join(dataDir, "inbox"), { recursive: true });
+        writeFileSync(join(dataDir, "inbox", "inbox.json"), "{}");
+      }],
+      ["a project", () => mkdirSync(join(dataDir, "inbox", "projects", "billing-svc-abc123"), { recursive: true })],
+      ["the notification settings", () => saveConfig({ inboxNotifications: { dismissed: true } })],
+      ["the inbox tool switch", () => saveConfig({ inboxTool: { pi: true } })],
+    ];
+    for (const [what, leave] of evidence) {
+      rmSync(dataDir, { recursive: true, force: true });
+      mkdirSync(dataDir, { recursive: true });
+      leave();
+      expect([what, inboxUsedBefore(dataDir)]).toEqual([what, true]);
+    }
+    // An empty projects folder (an Inbox that opened its store and never saw an agent) is not evidence on its own.
+    rmSync(dataDir, { recursive: true, force: true });
+    mkdirSync(join(dataDir, "inbox", "projects"), { recursive: true });
+    expect(inboxUsedBefore(dataDir)).toBe(false);
   });
 });
 

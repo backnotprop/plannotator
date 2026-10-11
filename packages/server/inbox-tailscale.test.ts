@@ -610,7 +610,7 @@ describe("the update control never answers through the tailnet", () => {
     const remote = await throughServe(inbox, "/api/inbox/sound/dialog", { method: "POST", headers: own, body: JSON.stringify({ serverSession: inbox.serverSession }) });
     expect(remote.status).toBe(200);
     expect(((await remote.json()) as Json).show).toBe(false);
-    expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxSound).toBeUndefined();
+    expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxSound).toEqual({ dialogDueFor: "0.28.10" });
     const local = await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/sound/dialog`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
