@@ -145,15 +145,11 @@ The install script also updates the Claude Code plugin when it is already instal
 
 `plannotator update` does the same thing in one command: it asks GitHub for the newest stable release and, if it is newer, runs the install script for it with the choices from your last install (the flags recorded in `~/.plannotator/install-flags.json`), showing the installer's output as it goes. `plannotator update --check` only says whether a newer release exists. Open reviews keep running on the old version; new ones start on the new one.
 
-### Update notices
+### Update check
 
-Plannotator tells you when a new version is out. Once a day, the machine (never your browser) asks GitHub for the latest stable release and caches the answer. When a newer one exists:
+Once a day, when a session starts, the `plannotator` binary asks GitHub for the latest stable release and caches the answer. When a newer one exists, a review you started yourself in a terminal ends with one line: `Plannotator X is available (you have Y). Update: plannotator update`.
 
-- the Inbox shows an **Update** button above Settings, which opens a dialog with what's new and **Update now**;
-- plan review, annotate and code review show a short toast at most once every three days, and the Options menu shows the right update command for your agent (`pi update --extensions` for Pi);
-- a review you started yourself in a terminal ends with one line: `Plannotator X is available (you have Y). Update: plannotator update`.
-
-Turn notices off with **Settings → General → Tell me when a new version is out**, `{ "updateCheck": false }` in `~/.plannotator/config.json`, or `PLANNOTATOR_UPDATE_CHECK=0`. Off makes no automatic request to GitHub at all (and stops auto-update, which needs the check).
+Turn the check off with `{ "updateCheck": false }` in `~/.plannotator/config.json` or `PLANNOTATOR_UPDATE_CHECK=0`. Off stops that request and auto-update, which needs it; `plannotator update` still checks when you run it.
 
 ### Automatic updates (opt-in)
 

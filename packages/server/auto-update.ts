@@ -319,6 +319,16 @@ export async function runAutoUpdateCheck(deps: AutoUpdateDeps): Promise<AutoUpda
   // Claim the window before the network call so concurrent session starts do
   // not all query GitHub.
   patchUpdateState((s) => ({ ...s, lastCheckAt: now }), deps.dataDir);
+  // Give the window back when nothing was installed for a reason that is not
+  // "checked and up to date": the next session start retries (the release
+  // check's own 6h backoff still bounds the requests).
+  const restoreWindow = () =>
+    patchUpdateState((s) => {
+      const next = { ...s };
+      if (state.lastCheckAt === undefined) delete next.lastCheckAt;
+      else next.lastCheckAt = state.lastCheckAt;
+      return next;
+    }, deps.dataDir);
 
   // The shared release check answers from the 24h cache, or asks GitHub once
   // (it reduces the tag to a canonical X.Y.Z, since the tag ends up as an
@@ -332,7 +342,10 @@ export async function runAutoUpdateCheck(deps: AutoUpdateDeps): Promise<AutoUpda
       fetchRelease: releaseFetcher(deps),
     });
     latest = checked.outcome === "checked" ? checked.version : null;
-    if (!latest) return "no-release";
+    if (!latest) {
+      restoreWindow();
+      return "no-release";
+    }
   }
   if (!isNewerStableVersion(latest, current)) return "up-to-date";
 
@@ -340,12 +353,7 @@ export async function runAutoUpdateCheck(deps: AutoUpdateDeps): Promise<AutoUpda
   if (others.length > 0) {
     // Do not spend the 24h install window: the next session start retries,
     // answering from the cached release instead of querying GitHub again.
-    patchUpdateState((s) => {
-      const next = { ...s };
-      if (state.lastCheckAt === undefined) delete next.lastCheckAt;
-      else next.lastCheckAt = state.lastCheckAt;
-      return next;
-    }, deps.dataDir);
+    restoreWindow();
     log(
       `${latest} is available; skipped because ${others.length} other Plannotator session(s) are open`,
       deps.dataDir,
@@ -504,6 +512,17 @@ export function startManualUpdateForThisBinary(currentVersion: string | undefine
 const POSIX_WRAPPER = `
 tmp=$(mktemp "\${TMPDIR:-/tmp}/plannotator-install.XXXXXX") || exit 1
 code=1
+# Interrupted (Ctrl-C on plannotator update, a TERM): record 130 and release
+# the lock now, so the next update does not wait an hour for a stale lock.
+on_signal() {
+  trap '' INT TERM HUP
+  rm -f "$tmp"
+  printf '{"version":"%s","exitCode":130}\\n' "$PLANNOTATOR_UPDATE_VERSION" > "$PLANNOTATOR_UPDATE_RESULT.tmp" && mv -f "$PLANNOTATOR_UPDATE_RESULT.tmp" "$PLANNOTATOR_UPDATE_RESULT"
+  echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] update: interrupted"
+  rm -f "$PLANNOTATOR_UPDATE_LOCK"
+  exit 130
+}
+trap on_signal INT TERM HUP
 if curl -fsSL "$PLANNOTATOR_UPDATE_SCRIPT_URL" -o "$tmp"; then
   bash "$tmp" --version "$PLANNOTATOR_UPDATE_VERSION" --non-interactive "$@" </dev/null
   code=$?
@@ -528,7 +547,9 @@ const POWERSHELL_ALLOWED_FLAGS = Object.values(INSTALL_FLAG_SPELLINGS)
  * splatted as an array, so they are never parsed as script text.
  */
 const POWERSHELL_WRAPPER = `
-$code = 1
+# 130 until the installer finished: a Ctrl-C stops the pipeline, and the
+# finally block below still records it and releases the lock.
+$code = 130
 $allowedFlags = @(${POWERSHELL_ALLOWED_FLAGS})
 $installFlags = @()
 if ($env:PLANNOTATOR_UPDATE_FLAGS) {
@@ -546,10 +567,10 @@ try {
   $code = 1
 } finally {
   Remove-Item -Force -ErrorAction SilentlyContinue $tmp
+  [System.IO.File]::WriteAllText($env:PLANNOTATOR_UPDATE_RESULT, ('{"version":"' + $env:PLANNOTATOR_UPDATE_VERSION + '","exitCode":' + [int]$code + '}'))
+  Write-Output ("[" + (Get-Date).ToUniversalTime().ToString('o') + "] update: install.ps1 exited " + $code)
+  Remove-Item -Force -ErrorAction SilentlyContinue $env:PLANNOTATOR_UPDATE_LOCK
 }
-[System.IO.File]::WriteAllText($env:PLANNOTATOR_UPDATE_RESULT, ('{"version":"' + $env:PLANNOTATOR_UPDATE_VERSION + '","exitCode":' + [int]$code + '}'))
-Write-Output ("[" + (Get-Date).ToUniversalTime().ToString('o') + "] update: install.ps1 exited " + $code)
-Remove-Item -Force -ErrorAction SilentlyContinue $env:PLANNOTATOR_UPDATE_LOCK
 `;
 
 /**
@@ -632,8 +653,23 @@ export function launchInstaller(launch: InstallerLaunch): void {
 export function runInstallerForeground(
   launch: InstallerLaunch,
   write: (chunk: string) => void,
+  options: { onSpawn?: (child: ReturnType<typeof spawn>) => void } = {},
 ): Promise<number> {
   return new Promise((resolve) => {
+    // While the installer runs, an INT or TERM to this process is passed to
+    // the wrapper (whose trap records 130 and releases the lock) instead of
+    // killing this process first; a Ctrl-C reaches both already.
+    const forward = (signal: NodeJS.Signals) => () => {
+      try {
+        child?.kill(signal);
+      } catch {}
+    };
+    const onInt = forward("SIGINT");
+    const onTerm = forward("SIGTERM");
+    const unhook = () => {
+      process.off("SIGINT", onInt);
+      process.off("SIGTERM", onTerm);
+    };
     const { file, args, env } = installerEnv(launch);
     const tee = (chunk: Buffer | string) => {
       const text = chunk.toString();
@@ -642,7 +678,7 @@ export function runInstallerForeground(
         appendFileSync(launch.logPath, text);
       } catch {}
     };
-    let child: ReturnType<typeof spawn>;
+    let child: ReturnType<typeof spawn> | undefined;
     try {
       child = spawn(file, args, { stdio: ["ignore", "pipe", "pipe"], env, windowsHide: true });
     } catch (err) {
@@ -650,9 +686,16 @@ export function runInstallerForeground(
       resolve(-1);
       return;
     }
+    process.on("SIGINT", onInt);
+    process.on("SIGTERM", onTerm);
+    options.onSpawn?.(child);
     child.stdout?.on("data", tee);
     child.stderr?.on("data", tee);
+    let settled = false;
     const finish = () => {
+      if (settled) return;
+      settled = true;
+      unhook();
       const raw = readJson<AutoUpdateResult>(launch.resultPath);
       if (raw && typeof raw.exitCode === "number") {
         resolve(raw.exitCode);
@@ -662,10 +705,15 @@ export function runInstallerForeground(
       resolve(-1);
     };
     child.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      unhook();
       abortLaunch(launch.version, err, join(launch.logPath, ".."));
       resolve(-1);
     });
-    child.on("close", finish);
+    // "exit", not "close": a wrapper killed outright can leave its own children
+    // holding the pipes open, and the lock must not wait for them.
+    child.on("exit", finish);
   });
 }
 

@@ -230,7 +230,7 @@ export const UPDATE_COMMAND_USAGE = [
   "",
   "Asks GitHub even when automatic update checks are off (PLANNOTATOR_UPDATE_CHECK=0",
   "or { \"updateCheck\": false }), because you asked. Exit codes: 0 up to date or",
-  "updated, 1 the update failed or could not run, 2 usage.",
+  "updated, 1 the update failed or could not run, 2 usage, 130 interrupted.",
 ].join("\n");
 
 // Per-subcommand usage text. Keyed by the canonical subcommand token; aliases

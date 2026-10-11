@@ -6,6 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { runUpdateCommand, type UpdateCommandDeps } from "./update-command";
@@ -85,6 +86,9 @@ describe("plannotator update (seams)", () => {
     let asked = 0;
     expect(await run([], { currentVersion: undefined, fetchRelease: async () => (asked++, { ok: true, release: { tag: "v1.0.0" } }) })).toBe(1);
     expect(asked).toBe(0);
+    // The e2e and CI binaries are built as 0.0.0-dev: not a release either.
+    expect(await run([], { currentVersion: "0.0.0-dev", fetchRelease: async () => (asked++, { ok: true, release: { tag: "v1.0.0" } }) })).toBe(1);
+    expect(asked).toBe(0);
   });
 
   test("an unreachable GitHub is a failure (exit 1)", async () => {
@@ -111,13 +115,16 @@ describe("plannotator update (seams)", () => {
   });
 });
 
-// The CLI from source, made a "release" with --define and made "managed" by a
-// temp HOME whose ~/.local/bin/plannotator links to this bun.
+// `plannotator update` from source (update-command-entry.ts, the function
+// index.ts dispatches, without the built HTML the full entry imports), made a
+// "release" with --define and made "managed" by a temp HOME whose
+// ~/.local/bin/plannotator links to this bun.
 describe.skipIf(process.platform === "win32" || !Bun.which("curl"))("plannotator update (process)", () => {
-  const entry = resolve(import.meta.dir, "index.ts");
+  const entry = resolve(import.meta.dir, "update-command-entry.ts");
   let home: string;
   let server: ReturnType<typeof Bun.serve>;
   let installerExit = 0;
+  let installerSleeps = false;
   let apiHits = 0;
 
   beforeEach(() => {
@@ -126,6 +133,7 @@ describe.skipIf(process.platform === "win32" || !Bun.which("curl"))("plannotator
     symlinkSync(realpathSync(process.execPath), join(home, ".local", "bin", "plannotator"));
     apiHits = 0;
     installerExit = 0;
+    installerSleeps = false;
     server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
@@ -137,7 +145,11 @@ describe.skipIf(process.platform === "win32" || !Bun.which("curl"))("plannotator
         }
         if (path === "/install.sh") {
           // The fake installer: records its argv and HOME, exits as told.
-          return new Response(`printf '%s\\n' "$@" > "$HOME/installer-args"\necho "fake installer ran"\nexit ${installerExit}\n`);
+          return new Response(
+            installerSleeps
+              ? `echo "fake installer started"\nsleep 30\n`
+              : `printf '%s\\n' "$@" > "$HOME/installer-args"\necho "fake installer ran"\nexit ${installerExit}\n`,
+          );
         }
         return new Response("not found", { status: 404 });
       },
@@ -151,7 +163,7 @@ describe.skipIf(process.platform === "win32" || !Bun.which("curl"))("plannotator
   // Async: the fake API and installer are served from this process, so a
   // spawnSync would block the server it is waiting on.
   async function cli(...args: string[]) {
-    const proc = Bun.spawn(["bun", "--define", '__CLI_VERSION__="0.1.0"', entry, "update", ...args], {
+    const proc = Bun.spawn(["bun", "--define", '__CLI_VERSION__="0.1.0"', entry, ...args], {
       env: {
         PATH: process.env.PATH ?? "/usr/bin:/bin",
         HOME: home,
@@ -193,6 +205,36 @@ describe.skipIf(process.platform === "win32" || !Bun.which("curl"))("plannotator
     expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain("exited with code 4");
     expect(existsSync(join(dataDir, "update.lock"))).toBe(false);
+  }, 60_000);
+
+  test("Ctrl-C while the installer runs: exit 130, the lock released, the result recorded", async () => {
+    installerSleeps = true;
+    // Its own process group, so a group SIGINT is what a terminal's Ctrl-C sends.
+    const child = spawn("bun", ["--define", '__CLI_VERSION__="0.1.0"', entry], {
+      env: {
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        HOME: home,
+        TMPDIR: home,
+        PLANNOTATOR_DATA_DIR: dataDir,
+        PLANNOTATOR_UPDATE_API_URL: `http://127.0.0.1:${server.port}/releases/latest`,
+        PLANNOTATOR_INSTALL_SCRIPT_URL: `http://127.0.0.1:${server.port}/install.sh`,
+      },
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let out = "";
+    let err = "";
+    child.stdout!.on("data", (c) => (out += c));
+    child.stderr!.on("data", (c) => (err += c));
+    const exited = new Promise<number | null>((r) => child.on("close", (code) => r(code)));
+    const deadline = Date.now() + 30_000;
+    while (!out.includes("fake installer started") && Date.now() < deadline) await Bun.sleep(25);
+    expect(existsSync(join(dataDir, "update.lock"))).toBe(true);
+    process.kill(-child.pid!, "SIGINT");
+    expect(await exited).toBe(130);
+    expect(err).toContain("The update was interrupted");
+    expect(existsSync(join(dataDir, "update.lock"))).toBe(false);
+    expect(JSON.parse(readFileSync(join(dataDir, "update-result.json"), "utf-8"))).toEqual({ version: "v9.9.9", exitCode: 130 });
   }, 60_000);
 
   test("--check installs nothing", async () => {

@@ -23,6 +23,7 @@ import {
   installCommandFor,
   installerFlagArgs,
   isNewerStableVersion,
+  parseStableVersion,
   knownLatestRelease,
   readInstallFlags,
   readUpdateState,
@@ -80,7 +81,7 @@ export async function runUpdateCommand(args: string[], deps: UpdateCommandDeps):
   const current = deps.currentVersion;
   const flags = readInstallFlags(dataDir).flags;
   const command = installCommandFor(platform, flags);
-  if (!current) {
+  if (!current || !parseStableVersion(current)) {
     err(
       "This is a development build of Plannotator (no release version), so there is nothing to update.\n" +
         `To install a release: ${command}\n`,
@@ -148,6 +149,12 @@ export async function runUpdateCommand(args: string[], deps: UpdateCommandDeps):
   );
   const run = deps.runInstaller ?? runInstallerForeground;
   const code = await run(begun.launch, out);
+  if (code === 130) {
+    err(
+      `The update was interrupted. Plannotator is still ${current}; the lock is released, so run plannotator update again when you like.\n`,
+    );
+    return 130;
+  }
   if (code !== 0) {
     err(
       `The update didn't install: the install script exited with code ${code}. Plannotator is still ${current}.\n` +
