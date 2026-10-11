@@ -10,7 +10,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
-import { INBOX_SET_ASIDE_HEADING } from "@plannotator/core/inbox-questions";
+import { INBOX_REOPENED_HEADING, INBOX_SET_ASIDE_HEADING } from "@plannotator/core/inbox-questions";
 import type { InboxAuthor, InboxQuestion } from "@plannotator/core/inbox-types";
 import { InboxError } from "./schema";
 import { InboxStore } from "./store";
@@ -163,12 +163,9 @@ describe("Mark read", () => {
     expect(store.pendingReplies("ses_a").map((m) => m.id)).toEqual([note.id]);
     // The note does not end the read, and pushes nothing new to the top.
     expect(rowOf(store, asked.id)).toMatchObject({ section: "quiet", last_author: "person" });
-    // Once: no second note, and none after Undo and a second Mark read.
+    // Once: no second note for the same Mark read.
     expect(store.tellSetAside(asked.id, 8_000)).toEqual([]);
-    store.markRead(asked.id, false);
-    store.markRead(asked.id, true);
-    clock.now += 8_000;
-    expect(store.tellSetAside(asked.id, 8_000)).toEqual([]);
+    expect(store.setAsideDue(0)).toEqual([]);
   });
 
   test("an Undo inside the window tells nothing", () => {
@@ -256,5 +253,42 @@ describe("a Send skips what it leaves unanswered", () => {
     const { store, asked } = setup();
     const result = store.sendReply(asked.id, { idempotency_key: "k-1", skip_unanswered: true });
     expect(result.reply.body.split("\n")[0]).toBe("Skipped 3 questions.");
+  });
+
+  test("a skip-only Send on a message with nothing left open is nothing_to_send, not a validation error", () => {
+    const { store, asked } = setup();
+    store.markRead(asked.id, true);
+    expect(() => store.sendReply(asked.id, { idempotency_key: "k-1", skip_unanswered: true })).toThrow(expect.objectContaining({ code: "nothing_to_send" }));
+    expect(() => store.sendReply(asked.id, { idempotency_key: "k-2" })).toThrow(expect.objectContaining({ code: "validation_error" }));
+  });
+});
+
+describe("Undo after the agent was told", () => {
+  test("an Undo after the set-aside note sends one reopened note; a later Mark read may tell again", () => {
+    const { store, clock, asked } = setup();
+    store.markRead(asked.id, true);
+    clock.now += 10_000;
+    expect(store.tellSetAside(asked.id, 10_000)).toHaveLength(1);
+    store.markRead(asked.id, false);
+    const reopened = store.thread(asked.id)!.messages.at(-1)!;
+    expect(reopened).toMatchObject({ author: { kind: "person" }, reply_to: asked.id });
+    expect(reopened.body.split("\n")[0]).toBe(INBOX_REOPENED_HEADING);
+    expect(reopened.body).toContain("- Q2. Should overdue invoices sort to the top?");
+    expect(reopened.reopened).toHaveLength(3);
+    // The asking session is handed it like any reply.
+    expect(store.pendingReplies("ses_a").map((m) => m.id)).toContain(reopened.id);
+    expect(store.questionsOf(asked.id).every((q) => q.state === "open")).toBe(true);
+    // Marked read again: the agent is told again, once.
+    store.markRead(asked.id, true);
+    clock.now += 10_000;
+    expect(store.tellSetAside(asked.id, 10_000)).toHaveLength(1);
+    expect(store.tellSetAside(asked.id, 10_000)).toEqual([]);
+  });
+
+  test("an Undo before the note went writes no reopened note", () => {
+    const { store, asked } = setup();
+    store.markRead(asked.id, true);
+    store.markRead(asked.id, false);
+    expect(store.thread(asked.id)!.messages).toHaveLength(1);
   });
 });

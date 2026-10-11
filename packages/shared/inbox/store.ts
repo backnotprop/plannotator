@@ -30,6 +30,7 @@ import { join } from "node:path";
 import {
   checkInboxAnswer,
   composeInboxReplyBody,
+  composeInboxReopenedBody,
   composeInboxSetAsideBody,
   inboxSkipAnswer,
   deriveInboxSubject,
@@ -769,6 +770,37 @@ export class InboxStore {
             at,
           );
         }
+        // The agent was already told not to wait on some of these: tell it
+        // they are open again, one note per asking message, so it does not
+        // go on believing it need not wait.
+        const told = this.toldSetAside(members);
+        const byMessage = new Map<string, InboxQuestionRecord[]>();
+        for (const record of closed) {
+          if (!told.has(record.id) || record.superseded_by) continue;
+          const list = byMessage.get(record.message_id) ?? [];
+          list.push(record);
+          byMessage.set(record.message_id, list);
+        }
+        for (const message of members) {
+          const reopened = byMessage.get(message.id);
+          if (!reopened) continue;
+          this.appendMessage(
+            {
+              id: inboxId("msg"),
+              project_id: message.project_id,
+              thread_id: message.thread_id,
+              reply_to: message.id,
+              author: { kind: "person" },
+              subject: null,
+              body: composeInboxReopenedBody(reopened),
+              created_at: at,
+              resolved_at: null,
+              idempotency_key: null,
+              reopened: reopened.map((r) => r.id),
+            },
+            at,
+          );
+        }
       }
     }
     const row = this.listRow(threadId);
@@ -777,14 +809,27 @@ export class InboxStore {
   }
 
   /**
+   * The questions a set-aside note has told the agent not to wait on, and no
+   * later reopened note has taken back (thread order decides).
+   */
+  private toldSetAside(members: readonly InboxMessage[]): Set<string> {
+    const told = new Set<string>();
+    for (const message of members) {
+      if (message.author.kind !== "person") continue;
+      for (const id of message.set_aside ?? []) told.add(id);
+      for (const id of message.reopened ?? []) told.delete(id);
+    }
+    return told;
+  }
+
+  /**
    * The questions a Mark read closed that no set-aside note has named yet,
    * closed at least `afterMs` ago and not replaced since, grouped by the
    * message that asked them (thread order).
    */
   private untoldSetAside(threadId: string, afterMs: number): { message: InboxMessage; records: InboxQuestionRecord[] }[] {
-    const told = new Set<string>();
     const members = this.threadMessages(threadId);
-    for (const message of members) for (const id of message.set_aside ?? []) told.add(id);
+    const told = this.toldSetAside(members);
     const now = this.now().getTime();
     const out: { message: InboxMessage; records: InboxQuestionRecord[] }[] = [];
     for (const message of members) {
@@ -1407,6 +1452,9 @@ export class InboxStore {
         ? this.questionRecords(message.id).filter((r) => !planned.has(r.key) && inboxQuestionState(r, false) === "open")
         : [];
     if (plan.length === 0 && skips.length === 0 && words.trim() === "" && feedback === "") {
+      // A target a Send meant only to skip, whose questions closed meanwhile
+      // (answered, replaced, a Mark read): nothing to write, not a refusal.
+      if (input.skip_unanswered === true) throw new InboxError("nothing_to_send", "Nothing is left to send on this message.");
       throw new InboxError("validation_error", "words: write a reply or send at least one answer.", { field: "words" });
     }
 

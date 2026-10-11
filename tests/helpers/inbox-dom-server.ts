@@ -7,8 +7,9 @@
  *
  * Seeds `count` projects (one per test, since the window keeps the first
  * server session it saw), each with a thread an agent is stopped on (two
- * questions) and one waiting on a single question, prints one JSON line
- * `{ port, worlds: [{ project, stopped, waiting }] }`, and runs until killed.
+ * questions), one waiting on a single question, and one two sessions write
+ * in (A asks, B posts a later update), prints one JSON line
+ * `{ port, worlds: [{ project, stopped, waiting, mixed, update }] }`, and runs until killed.
  * The set-aside note's delay is a minute, so no note is written while a test
  * runs.
  */
@@ -47,7 +48,7 @@ const WAITING = ["The docs site needs a search index.", "", ":::question", "Whic
 
 const server = await startInboxServer({ dataDir, setAsideDelayMs: 60_000, phones: false });
 const store = server.store;
-const worlds: { project: string; stopped: string; waiting: string }[] = [];
+const worlds: { project: string; stopped: string; waiting: string; mixed: string; update: string }[] = [];
 for (let i = 0; i < count; i++) {
   const root = join(projectsDir, `billing-${i}`);
   mkdirSync(root, { recursive: true });
@@ -55,7 +56,10 @@ for (let i = 0; i < count; i++) {
   const author = { kind: "agent" as const, host: "claude-code", session: `ses_a${i}`, name: "Claude Code" };
   const stopped = store.sendMessage({ project_id: project.id, author, body: STOPPED }).message;
   const waiting = store.sendMessage({ project_id: project.id, author: { ...author, session: `ses_b${i}` }, body: WAITING }).message;
-  worlds.push({ project: project.id, stopped: stopped.id, waiting: waiting.id });
+  // One thread two sessions write in: A asks, then B posts a later update in it.
+  const asking = store.sendMessage({ project_id: project.id, author: { ...author, session: `ses_m${i}` }, body: WAITING.replace("docs site", "admin site") }).message;
+  const update = store.sendMessage({ project_id: project.id, author: { ...author, session: `ses_n${i}`, name: "Codex", host: "codex" }, body: "Update: the admin index builds now.", reply_to: asking.id }).message;
+  worlds.push({ project: project.id, stopped: stopped.id, waiting: waiting.id, mixed: asking.id, update: update.id });
 }
 process.stdout.write(`${JSON.stringify({ port: server.port, worlds })}\n`);
 process.on("SIGTERM", () => {

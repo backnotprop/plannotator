@@ -206,10 +206,10 @@ export interface InboxServerOptions {
 }
 
 /**
- * After a Mark read, the set-aside note waits out the window's 7 s Undo (and
- * a little more, for a slow click), so an Undo never reaches an agent.
+ * After a Mark read, the set-aside note waits out the window's 7 s Undo with
+ * 3 s to spare (a slow click, a slow network), so an Undo never reaches an agent.
  */
-export const INBOX_SET_ASIDE_DELAY_MS = 8_000;
+export const INBOX_SET_ASIDE_DELAY_MS = 10_000;
 
 export interface InboxServer {
   port: number;
@@ -1197,15 +1197,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             // An unknown message is the store's 404, never "not live".
             const asked = body.to === undefined ? undefined : store.message(messageId);
             const to = body.to === undefined || !asked ? undefined : live.replyTarget(asked.thread_id, body.to);
-            const result = store.sendReply(messageId, {
-              ...(to === undefined ? {} : { to }),
-              words: typeof body.words === "string" ? body.words : undefined,
-              questions: (body.questions as never) ?? [],
-              idempotency_key: body.idempotency_key as string,
-              feedback: typeof body.feedback === "string" ? body.feedback : undefined,
-              annotation_ids: body.annotation_ids as never,
-              skip_unanswered: body.skip_unanswered === true,
-            });
+            let result: ReturnType<typeof store.sendReply>;
+            try {
+              result = store.sendReply(messageId, {
+                ...(to === undefined ? {} : { to }),
+                words: typeof body.words === "string" ? body.words : undefined,
+                questions: (body.questions as never) ?? [],
+                idempotency_key: body.idempotency_key as string,
+                feedback: typeof body.feedback === "string" ? body.feedback : undefined,
+                annotation_ids: body.annotation_ids as never,
+                skip_unanswered: body.skip_unanswered === true,
+              });
+            } catch (error) {
+              // A skip-only target whose questions closed meanwhile: a no-op, so
+              // the rest of a multi-message Send still goes.
+              if (error instanceof InboxError && error.code === "nothing_to_send") {
+                return json({ message_id: messageId, questions: store.questionsOf(messageId), reply: null, replayed: false, nothing_to_send: true, decisions: [], decisions_refused: [] });
+              }
+              throw error;
+            }
             // Step 3: the sent answers whose decision switch is on become
             // decisions, after the reply landed; a refused one never undoes it.
             const decisions = recordDecisionsForReply(store, result.reply.id);
@@ -1223,6 +1233,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               throw new InboxError("validation_error", "resolved: must be a boolean.");
             }
             const thread = store.resolveThread(messageId, body.resolved !== false);
+            // Unarchived: a Mark read's set-aside note an archive held back is due again.
+            if (body.resolved === false) scheduleSetAside(thread.thread_id);
             return json({ thread });
           }
         }

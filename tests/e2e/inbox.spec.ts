@@ -450,6 +450,16 @@ test('a pick is saved at once and the agent reads it through read_thread', async
       const where = `at ${width}px (${folder})`;
       if (width === 1440) await expect.poll(async () => (await textGap()).shape, where).toBe('ib-row');
       if (width === 820) await expect.poll(async () => (await textGap()).shape, where).toBe(narrowShape);
+      // The folder click closes the thread and the list re-renders (and may
+      // switch between the wide and the two-line row): measure once the row's
+      // shape and gap hold still, at every width.
+      await expect
+        .poll(async () => {
+          const first = await textGap();
+          await page.waitForTimeout(150);
+          return JSON.stringify(first) === JSON.stringify(await textGap());
+        }, where)
+        .toBe(true);
       const measured = await textGap();
       expect(measured.text).toBe('Answered, not sent');
       expect(measured.sameLine).toBe(true);

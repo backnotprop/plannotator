@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { InboxListRow, InboxListSection, InboxQuestion } from "@plannotator/core/inbox-types";
-import { INBOX_SET_ASIDE_HEADING } from "@plannotator/core/inbox-questions";
+import { INBOX_REOPENED_HEADING, INBOX_SET_ASIDE_HEADING } from "@plannotator/core/inbox-questions";
 import { startInboxServer, type InboxServer } from "./inbox";
 
 const roots: string[] = [];
@@ -130,6 +130,29 @@ describe("POST /api/inbox/threads/:id/read and /unread", () => {
     expect((await rowOf(server, threadId)).section).toBe("quiet");
   });
 
+  test("Undo after the note went: the agent gets one reopened note", async () => {
+    const { server, threadId } = await setup();
+    await post(server, `/api/inbox/threads/${threadId}/read`, {});
+    await Bun.sleep(DELAY + 400);
+    await post(server, `/api/inbox/threads/${threadId}/unread`, {});
+    const messages = server.store.thread(threadId)!.messages;
+    expect(messages.map((m) => m.body.split("\n")[0])).toEqual([messages[0]!.body.split("\n")[0], INBOX_SET_ASIDE_HEADING, INBOX_REOPENED_HEADING]);
+  });
+
+  test("archived inside the window, then unarchived: the note still goes", async () => {
+    const { server, threadId, messageId } = await setup();
+    await post(server, `/api/inbox/threads/${threadId}/read`, {});
+    await post(server, `/api/inbox/messages/${messageId}/resolve`, { resolved: true });
+    await Bun.sleep(DELAY + 400);
+    // Archived: nothing goes while the thread is archived.
+    expect(server.store.thread(threadId)!.messages).toHaveLength(1);
+    await post(server, `/api/inbox/messages/${messageId}/resolve`, { resolved: false });
+    await Bun.sleep(DELAY + 400);
+    const messages = server.store.thread(threadId)!.messages;
+    expect(messages).toHaveLength(2);
+    expect(messages[1]!.body.split("\n")[0]).toBe(INBOX_SET_ASIDE_HEADING);
+  });
+
   test("Undo inside the window: the agent is never told", async () => {
     const { server, threadId } = await setup();
     await post(server, `/api/inbox/threads/${threadId}/read`, {});
@@ -156,5 +179,16 @@ describe("POST /api/inbox/messages/:id/reply with skip_unanswered", () => {
     expect(body.decisions).toEqual([]);
     expect(body.decisions_refused).toEqual([]);
     expect((await rowOf(server, threadId)).section).toBe("sent");
+  });
+
+  test("a skip-only target whose questions closed meanwhile is a 200 no-op, not a refusal", async () => {
+    const { server, threadId, messageId } = await setup();
+    await post(server, `/api/inbox/threads/${threadId}/read`, {});
+    const res = await post(server, `/api/inbox/messages/${messageId}/reply`, { idempotency_key: "k-2", questions: [], skip_unanswered: true });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ reply: null, nothing_to_send: true, decisions_refused: [] });
+    expect(server.store.thread(threadId)!.messages).toHaveLength(1);
+    // Without skip_unanswered an empty Send is still refused, as before.
+    expect((await post(server, `/api/inbox/messages/${messageId}/reply`, { idempotency_key: "k-3", questions: [] })).status).toBe(422);
   });
 });

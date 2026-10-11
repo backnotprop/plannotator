@@ -29,8 +29,8 @@ const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-se
 let child: ReturnType<typeof Bun.spawn> | null = null;
 let port = 0;
 /** One seeded project per test: the window keeps the first server session it saw, so every test shares one server. */
-let worlds: { project: string; stopped: string; waiting: string }[] = [];
-let ids = { project: '', stopped: '', waiting: '' };
+let worlds: { project: string; stopped: string; waiting: string; mixed: string; update: string }[] = [];
+let ids = { project: '', stopped: '', waiting: '', mixed: '', update: '' };
 let dir: string | null = null;
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -66,7 +66,7 @@ async function serverSection(threadId: string): Promise<string | undefined> {
   return model.sections.find((s) => s.threads.some((t) => t.thread_id === threadId))?.id;
 }
 
-const TESTS = 6;
+const TESTS = 7;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -311,4 +311,22 @@ test.skipIf(!hasDom)("the warning toast's Reply moves the thread back and opens 
   await until(() => el.querySelector('textarea') !== null && head().getAttribute('aria-pressed') === 'false', 'the reply box');
   expect(posted.at(-1)!.path).toBe(`/api/inbox/threads/${ids.stopped}/unread`);
   expect((await questionStates(ids.stopped)).map((q) => q.state)).toEqual(['open', 'open']);
+});
+
+test.skipIf(!hasDom)('session A asked, session B posted a later update: the skip goes to A, the words reach B', async () => {
+  const el = await renderApp(`#thread=${ids.mixed}`);
+  act(() => button(el, 'Reply').click());
+  await settle();
+  type(el, 'Thanks, carry on.');
+  act(() => button(el, 'Send').click());
+  await until(() => el.querySelector('textarea') === null, 'the Send');
+  const replies = posted.filter((p) => p.path.endsWith('/reply'));
+  expect(replies.map((p) => p.path)).toEqual([`/api/inbox/messages/${ids.mixed}/reply`, `/api/inbox/messages/${ids.update}/reply`]);
+  expect(replies[0]!.body).toMatchObject({ words: '', skip_unanswered: true });
+  expect(replies[1]!.body).toMatchObject({ words: 'Thanks, carry on.', questions: [] });
+  // On the server: the words are a reply to B's message, which is what hands them to B's session.
+  const model = await api<{ thread: { messages: { author: { kind: string }; reply_to: string | null; body: string }[] } }>(`/api/inbox/threads/${ids.mixed}`);
+  const words = model.thread.messages.find((m) => m.author.kind === 'person' && m.body.includes('Thanks, carry on.'))!;
+  expect(words.reply_to).toBe(ids.update);
+  expect((await questionStates(ids.mixed)).map((q) => q.state)).toEqual(['sent']);
 });

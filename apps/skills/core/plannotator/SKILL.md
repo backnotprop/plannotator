@@ -251,7 +251,7 @@ Recommended: Local only, purged after 30 days
 - `- [x]` marks a settled choice. On resubmit, check the chosen answer, or drop the block and state the decision in prose.
 - Leave blank lines between the parts so the block reads well on GitHub.
 - Each answer comes back under its question (`### Q2. <question> (line N)`) as `Answer: <choice>`, marked `(your recommendation)` when the reviewer took yours, or as `Other: …`, free text in a quote, or `Skipped`, plus any `Note:`. A question you marked `- [x]` is settled and only comes back if the reviewer changed it or added a note.
-- In the Inbox, withdraw your own open questions as the thread moves on: when a newer message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, name them in `supersedes` (or a `Replaces:` line) so they stop keeping the thread at the top of the person's list.
+- In the Inbox, withdraw your own questions that are still open (read_thread state `open` or `picked`) as the thread moves on: when a newer message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, name them in `supersedes` (or a `Replaces:` line) so they stop keeping the thread at the top of the person's list.
 
 ## Do not
 

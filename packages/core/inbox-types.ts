@@ -216,6 +216,11 @@ export interface InboxMessage {
    */
   set_aside?: string[];
   /**
+   * On a person's reopened note: the questions an Undo of Mark read opened
+   * again after a set-aside note had named them. Absent on every other message.
+   */
+  reopened?: string[];
+  /**
    * On a root: the seq up to which the asking agent has read the person's
    * replies (wait_for_reply returned one, or read_thread read the thread),
    * and when. A Sent row moves to Quiet once its reply is checked.

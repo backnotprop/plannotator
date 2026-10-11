@@ -383,6 +383,21 @@ export function composeInboxSetAsideBody(questions: readonly Pick<InboxQuestionR
   return [INBOX_SET_ASIDE_HEADING, "", ...lines, "", "The person closed them unanswered in the Inbox. Ask again if you still need an answer to go on."].join("\n");
 }
 
+/** The first line of the note an Undo of Mark read sends once the agent was told. */
+export const INBOX_REOPENED_HEADING = "The person reopened these:";
+
+/**
+ * The note an Undo of Mark read sends when the asking agent was already told
+ * not to wait on those questions: they are open again, and wait on the
+ * person, so the agent must not go on as if they were set aside.
+ */
+export function composeInboxReopenedBody(questions: readonly Pick<InboxQuestionRecord, "position" | "prompt">[]): string {
+  const lines = [...questions]
+    .sort((a, b) => a.position - b.position)
+    .map((q) => `- Q${q.position + 1}. ${q.prompt.replace(/\s+/g, " ").trim()}`);
+  return [INBOX_REOPENED_HEADING, "", ...lines, "", "They are open again in the Inbox; wait for the person's answer before you rely on them."].join("\n");
+}
+
 // ─────────────────────────────── Subject ───────────────────────────────
 
 const SUBJECT_MAX = 120;
