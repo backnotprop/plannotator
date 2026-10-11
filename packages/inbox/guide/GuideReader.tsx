@@ -13,8 +13,10 @@
  * ship in inbox.html and its modules (the guide chain, the diff renderer) run
  * at page load; what waits for Open is the mount, the diff render and the
  * highlighter, as with every lazy runtime in Plannotator's single-file apps.
- * No new Tailwind classes here or in the chain: the guides.show viewer CSS,
- * and with it its pinned manifest, stay as they are.
+ * No new Tailwind classes here or in the chain. The comment cards, toolbar
+ * and suggestion blocks are styled by packages/review-editor/comments.css,
+ * which apps/inbox/index.css imports (guides.show gets it through
+ * review-editor's index.css; its pinned manifest follows the viewer build).
  */
 
 import { useCallback, useMemo, useRef, useState, type FC } from 'react';

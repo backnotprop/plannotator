@@ -6,6 +6,7 @@
     "./agents": "./agents.ts",
     "./annotatable": "./annotatable.ts",
     "./annotate-bundle": "./annotate-bundle.ts",
+    "./diff-files": "./diff-files.ts",
     "./app-html": "./app-html.ts",
     "./compress": "./compress.ts",
     "./crypto": "./crypto.ts",

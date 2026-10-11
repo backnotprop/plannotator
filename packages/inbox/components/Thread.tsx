@@ -311,6 +311,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   const { model: files, load: reloadFiles, patch: patchRecords } = useThreadAttachments(thread.thread_id, thread);
   const attachments: InboxAttachmentState[] = files?.attachments ?? [];
   const records = files?.annotations ?? [];
+  const fileRecords = useMemo(() => records.filter((r) => !r.guide), [records]);
   /** Something here takes annotations: an attached file, or a guided review's diffs. */
   const takesAnnotations = attachments.length > 0 || records.length > 0 || thread.messages.some((m) => m.guide);
   const [full, setFull] = useState(false);
@@ -336,9 +337,9 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   };
   const countsByPath = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const record of records) counts.set(record.path, (counts.get(record.path) ?? 0) + 1);
+    for (const record of fileRecords) counts.set(record.path, (counts.get(record.path) ?? 0) + 1);
     return counts;
-  }, [records]);
+  }, [fileRecords]);
   const saveRecord = useCallback(
     (record: InboxAnnotationRecord) => patchRecords((list) => [...list.filter((r) => r.id !== record.id), record]),
     [patchRecords],
@@ -924,7 +925,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       <AttachmentPane
         attachment={openAttachment}
         attachments={attachments}
-        records={records}
+        // The files' annotations only: a guided-review comment is on the guide's diff, not on a file.
+        records={fileRecords}
         agent={asker}
         projectName={thread.project.name}
         projectRoot={thread.project.root}

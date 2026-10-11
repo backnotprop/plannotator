@@ -72,7 +72,7 @@ import {
   type InboxAnnotationRecord,
   type InboxAttachment,
 } from "@plannotator/core/inbox-types";
-import { parseDiffToFiles } from "@plannotator/core/diff-files";
+import { isLineRangeInPatch, parseDiffToFiles, type DiffFile } from "@plannotator/core/diff-files";
 import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachments";
 import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
 import {
@@ -236,8 +236,8 @@ export class InboxStore {
   private readonly decisions = new Map<string, InboxDecision>();
   /** The person's annotations on attachments, by id. */
   private readonly annotations = new Map<string, InboxAnnotationRecord>();
-  /** A guided review's file paths by its snapshot's sha256 (a blob never changes). */
-  private readonly guideFileSets = new Map<string, ReadonlySet<string>>();
+  /** A guided review's files by its snapshot's sha256 (a blob never changes). */
+  private readonly guideFileSets = new Map<string, ReadonlyMap<string, DiffFile>>();
   private readonly tornFiles = new Set<string>();
   private readonly listeners = new Set<InboxListener>();
   private readonly now: () => Date;
@@ -1412,7 +1412,8 @@ export class InboxStore {
     if (!isInboxAnnotationId(id)) throw new InboxError("validation_error", "annotation.id: a short id.", { field: "annotation.id" });
     const file = fields.filePath;
     if (typeof file !== "string" || file === "") throw new InboxError("validation_error", "annotation.filePath: a file of the guide's patch.", { field: "annotation.filePath" });
-    if (!this.guideFiles(message.guide.sha256).has(file)) {
+    const diff = this.guideFiles(message.guide.sha256).get(file);
+    if (!diff) {
       throw new InboxError("validation_error", `annotation.filePath: ${file} is not in the guided review's patch.`, { field: "annotation.filePath" });
     }
     const side = fields.side;
@@ -1421,6 +1422,10 @@ export class InboxStore {
     const end = fields.lineEnd;
     if (!Number.isInteger(start) || !Number.isInteger(end) || (start as number) < 1 || (end as number) < (start as number)) {
       throw new InboxError("validation_error", "annotation.lineStart / lineEnd: line numbers, start first.", { field: "annotation.lineStart" });
+    }
+    if (!isLineRangeInPatch(diff.patch, start as number, end as number, side)) {
+      const range = start === end ? `line ${start}` : `lines ${start}-${end}`;
+      throw new InboxError("validation_error", `annotation.lineStart / lineEnd: ${range} on the ${side} side of ${file} is not in one hunk of the guided review's patch.`, { field: "annotation.lineStart" });
     }
     if (fields.scope !== undefined && fields.scope !== "line") {
       throw new InboxError("validation_error", 'annotation.scope: a guided-review comment is on lines ("line").', { field: "annotation.scope" });
@@ -1454,18 +1459,18 @@ export class InboxStore {
     return record;
   }
 
-  /** The files a guided review's patch names (new and old paths), read from its snapshot blob once. */
-  private guideFiles(sha256: string): ReadonlySet<string> {
+  /** A guided review's files by the paths its patch names (new and old), read from its snapshot blob once. */
+  private guideFiles(sha256: string): ReadonlyMap<string, DiffFile> {
     const known = this.guideFileSets.get(sha256);
     if (known) return known;
-    const files = new Set<string>();
+    const files = new Map<string, DiffFile>();
     try {
       const snapshot = JSON.parse(readFileSync(inboxBlobPath(this.dir, sha256), "utf8")) as { review?: { rawPatch?: unknown } };
       const patch = snapshot.review?.rawPatch;
       if (typeof patch === "string") {
         for (const file of parseDiffToFiles(patch)) {
-          files.add(file.path);
-          if (file.oldPath) files.add(file.oldPath);
+          files.set(file.path, file);
+          if (file.oldPath && !files.has(file.oldPath)) files.set(file.oldPath, file);
         }
       }
     } catch {

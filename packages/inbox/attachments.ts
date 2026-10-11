@@ -222,7 +222,7 @@ export const GUIDE_FEEDBACK_TITLE = 'Feedback on the guided review';
  * One comment as the review app's export writes it (exportReviewFeedback in
  * packages/review-editor/utils/exportFeedback.ts, line scope): the line range
  * and side, the comment, the lines it is on, any suggested code. Kept equal
- * to it by attachments.guide.test.ts.
+ * to it by guideFeedback.test.ts.
  */
 function guideCommentEntry(comment: CodeAnnotation, heading: string): string {
   const range = comment.lineStart === comment.lineEnd ? `Line ${comment.lineStart}` : `Lines ${comment.lineStart}-${comment.lineEnd}`;

@@ -15,7 +15,7 @@
  * shows the guide read-only.
  */
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { parseGuideSnapshot, type GuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxAnnotationRecord, InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
@@ -50,6 +50,12 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scrollTarget, setScrollTarget] = useState<{ id: string; token: number } | null>(null);
   const readOnly = thread.resolved_at !== null;
+  /**
+   * Bumped by every local save or removal: a read of the thread's annotations
+   * that started before it answers with the store as it was, and must not put
+   * back a comment just removed or drop one just saved.
+   */
+  const localWrites = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,10 +85,12 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
   // The comments: read with the thread's annotations, again whenever the thread changes (a Send, an edit in the reply's list, another tab).
   useEffect(() => {
     let cancelled = false;
+    const startedAt = localWrites.current;
     inboxApi
       .attachments(thread.thread_id)
       .then((model) => {
-        if (!cancelled) setRecords(model.annotations.filter((r) => r.message_id === message.id && r.guide));
+        if (cancelled || localWrites.current !== startedAt) return;
+        setRecords(model.annotations.filter((r) => r.message_id === message.id && r.guide));
       })
       .catch(() => {
         // The thread went away; the pane closes with it.
@@ -106,8 +114,13 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
   const save = useCallback(
     (annotation: CodeAnnotation) => {
       setSaveError(null);
+      localWrites.current += 1;
       inboxApi.saveGuideAnnotation(message.id, annotation).then(
-        (saved) => setRecords((list) => [...list.filter((r) => r.id !== saved.annotation.id), saved.annotation]),
+        (saved) => {
+          // Again on the answer: a read that started while the write was in flight may not hold it.
+          localWrites.current += 1;
+          setRecords((list) => [...list.filter((r) => r.id !== saved.annotation.id), saved.annotation]);
+        },
         (cause: unknown) => setSaveError(cause instanceof InboxApiError ? cause.message : 'The comment was not saved.'),
       );
     },
@@ -115,8 +128,12 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
   );
   const remove = useCallback((id: string) => {
     setSaveError(null);
+    localWrites.current += 1;
     inboxApi.removeAnnotation(id).then(
-      () => setRecords((list) => list.filter((r) => r.id !== id)),
+      () => {
+        localWrites.current += 1;
+        setRecords((list) => list.filter((r) => r.id !== id));
+      },
       (cause: unknown) => setSaveError(cause instanceof InboxApiError ? cause.message : 'The comment was not removed.'),
     );
   }, []);

@@ -148,6 +148,12 @@ test("a comment is refused on a file not in the guide, a bad side or range, a me
   await refused(route, comment({ side: "both" }), 422, "validation_error");
   await refused(route, comment({ lineStart: 3, lineEnd: 2 }), 422, "validation_error");
   await refused(route, comment({ scope: "file" }), 422, "validation_error");
+  // Lines the guide's patch does not show: the brief's src/auth.ts hunk is new line 1 only.
+  const outside = await post(server, route, { annotation: comment({ lineStart: 9999, lineEnd: 100000 }) });
+  expect(outside.status).toBe(422);
+  expect(((await outside.json()) as { error: string }).error).toContain("lines 9999-100000 on the new side of src/auth.ts is not in one hunk");
+  await refused(route, comment({ lineStart: 2, lineEnd: 2 }), 422, "validation_error");
+  await refused(route, comment({ side: "old", lineStart: 1, lineEnd: 2 }), 422, "validation_error");
   await refused(`/api/inbox/messages/${plain.message_id}/guide/annotations`, comment(), 404, "guide_not_found");
   await refused(`/api/inbox/messages/msg_00000000000000000000000000/guide/annotations`, comment(), 404, "message_not_found");
   const crossSite = await post(server, route, { annotation: comment() }, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" });
@@ -161,6 +167,23 @@ test("a comment is refused on a file not in the guide, a bad side or range, a me
   expect(viaAttachment.status).toBe(422);
   expect((await post(server, "/api/inbox/annotations", { attachment_id: plain.attachments[0].id, version: "current", annotation: { id: "ann-file-1", text: "x" } })).status).toBe(200);
   await refused(route, comment({ id: "ann-file-1" }), 422, "validation_error");
+});
+
+test("a resolved thread takes no new comment and no edit (409) until it is reopened", async () => {
+  const { project, dataDir } = world();
+  const server = await start(dataDir);
+  const client = await agent(server);
+  const sent = await sendGuide(client, project);
+  const route = `/api/inbox/messages/${sent.message_id}/guide/annotations`;
+  expect((await post(server, route, { annotation: comment() })).status).toBe(200);
+  expect((await post(server, `/api/inbox/messages/${sent.message_id}/resolve`, { resolved: true })).status).toBe(200);
+  for (const annotation of [comment({ id: "ann-guide-new" }), comment({ text: "An edit." })]) {
+    const answer = await post(server, route, { annotation });
+    expect(answer.status).toBe(409);
+    expect(((await answer.json()) as { code: string }).code).toBe("thread_resolved");
+  }
+  expect((await post(server, `/api/inbox/messages/${sent.message_id}/resolve`, { resolved: false })).status).toBe(200);
+  expect((await post(server, route, { annotation: comment({ text: "An edit." }) })).status).toBe(200);
 });
 
 test("Send carries the comments as the review app's export under the guided review's heading; the agent's wait_for_reply returns it, and a sent comment is closed", async () => {

@@ -364,10 +364,26 @@ test('a comment on the guide\'s diffs: a line and a range, listed beside the gui
   await viewer.getByRole('button', { name: 'Reviewed', exact: true }).first().click();
   await expect(viewer.getByText(/1\/2 reviewed/)).toBeVisible();
 
+  // The same thread also carries an attached file: the file's pane lists only its own annotations.
+  writeFileSync(join(world.ledger, 'notes.md'), '# Notes\n\nRefresh tokens a minute early.\n');
+  const notes = await claude.send({ project_path: world.ledger, thread: 'guide-comments', body: 'And my notes.', attachments: ['notes.md'] });
+  expect(notes.thread_id).toBe(sent.thread_id);
+
   // Back to the thread: the reply's chip counts them; edit one there.
   await viewer.getByRole('button', { name: 'Back to the thread' }).click();
   await expect(viewer).toHaveCount(0);
-  await page.getByRole('button', { name: 'Reply', exact: true }).click();
+  const tile = page.locator(`.ib-att-t[data-attachment-id="${notes.attachments[0].id}"]`);
+  await expect(tile).toBeVisible();
+  await expect(tile).not.toContainText('annotation');
+  await tile.click();
+  const filePane = page.locator(`[data-attachment-pane="${notes.attachments[0].id}"]`);
+  await expect(filePane.getByText('Refresh tokens a minute early.')).toBeVisible();
+  await expect(filePane.locator('.ib-apanel')).toContainText('No annotations yet');
+  await expect(filePane.locator('.ib-apanel')).not.toContainText('Throw a typed error');
+  await shot('4.3-guide-comments-not-on-the-attached-file');
+  await filePane.getByRole('button', { name: 'Close notes.md' }).click();
+  await expect(filePane).toHaveCount(0);
+  await page.getByRole('button', { name: 'Reply', exact: true }).last().click();
   const chip = page.locator('[data-annotations-chip]');
   await expect(chip).toHaveText('2 annotations');
   await chip.click();
