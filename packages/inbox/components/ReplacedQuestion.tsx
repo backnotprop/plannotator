@@ -238,7 +238,7 @@ export function ChangedNotice({
   const many = questions.length > 1;
   const which = many ? `${questions.length} questions you picked on` : questionName(first, false);
   return (
-    <div className="ib-changed" role="status" data-replaced-notice="">
+    <div className="ib-q-changed" role="status" data-replaced-notice="">
       <Icon name="warn" size={15} />
       <span>
         {replacement.by ? `${agent} replaced ${which} at ${at}. ` : `${agent} said at ${at} that ${which} no longer ${many ? 'apply' : 'applies'}. `}

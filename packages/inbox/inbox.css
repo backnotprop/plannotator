@@ -672,8 +672,8 @@ pre code.pn-code[data-keep-layout] {
 .pn-inbox .ib-q-target-out { box-shadow: 0 0 0 3px transparent; transition: box-shadow 600ms ease-out; border-radius: 10px; }
 @media (prefers-reduced-motion: reduce) { .pn-inbox .ib-q-target, .pn-inbox .ib-q-target-out { transition: none; } }
 /* The stale guard: the reply foot says a question changed under the person's answer. */
-.pn-inbox .ib-changed { display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px; font-size: 13px; line-height: 1.5; border-radius: 8px; background: color-mix(in oklab, var(--warning) 10%, var(--card)); border: 1px solid color-mix(in oklab, var(--warning) 25%, transparent); margin-bottom: 10px; }
-.pn-inbox .ib-changed svg.ib-ic { color: var(--warning); margin-top: 2px; }
+.pn-inbox .ib-q-changed { display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px; font-size: 13px; line-height: 1.5; border-radius: 8px; background: color-mix(in oklab, var(--warning) 10%, var(--card)); border: 1px solid color-mix(in oklab, var(--warning) 25%, transparent); margin-bottom: 10px; }
+.pn-inbox .ib-q-changed svg.ib-ic { color: var(--warning); margin-top: 2px; }
 .pn-inbox .ib-vlink { color: var(--primary); font-weight: 550; background: none; border: 0; padding: 0; font-size: inherit; cursor: pointer; }
 .pn-inbox .ib-guard { border: 1px solid color-mix(in oklab, var(--warning) 45%, var(--border)); background: color-mix(in oklab, var(--warning) 9%, var(--card)); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
 .pn-inbox .ib-guard:focus { outline: none; }
