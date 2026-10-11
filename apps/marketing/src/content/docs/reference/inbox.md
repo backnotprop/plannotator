@@ -44,7 +44,8 @@ You never need to keep the Inbox running yourself. When an agent calls it and it
 - **Decisions.** A question can record your answer as a project decision. The switch on the card is on by default when the agent wrote `Decision: when answered`. The **Decisions** page lists what is waiting, what is settled, and what was replaced or retired.
 - **Guided reviews.** An agent can send a guided review of a code change. It opens as sections, files and the diff, and you can tick sections as reviewed. Comment on the diff as in code review (click a line number, drag across lines, or select code): your comments ride your next Send under "Feedback on the guided review", with each file, line and the lines you commented on.
 - **Notifications.** The open page can raise a browser notification when a new question arrives while the tab is in the background. The Inbox asks once, the first time something arrives. You can change this later in **Settings**.
-- **Settings.** The inbox tool switch per host, notifications, the MCP command for other agents, and how much space each project and thread takes on disk, with **Delete thread** and **Delete project**.
+- **Sound.** When an agent asks you something and no Inbox tab is in front, the page plays a soft doorbell, once per burst of questions (more questions within 30 seconds stay quiet). Plain messages never ring, and several Inbox tabs ring once. It works whether notifications are on or not, and while it is on, notifications arrive without a system sound so you never hear two. Browsers play sound only after one click in the tab, so until then the sidebar shows **Click to turn on sound**. Turn it off, change the volume or hear it in **Settings**, under Notifications. After the update that brings it, the Inbox says so once.
+- **Settings.** The inbox tool switch per host, notifications and the sound, the MCP command for other agents, and how much space each project and thread takes on disk, with **Delete thread** and **Delete project**.
 
 How to write questions is described in [Questions in Plans and Documents](/docs/guides/questions/). The Inbox reads the same `:::question` blocks.
 
@@ -181,7 +182,7 @@ Everything lives under `~/.plannotator/inbox/` (or `$PLANNOTATOR_DATA_DIR/inbox/
 | `seq.json` | The highest event number ever written, kept across deletions |
 | `claims/`, `leases/` and `connection-tools.json` | Bookkeeping for the Pi and OpenCode connections |
 
-The Inbox stores the files agents attached as they were when sent, the messages and your replies. It sets no size limits. To free space, use **Delete thread** or **Delete project** in **Settings**, which also remove sent files that nothing else uses. Your choices for the inbox tool, notifications and the tailnet are kept in `~/.plannotator/config.json` (`inboxTool`, `inboxNotifications`, `inboxTailscale`, `inboxTailscaleAllow`).
+The Inbox stores the files agents attached as they were when sent, the messages and your replies. It sets no size limits. To free space, use **Delete thread** or **Delete project** in **Settings**, which also remove sent files that nothing else uses. Your choices for the inbox tool, notifications and the tailnet are kept in `~/.plannotator/config.json` (`inboxTool`, `inboxNotifications`, `inboxSound`, `inboxTailscale`, `inboxTailscaleAllow`).
 
 ## Uninstall
 

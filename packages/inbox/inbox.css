@@ -778,3 +778,28 @@ pre code.pn-code[data-keep-layout] {
   .ib-ptool-l { display: none; }
   .ib-pbody.ib-folding .ib-who span { display: none; }
 }
+
+/* The question sound (.product/approved/inbox-sound/): the one-time dialog, the Settings row, the hints, the toast. */
+.ib-dlg-head { display: flex; align-items: center; gap: 12px; }
+.ib-dlg-head h2 { flex: 1; min-width: 0; }
+.pn-inbox .ib-dlg-head .ib-btn svg.ib-ic, .pn-inbox .ib-btn.ib-icon svg.ib-ic { width: 14px; height: 14px; }
+.ib-nline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); font-size: 13px; color: var(--muted-foreground); }
+.ib-nline:focus { outline: none; }
+.pn-inbox .ib-nline .ib-lnk { margin-top: 0; }
+.ib-vslider { width: 120px; accent-color: var(--primary); margin: 0; }
+.ib-vslider:disabled { opacity: 0.45; }
+.pn-inbox .ib-btn.ib-icon { width: 28px; padding: 0; justify-content: center; }
+.ib-sound-hint { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 9px; border-radius: 7px; width: 100%; text-align: left; font-size: 12.5px; color: var(--muted-foreground); }
+.pn-inbox .ib-sound-hint:hover { color: var(--foreground); background: color-mix(in oklch, var(--muted) 55%, transparent); }
+.pn-inbox .ib-sound-hint svg.ib-ic { width: 14px; height: 14px; }
+.ib-toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 50; padding: 9px 14px; border-radius: 9px; background: var(--popover); color: var(--foreground); border: 1px solid var(--border); box-shadow: 0 12px 30px -12px oklch(0 0 0 / 0.5); font-size: 13px; max-width: calc(100% - 32px); transition: opacity 160ms ease-out; }
+.ib-toast[data-hidden] { opacity: 0; pointer-events: none; }
+@media (max-width: 720px) {
+  .ib-dlg .ib-acts-row { flex-direction: column-reverse; align-items: stretch; }
+  .ib-dlg .ib-acts-row .ib-left { margin-right: 0; }
+  .ib-dlg .ib-acts-row .ib-btn { height: 40px; justify-content: center; }
+  .ib-srow[data-settings-sound] { flex-wrap: wrap; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ib-sw::after, .ib-toast { transition: none; }
+}

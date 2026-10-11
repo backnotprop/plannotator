@@ -111,10 +111,32 @@ export function UpdateButton({ update, restarting, updated, onPress, onWhatsNew 
 
 // ───────────────────────────── Dialogs ─────────────────────────────
 
+const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+export interface ModalProps {
+  /** The accessible name, when no element labels the dialog (`labelledBy`). */
+  label?: string;
+  labelledBy?: string;
+  describedBy?: string;
+  onClose: () => void;
+  children: ReactNode;
+  testId: string;
+  /**
+   * The dialog handles Tab and Escape itself: Tab cycles inside it (the
+   * native modal leaves the browser's own chrome in the cycle), and Escape
+   * closes it without reaching the page's own Escape (which closes a thread).
+   */
+  ownKeys?: boolean;
+  /** Where focus goes on close when nothing focusable opened the dialog (the page heading). */
+  fallbackFocus?: () => HTMLElement | null;
+}
+
 /** A native modal dialog: focus stays inside, Escape closes, focus returns to what opened it. */
-function Modal({ label, onClose, children, testId }: { label: string; onClose: () => void; children: ReactNode; testId: string }) {
+export function Modal({ label, labelledBy, describedBy, onClose, children, testId, ownKeys, fallbackFocus }: ModalProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const opener = useRef<Element | null>(null);
+  const fallback = useRef(fallbackFocus);
+  fallback.current = fallbackFocus;
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
@@ -128,15 +150,47 @@ function Modal({ label, onClose, children, testId }: { label: string; onClose: (
     } else dialog.setAttribute('open', '');
     (dialog.querySelector('.ib-btn.ib-pri:not([disabled])') as HTMLElement | null)?.focus();
     return () => {
-      if (opener.current instanceof HTMLElement && document.contains(opener.current)) opener.current.focus();
+      if (opener.current instanceof HTMLElement && opener.current !== document.body && document.contains(opener.current)) opener.current.focus();
+      else fallback.current?.()?.focus();
     };
   }, []);
   return (
     <dialog
       ref={ref}
       className="ib-dlg"
-      aria-label={label}
+      aria-label={labelledBy ? undefined : label}
+      aria-labelledby={labelledBy}
+      aria-describedby={describedBy}
+      aria-modal={ownKeys ? 'true' : undefined}
       data-dialog={testId}
+      onKeyDown={
+        ownKeys
+          ? (event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                onClose();
+                return;
+              }
+              if (event.key !== 'Tab') return;
+              const items = [...(ref.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])];
+              if (items.length === 0) return;
+              const first = items[0]!;
+              const last = items[items.length - 1]!;
+              const active = document.activeElement;
+              if (!ref.current?.contains(active)) {
+                event.preventDefault();
+                first.focus();
+              } else if (event.shiftKey && active === first) {
+                event.preventDefault();
+                last.focus();
+              } else if (!event.shiftKey && active === last) {
+                event.preventDefault();
+                first.focus();
+              }
+            }
+          : undefined
+      }
       onCancel={(event) => {
         event.preventDefault();
         onClose();

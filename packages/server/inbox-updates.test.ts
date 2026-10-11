@@ -242,6 +242,71 @@ describe("Remind me tomorrow, Settings, What's new", () => {
   });
 });
 
+describe("the question sound (config.json inboxSound)", () => {
+  const settingsOf = async (server: InboxServer) => (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()).sound;
+  const postJson = (server: InboxServer, path: string, body: unknown) =>
+    fetch(`http://127.0.0.1:${server.port}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const claim = async (server: InboxServer) => (await (await postJson(server, "/api/inbox/sound/dialog", { serverSession: server.serverSession })).json()).show;
+
+  test("on at 60 unless set; saved field by field; anything else refused with nothing written", async () => {
+    writeUpdateState({ inboxVersion: "0.28.9" }, dataDir);
+    const server = await start();
+    expect(await settingsOf(server)).toEqual({ enabled: true, volume: 60, dialog_shown_for: null });
+    for (const bad of [
+      { enabled: "yes" },
+      { volume: 0 },
+      { volume: 5 },
+      { volume: 101 },
+      { volume: 55.5 },
+      { volume: "60" },
+      { dialog_shown_for: "0.28.10" },
+      { ring: true },
+      [true],
+    ]) {
+      const refused = await postJson(server, "/api/inbox/settings", { serverSession: server.serverSession, sound: bad });
+      expect([JSON.stringify(bad), refused.status]).toEqual([JSON.stringify(bad), 422]);
+    }
+    expect(loadConfig().inboxSound).toBeUndefined();
+    const saved = await postJson(server, "/api/inbox/settings", { serverSession: server.serverSession, sound: { volume: 30 } });
+    expect((await saved.json()).sound).toEqual({ enabled: true, volume: 30, dialog_shown_for: null });
+    await postJson(server, "/api/inbox/settings", { serverSession: server.serverSession, sound: { enabled: false } });
+    expect(await settingsOf(server)).toEqual({ enabled: false, volume: 30, dialog_shown_for: null });
+    expect(loadConfig().inboxSound).toEqual({ volume: 30, enabled: false });
+  });
+
+  test("after an update the dialog is claimed once: of two tabs asking together one shows it, and a reload never does", async () => {
+    writeUpdateState({ inboxVersion: "0.28.9" }, dataDir);
+    const server = await start();
+    const answers = await Promise.all([claim(server), claim(server)]);
+    expect(answers.sort()).toEqual([false, true]);
+    expect(loadConfig().inboxSound).toEqual({ dialogShownFor: "0.28.10" });
+    expect(await claim(server)).toBe(false);
+    // The choice the page makes later keeps the mark.
+    await postJson(server, "/api/inbox/settings", { serverSession: server.serverSession, sound: { enabled: false } });
+    expect(loadConfig().inboxSound).toEqual({ dialogShownFor: "0.28.10", enabled: false });
+    // A stale tab (another server's session) is refused before anything is claimed.
+    expect((await postJson(server, "/api/inbox/sound/dialog", { serverSession: "stale" })).status).toBe(409);
+  });
+
+  test("a fresh install marks it shown at start: no dialog now, and none after a later update", async () => {
+    const first = await start();
+    expect((await settingsOf(first)).dialog_shown_for).toBe("0.28.10");
+    expect(await claim(first)).toBe(false);
+    first.stop();
+    const updated = await start({ version: "0.28.12" });
+    expect((await (await fetch(`http://127.0.0.1:${updated.port}/api/inbox/threads`)).json()).updated).toBe("0.28.12");
+    expect(await claim(updated)).toBe(false);
+    expect(loadConfig().inboxSound).toEqual({ dialogShownFor: "0.28.10" });
+  });
+
+  test("no update this run: nothing to claim", async () => {
+    writeUpdateState({ inboxVersion: "0.28.10" }, dataDir);
+    const server = await start();
+    expect(await claim(server)).toBe(false);
+    expect(loadConfig().inboxSound).toBeUndefined();
+  });
+});
+
 describe("deriveInboxUpdate", () => {
   const base = {
     current: "0.28.10",

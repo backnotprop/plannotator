@@ -648,3 +648,24 @@ export function isInboxHealth(value: unknown): value is InboxHealth {
     typeof v.pid === "number"
   );
 }
+
+/**
+ * The question sound (config.json `inboxSound`, through GET and POST
+ * /api/inbox/settings): on unless turned off, one volume for every device.
+ */
+export interface InboxSoundSettings {
+  enabled: boolean;
+  /** 10 to 100; the slider has no 0, because the switch is how the sound goes off. */
+  volume: number;
+  /** The version the one-time "The Inbox can ring now" dialog was shown for (or a fresh install was marked with); null while never. */
+  dialog_shown_for: string | null;
+}
+
+export const INBOX_SOUND_DEFAULT_VOLUME = 60;
+export const INBOX_SOUND_MIN_VOLUME = 10;
+export const INBOX_SOUND_MAX_VOLUME = 100;
+
+/** A volume the Inbox keeps: a whole number from 10 to 100. */
+export function isInboxSoundVolume(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= INBOX_SOUND_MIN_VOLUME && value <= INBOX_SOUND_MAX_VOLUME;
+}

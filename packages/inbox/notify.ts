@@ -20,6 +20,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InboxAuthor, InboxSectionId } from '@plannotator/core/inbox-types';
 import { inboxApi, type InboxEvent, type ListModel, type NotificationSettings } from './api';
 import { agentName, plural } from './format';
+import { pageInFront } from './sound';
 
 /** The one tag every Inbox notification carries: a new one replaces the last. */
 export const NOTIFICATION_TAG = 'plannotator-inbox';
@@ -39,8 +40,10 @@ export interface InboxNotificationOptions extends NotificationOptions {
  * never displayed, say) with no banner and no sound, so a new question would
  * arrive silently.
  */
-export function inboxNotificationOptions(text: { body: string }): InboxNotificationOptions {
-  return { body: text.body, tag: NOTIFICATION_TAG, renotify: true };
+export function inboxNotificationOptions(text: { body: string }, options: { silent?: boolean } = {}): InboxNotificationOptions {
+  const base: InboxNotificationOptions = { body: text.body, tag: NOTIFICATION_TAG, renotify: true };
+  // The Inbox's own sound is on (sound.ts): the system's chime (Windows, Linux) would make it two.
+  return options.silent ? { ...base, silent: true } : base;
 }
 
 /** One thread's banner (record 6.2): "billing-svc: Claude Code stopped on you", then the subject. */
@@ -88,11 +91,6 @@ function sameHost(a: string, b: string): boolean {
   }
 }
 
-/** The Inbox tab is in front (record 6.3). */
-function pageInFront(): boolean {
-  return document.visibilityState === 'visible' && document.hasFocus();
-}
-
 function supported(): boolean {
   return typeof window !== 'undefined' && 'Notification' in window;
 }
@@ -120,6 +118,10 @@ export function useInboxNotifications(options: {
   onSettings: (next: NotificationSettings) => void;
   openThread: (threadId: string) => void;
   openList: () => void;
+  /** New questions arrived (before any notification rule): the sound decides for itself (sound.ts). */
+  onQuestions?: () => void;
+  /** The Inbox's own sound is on: notifications are raised silent, so there is one sound on every OS. */
+  silent?: () => boolean;
 }): InboxNotifications {
   const [permission, setPermission] = useState(currentPermission);
   const [askRaised, setAskRaised] = useState(false);
@@ -129,6 +131,8 @@ export function useInboxNotifications(options: {
   openRef.current = { thread: options.openThread, list: options.openList };
   const onSettingsRef = useRef(options.onSettings);
   onSettingsRef.current = options.onSettings;
+  const soundRef = useRef({ questions: options.onQuestions, silent: options.silent });
+  soundRef.current = { questions: options.onQuestions, silent: options.silent };
   const messages = useRef(new Map<string, { threadId: string; author: InboxAuthor }>());
   const counted = useRef(new Set<string>());
   /** Message ids with a new question, waiting for the list read. */
@@ -191,8 +195,7 @@ export function useInboxNotifications(options: {
   const flush = useCallback((list: ListModel) => {
     const items = pending.current;
     pending.current = [];
-    const settings = settingsRef.current;
-    if (items.length === 0 || !settings || !settings.enabled || !supported()) return;
+    if (items.length === 0) return;
     // The threads these items landed in, newest last, with the agent that wrote.
     const threads = new Map<string, InboxAuthor>();
     for (const messageId of items) {
@@ -200,6 +203,10 @@ export function useInboxNotifications(options: {
       if (message) threads.set(message.threadId, message.author);
     }
     if (threads.size === 0) return;
+    // The sound does not depend on notifications: off, not allowed or blocked, it still rings.
+    soundRef.current.questions?.();
+    const settings = settingsRef.current;
+    if (!settings || !settings.enabled || !supported()) return;
     const now = Notification.permission;
     setPermission(now);
     if (now === 'default') {
@@ -226,7 +233,7 @@ export function useInboxNotifications(options: {
       open = () => openRef.current.list();
     }
     try {
-      const notification = new Notification(text.title, inboxNotificationOptions(text));
+      const notification = new Notification(text.title, inboxNotificationOptions(text, { silent: soundRef.current.silent?.() === true }));
       notification.onclick = () => {
         window.focus();
         notification.close();

@@ -210,9 +210,13 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
   // "Just updated": this Inbox runs a newer version than the one that ran
   // before it. Shown as a quiet link for the life of this process.
   let updated: string | null = null;
+  // No Inbox ran on this machine before this one (a release build): a fresh
+  // install, which the one-time sound dialog skips (inbox.ts).
+  let firstRun = false;
   if (release) {
     try {
       const before = readUpdateState(options.dataDir).inboxVersion;
+      firstRun = !before;
       if (before && compareStableVersions(options.version, before) === 1) updated = normalizeStableVersion(options.version);
       if (before !== options.version) patchUpdateState((s) => ({ ...s, inboxVersion: options.version }), options.dataDir);
     } catch {}
@@ -345,6 +349,8 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
     /** The button's model (null: nothing to show). */
     current: () => model,
     updated: () => updated,
+    /** No Inbox had run on this machine before this one (release builds only). */
+    firstRun: () => firstRun,
     /** Work the state out again now (a setting changed). */
     refresh,
     details,

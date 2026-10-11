@@ -6,7 +6,18 @@ import { Icon } from '../icons';
  * that say why, drawn in the page; Turn on raises the browser's own prompt.
  * After a port change it returns once as "The Inbox moved to a new address".
  */
-export function NotificationAsk({ kind, onTurnOn, onNotNow }: { kind: AskKind; onTurnOn: () => void; onNotNow: () => void }) {
+export function NotificationAsk({
+  kind,
+  onTurnOn,
+  onNotNow,
+  soundOn = false,
+}: {
+  kind: AskKind;
+  onTurnOn: () => void;
+  onNotNow: () => void;
+  /** The question sound is on (sound.ts): a fresh install learns it here, not from a dialog. */
+  soundOn?: boolean;
+}) {
   return (
     <div className="ib-askline" role="region" aria-label="Desktop notifications" data-notification-ask={kind}>
       <Icon name="bell" />
@@ -14,7 +25,9 @@ export function NotificationAsk({ kind, onTurnOn, onNotNow }: { kind: AskKind; o
         {kind === 'ask' ? (
           <>
             <b>Get a desktop notice when an agent stops on you.</b>{' '}
-            <span className="ib-mut">Only for questions and stops, never for news. Your browser asks once.</span>
+            <span className="ib-mut">
+              Only for questions and stops, never for news. Your browser asks once.{soundOn && ' Sound is on.'}
+            </span>
           </>
         ) : (
           <>

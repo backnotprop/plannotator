@@ -1,4 +1,6 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { INBOX_SOUND_MAX_VOLUME, INBOX_SOUND_MIN_VOLUME } from '@plannotator/core/inbox-types';
+import type { InboxSound } from '../sound';
 import type { AgentToolHost, SettingsModel, TailscaleSettings } from '../api';
 import { formatBytes, plural, tildePath } from '../format';
 import { HARNESSES, type ConnectContext } from '../harnesses';
@@ -31,6 +33,8 @@ export interface SettingsPageProps {
   onDeleteProject: (projectId: string) => Promise<void>;
   /** Settings → About: the version, Check now and the two update switches (components/Updates.tsx). */
   about?: ReactNode;
+  /** The question sound's row, under the notifications switch (sound.ts). */
+  sound?: InboxSound;
 }
 
 const PERMISSION_LABEL: Record<NotificationPermission | 'unsupported', string> = {
@@ -48,10 +52,12 @@ function NotificationsBlock({
   settings,
   permission,
   onToggle,
+  sound,
 }: {
   settings: SettingsModel['notifications'];
   permission: NotificationPermission | 'unsupported';
   onToggle: (next: boolean) => void;
+  sound?: InboxSound;
 }) {
   const on = settings.enabled && permission === 'granted';
   return (
@@ -78,7 +84,82 @@ function NotificationsBlock({
           This browser blocks notifications for this page: allow them in its site settings.
         </div>
       )}
+      {sound && <SoundRow sound={sound} />}
     </div>
+  );
+}
+
+/**
+ * The question sound (design of record: .product/approved/inbox-sound/): one
+ * row, "Play a sound · when an agent asks you", then the volume, Play and
+ * the switch. Off, the slider is disabled and Play still plays. Letting go of
+ * the slider plays the sound once at the new level. Before the first click in
+ * the tab, one line says Chrome needs it.
+ */
+function SoundRow({ sound }: { sound: InboxSound }) {
+  const { enabled, volume } = sound.settings;
+  const [live, setLive] = useState(volume);
+  const slider = useRef<HTMLInputElement>(null);
+  const soundRef = useRef(sound);
+  soundRef.current = sound;
+  useEffect(() => setLive(volume), [volume]);
+  // React's onChange is the input event; letting go is the native change event.
+  useEffect(() => {
+    const el = slider.current;
+    if (!el) return;
+    const release = () => {
+      const next = Number(el.value);
+      soundRef.current.preview(next);
+      void soundRef.current.setVolume(next);
+    };
+    el.addEventListener('change', release);
+    return () => el.removeEventListener('change', release);
+  }, []);
+  return (
+    <>
+      <div className="ib-srow" data-settings-sound={enabled ? 'on' : 'off'}>
+        <span id="ib-sound-label">Play a sound</span>
+        <span className="ib-d">when an agent asks you</span>
+        <span className="ib-r">
+          <input
+            ref={slider}
+            type="range"
+            className="ib-vslider"
+            min={INBOX_SOUND_MIN_VOLUME}
+            max={INBOX_SOUND_MAX_VOLUME}
+            step={10}
+            value={live}
+            aria-label="Volume"
+            aria-valuetext={`${live} percent`}
+            disabled={!enabled}
+            onChange={(event) => setLive(Number(event.target.value))}
+          />
+          <button
+            type="button"
+            className="ib-btn ib-sm ib-icon"
+            aria-label={sound.playing ? 'Playing…' : 'Play the sound'}
+            data-sound-play=""
+            onClick={() => sound.preview(live)}
+          >
+            <Icon name="play" />
+          </button>
+          <button
+            type="button"
+            role="switch"
+            className="ib-sw"
+            aria-checked={enabled}
+            aria-labelledby="ib-sound-label"
+            onClick={() => void sound.setEnabled(!enabled)}
+          />
+        </span>
+      </div>
+      {enabled && !sound.armed && (
+        <div className="ib-note" role="status" data-sound-click-hint="">
+          <Icon name="clickHere" />
+          Click once in this tab to allow sound.
+        </div>
+      )}
+    </>
   );
 }
 
@@ -279,6 +360,7 @@ export function SettingsPage({
   onDeleteThread,
   onDeleteProject,
   about,
+  sound,
 }: SettingsPageProps) {
   const env = settings?.inbox_tool.env ?? null;
   return (
@@ -357,6 +439,7 @@ export function SettingsPage({
             settings={settings.notifications}
             permission={permission}
             onToggle={onToggleNotifications}
+            sound={sound}
           />
         )}
       </div>

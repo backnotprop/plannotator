@@ -597,4 +597,25 @@ describe("the update control never answers through the tailnet", () => {
     expect(local.status).toBe(200);
     expect(launches).toHaveLength(1);
   });
+
+  test("the one-time sound dialog is never claimed through the tailnet; it waits for a page on this computer", async () => {
+    const dataDir = world({ inboxTailscale: true });
+    writeFileSync(join(dataDir, "update-state.json"), JSON.stringify({ inboxVersion: "0.28.9" }));
+    const ts = fakeTailscale();
+    const inbox = await start(dataDir, ts.run, {
+      version: "0.28.10",
+      updates: { fetchRelease: async () => ({ ok: false, error: "offline" }), isManaged: () => false, listSessions: () => [] },
+    });
+    const own = { Origin: `https://${MAGIC}:${inbox.port}`, "Content-Type": "application/json" };
+    const remote = await throughServe(inbox, "/api/inbox/sound/dialog", { method: "POST", headers: own, body: JSON.stringify({ serverSession: inbox.serverSession }) });
+    expect(remote.status).toBe(200);
+    expect(((await remote.json()) as Json).show).toBe(false);
+    expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxSound).toBeUndefined();
+    const local = await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/sound/dialog`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serverSession: inbox.serverSession }),
+    });
+    expect(((await local.json()) as Json).show).toBe(true);
+  });
 });

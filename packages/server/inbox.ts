@@ -44,7 +44,9 @@ import { timingSafeEqual } from "node:crypto";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import {
   INBOX_APP_ID,
+  INBOX_SOUND_DEFAULT_VOLUME,
   isInboxId,
+  isInboxSoundVolume,
   type InboxHealth,
   type InboxLine,
   type InboxListRow,
@@ -504,6 +506,82 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return notificationsState();
   };
 
+  /**
+   * The question sound (the "Ding-dong"), resolved from config.json: on, at
+   * 60, unless set. `dialog_shown_for`: the version the one-time dialog was
+   * shown for, or that a fresh install was marked with; null while it never was.
+   */
+  const soundState = () => {
+    const value = loadConfig().inboxSound;
+    const saved = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    return {
+      enabled: saved.enabled !== false,
+      volume: isInboxSoundVolume(saved.volume) ? saved.volume : INBOX_SOUND_DEFAULT_VOLUME,
+      dialog_shown_for: typeof saved.dialogShownFor === "string" && saved.dialogShownFor !== "" ? saved.dialogShownFor : null,
+    };
+  };
+
+  /** The sound's config entry as it is on disk, to merge a change into. */
+  const savedSound = (): NonNullable<PlannotatorConfig["inboxSound"]> => {
+    const current = loadConfig().inboxSound;
+    return current && typeof current === "object" && !Array.isArray(current) ? { ...current } : {};
+  };
+
+  /** Save `enabled` / `volume`, keeping the rest. `validateOnly`: check the input and write nothing. */
+  const saveSound = (input: unknown, validateOnly = false) => {
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw new InboxError("validation_error", "sound: an object.", { field: "sound" });
+    }
+    const next = savedSound();
+    for (const [field, value] of Object.entries(input as Record<string, unknown>)) {
+      switch (field) {
+        case "enabled":
+          if (typeof value !== "boolean") throw new InboxError("validation_error", "sound.enabled: must be a boolean.", { field: "sound.enabled" });
+          next.enabled = value;
+          break;
+        case "volume":
+          if (!isInboxSoundVolume(value)) {
+            throw new InboxError("validation_error", "sound.volume: a whole number from 10 to 100.", { field: "sound.volume" });
+          }
+          next.volume = value;
+          break;
+        default:
+          // `dialog_shown_for` is the server's to write (the compare-and-set below), never the page's.
+          throw new InboxError("validation_error", `sound.${field}: not a setting (enabled, volume).`, { field: `sound.${field}` });
+      }
+    }
+    if (validateOnly) return soundState();
+    saveConfig({ inboxSound: next });
+    if (JSON.stringify(loadConfig().inboxSound) !== JSON.stringify(next)) {
+      throw new InboxError("config_not_saved", "config.json could not be written; nothing changed.");
+    }
+    return soundState();
+  };
+
+  /**
+   * The one-time sound dialog, claimed by the page that will show it: a
+   * compare-and-set on `dialogShownFor`, so of several tabs (or a reload)
+   * only the first ever gets `show: true`. Only after an update (this run
+   * started on a newer version), and only on this computer: a page that came
+   * through the tailnet (a phone, most likely) never shows it and leaves it
+   * for the next page opened here. The server is one process and this runs
+   * with no await, so two claims cannot interleave.
+   */
+  const claimSoundDialog = (via: RequestVia): boolean => {
+    const updatedTo = updates.updated();
+    if (via !== "local" || !updatedTo || soundState().dialog_shown_for !== null) return false;
+    saveConfig({ inboxSound: { ...savedSound(), dialogShownFor: updatedTo } });
+    // Not written (a read-only data dir): showing it anyway would show it on every load.
+    return loadConfig().inboxSound?.dialogShownFor === updatedTo;
+  };
+
+  // A fresh install (no Inbox ran here before): no dialog now, and none after
+  // a later update either. The sound is simply on, and the notification ask
+  // line says so.
+  if (updates.firstRun() && soundState().dialog_shown_for === null) {
+    saveConfig({ inboxSound: { ...savedSound(), dialogShownFor: version } });
+  }
+
   /** The two update switches (PLANNOTATOR_UPDATE_CHECK, PLANNOTATOR_AUTO_UPDATE): the effective value and whether the env decides. */
   const updatesState = () => {
     const config = loadConfig();
@@ -547,6 +625,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     data_dir: dataDir,
     inbox_tool: inboxToolState(),
     notifications: notificationsState(),
+    /** The question sound: the Settings row, and whether the one-time dialog was shown. */
+    sound: soundState(),
     /** Settings → About: update notices and automatic updates. */
     updates: updatesState(),
     store: store.diskUsage(),
@@ -916,8 +996,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const updateSwitches = body.update_check !== undefined || body.auto_update !== undefined;
-        if (body.inbox_tool === undefined && body.notifications === undefined && body.tailscale === undefined && !updateSwitches) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, tailscale, update_check or auto_update is required.");
+        if (body.inbox_tool === undefined && body.notifications === undefined && body.sound === undefined && body.tailscale === undefined && !updateSwitches) {
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, update_check or auto_update is required.");
         }
         // Updating changes this computer: never from a page that came through the tailnet.
         if (updateSwitches && via === "tailnet") return localOnly();
@@ -942,14 +1022,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // change (the one that can be refused: the env var, Tailscale itself)
         // goes first, so a refusal never leaves the others half saved.
         if (body.notifications !== undefined) saveNotifications(body.notifications, true);
+        if (body.sound !== undefined) saveSound(body.sound, true);
         if (body.inbox_tool !== undefined) saveInboxTool(body.inbox_tool, true);
         if (updateSwitches) saveUpdateSwitches(body, true);
         const tailnet = tailscaleChange === undefined ? tailscale.state() : tailscale.set(tailscaleChange.on, { via, replaceExposed: tailscaleChange.replaceExposed });
         const notifications = body.notifications === undefined ? notificationsState() : saveNotifications(body.notifications);
+        const sound = body.sound === undefined ? soundState() : saveSound(body.sound);
         const inboxTool = body.inbox_tool === undefined ? inboxToolState() : saveInboxTool(body.inbox_tool);
         const updateState = updateSwitches ? saveUpdateSwitches(body) : updatesState();
         if (updateSwitches) updates.refresh();
-        return json({ inbox_tool: inboxTool, notifications, tailscale: tailnet, updates: updateState });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState });
+      }
+      // The one-time sound dialog: the page asks to show it, and only the first ask ever gets `show: true`.
+      if (path === "/api/inbox/sound/dialog") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const show = claimSoundDialog(via);
+        return json({ show, sound: soundState() });
       }
 
       const threadMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)$/.exec(path);
