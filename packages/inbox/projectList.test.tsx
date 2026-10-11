@@ -1,0 +1,144 @@
+/**
+ * The list's project column. With every project shown a wide row carries the
+ * project label and a badge cell before the subject. In one project's list
+ * (a sidebar folder) neither cell is rendered, so the row does not start with
+ * an empty block: the badge, when the row has one, leads the subject cell, and
+ * the agent mark comes next. The failure this catches is the column coming
+ * back merely hidden (display: none, an empty span) while the grid still
+ * reserves its width. Pixel positions are proved in tests/e2e/inbox.spec.ts.
+ *
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ */
+import { afterEach, describe, expect, test } from 'bun:test';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+
+const hasDom = typeof document !== 'undefined';
+const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
+const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
+
+const AGENT = { kind: 'agent' as const, host: 'claude-code', session: 'ses_a', name: null };
+
+function row(id: string, section: InboxListRow['section'], extra: Partial<InboxListRow> = {}): InboxListRow {
+  return {
+    thread_id: id,
+    project_id: 'prj_1',
+    subject: `Subject ${id}`,
+    author: AGENT,
+    created_at: '2026-10-10T10:00:00.000Z',
+    last_at: '2026-10-10T10:00:00.000Z',
+    last_author: 'agent',
+    message_count: 1,
+    resolved_at: null,
+    questions: { open: 1, picked: 0, stopped: section === 'stopped', holds_up: section === 'holding' ? ['a', 'b'] : [], prompt: null },
+    waiting_on_person: true,
+    project: { id: 'prj_1', name: 'billing-svc' },
+    thread_name: null,
+    section,
+    unread: true,
+    answered_not_sent: false,
+    waiting_since: null,
+    unseen: 0,
+    sent: null,
+    guide: false,
+    ...extra,
+  };
+}
+
+const SECTIONS: InboxListSection[] = [
+  { id: 'stopped', label: 'Stopped on you', threads: [row('msg_stop', 'stopped')] },
+  { id: 'holding', label: 'Holding up work', threads: [row('msg_hold', 'holding')] },
+  { id: 'waiting', label: 'Waiting on you', threads: [row('msg_wait', 'waiting', { thread_name: 'refund-webhooks', guide: true })] },
+  { id: 'sent', label: 'Sent', threads: [row('msg_sent', 'sent', { unread: false, sent: { at: '2026-10-10T10:01:00.000Z', checked_at: null } })] },
+];
+
+let root: Root | null = null;
+let host: HTMLElement | null = null;
+
+afterEach(() => {
+  if (!hasDom) return;
+  act(() => root?.unmount());
+  host?.remove();
+  root = null;
+  host = null;
+});
+
+function render(filtered: boolean, narrow = false): HTMLElement {
+  host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  act(() => {
+    root!.render(
+      <SidebarProvider>
+        <InboxList
+          title={filtered ? 'billing-svc' : 'Inbox'}
+          path={filtered ? '~/src/billing-svc' : null}
+          sections={SECTIONS}
+          filtered={filtered}
+          narrow={narrow}
+          selectedThreadId={null}
+          notice={null}
+          onShowNew={() => {}}
+          onOpen={() => {}}
+        />
+      </SidebarProvider>,
+    );
+  });
+  return host;
+}
+
+function rowEl(el: HTMLElement, id: string): HTMLElement {
+  const found = el.querySelector<HTMLElement>(`.ib-row[data-thread-id="${id}"]`);
+  expect(found).not.toBeNull();
+  return found!;
+}
+
+describe.if(hasDom)('the wide list', () => {
+  test('every project: each row has the project cell and the badge cell before the subject', () => {
+    const el = render(false);
+    expect(el.querySelector('.ib-listcol')!.classList.contains('ib-noproj')).toBe(false);
+    for (const id of ['msg_stop', 'msg_hold', 'msg_wait', 'msg_sent']) {
+      const r = rowEl(el, id);
+      const cells = [...r.children];
+      expect(cells.length).toBe(5);
+      expect(cells[0]!.className).toBe('ib-p');
+      expect(cells[0]!.textContent).toBe('billing-svc');
+      expect(cells[2]!.className).toBe('ib-subj');
+      // The badge sits in its own column, never inside the subject cell.
+      expect(cells[2]!.querySelector('.ib-badge')).toBeNull();
+    }
+    expect(rowEl(el, 'msg_stop').children[1]!.querySelector('.ib-badge')!.textContent).toBe('Stopped');
+  });
+
+  test("one project: no project cell and no badge cell; the subject cell starts the row", () => {
+    const el = render(true);
+    expect(el.querySelector('.ib-listcol')!.classList.contains('ib-noproj')).toBe(true);
+    expect(el.querySelectorAll('.ib-row .ib-p').length).toBe(0);
+    for (const id of ['msg_stop', 'msg_hold', 'msg_wait', 'msg_sent']) {
+      const cells = [...rowEl(el, id).children];
+      expect(cells.map((c) => c.className)).toEqual(['ib-subj', 'ib-c', 'ib-t']);
+    }
+    // No badge: the agent mark is the subject cell's first child.
+    expect(rowEl(el, 'msg_wait').querySelector('.ib-subj')!.firstElementChild!.className).toBe('ib-mk');
+    expect(rowEl(el, 'msg_sent').querySelector('.ib-subj')!.firstElementChild!.className).toBe('ib-mk');
+    // A badge leads the subject cell, the mark follows it.
+    for (const [id, badge] of [['msg_stop', 'Stopped'], ['msg_hold', 'Holds up 2']] as const) {
+      const subj = rowEl(el, id).querySelector('.ib-subj')!;
+      expect(subj.children[0]!.className).toBe('ib-badge');
+      expect(subj.children[0]!.textContent).toBe(badge);
+      expect(subj.children[1]!.className).toBe('ib-mk');
+    }
+    // The thread chip and the guided review mark stay in the subject cell.
+    const wait = rowEl(el, 'msg_wait').querySelector('.ib-subj')!;
+    expect(wait.querySelector('.ib-key')!.textContent).toBe('refund-webhooks');
+    expect(wait.querySelector('[data-guide-mark]')).not.toBeNull();
+  });
+
+  test('one project beside an open thread: the narrow rows name the agent where the project was', () => {
+    const el = render(true, true);
+    expect(el.querySelectorAll('.ib-row').length).toBe(0);
+    const first = el.querySelector<HTMLElement>('.ib-nrow[data-thread-id="msg_wait"] .ib-l1 .ib-p')!;
+    expect(first.textContent).not.toBe('billing-svc');
+  });
+});
