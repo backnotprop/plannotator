@@ -289,6 +289,16 @@
      monospace instead. The variable crosses the renderer's shadow root. */
   --diffs-font-family: var(--font-mono);
 }
+/* Chromium 123 and 124 (Android WebView included) crash the page when they
+   compute a relative colour whose origin is light-dark(). The diff
+   renderer's word emphasis is one: rgb(from var(--diffs-addition-base) r g b
+   / .15), its base a light-dark() value. Its overrides give the same colour
+   through color-mix(), which those versions draw, so the crashing fallback is
+   never computed. Declared on the host, where --diffs-*-base are defined. */
+.sf-gcard diffs-container {
+  --diffs-bg-addition-emphasis-override: light-dark(color-mix(in srgb, var(--diffs-addition-base) 15%, transparent), color-mix(in srgb, var(--diffs-addition-base) 20%, transparent));
+  --diffs-bg-deletion-emphasis-override: light-dark(color-mix(in srgb, var(--diffs-deletion-base) 15%, transparent), color-mix(in srgb, var(--diffs-deletion-base) 20%, transparent));
+}
 /* The phone's diff header (the review app's compact touch layout) keeps the
    whole path, its ellipsis at the leading edge only when it does not fit;
    a path that fits starts at the left, under the chevron. */
