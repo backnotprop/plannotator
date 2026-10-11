@@ -294,8 +294,8 @@ test('agents write three threads in two projects; the rows land in the six secti
     'Stopped on you',
     'Holding up work',
     'Waiting on you',
-    'Sent',
     'New since you looked',
+    'Sent',
     'Quiet',
   ]);
 
@@ -495,6 +495,14 @@ test('"N new" waits behind the notice, and the list moves only on an action', as
   const { page } = world;
   await page.keyboard.press('Escape');
   await expect(page.locator('section.ib-pane')).toHaveCount(0);
+  // Leaving the thread is an action: rows the person's own writes held in place take their places now. Let that land first.
+  await expect
+    .poll(async () => {
+      const first = await rowOrder(page);
+      await page.waitForTimeout(250);
+      return JSON.stringify(first) === JSON.stringify(await rowOrder(page));
+    })
+    .toBe(true);
   const before = await rowOrder(page);
   const codex = await agent('Codex', 'codex');
   const news = await codex.send({ project_path: world.docs, body: DEMO_MESSAGES.news });

@@ -811,6 +811,12 @@ export interface QuestionAnswer {
   text?: string;
   note?: string;
   skipped?: boolean;
+  /**
+   * With `skipped`: the Plannotator Inbox skipped it because a Send left it
+   * unanswered, not because the person pressed Skip. Read only with
+   * `skipped: true`.
+   */
+  by_reply?: boolean;
   /** Document line of the prompt when answered. */
   sourceLine?: number;
 }
@@ -835,6 +841,7 @@ export const parseQuestionAnswer = (value: unknown): QuestionAnswer | null => {
     if (v[field] !== undefined && typeof v[field] !== 'string') return null;
   }
   if (v.skipped !== undefined && typeof v.skipped !== 'boolean') return null;
+  if (v.by_reply !== undefined && typeof v.by_reply !== 'boolean') return null;
   if (v.sourceLine !== undefined && !(Number.isInteger(v.sourceLine) && (v.sourceLine as number) > 0)) return null;
 
   const selected = [...new Set((v.selected as string[])
@@ -854,6 +861,7 @@ export const parseQuestionAnswer = (value: unknown): QuestionAnswer | null => {
     ...(text.trim() ? { text } : {}),
     ...(note.trim() ? { note } : {}),
     ...(v.skipped === true ? { skipped: true } : {}),
+    ...(v.skipped === true && v.by_reply === true ? { by_reply: true } : {}),
     ...(typeof v.sourceLine === 'number' ? { sourceLine: v.sourceLine } : {}),
   };
 };
@@ -1019,7 +1027,7 @@ export const formatQuestionAnswerLines = (
   } else if (picks.length === 1) {
     out += `Answer: ${picks[0]}${rec}\n`;
   } else if (answer.skipped) {
-    out += 'Skipped\n';
+    out += answer.by_reply ? 'Skipped (not answered in this reply)\n' : 'Skipped\n';
   }
   const note = answer.note?.trim();
   if (note) {
@@ -1109,6 +1117,14 @@ export const formatQuestionAnswersSection = (
   out += `${answered} of ${open.length} question${open.length === 1 ? '' : 's'} answered.`;
   if (settledUntouched > 0) {
     out += ` ${settledUntouched} already settled in the document ${settledUntouched === 1 ? 'was' : 'were'} left as is.`;
+  }
+  // The Inbox's Send skips what it left unanswered: say how the agent should read those skips.
+  const byReply = open.filter((q) => {
+    const a = byKey.get(q.key);
+    return a !== undefined && a.skipped === true && a.by_reply === true && !isQuestionAnswered(a);
+  }).length;
+  if (byReply > 0) {
+    out += ` ${byReply} ${byReply === 1 ? 'was' : 'were'} not answered in this reply; treat ${byReply === 1 ? 'it' : 'them'} as skipped, and ask again if you still need ${byReply === 1 ? 'it' : 'them'}.`;
   }
   out += '\n\n';
 
@@ -1218,4 +1234,5 @@ Recommended: Local only, purged after 30 days
 - \`- [x]\` marks a settled choice. On resubmit, check the chosen answer, or drop the block and state the decision in prose.
 - Leave blank lines between the parts so the block reads well on GitHub.
 - Each answer comes back under its question (\`### Q2. <question> (line N)\`) as \`Answer: <choice>\`, marked \`(your recommendation)\` when the reviewer took yours, or as \`Other: …\`, free text in a quote, or \`Skipped\`, plus any \`Note:\`. A question you marked \`- [x]\` is settled and only comes back if the reviewer changed it or added a note.
+- In the Inbox, withdraw your own open questions as the thread moves on: when a newer message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, name them in \`supersedes\` (or a \`Replaces:\` line) so they stop keeping the thread at the top of the person's list.
 `;

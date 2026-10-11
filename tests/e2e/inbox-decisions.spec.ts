@@ -452,6 +452,10 @@ test('read-only per question: in a half-sent message the sent card has a plain t
   const openCard = pane(page).locator(`[data-question-key="${second}"]`);
   await sentCard.getByText('Yes', { exact: true }).click();
   await expect(pane(page).getByText(/^Picked .*, not sent$/)).toHaveCount(1);
+  // A Send skips what it leaves unanswered unless the person keeps it open: keep the second one open.
+  await expect(page.locator('.ib-pfoot [data-skip-chip]')).toContainText('1 unanswered question will be skipped');
+  await page.locator('.ib-pfoot [data-skip-toggle]').click();
+  await expect(page.locator('.ib-pfoot [data-skip-chip]')).toContainText('1 unanswered question stays open');
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
   await expect(sentCard.getByText(/^Sent \d{1,2}:\d{2} [AP]M$/)).toBeVisible();
 

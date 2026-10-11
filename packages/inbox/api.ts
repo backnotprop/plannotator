@@ -11,6 +11,7 @@ import type {
   InboxDecisionDraft,
   InboxGuideRef,
   InboxHealth,
+  InboxListRow,
   InboxListSection,
   InboxMessage,
   InboxProject,
@@ -279,6 +280,9 @@ export const inboxApi = {
   thread: (threadId: string) => get<ThreadModel>(`/api/inbox/threads/${encodeURIComponent(threadId)}`),
   settings: () => get<SettingsModel>('/api/inbox/settings'),
   seen: (threadId: string) => post<unknown>(`/api/inbox/threads/${encodeURIComponent(threadId)}/seen`, {}),
+  /** Mark read (the thread leaves the top for Quiet, its waiting questions closed) or its Undo. */
+  markRead: (threadId: string, read: boolean) =>
+    post<{ thread: InboxListRow }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/${read ? 'read' : 'unread'}`, {}),
   pick: (messageId: string, key: string, revision: number, answer: QuestionAnswer | null) =>
     post<{ questions: InboxQuestion[] }>(`/api/inbox/messages/${encodeURIComponent(messageId)}/picks`, {
       questions: [{ key, revision, answer }],
@@ -293,6 +297,8 @@ export const inboxApi = {
       annotation_ids?: string[];
       /** Another live session takes the reply: the session that asked has ended. */
       to?: { host: string; session: string };
+      /** Skip this message's questions the Send leaves unanswered (false: Keep open). */
+      skip_unanswered?: boolean;
     },
   ) => post<ReplyResult>(`/api/inbox/messages/${encodeURIComponent(messageId)}/reply`, input),
   /** The card's switch and its words on one question: `recording`, and `draft` on Done. */

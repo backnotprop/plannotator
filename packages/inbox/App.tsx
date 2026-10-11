@@ -45,6 +45,8 @@ import { DecisionsPage } from './components/Decisions';
 import { GuidePane } from './components/GuidePane';
 import { AboutBlock, FailedDialog, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
 import { unsentReply } from './unsent';
+import { InboxToast, type InboxToastModel } from './components/Toast';
+import { canToggleRead, MARK_READ_UNDO_MS, markReadToast } from './markRead';
 import { lookBoundary } from './folding';
 
 // The Inbox has no /api/config and no browser-agent tools: settings stay in
@@ -190,13 +192,18 @@ function Inbox() {
   /** The one-time sound dialog: open on this load, or shown on it (then the notification ask line waits for another load). */
   const [soundDialog, setSoundDialog] = useState<'none' | 'open' | 'shown'>('none');
   const soundDialogAsked = useRef(false);
-  const [toast, setToast] = useState<string | null>(null);
   const routeRef = useRef(route);
   routeRef.current = route;
   const sound = useInboxSound({
     settings: settings?.sound,
     onSettings: (next) => setSettings((current) => (current ? { ...current, sound: next } : current)),
   });
+  /** The one toast (Mark read, Archive) with its Undo, and what the live region last said. */
+  const [toast, setToast] = useState<InboxToastModel | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [said, setSaid] = useState('');
+  /** The thread whose reply box opens once it is on screen (the warning toast's Reply). */
+  const [replyFor, setReplyFor] = useState<string | null>(null);
   const notifications = useInboxNotifications({
     settings: settings?.notifications ?? null,
     // New questions ring the doorbell on their own rules (sound.ts), whatever notifications say.
@@ -330,6 +337,12 @@ function Inbox() {
     };
   }, [refreshList, refreshSettings, refreshThread, observeEvent, flushNotifications, refreshDecisions, decisionsProjectOf]);
 
+  // Leaving a thread (Esc, Close, the browser's Back) or opening another is an
+  // action: the rows held while the person was in the thread take their places.
+  useEffect(() => {
+    if (latestRef.current) setShown(latestRef.current.sections);
+  }, [route.thread]);
+
   // Opening a thread: read it, record the look, and put the list as it now is on screen.
   useEffect(() => {
     const threadId = route.thread;
@@ -406,11 +419,6 @@ function Inbox() {
     };
   }, [soundDialogDue, soundDialogBlocked]);
 
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 4200);
-    return () => clearTimeout(timer);
-  }, [toast]);
 
   const go = (next: Route) => {
     writeRoute(next);
@@ -426,13 +434,147 @@ function Inbox() {
         ? { ...current, messages: current.messages.map((m) => (m.id === messageId ? { ...m, questions } : m)) }
         : current,
     );
-    void refreshList(true);
+    // While a thread is open the person's own writes never reorder the list
+    // (owner ruling 2026-10-11): each row shows its new state in place, and
+    // the list catches up when they leave the thread or open another.
+    void refreshList(!routeRef.current.thread);
   };
 
   const afterWrite = async () => {
-    if (route.thread) await refreshThread(route.thread);
-    await refreshList(true);
+    const open = routeRef.current.thread;
+    if (open) await refreshThread(open);
+    await refreshList(!open);
   };
+
+  const rowOf = (threadId: string): InboxListRow | undefined =>
+    (latestRef.current?.sections ?? []).flatMap((section) => section.threads).find((row) => row.thread_id === threadId);
+
+  const say = (text: string) => {
+    setSaid('');
+    setTimeout(() => setSaid(text), 30);
+  };
+  const dismissToast = useCallback(() => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = null;
+    setToast(null);
+  }, []);
+  /** The window's one toast: a new one replaces the last, so two never stack. */
+  const showToast = (next: Omit<InboxToastModel, 'id'>, ms = MARK_READ_UNDO_MS) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ ...next, id: Date.now() });
+    say(next.text);
+    toastTimer.current = setTimeout(() => {
+      toastTimer.current = null;
+      setToast(null);
+    }, ms);
+  };
+  useEffect(() => () => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+  }, []);
+
+  /**
+   * Mark read, or move it back (the pressed button, `E` again, Undo). The
+   * thread leaves the top for Quiet with its waiting questions closed; Undo
+   * reopens them as they were. An agent stopped or held up on it makes the
+   * toast a warning with Reply.
+   */
+  const markRead = async (threadId: string, read: boolean) => {
+    const before = rowOf(threadId);
+    try {
+      await inboxApi.markRead(threadId, read);
+    } catch (cause) {
+      showToast({ text: cause instanceof Error ? cause.message : 'The thread did not change.', warn: true });
+      return;
+    }
+    await afterWrite();
+    if (!read) {
+      dismissToast();
+      say('Moved back to the top.');
+      return;
+    }
+    if (!before) return;
+    const closed = before.questions.open + before.questions.picked;
+    const copy = markReadToast(before, closed);
+    showToast({
+      ...copy,
+      onUndo: () => void markRead(threadId, false),
+      ...(copy.warn
+        ? {
+            onReply: () => {
+              void (async () => {
+                await markRead(threadId, false);
+                if (routeRef.current.thread !== threadId) go({ page: 'inbox', project: routeRef.current.project, thread: threadId });
+                setReplyFor(threadId);
+              })();
+            },
+          }
+        : {}),
+    });
+    say(`Read. ${before.subject ?? 'The thread'} moved to Quiet.`);
+  };
+
+  /** Archive (the MCP's resolve) or Unarchive, with Undo. */
+  const archive = async (threadId: string, rootId: string, next: boolean) => {
+    try {
+      await inboxApi.resolve(rootId, next);
+    } catch (cause) {
+      showToast({ text: cause instanceof Error ? cause.message : 'The thread did not change.', warn: true });
+      return;
+    }
+    await afterWrite();
+    if (next) {
+      showToast({ text: 'Archived. The next message starts a new thread.', onUndo: () => void archive(threadId, rootId, false) });
+      say('Archived.');
+    } else {
+      dismissToast();
+      say('Unarchived.');
+    }
+  };
+
+  // E marks the open thread (or the focused row) read, and again moves it
+  // back; Z undoes while the toast is up. Never while typing, never with a
+  // modifier (so the reply box keeps its own ⌘Z).
+  // An open file (its viewer, the stepping bar, the guard row) and a guided
+  // review own the keyboard: E and Z stand down there, and while the sound
+  // dialog is up.
+  const keysRef = useRef({ markRead, toast, thread, soundDialog });
+  keysRef.current = { markRead, toast, thread, soundDialog };
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented || event.repeat) return;
+      const key = event.key.toLowerCase();
+      if (key !== 'e' && key !== 'z') return;
+      if (keysRef.current.soundDialog === 'open' || routeRef.current.guide) return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (target) {
+        if (target.isContentEditable || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return;
+        if (target.tagName === 'INPUT' && !['radio', 'checkbox'].includes((target as HTMLInputElement).type)) return;
+        if (target.closest('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], iframe, .ib-view, [data-step-guard]')) return;
+      }
+      // With a file open beside the thread, only a key aimed at the thread or the list counts.
+      if (routeRef.current.file && !target?.closest('section.ib-pane, .ib-listcol')) return;
+      const { markRead: toggle, toast: current, thread: open } = keysRef.current;
+      if (key === 'z') {
+        if (!current?.onUndo) return;
+        event.preventDefault();
+        current.onUndo();
+        return;
+      }
+      if (routeRef.current.page !== 'inbox') return;
+      // A row the keyboard is on wins over the thread open beside the list.
+      const rowId = target?.closest('.ib-listcol [data-row]')?.getAttribute('data-row') ?? null;
+      const threadId = rowId ?? (open && open.thread_id === routeRef.current.thread ? open.thread_id : null);
+      if (!threadId) return;
+      const row = rowOf(threadId);
+      if (!row || !canToggleRead(row)) return;
+      event.preventDefault();
+      void toggle(threadId, !(row.read_at ?? null));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // rowOf reads a ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const restart = async () => {
     setRestarting(true);
@@ -733,12 +875,18 @@ function Inbox() {
           }
           onShowNew={() => setShown(latest.sections)}
           onOpen={openRow}
+          onMarkRead={(row) => void markRead(row.thread_id, true)}
         />
         )}
         {route.thread && thread && thread.thread_id === route.thread && (
           <ThreadPane
             thread={thread}
             sent={latestSections.flatMap((section) => section.threads).find((row) => row.thread_id === thread.thread_id)?.sent ?? null}
+            row={latestSections.flatMap((section) => section.threads).find((row) => row.thread_id === thread.thread_id) ?? null}
+            onMarkRead={(read) => void markRead(thread.thread_id, read)}
+            onArchive={(next) => void archive(thread.thread_id, thread.messages[0]!.id, next)}
+            replyRequest={replyFor}
+            onReplyOpened={() => setReplyFor(null)}
             onQuestions={patchQuestions}
             onChanged={afterWrite}
             onClose={() => go({ ...route, thread: null, file: null })}
@@ -826,12 +974,13 @@ function Inbox() {
           onKeep={() => setSoundDialog('shown')}
           onTurnOff={() => {
             setSoundDialog('shown');
-            void sound.setEnabled(false).then((saved) => setToast(saved ? 'Sound off.' : 'The sound setting was not saved.'));
+            void sound.setEnabled(false).then((saved) => showToast({ text: saved ? 'Sound off.' : 'The sound setting was not saved.', warn: !saved }, 4200));
           }}
         />
       )}
-      <div className="ib-toast" role="status" aria-live="polite" data-hidden={toast ? undefined : ''} data-inbox-toast="">
-        {toast}
+      {toast && soundDialog !== 'open' && <InboxToast toast={toast} onDismiss={dismissToast} />}
+      <div className="ib-sr" aria-live="polite" data-inbox-live="">
+        {said}
       </div>
       {guideMessage && thread && (
         <GuidePane

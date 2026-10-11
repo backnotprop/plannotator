@@ -62,7 +62,7 @@ export const SEND_MESSAGE_DESCRIPTION = [
  * whole; send_message's own description is cut at 2,048 characters).
  */
 export const SUPERSEDES_DESCRIPTION =
-  "Earlier questions in this thread that no longer apply, so the person cannot answer them any more: \"<message id>/<key>\" for one question (read_thread gives each question's key) or \"<message id>\" for every open question of that message. With exactly one question in this message, it replaces them; otherwise they read \"No longer applies\". To replace one with a particular new question, put `Replaces: <message id>/<key>` in that question's block instead. The person's pick on a superseded question is never sent. Every id must name an open question of the thread this message lands in (use reply_to); otherwise nothing is sent and the refusal, invalid_supersedes, lists the thread's open questions.";
+  "Earlier questions in this thread that no longer apply, so the person cannot answer them any more. Withdraw your own open questions this way as the thread moves on: when this message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, so they stop keeping the thread at the top of the person's list. \"<message id>/<key>\" for one question (read_thread gives each question's key) or \"<message id>\" for every open question of that message. With exactly one question in this message, it replaces them; otherwise they read \"No longer applies\". To replace one with a particular new question, put `Replaces: <message id>/<key>` in that question's block instead. The person's pick on a superseded question is never sent. Every id must name an open question of the thread this message lands in (use reply_to); otherwise nothing is sent and the refusal, invalid_supersedes, lists the thread's open questions.";
 
 const PROJECT_PATH_DESCRIPTION =
   "Absolute path of the repository or folder you work in; the thread lands in that project's row. The `plannotator inbox mcp` shim fills it from its working folder.";
@@ -420,7 +420,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
     "resolve_message",
     {
       title: "Resolve a thread",
-      description: "Close the thread a message belongs to once you have what you needed (resolved: false reopens it). Its questions read as closed.",
+      description: "Close the thread a message belongs to once you have what you needed (resolved: false reopens it). Its questions read as closed; the person sees the thread as Archived.",
       inputSchema: z
         .object({
           message_id: z.string().describe("Any message id in the thread, or the thread id."),

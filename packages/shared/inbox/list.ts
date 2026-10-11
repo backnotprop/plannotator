@@ -10,7 +10,10 @@
  * thread here. The strongest
  * reason wins:
  *
- *   quiet     the thread is resolved (done)
+ *   quiet     the thread is archived (resolved: done)
+ *   quiet     the person marked it read (Mark read) and nothing but a
+ *             set-aside note came after; an agent's next message (or the
+ *             person's own reply) brings it back, with no write
  *   stopped   an open question says the agent cannot go on (`Stopped:`)
  *   holding   an open question names work that waits (`Holds up:`)
  *   waiting   any other open question
@@ -20,6 +23,10 @@
  *             read it yet; once it has, the row is Quiet
  *   new       agent messages the person has not looked at
  *   quiet     the remainder
+ *
+ * The sections are shown in INBOX_SECTIONS' order, which puts Sent (waiting
+ * on the agent, not on the person) below New since you looked (owner
+ * ruling 2026-10-11).
  *
  * Order inside every section: newest first, by the thread's latest message
  * (`last_at`, the time the row shows), so the time column reads down in order
@@ -41,10 +48,11 @@ import {
 export type InboxSectionFacts = Pick<
   InboxListRow,
   "resolved_at" | "questions" | "answered_not_sent" | "sent" | "unseen"
->;
+> & { read_at?: string | null };
 
 export function inboxSectionOf(row: InboxSectionFacts): InboxSectionId {
   if (row.resolved_at !== null) return "quiet";
+  if (row.read_at != null) return "quiet";
   if (row.questions.open > 0) {
     if (row.questions.stopped) return "stopped";
     if (row.questions.holds_up.length > 0) return "holding";

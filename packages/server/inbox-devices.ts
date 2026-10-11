@@ -90,6 +90,8 @@ const ALLOWLIST: readonly { method: "GET" | "POST"; route: RegExp; window: (m: R
   { method: "GET", route: /^projects$/, window: () => "/api/inbox/projects" },
   { method: "GET", route: /^threads\/([^/]+)$/, window: (m) => `/api/inbox/threads/${m[1]}` },
   { method: "POST", route: /^threads\/([^/]+)\/seen$/, window: (m) => `/api/inbox/threads/${m[1]}/seen` },
+  // Mark read and its Undo.
+  { method: "POST", route: /^threads\/([^/]+)\/(read|unread)$/, window: (m) => `/api/inbox/threads/${m[1]}/${m[2]}` },
   { method: "GET", route: /^events$/, window: () => "/api/inbox/events" },
   { method: "POST", route: /^messages\/([^/]+)\/(picks|reply|resolve)$/, window: (m) => `/api/inbox/messages/${m[1]}/${m[2]}` },
   { method: "POST", route: /^threads\/([^/]+)\/delete$/, window: (m) => `/api/inbox/threads/${m[1]}/delete` },

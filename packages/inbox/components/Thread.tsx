@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Viewer } from '@plannotator/ui/components/Viewer';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
-import type { InboxDecision, InboxDecisionDraft, InboxMessageWire, InboxProjectRepo, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxDecision, InboxDecisionDraft, InboxListRow, InboxMessageWire, InboxProjectRepo, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import type { IndexedQuestion, QuestionAnswer } from '@plannotator/core/question-block';
 import { inboxDecisionWords } from '@plannotator/core/inbox-questions';
 import { isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState } from '@plannotator/core/inbox-types';
@@ -20,6 +20,7 @@ import { DecisionCard } from './DecisionCard';
 import { GuideCard } from './GuideCard';
 import { inboxMessageImageBase } from '../images';
 import { reportUnsentReply } from '../unsent';
+import { canToggleRead } from '../markRead';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
 import {
   AskerEndedNote,
@@ -109,24 +110,30 @@ function HoldingChips({ holdings }: { holdings: Holding[] }) {
 }
 
 /**
- * The agent messages a Send answers: each one with picks waiting, else the
- * last agent message. The last of them carries the person's words.
+ * The agent messages a Send answers, in thread order: each one with picks
+ * waiting, and (`skip`, unless Keep open) each with questions left open,
+ * which the Send skips on the reply to that message. The latest agent
+ * message always comes last, with no picks of its own if it has none, so
+ * the person's words (which ride the last reply) go to the agent that wrote
+ * most recently, never to an older asker.
  */
-function sendTargetsOf(thread: InboxThread): { message: InboxMessageWire; questions: { key: string; revision: number }[] }[] {
+export function sendTargetsOf(
+  thread: InboxThread,
+  skip = true,
+): { message: InboxMessageWire; questions: { key: string; revision: number }[]; skips: boolean }[] {
   const targets = thread.messages
-    .filter((m) => m.author.kind === 'agent' && (m.questions ?? []).some((q) => q.state === 'picked'))
+    .filter((m) => m.author.kind === 'agent' && (m.questions ?? []).some((q) => q.state === 'picked' || (skip && q.state === 'open')))
     .map((m) => ({
       message: m,
       questions: (m.questions ?? []).filter((q) => q.state === 'picked').map((q) => ({ key: q.key, revision: q.revision })),
+      skips: skip && (m.questions ?? []).some((q) => q.state === 'open'),
     }));
-  if (targets.length === 0) {
-    const last = thread.messages.filter((m) => m.author.kind === 'agent').at(-1) ?? thread.messages[0]!;
-    targets.push({ message: last, questions: [] });
-  }
+  const latest = thread.messages.filter((m) => m.author.kind === 'agent').at(-1) ?? thread.messages[0]!;
+  if (targets.at(-1)?.message.id !== latest.id) targets.push({ message: latest, questions: [], skips: false });
   return targets;
 }
 
-/** The session a Send's words answer, when its message names one. */
+/** The session a Send's words answer (the latest agent message's), when it names one. */
 function askingSessionOf(thread: InboxThread): AskingSession | null {
   const message = sendTargetsOf(thread).at(-1)!.message;
   if (message.author.kind !== 'agent' || !message.author.session) return null;
@@ -295,6 +302,15 @@ export interface ThreadPaneProps {
    * the first thread it is given.
    */
   lookSeq?: number | null;
+  /** The thread's list row as it is now: Mark read's state and whether it is offered. Null until the list has it. */
+  row?: InboxListRow | null;
+  /** Mark read, or move it back (the pressed button). Absent: no Mark read button. */
+  onMarkRead?: (read: boolean) => void;
+  /** Archive (`true`) or Unarchive. Absent: the pane calls the resolve route itself. */
+  onArchive?: (archived: boolean) => void;
+  /** The thread whose reply box should open (the warning toast's Reply); the pane calls `onReplyOpened` once it has. */
+  replyRequest?: string | null;
+  onReplyOpened?: () => void;
 }
 
 /**
@@ -344,7 +360,7 @@ function useThreadAttachments(threadId: string, revision: unknown) {
   return { model, load, patch };
 }
 
-export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile, onOpenGuide, lookSeq }: ThreadPaneProps) {
+export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile, onOpenGuide, lookSeq, row, onMarkRead, onArchive, replyRequest, onReplyOpened }: ThreadPaneProps) {
   const root = thread.messages[0]!;
   const asker = agentName(root.author);
   const resolved = thread.resolved_at !== null;
@@ -365,6 +381,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   /** Decisions a Send could not record (the answers stay sent). */
   const [refused, setRefused] = useState<{ key: string; message: string }[]>([]);
   const [box, setBox] = useState<{ open: boolean; text: string }>({ open: false, text: '' });
+  /** Keep open: this Send leaves the unanswered questions open instead of skipping them. */
+  const [keepOpen, setKeepOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const sendKeys = useRef<Map<string, string> | null>(null);
@@ -655,6 +673,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     setStale([]);
     setGuard(false);
     setRoute(CLOSED_ROUTE);
+    setKeepOpen(false);
     sendKeys.current = null;
     revisions.current.clear();
   }, [thread.thread_id]);
@@ -849,8 +868,11 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     if (!q) return null;
     if (q.state === 'sent') {
       const at = sentAt(q.sent_reply_id);
+      // A Send skipped it because the person left it unanswered.
+      if (q.answer?.skipped && q.answer.by_reply) return at ? `Skipped with your reply · ${clockTime(at)}` : 'Skipped with your reply';
       return at ? `Sent ${clockTime(at)}` : 'Sent';
     }
+    if (q.state === 'closed' && q.set_aside_at) return `Closed unanswered when you marked it read · ${clockTime(q.set_aside_at)}`;
     if (q.state === 'picked' && q.picked_at) return `Picked ${clockTime(q.picked_at)}, not sent`;
     return null;
   };
@@ -927,6 +949,18 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   };
   /** Picks or annotations wait for a Send. */
   const waiting = picksCount > 0 || records.length > 0;
+  // What a Send skips: every question still open with no pick (one being
+  // saved counts as picked), unless the person pressed Keep open.
+  const unanswered = thread.messages.flatMap((m) =>
+    m.author.kind === 'agent'
+      ? (m.questions ?? []).filter((q) => {
+          if (q.state !== 'open') return false;
+          const id = `${m.id}/${q.key}`;
+          return !(pending.has(id) && pending.get(id) !== null);
+        })
+      : [],
+  );
+  const skipping = !keepOpen && unanswered.length > 0;
 
   const openBox = (withDraft: boolean) => {
     setNewMessage(null);
@@ -960,7 +994,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     // The session that asked has ended and another is live: Send asks where
     // the reply goes first (the choice), and sends nothing yet.
     if (askerEnded && anyOtherLive && asking && !options.routed) {
-      const empty = picksCount === 0 && records.length === 0 && !(box.open && box.text.trim());
+      const empty = picksCount === 0 && records.length === 0 && !(box.open && box.text.trim()) && !skipping;
       if (empty) {
         setError('Write a reply or pick an answer first.');
         return;
@@ -985,10 +1019,14 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       await pickChain.current;
       const current = threadRef.current;
       const words = box.open ? box.text.trim() : '';
-      const targets = sendTargetsOf(current);
-      total = targets.length;
+      const skip = !keepOpen;
       const pendingAnnotations = records;
-      if (targets.every((t) => t.questions.length === 0) && !words && pendingAnnotations.length === 0) {
+      const carries = words !== '' || pendingAnnotations.length > 0;
+      // The latest agent message rides last only to carry the words and the
+      // annotations; with neither, a target with nothing to send is left out.
+      const targets = sendTargetsOf(current, skip).filter((t, index, all) => t.questions.length > 0 || t.skips || (carries && index === all.length - 1));
+      total = targets.length;
+      if (targets.length === 0) {
         setError('Write a reply or pick an answer first.');
         return;
       }
@@ -1002,6 +1040,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
           idempotency_key: sendKeys.current.get(target.message.id) ?? crypto.randomUUID(),
           words: last ? words : '',
           questions: target.questions,
+          skip_unanswered: skip,
           ...(last && feedback ? { feedback, annotation_ids: pendingAnnotations.map((r) => r.id) } : {}),
           // Only a message the ended session asked goes to the session picked;
           // an answer to another session's message still goes to that session.
@@ -1013,6 +1052,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       setRefused(notRecorded);
       sendKeys.current = null;
       setRoute(CLOSED_ROUTE);
+      setKeepOpen(false);
       setBox({ open: false, text: '' });
       setFull(false);
       await onChanged();
@@ -1044,6 +1084,10 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
 
   const resolve = async (next: boolean) => {
     setError(null);
+    if (onArchive) {
+      onArchive(next);
+      return;
+    }
     try {
       await inboxApi.resolve(root.id, next);
       await onChanged();
@@ -1103,6 +1147,21 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     />
   ) : null;
 
+  // The warning toast's Reply: the reply box opens, once.
+  useEffect(() => {
+    if (replyRequest !== thread.thread_id) return;
+    onReplyOpened?.();
+    openBox(picksCount > 0);
+    // openBox reads this render's picks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replyRequest, thread.thread_id]);
+
+  // Mark read: pressed while the thread is marked read, offered while something here waits on the person.
+  const readAt = row?.read_at ?? null;
+  const markReadOffered = !resolved && row != null && onMarkRead !== undefined;
+  const markReadEnabled = markReadOffered && canToggleRead(row!);
+  const closedByRead = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'closed' && q.set_aside_at));
+
   const openAttachment = file ? attachments.find((a) => a.id === file.id) ?? null : null;
   const fileOpen = openAttachment !== null;
 
@@ -1119,11 +1178,36 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
           type="button"
           className="ib-iconbtn"
           onClick={() => void resolve(!resolved)}
-          title={resolved ? 'Reopen the thread' : 'Resolve the thread'}
-          aria-label={resolved ? 'Reopen the thread' : 'Resolve the thread'}
+          title={resolved ? 'Unarchive' : 'Archive: the thread ends; the next message starts a new one'}
+          aria-label={resolved ? 'Unarchive the thread' : 'Archive the thread'}
+          data-archive=""
         >
           <Icon name="archive" />
         </button>
+        {markReadOffered && (
+          <>
+            <span className="ib-vsep" aria-hidden="true" />
+            <button
+              type="button"
+              className="ib-hbtn"
+              data-mark-read=""
+              aria-pressed={readAt !== null}
+              disabled={!markReadEnabled}
+              onClick={() => onMarkRead!(readAt === null)}
+              title={
+                readAt !== null
+                  ? 'Move it back to the top'
+                  : markReadEnabled
+                    ? `Out of the top until ${asker} writes again. Its waiting questions close unanswered.`
+                    : 'Nothing here waits on you'
+              }
+            >
+              <Icon name="checkCircle" size={16} />
+              {readAt !== null ? 'Read' : 'Mark read'}
+              <kbd className="ib-kbd ib-wide">E</kbd>
+            </button>
+          </>
+        )}
         {one ? (
           <span className="ib-sp" />
         ) : (
@@ -1151,6 +1235,30 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       </div>
       <div className={`ib-pbody${one ? '' : ' ib-folding'}`} ref={bodyRef}>
         <h2 className="ib-subject">{thread.subject ?? '(no subject)'}</h2>
+        {readAt !== null && !resolved && (
+          <div className="ib-readline" data-read-line="">
+            <Icon name="checkCircle" size={16} />
+            <div>
+              <span>
+                Read {clockTime(readAt)}. It stays out of the top until {asker} writes again.
+              </span>
+              {closedByRead.length > 0 && (
+                <>
+                  <br />
+                  <span>
+                    {closedByRead.length === 1 ? '1 question was' : `${closedByRead.length} questions were`} closed unanswered; {asker} is told not to wait on{' '}
+                    {closedByRead.length === 1 ? 'it' : 'them'}.
+                  </span>
+                </>
+              )}
+            </div>
+            {onMarkRead && (
+              <button type="button" onClick={() => onMarkRead(false)} data-move-back="">
+                Move back
+              </button>
+            )}
+          </div>
+        )}
         {!one && (
           <div className="ib-tmeta" data-thread-meta="">
             <span>{plural(thread.messages.length, 'message')}</span>
@@ -1403,9 +1511,9 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         </div>
         {resolved ? (
           <div className="ib-acts">
-            <span className="ib-st">Resolved</span>
+            <span className="ib-st">Archived. The next message from {asker} starts a new thread.</span>
             <button type="button" className="ib-btn" onClick={() => void resolve(false)}>
-              Reopen
+              Unarchive
             </button>
           </div>
         ) : guard && staleQuestions.length > 0 ? (
@@ -1471,14 +1579,15 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                   }
                 }}
               />
-              {(picksCount > 0 || dropped.length > 0 || takesAnnotations) && (
-                <div className="ib-rfoot">
+              {(picksCount > 0 || dropped.length > 0 || takesAnnotations || unanswered.length > 0) && (
+                <div className={`ib-rfoot${keepOpen ? ' ib-keep' : ''}`}>
                   {picksCount > 0 && (
                     <span className="ib-rchip" data-picks-chip="">
                       <Icon name="check" size={13} />
                       {plural(picksCount, 'pick')}
                     </span>
                   )}
+                  <SkipChip count={unanswered.length} keepOpen={keepOpen} onToggle={() => setKeepOpen((v) => !v)} />
                   {dropped.length > 0 && (
                     <span className="ib-rchip ib-dropped" data-dropped-picks-chip="" title="Replaced; this pick won't be sent">
                       {dropped.length} {dropped.length === 1 ? 'pick' : 'picks'} on a replaced question
@@ -1489,6 +1598,9 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                   )}
                 </div>
               )}
+            </div>
+            <div className="ib-sr" role="status">
+              {skipping ? `${plural(unanswered.length, 'unanswered question')} will be skipped when you send.` : ''}
             </div>
             {route.open && asking ? (
               routeChoice
@@ -1523,6 +1635,14 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
               {waiting ? 'Edit the reply' : 'Reply'}
             </button>
             <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />
+            {waiting && unanswered.length > 0 && (
+              <>
+                <span className="ib-sp" />
+                <span className={keepOpen ? 'ib-keep' : undefined}>
+                  <SkipChip count={unanswered.length} keepOpen={keepOpen} onToggle={() => setKeepOpen((v) => !v)} />
+                </span>
+              </>
+            )}
           </div>
           </>
         )}
@@ -1595,6 +1715,25 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       />
     )}
     </>
+  );
+}
+
+/**
+ * What a Send does with the questions left unanswered: "↷ 3 unanswered
+ * questions will be skipped · Keep open", or, after Keep open, "3 unanswered
+ * questions stay open · Skip them". Nothing when none is unanswered.
+ */
+function SkipChip({ count, keepOpen, onToggle }: { count: number; keepOpen: boolean; onToggle: () => void }) {
+  if (count === 0) return null;
+  const them = count === 1 ? 'it' : 'them';
+  return (
+    <span className="ib-skipchip" data-skip-chip={keepOpen ? 'keep' : 'skip'}>
+      {!keepOpen && <Icon name="forward" size={14} />}
+      {keepOpen ? `${plural(count, 'unanswered question')} ${count === 1 ? 'stays' : 'stay'} open` : `${plural(count, 'unanswered question')} will be skipped`}
+      <button type="button" onClick={onToggle} data-skip-toggle="">
+        {keepOpen ? `Skip ${them}` : 'Keep open'}
+      </button>
+    </span>
   );
 }
 
