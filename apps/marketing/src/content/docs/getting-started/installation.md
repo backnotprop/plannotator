@@ -147,9 +147,12 @@ The install script also updates the Claude Code plugin when it is already instal
 
 ### Update check
 
-Once a day, when a session starts, the `plannotator` binary asks GitHub for the latest stable release and caches the answer. When a newer one exists, a review you started yourself in a terminal ends with one line: `Plannotator X is available (you have Y). Update: plannotator update`.
+Once a day, the machine asks GitHub for the latest stable release and caches the answer. When a newer one exists:
 
-Turn the check off with `{ "updateCheck": false }` in `~/.plannotator/config.json` or `PLANNOTATOR_UPDATE_CHECK=0`. Off stops that request and auto-update, which needs it; `plannotator update` still checks when you run it.
+- the Inbox shows an **Update** button above Settings, which opens a dialog with what's new and **Update now** (see [the Inbox](/docs/reference/inbox/#update));
+- a review you started yourself in a terminal ends with one line: `Plannotator X is available (you have Y). Update: plannotator update`.
+
+Turn the check off in the Inbox's **Settings → About**, with `{ "updateCheck": false }` in `~/.plannotator/config.json` or `PLANNOTATOR_UPDATE_CHECK=0`. Off stops that request and auto-update, which needs it; `plannotator update` still checks when you run it.
 
 ### Automatic updates (opt-in)
 

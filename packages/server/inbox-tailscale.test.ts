@@ -558,3 +558,43 @@ describe("Inbox over your tailnet", () => {
     expect(ts.serve.size).toBe(0);
   });
 });
+
+describe("the update control never answers through the tailnet", () => {
+  test("Update now, snooze, Check now, the facts, What's new and the update switches are local only; nothing is launched or written", async () => {
+    const dataDir = world({ inboxTailscale: true });
+    writeFileSync(join(dataDir, "update-state.json"), JSON.stringify({ latestRelease: { tag: "0.28.12", fetchedAt: Date.now() } }));
+    const ts = fakeTailscale();
+    const launches: unknown[] = [];
+    const inbox = await start(dataDir, ts.run, {
+      version: "0.28.10",
+      updates: {
+        fetchRelease: async () => ({ ok: true, release: { tag: "v0.28.12" } }),
+        isManaged: () => true,
+        listSessions: () => [],
+        launchInstaller: (launch) => void launches.push(launch),
+      },
+    });
+    const own = { Origin: `https://${MAGIC}:${inbox.port}`, "Content-Type": "application/json" };
+    const calls: [string, string, Json | undefined][] = [
+      ["POST", "/api/inbox/update", { serverSession: inbox.serverSession }],
+      ["POST", "/api/inbox/update/snooze", { serverSession: inbox.serverSession }],
+      ["POST", "/api/inbox/update/check", { serverSession: inbox.serverSession }],
+      ["GET", "/api/inbox/update", undefined],
+      ["GET", "/api/inbox/whats-new?version=0.28.12", undefined],
+      ["POST", "/api/inbox/settings", { serverSession: inbox.serverSession, auto_update: true }],
+      ["POST", "/api/inbox/settings", { serverSession: inbox.serverSession, update_check: false }],
+    ];
+    for (const [method, path, body] of calls) {
+      const response = await throughServe(inbox, path, { method, headers: own, ...(body ? { body: JSON.stringify(body) } : {}) });
+      expect([method, path, ...(await codeOf(response))]).toEqual([method, path, 403, "local_only"]);
+    }
+    expect(launches).toEqual([]);
+    const config = JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8"));
+    expect(config.autoUpdate).toBeUndefined();
+    expect(config.updateCheck).toBeUndefined();
+    // The same Update now works on this computer.
+    const local = await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/update`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    expect(local.status).toBe(200);
+    expect(launches).toHaveLength(1);
+  });
+});

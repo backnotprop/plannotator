@@ -45,3 +45,7 @@ delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
 // cached as a failure. Tests that need an answer inject `fetchRelease` or
 // serve a fake API and set this in their own bodies or spawned env.
 process.env.PLANNOTATOR_UPDATE_API_URL = "http://127.0.0.1:9/releases/latest";
+
+// The install script the update wrapper downloads: never the real one. A closed
+// loopback port refuses at once, so an unintended Update now fails fast.
+process.env.PLANNOTATOR_INSTALL_SCRIPT_URL = "http://127.0.0.1:9/install.sh";

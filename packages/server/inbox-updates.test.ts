@@ -168,6 +168,17 @@ describe("Update now", () => {
     expect(readUpdateState(dataDir).pending).toMatchObject({ version: "0.28.12", by: "person" });
   });
 
+  test("a tab left open on an older Inbox (another serverSession) gets 409 and starts nothing", async () => {
+    const server = await start();
+    await waitFor(() => health(server), (u) => u !== null);
+    for (const path of ["/api/inbox/update", "/api/inbox/update/snooze", "/api/inbox/update/check"]) {
+      const res = await post(server, path, { serverSession: "0".repeat(32) });
+      expect([path, res.status, (await res.json()).code]).toEqual([path, 409, "session_mismatch"]);
+    }
+    expect(launches).toHaveLength(0);
+    expect(readUpdateState(dataDir).snooze).toBeUndefined();
+  });
+
   test("a cross-site page cannot start it", async () => {
     const server = await start();
     await waitFor(() => health(server), (u) => u !== null);

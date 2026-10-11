@@ -86,6 +86,8 @@ export function worldEnv(w: InboxWorld): Record<string, string> {
     PLANNOTATOR_RELAY_URL: process.env.PLANNOTATOR_RELAY_URL || "http://127.0.0.1:9",
     // Never GitHub: a release build's daily update check refuses at once.
     PLANNOTATOR_UPDATE_API_URL: process.env.PLANNOTATOR_UPDATE_API_URL || "http://127.0.0.1:9/releases/latest",
+    // Never the real install script: Update now in a world fails fast unless a test serves one.
+    PLANNOTATOR_INSTALL_SCRIPT_URL: process.env.PLANNOTATOR_INSTALL_SCRIPT_URL || "http://127.0.0.1:9/install.sh",
     // Phones are hidden until the iPhone app ships; only the phone proofs turn them on.
     PLANNOTATOR_INBOX_PHONES: w.phones ? "1" : "0",
     TMPDIR: tmpdir(),
