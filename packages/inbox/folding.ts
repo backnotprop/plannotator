@@ -133,7 +133,8 @@ const ANSWERS_HEADING_LINE = new RegExp(`^#{1,6}\\s+${QUESTION_ANSWERS_HEADING}\
 
 /**
  * A person's reply without what the store wrote around the person's words
- * (core's `composeInboxReplyBody`): the leading "Answered N questions." and
+ * (core's `composeInboxReplyBody`): the leading "Answered N questions." / "Skipped N questions." /
+ * "Answered N questions, skipped M." and
  * everything from the "Answers to your questions" heading on (the answers,
  * then the annotations' feedback).
  */
@@ -141,7 +142,7 @@ export function replyWords(body: string): string {
   const lines = body.split(/\r?\n/);
   const at = lines.findIndex((line) => ANSWERS_HEADING_LINE.test(line.trim()));
   const kept = (at >= 0 ? lines.slice(0, at) : lines).join('\n');
-  return kept.replace(/^\s*Answered \d+ questions?\.\s*/, '');
+  return kept.replace(/^\s*(?:Answered \d+ questions?(?:, skipped \d+)?|Skipped \d+ questions?)\.\s*/, '');
 }
 
 /**

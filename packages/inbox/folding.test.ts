@@ -107,3 +107,9 @@ test('a long prompt is cut at a word near 40 characters, so the answer after it 
   expect(snippet.parts[0]!.full).toBe('Which of the three options in the search table should the docs site use for its first release, given the deploy cost');
   expect(cutAtWord('short', 40)).toBe('short');
 });
+
+test("a reply of skips or of answers and skips: the store's first line is dropped too", () => {
+  expect(replyWords('Skipped 3 questions.\n\nRedo the design.')).toBe('Redo the design.');
+  expect(replyWords('Answered 1 question, skipped 2.\n\nRedo the design.')).toBe('Redo the design.');
+  expect(replyWords('Skipped 1 question.')).toBe('');
+});
