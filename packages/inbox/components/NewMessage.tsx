@@ -14,7 +14,7 @@ import { HostMark, Icon } from '../icons';
  */
 
 /** The hosts whose Plannotator connection can wake a session (the mod, the extension, the plugin). */
-export const CONNECTED_HOSTS = new Set(['claude-code', 'claude', 'pi', 'opencode']);
+const CONNECTED_HOSTS = new Set(['claude-code', 'claude', 'pi', 'opencode']);
 /** How often the open thread re-reads its project's live sessions, so the button greys when none is left. */
 const REFRESH_MS = 10_000;
 const COUNT_WORDS = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];

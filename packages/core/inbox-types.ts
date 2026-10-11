@@ -247,6 +247,14 @@ export interface InboxMessage {
    */
   base_path?: string | null;
   /**
+   * On an agent's message: it was sent through a connection that wakes its
+   * session with the person's reply (the Claude Code mod, Pi, OpenCode 2;
+   * `INBOX_WAKES_META_KEY`). Only such a session can be said to have ended
+   * when it stops polling; an MCP-only agent or OpenCode 1 never polls, so
+   * the window never calls it ended. Absent otherwise and on older records.
+   */
+  wakes?: boolean;
+  /**
    * On an agent's message: the earlier questions it said it supersedes
    * (send_message's `supersedes`, as sent: `<message id>` for every open
    * question of that message, or `<message id>/<key>` for one). The question

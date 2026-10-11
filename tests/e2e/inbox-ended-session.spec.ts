@@ -162,7 +162,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   });
   const ledger = scratchProject(join(root, 'src'), 'ledger');
   const pi = await SimAgent.connect({ binary, env, name: 'Pi', host: 'pi' });
-  const sent = await pi.send({ project_path: ledger, subject: 'Retry policy for the nightly ledger sync', body: QUESTION });
+  // Sent as a waking connection sends (the Inbox records `wakes`): only such a session is ever called ended.
+  const sent = await pi.send({ project_path: ledger, subject: 'Retry policy for the nightly ledger sync', body: QUESTION }, { wakes: true });
   world = { root, dataDir, url, ledger, pi, context, page, errors, threadId: sent.thread_id as string, asker: '', connections: [] };
   const [first] = await threadMessages();
   world.asker = first!.author.session!;
@@ -206,7 +207,10 @@ test('the asking session stopped and another is live: the thread says so, Send a
   const box = pane.getByRole('textbox', { name: 'Reply to Pi' });
   const words = 'Go with backoff, but cap the total wait at 10 minutes so it finishes before the 2 AM export.';
   await box.fill(words);
-  await expect(box).toHaveAttribute('aria-describedby', (await note.getAttribute('id'))!);
+  // The note sits in one always-mounted status region, which describes the box.
+  const region = pane.locator('[data-asker-note]');
+  await expect(region).toHaveAttribute('role', 'status');
+  await expect(box).toHaveAttribute('aria-describedby', (await region.getAttribute('id'))!);
   await shot('1-ended');
 
   // Send does not send: the choice, the first live session selected and focused.
@@ -221,6 +225,15 @@ test('the asking session stopped and another is live: the thread says so, Send a
   await expect(box).toHaveValue(words);
   await shot('2-choose');
   expect((await threadMessages()).filter((m) => m.author.kind === 'person')).toHaveLength(0);
+
+  // Esc with focus on a button of the choice goes back to the reply; the thread stays open.
+  await primary.focus();
+  await page.keyboard.press('Escape');
+  await expect(choice).toHaveCount(0);
+  await expect(pane.getByRole('heading', { name: 'Retry policy for the nightly ledger sync' })).toBeVisible();
+  await expect(box).toBeFocused();
+  await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(taking).toBeFocused();
 
   // Arrow keys move the selection and the button follows; Esc goes back with the draft and its choice.
   await page.keyboard.press('ArrowDown');
@@ -259,11 +272,11 @@ test('nothing live: the note says the reply will wait, Send sends at once, and t
   world.connections = [];
   // The asking session asks again in the thread (it is still the ended one).
   const messages = await threadMessages();
-  await world.pi.send({ project_path: world.ledger, reply_to: messages.at(-1)!.id, body: 'One more: should a failed retry page on-call at night?' });
+  await world.pi.send({ project_path: world.ledger, reply_to: messages.at(-1)!.id, body: 'One more: should a failed retry page on-call at night?' }, { wakes: true });
   const pane = page.locator('section.ib-pane');
   const note = pane.locator('[data-asker-ended="none-live"]');
-  // The second session leaves the live list 30 s after its last poll.
-  await expect(note).toBeVisible({ timeout: 60_000 });
+  // The send itself is presence (an MCP call naming the session): ended again 60 s after it.
+  await expect(note).toBeVisible({ timeout: 100_000 });
   await expect(note).toHaveText('The Pi session that asked has ended, and no agent is running in ledger now. Your reply will wait here until an agent reads this thread.');
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
   await pane.getByRole('textbox', { name: 'Reply to Pi' }).fill('Only on the second failure.');

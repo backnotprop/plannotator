@@ -120,6 +120,13 @@ export interface InboxSendInput {
    * (`invalid_supersedes`).
    */
   supersedes?: readonly string[] | null;
+  /**
+   * The send came through a connection that wakes its session with the
+   * person's reply (the Claude Code mod, Pi, OpenCode 2): kept on the message
+   * (`InboxMessage.wakes`), the only evidence that the asking session can be
+   * told to have ended when it stops polling.
+   */
+  wakes?: boolean;
 }
 
 export interface InboxSendResult {
@@ -922,6 +929,7 @@ export class InboxStore {
         : {}),
       ...(input.guide ? { guide: input.guide } : {}),
       ...(input.base_path ? { base_path: input.base_path } : {}),
+      ...(input.wakes === true ? { wakes: true } : {}),
     };
     this.appendMessage(message, at);
     for (const question of parsed) {
@@ -1186,10 +1194,12 @@ export class InboxStore {
         }
       }
     }
+    const message = this.targetMessage(messageId);
+    // After the message's own refusals (not found, resolved), so a gone
+    // session is only ever the reason when it is the reason.
     if (input.to === null) {
       throw new InboxError("session_not_live", "That session is not live any more: the reply was not sent. Pick another session, or leave it for the next agent.");
     }
-    const message = this.targetMessage(messageId);
     const entries = input.questions ?? [];
     if (!Array.isArray(entries)) throw new InboxError("validation_error", "questions: must be a list.", { field: "questions" });
     const words = typeof input.words === "string" ? input.words : "";

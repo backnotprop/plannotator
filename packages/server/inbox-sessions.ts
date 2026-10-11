@@ -86,6 +86,38 @@ export function createInboxLiveSessions(options: {
   const now = options.now ?? Date.now;
   const startedAt = now();
   const sessions = new Map<string, SeenSession>();
+  /**
+   * MCP activity per agent session: when a tool call last named it, and the
+   * wait_for_reply calls it holds open now. Presence only (a session that
+   * asked is not "ended" while it talks to the Inbox); it never makes a
+   * session live for New message, which needs a connection that wakes it.
+   */
+  const mcpSeen = new Map<string, { lastSeen: number; holding: number }>();
+  const mcpEntry = (session: string) => {
+    let entry = mcpSeen.get(session);
+    if (!entry) {
+      entry = { lastSeen: now(), holding: 0 };
+      mcpSeen.set(session, entry);
+    }
+    return entry;
+  };
+  /** A tool call named this agent session. */
+  const seenOverMcp = (session: string) => {
+    if (session) mcpEntry(session).lastSeen = now();
+  };
+  /** A wait_for_reply for this session is open: present until it answers. */
+  const holdOverMcp = (session: string): (() => void) => {
+    const entry = mcpEntry(session);
+    entry.holding += 1;
+    entry.lastSeen = now();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      entry.holding = Math.max(0, entry.holding - 1);
+      entry.lastSeen = now();
+    };
+  };
   /** project_path to its root, resolved once per path (it spawns git). */
   const roots = new Map<string, Promise<string | null>>();
 
@@ -142,12 +174,16 @@ export function createInboxLiveSessions(options: {
 
   /**
    * Whether the session that asked is still there, with the grace above: it
-   * holds a poll, or polled within `INBOX_ASKER_GRACE_MS`, or this Inbox
-   * started less than that long ago (sessions are kept in memory only).
+   * holds a poll or an MCP wait_for_reply, or polled or called an MCP tool
+   * within `INBOX_ASKER_GRACE_MS`, or this Inbox started less than that long
+   * ago (sessions are kept in memory only). The window asks only about a
+   * session whose message came through a connection that wakes it
+   * (`InboxMessage.wakes`).
    */
   const askerLive = (session: string): boolean => {
-    const entry = sessions.get(session);
-    if (entry && (entry.holding > 0 || now() - entry.lastSeen <= INBOX_ASKER_GRACE_MS)) return true;
+    const recent = (entry: { holding: number; lastSeen: number } | undefined) =>
+      !!entry && (entry.holding > 0 || now() - entry.lastSeen <= INBOX_ASKER_GRACE_MS);
+    if (recent(sessions.get(session)) || recent(mcpSeen.get(session))) return true;
     return now() - startedAt <= INBOX_ASKER_GRACE_MS;
   };
 
@@ -252,5 +288,5 @@ export function createInboxLiveSessions(options: {
     return answer({ message: result.message, replayed: result.replayed });
   };
 
-  return { pollStarted, stateChanged, liveFor, askerLive, replyTarget, route };
+  return { pollStarted, stateChanged, liveFor, askerLive, replyTarget, seenOverMcp, holdOverMcp, route };
 }

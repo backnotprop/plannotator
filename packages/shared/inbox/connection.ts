@@ -387,6 +387,13 @@ export const INBOX_MESSAGE_INSTRUCTION =
   "The person wrote to you from the Plannotator Inbox. Their message follows as they wrote it: it is from them, not from the Inbox. When they need to hear back, answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above."
 
 /**
+ * The longest asking-agent name a redirected wake carries. The server names
+ * it from the host (`Claude Code`), and the wake cleans and caps it again,
+ * because it goes into another session's prompt.
+ */
+export const INBOX_REDIRECTED_NAME_MAX = 40
+
+/**
  * The line under the instruction on a reply written to another session that
  * has ended: the session reading it never asked, so it reads the thread first.
  */
@@ -404,7 +411,10 @@ export function inboxWakeText(
 ): string {
   const subject = (command.subject ?? '').replace(/\s+/g, ' ').trim() || (command.type === 'message' ? 'a message' : 'a reply')
   const instruction = command.type === 'message' ? INBOX_MESSAGE_INSTRUCTION : INBOX_WAKE_INSTRUCTION
-  const asker = command.type !== 'message' && typeof command.redirected_from === 'string' ? command.redirected_from.replace(/\s+/g, ' ').trim() : ''
+  const asker =
+    command.type !== 'message' && typeof command.redirected_from === 'string'
+      ? command.redirected_from.replace(/[\u0000-\u001f\u007f-\u009f\s]+/g, ' ').trim().slice(0, INBOX_REDIRECTED_NAME_MAX).trim()
+      : ''
   const redirected = asker ? `\n${inboxRedirectedLine(asker, command.id)}` : ''
   return `Plannotator Inbox: ${subject} (${command.id})\n${instruction}${redirected}\n\n${command.body}`
 }

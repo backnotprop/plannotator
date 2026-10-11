@@ -3,7 +3,7 @@ import type { InboxMessageWire } from '@plannotator/core/inbox-types';
 import type { LiveSession, LiveSessionsModel } from '../api';
 import { clockTime } from '../format';
 import { HostMark, Icon } from '../icons';
-import { CONNECTED_HOSTS, hostName, sessionWords } from './NewMessage';
+import { hostName, sessionWords } from './NewMessage';
 
 /**
  * Replying when the session that asked has ended (design record "replying
@@ -55,13 +55,21 @@ export const CLOSED_ROUTE: RouteState = { open: false, selected: null, rows: [],
 const FIRST_ROWS = 5;
 
 /**
+ * Whether the asking message is evidence that its session can end: it came
+ * through a connection that wakes its session (`wakes`, the Claude Code mod,
+ * Pi, OpenCode 2). An MCP-only agent or OpenCode 1 never polls, and may be
+ * waiting in wait_for_reply right now, so it is never called ended.
+ */
+export const askerCanEnd = (asking: AskingSession | null): boolean => asking?.message.wakes === true;
+
+/**
  * Whether the session that asked has ended, as the window can know it: its
- * host's sessions poll the Inbox (only those are ever live), and the Inbox
- * says it has not heard from it (with the server's 60 s grace).
+ * message came through a waking connection, and the Inbox has not heard from
+ * it since (no poll, no MCP call, no open wait; with the server's 60 s grace).
  */
 export function askerHasEnded(asking: AskingSession | null, live: LiveSessionsModel | null): boolean {
-  if (!asking || !live?.asker || live.asker.session !== asking.session) return false;
-  return CONNECTED_HOSTS.has(asking.host) && !live.asker.live;
+  if (!asking || !askerCanEnd(asking) || !live?.asker || live.asker.session !== asking.session) return false;
+  return !live.asker.live;
 }
 
 /** The project's live sessions other than the one that asked. */
@@ -113,10 +121,10 @@ export function SessionEndedMark() {
   );
 }
 
-/** The note at the top of the foot, before the person replies (two variants). */
-export function AskerEndedNote({ id, asking, project, anyLive }: { id: string; asking: AskingSession; project: string; anyLive: boolean }) {
+/** The note at the top of the foot, before the person replies (two variants); the host's always-mounted status region holds it. */
+export function AskerEndedNote({ asking, project, anyLive }: { asking: AskingSession; project: string; anyLive: boolean }) {
   return (
-    <p className="ib-sessnote" role="status" id={id} data-asker-ended={anyLive ? 'live' : 'none-live'}>
+    <p className="ib-sessnote" data-asker-ended={anyLive ? 'live' : 'none-live'}>
       <Icon name="info" size={15} />
       {anyLive ? (
         <span>
@@ -164,21 +172,12 @@ export function RouteChoice({
     if (!state.open) return;
     formRef.current?.querySelector<HTMLInputElement>('input[type=radio]:checked')?.focus();
   }, [state.open, state.focus]);
-  // Esc goes back to the reply, wherever focus is in the pane.
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
-      event.preventDefault();
-      onBack();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onBack]);
 
-  const visible = state.showAll ? state.rows : state.rows.slice(0, FIRST_ROWS);
-  // The selected row stays in view even past the first five.
-  const selectedRow = state.rows.find((row) => row.live.session === state.selected);
-  if (selectedRow && !visible.includes(selectedRow)) visible.push(selectedRow);
+  // The first five rows, or up to the selected one when it is further down,
+  // so it stays in view and in its place when "Show N more" opens the rest.
+  const selectedIndex = state.rows.findIndex((row) => row.live.session === state.selected);
+  const visible = state.showAll ? state.rows : state.rows.slice(0, Math.max(FIRST_ROWS, selectedIndex + 1));
+  const selectedRow = selectedIndex >= 0 ? state.rows[selectedIndex] : undefined;
   const hidden = state.rows.length - visible.length;
   const target = state.selected === LEAVE ? null : (selectedRow?.live ?? null);
   const primary = target ? `Send to ${hostName(target.host)}` : 'Leave it for the next agent';
@@ -197,6 +196,14 @@ export function RouteChoice({
       className="ib-routeform"
       ref={formRef}
       data-route-choice=""
+      // Esc goes back to the reply, from any control in the choice. The
+      // Escape is marked used, so the window's own Esc (close the thread)
+      // leaves it alone.
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        onBack();
+      }}
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit();
@@ -272,13 +279,22 @@ export function RouteChoice({
   );
 }
 
-/** The race: the chosen session ended before the reply went. The row greys, the next live row is selected, and the error says so. */
-export function routeRace(state: RouteState, ended: string): RouteState {
+/**
+ * The race: the chosen session ended before the reply went. The row greys,
+ * the next live row is selected, and the error says so. A Send that answers
+ * several messages posts one reply each; when some went before the refusal,
+ * the error says how many, never "Nothing was sent".
+ */
+export function routeRace(state: RouteState, ended: string, sent: { went: number; total: number } = { went: 0, total: 1 }): RouteState {
   const rows = state.rows.map((row) => (row.live.session === ended ? { ...row, ended: true } : row));
   const gone = state.rows.find((row) => row.live.session === ended);
   const next = rows.find((row) => !row.ended) ?? null;
   const name = gone ? hostName(gone.live.host) : 'That';
-  const error = `That ${name} session ended before your reply went. Nothing was sent. ${next ? `${hostName(next.live.host)} is selected now.` : 'Leave it for the next agent, or start a session.'}`;
+  const what =
+    sent.went > 0
+      ? `That ${name} session ended before all of your reply went. Your answers to ${sent.went} of ${sent.total} messages were sent; the rest was not.`
+      : `That ${name} session ended before your reply went. Nothing was sent.`;
+  const error = `${what} ${next ? `${hostName(next.live.host)} is selected now.` : 'Leave it for the next agent, or start a session.'}`;
   return { ...state, rows, selected: next?.live.session ?? LEAVE, error, focus: state.focus + 1 };
 }
 

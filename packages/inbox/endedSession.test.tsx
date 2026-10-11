@@ -37,7 +37,7 @@ const live = (session: string, host: string, extra: Record<string, unknown> = {}
   ...extra,
 });
 
-function questions(picked: boolean): InboxQuestion[] {
+function questions(picked: boolean, messageId = M1): InboxQuestion[] {
   return parseInboxQuestionBlocks(BODY).map((q) => ({
     key: q.key,
     position: q.position,
@@ -60,14 +60,15 @@ function questions(picked: boolean): InboxQuestion[] {
     picked_at: picked ? '2026-10-11T10:51:00.000Z' : null,
     sent_reply_id: null,
     decision_id: null,
-    message_id: M1,
+    message_id: messageId,
     decision_recording: false,
     decision_draft: null,
     superseded_by: null,
   }));
 }
 
-function asking(picked = false): InboxMessageWire {
+/** The asking message; sent through a waking connection (`wakes`) unless said otherwise. */
+function asking(picked = false, wakes = true): InboxMessageWire {
   return {
     id: M1,
     project_id: PROJECT.id,
@@ -80,6 +81,7 @@ function asking(picked = false): InboxMessageWire {
     resolved_at: null,
     idempotency_key: null,
     questions: questions(picked),
+    ...(wakes ? { wakes: true } : {}),
   };
 }
 
@@ -200,10 +202,28 @@ test.skipIf(!hasDom)('ended, live sessions exist: "session ended" on the asking 
   const text = await writeReply(el);
   const note = el.querySelector('[data-asker-ended]') as HTMLElement;
   expect(note.getAttribute('data-asker-ended')).toBe('live');
-  expect(note.getAttribute('role')).toBe('status');
   expect(note.textContent).toContain('The Claude Code session that asked has ended.');
   expect(note.textContent).toContain('pick a live session in ledger');
-  expect(text.getAttribute('aria-describedby')).toBe(note.id);
+  // The note lives in one always-mounted status region, which describes the box.
+  const region = el.querySelector('[data-asker-note]') as HTMLElement;
+  expect(region.getAttribute('role')).toBe('status');
+  expect(region.contains(note)).toBe(true);
+  expect(text.getAttribute('aria-describedby')).toBe(region.id);
+});
+
+test.skipIf(!hasDom)('a session with no evidence it wakes (MCP-only, OpenCode 1) is never "ended": no mark, no note, Send sends to it with no choice', async () => {
+  sessions = { sessions: [live('ses_other', 'claude-code')], asker: { session: 'ses_asker', live: false } };
+  const el = await render(threadOf(asking(false, false)));
+  expect(el.querySelector('[data-session-ended]')).toBeNull();
+  await writeReply(el);
+  expect(el.querySelector('[data-asker-ended]')).toBeNull();
+  // The status region stays mounted, empty.
+  expect(el.querySelector('[data-asker-note]')?.textContent).toBe('');
+  act(() => button(el, 'Send').click());
+  await settle();
+  expect(el.querySelector('[data-route-choice]')).toBeNull();
+  expect(replies()).toHaveLength(1);
+  expect(replies()[0]!.body.to).toBeUndefined();
 });
 
 test.skipIf(!hasDom)('the session that asked is live: no note, no mark, and Send sends to it with no choice', async () => {
@@ -271,6 +291,16 @@ test.skipIf(!hasDom)('keyboard: Esc goes back with the text and focus at its end
   await settle();
   expect(radio(el, 'leave').checked).toBe(true);
   expect(document.activeElement).toBe(radio(el, 'leave'));
+  // Esc with focus on a button of the choice goes back too, and marks the Escape used (the window's own Esc closes the thread otherwise).
+  const primary = el.querySelector('[data-route-send]') as HTMLButtonElement;
+  primary.focus();
+  const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+  act(() => void primary.dispatchEvent(esc));
+  await settle();
+  expect(esc.defaultPrevented).toBe(true);
+  expect(el.querySelector('[data-route-choice]')).toBeNull();
+  key(el.querySelector('textarea') as HTMLTextAreaElement, { key: 'Enter', ctrlKey: true });
+  await settle();
   // Back to the reply does the same as Esc.
   act(() => button(el, 'Back to the reply').click());
   await settle();
@@ -377,4 +407,56 @@ test.skipIf(!hasDom)('delivered to another session: "(another session)" only whe
   );
   expect(other.querySelector(`[data-message-article="${R1}"] .ib-to`)?.textContent).toBe('to Pi');
   expect(other.querySelector('[data-delivery]')?.textContent).toBe(`Delivered to Pi, ${time}`);
+});
+
+test.skipIf(!hasDom)('a Send answering two sessions: `to` rides only the ended asker\'s message; when it is refused after the other went, the error says what went', async () => {
+  const M0 = 'msg_01M4H5AAAAAAAAAAAAAAAAAAAA';
+  const other: InboxMessageWire = {
+    ...asking(true),
+    id: M0,
+    author: { kind: 'agent', host: 'pi', session: 'ses_pi_asker', name: null },
+    created_at: '2026-10-11T10:30:00.000Z',
+    questions: questions(true, M0),
+  };
+  const mine: InboxMessageWire = { ...asking(true), reply_to: M0 };
+  sessions = { sessions: [live('ses_other', 'claude-code'), live('ses_pi', 'pi')], asker: { session: 'ses_asker', live: false } };
+  replyAnswer = () =>
+    posted.at(-1)!.path.includes(M1)
+      ? Response.json({ error: 'That session is not live any more.', code: 'session_not_live' }, { status: 409 })
+      : Response.json({ reply: {}, questions: [], replayed: false, decisions_refused: [] });
+  const el = await render({ ...threadOf(other, mine), thread_id: M0 });
+  act(() => button(el, 'Send').click());
+  await settle();
+  act(() => (el.querySelector('[data-route-send]') as HTMLButtonElement).click());
+  await settle();
+  await settle();
+  expect(replies().map((r) => [r.path.includes(M0) ? 'other' : 'asker', r.body.to ?? null])).toEqual([
+    ['other', null],
+    ['asker', { host: 'claude-code', session: 'ses_other' }],
+  ]);
+  expect(el.querySelector('.ib-route-error')?.textContent).toBe(
+    'That Claude Code session ended before all of your reply went. Your answers to 1 of 2 messages were sent; the rest was not. Pi is selected now.',
+  );
+});
+
+test.skipIf(!hasDom)('"Show N more": a selected row past the first five shows in its place, and stays there when the rest opens', async () => {
+  const { RouteChoice, CLOSED_ROUTE } = await import('./components/ReplyRoute');
+  const rows = Array.from({ length: 8 }, (_, i) => ({ live: live(`ses_${i}`, 'pi'), ended: false, asker: false }));
+  const state = { ...CLOSED_ROUTE, open: true, rows, selected: 'ses_6' };
+  const asker = { message: asking(), session: 'ses_asker', host: 'claude-code', name: 'Claude Code' };
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  const draw = (showAll: boolean) =>
+    act(() => {
+      root ??= createRoot(host!);
+      root.render(
+        <RouteChoice name="route-t" asking={asker} project="ledger" state={{ ...state, showAll }} sending={false} onSelect={() => {}} onSubmit={() => {}} onBack={() => {}} onShowAll={() => {}} />,
+      );
+    });
+  const order = () => [...host!.querySelectorAll('[data-route-session]')].map((n) => n.getAttribute('data-route-session'));
+  draw(false);
+  expect(order()).toEqual(['ses_0', 'ses_1', 'ses_2', 'ses_3', 'ses_4', 'ses_5', 'ses_6', 'leave']);
+  expect(button(host!, 'Show 1 more')).toBeTruthy();
+  draw(true);
+  expect(order()).toEqual(['ses_0', 'ses_1', 'ses_2', 'ses_3', 'ses_4', 'ses_5', 'ses_6', 'ses_7', 'leave']);
 });

@@ -401,6 +401,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         resolveProject,
         recordAttachments: (paths, project, base) =>
           recordInboxAttachments(store.dir, paths, { base, at: new Date().toISOString() }),
+        // An open wait_for_reply keeps its session present (never "ended").
+        presence: { seen: (session) => live.seenOverMcp(session), hold: (session) => live.holdOverMcp(session) },
       }),
     { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES },
   );
@@ -666,7 +668,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A reply the person sent to another session because the one that asked
     // had ended: the wake says so, naming the agent that asked.
     const asked = reply.to && reply.reply_to ? store.message(reply.reply_to) : null;
-    const redirected = asked && asked.author.kind === "agent" && asked.author.session !== reply.to!.session ? inboxAgentName(asked.author) : null;
+    // Named from the host (`Claude Code`), never from the name the agent gave
+    // itself: this line goes into another session's prompt.
+    const redirected =
+      asked && asked.author.kind === "agent" && asked.author.session !== reply.to!.session
+        ? asked.author.host
+          ? inboxAgentName({ kind: "agent", host: asked.author.host, name: null })
+          : "agent"
+        : null;
     return {
       type: reply.to && !reply.reply_to ? "message" : "reply",
       id: reply.id,
@@ -740,6 +749,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return json({ ok: true, delivery: reply.delivery });
   };
 
+  /** The agent sessions a `/mcp` POST's tool calls name (a batch included), as MCP presence. */
+  const noteMcpPresence = async (req: Request): Promise<void> => {
+    try {
+      const body = (await req.json()) as unknown;
+      for (const call of Array.isArray(body) ? body : [body]) {
+        const args = (call as { method?: unknown; params?: { arguments?: { agent_session?: unknown } } } | null)?.params?.arguments;
+        if ((call as { method?: unknown } | null)?.method !== "tools/call" || typeof args?.agent_session !== "string") continue;
+        live.seenOverMcp(args.agent_session.trim());
+      }
+    } catch {
+      // Not JSON: the MCP handler answers it.
+    }
+  };
+
   // ── New message (step 8): the live sessions and the window's two routes (packages/server/inbox-sessions.ts) ──
   const live = createInboxLiveSessions({
     store,
@@ -806,6 +829,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (origin !== null) {
         return json({ error: "Browser requests are not accepted on /mcp.", code: "origin_not_allowed" }, 403);
       }
+      // A tool call naming an agent_session is presence: that session is
+      // not "ended" while it talks to the Inbox, connection or not.
+      if (req.method === "POST") void noteMcpPresence(req.clone());
       return mcp.fetch(req);
     }
 
@@ -997,8 +1023,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             // The session that asked has ended and the person picked another
             // live session to take the reply: checked here as New message
             // checks its session (null: not live, 409 and nothing written).
+            // An unknown message is the store's 404, never "not live".
             const asked = body.to === undefined ? undefined : store.message(messageId);
-            const to = body.to === undefined ? undefined : asked ? live.replyTarget(asked.thread_id, body.to) : null;
+            const to = body.to === undefined || !asked ? undefined : live.replyTarget(asked.thread_id, body.to);
             const result = store.sendReply(messageId, {
               ...(to === undefined ? {} : { to }),
               words: typeof body.words === "string" ? body.words : undefined,
