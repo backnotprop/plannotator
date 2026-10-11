@@ -9,7 +9,7 @@ A device holds at most one push token: `PUT .../devices/:dev/apns` (iPhone) or `
 - APNs (`src/apns.ts`): HTTP/2 over a `connect()` TLS socket (`src/apns-h2.ts`), an ES256 provider token signed with the APNs key.
 - FCM (`src/fcm.ts`): HTTP v1 `POST https://fcm.googleapis.com/v1/projects/<project>/messages:send` with plain `fetch`, the body `{ "message": { "token", "data": { "e": "<envelope>" }, "android": { "priority": "high", "collapse_key": "<collapse_id>" } } }`. The OAuth access token is minted from the service account: a JWT signed RS256 with WebCrypto, exchanged at `oauth2.googleapis.com/token`, reused for 50 minutes. FCM's `UNREGISTERED` deletes the token (`fcm_gone`), as Apple's 410 does (`apns_gone`).
 
-With neither token a push answers `no_push_token`. Pushes are braked at 60 a minute per mailbox (`PUSH_LIMITER` in `wrangler.toml`; `429` with `Retry-After`).
+With neither token a push answers `no_push_token`. Pushes are not rate limited: a push needs the phone's push token, which only the app and the relay hold.
 
 The overrides `APNS_ORIGIN`, `FCM_ORIGIN` and `FCM_OAUTH_ORIGIN` exist only for the proof and are honored only when they name a loopback host (`127.0.0.1`, `localhost`, `[::1]`); any other value is ignored, logged once, and the production host is used.
 

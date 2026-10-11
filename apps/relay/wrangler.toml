@@ -48,16 +48,3 @@ namespace_id = "1002"
   limit = 20
   period = 60
 
-# The brake on pushes (POST /v1/mailboxes/:mbx/push, APNs and FCM alike),
-# keyed per mailbox and checked after the Inbox's bearer, so only a mailbox's
-# own Inbox spends its count: 60 a minute, far above one person's questions,
-# a ceiling on a runaway or stolen mailbox secret. Over it the mailbox answers
-# 429 with Retry-After: 60. Optional in the Env type: without this block
-# nothing is braked.
-[[ratelimits]]
-name = "PUSH_LIMITER"
-namespace_id = "1003"
-
-  [ratelimits.simple]
-  limit = 60
-  period = 60

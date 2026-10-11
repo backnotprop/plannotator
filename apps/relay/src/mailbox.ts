@@ -27,8 +27,6 @@ export interface Env {
   MAILBOX: DurableObjectNamespace<Mailbox>;
   /** Cloudflare's rate limiting binding on mailbox creation, the rule guides.show uses (wrangler.toml). Absent: no brake. */
   MAILBOX_CREATE_LIMITER?: RateLimit;
-  /** The same kind of binding on pushes, keyed per mailbox (wrangler.toml). Absent: no brake. */
-  PUSH_LIMITER?: RateLimit;
   /** The APNs key (.p8 text), its key id and the team id: Worker secrets. Without the key a push answers `no_apns_key`. */
   APNS_KEY?: string;
   APNS_KEY_ID?: string;
@@ -108,9 +106,6 @@ function bearer(req: Request): string | null {
 
 let missingKeyLogged = false;
 let missingFcmKeyLogged = false;
-
-/** The `simple.period` of the PUSH_LIMITER block in wrangler.toml, echoed as `Retry-After`. */
-const PUSH_PERIOD_SECONDS = 60;
 
 export class Mailbox extends DurableObject<Env> {
   private readonly sql: SqlStorage;
@@ -375,8 +370,6 @@ export class Mailbox extends DurableObject<Env> {
 
   /** `POST .../push` (7.30): one push to one device, to whichever token it holds; the envelope passed to Apple or Google and never kept. */
   private async push(req: Request): Promise<Response> {
-    const brake = await this.pushBraked();
-    if (brake) return brake;
     const input = await body(req);
     const deviceId = input?.device_id;
     const collapseId = input?.collapse_id;
@@ -416,24 +409,6 @@ export class Mailbox extends DurableObject<Env> {
       return json({ sent: false, reason: "apns_gone" });
     }
     return json({ error: `APNs answered ${result.status}${result.reason ? ` ${result.reason}` : ""}.`, code: "apns_failed", apns_status: result.status, apns_reason: result.reason }, 502);
-  }
-
-  /**
-   * The brake on pushes, per mailbox, whatever the token: the Inbox's bearer
-   * passed, so only the mailbox's own Inbox spends it. Open wherever it cannot
-   * resolve (no binding, a limiter that throws), as the creation brake is.
-   */
-  private async pushBraked(): Promise<Response | null> {
-    const limiter = this.env.PUSH_LIMITER;
-    if (!limiter) return null;
-    try {
-      if ((await limiter.limit({ key: this.ctx.id.toString() })).success) return null;
-    } catch (error) {
-      console.log("relay: push rate limiter failed, allowing the push", error instanceof Error ? error.message : String(error));
-      return null;
-    }
-    console.log("relay: push braked");
-    return json({ error: "too many requests", code: "too_many_requests" }, 429, { "Retry-After": String(PUSH_PERIOD_SECONDS) });
   }
 
   /** The push to an FCM token (section 10): `UNREGISTERED` deletes the token, as Apple's 410 does. */

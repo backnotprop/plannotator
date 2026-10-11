@@ -23,7 +23,7 @@
  *
  * Then a second relay with no APNs key and no FCM service account (pushes
  * answer `no_apns_key`, `no_fcm_key`, or `no_push_token` with neither token),
- * where the token routes, `hello`'s flags, the push brake and a mailbox made
+ * where the token routes, `hello`'s flags and a mailbox made
  * under R2's schema are checked; then FCM (R3,
  * section 10) on its own relay and Inbox, an Android phone paired, with
  * Google's two hosts played locally (oauth2.googleapis.com checks the RS256
@@ -987,20 +987,17 @@ describe("the carriage: a phone reads and answers the Inbox through the relay al
 describe("a relay without the APNs key or an FCM service account", () => {
   let relay: Relay;
   const tokenSecret = "mailbox-secret-for-the-token-proof";
-  const brakeSecret = "mailbox-secret-for-the-push-brake-proof";
   let tokenMailbox = "";
-  let brakeMailbox = "";
 
   beforeAll(async () => {
     relay = await startRelay("no-key", {});
-    // Made before the brake test spends this minute's creations.
+    // Made before the creation-brake test spends this minute's creations.
     const make = async (secret: string) => {
       const made = await fetch(`${relay.url}/v1/mailboxes`, { method: "POST", body: JSON.stringify({ secret_sha256: sha256(secret) }) });
       expect(made.status).toBe(201);
       return ((await made.json()) as Json).mailbox_id as string;
     };
     tokenMailbox = await make(tokenSecret);
-    brakeMailbox = await make(brakeSecret);
   }, 90_000);
   afterAll(() => relay?.stop());
 
@@ -1081,31 +1078,6 @@ describe("a relay without the APNs key or an FCM service account", () => {
     expect((await at("DELETE", `/devices/${dev}`, undefined, secret)).status).toBe(204);
     expect(readMailbox(relay, mailbox_id).devices).toEqual([]);
   }, 30_000);
-
-  test("pushes are braked per mailbox after the Inbox's bearer: 60 a minute, then 429 with Retry-After", async () => {
-    const at = (method: string, path: string, body: unknown, bearer: string, mailbox = brakeMailbox) =>
-      fetch(`${relay.url}/v1/mailboxes/${mailbox}${path}`, { method, headers: { Authorization: `Bearer ${bearer}` }, body: JSON.stringify(body) });
-    const dev = "dev_00000000000000000000000002";
-    expect((await at("PUT", `/devices/${dev}`, { secret_sha256: sha256("phone"), cursor: 0 }, brakeSecret)).status).toBe(200);
-    // A wrong bearer spends nothing: it is refused before the brake.
-    for (let i = 0; i < 70; i++) expect((await at("POST", "/push", { device_id: dev, collapse_id: "c".repeat(64), ciphertext: "AAAAexample" }, "not-the-inbox")).status).toBe(401);
-    const statuses: number[] = [];
-    for (let i = 0; i < 61; i++) {
-      const push = await at("POST", "/push", { device_id: dev, collapse_id: "c".repeat(64), ciphertext: "AAAAexample" }, brakeSecret);
-      statuses.push(push.status);
-      if (push.status === 429) {
-        expect(push.headers.get("retry-after")).toBe("60");
-        expect(await push.json()).toEqual({ error: "too many requests", code: "too_many_requests" });
-      } else {
-        expect(await push.json()).toEqual({ sent: false, reason: "no_push_token" });
-      }
-    }
-    expect(statuses.slice(0, 60).every((status) => status === 200)).toBe(true);
-    expect(statuses[60]).toBe(429);
-    // Another mailbox's count is its own: its push reaches the mailbox (no such device there), not the brake.
-    const other = await at("POST", "/push", { device_id: "dev_00000000000000000000000009", collapse_id: "c".repeat(64), ciphertext: "AAAAexample" }, tokenSecret, tokenMailbox);
-    expect(other.status).toBe(404);
-  }, 60_000);
 
   test("a mailbox made before R3 (R2's devices table, no fcm_token) gains the column on its first request", async () => {
     const at = (method: string, path: string, body: unknown, bearer: string) =>

@@ -15,7 +15,7 @@
  *   GET    /v1/mailboxes/:mbx/devices/:dev/items        device bearer: the held down items after a number
  *   POST   /v1/mailboxes/:mbx/devices/:dev/ack          device bearer: delete them, by number or store cursor
  *   POST   /v1/mailboxes/:mbx/devices/:dev/commands     device bearer: a command up, held for the Inbox
- *   POST   /v1/mailboxes/:mbx/push                      Inbox bearer: one push to one phone, through APNs or FCM (braked per mailbox)
+ *   POST   /v1/mailboxes/:mbx/push                      Inbox bearer: one push to one phone, through APNs or FCM
  *   GET    /v1/mailboxes/:mbx/socket                    Inbox bearer, WebSocket: hello, carriage, command; item, applied
  *
  * Owner-deployed (`wrangler deploy` from this folder, never from CI); lanes
@@ -38,8 +38,7 @@ const MAILBOX_ID = /^mbx_[A-Za-z0-9_-]{22}$/;
  * The brake on mailbox creation, the anonymous write, as guides.show brakes
  * guide creation (apps/guides-show/worker/index.ts): keyed on the client's
  * IP, open wherever it cannot resolve (no binding, no CF-Connecting-IP, a
- * limiter that throws). The only other brake is on pushes, per mailbox,
- * inside the mailbox after the Inbox's bearer (`PUSH_LIMITER`).
+ * limiter that throws). Nothing else is braked.
  */
 async function braked(req: Request, limiter: RateLimit | undefined): Promise<Response | null> {
   if (!limiter) return null;
