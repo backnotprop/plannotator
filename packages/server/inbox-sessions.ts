@@ -22,6 +22,15 @@
  *        the person's message, addressed to that session while it is live
  *        (409 `session_not_live` otherwise, nothing written). Its connection
  *        is handed it on its next poll and delivers it like a reply.
+ *
+ * Replying when the asking session has ended (design record "replying when
+ * the asking agent's session has ended", not in this repo): the sessions
+ * route also answers whether the session that asked (`?asker=<session>`) is
+ * still there (`asker: { session, live }`), with a grace of
+ * `INBOX_ASKER_GRACE_MS` so a short gap, or an Inbox that just started and
+ * has not heard from its sessions yet, never reads as ended. The reply route
+ * (packages/server/inbox.ts) takes `to: { host, session }` and checks it with
+ * `replyTarget`, as New message does.
  */
 
 import { homedir } from "node:os";
@@ -57,6 +66,13 @@ interface SeenSession {
   idleSince: number | null;
 }
 
+/**
+ * How long the session that asked may go without a poll before the window
+ * says it has ended: twice the live window, so a slept laptop or a slow poll
+ * does not show the note for a moment.
+ */
+export const INBOX_ASKER_GRACE_MS = 60_000;
+
 const iso = (ms: number) => new Date(ms).toISOString();
 const finiteMs = (value: unknown): number | null => (typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null);
 
@@ -68,6 +84,7 @@ export function createInboxLiveSessions(options: {
 }) {
   const { store, serverSession } = options;
   const now = options.now ?? Date.now;
+  const startedAt = now();
   const sessions = new Map<string, SeenSession>();
   /** project_path to its root, resolved once per path (it spawns git). */
   const roots = new Map<string, Promise<string | null>>();
@@ -123,6 +140,33 @@ export function createInboxLiveSessions(options: {
 
   const isLive = (entry: SeenSession) => entry.holding > 0 || now() - entry.lastSeen <= INBOX_SESSION_LIVE_MS;
 
+  /**
+   * Whether the session that asked is still there, with the grace above: it
+   * holds a poll, or polled within `INBOX_ASKER_GRACE_MS`, or this Inbox
+   * started less than that long ago (sessions are kept in memory only).
+   */
+  const askerLive = (session: string): boolean => {
+    const entry = sessions.get(session);
+    if (entry && (entry.holding > 0 || now() - entry.lastSeen <= INBOX_ASKER_GRACE_MS)) return true;
+    return now() - startedAt <= INBOX_ASKER_GRACE_MS;
+  };
+
+  /**
+   * The reply route's `to`: the live session of the thread's project it
+   * names (the host, when given, must match), or null when it is not live.
+   */
+  const replyTarget = (threadId: string, to: unknown): { host: string; session: string } | null => {
+    if (!to || typeof to !== "object" || Array.isArray(to)) {
+      throw new InboxError("validation_error", "to: { host, session } of a live session.", { field: "to" });
+    }
+    const { host, session } = to as Record<string, unknown>;
+    if (typeof session !== "string" || !session) throw new InboxError("validation_error", "to.session: the live session to send to.", { field: "to.session" });
+    if (host !== undefined && typeof host !== "string") throw new InboxError("validation_error", "to.host: a string.", { field: "to.host" });
+    const target = liveFor(threadId).sessions.find((candidate) => candidate.session === session) ?? null;
+    if (!target || (host !== undefined && target.host !== host)) return null;
+    return { host: target.host, session: target.session };
+  };
+
   /** The live sessions of a thread's project: its writers first (the latest writer first), then by start. */
   const liveFor = (threadId: string): { project: InboxProject; sessions: InboxLiveSession[] } => {
     const thread = store.thread(threadId);
@@ -175,7 +219,14 @@ export function createInboxLiveSessions(options: {
     if (sessionsMatch) {
       if (req.method !== "GET") return answer({ error: "Use GET." }, 405);
       const live = liveFor(sessionsMatch[1]!);
-      return answer({ serverSession, home: homedir(), project: live.project, sessions: live.sessions });
+      const asker = new URL(req.url).searchParams.get("asker");
+      return answer({
+        serverSession,
+        home: homedir(),
+        project: live.project,
+        sessions: live.sessions,
+        ...(asker ? { asker: { session: asker, live: askerLive(asker) } } : {}),
+      });
     }
     const messageMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/message$/.exec(path);
     if (!messageMatch) return null;
@@ -201,5 +252,5 @@ export function createInboxLiveSessions(options: {
     return answer({ message: result.message, replayed: result.replayed });
   };
 
-  return { pollStarted, stateChanged, liveFor, route };
+  return { pollStarted, stateChanged, liveFor, askerLive, replyTarget, route };
 }

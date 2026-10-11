@@ -14,7 +14,7 @@ import { HostMark, Icon } from '../icons';
  */
 
 /** The hosts whose Plannotator connection can wake a session (the mod, the extension, the plugin). */
-const CONNECTED_HOSTS = new Set(['claude-code', 'claude', 'pi', 'opencode']);
+export const CONNECTED_HOSTS = new Set(['claude-code', 'claude', 'pi', 'opencode']);
 /** How often the open thread re-reads its project's live sessions, so the button greys when none is left. */
 const REFRESH_MS = 10_000;
 const COUNT_WORDS = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
@@ -30,7 +30,7 @@ function pickerHeading(sessions: readonly LiveSession[], project: string): strin
 }
 
 /** "Wrote this thread. Idle since 10:05 AM." / "Working now; takes it when the turn ends." */
-function sessionWords(session: LiveSession): string {
+export function sessionWords(session: LiveSession): string {
   const parts: string[] = [];
   if (session.wrote_thread) parts.push('Wrote this thread.');
   if (session.busy === true) parts.push('Working now; takes it when the turn ends.');
@@ -41,18 +41,22 @@ function sessionWords(session: LiveSession): string {
 
 export type NewMessageMode = { kind: 'pick' } | { kind: 'none' } | { kind: 'compose'; target: LiveSession } | null;
 
-/** The project's live sessions, read when the thread opens, every few seconds while it stays open, and on demand. */
-export function useLiveSessions(threadId: string) {
+/**
+ * The project's live sessions, read when the thread opens, every few seconds
+ * while it stays open, and on demand. With `asker` (the session that asked,
+ * for a host whose sessions poll), also whether that session is still there.
+ */
+export function useLiveSessions(threadId: string, asker: string | null = null) {
   const [model, setModel] = useState<LiveSessionsModel | null>(null);
   const load = useCallback(async (): Promise<LiveSessionsModel | null> => {
     try {
-      const next = await inboxApi.sessions(threadId);
+      const next = await inboxApi.sessions(threadId, asker);
       setModel(next);
       return next;
     } catch {
       return null;
     }
-  }, [threadId]);
+  }, [threadId, asker]);
   useEffect(() => {
     setModel(null);
     void load();

@@ -233,8 +233,10 @@ export interface InboxMessage {
   /**
    * On a person's New message (plan step 8): the live agent session it is
    * addressed to. Such a message answers nothing (`reply_to` null) and is
-   * delivered to that session as a turn, like a reply. Absent on every other
-   * message and on records older than step 8.
+   * delivered to that session as a turn, like a reply. Also on a person's
+   * reply (`reply_to` set) when the session that asked had ended and the
+   * person chose another live session to take it: that session alone is
+   * handed it. Absent on every other message and on records older than step 8.
    */
   to?: InboxAddressee | null;
   /**

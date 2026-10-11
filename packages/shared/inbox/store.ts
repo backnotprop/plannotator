@@ -145,6 +145,14 @@ export interface InboxReplyInput {
   feedback?: string;
   /** The annotations that text carries: marked sent with the reply. */
   annotation_ids?: string[];
+  /**
+   * The person chose another live session to take this reply, because the
+   * session that asked has ended (the window's choice at Send). Absent: the
+   * reply goes to the asking session, as always. Null: a session was asked
+   * for but the server found it not live; nothing is written
+   * (`session_not_live`), except that a replay answers what it wrote.
+   */
+  to?: InboxAddressee | null;
 }
 
 export interface InboxReplyResult {
@@ -1178,6 +1186,9 @@ export class InboxStore {
         }
       }
     }
+    if (input.to === null) {
+      throw new InboxError("session_not_live", "That session is not live any more: the reply was not sent. Pick another session, or leave it for the next agent.");
+    }
     const message = this.targetMessage(messageId);
     const entries = input.questions ?? [];
     if (!Array.isArray(entries)) throw new InboxError("validation_error", "questions: must be a list.", { field: "questions" });
@@ -1236,6 +1247,8 @@ export class InboxStore {
       created_at: at,
       resolved_at: null,
       idempotency_key: key,
+      // Another live session takes it: handed only to that session, like a New message.
+      ...(input.to ? { to: { host: input.to.host, session: input.to.session } } : {}),
     };
     try {
       for (const record of updated) this.appendQuestion(record, at);
@@ -1683,8 +1696,8 @@ export class InboxStore {
 
   /**
    * The person's replies waiting for an agent connection's `session`: replies
-   * to a message that session sent, and New messages addressed to it (step
-   * 8; settled only by their delivery), not yet delivered, and not yet read by an
+   * to a message that session sent, and New messages and replies addressed to
+   * it (`to`; settled only by their delivery), not yet delivered, and not yet read by an
    * agent (wait_for_reply or read_thread; any agent's read counts, as for the
    * Sent band). Derived from the log, so a reply waits for its session across
    * Inbox restarts and is handed out again until it is delivered. Oldest first.
@@ -1694,8 +1707,9 @@ export class InboxStore {
     for (const message of this.messages.values()) {
       if (message.author.kind !== "person" || message.delivery || !this.isFor(message, session)) continue;
       const seq = this.messageSeq.get(message.id) ?? 0;
-      // A New message is settled only by its delivery to the session it names
-      // (its own wait_for_reply records one), never by another agent's read.
+      // A New message, or a reply the person sent to another session, is
+      // settled only by its delivery to the session it names (its own
+      // wait_for_reply records one), never by another agent's read.
       if (!message.to && (this.messages.get(message.thread_id)?.agent_checked_seq ?? 0) >= seq) continue;
       out.push({ message, seq });
     }
@@ -1723,7 +1737,8 @@ export class InboxStore {
 
   /**
    * Whether a person's message goes to `session`: a New message addressed to
-   * it (`to`), or a reply to a message it sent.
+   * it (`to`), a reply the person sent to it because the asking session had
+   * ended (`to` on a reply), or a reply to a message it sent.
    */
   private isFor(message: InboxMessage, session: string): boolean {
     if (message.to) return message.to.session === session;

@@ -44,6 +44,7 @@ import { timingSafeEqual } from "node:crypto";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import {
   INBOX_APP_ID,
+  inboxAgentName,
   isInboxId,
   type InboxHealth,
   type InboxLine,
@@ -661,15 +662,22 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // out again on every poll until it is delivered or an agent read it, and it
   // survives an Inbox restart.
   const threadPageUrl = (base: string, threadId: string) => `${base}#thread=${threadId}`;
-  const replyCommand = (reply: InboxMessage): InboxReplyCommand => ({
-    type: reply.to ? "message" : "reply",
-    id: reply.id,
-    thread_id: reply.thread_id,
-    reply_to: reply.reply_to,
-    subject: store.threadSubject(reply.thread_id),
-    body: reply.body,
-    url: threadPageUrl(baseUrl, reply.thread_id),
-  });
+  const replyCommand = (reply: InboxMessage): InboxReplyCommand => {
+    // A reply the person sent to another session because the one that asked
+    // had ended: the wake says so, naming the agent that asked.
+    const asked = reply.to && reply.reply_to ? store.message(reply.reply_to) : null;
+    const redirected = asked && asked.author.kind === "agent" && asked.author.session !== reply.to!.session ? inboxAgentName(asked.author) : null;
+    return {
+      type: reply.to && !reply.reply_to ? "message" : "reply",
+      id: reply.id,
+      thread_id: reply.thread_id,
+      reply_to: reply.reply_to,
+      subject: store.threadSubject(reply.thread_id),
+      body: reply.body,
+      url: threadPageUrl(baseUrl, reply.thread_id),
+      ...(redirected ? { redirected_from: redirected } : {}),
+    };
+  };
 
   const bridgeSession = (body: Record<string, unknown>): string => {
     const session = typeof body.session === "string" ? body.session.trim() : "";
@@ -986,7 +994,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             return json({ message_id: messageId, questions, reply: null });
           }
           case "reply": {
+            // The session that asked has ended and the person picked another
+            // live session to take the reply: checked here as New message
+            // checks its session (null: not live, 409 and nothing written).
+            const asked = body.to === undefined ? undefined : store.message(messageId);
+            const to = body.to === undefined ? undefined : asked ? live.replyTarget(asked.thread_id, body.to) : null;
             const result = store.sendReply(messageId, {
+              ...(to === undefined ? {} : { to }),
               words: typeof body.words === "string" ? body.words : undefined,
               questions: (body.questions as never) ?? [],
               idempotency_key: body.idempotency_key as string,
