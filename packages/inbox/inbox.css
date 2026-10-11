@@ -176,12 +176,22 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-row:hover, .ib-nrow:hover { background: color-mix(in oklch, var(--muted) 35%, transparent); }
 .ib-row .ib-p { font-weight: 400; font-size: 13px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ib-row.ib-u .ib-s { font-weight: 600; }
-.ib-key { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted-foreground); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; white-space: nowrap; flex: 0 1 auto; min-width: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
-/* The subject cell never spills into the count or past the row: the subject
-   text gives way first (its large shrink factor), then the thread chip
-   (.ib-key shrinks, keeping its ellipsis), and the cell clips the rest. */
-.ib-row .ib-subj { display: flex; align-items: center; gap: 9px; min-width: 0; overflow: hidden; }
-.ib-row .ib-s { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1000; }
+/* The thread chip: it can shrink to its border (flex), and its name keeps its
+   own 166px cap and ellipsis (the inner span), so the chip is as wide as before
+   until the line runs short. */
+.ib-key { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted-foreground); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; white-space: nowrap; display: inline-flex; flex: 0 1 auto; min-width: 0; }
+.ib-key > .ib-keyt { min-width: 0; max-width: 166px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A subject line (a wide row's subject cell, a two-line row's second line)
+   never spills: when it runs short the subject gives way first, but only down
+   to min(45%, 220px) or its own width, whichever is less (its width sets the
+   floor through the automatic minimum while flex-basis: content keeps its
+   natural size); then the chip shrinks; the line clips the rest. The guided
+   review mark keeps only its icon when the cell is narrow. */
+.ib-row .ib-subj { display: flex; align-items: center; gap: 9px; min-width: 0; overflow: hidden; container-type: inline-size; }
+.ib-row .ib-s, .ib-nrow .ib-l2 .ib-s { flex: 0 1000 content; width: min(45%, 220px); white-space: nowrap; }
+.ib-row .ib-s > .ib-st, .ib-nrow .ib-l2 .ib-s > .ib-st { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@container (max-width: 260px) { .ib-row .ib-att .ib-att-l { display: none; } }
+.ib-nrow .ib-att .ib-att-l { display: none; }
 .ib-row .ib-c { color: var(--muted-foreground); font-size: 13px; text-align: right; white-space: nowrap; }
 .ib-row .ib-t { color: var(--muted-foreground); font-size: 13px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ib-row.ib-sent .ib-p, .ib-row.ib-sent .ib-s { color: var(--muted-foreground); font-weight: 400; }
@@ -193,8 +203,8 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-nrow .ib-l1 .ib-c { margin-left: auto; }
 .ib-nrow .ib-l1 .ib-t { margin-left: 8px; }
 .ib-nrow .ib-l1 .ib-t.ib-alone { margin-left: auto; }
-.ib-nrow .ib-l2 { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13.5px; }
-.ib-nrow .ib-l2 .ib-s { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted-foreground); }
+.ib-nrow .ib-l2 { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13.5px; overflow: hidden; }
+.ib-nrow .ib-l2 .ib-s { color: var(--muted-foreground); }
 .ib-nrow.ib-u .ib-l2 .ib-s { color: var(--foreground); font-weight: 600; }
 .ib-nrow.ib-sel { background: color-mix(in oklch, var(--primary) 9%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--primary) 35%, transparent); border-radius: 6px; }
 .ib-nrow.ib-sent .ib-p, .ib-nrow.ib-sent .ib-l2 .ib-s { color: var(--muted-foreground); font-weight: 400; }

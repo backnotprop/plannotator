@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { agentName, questionCount, shortTime } from '../format';
 import { AuthorMark, Icon } from '../icons';
@@ -39,6 +39,60 @@ function countOf(row: InboxListRow): string {
 }
 
 /**
+ * The thread chip, the subject and the guided review mark, shared by both row
+ * shapes. When the line is short of room the subject gives way first, down to
+ * a floor (inbox.css), then the chip; the mark drops its label to its icon.
+ */
+function SubjectLine({ row }: { row: InboxListRow }) {
+  return (
+    <>
+      {row.thread_name && (
+        <span className="ib-key">
+          <span className="ib-keyt">{row.thread_name}</span>
+        </span>
+      )}
+      <span className="ib-s">
+        <span className="ib-st">{subjectOf(row)}</span>
+      </span>
+      {/* The record's 1.1: a thread that carries a guided review says so after its subject. */}
+      {row.guide && row.section !== 'sent' && (
+        <span className="ib-att" data-guide-mark="" role="img" aria-label="Guided review" title="Guided review">
+          <Icon name="book" size={13} />
+          <span className="ib-att-l">Guided review</span>
+        </span>
+      )}
+    </>
+  );
+}
+
+/**
+ * Below this list width the wide row of every project leaves its subject cell
+ * too little room (the project and badge columns are fixed at 130px and
+ * 104px), so the list draws the two-line rows instead.
+ */
+export const WIDE_ROWS_MIN_LIST_WIDTH = 900;
+
+/**
+ * Whether the list is narrower than `min`, read before paint and on every
+ * resize. Unmeasured (no layout, no ResizeObserver) reads as wide.
+ */
+function useNarrowerThan(min: number) {
+  const ref = useRef<HTMLElement>(null);
+  const [narrower, setNarrower] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const read = (width: number) => setNarrower(width > 0 && width < min);
+    read(el.getBoundingClientRect().width);
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => read(entries[0]?.contentRect.width ?? 0));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [min]);
+  return [ref, narrower] as const;
+}
+
+/**
  * One row of the wide list. With every project shown it is five columns:
  * project, badge, subject, count, time. In one project's list (`filtered`)
  * the project and badge columns are not rendered at all: the badge, when the
@@ -62,15 +116,7 @@ function WideRow({ row, filtered, onOpen }: { row: InboxListRow; filtered: boole
       <span className="ib-subj">
         {filtered && badgeEl}
         <AuthorMark author={row.author} />
-        {row.thread_name && <span className="ib-key">{row.thread_name}</span>}
-        <span className="ib-s">{subjectOf(row)}</span>
-        {/* The record's 1.1: a thread that carries a guided review says so after its subject. */}
-        {row.guide && !sent && (
-          <span className="ib-att" data-guide-mark="">
-            <Icon name="book" size={13} />
-            Guided review
-          </span>
-        )}
+        <SubjectLine row={row} />
       </span>
       <span className="ib-c">{countOf(row)}</span>
       <span className="ib-t">{shortTime(row.last_at)}</span>
@@ -98,8 +144,7 @@ function NarrowRow({ row, selected, filtered, onOpen }: { row: InboxListRow; sel
       <div className="ib-l2">
         {badge && <span className="ib-badge">{badge}</span>}
         <AuthorMark author={row.author} />
-        {row.thread_name && <span className="ib-key">{row.thread_name}</span>}
-        <span className="ib-s">{subjectOf(row)}</span>
+        <SubjectLine row={row} />
       </div>
     </button>
   );
@@ -107,9 +152,13 @@ function NarrowRow({ row, selected, filtered, onOpen }: { row: InboxListRow; sel
 
 export function InboxList(props: InboxListProps) {
   const [quietOpen, setQuietOpen] = useState(false);
+  const [listRef, narrowList] = useNarrowerThan(WIDE_ROWS_MIN_LIST_WIDTH);
+  // Two-line rows beside an open thread, and for every project in a list too narrow for the wide row's columns.
+  const twoLine = props.narrow || (!props.filtered && narrowList);
   const visible = props.sections.filter((s) => s.threads.length > 0);
   return (
     <section
+      ref={listRef}
       className={`ib-listcol${props.narrow ? ' ib-narrow' : ''}${props.filtered ? ' ib-noproj' : ''}`}
       aria-label={props.title}
     >
@@ -144,7 +193,7 @@ export function InboxList(props: InboxListProps) {
               )}
               {open &&
                 section.threads.map((row) =>
-                  props.narrow ? (
+                  twoLine ? (
                     <NarrowRow
                       key={row.thread_id}
                       row={row}

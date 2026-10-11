@@ -15,7 +15,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
-const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
+const { InboxList, WIDE_ROWS_MIN_LIST_WIDTH } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 
 const AGENT = { kind: 'agent' as const, host: 'claude-code', session: 'ses_a', name: null };
@@ -132,7 +132,8 @@ describe.if(hasDom)('the wide list', () => {
     // The thread chip and the guided review mark stay in the subject cell.
     const wait = rowEl(el, 'msg_wait').querySelector('.ib-subj')!;
     expect(wait.querySelector('.ib-key')!.textContent).toBe('refund-webhooks');
-    expect(wait.querySelector('[data-guide-mark]')).not.toBeNull();
+    const mark = wait.querySelector('[data-guide-mark]')!;
+    expect(mark.getAttribute('aria-label')).toBe('Guided review');
   });
 
   test("beside an open thread: a narrow row's first line names its agent in one project, the project in all", () => {
@@ -146,5 +147,37 @@ describe.if(hasDom)('the wide list', () => {
     el = render(false, true);
     expect(l1('msg_wait')).toBe('billing-svc');
     expect(l1('msg_sent')).toBe('billing-svc');
+  });
+
+  test('every project, in a list narrower than the wide row needs: two-line rows; one project keeps its wide rows', () => {
+    const saved = globalThis.ResizeObserver;
+    let width = 800;
+    // happy-dom lays nothing out: report the list's width the way a browser's observer would.
+    globalThis.ResizeObserver = class {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe() {
+        this.callback([{ contentRect: { width } } as ResizeObserverEntry], this as unknown as ResizeObserver);
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+    try {
+      let el = render(false);
+      expect(el.querySelectorAll('.ib-row').length).toBe(0);
+      expect(el.querySelectorAll('.ib-nrow').length).toBe(4);
+      // The guided review mark stays on the two-line row.
+      expect(el.querySelector('.ib-nrow[data-thread-id="msg_wait"] [data-guide-mark]')).not.toBeNull();
+      act(() => root?.unmount());
+      host?.remove();
+      el = render(true);
+      expect(el.querySelectorAll('.ib-row').length).toBe(4);
+      act(() => root?.unmount());
+      host?.remove();
+      width = WIDE_ROWS_MIN_LIST_WIDTH;
+      el = render(false);
+      expect(el.querySelectorAll('.ib-row').length).toBe(4);
+    } finally {
+      globalThis.ResizeObserver = saved;
+    }
   });
 });
