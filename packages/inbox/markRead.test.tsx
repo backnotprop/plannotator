@@ -29,8 +29,8 @@ const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-se
 let child: ReturnType<typeof Bun.spawn> | null = null;
 let port = 0;
 /** One seeded project per test: the window keeps the first server session it saw, so every test shares one server. */
-let worlds: { project: string; stopped: string; waiting: string; mixed: string; update: string }[] = [];
-let ids = { project: '', stopped: '', waiting: '', mixed: '', update: '' };
+let worlds: { project: string; stopped: string; waiting: string; mixed: string; update: string; filed: string; attachment: string }[] = [];
+let ids = { project: '', stopped: '', waiting: '', mixed: '', update: '', filed: '', attachment: '' };
 let dir: string | null = null;
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -66,7 +66,7 @@ async function serverSection(threadId: string): Promise<string | undefined> {
   return model.sections.find((s) => s.threads.some((t) => t.thread_id === threadId))?.id;
 }
 
-const TESTS = 7;
+const TESTS = 8;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -329,4 +329,21 @@ test.skipIf(!hasDom)('session A asked, session B posted a later update: the skip
   const words = model.thread.messages.find((m) => m.author.kind === 'person' && m.body.includes('Thanks, carry on.'))!;
   expect(words.reply_to).toBe(ids.update);
   expect((await questionStates(ids.mixed)).map((q) => q.state)).toEqual(['sent']);
+});
+
+test.skipIf(!hasDom)('with a file open beside the thread, E stands down in the viewer and on the page; aimed at the thread it still marks read', async () => {
+  const el = await renderApp(`#thread=${ids.filed}&file=${ids.attachment}`);
+  await until(() => el.querySelector('.ib-view') !== null, 'the file viewer');
+  const inViewer = el.querySelector('.ib-view button') as HTMLButtonElement;
+  press('e', inViewer);
+  press('e');
+  await settle();
+  expect(posted.filter((p) => p.path.endsWith('/read'))).toEqual([]);
+  // A key aimed at the thread pane is the thread's.
+  press('e', el.querySelector('section.ib-pane [data-mark-read]')!);
+  await until(() => posted.some((p) => p.path === `/api/inbox/threads/${ids.filed}/read`), 'the Mark read');
+  // Z inside the viewer does not undo.
+  press('z', el.querySelector('.ib-view button')!);
+  await settle();
+  expect(posted.some((p) => p.path.endsWith('/unread'))).toBe(false);
 });

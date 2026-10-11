@@ -899,6 +899,8 @@ pre code.pn-code[data-keep-layout] {
 }
 @media (prefers-reduced-motion: reduce) {
   .ib-sw::after { transition: none; }
+}
+
 /* ── Mark read, the skip chip and the toast (design record "inbox-mark-read", 2026-10-11) ── */
 /* The header: Archive (icon) | Mark read (labelled), then the thread's own tools. */
 .ib-phead .ib-vsep { width: 1px; height: 18px; background: var(--ib-line); margin: 0 4px; flex: none; }
