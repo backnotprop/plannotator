@@ -1,13 +1,20 @@
-# The Plannotator Inbox relay (adr/implementation/inbox-mobile.md, section 4).
-# Owner-deployed from this folder with `wrangler deploy`; never from CI.
-# Lanes run it with `wrangler dev` only.
+# The Plannotator Inbox relay (adr/implementation/inbox-mobile.md, sections 4
+# and 10). Owner-deployed from this folder with `wrangler deploy`; never from
+# CI. Lanes run it with `wrangler dev` only.
 #
 # Secrets, set once by the owner (`wrangler secret put <NAME>`), never in a file:
-#   APNS_KEY      the APNs auth key, the .p8 file's text
-#   APNS_KEY_ID   its key id
-#   APNS_TEAM_ID  the Apple team id
-# Without APNS_KEY the relay runs and every push answers
-# `{ sent: false, reason: "no_apns_key" }`.
+#   APNS_KEY             the APNs auth key, the .p8 file's text
+#   APNS_KEY_ID          its key id
+#   APNS_TEAM_ID         the Apple team id
+#   FCM_SERVICE_ACCOUNT  the Firebase project's service account key, the JSON
+#                        key file's whole text (its project_id names the
+#                        project pushes go to; the account needs the
+#                        Firebase Cloud Messaging API's send permission)
+# Without APNS_KEY the relay runs and every push to an APNs token answers
+# `{ sent: false, reason: "no_apns_key" }`; without FCM_SERVICE_ACCOUNT every
+# push to an FCM token answers `{ sent: false, reason: "no_fcm_key" }`.
+# APNS_ORIGIN, FCM_ORIGIN and FCM_OAUTH_ORIGIN exist only for the proof under
+# `wrangler dev` (local stand-ins for Apple and Google); never set them here.
 name = "plannotator-relay"
 main = "src/index.ts"
 compatibility_date = "2026-09-01"

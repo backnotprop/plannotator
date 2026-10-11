@@ -21,9 +21,15 @@
  * answers through the relay alone (no Wi-Fi, no tailnet), with the Inbox
  * stopped and started between a question and its answer.
  *
- * Then a second relay with no APNs key (pushes answer `no_apns_key`), and a
- * third that reaches Apple's real sandbox over TLS with a throwaway key: the
- * transport works when Apple answers 403 InvalidProviderToken. The real
+ * Then a second relay with no APNs key and no FCM service account (pushes
+ * answer `no_apns_key`, `no_fcm_key`, or `no_push_token` with neither token),
+ * where the token routes and `hello`'s flags are checked; then FCM (R3,
+ * section 10) on its own relay and Inbox, an Android phone paired, with
+ * Google's two hosts played locally (oauth2.googleapis.com checks the RS256
+ * JWT against a throwaway RSA key made for this run; fcm.googleapis.com
+ * checks the access token it minted); and a relay that reaches Apple's real
+ * sandbox over TLS with a throwaway key: the transport works when Apple
+ * answers 403 InvalidProviderToken. The real
  * sandbox send to the test iPhone waits on the owner's APNs key and the device.
  *
  * Runs from this folder (`bun test`, its own bunfig): the root bunfig skips
@@ -40,6 +46,8 @@ import { decryptWithKey, deriveRelayKeys, encryptWithKey } from "@plannotator/co
 import { SimAgent } from "../../../scripts/inbox-sim";
 import { createInboxWorld, destroyInboxWorld, registry, stopInbox, stubBuiltHtml, worldEnv, type InboxWorld } from "../../../tests/helpers/inbox-world";
 import { GUIDE_BRIEF_EXAMPLE } from "../../../packages/server/inbox-guides";
+import { apnsBody } from "../../../packages/server/inbox-relay";
+import { fcmMessage } from "../src/fcm";
 
 type Json = Record<string, any>;
 
@@ -118,6 +126,120 @@ function fakeApns(publicKey: CryptoKey): Promise<{ port: number; pushes: Pushed[
   return new Promise((ready) => server.listen(0, "127.0.0.1", () => ready({ port: (server.address() as { port: number }).port, pushes, close: () => server.close() })));
 }
 
+// ── Google, played locally ──
+
+const FCM_PROJECT = "plannotator-relay-proof";
+const FCM_CLIENT = "relay-proof@plannotator-relay-proof.iam.gserviceaccount.com";
+const FCM_KEY_ID = "0000000000000000000000000000000000000000";
+
+/** A throwaway service account: an RSA key made for this run, in the JSON key file's shape. */
+async function throwawayServiceAccount() {
+  const pair = await crypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
+  const der = Buffer.from(await crypto.subtle.exportKey("pkcs8", pair.privateKey)).toString("base64");
+  const pem = `-----BEGIN PRIVATE KEY-----\n${der.match(/.{1,64}/g)!.join("\n")}\n-----END PRIVATE KEY-----\n`;
+  const json = JSON.stringify({ type: "service_account", project_id: FCM_PROJECT, private_key_id: FCM_KEY_ID, private_key: pem, client_email: FCM_CLIENT, token_uri: "https://oauth2.googleapis.com/token" });
+  return { json, publicKey: pair.publicKey };
+}
+
+interface FcmSent {
+  path: string;
+  authorization: string;
+  body: Json;
+}
+
+/**
+ * oauth2.googleapis.com and fcm.googleapis.com on two local ports. The token
+ * endpoint checks the JWT bearer grant (RS256 over the service account's key,
+ * its issuer, scope, audience and hour) and mints an access token; FCM checks
+ * that token and answers by the registration token: `fcm-gone…` UNREGISTERED
+ * (404), `fcm-down…` UNAVAILABLE (503), anything else 200.
+ */
+async function fakeGoogle(publicKey: CryptoKey) {
+  const exchanges: { header: Json; claims: Json; valid: boolean }[] = [];
+  const minted = new Set<string>();
+  const sent: FcmSent[] = [];
+  const oauth = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      const form = new URLSearchParams(await req.text());
+      const assertion = form.get("assertion") ?? "";
+      const [header, claims, signature] = assertion.split(".");
+      let parsed = { header: {} as Json, claims: {} as Json, valid: false };
+      try {
+        parsed = {
+          header: JSON.parse(Buffer.from(header!, "base64url").toString()),
+          claims: JSON.parse(Buffer.from(claims!, "base64url").toString()),
+          valid: await crypto.subtle.verify("RSASSA-PKCS1-v1_5", publicKey, Buffer.from(signature!, "base64url"), new TextEncoder().encode(`${header}.${claims}`)),
+        };
+      } catch {
+        // Refused below.
+      }
+      exchanges.push(parsed);
+      const c = parsed.claims;
+      const ok =
+        req.method === "POST" &&
+        new URL(req.url).pathname === "/token" &&
+        req.headers.get("content-type") === "application/x-www-form-urlencoded" &&
+        form.get("grant_type") === "urn:ietf:params:oauth:grant-type:jwt-bearer" &&
+        parsed.valid &&
+        parsed.header.alg === "RS256" &&
+        parsed.header.kid === FCM_KEY_ID &&
+        c.iss === FCM_CLIENT &&
+        c.scope === "https://www.googleapis.com/auth/firebase.messaging" &&
+        c.aud === "https://oauth2.googleapis.com/token" &&
+        c.exp - c.iat === 3600;
+      if (!ok) return Response.json({ error: "invalid_grant", error_description: "Invalid JWT Signature." }, { status: 400 });
+      const token = `ya29.proof-${minted.size + 1}`;
+      minted.add(token);
+      return Response.json({ access_token: token, expires_in: 3599, token_type: "Bearer" });
+    },
+  });
+  const fcm = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      const path = new URL(req.url).pathname;
+      const authorization = req.headers.get("authorization") ?? "";
+      const body = (await req.json().catch(() => ({}))) as Json;
+      sent.push({ path, authorization, body });
+      const fcmError = (code: number, status: string, errorCode: string) =>
+        Response.json({ error: { code, message: status, status, details: [{ "@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError", errorCode }] } }, { status: code });
+      if (req.method !== "POST" || path !== `/v1/projects/${FCM_PROJECT}/messages:send`) return Response.json({ error: { code: 404, status: "NOT_FOUND" } }, { status: 404 });
+      if (!minted.has(authorization.replace(/^Bearer /, ""))) return Response.json({ error: { code: 401, status: "UNAUTHENTICATED" } }, { status: 401 });
+      const token = String(body.message?.token ?? "");
+      if (token.startsWith("fcm-gone")) return fcmError(404, "NOT_FOUND", "UNREGISTERED");
+      if (token.startsWith("fcm-down")) return fcmError(503, "UNAVAILABLE", "UNAVAILABLE");
+      return Response.json({ name: `projects/${FCM_PROJECT}/messages/0:${sent.length}` });
+    },
+  });
+  return {
+    oauthOrigin: `http://127.0.0.1:${oauth.port}`,
+    fcmOrigin: `http://127.0.0.1:${fcm.port}`,
+    exchanges,
+    sent,
+    close: () => {
+      oauth.stop(true);
+      fcm.stop(true);
+    },
+  };
+}
+
+/** The Inbox's socket at the relay, held for one `hello`: what the relay lists for each device. */
+async function helloOf(relayUrl: string, mailboxId: string, secret: string): Promise<Json> {
+  // Bun's WebSocket takes headers as its second argument.
+  const socket = new WebSocket(`${relayUrl.replace(/^http/, "ws")}/v1/mailboxes/${mailboxId}/socket`, { headers: { Authorization: `Bearer ${secret}` } } as unknown as string[]);
+  try {
+    return await new Promise<Json>((done, fail) => {
+      socket.onmessage = (event) => done(JSON.parse(String(event.data)));
+      socket.onerror = () => fail(new Error("the socket failed"));
+      setTimeout(() => fail(new Error("no hello")), 10_000);
+    });
+  } finally {
+    socket.close();
+  }
+}
+
 // ── The relay under wrangler dev ──
 
 interface Relay {
@@ -134,7 +256,8 @@ async function startRelay(name: string, vars: Record<string, string>): Promise<R
   mkdirSync(persist, { recursive: true });
   // The throwaway key lives in this env file for the run only (.wrangler/ is not committed), never on a command line.
   const envFile = join(persist, "relay.env");
-  writeFileSync(envFile, Object.entries(vars).map(([k, v]) => `${k}=${v}\n`).join(""), { mode: 0o600 });
+  // A value that is not plain (the FCM service account's JSON) goes single-quoted: dotenv reads it literally.
+  writeFileSync(envFile, Object.entries(vars).map(([k, v]) => (/^[\w.:/+=-]*$/.test(v) ? `${k}=${v}\n` : `${k}='${v}'\n`)).join(""), { mode: 0o600 });
   let output = "";
   const child = Bun.spawn(
     [wrangler, "dev", "--local", "--ip", "127.0.0.1", "--port", String(port), "--inspector-port", String(freePort()), "--persist-to", persist, "--env-file", envFile, "--show-interactive-dev-session=false"],
@@ -306,7 +429,7 @@ describe("the relay with an Inbox, under wrangler dev", () => {
     const stored = readMailbox(relay, kept.mailbox_id);
     expect(stored.mailbox).toEqual({ secret_sha256: sha256(kept.secret) });
     expect(stored.devices).toEqual([
-      { id: phone.id, secret_sha256: sha256(phone.relaySecret), carriage: 1, cursor: expect.any(Number), apns_token: null, apns_environment: null, next_n: expect.any(Number) },
+      { id: phone.id, secret_sha256: sha256(phone.relaySecret), carriage: 1, cursor: expect.any(Number), apns_token: null, apns_environment: null, next_n: expect.any(Number), fcm_token: null },
     ]);
     expect((await device(phone.id)).carriage).toBe(true);
   });
@@ -450,7 +573,7 @@ describe("the relay with an Inbox, under wrangler dev", () => {
     expect(holds(bytes, sha256(phone.relaySecret))).toBe(true);
   });
 
-  test("a 410 from Apple deletes the token: the next push answers no_apns_token", async () => {
+  test("a 410 from Apple deletes the token: the next push answers no_push_token", async () => {
     expect((await atRelay("PUT", `/devices/${phone.id}/apns`, { token: TOKEN_GONE, environment: "production" })).status).toBe(204);
     apple.pushes.length = 0;
     await agent.send({ project_path: w.project, thread: "gone", body: [":::question", "Roll back?", "- Yes", "- No", ":::"].join("\n") });
@@ -458,7 +581,7 @@ describe("the relay with an Inbox, under wrangler dev", () => {
     await until(() => readMailbox(relay, mailbox.mailbox_id).devices[0]!.apns_token, (t) => t === null, "the token deleted");
     await until(inboxLog, (log) => log.includes(`${phone.id} 200 apns_gone`), "the Inbox's log line");
     await agent.send({ project_path: w.project, thread: "gone again", body: [":::question", "Roll back now?", "- Yes", "- No", ":::"].join("\n") });
-    await until(inboxLog, (log) => log.includes(`${phone.id} 200 no_apns_token`), "no_apns_token");
+    await until(inboxLog, (log) => log.includes(`${phone.id} 200 no_push_token`), "no_push_token");
     expect(apple.pushes.length).toBe(1);
   });
 
@@ -854,11 +977,17 @@ describe("the carriage: a phone reads and answers the Inbox through the relay al
   }, 60_000);
 });
 
-describe("a relay without the APNs key", () => {
+describe("a relay without the APNs key or an FCM service account", () => {
   let relay: Relay;
+  const tokenSecret = "mailbox-secret-for-the-token-proof";
+  let tokenMailbox = "";
 
   beforeAll(async () => {
     relay = await startRelay("no-key", {});
+    // Made before the brake test spends this minute's creations.
+    const made = await fetch(`${relay.url}/v1/mailboxes`, { method: "POST", body: JSON.stringify({ secret_sha256: sha256(tokenSecret) }) });
+    expect(made.status).toBe(201);
+    tokenMailbox = ((await made.json()) as Json).mailbox_id;
   }, 90_000);
   afterAll(() => relay?.stop());
 
@@ -892,6 +1021,259 @@ describe("a relay without the APNs key", () => {
     }
     expect(statuses).toContain(429);
   });
+
+  test("10.1: one push token per device, its kind in hello; no FCM service account answers no_fcm_key, neither token no_push_token", async () => {
+    const secret = tokenSecret;
+    const mailbox_id = tokenMailbox;
+    const at = (method: string, path: string, body: unknown, bearer: string) =>
+      fetch(`${relay.url}/v1/mailboxes/${mailbox_id}${path}`, { method, headers: { Authorization: `Bearer ${bearer}` }, body: JSON.stringify(body) });
+    const dev = "dev_00000000000000000000000001";
+    const row = () => readMailbox(relay, mailbox_id).devices[0]!;
+    const flags = async () => ((await helloOf(relay.url, mailbox_id, secret)).devices as Json[]).map((d) => ({ apns: d.apns, fcm: d.fcm }));
+    const push = async () => {
+      const answer = await at("POST", "/push", { device_id: dev, collapse_id: "c".repeat(64), ciphertext: "AAAAexample" }, secret);
+      return { status: answer.status, body: (await answer.json()) as Json };
+    };
+    expect((await at("PUT", `/devices/${dev}`, { secret_sha256: sha256("phone"), cursor: 0 }, secret)).status).toBe(200);
+    expect(row()).toMatchObject({ apns_token: null, fcm_token: null });
+    expect(await flags()).toEqual([{ apns: false, fcm: false }]);
+    expect(await push()).toEqual({ status: 200, body: { sent: false, reason: "no_push_token" } });
+
+    // The FCM token: kept plain, only the device's own bearer, a token that is not one refused.
+    expect((await at("PUT", `/devices/${dev}/fcm`, { token: "fcm-ok:APA91bExample_token-1" }, secret)).status).toBe(401);
+    expect((await at("PUT", `/devices/${dev}/fcm`, { token: "not a token" }, "phone")).status).toBe(400);
+    expect((await at("PUT", `/devices/${dev}/fcm`, { token: "fcm-ok:APA91bExample_token-1" }, "phone")).status).toBe(204);
+    expect(row()).toMatchObject({ apns_token: null, apns_environment: null, fcm_token: "fcm-ok:APA91bExample_token-1" });
+    expect(await flags()).toEqual([{ apns: false, fcm: true }]);
+    for (let i = 0; i < 2; i++) expect(await push()).toEqual({ status: 200, body: { sent: false, reason: "no_fcm_key" } });
+    await until(relay.log, (log) => log.includes("no FCM service account"), "the log line");
+    expect(relay.log().split("no FCM service account").length - 1).toBe(1);
+
+    // Registering APNs clears FCM, and the reverse.
+    expect((await at("PUT", `/devices/${dev}/apns`, { token: TOKEN_OK, environment: "sandbox" }, "phone")).status).toBe(204);
+    expect(row()).toMatchObject({ apns_token: TOKEN_OK, apns_environment: "sandbox", fcm_token: null });
+    expect(await flags()).toEqual([{ apns: true, fcm: false }]);
+    expect(await push()).toEqual({ status: 200, body: { sent: false, reason: "no_apns_key" } });
+    expect((await at("PUT", `/devices/${dev}/fcm`, { token: "fcm-ok-2" }, "phone")).status).toBe(204);
+    expect(row()).toMatchObject({ apns_token: null, apns_environment: null, fcm_token: "fcm-ok-2" });
+    expect(await flags()).toEqual([{ apns: false, fcm: true }]);
+
+    // `token: null` removes it; a removed device takes its token with it.
+    expect((await at("PUT", `/devices/${dev}/fcm`, { token: null }, "phone")).status).toBe(204);
+    expect(row()).toMatchObject({ apns_token: null, fcm_token: null });
+    expect(await push()).toEqual({ status: 200, body: { sent: false, reason: "no_push_token" } });
+    expect((await at("PUT", `/devices/${dev}/fcm`, { token: "fcm-ok-3" }, "phone")).status).toBe(204);
+    expect((await at("DELETE", `/devices/${dev}`, undefined, secret)).status).toBe(204);
+    expect(readMailbox(relay, mailbox_id).devices).toEqual([]);
+  }, 30_000);
+});
+
+// ── FCM (R3, section 10) ──
+
+describe("FCM: an Android phone gets its pushes through Google's hosts, played locally", () => {
+  let google: Awaited<ReturnType<typeof fakeGoogle>>;
+  let relay: Relay;
+  let w: InboxWorld;
+  let stubs: string[] = [];
+  let agent: SimAgent;
+  let base = "";
+  let env: Record<string, string> = {};
+  let phone: { id: string; secret: string; key: string; collapseKey: string; relaySecret: string };
+  let mailbox: { url: string; mailbox_id: string; secret: string };
+  const FCM_OK = "fcm-ok:APA91bH0000000000000000000000000000000000000000000000000000000000000_proof";
+
+  const win = (path: string, body?: unknown) =>
+    fetch(`${base}${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: { "Content-Type": "application/json", Origin: base },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+
+  const atRelay = (method: string, path: string, body?: unknown, bearer = phone.relaySecret) =>
+    fetch(`${mailbox.url}/v1/mailboxes/${mailbox.mailbox_id}${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+
+  const inboxLog = () => readFileSync(join(w.dataDir, "inbox", "inbox.log"), "utf8");
+  const collapseOf = (threadId: string) => createHmac("sha256", Buffer.from(phone.collapseKey, "base64url")).update(threadId).digest("hex");
+  const row = () => readMailbox(relay, mailbox.mailbox_id).devices.find((d) => d.id === phone.id)!;
+  const question = (thread: string, prompt: string, context?: string) =>
+    agent.send({ project_path: w.project, thread, body: [":::question", prompt, ...(context ? [context] : []), "- Yes", "- No", "Recommended: Yes", ":::"].join("\n") });
+  /** The relay's answer to a push posted by hand with the mailbox's bearer, as the Inbox posts it. */
+  const pushByHand = async () => {
+    const answer = await atRelay("POST", "/push", { device_id: phone.id, collapse_id: "c".repeat(64), ciphertext: "AAAAexample" }, mailbox.secret);
+    return { status: answer.status, body: (await answer.json()) as Json };
+  };
+
+  beforeAll(async () => {
+    const account = await throwawayServiceAccount();
+    google = await fakeGoogle(account.publicKey);
+    relay = await startRelay("fcm", { FCM_SERVICE_ACCOUNT: account.json, FCM_ORIGIN: google.fcmOrigin, FCM_OAUTH_ORIGIN: google.oauthOrigin });
+    stubs = stubBuiltHtml();
+    w = createInboxWorld("plannotator-relay-fcm-", "fcm", "R3", { phones: true });
+    env = { ...(process.env as Record<string, string>), ...worldEnv(w), PLANNOTATOR_RELAY_URL: relay.url };
+    // A harness proves its data dir before it spawns (row 5109): a temp path, never ~/.plannotator.
+    expect(realpathSync(w.root).startsWith(realpathSync(tmpdir()))).toBe(true);
+    expect(env.PLANNOTATOR_DATA_DIR).toBe(w.dataDir);
+    const run = Bun.spawnSync([join(w.bin, "plannotator"), "inbox", "--background"], { env, cwd: w.root });
+    if (run.exitCode !== 0) throw new Error(`inbox --background failed: ${run.stderr.toString()}`);
+    base = `http://127.0.0.1:${registry(w).port}`;
+    agent = await SimAgent.connect({ binary: join(w.bin, "plannotator"), env, name: "Claude Code", host: "claude-code", cwd: w.project });
+  }, 120_000);
+
+  afterAll(async () => {
+    await agent?.close().catch(() => {});
+    if (w) destroyInboxWorld(w);
+    for (const path of stubs) rmSync(path, { force: true });
+    relay?.stop();
+    google?.close();
+  });
+
+  test("an Android phone pairs and registers its FCM token; an agent's question is one data-only FCM message, sealed, collapsed per thread", async () => {
+    const health = (await (await fetch(`${base}/api/inbox/health`)).json()) as Json;
+    const offer = (await (await win("/api/inbox/pairing", { serverSession: health.serverSession })).json()) as Json;
+    const secret = /[?&]secret=([A-Za-z0-9_-]+)/.exec(offer.link)![1]!;
+    const paired = await fetch(`${base}/api/inbox/device/pair`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ secret, name: "Pixel", platform: "android" }) });
+    expect(paired.status).toBe(201);
+    const body = (await paired.json()) as Json;
+    expect(body.device.platform).toBe("android");
+    phone = { id: body.device.id, secret: body.secret, ...(await deriveRelayKeys(body.secret, body.device.id)) };
+    mailbox = JSON.parse(readFileSync(join(w.dataDir, "inbox", "relay.json"), "utf8"));
+    expect((await atRelay("PUT", `/devices/${phone.id}/fcm`, { token: FCM_OK })).status).toBe(204);
+    expect(row()).toMatchObject({ fcm_token: FCM_OK, apns_token: null });
+
+    const sent = await question("first", SUBJECT, "They take about four minutes against the test key.");
+    await until(() => google.sent.length, (n) => n === 1, "one FCM message");
+    await sleep(1000);
+    expect(google.sent.length).toBe(1);
+    const message = google.sent[0]!;
+    expect(message.path).toBe(`/v1/projects/${FCM_PROJECT}/messages:send`);
+    expect(message.authorization).toBe("Bearer ya29.proof-1");
+    // Exactly the contract's body: data only, the envelope as `e`, high priority, the collapse id as the collapse key.
+    expect(Object.keys(message.body)).toEqual(["message"]);
+    expect(message.body.message).toEqual({ token: FCM_OK, data: { e: expect.any(String) }, android: { priority: "high", collapse_key: collapseOf(sent.thread_id) } });
+    expect(JSON.stringify(message.body)).not.toContain("retry");
+    expect(JSON.parse(await decryptWithKey(message.body.message.data.e, phone.key))).toEqual({
+      v: 1,
+      type: "push",
+      thread_id: sent.thread_id,
+      message_id: sent.message_id ?? sent.thread_id,
+      subject: SUBJECT,
+      project: "refund-service",
+      agent: "Claude Code",
+      question: {
+        key: expect.stringMatching(/^q-/),
+        revision: 0,
+        prompt: SUBJECT,
+        context: "They take about four minutes against the test key.",
+        choices: [
+          { label: "Yes", recommended: true },
+          { label: "No", recommended: false },
+        ],
+      },
+    });
+    // The JWT the relay signed: RS256 under the service account's key, checked by the token endpoint.
+    expect(google.exchanges).toHaveLength(1);
+    expect(google.exchanges[0]).toMatchObject({ valid: true, header: { alg: "RS256", typ: "JWT", kid: FCM_KEY_ID }, claims: { iss: FCM_CLIENT, aud: "https://oauth2.googleapis.com/token" } });
+    await until(inboxLog, (log) => log.includes(`${phone.id} 202`), "the Inbox's log line");
+  }, 60_000);
+
+  test("the access token is reused: a second push mints no new one; the thread's next push carries the same collapse key", async () => {
+    const sent = await question("first", "And the slow suite too?");
+    await until(() => google.sent.length, (n) => n === 2, "the second FCM message");
+    expect(google.exchanges).toHaveLength(1);
+    expect(google.sent[1]!.authorization).toBe("Bearer ya29.proof-1");
+    expect(google.sent[1]!.body.message.android.collapse_key).toBe(collapseOf(sent.thread_id));
+    expect(google.sent[1]!.body.message.android.collapse_key).toBe(google.sent[0]!.body.message.android.collapse_key);
+  }, 60_000);
+
+  test("the size ladder holds for FCM: a long context is dropped against Apple's 4096 bytes, and FCM's data payload is never larger than the APNs body", async () => {
+    const before = google.sent.length;
+    await question("long", "Run the long suite?", "The four-minute run hits the test clock twice. ".repeat(120));
+    await until(() => google.sent.length, (n) => n === before + 1, "one FCM message");
+    const e = google.sent[before]!.body.message.data.e as string;
+    const summary = JSON.parse(await decryptWithKey(e, phone.key));
+    expect(summary.question).toMatchObject({ prompt: "Run the long suite?", context: null });
+    // FCM counts the data payload (`{"e":"<envelope>"}`) against its 4096 bytes; the Inbox measures the APNs body around the same envelope.
+    const data = Buffer.byteLength(JSON.stringify(google.sent[before]!.body.message.data));
+    expect(data).toBeLessThan(Buffer.byteLength(apnsBody(e)));
+    expect(Buffer.byteLength(apnsBody(e))).toBeLessThanOrEqual(4096);
+    // And for any envelope, from empty to past the ceiling: the relay's own FCM data is the smaller.
+    for (const length of [0, 1, 100, 2000, 4040, 4096, 10_000]) {
+      const envelope = "A".repeat(length);
+      expect(Buffer.byteLength(JSON.stringify(fcmMessage(FCM_OK, envelope, "c".repeat(64)).message.data))).toBeLessThan(Buffer.byteLength(apnsBody(envelope)));
+    }
+  }, 60_000);
+
+  test("a 5xx from FCM is 502 fcm_failed with FCM's status and errorCode, and keeps the token", async () => {
+    expect((await atRelay("PUT", `/devices/${phone.id}/fcm`, { token: "fcm-down-1" })).status).toBe(204);
+    expect(await pushByHand()).toEqual({ status: 502, body: { error: "FCM answered 503 UNAVAILABLE.", code: "fcm_failed", fcm_status: 503, fcm_reason: "UNAVAILABLE" } });
+    expect(row().fcm_token).toBe("fcm-down-1");
+    await question("down", "Retry the deploy?");
+    await until(inboxLog, (log) => log.includes(`${phone.id} 502 fcm_failed`), "the Inbox's log line");
+  }, 60_000);
+
+  test("UNREGISTERED deletes the token and answers fcm_gone; the next push answers no_push_token", async () => {
+    expect((await atRelay("PUT", `/devices/${phone.id}/fcm`, { token: "fcm-gone-1" })).status).toBe(204);
+    expect(await pushByHand()).toEqual({ status: 200, body: { sent: false, reason: "fcm_gone" } });
+    expect(row()).toMatchObject({ fcm_token: null, apns_token: null });
+
+    expect((await atRelay("PUT", `/devices/${phone.id}/fcm`, { token: "fcm-gone-2" })).status).toBe(204);
+    const before = google.sent.length;
+    await question("gone", "Roll back?");
+    await until(() => google.sent.length, (n) => n === before + 1, "the push FCM refuses");
+    await until(() => row().fcm_token, (t) => t === null, "the token deleted");
+    await until(inboxLog, (log) => log.includes(`${phone.id} 200 fcm_gone`), "fcm_gone");
+    await question("gone again", "Roll back now?");
+    await until(inboxLog, (log) => log.includes(`${phone.id} 200 no_push_token`), "no_push_token");
+    expect(google.sent.length).toBe(before + 1);
+  }, 60_000);
+
+  test("the relay's storage holds the FCM token in the clear, and no key, secret, subject, body or Google credential", async () => {
+    expect((await atRelay("PUT", `/devices/${phone.id}/fcm`, { token: FCM_OK })).status).toBe(204);
+    const bytes = storageBytes(relay);
+    expect(holds(bytes, FCM_OK)).toBe(true);
+    expect(holds(bytes, sha256(phone.relaySecret))).toBe(true);
+    for (const value of [phone.secret, phone.key, phone.relaySecret, mailbox.secret, SUBJECT, "Run the long suite?", "four minutes", "PRIVATE KEY", "ya29.proof"]) {
+      expect(holds(bytes, value)).toBe(false);
+    }
+  });
+});
+
+describe("FCM with a service account Google refuses", () => {
+  let google: Awaited<ReturnType<typeof fakeGoogle>>;
+  let relay: Relay;
+
+  beforeAll(async () => {
+    // The relay signs with one throwaway key; Google knows another.
+    const signer = await throwawayServiceAccount();
+    const known = await throwawayServiceAccount();
+    google = await fakeGoogle(known.publicKey);
+    relay = await startRelay("fcm-refused", { FCM_SERVICE_ACCOUNT: signer.json, FCM_ORIGIN: google.fcmOrigin, FCM_OAUTH_ORIGIN: google.oauthOrigin });
+  }, 90_000);
+  afterAll(() => {
+    relay?.stop();
+    google?.close();
+  });
+
+  test("a refused token exchange is 502 fcm_failed, nothing reaches FCM, and the token is kept", async () => {
+    const secret = "mailbox-secret-for-the-refused-proof";
+    const { mailbox_id } = (await (await fetch(`${relay.url}/v1/mailboxes`, { method: "POST", body: JSON.stringify({ secret_sha256: sha256(secret) }) })).json()) as Json;
+    const at = (method: string, path: string, body: unknown, bearer: string) =>
+      fetch(`${relay.url}/v1/mailboxes/${mailbox_id}${path}`, { method, headers: { Authorization: `Bearer ${bearer}` }, body: JSON.stringify(body) });
+    const dev = "dev_00000000000000000000000000";
+    await at("PUT", `/devices/${dev}`, { secret_sha256: sha256("phone"), cursor: 0 }, secret);
+    expect((await at("PUT", `/devices/${dev}/fcm`, { token: "fcm-ok-1" }, "phone")).status).toBe(204);
+    const push = await at("POST", "/push", { device_id: dev, collapse_id: "c".repeat(64), ciphertext: "AAAAexample" }, secret);
+    expect(push.status).toBe(502);
+    expect(await push.json()).toEqual({ error: "Google's token endpoint answered 400 invalid_grant.", code: "fcm_failed" });
+    expect(google.exchanges).toHaveLength(1);
+    expect(google.exchanges[0]!.valid).toBe(false);
+    expect(google.sent).toEqual([]);
+    expect(readMailbox(relay, mailbox_id).devices[0]!.fcm_token).toBe("fcm-ok-1");
+  }, 30_000);
 });
 
 describe("a hostile server in Apple's place", () => {

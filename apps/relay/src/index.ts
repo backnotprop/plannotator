@@ -1,6 +1,6 @@
 /**
  * The Plannotator Inbox relay: a Cloudflare Worker with one Durable Object
- * per mailbox (adr/implementation/inbox-mobile.md, section 4). It carries
+ * per mailbox (adr/implementation/inbox-mobile.md, sections 4 and 10). It carries
  * pushes, and the phone's reads and answers, between a person's
  * Inbox and their phones, and holds only what it cannot read: every body is
  * an envelope under a key made at pairing on the computer and the phone.
@@ -11,10 +11,11 @@
  *   DELETE /v1/mailboxes/:mbx/devices/:dev              Inbox bearer: remove it
  *   PUT    /v1/mailboxes/:mbx/devices/:dev/carriage     device bearer: the phone's relay switch
  *   PUT    /v1/mailboxes/:mbx/devices/:dev/apns         device bearer: the phone's APNs token
+ *   PUT    /v1/mailboxes/:mbx/devices/:dev/fcm          device bearer: the phone's FCM token (one push token per device)
  *   GET    /v1/mailboxes/:mbx/devices/:dev/items        device bearer: the held down items after a number
  *   POST   /v1/mailboxes/:mbx/devices/:dev/ack          device bearer: delete them, by number or store cursor
  *   POST   /v1/mailboxes/:mbx/devices/:dev/commands     device bearer: a command up, held for the Inbox
- *   POST   /v1/mailboxes/:mbx/push                      Inbox bearer: one push to one phone
+ *   POST   /v1/mailboxes/:mbx/push                      Inbox bearer: one push to one phone, through APNs or FCM
  *   GET    /v1/mailboxes/:mbx/socket                    Inbox bearer, WebSocket: hello, carriage, command; item, applied
  *
  * Owner-deployed (`wrangler deploy` from this folder, never from CI); lanes

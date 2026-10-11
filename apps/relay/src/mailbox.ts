@@ -1,17 +1,19 @@
 /**
  * One mailbox: a Durable Object per Inbox (adr/implementation/inbox-mobile.md,
- * section 4). It holds what it cannot read: the SHA-256 of the Inbox's
- * mailbox secret and of each phone's relay secret, each phone's relay switch
- * (`carriage`), its APNs token and environment (Apple needs them in the
- * clear), the store cursor the Inbox last gave for it, and the envelopes in
- * transit: down items for the phone, commands up for the Inbox. Never a key,
- * a secret, a subject or a body: a push's envelope goes to Apple and is not
- * kept. Logs carry ids and status codes only.
+ * sections 4 and 10). It holds what it cannot read: the SHA-256 of the
+ * Inbox's mailbox secret and of each phone's relay secret, each phone's relay
+ * switch (`carriage`), its one push token, APNs with its environment or FCM
+ * (Apple and Google need them in the clear), the store cursor the Inbox last
+ * gave for it, and the envelopes in transit: down items for the phone,
+ * commands up for the Inbox. Never a key, a secret, a subject or a body: a
+ * push's envelope goes to Apple or Google and is not kept. Logs carry ids and
+ * status codes only.
  *
  * Deleted: a down item when the phone acknowledges it; every down item of a
  * phone that turns carriage off; a command when the Inbox reports it applied;
  * a device and everything it holds when the Inbox removes it; an APNs token
- * when Apple answers 410. There is no time sweep.
+ * when Apple answers 410; an FCM token when FCM answers UNREGISTERED. There
+ * is no time sweep.
  *
  * An envelope is kept in parts of at most PART characters, one row each: a
  * SQLite-backed object refuses a row above 2 MB, and the relay sets no item
@@ -19,6 +21,7 @@
  */
 import { DurableObject } from "cloudflare:workers";
 import { sendPush, type ApnsEnvironment } from "./apns";
+import { FcmAuthError, parseServiceAccount, sendFcm } from "./fcm";
 
 export interface Env {
   MAILBOX: DurableObjectNamespace<Mailbox>;
@@ -30,6 +33,11 @@ export interface Env {
   APNS_TEAM_ID?: string;
   /** Replaces Apple's host in the relay's own proof under `wrangler dev` (a local HTTP/2 server). Never set in a deploy. */
   APNS_ORIGIN?: string;
+  /** The FCM service account's JSON key file, as text: a Worker secret. Without it a push to an FCM token answers `no_fcm_key`. */
+  FCM_SERVICE_ACCOUNT?: string;
+  /** Replace fcm.googleapis.com and oauth2.googleapis.com in the relay's own proof under `wrangler dev` (local mocks). Never set in a deploy. */
+  FCM_ORIGIN?: string;
+  FCM_OAUTH_ORIGIN?: string;
 }
 
 interface DeviceRow {
@@ -40,6 +48,7 @@ interface DeviceRow {
   apns_token: string | null;
   apns_environment: string | null;
   next_n: number;
+  fcm_token: string | null;
   [key: string]: SqlStorageValue;
 }
 
@@ -70,6 +79,8 @@ export async function sha256Hex(value: string): Promise<string> {
 export const HASH = /^[0-9a-f]{64}$/;
 const DEVICE_ID = /^dev_[A-Za-z0-9]+$/;
 const APNS_TOKEN = /^[0-9a-fA-F]+$/;
+/** An FCM registration token: base64url text and colons, well under 4 KiB. */
+const FCM_TOKEN = /^[A-Za-z0-9_:.-]{1,4096}$/;
 const ENVELOPE = /^[A-Za-z0-9_-]+$/;
 const COLLAPSE_ID = /^[\x21-\x7e]{1,64}$/;
 /** A command's id: the phone's idempotency key, or a fresh random id for a read. */
@@ -94,6 +105,7 @@ function bearer(req: Request): string | null {
 }
 
 let missingKeyLogged = false;
+let missingFcmKeyLogged = false;
 
 export class Mailbox extends DurableObject<Env> {
   private readonly sql: SqlStorage;
@@ -116,7 +128,8 @@ export class Mailbox extends DurableObject<Env> {
 
   /**
    * The tables, made with the mailbox. A mailbox made before R2 (R1's schema:
-   * no `next_n`, no items, no commands) gains them on its first request.
+   * no `next_n`, no items, no commands) or before R3 (no `fcm_token`) gains
+   * them on its first request.
    */
   private schema(): void {
     if (this.schemaReady) return;
@@ -126,6 +139,7 @@ export class Mailbox extends DurableObject<Env> {
     );
     const columns = this.sql.exec<{ name: string }>("PRAGMA table_info(devices)").toArray().map((c) => c.name);
     if (!columns.includes("next_n")) this.sql.exec("ALTER TABLE devices ADD COLUMN next_n INTEGER NOT NULL DEFAULT 1");
+    if (!columns.includes("fcm_token")) this.sql.exec("ALTER TABLE devices ADD COLUMN fcm_token TEXT");
     // Down items: `cursor` is the record's store seq, null for a result.
     this.sql.exec("CREATE TABLE IF NOT EXISTS items (device_id TEXT NOT NULL, n INTEGER NOT NULL, part INTEGER NOT NULL, cursor INTEGER, data TEXT NOT NULL, PRIMARY KEY (device_id, n, part))");
     // Commands up, in the order they arrived (`seq`).
@@ -179,7 +193,7 @@ export class Mailbox extends DurableObject<Env> {
     const devices = this.sql.exec<DeviceRow>("SELECT * FROM devices ORDER BY id").toArray();
     return {
       type: "hello",
-      devices: devices.map((d) => ({ device_id: d.id, cursor: d.cursor, carriage: d.carriage === 1, apns: d.apns_token !== null })),
+      devices: devices.map((d) => ({ device_id: d.id, cursor: d.cursor, carriage: d.carriage === 1, apns: d.apns_token !== null, fcm: d.fcm_token !== null })),
     };
   }
 
@@ -202,7 +216,7 @@ export class Mailbox extends DurableObject<Env> {
       return this.push(req);
     }
 
-    const match = /^\/devices\/([^/]+)(?:\/(carriage|apns|items|ack|commands))?$/.exec(path);
+    const match = /^\/devices\/([^/]+)(?:\/(carriage|apns|fcm|items|ack|commands))?$/.exec(path);
     if (!match || !DEVICE_ID.test(match[1]!)) return refuse(404, "not_found");
     const deviceId = match[1]!;
     const sub = match[2];
@@ -216,7 +230,7 @@ export class Mailbox extends DurableObject<Env> {
       this.deleteDevice(deviceId);
       return new Response(null, { status: 204 });
     }
-    const method = sub === "carriage" || sub === "apns" ? "PUT" : sub === "items" ? "GET" : "POST";
+    const method = sub === "carriage" || sub === "apns" || sub === "fcm" ? "PUT" : sub === "items" ? "GET" : "POST";
     if (sub && req.method === method) {
       const device = this.device(deviceId);
       if (!device) return refuse(404, "device_not_found");
@@ -224,6 +238,7 @@ export class Mailbox extends DurableObject<Env> {
       if (token === null || (await sha256Hex(token)) !== device.secret_sha256) return refuse(401, "unauthorized");
       if (sub === "carriage") return this.carriage(req, device);
       if (sub === "apns") return this.apns(req, device);
+      if (sub === "fcm") return this.fcm(req, device);
       if (sub === "items") return this.items(new URL(req.url), device);
       if (sub === "ack") return this.ack(req, device);
       return this.command(req, device);
@@ -254,7 +269,7 @@ export class Mailbox extends DurableObject<Env> {
     if (existing?.secret_sha256 !== hash) {
       this.deleteDevice(deviceId);
       this.sql.exec(
-        "INSERT INTO devices (id, secret_sha256, carriage, cursor, apns_token, apns_environment, next_n) VALUES (?, ?, 1, ?, NULL, NULL, 1)",
+        "INSERT INTO devices (id, secret_sha256, carriage, cursor, apns_token, apns_environment, next_n, fcm_token) VALUES (?, ?, 1, ?, NULL, NULL, 1, NULL)",
         deviceId,
         hash,
         cursor,
@@ -279,7 +294,7 @@ export class Mailbox extends DurableObject<Env> {
     return new Response(null, { status: 204 });
   }
 
-  /** `PUT .../apns` (7.29): the phone's APNs token and its environment; `token: null` removes it. */
+  /** `PUT .../apns` (7.29): the phone's APNs token and its environment; `token: null` removes it. A device holds one push token: this clears its FCM token. */
   private async apns(req: Request, device: DeviceRow): Promise<Response> {
     const input = await body(req);
     if (input?.token === null) {
@@ -290,7 +305,20 @@ export class Mailbox extends DurableObject<Env> {
     const environment = input?.environment;
     if (typeof token !== "string" || !APNS_TOKEN.test(token)) return refuse(400, "bad_request", "token: the APNs device token as hex, or null.");
     if (environment !== "sandbox" && environment !== "production") return refuse(400, "bad_request", 'environment: "sandbox" or "production".');
-    this.sql.exec("UPDATE devices SET apns_token = ?, apns_environment = ? WHERE id = ?", token.toLowerCase(), environment, device.id);
+    this.sql.exec("UPDATE devices SET apns_token = ?, apns_environment = ?, fcm_token = NULL WHERE id = ?", token.toLowerCase(), environment, device.id);
+    return new Response(null, { status: 204 });
+  }
+
+  /** `PUT .../fcm` (10.1): the phone's FCM registration token; `token: null` removes it. A device holds one push token: this clears its APNs token. */
+  private async fcm(req: Request, device: DeviceRow): Promise<Response> {
+    const input = await body(req);
+    if (input?.token === null) {
+      this.sql.exec("UPDATE devices SET fcm_token = NULL WHERE id = ?", device.id);
+      return new Response(null, { status: 204 });
+    }
+    const token = input?.token;
+    if (typeof token !== "string" || !FCM_TOKEN.test(token)) return refuse(400, "bad_request", "token: the FCM registration token, or null.");
+    this.sql.exec("UPDATE devices SET fcm_token = ?, apns_token = NULL, apns_environment = NULL WHERE id = ?", token, device.id);
     return new Response(null, { status: 204 });
   }
 
@@ -340,7 +368,7 @@ export class Mailbox extends DurableObject<Env> {
     return json({ queued: true, inbox_online: this.online() }, 202);
   }
 
-  /** `POST .../push` (7.30): one push to one device, the envelope passed to Apple and never kept. */
+  /** `POST .../push` (7.30): one push to one device, to whichever token it holds; the envelope passed to Apple or Google and never kept. */
   private async push(req: Request): Promise<Response> {
     const input = await body(req);
     const deviceId = input?.device_id;
@@ -352,7 +380,8 @@ export class Mailbox extends DurableObject<Env> {
     }
     const device = this.device(deviceId);
     if (!device) return refuse(404, "device_not_found");
-    if (!device.apns_token) return json({ sent: false, reason: "no_apns_token" });
+    if (device.fcm_token) return this.pushFcm(device, device.fcm_token, collapseId, envelope);
+    if (!device.apns_token) return json({ sent: false, reason: "no_push_token" });
     const { APNS_KEY, APNS_KEY_ID, APNS_TEAM_ID } = this.env;
     if (!APNS_KEY || !APNS_KEY_ID || !APNS_TEAM_ID) {
       if (!missingKeyLogged) console.log("relay: no APNs key; pushes answer no_apns_key");
@@ -380,6 +409,32 @@ export class Mailbox extends DurableObject<Env> {
       return json({ sent: false, reason: "apns_gone" });
     }
     return json({ error: `APNs answered ${result.status}${result.reason ? ` ${result.reason}` : ""}.`, code: "apns_failed", apns_status: result.status, apns_reason: result.reason }, 502);
+  }
+
+  /** The push to an FCM token (section 10): `UNREGISTERED` deletes the token, as Apple's 410 does. */
+  private async pushFcm(device: DeviceRow, token: string, collapseId: string, envelope: string): Promise<Response> {
+    const account = parseServiceAccount(this.env.FCM_SERVICE_ACCOUNT);
+    if (!account) {
+      if (!missingFcmKeyLogged) console.log(this.env.FCM_SERVICE_ACCOUNT ? "relay: FCM_SERVICE_ACCOUNT is not a service account key file; pushes answer no_fcm_key" : "relay: no FCM service account; pushes answer no_fcm_key");
+      missingFcmKeyLogged = true;
+      return json({ sent: false, reason: "no_fcm_key" });
+    }
+    let result: { status: number; reason: string | null };
+    try {
+      result = await sendFcm({ account, token, collapseKey: collapseId, envelope, origin: this.env.FCM_ORIGIN, oauthOrigin: this.env.FCM_OAUTH_ORIGIN });
+    } catch (error) {
+      console.log(`relay: push ${device.id} fcm ${error instanceof FcmAuthError ? "token exchange" : "transport"} failed`);
+      const message = error instanceof Error ? error.message : String(error);
+      return json({ error: error instanceof FcmAuthError ? message : `FCM could not be reached: ${message}`, code: "fcm_failed" }, 502);
+    }
+    console.log(`relay: push ${device.id} fcm ${result.status}`);
+    if (result.status === 200) return json({ sent: true }, 202);
+    if (result.reason === "UNREGISTERED") {
+      // Only the token FCM refused: one the phone registered meanwhile stays.
+      this.sql.exec("UPDATE devices SET fcm_token = NULL WHERE id = ? AND fcm_token = ?", device.id, token);
+      return json({ sent: false, reason: "fcm_gone" });
+    }
+    return json({ error: `FCM answered ${result.status}${result.reason ? ` ${result.reason}` : ""}.`, code: "fcm_failed", fcm_status: result.status, fcm_reason: result.reason }, 502);
   }
 
   /** `GET .../socket` (7.31): the Inbox's one socket. A new one replaces an older one; `hello` goes out at once. */
