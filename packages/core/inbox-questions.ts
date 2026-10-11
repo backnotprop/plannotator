@@ -12,7 +12,8 @@
  *   Holds up: <name>; <name>      the asker goes on; these pieces of work wait
  *
  * A third, `Replaces: <message id>/<key>`, is read by core's parser itself
- * (`ParsedQuestion.replaces`): it is never the prompt and never context.
+ * (`ParsedQuestion.replaces`) when every token on it is id-shaped: it is then
+ * never the prompt and never context. Any other `Replaces:` line is prose.
  *
  * Pure: no I/O, no clock unless passed in. Never throws on any input.
  */

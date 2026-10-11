@@ -988,6 +988,9 @@ export class InboxStore {
     if (requests.length === 0) return plan;
     const resolved = threadId !== null && this.isResolved(threadId);
     const problems: string[] = [];
+    // Which new block's Replaces: line claimed each old question: two blocks
+    // cannot both replace one question.
+    const claimedBy = new Map<string, string>();
     for (const { ref, by, where } of requests) {
       const target = parseInboxSupersedeRef(ref);
       if (!target) {
@@ -1020,6 +1023,14 @@ export class InboxStore {
         continue;
       }
       // A block's own Replaces: line names the replacement exactly, so it wins over the argument.
+      if (where === "Replaces:" && by.key !== null) {
+        const twice = open.find((record) => claimedBy.has(record.id) && claimedBy.get(record.id) !== by.key);
+        if (twice) {
+          problems.push(`Replaces: ${twice.id} is named by two questions (${claimedBy.get(twice.id)} and ${by.key}); one question can replace it.`);
+          continue;
+        }
+        for (const record of open) claimedBy.set(record.id, by.key);
+      }
       for (const record of open) if (!plan.has(record.id) || by.key !== null) plan.set(record.id, by);
     }
     if (problems.length > 0) {

@@ -208,6 +208,18 @@ describe("refusals: one bad id refuses the whole send and lists the thread's ope
     );
   });
 
+  test("two blocks naming the same old question refuse the send", () => {
+    const { store, first, q1 } = setup();
+    const cursor = store.cursor();
+    const ref = `${first.id}/${q1.key}`;
+    const body = [queueBlock(ref), "", ":::question", `Replaces: ${ref}`, "Keep the flag name?", "", "- [ ] Yes", "- [ ] No", ":::"].join("\n");
+    const error = refusal(() => store.sendMessage({ project_id: first.project_id, author: AGENT, body, reply_to: first.id }));
+    expect(error.code).toBe("invalid_supersedes");
+    expect(error.message).toContain(`${ref} is named by two questions`);
+    expect(store.cursor()).toBe(cursor);
+    expect(store.questionsOf(first.id)[0]!.state).toBe("open");
+  });
+
   test("a message that would start a new thread can supersede nothing", () => {
     const { store, first, q1, project } = setup();
     const error = refusal(() =>

@@ -64,10 +64,12 @@
  * - Replaces (the Plannotator Inbox): a `Replaces: <message id>/<key>` line
  *   (or a bare `<message id>`, several separated by commas, semicolons or
  *   spaces) names the earlier question(s) this one replaces. Read only when
- *   its value starts with `msg_` or `q-`, wherever it sits: it is never the
- *   prompt and never context, so the card never shows the raw ids
- *   (`replaces`). Any other `Replaces:` line is ordinary prose. It does not
- *   change the question key.
+ *   EVERY token of its value is id-shaped (`msg_` + a 26-character ULID,
+ *   optionally `/q-` + 8 hex, or a bare `q-` + 8 hex key; one trailing `.`
+ *   each is dropped), wherever it sits: it is then never the prompt and never
+ *   context, so the card never shows the raw ids (`replaces`). Any other
+ *   `Replaces:` line ("Replaces: q-learning with PPO") is ordinary prose. It
+ *   does not change the question key.
  */
 
 import {
@@ -162,9 +164,12 @@ const DECISION_RE = /^decision\s*:\s*(.*?)\s*$/i;
 const DECISION_FLAG_RE = /^when answered\.?$/i;
 const DECISION_LINK_RE = /^\[([^\]]+)\]\((\S+)\)\.?$/;
 // `Replaces: msg_…/q-…` anywhere in the block (leading whitespace aside):
-// read only when the value starts with an id, so a prose line that happens to
-// start with "Replaces:" stays prose.
-const REPLACES_RE = /^\s*replaces\s*:\s*((?:msg_|q-)\S*.*?)\s*$/i;
+// read only when every token is an id (a message id, optionally with its
+// question key, or a bare key), so a prose line that happens to start with
+// "Replaces:" stays prose.
+const REPLACES_KEY = String.raw`q-[0-9a-f]{8}(?:-\d{1,3})?`;
+const REPLACES_TOKEN = String.raw`(?:msg_[0-9A-HJKMNP-TV-Z]{26}(?:/${REPLACES_KEY})?|${REPLACES_KEY})\.?`;
+const REPLACES_RE = new RegExp(String.raw`^\s*replaces\s*:\s*(${REPLACES_TOKEN}(?:[\s,;]+${REPLACES_TOKEN})*)[\s,;]*$`, 'i');
 // A line (leading whitespace aside) that opens a block of its own (list item, heading,
 // quote, fence, directive, table row, HTML, rule) ends a plain bullet instead
 // of continuing it lazily.
@@ -477,7 +482,8 @@ export const parseQuestionBlock = (directiveKind: string | undefined, body: stri
     }
     const replacesLine = line.match(REPLACES_RE);
     if (replacesLine) {
-      for (const token of replacesLine[1].split(/[\s,;]+/)) {
+      for (const raw of replacesLine[1].split(/[\s,;]+/)) {
+        const token = raw.replace(/\.$/, '');
         if (token && !replaces.includes(token)) replaces.push(token);
       }
       lastChoice = -1;

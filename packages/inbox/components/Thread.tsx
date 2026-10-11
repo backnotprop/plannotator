@@ -22,6 +22,8 @@ import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useL
 import { ChangedNotice, ReplacedQuestionCard, ReplacesLine, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 
 const noop = () => {};
+/** The agent superseded the question this call named (`422 question_superseded`). */
+const isSuperseded = (cause: unknown): boolean => cause instanceof InboxApiError && cause.code === 'question_superseded';
 const NO_ANNOTATIONS: never[] = [];
 
 /** The words an answer reads as in a reply draft: "Retry with the same idempotency key". */
@@ -418,7 +420,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         for (const q of result.questions) revisions.current.set(`${q.message_id}/${q.key}`, q.revision);
         onQuestions(messageId, result.questions);
       } catch (cause) {
-        setError(cause instanceof InboxApiError ? cause.message : 'The pick was not saved.');
+        // The agent replaced the question meanwhile: reading the thread again redraws it as Replaced.
+        if (!isSuperseded(cause)) setError(cause instanceof InboxApiError ? cause.message : 'The pick was not saved.');
         await onChanged();
       } finally {
         setPending((current) => {
@@ -479,7 +482,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       .setDecision(messageId, key, { recording: next })
       .then((result) => patchQuestion(result.question))
       .catch(async (cause) => {
-        setError(cause instanceof InboxApiError ? cause.message : 'The switch was not saved.');
+        if (!isSuperseded(cause)) setError(cause instanceof InboxApiError ? cause.message : 'The switch was not saved.');
         await onChanged();
       })
       .finally(() =>
@@ -588,7 +591,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       // The reply and where it is now sit at the foot of the thread.
       requestAnimationFrame(() => bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight }));
     } catch (cause) {
-      if (cause instanceof InboxApiError && cause.code === 'question_superseded') {
+      if (isSuperseded(cause)) {
         // The race: the agent replaced a picked question as the person sent.
         // Nothing went; the thread is read again and the panel says why.
         await onChanged();

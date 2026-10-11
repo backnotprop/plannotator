@@ -486,13 +486,22 @@ export function createInboxRelay(context: InboxRelayContext) {
     ws?.close(1000, "closed");
   };
 
-  /** One push per phone whose switch is on, for an agent's message with a question or a guided review. */
+  /**
+   * One push per phone whose switch is on, for an agent's message with a
+   * question or a guided review, or one that superseded earlier questions
+   * (replaced questions). Pushes collapse per thread, so a withdrawal that
+   * asks nothing new still pushes (with `question: null`, no answer actions)
+   * to replace the older notification and its lock-screen answers.
+   */
   const pushFor = async (messageId: string): Promise<void> => {
     const message = store.message(messageId);
     if (!mailbox || !message) return;
     const questions = store.questionsOf(messageId);
-    if (questions.length === 0 && !message.guide) return;
-    const only = questions.length === 1 ? questions[0]! : null;
+    const supersedes = store.supersededBy(messageId).length > 0;
+    if (questions.length === 0 && !message.guide && !supersedes) return;
+    // Only an open question is ever offered for a lock-screen answer.
+    const open = questions.filter((q) => q.state === "open");
+    const only = open.length === 1 ? open[0]! : null;
     const summary: PushPlaintext = {
       v: 1,
       type: "push",

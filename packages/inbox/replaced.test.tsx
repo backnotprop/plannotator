@@ -132,17 +132,20 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let posted: { path: string; body: unknown }[] = [];
 let replyAnswer: () => Response = () => new Response('{}');
+let picksAnswer: () => Response = () => Response.json({ questions: [] });
 
 beforeEach(() => {
   if (!hasDom) return;
   savedFetch = globalThis.fetch;
   posted = [];
   replyAnswer = () => Response.json({ reply: {}, questions: [], replayed: false, decisions_refused: [] });
+  picksAnswer = () => Response.json({ questions: [] });
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (init?.method === 'POST') {
       posted.push({ path, body: JSON.parse(String(init.body)) });
       if (path.endsWith('/reply')) return replyAnswer();
+      if (path.endsWith('/picks')) return picksAnswer();
       return Response.json({});
     }
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
@@ -327,4 +330,27 @@ test.skipIf(!hasDom)('the race: a 422 question_superseded at Send shows the same
   // Nothing else is in this reply: no "Send … only".
   expect(guard.querySelector('[data-guard-send-rest]')).toBeNull();
   expect(guard.textContent).toContain('Nothing else is in this reply yet.');
+});
+
+test.skipIf(!hasDom)('a pick that meets 422 question_superseded shows no error: the thread is read again and the card redraws as Replaced', async () => {
+  let current = before();
+  const [, q2] = current.messages[0]!.questions!;
+  let reads = 0;
+  const onChanged = async () => {
+    reads += 1;
+    current = after('withdraw');
+    act(() => root!.render(pane(current, onChanged)));
+  };
+  picksAnswer = () => Response.json({ error: 'Question q-x no longer applies.', code: 'question_superseded' }, { status: 422 });
+  const el = await render(current, onChanged);
+  const yes = [...card(el, M1, q2!.key).querySelectorAll('label')].find((l) => l.textContent?.includes('Yes'))!.querySelector('input')!;
+  await act(async () => {
+    yes.click();
+  });
+  await settle();
+  await settle();
+  expect(posted.some((p) => p.path.endsWith('/picks'))).toBe(true);
+  expect(reads).toBe(1);
+  expect(el.querySelector('.ib-error')).toBeNull();
+  expect(card(el, M1, q2!.key).getAttribute('data-question-state')).toBe('superseded');
 });

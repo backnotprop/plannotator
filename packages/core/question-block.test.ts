@@ -651,4 +651,15 @@ describe("Replaces: lines (the Plannotator Inbox)", () => {
     expect(prose.replaces).toBeUndefined();
     expect(prose.context).toBe("Replaces: the legacy cache");
   });
+
+  test("a value that only starts like an id stays prose; a trailing period on an id is dropped", () => {
+    for (const line of ["Replaces: q-learning with PPO for the agent.", "Replaces: msg_ queue drain approach", `Replaces: ${OLD} and the other one`]) {
+      const parsed = parseQuestionBlock("question-text", `Why?\n${line}`)!;
+      expect(parsed.replaces).toBeUndefined();
+      expect(parsed.context).toBe(line);
+    }
+    const prompt = parseQuestionBlock("question-text", "Replaces: q-learning with PPO\nWhy?")!;
+    expect(prompt.prompt).toBe("Replaces: q-learning with PPO");
+    expect(parseQuestionBlock("question-text", `Why?\nReplaces: ${OLD}.`)!.replaces).toEqual([OLD]);
+  });
 });
