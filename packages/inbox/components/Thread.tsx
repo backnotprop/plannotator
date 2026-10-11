@@ -28,7 +28,7 @@ const isSuperseded = (cause: unknown): boolean => cause instanceof InboxApiError
 const NO_ANNOTATIONS: never[] = [];
 
 /** The fold state of one open thread: in memory only, decided once when the thread opens. */
-export interface FoldState {
+interface FoldState {
   threadId: string;
   /** Messages shown as one line. A message that arrives later is not in it, so it shows open. */
   folded: Set<string>;
@@ -36,19 +36,6 @@ export interface FoldState {
   hidden: string[][];
   /** The runs whose "N earlier messages" was opened. */
   revealed: Set<number>;
-}
-
-/**
- * What the window keeps of an open thread across the pane's remounts (a
- * guided review takes the window, then closes): the fold state, whether the
- * thread already landed at "New since you looked", and where it was scrolled.
- * One object per open thread, owned by App and written by the pane.
- */
-export interface ThreadFoldMemory {
-  threadId: string;
-  fold: FoldState | null;
-  landed: boolean;
-  scrollTop: number;
 }
 
 /** "Today, 9:12 AM": a moment in the thread's meta line. */
@@ -260,13 +247,11 @@ export interface ThreadPaneProps {
   /**
    * Where "new since you looked" starts (folding.ts `lookBoundary`), read
    * from the thread BEFORE the window recorded this look and kept until the
-   * person leaves the thread. The window holds it, so it outlives this pane
-   * (a guided review opened from the thread and closed again). Absent: the
-   * pane takes it from the first thread it is given.
+   * person leaves the thread. The window takes it from its own first read,
+   * which lands before it records the look. Absent: the pane takes it from
+   * the first thread it is given.
    */
   lookSeq?: number | null;
-  /** The window's memory of this thread (fold state, landed, scroll), kept across remounts. */
-  memory?: ThreadFoldMemory;
 }
 
 /** The thread's attachments as they are now and the annotations waiting for a Send, kept fresh. */
@@ -298,7 +283,7 @@ function useThreadAttachments(threadId: string, revision: unknown) {
   return { model, load, patch };
 }
 
-export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile, onOpenGuide, lookSeq, memory }: ThreadPaneProps) {
+export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile, onOpenGuide, lookSeq }: ThreadPaneProps) {
   const root = thread.messages[0]!;
   const asker = agentName(root.author);
   const resolved = thread.resolved_at !== null;
@@ -372,20 +357,13 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   const showNew = !one && fresh.size > 0;
   // The fold is decided once, when the thread opens: opening a message never
   // makes others appear or disappear.
-  // The window keeps it beside the boundary (`memory`), so a guided review
-  // opened from the thread and closed again finds the thread as it was left.
-  const memoryRef = useRef(memory);
-  memoryRef.current = memory?.threadId === thread.thread_id ? memory : undefined;
-  const [foldState, setFoldState] = useState<FoldState | null>(() => (memory?.threadId === thread.thread_id ? memory.fold : null));
+  const [foldState, setFoldState] = useState<FoldState | null>(null);
   let fold = foldState;
   if (!fold || fold.threadId !== thread.thread_id) {
     const plan = planFolds(thread.messages, fresh, boundary);
     fold = { threadId: thread.thread_id, folded: plan.folded, hidden: plan.hidden, revealed: new Set() };
     setFoldState(fold);
   }
-  useEffect(() => {
-    if (memoryRef.current && foldState?.threadId === memoryRef.current.threadId) memoryRef.current.fold = foldState;
-  }, [foldState]);
   const foldRef = useRef(fold);
   foldRef.current = fold;
   const hiddenNow = new Set(fold.hidden.flatMap((ids, index) => (fold.revealed.has(index) ? [] : ids)));
@@ -606,40 +584,31 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   useEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
-    const onScroll = () => {
-      if (memoryRef.current) memoryRef.current.scrollTop = body.scrollTop;
-      updateChrome();
-    };
-    body.addEventListener('scroll', onScroll, { passive: true });
+    body.addEventListener('scroll', updateChrome, { passive: true });
     window.addEventListener('resize', updateChrome);
+    // The thread's own box changes without a scroll or a window resize when
+    // the foot grows (the reply box, the stale guard, the New-message
+    // composer) or a file opens beside it.
+    const resized = typeof ResizeObserver === 'function' ? new ResizeObserver(() => updateChrome()) : null;
+    resized?.observe(body);
     return () => {
-      body.removeEventListener('scroll', onScroll);
+      body.removeEventListener('scroll', updateChrome);
       window.removeEventListener('resize', updateChrome);
+      resized?.disconnect();
     };
   }, [updateChrome]);
 
   // Where the thread opens: at the "New since you looked" divider with the
-  // last read line just above it, or at the top when nothing is new. Once per
-  // thread; a pane opened again on a thread that already landed (back from a
-  // guided review) goes back to where it was scrolled.
+  // last read line just above it, or at the top when nothing is new. Once per thread.
   const landed = useRef<string | null>(null);
   useLayoutEffect(() => {
     if (!foldState || foldState.threadId !== thread.thread_id || landed.current === thread.thread_id) return;
     landed.current = thread.thread_id;
     const body = bodyRef.current;
     if (!body) return;
-    const kept = memoryRef.current;
-    if (kept?.landed) {
-      body.scrollTop = kept.scrollTop;
-      return;
-    }
     const divider = body.querySelector<HTMLElement>('[data-new-divider]');
     const above = divider?.previousElementSibling as HTMLElement | null | undefined;
     body.scrollTop = divider ? Math.max(0, (above ? above.offsetTop : divider.offsetTop) - 6) : 0;
-    if (kept) {
-      kept.landed = true;
-      kept.scrollTop = body.scrollTop;
-    }
   }, [foldState, thread.thread_id]);
 
   // After a fold or an open: the message the person acted on stays where it

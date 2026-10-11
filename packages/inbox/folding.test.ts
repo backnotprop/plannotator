@@ -72,6 +72,9 @@ test('emphasis marks go only where they pair at word boundaries; snake_case, ari
   expect(firstWords('Rename retry_count to max_retry_count in `queue_worker.ts`.')).toBe('Rename retry_count to max_retry_count in queue_worker.ts.');
   expect(firstWords('It costs 2 * 3 = 6 seconds, and **this** is _the_ ~~old~~ *new* plan.')).toBe('It costs 2 * 3 = 6 seconds, and this is the old new plan.');
   expect(cleanInline('The `**not bold**` stays, __a__ goes.')).toBe('The **not bold** stays, a goes.');
+  // A closing mark followed by `.` and a word character is part of a name.
+  expect(firstWords('__init__.py is here, and so is *main*.')).toBe('__init__.py is here, and so is main.');
+  expect(firstWords('Read **this**: it is _short_; (*really*) "**quoted**".')).toBe('Read this: it is short; (really) "quoted".');
 });
 
 test("a person's reply snippet: its own words, without the store's 'Answered N questions.' and the answers section after them", () => {

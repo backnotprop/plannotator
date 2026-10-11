@@ -17,7 +17,6 @@ import type { InboxAuthor, InboxMessageWire, InboxProject, InboxQuestion, InboxT
 const hasDom = typeof document !== 'undefined';
 // Viewer pulls in web-highlighter, which reads `window` at module-eval time.
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
-type ThreadFoldMemory = import('./components/Thread').ThreadFoldMemory;
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'docs-site-abcdef', name: 'docs-site', root: '/work/docs-site', created_at: '2026-10-10T09:00:00.000Z' };
 const AGENT: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: 'Claude Code' };
@@ -186,7 +185,7 @@ async function settle() {
   });
 }
 
-function pane(thread: InboxThread, lookSeq?: number | null, memory?: ThreadFoldMemory) {
+function pane(thread: InboxThread, lookSeq?: number | null) {
   return (
     <div className="pn-inbox">
       <ThreadPane
@@ -201,18 +200,17 @@ function pane(thread: InboxThread, lookSeq?: number | null, memory?: ThreadFoldM
         onOpenFile={() => {}}
         onOpenGuide={() => {}}
         lookSeq={lookSeq}
-        memory={memory}
       />
     </div>
   );
 }
 
-async function render(thread: InboxThread, lookSeq?: number | null, memory?: ThreadFoldMemory) {
+async function render(thread: InboxThread, lookSeq?: number | null) {
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
-    root.render(pane(thread, lookSeq, memory));
+    root.render(pane(thread, lookSeq));
   });
   await settle();
   return host;
@@ -509,25 +507,6 @@ test.skipIf(!hasDom)('the meta line says one time when the thread began and ende
   expect(el.querySelectorAll('button div').length).toBe(0);
 });
 
-test.skipIf(!hasDom)("the window's memory keeps the fold, the landing and the scroll across the pane's remount (a guided review opened and closed)", async () => {
-  const memory: ThreadFoldMemory = { threadId: ROOT, fold: null, landed: false, scrollTop: 0 };
-  const el = await render(seven(), 13, memory);
-  act(() => (el.querySelector('[data-middle-fold] button') as HTMLButtonElement).click());
-  act(() => (article(el, 'msg_A2')!.querySelector('[data-fold-head]') as HTMLButtonElement).click());
-  const left = shown(el);
-  const body = el.querySelector<HTMLElement>('.ib-pbody')!;
-  body.scrollTop = 120;
-  act(() => void body.dispatchEvent(new Event('scroll')));
-  expect(memory.landed).toBe(true);
-  act(() => root!.unmount());
-  host!.remove();
-  // Back from the guided review: the same thread, the same boundary, the same memory.
-  const back = await render(seven({ lookAt: 15 }), 13, memory);
-  expect(shown(back)).toEqual(left);
-  expect(article(back, 'msg_A2')!.hasAttribute('data-open')).toBe(true);
-  expect(back.querySelector<HTMLElement>('.ib-pbody')!.scrollTop).toBe(120);
-});
-
 test.skipIf(!hasDom)('the pill shows while ANY new message is below the view, and goes to the first one below', async () => {
   const grown = seven();
   grown.messages.push(message('msg_A5', AGENT, 17, 'Merged.'));
@@ -575,4 +554,47 @@ test.skipIf(!hasDom)('typing in the reply box measures nothing: the chrome and t
   }
   expect(box.value).toBe('On m');
   expect(measured).toBe(0);
+});
+
+test.skipIf(!hasDom)('the thread box shrinking (the reply box opening below it) brings the pill back without a scroll or a window resize', async () => {
+  // A fake ResizeObserver the test drives, standing in for the browser's.
+  const observers: { callback: ResizeObserverCallback; observed: Element[]; connected: boolean }[] = [];
+  stub(globalThis, 'ResizeObserver', {
+    writable: true,
+    value: class {
+      private entry: (typeof observers)[number];
+      constructor(callback: ResizeObserverCallback) {
+        this.entry = { callback, observed: [], connected: true };
+        observers.push(this.entry);
+      }
+      observe(target: Element) {
+        this.entry.observed.push(target);
+      }
+      unobserve() {}
+      disconnect() {
+        this.entry.connected = false;
+      }
+    },
+  });
+  // The new message's top is at 700; the thread box ends at 800, then at 600 once the foot grows.
+  let bottom = 800;
+  stub(HTMLElement.prototype, 'getBoundingClientRect', {
+    value(this: HTMLElement) {
+      const y = this.classList.contains('ib-pbody') ? 0 : this.hasAttribute('data-new') ? 700 : 0;
+      const h = this.classList.contains('ib-pbody') ? bottom : 40;
+      return { top: y, bottom: y + h, left: 0, right: 0, width: 0, height: h, x: 0, y, toJSON() {} };
+    },
+  });
+  const el = await render(seven());
+  const body = el.querySelector('.ib-pbody')!;
+  const watcher = observers.find((o) => o.observed.includes(body))!;
+  expect(watcher).toBeDefined();
+  const pill = el.querySelector<HTMLButtonElement>('[data-new-pill]')!;
+  expect(pill.hasAttribute('data-off')).toBe(true);
+  bottom = 600;
+  act(() => watcher.callback([], {} as ResizeObserver));
+  expect(pill.hasAttribute('data-off')).toBe(false);
+  act(() => root!.unmount());
+  root = null;
+  expect(watcher.connected).toBe(false);
 });

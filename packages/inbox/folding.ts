@@ -192,8 +192,11 @@ export function cleanInline(text: string): string {
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/\[\[([^\]|]*)(?:\|([^\]]*))?\]\]/g, (_m, target: string, label?: string) => label ?? target)
     .replace(/<\/?[A-Za-z][^>]*>/g, '');
+  // A closing mark ends a word: whitespace, the end, or punctuation that does
+  // not run into another word (`__init__.py` is a name, not emphasis).
+  const close = `(?=$|\\s|[,;:!?)\\]"'’]|\\.(?!\\w))`;
   for (const mark of ['\\*\\*', '__', '~~', '\\*', '_']) {
-    const pair = new RegExp(`(^|[^\\w*~])${mark}(?=\\S)([\\s\\S]*?\\S)${mark}(?![\\w*~])`, 'g');
+    const pair = new RegExp(`(^|[^\\w*~])${mark}(?=\\S)([\\s\\S]*?\\S)${mark}${close}`, 'g');
     out = out.replace(pair, '$1$2');
   }
   return out.replace(/\u0000(\d+)\u0000/g, (_m, i: string) => code[Number(i)] ?? '');
