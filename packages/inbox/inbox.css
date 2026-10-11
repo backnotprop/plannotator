@@ -161,6 +161,12 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-main { background: var(--card); display: flex; flex: 1; min-width: 0; height: 100%; }
 .ib-listcol { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .ib-listcol.ib-narrow { flex: none; width: 380px; border-right: 1px solid var(--ib-line); }
+/* Beside a thread, off phones, the column has the sidebar's resize edge
+   (shell/ListColumnEdge.tsx sets its width): never narrower than 380px, and
+   never so wide that the thread pane gets less than 480px. min-width wins
+   when the window has room for neither. */
+.ib-listcol.ib-resizable { position: relative; min-width: 380px; max-width: calc(100% - 480px); }
+.ib-listcol > .ib-listedge { position: absolute; top: 0; bottom: 0; right: 0; z-index: 5; display: flex; }
 .ib-lhead { height: 60px; display: flex; align-items: center; gap: 12px; padding: 0 22px; flex: none; }
 .ib-lhead h1 { font-size: 20px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
 .ib-lhead .ib-path { font-family: var(--font-mono); font-size: 12px; color: var(--muted-foreground); }
@@ -211,7 +217,7 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-nrow .ib-l2 { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13.5px; overflow: hidden; }
 .ib-nrow .ib-l2 .ib-s { color: var(--muted-foreground); }
 .ib-nrow.ib-u .ib-l2 .ib-s { color: var(--foreground); font-weight: 600; }
-.ib-nrow.ib-sel { background: color-mix(in oklch, var(--primary) 9%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--primary) 35%, transparent); border-radius: 6px; }
+.ib-row.ib-sel, .ib-nrow.ib-sel { background: color-mix(in oklch, var(--primary) 9%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--primary) 35%, transparent); border-radius: 6px; }
 .ib-nrow.ib-sent .ib-p, .ib-nrow.ib-sent .ib-l2 .ib-s { color: var(--muted-foreground); font-weight: 400; }
 .ib-att { display: inline-flex; align-items: center; gap: 4px; color: var(--muted-foreground); font-size: 13px; white-space: nowrap; flex: none; }
 .ib-notice { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 14px; border-radius: 8px; background: color-mix(in oklch, var(--primary) 10%, var(--card)); border: 1px solid color-mix(in oklch, var(--primary) 25%, transparent); font-size: 13.5px; margin-bottom: 12px; width: 100%; text-align: left; }

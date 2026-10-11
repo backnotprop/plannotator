@@ -2,7 +2,8 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { agentName, questionCount, shortTime } from '../format';
 import { AuthorMark, Icon } from '../icons';
-import { SidebarTrigger } from '../shell/sidebar';
+import { ListColumnEdge } from '../shell/ListColumnEdge';
+import { SidebarTrigger, useSidebar } from '../shell/sidebar';
 
 export interface InboxListProps {
   title: string;
@@ -11,7 +12,11 @@ export interface InboxListProps {
   sections: readonly InboxListSection[];
   /** One project is shown: its rows drop the project label. */
   filtered: boolean;
-  /** A thread is open beside the list: two-line rows in a narrow column. */
+  /**
+   * A thread is open beside the list: a column of its own width (380px, or
+   * wider where the person dragged its edge), two-line rows until it is
+   * wide enough for the wide ones.
+   */
   narrow: boolean;
   selectedThreadId: string | null;
   notice: string | null;
@@ -74,22 +79,23 @@ export const WIDE_ROWS_MIN_LIST_WIDTH = 900;
 
 /**
  * Whether the list is narrower than `min`, read before paint and on every
- * resize. Unmeasured (no layout, no ResizeObserver) reads as wide.
+ * resize. Unmeasured (no layout, no ResizeObserver) reads as `unmeasured`:
+ * wide for the full list, narrow for the column beside a thread.
  *
  * Crossing `min` swaps every row element for the other shape, which would
  * drop keyboard focus: the row that held it is noted just before the swap and
  * focused again (without scrolling) once the new rows are in the DOM.
  */
-function useNarrowerThan(min: number) {
+function useNarrowerThan(min: number, unmeasured: boolean) {
   const ref = useRef<HTMLElement>(null);
-  const [narrower, setNarrower] = useState(false);
-  const current = useRef(false);
+  const [narrower, setNarrower] = useState(unmeasured);
+  const current = useRef(unmeasured);
   const focusedThread = useRef<string | null>(null);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const read = (width: number) => {
-      const next = width > 0 && width < min;
+      const next = width > 0 ? width < min : unmeasured;
       if (next === current.current) return;
       const active = document.activeElement;
       focusedThread.current = active instanceof HTMLElement && el.contains(active) ? (active.closest('[data-thread-id]')?.getAttribute('data-thread-id') ?? null) : null;
@@ -101,7 +107,7 @@ function useNarrowerThan(min: number) {
     const observer = new ResizeObserver((entries) => read(entries[0]?.contentRect.width ?? 0));
     observer.observe(el);
     return () => observer.disconnect();
-  }, [min]);
+  }, [min, unmeasured]);
   useLayoutEffect(() => {
     const id = focusedThread.current;
     focusedThread.current = null;
@@ -119,15 +125,16 @@ function useNarrowerThan(min: number) {
  * row has one, leads the subject cell, so a row starts at the list's left edge
  * instead of after an empty block.
  */
-function WideRow({ row, filtered, onOpen }: { row: InboxListRow; filtered: boolean; onOpen: () => void }) {
+function WideRow({ row, selected, filtered, onOpen }: { row: InboxListRow; selected: boolean; filtered: boolean; onOpen: () => void }) {
   const badge = badgeOf(row);
   const sent = row.section === 'sent';
   const badgeEl = badge && <span className="ib-badge">{badge}</span>;
   return (
     <button
       type="button"
-      className={`ib-row${row.unread ? ' ib-u' : ''}${sent ? ' ib-sent' : ''}`}
+      className={`ib-row${row.unread ? ' ib-u' : ''}${sent ? ' ib-sent' : ''}${selected ? ' ib-sel' : ''}`}
       onClick={onOpen}
+      aria-current={selected ? 'true' : undefined}
       data-thread-id={row.thread_id}
       data-section={row.section}
     >
@@ -172,14 +179,20 @@ function NarrowRow({ row, selected, filtered, onOpen }: { row: InboxListRow; sel
 
 export function InboxList(props: InboxListProps) {
   const [quietOpen, setQuietOpen] = useState(false);
-  const [listRef, narrowList] = useNarrowerThan(WIDE_ROWS_MIN_LIST_WIDTH);
-  // Two-line rows beside an open thread, and for every project in a list too narrow for the wide row's columns.
-  const twoLine = props.narrow || (!props.filtered && narrowList);
+  const [listRef, narrowList] = useNarrowerThan(WIDE_ROWS_MIN_LIST_WIDTH, props.narrow);
+  // Two-line rows in a list too narrow for the wide row's columns: beside an
+  // open thread for every list (the column is 380px unless its edge was
+  // dragged past the wide rows' width), and in the full list for every
+  // project (one project's wide row fits any width).
+  const twoLine = narrowList && (props.narrow || !props.filtered);
+  // The column beside a thread gets the sidebar's resize edge, except on a phone.
+  const { isMobile } = useSidebar();
+  const resizable = props.narrow && !isMobile;
   const visible = props.sections.filter((s) => s.threads.length > 0);
   return (
     <section
       ref={listRef}
-      className={`ib-listcol${props.narrow ? ' ib-narrow' : ''}${props.filtered ? ' ib-noproj' : ''}`}
+      className={`ib-listcol${props.narrow ? ' ib-narrow' : ''}${resizable ? ' ib-resizable' : ''}${props.filtered ? ' ib-noproj' : ''}`}
       aria-label={props.title}
     >
       <div className="ib-lhead">
@@ -222,13 +235,20 @@ export function InboxList(props: InboxListProps) {
                       onOpen={() => props.onOpen(row)}
                     />
                   ) : (
-                    <WideRow key={row.thread_id} row={row} filtered={props.filtered} onOpen={() => props.onOpen(row)} />
+                    <WideRow
+                      key={row.thread_id}
+                      row={row}
+                      filtered={props.filtered}
+                      selected={row.thread_id === props.selectedThreadId}
+                      onOpen={() => props.onOpen(row)}
+                    />
                   ),
                 )}
             </div>
           );
         })}
       </div>
+      {resizable && <ListColumnEdge />}
     </section>
   );
 }
