@@ -70,6 +70,18 @@ export function isEditableTarget(target: EventTarget | null): boolean {
 const ARROW_OWNERS =
   '[data-claims-arrows="true"], [data-diagram-canvas], [role="menu"], [role="menubar"], [role="listbox"], [role="tablist"], [role="radiogroup"], [role="slider"], [role="tree"], [role="grid"]';
 
+/** Whether the key's path (through shadow roots) passes an element that scrolls horizontally. */
+function scrollsSideways(event: KeyboardEvent): boolean {
+  const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
+  for (const node of path) {
+    if (!(node instanceof Element) || node === document.documentElement || node === document.body) continue;
+    if (node.scrollWidth <= node.clientWidth + 1) continue;
+    const overflow = getComputedStyle(node).overflowX;
+    if (overflow === 'auto' || overflow === 'scroll') return true;
+  }
+  return false;
+}
+
 export interface StepKeyContext {
   /** The pane is full screen (keys work from anywhere in the window). */
   full: boolean;
@@ -84,8 +96,9 @@ export interface StepKeyContext {
  * step. `]` `[` always, except while typing, with ⌘ / Ctrl / Alt (⌘[ ⌘] are
  * the browser's Back and Forward), on auto-repeat, during an IME
  * composition, or when the question row or the list is open. `→` `←` the
- * same, and also not with Shift, not where the focused element uses arrows,
- * not while a text selection exists, and not when a handler already used the
+ * same, and also not with Shift, not where the focused element uses arrows
+ * or sits in a block that scrolls sideways, not while a text selection
+ * exists, and not when a handler already used the
  * key. Beside the thread, only when focus is in the file.
  */
 export function stepKeyIntent(event: KeyboardEvent, context: StepKeyContext): 1 | -1 | null {
@@ -109,6 +122,8 @@ export function stepKeyIntent(event: KeyboardEvent, context: StepKeyContext): 1 
   if (arrow) {
     if (event.shiftKey || event.defaultPrevented) return null;
     if (target?.closest(ARROW_OWNERS)) return null;
+    // A block that scrolls sideways (a wide code line, a table), Pierre's code scroller in its shadow root included.
+    if (scrollsSideways(event)) return null;
     const selection = typeof window !== 'undefined' ? window.getSelection() : null;
     if (selection && !selection.isCollapsed && selection.toString().trim() !== '') return null;
   }

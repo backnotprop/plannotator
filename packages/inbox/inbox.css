@@ -491,7 +491,7 @@ button.ib-drow:hover { background: color-mix(in oklch, var(--muted) 35%, transpa
 .pn-inbox .ib-stepbig[aria-disabled="true"] { opacity: 0.35; cursor: default; }
 .pn-inbox .ib-steppos.ib-stepmid { flex: 1; justify-content: center; height: 44px; max-width: none; }
 .ib-stepphone .ib-steplist { left: 8px; right: 8px; width: auto; max-width: none; }
-.ib-stepphone .ib-endnote { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); box-shadow: var(--card-shadow); }
+.ib-stepphone .ib-stepnote { white-space: normal; text-align: center; font-size: 12px; line-height: 1.25; min-width: 0; color: var(--foreground); }
 .ib-view.ib-phone .ib-vhead { padding: 0 6px 0 12px; gap: 6px; }
 .ib-view.ib-phone .ib-vhead .ib-fn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ib-view.ib-phone .ib-vhead .ib-from, .ib-view.ib-phone .ib-vhead .ib-sp { display: none; }

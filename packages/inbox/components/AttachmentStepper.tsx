@@ -201,16 +201,22 @@ export function AttachmentStepper(props: AttachmentStepperProps) {
           onClick={() => props.onMenuOpenChange(!menuOpen)}
           data-step-label=""
         >
-          <span className="ib-stepn">
-            {index + 1} of {total}
-          </span>
+          {/* The end note takes the count's place for a moment: in the bar, never over the file. */}
+          {props.endNote ? (
+            <span className="ib-stepn ib-stepnote" aria-hidden="true" data-step-end-note="">
+              {props.endNote}
+            </span>
+          ) : (
+            <span className="ib-stepn">
+              {index + 1} of {total}
+            </span>
+          )}
           <Icon name="chevD" size={13} />
         </button>
         <button type="button" className="ib-stepbig" aria-label={nextLabel} aria-disabled={next ? undefined : 'true'} onClick={() => props.onStep(1, 'button')} data-step-next="">
           Next
           <Icon name="chevR" size={16} />
         </button>
-        {endNote}
         {list}
       </nav>
     );

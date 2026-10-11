@@ -1589,18 +1589,37 @@ describe.if(hasDom)('Interact/Annotate mode on static (srcdoc) surfaces', () => 
     expect(toggles).toBe(1);
   });
 
-  test('a bridge step message (a plain ] or [ in the page) reaches the host only while armed, and only as 1 or -1', async () => {
-    // The Inbox steps through a thread's attachments on it; in Interact the page owns its keys.
+  test('a bridge step message (a plain ] or [ in the page) reaches the host only while armed, with the frame focused, at most once per 150 ms', async () => {
+    // The Inbox steps through a thread's attachments on it. The page can post
+    // the message itself, so a page posting in a loop without the person's
+    // focus must not move anything, and a loop with focus is throttled.
     const armed: number[] = [];
     const { post } = await mountModeViewer({ annotateModeActive: true, onStep: (dir) => armed.push(dir) });
-    await post({ type: 'plannotator-bridge-step', dir: 1 });
-    await post({ type: 'plannotator-bridge-step', dir: -1 });
+    const iframe = document.querySelector<HTMLIFrameElement>('iframe')!;
+    // Not focused: a page posting every 50 ms moves nothing.
+    for (let i = 0; i < 5; i++) {
+      await post({ type: 'plannotator-bridge-step', dir: 1 });
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    }
+    expect(armed).toEqual([]);
+    // Focused: one step, then nothing until 150 ms have passed; only 1 or -1.
+    await act(async () => { iframe.focus(); });
+    expect(document.activeElement).toBe(iframe);
     await post({ type: 'plannotator-bridge-step', dir: 2 });
     await post({ type: 'plannotator-bridge-step', dir: '1' });
+    await post({ type: 'plannotator-bridge-step', dir: 1 });
+    await post({ type: 'plannotator-bridge-step', dir: 1 });
+    await post({ type: 'plannotator-bridge-step', dir: -1 });
+    expect(armed).toEqual([1]);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, htmlViewerModule!.STEP_MESSAGE_MIN_INTERVAL_MS + 20)); });
+    await post({ type: 'plannotator-bridge-step', dir: -1 });
     expect(armed).toEqual([1, -1]);
 
+    // In Interact the page owns its keys: nothing reaches the host.
     const interact: number[] = [];
     const second = await mountModeViewer({ annotateModeActive: false, onStep: (dir) => interact.push(dir) });
+    const frames = document.querySelectorAll<HTMLIFrameElement>('iframe');
+    await act(async () => { frames[frames.length - 1]!.focus(); });
     await second.post({ type: 'plannotator-bridge-step', dir: 1 });
     expect(interact).toEqual([]);
   });

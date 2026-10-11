@@ -89,7 +89,7 @@ interface Harness {
 }
 
 /** The pane as the thread drives it: a step opens the next file in place. */
-function Pane({ start, full = true, harness, steps = STEPS }: { start: InboxAttachmentState; full?: boolean; harness: Harness; steps?: AttachmentStep[] }) {
+function Pane({ start, full = true, harness, steps = STEPS, phone = false }: { start: InboxAttachmentState; full?: boolean; harness: Harness; steps?: AttachmentStep[]; phone?: boolean }) {
   const [open, setOpen] = useState(start);
   const noop = () => {};
   const all = steps.map((s) => s.attachment);
@@ -113,6 +113,7 @@ function Pane({ start, full = true, harness, steps = STEPS }: { start: InboxAtta
       onClose={() => harness.closed++}
       strip={{ picks: 0, annotations: 0, onBack: noop, onWriteReply: noop }}
       steps={steps}
+      phone={phone}
       onStep={(id, version) => {
         harness.steps.push({ id, version });
         setOpen(all.find((a) => a.id === id)!);
@@ -411,4 +412,49 @@ test.skipIf(!hasDom)('the header drops the file name when the thread has more th
   // Beside the thread with one file there is no bar at all.
   expect(host!.querySelector('[data-view-foot]')).toBeNull();
   expect(pane().getAttribute('aria-label')).toBe('desktop.png');
+});
+
+test.skipIf(!hasDom)('the arrows stand down inside a block that scrolls sideways, through a shadow root too', async () => {
+  const harness = harnessOf();
+  await render(<Pane start={spec} harness={harness} />);
+  const wide = (el: HTMLElement) => {
+    el.style.overflowX = 'auto';
+    Object.defineProperty(el, 'scrollWidth', { configurable: true, get: () => 2000 });
+    Object.defineProperty(el, 'clientWidth', { configurable: true, get: () => 600 });
+  };
+  const block = document.createElement('pre');
+  wide(block);
+  const line = document.createElement('code');
+  line.tabIndex = 0;
+  block.appendChild(line);
+  pane().appendChild(block);
+  await key(line, { key: 'ArrowRight' });
+  // Pierre's code scroller lives in a shadow root.
+  const shadowHost = document.createElement('div');
+  pane().appendChild(shadowHost);
+  const shadow = shadowHost.attachShadow({ mode: 'open' });
+  const scroller = document.createElement('div');
+  wide(scroller);
+  const inner = document.createElement('span');
+  inner.tabIndex = 0;
+  scroller.appendChild(inner);
+  shadow.appendChild(scroller);
+  await key(inner, { key: 'ArrowRight' });
+  expect(harness.steps).toEqual([]);
+  // ] is not an arrow: it still steps from there.
+  await key(line, { key: ']' });
+  expect(harness.steps.map((s) => s.id)).toEqual([shotB.id]);
+});
+
+test.skipIf(!hasDom)('on a phone the end note takes the place of the count in the bar, never floating over the file', async () => {
+  const harness = harnessOf();
+  await render(<Pane start={zip} harness={harness} phone />);
+  const label = host!.querySelector<HTMLButtonElement>('[data-step-label]')!;
+  expect(label.textContent).toContain('4 of 4');
+  await act(async () => host!.querySelector<HTMLButtonElement>('[data-step-next]')!.click());
+  const note = host!.querySelector('[data-step-end-note]')!;
+  expect(note.textContent).toBe('Last attachment in this thread');
+  expect(label.contains(note)).toBe(true);
+  expect(label.textContent).not.toContain('4 of 4');
+  expect(host!.querySelectorAll('[data-step-end-note]')).toHaveLength(1);
 });

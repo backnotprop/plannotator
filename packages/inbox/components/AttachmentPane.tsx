@@ -84,8 +84,12 @@ export interface AttachmentPaneHandle {
   leave: (to: string | null, go: () => void) => void;
 }
 
-/** A composer in the open file with words (or a drawing) not yet saved: its textarea. */
-export function unsavedComposer(pane: HTMLElement | null): HTMLTextAreaElement | null {
+/**
+ * A composer in the open file with words (or a drawing) not yet saved, or an
+ * existing comment being edited whose words differ from the saved ones: its
+ * textarea. `savedText` answers an annotation's saved words by id.
+ */
+export function unsavedComposer(pane: HTMLElement | null, savedText: (id: string) => string | undefined = () => undefined): HTMLTextAreaElement | null {
   const typed = (area: HTMLTextAreaElement) => area.value.trim() !== '';
   // Plannotator's comment popover (text, HTML pinpoint, code lines) draws in a portal on the page.
   for (const area of document.querySelectorAll<HTMLTextAreaElement>('[data-comment-popover] textarea')) {
@@ -98,6 +102,16 @@ export function unsavedComposer(pane: HTMLElement | null): HTMLTextAreaElement |
   // An image drawn on but not yet commented.
   const drawn = pane.querySelector<HTMLElement>('[data-image-composer] .ib-markup');
   if (drawn) return pane.querySelector<HTMLTextAreaElement>('[data-image-composer] textarea');
+  // A comment being edited (the annotation panel's card, a code line's inline comment, which Pierre may draw in its shadow root).
+  const roots: ParentNode[] = [pane];
+  for (const container of pane.querySelectorAll('diffs-container')) if (container.shadowRoot) roots.push(container.shadowRoot);
+  for (const scope of roots) {
+    for (const area of scope.querySelectorAll<HTMLTextAreaElement>('[data-annotation-id] textarea, [data-code-annotation-id] textarea')) {
+      const owner = area.closest('[data-annotation-id], [data-code-annotation-id]');
+      const id = owner?.getAttribute('data-annotation-id') ?? owner?.getAttribute('data-code-annotation-id') ?? '';
+      if (area.value.trim() !== (savedText(id) ?? '').trim()) return area;
+    }
+  }
   return null;
 }
 
@@ -201,6 +215,18 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   );
   /** The question row: a typed comment would be lost by what the person just did. */
   const [guard, setGuard] = useState<{ to: string | null; go: () => void } | null>(null);
+  /** "Save it and go on" is waiting for the save to answer. */
+  const [guardSaving, setGuardSaving] = useState(false);
+  /** Every save the pane makes, counted, with the last one's answer: the question row waits on it. */
+  const saves = useRef<{ count: number; last: Promise<boolean> | null }>({ count: 0, last: null });
+  /** An annotation's saved words by id (an edit box differs from them when it holds unsaved words). */
+  const savedTextRef = useRef<(id: string) => string | undefined>(() => undefined);
+  savedTextRef.current = (id) => {
+    const record = props.records.find((r) => r.id === id);
+    if (!record) return undefined;
+    const text = (record.annotation as { text?: unknown }).text;
+    return typeof text === 'string' ? text : '';
+  };
   const guardRef = useRef<HTMLDivElement>(null);
   const memory = useRef(new Map<string, FileMemory>());
   const remember = (id: string, patch: FileMemory) => memory.current.set(id, { ...memory.current.get(id), ...patch });
@@ -213,7 +239,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   };
   /** Leave the open file for `to` (a name), or close it (null), unless a typed comment would be lost. */
   const leave = (to: string | null, go: () => void) => {
-    if (!props.readOnly && unsavedComposer(sectionRef.current)) {
+    if (!props.readOnly && unsavedComposer(sectionRef.current, savedTextRef.current)) {
       setMenuOpen(false);
       setGuard({ to, go });
       return;
@@ -275,6 +301,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   // `]` `[` `→` `←` (stepping.ts has the rules for when they stand down).
   const full = props.full;
   const blocked = guard !== null || menuOpen;
+  const blockedRef = useRef(blocked);
+  blockedRef.current = blocked;
   useEffect(() => {
     if (!multi) return;
     const onKey = (event: KeyboardEvent) => {
@@ -294,27 +322,58 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   useEffect(() => {
     if (guard) guardRef.current?.querySelector<HTMLButtonElement>('[data-guard-save]')?.focus();
   }, [guard]);
-  const keepWriting = () => {
-    setGuard(null);
-    const area = unsavedComposer(sectionRef.current);
+  const focusComposer = () => {
+    const area = unsavedComposer(sectionRef.current, savedTextRef.current);
     if (area) {
       area.focus();
       area.setSelectionRange(area.value.length, area.value.length);
     }
   };
-  const saveAndGo = () => {
-    const pending = guard;
-    const area = unsavedComposer(sectionRef.current);
-    // Every composer saves on Cmd/Ctrl+Enter (the comment popover, the diagram's, the image's own).
-    area?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', metaKey: true, ctrlKey: true, bubbles: true, cancelable: true }));
+  const keepWriting = () => {
     setGuard(null);
-    if (pending) {
+    focusComposer();
+  };
+  /**
+   * Save the typed comment, then go on only once the save answered. Every
+   * composer saves on Cmd/Ctrl+Enter (the comment popover, the diagram's, the
+   * image's own, an edit box). Nothing saved (the composer refused it): the
+   * row stays and the words get focus. A failed save stays on the file with
+   * the error.
+   */
+  const saveAndGo = async () => {
+    const pending = guard;
+    if (!pending || guardSaving) return;
+    const area = unsavedComposer(sectionRef.current, savedTextRef.current);
+    const before = saves.current.count;
+    area?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', metaKey: true, ctrlKey: true, bubbles: true, cancelable: true }));
+    setGuardSaving(true);
+    // The composer submits and React draws its answer before the save is read.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const started = saves.current.count > before ? saves.current.last : null;
+    const ok = started ? await started : false;
+    setGuardSaving(false);
+    if (!started) {
+      // Still typed and not saved: never lost. The row stays open over the words.
+      if (unsavedComposer(sectionRef.current, savedTextRef.current)) {
+        focusComposer();
+        return;
+      }
+      setGuard(null);
       rememberPlace();
       pending.go();
+      return;
     }
+    setGuard(null);
+    if (!ok) {
+      focusComposer();
+      return;
+    }
+    rememberPlace();
+    pending.go();
   };
   const discardAndGo = () => {
     const pending = guard;
+    if (guardSaving) return;
     setGuard(null);
     if (pending) {
       rememberPlace();
@@ -388,15 +447,19 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   }, [view, attachment.kind, attachment.id, annotations]);
 
   const save = useCallback(
-    async (annotation: Annotation): Promise<boolean> => {
-      try {
-        const result = await inboxApi.saveAnnotation(attachment.id, annotationVersion, annotation);
-        props.onSaved(result.annotation);
-        return true;
-      } catch (cause) {
-        setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not saved.');
-        return false;
-      }
+    (annotation: Annotation): Promise<boolean> => {
+      const answer = (async () => {
+        try {
+          const result = await inboxApi.saveAnnotation(attachment.id, annotationVersion, annotation);
+          props.onSaved(result.annotation);
+          return true;
+        } catch (cause) {
+          setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not saved.');
+          return false;
+        }
+      })();
+      saves.current = { count: saves.current.count + 1, last: answer };
+      return answer;
     },
     [attachment.id, annotationVersion, props.onSaved],
   );
@@ -578,7 +641,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               onAnnotateModeExit={() => setArmed(false)}
               onAnnotateModeToggle={() => setArmed((v) => !v)}
               // A plain ] or [ pressed in the page while armed (the bridge forwards nothing in Interact).
-              onStep={multi ? (dir) => armed && stepRef.current(dir, 'key') : undefined}
+              onStep={multi ? (dir) => !blockedRef.current && armed && stepRef.current(dir, 'key') : undefined}
               onOpenLink={(href) => {
                 if (/^https?:\/\//i.test(href)) window.open(href, '_blank', 'noopener,noreferrer');
               }}
@@ -738,10 +801,10 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           <span className="ib-gt" id="ib-guard-text">
             Your comment on <b>{attachment.name}</b> is not saved yet.
           </span>
-          <button type="button" className="ib-btn ib-sm ib-pri" onClick={saveAndGo} data-guard-save="">
+          <button type="button" className="ib-btn ib-sm ib-pri" onClick={() => void saveAndGo()} disabled={guardSaving} aria-busy={guardSaving || undefined} data-guard-save="">
             {guard.to === null ? 'Save it and close' : 'Save it and go on'}
           </button>
-          <button type="button" className="ib-btn ib-sm" onClick={discardAndGo} data-guard-discard="">
+          <button type="button" className="ib-btn ib-sm" onClick={discardAndGo} disabled={guardSaving} data-guard-discard="">
             {guard.to === null ? 'Discard and close the file' : `Discard and go to ${guard.to}`}
           </button>
           <button type="button" className="ib-btn ib-sm ib-ghost" onClick={keepWriting} data-guard-keep="">

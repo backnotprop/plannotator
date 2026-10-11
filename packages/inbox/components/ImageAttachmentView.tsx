@@ -55,14 +55,16 @@ export function ImageAttachmentView({
   /** A swipe across the fitted image: 1 next file, -1 previous. */
   onSwipe?: (dir: 1 | -1) => void;
 }) {
-  const [fit, setFitState] = useState<'fit' | 'actual'>(initialFit ?? 'fit');
-  const setFit = (update: 'fit' | 'actual' | ((v: 'fit' | 'actual') => 'fit' | 'actual')) => {
-    setFitState((current) => {
-      const next = typeof update === 'function' ? update(current) : update;
-      if (next !== current) onFitChange?.(next);
-      return next;
-    });
-  };
+  const [fit, setFit] = useState<'fit' | 'actual'>(initialFit ?? 'fit');
+  // The pane remembers the size per file: told after each change, never from inside a state update.
+  const reportedFit = useRef(fit);
+  const onFitChangeRef = useRef(onFitChange);
+  onFitChangeRef.current = onFitChange;
+  useEffect(() => {
+    if (reportedFit.current === fit) return;
+    reportedFit.current = fit;
+    onFitChangeRef.current?.(fit);
+  }, [fit]);
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const [failed, setFailed] = useState(false);
   const [text, setText] = useState('');

@@ -394,6 +394,50 @@ test('a phone: Previous / "1 of 5" / Next, the list across the width', async () 
   await page.setViewportSize({ width: 1440, height: 900 });
 });
 
+test('a phone at an end: the note shows in the bar in place of the count, and nothing of ours covers the HTML page', async () => {
+  const page = world.page;
+  // A second thread whose first file is the page, so the page is on screen at an end.
+  const sent = await world.claude.send({
+    project_path: world.project,
+    thread: 'Phone check',
+    subject: 'The checkout page on a phone',
+    body: 'The page first, then the scope.',
+    attachments: ['proto/checkout-flow.html', 'docs/SCOPE.md'],
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${world.url}#thread=${sent.thread_id}`);
+  await page.getByRole('button', { name: 'Open checkout-flow.html' }).click();
+  await expect(pane()).toHaveClass(/ib-full/);
+  await expect(label()).toHaveAttribute('aria-label', '1 of 2, checkout-flow.html. Show all attachments');
+  await expect(htmlFrame().locator('#pay')).toHaveText('Pay now');
+  // Previous is greyed (aria-disabled) and keeps focus: pressing it says where you are.
+  await page.locator('[data-step-prev]').press('Enter');
+  const note = page.locator('[data-step-end-note]');
+  await expect(note).toHaveText('First attachment in this thread');
+  await expect(label()).not.toContainText('1 of 2');
+  const layout = await page.evaluate(() => {
+    const iframe = document.querySelector('[data-attachment-pane] iframe')!;
+    const frame = iframe.getBoundingClientRect();
+    const bar = document.querySelector('[data-view-foot]')!.getBoundingClientRect();
+    const noteBox = document.querySelector('[data-step-end-note]')!.getBoundingClientRect();
+    // What sits on top at a grid of points over the page: only the frame itself.
+    const covered: string[] = [];
+    for (let x = frame.left + 2; x < frame.right - 1; x += (frame.width - 4) / 6) {
+      for (let y = frame.top + 2; y < frame.bottom - 1; y += (frame.height - 4) / 8) {
+        const top = document.elementFromPoint(x, y);
+        if (top !== iframe) covered.push(`${Math.round(x)},${Math.round(y)} ${top?.tagName}.${top?.className}`);
+      }
+    }
+    return { covered, frameBottom: frame.bottom, barTop: bar.top, noteTop: noteBox.top, noteBottom: noteBox.bottom, barBottom: bar.bottom };
+  });
+  expect(layout.covered).toEqual([]);
+  expect(layout.noteTop).toBeGreaterThanOrEqual(layout.barTop);
+  expect(layout.noteBottom).toBeLessThanOrEqual(layout.barBottom);
+  expect(layout.barTop).toBeGreaterThanOrEqual(layout.frameBottom - 0.5);
+  await shot('08-phone-end-note');
+  await page.setViewportSize({ width: 1440, height: 900 });
+});
+
 test('no page errors along the way', async () => {
   expect(world.errors).toEqual([]);
 });
