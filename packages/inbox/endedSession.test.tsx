@@ -111,12 +111,15 @@ let savedFetch: typeof fetch;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
 let sessions: { sessions: ReturnType<typeof live>[]; asker?: { session: string; live: boolean } } = { sessions: [] };
 let replyAnswer: () => Response = () => new Response('{}');
+/** Which sessions are still there, by id (answers `?asker=` for any session); null: `sessions.asker` as set. */
+let liveness: Record<string, boolean> | null = null;
 
 beforeEach(() => {
   if (!hasDom) return;
   savedFetch = globalThis.fetch;
   posted = [];
   sessions = { sessions: [], asker: { session: 'ses_asker', live: false } };
+  liveness = null;
   replyAnswer = () => Response.json({ reply: {}, questions: [], replayed: false, decisions_refused: [] });
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
@@ -126,7 +129,12 @@ beforeEach(() => {
       return Response.json({ questions: [] });
     }
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
-    if (path.includes('/sessions')) return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, ...sessions });
+    if (path.includes('/sessions')) {
+      // With `liveness`, `?asker=` is answered for whichever session the window asks about.
+      const asked = new URL(path, 'http://inbox.test').searchParams.get('asker');
+      const asker = liveness && asked ? { session: asked, live: liveness[asked] ?? false } : sessions.asker;
+      return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, ...sessions, ...(asker ? { asker } : {}) });
+    }
     return Response.json({});
   }) as typeof fetch;
 });
@@ -459,4 +467,46 @@ test.skipIf(!hasDom)('"Show N more": a selected row past the first five shows in
   expect(button(host!, 'Show 1 more')).toBeTruthy();
   draw(true);
   expect(order()).toEqual(['ses_0', 'ses_1', 'ses_2', 'ses_3', 'ses_4', 'ses_5', 'ses_6', 'ses_7', 'leave']);
+});
+
+// Two sessions in one thread: A asked (its question picked), then B posted a
+// later update with no question. A Send of picks only answers A alone, so the
+// asker the window watches (and offers a choice for) is A, never B.
+const B = 'msg_01M4HB2W6Q8X0P5T7R9V3K1N4D';
+function laterUpdate(): InboxMessageWire {
+  return {
+    id: B,
+    project_id: PROJECT.id,
+    thread_id: M1,
+    reply_to: M1,
+    author: { kind: 'agent', host: 'claude-code', session: 'ses_b', name: null },
+    subject: null,
+    body: 'Update: the nightly sync ran clean last night.',
+    created_at: '2026-10-11T10:45:00.000Z',
+    resolved_at: null,
+    idempotency_key: null,
+    wakes: true,
+  };
+}
+
+test.skipIf(!hasDom)("picks only on A's older question, the latest message from B, B ended: no choice opens, A gets the answer, B gets nothing", async () => {
+  liveness = { ses_asker: true, ses_b: false };
+  sessions = { sessions: [live('ses_asker', 'claude-code', { wrote_thread: true }), live('ses_other', 'pi')] };
+  const el = await render(threadOf(asking(true), laterUpdate()));
+  expect(el.querySelector('[data-asker-ended]')).toBeNull();
+  act(() => button(el.querySelector('.ib-pfoot') as HTMLElement, 'Send').click());
+  await settle();
+  expect(el.querySelector('[data-route-choice]')).toBeNull();
+  expect(replies().map((r) => r.path)).toEqual([`/api/inbox/messages/${M1}/reply`]);
+  expect(replies()[0]!.body.to).toBeUndefined();
+});
+
+test.skipIf(!hasDom)("picks only on A's older question, the latest message from B, A ended: the choice opens for A's answers", async () => {
+  liveness = { ses_asker: false, ses_b: true };
+  sessions = { sessions: [live('ses_b', 'claude-code', { wrote_thread: true }), live('ses_other', 'pi')] };
+  const el = await render(threadOf(asking(true), laterUpdate()));
+  act(() => button(el.querySelector('.ib-pfoot') as HTMLElement, 'Send').click());
+  await settle();
+  expect(el.querySelector('[data-route-choice]')).not.toBeNull();
+  expect(replies()).toEqual([]);
 });

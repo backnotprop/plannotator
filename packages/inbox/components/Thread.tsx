@@ -133,9 +133,17 @@ export function sendTargetsOf(
   return targets;
 }
 
-/** The session a Send's words answer (the latest agent message's), when it names one. */
-function askingSessionOf(thread: InboxThread): AskingSession | null {
-  const message = sendTargetsOf(thread).at(-1)!.message;
+/**
+ * The session a Send reaches, when its message names one: the latest agent
+ * message's when words or annotations ride on it (`carries`), otherwise the
+ * last message a pick or a skip answers (a message that only would have
+ * carried words receives nothing, so its session is not asked about). With
+ * nothing to send, the latest agent message's.
+ */
+function askingSessionOf(thread: InboxThread, options: { skip: boolean; carries: boolean }): AskingSession | null {
+  const targets = sendTargetsOf(thread, options.skip);
+  const sending = targets.filter((t) => t.questions.length > 0 || t.skips);
+  const message = (options.carries ? targets.at(-1) : (sending.at(-1) ?? targets.at(-1)))!.message;
   if (message.author.kind !== 'agent' || !message.author.session) return null;
   return { message, session: message.author.session, host: message.author.host ?? '', name: agentName(message.author) };
 }
@@ -540,9 +548,16 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     }
   };
 
+  // Attachments (step 2): the files as they are now, and the annotations that ride the next Send.
+  const { model: files, load: reloadFiles, patch: patchRecords } = useThreadAttachments(thread.thread_id, thread);
+  const attachments: InboxAttachmentState[] = files?.attachments ?? [];
+  const records = files?.annotations ?? [];
+
   // The session that asked, and whether it is still there (only hosts whose
-  // sessions poll the Inbox can be known to have ended).
-  const asking = askingSessionOf(thread);
+  // sessions poll the Inbox can be known to have ended). It is the session
+  // the Send actually reaches: the latest agent message's when words or
+  // annotations ride on it, else the last message a pick or a skip answers.
+  const asking = askingSessionOf(thread, { skip: !keepOpen, carries: (box.open && box.text.trim() !== '') || records.length > 0 });
   const askerToWatch = asking && askerCanEnd(asking) ? asking.session : null;
   // New message (record 5.x): the project's live sessions, and what the button opened.
   const { model: live, load: loadLive } = useLiveSessions(thread.thread_id, askerToWatch);
@@ -570,10 +585,6 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     setNewMessage(sessions.length === 0 ? { kind: 'none' } : sessions.length === 1 ? { kind: 'compose', target: sessions[0]! } : { kind: 'pick' });
   };
 
-  // Attachments (step 2): the files as they are now, and the annotations that ride the next Send.
-  const { model: files, load: reloadFiles, patch: patchRecords } = useThreadAttachments(thread.thread_id, thread);
-  const attachments: InboxAttachmentState[] = files?.attachments ?? [];
-  const records = files?.annotations ?? [];
   const fileRecords = useMemo(() => records.filter((r) => !r.guide), [records]);
   /** Something here takes annotations: an attached file, or a guided review's diffs. */
   const takesAnnotations = attachments.length > 0 || records.length > 0 || thread.messages.some((m) => m.guide);
