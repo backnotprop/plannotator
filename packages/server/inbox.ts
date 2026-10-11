@@ -954,7 +954,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
       const threadMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)$/.exec(path);
       if (threadMatch && req.method === "GET") {
-        const thread = store.thread(threadMatch[1]!);
+        // The window's thread: each message's seq (what is new since the last look) and a reply's sent annotations.
+        const thread = store.windowThread(threadMatch[1]!);
         if (!thread) return json({ error: "No such thread.", code: "thread_not_found" }, 404);
         const decisionIds = thread.messages.flatMap((m) => (m.questions ?? []).map((q) => q.decision_id));
         const withRepo = { ...thread, project: { ...thread.project, repo: repos.get(thread.project.root) } };

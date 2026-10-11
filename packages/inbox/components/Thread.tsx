@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Viewer } from '@plannotator/ui/components/Viewer';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import type { InboxDecision, InboxDecisionDraft, InboxMessageWire, InboxProjectRepo, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
@@ -12,7 +12,8 @@ import { annotationOf, attachmentFeedback } from '../attachments';
 import { AttachmentTiles } from './AttachmentTiles';
 import { AttachmentPane } from './AttachmentPane';
 import { AnnotationsChip } from './AnnotationsChip';
-import { agentName, clockTime, plural } from '../format';
+import { agentName, clockTime, dayWords, plural } from '../format';
+import { answerWords, foldSnippet, holdingsOf, isDelivered, lookBoundary, newSinceLook, planFolds, snippetText, type FoldSnippet, type Holding } from '../folding';
 import { AuthorMark, DecisionDiamond, Icon } from '../icons';
 import { DecisionCard } from './DecisionCard';
 import { GuideCard } from './GuideCard';
@@ -26,13 +27,62 @@ const noop = () => {};
 const isSuperseded = (cause: unknown): boolean => cause instanceof InboxApiError && cause.code === 'question_superseded';
 const NO_ANNOTATIONS: never[] = [];
 
-/** The words an answer reads as in a reply draft: "Retry with the same idempotency key". */
-function answerWords(answer: QuestionAnswer): string {
-  if (answer.skipped) return 'skipped';
-  const parts = [...answer.selected];
-  if (answer.other) parts.push(answer.other);
-  if (answer.text) parts.push(answer.text);
-  return parts.join(', ');
+/** The fold state of one open thread: in memory only, decided once when the thread opens. */
+interface FoldState {
+  threadId: string;
+  /** Messages shown as one line. A message that arrives later is not in it, so it shows open. */
+  folded: Set<string>;
+  /** The middle of each long read run ("N earlier messages"), by run. */
+  hidden: string[][];
+  /** The runs whose "N earlier messages" was opened. */
+  revealed: Set<number>;
+}
+
+/** "Today, 9:12 AM": a moment in the thread's meta line. */
+function momentWords(iso: string): string {
+  const day = dayWords(iso);
+  return day ? `${day.charAt(0).toUpperCase()}${day.slice(1)}, ${clockTime(iso)}` : '';
+}
+
+/** "Today, 9:12 AM to 5:48 PM", or both days when they differ. */
+function spanWords(from: string, to: string): string {
+  if (dayWords(from) === dayWords(to)) return `${momentWords(from)} to ${clockTime(to)}`;
+  return `${momentWords(from)} to ${momentWords(to)}`;
+}
+
+const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** A folded line's snippet: the message's first words, or the person's answers. */
+function SnippetText({ snippet }: { snippet: FoldSnippet }) {
+  if (snippet.kind === 'words') return <>{snippet.text}</>;
+  return (
+    <>
+      {snippet.parts.map((part, index) => (
+        <span key={index} className="ib-fl-ans">
+          {index > 0 && <span className="ib-fl-sep"> · </span>}
+          {part.prompt} <span className="ib-fl-arr">→</span> <b>{part.answer}</b>
+        </span>
+      ))}
+    </>
+  );
+}
+
+/** What a folded line says a message holds. */
+function HoldingChips({ holdings }: { holdings: Holding[] }) {
+  if (holdings.length === 0) return <span className="ib-fl-chips" />;
+  return (
+    <span className="ib-fl-chips" data-holdings="">
+      {holdings.map((h) => (
+        <span key={h.kind} className={`ib-fl-chip${h.kind === 'open' ? ' ib-fl-open' : h.kind === 'picks' ? ' ib-fl-pick' : ''}`} data-holding={h.kind}>
+          {h.kind === 'answered' || h.kind === 'delivered' ? <Icon name="check" size={14} /> : null}
+          {h.kind === 'files' ? <Icon name="clip" size={14} /> : null}
+          {h.kind === 'annotations' ? <Icon name="doc" size={14} /> : null}
+          {h.kind === 'guide' ? <Icon name="book" size={14} /> : null}
+          {h.text}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 /** One message's text, with its question cards (exported for its DOM test). */
@@ -188,6 +238,14 @@ export interface ThreadPaneProps {
   onOpenFile: (file: { id: string; version: 'current' | 'sent'; focus: string | null } | null) => void;
   /** Open the guided review a message carries (the record's 4.2). */
   onOpenGuide: (messageId: string) => void;
+  /**
+   * Where "new since you looked" starts (folding.ts `lookBoundary`), read
+   * from the thread BEFORE the window recorded this look and kept until the
+   * person leaves the thread. The window holds it, so it outlives this pane
+   * (a guided review opened from the thread and closed again). Absent: the
+   * pane takes it from the first thread it is given.
+   */
+  lookSeq?: number | null;
 }
 
 /** The thread's attachments as they are now and the annotations waiting for a Send, kept fresh. */
@@ -219,7 +277,7 @@ function useThreadAttachments(threadId: string, revision: unknown) {
   return { model, load, patch };
 }
 
-export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile, onOpenGuide }: ThreadPaneProps) {
+export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile, onOpenGuide, lookSeq }: ThreadPaneProps) {
   const root = thread.messages[0]!;
   const asker = agentName(root.author);
   const resolved = thread.resolved_at !== null;
@@ -274,8 +332,101 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     if (fresh.length > 0) setStale((current) => [...current, ...fresh.filter((id) => !current.includes(id))]);
   }, [thread]);
 
-  /** Scroll to a card or a message, focus it, and ring it briefly. */
+  // ── Folding (design record "Land", not in this repo) ──────────────────────
+  // Read messages fold to one line; the thread opens at "New since you
+  // looked". What is new is decided against the boundary from BEFORE this
+  // look (the window's `lookSeq`, else the first thread this pane was given),
+  // so the "New" marks last until the person leaves the thread.
+  const one = thread.messages.length < 2;
+  const lookRef = useRef<{ threadId: string; seq: number | null } | null>(null);
+  if (!lookRef.current || lookRef.current.threadId !== thread.thread_id) lookRef.current = { threadId: thread.thread_id, seq: lookBoundary(thread) };
+  const boundary = lookSeq !== undefined ? lookSeq : lookRef.current.seq;
+  const fresh = useMemo(() => newSinceLook(thread.messages, boundary), [thread.messages, boundary]);
+  const showNew = !one && fresh.size > 0;
+  // The fold is decided once, when the thread opens: opening a message never
+  // makes others appear or disappear.
+  const [foldState, setFoldState] = useState<FoldState | null>(null);
+  let fold = foldState;
+  if (!fold || fold.threadId !== thread.thread_id) {
+    const plan = planFolds(thread.messages, fresh, boundary);
+    fold = { threadId: thread.thread_id, folded: plan.folded, hidden: plan.hidden, revealed: new Set() };
+    setFoldState(fold);
+  }
+  const foldRef = useRef(fold);
+  foldRef.current = fold;
+  const hiddenNow = new Set(fold.hidden.flatMap((ids, index) => (fold.revealed.has(index) ? [] : ids)));
+  const allOpen = thread.messages.every((m) => !fold.folded.has(m.id)) && hiddenNow.size === 0;
+  const sectionRef = useRef<HTMLElement>(null);
+  /** After a fold changes: keep the message the person acted on in place, then move focus. */
+  const anchorRef = useRef<{ id: string | null; top: number; focus: string | null; folding: boolean } | null>(null);
+  const [announced, setAnnounced] = useState('');
+  const announce = (text: string) => {
+    setAnnounced('');
+    setTimeout(() => setAnnounced(text), 30);
+  };
+  const articleOf = (id: string) => bodyRef.current?.querySelector<HTMLElement>(`[data-message-article="${CSS.escape(id)}"]`) ?? null;
+  const headOf = (id: string) => articleOf(id)?.querySelector<HTMLElement>('[data-fold-head]') ?? null;
+  const toggleMessage = (id: string) => {
+    const folding = !fold.folded.has(id);
+    anchorRef.current = { id, top: articleOf(id)?.getBoundingClientRect().top ?? 0, focus: id, folding };
+    setFoldState((current) => {
+      if (!current) return current;
+      const folded = new Set(current.folded);
+      if (folding) folded.add(id);
+      else folded.delete(id);
+      return { ...current, folded };
+    });
+  };
+  /** The first message whose top is in view: what is above it may grow, it stays put. */
+  const topVisible = (): string | null => {
+    const body = bodyRef.current;
+    if (!body) return null;
+    const top = body.getBoundingClientRect().top;
+    const articles = [...body.querySelectorAll<HTMLElement>('[data-message-article]')];
+    const found = articles.find((a) => a.getBoundingClientRect().top >= top - 1) ?? articles[articles.length - 1];
+    return found?.getAttribute('data-message-article') ?? null;
+  };
+  const expandAll = () => {
+    const id = topVisible();
+    anchorRef.current = { id, top: id ? (articleOf(id)?.getBoundingClientRect().top ?? 0) : 0, focus: null, folding: false };
+    if (allOpen) {
+      const last = thread.messages[thread.messages.length - 1]!;
+      setFoldState((current) => (current ? { ...current, folded: new Set(thread.messages.filter((m) => m !== last).map((m) => m.id)), revealed: new Set() } : current));
+      announce('Earlier messages folded');
+    } else {
+      setFoldState((current) => (current ? { ...current, folded: new Set(), revealed: new Set(current.hidden.map((_, index) => index)) } : current));
+      announce(`All ${thread.messages.length} messages open`);
+    }
+  };
+  const revealRun = (index: number) => {
+    const first = fold.hidden[index]?.[0] ?? null;
+    anchorRef.current = { id: null, top: 0, focus: first, folding: false };
+    setFoldState((current) => (current ? { ...current, revealed: new Set(current.revealed).add(index) } : current));
+    announce(`${plural(fold.hidden[index]?.length ?? 0, 'earlier message')} shown`);
+  };
+  /** Open a message that is folded or hidden in the middle fold; true when it was. */
+  const unfold = useCallback((messageId: string): boolean => {
+    const current = foldRef.current;
+    const run = current.hidden.findIndex((ids, index) => !current.revealed.has(index) && ids.includes(messageId));
+    if (!current.folded.has(messageId) && run < 0) return false;
+    setFoldState((state) => {
+      if (!state) return state;
+      const folded = new Set(state.folded);
+      folded.delete(messageId);
+      return { ...state, folded, revealed: run < 0 ? state.revealed : new Set(state.revealed).add(run) };
+    });
+    return true;
+  }, []);
+
+  /** Scroll to a card or a message, focus it, and ring it briefly; a folded message opens first. */
   const jumpTo = useCallback((target: JumpTarget) => {
+    if (unfold(target.messageId)) {
+      requestAnimationFrame(() => jumpNow(target));
+      return;
+    }
+    jumpNow(target);
+  }, [unfold]);
+  const jumpNow = (target: JumpTarget) => {
     const body = bodyRef.current;
     if (!body) return;
     const element =
@@ -296,7 +447,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         setTimeout(() => element.classList.remove('ib-q-target-out'), 700);
       }, 1400);
     }
-  }, []);
+  };
 
   // New message (record 5.x): the project's live sessions, and what the button opened.
   const { model: live, load: loadLive } = useLiveSessions(thread.thread_id);
@@ -402,8 +553,119 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     setGuard(false);
     sendKeys.current = null;
     revisions.current.clear();
-    bodyRef.current?.scrollTo({ top: 0 });
   }, [thread.thread_id]);
+
+  // The subject in the header once it scrolls away, and the "↓ N new" pill while new messages are below the view.
+  const [chrome, setChrome] = useState({ subject: false, pill: false });
+  const updateChrome = useCallback(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const box = body.getBoundingClientRect();
+    const subject = body.querySelector<HTMLElement>('.ib-subject');
+    const firstNew = body.querySelector<HTMLElement>('[data-message-article][data-new]');
+    const next = {
+      subject: subject !== null && subject.getBoundingClientRect().bottom < box.top + 4,
+      pill: firstNew !== null && firstNew.getBoundingClientRect().top > box.bottom - 56,
+    };
+    setChrome((current) => (current.subject === next.subject && current.pill === next.pill ? current : next));
+  }, []);
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    body.addEventListener('scroll', updateChrome, { passive: true });
+    window.addEventListener('resize', updateChrome);
+    return () => {
+      body.removeEventListener('scroll', updateChrome);
+      window.removeEventListener('resize', updateChrome);
+    };
+  }, [updateChrome]);
+
+  // Where the thread opens: at the "New since you looked" divider with the
+  // last read line just above it, or at the top when nothing is new. Once per thread.
+  const landed = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (!foldState || foldState.threadId !== thread.thread_id || landed.current === thread.thread_id) return;
+    landed.current = thread.thread_id;
+    const body = bodyRef.current;
+    if (!body) return;
+    const divider = body.querySelector<HTMLElement>('[data-new-divider]');
+    const above = divider?.previousElementSibling as HTMLElement | null | undefined;
+    body.scrollTop = divider ? Math.max(0, (above ? above.offsetTop : divider.offsetTop) - 6) : 0;
+  });
+
+  // After a fold or an open: the message the person acted on stays where it was, and keeps focus.
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    anchorRef.current = null;
+    const body = bodyRef.current;
+    if (anchor && body) {
+      const article = anchor.id ? articleOf(anchor.id) : null;
+      if (article) {
+        body.scrollTop += article.getBoundingClientRect().top - anchor.top;
+        // A long message folded from below its top: bring its line into view.
+        if (anchor.folding && article.getBoundingClientRect().top < body.getBoundingClientRect().top) article.scrollIntoView?.({ block: 'start' });
+      }
+      const focus = anchor.focus ? headOf(anchor.focus) : null;
+      if (focus) {
+        focus.focus({ preventScroll: true });
+        const r = focus.getBoundingClientRect();
+        const b = body.getBoundingClientRect();
+        if (r.top < b.top + 8 || r.bottom > b.bottom - 8) focus.scrollIntoView?.({ block: 'nearest' });
+      }
+    }
+    updateChrome();
+  });
+
+  /** n, and the pill: the first new message, at the divider. */
+  const jumpNew = useCallback(() => {
+    const body = bodyRef.current;
+    const first = body?.querySelector<HTMLElement>('[data-message-article][data-new]');
+    if (!body || !first) return;
+    const divider = body.querySelector<HTMLElement>('[data-new-divider]');
+    (divider ?? first).scrollIntoView?.({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' });
+    first.querySelector<HTMLElement>('[data-fold-head]')?.focus({ preventScroll: true });
+  }, []);
+
+  // j / k move between messages (and the middle fold), n goes to the first
+  // new one; Enter and Space are the buttons' own. Never while typing.
+  useEffect(() => {
+    if (one) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
+      if (event.key !== 'j' && event.key !== 'k' && event.key !== 'n') return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (target) {
+        if (target.isContentEditable || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return;
+        if (target.tagName === 'INPUT' && !['radio', 'checkbox'].includes((target as HTMLInputElement).type)) return;
+        // Keys aimed at the open file, a dialog or a popover are theirs.
+        if (target !== document.body && !sectionRef.current?.contains(target)) return;
+        if (target.closest('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]')) return;
+      }
+      const body = bodyRef.current;
+      if (!body) return;
+      event.preventDefault();
+      if (event.key === 'n') {
+        jumpNew();
+        return;
+      }
+      const heads = [...body.querySelectorAll<HTMLElement>('[data-fold-head]')];
+      if (heads.length === 0) return;
+      const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      const home = active?.closest('[data-message-article], [data-middle-fold]') ?? null;
+      let index = heads.findIndex((h) => h === active || (home !== null && h.closest('[data-message-article], [data-middle-fold]') === home));
+      if (index < 0) {
+        const top = body.getBoundingClientRect().top;
+        index = heads.findIndex((h) => h.getBoundingClientRect().top >= top) - (event.key === 'j' ? 1 : 0);
+      }
+      const next = heads[Math.max(0, Math.min(heads.length - 1, index + (event.key === 'j' ? 1 : -1)))];
+      if (next) {
+        next.focus({ preventScroll: true });
+        next.scrollIntoView?.({ block: 'nearest' });
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [one, jumpNew]);
 
   useEffect(() => {
     if (box.open) textRef.current?.focus();
@@ -653,6 +915,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   return (
     <>
     <section
+      ref={sectionRef}
       className={`ib-pane${fileOpen ? ' ib-withfile' : ''}`}
       aria-label={thread.subject ?? 'Thread'}
       data-thread-id={thread.thread_id}
@@ -667,15 +930,119 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         >
           <Icon name="archive" />
         </button>
-        <span className="ib-sp" />
+        {one ? (
+          <span className="ib-sp" />
+        ) : (
+          <>
+            {/* The subject, once it has scrolled away (the heading stays the one a screen reader reads). */}
+            <span className="ib-phsubj" data-header-subject="" data-on={chrome.subject ? '' : undefined} aria-hidden="true">
+              {thread.subject ?? '(no subject)'}
+            </span>
+            <button
+              type="button"
+              className="ib-ptool"
+              data-expand-all=""
+              onClick={expandAll}
+              title={allOpen ? 'Fold the earlier messages' : 'Expand all messages'}
+              aria-label={allOpen ? 'Fold the earlier messages' : 'Expand all messages'}
+            >
+              <Icon name={allOpen ? 'collapse' : 'expand'} size={15} />
+              <span className="ib-ptool-l">{allOpen ? 'Fold all' : 'Expand all'}</span>
+            </button>
+          </>
+        )}
         <button type="button" className="ib-iconbtn" onClick={onClose} title="Close" aria-label="Close the thread">
           <Icon name="x" />
         </button>
       </div>
-      <div className="ib-pbody" ref={bodyRef}>
+      <div className={`ib-pbody${one ? '' : ' ib-folding'}`} ref={bodyRef}>
         <h2 className="ib-subject">{thread.subject ?? '(no subject)'}</h2>
-        {thread.messages.map((message) => {
+        {!one && (
+          <div className="ib-tmeta" data-thread-meta="">
+            <span>{plural(thread.messages.length, 'message')}</span>
+            <span className="ib-tdot" aria-hidden="true" />
+            <span>{spanWords(root.created_at, last.created_at)}</span>
+            {showNew && (
+              <>
+                <span className="ib-tdot" aria-hidden="true" />
+                <b>{fresh.size} new since you looked</b>
+              </>
+            )}
+          </div>
+        )}
+        {thread.messages.flatMap((message, index) => {
+          const before: React.ReactNode[] = [];
+          // The middle of a long read run: one "N earlier messages" in place of its messages.
+          const run = fold.hidden.findIndex((ids, i) => !fold.revealed.has(i) && ids[0] === message.id);
+          if (run >= 0) {
+            const n = fold.hidden[run]!.length;
+            before.push(
+              <div className="ib-mfold" key={`fold-${run}`} data-middle-fold="">
+                <button type="button" className="ib-mfold-b" data-fold-head="" onClick={() => revealRun(run)} aria-label={`Show ${plural(n, 'earlier message')}`}>
+                  <span>
+                    <Icon name="stack" size={14} />
+                    {plural(n, 'earlier message')}
+                  </span>
+                </button>
+              </div>,
+            );
+          }
+          if (hiddenNow.has(message.id)) return before;
+          const isNew = showNew && fresh.has(message.id);
+          // "New since you looked", above the first new message (not above the first message of the thread).
+          if (isNew && index > 0 && thread.messages.findIndex((m) => fresh.has(m.id)) === index) {
+            before.push(
+              <div className="ib-newdiv" key="new-divider" data-new-divider="" role="separator" aria-label={`New since you looked: ${plural(fresh.size, 'message')}`}>
+                New since you looked
+              </div>,
+            );
+          }
           const isAgent = message.author.kind === 'agent';
+          const name = isAgent ? agentName(message.author) : 'You';
+          const time = clockTime(message.created_at);
+          const open = one || !fold.folded.has(message.id);
+          if (!open) {
+            const holdings = holdingsOf(message, {
+              delivered: isDelivered(message, root),
+              picked: (q) => {
+                const id = `${message.id}/${q.key}`;
+                return pending.has(id) ? pending.get(id) !== null : q.state === 'picked';
+              },
+            });
+            const snippet = foldSnippet(message);
+            const label = `${name}, ${time}${isNew ? ', new' : ''}${holdings.length > 0 ? `. ${holdings.map((h) => h.say).join(', ')}` : ''}. ${snippetText(snippet)}`;
+            before.push(
+              <article
+                className="ib-message ib-folded"
+                key={message.id}
+                data-author={message.author.kind}
+                data-message-article={message.id}
+                data-folded=""
+                data-new={isNew ? '' : undefined}
+                tabIndex={-1}
+              >
+                <button type="button" className={`ib-fline${isNew ? ' ib-fl-unread' : ''}`} data-fold-head="" aria-expanded={false} aria-label={label} onClick={() => toggleMessage(message.id)}>
+                  {isAgent ? (
+                    <AuthorMark author={message.author} big />
+                  ) : (
+                    <span className="ib-mk ib-big">
+                      <Icon name="reply" />
+                    </span>
+                  )}
+                  <span className="ib-fl-nm">{name}</span>
+                  <span className="ib-fl-sn" data-snippet={snippet.kind}>
+                    <SnippetText snippet={snippet} />
+                  </span>
+                  <HoldingChips holdings={holdings} />
+                  <span className="ib-fl-tm">
+                    {isNew && <span className="ib-newtag">New</span>}
+                    {time}
+                  </span>
+                </button>
+              </article>,
+            );
+            return before;
+          }
           const questions = message.questions ?? [];
           // Nothing left to answer: every question is sent or was superseded.
           const allSent = questions.length > 0 && questions.every((q) => q.state !== 'open' && q.state !== 'picked');
@@ -691,24 +1058,52 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
             const old = q ? replacedBy(thread.messages, q) : [];
             return old.length > 0 ? <ReplacesLine old={old} onJump={jumpTo} /> : null;
           };
-          return (
-            <article className="ib-message" key={message.id} data-author={message.author.kind} data-message-article={message.id} tabIndex={-1}>
-              <div className="ib-sender">
-                {isAgent ? (
-                  <AuthorMark author={message.author} big />
-                ) : (
-                  <span className="ib-mk ib-big">
-                    <Icon name="reply" />
-                  </span>
-                )}
-                <div>
-                  <div className="ib-who">
-                    {isAgent ? agentName(message.author) : 'You'} <span>in {thread.project.name}</span>
-                  </div>
-                  <div className="ib-to">to {isAgent ? 'you' : message.to ? hostName(message.to.host) : asker}</div>
+          const who = (
+            <>
+              {isAgent ? (
+                <AuthorMark author={message.author} big />
+              ) : (
+                <span className="ib-mk ib-big">
+                  <Icon name="reply" />
+                </span>
+              )}
+              <div>
+                <div className="ib-who">
+                  {name} <span>in {thread.project.name}</span>
                 </div>
+                <div className="ib-to">to {isAgent ? 'you' : message.to ? hostName(message.to.host) : asker}</div>
+              </div>
+            </>
+          );
+          before.push(
+            <article
+              className="ib-message"
+              key={message.id}
+              data-author={message.author.kind}
+              data-message-article={message.id}
+              data-open={one ? undefined : ''}
+              data-new={isNew ? '' : undefined}
+              tabIndex={-1}
+            >
+              <div className="ib-sender">
+                {one ? (
+                  who
+                ) : (
+                  // The sender is the fold button; the time and Reply stay beside it.
+                  <button
+                    type="button"
+                    className="ib-head"
+                    data-fold-head=""
+                    aria-expanded={true}
+                    aria-label={`${name}, ${time}${isNew ? ', new' : ''}. Fold this message`}
+                    onClick={() => toggleMessage(message.id)}
+                  >
+                    {who}
+                  </button>
+                )}
                 <div className="ib-tm">
-                  {clockTime(message.created_at)}
+                  {isNew && <span className="ib-newtag">New</span>}
+                  {time}
                   {isAgent && !resolved && (
                     <button type="button" className="ib-mut" onClick={() => openBox(picksCount > 0)} title="Reply" aria-label="Reply">
                       <Icon name="reply" size={15} />
@@ -773,8 +1168,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                 )}
                 {message === lastAgent && holdsOpen && waitingHoldsUp.length > 0 && (
                   <ul className="ib-holds">
-                    {waitingHoldsUp.map((name) => (
-                      <li key={name}>{name}</li>
+                    {waitingHoldsUp.map((held) => (
+                      <li key={held}>{held}</li>
                     ))}
                   </ul>
                 )}
@@ -785,9 +1180,22 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                   </div>
                 )}
               </div>
-            </article>
+            </article>,
           );
+          return before;
         })}
+        {showNew && (
+          // While new messages are below the view: a pill that goes to them.
+          <div className="ib-npill-wrap">
+            <button type="button" className="ib-npill" data-new-pill="" data-off={chrome.pill ? undefined : ''} tabIndex={chrome.pill ? 0 : -1} aria-hidden={!chrome.pill} onClick={jumpNew}>
+              <Icon name="arrowDown" size={15} />
+              {fresh.size} new
+            </button>
+          </div>
+        )}
+        <div className="ib-sr" aria-live="polite" data-fold-live="">
+          {announced}
+        </div>
       </div>
       <div className="ib-pfoot">
         {resolved ? (

@@ -447,6 +447,20 @@ export interface InboxQuestionSummary {
 export interface InboxMessageWire extends InboxMessage {
   /** Omitted when the message asks no question (the Workspaces rule). */
   questions?: InboxQuestion[];
+  /**
+   * The seq of the message's first line in the event log. Rides only on
+   * `GET /api/inbox/threads/:id` (the window's thread), is never stored and
+   * is not on the MCP tools: with the root's `person_seen_seq` it tells the
+   * window which messages are new since the person's last look, read BEFORE
+   * the window records the next look. Absent from an older Inbox.
+   */
+  seq?: number;
+  /**
+   * On a person's reply, on `GET /api/inbox/threads/:id` only: how many of
+   * the person's annotations (on attached files or a guided review's diffs)
+   * that reply carried. Absent from an older Inbox.
+   */
+  sent_annotations?: number;
 }
 
 export interface InboxThreadSummary {

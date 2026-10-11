@@ -326,3 +326,21 @@ describe("the list and the subject", () => {
     expect(store.thread(first.thread_id)!.subject).toBe("Retry a 409 at all?");
   });
 });
+
+describe("the window's thread (windowThread)", () => {
+  test("each message carries the seq of its first line, a reply its sent annotations; thread() is unchanged", () => {
+    const { store, first } = setup();
+    store.markSeen(first.thread_id);
+    const reply = store.sendReply(first.id, { idempotency_key: "k1", words: "Not yet." }).reply;
+    const later = store.sendMessage({ project_id: first.project_id, author: AGENT, body: "CI is green.", reply_to: first.id }).message;
+    const thread = store.windowThread(first.thread_id)!;
+    expect(thread.messages.map((m) => m.seq)).toEqual([store.messageCursor(first.id)!, store.messageCursor(reply.id)!, store.messageCursor(later.id)!]);
+    // The look rewrote the root's line (up to the root itself); its seq stays the first line's.
+    expect(thread.messages[0]!.person_seen_seq).toBe(thread.messages[0]!.seq);
+    expect(thread.messages.map((m) => m.sent_annotations)).toEqual([undefined, 0, undefined]);
+    for (const message of store.thread(first.thread_id)!.messages) {
+      expect("seq" in message).toBe(false);
+      expect("sent_annotations" in message).toBe(false);
+    }
+  });
+});

@@ -1,0 +1,455 @@
+/**
+ * Folding a thread as the window draws it (design record, not in this repo;
+ * variant "Land"): which messages fold to one line and which stay open, what a
+ * folded line says, the middle fold of a long read run, where the thread
+ * opens, the "↓ N new" pill, the keys, and how long "New" lasts. happy-dom
+ * has no layout, so where a test needs positions it gives the elements some.
+ * The real browser proof is tests/e2e/inbox-thread-folding.spec.ts.
+ *
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ */
+import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
+import type { InboxAuthor, InboxMessageWire, InboxProject, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
+
+const hasDom = typeof document !== 'undefined';
+// Viewer pulls in web-highlighter, which reads `window` at module-eval time.
+const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
+
+const PROJECT: InboxProject = { id: 'prj_1', key: 'docs-site-abcdef', name: 'docs-site', root: '/work/docs-site', created_at: '2026-10-10T09:00:00.000Z' };
+const AGENT: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: 'Claude Code' };
+const PERSON: InboxAuthor = { kind: 'person' };
+const ROOT = 'msg_A1';
+
+const ASK = [
+  'I looked at three ways to add search to the docs site.',
+  '',
+  ':::question',
+  'Which search index should the docs site use?',
+  '',
+  '- [ ] Pagefind',
+  '- [ ] Orama',
+  ':::',
+  '',
+  ':::question-multi',
+  'Which sections go in the index?',
+  '',
+  '- [ ] Guides',
+  '- [ ] API reference',
+  ':::',
+].join('\n');
+
+const ONE_OPEN = [
+  'Pagefind is wired in. Here is the plan.',
+  '',
+  ':::question',
+  'Which shortcut opens search?',
+  '',
+  '- [ ] / and Cmd K',
+  '- [ ] Cmd K only',
+  ':::',
+].join('\n');
+
+const LATEST = [
+  'CI is green. The index is **1.8 MB**.',
+  '',
+  ':::question',
+  'When should the search index build?',
+  '',
+  '- [ ] On main and release tags',
+  '- [ ] On every deploy',
+  ':::',
+].join('\n');
+
+function questionsOf(messageId: string, body: string): InboxQuestion[] {
+  return parseInboxQuestionBlocks(body).map((q) => ({
+    key: q.key,
+    position: q.position,
+    kind: q.kind,
+    prompt: q.prompt,
+    context: q.parsed.context,
+    choices: q.parsed.choices,
+    recommendation: null,
+    suggested_text: null,
+    decision_on_answer: false,
+    stopped: q.stopped,
+    holds_up: q.holds_up,
+    asked_by_agent_id: 'ses_a',
+    orphaned: false,
+    state: 'open',
+    answer: null,
+    revision: 0,
+    sent_revision: 0,
+    picked_by: null,
+    picked_at: null,
+    sent_reply_id: null,
+    decision_id: null,
+    message_id: messageId,
+    decision_recording: false,
+    decision_draft: null,
+    superseded_by: null,
+  }));
+}
+
+function sentAs(q: InboxQuestion, selected: string[], replyId: string): InboxQuestion {
+  return { ...q, state: 'sent', revision: 1, sent_revision: 1, sent_reply_id: replyId, answer: { v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected } };
+}
+
+function message(id: string, author: InboxAuthor, seq: number, body: string, extra: Partial<InboxMessageWire> = {}): InboxMessageWire {
+  return {
+    id,
+    project_id: PROJECT.id,
+    thread_id: ROOT,
+    reply_to: id === ROOT ? null : ROOT,
+    author,
+    subject: id === ROOT ? 'Search for the docs site' : null,
+    body,
+    created_at: `2026-10-10T${String(9 + Math.floor(seq / 2)).padStart(2, '0')}:${String((seq * 7) % 60).padStart(2, '0')}:00.000Z`,
+    resolved_at: null,
+    idempotency_key: null,
+    seq,
+    ...(author.kind === 'person' ? { sent_annotations: 0 } : {}),
+    ...extra,
+  };
+}
+
+/**
+ * Seven messages: two questions answered, a reply, a plan with a file and an
+ * answered question, a reply with two annotations, a plain note, the person's
+ * last reply (read by the agent), and one message after the person's look.
+ */
+function seven(options: { lookAt?: number } = {}): InboxThread {
+  const [index, sections] = questionsOf(ROOT, ASK);
+  const [shortcut] = questionsOf('msg_A2', ONE_OPEN);
+  const messages = [
+    message(ROOT, AGENT, 2, ASK, {
+      questions: [sentAs(index!, ['Pagefind'], 'msg_P1'), sentAs(sections!, ['Guides', 'API reference'], 'msg_P1')],
+      person_seen_seq: options.lookAt ?? 11,
+      agent_checked_seq: 13,
+    }),
+    message('msg_P1', PERSON, 5, 'Answered 2 questions.\n\nPagefind is fine. Keep the blog out for now.'),
+    message('msg_A2', AGENT, 7, ONE_OPEN, {
+      questions: [sentAs(shortcut!, ['/ and Cmd K'], 'msg_P2')],
+      attachments: [{ id: 'att_1', path: '/work/docs-site/plan.md', named_path: null, kind: 'markdown', sent_sha256: '0'.repeat(64), size: 10, sent_at: '2026-10-10T12:00:00.000Z', sent_mtime: '2026-10-10T12:00:00.000Z' } as never],
+    }),
+    message('msg_P2', PERSON, 9, 'Answered 1 question. The plan is close. Two notes on the file.', { sent_annotations: 2 }),
+    message('msg_A3', AGENT, 11, 'Both notes are in: **results** show the [section path](https://example.com). Ready for a read.'),
+    message('msg_P3', PERSON, 13, 'Read it, looks good. One thing: an empty result says only "No results".'),
+    message('msg_A4', AGENT, 15, LATEST, { questions: questionsOf('msg_A4', LATEST) }),
+  ];
+  return { thread_id: ROOT, project: PROJECT, subject: 'Search for the docs site', thread_name: null, resolved_at: null, messages };
+}
+
+let root: Root | null = null;
+let host: HTMLElement | null = null;
+let savedFetch: typeof fetch;
+const restore: (() => void)[] = [];
+
+beforeEach(() => {
+  if (!hasDom) return;
+  savedFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    if (init?.method === 'POST') return Response.json({ questions: [] });
+    if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
+    if (path.includes('/sessions')) return Response.json({ home: null, project: PROJECT, sessions: [] });
+    return Response.json({});
+  }) as typeof fetch;
+});
+
+afterEach(() => {
+  if (!hasDom) return;
+  act(() => root?.unmount());
+  host?.remove();
+  root = null;
+  host = null;
+  globalThis.fetch = savedFetch;
+  for (const undo of restore.splice(0).reverse()) undo();
+});
+
+/** Override a prototype property for this test only. */
+function stub<T extends object>(target: T, key: string, descriptor: PropertyDescriptor) {
+  const saved = Object.getOwnPropertyDescriptor(target, key);
+  Object.defineProperty(target, key, { configurable: true, ...descriptor });
+  restore.push(() => (saved ? Object.defineProperty(target, key, saved) : delete (target as Record<string, unknown>)[key]));
+}
+
+async function settle() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+function pane(thread: InboxThread, lookSeq?: number | null) {
+  return (
+    <div className="pn-inbox">
+      <ThreadPane
+        thread={thread}
+        sent={null}
+        onQuestions={() => {}}
+        onChanged={async () => {}}
+        onClose={() => {}}
+        decisions={[]}
+        onOpenDecisionPage={() => {}}
+        file={null}
+        onOpenFile={() => {}}
+        onOpenGuide={() => {}}
+        lookSeq={lookSeq}
+      />
+    </div>
+  );
+}
+
+async function render(thread: InboxThread, lookSeq?: number | null) {
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(pane(thread, lookSeq));
+  });
+  await settle();
+  return host;
+}
+
+const article = (el: HTMLElement, id: string) => el.querySelector<HTMLElement>(`[data-message-article="${id}"]`);
+const shown = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>('.ib-pbody > [data-message-article], .ib-pbody > [data-middle-fold], .ib-pbody > [data-new-divider]')].map((node) =>
+  node.hasAttribute('data-middle-fold') ? 'fold' : node.hasAttribute('data-new-divider') ? 'divider' : `${node.getAttribute('data-message-article')}:${node.hasAttribute('data-folded') ? 'line' : 'open'}`,
+);
+const holdings = (el: HTMLElement, id: string) => [...(article(el, id)?.querySelectorAll('[data-holding]') ?? [])].map((h) => `${h.getAttribute('data-holding')}=${h.textContent}`);
+const focusedArticle = () => (document.activeElement as HTMLElement | null)?.closest('[data-message-article], [data-middle-fold]');
+const key = (k: string, target: EventTarget = document.body) => act(() => void target.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })));
+
+test.skipIf(!hasDom)('read messages fold to lines; the new, the last and one holding an unsent pick stay open; the middle of the read run hides', async () => {
+  const el = await render(seven());
+  // The read run A1..P3 keeps its first and last two; the new last message is open under the divider.
+  expect(shown(el)).toEqual(['msg_A1:line', 'fold', 'msg_A3:line', 'msg_P3:line', 'divider', 'msg_A4:open']);
+  expect(el.querySelector('[data-middle-fold]')!.textContent).toBe('3 earlier messages');
+  expect(el.querySelector('[data-new-divider]')!.textContent).toBe('New since you looked');
+  expect(article(el, 'msg_A4')!.hasAttribute('data-new')).toBe(true);
+  expect(article(el, 'msg_A4')!.querySelector('.ib-newtag')!.textContent).toBe('New');
+  expect(el.querySelector('[data-thread-meta]')!.textContent).toContain('7 messages');
+  expect(el.querySelector('[data-thread-meta]')!.textContent).toContain('1 new since you looked');
+  expect(el.querySelector('[data-expand-all]')!.textContent).toBe('Expand all');
+  // Every folded line and every open header is a button that says whether it is open.
+  expect(article(el, 'msg_A1')!.querySelector('[data-fold-head]')!.getAttribute('aria-expanded')).toBe('false');
+  expect(article(el, 'msg_A4')!.querySelector('[data-fold-head]')!.getAttribute('aria-expanded')).toBe('true');
+
+  // A message holding a pick not sent stays open though it was read and is not the last.
+  const thread = seven();
+  const a3 = thread.messages[4]!;
+  const [q] = questionsOf('msg_A3', ONE_OPEN);
+  thread.messages[4] = { ...a3, body: ONE_OPEN, questions: [{ ...q!, message_id: 'msg_A3', state: 'picked', answer: { v: 1, key: q!.key, kind: q!.kind, prompt: q!.prompt, selected: ['Cmd K only'] }, picked_at: '2026-10-10T13:00:00.000Z' }] };
+  act(() => root!.unmount());
+  host!.remove();
+  const again = await render(thread);
+  // The read run before it is four long now: the first and last two stay, one message hides.
+  expect(shown(again)).toEqual(['msg_A1:line', 'fold', 'msg_A2:line', 'msg_P2:line', 'msg_A3:open', 'msg_P3:line', 'divider', 'msg_A4:open']);
+  expect(again.querySelector('[data-middle-fold]')!.textContent).toBe('1 earlier message');
+  // Folded by hand, its line says the pick is not sent.
+  act(() => (article(again, 'msg_A3')!.querySelector('[data-fold-head]') as HTMLButtonElement).click());
+  expect(holdings(again, 'msg_A3')).toEqual(['picks=1 pick, not sent']);
+});
+
+test.skipIf(!hasDom)("a folded line's snippet is the person's answers when every question is answered, else the message's first words; and it says what the message holds", async () => {
+  const el = await render(seven());
+  act(() => (el.querySelector('[data-middle-fold] button') as HTMLButtonElement).click());
+  const snippet = (id: string) => article(el, id)!.querySelector('[data-snippet]')!;
+  expect(snippet('msg_A1').getAttribute('data-snippet')).toBe('answers');
+  expect(snippet('msg_A1').textContent).toBe('Which search index should the docs site use → Pagefind · Which sections go in the index → Guides, API reference');
+  expect(snippet('msg_A3').getAttribute('data-snippet')).toBe('words');
+  // Markdown marks gone, link text kept.
+  expect(snippet('msg_A3').textContent).toBe('Both notes are in: results show the section path. Ready for a read.');
+  expect(snippet('msg_P1').textContent).toBe('Answered 2 questions. Pagefind is fine. Keep the blog out for now.');
+  expect(holdings(el, 'msg_A1')).toEqual(['answered=2 answered']);
+  expect(holdings(el, 'msg_A2')).toEqual(['answered=1 answered', 'files=1']);
+  expect(holdings(el, 'msg_P2')).toEqual(['annotations=2', 'delivered=Delivered']);
+  expect(holdings(el, 'msg_P3')).toEqual(['delivered=Delivered']);
+  // The line's label reads the sender, the time, what it holds and the snippet.
+  expect(article(el, 'msg_A1')!.querySelector('[data-fold-head]')!.getAttribute('aria-label')).toMatch(/^Claude Code, \d{1,2}:\d{2} [AP]M\. 2 questions answered\. Which search index should the docs site use: Pagefind; Which sections go in the index: Guides, API reference$/);
+
+  // One question answered, one still open: the first words, and "1 open question".
+  const thread = seven();
+  const [index, sections] = questionsOf(ROOT, ASK);
+  thread.messages[0] = { ...thread.messages[0]!, questions: [sentAs(index!, ['Pagefind'], 'msg_P1'), sections!] };
+  act(() => root!.render(pane(thread)));
+  expect(snippet('msg_A1').getAttribute('data-snippet')).toBe('words');
+  expect(snippet('msg_A1').textContent).toBe('I looked at three ways to add search to the docs site.');
+  expect(holdings(el, 'msg_A1')).toEqual(['open=1 open question']);
+});
+
+test.skipIf(!hasDom)('the middle fold opens to lines and focuses the first; Expand all opens everything; Fold all goes back to lines, keeping the last open', async () => {
+  const el = await render(seven());
+  act(() => (el.querySelector('[data-middle-fold] button') as HTMLButtonElement).click());
+  expect(shown(el)).toEqual(['msg_A1:line', 'msg_P1:line', 'msg_A2:line', 'msg_P2:line', 'msg_A3:line', 'msg_P3:line', 'divider', 'msg_A4:open']);
+  expect(focusedArticle()?.getAttribute('data-message-article')).toBe('msg_P1');
+  await settle();
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  expect(el.querySelector('[data-fold-live]')!.textContent).toBe('3 earlier messages shown');
+
+  act(() => (el.querySelector('[data-expand-all]') as HTMLButtonElement).click());
+  expect(shown(el)).toEqual(['msg_A1:open', 'msg_P1:open', 'msg_A2:open', 'msg_P2:open', 'msg_A3:open', 'msg_P3:open', 'divider', 'msg_A4:open']);
+  expect(el.querySelector('[data-expand-all]')!.textContent).toBe('Fold all');
+  expect(article(el, 'msg_A1')!.querySelector('[data-message-id="msg_A1"]')).not.toBeNull();
+
+  act(() => (el.querySelector('[data-expand-all]') as HTMLButtonElement).click());
+  expect(shown(el)).toEqual(['msg_A1:line', 'fold', 'msg_A3:line', 'msg_P3:line', 'divider', 'msg_A4:open']);
+  expect(el.querySelector('[data-expand-all]')!.textContent).toBe('Expand all');
+});
+
+test.skipIf(!hasDom)('opening a line keeps it where it was: the scroll moves by however much the thread above it changed', async () => {
+  const el = await render(seven());
+  const body = el.querySelector<HTMLElement>('.ib-pbody')!;
+  // A layout: at a scroll of 100 the line sits at 300; opened, the thread above it grows and it would land at 340.
+  stub(HTMLElement.prototype, 'getBoundingClientRect', {
+    value(this: HTMLElement) {
+      const y = this.getAttribute('data-message-article') === 'msg_A3' ? (this.hasAttribute('data-open') ? 340 : 300) - (body.scrollTop - 100) : 0;
+      return { top: y, bottom: y + 40, left: 0, right: 0, width: 0, height: 40, x: 0, y, toJSON() {} };
+    },
+  });
+  body.scrollTop = 100;
+  const line = article(el, 'msg_A3')!.querySelector<HTMLButtonElement>('[data-fold-head]')!;
+  act(() => line.click());
+  // The scroll moves 40 down, so the message stays at 300.
+  expect(body.scrollTop).toBe(140);
+  expect(article(el, 'msg_A3')!.hasAttribute('data-open')).toBe(true);
+  // Focus stays on the message the person opened (its header now).
+  expect(document.activeElement).toBe(article(el, 'msg_A3')!.querySelector('[data-fold-head]'));
+});
+
+test.skipIf(!hasDom)('the thread opens at the divider with the last read line above it; with nothing new it opens at the top', async () => {
+  // Every top-level element of the thread is 50px under the one before it.
+  stub(HTMLElement.prototype, 'offsetTop', {
+    get(this: HTMLElement) {
+      const parent = this.parentElement;
+      return parent?.classList.contains('ib-pbody') ? [...parent.children].indexOf(this) * 50 : 0;
+    },
+  });
+  const el = await render(seven());
+  const body = el.querySelector<HTMLElement>('.ib-pbody')!;
+  const divider = el.querySelector<HTMLElement>('[data-new-divider]')!;
+  const above = divider.previousElementSibling as HTMLElement;
+  expect(above.getAttribute('data-message-article')).toBe('msg_P3');
+  expect(body.scrollTop).toBe(above.offsetTop - 6);
+
+  act(() => root!.unmount());
+  host!.remove();
+  const read = await render(seven({ lookAt: 15 }));
+  expect(read.querySelector('[data-new-divider]')).toBeNull();
+  expect(read.querySelector('.ib-newtag')).toBeNull();
+  expect(read.querySelector('[data-thread-meta]')!.textContent).not.toContain('new since you looked');
+  expect(read.querySelector<HTMLElement>('.ib-pbody')!.scrollTop).toBe(0);
+});
+
+test.skipIf(!hasDom)('the "↓ 1 new" pill shows while the first new message is below the view, and goes to it', async () => {
+  let newTop = 2000;
+  stub(HTMLElement.prototype, 'getBoundingClientRect', {
+    value(this: HTMLElement) {
+      const y = this.classList.contains('ib-pbody') ? 0 : this.hasAttribute('data-new') ? newTop : this.classList.contains('ib-subject') ? 20 : 0;
+      const h = this.classList.contains('ib-pbody') ? 800 : 40;
+      return { top: y, bottom: y + h, left: 0, right: 0, width: 0, height: h, x: 0, y, toJSON() {} };
+    },
+  });
+  const scrolled: string[] = [];
+  stub(HTMLElement.prototype, 'scrollIntoView', {
+    value(this: HTMLElement) {
+      scrolled.push(this.hasAttribute('data-new-divider') ? 'divider' : (this.getAttribute('data-message-article') ?? this.className));
+    },
+  });
+  const el = await render(seven());
+  const pill = el.querySelector<HTMLButtonElement>('[data-new-pill]')!;
+  expect(pill.textContent).toBe('1 new');
+  expect(pill.hasAttribute('data-off')).toBe(false);
+  act(() => pill.click());
+  expect(scrolled).toContain('divider');
+  expect(document.activeElement).toBe(article(el, 'msg_A4')!.querySelector('[data-fold-head]'));
+  // Scrolled down to it, the pill goes.
+  newTop = 300;
+  act(() => void el.querySelector('.ib-pbody')!.dispatchEvent(new Event('scroll')));
+  expect(pill.hasAttribute('data-off')).toBe(true);
+});
+
+test.skipIf(!hasDom)('keys: n goes to the first new message, j and k move between messages and the fold; never while typing', async () => {
+  const el = await render(seven());
+  key('n');
+  expect(focusedArticle()?.getAttribute('data-message-article')).toBe('msg_A4');
+  key('k');
+  expect(focusedArticle()?.getAttribute('data-message-article')).toBe('msg_P3');
+  key('k');
+  key('k');
+  expect(focusedArticle()?.hasAttribute('data-middle-fold')).toBe(true);
+  key('k');
+  expect(focusedArticle()?.getAttribute('data-message-article')).toBe('msg_A1');
+  key('k');
+  expect(focusedArticle()?.getAttribute('data-message-article')).toBe('msg_A1');
+  key('j');
+  key('j');
+  expect(focusedArticle()?.getAttribute('data-message-article')).toBe('msg_A3');
+  // In the reply box the letters are text.
+  act(() => ([...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Reply') as HTMLButtonElement).click());
+  const box = el.querySelector('textarea')!;
+  box.focus();
+  key('n', box);
+  key('j', box);
+  expect(document.activeElement).toBe(box);
+});
+
+test.skipIf(!hasDom)('"New" lasts until the person leaves the thread: the thread read again after the look keeps the marks; reopened, nothing is new', async () => {
+  // As the window does it: the boundary from the first read, the thread read again after /seen.
+  const el = await render(seven(), 13);
+  act(() => root!.render(pane(seven({ lookAt: 15 }), 13)));
+  expect(article(el, 'msg_A4')!.hasAttribute('data-new')).toBe(true);
+  expect(el.querySelector('[data-new-divider]')).not.toBeNull();
+  // A message that arrives while the thread is open shows open, new, at the bottom; nothing above moves.
+  const grown = seven({ lookAt: 15 });
+  grown.messages.push(message('msg_A5', AGENT, 17, 'Merged.'));
+  act(() => root!.render(pane(grown, 13)));
+  expect(shown(el)).toEqual(['msg_A1:line', 'fold', 'msg_A3:line', 'msg_P3:line', 'divider', 'msg_A4:open', 'msg_A5:open']);
+  expect(article(el, 'msg_A5')!.hasAttribute('data-new')).toBe(true);
+  expect(el.querySelector('[data-thread-meta]')!.textContent).toContain('2 new since you looked');
+  // Left and opened again: the boundary is read again, after the look.
+  act(() => root!.unmount());
+  host!.remove();
+  const seenAll: InboxThread = { ...grown, messages: grown.messages.map((m, i) => (i === 0 ? { ...m, person_seen_seq: 17 } : m)) };
+  const reopened = await render(seenAll);
+  expect(reopened.querySelector('[data-message-article][data-new]')).toBeNull();
+  expect(reopened.querySelector('[data-new-pill]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a one-message thread looks as it always did: no fold button, no New, no meta line, no Expand all', async () => {
+  const thread = seven();
+  const one: InboxThread = { ...thread, messages: [{ ...thread.messages[0]!, person_seen_seq: 0 }] };
+  const el = await render(one);
+  expect(el.querySelector('[data-fold-head]')).toBeNull();
+  expect(el.querySelector('[data-expand-all]')).toBeNull();
+  expect(el.querySelector('[data-thread-meta]')).toBeNull();
+  expect(el.querySelector('.ib-newtag')).toBeNull();
+  expect(el.querySelector('[data-new-pill]')).toBeNull();
+  expect(el.querySelector('.ib-pbody')!.classList.contains('ib-folding')).toBe(false);
+  expect(article(el, ROOT)!.querySelector('.ib-who')!.textContent).toBe('Claude Code in docs-site');
+});
+
+test.skipIf(!hasDom)('a payload without seqs (an older Inbox) folds nothing and marks nothing new', async () => {
+  const thread = seven();
+  const old: InboxThread = { ...thread, messages: thread.messages.map(({ seq: _seq, ...rest }) => rest) };
+  const el = await render(old);
+  expect(el.querySelector('[data-folded]')).toBeNull();
+  expect(el.querySelector('[data-new]')).toBeNull();
+  expect(el.querySelectorAll('[data-message-article][data-open]').length).toBe(7);
+});
+
+test.skipIf(!hasDom)('a link to a replaced card in a folded message opens the message, then lands on the card', async () => {
+  const thread = seven();
+  const [index, sections] = questionsOf(ROOT, ASK);
+  const [latest] = questionsOf('msg_A4', LATEST);
+  thread.messages[0] = { ...thread.messages[0]!, questions: [{ ...index!, state: 'superseded', superseded_by: { message_id: 'msg_A4', key: latest!.key } }, sentAs(sections!, ['Guides'], 'msg_P1')] };
+  const el = await render(thread);
+  expect(article(el, ROOT)!.hasAttribute('data-folded')).toBe(true);
+  const link = article(el, 'msg_A4')!.querySelector<HTMLButtonElement>('[data-replaces-line] .ib-q-link')!;
+  act(() => link.click());
+  await settle();
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  expect(article(el, ROOT)!.hasAttribute('data-open')).toBe(true);
+  expect(document.activeElement?.getAttribute('data-question-key')).toBe(index!.key);
+});

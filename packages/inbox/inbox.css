@@ -683,3 +683,76 @@ pre code.pn-code[data-keep-layout] {
 .pn-inbox .ib-guard p.ib-mut { font-size: 13px; }
 .pn-inbox .ib-guard .ib-acts { margin-top: 10px; padding-left: 24px; flex-wrap: wrap; }
 .pn-inbox .ib-rchip.ib-dropped { background: transparent; box-shadow: inset 0 0 0 1px var(--border); color: var(--muted-foreground); text-decoration: line-through; text-decoration-color: color-mix(in oklab, var(--muted-foreground) 70%, transparent); }
+
+/* ── Folding a thread (design record "Land", not in this repo) ─────────────
+   Read messages fold to one line; the thread opens at "New since you looked".
+   One-message threads never get .ib-folding: they look exactly as before. */
+.ib-pbody { scroll-padding-top: 12px; }
+.ib-tmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin: -4px 0 12px; font-size: 12.5px; color: var(--muted-foreground); }
+.ib-tmeta > * { white-space: nowrap; }
+.ib-tmeta b { color: var(--primary); font-weight: 600; }
+.ib-tdot { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: 0.6; }
+/* every message an article, a hairline between them */
+.ib-pbody.ib-folding .ib-message { margin: 0; padding: 16px 0 20px; border-top: 1px solid var(--ib-hair); scroll-margin-top: 12px; }
+.ib-pbody.ib-folding .ib-message.ib-folded { padding: 0; }
+.ib-pbody.ib-folding .ib-tmeta + .ib-message { border-top: 0; padding-top: 6px; }
+.ib-pbody.ib-folding .ib-tmeta + .ib-message.ib-folded { padding-top: 0; }
+.ib-pbody.ib-folding .ib-newdiv + .ib-message { border-top: 0; }
+/* the open message's header: the sender part is the fold button; time and Reply stay beside it */
+.pn-inbox .ib-head { display: flex; align-items: flex-start; gap: 11px; flex: 1; min-width: 0; text-align: left; border-radius: 8px; margin: -4px -6px; padding: 4px 6px; }
+.pn-inbox .ib-head:hover { background: color-mix(in oklch, var(--muted) 35%, transparent); }
+/* "New": a word in a tinted pill, never only a colour */
+.ib-newtag { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border-radius: 6px; background: color-mix(in oklch, var(--primary) 15%, transparent); color: var(--primary); font-size: 11.5px; font-weight: 650; letter-spacing: 0.01em; white-space: nowrap; flex: none; }
+.ib-newtag::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+/* the folded line: mark, sender, a one-line snippet, what the message holds, time */
+.pn-inbox .ib-fline { display: grid; grid-template-columns: 24px 118px minmax(0, 1fr) auto minmax(66px, auto); align-items: center; gap: 0 10px; width: calc(100% + 16px); height: 44px; margin: 0 -8px; padding: 0 8px; border-radius: 8px; text-align: left; font-size: 13.5px; }
+.pn-inbox .ib-fline:hover { background: color-mix(in oklch, var(--muted) 40%, transparent); }
+.ib-fline .ib-mk.ib-big { width: 24px; height: 24px; border-radius: 6px; }
+.ib-fline .ib-mk.ib-big > svg, .ib-fline .ib-mk.ib-big > img { width: 14px; height: 14px; }
+.ib-fl-nm { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-fl-sn { color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ib-fl-sn b { font-weight: 600; color: var(--foreground); }
+.ib-fl-arr { opacity: 0.7; }
+.ib-fl-tm { display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; color: var(--muted-foreground); font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ib-fline.ib-fl-unread .ib-fl-nm { font-weight: 650; }
+.ib-fline.ib-fl-unread .ib-fl-sn { color: var(--foreground); }
+.ib-fl-chips { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+.ib-fl-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--muted-foreground); }
+.ib-fl-chip.ib-fl-open { height: 20px; padding: 0 7px; border-radius: 6px; border: 1px solid color-mix(in oklch, var(--foreground) 35%, transparent); color: var(--foreground); font-weight: 550; }
+.ib-fl-chip.ib-fl-pick { height: 20px; padding: 0 7px; border-radius: 6px; background: color-mix(in oklch, var(--primary) 14%, transparent); color: var(--primary); font-weight: 600; }
+/* the fold in the middle of a long read run */
+.ib-mfold { border-top: 1px solid var(--ib-hair); }
+.pn-inbox .ib-mfold-b { position: relative; display: flex; align-items: center; justify-content: center; width: 100%; height: 34px; }
+.ib-mfold-b::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 1px solid var(--ib-hair); }
+.ib-mfold-b > span { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 11px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); font-size: 12.5px; font-weight: 500; color: var(--muted-foreground); }
+.pn-inbox .ib-mfold-b:hover > span { color: var(--foreground); border-color: color-mix(in oklch, var(--primary) 45%, var(--border)); }
+/* the divider at the first new message */
+.ib-newdiv { display: flex; align-items: center; gap: 10px; height: 30px; margin-top: 4px; color: var(--primary); font-size: 12.5px; font-weight: 650; scroll-margin-top: 8px; }
+.ib-newdiv::before, .ib-newdiv::after { content: ""; height: 1px; background: color-mix(in oklch, var(--primary) 45%, transparent); }
+.ib-newdiv::before { width: 14px; }
+.ib-newdiv::after { flex: 1; }
+/* the pill while new messages are below the view: floats above the reply foot,
+   and above the message bodies (Viewer draws at z-50 inside the thread's scroll area) */
+.ib-npill-wrap { position: sticky; bottom: 12px; height: 0; display: flex; justify-content: center; z-index: 60; pointer-events: none; }
+.pn-inbox .ib-npill { pointer-events: auto; transform: translateY(-100%); display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px 0 11px; border-radius: 999px; border: 1px solid color-mix(in oklch, var(--primary) 50%, var(--border)); background: var(--popover); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22); font-size: 13px; font-weight: 600; color: var(--primary); transition: opacity 160ms ease-out, transform 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+.pn-inbox .ib-npill[data-off] { opacity: 0; transform: translateY(-60%); pointer-events: none; visibility: hidden; transition: opacity 120ms ease-out, transform 120ms ease-out, visibility 0s 120ms; }
+/* the header: the subject once it scrolls away, and Expand all / Fold all */
+.ib-phsubj { flex: 1; min-width: 0; padding: 0 8px; font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0; transition: opacity 120ms ease-out; }
+.ib-phsubj[data-on] { opacity: 1; }
+.pn-inbox .ib-ptool { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border-radius: 7px; font-size: 12.5px; color: var(--muted-foreground); white-space: nowrap; }
+.pn-inbox .ib-ptool:hover { background: var(--muted); color: var(--foreground); }
+@media (prefers-reduced-motion: reduce) {
+  .pn-inbox .ib-npill, .ib-phsubj { transition: none; }
+}
+/* narrow windows: a folded line takes two or three rows (name and time, the snippet, what it holds) */
+@media (max-width: 720px) {
+  .pn-inbox .ib-fline { grid-template-columns: 24px minmax(0, 1fr) auto; grid-template-areas: "mk nm tm" ". sn sn" ". ch ch"; height: auto; padding: 8px; row-gap: 2px; }
+  .ib-fline > .ib-mk { grid-area: mk; }
+  .ib-fl-nm { grid-area: nm; }
+  .ib-fl-tm { grid-area: tm; }
+  .ib-fl-sn { grid-area: sn; }
+  .ib-fl-chips { grid-area: ch; }
+  .ib-fl-chips:empty { display: none; }
+  .ib-ptool-l { display: none; }
+  .ib-pbody.ib-folding .ib-who span { display: none; }
+}

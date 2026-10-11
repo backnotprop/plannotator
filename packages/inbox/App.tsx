@@ -43,6 +43,7 @@ import { DecisionsPage } from './components/Decisions';
 import { GuidePane } from './components/GuidePane';
 import { AboutBlock, FailedDialog, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
 import { unsentReply } from './unsent';
+import { lookBoundary } from './folding';
 
 // The Inbox has no /api/config and no browser-agent tools: settings stay in
 // the page's own cookies, and WebMCP is off.
@@ -148,6 +149,8 @@ function Inbox() {
   const [shown, setShown] = useState<InboxListSection[] | null>(null);
   const [thread, setThread] = useState<InboxThread | null>(null);
   const [threadDecisions, setThreadDecisions] = useState<InboxDecision[]>([]);
+  /** The open thread's "new since you looked" boundary (folding.ts), from before this look. */
+  const [look, setLook] = useState<{ threadId: string; seq: number | null } | null>(null);
   const [decisions, setDecisions] = useState<DecisionsModel | null>(null);
   const [decisionsError, setDecisionsError] = useState<string | null>(null);
   const [settings, setSettings] = useState<SettingsModel | null>(null);
@@ -219,6 +222,9 @@ function Inbox() {
       if (routeRef.current.thread === threadId) {
         setThread(next.thread);
         setThreadDecisions(next.decisions);
+        // What is new since the last look, from the first read of this thread:
+        // it lands before the window records the look, and is kept until the person leaves the thread.
+        setLook((current) => (current?.threadId === threadId ? current : { threadId, seq: lookBoundary(next.thread) }));
       }
       return next.thread;
     } catch (cause) {
@@ -300,6 +306,7 @@ function Inbox() {
     const threadId = route.thread;
     if (!threadId) {
       setThread(null);
+      setLook(null);
       return;
     }
     let cancelled = false;
@@ -663,6 +670,7 @@ function Inbox() {
             file={route.file ?? null}
             onOpenFile={(file) => writeRoute({ ...routeRef.current, file })}
             onOpenGuide={(messageId) => go({ ...route, guide: messageId })}
+            lookSeq={look?.threadId === thread.thread_id ? look.seq : undefined}
           />
         )}
       </>

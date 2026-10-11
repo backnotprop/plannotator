@@ -509,6 +509,33 @@ export class InboxStore {
     };
   }
 
+  /**
+   * The thread as the window reads it (`GET /api/inbox/threads/:id`): each
+   * message with its `seq`, and each person reply with the number of
+   * annotations it carried (`sent_annotations`). Additive to `thread()`,
+   * which the MCP tools return unchanged.
+   */
+  windowThread(threadId: string): InboxThread | null {
+    const thread = this.thread(threadId);
+    if (!thread) return null;
+    const carried = new Map<string, number>();
+    for (const record of this.annotations.values()) {
+      if (record.thread_id !== threadId || record.removed_at !== null || record.sent_reply_id === null) continue;
+      carried.set(record.sent_reply_id, (carried.get(record.sent_reply_id) ?? 0) + 1);
+    }
+    return {
+      ...thread,
+      messages: thread.messages.map((message) => {
+        const seq = this.messageSeq.get(message.id);
+        return {
+          ...message,
+          ...(seq === undefined ? {} : { seq }),
+          ...(message.author.kind === "person" ? { sent_annotations: carried.get(message.id) ?? 0 } : {}),
+        };
+      }),
+    };
+  }
+
   threadSummary(threadId: string): InboxThreadSummary | null {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) return null;

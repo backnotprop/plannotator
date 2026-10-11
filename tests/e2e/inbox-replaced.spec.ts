@@ -254,6 +254,10 @@ test('a whole message withdrawn: the held list says "1 new"; shown, the row leav
   await shot('6-withdrawn-shown');
   await row.click();
   const pane = page.locator('section.ib-pane');
+  // The person looked at the asking message before the withdrawal, so it opens folded to a line; open it.
+  const asking = pane.locator(`[data-message-article="${second.message_id}"]`);
+  await expect(asking).toHaveAttribute('data-folded', '');
+  await asking.locator('[data-fold-head]').click();
   const tags = pane.locator('[data-replaced-tag]');
   await expect(tags).toHaveText(['No longer applies', 'No longer applies']);
   await expect(pane.locator('[data-replaced-row]').first()).toContainText(/Claude Code said at \d{1,2}:\d{2} [AP]M that this no longer applies\. Read why/);

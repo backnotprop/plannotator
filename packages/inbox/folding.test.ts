@@ -1,0 +1,68 @@
+/**
+ * The pure rules a thread folds by (folding.ts): the boundary of "new since
+ * you looked", the fold plan, and a folded line's first words. The pane's
+ * drawing of them is proved in threadFolding.test.tsx.
+ */
+import { expect, test } from 'bun:test';
+import type { InboxAuthor, InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
+import { firstWords, lookBoundary, newSinceLook, planFolds } from './folding';
+
+const AGENT: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: null };
+const PERSON: InboxAuthor = { kind: 'person' };
+
+function msg(id: string, author: InboxAuthor, seq: number | undefined, extra: Partial<InboxMessageWire> = {}): InboxMessageWire {
+  return { id, project_id: 'prj_1', thread_id: 'm1', reply_to: null, author, subject: null, body: id, created_at: '2026-10-10T10:00:00.000Z', resolved_at: null, idempotency_key: null, ...(seq === undefined ? {} : { seq }), ...extra };
+}
+
+const thread = (messages: InboxMessageWire[]): InboxThread => ({ thread_id: 'm1', project: { id: 'prj_1', key: 'k', name: 'p', root: '/p', created_at: '' }, subject: null, thread_name: null, resolved_at: null, messages });
+
+test("the boundary is the later of the person's last look and their last reply; an older payload without seqs has none", () => {
+  expect(lookBoundary(thread([msg('m1', AGENT, 2, { person_seen_seq: 9 }), msg('m2', PERSON, 5), msg('m3', AGENT, 11)]))).toBe(9);
+  expect(lookBoundary(thread([msg('m1', AGENT, 2, { person_seen_seq: 3 }), msg('m2', PERSON, 5), msg('m3', AGENT, 11)]))).toBe(5);
+  expect(lookBoundary(thread([msg('m1', AGENT, 2), msg('m3', AGENT, 4)]))).toBe(0);
+  expect(lookBoundary(thread([msg('m1', AGENT, 2), msg('m3', AGENT, undefined)]))).toBeNull();
+  const messages = [msg('m1', AGENT, 2), msg('m2', PERSON, 5), msg('m3', AGENT, 11)];
+  expect([...newSinceLook(messages, 5)]).toEqual(['m3']);
+  expect([...newSinceLook(messages, null)]).toEqual([]);
+});
+
+test('the fold plan: open when new, holding an unsent pick, or last; each read run of 4 or more hides all but its first and last two', () => {
+  const ids = Array.from({ length: 9 }, (_, i) => `m${i + 1}`);
+  const messages = ids.map((id, i) => msg(id, i % 2 ? PERSON : AGENT, i + 1));
+  // m5 is new: it splits the read messages into a run of 4 (m1..m4) and a run of 3 (m6..m8); m9 is last.
+  const plan = planFolds(messages, new Set(['m5']), 4);
+  expect([...plan.folded]).toEqual(['m1', 'm2', 'm3', 'm4', 'm6', 'm7', 'm8']);
+  expect(plan.hidden).toEqual([['m2']]);
+  // Seven read messages in a row and the last: one fold of four.
+  expect(planFolds(messages.slice(0, 8), new Set(), 8).hidden).toEqual([['m2', 'm3', 'm4', 'm5']]);
+  // One message, or no seqs: nothing folds.
+  expect(planFolds(messages.slice(0, 1), new Set(), 1).folded.size).toBe(0);
+  expect(planFolds(messages, new Set(), null).folded.size).toBe(0);
+});
+
+test("a folded line's first words: question blocks, fences, tables and images out; marks and link targets gone; cut at a word", () => {
+  const body = [
+    '## Search',
+    '',
+    'I looked at **three** ways: see [the plan](plan.md) and ![a mock](mock.png) `docs-search`.',
+    '',
+    '```ts',
+    'const index = build();',
+    '```',
+    '',
+    '| Option | Cost |',
+    '| --- | --- |',
+    '| Pagefind | 1.6 MB |',
+    '',
+    ':::question',
+    'Which index?',
+    '',
+    '- [ ] Pagefind',
+    ':::',
+    '',
+    '- Built at deploy',
+    '> Quoted',
+  ].join('\n');
+  expect(firstWords(body)).toBe('Search I looked at three ways: see the plan and docs-search. Built at deploy Quoted');
+  expect(firstWords('word '.repeat(100), 40)).toBe(`${'word '.repeat(8).trim()}…`);
+});
