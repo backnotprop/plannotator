@@ -80,7 +80,7 @@ export function Sidebar(props: SidebarProps) {
               <button
                 key={project.id}
                 type="button"
-                className={`ib-proj${n === 0 ? ' ib-q' : ''}${on ? ' ib-on' : ''}`}
+                className={`ib-proj${n === 0 ? ' ib-proj-quiet' : ''}${on ? ' ib-on' : ''}`}
                 onClick={pick(() => props.onProject(project.id))}
                 aria-current={on ? 'page' : undefined}
                 title={project.root}

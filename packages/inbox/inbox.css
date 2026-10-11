@@ -96,7 +96,7 @@
 .ib-proj { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 9px; border-radius: 7px; font-size: 13.5px; width: 100%; text-align: left; }
 .ib-proj .ib-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ib-proj .ib-n { margin-left: auto; font-size: 12.5px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
-.ib-proj.ib-q { color: var(--muted-foreground); }
+.ib-proj.ib-proj-quiet { color: var(--muted-foreground); }
 .ib-proj.ib-on { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); font-weight: 550; }
 .ib-side-empty { font-size: 13px; color: var(--muted-foreground); padding: 2px 9px; line-height: 1.5; }
 .ib-side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
