@@ -11,6 +11,7 @@
  */
 
 import { getItem, setItem } from './storage';
+import { noteServerSessionMismatch, withServerSession } from './serverSession';
 
 export type UpdateAction = 'script' | 'copy' | 'pi' | 'opencode';
 
@@ -108,7 +109,8 @@ export function describeUpdateToast(advert: UpdateAdvert): { title: string; desc
 /** Ask the server to run the install script now (`script` only). */
 export async function requestUpdateNow(): Promise<{ ok: true; version: string } | { ok: false; error: string }> {
   try {
-    const res = await fetch('/api/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const res = await fetch('/api/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(withServerSession({})) });
+    if (await noteServerSessionMismatch(res)) return { ok: false, error: 'This review was replaced by a newer Plannotator session. Reload the page.' };
     const body = (await res.json().catch(() => ({}))) as { version?: string; error?: string };
     if (res.ok && typeof body.version === 'string') return { ok: true, version: body.version };
     return { ok: false, error: body.error ?? `The update could not start (HTTP ${res.status}).` };

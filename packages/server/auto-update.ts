@@ -70,6 +70,8 @@ import {
   type UpdateState,
 } from "@plannotator/shared/update-check";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { isLoopbackHostHeader } from "@plannotator/shared/loopback-host";
+import { checkServerSession, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 import { listSessions, type SessionInfo } from "./sessions";
 
 // The version helpers and the install-flag allowlist moved to
@@ -837,10 +839,12 @@ export function getAutoUpdateNotice(): AutoUpdateNotice | undefined {
 }
 
 /** What updating means for a server the compiled CLI started for `origin`. */
-export function updateActionFor(origin: string | null | undefined, managed: boolean): UpdateAction {
+export function updateActionFor(origin: string | null | undefined, managed: boolean, exposed = false): UpdateAction {
   if (origin === "opencode") return "opencode";
   if (origin === "pi") return "pi";
-  return managed ? "script" : "copy";
+  // A session other devices can reach (remote mode, --tailscale) never offers
+  // to start the installer: it shows the command instead.
+  return managed && !exposed ? "script" : "copy";
 }
 
 /**
@@ -848,7 +852,7 @@ export function updateActionFor(origin: string | null | undefined, managed: bool
  * `updateAvailable` when the machine knows of a newer stable release and
  * update checks are on. Read from the cache only: never a network call.
  */
-export function getUpdateAdvert(origin?: string | null): { updateAvailable?: UpdateAdvert } {
+export function getUpdateAdvert(origin?: string | null, options: { exposed?: boolean } = {}): { updateAvailable?: UpdateAdvert } {
   if (!noticeVersion) return {};
   try {
     if (!resolveUpdateCheck(loadConfig())) return {};
@@ -856,7 +860,7 @@ export function getUpdateAdvert(origin?: string | null): { updateAvailable?: Upd
     const advert = buildUpdateAdvert({
       state: readAutoUpdateState(dataDir),
       current: noticeVersion,
-      action: updateActionFor(origin, isManagedBinary(process.execPath)),
+      action: updateActionFor(origin, isManagedBinary(process.execPath), options.exposed === true),
       platform: process.platform,
       flags: readInstallFlags(dataDir).flags,
     });
@@ -871,26 +875,52 @@ export function getUpdateAdvert(origin?: string | null): { updateAvailable?: Upd
  * POST /api/update on the compiled CLI's plan, review and annotate servers:
  * the review toast's (and the Options menu's) Update. The same Update now as
  * the Inbox: the install script for the newest known release, detached, once
- * (update.lock). Same-origin only. Null for any other path.
+ * (update.lock). Null for any other path.
+ *
+ * Starting an installer is this computer's decision, so it answers only a
+ * loopback Host naming this server's port (a LAN or tailnet device reaching a
+ * remote-mode or --tailscale session never can), never while the session is
+ * exposed beyond this computer (its advert says `copy` then), never a
+ * cross-origin page, and a tab left open on an older session gets 409.
  */
-export function handleUpdateRoute(req: Request, url: URL): Response | null {
+export function handleUpdateRoute(
+  req: Request,
+  url: URL,
+  ctx: { port: number | null | undefined; exposed: boolean; serverSession: string },
+): Promise<Response> | null {
   if (url.pathname !== "/api/update") return null;
-  if (req.method !== "POST") return Response.json({ error: "Use POST." }, { status: 405 });
-  if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) {
-    return Response.json({ error: "Cross-origin requests are not accepted." }, { status: 403 });
-  }
-  const result = startManualUpdateForThisBinary(noticeVersion);
-  if (result.outcome === "launched") return Response.json({ ok: true, version: result.version });
-  const refused: Record<string, string> = {
-    locked: "An update is already running.",
-    unmanaged: "This copy of Plannotator was not installed by the install script, so it can't update itself.",
-    "dev-build": "This is a development build; there is nothing to update.",
-    "no-release": "No newer release is known yet.",
-    "up-to-date": "Plannotator is up to date.",
-    "launch-failed": "The install script could not be started; see update.log.",
-  };
-  return Response.json(
-    { error: refused[result.outcome] ?? "The update could not start.", code: `update_${result.outcome.replace(/-/g, "_")}` },
-    { status: 409 },
-  );
+  return (async () => {
+    if (req.method !== "POST") return Response.json({ error: "Use POST." }, { status: 405 });
+    if (!isLoopbackHostHeader(req.headers.get("host"), ctx.port)) {
+      return Response.json({ error: "Update answers only this computer.", code: "forbidden_host" }, { status: 403 });
+    }
+    if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) {
+      return Response.json({ error: "Cross-origin requests are not accepted." }, { status: 403 });
+    }
+    if (ctx.exposed) {
+      return Response.json(
+        { error: "This session is reachable from other devices, so it does not start the installer. Run the install command instead.", code: "update_exposed" },
+        { status: 403 },
+      );
+    }
+    let body: unknown = {};
+    try {
+      body = await req.json();
+    } catch {}
+    if (checkServerSession(body, ctx.serverSession) === "mismatch") return Response.json(serverSessionMismatchBody(), { status: 409 });
+    const result = startManualUpdateForThisBinary(noticeVersion);
+    if (result.outcome === "launched") return Response.json({ ok: true, version: result.version });
+    const refused: Record<string, string> = {
+      locked: "An update is already running.",
+      unmanaged: "This copy of Plannotator was not installed by the install script, so it can't update itself.",
+      "dev-build": "This is a development build; there is nothing to update.",
+      "no-release": "No newer release is known yet.",
+      "up-to-date": "Plannotator is up to date.",
+      "launch-failed": "The install script could not be started; see update.log.",
+    };
+    return Response.json(
+      { error: refused[result.outcome] ?? "The update could not start.", code: `update_${result.outcome.replace(/-/g, "_")}` },
+      { status: 409 },
+    );
+  })();
 }

@@ -917,7 +917,7 @@ export async function startAnnotateServer(
               isWSL: wslFlag,
               serverConfig: getServerConfig(gitUser, agentToolHostForServer(options.sessionBridge)),
               ...getAutoUpdateAdvert(),
-              ...getUpdateAdvert(origin),
+              ...getUpdateAdvert(origin, { exposed: isRemote || options.tailnetPublished === true }),
               agentTerminal: agentTerminal.capability,
               feedbackTemplates: {
                 fileFeedback: getAnnotateFileFeedbackTemplate(origin),
@@ -993,7 +993,7 @@ export async function startAnnotateServer(
               ...(annotateDrafts.documentsEnabled ? { documentDrafts: true } : {}),
               serverConfig: getServerConfig(gitUser, agentToolHostForServer(options.sessionBridge)),
               ...getAutoUpdateAdvert(),
-              ...getUpdateAdvert(origin),
+              ...getUpdateAdvert(origin, { exposed: isRemote || options.tailnetPublished === true }),
               agentTerminal: agentTerminal.capability,
               ...(recentMessages ? { recentMessages } : {}),
               // Resolved copy-wrapper templates (config-aware, placeholders
@@ -1107,7 +1107,7 @@ export async function startAnnotateServer(
 
           // API: Update now (the update toast and the Options menu): the install script, once.
 
-          const updateRoute = handleUpdateRoute(req, url);
+          const updateRoute = handleUpdateRoute(req, url, { port: boundPort, exposed: isRemote || options.tailnetPublished === true, serverSession });
 
           if (updateRoute) return updateRoute;
 

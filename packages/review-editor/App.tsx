@@ -27,6 +27,7 @@ import {
 } from './reviewDecision';
 import { useUpdateCheck } from '@plannotator/ui/hooks/useUpdateCheck';
 import { useUpdateToast } from '@plannotator/ui/hooks/useUpdateToast';
+import { useUpdateCheckSetting } from '@plannotator/ui/hooks/useUpdateCheckSetting';
 import { parseUpdateAdvert, type UpdateAdvert } from '@plannotator/ui/utils/updateNotice';
 import { claimAutoUpdateNotice, describeAutoUpdateNotice, parseAutoUpdateNotice, type AutoUpdateNotice } from '@plannotator/ui/utils/autoUpdateNotice';
 import { storage } from '@plannotator/ui/utils/storage';
@@ -842,7 +843,7 @@ const ReviewApp: React.FC = () => {
   // "new version available" toast is then redundant and stays hidden.
   const [autoUpdateActive, setAutoUpdateActive] = useState(false);
   // The update-notice switch for Settings: present when the server reports it.
-  const [updateCheckSetting, setUpdateCheckSetting] = useState<{ env?: boolean } | undefined>();
+  const updateCheckSetting = useUpdateCheckSetting();
   // One-time notice after a background auto-update (#1634); the compiled
   // CLI's server attaches it to the initial payload.
   const [autoUpdateNotice, setAutoUpdateNotice] = useState<AutoUpdateNotice | undefined>();
@@ -2329,7 +2330,7 @@ const ReviewApp: React.FC = () => {
         setAutoUpdateActive(data.autoUpdateActive === true);
         setAutoUpdateNotice(parseAutoUpdateNotice(data.autoUpdateNotice));
         setUpdateAdvert(parseUpdateAdvert(data.updateAvailable));
-        setUpdateCheckSetting(typeof data.serverConfig?.updateCheck === 'boolean' ? { env: data.serverConfig.updateCheckEnv as boolean | undefined } : undefined);
+        updateCheckSetting.adopt(data.serverConfig as Record<string, unknown> | undefined);
         setSnapshotId(data.snapshotId);
         setAiEnabled(data.aiEnabled !== false);
         const apiFiles = orderFilesBySections(parseDiffToFiles(data.rawPatch), data.sections);
@@ -5852,7 +5853,7 @@ const ReviewApp: React.FC = () => {
             aiProviders={aiProviders}
             gitUser={gitUser}
             autoUpdateSetting={autoUpdateSetting}
-            updateCheckSetting={updateCheckSetting}
+            updateCheckSetting={updateCheckSetting.setting}
             agentToolSetting={agentTool.setting}
             onAgentToolChange={agentTool.save}
             externalOpen={openSettingsMenu}

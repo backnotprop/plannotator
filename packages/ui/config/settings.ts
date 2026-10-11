@@ -616,24 +616,6 @@ export const SETTINGS = {
       typeof sc.autoUpdate === 'boolean' ? sc.autoUpdate : undefined,
     toServer: (v: boolean) => ({ autoUpdate: v }),
   },
-  /**
-   * Update notices (PLANNOTATOR_UPDATE_CHECK / updateCheck): the machine asks
-   * GitHub once a day and the review windows show a toast and the Options dot.
-   * On by default. The server always sends the config-file value, so the
-   * cookie is only a mirror.
-   */
-  updateCheck: {
-    defaultValue: true as boolean,
-    fromCookie: () => {
-      const v = storage.getItem('plannotator-update-check');
-      return v === 'true' ? true : v === 'false' ? false : undefined;
-    },
-    toCookie: (v: boolean) => storage.setItem('plannotator-update-check', String(v)),
-    serverKey: 'updateCheck',
-    fromServer: (sc: Record<string, unknown>) =>
-      typeof sc.updateCheck === 'boolean' ? sc.updateCheck : undefined,
-    toServer: (v: boolean) => ({ updateCheck: v }),
-  },
   conventionalComments: {
     defaultValue: false as boolean,
     fromCookie: () => {

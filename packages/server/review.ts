@@ -2361,7 +2361,7 @@ export async function startReviewServer(
               callFlow: await getCallFlowAdvert(servedDiffType as DiffType),
               serverConfig: getServerConfig(gitUser, agentToolHostForServer(options.sessionBridge)),
               ...getAutoUpdateAdvert(),
-              ...getUpdateAdvert(origin),
+              ...getUpdateAdvert(origin, { exposed: isRemote || options.tailnetPublished === true }),
             });
           }
 
@@ -3696,7 +3696,7 @@ export async function startReviewServer(
 
           // API: Update now (the update toast and the Options menu): the install script, once.
 
-          const updateRoute = handleUpdateRoute(req, url);
+          const updateRoute = handleUpdateRoute(req, url, { port: boundPort, exposed: isRemote || options.tailnetPublished === true, serverSession });
 
           if (updateRoute) return updateRoute;
 

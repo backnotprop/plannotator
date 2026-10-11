@@ -1,3 +1,4 @@
+import type { UpdateCheckSetting } from '../hooks/useUpdateCheckSetting';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { AnnotateAgentTerminalSide } from '@plannotator/core/agent-terminal';
@@ -112,10 +113,10 @@ interface SettingsProps {
    *  `env` is PLANNOTATOR_AUTO_UPDATE when it overrides the config file.
    *  Hosts that omit it get no toggle. */
   autoUpdateSetting?: { env?: boolean };
-  /** Present when the server reports the update-notice switch (serverConfig.updateCheck);
-   *  `env` is PLANNOTATOR_UPDATE_CHECK when it overrides the config file.
-   *  Hosts that omit it get no row. */
-  updateCheckSetting?: { env?: boolean };
+  /** Present when the server reports the update-notice switch (serverConfig.updateCheck,
+   *  useUpdateCheckSetting); `env` is PLANNOTATOR_UPDATE_CHECK when it overrides the
+   *  config file. Hosts that omit it get no row. */
+  updateCheckSetting?: UpdateCheckSetting;
   /** The `plannotator` agent tool switch, as the server reports it
    *  (parseAgentToolSetting of serverConfig: present only when the session's
    *  host registers the tool). Shown only together with onAgentToolChange;
@@ -1009,8 +1010,7 @@ const CommentsTab: React.FC = () => {
 export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, updateCheckSetting, agentToolSetting, onAgentToolChange, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false }) => {
   const webmcpTools = useWebMcpToolsEnabled();
   const autoUpdate = useConfigValue('autoUpdate');
-  const updateCheck = useConfigValue('updateCheck');
-  const updateChecksOn = updateCheckSetting ? (updateCheckSetting.env ?? updateCheck) : true;
+  const updateChecksOn = updateCheckSetting ? updateCheckSetting.on : true;
   const [showDialog, setShowDialog] = useState(false);
   const settingsWasOpenRef = useRef(false);
   const [themePreview, setThemePreview] = useState(false);
@@ -1454,7 +1454,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         <div className="border-t border-border" />
                         <ToggleSwitch
                           checked={updateChecksOn}
-                          onChange={(v) => configStore.set('updateCheck', v)}
+                          onChange={(v) => updateCheckSetting.onChange(v)}
                           disabled={updateCheckSetting.env !== undefined}
                           label="Tell me when a new version is out"
                           description={

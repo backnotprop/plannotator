@@ -1,3 +1,4 @@
+import type { UpdateCheckSetting } from '@plannotator/ui/hooks/useUpdateCheckSetting';
 import React from 'react';
 import type { Origin } from '@plannotator/shared/agents';
 import type { Agent } from '@plannotator/ui/hooks/useAgents';
@@ -112,7 +113,7 @@ interface AppHeaderProps {
   gitUser: string | undefined;
   /** Present when the server advertises the auto-update setting; Settings shows its switch. */
   autoUpdateSetting?: { env?: boolean };
-  updateCheckSetting?: { env?: boolean };
+  updateCheckSetting?: UpdateCheckSetting;
   /** The `plannotator` agent tool switch (parseAgentToolSetting of serverConfig); Settings shows its row. */
   agentToolSetting?: AgentToolSetting;
   onAgentToolChange?: (enabled: boolean) => Promise<void>;
