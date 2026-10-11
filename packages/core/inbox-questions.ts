@@ -308,8 +308,9 @@ export function composeInboxReplyBody(input: {
   earlier: readonly QuestionAnswer[];
   words: string | undefined;
 }): string {
-  const count = input.sent.filter((a) => !isQuestionAnswerEmpty(a)).length;
-  const sentence = count > 0 ? `Answered ${count} question${count === 1 ? "" : "s"}.` : "";
+  const given = input.sent.filter((a) => !isQuestionAnswerEmpty(a));
+  const skipped = given.filter((a) => a.skipped).length;
+  const sentence = replySentence(given.length - skipped, skipped);
   // A superseded question is neither answered nor "Unanswered": the agent
   // withdrew it. The others keep their numbers ("Q2" stays the card's 2).
   const items = [...input.questions]
@@ -319,6 +320,20 @@ export function composeInboxReplyBody(input: {
   const section = input.sent.length > 0 ? formatQuestionAnswersSection(items, [...input.sent, ...input.earlier]).trimEnd() : "";
   const words = input.words?.trim() ?? "";
   return [sentence, words, section].filter((part) => part !== "").join("\n\n");
+}
+
+const questionsWord = (n: number): string => `${n} question${n === 1 ? "" : "s"}`;
+
+/**
+ * The reply's first line: "Answered 2 questions.", "Skipped 3 questions.", or
+ * "Answered 1 question, skipped 2." A skip is not an answer, so a Send of
+ * skips alone never opens with "Answered".
+ */
+function replySentence(answered: number, skipped: number): string {
+  if (answered > 0 && skipped > 0) return `Answered ${questionsWord(answered)}, skipped ${skipped}.`;
+  if (answered > 0) return `Answered ${questionsWord(answered)}.`;
+  if (skipped > 0) return `Skipped ${questionsWord(skipped)}.`;
+  return "";
 }
 
 // ─────────────────────────────── Subject ───────────────────────────────
