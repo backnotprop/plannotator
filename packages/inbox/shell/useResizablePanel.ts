@@ -3,7 +3,7 @@
 // Port: the width persists through Plannotator's cookie storage instead of
 // localStorage, as every Plannotator setting does (a session's port changes).
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { storage } from "@plannotator/ui/utils/storage";
 
 interface UseResizablePanelOptions {
@@ -117,8 +117,10 @@ export function useResizablePanel({
 	// that same bound — a static 520 on a 700px window would promise a range
 	// End cannot reach. Recomputed on window resize; without reserveViewport
 	// the design max is already the operable max and no listener mounts.
+	// A layout effect: the room is measured before the first paint, so the
+	// announced range is right from the first frame.
 	const [liveMax, setLiveMax] = useState(effectiveMax);
-	useEffect(() => {
+	useLayoutEffect(() => {
 		if (reserveViewport === undefined) return;
 		const onResize = () => setLiveMax(effectiveMax());
 		onResize();

@@ -37,6 +37,7 @@ const KEYBOARD_STEP = 10;
 export function CollapsibleEdge({
 	onCollapse,
 	label,
+	controls,
 	isDragging,
 	resize,
 	children,
@@ -44,6 +45,8 @@ export function CollapsibleEdge({
 	onCollapse?: () => void;
 	/** Accessible name for the focusable edge. */
 	label: string;
+	/** The id of the panel the edge resizes (aria-controls). */
+	controls?: string;
 	/** Mid-drag the tooltip is suppressed (the hint is for the idle edge). */
 	isDragging: boolean;
 	resize: EdgeKeyboardResize;
@@ -79,6 +82,7 @@ export function CollapsibleEdge({
 							aria-valuemax={resize.max}
 							tabIndex={0}
 							aria-label={label}
+							aria-controls={controls}
 							onKeyDown={onKeyDown}
 							className="ib-edge"
 						/>

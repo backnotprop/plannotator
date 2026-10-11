@@ -1934,7 +1934,7 @@ Sorting and the rest:
   - the time
 
   A Sent row reads "Saved for <agent>. It sees it when it checks." Quiet is folded.
-- Beside an open thread the list narrows to 380 px and takes the sidebar's edge (`shell/ListColumnEdge.tsx`: the same `useResizablePanel`, `CollapsibleEdge` separator and `ResizeHandle`, without the collapse; arrows, Home/End; cookie `plannotator-inbox-list-width`): a drag widens it from 380 px up to leaving the thread pane 480 px, and its rows turn wide once it reaches 900 px (`WIDE_ROWS_MIN_LIST_WIDTH`); no edge below 768 px (`tests/e2e/inbox-list-resize.spec.ts`).
+- Beside an open thread the list narrows to 380 px and takes the sidebar's edge (`shell/ListColumnEdge.tsx`: the same `useResizablePanel`, `CollapsibleEdge` separator and `ResizeHandle`, without the collapse; arrows, Home/End, `aria-controls` the column; its grab area leans toward the pane so a classic scrollbar stays grabbable; cookie `plannotator-inbox-list-width`): a drag widens it from 380 px up to leaving the thread pane 480 px (no edge when the window leaves no room to widen, and none below 768 px), and its rows turn wide while the column's border box is 900 px or wider (`WIDE_ROWS_MIN_LIST_WIDTH`, read from the observer's `borderBoxSize`, the same box as `getBoundingClientRect`) (`tests/e2e/inbox-list-resize.spec.ts`).
 - Held order (`packages/inbox/held.ts`): the rows on screen change only on an action (opening a row, a pick, a Send, a folder, Show). New agent activity waits behind "N new in <project>". The person's own writes never count.
 - First run (no project yet), "No agent has written yet":
   - three equal cards for the Plannotator connections (Claude Code, Pi, OpenCode), each with "Use MCP instead"

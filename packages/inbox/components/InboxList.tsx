@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { agentName, questionCount, shortTime } from '../format';
 import { AuthorMark, Icon } from '../icons';
@@ -104,7 +104,9 @@ function useNarrowerThan(min: number, unmeasured: boolean) {
     };
     read(el.getBoundingClientRect().width);
     if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver((entries) => read(entries[0]?.contentRect.width ?? 0));
+    // The border box, as getBoundingClientRect reads it: contentRect leaves out
+    // the column's 1px border, so a 900px column would read 899 here.
+    const observer = new ResizeObserver((entries) => read(entries[0]?.borderBoxSize?.[0]?.inlineSize ?? el.getBoundingClientRect().width));
     observer.observe(el);
     return () => observer.disconnect();
   }, [min, unmeasured]);
@@ -187,11 +189,13 @@ export function InboxList(props: InboxListProps) {
   const twoLine = narrowList && (props.narrow || !props.filtered);
   // The column beside a thread gets the sidebar's resize edge, except on a phone.
   const { isMobile } = useSidebar();
+  const columnId = useId();
   const resizable = props.narrow && !isMobile;
   const visible = props.sections.filter((s) => s.threads.length > 0);
   return (
     <section
       ref={listRef}
+      id={columnId}
       className={`ib-listcol${props.narrow ? ' ib-narrow' : ''}${resizable ? ' ib-resizable' : ''}${props.filtered ? ' ib-noproj' : ''}`}
       aria-label={props.title}
     >
@@ -248,7 +252,7 @@ export function InboxList(props: InboxListProps) {
           );
         })}
       </div>
-      {resizable && <ListColumnEdge />}
+      {resizable && <ListColumnEdge controls={columnId} />}
     </section>
   );
 }

@@ -54,20 +54,23 @@ function row(id: string): InboxListRow {
 
 const SECTIONS: InboxListSection[] = [{ id: 'waiting', label: 'Waiting on you', threads: [row('msg_a'), row('msg_b')] }];
 
-// A ResizeObserver that reports the width a browser would: the list's inline width.
+// A ResizeObserver that reports what a browser would for the list: its border
+// box (the inline width) and a content box 1px narrower (its right border).
 const observed: Array<{ el: Element; callback: ResizeObserverCallback }> = [];
 const savedObserver = hasDom ? globalThis.ResizeObserver : undefined;
 function reportListWidth() {
   for (const { el, callback } of observed) {
     if (!el.classList.contains('ib-listcol')) continue;
     const width = parseFloat((el as HTMLElement).style.width) || LIST_COLUMN_MIN;
-    callback([{ contentRect: { width } } as ResizeObserverEntry], {} as ResizeObserver);
+    callback([{ contentRect: { width: width - 1 }, borderBoxSize: [{ inlineSize: width, blockSize: 0 }] } as unknown as ResizeObserverEntry], {} as ResizeObserver);
   }
 }
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedInnerWidth = 0;
+let room = ROOM;
+const clientWidthOf = hasDom ? Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth') : undefined;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -78,6 +81,15 @@ beforeEach(() => {
     removeItem: (key) => void stored.delete(key),
   });
   savedInnerWidth = window.innerWidth;
+  room = ROOM;
+  // happy-dom lays nothing out: `.ib-main` reports the room from its first
+  // layout, as a browser's would (the edge measures it before the first paint).
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.classList.contains('ib-main') ? room : 0;
+    },
+  });
   globalThis.ResizeObserver = class {
     constructor(private readonly callback: ResizeObserverCallback) {}
     observe(el: Element) {
@@ -100,6 +112,8 @@ afterEach(() => {
   globalThis.ResizeObserver = savedObserver!;
   Object.defineProperty(window, 'innerWidth', { value: savedInnerWidth, configurable: true, writable: true });
   resetStorageBackend();
+  delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
+  if (clientWidthOf) Object.defineProperty(Element.prototype, 'clientWidth', clientWidthOf);
 });
 
 function render(narrow: boolean): HTMLElement {
@@ -110,12 +124,7 @@ function render(narrow: boolean): HTMLElement {
   const draw = () =>
     root!.render(
       <SidebarProvider>
-        <main
-          className="ib-main"
-          ref={(el) => {
-            if (el) Object.defineProperty(el, 'clientWidth', { value: ROOM, configurable: true });
-          }}
-        >
+        <main className="ib-main">
           <InboxList
             title="Inbox"
             path={null}
@@ -131,8 +140,6 @@ function render(narrow: boolean): HTMLElement {
       </SidebarProvider>,
     );
   act(draw);
-  // The room is measured once the main element exists.
-  act(() => window.dispatchEvent(new Event('resize')));
   return host;
 }
 
@@ -161,6 +168,33 @@ describe.if(hasDom)('the list column beside an open thread', () => {
     expect(sep.getAttribute('aria-valuemax')).toBe(String(max()));
     expect(sep.getAttribute('aria-valuenow')).toBe(String(LIST_COLUMN_MIN));
     expect(column(el).style.width).toBe(`${LIST_COLUMN_MIN}px`);
+    // It names the column it resizes.
+    expect(column(el).id).not.toBe('');
+    expect(sep.getAttribute('aria-controls')).toBe(column(el).id);
+  });
+
+  test('the range is measured from the column’s room on mount, with no resize event', () => {
+    // The window is narrower than the room here, so a window-based max would differ.
+    expect(window.innerWidth - READING_PANE_MIN).not.toBe(max());
+    const el = render(true);
+    expect(separator(el).getAttribute('aria-valuemax')).toBe(String(max()));
+  });
+
+  test('no separator when the window leaves no room to widen into', () => {
+    room = LIST_COLUMN_MIN + READING_PANE_MIN;
+    const el = render(true);
+    expect(el.querySelector('[role="separator"]')).toBeNull();
+    expect(column(el).classList.contains('ib-resizable')).toBe(true);
+  });
+
+  test('the wide rows start at a 900px border box (the content box is 899 there)', () => {
+    const el = render(true);
+    const sep = separator(el);
+    for (let i = 0; LIST_COLUMN_MIN + 10 * i < WIDE_ROWS_MIN_LIST_WIDTH; i++) press(sep, 'ArrowRight');
+    expect(column(el).style.width).toBe(`${WIDE_ROWS_MIN_LIST_WIDTH}px`);
+    act(reportListWidth);
+    expect(el.querySelectorAll('.ib-nrow').length).toBe(0);
+    expect(el.querySelectorAll('.ib-row').length).toBe(2);
   });
 
   test('arrow keys resize in 10px steps, Home and End go to the ends, both clamped; the width persists', () => {

@@ -24,7 +24,7 @@ export const LIST_COLUMN_WIDTH_KEY = "plannotator-inbox-list-width";
  * open and the window is not a phone's; unmounting hands the width back to
  * the stylesheet.
  */
-export function ListColumnEdge() {
+export function ListColumnEdge({ controls }: { controls?: string }) {
 	// The edge's own element, not a ref from the list: a child's ref is set
 	// before its layout effects run, a parent's only after them.
 	const edge = useRef<HTMLDivElement>(null);
@@ -60,15 +60,22 @@ export function ListColumnEdge() {
 	// The stylesheet keeps the reading pane's room after the window narrows;
 	// the separator announces the width that is drawn.
 	const value = Math.min(resize.width, resize.maxWidth);
+	// No room to widen into (the window leaves the pane less than 480px beside
+	// a 380px list): no separator, rather than one that cannot move. The
+	// wrapper stays, so the edge comes back when the room does.
+	const room = resize.maxWidth > resize.minWidth;
 	return (
 		<div ref={edge} className="ib-listedge">
-			<CollapsibleEdge
-				label="List width"
-				isDragging={resize.isDragging}
-				resize={{ value, min: resize.minWidth, max: resize.maxWidth, resizeTo: resize.resizeTo }}
-			>
-				<ResizeHandle {...resize.handleProps} />
-			</CollapsibleEdge>
+			{room && (
+				<CollapsibleEdge
+					label="List width"
+					controls={controls}
+					isDragging={resize.isDragging}
+					resize={{ value, min: resize.minWidth, max: resize.maxWidth, resizeTo: resize.resizeTo }}
+				>
+					<ResizeHandle {...resize.handleProps} />
+				</CollapsibleEdge>
+			)}
 		</div>
 	);
 }
