@@ -68,6 +68,8 @@ export function AttachmentPane(props: AttachmentPaneProps) {
   const { attachment, version } = props;
   const [view, setView] = useState<AttachmentView | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The text grew past what the window reads whole (413): the Download card instead.
+  const [tooLarge, setTooLarge] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(props.focusId);
   const [unanchored, setUnanchored] = useState<ReadonlySet<string>>(new Set());
   const [inputMethod, setInputMethod] = useState<InputMethod>('drag');
@@ -88,6 +90,7 @@ export function AttachmentPane(props: AttachmentPaneProps) {
   useEffect(() => {
     let cancelled = false;
     setView(null);
+    setTooLarge(false);
     setError(null);
     setUnanchored(new Set());
     if (!readsText) return;
@@ -97,7 +100,9 @@ export function AttachmentPane(props: AttachmentPaneProps) {
         if (!cancelled) setView(next);
       })
       .catch((cause) => {
-        if (!cancelled) setError(cause instanceof InboxApiError ? cause.message : 'The file could not be opened.');
+        if (cancelled) return;
+        if (cause instanceof InboxApiError && cause.code === 'attachment_too_large') setTooLarge(true);
+        else setError(cause instanceof InboxApiError ? cause.message : 'The file could not be opened.');
       });
     return () => {
       cancelled = true;
@@ -118,7 +123,7 @@ export function AttachmentPane(props: AttachmentPaneProps) {
   const isCode = kind === 'code';
   const isImage = kind === 'image';
   // A PDF, any other file, and a kind this window does not know: offered as a download.
-  const isDownload = kind === 'pdf' || kind === 'file';
+  const isDownload = kind === 'pdf' || kind === 'file' || tooLarge;
   const fileRecords = useMemo(
     () => props.records.filter((r) => r.path === attachment.path && r.version === annotationVersion),
     [props.records, attachment.path, annotationVersion],
@@ -355,7 +360,7 @@ export function AttachmentPane(props: AttachmentPaneProps) {
                 <span className="ib-att-text">
                   <span className="ib-nm">{attachment.name}</span>
                   <span className="ib-kd">
-                    {inboxAttachmentKindLabel(attachment.kind, attachment.name, attachment.media_type)}, {formatBytes(attachment.current?.size ?? attachment.size)}. Plannotator does not show this kind of file; download it to open it.
+                    {inboxAttachmentKindLabel(attachment.kind, attachment.name, attachment.media_type)}, {formatBytes(attachment.current?.size ?? attachment.size)}. {tooLarge ? 'It is too large to show here; download it to open it.' : 'Plannotator does not show this kind of file; download it to open it.'}
                   </span>
                 </span>
                 <a className="ib-btn ib-pri" href={attachmentDownloadUrl(attachment, effectiveVersion)} download={attachment.name}>

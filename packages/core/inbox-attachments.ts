@@ -130,6 +130,15 @@ export interface InboxAnnotationRecord {
 
 export const INBOX_ANNOTATION_CURRENT = "current";
 
+/**
+ * The largest text the window reads whole (the `view` and raw routes). A
+ * text or code file over it is attached as a `file` (a download), and a text
+ * file that grew past it after it was sent answers `413
+ * attachment_too_large`, which the window shows as its Download card. This
+ * bounds what is read into memory, not what attaches.
+ */
+export const INBOX_VIEW_MAX_BYTES = 16 * 1024 * 1024;
+
 const ATTACHMENT_ID_RE = /^att_[0-9A-HJKMNP-TV-Z]{26}$/;
 /** An annotation id the viewer mints: short, and safe in a URL path segment. */
 const ANNOTATION_ID_RE = /^[A-Za-z0-9_.:-]{1,200}$/;
@@ -161,9 +170,13 @@ function isCodeName(name: string): boolean {
   return CODE_FILE_REGEX.test(name);
 }
 
-/** The dotenv family: `.env`, and `.env.*` outside the annotatable docs (`.env.example` is a doc and stays). */
+/**
+ * The dotenv family, as annotate denies it: `.env` and any name ending in
+ * `.env` (`prod.env`, `.prod.env`), `.envrc`, and `.env.*` outside the
+ * annotatable docs (`.env.example` is a doc and stays).
+ */
 function isDotenvName(name: string): boolean {
-  if (/^\.env$/i.test(name)) return true;
+  if (/(^|\.)env$/i.test(name) || /^\.envrc$/i.test(name)) return true;
   return /^\.env\./i.test(name) && !isAnnotatableDocPath(name);
 }
 

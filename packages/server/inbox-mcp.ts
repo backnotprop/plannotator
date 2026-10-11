@@ -36,7 +36,7 @@ export const INBOX_MCP_INSTRUCTIONS = [
   "",
   "- send_message posts markdown to the person. Your messages land in one thread, your session's, until the person resolves it; pass `thread` (a short name) to keep separate work in its own thread, or to join another session's thread of that name; reply_to answers one message. Ask what you cannot decide alone as question blocks (:::question, :::question-multi, :::question-text); send_message's description has the syntax. Pass an idempotency_key so a retry never posts twice.",
   "- After sending, either go on with other work or call wait_for_reply with the thread_id. It returns the person's reply as soon as it lands, or { status: \"waiting\", cursor } after about 50 seconds; call it again with that cursor to keep waiting.",
-  "- To show the person files (a plan, a screenshot, an HTML prototype, a diagram, a PDF, any file), pass their paths in send_message's attachments, e.g. [\"docs/plan.md\", \"/tmp/shot.png\"]. They open and annotate them in the Inbox; their annotations come back in the reply after the answers. A link to one in your message (`[the mock](mock.html)`) opens it beside the thread.",
+  "- To show the person files (a plan, a screenshot, a prototype, a PDF, any file), pass their paths in send_message's attachments, e.g. [\"docs/plan.md\", \"/tmp/shot.png\"]. They open and annotate them in the Inbox; annotations come back in the reply. A link to one in your message (`[the mock](mock.html)`) opens it beside the thread.",
   "- read_thread reads one thread (thread_id) or lists the threads you sent in, in this project.",
   "- resolve_message closes a thread once you have what you needed.",
   "- list_decisions reads what holds in this project: decisions the person recorded from answers, or agents recorded. record_decision records one you settled with the person. Add `Decision: when answered` to a question block to have its answer recorded.",
@@ -93,7 +93,7 @@ export interface InboxMcpContext {
    * file rules, a blob of the bytes): `base` resolves relative paths. Absent:
    * attachments are refused.
    */
-  recordAttachments?: (paths: readonly string[], project: InboxProject, base: string) => InboxAttachment[];
+  recordAttachments?: (paths: readonly string[], project: InboxProject, base: string) => Promise<InboxAttachment[]>;
   /** wait_for_reply's default hold in ms (tests pass a shorter one only through timeout_seconds). */
   waitDefaultMs?: number;
 }
@@ -246,18 +246,18 @@ function sendBasePath(projectPath: string | undefined, project: InboxProject): s
 }
 
 /** An agent's message into `project`, routed by the store (send_message, submit_guide). */
-export function sendAgentMessage(
+export async function sendAgentMessage(
   context: InboxMcpContext,
   project: InboxProject,
   input: AgentSendInput,
   guide?: InboxGuideRef,
-): { structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number } {
+): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number }> {
   const { store } = context;
   let attachments: InboxAttachment[] | undefined;
   if (input.attachments && input.attachments.length > 0) {
     if (!context.recordAttachments) throw new InboxError("validation_error", "attachments: not taken by this Inbox.");
     const base = input.project_path && isAbsolute(input.project_path) ? input.project_path : project.root;
-    attachments = context.recordAttachments(input.attachments, project, base);
+    attachments = await context.recordAttachments(input.attachments, project, base);
   }
   const result = store.sendMessage({
     project_id: project.id,
@@ -328,7 +328,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
     async (input, ctx) =>
       guarded(async () => {
         const project = await sendProject(context, input);
-        const sent = sendAgentMessage(context, project, input);
+        const sent = await sendAgentMessage(context, project, input);
         const asked =
           (sent.questions > 0 ? ` asking ${sent.questions} question${sent.questions === 1 ? "" : "s"}` : "") +
           (sent.attachments > 0 ? ` with ${sent.attachments} attachment${sent.attachments === 1 ? "" : "s"}` : "");

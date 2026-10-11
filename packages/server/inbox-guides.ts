@@ -239,7 +239,7 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
         const described = describeInboxGuide(checked.snapshot, inboxGuideInputHash(input));
         const body = input.body?.trim() ? input.body : checked.snapshot.guide.intent;
         const subject = input.subject ?? (input.body?.trim() ? undefined : `Guided review: ${described.ref.title}`);
-        const sent = sendAgentMessage(context, project, { ...input, body, subject }, described.ref);
+        const sent = await sendAgentMessage(context, project, { ...input, body, subject }, described.ref);
         // The blob is written once the message has landed, in the same turn (nothing can ask for it
         // in between); a refused send writes none, and a retry answers the first message's guide.
         if (!sent.replayed) writeBlob(context.store.dir, described.ref.sha256, Buffer.from(described.text, "utf8"));

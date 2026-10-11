@@ -9,12 +9,13 @@
  * its absolute path as an `images` entry, so the reply's feedback names a
  * file the agent can open (`- [shot-markup] /…/inbox/markups/<sha>.png`).
  * The window shows it back through `GET /api/inbox/markups/<name>`, by name
- * only. A markup no remaining annotation names is removed with the thread or
- * project that held it.
+ * only. A markup the deleted thread's or project's annotations named, and no
+ * remaining annotation names, is removed with it; one no annotation names yet
+ * (uploaded, its comment not saved) is left alone.
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { sniffImageContentType } from "../review-image";
 import { InboxError } from "./schema";
@@ -77,16 +78,10 @@ export function inboxMarkupNamesOf(inboxDirPath: string, annotation: Record<stri
   return out;
 }
 
-/** Remove every markup no annotation names any more. */
-export function removeUnusedInboxMarkups(inboxDirPath: string, used: ReadonlySet<string>): void {
-  let names: string[];
-  try {
-    names = readdirSync(inboxMarkupsDir(inboxDirPath));
-  } catch {
-    return;
-  }
+/** Remove these markups (by file name): the deleted records' markups no remaining annotation names. */
+export function removeInboxMarkups(inboxDirPath: string, names: readonly string[]): void {
   for (const name of names) {
-    if (!isInboxMarkupName(name) || used.has(name)) continue;
+    if (!isInboxMarkupName(name)) continue;
     try {
       unlinkSync(join(inboxMarkupsDir(inboxDirPath), name));
     } catch {

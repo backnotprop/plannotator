@@ -137,6 +137,44 @@ test.skipIf(!hasDom)('the image pane draws the image from its route and offers a
   expect(fetched.filter((url) => url.includes('/view'))).toEqual([]);
 });
 
+test.skipIf(!hasDom)('a text file too large to show (413 attachment_too_large) opens as the Download card', async () => {
+  const log = file('att_01K7GGGGGGGGGGGGGGGGGGGGGG', 'worker.log', 'text');
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ error: 'worker.log is too large to show here.', code: 'attachment_too_large' }), {
+      status: 413,
+      headers: { 'Content-Type': 'application/json' },
+    })) as unknown as typeof fetch;
+  const noop = () => {};
+  await render(
+    <AttachmentPane
+      attachment={log}
+      attachments={[log]}
+      records={[]}
+      agent="Claude Code"
+      projectName="api"
+      projectRoot="/work/api"
+      version="current"
+      onVersion={noop}
+      full={false}
+      onToggleFull={noop}
+      focusId={null}
+      readOnly={false}
+      onSaved={noop}
+      onRemoved={noop}
+      onOpenAt={noop}
+      onClose={noop}
+      strip={{ picks: 0, annotations: 0, onBack: noop, onWriteReply: noop }}
+    />,
+  );
+  await act(async () => {
+    for (let i = 0; i < 100 && !host!.querySelector('[data-download-card]'); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  const card = host!.querySelector('[data-download-card]')!;
+  expect(card).not.toBeNull();
+  expect(card.querySelector('a[download]')!.getAttribute('href')).toBe(`/api/inbox/attachments/${log.id}/download`);
+  expect(host!.querySelector('[role="alert"]')).toBeNull();
+});
+
 function record(attachment: InboxAttachmentState, annotation: object, id: string): InboxAnnotationRecord {
   return {
     id,

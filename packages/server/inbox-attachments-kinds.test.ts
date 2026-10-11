@@ -13,7 +13,8 @@
  * dotenv refusal.
  */
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { INBOX_VIEW_MAX_BYTES } from "@plannotator/core/inbox-types";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -263,4 +264,93 @@ test("the phone's door: an image, a PDF and a file with the window's own headers
   expect(phoneAnswer.status).toBe(409);
   expect(((await phoneAnswer.json()) as Json).code).toBe("attachment_changed_type");
   expect(await windowAnswer.text()).not.toContain("sk_live_secret");
+});
+
+test("a text file that grew past the view limit answers 413 attachment_too_large on the window's text routes and the phone's view; it still downloads", async () => {
+  const { project, dataDir } = world();
+  process.env.PLANNOTATOR_RELAY_URL = "http://127.0.0.1:9";
+  const server = await start(dataDir, true);
+  const origin = `http://127.0.0.1:${server.port}`;
+  const made = (await (await fetch(`${origin}/api/inbox/pairing`, { method: "POST", body: "{}" })).json()) as Json;
+  const paired = (await (
+    await fetch(`${origin}/api/inbox/device/pair`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: made.offer.code, name: "iPhone", platform: "ios" }) })
+  ).json()) as Json;
+  writeFileSync(join(project, "worker.log"), "started\n");
+  const client = await agent(server);
+  const sent = await send(client, { project_path: project, body: "The log.", attachments: ["worker.log"] });
+  const id = sent.attachments[0].id as string;
+  expect(sent.attachments[0].kind).toBe("text");
+  appendFileSync(join(project, "worker.log"), Buffer.alloc(INBOX_VIEW_MAX_BYTES, 0x61));
+  for (const path of [`/api/inbox/attachments/${id}/view`, `/api/inbox/attachments/${id}`]) {
+    const answer = await fetch(`${origin}${path}`);
+    expect([path, answer.status, ((await answer.json()) as Json).code]).toEqual([path, 413, "attachment_too_large"]);
+  }
+  const door = await fetch(`${origin}/api/inbox/device/attachments/${id}/view`, { headers: { Authorization: `Bearer ${paired.token}` } });
+  expect(door.status).toBe(413);
+  expect(((await door.json()) as Json).code).toBe("attachment_too_large");
+  // The sent version still reads, and the grown file still downloads.
+  expect(((await (await fetch(`${origin}/api/inbox/attachments/${id}/view?version=sent`)).json()) as Json).text).toBe("started\n");
+  const download = await fetch(`${origin}/api/inbox/attachments/${id}/download`);
+  expect(download.status).toBe(200);
+  expect((await download.arrayBuffer()).byteLength).toBe(INBOX_VIEW_MAX_BYTES + 8);
+  // The cross-site check guards the view and the listing too.
+  expect((await fetch(`${origin}/api/inbox/attachments/${id}/view`, { headers: { "Sec-Fetch-Site": "cross-site" } })).status).toBe(403);
+  expect((await fetch(`${origin}/api/inbox/threads/${sent.thread_id}/attachments`, { headers: { "Sec-Fetch-Site": "cross-site" } })).status).toBe(403);
+});
+
+test("an HTML page attached from a home folder exposes no hidden file and no .env through its asset route; nested documents get no network", async () => {
+  const { root, project, dataDir } = world();
+  // A fake home: the page sits at its top, beside dot folders holding secrets.
+  const home = join(root, "fake-home");
+  mkdirSync(join(home, ".docker"), { recursive: true });
+  mkdirSync(join(home, ".plannotator"), { recursive: true });
+  mkdirSync(join(home, "img"), { recursive: true });
+  writeFileSync(join(home, ".docker", "config.json"), '{"auths":{"registry":{"auth":"c2VjcmV0"}}}');
+  writeFileSync(join(home, ".plannotator", "config.json"), '{"bitbucketToken":"secret"}');
+  writeFileSync(join(home, "prod.env"), "STRIPE_KEY=secret\n");
+  writeFileSync(join(home, "img", "logo.png"), PNG);
+  writeFileSync(join(home, "frame.html"), "<p>frame</p>");
+  // An innocent name linked to a hidden file is judged by where it leads.
+  symlinkSync(join(home, ".docker", "config.json"), join(home, "settings.json"));
+  writeFileSync(join(home, "report.html"), '<!doctype html><img src="img/logo.png"><iframe src="frame.html"></iframe>');
+  const server = await start(dataDir);
+  const client = await agent(server);
+  const sent = await send(client, { project_path: project, body: "The report.", attachments: [join(home, "report.html")] });
+  const view = (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/attachments/${sent.attachments[0].id}/view`)).json()) as Json;
+  const base = /<base href="(\/api\/html-assets\/[^"]+\/)">/.exec(view.html)?.[1];
+  expect(base).toBeTruthy();
+  const asset = (path: string) => fetch(`http://127.0.0.1:${server.port}${base}${path}`);
+  expect((await asset("img/logo.png")).status).toBe(200);
+  for (const path of [".docker/config.json", ".plannotator/config.json", "%2Edocker/config.json", "prod.env", "settings.json"]) {
+    const answer = await asset(path);
+    // Hidden paths are 404 by the Inbox's rule; a dotenv name is never a served asset type at all.
+    expect([path, answer.status]).toEqual([path, path === "prod.env" ? 415 : 404]);
+    expect(await answer.text()).not.toContain("secret");
+  }
+  const nested = await asset("frame.html");
+  expect(nested.status).toBe(200);
+  expect(nested.headers.get("content-security-policy")).toBe("sandbox allow-scripts; connect-src 'none'");
+});
+
+test("deleting a thread removes the markups its annotations named and leaves a markup no annotation names yet", async () => {
+  const { project, dataDir } = world();
+  const server = await start(dataDir);
+  const client = await agent(server);
+  const origin = `http://127.0.0.1:${server.port}`;
+  const sent = await send(client, { project_path: project, body: "Shot.", attachments: ["shots/checkout.png"] });
+  const upload = async (bytes: Uint8Array) =>
+    (await (await fetch(`${origin}/api/inbox/markups`, { method: "POST", headers: { Origin: origin, "Content-Type": "image/png" }, body: bytes })).json()) as Json;
+  const named = await upload(PNG);
+  // A second, different PNG: uploaded, its comment not saved yet.
+  const pending = await upload(Buffer.concat([PNG, Buffer.from([0])]));
+  expect(pending.name).not.toBe(named.name);
+  const saved = await fetch(`${origin}/api/inbox/annotations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify({ attachment_id: sent.attachments[0].id, version: "current", annotation: { id: "ann-m", type: "COMMENT", text: "x", originalText: "checkout.png", blockId: "image", startOffset: 0, endOffset: 0, createdA: 1, images: [{ path: named.path, name: "m" }] } }),
+  });
+  expect(saved.status).toBe(200);
+  await fetch(`${origin}/api/inbox/threads/${sent.thread_id}/delete`, { method: "POST", headers: { "Content-Type": "application/json", Origin: origin }, body: "{}" });
+  expect(existsSync(named.path)).toBe(false);
+  expect(existsSync(pending.path)).toBe(true);
 });

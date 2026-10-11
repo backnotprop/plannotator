@@ -27,14 +27,14 @@
  */
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { closeSync, read as readFd } from "node:fs";
-import { INBOX_ANNOTATION_CURRENT, isInboxTextKind, readInboxAttachmentKind, type InboxAttachment } from "@plannotator/core/inbox-types";
+import type { FileHandle } from "node:fs/promises";
+import { HTML_ASSET_DOCUMENT_CSP } from "@plannotator/shared/html-assets";
+import { INBOX_ANNOTATION_CURRENT, inboxAttachmentNameRefusal, isInboxTextKind, readInboxAttachmentKind, type InboxAttachment } from "@plannotator/core/inbox-types";
 import {
   inboxAttachmentState,
   isPdfHead,
   openInboxAttachmentVersion,
-  readInboxAttachmentCurrent,
-  readInboxAttachmentSent,
+  readInboxAttachmentText,
 } from "@plannotator/shared/inbox/attachments";
 import { INBOX_MESSAGE_IMAGE_CSP } from "@plannotator/shared/inbox/message-images";
 import { readInboxMarkup, writeInboxMarkup } from "@plannotator/shared/inbox/markups";
@@ -66,33 +66,27 @@ export function contentDisposition(type: "inline" | "attachment", name: string):
   return `${type}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }
 
-/** A descriptor as a response body, read in 1 MiB chunks and closed at its end or when the reader goes away. */
-function fdStream(fd: number): ReadableStream<Uint8Array> {
+/** A file handle as a response body, read in 1 MiB chunks and closed at its end or when the reader goes away. */
+function handleStream(handle: FileHandle): ReadableStream<Uint8Array> {
   let position = 0;
   let closed = false;
   const close = () => {
     if (closed) return;
     closed = true;
-    try {
-      closeSync(fd);
-    } catch {
-      // Already closed.
-    }
+    void handle.close().catch(() => {});
   };
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
-      const buffer = Buffer.allocUnsafe(1024 * 1024);
       try {
-        const n = await new Promise<number>((done, fail) =>
-          readFd(fd, buffer, 0, buffer.length, position, (error, bytesRead) => (error ? fail(error) : done(bytesRead))),
-        );
-        if (n === 0) {
+        const buffer = Buffer.allocUnsafe(1024 * 1024);
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
+        if (bytesRead === 0) {
           close();
           controller.close();
           return;
         }
-        position += n;
-        controller.enqueue(buffer.subarray(0, n));
+        position += bytesRead;
+        controller.enqueue(buffer.subarray(0, bytesRead));
       } catch (error) {
         close();
         controller.error(error);
@@ -103,6 +97,19 @@ function fdStream(fd: number): ReadableStream<Uint8Array> {
     },
   });
 }
+
+/**
+ * The asset paths the Inbox never serves from an attached HTML page's folder
+ * (which may be a home folder): any segment starting with `.` (`.docker`,
+ * `.ssh`, `.plannotator`) and the dotenv family.
+ */
+export function inboxRefusesAssetPath(relativePath: string): boolean {
+  const segments = relativePath.split(/[\\/]+/).filter(Boolean);
+  return segments.some((segment) => segment.startsWith(".")) || inboxAttachmentNameRefusal(relativePath) !== null;
+}
+
+/** A nested document in an attached page runs scripts but reaches no network. */
+export const INBOX_HTML_DOCUMENT_CSP = `${HTML_ASSET_DOCUMENT_CSP}; connect-src 'none'`;
 
 /** A request another site (or another localhost port) made: refused before anything is read. */
 function crossSite(req: Request): boolean {
@@ -131,21 +138,16 @@ function versionOf(url: URL): Version {
   throw new InboxError("validation_error", "version: \"current\" or \"sent\".", { field: "version" });
 }
 
-/** The bytes of one version, or the reason the current file cannot be read. */
-function readVersion(store: InboxStore, attachment: InboxAttachment, version: Version): Buffer {
-  if (version === "sent") {
-    const bytes = readInboxAttachmentSent(store.dir, attachment);
-    if (!bytes) throw new InboxError("attachment_missing", `The sent version of ${attachment.name} is gone.`);
-    return bytes;
-  }
-  const current = readInboxAttachmentCurrent(attachment);
-  if (!current.ok) throw new InboxError(current.unavailable.code, current.unavailable.message);
-  return current.bytes;
+/** One version's whole text (a text kind), or the reason it cannot be read: missing, changed, or too large to read whole (413). */
+async function readVersion(store: InboxStore, attachment: InboxAttachment, version: Version): Promise<Buffer> {
+  const read = await readInboxAttachmentText(store.dir, attachment, version);
+  if (!read.ok) throw new InboxError(read.code, read.message);
+  return read.bytes;
 }
 
 export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContext) {
   const { store, serverSession } = context;
-  const htmlAssets = createHtmlAssetRegistry();
+  const htmlAssets = createHtmlAssetRegistry({ refuseAssetPath: inboxRefusesAssetPath, documentCsp: INBOX_HTML_DOCUMENT_CSP });
 
   const guardedBody = async (req: Request): Promise<Record<string, unknown> | Response> => {
     const body = await context.readBody(req);
@@ -169,11 +171,13 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
     const threadAttachments = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/attachments$/.exec(path);
     if (threadAttachments) {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+      if (crossSite(req)) return json(CROSS_SITE_BODY, 403);
       const threadId = threadAttachments[1]!;
       if (!store.thread(threadId)) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
       return json({
         serverSession,
-        attachments: store.threadAttachments(threadId).map(({ attachment, message }) => inboxAttachmentState(attachment, message.id)),
+        // A changed large file is judged by its stat here and hashed when it is opened.
+        attachments: await Promise.all(store.threadAttachments(threadId).map(({ attachment, message }) => inboxAttachmentState(attachment, message.id, { hash: "small" }))),
         annotations: store.pendingAnnotations(threadId),
       });
     }
@@ -181,13 +185,14 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
     const view = /^\/api\/inbox\/attachments\/(att_[A-Za-z0-9]+)\/view$/.exec(path);
     if (view) {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+      if (crossSite(req)) return json(CROSS_SITE_BODY, 403);
       const { attachment, message } = attachmentOf(view[1]!);
       if (!isInboxTextKind(attachment.kind)) throw notText(attachment);
       const version = versionOf(url);
-      const text = readVersion(store, attachment, version).toString("utf8");
+      const text = (await readVersion(store, attachment, version)).toString("utf8");
       return json({
         serverSession,
-        attachment: inboxAttachmentState(attachment, message.id),
+        attachment: await inboxAttachmentState(attachment, message.id),
         version: version === "sent" ? attachment.sent_sha256 : INBOX_ANNOTATION_CURRENT,
         text,
         // The page as annotate serves it: a <base href> at its own folder's asset route.
@@ -202,7 +207,7 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       const { attachment } = attachmentOf(raw[1]!);
       // A binary kind is never streamed as text: it has the image and download routes.
       if (!isInboxTextKind(attachment.kind)) throw notText(attachment);
-      const bytes = readVersion(store, attachment, versionOf(url));
+      const bytes = await readVersion(store, attachment, versionOf(url));
       return new Response(req.method === "HEAD" ? null : new Uint8Array(bytes), {
         headers: {
           ...BYTE_GUARD_HEADERS,
@@ -223,7 +228,8 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       const route = bytesRoute[2] as "image" | "download";
       const kind = readInboxAttachmentKind(attachment.kind);
       if (route === "image" && kind !== "image") throw new InboxError("attachment_not_image", `${attachment.name} is not an image; download it instead.`);
-      const opened = openInboxAttachmentVersion(store.dir, attachment, versionOf(url));
+      // The image route's ETag is the hash; a download needs none, so a large file is not read twice.
+      const opened = await openInboxAttachmentVersion(store.dir, attachment, versionOf(url), { hash: route === "image" ? "always" : "none" });
       if (!opened.ok) throw new InboxError(opened.code, opened.message);
       let contentType: string;
       const extra: Record<string, string> = {};
@@ -231,7 +237,7 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
         // The type of the bytes served, sniffed now: never the record's, never the name's.
         const sniffed = sniffImageContentType(opened.head);
         if (!sniffed) {
-          closeSync(opened.fd);
+          await opened.handle.close().catch(() => {});
           throw new InboxError("attachment_not_image", `${attachment.name} is no longer an image.`);
         }
         contentType = sniffed;
@@ -243,7 +249,7 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       } else {
         contentType = kind === "pdf" && isPdfHead(opened.head) ? "application/pdf" : "application/octet-stream";
       }
-      const etag = `"${opened.sha256}"`;
+      const etag = opened.sha256 ? `"${opened.sha256}"` : null;
       const headers: Record<string, string> = {
         ...BYTE_GUARD_HEADERS,
         ...extra,
@@ -251,17 +257,17 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
         "Content-Security-Policy": route === "image" ? INBOX_MESSAGE_IMAGE_CSP : "sandbox",
         "Content-Disposition": contentDisposition(route === "image" ? "inline" : "attachment", attachment.name),
         "Cache-Control": route === "image" ? "private, no-cache" : "no-store",
-        ETag: etag,
+        ...(etag ? { ETag: etag } : {}),
       };
       if (req.method === "HEAD") {
-        closeSync(opened.fd);
+        await opened.handle.close().catch(() => {});
         return new Response(null, { headers: { ...headers, "Content-Length": String(opened.size) } });
       }
-      if (route === "image" && req.headers.get("if-none-match") === etag) {
-        closeSync(opened.fd);
+      if (route === "image" && etag && req.headers.get("if-none-match") === etag) {
+        await opened.handle.close().catch(() => {});
         return new Response(null, { status: 304, headers });
       }
-      return new Response(fdStream(opened.fd), { headers: { ...headers, "Content-Length": String(opened.size) } });
+      return new Response(handleStream(opened.handle), { headers: { ...headers, "Content-Length": String(opened.size) } });
     }
 
     // The person's marked-up images (a comment drawn on an image attachment).

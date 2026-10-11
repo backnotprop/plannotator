@@ -15,37 +15,26 @@
  * directory, or a symlink the agent attached that now points elsewhere is
  * refused (the sent version still opens from its blob).
  *
- * Nothing holds a whole file in memory: sending streams the bytes through
- * the hash into a temp blob, and the current file's hash is kept per
- * (dev, ino, size, mtime, ctime), so listing a thread re-reads a file only
- * when it changed.
+ * Nothing holds a whole file in memory and nothing blocks the event loop on
+ * a large file: every read is async, in 1 MiB chunks, through one descriptor
+ * opened `O_NOFOLLOW | O_NONBLOCK` and checked against the path's stat by
+ * dev and ino. Sending streams the bytes through the hash into a temp blob
+ * and primes the current file's hash, which is kept per (dev, ino, size,
+ * mtime, ctime). Listing a thread hashes a changed file only up to
+ * INBOX_LISTING_HASH_MAX_BYTES; a larger one is judged by its stat until the
+ * person opens it.
  */
 
 import { createHash } from "node:crypto";
-import {
-  closeSync,
-  constants,
-  existsSync,
-  fstatSync,
-  lstatSync,
-  mkdirSync,
-  openSync,
-  readdirSync,
-  readFileSync,
-  readSync,
-  realpathSync,
-  renameSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-  writeSync,
-  type Stats,
-} from "node:fs";
+import { constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync, type Stats } from "node:fs";
+import { open, type FileHandle } from "node:fs/promises";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import {
+  INBOX_VIEW_MAX_BYTES,
   inboxAttachmentId,
   inboxAttachmentKind,
   inboxAttachmentNameRefusal,
+  isInboxTextKind,
   readInboxAttachmentKind,
   type InboxAttachment,
   type InboxAttachmentKind,
@@ -61,8 +50,13 @@ const SHA256_RE = /^[0-9a-f]{64}$/;
 /** How much of a file the kind is decided from (image headers, `%PDF-`, an SVG's first element). */
 export const INBOX_ATTACHMENT_HEAD_BYTES = 64 * 1024;
 const CHUNK_BYTES = 1024 * 1024;
+/** Listing a thread hashes a changed current file only up to this size; a larger one is judged by its stat. */
+export const INBOX_LISTING_HASH_MAX_BYTES = 8 * 1024 * 1024;
+/** A send's temp blob left by a crash is removed once it is this old. */
+export const STALE_SEND_TEMP_MS = 10 * 60_000;
 /** Never follow a final symlink, never block on a FIFO. */
 const OPEN_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
+const SEND_TEMP_RE = /^\.send\..*\.tmp$/;
 
 export function inboxBlobsDir(inboxDirPath: string): string {
   return join(inboxDirPath, BLOBS_DIR);
@@ -71,10 +65,6 @@ export function inboxBlobsDir(inboxDirPath: string): string {
 export function inboxBlobPath(inboxDirPath: string, sha256: string): string {
   if (!SHA256_RE.test(sha256)) throw new InboxError("validation_error", "Not a blob hash.");
   return join(inboxBlobsDir(inboxDirPath), sha256);
-}
-
-function sha256Of(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex");
 }
 
 /** Write a blob once (temp file, then rename), owner-only. Also the guided reviews' writer (step 5, packages/server/inbox-guides.ts). */
@@ -102,23 +92,26 @@ export interface InboxAttachmentKindDecision {
 }
 
 /**
- * The kind of a file from its name and its bytes. Plannotator's documents
- * (markdown, text, config and data, HTML, Mermaid, Graphviz) keep their
- * viewer by extension while their bytes are text; everything else is read
- * from the bytes: an image by its magic bytes (the extension is ignored, so
- * an HTML page named `.svg` is not an image), a PDF by `%PDF-`, UTF-8 text
- * with no NUL as `code`, and anything else as `file`.
+ * The kind of a file from its name, its bytes and its size. Plannotator's
+ * documents (markdown, text, config and data, HTML, Mermaid, Graphviz) keep
+ * their viewer by extension while their bytes are text; everything else is
+ * read from the bytes: an image by its magic bytes (the extension is
+ * ignored, so an HTML page named `.svg` is not an image), a PDF by `%PDF-`,
+ * UTF-8 text with no NUL as `code`, and anything else as `file`. A text kind
+ * over INBOX_VIEW_MAX_BYTES is a `file` (a download), since the window reads
+ * text whole: this is not a limit on what attaches.
  */
-export function decideInboxAttachmentKind(name: string, head: Uint8Array, isText: boolean): InboxAttachmentKindDecision {
+export function decideInboxAttachmentKind(name: string, head: Uint8Array, isText: boolean, size = 0): InboxAttachmentKindDecision {
   const byName = inboxAttachmentKind(name);
-  if (byName !== "code" && byName !== "file") return isText ? { kind: byName } : { kind: "file" };
+  const fitsView = size <= INBOX_VIEW_MAX_BYTES;
+  if (byName !== "code" && byName !== "file") return isText && fitsView ? { kind: byName } : { kind: "file" };
   const image = isLfsPointer(head) ? null : sniffImageContentType(head);
   if (image) {
     const dims = readImageDimensions(head, image);
     return { kind: "image", media_type: image, ...(dims ? { width: dims.width, height: dims.height } : {}) };
   }
   if (isPdfHead(head)) return { kind: "pdf", media_type: "application/pdf" };
-  if (isText) return { kind: "code" };
+  if (isText && fitsView) return { kind: "code" };
   return { kind: "file" };
 }
 
@@ -130,27 +123,26 @@ interface Scan {
 }
 
 /**
- * Read a descriptor from its start to its end in chunks: the sha256, the
- * size, the first INBOX_ATTACHMENT_HEAD_BYTES and whether it is UTF-8 text
- * with no NUL. `sink` sees every chunk (the send path copies them to a blob).
+ * Read a file handle from its start to its end in 1 MiB chunks, yielding to
+ * the event loop between them: the sha256, the size, the first
+ * INBOX_ATTACHMENT_HEAD_BYTES and whether it is UTF-8 text with no NUL.
+ * `sink` sees every chunk (the send path copies them to a blob).
  */
-function scanFd(fd: number, sink?: (chunk: Buffer) => void): Scan {
+async function scanHandle(handle: FileHandle, sink?: (chunk: Buffer) => Promise<void>): Promise<Scan> {
   const hash = createHash("sha256");
   const decoder = new TextDecoder("utf-8", { fatal: true });
-  const buffer = Buffer.allocUnsafe(CHUNK_BYTES);
   const headParts: Buffer[] = [];
   let headSize = 0;
   let size = 0;
   let text = true;
-  let position = 0;
   for (;;) {
-    const n = readSync(fd, buffer, 0, buffer.length, position);
-    if (n === 0) break;
-    position += n;
-    const chunk = buffer.subarray(0, n);
+    const buffer = Buffer.allocUnsafe(CHUNK_BYTES);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, size);
+    if (bytesRead === 0) break;
+    const chunk = buffer.subarray(0, bytesRead);
     hash.update(chunk);
-    sink?.(chunk);
-    size += n;
+    if (sink) await sink(chunk);
+    size += bytesRead;
     if (headSize < INBOX_ATTACHMENT_HEAD_BYTES) {
       const part = Buffer.from(chunk.subarray(0, INBOX_ATTACHMENT_HEAD_BYTES - headSize));
       headParts.push(part);
@@ -177,16 +169,52 @@ function scanFd(fd: number, sink?: (chunk: Buffer) => void): Scan {
   return { sha256: hash.digest("hex"), size, head: Buffer.concat(headParts), text };
 }
 
-/** The first bytes of a descriptor. */
-function readHead(fd: number): Buffer {
+/** The first bytes of a file handle. */
+async function readHead(handle: FileHandle): Promise<Buffer> {
   const buffer = Buffer.alloc(INBOX_ATTACHMENT_HEAD_BYTES);
   let total = 0;
   while (total < buffer.length) {
-    const n = readSync(fd, buffer, total, buffer.length - total, total);
-    if (n === 0) break;
-    total += n;
+    const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+    if (bytesRead === 0) break;
+    total += bytesRead;
   }
   return buffer.subarray(0, total);
+}
+
+/** A file handle's whole contents, at most `max` bytes (the caller checked the size first; a file that grew is cut at `max + 1` and refused). */
+async function readAll(handle: FileHandle, max: number): Promise<Buffer | null> {
+  const parts: Buffer[] = [];
+  let total = 0;
+  for (;;) {
+    const buffer = Buffer.allocUnsafe(Math.min(CHUNK_BYTES, max + 1 - total));
+    if (buffer.length === 0) return null;
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, total);
+    if (bytesRead === 0) break;
+    parts.push(buffer.subarray(0, bytesRead));
+    total += bytesRead;
+    if (total > max) return null;
+  }
+  return Buffer.concat(parts, total);
+}
+
+/** Remove send temp blobs a crash left behind (older than STALE_SEND_TEMP_MS). */
+export function sweepStaleInboxSendTemps(inboxDirPath: string, now = Date.now()): void {
+  const dir = inboxBlobsDir(inboxDirPath);
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!SEND_TEMP_RE.test(name)) continue;
+    try {
+      const path = join(dir, name);
+      if (now - statSync(path).mtimeMs > STALE_SEND_TEMP_MS) unlinkSync(path);
+    } catch {
+      // Gone already.
+    }
+  }
 }
 
 /**
@@ -194,13 +222,10 @@ function readHead(fd: number): Buffer {
  * can read) or relative to `base` (the agent's project_path), resolved to its
  * realpath, a regular file outside the dotenv family. Every file is checked
  * before any blob is committed; one refusal refuses the whole send. The bytes
- * stream through the hash into a temp blob, so a file of any size is taken.
+ * stream through the hash into a temp blob, so a file of any size is taken
+ * without holding it in memory or blocking other requests.
  */
-export function recordInboxAttachments(
-  inboxDirPath: string,
-  paths: readonly unknown[],
-  options: { base: string; at: string },
-): InboxAttachment[] {
+export async function recordInboxAttachments(inboxDirPath: string, paths: readonly unknown[], options: { base: string; at: string }): Promise<InboxAttachment[]> {
   const checked: { named: string; real: string; stat: Stats; field: string }[] = [];
   paths.forEach((value, index) => {
     const field = `attachments[${index}]`;
@@ -233,7 +258,7 @@ export function recordInboxAttachments(
   // Copy each file into a temp blob while hashing it; nothing is committed
   // until every file read.
   const dir = inboxBlobsDir(inboxDirPath);
-  const read: { named: string; real: string; scan: Scan; mtime: string; temp: string }[] = [];
+  const read: { named: string; real: string; scan: Scan; stat: Stats; temp: string }[] = [];
   const dropTemps = () => {
     for (const entry of read) {
       try {
@@ -250,23 +275,23 @@ export function recordInboxAttachments(
     };
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const temp = join(dir, `.send.${process.pid}.${Date.now()}.${index}.${Math.random().toString(36).slice(2, 8)}.tmp`);
-    let fd: number;
+    let handle: FileHandle;
     try {
-      fd = openSync(real, OPEN_FLAGS);
+      handle = await open(real, OPEN_FLAGS);
     } catch {
       return refuse(`${named}: could not be read.`);
     }
-    let out: number | null = null;
+    let out: FileHandle | null = null;
     try {
-      const opened = fstatSync(fd);
+      const opened = await handle.stat();
       if (!opened.isFile() || opened.dev !== stat.dev || opened.ino !== stat.ino) refuse(`${named}: changed while it was read.`);
-      out = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
+      out = await open(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
       const target = out;
-      const scan = scanFd(fd, (chunk) => {
+      const scan = await scanHandle(handle, async (chunk) => {
         let written = 0;
-        while (written < chunk.length) written += writeSync(target, chunk, written, chunk.length - written);
+        while (written < chunk.length) written += (await target.write(chunk, written, chunk.length - written)).bytesWritten;
       });
-      read.push({ named, real, scan, mtime: opened.mtime.toISOString(), temp });
+      read.push({ named, real, scan, stat: opened, temp });
     } catch (error) {
       if (error instanceof InboxError) throw error;
       try {
@@ -276,17 +301,17 @@ export function recordInboxAttachments(
       }
       return refuse(`${named}: could not be read.`);
     } finally {
-      closeSync(fd);
-      if (out !== null) closeSync(out);
+      await handle.close().catch(() => {});
+      if (out) await out.close().catch(() => {});
     }
   }
 
-  return read.map(({ named, real, scan, mtime, temp }) => {
+  return read.map(({ named, real, scan, stat, temp }) => {
     const path = inboxBlobPath(inboxDirPath, scan.sha256);
     if (existsSync(path)) unlinkSync(temp);
     else renameSync(temp, path);
-    const decided = decideInboxAttachmentKind(real, scan.head, scan.text);
-    return {
+    const decided = decideInboxAttachmentKind(real, scan.head, scan.text, scan.size);
+    const attachment = {
       id: inboxAttachmentId(),
       path: real,
       named_path: named === real ? null : named,
@@ -295,10 +320,13 @@ export function recordInboxAttachments(
       sent_sha256: scan.sha256,
       size: scan.size,
       sent_at: options.at,
-      sent_mtime: mtime,
+      sent_mtime: stat.mtime.toISOString(),
       ...(decided.media_type ? { media_type: decided.media_type } : {}),
       ...(decided.width !== undefined && decided.height !== undefined ? { width: decided.width, height: decided.height } : {}),
     } satisfies InboxAttachment;
+    // The file was just read whole: listing the thread needs no second read.
+    primeCurrentInfo(attachment, stat, { ok: true, sha256: scan.sha256, size: scan.size, mtime: stat.mtime.toISOString() });
+    return attachment;
   });
 }
 
@@ -353,63 +381,129 @@ function headMatchesKind(attachment: InboxAttachment, head: Uint8Array): string 
   return null;
 }
 
+/**
+ * Open the current file through the one check: `O_NOFOLLOW | O_NONBLOCK`,
+ * and the descriptor must be the very file the check saw (dev and ino), so a
+ * swap in between, a FIFO or a device is refused without being read.
+ */
+async function openCurrent(attachment: InboxAttachment): Promise<{ ok: true; handle: FileHandle; stat: Stats } | { ok: false; unavailable: InboxAttachmentUnavailable }> {
+  const check = checkCurrent(attachment);
+  if (!check.ok) return check;
+  let handle: FileHandle;
+  try {
+    handle = await open(attachment.path, OPEN_FLAGS);
+  } catch {
+    return missing(`${attachment.name} could not be opened.`);
+  }
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.dev !== check.stat.dev || stat.ino !== check.stat.ino) {
+      await handle.close().catch(() => {});
+      return changedType(`${attachment.name} changed while it was opened.`);
+    }
+    return { ok: true, handle, stat };
+  } catch {
+    await handle.close().catch(() => {});
+    return missing(`${attachment.name} could not be read.`);
+  }
+}
+
+type CurrentResult = { ok: true; sha256: string; size: number; mtime: string } | { ok: false; unavailable: InboxAttachmentUnavailable };
+
 interface CurrentInfo {
   key: string;
-  result: { ok: true; sha256: string; size: number; mtime: string } | { ok: false; unavailable: InboxAttachmentUnavailable };
+  result: CurrentResult;
 }
 
 /** The current file's hash per attachment path, valid while (dev, ino, size, mtime, ctime) stay the same. */
 const currentInfoCache = new Map<string, CurrentInfo>();
+/** One read per path at a time: concurrent listings share it. */
+const currentInfoReads = new Map<string, Promise<CurrentResult>>();
 const CURRENT_INFO_CACHE_MAX = 2048;
 
 function statKey(stat: Stats): string {
   return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
 }
 
-/** The current file's hash, size and mtime (or why it cannot be read), re-read only when the file changed. */
-export function inboxAttachmentCurrentInfo(attachment: InboxAttachment): CurrentInfo["result"] {
+function cacheKey(attachment: InboxAttachment, stat: Stats): string {
+  return `${attachment.kind}\0${statKey(stat)}`;
+}
+
+function primeCurrentInfo(attachment: InboxAttachment, stat: Stats, result: CurrentResult): void {
+  if (currentInfoCache.size >= CURRENT_INFO_CACHE_MAX) currentInfoCache.delete(currentInfoCache.keys().next().value!);
+  currentInfoCache.set(attachment.path, { key: cacheKey(attachment, stat), result });
+}
+
+/**
+ * The current file's hash, size and mtime (or why it cannot be read),
+ * re-read only when the file changed. `hash: "small"` (listing a thread)
+ * hashes a changed file only up to INBOX_LISTING_HASH_MAX_BYTES; a larger one
+ * is judged by its stat (unchanged when size and mtime are the sent ones),
+ * so a growing log is not re-read on every listing.
+ */
+export async function inboxAttachmentCurrentInfo(attachment: InboxAttachment, options: { hash?: "always" | "small" } = {}): Promise<CurrentResult> {
   const check = checkCurrent(attachment);
   if (!check.ok) return check;
-  const key = `${attachment.kind}\0${statKey(check.stat)}`;
+  const key = cacheKey(attachment, check.stat);
   const cached = currentInfoCache.get(attachment.path);
   if (cached && cached.key === key) return cached.result;
-  let result: CurrentInfo["result"];
-  let fd: number | null = null;
-  try {
-    fd = openSync(attachment.path, OPEN_FLAGS);
-    const opened = fstatSync(fd);
-    if (!opened.isFile() || opened.dev !== check.stat.dev || opened.ino !== check.stat.ino) {
-      result = changedType(`${attachment.name} changed while it was read.`);
-    } else {
-      const scan = scanFd(fd);
-      const wrong = headMatchesKind(attachment, scan.head);
-      result = wrong ? changedType(wrong) : { ok: true, sha256: scan.sha256, size: scan.size, mtime: opened.mtime.toISOString() };
-    }
-  } catch {
-    result = missing(`${attachment.name} could not be read.`);
-  } finally {
-    if (fd !== null) closeSync(fd);
+  if (options.hash === "small" && check.stat.size > INBOX_LISTING_HASH_MAX_BYTES) {
+    const mtime = check.stat.mtime.toISOString();
+    const unchanged = check.stat.size === attachment.size && mtime === attachment.sent_mtime;
+    // Not cached: the full hash is taken when the person opens or downloads the file.
+    return { ok: true, sha256: unchanged ? attachment.sent_sha256 : `stat:${check.stat.size}:${check.stat.mtimeMs}`, size: check.stat.size, mtime };
   }
-  if (currentInfoCache.size >= CURRENT_INFO_CACHE_MAX) currentInfoCache.delete(currentInfoCache.keys().next().value!);
-  currentInfoCache.set(attachment.path, { key, result });
-  return result;
+  const inFlight = currentInfoReads.get(`${attachment.path}\0${key}`);
+  if (inFlight) return inFlight;
+  const run = (async (): Promise<CurrentResult> => {
+    const opened = await openCurrent(attachment);
+    if (!opened.ok) return opened;
+    try {
+      const scan = await scanHandle(opened.handle);
+      const wrong = headMatchesKind(attachment, scan.head);
+      const result: CurrentResult = wrong ? changedType(wrong) : { ok: true, sha256: scan.sha256, size: scan.size, mtime: opened.stat.mtime.toISOString() };
+      primeCurrentInfo(attachment, opened.stat, result);
+      return result;
+    } catch {
+      return missing(`${attachment.name} could not be read.`);
+    } finally {
+      await opened.handle.close().catch(() => {});
+    }
+  })();
+  currentInfoReads.set(`${attachment.path}\0${key}`, run);
+  try {
+    return await run;
+  } finally {
+    currentInfoReads.delete(`${attachment.path}\0${key}`);
+  }
 }
 
 export type InboxAttachmentRead =
   | { ok: true; bytes: Buffer; sha256: string; size: number; mtime: string }
-  | { ok: false; unavailable: InboxAttachmentUnavailable };
+  | { ok: false; code: InboxAttachmentUnavailable["code"] | "attachment_too_large"; message: string };
 
-/** The current file's bytes, read only through its record (the rules in the header). For the text routes. */
-export function readInboxAttachmentCurrent(attachment: InboxAttachment): InboxAttachmentRead {
-  const check = checkCurrent(attachment);
-  if (!check.ok) return check;
-  let bytes: Buffer;
+/**
+ * One version's whole text, for the text routes: the size is checked on the
+ * open descriptor first, so a file over INBOX_VIEW_MAX_BYTES (one that grew
+ * after it was sent, say) answers `attachment_too_large` without being read.
+ */
+export async function readInboxAttachmentText(inboxDirPath: string, attachment: InboxAttachment, version: "current" | "sent"): Promise<InboxAttachmentRead> {
+  const opened = await openInboxAttachmentVersion(inboxDirPath, attachment, version, { hash: "none" });
+  if (!opened.ok) return opened;
   try {
-    bytes = readFileSync(attachment.path);
-  } catch {
-    return missing(`${attachment.name} could not be read.`);
+    const tooLarge = (): InboxAttachmentRead => ({
+      ok: false,
+      code: "attachment_too_large",
+      message: `${attachment.name} is too large to show here (over ${Math.round(INBOX_VIEW_MAX_BYTES / 1024 / 1024)} MB). Download it instead.`,
+    });
+    if (opened.size > INBOX_VIEW_MAX_BYTES) return tooLarge();
+    const bytes = await readAll(opened.handle, INBOX_VIEW_MAX_BYTES);
+    if (!bytes) return tooLarge();
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    return { ok: true, bytes, sha256, size: bytes.length, mtime: opened.mtime };
+  } finally {
+    await opened.handle.close().catch(() => {});
   }
-  return { ok: true, bytes, sha256: sha256Of(bytes), size: bytes.length, mtime: check.stat.mtime.toISOString() };
 }
 
 /** The sent version's bytes, or null when its blob is gone. */
@@ -422,65 +516,63 @@ export function readInboxAttachmentSent(inboxDirPath: string, attachment: InboxA
 }
 
 export type InboxAttachmentOpen =
-  | { ok: true; fd: number; size: number; head: Buffer; sha256: string; mtime: string }
+  | { ok: true; handle: FileHandle; size: number; head: Buffer; sha256: string | null; mtime: string }
   | { ok: false; code: InboxAttachmentUnavailable["code"]; message: string };
 
 /**
- * One version of an attachment opened for streaming: the descriptor (the
+ * One version of an attachment opened for streaming: the file handle (the
  * caller closes it, or hands it to a stream that does), its size, its first
- * bytes for sniffing, and its hash. The current version passes `checkCurrent`
- * first, and the descriptor must be the very file that check saw (dev and
- * ino), so a swap in between is refused.
+ * bytes for sniffing, and its hash when asked for (`hash: "always"`, the
+ * image route's ETag; the sent version's is its record's). The current
+ * version goes through `openCurrent`, so a swap after the check is refused.
  */
-export function openInboxAttachmentVersion(inboxDirPath: string, attachment: InboxAttachment, version: "current" | "sent"): InboxAttachmentOpen {
+export async function openInboxAttachmentVersion(
+  inboxDirPath: string,
+  attachment: InboxAttachment,
+  version: "current" | "sent",
+  options: { hash?: "always" | "none" } = {},
+): Promise<InboxAttachmentOpen> {
   const fail = (code: InboxAttachmentUnavailable["code"], message: string): InboxAttachmentOpen => ({ ok: false, code, message });
   if (version === "sent") {
-    let fd: number;
+    let handle: FileHandle;
     try {
-      fd = openSync(inboxBlobPath(inboxDirPath, attachment.sent_sha256), OPEN_FLAGS);
+      handle = await open(inboxBlobPath(inboxDirPath, attachment.sent_sha256), OPEN_FLAGS);
     } catch {
       return fail("attachment_missing", `The sent version of ${attachment.name} is gone.`);
     }
     try {
-      const stat = fstatSync(fd);
-      return { ok: true, fd, size: stat.size, head: readHead(fd), sha256: attachment.sent_sha256, mtime: attachment.sent_mtime };
+      const stat = await handle.stat();
+      return { ok: true, handle, size: stat.size, head: await readHead(handle), sha256: attachment.sent_sha256, mtime: attachment.sent_mtime };
     } catch {
-      closeSync(fd);
+      await handle.close().catch(() => {});
       return fail("attachment_missing", `The sent version of ${attachment.name} could not be read.`);
     }
   }
-  const info = inboxAttachmentCurrentInfo(attachment);
-  if (!info.ok) return fail(info.unavailable.code, info.unavailable.message);
-  const check = checkCurrent(attachment);
-  if (!check.ok) return fail(check.unavailable.code, check.unavailable.message);
-  let fd: number;
-  try {
-    fd = openSync(attachment.path, OPEN_FLAGS);
-  } catch {
-    return fail("attachment_missing", `${attachment.name} could not be opened.`);
+  let sha256: string | null = null;
+  if (options.hash === "always") {
+    const info = await inboxAttachmentCurrentInfo(attachment);
+    if (!info.ok) return fail(info.unavailable.code, info.unavailable.message);
+    sha256 = info.sha256;
   }
+  const opened = await openCurrent(attachment);
+  if (!opened.ok) return fail(opened.unavailable.code, opened.unavailable.message);
   try {
-    const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.dev !== check.stat.dev || stat.ino !== check.stat.ino) {
-      closeSync(fd);
-      return fail("attachment_changed_type", `${attachment.name} changed while it was opened.`);
-    }
-    const head = readHead(fd);
+    const head = await readHead(opened.handle);
     const wrong = headMatchesKind(attachment, head);
     if (wrong) {
-      closeSync(fd);
+      await opened.handle.close().catch(() => {});
       return fail("attachment_changed_type", wrong);
     }
-    return { ok: true, fd, size: stat.size, head, sha256: info.sha256, mtime: stat.mtime.toISOString() };
+    return { ok: true, handle: opened.handle, size: opened.stat.size, head, sha256, mtime: opened.stat.mtime.toISOString() };
   } catch {
-    closeSync(fd);
+    await opened.handle.close().catch(() => {});
     return fail("attachment_missing", `${attachment.name} could not be read.`);
   }
 }
 
-/** The record plus the file as it is now. */
-export function inboxAttachmentState(attachment: InboxAttachment, messageId: string): InboxAttachmentState {
-  const current = inboxAttachmentCurrentInfo(attachment);
+/** The record plus the file as it is now. `hash: "small"` when listing a thread (see inboxAttachmentCurrentInfo). */
+export async function inboxAttachmentState(attachment: InboxAttachment, messageId: string, options: { hash?: "always" | "small" } = {}): Promise<InboxAttachmentState> {
+  const current = await inboxAttachmentCurrentInfo(attachment, options);
   return {
     ...attachment,
     message_id: messageId,
@@ -488,6 +580,11 @@ export function inboxAttachmentState(attachment: InboxAttachment, messageId: str
     changed_since_sent: current.ok && current.sha256 !== attachment.sent_sha256,
     unavailable: current.ok ? null : current.unavailable,
   };
+}
+
+/** Whether an attachment's kind is read whole as text by the `view` and raw routes. */
+export function isInboxAttachmentText(attachment: Pick<InboxAttachment, "kind">): boolean {
+  return isInboxTextKind(attachment.kind);
 }
 
 /** Each blob's size on disk, by hash. */
@@ -511,7 +608,7 @@ export function inboxBlobSizes(inboxDirPath: string): Map<string, number> {
   return sizes;
 }
 
-/** Remove every blob no record uses any more. */
+/** Remove every blob no record uses any more, and send temps a crash left behind. */
 export function removeUnusedInboxBlobs(inboxDirPath: string, used: ReadonlySet<string>): void {
   for (const sha256 of inboxBlobSizes(inboxDirPath).keys()) {
     if (used.has(sha256)) continue;
@@ -521,4 +618,5 @@ export function removeUnusedInboxBlobs(inboxDirPath: string, used: ReadonlySet<s
       // Already gone.
     }
   }
+  sweepStaleInboxSendTemps(inboxDirPath);
 }

@@ -10,8 +10,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { decideInboxAttachmentKind, inboxAttachmentState, inboxBlobPath, inboxBlobsDir, openInboxAttachmentVersion, recordInboxAttachments } from "./attachments";
-import { closeSync } from "node:fs";
+import { appendFileSync, utimesSync } from "node:fs";
+import { INBOX_VIEW_MAX_BYTES } from "@plannotator/core/inbox-types";
+import {
+  decideInboxAttachmentKind,
+  inboxAttachmentState,
+  inboxBlobPath,
+  inboxBlobsDir,
+  openInboxAttachmentVersion,
+  readInboxAttachmentText,
+  recordInboxAttachments,
+  sweepStaleInboxSendTemps,
+  STALE_SEND_TEMP_MS,
+} from "./attachments";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -45,7 +56,7 @@ function png(width: number, height: number): Uint8Array {
   return bytes;
 }
 
-test("code and script files are recorded as kind code, with the sent bytes in a blob", () => {
+test("code and script files are recorded as kind code, with the sent bytes in a blob", async () => {
   const w = world();
   const files: Record<string, string> = {
     "scripts/run.sh": "#!/bin/sh\n# retry the webhook\necho ok\n",
@@ -55,14 +66,14 @@ test("code and script files are recorded as kind code, with the sent bytes in a 
     "Makefile": "all:\n\techo hi\n",
   };
   for (const [name, text] of Object.entries(files)) writeFileSync(join(w.project, name), text);
-  const recorded = record(w, Object.keys(files));
+  const recorded = await record(w, Object.keys(files));
   expect(recorded.map((a) => a.kind)).toEqual(["code", "code", "code", "code", "code"]);
   for (const attachment of recorded) {
     expect(readFileSync(inboxBlobPath(w.inbox, attachment.sent_sha256), "utf8")).toBe(files[attachment.path.slice(w.project.length + 1)]!);
   }
 });
 
-test("the kind comes from the bytes: images, PDFs, other text as code, anything else a file", () => {
+test("the kind comes from the bytes: images, PDFs, other text as code, anything else a file", async () => {
   const w = world();
   const svg = '<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"/>';
   writeFileSync(join(w.project, "shot.png"), png(1280, 800));
@@ -79,7 +90,7 @@ test("the kind comes from the bytes: images, PDFs, other text as code, anything 
   writeFileSync(join(w.project, "notes.unknownext"), "plain words\n");
   writeFileSync(join(w.project, "fixtures.zip"), new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00, 0xff]));
   writeFileSync(join(w.project, "broken.md"), new Uint8Array([0x23, 0x20, 0x00, 0xff]));
-  const recorded = record(w, ["shot.png", "states.svg", "capture", "spec.pdf", "report.bin", "fake.png", "page.svg", "notes.unknownext", "fixtures.zip", "broken.md"]);
+  const recorded = await record(w, ["shot.png", "states.svg", "capture", "spec.pdf", "report.bin", "fake.png", "page.svg", "notes.unknownext", "fixtures.zip", "broken.md"]);
   expect(recorded.map((a) => [a.name, a.kind])).toEqual([
     ["shot.png", "image"],
     ["states.svg", "image"],
@@ -98,7 +109,7 @@ test("the kind comes from the bytes: images, PDFs, other text as code, anything 
   expect(recorded[5]!.media_type).toBeUndefined();
 });
 
-test("documents keep their viewer by extension while their bytes are text", () => {
+test("documents keep their viewer by extension while their bytes are text", async () => {
   expect(decideInboxAttachmentKind("/r/plan.md", new Uint8Array(), true).kind).toBe("markdown");
   expect(decideInboxAttachmentKind("/r/page.html", new Uint8Array(), true).kind).toBe("html");
   expect(decideInboxAttachmentKind("/r/flow.mmd", new Uint8Array(), true).kind).toBe("mermaid");
@@ -107,71 +118,75 @@ test("documents keep their viewer by extension while their bytes are text", () =
   expect(decideInboxAttachmentKind("/r/shot.txt", png(1, 1), false).kind).toBe("file");
 });
 
-test("a file outside the project is attached by its absolute path; a relative path resolves against the project", () => {
+test("a file outside the project is attached by its absolute path; a relative path resolves against the project", async () => {
   const w = world();
   const elsewhere = join(w.root, "elsewhere");
   mkdirSync(elsewhere);
   writeFileSync(join(elsewhere, "shot.png"), png(4, 4));
   writeFileSync(join(w.root, "outside.ts"), "export {};\n");
-  const recorded = record(w, [join(elsewhere, "shot.png"), "../outside.ts"]);
+  const recorded = await record(w, [join(elsewhere, "shot.png"), "../outside.ts"]);
   expect(recorded.map((a) => [a.path, a.kind])).toEqual([
     [join(elsewhere, "shot.png"), "image"],
     [join(w.root, "outside.ts"), "code"],
   ]);
 });
 
-test(".env is refused by name and through a symlink with another name; folders and FIFOs are refused; nothing of the send is written", () => {
+test(".env is refused by name and through a symlink with another name; folders and FIFOs are refused; nothing of the send is written", async () => {
   const w = world();
   writeFileSync(join(w.project, ".env"), "SECRET=1\n");
   symlinkSync(join(w.project, ".env"), join(w.project, "load.sh"));
   writeFileSync(join(w.project, "notes.md"), "# Notes\n");
-  expect(() => record(w, [".env"])).toThrow(/\.env files are never attached/);
-  expect(() => record(w, ["notes.md", "load.sh"])).toThrow(/attachments\[1\]: load\.sh resolves to \.env/);
+  await expect(record(w, [".env"])).rejects.toThrow(/\.env files are never attached/);
+  await expect(record(w, ["notes.md", "load.sh"])).rejects.toThrow(/attachments\[1\]: load\.sh resolves to \.env/);
   writeFileSync(join(w.project, ".env.ts"), "export const KEY = 'secret';\n");
   writeFileSync(join(w.project, ".env.local"), "KEY=1\n");
   writeFileSync(join(w.project, ".env.example"), "KEY=\n");
-  expect(() => record(w, [".env.ts"])).toThrow(/\.env\.ts: \.env files are never attached/);
-  expect(() => record(w, [".env.local"])).toThrow(/never attached/);
-  expect(record(w, [".env.example"])[0]?.kind).toBe("text");
+  await expect(record(w, [".env.ts"])).rejects.toThrow(/\.env\.ts: \.env files are never attached/);
+  await expect(record(w, [".env.local"])).rejects.toThrow(/never attached/);
+  for (const name of ["prod.env", ".prod.env", ".envrc"]) {
+    writeFileSync(join(w.project, name), "KEY=1\n");
+    await expect(record(w, [name])).rejects.toThrow(/never attached/);
+  }
+  expect((await record(w, [".env.example"]))[0]?.kind).toBe("text");
   const blobsBefore = blobs(w);
-  expect(() => record(w, ["notes.md", "scripts"])).toThrow(/attachments\[1\]: .*a folder/);
+  await expect(record(w, ["notes.md", "scripts"])).rejects.toThrow(/attachments\[1\]: .*a folder/);
   if (process.platform !== "win32") {
     spawnSync("mkfifo", [join(w.project, "pipe")]);
-    expect(() => record(w, ["notes.md", "pipe"])).toThrow(/not a regular file/);
+    await expect(record(w, ["notes.md", "pipe"])).rejects.toThrow(/not a regular file/);
   }
   expect(blobs(w)).toEqual(blobsBefore);
 });
 
-test("a large file streams through: its hash and size are right, and nothing else is left in the blob folder", () => {
+test("a large file streams through: its hash and size are right, and nothing else is left in the blob folder", async () => {
   const w = world();
   const big = new Uint8Array(5 * 1024 * 1024 + 17);
   for (let i = 0; i < big.length; i++) big[i] = (i * 31) & 0xff;
   writeFileSync(join(w.project, "dump.bin"), big);
-  const [attachment] = record(w, ["dump.bin"]);
+  const [attachment] = await record(w, ["dump.bin"]);
   expect(attachment!.kind).toBe("file");
   expect(attachment!.size).toBe(big.length);
   expect(attachment!.sent_sha256).toBe(createHash("sha256").update(big).digest("hex"));
   expect(blobs(w)).toEqual([attachment!.sent_sha256]);
 });
 
-test("the current file is re-hashed only when it changes; an image that stops being one reads as changed type, and the sent version still opens", () => {
+test("the current file is re-hashed only when it changes; an image that stops being one reads as changed type, and the sent version still opens", async () => {
   const w = world();
   writeFileSync(join(w.project, "shot.png"), png(10, 10));
-  const [attachment] = record(w, ["shot.png"]);
-  const state = inboxAttachmentState(attachment!, "msg_x");
+  const [attachment] = await record(w, ["shot.png"]);
+  const state = await inboxAttachmentState(attachment!, "msg_x");
   expect(state.unavailable).toBeNull();
   expect(state.changed_since_sent).toBe(false);
   writeFileSync(join(w.project, "shot.png"), "now it is text");
-  const changed = inboxAttachmentState(attachment!, "msg_x");
+  const changed = await inboxAttachmentState(attachment!, "msg_x");
   expect(changed.unavailable?.code).toBe("attachment_changed_type");
-  const sent = openInboxAttachmentVersion(w.inbox, attachment!, "sent");
+  const sent = await openInboxAttachmentVersion(w.inbox, attachment!, "sent");
   expect(sent.ok).toBe(true);
-  if (sent.ok) closeSync(sent.fd);
-  const current = openInboxAttachmentVersion(w.inbox, attachment!, "current");
+  if (sent.ok) await sent.handle.close();
+  const current = await openInboxAttachmentVersion(w.inbox, attachment!, "current");
   expect(current.ok).toBe(false);
 });
 
-test("the current file is refused when its recorded path is of the dotenv family (the one check every route runs)", () => {
+test("the current file is refused when its recorded path is of the dotenv family (the one check every route runs)", async () => {
   const w = world();
   writeFileSync(join(w.project, ".env"), "SECRET=1\n");
   const forged = {
@@ -185,6 +200,62 @@ test("the current file is refused when its recorded path is of the dotenv family
     sent_at: w.at,
     sent_mtime: w.at,
   };
-  expect(inboxAttachmentState(forged, "msg_x").unavailable?.code).toBe("attachment_changed_type");
-  expect(openInboxAttachmentVersion(w.inbox, forged, "current")).toMatchObject({ ok: false, code: "attachment_changed_type" });
+  expect((await inboxAttachmentState(forged, "msg_x")).unavailable?.code).toBe("attachment_changed_type");
+  expect(await openInboxAttachmentVersion(w.inbox, forged, "current")).toMatchObject({ ok: false, code: "attachment_changed_type" });
+  expect(await readInboxAttachmentText(w.inbox, forged, "current")).toMatchObject({ ok: false, code: "attachment_changed_type" });
+});
+
+test("a text or code file over the view limit is attached as a file (a download); this is not an attach cap", () => {
+  const text = new TextEncoder().encode("line\n");
+  expect(decideInboxAttachmentKind("/r/app.log", text, true, INBOX_VIEW_MAX_BYTES).kind).toBe("text");
+  expect(decideInboxAttachmentKind("/r/app.log", text, true, INBOX_VIEW_MAX_BYTES + 1).kind).toBe("file");
+  expect(decideInboxAttachmentKind("/r/bundle.js", text, true, INBOX_VIEW_MAX_BYTES + 1).kind).toBe("file");
+  // Images and PDFs are never read whole as text, so size does not change them.
+  expect(decideInboxAttachmentKind("/r/huge.png", png(9000, 9000), false, INBOX_VIEW_MAX_BYTES * 4).kind).toBe("image");
+});
+
+test("a text file that grew past the view limit after it was sent answers too large without being read; the sent version still reads", async () => {
+  const w = world();
+  writeFileSync(join(w.project, "app.log"), "started\n");
+  const [attachment] = await record(w, ["app.log"]);
+  expect(attachment!.kind).toBe("text");
+  expect(await readInboxAttachmentText(w.inbox, attachment!, "current")).toMatchObject({ ok: true });
+  appendFileSync(join(w.project, "app.log"), Buffer.alloc(INBOX_VIEW_MAX_BYTES, 0x61));
+  const grown = await readInboxAttachmentText(w.inbox, attachment!, "current");
+  expect(grown).toMatchObject({ ok: false, code: "attachment_too_large" });
+  const sent = await readInboxAttachmentText(w.inbox, attachment!, "sent");
+  expect(sent.ok && sent.bytes.toString("utf8")).toBe("started\n");
+  // Listing judges the large changed file by its stat, without hashing it.
+  const listed = await inboxAttachmentState(attachment!, "msg_x", { hash: "small" });
+  expect(listed.changed_since_sent).toBe(true);
+  expect(listed.current?.sha256.startsWith("stat:")).toBe(true);
+});
+
+test("sending a large file does not block the event loop", async () => {
+  const w = world();
+  writeFileSync(join(w.project, "big.bin"), Buffer.alloc(48 * 1024 * 1024, 0x01));
+  let ticks = 0;
+  const timer = setInterval(() => (ticks += 1), 1);
+  try {
+    const [attachment] = await record(w, ["big.bin"]);
+    expect(attachment!.size).toBe(48 * 1024 * 1024);
+  } finally {
+    clearInterval(timer);
+  }
+  // A blocking read loop would let no timer run until it finished.
+  expect(ticks).toBeGreaterThan(3);
+});
+
+test("a send temp blob a crash left behind is swept once stale; a fresh one is kept", () => {
+  const w = world();
+  mkdirSync(inboxBlobsDir(w.inbox), { recursive: true });
+  const stale = join(inboxBlobsDir(w.inbox), ".send.1.1.0.abc.tmp");
+  const fresh = join(inboxBlobsDir(w.inbox), ".send.2.2.0.def.tmp");
+  writeFileSync(stale, "partial");
+  writeFileSync(fresh, "partial");
+  const old = (Date.now() - STALE_SEND_TEMP_MS - 60_000) / 1000;
+  utimesSync(stale, old, old);
+  sweepStaleInboxSendTemps(w.inbox);
+  expect(existsSync(stale)).toBe(false);
+  expect(existsSync(fresh)).toBe(true);
 });

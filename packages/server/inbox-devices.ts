@@ -77,9 +77,12 @@ function refuse(status: number, code: string, error: string, details: Record<str
 /**
  * The allowlist (contract section 2): door route to the window's route. A
  * door path outside it is `404 device_route_not_found`; the window, `/mcp`,
- * the bridge, control, settings, restart, raw attachment bytes, project
- * deletion, decision retire and replace, pairing and the device list are
- * never on it.
+ * the bridge, control, settings, restart, the raw text route
+ * (`attachments/<id>`; text reaches the phone through `view`), uploading a
+ * markup, project deletion, decision retire and replace, pairing and the
+ * device list are never on it. An attachment's bytes reach the phone only
+ * through the window's own `image` and `download` routes, so the dotenv
+ * refusal, the size checks and the headers are the window's.
  */
 const ALLOWLIST: readonly { method: "GET" | "POST"; route: RegExp; window: (m: RegExpExecArray) => string }[] = [
   { method: "GET", route: /^health$/, window: () => "/api/inbox/health" },
