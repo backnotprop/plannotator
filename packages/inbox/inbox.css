@@ -554,6 +554,41 @@ pre code.pn-code[data-keep-layout] {
 .ib-state p { margin: 0 0 10px; font-size: 13px; line-height: 1.55; color: var(--muted-foreground); }
 .pn-inbox .ib-menu:hover .ib-mi.ib-on:not(:hover) { background: transparent; }
 
+/* Replying when the session that asked has ended (design record, not in this
+   repo): "session ended" on the asking message, the quiet note in the foot,
+   and the choice at Send (one radio group, New message's rows plus "leave it"). */
+.ib-gone { display: inline-flex; align-items: center; gap: 5px; }
+.ib-gone::before { content: ""; width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid currentColor; opacity: 0.8; }
+.ib-sessnote { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.5; color: var(--muted-foreground); margin: 0 0 10px; }
+.pn-inbox .ib-sessnote svg.ib-ic { width: 15px; height: 15px; margin-top: 2px; flex: none; }
+.ib-sessnote b { font-weight: 550; color: var(--foreground); }
+.ib-route { border: 1px solid var(--border); border-radius: 10px; padding: 12px 10px 10px; margin: 0 0 10px; background: var(--card); min-width: 0; }
+.ib-route legend { float: left; width: 100%; padding: 0 4px; font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+.ib-route .ib-why { clear: both; margin: 0 4px 10px; font-size: 12.5px; color: var(--muted-foreground); }
+.ib-route .ib-gl { font-size: 12px; color: var(--muted-foreground); margin: 0 4px 4px; }
+.ib-opt { display: flex; align-items: flex-start; gap: 10px; padding: 8px; border-radius: 7px; cursor: pointer; }
+.ib-opt:hover { background: color-mix(in oklch, var(--muted) 45%, transparent); }
+.ib-opt:has(input:checked) { background: color-mix(in oklch, var(--primary) 10%, transparent); }
+.ib-opt:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-opt input { margin: 3px 0 0; accent-color: var(--primary); width: 15px; height: 15px; flex: none; }
+.pn-inbox .ib-opt input:focus-visible { outline: none; }
+.ib-opt .ib-mk { margin-top: 2px; }
+.ib-opt .ib-t { display: block; font-size: 13.5px; font-weight: 550; }
+.ib-opt .ib-d { display: block; font-size: 12.5px; color: var(--muted-foreground); }
+.ib-opt[data-ended] { cursor: default; opacity: 0.55; }
+.ib-opt[data-ended]:hover { background: none; }
+.ib-route hr { border: 0; border-top: 1px solid var(--ib-hair); margin: 6px 4px; }
+.pn-inbox .ib-route .ib-more { display: block; margin: 2px 4px 4px 33px; font-size: 12.5px; color: var(--primary); font-weight: 550; }
+.ib-route-error { margin: -2px 0 10px; }
+.ib-esc { font-size: 12px; color: var(--muted-foreground); }
+.ib-esc kbd { font-family: var(--font-sans); font-size: 11px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
+@media (max-width: 560px), (pointer: coarse) { .ib-esc { display: none; } }
+@media (max-width: 560px) { .pn-inbox .ib-route-acts .ib-btn.ib-pri { flex: 1; justify-content: center; } }
+@media (prefers-reduced-motion: no-preference) {
+  .ib-route { animation: ib-route-in 140ms ease-out; }
+  @keyframes ib-route-in { from { opacity: 0; transform: translateY(4px); } }
+}
+
 /* The sidebar: Workspaces' primitive (packages/inbox/shell, the owner 2026-10-09),
    its geometry from the Workspaces app's sidebar, SidebarPeek, CollapsibleEdge
    and ResizeHandle components, on the Inbox's skin (.ib-side above).

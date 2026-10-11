@@ -12,7 +12,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { inboxAgentTool, INBOX_MESSAGE_INSTRUCTION, INBOX_TOOL_ACTIONS, INBOX_WAKE_INSTRUCTION, inboxWakeText, mcpAnswerOf } from './inbox-contract'
+import { inboxAgentTool, INBOX_MESSAGE_INSTRUCTION, INBOX_TOOL_ACTIONS, INBOX_WAKE_INSTRUCTION, inboxRedirectedLine, inboxWakeText, mcpAnswerOf } from './inbox-contract'
 import { ClaudeSession } from './testing/claude-session'
 import { INBOX_DISCOVER_TIMEOUT_MS, STORE_INBOX_TOOLS } from './inbox'
 
@@ -555,5 +555,44 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     expect(((await refused.json()) as { code: string }).code).toBe('session_not_live')
     expect((await thread(w, asked.thread_id)).messages).toHaveLength(before)
     w.proof('session-other quit: gone from the live list after 30 s; a New message to it answers 409 session_not_live and writes nothing')
+  }, 120_000)
+
+  test('the asking session ended and the person sent the reply to another live session: that session is woken once, with the line saying the asker ended; the asker is not', async () => {
+    const w = world('10-ended-session-reply')
+    startInbox(w)
+    const asker = await open(w, 'session-asker')
+    const asked = await send(asker, w, QUESTION)
+    asker.quit()
+    const taker = await open(w, 'session-taker')
+    const { port } = registry(w)
+    await waitFor('the other session live', async () => {
+      const model = (await (await fetch(`http://127.0.0.1:${port}/api/inbox/threads/${asked.thread_id}/sessions`)).json()) as { sessions: { session: string }[] }
+      return model.sessions.some((s) => s.session === 'session-taker') ? true : null
+    })
+    const health = (await (await fetch(`http://127.0.0.1:${port}/api/inbox/health`)).json()) as { serverSession: string }
+    const words = 'Retry with the same key.'
+    const response = await fetch(`http://127.0.0.1:${port}/api/inbox/messages/${asked.message_id}/reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: `http://127.0.0.1:${port}` },
+      body: JSON.stringify({ serverSession: health.serverSession, idempotency_key: 'ended-1', words, to: { host: 'claude-code', session: 'session-taker' } }),
+    })
+    expect(response.status).toBe(200)
+    const reply = ((await response.json()) as { reply: { id: string; body: string } }).reply
+    w.proof(`> the person picks session-taker at Send (session-asker has ended)\n${reply.body}\n`)
+
+    const turn = await waitFor('the redirected reply turn', () => taker.turns.find((t) => t.text.includes(reply.id)))
+    await Bun.sleep(3_000)
+    expect(taker.host.submits).toEqual([
+      inboxWakeText({ id: reply.id, subject: 'What should the worker do on a Stripe 409?', body: reply.body, redirected_from: 'Claude Code' }),
+    ])
+    const lines = taker.host.submits[0]!.split('\n')
+    expect(lines[1]).toBe(INBOX_WAKE_INSTRUCTION)
+    expect(lines[2]).toBe(inboxRedirectedLine('Claude Code', reply.id))
+    expect(asker.host.submits).toEqual([])
+    w.proof(`turn.start ${turn.id} in session-taker:\n${turn.text}`)
+
+    const delivered = await waitFor('the delivery record', async () => (await thread(w, asked.thread_id)).messages.find((m) => m.id === reply.id)?.delivery)
+    expect(delivered).toMatchObject({ state: 'delivered', host: 'claude-code', session: 'session-taker' })
+    w.proof(`thread shows: Delivered to Claude Code (another session), ${delivered.at}`)
   }, 120_000)
 })

@@ -337,6 +337,8 @@ function Inbox() {
     const onKey = (event: KeyboardEvent) => {
       // An open file owns Escape (the HTML viewer's ladder, the composers).
       if (event.key !== 'Escape' || !routeRef.current.thread || routeRef.current.file) return;
+      // Something inside the thread already used this Escape (the reply's choice at Send goes back to the reply).
+      if (event.defaultPrevented) return;
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable)) return;
       // An open guided review closes first, back to its thread.

@@ -133,6 +133,7 @@ jobs:
           packages/inbox/projectList.test.tsx
           packages/inbox/sidebarQuiet.test.tsx
           packages/inbox/listColumn.test.tsx
+          packages/inbox/endedSession.test.tsx
           packages/ui/components/MenuVersionSection.test.tsx
           packages/ui/components/blocks/QuestionBlock.test.tsx
           packages/ui/components/blocks/QuestionBlock.host.test.tsx

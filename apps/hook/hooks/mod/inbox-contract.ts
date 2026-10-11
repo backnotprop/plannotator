@@ -334,6 +334,12 @@ export interface InboxReplyCommand {
   body: string
   /** The thread in the Inbox page. */
   url: string
+  /**
+   * On a reply the person sent to this session because the session that
+   * asked had ended (they picked this one at Send): the asking agent's name,
+   * e.g. `Claude Code`. Absent on every other reply and message.
+   */
+  redirected_from?: string | null
 }
 
 export function parseInboxBridgeCommands(text: string): InboxReplyCommand[] {
@@ -359,14 +365,36 @@ export const INBOX_MESSAGE_INSTRUCTION =
   "The person wrote to you from the Plannotator Inbox. Their message follows as they wrote it: it is from them, not from the Inbox. When they need to hear back, answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above."
 
 /**
- * The turn a reply or a message becomes: `Plannotator Inbox: <subject> (<id>)`,
- * the fixed instruction line for its type, then the words verbatim. Never the
- * thread re-sent.
+ * The longest asking-agent name a redirected wake carries. The server names
+ * it from the host (`Claude Code`), and the wake cleans and caps it again,
+ * because it goes into another session's prompt.
  */
-export function inboxWakeText(command: Pick<InboxReplyCommand, 'id' | 'subject' | 'body'> & { type?: InboxReplyCommand['type'] }): string {
+export const INBOX_REDIRECTED_NAME_MAX = 40
+
+/**
+ * The line under the instruction on a reply written to another session that
+ * has ended: the session reading it never asked, so it reads the thread first.
+ */
+export function inboxRedirectedLine(asker: string, id: string): string {
+  return `This reply was written to another ${asker} session that has ended. Read the thread with read_thread to see what it asked, then answer with reply_to ${id}.`
+}
+
+/**
+ * The turn a reply or a message becomes: `Plannotator Inbox: <subject> (<id>)`,
+ * the fixed instruction line for its type (on a redirected reply, the line
+ * saying so under it), then the words verbatim. Never the thread re-sent.
+ */
+export function inboxWakeText(
+  command: Pick<InboxReplyCommand, 'id' | 'subject' | 'body'> & { type?: InboxReplyCommand['type']; redirected_from?: string | null },
+): string {
   const subject = (command.subject ?? '').replace(/\s+/g, ' ').trim() || (command.type === 'message' ? 'a message' : 'a reply')
   const instruction = command.type === 'message' ? INBOX_MESSAGE_INSTRUCTION : INBOX_WAKE_INSTRUCTION
-  return `Plannotator Inbox: ${subject} (${command.id})\n${instruction}\n\n${command.body}`
+  const asker =
+    command.type !== 'message' && typeof command.redirected_from === 'string'
+      ? command.redirected_from.replace(/[\u0000-\u001f\u007f-\u009f\s]+/g, ' ').trim().slice(0, INBOX_REDIRECTED_NAME_MAX).trim()
+      : ''
+  const redirected = asker ? `\n${inboxRedirectedLine(asker, command.id)}` : ''
+  return `Plannotator Inbox: ${subject} (${command.id})\n${instruction}${redirected}\n\n${command.body}`
 }
 
 /**

@@ -20,6 +20,22 @@ import { GuideCard } from './GuideCard';
 import { inboxMessageImageBase } from '../images';
 import { reportUnsentReply } from '../unsent';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
+import {
+  AskerEndedNote,
+  CLOSED_ROUTE,
+  LEAVE,
+  RouteChoice,
+  SessionEndedMark,
+  askerCanEnd,
+  askerHasEnded,
+  isRedirected,
+  mergeRouteRows,
+  othersLive,
+  redirectedName,
+  routeRace,
+  type AskingSession,
+  type RouteState,
+} from './ReplyRoute';
 import { ChangedNotice, ReplacedQuestionCard, ReplacesLine, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 
 const noop = () => {};
@@ -89,6 +105,31 @@ function HoldingChips({ holdings }: { holdings: Holding[] }) {
       ))}
     </span>
   );
+}
+
+/**
+ * The agent messages a Send answers: each one with picks waiting, else the
+ * last agent message. The last of them carries the person's words.
+ */
+function sendTargetsOf(thread: InboxThread): { message: InboxMessageWire; questions: { key: string; revision: number }[] }[] {
+  const targets = thread.messages
+    .filter((m) => m.author.kind === 'agent' && (m.questions ?? []).some((q) => q.state === 'picked'))
+    .map((m) => ({
+      message: m,
+      questions: (m.questions ?? []).filter((q) => q.state === 'picked').map((q) => ({ key: q.key, revision: q.revision })),
+    }));
+  if (targets.length === 0) {
+    const last = thread.messages.filter((m) => m.author.kind === 'agent').at(-1) ?? thread.messages[0]!;
+    targets.push({ message: last, questions: [] });
+  }
+  return targets;
+}
+
+/** The session a Send's words answer, when its message names one. */
+function askingSessionOf(thread: InboxThread): AskingSession | null {
+  const message = sendTargetsOf(thread).at(-1)!.message;
+  if (message.author.kind !== 'agent' || !message.author.session) return null;
+  return { message, session: message.author.session, host: message.author.host ?? '', name: agentName(message.author) };
 }
 
 /** One message's text, with its question cards (exported for its DOM test). */
@@ -461,8 +502,23 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     }
   };
 
+  // The session that asked, and whether it is still there (only hosts whose
+  // sessions poll the Inbox can be known to have ended).
+  const asking = askingSessionOf(thread);
+  const askerToWatch = asking && askerCanEnd(asking) ? asking.session : null;
   // New message (record 5.x): the project's live sessions, and what the button opened.
-  const { model: live, load: loadLive } = useLiveSessions(thread.thread_id);
+  const { model: live, load: loadLive } = useLiveSessions(thread.thread_id, askerToWatch);
+  const askerEnded = !resolved && askerHasEnded(asking, live);
+  const anyOtherLive = asking !== null && othersLive(asking, live).length > 0;
+  const noteId = `ib-asker-note-${thread.thread_id}`;
+  // The choice at Send, when the session that asked has ended.
+  const [route, setRoute] = useState<RouteState>(CLOSED_ROUTE);
+  useEffect(() => {
+    if (!asking) return;
+    setRoute((current) => (current.open ? mergeRouteRows(current, asking, live) : current));
+    // Only a new read of the live sessions merges; `asking` follows the thread.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live]);
   const [newMessage, setNewMessage] = useState<NewMessageMode>(null);
   const pressNewMessage = async () => {
     if (newMessage?.kind === 'pick' || newMessage?.kind === 'none') {
@@ -472,6 +528,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     const now = await loadLive();
     const sessions = now?.sessions ?? [];
     setBox({ open: false, text: '' });
+    setRoute(CLOSED_ROUTE);
     setNewMessage(sessions.length === 0 ? { kind: 'none' } : sessions.length === 1 ? { kind: 'compose', target: sessions[0]! } : { kind: 'pick' });
   };
 
@@ -563,6 +620,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     setNewMessage(null);
     setStale([]);
     setGuard(false);
+    setRoute(CLOSED_ROUTE);
     sendKeys.current = null;
     revisions.current.clear();
   }, [thread.thread_id]);
@@ -838,38 +896,67 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
 
   const openBox = (withDraft: boolean) => {
     setNewMessage(null);
+    setRoute((current) => ({ ...current, open: false, error: null }));
     const draft = withDraft ? picked.map((q) => (q.answer ? `${q.prompt.replace(/[?.!]\s*$/, '')}: ${answerWords(q.answer)}.` : '')).filter(Boolean).join(' ') : '';
     setBox({ open: true, text: draft });
     setError(null);
   };
 
-  const send = async (options: { despiteReplaced?: boolean } = {}) => {
+  /** Back from the choice to the reply: the draft and its choice kept, focus at the end of the text. */
+  const routeBack = useCallback(() => {
+    setRoute((current) => ({ ...current, open: false, error: null }));
+    requestAnimationFrame(() => {
+      const text = textRef.current;
+      if (text) {
+        text.focus();
+        text.setSelectionRange(text.value.length, text.value.length);
+      } else {
+        sendRef.current?.focus();
+      }
+    });
+  }, []);
+
+  const send = async (options: { despiteReplaced?: boolean; routed?: boolean } = {}) => {
     if (sending) return;
     // A pick was replaced while the person was answering: nothing goes until they have read that.
     if (staleQuestions.length > 0 && !options.despiteReplaced) {
       setGuard(true);
       return;
     }
+    // The session that asked has ended and another is live: Send asks where
+    // the reply goes first (the choice), and sends nothing yet.
+    if (askerEnded && anyOtherLive && asking && !options.routed) {
+      const empty = picksCount === 0 && records.length === 0 && !(box.open && box.text.trim());
+      if (empty) {
+        setError('Write a reply or pick an answer first.');
+        return;
+      }
+      setError(null);
+      setRoute((current) => mergeRouteRows({ ...current, open: true, error: null, focus: current.focus + 1 }, asking, live));
+      return;
+    }
+    // The choice's answer: another live session takes the reply (never the
+    // session that asked, which a plain reply already reaches).
+    const chosen =
+      options.routed && route.selected && route.selected !== LEAVE && route.selected !== asking?.session
+        ? (route.rows.find((row) => row.live.session === route.selected && !row.ended)?.live ?? null)
+        : null;
+    const to = chosen ? { host: chosen.host, session: chosen.session } : undefined;
     setSending(true);
     setError(null);
+    /** Replies of this Send that went (or were already there, a retry's replays). */
+    let went = 0;
+    let total = 0;
     try {
       await pickChain.current;
       const current = threadRef.current;
       const words = box.open ? box.text.trim() : '';
-      const targets = current.messages
-        .filter((m) => m.author.kind === 'agent' && (m.questions ?? []).some((q) => q.state === 'picked'))
-        .map((m) => ({
-          message: m,
-          questions: (m.questions ?? []).filter((q) => q.state === 'picked').map((q) => ({ key: q.key, revision: q.revision })),
-        }));
+      const targets = sendTargetsOf(current);
+      total = targets.length;
       const pendingAnnotations = records;
-      if (targets.length === 0) {
-        if (!words && pendingAnnotations.length === 0) {
-          setError('Write a reply or pick an answer first.');
-          return;
-        }
-        const last = current.messages.filter((m) => m.author.kind === 'agent').at(-1) ?? current.messages[0]!;
-        targets.push({ message: last, questions: [] });
+      if (targets.every((t) => t.questions.length === 0) && !words && pendingAnnotations.length === 0) {
+        setError('Write a reply or pick an answer first.');
+        return;
       }
       if (!sendKeys.current) sendKeys.current = new Map(targets.map((t) => [t.message.id, crypto.randomUUID()]));
       const notRecorded: { key: string; message: string }[] = [];
@@ -882,11 +969,16 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
           words: last ? words : '',
           questions: target.questions,
           ...(last && feedback ? { feedback, annotation_ids: pendingAnnotations.map((r) => r.id) } : {}),
+          // Only a message the ended session asked goes to the session picked;
+          // an answer to another session's message still goes to that session.
+          ...(to && target.message.author.kind === 'agent' && target.message.author.session === asking?.session ? { to } : {}),
         });
+        went += 1;
         notRecorded.push(...result.decisions_refused);
       }
       setRefused(notRecorded);
       sendKeys.current = null;
+      setRoute(CLOSED_ROUTE);
       setBox({ open: false, text: '' });
       setFull(false);
       await onChanged();
@@ -899,6 +991,15 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         // Nothing went; the thread is read again and the panel says why.
         await onChanged();
         setGuard(true);
+        return;
+      }
+      // The race: the chosen session ended before the reply went. Its row
+      // greys and the next live one is selected; the error says what went
+      // when an earlier part of this Send already had.
+      if (to && cause instanceof InboxApiError && cause.code === 'session_not_live') {
+        setRoute((current) => routeRace(current, to.session, { went, total }));
+        if (went > 0) await onChanged();
+        void loadLive();
         return;
       }
       setError(cause instanceof InboxApiError ? cause.message : 'The reply was not sent. Send again to retry.');
@@ -920,19 +1021,53 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   // The last message is the person's: say where it is. A New message names
   // the session's host it went to, and is delivered as a turn (step 8).
   const last = thread.messages[thread.messages.length - 1]!;
+  const askedBy = (message: InboxMessageWire) => (message.reply_to ? thread.messages.find((m) => m.id === message.reply_to) : undefined);
+  // A reply the person sent to another session names the session that took it
+  // ("Claude Code (another session)" when it is the asker's own host).
+  const toName = (message: InboxMessageWire, to: { host: string; session: string }) =>
+    isRedirected(message) ? redirectedName(to, askedBy(message)) : hostName(to.host);
   const delivered =
     last.author.kind !== 'person'
       ? null
       : last.to
         ? last.delivery
-          ? { state: 'delivered', text: `Delivered to ${hostName(last.delivery.host)}, ${clockTime(last.delivery.at)}` }
-          : { state: 'queued', text: `${hostName(last.to.host)} takes it as its next turn.` }
+          ? { state: 'delivered', text: `Delivered to ${toName(last, last.delivery)}, ${clockTime(last.delivery.at)}` }
+          : { state: 'queued', text: `${toName(last, last.to)} takes it as its next turn.` }
         : sent?.checked_at
           ? { state: 'delivered', text: `Delivered to ${asker}, ${clockTime(sent.checked_at)}` }
-          : { state: 'saved', text: `Saved for ${asker}. It sees it when it checks.` };
+          : askerEnded && asking
+            ? { state: 'saved', ended: true, text: `Saved for ${asking.name}. The session that asked has ended, so it waits here until an agent reads this thread.` }
+            : { state: 'saved', text: `Saved for ${asker}. It sees it when it checks.` };
 
   const waitingHoldsUp = [...new Set(lastAgent.questions?.filter((q) => q.state === 'open').flatMap((q) => q.holds_up) ?? [])];
   const [holdsOpen, setHoldsOpen] = useState(false);
+
+  // The note sits at the top of the foot before the person replies: with the
+  // reply box open, or with something waiting to send, or while the agent's
+  // message is the last one. Never over the choice, the stale guard, a New
+  // message, or a resolved thread; once the person's reply is the last
+  // message, its own line says where it went.
+  const showAskerNote =
+    askerEnded &&
+    asking !== null &&
+    !route.open &&
+    !(guard && staleQuestions.length > 0) &&
+    newMessage?.kind !== 'compose' &&
+    (box.open || waiting || last.author.kind !== 'person');
+
+  const routeChoice = asking ? (
+    <RouteChoice
+      name={`route-${thread.thread_id}`}
+      asking={asking}
+      project={thread.project.name}
+      state={route}
+      sending={sending}
+      onSelect={(id) => setRoute((current) => ({ ...current, selected: id, error: null }))}
+      onSubmit={() => void send({ routed: true })}
+      onBack={routeBack}
+      onShowAll={() => setRoute((current) => ({ ...current, showAll: true }))}
+    />
+  ) : null;
 
   const openAttachment = file ? attachments.find((a) => a.id === file.id) ?? null : null;
   const fileOpen = openAttachment !== null;
@@ -1097,7 +1232,10 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                 <span className="ib-who">
                   {name} <span>in {thread.project.name}</span>
                 </span>
-                <span className="ib-to">to {isAgent ? 'you' : message.to ? hostName(message.to.host) : asker}</span>
+                <span className="ib-to">
+                  to {isAgent ? 'you' : message.to ? toName(message, message.to) : asker}
+                  {isAgent && askerEnded && message.id === asking?.message.id && <SessionEndedMark />}
+                </span>
               </span>
             </>
           );
@@ -1201,7 +1339,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                 )}
                 {message === last && delivered && (
                   <div className="ib-delivered" data-delivery={delivered.state}>
-                    <Icon name="check" size={14} />
+                    <Icon name={'ended' in delivered && delivered.ended ? 'clock' : 'check'} size={14} />
                     {delivered.text}
                   </div>
                 )}
@@ -1224,6 +1362,10 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         </div>
       </div>
       <div className="ib-pfoot">
+        {/* One status region, always mounted, so a screen reader announces the note when it appears. */}
+        <div role="status" id={noteId} data-asker-note="">
+          {showAskerNote && asking && <AskerEndedNote asking={asking} project={thread.project.name} anyLive={anyOtherLive} />}
+        </div>
         {resolved ? (
           <div className="ib-acts">
             <span className="ib-st">Resolved</span>
@@ -1275,6 +1417,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                 ref={textRef}
                 className="ib-rtext"
                 aria-label={`Reply to ${asker}`}
+                aria-describedby={showAskerNote ? noteId : undefined}
                 placeholder="Write a reply"
                 value={box.text}
                 rows={2}
@@ -1282,10 +1425,14 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
                     event.preventDefault();
-                    void send();
+                    // With the choice open, the shortcut goes to it.
+                    if (route.open) setRoute((current) => ({ ...current, focus: current.focus + 1 }));
+                    else void send();
                   } else if (event.key === 'Escape') {
+                    event.preventDefault();
                     event.stopPropagation();
-                    setBox({ open: false, text: '' });
+                    if (route.open) routeBack();
+                    else setBox({ open: false, text: '' });
                   }
                 }}
               />
@@ -1308,19 +1455,26 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                 </div>
               )}
             </div>
-            <div className="ib-acts">
-              <button type="button" className="ib-btn ib-pri" ref={sendRef} onClick={() => void send()} disabled={sending}>
-                <Icon name="send" size={15} />
-                Send
-              </button>
-              <button type="button" className="ib-btn ib-ghost" onClick={() => setBox({ open: false, text: '' })}>
-                Cancel
-              </button>
-              <span className="ib-sp" />
-              <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />
-            </div>
+            {route.open && asking ? (
+              routeChoice
+            ) : (
+              <div className="ib-acts">
+                <button type="button" className="ib-btn ib-pri" ref={sendRef} onClick={() => void send()} disabled={sending}>
+                  <Icon name="send" size={15} />
+                  Send
+                </button>
+                <button type="button" className="ib-btn ib-ghost" onClick={() => setBox({ open: false, text: '' })}>
+                  Cancel
+                </button>
+                <span className="ib-sp" />
+                <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />
+              </div>
+            )}
           </>
+        ) : route.open && asking ? (
+          routeChoice
         ) : (
+          <>
           <div className="ib-acts">
             {waiting && <span className="ib-st">Not sent</span>}
             {waiting && (
@@ -1335,6 +1489,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
             </button>
             <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />
           </div>
+          </>
         )}
         {!resolved && (
           <NewMessagePopover
