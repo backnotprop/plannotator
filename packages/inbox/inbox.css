@@ -624,3 +624,55 @@ pre code.pn-code[data-keep-layout] {
 .ib-att-t.ib-dlcard:hover, .ib-att-t.ib-dlcard:active { border-color: var(--border); background: var(--card); transform: none; }
 .ib-att-t.ib-dlcard .ib-kd { white-space: normal; }
 .ib-imgbar .ib-imgsize { font-size: 12px; color: var(--muted-foreground); padding: 0 8px; font-variant-numeric: tabular-nums; }
+
+/* ───────────── Replaced questions (design record, not in this repo; direction A "Quiet") ───────────── */
+/* The old card keeps the answer card's frame (ui QuestionBlock's values) with no controls. */
+.pn-inbox .ib-q { margin: 20px 0; min-width: 0; border-radius: 10px; border: 1px solid color-mix(in oklab, var(--border) 85%, transparent); padding: 12px 14px 10px; background: color-mix(in oklab, var(--background) 35%, var(--card)); }
+.pn-inbox .ib-q:focus { outline: none; }
+.pn-inbox .ib-q-sup { background: transparent; border-color: color-mix(in oklab, var(--border) 70%, transparent); }
+.pn-inbox .ib-q-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; user-select: none; }
+.pn-inbox .ib-q-eye { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted-foreground); }
+.pn-inbox .ib-q-tags { margin-left: auto; display: inline-flex; gap: 4px; align-items: center; }
+.pn-inbox .ib-tag { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; border-radius: 4px; padding: 1px 6px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.03em; line-height: 1.5; }
+.pn-inbox .ib-tag svg.ib-ic { width: 10px; height: 10px; stroke-width: 2.2; }
+.pn-inbox .ib-t-repl { background: var(--muted); color: var(--muted-foreground); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--border) 80%, transparent); }
+.pn-inbox .ib-t-notsent { background: transparent; color: var(--muted-foreground); box-shadow: inset 0 0 0 1px var(--border); margin-left: 6px; vertical-align: 1px; }
+.pn-inbox .ib-q-prompt { margin: 0; font-size: 15px; line-height: 1.45; color: var(--muted-foreground); font-weight: 550; }
+.pn-inbox .ib-q-repl { margin: 8px 0 2px; display: flex; align-items: flex-start; gap: 8px; border-radius: 8px; background: color-mix(in oklab, var(--muted) 70%, transparent); padding: 6px 9px; font-size: 12.5px; line-height: 18px; color: var(--foreground); }
+.pn-inbox .ib-q-repl svg.ib-ic { margin-top: 2px; color: var(--muted-foreground); }
+.pn-inbox .ib-q-link { color: var(--primary); text-decoration: underline; text-decoration-color: color-mix(in oklab, var(--primary) 45%, transparent); text-underline-offset: 2px; font-weight: 500; text-align: left; background: none; border: 0; padding: 0; font-size: inherit; line-height: inherit; cursor: pointer; }
+.pn-inbox .ib-q-link:hover { text-decoration-color: currentColor; }
+.pn-inbox .ib-q-link:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 3px; }
+.pn-inbox .ib-q-arrow { display: inline-block; text-decoration: none; margin-left: 3px; }
+.pn-inbox .ib-q-unsent { margin: 8px 0 0; font-size: 13px; line-height: 1.5; color: var(--muted-foreground); }
+.pn-inbox .ib-q-unsent b { color: var(--foreground); font-weight: 550; }
+.pn-inbox .ib-q-disclose { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; border-radius: 5px; padding: 3px 7px 3px 5px; font-size: 12px; color: var(--muted-foreground); background: none; border: 0; cursor: pointer; }
+.pn-inbox .ib-q-disclose:hover { background: var(--muted); color: var(--foreground); }
+.pn-inbox .ib-q-opts { margin-top: 10px; display: grid; gap: 2px; }
+.pn-inbox .ib-q-opt { display: flex; align-items: flex-start; gap: 10px; border-radius: 7px; padding: 6px 9px; cursor: default; }
+.pn-inbox .ib-q-opt.ib-on { background: color-mix(in oklab, var(--muted) 60%, transparent); }
+.pn-inbox .ib-q-opt input { margin: 3px 0 0; width: 15px; height: 15px; flex: none; accent-color: var(--primary); }
+.pn-inbox .ib-q-lbl { min-width: 0; flex: 1; font-size: 13.5px; line-height: 1.45; color: var(--muted-foreground); }
+.pn-inbox .ib-q-opt.ib-on .ib-q-lbl { color: var(--foreground); }
+.pn-inbox .ib-q-lbl b { font-weight: 550; }
+:root:not(.light) .pn-inbox .ib-q { color-scheme: dark; }
+/* "Replaces …" on the newer card: light, a pointer back, not a second banner. */
+.pn-inbox .ib-q-replaces { margin: 6px 0 0; display: flex; align-items: flex-start; gap: 6px; font-size: 12.5px; line-height: 18px; color: var(--muted-foreground); user-select: none; }
+.pn-inbox .ib-q-replaces svg.ib-ic { margin-top: 2.5px; }
+/* The landing ring after a link between the cards: says where you arrived, then fades. */
+.pn-inbox .ib-q-target { box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 40%, transparent); transition: box-shadow 200ms ease-out; border-radius: 10px; }
+.pn-inbox .ib-q-target-out { box-shadow: 0 0 0 3px transparent; transition: box-shadow 600ms ease-out; border-radius: 10px; }
+@media (prefers-reduced-motion: reduce) { .pn-inbox .ib-q-target, .pn-inbox .ib-q-target-out { transition: none; } }
+/* The stale guard: the reply foot says a question changed under the person's answer. */
+.pn-inbox .ib-changed { display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px; font-size: 13px; line-height: 1.5; border-radius: 8px; background: color-mix(in oklab, var(--warning) 10%, var(--card)); border: 1px solid color-mix(in oklab, var(--warning) 25%, transparent); margin-bottom: 10px; }
+.pn-inbox .ib-changed svg.ib-ic { color: var(--warning); margin-top: 2px; }
+.pn-inbox .ib-vlink { color: var(--primary); font-weight: 550; background: none; border: 0; padding: 0; font-size: inherit; cursor: pointer; }
+.pn-inbox .ib-guard { border: 1px solid color-mix(in oklab, var(--warning) 45%, var(--border)); background: color-mix(in oklab, var(--warning) 9%, var(--card)); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
+.pn-inbox .ib-guard:focus { outline: none; }
+.pn-inbox .ib-guard:focus-visible { box-shadow: 0 0 0 2px var(--ring); }
+.pn-inbox .ib-guard h3 { margin: 0 0 4px; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.pn-inbox .ib-guard h3 svg.ib-ic { color: var(--warning); }
+.pn-inbox .ib-guard p { margin: 0 0 6px; font-size: 13.5px; line-height: 1.5; padding-left: 24px; }
+.pn-inbox .ib-guard p.ib-mut { font-size: 13px; }
+.pn-inbox .ib-guard .ib-acts { margin-top: 10px; padding-left: 24px; flex-wrap: wrap; }
+.pn-inbox .ib-rchip.ib-dropped { background: transparent; box-shadow: inset 0 0 0 1px var(--border); color: var(--muted-foreground); text-decoration: line-through; text-decoration-color: color-mix(in oklab, var(--muted-foreground) 70%, transparent); }

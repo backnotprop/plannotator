@@ -261,6 +261,16 @@ export interface ViewerProps {
    *  Settled / Skipped) so the host can draw its own; the decision tags stay.
    *  Default `'card'`. */
   questionStatusTag?: 'card' | 'none';
+  /** A host's own card in place of a question's (ui seam for a question the
+   *  host no longer lets anyone answer, such as the Plannotator Inbox's
+   *  replaced questions). Called per question; a returned node is drawn
+   *  instead of the answer card, inside a wrapper carrying the block's
+   *  `data-block-id`; `undefined` keeps the answer card. Absent: every
+   *  question draws its answer card (today's behaviour). */
+  renderQuestionCard?: (question: IndexedQuestion, answer: QuestionAnswer | undefined) => React.ReactNode | undefined;
+  /** Host content right under a question card's prompt, per question (e.g.
+   *  "Replaces <an earlier question>"); null for none. Absent: nothing there. */
+  renderQuestionBelowPrompt?: (question: IndexedQuestion) => React.ReactNode;
   onAskAI?: CommentAskAIHandler;
   /** Whether comment popovers offer image attachments. Hosts without an
    *  uploadTransport pass false so the attach affordance never dead-ends.
@@ -674,6 +684,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   onOpenQuestionDecision,
   questionDecisionLocked,
   questionStatusTag,
+  renderQuestionCard,
+  renderQuestionBelowPrompt,
   onAskAI,
   allowImages = true,
   readOnly = false,
@@ -1628,6 +1640,16 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           ) : (
             (() => {
               const question = questionIndex.byBlock.get(group.block.id);
+              const hostCard = question && renderQuestionCard
+                ? renderQuestionCard(question, answersByKey.get(question.question.key))
+                : undefined;
+              if (hostCard !== undefined) {
+                return (
+                  <div key={group.block.id} data-block-id={group.block.id} data-block-type="directive">
+                    {hostCard}
+                  </div>
+                );
+              }
               return (
                 <BlockRenderer
                   imageBaseDir={imageBaseDir}
@@ -1654,6 +1676,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   onToggleQuestionDecisionRecording={readOnly || (question && questionDecisionLocked?.(question)) ? undefined : onToggleQuestionDecisionRecording}
                   onOpenQuestionDecision={readOnly || (question && questionDecisionLocked?.(question)) ? undefined : onOpenQuestionDecision}
                   questionStatusTag={questionStatusTag}
+                  renderQuestionBelowPrompt={renderQuestionBelowPrompt}
                 />
               );
             })()

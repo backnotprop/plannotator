@@ -498,7 +498,7 @@ export function createInboxRelay(context: InboxRelayContext) {
       type: "push",
       thread_id: message.thread_id,
       message_id: message.id,
-      subject: store.message(message.thread_id)?.subject ?? message.subject ?? "",
+      subject: store.threadSubject(message.thread_id) ?? message.subject ?? "",
       project: store.project(message.project_id)?.name ?? "",
       agent: inboxAgentName(message.author),
       // Apple shows at most four actions: one single-choice question with up to four choices is answered from the lock screen.

@@ -234,6 +234,35 @@ export interface InboxMessage {
    * at the project root. Added after step 8: older records lack it.
    */
   base_path?: string | null;
+  /**
+   * On an agent's message: the earlier questions it said it supersedes
+   * (send_message's `supersedes`, as sent: `<message id>` for every open
+   * question of that message, or `<message id>/<key>` for one). The question
+   * records carry the result (`InboxQuestionRecord.superseded_by`); this is
+   * what the agent asked for, so a retry with another list is refused. Absent
+   * when it superseded nothing through the argument (a `Replaces:` line rides
+   * the body). Added for replaced questions: older records lack it.
+   */
+  supersedes?: string[];
+  /**
+   * On a thread's root whose subject the agent did not give: the question
+   * (`<message id>/<key>`) the subject was derived from, so the thread's
+   * subject follows that question's `superseded_by` chain. Null when the
+   * subject was the agent's own or came from the body's first line (it never
+   * changes). Absent on records older than replaced questions: then a subject
+   * equal to the root's first question's prompt counts as derived from it.
+   */
+  subject_question?: string | null;
+}
+
+/**
+ * What superseded a question (`InboxQuestionRecord.superseded_by`): the
+ * agent's later message, and the question in it that replaces this one, or
+ * null when that message asks nothing in its place ("No longer applies").
+ */
+export interface InboxSupersededBy {
+  message_id: string;
+  key: string | null;
 }
 
 /** The agent session a person's New message is addressed to (`InboxMessage.to`). */
@@ -334,6 +363,13 @@ export interface InboxQuestionRecord {
   decision_recording?: boolean;
   /** The decision card's words after Done; null or absent: the drafted words. Added in step 3. */
   decision_draft?: InboxDecisionDraft | null;
+  /**
+   * The agent superseded this question with a later message (send_message's
+   * `supersedes`, or a `Replaces:` line in a newer block): it can no longer
+   * be answered, and a pick saved on it is never sent. Absent or null while
+   * it stands. Added for replaced questions: older records lack it.
+   */
+  superseded_by?: InboxSupersededBy | null;
 }
 
 /**
@@ -346,7 +382,12 @@ export interface InboxDecisionDraft {
   reason: string | null;
 }
 
-export type InboxQuestionState = "open" | "picked" | "sent" | "closed";
+/**
+ * Derived, never stored. `superseded`: the agent replaced or withdrew the
+ * question (`superseded_by`); it wins over `closed`, so a resolved thread's
+ * card still says what replaced it.
+ */
+export type InboxQuestionState = "open" | "picked" | "sent" | "closed" | "superseded";
 
 /**
  * A question as the window and the agents read it: Workspaces' `Question`
@@ -380,6 +421,8 @@ export interface InboxQuestion {
   decision_recording: boolean;
   /** The decision card's edited words, or null for the drafted ones. */
   decision_draft: InboxDecisionDraft | null;
+  /** What superseded it (`state: "superseded"`), or null. */
+  superseded_by: InboxSupersededBy | null;
 }
 
 /** Workspaces' `NotificationQuestionSummary`: a row's questions, summed. */

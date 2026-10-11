@@ -1738,6 +1738,13 @@ Additive, one optional `Viewer` prop; Plannotator passes none, so its render is 
 
 - **`questionDecisionLocked?: (question: IndexedQuestion) => boolean`**: true for a question passes it neither `onToggleQuestionDecisionRecording` nor `onOpenQuestionDecision`, so its decision tag draws as a plain tag (on or dimmed off, as `questionDecisionRecording` says), exactly as under `readOnly`. Other questions in the same `Viewer` keep their switch and opener. Absent or false, every path is the one it was.
 
+## Viewer `renderQuestionCard` and `renderQuestionBelowPrompt` (unreleased)
+
+Additive, two optional `Viewer` props; Plannotator passes none, so its render is unchanged. Added for the Plannotator Inbox's replaced questions, where an agent supersedes an earlier question and the host draws it as a card nobody can answer.
+
+- **`renderQuestionCard?: (question: IndexedQuestion, answer: QuestionAnswer | undefined) => ReactNode | undefined`**: a returned node is drawn in place of that question's answer card, inside a `<div data-block-id data-block-type="directive">`; `undefined` keeps the answer card. Adds no classes to the shared stylesheet.
+- **`renderQuestionBelowPrompt?: (question: IndexedQuestion) => ReactNode`** (`QuestionBlock`'s `renderBelowPrompt`, through `BlockRenderer`'s `renderQuestionBelowPrompt`): host content right under a card's prompt, e.g. "Replaces <an earlier question>"; null for none.
+
 ## The composer handed to the host: `onHostDraft`, `stepPin`, `hideRedline` (unreleased)
 
 Additive, all opt-in; Plannotator passes none of it, so its render is unchanged. Added for the Plannotator Inbox surface (PLAN step S1, `packages/inbox/surface`), the single-file build a phone's native shell hosts: the shell's own sheet writes every comment, so the viewers report what a comment would be on and draw no composer.

@@ -178,6 +178,10 @@ export interface QuestionBlockProps {
    *  Skipped) so the host can draw its own; the decision tags stay. Default
    *  `'card'`. */
   statusTag?: 'card' | 'none';
+  /** Host content drawn right under the prompt (a host note such as "Replaces
+   *  <an earlier question>"), given the question. Return null for none.
+   *  Absent: nothing is drawn there (today's card). */
+  renderBelowPrompt?: (question: IndexedQuestion) => React.ReactNode;
   onOpenLinkedDoc?: (path: string) => void;
   onOpenCodeFile?: (path: string) => void;
   imageBaseDir?: string;
@@ -201,6 +205,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   onToggleDecisionRecording,
   onOpenDecision,
   statusTag = 'card',
+  renderBelowPrompt,
   onOpenLinkedDoc,
   onOpenCodeFile,
   imageBaseDir,
@@ -503,6 +508,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       <p id={promptId} className="m-0 text-[15px] font-semibold leading-[1.45] text-foreground" data-question-part="prompt">
         {inline(question.prompt)}
       </p>
+      {renderBelowPrompt?.(indexed)}
       {(question.decision || (decisionCapable && recordingOn)) && (
         <div
           className="annotation-exclude mt-2 mb-0.5 flex items-center gap-2 rounded-lg bg-primary/8 px-[9px] py-1.5 text-[12.5px] leading-[18px] text-foreground [&>svg]:text-primary"

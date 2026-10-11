@@ -19,6 +19,7 @@ import { GuideCard } from './GuideCard';
 import { inboxMessageImageBase } from '../images';
 import { reportUnsentReply } from '../unsent';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
+import { ChangedNotice, ReplacedQuestionCard, ReplacesLine, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 
 const noop = () => {};
 const NO_ANNOTATIONS: never[] = [];
@@ -44,6 +45,8 @@ export function MessageBody({
   recordingOf,
   onToggleDecision,
   onOpenDecision,
+  renderReplacedCard,
+  renderReplacesLine,
 }: {
   message: InboxMessageWire;
   /** The thread's project root: relative links start there or at the message's own folder. */
@@ -58,6 +61,10 @@ export function MessageBody({
   recordingOf: (key: string) => boolean | undefined;
   onToggleDecision: (key: string, next: boolean) => void;
   onOpenDecision: (key: string, anchor: HTMLElement) => void;
+  /** A superseded question's card in place of its answer card (the question's key and number), or undefined to keep it. */
+  renderReplacedCard?: (key: string, number: number) => React.ReactNode | undefined;
+  /** The "Replaces …" line under a question's prompt, or null. */
+  renderReplacesLine?: (key: string) => React.ReactNode;
 }) {
   const blocks = useMemo(() => parseMarkdownToBlocks(message.body, { frontmatter: false }), [message.body]);
   // A link to a file this message attached opens it beside the thread; any
@@ -93,6 +100,22 @@ export function MessageBody({
     (question: IndexedQuestion) => (question.question.decision ? undefined : recordingOf(question.question.key)),
     [recordingOf],
   );
+  // Replaced questions: the host's Quiet card in place of the answer card, and
+  // the newer card's "Replaces …" line. Kept stable across renders.
+  const replacedRef = useRef(renderReplacedCard);
+  replacedRef.current = renderReplacedCard;
+  const replacesRef = useRef(renderReplacesLine);
+  replacesRef.current = renderReplacesLine;
+  const questionCard = useCallback(
+    (question: IndexedQuestion) => replacedRef.current?.(question.question.key, question.number),
+    // A new identity when the questions change, so a card that was just replaced redraws.
+    [message.questions],
+  );
+  const belowPrompt = useCallback(
+    (question: IndexedQuestion) => replacesRef.current?.(question.question.key) ?? null,
+    [message.questions],
+  );
+
   // Read-only per question: a sent answer's tag is a plain tag while an open
   // question in the same message keeps its switch and card.
   const locked = useCallback(
@@ -129,6 +152,8 @@ export function MessageBody({
         onToggleQuestionDecisionRecording={onToggleDecision}
         onOpenQuestionDecision={onOpenDecision}
         questionDecisionLocked={locked}
+        renderQuestionCard={renderReplacedCard ? questionCard : undefined}
+        renderQuestionBelowPrompt={renderReplacesLine ? belowPrompt : undefined}
       />
     </div>
   );
@@ -213,6 +238,58 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   const sendKeys = useRef<Map<string, string> | null>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const sendRef = useRef<HTMLButtonElement>(null);
+  const guardRef = useRef<HTMLDivElement>(null);
+
+  // Replaced questions. A pick the person saved can be superseded while this
+  // thread is open; the stale guard then says so before Send, once per
+  // replacement. `seenReplaced` is every superseded question this pane has
+  // shown (a replacement already on screen when the thread opened is read on
+  // its card, so it never raises the guard); `stale` the ones that dropped a
+  // pick since, until the person acts on the panel.
+  const seenReplaced = useRef<{ threadId: string; ids: Set<string> } | null>(null);
+  const [stale, setStale] = useState<string[]>([]);
+  const [guard, setGuard] = useState(false);
+  useEffect(() => {
+    const superseded = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'superseded'));
+    const seen = seenReplaced.current;
+    if (!seen || seen.threadId !== thread.thread_id) {
+      seenReplaced.current = { threadId: thread.thread_id, ids: new Set(superseded.map((q) => `${q.message_id}/${q.key}`)) };
+      return;
+    }
+    const fresh: string[] = [];
+    for (const q of superseded) {
+      const id = `${q.message_id}/${q.key}`;
+      if (seen.ids.has(id)) continue;
+      seen.ids.add(id);
+      if (q.answer !== null) fresh.push(id);
+    }
+    if (fresh.length > 0) setStale((current) => [...current, ...fresh.filter((id) => !current.includes(id))]);
+  }, [thread]);
+
+  /** Scroll to a card or a message, focus it, and ring it briefly. */
+  const jumpTo = useCallback((target: JumpTarget) => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const element =
+      target.kind === 'message'
+        ? body.querySelector<HTMLElement>(`[data-message-article="${CSS.escape(target.messageId)}"]`)
+        : body.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(target.messageId)}"] [data-question-key="${CSS.escape(target.key)}"]`);
+    if (!element) return;
+    const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    element.scrollIntoView?.({ block: 'center', behavior: reduced ? 'auto' : 'smooth' });
+    if (!element.hasAttribute('tabindex')) element.setAttribute('tabindex', '-1');
+    element.focus({ preventScroll: true });
+    if (target.kind === 'question') {
+      element.classList.remove('ib-q-target-out');
+      element.classList.add('ib-q-target');
+      setTimeout(() => {
+        element.classList.add('ib-q-target-out');
+        element.classList.remove('ib-q-target');
+        setTimeout(() => element.classList.remove('ib-q-target-out'), 700);
+      }, 1400);
+    }
+  }, []);
 
   // New message (record 5.x): the project's live sessions, and what the button opened.
   const { model: live, load: loadLive } = useLiveSessions(thread.thread_id);
@@ -303,6 +380,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     setCard(null);
     setRefused([]);
     setNewMessage(null);
+    setStale([]);
+    setGuard(false);
     sendKeys.current = null;
     revisions.current.clear();
     bodyRef.current?.scrollTo({ top: 0 });
@@ -426,9 +505,28 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     }
   };
 
-  // What a Send carries: every picked, unsent answer, per message.
+  // What a Send carries: every picked, unsent answer, per message. A pick on a
+  // superseded question is never one of them (its state is "superseded").
   const picked = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'picked'));
   const picksCount = picked.length;
+  // Picks the agent's replacement dropped since the person's last reply: the
+  // reply box shows them struck, never in "N picks".
+  const lastReplyAt = thread.messages.filter((m) => m.author.kind === 'person').at(-1)?.created_at ?? '';
+  const dropped = thread.messages.flatMap((m) =>
+    (m.questions ?? []).filter((q) => {
+      if (q.state !== 'superseded' || q.answer === null) return false;
+      const by = thread.messages.find((x) => x.id === q.superseded_by?.message_id);
+      return !by || by.created_at > lastReplyAt;
+    }),
+  );
+  const staleQuestions = stale
+    .map((id) => thread.messages.flatMap((m) => m.questions ?? []).find((q) => `${q.message_id}/${q.key}` === id))
+    .filter((q): q is InboxQuestion => q !== undefined && q.state === 'superseded');
+  /** Acting on the panel: these replacements were seen, so Send goes as asked from now on. */
+  const acknowledgeStale = () => {
+    setStale([]);
+    setGuard(false);
+  };
   /** Picks or annotations wait for a Send. */
   const waiting = picksCount > 0 || records.length > 0;
 
@@ -439,8 +537,13 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     setError(null);
   };
 
-  const send = async () => {
+  const send = async (options: { despiteReplaced?: boolean } = {}) => {
     if (sending) return;
+    // A pick was replaced while the person was answering: nothing goes until they have read that.
+    if (staleQuestions.length > 0 && !options.despiteReplaced) {
+      setGuard(true);
+      return;
+    }
     setSending(true);
     setError(null);
     try {
@@ -485,6 +588,13 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       // The reply and where it is now sit at the foot of the thread.
       requestAnimationFrame(() => bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight }));
     } catch (cause) {
+      if (cause instanceof InboxApiError && cause.code === 'question_superseded') {
+        // The race: the agent replaced a picked question as the person sent.
+        // Nothing went; the thread is read again and the panel says why.
+        await onChanged();
+        setGuard(true);
+        return;
+      }
       setError(cause instanceof InboxApiError ? cause.message : 'The reply was not sent. Send again to retry.');
     } finally {
       setSending(false);
@@ -548,9 +658,22 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         {thread.messages.map((message) => {
           const isAgent = message.author.kind === 'agent';
           const questions = message.questions ?? [];
-          const allSent = questions.length > 0 && questions.every((q) => q.state === 'sent');
+          // Nothing left to answer: every question is sent or was superseded.
+          const allSent = questions.length > 0 && questions.every((q) => q.state !== 'open' && q.state !== 'picked');
+          const replacedCard = (key: string, number: number) => {
+            const q = questions.find((x) => x.key === key);
+            const replacement = q ? replacementOf(thread.messages, q) : null;
+            if (!q || !replacement) return undefined;
+            const answer = pending.has(`${message.id}/${key}`) ? (pending.get(`${message.id}/${key}`) ?? null) : q.answer;
+            return <ReplacedQuestionCard question={q} number={number} total={questions.length} replacement={replacement} answer={answer} onJump={jumpTo} />;
+          };
+          const replacesLine = (key: string) => {
+            const q = questions.find((x) => x.key === key);
+            const old = q ? replacedBy(thread.messages, q) : [];
+            return old.length > 0 ? <ReplacesLine old={old} onJump={jumpTo} /> : null;
+          };
           return (
-            <article className="ib-message" key={message.id} data-author={message.author.kind}>
+            <article className="ib-message" key={message.id} data-author={message.author.kind} data-message-article={message.id} tabIndex={-1}>
               <div className="ib-sender">
                 {isAgent ? (
                   <AuthorMark author={message.author} big />
@@ -586,6 +709,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                   recordingOf={recordingOf(message)}
                   onToggleDecision={toggleDecision(message.id)}
                   onOpenDecision={openDecision(message.id)}
+                  renderReplacedCard={replacedCard}
+                  renderReplacesLine={replacesLine}
                 />
                 {questions.map((q) => {
                   const decision = q.decision_id ? decisions.find((d) => d.id === q.decision_id) : undefined;
@@ -652,6 +777,27 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
               Reopen
             </button>
           </div>
+        ) : guard && staleQuestions.length > 0 ? (
+          <StaleGuard
+            ref={guardRef}
+            questions={staleQuestions}
+            thread={thread}
+            words={box.open ? box.text.trim() : ''}
+            otherPicks={picksCount}
+            annotations={records.length}
+            onAnswerNew={(target) => {
+              acknowledgeStale();
+              requestAnimationFrame(() => jumpTo(target));
+            }}
+            onSendAnyway={() => {
+              acknowledgeStale();
+              void send({ despiteReplaced: true });
+            }}
+            onKeepEditing={() => {
+              acknowledgeStale();
+              requestAnimationFrame(() => (sendRef.current ?? textRef.current)?.focus());
+            }}
+          />
         ) : newMessage?.kind === 'compose' ? (
           <NewMessageComposer
             key={newMessage.target.session}
@@ -669,6 +815,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
             <div className="ib-reply-l">
               Reply to {asker} in {thread.project.name}
             </div>
+            {staleQuestions.length > 0 && <ChangedNotice questions={staleQuestions} thread={thread} onJump={jumpTo} />}
             <div className="ib-rbox">
               <textarea
                 ref={textRef}
@@ -688,12 +835,17 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                   }
                 }}
               />
-              {(picksCount > 0 || attachments.length > 0) && (
+              {(picksCount > 0 || dropped.length > 0 || attachments.length > 0) && (
                 <div className="ib-rfoot">
                   {picksCount > 0 && (
                     <span className="ib-rchip" data-picks-chip="">
                       <Icon name="check" size={13} />
                       {plural(picksCount, 'pick')}
+                    </span>
+                  )}
+                  {dropped.length > 0 && (
+                    <span className="ib-rchip ib-dropped" data-dropped-picks-chip="" title="Replaced; this pick won't be sent">
+                      {dropped.length} {dropped.length === 1 ? 'pick' : 'picks'} on a replaced question
                     </span>
                   )}
                   {attachments.length > 0 && (
@@ -703,7 +855,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
               )}
             </div>
             <div className="ib-acts">
-              <button type="button" className="ib-btn ib-pri" onClick={() => void send()} disabled={sending}>
+              <button type="button" className="ib-btn ib-pri" ref={sendRef} onClick={() => void send()} disabled={sending}>
                 <Icon name="send" size={15} />
                 Send
               </button>
@@ -718,7 +870,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
           <div className="ib-acts">
             {waiting && <span className="ib-st">Not sent</span>}
             {waiting && (
-              <button type="button" className="ib-btn ib-pri" onClick={() => void send()} disabled={sending}>
+              <button type="button" className="ib-btn ib-pri" ref={sendRef} onClick={() => void send()} disabled={sending}>
                 <Icon name="send" size={15} />
                 Send
               </button>

@@ -61,7 +61,9 @@ export const BlockRenderer: React.FC<{
   onOpenQuestionDecision?: QuestionBlockProps['onOpenDecision'];
   /** `'none'` hides the card's own status tag (see `QuestionBlock`). */
   questionStatusTag?: QuestionBlockProps['statusTag'];
-}> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, repoHost, headingAnchorId, onNavigateAnchor, question, questionTotal, questionAnswer, onAnswerQuestion, onSaveQuestionAnswer, saveQuestionAnswerLabel, renderQuestionFooter, questionDecisionRecording, questionDecisionScope, onToggleQuestionDecisionRecording, onOpenQuestionDecision, questionStatusTag }) => {
+  /** Host content under a question's prompt (see `QuestionBlock`). */
+  renderQuestionBelowPrompt?: QuestionBlockProps['renderBelowPrompt'];
+}> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, repoHost, headingAnchorId, onNavigateAnchor, question, questionTotal, questionAnswer, onAnswerQuestion, onSaveQuestionAnswer, saveQuestionAnswerLabel, renderQuestionFooter, questionDecisionRecording, questionDecisionScope, onToggleQuestionDecisionRecording, onOpenQuestionDecision, questionStatusTag, renderQuestionBelowPrompt }) => {
   switch (block.type) {
     case 'heading': {
       const Tag = `h${block.level || 1}` as React.ElementType;
@@ -193,6 +195,7 @@ export const BlockRenderer: React.FC<{
               onToggleDecisionRecording={onToggleQuestionDecisionRecording}
               onOpenDecision={onOpenQuestionDecision}
               statusTag={questionStatusTag}
+              renderBelowPrompt={renderQuestionBelowPrompt}
               onOpenLinkedDoc={onOpenLinkedDoc}
               onOpenCodeFile={onOpenCodeFile}
               imageBaseDir={imageBaseDir}

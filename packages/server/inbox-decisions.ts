@@ -104,6 +104,13 @@ export function setQuestionDecision(
   if (typeof input.key !== "string") throw new InboxError("validation_error", "key: required.", { field: "key" });
   const record = store.questionRecord(`${messageId}/${input.key}`);
   if (!record) throw new InboxError("question_not_found", `No question ${input.key} on this message.`, { key: input.key });
+  if (record.superseded_by) {
+    const by = { message_id: record.superseded_by.message_id, key: record.superseded_by.key ?? null };
+    throw new InboxError("question_superseded", `Question ${input.key} was superseded by a later message; it records no decision.`, {
+      key: input.key,
+      superseded_by: by,
+    });
+  }
   if (record.decision_id !== null || questionWire(store, record).state === "sent") {
     throw new InboxError("question_already_sent", `The answer to ${input.key} was already sent.`, { key: input.key });
   }

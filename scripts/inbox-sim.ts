@@ -75,6 +75,8 @@ export class SimAgent {
     idempotency_key?: string;
     /** Files to attach: absolute, or relative to project_path. */
     attachments?: string[];
+    /** Earlier questions of the thread this message supersedes: `<message id>` or `<message id>/<key>`. */
+    supersedes?: string[];
   }): Promise<Structured> {
     return this.call('send_message', { ...input, agent_name: this.name, agent_host: this.host });
   }

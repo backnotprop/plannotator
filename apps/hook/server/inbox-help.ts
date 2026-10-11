@@ -65,6 +65,23 @@ export const INBOX_QUESTION_EXAMPLE = [
 ].join("\n");
 
 /**
+ * The guide's example of a question that replaces an earlier one (a
+ * `Replaces:` line). inbox-help.test.ts parses it with the store's own
+ * parser; the id is a well-formed placeholder.
+ */
+export const INBOX_REPLACES_EXAMPLE = [
+  ":::question",
+  "Replaces: msg_01M4H6G73M9H3Z32T859E72DPY/q-4f7db09f",
+  "How many times should the jobs queue retry a webhook before it gives up?",
+  "",
+  "You moved retries into the jobs queue, so the earlier question about the retry worker no longer fits.",
+  "",
+  "- [ ] 3 times over 10 minutes",
+  "- [ ] Once, then the dead-letter queue",
+  ":::",
+].join("\n");
+
+/**
  * Code files the guide names as attachable. inbox-help.test.ts checks each
  * one against the Inbox's own name rule and kind.
  */
@@ -73,11 +90,12 @@ export const INBOX_HELP_CODE_EXAMPLES = ["run.sh", "build.mjs", "app.ts", "main.
 /** One block per MCP tool, in INBOX_MCP_TOOLS order. */
 export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
   send_message: {
-    args: ["body", "subject", "thread", "reply_to", "attachments", "idempotency_key"],
+    args: ["body", "subject", "thread", "reply_to", "supersedes", "attachments", "idempotency_key"],
     lines: [
       "Post a markdown message to the person. `body` is required; question blocks in it render as answerable cards (see \"Asking the reviewer questions\").",
       "- `subject`: used when the message starts a thread. Default: the first question's prompt, else the first line.",
       "- `thread`, `reply_to`: where it lands (see \"Threads\").",
+      "- `supersedes`: earlier questions of the thread this message lands in that no longer apply, so the person can no longer answer them: `\"<message id>/<key>\"` for one question (read_thread gives each question's `key`) or `\"<message id>\"` for every open question of that message. With exactly one question in this message, it replaces them; otherwise they read \"No longer applies\". To name the replacement exactly, write a `Replaces:` line in the new block instead (see \"Only in the Inbox\"). A pick the person saved on a superseded question is never sent. An id that names no open question of the thread refuses the whole send with `invalid_supersedes: …`, which lists the thread's open questions. The result's `superseded` lists what it superseded.",
       `- \`attachments\`: files to show the person beside your message, e.g. \`["docs/plan.md", "proto/admin.html", "/tmp/shot.png"]\`: absolute (anywhere you can read) or relative to \`project_path\`. Any regular file, of any size. Markdown, plain text, config and data files, Mermaid and Graphviz sources and HTML open in Plannotator's viewers; images (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP, ICO) show in the message; source code, scripts (${INBOX_HELP_CODE_EXAMPLES.map(code).join(", ")} and the like) and any other text open as code with line comments (text over 16 MB is offered as a download); PDFs and every other file are offered as a download. The kind is read from the bytes, so an image or PDF needs no particular name. Folders and \`.env\` files are refused, and one refused file refuses the whole send. The Inbox keeps the version you sent and shows the file as it is now; the person's annotations, including comments on images and code lines, come back in their reply. Each attachment in the result has a \`kind\` (\`markdown\`, \`text\`, \`html\`, \`mermaid\`, \`graphviz\`, \`code\`, \`image\`, \`pdf\`, \`file\`); treat a kind you do not know as \`file\`.`,
       "- `idempotency_key`: any unique string. Sending again with the same key returns the first message instead of posting twice; the same key with another body, thread or `reply_to` is refused.",
       "- Returns `message_id`, `thread_id`, `new_thread`, `cursor` and the thread's `url`.",
@@ -123,7 +141,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
   submit_guide: {
     args: ["guide", "patch", "snapshot", "body"],
     lines: [
-      "Send the person a guided review of a code change: `guide` (the shape get_guide_brief gives) plus `patch` (the exact unified diff it describes), or a complete `snapshot` instead of both. `body` is your note above the card (default: the guide's intent). It takes send_message's routing fields (`subject`, `thread`, `reply_to`, `idempotency_key`). A guide that does not match its patch is refused with `invalid_guide: …` naming the file. Code diffs only.",
+      "Send the person a guided review of a code change: `guide` (the shape get_guide_brief gives) plus `patch` (the exact unified diff it describes), or a complete `snapshot` instead of both. `body` is your note above the card (default: the guide's intent). It takes send_message's routing fields (`subject`, `thread`, `reply_to`, `supersedes`, `idempotency_key`). A guide that does not match its patch is refused with `invalid_guide: …` naming the file. Code diffs only.",
     ],
   },
 };
@@ -281,14 +299,21 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     "### Only in the Inbox",
     "",
-    "Three more lines a question block can carry, each on its own line after the question (the first line is always the question):",
+    "Four more lines a question block can carry, each on its own line (the first other line is always the question):",
     "",
     `- \`Stopped: <why>\`: you cannot go on until this is answered. The person's list shows the thread first, under "${SECTION_LABEL("stopped")}".`,
     `- \`Holds up: <name>; <name>\`: you go on, and these pieces of work wait. The list shows it under "${SECTION_LABEL("holding")}", the most held-up first.`,
     "- `Decision: when answered` (at the start of a line): when the person sends their answer, it is recorded as a project decision (list_decisions). The person can turn that off on the card.",
+    "- `Replaces: <message id>/<key>`: this question replaces an earlier one of the same thread (send with `reply_to` into that thread). The old card then reads \"Replaced\", links to this one, and can no longer be answered; a pick the person saved on it is never sent. It is never read as the question, wherever it sits in the block. Get the key from read_thread; several ids may follow, separated by commas. An id that names no open question of the thread refuses the whole send with `invalid_supersedes: …`. send_message's `supersedes` does the same for a whole message or when you ask nothing new.",
     "",
     "```markdown",
     INBOX_QUESTION_EXAMPLE,
+    "```",
+    "",
+    "A question that replaces an earlier one:",
+    "",
+    "```markdown",
+    INBOX_REPLACES_EXAMPLE,
     "```",
     "",
     "Attach the files a question points to (send_message's `attachments`, here `[\"load-test.html\"]`) and link them from its context, as above: the link opens the file beside the thread. A link to a file you did not attach shows as \"Not attached\". Add a screenshot (`![alt](path)`) when the question is about something visual.",

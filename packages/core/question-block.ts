@@ -61,6 +61,13 @@
  *   when both are present the link wins. Each form is read once per block;
  *   any other `Decision:` value is context prose. A `Decision:` line BEFORE
  *   the prompt is the prompt. Neither form changes the question key.
+ * - Replaces (the Plannotator Inbox): a `Replaces: <message id>/<key>` line
+ *   (or a bare `<message id>`, several separated by commas, semicolons or
+ *   spaces) names the earlier question(s) this one replaces. Read only when
+ *   its value starts with `msg_` or `q-`, wherever it sits: it is never the
+ *   prompt and never context, so the card never shows the raw ids
+ *   (`replaces`). Any other `Replaces:` line is ordinary prose. It does not
+ *   change the question key.
  */
 
 import {
@@ -120,6 +127,11 @@ export interface ParsedQuestion {
   decisionOnAnswer?: true;
   /** `Decision: [statement](url)`: the decision this question became. */
   decision?: QuestionDecisionLink;
+  /** `Replaces: <message id>/<key>` (the Plannotator Inbox): the earlier
+   *  questions this one replaces, each token as written. Absent when the
+   *  block has no such line. The host checks them (the Inbox refuses an id
+   *  that names no open question of the thread). */
+  replaces?: string[];
 }
 
 /** A recorded decision a question links to (`Decision: [statement](url)`). */
@@ -149,6 +161,10 @@ const LABEL_DESC_SEP_RE = /\s+(?:—|–|-)\s+/;
 const DECISION_RE = /^decision\s*:\s*(.*?)\s*$/i;
 const DECISION_FLAG_RE = /^when answered\.?$/i;
 const DECISION_LINK_RE = /^\[([^\]]+)\]\((\S+)\)\.?$/;
+// `Replaces: msg_…/q-…` anywhere in the block (leading whitespace aside):
+// read only when the value starts with an id, so a prose line that happens to
+// start with "Replaces:" stays prose.
+const REPLACES_RE = /^\s*replaces\s*:\s*((?:msg_|q-)\S*.*?)\s*$/i;
 // A line (leading whitespace aside) that opens a block of its own (list item, heading,
 // quote, fence, directive, table row, HTML, rule) ends a plain bullet instead
 // of continuing it lazily.
@@ -426,6 +442,7 @@ export const parseQuestionBlock = (directiveKind: string | undefined, body: stri
   let openBullet: { index: number; contentColumn: number; afterBlank: boolean } | null = null;
   let decisionFlag = false;
   let decision: QuestionDecisionLink | undefined;
+  const replaces: string[] = [];
 
   const pushContext = (line: string) => {
     contextLines.push(line);
@@ -454,6 +471,16 @@ export const parseQuestionBlock = (directiveKind: string | undefined, body: stri
       });
       raws.push(raw);
       lastChoice = choices.length - 1;
+      openBullet = null;
+      recommendationOpen = false;
+      continue;
+    }
+    const replacesLine = line.match(REPLACES_RE);
+    if (replacesLine) {
+      for (const token of replacesLine[1].split(/[\s,;]+/)) {
+        if (token && !replaces.includes(token)) replaces.push(token);
+      }
+      lastChoice = -1;
       openBullet = null;
       recommendationOpen = false;
       continue;
@@ -610,6 +637,7 @@ export const parseQuestionBlock = (directiveKind: string | undefined, body: stri
     ...(suggestedText ? { suggestedText } : {}),
     key: questionKey(kind, prompt),
     ...(decision ? { decision } : decisionFlag ? { decisionOnAnswer: true as const } : {}),
+    ...(replaces.length > 0 ? { replaces } : {}),
   };
 };
 

@@ -17,12 +17,12 @@ import { join, resolve } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { HARNESSES, harnessPanel, shellLine } from "@plannotator/inbox/harnesses";
-import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
+import { parseInboxQuestionBlocks, parseInboxSupersedeRef } from "@plannotator/core/inbox-questions";
 import { startInboxServer } from "@plannotator/server/inbox";
 import { INBOX_FILLED_ARGUMENTS } from "@plannotator/shared/inbox/connection";
 import { formatTopLevelHelp } from "./cli";
 import { inboxAttachmentKind, inboxAttachmentNameRefusal } from "@plannotator/core/inbox-types";
-import { formatInboxHelp, INBOX_HELP_CODE_EXAMPLES, INBOX_HELP_MCP_URL, INBOX_QUESTION_EXAMPLE, TOOL_GUIDE } from "./inbox-help";
+import { formatInboxHelp, INBOX_HELP_CODE_EXAMPLES, INBOX_HELP_MCP_URL, INBOX_QUESTION_EXAMPLE, INBOX_REPLACES_EXAMPLE, TOOL_GUIDE } from "./inbox-help";
 
 const entry = resolve(import.meta.dir, "index.ts");
 const distDir = resolve(import.meta.dir, "../dist");
@@ -141,6 +141,16 @@ describe("the guide against what it describes", () => {
     expect(question!.parsed.choices.map((choice) => choice.label)).toEqual(["The existing jobs queue", "A dedicated retries queue"]);
     // The example models the context rule: what the choice affects, plus a link to an attached file.
     expect(question!.parsed.context).toContain("[The load test](load-test.html)");
+  });
+
+  test("its replacing example reads as a question with a Replaces: id, never as its prompt", () => {
+    expect(help).toContain(`\`\`\`markdown\n${INBOX_REPLACES_EXAMPLE}\n\`\`\``);
+    const [question, ...rest] = parseInboxQuestionBlocks(INBOX_REPLACES_EXAMPLE);
+    expect(rest).toEqual([]);
+    expect(question!.prompt).toBe("How many times should the jobs queue retry a webhook before it gives up?");
+    expect(question!.replaces).toHaveLength(1);
+    expect(parseInboxSupersedeRef(question!.replaces[0])).not.toBeNull();
+    expect(question!.parsed.context ?? "").not.toContain("Replaces");
   });
 
   // Deliberate: the top-level help is where an agent learns this guide exists.

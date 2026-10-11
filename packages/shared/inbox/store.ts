@@ -31,7 +31,10 @@ import {
   checkInboxAnswer,
   composeInboxReplyBody,
   deriveInboxSubject,
+  inboxQuestionState,
+  isInboxQuestionSupersedable,
   parseInboxQuestionBlocks,
+  parseInboxSupersedeRef,
   summarizeInboxQuestions,
   toInboxQuestion,
   type InboxAnswerRefusal,
@@ -50,6 +53,7 @@ import {
   type InboxProject,
   type InboxQuestion,
   type InboxQuestionRecord,
+  type InboxSupersededBy,
   type InboxListRow,
   type InboxListSection,
   type InboxThread,
@@ -107,6 +111,14 @@ export interface InboxSendInput {
   guide?: InboxGuideRef | null;
   /** The folder inside the project the agent sent from, when not its root (`InboxMessage.base_path`). */
   base_path?: string | null;
+  /**
+   * Earlier questions of the same thread this message supersedes:
+   * `<message id>` (each open question of it) or `<message id>/<key>`. A
+   * `Replaces:` line in the body's blocks does the same per block. One id
+   * that names no open question of the thread refuses the whole send
+   * (`invalid_supersedes`).
+   */
+  supersedes?: readonly string[] | null;
 }
 
 export interface InboxSendResult {
@@ -175,8 +187,19 @@ function refusalError(refusal: InboxAnswerRefusal): InboxError {
       );
     case "question_already_sent":
       return new InboxError("question_already_sent", `The answer to ${refusal.key} was already sent.`, { key: refusal.key });
+    case "question_superseded":
+      return new InboxError(
+        "question_superseded",
+        refusal.superseded_by.key
+          ? `Question ${refusal.key} was replaced by a newer question (${refusal.superseded_by.message_id}/${refusal.superseded_by.key}); it can no longer be answered.`
+          : `Question ${refusal.key} no longer applies (${refusal.superseded_by.message_id}); it can no longer be answered.`,
+        { key: refusal.key, superseded_by: refusal.superseded_by },
+      );
   }
 }
+
+/** The most ids one send may supersede. */
+export const INBOX_SUPERSEDES_MAX = 100;
 
 /** `<name>-<6 hex of the root>`, so two repositories with one name stay apart. */
 export function inboxProjectKey(name: string, root: string, hashLength = 6): string {
@@ -429,6 +452,45 @@ export class InboxStore {
     return message ? this.wire(message) : null;
   }
 
+  /**
+   * The question a root's subject was derived from (`<message id>/<key>`), or
+   * null when the agent gave the subject or it came from the body. A record
+   * older than `subject_question` counts as derived when its subject is the
+   * one its first question's prompt gives.
+   */
+  private subjectQuestion(root: InboxMessage): string | null {
+    if (root.subject_question !== undefined) return root.subject_question;
+    const first = this.questionRecords(root.id)[0];
+    if (!first || root.subject === null) return null;
+    return deriveInboxSubject("", [first]) === root.subject ? first.id : null;
+  }
+
+  /**
+   * A thread's subject as the list and the thread show it: the root's, except
+   * that a subject derived from a question follows that question's
+   * replacement (`superseded_by` with a key), down the chain. An agent-given
+   * subject never changes, and a question withdrawn with nothing in its place
+   * keeps the subject it gave.
+   */
+  threadSubject(threadId: string): string | null {
+    const root = this.messages.get(threadId);
+    if (!root) return null;
+    let id = this.subjectQuestion(root);
+    if (id === null) return root.subject;
+    let record = this.questions.get(id);
+    const seen = new Set<string>();
+    while (record?.superseded_by?.key && !seen.has(id)) {
+      seen.add(id);
+      const next = `${record.superseded_by.message_id}/${record.superseded_by.key}`;
+      const nextRecord = this.questions.get(next);
+      if (!nextRecord) break;
+      id = next;
+      record = nextRecord;
+    }
+    if (seen.size === 0 || !record) return root.subject;
+    return deriveInboxSubject("", [record]) ?? root.subject;
+  }
+
   thread(threadId: string): InboxThread | null {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) return null;
@@ -437,7 +499,7 @@ export class InboxStore {
     return {
       thread_id: threadId,
       project,
-      subject: root.subject,
+      subject: this.threadSubject(threadId),
       thread_name: root.thread_name ?? null,
       resolved_at: root.resolved_at,
       messages: this.threadMessages(threadId).map((m) => this.wire(m)),
@@ -453,7 +515,7 @@ export class InboxStore {
     return {
       thread_id: threadId,
       project_id: root.project_id,
-      subject: root.subject,
+      subject: this.threadSubject(threadId),
       author: root.author,
       created_at: root.created_at,
       last_at: last.created_at,
@@ -633,7 +695,7 @@ export class InboxStore {
         }
       }
       const threads = [...perThread.entries()]
-        .map(([threadId, threadBytes]) => ({ thread_id: threadId, subject: this.messages.get(threadId)?.subject ?? null, bytes: threadBytes }))
+        .map(([threadId, threadBytes]) => ({ thread_id: threadId, subject: this.threadSubject(threadId), bytes: threadBytes }))
         .sort((a, b) => b.bytes - a.bytes || a.thread_id.localeCompare(b.thread_id));
       projects.push({ id: project.id, name: project.name, root: project.root, bytes, threads });
     }
@@ -771,16 +833,19 @@ export class InboxStore {
     }
     if (!this.projectsById.has(projectId)) throw new InboxError("project_not_found", `No project ${projectId}.`);
 
+    const supersedes = this.normalizeSupersedes(input.supersedes);
     const key = input.idempotency_key?.trim() || null;
     if (key) {
       for (const message of this.messages.values()) {
         if (message.project_id !== projectId || message.idempotency_key !== key || message.author.kind !== "agent") continue;
-        // A retry is the same call: the same body, reply target and thread
-        // name (compared as routing compares names). The thread it joined
-        // is the first call's, whatever the routing would say now.
+        // A retry is the same call: the same body, reply target, thread
+        // name (compared as routing compares names) and superseded ids. The
+        // thread it joined is the first call's, whatever the routing would
+        // say now.
         const sameName = inboxThreadNameKey(message.thread_name ?? "") === inboxThreadNameKey(threadName ?? "");
         const sameGuide = (message.guide?.input_sha256 ?? null) === (input.guide?.input_sha256 ?? null);
-        if (message.body !== body || message.reply_to !== replyTo || !sameName || !sameGuide) {
+        const sameSupersedes = [...(message.supersedes ?? [])].sort().join("\n") === [...supersedes].sort().join("\n");
+        if (message.body !== body || message.reply_to !== replyTo || !sameName || !sameGuide || !sameSupersedes) {
           throw new InboxError(
             "idempotency_key_reused",
             "This idempotency_key was already used for a different message.",
@@ -796,13 +861,19 @@ export class InboxStore {
     const at = this.stamp();
     const id = inboxId("msg");
     const parsed = parseInboxQuestionBlocks(body);
+    // Checked before anything is written: one id that names no open question
+    // of this thread refuses the whole send.
+    const superseding = this.planSupersede(threadId, id, supersedes, parsed);
+    const agentSubject = input.subject?.trim() || null;
     const message: InboxMessage = {
       id,
       project_id: projectId,
       thread_id: threadId ?? id,
       reply_to: replyTo,
       author: input.author,
-      subject: threadId ? null : (input.subject?.trim() || deriveInboxSubject(body, parsed)),
+      subject: threadId ? null : (agentSubject || deriveInboxSubject(body, parsed)),
+      ...(threadId ? {} : { subject_question: !agentSubject && parsed[0] ? `${id}/${parsed[0].key}` : null }),
+      ...(supersedes.length > 0 ? { supersedes } : {}),
       body,
       created_at: at,
       resolved_at: null,
@@ -841,8 +912,130 @@ export class InboxStore {
         at,
       );
     }
+    // The superseded questions last, so whoever reads them finds the message
+    // that superseded them. A pick saved on one stays on it, never sent; a
+    // decision drafted on it is dropped.
+    for (const [questionId, by] of superseding) {
+      const record = this.questions.get(questionId)!;
+      this.appendQuestion({ ...record, superseded_by: by, ...(record.decision_draft ? { decision_draft: null } : {}) }, at);
+    }
     // A reply from the agent reopens nothing: a resolved thread stays resolved.
     return { message: this.wire(message), replayed: false };
+  }
+
+  /** send_message's `supersedes` as the store keeps it: trimmed, each once, in order. */
+  private normalizeSupersedes(value: unknown): string[] {
+    if (value === undefined || value === null) return [];
+    const refuse = (message: string) => new InboxError("invalid_supersedes", `supersedes: ${message}`, { field: "supersedes" });
+    if (!Array.isArray(value)) throw refuse("a list of ids, each `<message id>` or `<message id>/<key>`.");
+    if (value.length > INBOX_SUPERSEDES_MAX) throw refuse(`at most ${INBOX_SUPERSEDES_MAX} ids.`);
+    const out: string[] = [];
+    for (const entry of value) {
+      if (typeof entry !== "string" || entry.trim() === "") throw refuse("each id is a string, `<message id>` or `<message id>/<key>`.");
+      const id = entry.trim();
+      if (!out.includes(id)) out.push(id);
+    }
+    return out;
+  }
+
+  /** The questions a message superseded (`<message id>/<key>`), in thread order. */
+  supersededBy(messageId: string): string[] {
+    const message = this.messages.get(messageId);
+    if (!message) return [];
+    const out: string[] = [];
+    for (const member of this.threadMessages(message.thread_id)) {
+      for (const record of this.questionRecords(member.id)) if (record.superseded_by?.message_id === messageId) out.push(record.id);
+    }
+    return out;
+  }
+
+  /** A thread's questions that may still be superseded (open, or picked and not sent), with their prompts. */
+  openQuestionsOf(threadId: string | null): { id: string; prompt: string }[] {
+    if (threadId === null) return [];
+    const resolved = this.isResolved(threadId);
+    const out: { id: string; prompt: string }[] = [];
+    for (const message of this.threadMessages(threadId)) {
+      for (const record of this.questionRecords(message.id)) {
+        if (isInboxQuestionSupersedable(inboxQuestionState(record, resolved))) out.push({ id: record.id, prompt: record.prompt });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Which questions a new message supersedes, and by what: each id of
+   * `supersedes` (replaced by the message's only question when it asks
+   * exactly one, else by the message alone: "No longer applies"), then each
+   * block's `Replaces:` line (replaced by that block's question, which
+   * wins). Every id must name an open question of `threadId`, the thread the
+   * message lands in, else the whole send is refused with
+   * `invalid_supersedes`, listing that thread's open questions.
+   */
+  private planSupersede(
+    threadId: string | null,
+    messageId: string,
+    supersedes: readonly string[],
+    parsed: readonly { key: string; replaces: string[] }[],
+  ): Map<string, InboxSupersededBy> {
+    const plan = new Map<string, InboxSupersededBy>();
+    const only = parsed.length === 1 ? parsed[0]!.key : null;
+    const requests: { ref: string; by: InboxSupersededBy; where: string }[] = [
+      ...supersedes.map((ref) => ({ ref, by: { message_id: messageId, key: only }, where: "supersedes" })),
+      ...parsed.flatMap((question) =>
+        question.replaces.map((ref) => ({ ref, by: { message_id: messageId, key: question.key }, where: "Replaces:" })),
+      ),
+    ];
+    if (requests.length === 0) return plan;
+    const resolved = threadId !== null && this.isResolved(threadId);
+    const problems: string[] = [];
+    for (const { ref, by, where } of requests) {
+      const target = parseInboxSupersedeRef(ref);
+      if (!target) {
+        problems.push(`${where} "${ref}" is not an id: write <message id>/<key> (read_thread gives the keys) or <message id>.`);
+        continue;
+      }
+      const message = this.messages.get(target.message_id);
+      if (!message || message.author.kind !== "agent") {
+        problems.push(`${where} ${ref}: no agent message ${target.message_id}.`);
+        continue;
+      }
+      if (threadId === null || message.thread_id !== threadId) {
+        problems.push(
+          `${where} ${ref} is in another thread (${message.thread_id}): only questions of the thread this message lands in can be superseded; send with reply_to ${target.message_id} to write in that thread.`,
+        );
+        continue;
+      }
+      const records = this.questionRecords(message.id).filter((r) => target.key === null || r.key === target.key);
+      if (target.key !== null && records.length === 0) {
+        problems.push(`${where} ${ref}: message ${target.message_id} has no question ${target.key}.`);
+        continue;
+      }
+      const open = records.filter((r) => isInboxQuestionSupersedable(inboxQuestionState(r, resolved)));
+      if (open.length === 0) {
+        problems.push(
+          target.key === null
+            ? `${where} ${ref}: that message has no open question.`
+            : `${where} ${ref} is not open (it is ${inboxQuestionState(records[0]!, resolved)}).`,
+        );
+        continue;
+      }
+      // A block's own Replaces: line names the replacement exactly, so it wins over the argument.
+      for (const record of open) if (!plan.has(record.id) || by.key !== null) plan.set(record.id, by);
+    }
+    if (problems.length > 0) {
+      const open = this.openQuestionsOf(threadId);
+      const listing =
+        threadId === null
+          ? "This message would start a new thread, which has no questions yet."
+          : open.length > 0
+            ? `Open questions in this thread: ${open.map((q) => `${q.id} (${q.prompt})`).join("; ")}.`
+            : "This thread has no open questions.";
+      throw new InboxError("invalid_supersedes", `${problems.join(" ")} Nothing was sent. ${listing}`, {
+        field: "supersedes",
+        open_questions: open,
+      });
+    }
+    return plan;
   }
 
   private targetMessage(messageId: string): InboxMessage {
@@ -878,6 +1071,11 @@ export class InboxStore {
       }
       const record = records.get(entry.key);
       if (!record) throw refusalError({ code: "question_not_found", key: entry.key });
+      // A superseded question takes no pick and no Send: a pick saved on it stays, never sent.
+      if (record.superseded_by) {
+        const by = { message_id: record.superseded_by.message_id, key: record.superseded_by.key ?? null };
+        throw refusalError({ code: "question_superseded", key: entry.key, superseded_by: by });
+      }
       if (record.revision !== entry.revision) {
         throw refusalError({ code: "question_revision_conflict", key: entry.key, current_revision: record.revision });
       }

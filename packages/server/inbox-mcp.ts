@@ -57,6 +57,13 @@ export const SEND_MESSAGE_DESCRIPTION = [
   QUESTION_AUTHORING_GUIDE,
 ].join("\n");
 
+/**
+ * `supersedes`, as an agent reads it (a field description reaches the model
+ * whole; send_message's own description is cut at 2,048 characters).
+ */
+export const SUPERSEDES_DESCRIPTION =
+  "Earlier questions in this thread that no longer apply, so the person cannot answer them any more: \"<message id>/<key>\" for one question (read_thread gives each question's key) or \"<message id>\" for every open question of that message. With exactly one question in this message, it replaces them; otherwise they read \"No longer applies\". To replace one with a particular new question, put `Replaces: <message id>/<key>` in that question's block instead. The person's pick on a superseded question is never sent. Every id must name an open question of the thread this message lands in (use reply_to); otherwise nothing is sent and the refusal, invalid_supersedes, lists the thread's open questions.";
+
 const PROJECT_PATH_DESCRIPTION =
   "Absolute path of the repository or folder you work in; the thread lands in that project's row. The `plannotator inbox mcp` shim fills it from its working folder.";
 const AGENT_SESSION_DESCRIPTION =
@@ -76,6 +83,10 @@ export const SEND_ROUTING_FIELDS = {
       `A short thread name (1-${INBOX_THREAD_NAME_MAX} characters, one line). Without it, your messages join your session's open thread in this project (a new one the first time, or once the person resolved it; a thread keeps its first subject). With it, the same name in this project is the same open thread, across sessions (compared without case, spacing or invisible characters). Use it to split separate work, or to join another session's thread. Ignored with reply_to.`,
     ),
   reply_to: z.string().optional().describe("A message id: post this as a reply in that message's thread."),
+  supersedes: z
+    .array(z.string())
+    .optional()
+    .describe(SUPERSEDES_DESCRIPTION),
   idempotency_key: z.string().optional().describe("Any unique string; sending again with the same key answers the first message instead of posting twice."),
   agent_session: z.string().optional().describe(AGENT_SESSION_DESCRIPTION),
   agent_name: z.string().optional().describe("How the person sees you, e.g. \"Claude Code\"."),
@@ -183,12 +194,12 @@ function replyResult(store: InboxStore, reply: InboxMessage, base: string): Tool
   // The agent now has this reply (not any later one): a Sent row moves to Quiet.
   store.markAgentChecked(reply.thread_id, cursor);
   const questions = reply.reply_to ? store.questionsOf(reply.reply_to) : [];
-  const root = store.message(reply.thread_id);
+  const subject = store.threadSubject(reply.thread_id);
   return {
     content: [
       {
         type: "text",
-        text: `The person replied in thread ${reply.thread_id}${root?.subject ? ` (${root.subject})` : ""}:\n\n${reply.body}`,
+        text: `The person replied in thread ${reply.thread_id}${subject ? ` (${subject})` : ""}:\n\n${reply.body}`,
       },
     ],
     structuredContent: {
@@ -211,6 +222,8 @@ export type AgentSendInput = {
   idempotency_key?: string;
   /** Files to attach (send_message only): absolute, or relative to project_path. */
   attachments?: string[];
+  /** Earlier questions of the thread this message supersedes (`<message id>` or `<message id>/<key>`). */
+  supersedes?: string[];
   agent_session?: string;
   agent_name?: string;
   agent_host?: string;
@@ -251,7 +264,7 @@ export async function sendAgentMessage(
   project: InboxProject,
   input: AgentSendInput,
   guide?: InboxGuideRef,
-): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number }> {
+): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; superseded: number }> {
   const { store } = context;
   let attachments: InboxAttachment[] | undefined;
   if (input.attachments && input.attachments.length > 0) {
@@ -275,11 +288,14 @@ export async function sendAgentMessage(
     attachments,
     guide: guide ?? null,
     base_path: sendBasePath(input.project_path, project),
+    supersedes: input.supersedes ?? null,
   });
   const message = result.message;
   const landed = store.project(message.project_id)!;
   const questions = (message.questions ?? []).map((q) => ({ key: q.key, kind: q.kind, prompt: q.prompt }));
+  const superseded = store.supersededBy(message.id);
   return {
+    superseded: superseded.length,
     replayed: result.replayed,
     questions: questions.length,
     attachments: message.attachments?.length ?? 0,
@@ -292,6 +308,8 @@ export async function sendAgentMessage(
       project: { id: landed.id, name: landed.name, root: landed.root },
       questions,
       attachments: (message.attachments ?? []).map((a) => ({ id: a.id, name: a.name, kind: a.kind, path: a.path })),
+      /** The earlier questions this message superseded (`<message id>/<key>`). */
+      superseded,
       replayed: result.replayed,
       cursor: store.messageCursor(message.id) ?? store.cursor(),
       url: threadUrl(context.baseUrl(), message.thread_id),
@@ -331,7 +349,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         const sent = await sendAgentMessage(context, project, input);
         const asked =
           (sent.questions > 0 ? ` asking ${sent.questions} question${sent.questions === 1 ? "" : "s"}` : "") +
-          (sent.attachments > 0 ? ` with ${sent.attachments} attachment${sent.attachments === 1 ? "" : "s"}` : "");
+          (sent.attachments > 0 ? ` with ${sent.attachments} attachment${sent.attachments === 1 ? "" : "s"}` : "") +
+          (sent.superseded > 0 ? `, superseding ${sent.superseded} earlier question${sent.superseded === 1 ? "" : "s"}` : "");
         return ok(
           `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}). ${callerWakes(ctx) ? INBOX_REPLY_ARRIVES_TEXT : "Call wait_for_reply with this thread_id for the answer, or go on and read_thread later."}`,
           sent.structured,

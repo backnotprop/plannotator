@@ -87,7 +87,8 @@ type Op =
   | { op: "reply"; target: number; body: string }
   | { op: "pick"; target: number; choice: number }
   | { op: "personSend"; target: number; key: string; words: string }
-  | { op: "resolve"; target: number; resolved: boolean };
+  | { op: "resolve"; target: number; resolved: boolean }
+  | { op: "supersede"; target: number; whole: boolean; body: string };
 
 const opArb: fc.Arbitrary<Op> = fc.oneof(
   fc.record({ op: fc.constant("send" as const), root: fc.nat(2), body: bodyArb, key: fc.option(fc.constantFrom("a", "b", "c"), { nil: null }) }),
@@ -95,6 +96,8 @@ const opArb: fc.Arbitrary<Op> = fc.oneof(
   fc.record({ op: fc.constant("pick" as const), target: fc.nat(), choice: fc.nat(3) }),
   fc.record({ op: fc.constant("personSend" as const), target: fc.nat(), key: fc.constantFrom("s1", "s2"), words: fc.constantFrom("", "ok", "go ahead") }),
   fc.record({ op: fc.constant("resolve" as const), target: fc.nat(), resolved: fc.boolean() }),
+  // An agent replaces an earlier question (or a whole message's), replying in its thread.
+  fc.record({ op: fc.constant("supersede" as const), target: fc.nat(), whole: fc.boolean(), body: bodyArb }),
 );
 
 /** Run one op; expected refusals (InboxError) are part of the space and write nothing. */
@@ -152,6 +155,21 @@ function run(store: InboxStore, op: Op, messageIds: string[]): void {
       case "resolve": {
         const target = pick(op.target);
         if (target) store.resolveThread(target, op.resolved);
+        return;
+      }
+      case "supersede": {
+        const target = pick(op.target);
+        if (!target) return;
+        const message = store.message(target)!;
+        const first = store.questionsOf(target)[0];
+        const result = store.sendMessage({
+          project_id: message.project_id,
+          author: { kind: "agent", host: "test", session: "ses_x", name: null },
+          body: op.body,
+          reply_to: target,
+          supersedes: [op.whole || !first ? target : `${target}/${first.key}`],
+        });
+        messageIds.push(result.message.id);
         return;
       }
     }

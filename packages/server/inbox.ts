@@ -223,6 +223,10 @@ const ERROR_STATUS: Record<string, number> = {
   question_not_found: 404,
   question_revision_conflict: 409,
   question_already_sent: 409,
+  // Replaced questions: answering one the agent superseded, or superseding
+  // an id that names no open question of the thread.
+  question_superseded: 422,
+  invalid_supersedes: 422,
   thread_resolved: 409,
   idempotency_key_reused: 409,
   config_not_saved: 500,
@@ -650,7 +654,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     id: reply.id,
     thread_id: reply.thread_id,
     reply_to: reply.reply_to,
-    subject: store.message(reply.thread_id)?.subject ?? null,
+    subject: store.threadSubject(reply.thread_id),
     body: reply.body,
     url: threadPageUrl(baseUrl, reply.thread_id),
   });

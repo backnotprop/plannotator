@@ -11,6 +11,9 @@
  *   Stopped: <why>                the asker cannot go on until this is answered
  *   Holds up: <name>; <name>      the asker goes on; these pieces of work wait
  *
+ * A third, `Replaces: <message id>/<key>`, is read by core's parser itself
+ * (`ParsedQuestion.replaces`): it is never the prompt and never context.
+ *
  * Pure: no I/O, no clock unless passed in. Never throws on any input.
  */
 
@@ -47,6 +50,8 @@ export interface ParsedInboxQuestion {
   stopped: string | null;
   holds_up: string[];
   decision_on_answer: boolean;
+  /** The block's `Replaces:` tokens, as written (checked by the store). */
+  replaces: string[];
 }
 
 const STOPPED_RE = /^stopped\s*:\s*(.*)$/i;
@@ -95,6 +100,7 @@ export function parseInboxQuestionBlocks(markdown: string): ParsedInboxQuestion[
       },
       ...waitsOf(context),
       decision_on_answer: parsed.decisionOnAnswer === true,
+      replaces: parsed.replaces ? [...parsed.replaces] : [],
     });
   }
   return out;
@@ -126,11 +132,15 @@ function waitsOf(context: string): { stopped: string | null; holds_up: string[] 
   return { stopped, holds_up: holdsUp ?? [] };
 }
 
-/** Derived, never stored: closed when the thread is resolved, else open / picked / sent. */
+/**
+ * Derived, never stored: superseded when an agent replaced or withdrew it,
+ * else closed when the thread is resolved, else open / picked / sent.
+ */
 export function inboxQuestionState(
-  record: Pick<InboxQuestionRecord, "answer" | "revision" | "sent_revision">,
+  record: Pick<InboxQuestionRecord, "answer" | "revision" | "sent_revision" | "superseded_by">,
   threadResolved: boolean,
 ): InboxQuestionState {
+  if (record.superseded_by) return "superseded";
   if (threadResolved) return "closed";
   if (record.answer === null) return "open";
   if (record.revision > 0 && record.sent_revision === record.revision) return "sent";
@@ -178,7 +188,29 @@ export function toInboxQuestion(record: InboxQuestionRecord, threadResolved: boo
     message_id: record.message_id,
     decision_recording: inboxDecisionRecording(record),
     decision_draft: record.decision_draft ?? null,
+    superseded_by: record.superseded_by ? { message_id: record.superseded_by.message_id, key: record.superseded_by.key ?? null } : null,
   };
+}
+
+// ─────────────────────────────── Superseding ───────────────────────────────
+
+const SUPERSEDE_REF_RE = /^(msg_[0-9A-HJKMNP-TV-Z]{26})(?:\/(q-[0-9a-f]{8}(?:-\d{1,3})?))?$/;
+
+/**
+ * One id an agent supersedes with (send_message's `supersedes`, or a token of
+ * a `Replaces:` line): `<message id>` (every open question of that message)
+ * or `<message id>/<key>` (one). Null when it is neither.
+ */
+export function parseInboxSupersedeRef(value: unknown): { message_id: string; key: string | null } | null {
+  if (typeof value !== "string") return null;
+  const match = SUPERSEDE_REF_RE.exec(value.trim());
+  if (!match) return null;
+  return { message_id: match[1]!, key: match[2] ?? null };
+}
+
+/** A question that can still be superseded: one the person has not answered and sent. */
+export function isInboxQuestionSupersedable(state: InboxQuestionState): boolean {
+  return state === "open" || state === "picked";
 }
 
 /** Workspaces' row summary over a thread's questions (open ones only for the badges). */
@@ -206,7 +238,8 @@ export type InboxAnswerRefusal =
   | { code: "validation_error"; field: string; message: string }
   | { code: "question_not_found"; key: string }
   | { code: "question_revision_conflict"; key: string; current_revision: number }
-  | { code: "question_already_sent"; key: string };
+  | { code: "question_already_sent"; key: string }
+  | { code: "question_superseded"; key: string; superseded_by: { message_id: string; key: string | null } };
 
 /**
  * Plannotator's record checked against its question: the fail-closed parser
@@ -276,7 +309,12 @@ export function composeInboxReplyBody(input: {
 }): string {
   const count = input.sent.filter((a) => !isQuestionAnswerEmpty(a)).length;
   const sentence = count > 0 ? `Answered ${count} question${count === 1 ? "" : "s"}.` : "";
-  const items = [...input.questions].sort((a, b) => a.position - b.position).map((q, i) => exportItem(q, i + 1));
+  // A superseded question is neither answered nor "Unanswered": the agent
+  // withdrew it. The others keep their numbers ("Q2" stays the card's 2).
+  const items = [...input.questions]
+    .sort((a, b) => a.position - b.position)
+    .map((q, i) => (q.superseded_by ? null : exportItem(q, i + 1)))
+    .filter((item): item is QuestionExportItem => item !== null);
   const section = input.sent.length > 0 ? formatQuestionAnswersSection(items, [...input.sent, ...input.earlier]).trimEnd() : "";
   const words = input.words?.trim() ?? "";
   return [sentence, words, section].filter((part) => part !== "").join("\n\n");
