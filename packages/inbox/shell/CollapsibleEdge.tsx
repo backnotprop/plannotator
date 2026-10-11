@@ -29,24 +29,31 @@ const KEYBOARD_STEP = 10;
  * threshold-gated `onClick`), and the handle is a real keyboard target:
  * Enter/Space collapse, ArrowLeft/Right resize in 10px steps, Home/End to the
  * range ends, announced as a separator.
+ *
+ * Inbox addition: without `onCollapse` (the list column beside an open
+ * thread, which has nothing to collapse to) the edge only resizes: Enter and
+ * Space do nothing and the tooltip says "Drag to resize".
  */
 export function CollapsibleEdge({
 	onCollapse,
 	label,
+	controls,
 	isDragging,
 	resize,
 	children,
 }: {
-	onCollapse: () => void;
+	onCollapse?: () => void;
 	/** Accessible name for the focusable edge. */
 	label: string;
+	/** The id of the panel the edge resizes (aria-controls). */
+	controls?: string;
 	/** Mid-drag the tooltip is suppressed (the hint is for the idle edge). */
 	isDragging: boolean;
 	resize: EdgeKeyboardResize;
 	children: ReactNode;
 }) {
 	const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-		if (e.key === "Enter" || e.key === " ") {
+		if (onCollapse && (e.key === "Enter" || e.key === " ")) {
 			e.preventDefault();
 			onCollapse();
 			return;
@@ -75,6 +82,7 @@ export function CollapsibleEdge({
 							aria-valuemax={resize.max}
 							tabIndex={0}
 							aria-label={label}
+							aria-controls={controls}
 							onKeyDown={onKeyDown}
 							className="ib-edge"
 						/>
@@ -85,7 +93,9 @@ export function CollapsibleEdge({
 				{!isDragging && (
 					<Tooltip.Portal>
 						<Tooltip.Positioner side="bottom" sideOffset={14} className="ib-edge-tip-pos">
-							<Tooltip.Popup className="ib-edge-tip">Click to collapse, drag to resize</Tooltip.Popup>
+							<Tooltip.Popup className="ib-edge-tip">
+								{onCollapse ? "Click to collapse, drag to resize" : "Drag to resize"}
+							</Tooltip.Popup>
 						</Tooltip.Positioner>
 					</Tooltip.Portal>
 				)}

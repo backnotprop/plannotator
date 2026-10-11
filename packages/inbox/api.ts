@@ -184,6 +184,12 @@ export interface LiveSessionsModel {
   project: InboxProject;
   /** The thread's own writers first. */
   sessions: LiveSession[];
+  /**
+   * Asked for with `?asker=`: whether the session that asked is still there
+   * (with a 60 s grace, packages/server/inbox-sessions.ts). Absent from an
+   * older Inbox, which reads as live.
+   */
+  asker?: { session: string; live: boolean };
 }
 
 /** A paired phone as the window lists it (adr/implementation/inbox-mobile.md, 7.36). */
@@ -282,6 +288,8 @@ export const inboxApi = {
       questions: { key: string; revision: number }[];
       feedback?: string;
       annotation_ids?: string[];
+      /** Another live session takes the reply: the session that asked has ended. */
+      to?: { host: string; session: string };
     },
   ) => post<ReplyResult>(`/api/inbox/messages/${encodeURIComponent(messageId)}/reply`, input),
   /** The card's switch and its words on one question: `recording`, and `draft` on Done. */
@@ -337,7 +345,8 @@ export const inboxApi = {
     ),
   deleteThread: (threadId: string) => post<{ store: SettingsModel['store'] }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/delete`, {}),
   // Step 8: New message to a live session of the thread's project.
-  sessions: (threadId: string) => get<LiveSessionsModel>(`/api/inbox/threads/${encodeURIComponent(threadId)}/sessions`),
+  sessions: (threadId: string, asker?: string | null) =>
+    get<LiveSessionsModel>(`/api/inbox/threads/${encodeURIComponent(threadId)}/sessions${asker ? `?asker=${encodeURIComponent(asker)}` : ''}`),
   newMessage: (threadId: string, input: { session: string; body: string; idempotency_key: string }) =>
     post<{ message: InboxMessage; replayed: boolean }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/message`, input),
   // Phones: pairing, the paired devices, the tailnet and Wi-Fi switches (packages/server/inbox-devices.ts).

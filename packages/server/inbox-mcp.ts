@@ -107,6 +107,13 @@ export interface InboxMcpContext {
   recordAttachments?: (paths: readonly string[], project: InboxProject, base: string) => Promise<InboxAttachment[]>;
   /** wait_for_reply's default hold in ms (tests pass a shorter one only through timeout_seconds). */
   waitDefaultMs?: number;
+  /**
+   * Presence from MCP activity, for "the session that asked has ended": a
+   * tool call naming an `agent_session` counts as seen, and an open
+   * wait_for_reply holds the session present while it waits
+   * (packages/server/inbox-sessions.ts).
+   */
+  presence?: { seen: (session: string) => void; hold: (session: string) => () => void };
 }
 
 export type ToolResult = {
@@ -264,6 +271,7 @@ export async function sendAgentMessage(
   project: InboxProject,
   input: AgentSendInput,
   guide?: InboxGuideRef,
+  wakes = false,
 ): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; superseded: number }> {
   const { store } = context;
   let attachments: InboxAttachment[] | undefined;
@@ -289,6 +297,7 @@ export async function sendAgentMessage(
     guide: guide ?? null,
     base_path: sendBasePath(input.project_path, project),
     supersedes: input.supersedes ?? null,
+    ...(wakes ? { wakes: true } : {}),
   });
   const message = result.message;
   const landed = store.project(message.project_id)!;
@@ -346,7 +355,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
     async (input, ctx) =>
       guarded(async () => {
         const project = await sendProject(context, input);
-        const sent = await sendAgentMessage(context, project, input);
+        const sent = await sendAgentMessage(context, project, input, undefined, callerWakes(ctx));
         const asked =
           (sent.questions > 0 ? ` asking ${sent.questions} question${sent.questions === 1 ? "" : "s"}` : "") +
           (sent.attachments > 0 ? ` with ${sent.attachments} attachment${sent.attachments === 1 ? "" : "s"}` : "") +
@@ -447,82 +456,89 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
     },
     async (input, ctx) =>
       guarded(async () => {
-        const single = threadOf(store, input);
-        let threadIds: string[];
-        if (single) {
-          threadIds = [single];
-        } else {
-          const session = input.agent_session?.trim();
-          if (!session) throw new InboxError("validation_error", "thread_id: required (or agent_session, to wait on every thread you asked).");
-          const projectId = input.project_path ? (await context.resolveProject(input.project_path)).id : null;
-          threadIds = store
-            .listRows({ projectId, session })
-            .filter((t) => t.resolved_at === null)
-            .map((t) => t.thread_id);
-        }
-        const caller = input.agent_session?.trim() || null;
-        const thresholds = new Map(threadIds.map((id) => [id, input.cursor ?? lastAgentCursor(store, id, caller)]));
-        // A New message (step 8) belongs to the session the person picked: it
-        // never answers another session's wait.
-        const forCaller = (message: InboxMessage) => !message.to || message.to.session === caller;
-
-        const findExisting = (): InboxMessage | null => {
-          let best: { message: InboxMessage; seq: number } | null = null;
-          for (const [threadId, threshold] of thresholds) {
-            for (const message of store.thread(threadId)?.messages ?? []) {
-              if (message.author.kind !== "person" || !forCaller(message)) continue;
-              const seq = store.messageCursor(message.id) ?? 0;
-              if (seq > threshold && (!best || seq < best.seq)) best = { message, seq };
-            }
+        // An open wait is presence: the session that asked is not "ended" while it waits here.
+        const holder = input.agent_session?.trim();
+        const release = holder ? context.presence?.hold(holder) : undefined;
+        try {
+          const single = threadOf(store, input);
+          let threadIds: string[];
+          if (single) {
+            threadIds = [single];
+          } else {
+            const session = input.agent_session?.trim();
+            if (!session) throw new InboxError("validation_error", "thread_id: required (or agent_session, to wait on every thread you asked).");
+            const projectId = input.project_path ? (await context.resolveProject(input.project_path)).id : null;
+            threadIds = store
+              .listRows({ projectId, session })
+              .filter((t) => t.resolved_at === null)
+              .map((t) => t.thread_id);
           }
-          return best?.message ?? null;
-        };
+          const caller = input.agent_session?.trim() || null;
+          const thresholds = new Map(threadIds.map((id) => [id, input.cursor ?? lastAgentCursor(store, id, caller)]));
+          // A New message (step 8) belongs to the session the person picked: it
+          // never answers another session's wait.
+          const forCaller = (message: InboxMessage) => !message.to || message.to.session === caller;
 
-        const existing = findExisting();
-        if (existing) return replyResult(store, existing, context.baseUrl());
-        // A resolved thread takes no reply: say so now instead of holding the call.
-        if (single && store.message(single)?.resolved_at != null) {
-          return ok(`Thread ${single} is resolved; no reply will come.`, { status: "resolved", thread_id: single, cursor: store.cursor() });
-        }
-
-        const waitMs = input.timeout_seconds ? input.timeout_seconds * 1000 : (context.waitDefaultMs ?? INBOX_WAIT_DEFAULT_MS);
-        const signal: AbortSignal | undefined = ctx?.mcpReq?.signal;
-        const outcome = await new Promise<{ kind: "reply"; message: InboxMessage } | { kind: "resolved"; threadId: string } | { kind: "timeout" }>(
-          (resolve) => {
-            let done = false;
-            const finish = (value: Parameters<typeof resolve>[0]) => {
-              if (done) return;
-              done = true;
-              clearTimeout(timer);
-              unsubscribe();
-              signal?.removeEventListener("abort", onAbort);
-              resolve(value);
-            };
-            const onAbort = () => finish({ kind: "timeout" });
-            const timer = setTimeout(() => finish({ kind: "timeout" }), waitMs);
-            const unsubscribe = store.subscribe((line: InboxLine) => {
-              if (line.kind !== "message") return;
-              const message = line.record;
-              const threshold = thresholds.get(message.thread_id);
-              if (threshold === undefined) return;
-              if (message.author.kind === "person" && forCaller(message) && line.seq > threshold && store.messageCursor(message.id) === line.seq) {
-                finish({ kind: "reply", message });
-              } else if (message.id === message.thread_id && message.resolved_at !== null && threadIds.length === 1) {
-                finish({ kind: "resolved", threadId: message.id });
+          const findExisting = (): InboxMessage | null => {
+            let best: { message: InboxMessage; seq: number } | null = null;
+            for (const [threadId, threshold] of thresholds) {
+              for (const message of store.thread(threadId)?.messages ?? []) {
+                if (message.author.kind !== "person" || !forCaller(message)) continue;
+                const seq = store.messageCursor(message.id) ?? 0;
+                if (seq > threshold && (!best || seq < best.seq)) best = { message, seq };
               }
-            });
-            signal?.addEventListener("abort", onAbort);
-          },
-        );
-        if (outcome.kind === "reply") return replyResult(store, outcome.message, context.baseUrl());
-        const cursor = store.cursor();
-        if (outcome.kind === "resolved") {
-          return ok(`The person resolved thread ${outcome.threadId} without a reply.`, { status: "resolved", thread_id: outcome.threadId, cursor });
+            }
+            return best?.message ?? null;
+          };
+
+          const existing = findExisting();
+          if (existing) return replyResult(store, existing, context.baseUrl());
+          // A resolved thread takes no reply: say so now instead of holding the call.
+          if (single && store.message(single)?.resolved_at != null) {
+            return ok(`Thread ${single} is resolved; no reply will come.`, { status: "resolved", thread_id: single, cursor: store.cursor() });
+          }
+
+          const waitMs = input.timeout_seconds ? input.timeout_seconds * 1000 : (context.waitDefaultMs ?? INBOX_WAIT_DEFAULT_MS);
+          const signal: AbortSignal | undefined = ctx?.mcpReq?.signal;
+          const outcome = await new Promise<{ kind: "reply"; message: InboxMessage } | { kind: "resolved"; threadId: string } | { kind: "timeout" }>(
+            (resolve) => {
+              let done = false;
+              const finish = (value: Parameters<typeof resolve>[0]) => {
+                if (done) return;
+                done = true;
+                clearTimeout(timer);
+                unsubscribe();
+                signal?.removeEventListener("abort", onAbort);
+                resolve(value);
+              };
+              const onAbort = () => finish({ kind: "timeout" });
+              const timer = setTimeout(() => finish({ kind: "timeout" }), waitMs);
+              const unsubscribe = store.subscribe((line: InboxLine) => {
+                if (line.kind !== "message") return;
+                const message = line.record;
+                const threshold = thresholds.get(message.thread_id);
+                if (threshold === undefined) return;
+                if (message.author.kind === "person" && forCaller(message) && line.seq > threshold && store.messageCursor(message.id) === line.seq) {
+                  finish({ kind: "reply", message });
+                } else if (message.id === message.thread_id && message.resolved_at !== null && threadIds.length === 1) {
+                  finish({ kind: "resolved", threadId: message.id });
+                }
+              });
+              signal?.addEventListener("abort", onAbort);
+            },
+          );
+          if (outcome.kind === "reply") return replyResult(store, outcome.message, context.baseUrl());
+          const cursor = store.cursor();
+          if (outcome.kind === "resolved") {
+            return ok(`The person resolved thread ${outcome.threadId} without a reply.`, { status: "resolved", thread_id: outcome.threadId, cursor });
+          }
+          return ok(
+            `No reply yet. Call wait_for_reply again with cursor ${cursor} to keep waiting, or go on and check later.`,
+            { status: "waiting", cursor, thread_ids: threadIds },
+          );
+        } finally {
+          release?.();
         }
-        return ok(
-          `No reply yet. Call wait_for_reply again with cursor ${cursor} to keep waiting, or go on and check later.`,
-          { status: "waiting", cursor, thread_ids: threadIds },
-        );
       }),
   );
 

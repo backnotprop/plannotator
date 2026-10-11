@@ -3,7 +3,7 @@
 // Port: the width persists through Plannotator's cookie storage instead of
 // localStorage, as every Plannotator setting does (a session's port changes).
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { storage } from "@plannotator/ui/utils/storage";
 
 interface UseResizablePanelOptions {
@@ -50,6 +50,14 @@ interface UseResizablePanelOptions {
 	 * resize is re-clamped by the next interaction, not reactively.
 	 */
 	reserveViewport?: number;
+	/**
+	 * Inbox addition (the list column beside an open thread): with
+	 * reserveViewport, measure the room against this element's width instead
+	 * of the window's, because the panel shares it with the sidebar. The
+	 * announced maximum follows the element's resizes. An element with no
+	 * layout yet (width 0) falls back to the window.
+	 */
+	container?: () => HTMLElement | null | undefined;
 }
 
 export interface ResizeHandleProps {
@@ -83,20 +91,23 @@ export function useResizablePanel({
 	onClick,
 	clickThreshold = 4,
 	reserveViewport,
+	container,
 }: UseResizablePanelOptions) {
 	// The live maximum: static unless reserveViewport asks for the
 	// main-content floor. Computed at call time (never memoized) so a drag
 	// after a window resize clamps against the current viewport.
-	const effectiveMax = useCallback(
-		() =>
-			reserveViewport === undefined
-				? maxWidth
-				: Math.max(minWidth, Math.min(maxWidth, window.innerWidth - reserveViewport)),
-		[maxWidth, minWidth, reserveViewport],
-	);
+	const effectiveMax = useCallback(() => {
+		if (reserveViewport === undefined) return maxWidth;
+		const room = container?.()?.clientWidth || window.innerWidth;
+		return Math.max(minWidth, Math.min(maxWidth, room - reserveViewport));
+	}, [maxWidth, minWidth, reserveViewport, container]);
 
+	// With a container the room cannot be measured yet (the first render
+	// comes before layout), so the restore keeps the stored width under the
+	// design max; the consumer draws it clamped to the room (min(width,
+	// maxWidth)), and a drag or a key press starts from that drawn width.
 	const [width, setWidth] = useState(
-		() => getStoredWidth(storageKey, minWidth, effectiveMax()) ?? defaultWidth,
+		() => getStoredWidth(storageKey, minWidth, container ? maxWidth : effectiveMax()) ?? defaultWidth,
 	);
 	const [isDragging, setIsDragging] = useState(false);
 
@@ -106,14 +117,22 @@ export function useResizablePanel({
 	// that same bound — a static 520 on a 700px window would promise a range
 	// End cannot reach. Recomputed on window resize; without reserveViewport
 	// the design max is already the operable max and no listener mounts.
+	// A layout effect: the room is measured before the first paint, so the
+	// announced range is right from the first frame.
 	const [liveMax, setLiveMax] = useState(effectiveMax);
-	useEffect(() => {
+	useLayoutEffect(() => {
 		if (reserveViewport === undefined) return;
 		const onResize = () => setLiveMax(effectiveMax());
 		onResize();
 		window.addEventListener("resize", onResize);
-		return () => window.removeEventListener("resize", onResize);
-	}, [effectiveMax, reserveViewport]);
+		const el = container?.();
+		const observer = el && typeof ResizeObserver !== "undefined" ? new ResizeObserver(onResize) : null;
+		if (el) observer?.observe(el);
+		return () => {
+			window.removeEventListener("resize", onResize);
+			observer?.disconnect();
+		};
+	}, [effectiveMax, reserveViewport, container]);
 
 	const widthRef = useRef(width);
 	const startXRef = useRef(0);
@@ -194,7 +213,10 @@ export function useResizablePanel({
 			if (e.button !== 0) return;
 			e.preventDefault();
 			startXRef.current = e.clientX;
-			startWidthRef.current = widthRef.current;
+			// A width restored or kept from a wider window is drawn clamped to
+			// the room there is now: the drag starts from the drawn width, so
+			// the first pixels of travel move the edge.
+			startWidthRef.current = Math.min(effectiveMax(), widthRef.current);
 			latestXRef.current = e.clientX;
 			closedRef.current = false;
 			movedRef.current = false;
@@ -249,7 +271,7 @@ export function useResizablePanel({
 			window.addEventListener("pointerup", onUp);
 			window.addEventListener("pointercancel", onUp);
 		},
-		[flush, storageKey, clickThreshold],
+		[flush, storageKey, clickThreshold, effectiveMax],
 	);
 
 	/**

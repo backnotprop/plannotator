@@ -9,7 +9,7 @@
 // Workspaces runs 275 in 240 to 520); the page frame, search, assistant and
 // the rest of AppShell stay in Workspaces.
 
-import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useId, useRef, type CSSProperties, type ReactNode } from "react";
 import { useMotionValue, type MotionValue } from "motion/react";
 
 import { CollapsibleEdge, ResizeHandle } from "./CollapsibleEdge";
@@ -60,6 +60,8 @@ export function SidebarShell({
 		apply: (w) => widthApplyRef.current(w),
 	});
 	const sidebarWidth = useMotionValue(sidebarResize.width);
+	// The docked panel's id, for the edge's aria-controls.
+	const panelId = useId();
 	useEffect(() => {
 		widthApplyRef.current = (w) => sidebarWidth.set(w);
 	});
@@ -76,9 +78,9 @@ export function SidebarShell({
 			className={className}
 			style={{ "--sidebar-width": `${sidebarResize.width}px` } as CSSProperties}
 		>
-			<Sidebar>{navigation}</Sidebar>
+			<Sidebar id={panelId}>{navigation}</Sidebar>
 			<SidebarPeek>{navigation}</SidebarPeek>
-			<SidebarEdge sidebarResize={sidebarResize} sidebarWidth={sidebarWidth} />
+			<SidebarEdge sidebarResize={sidebarResize} sidebarWidth={sidebarWidth} panelId={panelId} />
 			{children}
 		</SidebarProvider>
 	);
@@ -87,9 +89,11 @@ export function SidebarShell({
 function SidebarEdge({
 	sidebarResize,
 	sidebarWidth,
+	panelId,
 }: {
 	sidebarResize: ReturnType<typeof useResizablePanel>;
 	sidebarWidth: MotionValue<number>;
+	panelId: string;
 }) {
 	const { open, setOpen, isMobile } = useSidebar();
 	if (!open || isMobile) return null;
@@ -101,6 +105,7 @@ function SidebarEdge({
 			<CollapsibleEdge
 				onCollapse={() => setOpen(false)}
 				label="Sidebar width"
+				controls={panelId}
 				isDragging={sidebarResize.isDragging}
 				resize={{
 					value: sidebarResize.width,
