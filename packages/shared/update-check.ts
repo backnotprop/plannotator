@@ -4,7 +4,7 @@
  * the compiled CLI and of Pi, `plannotator update`, the terminal hint) and by
  * background auto-update (packages/server/auto-update.ts).
  *
- * The machine asks GitHub, never the browser: at most once per 24h per data
+ * The machine asks GitHub: at most once per 24h per data
  * dir, and after a failed check (offline, 403/429, a proxy) no sooner than 6h.
  * The answer is cached in `update-state.json` beside auto-update's own state,
  * and the release notes in `update-notes/<version>.json`, so a check made by
