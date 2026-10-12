@@ -662,6 +662,13 @@ const stateOpArb = stateOpArbOf(
 const traceOpArb = stateOpArbOf(fc.constantFrom(...Object.values(STATE_BODIES)), false);
 
 type QState = "open" | "picked" | "sent" | "closed" | "superseded";
+/**
+ * Which look rule a row is derived under. "spec": the intended rule, the
+ * Inbox's notes are neither the person's reply nor a look. "today": the
+ * store's rule, both notes count as both. The store must match "today"
+ * exactly; where "spec" differs, that difference is KNOWN VIOLATION A.
+ */
+type LookRule = "spec" | "today";
 type ModelAnswer = null | "pick" | "skip";
 
 interface ModelQuestion {
@@ -692,12 +699,15 @@ interface ModelMessage {
 interface ModelThread {
   id: string;
   messages: ModelMessage[];
-  /** The latest agent message the person looked at (0: none). */
+  /** The latest agent message the person looked at (0: none), under the intended rule. */
   seen: number;
+  /** The same under today's rule (the store's): notes count as a look, so a look may write less. */
+  seenToday: number;
   /** The step of the Mark read that still stands, or null. */
   read: number | null;
-  /** The look before that Mark read, which its Undo puts back. */
+  /** The look before that Mark read, which its Undo puts back (each rule's own). */
   seenBeforeRead: number | undefined;
+  seenBeforeReadToday: number | undefined;
   resolved: boolean;
   /** The archive line: the step that archived it (resolved only). */
   archive: number;
@@ -760,15 +770,15 @@ class ThreadStateModel {
   }
 
   /**
-   * Where "new since you looked" starts: the last look, or the person's
-   * latest real reply. The intended rule, written independently of the
-   * store: the Inbox's own notes (set-aside, reopened) are neither the
-   * person's reply nor a look. The store counts them as both; where that
-   * changes a row, `checkThreadState` reports it as KNOWN VIOLATION A.
+   * Where "new since you looked" starts: the last look, or the latest person
+   * message. Under "spec" only the person's real replies count; under
+   * "today" (the store) the Inbox's notes count too.
    */
-  private lookTick(t: ModelThread): number {
-    let look = t.seen;
-    for (const m of t.messages) if (m.author === "person" && m.note === null) look = Math.max(look, m.tick);
+  private lookTick(t: ModelThread, rule: LookRule = "spec"): number {
+    let look = rule === "spec" ? t.seen : t.seenToday;
+    for (const m of t.messages) {
+      if (m.author === "person" && (rule === "today" || m.note === null)) look = Math.max(look, m.tick);
+    }
     return look;
   }
 
@@ -777,8 +787,8 @@ class ThreadStateModel {
     return t.messages.some((m) => m.note !== null);
   }
 
-  unseen(t: ModelThread): number {
-    const look = this.lookTick(t);
+  unseen(t: ModelThread, rule: LookRule = "spec"): number {
+    const look = this.lookTick(t, rule);
     return t.messages.filter((m) => m.author === "agent" && m.tick > look).length;
   }
 
@@ -799,9 +809,9 @@ class ThreadStateModel {
     return t.messages.every((m) => m.tick < t.read! || (m.author === "person" && m.note === "set_aside"));
   }
 
-  back(t: ModelThread): boolean {
+  back(t: ModelThread, rule: LookRule = "spec"): boolean {
     if (!this.agentAfter(t)) return false;
-    const look = this.lookTick(t);
+    const look = this.lookTick(t, rule);
     const c = this.counts(t);
     return (
       t.messages.some((m) => m.author === "agent" && m.tick > t.archive && m.tick > look) ||
@@ -811,21 +821,21 @@ class ThreadStateModel {
     );
   }
 
-  archived(t: ModelThread): boolean {
-    return t.resolved && !this.back(t);
+  archived(t: ModelThread, rule: LookRule = "spec"): boolean {
+    return t.resolved && !this.back(t, rule);
   }
 
   /** The section, strongest reason first (the doc's table "Sections"). */
-  section(t: ModelThread): InboxSectionId {
-    if (this.archived(t)) return "quiet";
+  section(t: ModelThread, rule: LookRule = "spec"): InboxSectionId {
+    if (this.archived(t, rule)) return "quiet";
     if (this.readHolds(t)) return "quiet";
     const c = this.counts(t);
     if (c.open > 0) return c.stopped ? "stopped" : c.holds ? "holding" : "waiting";
     if (c.picked > 0) return "new";
-    // The person's reply is the last message, the Inbox's notes aside.
-    const last = [...t.messages].reverse().find((m) => m.note === null)!;
+    // The person's reply is the last message: the Inbox's notes aside (spec), or any (today).
+    const last = rule === "today" ? t.messages.at(-1)! : [...t.messages].reverse().find((m) => m.note === null)!;
     if (last.author === "person" && t.checked < last.tick) return "sent";
-    if (this.unseen(t) > 0) return "new";
+    if (this.unseen(t, rule) > 0) return "new";
     return "quiet";
   }
 
@@ -916,7 +926,7 @@ class ThreadStateModel {
       if (!thread || thread.resolved) {
         // Resolved means done: the next message starts a new thread.
         const id = this.created[this.used]!;
-        thread = { id, messages: [], seen: 0, read: null, seenBeforeRead: undefined, resolved: false, archive: 0, checked: 0, told: new Set() };
+        thread = { id, messages: [], seen: 0, seenToday: 0, read: null, seenBeforeRead: undefined, seenBeforeReadToday: undefined, resolved: false, archive: 0, checked: 0, told: new Set() };
         this.threads.set(id, thread);
         if (route) this.sessionRoots.set(route, id);
       }
@@ -984,6 +994,7 @@ class ThreadStateModel {
           if (thread.read !== null && thread.read > thread.archive) {
             thread.read = null;
             thread.seenBeforeRead = undefined;
+            thread.seenBeforeReadToday = undefined;
           }
           thread.resolved = false;
           thread.archive = 0;
@@ -993,7 +1004,8 @@ class ThreadStateModel {
         // A look covers every agent message so far.
         let latestAgent = 0;
         for (const m of thread.messages) if (m.author === "agent") latestAgent = Math.max(latestAgent, m.tick);
-        if (latestAgent > this.lookTick(thread)) thread.seen = latestAgent;
+        if (latestAgent > this.lookTick(thread, "spec")) thread.seen = latestAgent;
+        if (latestAgent > this.lookTick(thread, "today")) thread.seenToday = latestAgent;
         return "ok";
       }
       case "read": {
@@ -1008,8 +1020,10 @@ class ThreadStateModel {
             let latestAgent = 0;
             for (const m of thread.messages) if (m.author === "agent") latestAgent = Math.max(latestAgent, m.tick);
             thread.seenBeforeRead = thread.seen;
+            thread.seenBeforeReadToday = thread.seenToday;
             thread.read = tick;
             thread.seen = Math.max(thread.seen, latestAgent);
+            thread.seenToday = Math.max(thread.seenToday, latestAgent);
             for (const q of waiting) {
               q.setAside = { answer: q.answer, sent: q.sent, by: tick };
               q.answer = "skip";
@@ -1024,9 +1038,13 @@ class ThreadStateModel {
         const earlier = closed.filter((q) => q.setAside!.by !== thread.read).length;
         if (earlier > 0) this.tags.push({ kind: "C", threadId: thread.id, earlier });
         if (thread.read !== null) {
-          if (this.readHolds(thread) && thread.seenBeforeRead !== undefined) thread.seen = thread.seenBeforeRead;
+          if (this.readHolds(thread)) {
+            if (thread.seenBeforeRead !== undefined) thread.seen = thread.seenBeforeRead;
+            if (thread.seenBeforeReadToday !== undefined) thread.seenToday = thread.seenBeforeReadToday;
+          }
           thread.read = null;
           thread.seenBeforeRead = undefined;
+          thread.seenBeforeReadToday = undefined;
         }
         const reopened = new Map<ModelMessage, ModelQuestion[]>();
         for (const m of live) {
@@ -1102,8 +1120,8 @@ interface StateWorld {
   timeOf: Map<number, number>;
   /** The last successful Mark read, for the Mark read then Undo check. */
   lastRead: { threadId: string; before: ReturnType<typeof readSnapshot> } | null;
-  /** Rows the tie-break ordered (equal `last_at` in a section, or equal `resolved_at` in the archived list). */
-  ties: number;
+  /** Rows the tie-break ordered: equal `last_at` in a section, equal `resolved_at` in the archived list. */
+  ties: { sections: number; archived: number };
 }
 
 function stateWorld(): StateWorld {
@@ -1118,7 +1136,7 @@ function stateWorld(): StateWorld {
     tick: 0,
     timeOf: new Map(),
     lastRead: null,
-    ties: 0,
+    ties: { sections: 0, archived: 0 },
   };
 }
 
@@ -1137,9 +1155,14 @@ function readSnapshot(world: StateWorld, threadId: string) {
 const LOOK_FIELDS = ["section", "unseen", "back", "archived"] as const;
 
 /**
- * Every row signature of KNOWN VIOLATION A the generated runs may meet: the
- * section the rule wants > the store's, and how `unseen` moved. Each has a
- * `test.failing` below. A new one fails the run: a variant nobody has looked at.
+ * Every shape of KNOWN VIOLATION A the generated runs meet: the section the
+ * intended rule gives > the one today's rule gives (Stopped, Holding and
+ * Waiting merged as `asks`), and how `unseen` moved. This only classifies the
+ * difference between the model's two rules; the store itself is held to
+ * today's rule exactly. Each shape has a `test.failing` case below
+ * (`asks>asks unseen-` has two: a new question before the note, and a late
+ * Undo's reopened note). A new shape fails the run: a variant nobody has
+ * looked at.
  */
 const KNOWN_A_SIGNATURES = new Set(["new>sent unseen-", "asks>asks unseen-", "new>quiet unseen-", "quiet>sent", "new>new unseen-", "quiet>quiet unseen-"]);
 const seenSignatures = new Set<string>();
@@ -1173,7 +1196,7 @@ function checkThreadState(world: StateWorld): StepViolation[] {
       for (let i = 1; i < section.threads.length; i++) {
         const a = section.threads[i - 1]!;
         const b = section.threads[i]!;
-        if (a.last_at === b.last_at) world.ties += 1;
+        if (a.last_at === b.last_at) world.ties.sections += 1;
         expect(a.last_at > b.last_at || (a.last_at === b.last_at && a.thread_id < b.thread_id)).toBe(true);
       }
     }
@@ -1185,13 +1208,24 @@ function checkThreadState(world: StateWorld): StepViolation[] {
   for (let i = 1; i < views.archived.length; i++) {
     const a = views.archived[i - 1]!;
     const b = views.archived[i]!;
-    if (a.resolved_at === b.resolved_at) world.ties += 1;
+    if (a.resolved_at === b.resolved_at) world.ties.archived += 1;
     expect(a.resolved_at! > b.resolved_at! || (a.resolved_at === b.resolved_at && a.thread_id < b.thread_id)).toBe(true);
   }
   for (const row of rows) {
     const t = model.threads.get(row.thread_id)!;
-    // The model and the store agree on the row...
-    const today = {
+    // The store matches the model under today's rule exactly, on every field...
+    const derive = (rule: LookRule) => ({
+      section: model.section(t, rule),
+      archived: model.archived(t, rule),
+      read: model.readHolds(t),
+      back: model.back(t, rule),
+      after: model.agentAfter(t),
+      unseen: model.unseen(t, rule),
+      last_at: new Date(world.timeOf.get(t.messages.at(-1)!.tick)!).toISOString(),
+      messages: t.messages.length,
+    });
+    const today = derive("today");
+    expect({
       section: row.section,
       archived: inboxRowArchived(row),
       read: (row.read_at ?? null) !== null,
@@ -1200,23 +1234,13 @@ function checkThreadState(world: StateWorld): StepViolation[] {
       unseen: row.unseen,
       last_at: row.last_at,
       messages: row.message_count,
-    };
-    const spec = {
-      section: model.section(t),
-      archived: model.archived(t),
-      read: model.readHolds(t),
-      back: model.back(t),
-      after: model.agentAfter(t),
-      unseen: model.unseen(t),
-      last_at: new Date(world.timeOf.get(t.messages.at(-1)!.tick)!).toISOString(),
-      messages: t.messages.length,
-    };
+    }).toEqual(today);
+    // ...and where the intended rule gives another row, that difference is
+    // KNOWN VIOLATION A: recorded, and classified by its shape. It can only
+    // come from a note, and only in the look and what follows from it.
+    const spec = derive("spec");
     const differs = (Object.keys(spec) as (keyof typeof spec)[]).filter((k) => spec[k] !== today[k]);
     if (differs.length > 0) {
-      // ...except where the store counts its own notes as the person's reply
-      // and as a look (KNOWN VIOLATION A): only on a thread holding a note,
-      // only in the look and what follows from it, and only in a shape a
-      // known-violation test pins.
       expect(model.hasNote(t)).toBe(true);
       for (const k of differs) expect(LOOK_FIELDS as readonly string[]).toContain(k);
       const signature = violationASignature(spec, today);
@@ -1345,20 +1369,40 @@ const rootIndex = (world: StateWorld, threadId: string) => world.ids.indexOf(thr
 describe("the thread-state model", () => {
   // Deterministic: the seeds are fixed, so a failure names a seed and a path to rerun.
   test("generated sequences: the store agrees with the model, and every invariant holds after every step", () => {
-    let ties = 0;
+    const ties = { sections: 0, archived: 0 };
     fc.assert(
       // About one step in four shares the previous step's clock time, so `last_at` and `resolved_at` tie.
       fc.property(fc.array(fc.tuple(stateOpArb, fc.nat(3)), { minLength: 15, maxLength: 45, size: "max" }), (steps) => {
         const world = stateWorld();
         for (const [op, roll] of steps) stateStep(world, op, roll === 0);
-        ties += world.ties;
+        ties.sections += world.ties.sections;
+        ties.archived += world.ties.archived;
       }),
       { numRuns: 300, seed: 20261012 },
     );
-    // The sort's tie-break on the thread id was exercised, not only defined.
-    expect(ties).toBeGreaterThan(0);
+    // The sections' tie-break on the thread id was exercised, not only defined.
+    expect(ties.sections).toBeGreaterThan(0);
     // Every shape of KNOWN VIOLATION A the runs may meet was met (a fix that removes one updates the list).
     expect([...seenSignatures].sort()).toEqual([...KNOWN_A_SIGNATURES].sort());
+  });
+
+  test("the archived list breaks ties on the thread id: every open thread archived in one clock tick", () => {
+    let ties = 0;
+    fc.assert(
+      fc.property(fc.array(stateOpArb, { minLength: 10, maxLength: 30, size: "max" }), (ops) => {
+        const world = stateWorld();
+        for (const op of ops) stateStep(world, op);
+        let first = true;
+        for (const threadId of [...world.model.threads.keys()]) {
+          if (world.store.message(threadId)!.resolved_at !== null) continue;
+          stateStep(world, { op: "resolve", target: rootIndex(world, threadId), resolved: true }, !first);
+          first = false;
+        }
+        ties += world.ties.archived;
+      }),
+      { numRuns: 60, seed: 20261015 },
+    );
+    expect(ties).toBeGreaterThan(0);
   });
 
   test("Mark read then Undo, on every thread after a generated history, gives the thread back exactly as it was", () => {
