@@ -1237,6 +1237,8 @@ pre code.pn-code[data-keep-layout] {
   .ib-nav { height: 44px; font-size: 15.5px; flex: none; }
   .ib-setrow > .ib-nav { padding-right: 50px; }
   .pn-inbox .ib-theme-tg { width: 40px; height: 40px; right: 2px; border-radius: 8px; }
+  /* drawn at 40 px, hit at 44 px (the row's height) */
+  .pn-inbox .ib-theme-tg::after { content: ""; position: absolute; inset: -2px; }
   .ib-theme-tg .ib-ic { width: 18px; height: 18px; }
   .ib-seg-o { height: 40px; }
   /* a phone on its side is about 400 px tall: the projects scroll, the rest keeps its height */
