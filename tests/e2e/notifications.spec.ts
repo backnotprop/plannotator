@@ -23,7 +23,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { createServer, type Server } from 'node:net';
 import { join, resolve } from 'node:path';
 import { DEMO_MESSAGES, SimAgent, scratchProject } from '../../scripts/inbox-sim';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { inboxScratch, rememberInboxOf, removeInboxScratch, stopScratchInbox } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -111,7 +111,7 @@ function startInbox(): string {
 /** Stop the Inbox, hold its port with something else, start it again: it comes up on another port (another origin). */
 async function moveInbox(): Promise<string> {
   const before = registry();
-  process.kill(before.pid, 'SIGTERM');
+  await stopScratchInbox(world.dataDir);
   await expect
     .poll(async () => {
       try {

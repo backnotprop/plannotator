@@ -24,12 +24,12 @@ beforeAll(() => {
 afterAll(() => {
   removeStubbedHtml(stubs);
 });
-afterEach(() => {
+afterEach(async () => {
   for (const key of ["PLANNOTATOR_DATA_DIR", "PLANNOTATOR_INBOX_TOOL", "PLANNOTATOR_BIN"]) {
     if (saved[key] === undefined) delete process.env[key];
     else process.env[key] = saved[key];
   }
-  for (const w of worlds.splice(0)) destroyInboxWorld(w);
+  for (const w of worlds.splice(0)) await destroyInboxWorld(w);
 });
 
 async function loadPlugin(w: InboxWorld): Promise<Record<string, any>> {

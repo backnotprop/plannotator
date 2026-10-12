@@ -21,24 +21,18 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 
 const entry = resolve(import.meta.dir, "index.ts");
-const distDir = resolve(import.meta.dir, "../dist");
 let stubbedDist: string[] = [];
 const tempDirs: string[] = [];
 
 beforeAll(() => {
-  stubbedDist = ["index.html", "review.html", "inbox.html"]
-    .map((name) => join(distDir, name))
-    .filter((path) => !existsSync(path));
-  if (stubbedDist.length > 0) {
-    mkdirSync(distDir, { recursive: true });
-    for (const path of stubbedDist) writeFileSync(path, "<!doctype html><title>test stub</title>");
-  }
+  stubbedDist = stubHookDistHtml();
 });
 
 afterAll(() => {
-  for (const path of stubbedDist) rmSync(path, { force: true });
+  removeStubbedHtml(stubbedDist);
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 

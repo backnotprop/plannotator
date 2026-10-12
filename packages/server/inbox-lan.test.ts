@@ -25,7 +25,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createInboxWorld, destroyInboxWorld, registry, startInbox, stubBuiltHtml, type InboxWorld } from "../../tests/helpers/inbox-world";
+import { createInboxWorld, destroyInboxWorld, registry, removeStubbedHtml, signalInbox, startInbox, stubBuiltHtml, type InboxWorld } from "../../tests/helpers/inbox-world";
 import { PinMismatchError, pinnedRequest } from "../../tests/helpers/pinned-phone";
 import { startInboxServer } from "./inbox";
 import { certificateFingerprint, INBOX_BONJOUR_TYPE } from "./inbox-lan";
@@ -100,9 +100,9 @@ describe("Reach from this Wi-Fi, on the binary", () => {
     computerName = ((await (await win("/api/inbox/pairing", { serverSession })).json()) as Json).computer.name;
   }, 60_000);
 
-  afterAll(() => {
-    if (w) destroyInboxWorld(w);
-    for (const path of stubs) rmSync(path, { force: true });
+  afterAll(async () => {
+    if (w) await destroyInboxWorld(w);
+    removeStubbedHtml(stubs);
   });
 
   test("off until switched on: no listener, no certificate, the QR carries no lan", async () => {
@@ -299,7 +299,7 @@ describe("Reach from this Wi-Fi, on the binary", () => {
       expect(await bonjourBrowse()).not.toContain(computerName);
     }
     // A start with the switch off opens nothing.
-    process.kill(registry(w).pid, "SIGTERM");
+    await signalInbox(w, "SIGTERM");
     await Bun.sleep(500);
     await restart();
     expect(((await (await win("/api/inbox/lan")).json()) as Json).lan).toEqual({ on: false, address: null, fingerprint: null, bonjour: false, error: null });
@@ -312,7 +312,7 @@ describe("Reach from this Wi-Fi, on the binary", () => {
 
   test("a clean stop takes the listener and the record down; the next start opens the same port with the same certificate", async () => {
     const before = lan;
-    process.kill(registry(w).pid, "SIGTERM");
+    await signalInbox(w, "SIGTERM");
     await Bun.sleep(500);
     expect(await pinnedRequest(before.address, before.fingerprint, { path: "/api/inbox/device/health" }).then(() => "answered", () => "closed")).toBe("closed");
     expect((registry(w) as Json).lan).toEqual({ port: Number(before.address.split(":")[1]), on: true });
@@ -327,7 +327,7 @@ describe("Reach from this Wi-Fi, on the binary", () => {
   }, 30_000);
 
   test.skipIf(!canBrowse)("a kill -9 leaves no record behind: the publisher ends with the Inbox", async () => {
-    process.kill(registry(w).pid, "SIGKILL");
+    await signalInbox(w, "SIGKILL");
     await Bun.sleep(1000);
     expect(await bonjourBrowse()).not.toContain(computerName);
     await restart();

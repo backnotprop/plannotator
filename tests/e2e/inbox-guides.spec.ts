@@ -18,7 +18,7 @@ import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 import { FIXTURE_V1_LOCAL, FIXTURE_PATCH_TS_JSON } from '../../packages/core/guide-format-fixtures';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { inboxScratch, rememberInboxOf, removeInboxScratch, stopScratchInbox } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -43,15 +43,6 @@ let world: World;
 
 function registry(): { pid: number; port: number } {
   return JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8'));
-}
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 async function shot(name: string): Promise<void> {
@@ -208,8 +199,7 @@ test('a reviewed tick is kept with the thread, across a restart on another port;
   const before = registry();
   // The old page loses its event stream and its reconnects are refused while the Inbox is down, by design.
   const mark = world.errors.length;
-  process.kill(before.pid, 'SIGTERM');
-  await expect.poll(() => isAlive(before.pid), { timeout: 20_000 }).toBe(false);
+  await stopScratchInbox(world.dataDir);
   const squatter = createServer();
   await new Promise<void>((done) => squatter.listen(before.port, '127.0.0.1', done));
   try {

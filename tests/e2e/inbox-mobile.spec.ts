@@ -20,11 +20,11 @@
  */
 
 import { chromium, devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DEMO_MESSAGES, SimAgent, scratchProject } from '../../scripts/inbox-sim';
+import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -71,7 +71,7 @@ test.describe.configure({ mode: 'serial' });
 test.beforeAll(async () => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   mkdirSync(proofDir, { recursive: true });
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-mobile-e2e-')));
+  const root = inboxScratch('plannotator-inbox-mobile-e2e-');
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
   const trap = join(root, 'trap');
@@ -162,15 +162,12 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  if (!world) return;
-  await Promise.all(world.agents.map((a) => a.close().catch(() => {})));
   try {
-    const registry = JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8')) as { pid: number };
-    process.kill(registry.pid, 'SIGTERM');
-  } catch {
-    // Already gone.
+    if (world) await Promise.all(world.agents.map((a) => a.close().catch(() => {})));
+  } finally {
+    // Stops only the Inbox this spec provably started, even when beforeAll failed half way (inbox-scratch.ts).
+    await removeInboxScratch();
   }
-  rmSync(world.root, { recursive: true, force: true });
 });
 
 /** What sticks out sideways: the page itself, any box past the window, any container that scrolls sideways. */

@@ -14,10 +14,11 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { inboxAgentTool, INBOX_MESSAGE_INSTRUCTION, INBOX_TOOL_ACTIONS, INBOX_WAKE_INSTRUCTION, inboxRedirectedLine, inboxWakeText, mcpAnswerOf } from './inbox-contract'
 import { ClaudeSession } from './testing/claude-session'
+import { removeStubbedHtml, stubBuiltHtml } from '../../../../tests/helpers/inbox-world'
+import { inboxEntryOf, isAlive, mustSignalInbox, stopProvenInboxes } from '../../../../tests/helpers/inbox-process'
 import { INBOX_DISCOVER_TIMEOUT_MS, STORE_INBOX_TOOLS } from './inbox'
 
 const entry = resolve(import.meta.dir, '../../server/index.ts')
-const distDir = resolve(import.meta.dir, '../../dist')
 const binary = process.env.PLANNOTATOR_INBOX_TEST_BINARY
 const proofDir = process.env.INBOX_PROOF_DIR
 let stubs: string[] = []
@@ -25,29 +26,28 @@ const roots: string[] = []
 const sessions: ClaudeSession[] = []
 
 beforeAll(() => {
-  if (binary) return
   // The CLI from source imports the built HTML; the Inbox never serves it.
-  stubs = ['index.html', 'review.html', 'inbox.html'].map((name) => join(distDir, name)).filter((path) => !existsSync(path))
-  mkdirSync(distDir, { recursive: true })
-  for (const path of stubs) writeFileSync(path, '<!doctype html><title>test</title>')
+  stubs = stubBuiltHtml()
 })
 afterAll(() => {
-  for (const path of stubs) rmSync(path, { force: true })
+  removeStubbedHtml(stubs)
 })
-afterEach(() => {
+afterEach(async () => {
   for (const session of sessions.splice(0)) session.quit()
   for (const root of roots.splice(0)) {
-    const registry = join(root, 'home', '.plannotator', 'inbox', 'inbox.json')
-    if (existsSync(registry)) {
-      try {
-        process.kill(JSON.parse(readFileSync(registry, 'utf8')).pid, 'SIGKILL')
-      } catch {
-        // gone
-      }
-    }
+    // Only an Inbox proven to be the one this world started (tests/helpers/inbox-process.ts).
+    const entry = inboxEntryOf(join(root, 'home', '.plannotator'))
+    if (entry) await stopProvenInboxes([{ entry, root }], { signal: 'SIGKILL' })
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+/** SIGKILL the world's Inbox, once proven to be the one it started, and wait for it to die. */
+async function killInbox(w: World): Promise<number> {
+  const { pid } = await mustSignalInbox(inboxEntryOf(w.dataDir), w.root, 'SIGKILL')
+  await waitFor('the Inbox to die', () => !isAlive(pid))
+  return pid
+}
 
 interface World {
   root: string
@@ -389,15 +389,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     const first = startInbox(w)
     const session = await open(w, 'session-dead')
     expect(session.inboxTools).not.toBeNull()
-    process.kill(first.pid, 'SIGKILL')
-    await waitFor('the Inbox to die', () => {
-      try {
-        process.kill(first.pid, 0)
-        return false
-      } catch {
-        return true
-      }
-    })
+    expect(await killInbox(w)).toBe(first.pid)
     w.proof(`killed the Inbox (pid ${first.pid}); inbox.json stays`)
 
     const sent = await send(session, w, 'Is the staging deploy green?')
@@ -408,8 +400,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     w.proof(`the tool call started a new Inbox (pid ${now.pid}) through plannotator inbox --background; no browser opened`)
 
     // A new session whose Inbox is stopped still gets the tool, from the list the Inbox last offered.
-    process.kill(now.pid, 'SIGKILL')
-    await Bun.sleep(300)
+    expect(await killInbox(w)).toBe(now.pid)
     const later = await open(w, 'session-dead-2')
     expect(later.inboxTools?.map((tool) => tool.name)).toEqual(session.inboxTools?.map((tool) => tool.name))
     w.proof('a session starting while the Inbox is stopped registers the tool from the list the Inbox last offered')
@@ -433,15 +424,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     expect((await thread(w, JSON.parse(plain.text.slice(plain.text.indexOf('{'))).thread_id)).project.root).toBe(notes)
     w.proof(`project_path "../refund-service" from ${notes} landed in ${w.project}; without it, in ${notes}`)
 
-    process.kill(first.pid, 'SIGKILL')
-    await waitFor('the Inbox to die', () => {
-      try {
-        process.kill(first.pid, 0)
-        return false
-      } catch {
-        return true
-      }
-    })
+    expect(await killInbox(w)).toBe(first.pid)
     for (const bad of ['../missing', join(w.project, 'replay.sh'), 'two\nlines']) {
       const refused = await session.callInbox({ action: 'send_message', body: 'x', project_path: bad }, notes)
       expect('deny' in refused && refused.deny, bad).toContain('project_path')

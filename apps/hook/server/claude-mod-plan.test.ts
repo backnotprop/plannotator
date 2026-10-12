@@ -8,20 +8,18 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseModPlanInput, readModPlanRevision } from "./claude-mod-plan";
+import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 
 const entry = resolve(import.meta.dir, "index.ts");
-const distDir = resolve(import.meta.dir, "../dist");
 const roots: string[] = [];
 let stubs: string[] = [];
 
 beforeAll(() => {
   // The CLI imports the built HTML; API-only tests need just a stub.
-  stubs = ["index.html", "review.html", "inbox.html"].map((name) => join(distDir, name)).filter((path) => !existsSync(path));
-  mkdirSync(distDir, { recursive: true });
-  for (const path of stubs) writeFileSync(path, "<!doctype html><title>test</title>");
+  stubs = stubHookDistHtml();
 });
 afterAll(() => {
-  for (const path of stubs) rmSync(path, { force: true });
+  removeStubbedHtml(stubs);
   for (const root of roots) rmSync(root, { recursive: true, force: true });
 });
 

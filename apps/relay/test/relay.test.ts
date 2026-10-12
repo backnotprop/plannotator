@@ -416,7 +416,7 @@ describe("the relay with an Inbox, under wrangler dev", () => {
 
   afterAll(async () => {
     await agent?.close().catch(() => {});
-    if (w) destroyInboxWorld(w);
+    if (w) await destroyInboxWorld(w);
     removeStubbedHtml(stubs);
     relay?.stop();
     apple?.close();
@@ -595,7 +595,7 @@ describe("the relay with an Inbox, under wrangler dev", () => {
   test("hello: a restarted Inbox registers a phone the relay does not list and takes each phone's switch from the relay", async () => {
     const second = (await pair("iPad")).phone;
     await until(() => readMailbox(relay, mailbox.mailbox_id).devices.map((d) => d.id), (ids) => ids.includes(second.id), "the second phone registered");
-    stopInbox(w);
+    await stopInbox(w);
     // While the Inbox is stopped: the relay loses the second phone, and the first turns its switch off.
     expect((await atRelay("DELETE", `/devices/${second.id}`, undefined, mailbox.secret)).status).toBe(204);
     expect((await atRelay("PUT", `/devices/${phone.id}/carriage`, { on: false })).status).toBe(204);
@@ -751,7 +751,7 @@ describe("the carriage: a phone reads and answers the Inbox through the relay al
 
   afterAll(async () => {
     await agent?.close().catch(() => {});
-    if (w) destroyInboxWorld(w);
+    if (w) await destroyInboxWorld(w);
     removeStubbedHtml(stubs);
     relay?.stop();
   });
@@ -899,7 +899,7 @@ describe("the carriage: a phone reads and answers the Inbox through the relay al
       (item) => item !== undefined,
       "the second question down",
     );
-    stopInbox(w);
+    await stopInbox(w);
     await agent.close();
     // The relay learns the socket closed when the stopped Inbox's close reaches it.
     await until(async () => (await fetchItems(a)).inbox_online, (online) => online === false, "the relay to see the Inbox gone");
@@ -1171,7 +1171,7 @@ describe("FCM: an Android phone gets its pushes through Google's hosts, played l
 
   afterAll(async () => {
     await agent?.close().catch(() => {});
-    if (w) destroyInboxWorld(w);
+    if (w) await destroyInboxWorld(w);
     removeStubbedHtml(stubs);
     relay?.stop();
     google?.close();

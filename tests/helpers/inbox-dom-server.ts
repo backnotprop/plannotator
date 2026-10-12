@@ -20,6 +20,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { startInboxServer } from "../../packages/server/inbox";
 import { recordInboxAttachments } from "../../packages/shared/inbox/attachments";
+import { refuseRealDataDir } from "./real-data-dir";
 
 const [dataDir, projectsDir, countArg] = process.argv.slice(2);
 const count = Number(countArg ?? "1");
@@ -27,6 +28,8 @@ if (!dataDir || !projectsDir || !Number.isInteger(count) || count < 1) {
   process.stderr.write("usage: inbox-dom-server.ts <data dir> <projects dir> <count>\n");
   process.exit(2);
 }
+// A scratch data dir only, never the person's real one.
+refuseRealDataDir(dataDir, "inbox-dom-server.ts");
 
 const STOPPED = [
   "Before I build the invoice list:",

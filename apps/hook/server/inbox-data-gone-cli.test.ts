@@ -12,21 +12,16 @@ import { chmodSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { INBOX_DATA_CHECK_MS } from "@plannotator/server/inbox";
 import { isPidAlive } from "@plannotator/shared/inbox/registry";
+import { type InboxEntry, inboxEntryOf, stopProvenInboxes } from "../../../tests/helpers/inbox-process";
 import { createInboxWorld, registry, removeStubbedHtml, stubBuiltHtml, worldEnv, type InboxWorld } from "../../../tests/helpers/inbox-world";
 
 const worlds: InboxWorld[] = [];
-const pids = new Set<number>();
+/** Each Inbox started, with its world: killed after only when still provably that Inbox (its data folder may be gone). */
+const started: { entry: InboxEntry; root: string }[] = [];
 let stubs: string[] = [];
 
-afterEach(() => {
-  for (const pid of pids) {
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {
-      // gone
-    }
-  }
-  pids.clear();
+afterEach(async () => {
+  await stopProvenInboxes(started.splice(0), { signal: "SIGKILL" });
   for (const w of worlds.splice(0)) rmSync(w.root, { recursive: true, force: true });
   removeStubbedHtml(stubs.splice(0));
 });
@@ -54,7 +49,8 @@ function startBackground(w: InboxWorld, args: string[]): number {
   });
   expect(run.exitCode, run.stderr.toString()).toBe(0);
   const { pid } = registry(w);
-  pids.add(pid);
+  const entry = inboxEntryOf(w.dataDir);
+  if (entry) started.push({ entry, root: w.root });
   return pid;
 }
 

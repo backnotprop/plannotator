@@ -21,6 +21,7 @@ import { dirname, join, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { INBOX_WAKES_META_KEY } from '../packages/shared/inbox/connection';
+import { isRealDataDir, refuseRealDataDir } from '../tests/helpers/real-data-dir';
 
 export interface SimAgentOptions {
   /** The compiled `plannotator` binary. */
@@ -45,6 +46,8 @@ export class SimAgent {
   ) {}
 
   static async connect(options: SimAgentOptions): Promise<SimAgent> {
+    // The shim falls back to the default data dir without one: never let it reach the person's Inbox.
+    refuseRealDataDir(options.env.PLANNOTATOR_DATA_DIR, 'SimAgent.connect');
     const client = new Client({ name: `inbox-sim-${options.host}`, version: '1.0.0' });
     const transport = new StdioClientTransport({
       command: options.binary,
@@ -190,6 +193,11 @@ async function main(): Promise<void> {
   const dataDir = resolve(flag('--data-dir') ?? '');
   if (!flag('--data-dir')) {
     process.stderr.write('Usage: bun scripts/inbox-sim.ts --binary <plannotator> --data-dir <scratch data dir>\n');
+    process.exit(2);
+  }
+  // A scratch folder only: the simulated agents write threads into this Inbox and start it.
+  if (isRealDataDir(flag('--data-dir')!)) {
+    process.stderr.write(`inbox-sim: refusing ${dataDir}, the real Plannotator data directory. Pass a scratch folder.\n`);
     process.exit(2);
   }
   mkdirSync(dataDir, { recursive: true });

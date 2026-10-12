@@ -20,7 +20,7 @@ import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { resolveInboxPhones } from "@plannotator/shared/config";
 import { isPidAlive, readInboxRegistry, writeInboxRegistry } from "@plannotator/shared/inbox/registry";
-import { createInboxWorld, destroyInboxWorld, registry, stopInbox, stubBuiltHtml, waitFor, worldEnv, type InboxWorld } from "../../tests/helpers/inbox-world";
+import { createInboxWorld, destroyInboxWorld, registry, stopInbox, removeStubbedHtml, stubBuiltHtml, waitFor, worldEnv, type InboxWorld } from "../../tests/helpers/inbox-world";
 
 type Json = Record<string, any>;
 
@@ -75,7 +75,7 @@ describe("the phone switch, on the binary", () => {
   };
   const stop = async () => {
     const { pid } = registry(w);
-    stopInbox(w);
+    await stopInbox(w);
     await waitFor("the Inbox to exit", () => !isPidAlive(pid));
   };
   const call = (method: string, path: string, body: unknown = {}) =>
@@ -112,10 +112,10 @@ describe("the phone switch, on the binary", () => {
     });
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     relay?.stop(true);
-    if (w) destroyInboxWorld(w);
-    for (const path of stubs) rmSync(path, { force: true });
+    if (w) await destroyInboxWorld(w);
+    removeStubbedHtml(stubs);
   });
 
   test("on: a phone pairs as before, and the paired Inbox holds the relay socket", async () => {

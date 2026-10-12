@@ -25,35 +25,34 @@ import { INBOX_BRIDGE_POLL_PATH, parseInboxBridgeCommands } from "@plannotator/s
 import { INBOX_AGENT_NAME, INBOX_HOST } from "../hooks/mod/inbox";
 import { OPENCODE_INBOX_AGENT_NAME, OPENCODE_INBOX_HOST } from "../../opencode-plugin/inbox";
 import { fillInboxToolArguments, inboxHostSessionFromEnv, INBOX_SESSION_HOST_NAMES, runInboxMcpShim } from "./inbox-mcp-shim";
+import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
+import { type InboxEntry, inboxEntryOf, mustSignalInbox, signalProvenInbox, stopProvenInboxes } from "../../../tests/helpers/inbox-process";
 
 const entry = resolve(import.meta.dir, "index.ts");
-const distDir = resolve(import.meta.dir, "../dist");
 const roots: string[] = [];
 let stubs: string[] = [];
-const pids = new Set<number>();
+/** Each Inbox a test started, with its sandbox: killed after only when still provably that Inbox. */
+const started: { entry: InboxEntry; root: string }[] = [];
 const cleanups: (() => void | Promise<void>)[] = [];
 
 beforeAll(() => {
   // The CLI imports the built HTML; these tests never read the pages.
-  stubs = ["index.html", "review.html", "inbox.html"].map((name) => join(distDir, name)).filter((path) => !existsSync(path));
-  mkdirSync(distDir, { recursive: true });
-  for (const path of stubs) writeFileSync(path, "<!doctype html><title>test</title>");
+  stubs = stubHookDistHtml();
 });
 afterAll(() => {
-  for (const path of stubs) rmSync(path, { force: true });
+  removeStubbedHtml(stubs);
 });
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
-  for (const pid of pids) {
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {
-      // gone
-    }
-  }
-  pids.clear();
+  await stopProvenInboxes(started.splice(0), { signal: "SIGKILL" });
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
+
+/** Remember the Inbox the sandbox's registry names now, for the teardown. */
+function track(box: Sandbox): void {
+  const entry = inboxEntryOf(box.dataDir);
+  if (entry) started.push({ entry, root: box.root });
+}
 
 interface Sandbox {
   root: string;
@@ -110,7 +109,7 @@ async function cli(box: Sandbox, args: string[], cwd = box.root): Promise<{ code
 async function background(box: Sandbox) {
   const result = await cli(box, ["inbox", "--background"]);
   const registry = readInboxRegistry(box.dataDir);
-  if (registry) pids.add(registry.pid);
+  track(box);
   return { ...result, registry };
 }
 
@@ -161,7 +160,7 @@ describe("plannotator inbox --background", () => {
   test("a killed Inbox reads as stopped; the next start takes the last port and rotates token and serverSession", async () => {
     const box = sandbox();
     const first = (await background(box)).registry!;
-    process.kill(first.pid, "SIGKILL");
+    await mustSignalInbox(first, box.root, "SIGKILL");
     await waitDead(first.pid);
     const stopped = await inboxStatus(box.dataDir);
     expect(stopped).toMatchObject({ state: "stopped", reason: "dead_pid" });
@@ -180,7 +179,7 @@ describe("plannotator inbox --background", () => {
   test("a port answering for a different Inbox reads as stopped; the restart moves to a new port", async () => {
     const box = sandbox();
     const first = (await background(box)).registry!;
-    process.kill(first.pid, "SIGKILL");
+    await mustSignalInbox(first, box.root, "SIGKILL");
     await waitDead(first.pid);
     // Another Inbox (another data dir) now holds that port.
     const otherDir = join(box.root, "other-data");
@@ -199,13 +198,13 @@ describe("plannotator inbox --background", () => {
   test("a busy Inbox (paused: the port takes the request, no answer) is waited for, never replaced by a second writer", async () => {
     const box = sandbox();
     const first = (await background(box)).registry!;
-    process.kill(first.pid, "SIGSTOP");
+    await mustSignalInbox(first, box.root, "SIGSTOP");
     let resumed = false;
     try {
       expect(await inboxStatus(box.dataDir, 500)).toMatchObject({ state: "busy" });
       const starting = background(box);
       await Bun.sleep(3000);
-      process.kill(first.pid, "SIGCONT");
+      await mustSignalInbox(first, box.root, "SIGCONT");
       resumed = true;
       const again = await starting;
       expect(again.code).toBe(0);
@@ -216,7 +215,7 @@ describe("plannotator inbox --background", () => {
       const log = readFileSync(join(box.dataDir, "inbox", "inbox.log"), "utf8");
       expect(log.split("\n").filter((line) => line.startsWith("Plannotator Inbox: "))).toHaveLength(1);
     } finally {
-      if (!resumed) process.kill(first.pid, "SIGCONT");
+      if (!resumed) await signalProvenInbox(first, box.root, "SIGCONT");
     }
   }, 60_000);
 
@@ -248,7 +247,7 @@ describe("plannotator inbox mcp (the stdio shim)", () => {
     const project = gitProject(box);
     // An Inbox ran here once and stopped: the registry is stale.
     const old = (await background(box)).registry!;
-    process.kill(old.pid, "SIGKILL");
+    await mustSignalInbox(old, box.root, "SIGKILL");
     await waitDead(old.pid);
 
     const client = new Client({ name: "shim-test", version: "1.0.0" });
@@ -263,7 +262,7 @@ describe("plannotator inbox mcp (the stdio shim)", () => {
     cleanups.push(() => client.close());
 
     const registry = readInboxRegistry(box.dataDir)!;
-    pids.add(registry.pid);
+    track(box);
     expect(registry.pid).not.toBe(old.pid);
     expect((await inboxStatus(box.dataDir)).state).toBe("running");
     expect(existsSync(box.browserMarker)).toBe(false);
@@ -518,7 +517,7 @@ describe("plannotator inbox mcp: large messages", () => {
     await client.connect(transport);
     cleanups.push(() => client.close());
     const registry = readInboxRegistry(box.dataDir)!;
-    pids.add(registry.pid);
+    track(box);
 
     // Past 4 MiB (the MCP SDK's default request bound), with multi-byte text so
     // stdin chunks split characters.
@@ -545,7 +544,7 @@ describe("plannotator inbox mcp: large messages", () => {
     });
     await client.connect(transport);
     cleanups.push(() => client.close());
-    pids.add(readInboxRegistry(box.dataDir)!.pid);
+    track(box);
 
     const started = Date.now();
     const refused = await client
@@ -590,7 +589,7 @@ describe("plannotator inbox (a person)", () => {
   test("opens the browser on the Inbox it starts, and on the one already running", async () => {
     const box = sandbox();
     const proc = Bun.spawn([process.execPath, "run", entry, "inbox"], { cwd: box.root, env: box.env, stdout: "pipe", stderr: "pipe", stdin: "ignore" });
-    pids.add(proc.pid);
+    cleanups.push(() => proc.kill("SIGKILL"));
     const deadline = Date.now() + 20_000;
     while (!existsSync(box.browserMarker) && Date.now() < deadline) await Bun.sleep(50);
     const registry = readInboxRegistry(box.dataDir)!;

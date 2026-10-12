@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isPidAlive } from "@plannotator/shared/inbox/registry";
-import { createInboxWorld, destroyInboxWorld, registry, removeStubbedHtml, stubBuiltHtml, waitFor, worldEnv, type InboxWorld } from "../../../tests/helpers/inbox-world";
+import { createInboxWorld, destroyInboxWorld, registry, removeStubbedHtml, signalInbox, stubBuiltHtml, waitFor, worldEnv, type InboxWorld } from "../../../tests/helpers/inbox-world";
 
 type Json = Record<string, any>;
 
@@ -71,7 +71,7 @@ describe("plannotator inbox --tailscale (processes, a fake tailscale on PATH)", 
   const codeOf = async (response: Response) => [response.status, ((await response.json()) as Json).code];
   const stop = async (signal: "SIGTERM" | "route") => {
     const entry = registry(w);
-    if (signal === "SIGTERM") process.kill(entry.pid, "SIGTERM");
+    if (signal === "SIGTERM") await signalInbox(w, "SIGTERM");
     else await fetch(`http://127.0.0.1:${entry.port}/api/inbox/control/stop`, { method: "POST", headers: { Authorization: `Bearer ${entry.token}` } });
     await waitFor("the Inbox to exit", () => !isPidAlive(entry.pid));
   };
@@ -86,8 +86,8 @@ describe("plannotator inbox --tailscale (processes, a fake tailscale on PATH)", 
     chmodSync(join(w.bin, "tailscale"), 0o755);
   });
 
-  afterAll(() => {
-    if (w) destroyInboxWorld(w);
+  afterAll(async () => {
+    if (w) await destroyInboxWorld(w);
     removeStubbedHtml(stubs);
   });
 

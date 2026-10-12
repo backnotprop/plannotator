@@ -36,7 +36,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { join, resolve } from 'node:path';
 import { qrModules } from '../../packages/inbox/qr';
 import { pinnedRequest } from '../helpers/pinned-phone';
-import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { inboxScratch, removeInboxScratch, stopScratchInbox } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -302,9 +302,7 @@ test('Reach from this Wi-Fi where nothing can announce it (no Bonjour) and where
     await expect(toggle).toHaveAttribute('aria-checked', 'true');
     const kept = () => JSON.parse(readFileSync(join(root, 'data', 'inbox', 'inbox.json'), 'utf8'));
     const port = kept().lan.port;
-    const pid = kept().pid;
-    process.kill(pid, 'SIGTERM');
-    await expect.poll(() => { try { process.kill(pid, 0); return 'running'; } catch { return 'gone'; } }).toBe('gone');
+    await stopScratchInbox(join(root, 'data'));
     rmSync(join(root, 'data', 'inbox', 'tls'), { recursive: true, force: true });
     writeFileSync(join(root, 'mode'), 'broken');
     const again = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });

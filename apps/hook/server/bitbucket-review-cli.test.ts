@@ -14,16 +14,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startFakeBitbucket, type FakeBitbucket } from "../../../tests/test-fixtures/bitbucket/fake-bitbucket";
+import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 
 const serverDir = import.meta.dir;
 const cliEntry = join(serverDir, "index.ts");
-const distDir = join(serverDir, "..", "dist");
 const fixtures = join(serverDir, "../../../tests/test-fixtures/bitbucket");
 const TOKEN = "fake-token-for-cli-test-0987654321";
 const EMAIL = "ada@example.invalid";
 
-const createdDist: string[] = [];
-let createdDistDir = false;
+let stubs: string[] = [];
 let workDir: string;
 let fake: FakeBitbucket;
 let proc: ReturnType<typeof Bun.spawn> | undefined;
@@ -42,11 +41,7 @@ async function waitForReady(readyFile: string): Promise<string> {
 }
 
 beforeAll(async () => {
-  if (!existsSync(distDir)) { mkdirSync(distDir, { recursive: true }); createdDistDir = true; }
-  for (const file of ["index.html", "review.html", "inbox.html"]) {
-    const p = join(distDir, file);
-    if (!existsSync(p)) { writeFileSync(p, "<!-- test placeholder -->"); createdDist.push(p); }
-  }
+  stubs = stubHookDistHtml();
   workDir = mkdtempSync(join(tmpdir(), "plannotator-bb-cli-"));
   fake = startFakeBitbucket({ email: EMAIL, token: TOKEN });
   const readyFile = join(workDir, "ready.json");
@@ -84,8 +79,8 @@ afterAll(async () => {
     if (exited === null) proc.kill();
   }
   fake?.stop();
-  for (const p of createdDist) rmSync(p, { force: true });
-  if (createdDistDir) rmSync(distDir, { recursive: true, force: true });
+  // Only the stubs this file wrote; never the dist folder (a build may be writing into it).
+  removeStubbedHtml(stubs);
   rmSync(workDir, { recursive: true, force: true });
 });
 

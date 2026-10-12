@@ -33,11 +33,22 @@ function hasTestFiles(dir: string): boolean {
 
 const rootPreload = readPreload(join(repoRoot, "bunfig.toml")).map((p) => resolve(repoRoot, p));
 
-const packageDirs = ["apps", "packages"].flatMap((group) =>
-  readdirSync(join(repoRoot, group))
-    .map((name) => join(repoRoot, group, name))
-    .filter((dir) => statSync(dir).isDirectory() && hasTestFiles(dir)),
-);
+/**
+ * Other folders people run `bun test` from: the CLI's tests (apps/hook/server,
+ * which start real Inboxes), the repo-level tests, and the scripts' tests.
+ * The Inbox test helpers also sandbox on import (tests/setup/sandbox-data-dir.ts),
+ * so a folder missing from here is not a hole, only a slower failure.
+ */
+const extraDirs = ["apps/hook/server", "tests", "scripts"].map((dir) => join(repoRoot, dir));
+
+const packageDirs = [
+  ...["apps", "packages"].flatMap((group) =>
+    readdirSync(join(repoRoot, group))
+      .map((name) => join(repoRoot, group, name))
+      .filter((dir) => statSync(dir).isDirectory() && hasTestFiles(dir)),
+  ),
+  ...extraDirs,
+];
 
 describe("package-directory bunfig.toml", () => {
   test("root preload sandboxes the data dir", () => {

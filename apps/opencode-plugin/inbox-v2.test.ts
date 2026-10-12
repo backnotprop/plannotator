@@ -60,7 +60,7 @@ afterAll(() => {
 afterEach(async () => {
   for (const host of hosts.splice(0)) await host.stop();
   for (const model of models.splice(0)) model.stop();
-  for (const w of worlds.splice(0)) destroyInboxWorld(w);
+  for (const w of worlds.splice(0)) await destroyInboxWorld(w);
 });
 
 async function freePort(): Promise<number> {

@@ -72,7 +72,7 @@ afterAll(() => {
 afterEach(async () => {
 	for (const pi of pis.splice(0)) await pi.stop().catch(() => undefined);
 	for (const model of models.splice(0)) model.stop();
-	for (const w of worlds.splice(0)) destroyInboxWorld(w);
+	for (const w of worlds.splice(0)) await destroyInboxWorld(w);
 });
 
 function world(name: string): InboxWorld {
@@ -419,7 +419,7 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		startInbox(w);
 		const m = model(askingScript());
 		const pi = await openPi(w, m);
-		stopInbox(w);
+		await stopInbox(w);
 		const before = registry(w).pid;
 		await ask(pi, "Ask the person what to do on a 409.");
 		const asked = sentFrom(m);
@@ -427,7 +427,7 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		expect((await thread(w, asked.thread_id)).messages).toHaveLength(1);
 		w.proof(`the Inbox was stopped (pid ${before}); the tool call started it with plannotator inbox --background (pid ${registry(w).pid}) and the message landed`);
 		await pi.client.stop();
-		stopInbox(w);
+		await stopInbox(w);
 
 		const nodeDir = dirname(Bun.which("node")!);
 		const bare = await openPi(w, m, { env: { PATH: `${nodeDir}:/usr/bin:/bin` } });

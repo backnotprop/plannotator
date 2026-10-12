@@ -14,17 +14,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { ANNOTATE_BUNDLE_HINT } from "@plannotator/shared/annotate-target";
+import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 
 const entry = resolve(import.meta.dir, "index.ts");
-const distDir = resolve(import.meta.dir, "../dist");
 let stubs: string[] = [];
 let root = "";
 
 beforeAll(() => {
   // The CLI imports the built HTML; API-only tests need just a stub.
-  stubs = ["index.html", "review.html", "inbox.html"].map((name) => join(distDir, name)).filter((path) => !existsSync(path));
-  mkdirSync(distDir, { recursive: true });
-  for (const path of stubs) writeFileSync(path, "<!doctype html><title>test</title>");
+  stubs = stubHookDistHtml();
   root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-annotate-bundle-cli-")));
   mkdirSync(join(root, "docs"));
   writeFileSync(join(root, "spec.md"), "# Spec\n\nBody\n");
@@ -33,7 +31,7 @@ beforeAll(() => {
   writeFileSync(join(root, "image.png"), "not really a png");
 });
 afterAll(() => {
-  for (const path of stubs) rmSync(path, { force: true });
+  removeStubbedHtml(stubs);
   rmSync(root, { recursive: true, force: true });
 });
 

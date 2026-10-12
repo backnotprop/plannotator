@@ -29,7 +29,7 @@ import {
   registry,
   startInbox,
   stopInbox,
-  stubBuiltHtml,
+  removeStubbedHtml, stubBuiltHtml,
   worldEnv,
   type InboxWorld,
 } from "../../tests/helpers/inbox-world";
@@ -121,8 +121,8 @@ describe("the device door, on the binary", () => {
 
   afterAll(async () => {
     await agent?.close().catch(() => {});
-    if (w) destroyInboxWorld(w);
-    for (const path of stubs) rmSync(path, { force: true });
+    if (w) await destroyInboxWorld(w);
+    removeStubbedHtml(stubs);
   });
 
   test("7.1: the window makes an offer, with the QR link, the six digits, the computer and its addresses", async () => {
@@ -474,7 +474,7 @@ describe("the device door, on the binary", () => {
     const key = keys();
     const first = await door(`messages/${guideMessage}/guide/reviewed`, { body: { idempotency_key: key, reviewed: [false] } });
     expect(first.status).toBe(200);
-    stopInbox(w);
+    await stopInbox(w);
     const entry = startInbox(w);
     base = `http://127.0.0.1:${entry.port}`;
     serverSession = ((await (await fetch(`${base}/api/inbox/health`)).json()) as Json).serverSession;

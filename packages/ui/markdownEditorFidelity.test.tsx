@@ -8,12 +8,14 @@
  *
  * Two layers:
  *  1. Synthetic PFM fixtures (in-repo, deterministic, run everywhere).
- *  2. A runtime sample of real plans from ~/.plannotator/history — skipped
- *     when the directory doesn't exist (CI). Real user content deliberately
- *     stays OUT of the repo.
+ *  2. A runtime sample of real plans from the folder PLANNOTATOR_FIDELITY_CORPUS
+ *     names (e.g. a copy of a history/ folder) — skipped when it is unset.
+ *     Opt-in, so a test run never reads the person's ~/.plannotator by
+ *     itself; real user content deliberately stays OUT of the repo.
  *
  * Requires DOM_TESTS=1 (happy-dom preload). Run:
  *   DOM_TESTS=1 bun test markdownEditorFidelity
+ *   DOM_TESTS=1 PLANNOTATOR_FIDELITY_CORPUS=/tmp/plans bun test markdownEditorFidelity
  */
 import { describe, test, expect } from 'bun:test';
 import React from 'react';
@@ -21,14 +23,16 @@ import { createRoot } from 'react-dom/client';
 import { act } from 'react';
 import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 import {
   AtomicCodeMirrorEditor,
   type AtomicCodeMirrorEditorHandle,
 } from '@plannotator/atomic-editor';
 
 const hasDom = typeof document !== 'undefined';
-const CORPUS_DIR = join(homedir(), '.plannotator', 'history');
+// Opt-in only: a test run never reads the person's data dir by itself. Point
+// PLANNOTATOR_FIDELITY_CORPUS at a folder of plans (a copy of a history/ folder).
+const CORPUS_DIR = process.env.PLANNOTATOR_FIDELITY_CORPUS?.trim() || join(tmpdir(), 'plannotator-fidelity-corpus-unset');
 const CORPUS_SAMPLE_SIZE = 150;
 const MAX_FILE_BYTES = 64 * 1024;
 

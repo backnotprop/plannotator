@@ -23,9 +23,9 @@ import { INBOX_FILLED_ARGUMENTS } from "@plannotator/shared/inbox/connection";
 import { formatTopLevelHelp } from "./cli";
 import { inboxAttachmentKind, inboxAttachmentNameRefusal } from "@plannotator/core/inbox-types";
 import { formatInboxHelp, INBOX_HELP_CODE_EXAMPLES, INBOX_HELP_MCP_URL, INBOX_QUESTION_EXAMPLE, INBOX_REPLACES_EXAMPLE, TOOL_GUIDE } from "./inbox-help";
+import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 
 const entry = resolve(import.meta.dir, "index.ts");
-const distDir = resolve(import.meta.dir, "../dist");
 const COMMAND = ["/opt/example bin/plannotator"];
 const DATA_DIR = "/home/someone/.plannotator";
 const help = formatInboxHelp({ command: COMMAND, dataDir: DATA_DIR, platform: "linux" });
@@ -42,13 +42,11 @@ beforeAll(() => {
   writeFileSync(join(trapBin, "tailscale"), "#!/bin/sh\necho 'inbox-help.test: tailscale must not run' >&2\nexit 97\n");
   chmodSync(join(trapBin, "tailscale"), 0o755);
   // The CLI imports the built HTML; --help never reads it.
-  stubs = ["index.html", "review.html", "inbox.html"].map((name) => join(distDir, name)).filter((path) => !existsSync(path));
-  mkdirSync(distDir, { recursive: true });
-  for (const path of stubs) writeFileSync(path, "<!doctype html><title>test</title>");
+  stubs = stubHookDistHtml();
 });
 
 afterAll(() => {
-  for (const path of stubs) rmSync(path, { force: true });
+  removeStubbedHtml(stubs);
   rmSync(root, { recursive: true, force: true });
 });
 

@@ -20,16 +20,14 @@ import {
 } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 
 const serverDir = import.meta.dir;
 const cliEntry = join(serverDir, "index.ts");
-const distDir = join(serverDir, "..", "dist");
-const distFiles = ["index.html", "review.html", "inbox.html"];
 
 let fixtureDir: string;
 let dataDir: string;
-const createdDistFiles: string[] = [];
-let createdDistDir = false;
+let stubs: string[] = [];
 
 function runAnnotate(args: string[], envOverrides: Record<string, string> = {}): {
   exitCode: number;
@@ -59,17 +57,7 @@ function runAnnotate(args: string[], envOverrides: Record<string, string> = {}):
 }
 
 beforeAll(() => {
-  if (!existsSync(distDir)) {
-    mkdirSync(distDir, { recursive: true });
-    createdDistDir = true;
-  }
-  for (const file of distFiles) {
-    const path = join(distDir, file);
-    if (!existsSync(path)) {
-      writeFileSync(path, "<!-- test placeholder -->");
-      createdDistFiles.push(path);
-    }
-  }
+  stubs = stubHookDistHtml();
 
   fixtureDir = mkdtempSync(join(tmpdir(), "plannotator-annotate-cli-"));
   dataDir = join(fixtureDir, ".plannotator-data");
@@ -89,12 +77,8 @@ beforeAll(() => {
 
 afterAll(() => {
   rmSync(fixtureDir, { recursive: true, force: true });
-  for (const path of createdDistFiles) {
-    rmSync(path, { force: true });
-  }
-  if (createdDistDir) {
-    rmSync(distDir, { recursive: true, force: true });
-  }
+  // Only the stubs this file wrote; never the dist folder (a build may be writing into it).
+  removeStubbedHtml(stubs);
 });
 
 describe("annotate CLI single-token failures stay legacy", () => {

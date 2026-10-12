@@ -20,7 +20,7 @@ import { expect, test, type Browser, type BrowserContext, type Page } from '@pla
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { inboxScratch, rememberInboxOf, removeInboxScratch, stopScratchInbox } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -92,28 +92,14 @@ function startInbox(args: string[]): string {
   return started.stdout.trim();
 }
 
-const isAlive = (pid: number) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 /**
  * SIGTERM, then wait until the PROCESS is gone, not only its port: a stopping
  * Inbox still runs its clean stop (the tailnet mapping) after it stops
- * listening, and the next start must not overlap it.
+ * listening, and the next start must not overlap it. Only the proven Inbox
+ * this spec started (inbox-scratch.ts).
  */
 async function stopInbox(): Promise<void> {
-  const { pid } = registry();
-  try {
-    process.kill(pid, 'SIGTERM');
-  } catch {
-    // Already gone.
-  }
-  await expect.poll(() => (isAlive(pid) ? 'alive' : 'gone')).toBe('gone');
+  await stopScratchInbox(world.dataDir);
 }
 
 test.describe.configure({ mode: 'serial' });
