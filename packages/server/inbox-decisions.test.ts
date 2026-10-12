@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { InboxQuestion } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
+import { decisionProjectCounts, recordAgentDecision, replaceDecision, retireDecision, setQuestionDecision, waitingDecisionCount, waitingDecisions } from "./inbox-decisions";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -179,6 +180,52 @@ test("refusals: a stale version, an ended decision, a reused key with other word
     body: JSON.stringify({ key, recording: true }),
   });
   expect(crossSite.status).toBe(403);
+});
+
+test("the one-pass counts equal each project's Waiting group and current decisions, on a mixed multi-project seed", async () => {
+  const { dataDir, project } = world();
+  const server = await start(dataDir);
+  const store = server.store;
+  const author = { kind: "agent" as const, host: "claude-code", session: "ses_seed", name: "Claude Code" };
+  const agentOf = { host: "claude-code", session: "ses_seed", name: "Claude Code" };
+  const ids: string[] = [];
+  for (let p = 0; p < 4; p++) {
+    const root = join(project, `p${p}`);
+    mkdirSync(root);
+    const prj = store.ensureProject({ name: `p${p}`, root });
+    ids.push(prj.id);
+    for (let q = 0; q < p + 1; q++) {
+      const sent = store.sendMessage({ project_id: prj.id, author: { ...author, session: `ses_${p}_${q}` }, body: ASK.replace("409?", `409 (${q})?`) }).message;
+      // Some questions turn their switch off, some threads are resolved: neither waits.
+      if (q === 1) setQuestionDecision(store, sent.id, { key: store.questionsOf(sent.id)[0]!.key, recording: false });
+      if (q === 2) store.resolveThread(sent.thread_id, true);
+    }
+    // A question without the decision line never waits.
+    store.sendMessage({ project_id: prj.id, author, body: [":::question", "Plain question?", "", "- [ ] A", "- [ ] B", ":::"].join("\n") });
+    for (let d = 0; d < p; d++) {
+      const { decision } = recordAgentDecision(store, { project_id: prj.id, text: `p${p} decision ${d}`, agent: agentOf });
+      if (d === 1) retireDecision(store, decision.id, 1);
+      if (d === 2) replaceDecision(store, decision.id, { version: 1, text: `p${p} decision ${d}, revised` });
+    }
+  }
+  const counts = decisionProjectCounts(store);
+  expect(counts.map((c) => c.project_id)).toEqual(store.listProjects().map((p) => p.id));
+  for (const id of ids) {
+    const one = counts.find((c) => c.project_id === id)!;
+    expect(one.waiting).toBe(waitingDecisions(store, id).length);
+    expect(one.settled).toBe(store.decisionsOf(id).filter((d) => d.state === "current").length);
+  }
+  // Not vacuous: the seed has waiting questions and settled decisions to count, and some to leave out.
+  expect(counts.map((c) => [c.waiting, c.settled])).toEqual([
+    [1, 0],
+    [1, 1],
+    [1, 1],
+    [2, 2],
+  ]);
+  // The sidebar's Decisions count is the same rule, in the same pass.
+  expect(waitingDecisionCount(store)).toBe(waitingDecisions(store).length);
+  const list = await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads`)).json();
+  expect(list.decisions_waiting).toBe(5);
 });
 
 test("the Decisions route carries every project's waiting and settled counts, for the project switch", async () => {

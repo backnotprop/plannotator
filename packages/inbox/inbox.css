@@ -1208,14 +1208,16 @@ pre code.pn-code[data-keep-layout] {
   .ib-dh h1 { font-size: 22px; flex: none; }
   .ib-ppick { flex: 1 1 0; }
   .pn-inbox .ib-ppick-t { height: 44px; width: 100%; font-size: 15px; }
-  /* the name keeps its width; the counts give way first (the sheet shows them whole) */
-  .pn-inbox .ib-ppick-t .ib-ppick-tn { flex: 0 1 auto; min-width: 3.5em; }
-  .pn-inbox .ib-ppick-t .ib-ppick-tc { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+  /* the button carries one count, whole (never a cut number); the name gives way (the sheet shows everything) */
+  .pn-inbox .ib-ppick-t .ib-ppick-tn { flex: 0 1 auto; }
+  .pn-inbox .ib-ppick-t .ib-ppick-tc { flex: none; margin-left: auto; }
   .pn-inbox .ib-ppick-t > svg { margin-left: auto; }
+  .pn-inbox .ib-ppick-t .ib-ppick-tc + svg { margin-left: 0; }
   /* the list is a sheet from the bottom edge, like New message's sessions and the decision card */
   .ib-ppick-scrim { position: fixed; inset: 0; z-index: 59; background: rgb(0 0 0 / 0.35); }
   .ib-ppick-list.ib-ppick-sheet { position: fixed; left: 0; right: 0; bottom: 0; top: auto; width: auto; max-width: none; max-height: 72%; z-index: 60; border-radius: 16px 16px 0 0; border-bottom: 0; padding: 0 8px calc(10px + env(safe-area-inset-bottom)); box-shadow: 0 -16px 48px rgba(0, 0, 0, 0.28); }
-  .ib-ppick-h { position: sticky; top: 0; z-index: 1; height: 48px; display: flex; align-items: center; padding: 0 8px; font-size: 15px; font-weight: 600; background: var(--popover); border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); margin-bottom: 4px; }
+  .ib-ppick-h { position: sticky; top: 0; z-index: 1; height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 0 0 0 8px; font-size: 15px; background: var(--popover); border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); margin-bottom: 4px; }
+  .ib-ppick-h b { font-weight: 600; }
   .ib-ppick-o { min-height: 56px; padding: 8px 10px; font-size: 15px; }
   .ib-ppick-p { font-size: 13px; }
   .ib-ppick-oc { font-size: 13px; }

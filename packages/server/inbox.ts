@@ -104,7 +104,7 @@ import {
   INBOX_DECISION_ERROR_STATUS,
   recordDecisionsForReply,
   threadDecisions,
-  waitingDecisions,
+  waitingDecisionCount,
 } from "./inbox-decisions";
 import { inboxGuideRoute } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
@@ -517,7 +517,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       project: projectFilter,
       sections: inboxListSections(projectFilter ? rows.filter((row) => row.project.id === projectFilter) : rows),
       /** Questions in every project that record a decision once answered and sent: the sidebar's Decisions count. */
-      decisions_waiting: waitingDecisions(store).length,
+      decisions_waiting: waitingDecisionCount(store),
     };
   };
 

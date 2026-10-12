@@ -244,3 +244,109 @@ test.skipIf(!hasDom)('Escape closes the list without a change and puts focus bac
   expect(window.location.hash).toBe(`#decisions=${worlds[0]!.project}`);
   await until(() => trigger(el).getAttribute('aria-label') === 'Project: billing-0, 2 waiting · 1 settled', 'billing-0 on the button');
 });
+
+test.skipIf(!hasDom)('the press that closes the list never also opens what lay under it; the next press works as usual', async () => {
+  const el = await renderDecisions(worlds[0]!.project);
+  await until(() => el.querySelector('[data-decision-group="settled"] [data-decision-id]') !== null, 'the settled decision');
+  const row = () => el.querySelector('[data-decision-group="settled"] [data-decision-id]') as HTMLButtonElement;
+  act(() => trigger(el).click());
+  expect(list(el)).not.toBeNull();
+  // A real press: pointerdown, then the click on the same row.
+  act(() => {
+    row().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  });
+  expect(list(el)).toBeNull();
+  act(() => row().click());
+  expect(window.location.hash).toBe(`#decisions=${worlds[0]!.project}`);
+  expect(el.querySelector('[data-decision-pane]')).toBeNull();
+  // The list is closed now: the next press opens the decision.
+  act(() => {
+    row().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  });
+  act(() => row().click());
+  expect(window.location.hash).toContain('&decision=dec_');
+});
+
+test.skipIf(!hasDom)("the browser's Back, or any route change, closes the list", async () => {
+  const el = await renderDecisions(worlds[0]!.project);
+  act(() => trigger(el).click());
+  expect(list(el)).not.toBeNull();
+  act(() => {
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  expect(list(el)).toBeNull();
+
+  act(() => trigger(el).click());
+  expect(list(el)).not.toBeNull();
+  // The route moves to another project under the open list (as Back does on a phone).
+  act(() => {
+    window.history.replaceState(null, '', `#decisions=${worlds[2]!.project}`);
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  await until(() => (trigger(el).getAttribute('aria-label') ?? '').startsWith('Project: billing-2'), 'billing-2 on the button');
+  expect(list(el)).toBeNull();
+});
+
+test.skipIf(!hasDom)('type-ahead: the same letter again cycles through the projects it starts; a space while typing never picks', async () => {
+  const el = await renderDecisions(worlds[0]!.project);
+  act(() => trigger(el).click());
+  expect(document.activeElement).toBe(option(el, worlds[0]!.project));
+  press(document.activeElement as HTMLElement, 'b');
+  expect(document.activeElement).toBe(option(el, worlds[1]!.project));
+  press(document.activeElement as HTMLElement, 'b');
+  expect(document.activeElement).toBe(option(el, worlds[2]!.project));
+  press(document.activeElement as HTMLElement, 'b');
+  expect(document.activeElement).toBe(option(el, worlds[0]!.project));
+  // "b", then a space inside the window: part of a name being typed, not a pick.
+  press(document.activeElement as HTMLElement, ' ');
+  expect(list(el)).not.toBeNull();
+  expect(window.location.hash).toBe(`#decisions=${worlds[0]!.project}`);
+  // Once the typing has lapsed, Space picks again.
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 700));
+  });
+  press(document.activeElement as HTMLElement, 'ArrowDown');
+  press(document.activeElement as HTMLElement, ' ');
+  expect(list(el)).toBeNull();
+  expect(window.location.hash).toBe(`#decisions=${worlds[1]!.project}`);
+});
+
+test.skipIf(!hasDom)('on a phone the button carries one whole count, the name it all, and the sheet has a Close that hands focus back', async () => {
+  const { DecisionsProjectPicker } = await import('./components/DecisionsProjectPicker');
+  const projects = [
+    { id: 'prj_a', key: 'a', name: 'billing-svc', root: '/home/me/src/billing-svc', created_at: '2026-10-01T00:00:00.000Z', threads: 1, unread: 0 },
+    { id: 'prj_b', key: 'b', name: 'docs', root: '/home/me/src/docs', created_at: '2026-10-02T00:00:00.000Z', threads: 1, unread: 0 },
+  ];
+  const counts = new Map([
+    ['prj_a', { project_id: 'prj_a', waiting: 12, settled: 31 }],
+    ['prj_b', { project_id: 'prj_b', waiting: 0, settled: 4 }],
+  ]);
+  const picks: string[] = [];
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  const draw = (current: number) =>
+    act(() => {
+      root ??= createRoot(host!);
+      root.render(<DecisionsProjectPicker projects={projects} current={projects[current]!} counts={counts} home="/home/me" phone onPick={(id) => picks.push(id)} />);
+    });
+  draw(0);
+  const el = host;
+  // The button shows "12 waiting" whole and drops the settled part; its name keeps both.
+  expect(el.querySelector('.ib-ppick-tc')?.textContent).toBe('12 waiting');
+  expect(trigger(el).getAttribute('aria-label')).toBe('Project: billing-svc, 12 waiting · 31 settled');
+  draw(1);
+  expect(el.querySelector('.ib-ppick-tc')?.textContent).toBe('4 settled');
+
+  act(() => trigger(el).click());
+  const sheet = el.querySelector('[data-project-sheet]') as HTMLElement;
+  expect(sheet).not.toBeNull();
+  // The Close sits in the sheet's head, outside the listbox (a listbox holds options only).
+  const closeButton = sheet.querySelector('[data-project-sheet-close]') as HTMLButtonElement;
+  expect(closeButton.getAttribute('aria-label')).toBe('Close the project list');
+  expect(list(el)!.contains(closeButton)).toBe(false);
+  expect(list(el)!.querySelectorAll('[role="option"]')).toHaveLength(2);
+  act(() => closeButton.click());
+  expect(el.querySelector('[data-project-sheet]')).toBeNull();
+  expect(document.activeElement).toBe(trigger(el));
+  expect(picks).toEqual([]);
+});
