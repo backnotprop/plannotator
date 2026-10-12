@@ -31,3 +31,27 @@ export function agentClosedSubtitle(unsentAnnotations: number, surface: AgentClo
   const comments = unsentAnnotations === 1 ? 'Your comment is' : `Your ${unsentAnnotations} comments are`;
   return `The agent closed this review. ${comments} saved as a draft. ${RESTORE[surface]}`;
 }
+
+/**
+ * Copy for a plan review closed because plan mode or the agent session ended
+ * (`session-closed` with `by: "session"`, Pi's plan review), not because the
+ * agent asked to close it.
+ */
+export const SESSION_CLOSED_TITLE = 'Plan Mode Ended';
+
+export function sessionClosedSubtitle(unsentAnnotations: number): string {
+  if (unsentAnnotations <= 0) return 'Plan mode ended in the agent session.';
+  const comments = unsentAnnotations === 1 ? 'Your comment is' : `Your ${unsentAnnotations} comments are`;
+  return `Plan mode ended in the agent session. ${comments} saved.`;
+}
+
+/** Title and subtitle for a closed review, by who closed it. */
+export function closedReviewCopy(
+  closed: { unsentAnnotations: number; by?: 'agent' | 'session' },
+  surface: AgentClosedSurface = 'document',
+): { title: string; subtitle: string } {
+  if (closed.by === 'session') {
+    return { title: SESSION_CLOSED_TITLE, subtitle: sessionClosedSubtitle(closed.unsentAnnotations) };
+  }
+  return { title: AGENT_CLOSED_TITLE, subtitle: agentClosedSubtitle(closed.unsentAnnotations, surface) };
+}

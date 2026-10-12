@@ -202,7 +202,8 @@ describe("plan: closeKeepingDraft (the session that opened the review ended)", (
 				const event = await readEvent(server.url, (e) => e.type === "session-closed", () => {
 					expect(server.closeKeepingDraft()).toEqual({ closed: true, unsentAnnotations: 2 });
 				});
-				expect(event).toEqual({ type: "session-closed", by: "agent", unsentAnnotations: 2 });
+				// "session", not "agent": plan mode or the Pi session ended; nobody asked to close it.
+				expect(event).toEqual({ type: "session-closed", by: "session", unsentAnnotations: 2 });
 
 				const late = await postJson(`${server.url}/api/approve`, {});
 				expect(late.status).toBe(409);
@@ -226,7 +227,7 @@ describe("plan: closeKeepingDraft (the session that opened the review ended)", (
 					server.stop();
 					stopped = true;
 				});
-				expect(event).toMatchObject({ type: "session-closed", by: "agent" });
+				expect(event).toMatchObject({ type: "session-closed", by: "session" });
 			} finally {
 				if (!stopped) server.stop();
 			}

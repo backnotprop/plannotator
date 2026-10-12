@@ -16,13 +16,14 @@
  *    emitted onto the replaced runtime's dead bus.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	PLANNOTATOR_REQUEST_CHANNEL,
 	PLANNOTATOR_REVIEW_RESULT_CHANNEL,
 	registerPlannotatorEventListeners,
+	writeReviewStatusesAtomically,
 	type PlannotatorReviewStatusResult,
 } from "./plannotator-events.ts";
 import { startPlanReviewServer, type PlanServerResult } from "./server/serverPlan.ts";
@@ -219,5 +220,50 @@ describe("plannotator:request plan-review across a session replacement", () => {
 		expect(harness.results).toHaveLength(1);
 		expect(await harness.reviewStatus(open.reviewId)).toMatchObject({ status: "completed", approved: true, feedback: "after reload" });
 		expect(await harness.reviewStatus(decided.reviewId)).toMatchObject({ status: "completed", approved: true });
+	});
+});
+
+// review-status is the recovery path across restarts, so its file must never
+// be torn by a crash mid-write, nor wiped when it cannot be read.
+describe("review-status file", () => {
+	test("a decision is written through a temp file and rename, leaving no temp behind", async () => {
+		const dir = sandbox();
+		const harness = createHarness(dir);
+		await harness.startSession();
+		const { reviewId, url } = await openPlanReview(harness, "Atomic write");
+		expect((await postJson(`${url}/api/approve`, {})).status).toBe(200);
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(readdirSync(dir).filter((name) => name.startsWith("review-status"))).toEqual(["review-status.json"]);
+		const stored = JSON.parse(readFileSync(join(dir, "review-status.json"), "utf-8"));
+		expect(stored[reviewId]).toMatchObject({ status: "completed", approved: true });
+	});
+
+	test("a failed write removes its temp file and leaves the old file", () => {
+		const dir = sandbox();
+		// A non-empty directory where the file should be: the rename fails.
+		const target = join(dir, "status.json");
+		mkdirSync(target);
+		writeFileSync(join(target, "keep"), "x");
+		expect(() => writeReviewStatusesAtomically(target, { r: { status: "pending" } })).toThrow();
+		expect(readdirSync(dir)).toEqual(["status.json"]);
+		expect(readdirSync(target)).toEqual(["keep"]);
+	});
+
+	test("a file that cannot be parsed is kept as it is, never replaced with only the new review", async () => {
+		const dir = sandbox();
+		const statusPath = join(dir, "review-status.json");
+		const torn = '{"older-review":{"status":"completed","reviewId":"older-review","approved":tr';
+		writeFileSync(statusPath, torn);
+		const harness = createHarness(dir);
+		await harness.startSession();
+		const { logged, value: reviewId } = await captureErrors(async () => {
+			const opened = await openPlanReview(harness, "Torn file");
+			expect((await postJson(`${opened.url}/api/deny`, { feedback: "no" })).status).toBe(200);
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			return opened.reviewId;
+		});
+		expect(readFileSync(statusPath, "utf-8")).toBe(torn);
+		expect(logged.some((line) => line.includes(statusPath) && line.includes(reviewId))).toBe(true);
+		expect(await harness.reviewStatus(reviewId)).toEqual({ status: "missing" });
 	});
 });

@@ -1933,6 +1933,12 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 			// review would be an orphan whose decision nobody delivers.
 			if (phase !== "planning") {
 				try {
+					// A tab that already loaded learns the review closed.
+					session.closeKeepingDraft?.();
+				} catch {
+					// Best effort, as below.
+				}
+				try {
 					session.stop();
 				} catch {
 					// Best effort: nothing was delivered through it.

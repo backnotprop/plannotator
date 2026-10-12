@@ -150,8 +150,8 @@ import { useDocumentDrafts } from './hooks/useDocumentDrafts';
 import { composeSessionDraft } from './documentDrafts';
 import { useArchive } from '@plannotator/ui/hooks/useArchive';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
-import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotations';
-import { AGENT_CLOSED_TITLE, agentClosedSubtitle } from '@plannotator/ui/utils/agentClosed';
+import { useExternalAnnotations, type ExternalSessionClosed } from '@plannotator/ui/hooks/useExternalAnnotations';
+import { closedReviewCopy } from '@plannotator/ui/utils/agentClosed';
 import { useExternalAnnotationHighlights } from '@plannotator/ui/hooks/useExternalAnnotationHighlights';
 import { useUndoHistory } from '@plannotator/ui/hooks/useUndoHistory';
 import { buildPlanAgentInstructions } from '@plannotator/ui/utils/planAgentInstructions';
@@ -734,7 +734,7 @@ const App: React.FC = () => {
   const [submitted, setSubmitted] = useState<'approved' | 'denied' | 'done' | 'exited' | null>(null);
   // The agent that opened this review closed it (POST /api/host/close); the
   // reviewer's unsent comments stay in the draft for a reopen.
-  const [agentClosed, setAgentClosed] = useState<{ unsentAnnotations: number } | null>(null);
+  const [agentClosed, setAgentClosed] = useState<ExternalSessionClosed | null>(null);
   // Set below once the draft hooks exist; read by the session-closed handler.
   const flushPendingDraftsRef = useRef<() => void>(() => {});
   const [pendingPasteImage, setPendingPasteImage] = useState<{ file: File; blobUrl: string; initialName: string } | null>(null);
@@ -7835,7 +7835,7 @@ const App: React.FC = () => {
           submitted={submitted}
           title={
             archive.archiveMode ? 'Archive Closed'
-            : submitted === 'exited' && agentClosed ? AGENT_CLOSED_TITLE
+            : submitted === 'exited' && agentClosed ? closedReviewCopy(agentClosed).title
             : submitted === 'exited' ? 'Session Closed'
             : goalSetupMode ? 'Answers Submitted'
             : submitted === 'approved'
@@ -7846,14 +7846,14 @@ const App: React.FC = () => {
           }
           subtitle={
             submitted === 'exited' && agentClosed
-              ? agentClosedSubtitle(
-                  agentClosed.unsentAnnotations,
+              ? closedReviewCopy(
+                  agentClosed,
                   // Path-keyed drafts (documentDrafts) follow a local file
                   // through edits; URL and agent-message drafts do not.
                   liveApp ? 'app'
                     : documentDraftsEnabled ? (annotateSource === 'folder' ? 'folder' : 'file')
                     : 'document',
-                )
+                ).subtitle
             : submitted === 'exited'
               ? 'Annotation session closed without feedback.'
               : archive.archiveMode

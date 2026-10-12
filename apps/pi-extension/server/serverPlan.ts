@@ -115,9 +115,9 @@ export interface PlanServerResult {
 	 * In-process only (over HTTP a plan review stays unclosable): the Pi
 	 * session that opened this review is going away (/reload, a session
 	 * switch, leaving plan mode), so nothing could deliver a decision. Tells
-	 * open tabs over the external-annotation stream (`session-closed`, the
-	 * agent-close event: the tab shows the review closed, its draft kept) and
-	 * refuses any later decision. The caller stops the server afterwards.
+	 * open tabs over the external-annotation stream (`session-closed` with
+	 * `by: "session"`: the tab says plan mode ended and keeps its saved draft)
+	 * and refuses any later decision. The caller stops the server afterwards.
 	 */
 	closeKeepingDraft: () => HostCloseOutcome;
 }
@@ -703,7 +703,7 @@ export async function startPlanReviewServer(options: {
 			// updatePlan refuses from here on, as after a decision.
 			decisionClaimed = true;
 			const unsentAnnotations = draftKey ? countUnsentDraftComments(loadDraft(draftKey)) : 0;
-			externalAnnotations?.broadcast(hostSessionClosedEvent(unsentAnnotations));
+			externalAnnotations?.broadcast(hostSessionClosedEvent(unsentAnnotations, "session"));
 			return { closed: true, unsentAnnotations };
 		},
 		onDecision: (listener) => {

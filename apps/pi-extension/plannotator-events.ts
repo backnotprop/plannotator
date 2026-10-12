@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -256,30 +257,64 @@ function defaultReviewStatusPath(): string {
 
 type StoredReviewStatus = Record<string, PlannotatorReviewStatusResult>;
 
-function readStoredReviewStatuses(path: string): StoredReviewStatus {
+type StoredReviewStatusRead =
+	| { ok: true; statuses: StoredReviewStatus }
+	/** The file exists but cannot be read or parsed (torn, hand-edited). */
+	| { ok: false; error: string };
+
+function readStoredReviewStatuses(path: string): StoredReviewStatusRead {
+	let raw: string;
 	try {
-		if (!existsSync(path)) return {};
-		const raw = readFileSync(path, "utf-8");
-		const parsed = JSON.parse(raw) as StoredReviewStatus;
-		return parsed && typeof parsed === "object" ? parsed : {};
-	} catch {
-		return {};
+		raw = readFileSync(path, "utf-8");
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code === "ENOENT") return { ok: true, statuses: {} };
+		return { ok: false, error: describeError(err) };
+	}
+	try {
+		const parsed = JSON.parse(raw) as unknown;
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+			return { ok: false, error: "not a JSON object" };
+		}
+		return { ok: true, statuses: parsed as StoredReviewStatus };
+	} catch (err) {
+		return { ok: false, error: describeError(err) };
 	}
 }
 
-function writeStoredReviewStatuses(path: string, statuses: StoredReviewStatus): void {
+/**
+ * Replace the status file atomically: a same-directory temp file, then a
+ * rename, so a reader (or a crash mid-write) never sees a torn file. The temp
+ * file is removed when either step fails. Exported for tests.
+ */
+export function writeReviewStatusesAtomically(path: string, statuses: StoredReviewStatus): void {
 	mkdirSync(dirname(path), { recursive: true });
-	writeFileSync(path, JSON.stringify(statuses, null, 2));
+	const temp = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+	try {
+		writeFileSync(temp, JSON.stringify(statuses, null, 2));
+		renameSync(temp, path);
+	} catch (err) {
+		rmSync(temp, { force: true });
+		throw err;
+	}
 }
 
 function setStoredReviewStatus(path: string, reviewId: string, status: PlannotatorReviewStatusResult): void {
-	const statuses = readStoredReviewStatuses(path);
-	statuses[reviewId] = status;
-	writeStoredReviewStatuses(path, statuses);
+	const read = readStoredReviewStatuses(path);
+	if (!read.ok) {
+		// Never start over from {}: that would wipe every other review's
+		// recovery data. Leave the file for a person to look at.
+		console.error(
+			`Plannotator: ${path} could not be read (${read.error}); left it as it is and did not record review ${reviewId}.`,
+		);
+		return;
+	}
+	read.statuses[reviewId] = status;
+	writeReviewStatusesAtomically(path, read.statuses);
 }
 
 function getStoredReviewStatus(path: string, reviewId: string): PlannotatorReviewStatusResult {
-	return readStoredReviewStatuses(path)[reviewId] ?? { status: "missing" };
+	const read = readStoredReviewStatuses(path);
+	return (read.ok ? read.statuses[reviewId] : undefined) ?? { status: "missing" };
 }
 
 function describeError(err: unknown): string {
