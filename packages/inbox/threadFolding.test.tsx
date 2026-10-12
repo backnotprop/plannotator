@@ -526,8 +526,10 @@ test.skipIf(!hasDom)('the pill shows while ANY new message is below the view, an
   });
   const el = await render(grown);
   const pill = el.querySelector<HTMLButtonElement>('[data-new-pill]')!;
-  // The first new message is in view, the second is not.
-  expect(pill.textContent).toBe('2 new');
+  // The first new message is in view, the second is not: the pill counts what
+  // is below the view (it used to print every new message of the visit, "2 new";
+  // design record "inbox-new-in-open-thread").
+  expect(pill.textContent).toBe('1 new');
   expect(pill.hasAttribute('data-off')).toBe(false);
   act(() => pill.click());
   expect(scrolled.at(-1)).toBe('msg_A5');

@@ -1012,8 +1012,16 @@ export class InboxStore {
     return out;
   }
 
-  /** The person looked at a thread: its agent messages so far are no longer new. No write when nothing is new. */
-  markSeen(threadId: string): InboxListRow {
+  /**
+   * The person looked at a thread: its agent messages so far are no longer
+   * new. No write when nothing is new. `throughSeq` caps the look at what the
+   * window showed: it covers only agent messages whose seq is at or below it,
+   * so a message that landed after the window read the thread stays new. A
+   * cap at or below the look already recorded writes nothing (a look never
+   * goes back), and one past the newest message is the newest message.
+   * Without it: every agent message so far (older clients, the phone door).
+   */
+  markSeen(threadId: string, throughSeq?: number): InboxListRow {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
     // What listRow counts as seen: the last look, or the person's own last
@@ -1024,8 +1032,9 @@ export class InboxStore {
     for (const id of this.threadMembers.get(threadId) ?? []) {
       const seq = this.messageSeq.get(id) ?? 0;
       const message = this.messages.get(id);
-      if (message?.author.kind === "agent") latestAgent = Math.max(latestAgent, seq);
-      else if (message && !isInboxNote(message)) seen = Math.max(seen, seq);
+      if (message?.author.kind === "agent") {
+        if (throughSeq === undefined || seq <= throughSeq) latestAgent = Math.max(latestAgent, seq);
+      } else if (message && !isInboxNote(message)) seen = Math.max(seen, seq);
     }
     if (latestAgent > seen) {
       const at = this.stamp();

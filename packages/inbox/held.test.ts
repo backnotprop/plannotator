@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { heldNotice, markHeldRowArchived, refreshHeldRows, settleOwn } from './held';
+import { heldNotice, markHeldRowArchived, refreshHeldRows, settleOwn, settleThread } from './held';
 
 function row(id: string, project: string, last_at: string, last_author: 'agent' | 'person'): InboxListRow {
   return { thread_id: id, project: { id: `prj_${project}`, name: project }, last_at, last_author } as InboxListRow;
@@ -224,5 +224,81 @@ describe('markHeldRowArchived', () => {
     expect(refreshHeldRows(marked, sections(b))[0]!.threads[0]).toBe(marked[0]!.threads[0]);
     // Unarchived again: the list has it, and its fresh state replaces the archived one.
     expect(refreshHeldRows(marked, sections(a, b))[0]!.threads[0]).toBe(a);
+  });
+});
+
+// A new message in the thread the person has open (design record
+// "inbox-new-in-open-thread", approved 2026-10-12): the open thread's row
+// tells its state in place and is never in "N new"; on close it settles where
+// its state puts it, an unseen arrival bringing it back unread.
+describe('the open thread', () => {
+  const at = (minute: number) => `2026-10-12T10:${String(minute).padStart(2, '0')}:00Z`;
+  const r = (id: string, project: string, minute: number, section: InboxListRow['section'], unseen: number) =>
+    ({ ...row(id, project, at(minute), 'agent'), last_agent_at: at(minute), sent: null, section, unseen, unread: section !== 'quiet' && section !== 'sent' }) as InboxListRow;
+  const bySection = (...rows: InboxListRow[]): InboxListSection[] =>
+    (['stopped', 'holding', 'waiting', 'new', 'sent', 'quiet'] as const).map((id) => ({ id, label: id, threads: rows.filter((x) => x.section === id) }));
+  const ids = (list: InboxListSection[]) => list.filter((s) => s.threads.length > 0).map((s) => `${s.id}:${s.threads.map((t) => t.thread_id).join(',')}`);
+
+  // Opened from New: the look unbolded it on screen, in place. Then the agent posts in it.
+  const openShown = { ...r('open', 'billing-svc', 1, 'new', 0), unread: false } as InboxListRow;
+  const other = r('other', 'docs-site', 0, 'new', 1);
+  const shown = bySection(openShown, other);
+  const arrived = r('open', 'billing-svc', 5, 'new', 1);
+  const asked = r('open', 'billing-svc', 5, 'waiting', 1);
+  const seen = r('open', 'billing-svc', 5, 'quiet', 0);
+  const elsewhere = r('elsewhere', 'docs-site', 6, 'new', 1);
+
+  test('an arrival in the open thread is never in "N new"; another thread\'s still is, and the line names only that one', () => {
+    expect(heldNotice(shown, bySection(arrived, other), undefined, 'open')).toEqual({ count: 0, text: null });
+    expect(heldNotice(shown, bySection(arrived, other, elsewhere), undefined, 'open')).toEqual({ count: 1, text: '1 new in docs-site' });
+    // Without the exemption (no thread open), the same arrival is news as before.
+    expect(heldNotice(shown, bySection(arrived, other)).count).toBe(1);
+  });
+
+  test('the open thread\'s row goes bold in place on arrival and unbolds in place once seen; it never moves', () => {
+    const onArrival = refreshHeldRows(shown, bySection(asked, other, elsewhere), 'open');
+    expect(ids(onArrival)).toEqual(['new:open,other']);
+    expect(onArrival.find((s) => s.id === 'new')!.threads[0]).toBe(asked);
+    expect(onArrival.find((s) => s.id === 'new')!.threads[0]).toMatchObject({ unread: true, unseen: 1 });
+    const onSeen = refreshHeldRows(onArrival, bySection(seen, other, elsewhere), 'open');
+    expect(ids(onSeen)).toEqual(['new:open,other']);
+    expect(onSeen.find((s) => s.id === 'new')!.threads[0]).toMatchObject({ unread: false, unseen: 0 });
+    // Without the exemption the arrival waits behind "N new": the row keeps what it showed.
+    expect(refreshHeldRows(shown, bySection(asked, other)).find((s) => s.id === 'new')!.threads[0]).toBe(openShown);
+  });
+
+  test('closed before the arrival was seen: it settles unread, in New, or in Waiting when it asks', () => {
+    expect(ids(settleOwn(shown, bySection(arrived, other), undefined, 'open'))).toEqual(['new:open,other']);
+    const settled = settleOwn(shown, bySection(asked, other, elsewhere), undefined, 'open');
+    expect(ids(settled)).toEqual(['waiting:open', 'new:other']);
+    expect(settled.find((s) => s.id === 'waiting')!.threads[0]).toMatchObject({ unread: true });
+    // Another thread's agent activity still waits behind Show.
+    expect(heldNotice(settled, bySection(asked, other, elsewhere))).toEqual({ count: 1, text: '1 new in docs-site' });
+    // Without the exemption (the old rule) the unseen arrival waited behind Show and the row kept its old state.
+    expect(ids(settleOwn(shown, bySection(asked, other)))).toEqual(['new:open,other']);
+  });
+
+  test('closed after the arrival was seen: it settles where its state puts it (Quiet)', () => {
+    expect(ids(settleOwn(shown, bySection(seen, other), undefined, 'open'))).toEqual(['new:other', 'quiet:open']);
+  });
+
+  test('a thread opened from a link, not on screen: closed unseen, it comes in unread; nothing else an agent started does', () => {
+    const away = bySection(other);
+    expect(heldNotice(away, bySection(arrived, other), new Set(['open']), 'open').count).toBe(0);
+    expect(ids(settleOwn(away, bySection(arrived, other, elsewhere), new Set(['open']), 'open'))).toEqual(['new:open,other']);
+  });
+
+  test('settleThread (the list the thread covered): only that row moves, to its place in the section its state gives it', () => {
+    const quietOpen = r('open', 'billing-svc', 1, 'quiet', 0);
+    const q2 = r('q2', 'docs-site', 9, 'quiet', 0);
+    const w1 = r('w1', 'docs-site', 7, 'waiting', 1);
+    const w2 = r('w2', 'docs-site', 3, 'waiting', 1);
+    const before = bySection(quietOpen, q2, w1, w2, other);
+    const moved = settleThread(before, bySection(asked, q2, w1, w2, other, elsewhere), 'open');
+    // Newest first in Waiting: w1 (10:07), open (10:05), w2 (10:03). The new thread `elsewhere` stays out.
+    expect(ids(moved)).toEqual(['waiting:w1,open,w2', 'new:other', 'quiet:q2']);
+    expect(moved.find((s) => s.id === 'new')!.threads[0]).toBe(other);
+    // No row for it in the list read: nothing changes.
+    expect(ids(settleThread(before, bySection(q2), 'open'))).toEqual(ids(before));
   });
 });

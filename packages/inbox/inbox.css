@@ -978,6 +978,13 @@ pre code.pn-code[data-keep-layout] {
 @media (prefers-reduced-motion: reduce) {
   .pn-inbox .ib-npill, .ib-phsubj { transition: none; }
 }
+/* A message that arrives while its thread is open (.product/approved/inbox-new-in-open-thread/, variant A):
+   a short entrance so the eye catches what changed; none under reduced motion. */
+@keyframes ib-arrive { from { opacity: 0; transform: translateY(6px); } }
+.ib-pbody .ib-message[data-arrived] { animation: ib-arrive 200ms cubic-bezier(0.23, 1, 0.32, 1); }
+@media (prefers-reduced-motion: reduce) {
+  .ib-pbody .ib-message[data-arrived] { animation: none; }
+}
 /* narrow windows: a folded line takes two or three rows (name and time, the snippet, what it holds) */
 @media (max-width: 720px) {
   .pn-inbox .ib-fline { grid-template-columns: 24px minmax(0, 1fr) auto; grid-template-areas: "mk nm tm" ". sn sn" ". ch ch"; height: auto; padding: 8px; row-gap: 2px; }

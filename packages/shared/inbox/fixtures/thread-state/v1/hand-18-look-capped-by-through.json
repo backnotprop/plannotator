@@ -1,0 +1,579 @@
+{
+  "format": "plannotator-inbox-thread-state",
+  "version": 1,
+  "name": "hand-18-look-capped-by-through",
+  "description": "The look capped at what the window showed (`seen` with `through`): a message that landed after the window read the thread stays New; a cap behind the recorded look changes nothing; a cap past the thread's newest message (here another thread's later message) covers all of it.",
+  "source": "hand",
+  "seed": null,
+  "clock": {
+    "start": "2026-10-12T10:00:00.000Z",
+    "step_ms": 1000
+  },
+  "known_violations": [],
+  "steps": [
+    {
+      "event": {
+        "type": "agent_message",
+        "project": "repo0",
+        "session": "ses_a",
+        "reply_to": null,
+        "body": "The nightly build is green."
+      },
+      "outcome": "ok",
+      "created": [
+        "m1"
+      ],
+      "lands_in": "t1",
+      "expect": {
+        "sections": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [],
+          "new": [
+            "t1"
+          ],
+          "sent": [],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [],
+          "new": [
+            "t1"
+          ],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 0,
+          "unread": 1,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "new",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m1",
+            "questions": {}
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "agent_message",
+        "project": "repo0",
+        "reply_to": "m1",
+        "body": "The nightly build is green."
+      },
+      "outcome": "ok",
+      "created": [
+        "m2"
+      ],
+      "lands_in": "t1",
+      "expect": {
+        "sections": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [],
+          "new": [
+            "t1"
+          ],
+          "sent": [],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [],
+          "new": [
+            "t1"
+          ],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 0,
+          "unread": 1,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "new",
+            "unread": true,
+            "unseen": 2,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m2",
+            "questions": {}
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "seen",
+        "thread": "t1",
+        "through": "m1"
+      },
+      "outcome": "ok",
+      "created": [],
+      "expect": {
+        "sections": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [],
+          "new": [
+            "t1"
+          ],
+          "sent": [],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [],
+          "new": [
+            "t1"
+          ],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 0,
+          "unread": 1,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "new",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m2",
+            "questions": {}
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "seen",
+        "thread": "t1",
+        "through": "m2"
+      },
+      "outcome": "ok",
+      "created": [],
+      "expect": {
+        "sections": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": [
+            "t1"
+          ]
+        },
+        "sections_exclude_archived": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": [
+            "t1"
+          ]
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 0,
+          "unread": 0,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "quiet",
+            "unread": false,
+            "unseen": 0,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m2",
+            "questions": {}
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "agent_message",
+        "project": "repo0",
+        "reply_to": "m1",
+        "body": ":::question\nShip it today?\n\n- [ ] Yes\n- [ ] No\n:::"
+      },
+      "outcome": "ok",
+      "created": [
+        "m3"
+      ],
+      "lands_in": "t1",
+      "expect": {
+        "sections": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [
+            "t1"
+          ],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [
+            "t1"
+          ],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 1,
+          "unread": 1,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "waiting",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m3",
+            "questions": {
+              "m3/q-c0f244f5": "open"
+            }
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "seen",
+        "thread": "t1",
+        "through": "m1"
+      },
+      "outcome": "ok",
+      "created": [],
+      "expect": {
+        "sections": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [
+            "t1"
+          ],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [
+            "t1"
+          ],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 1,
+          "unread": 1,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "waiting",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m3",
+            "questions": {
+              "m3/q-c0f244f5": "open"
+            }
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "seen",
+        "thread": "t1",
+        "through": "m3"
+      },
+      "outcome": "ok",
+      "created": [],
+      "expect": {
+        "sections": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [
+            "t1"
+          ],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [
+            "t1"
+          ],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 1,
+          "unread": 1,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "waiting",
+            "unread": true,
+            "unseen": 0,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m3",
+            "questions": {
+              "m3/q-c0f244f5": "open"
+            }
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "agent_message",
+        "project": "repo0",
+        "reply_to": "m1",
+        "body": "The nightly build is green."
+      },
+      "outcome": "ok",
+      "created": [
+        "m4"
+      ],
+      "lands_in": "t1",
+      "expect": {
+        "sections": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [
+            "t1"
+          ],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [
+            "t1"
+          ],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 1,
+          "unread": 1,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "waiting",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m4",
+            "questions": {
+              "m3/q-c0f244f5": "open"
+            }
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "agent_message",
+        "project": "repo1",
+        "session": null,
+        "reply_to": null,
+        "body": "The nightly build is green."
+      },
+      "outcome": "ok",
+      "created": [
+        "m5"
+      ],
+      "lands_in": "t2",
+      "expect": {
+        "sections": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [
+            "t1"
+          ],
+          "new": [
+            "t2"
+          ],
+          "sent": [],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [
+            "t1"
+          ],
+          "new": [
+            "t2"
+          ],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 1,
+          "unread": 2,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "waiting",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m4",
+            "questions": {
+              "m3/q-c0f244f5": "open"
+            }
+          },
+          "t2": {
+            "section": "new",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m5",
+            "questions": {}
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "seen",
+        "thread": "t1",
+        "through": "m5"
+      },
+      "outcome": "ok",
+      "created": [],
+      "expect": {
+        "sections": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [
+            "t1"
+          ],
+          "new": [
+            "t2"
+          ],
+          "sent": [],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [
+            "t1"
+          ],
+          "new": [
+            "t2"
+          ],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 1,
+          "unread": 2,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "waiting",
+            "unread": true,
+            "unseen": 0,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m4",
+            "questions": {
+              "m3/q-c0f244f5": "open"
+            }
+          },
+          "t2": {
+            "section": "new",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m5",
+            "questions": {}
+          }
+        }
+      }
+    }
+  ]
+}

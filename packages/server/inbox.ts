@@ -1291,7 +1291,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-        return json({ thread: store.markSeen(seenMatch[1]!) });
+        // `through_seq` (optional): the seq of the newest message the window showed; the look stops there.
+        const through = body.through_seq;
+        if (through !== undefined && through !== null && !(typeof through === "number" && Number.isSafeInteger(through) && through >= 0)) {
+          throw new InboxError("validation_error", "through_seq: a message seq (a whole number, 0 or more).", { field: "through_seq" });
+        }
+        return json({ thread: store.markSeen(seenMatch[1]!, typeof through === "number" ? through : undefined) });
       }
 
       // Mark read and its Undo: the thread leaves the top for Quiet, its waiting questions closed (store.markRead).

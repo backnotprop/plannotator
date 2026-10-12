@@ -130,6 +130,7 @@ jobs:
           packages/inbox/updates.test.tsx
           packages/inbox/replaced.test.tsx
           packages/inbox/threadFolding.test.tsx
+          packages/inbox/seenOnSight.test.tsx
           packages/inbox/projectList.test.tsx
           packages/inbox/sidebarQuiet.test.tsx
           packages/inbox/soundIntro.test.tsx

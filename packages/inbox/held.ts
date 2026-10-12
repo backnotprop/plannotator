@@ -61,13 +61,24 @@ function hasNewAgentActivity(old: InboxListRow | undefined, row: InboxListRow, o
 /**
  * The threads in `latest` with agent activity the list on screen does not
  * show: a thread it lacks, or one whose last message is a newer agent
- * message. The person's own picks, replies and looks never count.
+ * message. The person's own picks, replies and looks never count. `open`:
+ * the thread the person has open, or just closed until the list settles
+ * (design record "inbox-new-in-open-thread", approved 2026-10-12), which is
+ * never counted or named here.
  */
-export function heldNotice(shown: readonly InboxListSection[], latest: readonly InboxListSection[], openedHere?: ReadonlySet<string>): HeldNotice {
+export function heldNotice(
+  shown: readonly InboxListSection[],
+  latest: readonly InboxListSection[],
+  openedHere?: ReadonlySet<string>,
+  open?: string | null,
+): HeldNotice {
   const before = rowsById(shown);
   const projects = new Set<string>();
   let count = 0;
   for (const row of rowsById(latest).values()) {
+    // The thread the person has open (or just closed, until the list settles)
+    // is never news here: its own row and its pill say what arrived there.
+    if (row.thread_id === open) continue;
     if (!hasNewAgentActivity(before.get(row.thread_id), row, openedHere)) continue;
     count += 1;
     projects.add(row.project.name);
@@ -85,13 +96,15 @@ export function heldNotice(shown: readonly InboxListSection[], latest: readonly 
  * reply. A row with new agent activity keeps what was on screen: that change
  * waits behind "N new". A row whose thread is gone stays as it was.
  */
-export function refreshHeldRows(shown: readonly InboxListSection[], latest: readonly InboxListSection[]): InboxListSection[] {
+export function refreshHeldRows(shown: readonly InboxListSection[], latest: readonly InboxListSection[], open?: string | null): InboxListSection[] {
   const fresh = rowsById(latest);
   return shown.map((section) => ({
     ...section,
     threads: section.threads.map((row) => {
       const next = fresh.get(row.thread_id);
-      return next && !hasNewAgentActivity(row, next) ? next : row;
+      // The open thread's row always tells its state, in place: bold when an
+      // agent message arrives, not bold once it is seen (it never moves).
+      return next && (row.thread_id === open || !hasNewAgentActivity(row, next)) ? next : row;
     }),
   }));
 }
@@ -109,9 +122,17 @@ function newestFirst(left: InboxListRow, right: InboxListRow): number {
  * the list on screen lacks and an agent started stays out; a row with a newer
  * agent message keeps the state it had on screen and the place that state
  * gives it. A thread gone from `latest` leaves (an archived one, archived while
- * it was open). Show adopts `latest` whole.
+ * it was open). Show adopts `latest` whole. `open`: the thread just closed,
+ * which settles as it now is whatever arrived while it was open (design
+ * record "inbox-new-in-open-thread", decision 2: an arrival the person did
+ * not see brings it back unread).
  */
-export function settleOwn(shown: readonly InboxListSection[], latest: readonly InboxListSection[], openedHere?: ReadonlySet<string>): InboxListSection[] {
+export function settleOwn(
+  shown: readonly InboxListSection[],
+  latest: readonly InboxListSection[],
+  openedHere?: ReadonlySet<string>,
+  open?: string | null,
+): InboxListSection[] {
   const before = rowsById(shown);
   const known = new Set(latest.map((section) => section.id));
   const buckets = new Map<string, InboxListRow[]>();
@@ -123,7 +144,10 @@ export function settleOwn(shown: readonly InboxListSection[], latest: readonly I
   for (const section of latest) {
     for (const row of section.threads) {
       const old = before.get(row.thread_id);
-      if (!hasNewAgentActivity(old, row, openedHere)) put(section.id, row);
+      // The thread just closed settles where its state puts it, an agent
+      // message that arrived while it was open included: seen, by its state
+      // (often Quiet); not yet seen, back as unread (New, or Waiting when it asks).
+      if (row.thread_id === open || !hasNewAgentActivity(old, row, openedHere)) put(section.id, row);
       // Archived by the person while it was open (markHeldRowArchived): the archive settles (the row
       // leaves); the agent's message that brought it back waits behind "N new", like any agent activity.
       else if (old && (old.resolved_at ?? null) !== null && old.back_from_archive !== true) continue;
@@ -132,6 +156,27 @@ export function settleOwn(shown: readonly InboxListSection[], latest: readonly I
     }
   }
   return latest.map((section) => ({ ...section, threads: (buckets.get(section.id) ?? []).sort(newestFirst) }));
+}
+
+/**
+ * One row settled, the rest of the list held: where the thread covers the
+ * list (a phone, a stacked window) the list is shown on Back exactly as the
+ * person left it (settle.ts), except the thread they just closed when an
+ * agent message arrived there that they did not see: it comes back unread, in
+ * the section its state now gives it (New, or Waiting when it asks), at its
+ * place there, instead of staying where it was (folded Quiet, say). Nothing
+ * else moves. Without a row for it in `latest` the list stays as it is.
+ */
+export function settleThread(shown: readonly InboxListSection[], latest: readonly InboxListSection[], threadId: string): InboxListSection[] {
+  const next = rowsById(latest).get(threadId);
+  if (!next) return shown.map((section) => ({ ...section }));
+  return shown.map((section) => {
+    const threads = section.threads.filter((row) => row.thread_id !== threadId);
+    if (section.id !== next.section) return { ...section, threads };
+    const at = threads.findIndex((row) => newestFirst(next, row) < 0);
+    threads.splice(at < 0 ? threads.length : at, 0, next);
+    return { ...section, threads };
+  });
 }
 
 /**
