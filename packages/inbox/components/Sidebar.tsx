@@ -26,6 +26,12 @@ export interface SidebarProps {
   onDecisions: () => void;
   onUpdate: () => void;
   onWhatsNew: (version: string) => void;
+  /**
+   * The question sound is on and the tab has had no click yet, so Chrome
+   * would keep it silent: a quiet line above Settings. Any click in the tab
+   * (this one too) turns the sound on, and the line goes.
+   */
+  soundNeedsClick?: boolean;
 }
 
 /**
@@ -93,6 +99,13 @@ export function Sidebar(props: SidebarProps) {
         )}
       </div>
       <div className="ib-side-foot">
+        {props.soundNeedsClick && (
+          // The click itself is what allows sound (sound.ts listens for the first one anywhere in the tab).
+          <button type="button" className="ib-sound-hint" data-sound-hint="">
+            <Icon name="clickHere" />
+            Click to turn on sound
+          </button>
+        )}
         <UpdateButton
           update={props.update}
           restarting={props.restarting}

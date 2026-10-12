@@ -291,9 +291,10 @@ test('Settings turns them on; after a port change the line returns once as "move
   const block = page.locator('[data-settings-notifications]');
   await expect(block).toContainText('Allowed in this browser');
   const main = block.getByRole('switch', { name: 'Desktop notifications' });
-  // On by default, and allowed by the browser: the one drawn switch reads on.
+  // On by default, and allowed by the browser: the one notifications switch reads on (the other is the question sound's).
   await expect(main).toHaveAttribute('aria-checked', 'true');
-  await expect(block.getByRole('switch')).toHaveCount(1);
+  await expect(block.getByRole('switch', { name: 'Desktop notifications' })).toHaveCount(1);
+  await expect(block.getByRole('switch')).toHaveCount(2);
   await main.click();
   await expect(main).toHaveAttribute('aria-checked', 'false');
   await expect.poll(() => config().inboxNotifications?.enabled).toBe(false);

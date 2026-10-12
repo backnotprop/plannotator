@@ -11,10 +11,12 @@ import type {
   InboxDecisionDraft,
   InboxGuideRef,
   InboxHealth,
+  InboxListRow,
   InboxListSection,
   InboxMessage,
   InboxProject,
   InboxQuestion,
+  InboxSoundSettings,
   InboxThread,
 } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
@@ -148,6 +150,8 @@ export interface SettingsModel {
   data_dir: string;
   inbox_tool: { hosts: Record<AgentToolHost, boolean>; env: boolean | null };
   notifications: NotificationSettings;
+  /** The question sound (config.json inboxSound). Absent from an Inbox that predates it. */
+  sound?: InboxSoundSettings;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */
   updates?: UpdateSwitches;
   /** Whether this Inbox serves phones (PLANNOTATOR_INBOX_PHONES): the Phones block shows only then. */
@@ -276,6 +280,9 @@ export const inboxApi = {
   thread: (threadId: string) => get<ThreadModel>(`/api/inbox/threads/${encodeURIComponent(threadId)}`),
   settings: () => get<SettingsModel>('/api/inbox/settings'),
   seen: (threadId: string) => post<unknown>(`/api/inbox/threads/${encodeURIComponent(threadId)}/seen`, {}),
+  /** Mark read (the thread leaves the top for Quiet, its waiting questions closed) or its Undo. */
+  markRead: (threadId: string, read: boolean) =>
+    post<{ thread: InboxListRow }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/${read ? 'read' : 'unread'}`, {}),
   pick: (messageId: string, key: string, revision: number, answer: QuestionAnswer | null) =>
     post<{ questions: InboxQuestion[] }>(`/api/inbox/messages/${encodeURIComponent(messageId)}/picks`, {
       questions: [{ key, revision, answer }],
@@ -290,6 +297,8 @@ export const inboxApi = {
       annotation_ids?: string[];
       /** Another live session takes the reply: the session that asked has ended. */
       to?: { host: string; session: string };
+      /** Skip this message's questions the Send leaves unanswered (false: Keep open). */
+      skip_unanswered?: boolean;
     },
   ) => post<ReplyResult>(`/api/inbox/messages/${encodeURIComponent(messageId)}/reply`, input),
   /** The card's switch and its words on one question: `recording`, and `draft` on Done. */
@@ -325,6 +334,9 @@ export const inboxApi = {
     post<{ inbox_tool: SettingsModel['inbox_tool'] }>('/api/inbox/settings', { inbox_tool: hosts }),
   saveNotifications: (change: Partial<NotificationSettings>) =>
     post<{ notifications: NotificationSettings }>('/api/inbox/settings', { notifications: change }),
+  saveSound: (change: { enabled?: boolean; volume?: number }) => post<{ sound: InboxSoundSettings }>('/api/inbox/settings', { sound: change }),
+  /** Ask to show the one-time sound dialog: `show` is true for the first page that ever asks after an update, and only that one. */
+  claimSoundDialog: () => post<{ show: boolean; sound: InboxSoundSettings }>('/api/inbox/sound/dialog', {}),
   saveTailscale: (on: boolean, replaceExposed = false) =>
     post<{ tailscale: TailscaleSettings }>('/api/inbox/settings', { tailscale: replaceExposed ? { on, replace_exposed: true } : { on } }),
   // Step 2: attachments (by id only), annotations, deleting.

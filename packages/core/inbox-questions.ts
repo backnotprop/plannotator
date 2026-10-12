@@ -136,14 +136,15 @@ function waitsOf(context: string): { stopped: string | null; holds_up: string[] 
 
 /**
  * Derived, never stored: superseded when an agent replaced or withdrew it,
- * else closed when the thread is resolved, else open / picked / sent.
+ * else closed when the thread is resolved or the person's Mark read closed
+ * it (`set_aside`), else open / picked / sent.
  */
 export function inboxQuestionState(
-  record: Pick<InboxQuestionRecord, "answer" | "revision" | "sent_revision" | "superseded_by">,
+  record: Pick<InboxQuestionRecord, "answer" | "revision" | "sent_revision" | "superseded_by" | "set_aside">,
   threadResolved: boolean,
 ): InboxQuestionState {
   if (record.superseded_by) return "superseded";
-  if (threadResolved) return "closed";
+  if (threadResolved || record.set_aside) return "closed";
   if (record.answer === null) return "open";
   if (record.revision > 0 && record.sent_revision === record.revision) return "sent";
   return "picked";
@@ -191,6 +192,7 @@ export function toInboxQuestion(record: InboxQuestionRecord, threadResolved: boo
     decision_recording: inboxDecisionRecording(record),
     decision_draft: record.decision_draft ?? null,
     superseded_by: record.superseded_by ? { message_id: record.superseded_by.message_id, key: record.superseded_by.key ?? null } : null,
+    set_aside_at: record.set_aside?.at ?? null,
   };
 }
 
@@ -346,6 +348,54 @@ function replySentence(answered: number, skipped: number): string {
   if (answered > 0) return `Answered ${questionsWord(answered)}.`;
   if (skipped > 0) return `Skipped ${questionsWord(skipped)}.`;
   return "";
+}
+
+/**
+ * A skip the Inbox writes for the person: a Send's for a question it left
+ * unanswered (`by_reply`, so the window says "Skipped with your reply" and
+ * the agent can tell it from a Skip the person pressed), or a Mark read's for
+ * a question it closed. Never records a decision (a skip decides nothing).
+ */
+export function inboxSkipAnswer(record: Pick<InboxQuestionRecord, "key" | "kind" | "prompt">, options: { byReply: boolean }): QuestionAnswer {
+  return {
+    v: 1,
+    key: record.key,
+    kind: record.kind,
+    prompt: record.prompt.slice(0, MAX_QUESTION_PROMPT_CHARS),
+    selected: [],
+    skipped: true,
+    ...(options.byReply ? { by_reply: true } : {}),
+  };
+}
+
+/** The first line of a Mark read's note to the asking agent. */
+export const INBOX_SET_ASIDE_HEADING = "Set aside for now; don't wait on these:";
+
+/**
+ * The note a Mark read sends the agent that asked the questions it closed
+ * (approval 2026-10-11: "tells the asking agent once"): the heading, then
+ * each question with its card number.
+ */
+export function composeInboxSetAsideBody(questions: readonly Pick<InboxQuestionRecord, "position" | "prompt">[]): string {
+  const lines = [...questions]
+    .sort((a, b) => a.position - b.position)
+    .map((q) => `- Q${q.position + 1}. ${q.prompt.replace(/\s+/g, " ").trim()}`);
+  return [INBOX_SET_ASIDE_HEADING, "", ...lines, "", "The person closed them unanswered in the Inbox. Ask again if you still need an answer to go on."].join("\n");
+}
+
+/** The first line of the note an Undo of Mark read sends once the agent was told. */
+export const INBOX_REOPENED_HEADING = "The person reopened these:";
+
+/**
+ * The note an Undo of Mark read sends when the asking agent was already told
+ * not to wait on those questions: they are open again, and wait on the
+ * person, so the agent must not go on as if they were set aside.
+ */
+export function composeInboxReopenedBody(questions: readonly Pick<InboxQuestionRecord, "position" | "prompt">[]): string {
+  const lines = [...questions]
+    .sort((a, b) => a.position - b.position)
+    .map((q) => `- Q${q.position + 1}. ${q.prompt.replace(/\s+/g, " ").trim()}`);
+  return [INBOX_REOPENED_HEADING, "", ...lines, "", "They are open again in the Inbox; wait for the person's answer before you rely on them."].join("\n");
 }
 
 // ─────────────────────────────── Subject ───────────────────────────────

@@ -37,15 +37,17 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
-import { realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import {
   INBOX_APP_ID,
+  INBOX_SOUND_DEFAULT_VOLUME,
   inboxAgentName,
   isInboxId,
+  isInboxSoundVolume,
   type InboxHealth,
   type InboxLine,
   type InboxListRow,
@@ -72,6 +74,7 @@ import {
   type PlannotatorConfig,
 } from "@plannotator/shared/config";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { normalizeStableVersion, readUpdateState } from "@plannotator/shared/update-check";
 import { isLoopbackHostHeader } from "@plannotator/shared/loopback-host";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -86,6 +89,7 @@ import {
 } from "@plannotator/shared/inbox/connection";
 import {
   createInboxToken,
+  inboxRegistryPath,
   readInboxRegistry,
   writeInboxRegistry,
   type InboxRegistryEntry,
@@ -194,7 +198,18 @@ export interface InboxServerOptions {
   publishTailnet?: boolean;
   /** Tests: how a project root's `origin` is read (default `readInboxProjectRepo`, inbox-repos.ts). */
   readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null>;
+  /**
+   * How long after a Mark read the asking agents are told what it closed (the
+   * window's Undo lasts 7 s). Default `INBOX_SET_ASIDE_DELAY_MS`. Tests shorten it.
+   */
+  setAsideDelayMs?: number;
 }
+
+/**
+ * After a Mark read, the set-aside note waits out the window's 7 s Undo with
+ * 3 s to spare (a slow click, a slow network), so an Undo never reaches an agent.
+ */
+export const INBOX_SET_ASIDE_DELAY_MS = 10_000;
 
 export interface InboxServer {
   port: number;
@@ -232,6 +247,8 @@ const ERROR_STATUS: Record<string, number> = {
   // an id that names no open question of the thread.
   question_superseded: 422,
   invalid_supersedes: 422,
+  // A pick on a question a Mark read closed: Move back first.
+  question_set_aside: 409,
   thread_resolved: 409,
   idempotency_key_reused: 409,
   config_not_saved: 500,
@@ -343,14 +360,58 @@ function startOnLoopback(fetch: Parameters<typeof Bun.serve>[0]["fetch"], prefer
   }
 }
 
+/**
+ * Whether an Inbox ran on this machine before this start, from evidence that
+ * predates it (read before this start writes the version, the store or the
+ * registry): the version an earlier Inbox recorded (0.28.12 and later), the
+ * registry every Inbox writes, a project in the store, or a setting the Inbox
+ * page wrote. Builds 0.28.7 to 0.28.11 recorded no version, so the version
+ * alone would call their people fresh.
+ */
+export function inboxUsedBefore(dataDir: string): boolean {
+  try {
+    if (readUpdateState(dataDir).inboxVersion) return true;
+  } catch {}
+  if (existsSync(inboxRegistryPath(dataDir))) return true;
+  try {
+    if (readdirSync(join(dataDir, "inbox", "projects")).length > 0) return true;
+  } catch {}
+  const config = loadConfig();
+  return config.inboxNotifications !== undefined || config.inboxTool !== undefined;
+}
+
 /** Start the Inbox server and write the registry. */
 export async function startInboxServer(options: InboxServerOptions = {}): Promise<InboxServer> {
   const dataDir = options.dataDir ?? getPlannotatorDataDir();
   const version = options.version ?? "dev";
+  // Read before the store, the update state and the registry are written below.
+  const usedBefore = inboxUsedBefore(dataDir);
+  let previousInboxVersion: string | null = null;
+  try {
+    previousInboxVersion = readUpdateState(dataDir).inboxVersion ?? null;
+  } catch {}
   const store = InboxStore.open(dataDir);
   // A send a crash interrupted leaves a temp blob; the next start removes it once it is stale.
   sweepStaleInboxSendTemps(store.dir);
   const serverSession = createServerSessionNonce();
+  // Mark read: the note to the asking agents goes once the Undo window has passed.
+  const setAsideDelayMs = options.setAsideDelayMs ?? INBOX_SET_ASIDE_DELAY_MS;
+  const setAsideTimers = new Set<ReturnType<typeof setTimeout>>();
+  const tellSetAside = (threadId: string) => {
+    try {
+      store.tellSetAside(threadId, setAsideDelayMs);
+    } catch (error) {
+      process.stderr.write(`Inbox: the set-aside note for ${threadId} was not written: ${error instanceof Error ? error.message : String(error)}\n`);
+    }
+  };
+  const scheduleSetAside = (threadId: string) => {
+    const timer = setTimeout(() => {
+      setAsideTimers.delete(timer);
+      tellSetAside(threadId);
+    }, setAsideDelayMs + 50);
+    (timer as { unref?: () => void }).unref?.();
+    setAsideTimers.add(timer);
+  };
   const token = createInboxToken();
   // Read once per start: the phone surface stays hidden until the iPhone app ships.
   const phonesOn = options.phones ?? resolveInboxPhones(loadConfig());
@@ -509,6 +570,92 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return notificationsState();
   };
 
+  /**
+   * The question sound (the "Ding-dong"), resolved from config.json: on, at
+   * 60, unless set. `dialog_shown_for`: the version the one-time dialog was
+   * shown for, or that a fresh install was marked with; null while it never
+   * was. `dialog_due`: the dialog waits for a page on this computer to claim it.
+   */
+  const soundState = () => {
+    const value = loadConfig().inboxSound;
+    const saved = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    const shownFor = typeof saved.dialogShownFor === "string" && saved.dialogShownFor !== "" ? saved.dialogShownFor : null;
+    return {
+      enabled: saved.enabled !== false,
+      volume: isInboxSoundVolume(saved.volume) ? saved.volume : INBOX_SOUND_DEFAULT_VOLUME,
+      dialog_shown_for: shownFor,
+      dialog_due: shownFor === null && typeof saved.dialogDueFor === "string" && saved.dialogDueFor !== "",
+    };
+  };
+
+  /** The sound's config entry as it is on disk, to merge a change into. */
+  const savedSound = (): NonNullable<PlannotatorConfig["inboxSound"]> => {
+    const current = loadConfig().inboxSound;
+    return current && typeof current === "object" && !Array.isArray(current) ? { ...current } : {};
+  };
+
+  /** Save `enabled` / `volume`, keeping the rest. `validateOnly`: check the input and write nothing. */
+  const saveSound = (input: unknown, validateOnly = false) => {
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw new InboxError("validation_error", "sound: an object.", { field: "sound" });
+    }
+    const next = savedSound();
+    for (const [field, value] of Object.entries(input as Record<string, unknown>)) {
+      switch (field) {
+        case "enabled":
+          if (typeof value !== "boolean") throw new InboxError("validation_error", "sound.enabled: must be a boolean.", { field: "sound.enabled" });
+          next.enabled = value;
+          break;
+        case "volume":
+          if (!isInboxSoundVolume(value)) {
+            throw new InboxError("validation_error", "sound.volume: a whole number from 10 to 100.", { field: "sound.volume" });
+          }
+          next.volume = value;
+          break;
+        default:
+          // The dialog's marks are the server's to write (below), never the page's.
+          throw new InboxError("validation_error", `sound.${field}: not a setting (enabled, volume).`, { field: `sound.${field}` });
+      }
+    }
+    if (validateOnly) return soundState();
+    saveConfig({ inboxSound: next });
+    if (JSON.stringify(loadConfig().inboxSound) !== JSON.stringify(next)) {
+      throw new InboxError("config_not_saved", "config.json could not be written; nothing changed.");
+    }
+    return soundState();
+  };
+
+  /**
+   * The one-time sound dialog, claimed by the page that will show it: a
+   * compare-and-set from `dialogDueFor` to `dialogShownFor`, so of several
+   * tabs (or a reload) only the first ever gets `show: true`. Only on this
+   * computer: a page that came through the tailnet (a phone, most likely)
+   * never shows it and leaves it for the next page opened here. The server is
+   * one process and this runs with no await, so two claims cannot interleave.
+   */
+  const claimSoundDialog = (via: RequestVia): boolean => {
+    if (via !== "local" || !soundState().dialog_due) return false;
+    const { dialogDueFor, ...rest } = savedSound();
+    saveConfig({ inboxSound: { ...rest, dialogShownFor: dialogDueFor } });
+    // Not written (a read-only data dir): showing it anyway would show it on every load.
+    return loadConfig().inboxSound?.dialogShownFor === dialogDueFor;
+  };
+
+  // Release builds decide the dialog at start, from what was here before:
+  // - a fresh install (no Inbox ran here) never sees it: it is marked shown,
+  //   and the notification ask line says the sound is on;
+  // - someone who used an earlier Inbox, on this version for the first time
+  //   (or after a build that recorded no version), gets it due, kept in
+  //   config.json until a page on this computer claims it, so a start that
+  //   ends before any window opens (a --background start) does not lose it.
+  if (normalizeStableVersion(version) !== null) {
+    const sound = soundState();
+    if (sound.dialog_shown_for === null && !sound.dialog_due) {
+      if (!usedBefore) saveConfig({ inboxSound: { ...savedSound(), dialogShownFor: version } });
+      else if (previousInboxVersion !== version) saveConfig({ inboxSound: { ...savedSound(), dialogDueFor: version } });
+    }
+  }
+
   /** The two update switches (PLANNOTATOR_UPDATE_CHECK, PLANNOTATOR_AUTO_UPDATE): the effective value and whether the env decides. */
   const updatesState = () => {
     const config = loadConfig();
@@ -552,6 +699,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     data_dir: dataDir,
     inbox_tool: inboxToolState(),
     notifications: notificationsState(),
+    /** The question sound: the Settings row, and whether the one-time dialog was shown. */
+    sound: soundState(),
     /** Settings → About: update notices and automatic updates. */
     updates: updatesState(),
     store: store.diskUsage(),
@@ -952,8 +1101,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const updateSwitches = body.update_check !== undefined || body.auto_update !== undefined;
-        if (body.inbox_tool === undefined && body.notifications === undefined && body.tailscale === undefined && !updateSwitches) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, tailscale, update_check or auto_update is required.");
+        if (body.inbox_tool === undefined && body.notifications === undefined && body.sound === undefined && body.tailscale === undefined && !updateSwitches) {
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, update_check or auto_update is required.");
         }
         // Updating changes this computer: never from a page that came through the tailnet.
         if (updateSwitches && via === "tailnet") return localOnly();
@@ -978,14 +1127,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // change (the one that can be refused: the env var, Tailscale itself)
         // goes first, so a refusal never leaves the others half saved.
         if (body.notifications !== undefined) saveNotifications(body.notifications, true);
+        if (body.sound !== undefined) saveSound(body.sound, true);
         if (body.inbox_tool !== undefined) saveInboxTool(body.inbox_tool, true);
         if (updateSwitches) saveUpdateSwitches(body, true);
         const tailnet = tailscaleChange === undefined ? tailscale.state() : tailscale.set(tailscaleChange.on, { via, replaceExposed: tailscaleChange.replaceExposed });
         const notifications = body.notifications === undefined ? notificationsState() : saveNotifications(body.notifications);
+        const sound = body.sound === undefined ? soundState() : saveSound(body.sound);
         const inboxTool = body.inbox_tool === undefined ? inboxToolState() : saveInboxTool(body.inbox_tool);
         const updateState = updateSwitches ? saveUpdateSwitches(body) : updatesState();
         if (updateSwitches) updates.refresh();
-        return json({ inbox_tool: inboxTool, notifications, tailscale: tailnet, updates: updateState });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState });
+      }
+      // The one-time sound dialog: the page asks to show it, and only the first ask ever gets `show: true`.
+      if (path === "/api/inbox/sound/dialog") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const show = claimSoundDialog(via);
+        return json({ show, sound: soundState() });
       }
 
       const threadMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)$/.exec(path);
@@ -1004,6 +1163,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         return json({ thread: store.markSeen(seenMatch[1]!) });
+      }
+
+      // Mark read and its Undo: the thread leaves the top for Quiet, its waiting questions closed (store.markRead).
+      const readMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/(read|unread)$/.exec(path);
+      if (readMatch) {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const read = readMatch[2] === "read";
+        const row = store.markRead(readMatch[1]!, read);
+        if (read) scheduleSetAside(readMatch[1]!);
+        return json({ thread: row });
       }
 
       // Guided reviews (step 5): the snapshot a message carries (packages/server/inbox-guides.ts).
@@ -1028,14 +1199,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             // An unknown message is the store's 404, never "not live".
             const asked = body.to === undefined ? undefined : store.message(messageId);
             const to = body.to === undefined || !asked ? undefined : live.replyTarget(asked.thread_id, body.to);
-            const result = store.sendReply(messageId, {
-              ...(to === undefined ? {} : { to }),
-              words: typeof body.words === "string" ? body.words : undefined,
-              questions: (body.questions as never) ?? [],
-              idempotency_key: body.idempotency_key as string,
-              feedback: typeof body.feedback === "string" ? body.feedback : undefined,
-              annotation_ids: body.annotation_ids as never,
-            });
+            let result: ReturnType<typeof store.sendReply>;
+            try {
+              result = store.sendReply(messageId, {
+                ...(to === undefined ? {} : { to }),
+                words: typeof body.words === "string" ? body.words : undefined,
+                questions: (body.questions as never) ?? [],
+                idempotency_key: body.idempotency_key as string,
+                feedback: typeof body.feedback === "string" ? body.feedback : undefined,
+                annotation_ids: body.annotation_ids as never,
+                skip_unanswered: body.skip_unanswered === true,
+              });
+            } catch (error) {
+              // A skip-only target whose questions closed meanwhile: a no-op, so
+              // the rest of a multi-message Send still goes.
+              if (error instanceof InboxError && error.code === "nothing_to_send") {
+                return json({ message_id: messageId, questions: store.questionsOf(messageId), reply: null, replayed: false, nothing_to_send: true, decisions: [], decisions_refused: [] });
+              }
+              throw error;
+            }
             // Step 3: the sent answers whose decision switch is on become
             // decisions, after the reply landed; a refused one never undoes it.
             const decisions = recordDecisionsForReply(store, result.reply.id);
@@ -1053,6 +1235,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               throw new InboxError("validation_error", "resolved: must be a boolean.");
             }
             const thread = store.resolveThread(messageId, body.resolved !== false);
+            // Unarchived: a Mark read's set-aside note an archive held back is due again.
+            if (body.resolved === false) scheduleSetAside(thread.thread_id);
             return json({ thread });
           }
         }
@@ -1189,12 +1373,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   setTimeout(() => {
     if (stopped) return;
     for (const project of store.listProjects()) void repos.refresh(project.root);
+    // A set-aside note a stop interrupted (marked read, then the Inbox went away within the Undo window).
+    for (const threadId of store.setAsideDue(setAsideDelayMs)) tellSetAside(threadId);
+    for (const threadId of store.setAsideDue(0)) scheduleSetAside(threadId);
   }, 0);
 
   let stopped = false;
   const stop = () => {
     if (stopped) return;
     stopped = true;
+    for (const timer of setAsideTimers) clearTimeout(timer);
+    setAsideTimers.clear();
     updates.stop();
     void mcp.close().catch(() => {});
     server.stop(true);

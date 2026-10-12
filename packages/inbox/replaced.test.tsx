@@ -287,12 +287,18 @@ test.skipIf(!hasDom)('the stale guard: a pick replaced while the person writes s
   expect((el.querySelector('textarea') as HTMLTextAreaElement).value).toBe(text.value);
   expect(document.activeElement?.textContent).toBe('Send');
 
-  // Once per replacement: Send now goes, with the words only.
+  // Once per replacement: Send now goes, with the words only (no pick).
+  // The Send also skips the questions left open, each on the reply to its own
+  // message, and the words ride the last reply.
   act(() => button(el, 'Send').click());
   await settle();
   const replies = posted.filter((p) => p.path.endsWith('/reply'));
-  expect(replies.length).toBe(1);
-  expect((replies[0]!.body as { questions: unknown[] }).questions).toEqual([]);
+  expect(replies.length).toBeGreaterThan(0);
+  for (const reply of replies) {
+    expect((reply.body as { questions: unknown[] }).questions).toEqual([]);
+    expect((reply.body as { skip_unanswered?: boolean }).skip_unanswered).toBe(true);
+  }
+  expect((replies.at(-1)!.body as { words: string }).words).toBe(text.value.trim());
 });
 
 test.skipIf(!hasDom)('Answer the new question keeps the draft and goes to the new card', async () => {

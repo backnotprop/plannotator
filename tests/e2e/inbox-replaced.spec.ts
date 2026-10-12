@@ -223,8 +223,12 @@ test('the guard shows once per replacement: the next Send carries the words only
   await expect(page.locator('.ib-delivered')).toContainText('Saved for Claude Code');
   const reply = await claude.waitForReply(first.thread_id, 10);
   expect(reply.status).toBe('replied');
-  expect(reply.reply.body).toContain(WORDS);
-  expect(reply.reply.body).not.toContain(PICK);
+  // The Send also skips the questions it left open, each on the reply to its
+  // own message; the words ride the last reply. No reply carries the replaced pick.
+  const thread = await claude.readThread(first.thread_id);
+  const replies = (thread.messages as { author: { kind: string }; body: string }[]).filter((m) => m.author.kind === 'person');
+  expect(replies.at(-1)!.body).toContain(WORDS);
+  for (const r of replies) expect(r.body).not.toContain(PICK);
   // The replaced card still shows the pick, never sent.
   await expect(card(page, first.message_id, first.questions[0]!.key).locator('[data-unsent-pick]')).toContainText('Not sent');
 });

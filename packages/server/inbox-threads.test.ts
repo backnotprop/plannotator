@@ -238,8 +238,9 @@ describe("the list: per-thread sections across projects", () => {
       ["stopped", "Stopped on you"],
       ["holding", "Holding up work"],
       ["waiting", "Waiting on you"],
-      ["sent", "Sent"],
+      // Sent waits on the agent, not on the person: below New (owner ruling 2026-10-11).
       ["new", "New since you looked"],
+      ["sent", "Sent"],
       ["quiet", "Quiet"],
     ]);
     expect(placed(all)).toEqual({

@@ -4,6 +4,7 @@ import { agentName, questionCount, shortTime } from '../format';
 import { AuthorMark, Icon } from '../icons';
 import { ListColumnEdge } from '../shell/ListColumnEdge';
 import { SidebarTrigger, useSidebar } from '../shell/sidebar';
+import { offersRowMarkRead } from '../markRead';
 
 export interface InboxListProps {
   title: string;
@@ -24,6 +25,8 @@ export interface InboxListProps {
   ask?: ReactNode;
   onShowNew: () => void;
   onOpen: (row: InboxListRow) => void;
+  /** The row's hover action (a row that waits on the person): Mark read, without opening it. Absent: no action. */
+  onMarkRead?: (row: InboxListRow) => void;
 }
 
 function badgeOf(row: InboxListRow): string | null {
@@ -39,6 +42,9 @@ function subjectOf(row: InboxListRow): string {
 }
 
 function countOf(row: InboxListRow): string {
+  // A Quiet row says why it is there: archived (resolved), or marked read.
+  if (row.section === 'quiet' && row.resolved_at !== null) return 'Archived';
+  if (row.section === 'quiet' && (row.read_at ?? null) !== null) return 'Read';
   if (row.answered_not_sent) return 'Answered, not sent';
   return questionCount(row.questions.open);
 }
@@ -147,9 +153,40 @@ function WideRow({ row, selected, filtered, onOpen }: { row: InboxListRow; selec
         <AuthorMark author={row.author} />
         <SubjectLine row={row} />
       </span>
-      <span className="ib-c">{countOf(row)}</span>
+      <span className={`ib-c${row.section === 'quiet' ? ' ib-qlabel' : ''}`}>{countOf(row)}</span>
       <span className="ib-t">{shortTime(row.last_at)}</span>
     </button>
+  );
+}
+
+/**
+ * A row and its quiet hover action: Mark read on a row that waits on the
+ * person, shown on hover or keyboard focus where the count and time are. It
+ * never opens the thread. The action is the row's sibling (a button cannot
+ * hold a button).
+ */
+function RowWithAction({ row, onMarkRead, children }: { row: InboxListRow; onMarkRead?: (row: InboxListRow) => void; children: ReactNode }) {
+  const offer = onMarkRead && offersRowMarkRead(row);
+  return (
+    <div className="ib-rw" data-row={row.thread_id}>
+      {children}
+      {offer && (
+        <button
+          type="button"
+          className="ib-ract"
+          data-row-mark-read=""
+          title={`Mark read (E): out of the top until ${agentName(row.author)} writes again`}
+          aria-label={`Mark read: ${row.subject ?? '(no subject)'}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onMarkRead(row);
+          }}
+        >
+          <Icon name="checkCircle" size={15} />
+          Mark read
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -167,7 +204,7 @@ function NarrowRow({ row, selected, filtered, onOpen }: { row: InboxListRow; sel
     >
       <div className="ib-l1">
         <span className="ib-p">{filtered ? agentName(row.author) : row.project.name}</span>
-        {count && <span className="ib-c">{count}</span>}
+        {count && <span className={`ib-c${row.section === 'quiet' ? ' ib-qlabel' : ''}`}>{count}</span>}
         <span className={`ib-t${count ? '' : ' ib-alone'}`}>{shortTime(row.last_at)}</span>
       </div>
       <div className="ib-l2">
@@ -229,25 +266,15 @@ export function InboxList(props: InboxListProps) {
                 </div>
               )}
               {open &&
-                section.threads.map((row) =>
-                  twoLine ? (
-                    <NarrowRow
-                      key={row.thread_id}
-                      row={row}
-                      filtered={props.filtered}
-                      selected={row.thread_id === props.selectedThreadId}
-                      onOpen={() => props.onOpen(row)}
-                    />
-                  ) : (
-                    <WideRow
-                      key={row.thread_id}
-                      row={row}
-                      filtered={props.filtered}
-                      selected={row.thread_id === props.selectedThreadId}
-                      onOpen={() => props.onOpen(row)}
-                    />
-                  ),
-                )}
+                section.threads.map((row) => (
+                  <RowWithAction key={row.thread_id} row={row} onMarkRead={props.onMarkRead}>
+                    {twoLine ? (
+                      <NarrowRow row={row} filtered={props.filtered} selected={row.thread_id === props.selectedThreadId} onOpen={() => props.onOpen(row)} />
+                    ) : (
+                      <WideRow row={row} filtered={props.filtered} selected={row.thread_id === props.selectedThreadId} onOpen={() => props.onOpen(row)} />
+                    )}
+                  </RowWithAction>
+                ))}
             </div>
           );
         })}

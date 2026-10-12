@@ -237,6 +237,8 @@ describe("the device door, on the binary", () => {
       ["GET", "projects"],
       ["GET", `threads/${threadId}`],
       ["POST", `threads/${threadId}/seen`],
+      ["POST", `threads/${threadId}/read`],
+      ["POST", `threads/${threadId}/unread`],
       ["GET", "events"],
       ["POST", `messages/${threadId}/picks`],
       ["POST", `messages/${threadId}/reply`],
@@ -305,7 +307,7 @@ describe("the device door, on the binary", () => {
   test("7.5 to 7.9: the list, projects, a thread, seen (key required), the event stream", async () => {
     const list = (await (await door("threads")).json()) as Json;
     expect(Object.keys(list).sort()).toEqual(["cursor", "decisions_waiting", "notice", "project", "projects", "sections", "serverSession", "update", "updated", "version"]);
-    expect(list.sections.map((s: Json) => s.id)).toEqual(["stopped", "holding", "waiting", "sent", "new", "quiet"]);
+    expect(list.sections.map((s: Json) => s.id)).toEqual(["stopped", "holding", "waiting", "new", "sent", "quiet"]);
     const row = list.sections.flatMap((s: Json) => s.threads).find((t: Json) => t.thread_id === threadId);
     expect(row).toMatchObject({ section: "waiting", unread: true, questions: { open: 2 } });
     const filtered = (await (await door(`threads?project=${row.project_id}`)).json()) as Json;

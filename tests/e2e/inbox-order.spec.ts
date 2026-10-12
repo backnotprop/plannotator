@@ -4,7 +4,8 @@
  * against the compiled binary: three agents (Pi, then OpenCode, then Claude
  * Code) each ask a question through `plannotator inbox mcp` with the MCP
  * SDK's stdio client (scripts/inbox-sim.ts), and "Waiting on you" reads
- * Claude Code, OpenCode, Pi. A reply to Pi's question moves its row to Sent;
+ * Claude Code, OpenCode, Pi. A reply to Pi's question moves its row to Sent
+ * once the person leaves the thread;
  * a newer agent message waits behind "N new" and, once shown, sits at the top
  * of its section.
  *
@@ -132,11 +133,13 @@ test("a reply to A moves A to Sent; Waiting keeps C, B", async () => {
   const row = page.locator(`.ib-lbody [data-thread-id="${threads.pi}"]`);
   await expect(row).toHaveAttribute('data-section', 'sent');
   await expect(row).toContainText('Saved for Pi');
-  expect(await sectionOrder(page, 'waiting')).toEqual([threads.claude, threads.opencode]);
-  expect(await sectionOrder(page, 'sent')).toEqual([threads.pi]);
-  await shot('2-reply-moves-a-to-sent');
+  // While the thread is open the person's own Send does not reorder the list (owner ruling 2026-10-11).
+  expect(await sectionOrder(page, 'waiting')).toEqual([threads.claude, threads.opencode, threads.pi]);
   await page.keyboard.press('Escape');
   await expect(pane).toHaveCount(0);
+  await expect.poll(() => sectionOrder(page, 'waiting')).toEqual([threads.claude, threads.opencode]);
+  expect(await sectionOrder(page, 'sent')).toEqual([threads.pi]);
+  await shot('2-reply-moves-a-to-sent');
 });
 
 test('a newer agent message waits behind "N new"; shown, its row is first in its section; no page errors', async () => {

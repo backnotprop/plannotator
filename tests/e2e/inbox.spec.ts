@@ -294,8 +294,8 @@ test('agents write three threads in two projects; the rows land in the six secti
     'Stopped on you',
     'Holding up work',
     'Waiting on you',
-    'Sent',
     'New since you looked',
+    'Sent',
     'Quiet',
   ]);
 
@@ -450,6 +450,16 @@ test('a pick is saved at once and the agent reads it through read_thread', async
       const where = `at ${width}px (${folder})`;
       if (width === 1440) await expect.poll(async () => (await textGap()).shape, where).toBe('ib-row');
       if (width === 820) await expect.poll(async () => (await textGap()).shape, where).toBe(narrowShape);
+      // The folder click closes the thread and the list re-renders (and may
+      // switch between the wide and the two-line row): measure once the row's
+      // shape and gap hold still, at every width.
+      await expect
+        .poll(async () => {
+          const first = await textGap();
+          await page.waitForTimeout(150);
+          return JSON.stringify(first) === JSON.stringify(await textGap());
+        }, where)
+        .toBe(true);
       const measured = await textGap();
       expect(measured.text).toBe('Answered, not sent');
       expect(measured.sameLine).toBe(true);
@@ -495,6 +505,14 @@ test('"N new" waits behind the notice, and the list moves only on an action', as
   const { page } = world;
   await page.keyboard.press('Escape');
   await expect(page.locator('section.ib-pane')).toHaveCount(0);
+  // Leaving the thread is an action: rows the person's own writes held in place take their places now. Let that land first.
+  await expect
+    .poll(async () => {
+      const first = await rowOrder(page);
+      await page.waitForTimeout(250);
+      return JSON.stringify(first) === JSON.stringify(await rowOrder(page));
+    })
+    .toBe(true);
   const before = await rowOrder(page);
   const codex = await agent('Codex', 'codex');
   const news = await codex.send({ project_path: world.docs, body: DEMO_MESSAGES.news });

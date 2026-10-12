@@ -126,9 +126,10 @@ The allowlist. Each row is the window's handler as it is today, with the request
 | `GET projects` | `GET /api/inbox/projects` | | `{ serverSession, cursor, projects: [{ id, key, name, root, created_at, threads, unread }] }` | 7.6 |
 | `GET threads/:id` | `GET /api/inbox/threads/:id` | | `{ serverSession, cursor, thread, decisions }` | 7.7 |
 | `POST threads/:id/seen` | same | `{ idempotency_key }` | `{ thread: row }` | 7.8 |
+| `POST threads/:id/read`, `POST threads/:id/unread` | same | `{ idempotency_key }` | `{ thread: row }`: Mark read (the row goes to Quiet, its waiting questions close unanswered) and its Undo; added after section 7, no exchange of its own | |
 | `GET events[?cursor=n]` | `GET /api/inbox/events` | `Last-Event-ID` or `?cursor=` | SSE: `hello`, `record` per store line (`id:` = seq), `status`, a heartbeat every 15 s | 7.9 |
 | `POST messages/:id/picks` | same | `{ idempotency_key, questions: [{ key, revision, answer or null }] }` | `{ message_id, questions, reply: null }` | 7.10 |
-| `POST messages/:id/reply` | same | `{ idempotency_key, words?, questions?, feedback?, annotation_ids? }` | `{ message_id, questions, reply, replayed, decisions, decisions_refused }` | 7.11 |
+| `POST messages/:id/reply` | same | `{ idempotency_key, words?, questions?, feedback?, annotation_ids?, skip_unanswered? }` (`skip_unanswered: true` skips the message's questions left without a pick) | `{ message_id, questions, reply, replayed, decisions, decisions_refused }` | 7.11 |
 | `POST messages/:id/resolve` | same | `{ idempotency_key, resolved? }` | `{ thread: summary }` | 7.12 |
 | `POST threads/:id/delete` | same | `{ idempotency_key }` | `{ ok, store }` | 7.13 |
 | `GET threads/:id/attachments` | same | | `{ serverSession, attachments: [state], annotations }` | 7.14 |
@@ -377,6 +378,7 @@ Every command a phone sends carries one key: `idempotency_key` in the request bo
 | Pick | `POST messages/:id/picks` | body `idempotency_key` |
 | Send | `POST messages/:id/reply` | body `idempotency_key` (also the store's own key) |
 | Seen | `POST threads/:id/seen` | body `idempotency_key` |
+| Mark read, Undo | `POST threads/:id/read`, `POST threads/:id/unread` | body `idempotency_key` |
 | Resolve | `POST messages/:id/resolve` | body `idempotency_key` |
 | Delete | `POST threads/:id/delete` | body `idempotency_key` |
 | Annotation save, remove | `POST annotations`, `POST annotations/:id/remove` | body `idempotency_key` |

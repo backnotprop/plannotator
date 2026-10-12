@@ -30,6 +30,9 @@ import { join } from "node:path";
 import {
   checkInboxAnswer,
   composeInboxReplyBody,
+  composeInboxReopenedBody,
+  composeInboxSetAsideBody,
+  inboxSkipAnswer,
   deriveInboxSubject,
   inboxQuestionState,
   isInboxQuestionSupersedable,
@@ -160,6 +163,13 @@ export interface InboxReplyInput {
    * (`session_not_live`), except that a replay answers what it wrote.
    */
   to?: InboxAddressee | null;
+  /**
+   * Skip the message's questions this Send leaves unanswered (no pick): each
+   * is sent as a skip marked `by_reply`, in the same reply. The window sends
+   * true unless the person pressed Keep open; absent (an older window, the
+   * MCP) keeps them open.
+   */
+  skip_unanswered?: boolean;
 }
 
 export interface InboxReplyResult {
@@ -610,6 +620,7 @@ export class InboxStore {
         : null;
     const facts = {
       ...summary,
+      read_at: this.readAt(root, messages),
       project: { id: project.id, name: project.name },
       thread_name: root.thread_name ?? null,
       answered_not_sent: root.resolved_at === null && summary.questions.open === 0 && summary.questions.picked > 0,
@@ -650,6 +661,229 @@ export class InboxStore {
   /** The list, placed in its sections; a project filter keeps the sections and drops other rows. */
   listSections(projectId?: string | null): InboxListSection[] {
     return inboxListSections(this.listRows({ projectId }));
+  }
+
+  /**
+   * When the person marked the thread read, while that still holds: the
+   * thread is open, and no message came after the Mark read except a
+   * set-aside note it sent. Null otherwise. Derived, so an agent's next
+   * message (or the person's reply) ends it without a write.
+   */
+  private readAt(root: InboxMessage, messages: readonly InboxMessage[] = this.threadMessages(root.id)): string | null {
+    const readSeq = root.person_read_seq;
+    if (readSeq == null || root.resolved_at !== null) return null;
+    for (const message of messages) {
+      if (message.set_aside && message.author.kind === "person") continue;
+      if ((this.messageSeq.get(message.id) ?? 0) > readSeq) return null;
+    }
+    return root.person_read_at ?? null;
+  }
+
+  /**
+   * Mark read (`read`), or move it back (Undo, the pressed button). Mark read
+   * moves the thread to Quiet without archiving it: every question still
+   * waiting on the person (open, or picked and not sent) is closed as a skip
+   * (`set_aside`, never a decision), and the thread counts as looked at. It
+   * comes back when an agent writes again. Moving back reopens every question
+   * a Mark read closed exactly as it was, a saved pick included (its revision
+   * goes up by one, so a pick in flight is refused rather than lost). No
+   * write when nothing changes. An archived thread refuses.
+   */
+  markRead(threadId: string, read: boolean): InboxListRow {
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    if (root.resolved_at !== null) throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
+    const members = this.threadMessages(threadId);
+    const records = members.filter((m) => m.author.kind === "agent").flatMap((m) => this.questionRecords(m.id));
+    if (read) {
+      const waiting = records.filter((r) => {
+        const state = inboxQuestionState(r, false);
+        return state === "open" || state === "picked";
+      });
+      if (this.readAt(root, members) === null || waiting.length > 0) {
+        const at = this.stamp();
+        let latestAgent = 0;
+        for (const m of members) if (m.author.kind === "agent") latestAgent = Math.max(latestAgent, this.messageSeq.get(m.id) ?? 0);
+        this.appendMessage(
+          {
+            ...root,
+            person_read_seq: this.seq + 1,
+            person_read_at: at,
+            person_seen_seq: Math.max(root.person_seen_seq ?? 0, latestAgent),
+            // The look before, so an Undo puts unseen news back as it was.
+            person_seen_before_read: root.person_seen_seq ?? null,
+          },
+          at,
+        );
+        for (const record of waiting) {
+          this.appendQuestion(
+            {
+              ...record,
+              answer: inboxSkipAnswer(record, { byReply: false }),
+              revision: record.revision + 1,
+              set_aside: {
+                at,
+                previous: {
+                  answer: record.answer,
+                  revision: record.revision,
+                  sent_revision: record.sent_revision,
+                  picked_by: record.picked_by,
+                  picked_at: record.picked_at,
+                },
+              },
+            },
+            at,
+          );
+        }
+      }
+    } else {
+      const closed = records.filter((r) => r.set_aside);
+      if (root.person_read_seq != null || closed.length > 0) {
+        const at = this.stamp();
+        if (root.person_read_seq != null) {
+          // While the read still holds (no message since), the look it counted
+          // is taken back too, so news it hid is news again.
+          const restoreLook = this.readAt(root, members) !== null && root.person_seen_before_read !== undefined;
+          this.appendMessage(
+            {
+              ...root,
+              person_read_seq: null,
+              person_read_at: null,
+              ...(restoreLook ? { person_seen_seq: root.person_seen_before_read } : {}),
+              person_seen_before_read: undefined,
+            },
+            at,
+          );
+        }
+        for (const record of closed) {
+          const previous = record.set_aside!.previous;
+          this.appendQuestion(
+            {
+              ...record,
+              answer: previous.answer,
+              revision: record.revision + 1,
+              sent_revision: previous.sent_revision,
+              picked_by: previous.picked_by,
+              picked_at: previous.picked_at,
+              set_aside: null,
+            },
+            at,
+          );
+        }
+        // The agent was already told not to wait on some of these: tell it
+        // they are open again, one note per asking message, so it does not
+        // go on believing it need not wait.
+        const told = this.toldSetAside(members);
+        const byMessage = new Map<string, InboxQuestionRecord[]>();
+        for (const record of closed) {
+          if (!told.has(record.id) || record.superseded_by) continue;
+          const list = byMessage.get(record.message_id) ?? [];
+          list.push(record);
+          byMessage.set(record.message_id, list);
+        }
+        for (const message of members) {
+          const reopened = byMessage.get(message.id);
+          if (!reopened) continue;
+          this.appendMessage(
+            {
+              id: inboxId("msg"),
+              project_id: message.project_id,
+              thread_id: message.thread_id,
+              reply_to: message.id,
+              author: { kind: "person" },
+              subject: null,
+              body: composeInboxReopenedBody(reopened),
+              created_at: at,
+              resolved_at: null,
+              idempotency_key: null,
+              reopened: reopened.map((r) => r.id),
+            },
+            at,
+          );
+        }
+      }
+    }
+    const row = this.listRow(threadId);
+    if (!row) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    return row;
+  }
+
+  /**
+   * The questions a set-aside note has told the agent not to wait on, and no
+   * later reopened note has taken back (thread order decides).
+   */
+  private toldSetAside(members: readonly InboxMessage[]): Set<string> {
+    const told = new Set<string>();
+    for (const message of members) {
+      if (message.author.kind !== "person") continue;
+      for (const id of message.set_aside ?? []) told.add(id);
+      for (const id of message.reopened ?? []) told.delete(id);
+    }
+    return told;
+  }
+
+  /**
+   * The questions a Mark read closed that no set-aside note has named yet,
+   * closed at least `afterMs` ago and not replaced since, grouped by the
+   * message that asked them (thread order).
+   */
+  private untoldSetAside(threadId: string, afterMs: number): { message: InboxMessage; records: InboxQuestionRecord[] }[] {
+    const members = this.threadMessages(threadId);
+    const told = this.toldSetAside(members);
+    const now = this.now().getTime();
+    const out: { message: InboxMessage; records: InboxQuestionRecord[] }[] = [];
+    for (const message of members) {
+      if (message.author.kind !== "agent") continue;
+      const records = this.questionRecords(message.id).filter(
+        (r) => r.set_aside && !r.superseded_by && !told.has(r.id) && Date.parse(r.set_aside.at) + afterMs <= now,
+      );
+      if (records.length > 0) out.push({ message, records });
+    }
+    return out;
+  }
+
+  /**
+   * Tell the agents what a Mark read closed (approval 2026-10-11, "tells the
+   * asking agent once"): once the Undo window (`afterMs`) has passed and the
+   * questions are still closed, one person note per asking message, a reply
+   * to it ("Set aside for now; don't wait on these:" and the questions),
+   * delivered like any reply (the wake, wait_for_reply). Each question is
+   * named once, across Mark reads. Returns the notes written.
+   */
+  tellSetAside(threadId: string, afterMs: number): InboxMessage[] {
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId || root.resolved_at !== null) return [];
+    const notes: InboxMessage[] = [];
+    for (const { message, records } of this.untoldSetAside(threadId, afterMs)) {
+      const at = this.stamp();
+      const note: InboxMessage = {
+        id: inboxId("msg"),
+        project_id: message.project_id,
+        thread_id: message.thread_id,
+        reply_to: message.id,
+        author: { kind: "person" },
+        subject: null,
+        body: composeInboxSetAsideBody(records),
+        created_at: at,
+        resolved_at: null,
+        idempotency_key: null,
+        set_aside: records.map((r) => r.id),
+      };
+      this.appendMessage(note, at);
+      notes.push(note);
+    }
+    return notes;
+  }
+
+  /** The open threads with a set-aside note due (a question a Mark read closed at least `afterMs` ago, not yet named). */
+  setAsideDue(afterMs: number): string[] {
+    const out: string[] = [];
+    for (const threadId of this.threadMembers.keys()) {
+      const root = this.messages.get(threadId);
+      if (!root || root.thread_id !== threadId || root.resolved_at !== null) continue;
+      if (this.untoldSetAside(threadId, afterMs).length > 0) out.push(threadId);
+    }
+    return out;
   }
 
   /** The person looked at a thread: its agent messages so far are no longer new. No write when nothing is new. */
@@ -1133,6 +1367,10 @@ export class InboxStore {
         const by = { message_id: record.superseded_by.message_id, key: record.superseded_by.key ?? null };
         throw refusalError({ code: "question_superseded", key: entry.key, superseded_by: by });
       }
+      // Mark read closed it: Move back reopens it, pick included.
+      if (record.set_aside) {
+        throw new InboxError("question_set_aside", `Question ${entry.key} was closed when the thread was marked read; move the thread back to answer it.`, { key: entry.key });
+      }
       if (record.revision !== entry.revision) {
         throw refusalError({ code: "question_revision_conflict", key: entry.key, current_revision: record.revision });
       }
@@ -1206,14 +1444,36 @@ export class InboxStore {
     const plan = this.planAnswers(message, entries, "send");
     const feedback = typeof input.feedback === "string" ? input.feedback.trim() : "";
     const carried = this.planSentAnnotations(message.thread_id, input.annotation_ids);
-    if (plan.length === 0 && words.trim() === "" && feedback === "") {
+    // A Send skips the message's questions it leaves unanswered (no pick),
+    // unless the person pressed Keep open. Superseded and closed ones are not open.
+    const planned = new Set(plan.map((p) => p.record.key));
+    const skips =
+      input.skip_unanswered === true
+        ? this.questionRecords(message.id).filter((r) => !planned.has(r.key) && inboxQuestionState(r, false) === "open")
+        : [];
+    if (plan.length === 0 && skips.length === 0 && words.trim() === "" && feedback === "") {
+      // A target a Send meant only to skip, whose questions closed meanwhile
+      // (answered, replaced, a Mark read): nothing to write, not a refusal.
+      if (input.skip_unanswered === true) throw new InboxError("nothing_to_send", "Nothing is left to send on this message.");
       throw new InboxError("validation_error", "words: write a reply or send at least one answer.", { field: "words" });
     }
 
     const replyId = inboxId("msg");
     const at = this.stamp();
-    const sentKeys = new Set(plan.map((p) => p.record.key));
-    const updated = plan.map(({ record, answer }) => {
+    const sentKeys = new Set([...plan.map((p) => p.record.key), ...skips.map((r) => r.key)]);
+    const skipped = skips.map(
+      (record) =>
+        ({
+          ...record,
+          answer: inboxSkipAnswer(record, { byReply: true }),
+          revision: record.revision + 1,
+          sent_revision: record.revision + 1,
+          sent_reply_id: replyId,
+          picked_by: INBOX_PERSON,
+          picked_at: at,
+        }) satisfies InboxQuestionRecord,
+    );
+    const answered = plan.map(({ record, answer }) => {
       const nextAnswer = answer === undefined ? record.answer : answer;
       const revision = answer === undefined ? record.revision : record.revision + 1;
       return {
@@ -1225,6 +1485,7 @@ export class InboxStore {
         ...(answer === undefined ? {} : { picked_by: INBOX_PERSON, picked_at: at }),
       } satisfies InboxQuestionRecord;
     });
+    const updated = [...answered, ...skipped];
     const all = this.questionRecords(message.id);
     const earlier = all
       .filter((r) => !sentKeys.has(r.key) && r.answer !== null && r.sent_revision > 0 && r.sent_revision === r.revision)
@@ -1266,6 +1527,7 @@ export class InboxStore {
       this.appendMessage(reply, at);
     } catch (error) {
       for (const { record } of plan) this.restoreQuestion(record);
+      for (const record of skips) this.restoreQuestion(record);
       for (const record of carried) this.restoreAnnotation(record);
       throw error;
     }

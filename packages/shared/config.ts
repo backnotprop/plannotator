@@ -287,6 +287,24 @@ export interface PlannotatorConfig {
     allowedOrigin?: string | null;
   };
   /**
+   * The Plannotator Inbox's question sound ("Ding-dong"), set from the Inbox
+   * page (its Settings row and its one-time dialog), kept here for the same
+   * reason as `inboxNotifications`: the Inbox's port, and so its origin, can
+   * change. `enabled`: ring at all (unset: on). `volume`: 10 to 100 (unset:
+   * 60), the same on every device. `dialogDueFor`: the version whose first
+   * start found someone who used an earlier Inbox, so the one-time "The Inbox
+   * can ring now" dialog waits for a page to claim it. `dialogShownFor`: the
+   * version it was shown for (or a fresh install was marked with, so it never
+   * shows); once set it never shows again. Both are written by the server
+   * only; the claim is a compare-and-set, so only one tab ever shows it.
+   */
+  inboxSound?: {
+    enabled?: boolean;
+    volume?: number;
+    dialogDueFor?: string;
+    dialogShownFor?: string;
+  };
+  /**
    * The Plannotator Inbox's phone surface: pairing, the device door
    * (`/api/inbox/device/*`), the tailnet and Wi-Fi listeners, the relay and
    * Settings' Phones block. Hidden until the iPhone app ships, so `true` is

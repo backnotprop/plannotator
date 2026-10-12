@@ -198,6 +198,29 @@ export interface InboxMessage {
    */
   person_seen_seq?: number | null;
   /**
+   * On a root: the person's Mark read, the event-log seq when they pressed it
+   * and when. While no message but a set-aside note (`set_aside`) came after
+   * it, the thread sits in Quiet without being closed; any other message
+   * (an agent's, or the person's own reply) ends it without a write. Null
+   * after Undo. Absent on records older than Mark read.
+   */
+  person_read_seq?: number | null;
+  person_read_at?: string | null;
+  /** On a root marked read: `person_seen_seq` before the Mark read (which counts as a look), for its Undo. */
+  person_seen_before_read?: number | null;
+  /**
+   * On a person's set-aside note: the questions (`<message id>/<key>`) a
+   * Mark read told the asking agent not to wait on. Written once per
+   * question, after the Undo window, as a reply to the message that asked.
+   * Absent on every other message.
+   */
+  set_aside?: string[];
+  /**
+   * On a person's reopened note: the questions an Undo of Mark read opened
+   * again after a set-aside note had named them. Absent on every other message.
+   */
+  reopened?: string[];
+  /**
    * On a root: the seq up to which the asking agent has read the person's
    * replies (wait_for_reply returned one, or read_thread read the thread),
    * and when. A Sent row moves to Quiet once its reply is checked.
@@ -390,6 +413,19 @@ export interface InboxQuestionRecord {
    * it stands. Added for replaced questions: older records lack it.
    */
   superseded_by?: InboxSupersededBy | null;
+  /**
+   * The person's Mark read closed this question unanswered: it reads as
+   * `closed` with a skip for its answer, and records no decision. `previous`
+   * is the question as it was (a saved pick included), which Undo puts back.
+   * Absent or null while it stands. Added for Mark read: older records lack it.
+   */
+  set_aside?: InboxQuestionSetAside | null;
+}
+
+/** A question Mark read closed (`InboxQuestionRecord.set_aside`). */
+export interface InboxQuestionSetAside {
+  at: string;
+  previous: Pick<InboxQuestionRecord, "answer" | "revision" | "sent_revision" | "picked_by" | "picked_at">;
 }
 
 /**
@@ -405,7 +441,8 @@ export interface InboxDecisionDraft {
 /**
  * Derived, never stored. `superseded`: the agent replaced or withdrew the
  * question (`superseded_by`); it wins over `closed`, so a resolved thread's
- * card still says what replaced it.
+ * card still says what replaced it. `closed`: the thread is archived, or the
+ * person's Mark read closed the question (`set_aside_at`).
  */
 export type InboxQuestionState = "open" | "picked" | "sent" | "closed" | "superseded";
 
@@ -443,6 +480,11 @@ export interface InboxQuestion {
   decision_draft: InboxDecisionDraft | null;
   /** What superseded it (`state: "superseded"`), or null. */
   superseded_by: InboxSupersededBy | null;
+  /**
+   * When the person's Mark read closed it unanswered (`state: "closed"`,
+   * answer a skip), or null. Absent from an older Inbox.
+   */
+  set_aside_at?: string | null;
 }
 
 /** Workspaces' `NotificationQuestionSummary`: a row's questions, summed. */
@@ -489,14 +531,15 @@ export interface InboxThreadSummary {
 }
 
 /** The list's sections, in the approved order (Workspaces' inbox model). */
-export type InboxSectionId = "stopped" | "holding" | "waiting" | "sent" | "new" | "quiet";
+export type InboxSectionId = "stopped" | "holding" | "waiting" | "new" | "sent" | "quiet";
 
 export const INBOX_SECTIONS: readonly { readonly id: InboxSectionId; readonly label: string }[] = [
   { id: "stopped", label: "Stopped on you" },
   { id: "holding", label: "Holding up work" },
   { id: "waiting", label: "Waiting on you" },
-  { id: "sent", label: "Sent" },
   { id: "new", label: "New since you looked" },
+  // Sent waits on the agent, not on the person: below what is new to them.
+  { id: "sent", label: "Sent" },
   { id: "quiet", label: "Quiet" },
 ];
 
@@ -521,6 +564,12 @@ export interface InboxListRow extends InboxThreadSummary {
   sent: { at: string; checked_at: string | null } | null;
   /** A message in the thread carries a guided review: the row's "Guided review" mark. */
   guide: boolean;
+  /**
+   * When the person marked the thread read (Mark read), while it still holds:
+   * no message but a set-aside note since. The row is Quiet. Null otherwise.
+   * Absent from an older Inbox.
+   */
+  read_at?: string | null;
 }
 
 export interface InboxListSection {
@@ -657,4 +706,27 @@ export function isInboxHealth(value: unknown): value is InboxHealth {
     typeof v.serverSession === "string" &&
     typeof v.pid === "number"
   );
+}
+
+/**
+ * The question sound (config.json `inboxSound`, through GET and POST
+ * /api/inbox/settings): on unless turned off, one volume for every device.
+ */
+export interface InboxSoundSettings {
+  enabled: boolean;
+  /** 10 to 100; the slider has no 0, because the switch is how the sound goes off. */
+  volume: number;
+  /** The version the one-time "The Inbox can ring now" dialog was shown for (or a fresh install was marked with); null while never. */
+  dialog_shown_for: string | null;
+  /** The one-time dialog waits for a page on this computer to claim it (POST /api/inbox/sound/dialog). Absent from an Inbox before it. */
+  dialog_due?: boolean;
+}
+
+export const INBOX_SOUND_DEFAULT_VOLUME = 60;
+export const INBOX_SOUND_MIN_VOLUME = 10;
+export const INBOX_SOUND_MAX_VOLUME = 100;
+
+/** A volume the Inbox keeps: a whole number from 10 to 100. */
+export function isInboxSoundVolume(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= INBOX_SOUND_MIN_VOLUME && value <= INBOX_SOUND_MAX_VOLUME;
 }
