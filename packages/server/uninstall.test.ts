@@ -2103,9 +2103,9 @@ describe("the Inbox's agent connections (inbox-agents.ts)", () => {
     ].join("\n");
     writeText(join(fixture.homeDir, ".codex", "AGENTS.md"), `Mine.\n\n${note}\n`);
     const dry = await runPlannotatorUninstall({ purge: false, dryRun: true }, fixture.environment);
-    expect(dry.planned).toContain("Note for Codex (~/.codex/AGENTS.md, marked section only; you edited it)");
+    expect(dry.planned).toContain(`Note for Codex (${join("~", ".codex", "AGENTS.md")}, marked section only; you edited it)`);
     const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
-    expect(result.removed).toContain("Note for Codex (~/.codex/AGENTS.md, marked section only; you edited it)");
+    expect(result.removed).toContain(`Note for Codex (${join("~", ".codex", "AGENTS.md")}, marked section only; you edited it)`);
     expect(readFileSync(join(fixture.homeDir, ".codex", "AGENTS.md"), "utf8")).toBe("Mine.\n");
   });
 
