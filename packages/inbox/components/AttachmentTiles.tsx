@@ -133,34 +133,45 @@ function GalleryImage({ image, count, onOpen }: { image: InboxAttachmentState; c
  * images with their thumbnail) is one button; a PDF, any other file and a
  * kind this window does not know is one Download link. The changed line
  * replaces the kind when the file on disk is no longer what was sent.
+ *
+ * `placement="header"` is the same tiles a second time, in the band the
+ * message header's count opens (design record "inbox-attachments-header",
+ * variant Count): no heading and no gallery, only the tiles.
  */
 export function AttachmentTiles({
   attachments,
   annotationCounts,
   onOpen,
   openId = null,
+  placement = 'foot',
 }: {
   attachments: readonly InboxAttachmentState[];
   annotationCounts: ReadonlyMap<string, number>;
   onOpen: (attachment: InboxAttachmentState) => void;
   /** The file open beside the thread: its tile says "Open beside" (`aria-current`); the thread does not scroll to it. */
   openId?: string | null;
+  /** Where the tiles sit: at the foot of the message (with their heading and the image gallery), or in the header's band. */
+  placement?: 'foot' | 'header';
 }) {
   if (attachments.length === 0) return null;
-  const images = attachments.filter((a) => readInboxAttachmentKind(a.kind) === 'image');
+  const header = placement === 'header';
+  const images = header ? [] : attachments.filter((a) => readInboxAttachmentKind(a.kind) === 'image');
   return (
-    <div className="ib-attachments">
-      <div className="ib-attach-h">
-        <Icon name="clip" size={13} />
-        {plural(attachments.length, 'attachment')}
-      </div>
+    <div className={header ? 'ib-attachments ib-hatts-tiles' : 'ib-attachments'}>
+      {!header && (
+        <div className="ib-attach-h">
+          <Icon name="clip" size={13} />
+          {plural(attachments.length, 'attachment')}
+        </div>
+      )}
       <ImageGallery images={images} annotationCounts={annotationCounts} onOpen={onOpen} />
       <div className="ib-atts ib-tiles">
         {attachments.map((attachment) => {
           const count = annotationCounts.get(attachment.path) ?? 0;
           const changed = changedLine(attachment);
           const detail = changed ?? `${sizeLine(attachment)}${count > 0 ? `, ${plural(count, 'annotation')}` : ''}`;
-          const detailId = `ib-att-detail-${attachment.id}`;
+          // The header's band shows the same tiles while the foot's are on the page: ids stay unique.
+          const detailId = `ib-${header ? 'hatt' : 'att'}-detail-${attachment.id}`;
           const isImage = readInboxAttachmentKind(attachment.kind) === 'image';
           const icon = isImage ? (
             <span className="ib-fi ib-thumb">
@@ -228,5 +239,66 @@ export function AttachmentTiles({
         })}
       </div>
     </div>
+  );
+}
+
+/** How many of these files changed since they were sent: the same truth as the tiles' changed line. */
+export function changedCount(attachments: readonly InboxAttachmentState[]): number {
+  return attachments.filter((attachment) => changedLine(attachment) !== null).length;
+}
+
+/**
+ * The count in an agent message's "to you" line (design record
+ * "inbox-attachments-header", variant Count, approved 2026-10-11): a quiet
+ * disclosure, `3 attachments · 1 changed ⌄`, that opens the band of tiles
+ * under the sender row. "· N changed" only when a file changed since it was
+ * sent.
+ */
+export function AttachmentsCount({
+  messageId,
+  count,
+  changed,
+  open,
+  controls,
+  onToggle,
+  onKeyDown,
+}: {
+  messageId: string;
+  count: number;
+  changed: number;
+  open: boolean;
+  /** The band's id (`aria-controls`). */
+  controls: string;
+  onToggle: () => void;
+  onKeyDown: (event: React.KeyboardEvent) => void;
+}) {
+  return (
+    <>
+      <span className="ib-to-sep" aria-hidden="true">
+        ·
+      </span>
+      <button
+        type="button"
+        className="ib-hcount"
+        data-header-files={messageId}
+        aria-expanded={open}
+        aria-controls={controls}
+        aria-label={`${plural(count, 'attachment')}${changed > 0 ? `, ${changed} changed` : ''}`}
+        onClick={onToggle}
+        onKeyDown={onKeyDown}
+      >
+        <Icon name="clip" size={13} />
+        <span>{plural(count, 'attachment')}</span>
+        {changed > 0 && (
+          <>
+            <span className="ib-to-sep" aria-hidden="true">
+              ·
+            </span>
+            <span className="ib-hflag">{changed} changed</span>
+          </>
+        )}
+        <Icon name="chevD" size={12} className="ib-hchev" />
+      </button>
+    </>
   );
 }

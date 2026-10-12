@@ -837,6 +837,33 @@ pre code.pn-code[data-keep-layout] {
 /* the open message's header: the sender part is the fold button; time and Reply stay beside it */
 .pn-inbox .ib-head { display: flex; align-items: flex-start; gap: 11px; flex: 1; min-width: 0; text-align: left; border-radius: 8px; margin: -4px -6px; padding: 4px 6px; }
 .pn-inbox .ib-head:hover { background: color-mix(in oklch, var(--muted) 35%, transparent); }
+
+/* ── Attachments in the message header (.product/approved/inbox-attachments-header/, variant Count, 2026-10-11) ──
+   A quiet count in the "to you" line opens the foot's tiles a second time, in a soft band under the sender row. */
+.ib-sender .ib-to.ib-to-files { display: flex; align-items: center; flex-wrap: wrap; column-gap: 6px; min-width: 0; }
+.ib-to-sep { opacity: 0.6; }
+.pn-inbox .ib-hcount { position: relative; display: inline-flex; align-items: center; gap: 4px; height: 22px; margin: -2px 0; padding: 0 7px 0 6px; border-radius: 6px; font-size: 12.5px; color: var(--muted-foreground); white-space: nowrap; }
+.pn-inbox .ib-hcount:hover { background: var(--muted); color: var(--foreground); }
+.pn-inbox .ib-hcount[aria-expanded="true"] { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
+.pn-inbox .ib-hcount svg.ib-ic { stroke-width: 1.6; }
+.ib-hcount .ib-hchev { transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-hcount[aria-expanded="true"] .ib-hchev { transform: rotate(180deg); }
+.ib-hcount .ib-hflag { color: var(--warning); font-weight: 550; }
+.ib-hatts { margin: 0 0 16px; padding: 10px; border-radius: 10px; background: color-mix(in oklch, var(--muted) 45%, transparent); }
+.ib-hatts[hidden] { display: none; }
+.ib-hatts:not([hidden]) { animation: ib-hatts-in 180ms cubic-bezier(0.23, 1, 0.32, 1); }
+@keyframes ib-hatts-in { from { opacity: 0; transform: translateY(-4px); } }
+.ib-hatts-note { font-size: 12px; color: var(--muted-foreground); margin: 8px 2px 0; }
+/* A multi-message thread: the fold button lies under the sender as its hit area; the count sits above it. */
+.ib-headwrap { position: relative; display: flex; flex: 1; min-width: 0; }
+.pn-inbox .ib-headwrap > .ib-head { position: absolute; inset: -4px -6px; margin: 0; padding: 0; }
+.ib-head-face { position: relative; display: flex; align-items: flex-start; gap: 11px; flex: 1; min-width: 0; pointer-events: none; }
+.ib-head-face .ib-hcount { pointer-events: auto; }
+.ib-a11y-skip { display: contents; }
+@media (prefers-reduced-motion: reduce) {
+  .ib-hatts:not([hidden]) { animation: none; }
+  .ib-hcount .ib-hchev { transition: none; }
+}
 /* "New": a word in a tinted pill, never only a colour */
 .ib-newtag { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border-radius: 6px; background: color-mix(in oklch, var(--primary) 15%, transparent); color: var(--primary); font-size: 11.5px; font-weight: 650; letter-spacing: 0.01em; white-space: nowrap; flex: none; }
 .ib-newtag::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
@@ -1061,6 +1088,10 @@ pre code.pn-code[data-keep-layout] {
   .ib-sender { gap: 10px; align-items: center; }
   .ib-whobox { flex: 1; }
   .ib-whobox > .ib-who, .ib-whobox > .ib-to { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* the header's attachments count wraps under "to you" rather than being cut, and takes a thumb's height */
+  .ib-whobox > .ib-to.ib-to-files { white-space: normal; overflow: visible; row-gap: 2px; }
+  .pn-inbox .ib-hcount::after { content: ""; position: absolute; inset: -11px -2px; }
+  .ib-hatts { margin-bottom: 14px; }
   .ib-sender .ib-tm { flex: none; white-space: nowrap; }
   .pn-inbox .ib-sender .ib-tm > button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; margin: -12px -10px -12px -6px; }
   .ib-pbody.ib-folding .ib-who span { display: none; }

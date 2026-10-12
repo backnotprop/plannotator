@@ -9,7 +9,7 @@ import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkCont
 import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, attachmentForLink, openAttachmentTitle, useRefRepo } from '../links';
 import { InboxApiError, inboxApi, type AttachmentsModel } from '../api';
 import { annotationOf, attachmentFeedback } from '../attachments';
-import { AttachmentTiles } from './AttachmentTiles';
+import { AttachmentTiles, AttachmentsCount, changedCount } from './AttachmentTiles';
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import { attachmentSequence } from '../stepping';
 import { AnnotationsChip } from './AnnotationsChip';
@@ -44,6 +44,7 @@ const noop = () => {};
 /** The agent superseded the question this call named (`422 question_superseded`). */
 const isSuperseded = (cause: unknown): boolean => cause instanceof InboxApiError && cause.code === 'question_superseded';
 const NO_ANNOTATIONS: never[] = [];
+const NO_IDS: ReadonlySet<string> = new Set();
 
 /** The fold state of one open thread: in memory only, decided once when the thread opens. */
 interface FoldState {
@@ -468,8 +469,28 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   };
   const articleOf = (id: string) => bodyRef.current?.querySelector<HTMLElement>(`[data-message-article="${CSS.escape(id)}"]`) ?? null;
   const headOf = (id: string) => articleOf(id)?.querySelector<HTMLElement>('[data-fold-head]') ?? null;
+  // The header's attachments band (design record "inbox-attachments-header",
+  // variant Count): open per message, never remembered. It starts closed on
+  // every visit to a thread, and a message that folds closes its band.
+  const [headerFiles, setHeaderFiles] = useState<{ threadId: string; open: ReadonlySet<string> }>(() => ({ threadId: thread.thread_id, open: new Set() }));
+  const headerOpen: ReadonlySet<string> = headerFiles.threadId === thread.thread_id ? headerFiles.open : NO_IDS;
+  const setHeaderOpen = (id: string, open: boolean) =>
+    setHeaderFiles((current) => {
+      const ids = new Set(current.threadId === thread.thread_id ? current.open : []);
+      if (open) ids.add(id);
+      else ids.delete(id);
+      return { threadId: thread.thread_id, open: ids };
+    });
+  /** Escape on the count or inside its band closes the band, focus back on the count; the thread stays open. */
+  const closeHeaderOnEscape = (id: string) => (event: React.KeyboardEvent) => {
+    if (event.key !== 'Escape' || event.defaultPrevented || !headerOpen.has(id)) return;
+    event.preventDefault();
+    setHeaderOpen(id, false);
+    bodyRef.current?.querySelector<HTMLElement>(`[data-header-files="${CSS.escape(id)}"]`)?.focus();
+  };
   const toggleMessage = (id: string) => {
     const folding = !fold.folded.has(id);
+    if (folding) setHeaderOpen(id, false);
     anchorRef.current = { id, top: articleOf(id)?.getBoundingClientRect().top ?? 0, focus: id, folding };
     setFoldState((current) => {
       if (!current) return current;
@@ -494,6 +515,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     if (allOpen) {
       const last = thread.messages[thread.messages.length - 1]!;
       setFoldState((current) => (current ? { ...current, folded: new Set(thread.messages.filter((m) => m !== last).map((m) => m.id)), revealed: new Set() } : current));
+      setHeaderFiles({ threadId: thread.thread_id, open: new Set([...headerOpen].filter((id) => id === last.id)) });
       announce('Earlier messages folded');
     } else {
       setFoldState((current) => (current ? { ...current, folded: new Set(), revealed: new Set(current.hidden.map((_, index) => index)) } : current));
@@ -1407,10 +1429,46 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
             const old = q ? replacedBy(thread.messages, q) : [];
             return old.length > 0 ? <ReplacesLine old={old} onJump={jumpTo} /> : null;
           };
+          // An agent message with files says so in its header (design record
+          // "inbox-attachments-header", variant Count): a count in the "to you"
+          // line opens the same tiles as the foot, in a band under the sender.
+          const messageFiles = isAgent && (message.attachments?.length ?? 0) > 0 ? attachments.filter((a) => a.message_id === message.id) : [];
+          const fileCount = isAgent ? Math.max(message.attachments?.length ?? 0, messageFiles.length) : 0;
+          const filesOpen = fileCount > 0 && headerOpen.has(message.id);
+          const bandId = `ib-hatts-${message.id}`;
+          const count =
+            fileCount > 0 ? (
+              <AttachmentsCount
+                messageId={message.id}
+                count={fileCount}
+                changed={changedCount(messageFiles)}
+                open={filesOpen}
+                controls={bandId}
+                onToggle={() => setHeaderOpen(message.id, !filesOpen)}
+                onKeyDown={closeHeaderOnEscape(message.id)}
+              />
+            ) : null;
+          // With a count in a multi-message thread, the fold button cannot hold
+          // it (a button inside a button): the fold button lies under the
+          // sender as its hit area, and the sender's text (hidden from screen
+          // readers, the button's label says it) lets clicks through to it.
+          const cover = count !== null && !one;
+          const toWords = (
+            <>
+              to {isAgent ? 'you' : message.to ? toName(message, message.to) : asker}
+              {isAgent && askerEnded && message.id === asking?.message.id && <SessionEndedMark />}
+            </>
+          );
           const who = (
             <>
               {isAgent ? (
-                <AuthorMark author={message.author} big />
+                cover ? (
+                  <span className="ib-a11y-skip" aria-hidden="true">
+                    <AuthorMark author={message.author} big />
+                  </span>
+                ) : (
+                  <AuthorMark author={message.author} big />
+                )
               ) : (
                 <span className="ib-mk ib-big">
                   <Icon name="reply" />
@@ -1418,16 +1476,21 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
               )}
               {/* Spans, not divs: in a multi-message thread this sits inside the fold button. */}
               <span className="ib-whobox">
-                <span className="ib-who">
+                <span className="ib-who" aria-hidden={cover || undefined}>
                   {name} <span>in {thread.project.name}</span>
                 </span>
-                <span className="ib-to">
-                  to {isAgent ? 'you' : message.to ? toName(message, message.to) : asker}
-                  {isAgent && askerEnded && message.id === asking?.message.id && <SessionEndedMark />}
-                </span>
+                {count ? (
+                  <span className="ib-to ib-to-files">
+                    <span aria-hidden={cover || undefined}>{toWords}</span>
+                    {count}
+                  </span>
+                ) : (
+                  <span className="ib-to">{toWords}</span>
+                )}
               </span>
             </>
           );
+          const foldLabel = `${name}, ${time}${isNew ? ', new' : ''}. Fold this message`;
           before.push(
             <article
               className="ib-message"
@@ -1441,6 +1504,18 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
               <div className="ib-sender">
                 {one ? (
                   who
+                ) : cover ? (
+                  <div className="ib-headwrap">
+                    <button
+                      type="button"
+                      className="ib-head"
+                      data-fold-head=""
+                      aria-expanded={true}
+                      aria-label={foldLabel}
+                      onClick={() => toggleMessage(message.id)}
+                    />
+                    <span className="ib-head-face">{who}</span>
+                  </div>
                 ) : (
                   // The sender is the fold button; the time and Reply stay beside it.
                   <button
@@ -1448,7 +1523,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                     className="ib-head"
                     data-fold-head=""
                     aria-expanded={true}
-                    aria-label={`${name}, ${time}${isNew ? ', new' : ''}. Fold this message`}
+                    aria-label={foldLabel}
                     onClick={() => toggleMessage(message.id)}
                   >
                     {who}
@@ -1465,6 +1540,22 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                 </div>
               </div>
               <div className="ib-msg">
+                {count && (
+                  <div className="ib-hatts" id={bandId} role="region" aria-label="Attachments in this message" hidden={!filesOpen} onKeyDown={closeHeaderOnEscape(message.id)} data-header-band={message.id}>
+                    {filesOpen && (
+                      <>
+                        <AttachmentTiles
+                          attachments={messageFiles}
+                          annotationCounts={countsByPath}
+                          onOpen={openFromMessage}
+                          openId={file && !full && !phone && !fileStacked ? file.id : null}
+                          placement="header"
+                        />
+                        <p className="ib-hatts-note">Also at the end of the message.</p>
+                      </>
+                    )}
+                  </div>
+                )}
                 <MessageBody
                   message={message}
                   projectRoot={thread.project.root}

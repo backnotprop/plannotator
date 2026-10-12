@@ -544,6 +544,48 @@ test('the agent edits the plan on disk: the changed line, the annotations surviv
   await pane.getByRole('button', { name: 'Close retry-plan.md' }).click();
 });
 
+test('the header says the message has files: its count opens the same tiles under the sender, Escape closes them, and a file opens from there as from its tile', async () => {
+  // Design record "inbox-attachments-header", variant Count (approved 2026-10-11).
+  const page = world.page;
+  await page.goto(`${world.url}#thread=${world.threads.billing}`);
+  const count = page.getByRole('button', { name: '2 attachments, 1 changed', exact: true });
+  await expect(count).toHaveText(/2 attachments\s*·\s*1 changed/);
+  await expect(count).toHaveAttribute('aria-expanded', 'false');
+  const band = page.locator(`#${await count.getAttribute('aria-controls')}`);
+  await expect(band).toBeHidden();
+  await expect(band.locator('.ib-att-t')).toHaveCount(0);
+  await shot('2.9-header-count-closed');
+
+  await count.click();
+  await expect(count).toHaveAttribute('aria-expanded', 'true');
+  await expect(band).toBeVisible();
+  await expect(band.locator('.ib-att-t')).toHaveCount(2);
+  await expect(band.locator('.ib-att-t').first()).toContainText('Changed since it was sent, edited');
+  await expect(band).toContainText('Also at the end of the message.');
+  // Under the sender row, in view without scrolling.
+  const box = await band.boundingBox();
+  expect(box && box.y + box.height).toBeLessThan(900);
+  await shot('2.9-header-count-open');
+
+  // Escape from a tile in the band closes it, focus back on the count; the thread stays open.
+  await band.locator('.ib-att-t').first().focus();
+  await page.keyboard.press('Escape');
+  await expect(band).toBeHidden();
+  await expect(count).toBeFocused();
+  expect(page.url()).toContain(`thread=${world.threads.billing}`);
+  // The keyboard opens it again; a tile there opens the file beside the thread, as the foot's does.
+  await page.keyboard.press('Enter');
+  await expect(band).toBeVisible();
+  await band.getByRole('button', { name: 'Open retry-plan.md' }).click();
+  const pane = page.locator(`[data-attachment-pane="${world.attachments.plan}"]`);
+  await expect(pane).toBeVisible();
+  expect(page.url()).toContain(`file=${world.attachments.plan}`);
+  await pane.getByRole('button', { name: 'Close retry-plan.md' }).click();
+  await expect(pane).toHaveCount(0);
+  await count.click();
+  await expect(band).toBeHidden();
+});
+
 test('Send carries the picks and then the annotations as feedback; wait_for_reply returns both', async () => {
   const page = world.page;
   await page.getByRole('radio', { name: /Retry with the same idempotency key/ }).click();
