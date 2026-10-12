@@ -94,17 +94,17 @@ function mount(start: InboxAgentsModel) {
 
 const group = (el: HTMLElement, id: string) => el.querySelector(`[data-agent="${id}"]`)!;
 const rows = (el: Element) =>
-  [...el.querySelectorAll('.ib-arow')].map((r) => ({
-    k: r.querySelector('.ib-ak')?.textContent,
-    v: r.querySelector('.ib-av')?.textContent,
+  [...el.querySelectorAll('.ib-agrow')].map((r) => ({
+    k: r.querySelector('.ib-agk')?.textContent,
+    v: r.querySelector('.ib-agv')?.textContent,
     sw: (r.querySelector('[role="switch"]') as HTMLButtonElement | null)?.getAttribute('aria-checked') ?? null,
-    sub: r.querySelector('.ib-asub')?.textContent ?? null,
+    sub: r.querySelector('.ib-agsub')?.textContent ?? null,
   }));
 
 test.skipIf(!hasDom)('one group per agent found, with its switches and the states the design names', () => {
   const el = mount(model());
   expect([...el.querySelectorAll('[data-agent]')].map((g) => g.getAttribute('data-agent'))).toEqual(['claude-code', 'codex', 'pi', 'opencode', 'cursor']);
-  expect(group(el, 'claude-code').querySelector('.ib-via')?.textContent).toBe("Plannotator's plugin");
+  expect(group(el, 'claude-code').querySelector('.ib-agvia')?.textContent).toBe("Plannotator's plugin");
   expect(rows(group(el, 'claude-code'))).toEqual([
     { k: 'Reaches the Inbox', v: 'the plannotator_inbox tool', sw: 'true', sub: null },
     { k: 'Reminder at session start', v: 'one line when a session starts', sw: 'true', sub: null },
@@ -118,7 +118,7 @@ test.skipIf(!hasDom)('one group per agent found, with its switches and the state
   const opencode = rows(group(el, 'opencode'))[2]!;
   expect(opencode.sw).toBeNull();
   expect(opencode.sub).toContain('OpenCode 1');
-  expect(group(el, 'cursor').querySelector('.ib-astate')?.textContent).toBe('Removed outside Plannotator');
+  expect(group(el, 'cursor').querySelector('.ib-agstate')?.textContent).toBe('Removed outside Plannotator');
   expect(rows(group(el, 'cursor'))).toEqual([
     { k: 'Reaches the Inbox', v: "plannotator-inbox is no longer in ~/.cursor/mcp.json. Plannotator won't add it back on its own; turn this on to add it.", sw: 'false', sub: null },
     { k: 'Note in its instructions', v: 'Cursor keeps its rules in its own settings, so there is no file to add a note to.', sw: null, sub: null },
@@ -141,7 +141,7 @@ test.skipIf(!hasDom)('a switch saves that one change and says it applies to the 
   });
   expect(sent).toEqual([{ agent: 'pi', reminder: false }]);
   expect(group(el, 'pi').querySelectorAll('[role="switch"]')[1]!.getAttribute('aria-checked')).toBe('false');
-  expect(group(el, 'pi').querySelector('.ib-apending')?.textContent).toBe("Pi's next session");
+  expect(group(el, 'pi').querySelector('.ib-agpending')?.textContent).toBe("Pi's next session");
 
   const show = [...group(el, 'codex').querySelectorAll('button')].find((b) => b.textContent === 'Show')!;
   act(() => show.click());

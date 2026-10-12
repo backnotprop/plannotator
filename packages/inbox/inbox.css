@@ -1422,27 +1422,27 @@ pre code.pn-code[data-keep-layout] {
 /* Settings → Agents */
 .ib-agents { border: 1px solid var(--ib-line); border-radius: 10px; overflow: hidden; }
 .ib-agent + .ib-agent { border-top: 1px solid var(--ib-line); }
-.ib-ahead { display: flex; align-items: center; gap: 10px; padding: 11px 14px 4px; }
-.ib-ahead b { font-weight: 600; font-size: 14px; }
-.ib-ahead .ib-via { font-size: 12.5px; color: var(--muted-foreground); }
-.ib-ahead .ib-astate { margin-left: auto; font-size: 12.5px; color: var(--muted-foreground); display: inline-flex; align-items: center; gap: 6px; }
-.ib-astate .ib-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
-.ib-astate.ib-aoff .ib-dot { background: var(--muted-foreground); opacity: 0.6; }
-.ib-astate.ib-abad { color: color-mix(in oklch, var(--warning) 80%, var(--foreground)); }
-.ib-astate.ib-abad .ib-dot { background: var(--warning); }
-.ib-arow { display: grid; grid-template-columns: 190px minmax(0, 1fr) auto; align-items: center; gap: 4px 14px; padding: 6px 14px 6px 54px; font-size: 13.5px; }
-.ib-arow:last-child { padding-bottom: 12px; }
-.ib-arow .ib-ak { color: var(--foreground); }
-.ib-arow .ib-av { font-size: 12.5px; color: var(--muted-foreground); min-width: 0; overflow-wrap: anywhere; }
-.ib-arow .ib-av code { font-size: 12px; color: var(--foreground); }
-.pn-inbox .ib-arow .ib-av .ib-lnk { font-size: 12.5px; margin: 0 0 0 6px; display: inline; }
-.ib-arow .ib-ar { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
-.ib-arow .ib-asub { grid-column: 2 / 4; margin-top: -2px; font-size: 12.5px; line-height: 1.45; display: flex; gap: 6px; align-items: flex-start; color: var(--muted-foreground); }
-.ib-arow .ib-asub.ib-awarn { color: color-mix(in oklch, var(--warning) 80%, var(--foreground)); }
-.pn-inbox .ib-arow .ib-asub svg.ib-ic { width: 13px; height: 13px; margin-top: 2px; flex: none; }
-.ib-arow.ib-ana .ib-ak { color: var(--muted-foreground); }
-.ib-apending { font-size: 12px; color: var(--primary); }
-.ib-anote pre { font-size: 12px; line-height: 1.55; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ib-aghead { display: flex; align-items: center; gap: 10px; padding: 11px 14px 4px; }
+.ib-aghead b { font-weight: 600; font-size: 14px; }
+.ib-aghead .ib-agvia { font-size: 12.5px; color: var(--muted-foreground); }
+.ib-aghead .ib-agstate { margin-left: auto; font-size: 12.5px; color: var(--muted-foreground); display: inline-flex; align-items: center; gap: 6px; }
+.ib-agstate .ib-agdot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+.ib-agstate.ib-agoff .ib-agdot { background: var(--muted-foreground); opacity: 0.6; }
+.ib-agstate.ib-agbad { color: color-mix(in oklch, var(--warning) 80%, var(--foreground)); }
+.ib-agstate.ib-agbad .ib-agdot { background: var(--warning); }
+.ib-agrow { display: grid; grid-template-columns: 190px minmax(0, 1fr) auto; align-items: center; gap: 4px 14px; padding: 6px 14px 6px 54px; font-size: 13.5px; }
+.ib-agrow:last-child { padding-bottom: 12px; }
+.ib-agrow .ib-agk { color: var(--foreground); }
+.ib-agrow .ib-agv { font-size: 12.5px; color: var(--muted-foreground); min-width: 0; overflow-wrap: anywhere; }
+.ib-agrow .ib-agv code { font-size: 12px; color: var(--foreground); }
+.pn-inbox .ib-agrow .ib-agv .ib-lnk { font-size: 12.5px; margin: 0 0 0 6px; display: inline; }
+.ib-agrow .ib-agr { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
+.ib-agrow .ib-agsub { grid-column: 2 / 4; margin-top: -2px; font-size: 12.5px; line-height: 1.45; display: flex; gap: 6px; align-items: flex-start; color: var(--muted-foreground); }
+.ib-agrow .ib-agsub.ib-agwarn { color: color-mix(in oklch, var(--warning) 80%, var(--foreground)); }
+.pn-inbox .ib-agrow .ib-agsub svg.ib-ic { width: 13px; height: 13px; margin-top: 2px; flex: none; }
+.ib-agrow.ib-agna .ib-agk { color: var(--muted-foreground); }
+.ib-agpending { font-size: 12px; color: var(--primary); }
+.ib-agnote pre { font-size: 12px; line-height: 1.55; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ib-amore { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-top: 1px solid var(--ib-line); font-size: 13.5px; width: 100%; text-align: left; background: none; border-left: 0; border-right: 0; border-bottom: 0; color: inherit; cursor: pointer; }
 .pn-inbox .ib-amore svg.ib-ic { width: 13px; height: 13px; color: var(--muted-foreground); transition: transform 120ms ease-out; }
 .ib-amore[aria-expanded="true"] svg.ib-ic { transform: rotate(90deg); }
@@ -1474,10 +1474,10 @@ pre code.pn-code[data-keep-layout] {
   .ib-conn-acts .ib-conn-small { margin: 0; text-align: center; }
   .ib-conn-fail { margin: 0 12px 12px; }
   .ib-conn-done { padding: 0 12px 12px 12px; }
-  .ib-arow { grid-template-columns: minmax(0, 1fr) auto; padding: 6px 12px; }
-  .ib-arow .ib-av { grid-column: 1 / 2; grid-row: 2; }
-  .ib-arow .ib-ar { grid-column: 2; grid-row: 1 / 3; }
-  .ib-arow .ib-asub { grid-column: 1 / 3; }
-  .ib-ahead { padding: 11px 12px 4px; flex-wrap: wrap; }
-  .ib-ahead .ib-via { flex-basis: 100%; order: 3; margin-left: 40px; margin-top: -4px; }
+  .ib-agrow { grid-template-columns: minmax(0, 1fr) auto; padding: 6px 12px; }
+  .ib-agrow .ib-agv { grid-column: 1 / 2; grid-row: 2; }
+  .ib-agrow .ib-agr { grid-column: 2; grid-row: 1 / 3; }
+  .ib-agrow .ib-agsub { grid-column: 1 / 3; }
+  .ib-aghead { padding: 11px 12px 4px; flex-wrap: wrap; }
+  .ib-aghead .ib-agvia { flex-basis: 100%; order: 3; margin-left: 40px; margin-top: -4px; }
 }

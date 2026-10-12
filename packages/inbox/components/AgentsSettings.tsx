@@ -45,12 +45,12 @@ const NO_NOTE_FILE: Partial<Record<InboxAgentId, string>> = {
 
 function Row({ k, v, r, sub, warn, na }: { k: string; v: ReactNode; r?: ReactNode; sub?: ReactNode; warn?: boolean; na?: boolean }) {
   return (
-    <div className={`ib-arow${na ? ' ib-ana' : ''}`}>
-      <span className="ib-ak">{k}</span>
-      <span className="ib-av">{v}</span>
-      <span className="ib-ar">{r}</span>
+    <div className={`ib-agrow${na ? ' ib-agna' : ''}`}>
+      <span className="ib-agk">{k}</span>
+      <span className="ib-agv">{v}</span>
+      <span className="ib-agr">{r}</span>
       {sub && (
-        <span className={`ib-asub${warn ? ' ib-awarn' : ''}`}>
+        <span className={`ib-agsub${warn ? ' ib-agwarn' : ''}`}>
           <Icon name={warn ? 'warn' : 'info'} />
           <span>{sub}</span>
         </span>
@@ -124,12 +124,12 @@ function AgentGroup({ row, noteText, onChange, pending }: { row: InboxAgentRow; 
 
   return (
     <div className="ib-agent" data-agent={row.id}>
-      <div className="ib-ahead">
+      <div className="ib-aghead">
         <HostMark host={row.id} big />
         <b>{row.label}</b>
-        <span className="ib-via">{viaOf(row)}</span>
-        <span className={`ib-astate${state.tone === 'off' ? ' ib-aoff' : state.tone === 'bad' ? ' ib-abad' : ''}`}>
-          <span className="ib-dot" />
+        <span className="ib-agvia">{viaOf(row)}</span>
+        <span className={`ib-agstate${state.tone === 'off' ? ' ib-agoff' : state.tone === 'bad' ? ' ib-agbad' : ''}`}>
+          <span className="ib-agdot" />
           {state.text}
         </span>
       </div>
@@ -139,7 +139,7 @@ function AgentGroup({ row, noteText, onChange, pending }: { row: InboxAgentRow; 
         r={
           reachSwitchable ? (
             <>
-              {pending.has(`${row.id}:reach`) && <span className="ib-apending">{next}</span>}
+              {pending.has(`${row.id}:reach`) && <span className="ib-agpending">{next}</span>}
               <Switch on={reach.on} label={`Reaches the Inbox: ${row.label}`} disabled={reach.locked} onClick={() => onChange({ reach: !reach.on })} />
             </>
           ) : null
@@ -151,7 +151,7 @@ function AgentGroup({ row, noteText, onChange, pending }: { row: InboxAgentRow; 
           v={row.reminder.needs_tool ? 'Needs the tool' : 'one line when a session starts'}
           r={
             <>
-              {pending.has(`${row.id}:reminder`) && <span className="ib-apending">{next}</span>}
+              {pending.has(`${row.id}:reminder`) && <span className="ib-agpending">{next}</span>}
               <Switch
                 on={row.reminder.on}
                 label={`Reminder at session start: ${row.label}`}
@@ -178,7 +178,7 @@ function AgentGroup({ row, noteText, onChange, pending }: { row: InboxAgentRow; 
             r={
               note.state === 'absent' || note.state === 'added' || note.state === 'edited' ? (
                 <>
-                  {pending.has(`${row.id}:note`) && <span className="ib-apending">{next}</span>}
+                  {pending.has(`${row.id}:note`) && <span className="ib-agpending">{next}</span>}
                   <Switch on={noteOn} label={`Note in its instructions: ${row.label}`} onClick={() => onChange({ note: !noteOn })} />
                 </>
               ) : null
@@ -187,7 +187,7 @@ function AgentGroup({ row, noteText, onChange, pending }: { row: InboxAgentRow; 
             warn={note.state !== 'edited' && noteSub !== null && !note.target}
           />
           {show && (
-            <div className="ib-arow ib-anote" id={`${id}-note`}>
+            <div className="ib-agrow ib-agnote" id={`${id}-note`}>
               <span />
               <div className="ib-cbox">
                 <pre>{noteText}</pre>
@@ -261,8 +261,8 @@ export function AgentsSettings({ model, onModel, context }: { model: InboxAgents
           <AgentGroup key={row.id} row={row} noteText={model.note_text} pending={pending} onChange={(input) => void change(row.id, input)} />
         ))}
         {detected.length === 0 && (
-          <div className="ib-arow ib-ana">
-            <span className="ib-ak">No agent found on this computer</span>
+          <div className="ib-agrow ib-agna">
+            <span className="ib-agk">No agent found on this computer</span>
           </div>
         )}
         <button type="button" className="ib-amore" aria-expanded={more} aria-controls="ib-aundet" onClick={() => setMore((open) => !open)}>
