@@ -6,6 +6,7 @@ import { CodeBlock } from "./blocks/CodeBlock";
 import { HtmlBlock } from "./blocks/HtmlBlock";
 import { Callout } from "./blocks/Callout";
 import { AlertBlock } from "./blocks/AlertBlock";
+import { BlockquoteBlock } from "./blocks/BlockquoteBlock";
 import { TableBlock } from "./blocks/TableBlock";
 import { MathBlock } from "./blocks/MathBlock";
 import { QuestionBlock, type QuestionBlockProps } from "./blocks/QuestionBlock";
@@ -101,20 +102,19 @@ export const BlockRenderer: React.FC<{
           />
         );
       }
-      // Content may span multiple merged `>` lines. Split on blank-line
-      // paragraph breaks so `> a\n>\n> b` renders as two <p> children.
-      const paragraphs = block.content.split(/\n\n+/);
+      // One quote whatever it holds: its content is the quote's own markdown
+      // (paragraphs, code fences, lists, nested quotes), see BlockquoteBlock.
       return (
-        <blockquote
-          className="border-l-2 border-primary/50 pl-4 my-4 text-muted-foreground italic"
-          data-block-id={block.id}
-        >
-          {paragraphs.map((para, i) => (
-            <p key={i} className={i > 0 ? 'mt-2' : ''}>
-              <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={para} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} githubRepo={githubRepo} repoHost={repoHost} onNavigateAnchor={onNavigateAnchor} />
-            </p>
-          ))}
-        </blockquote>
+        <BlockquoteBlock
+          block={block}
+          onOpenLinkedDoc={onOpenLinkedDoc}
+          onOpenCodeFile={onOpenCodeFile}
+          imageBaseDir={imageBaseDir}
+          onImageClick={onImageClick}
+          githubRepo={githubRepo}
+          repoHost={repoHost}
+          onNavigateAnchor={onNavigateAnchor}
+        />
       );
     }
 

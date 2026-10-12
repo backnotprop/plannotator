@@ -2202,6 +2202,16 @@ New optional `refRepo?: { display: string; host?: string } | null` on `Viewer`: 
 
 ---
 
+## Block quotes render their content (unreleased; parser output change, no API change)
+
+`parseMarkdownToBlocks` now returns ONE `blockquote` block per run of consecutive `>` lines (blank `>` lines included), where it used to split the run whenever a line started with a list marker, a heading, a code fence or a nested `>`. The block's `content` is the quote's own markdown: each line with its `>` and one following space or tab removed, deeper indentation kept, trailing whitespace trimmed, one content line per source line; blank lines at the quote's edges are dropped and `startLine` moves past leading ones. So `exportAnnotations` labels a quote with its real span (`lines 3–7`).
+
+The renderer is `components/blocks/BlockquoteBlock` (BlockRenderer's non-alert `blockquote` case; also the plan diff view): a quote whose inner blocks are only paragraphs renders exactly as before (same DOM, one `<p>` per paragraph). Anything else renders inside the one `<blockquote>`: a code fence as a real `CodeBlock` (no literal backticks, no mention/issue linking inside code), lists, nested quotes, tables, headings. Inner blocks carry no `data-block-id`, so selections, restores, exports and pinpoint all resolve to the quote block. Spacing comes from a hoisted `<style href="plannotator-quote-body">` (the QuestionContext pattern), scoped to `.pn-quote-body`. A `:::question` written inside a quote renders as a plain callout, never a question card (`findQuestionBlocks` already ignores it). `utils/blockTargeting` treats a `<blockquote>` block as one text block, never a code or table target.
+
+Unchanged: GitHub alerts (`> [!NOTE]` … keep their old body text and `AlertBlock`), single-line and wrapped prose quotes, the `Block` type, every prop. What a host may notice: block ids after a quote that used to split shift down (ids are positional; restore re-anchors by text as for any edit), and a host that reads `block.content` of a quote sees the inner markdown (fences, list markers) where it used to see one line.
+
+---
+
 ## Stale-tab guard: `serverSession` (ui 0.52.0, core 0.25.12; additive)
 
 Plannotator's servers issue one random `serverSession` nonce per process (new `@plannotator/core/server-session`) and refuse a decision that echoes a different one with `409 { code: "session_mismatch" }`, so a tab left open on a reused port cannot decide a new session. The client half is `utils/serverSession` (`adoptServerSession`, `withServerSession`, `withServerSessionQuery`, `noteServerSessionMismatch`, `useServerSessionReplaced`) plus `components/ServerSessionReplacedBanner`. Hosts that post decisions to their own backend need none of it: nothing in the shared components sends the field on its own, and a request without it is always accepted.

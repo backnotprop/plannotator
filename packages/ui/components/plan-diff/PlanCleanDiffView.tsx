@@ -11,6 +11,7 @@ import { parseMarkdownToBlocks, computeListIndices } from "../../utils/parser";
 import { applyHighlight, codeBlockClassName, codeBlockKeepsLayout } from "../../utils/codeHighlight";
 import { useFenceTheme } from "../../hooks/useFenceTheme";
 import { ListItemBody } from "../ListItemBody";
+import { BlockquoteBlock, BLOCKQUOTE_CLASS_NAME } from "../blocks/BlockquoteBlock";
 import type { Block, Annotation, EditorMode, ImageAttachment } from "../../types";
 import { AnnotationType } from "../../types";
 import type {
@@ -606,18 +607,23 @@ const SimpleBlockRenderer: React.FC<{ block: Block; orderedIndex?: number | null
     }
 
     case "blockquote": {
-      // Split on blank-line paragraph breaks so merged `> a\n>\n> b`
-      // renders as two <p> children instead of collapsing to one line.
-      const paragraphs = block.content.split(/\n\n+/);
-      return (
-        <blockquote className="border-l-2 border-primary/50 pl-4 my-4 text-muted-foreground italic">
-          {paragraphs.map((para, i) => (
-            <p key={i} className={i > 0 ? "mt-2" : ""}>
-              <InlineMarkdown text={para} />
-            </p>
-          ))}
-        </blockquote>
-      );
+      // The document's quote renderer, without a block id (the diff view
+      // keeps none): a prose quote renders as it always has, and a quote
+      // with a code fence, a list or a nested quote renders them inside one
+      // quote. Alerts keep the plain quote look they have always had here.
+      if (block.alertKind) {
+        const paragraphs = block.content.split(/\n\n+/);
+        return (
+          <blockquote className={BLOCKQUOTE_CLASS_NAME}>
+            {paragraphs.map((para, i) => (
+              <p key={i} className={i > 0 ? "mt-2" : ""}>
+                <InlineMarkdown text={para} />
+              </p>
+            ))}
+          </blockquote>
+        );
+      }
+      return <BlockquoteBlock block={{ ...block, id: undefined as unknown as string }} />;
     }
 
     case "list-item": {

@@ -247,11 +247,15 @@ export function buildSemanticTargetGraph(container: HTMLElement): SemanticTarget
       continue;
     }
 
-    const codeElement = block.querySelector<HTMLElement>('pre > code.pn-code');
+    // A quote is one text block even when it holds a code fence or a table:
+    // its fence is not a code-block target (whose click would annotate only
+    // the fence), and its table rows are not cells of the quote.
+    const isQuote = block.tagName === 'BLOCKQUOTE';
+    const codeElement = isQuote ? null : block.querySelector<HTMLElement>('pre > code.pn-code');
     const mathElement = block.matches('.math-annotatable,[data-math-tex]')
       ? block
       : block.querySelector<HTMLElement>('.math-annotatable,[data-math-tex]');
-    const table = block.querySelector<HTMLTableElement>('table');
+    const table = isQuote ? null : block.querySelector<HTMLTableElement>('table');
 
     if (codeElement) {
       const target: SemanticTarget = {

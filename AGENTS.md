@@ -2774,7 +2774,7 @@ interface Block {
 - Headings (`#`, `##`, etc.) with slug-derived anchor ids
 - Code blocks (``` with language extraction)
 - List items (`-`, `*`, `1.`)
-- Blockquotes (`>`) — including GitHub alerts (`> [!NOTE|TIP|WARNING|CAUTION|IMPORTANT]`) which set `alertKind`
+- Blockquotes (`>`) — a run of consecutive `>` lines is ONE block whose `content` is the quote's own markdown (`>` plus one space stripped per line); `BlockquoteBlock` parses it again and renders fences, lists and nested quotes inside the one quote, with no `data-block-id` on the inner blocks, so the quote stays one annotatable block. GitHub alerts (`> [!NOTE|TIP|WARNING|CAUTION|IMPORTANT]`) set `alertKind` and keep `AlertBlock`
 - Horizontal rules (`---`)
 - Tables (pipe-delimited) — rendered via `TableBlock` with a `TableToolbar` (copy as markdown/CSV) and `TablePopout` overlay
 - Raw HTML blocks (`<details>`, `<summary>`, etc.) — rendered via `HtmlBlock` through `marked` + DOMPurify
