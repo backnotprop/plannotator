@@ -14,8 +14,8 @@
  *    some, and no dropdown;
  *  - Unarchive opens the thread back in the main list;
  *  - an agent's reply_to reply into an archived thread brings it back to the
- *    list (placed by its question) and out of the Archived block, while its
- *    foot still says Archived.
+ *    list (placed by its question) and out of the Archived block; its foot
+ *    says it came back, and the person answers it without unarchiving.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  * PNGs at 1440 by 900 land in .local/proof/archived/.
@@ -240,8 +240,19 @@ test("an agent's reply into an archived thread brings it back to the list and ou
   await expect(page.locator(`[data-section-id="waiting"] [data-row="${threads.build}"]`)).toBeVisible();
   await shot('07-agent-reply-back');
   await page.locator(`.ib-lbody [data-thread-id="${threads.build}"]`).click();
-  await expect(page.locator('.ib-pfoot')).toContainText('Archived. The next message from');
-  await expect(page.locator('section.ib-pane')).toContainText('Roll back the last deploy?');
+  const pane = page.locator('section.ib-pane');
+  await expect(page.locator('[data-came-back]')).toContainText('wrote after you archived it. Your reply goes to it; the thread stays archived.');
+  await expect(pane).toContainText('Roll back the last deploy?');
   await shot('08-agent-reply-thread', ['light']);
+
+  // Answered without unarchiving: pick, then Send.
+  await pane.getByRole('radio', { name: /^Yes/ }).click();
+  await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
+  await expect(pane.getByText(/^Sent /).first()).toBeVisible();
+  await shot('09-came-back-answered', ['light']);
+  const thread = await page.evaluate(async (id) => (await (await fetch(`/api/inbox/threads/${id}`)).json()) as { thread: { resolved_at: string | null; messages: { author: { kind: string }; body: string }[] } }, threads.build);
+  expect(thread.thread.resolved_at).not.toBeNull();
+  expect(thread.thread.messages.at(-1)).toMatchObject({ author: { kind: 'person' } });
+  expect(thread.thread.messages.at(-1)!.body).toContain('Yes');
   expect(world.errors).toEqual([]);
 });

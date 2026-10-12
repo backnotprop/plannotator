@@ -10,10 +10,11 @@
  * thread here. The strongest
  * reason wins:
  *
- *   quiet     the thread is archived (resolved: done) and no agent wrote
- *             after the archive; one that did is news again and is placed
- *             by the rules below, as an open thread would be (mail apps'
- *             rule), while it stays resolved until the person acts
+ *   quiet     the thread is archived (resolved: done), unless it came back
+ *             (`back_from_archive`: an agent wrote after the archive and
+ *             something there still waits), which is placed by the rules
+ *             below as an open thread would be (mail apps' rule) while it
+ *             stays resolved until the person acts
  *   quiet     the person marked it read (Mark read) and nothing but a
  *             set-aside note came after; an agent's next message (or the
  *             person's own reply) brings it back, with no write
@@ -44,7 +45,7 @@
  * list model still places them in Quiet unless the caller asks for them apart
  * (`GET /api/inbox/threads?archived=exclude`), so an older window and the
  * phone, which may draw these sections, keep every thread. "Archived" here
- * means resolved with no agent message after the archive line.
+ * means resolved and not come back.
  */
 
 import {
@@ -58,10 +59,10 @@ import {
 export type InboxSectionFacts = Pick<
   InboxListRow,
   "resolved_at" | "questions" | "answered_not_sent" | "sent" | "unseen"
-> & { read_at?: string | null; agent_after_archive?: boolean };
+> & { read_at?: string | null; back_from_archive?: boolean };
 
 export function inboxSectionOf(row: InboxSectionFacts): InboxSectionId {
-  if (row.resolved_at !== null && row.agent_after_archive !== true) return "quiet";
+  if (row.resolved_at !== null && row.back_from_archive !== true) return "quiet";
   if (row.read_at != null) return "quiet";
   if (row.questions.open > 0) {
     if (row.questions.stopped) return "stopped";
@@ -97,12 +98,12 @@ export function inboxListSections(rows: readonly InboxListRow[]): InboxListSecti
 }
 
 /**
- * Archived: resolved, and no agent wrote after the archive. Not shown in the
- * window's list; Settings lists it. A thread an agent wrote in after the
- * archive is news again: in the list, not in Settings.
+ * Archived: resolved, and not come back. Not shown in the window's list;
+ * Settings lists it. A thread an agent wrote in after the archive is back in
+ * the list while something there waits, and returns here once handled.
  */
-export function inboxRowArchived(row: Pick<InboxListRow, "resolved_at" | "agent_after_archive">): boolean {
-  return row.resolved_at !== null && row.agent_after_archive !== true;
+export function inboxRowArchived(row: Pick<InboxListRow, "resolved_at" | "back_from_archive">): boolean {
+  return row.resolved_at !== null && row.back_from_archive !== true;
 }
 
 /** Newest archived first (the Archived block's order); ties on the thread id. */

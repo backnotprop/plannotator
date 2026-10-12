@@ -251,12 +251,12 @@ test.skipIf(!hasDom)('several projects: rows grouped under a header per project 
 });
 
 /** An agent's reply_to reply, over the Inbox's own MCP (stateless: one tools/call). */
-function agentReply(replyTo: string, body: string): Promise<{ status: number; text: string }> {
+function agentReply(replyTo: string, body: string, project = 'billing-1'): Promise<{ status: number; text: string }> {
   const payload = JSON.stringify({
     jsonrpc: '2.0',
     id: 1,
     method: 'tools/call',
-    params: { name: 'send_message', arguments: { project_path: join(dir!, 'projects', 'billing-1'), agent_session: 'ses_reply', agent_name: 'Claude Code', reply_to: replyTo, body } },
+    params: { name: 'send_message', arguments: { project_path: join(dir!, 'projects', project), agent_session: 'ses_reply', agent_name: 'Claude Code', reply_to: replyTo, body } },
   });
   return new Promise((done, fail) => {
     const req = request(
@@ -291,10 +291,48 @@ test.skipIf(!hasDom)("an agent's reply into an archived thread brings it back to
     await go('#settings');
     await until(() => list.querySelector('[data-settings-archived]')?.getAttribute('data-settings-archived') === '0', 'the Archived block without it');
     expect(archivedRow(list, world.filed)).toBeNull();
-    // Opened, it still says archived, with Unarchive in its foot.
+    // Opened, it still says archived (the agent wrote after it), with Unarchive in its foot.
     await go(`#thread=${world.filed}`);
-    await until(() => list.textContent?.includes('Archived. The next message from') ?? false, 'the archived foot');
+    await until(() => list.querySelector('[data-came-back]')?.textContent?.includes('Unarchive') ?? false, 'the came-back foot');
   } finally {
     await setArchived(world.filed, false);
+  }
+});
+
+function type(el: HTMLElement, words: string) {
+  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+  act(() => {
+    setter.call(text, words);
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+test.skipIf(!hasDom)('a came-back thread is answered without unarchiving: its later message takes a reply, the foot says so, the thread stays archived', async () => {
+  const world = worlds[0]!;
+  await setArchived(world.waiting, true);
+  try {
+    const answer = await agentReply(world.waiting, 'Follow-up.\n\n:::question\nKeep the old index too?\n\n- [ ] Yes\n- [ ] No\n:::', 'billing-0');
+    expect(answer.status).toBe(200);
+    const el = await renderApp(`#thread=${world.waiting}`);
+    await until(() => el.querySelector('[data-came-back]') !== null, 'the came-back note');
+    expect(el.querySelector('[data-came-back]')!.textContent).toContain('wrote after you archived it. Your reply goes to it; the thread stays archived.');
+    // Not the read-only archived foot: the reply box is offered.
+    expect(el.textContent).not.toContain('starts a new thread');
+    act(() => button(el.querySelector('.ib-pfoot')!, 'Reply').click());
+    await settle();
+    type(el, 'Keep it for a week.');
+    act(() => button(el.querySelector('.ib-pfoot')!, 'Send').click());
+    await until(() => el.querySelector('textarea') === null, 'the Send');
+    const model = JSON.parse((await loopback(`/api/inbox/threads/${world.waiting}`)).text) as {
+      thread: { resolved_at: string | null; messages: { id: string; author: { kind: string }; reply_to: string | null; body: string }[] };
+    };
+    const later = model.thread.messages.filter((m) => m.author.kind === 'agent').at(-1)!;
+    const sent = model.thread.messages.at(-1)!;
+    expect(sent).toMatchObject({ author: { kind: 'person' }, reply_to: later.id });
+    expect(sent.body).toContain('Keep it for a week.');
+    expect(model.thread.resolved_at).not.toBeNull();
+  } finally {
+    await setArchived(world.waiting, false);
   }
 });

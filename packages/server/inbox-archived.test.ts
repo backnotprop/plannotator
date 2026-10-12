@@ -5,12 +5,15 @@
  *
  * - `GET /api/inbox/threads` without `archived` keeps them in Quiet, so an
  *   older window and the phone read what they read before;
- * - `?archived=exclude` (the window) leaves them out of every section and
- *   counts them in `archived_count`;
+ * - `?archived=exclude` (the window) leaves them out of every section;
  * - `GET /api/inbox/threads/archived` lists them newest archived first, a
  *   page at a time, with a project filter and per-project counts;
  * - Unarchive brings a thread back to the list and out of the archived set;
- * - a thread's own read carries its row, an archived thread's too.
+ * - a thread's own read carries its row, an archived thread's too;
+ * - a thread that came back (an agent's reply_to after the archive line) is
+ *   answerable without unarchiving: the answer reaches the agent's
+ *   wait_for_reply, the event stream says its question is open, the
+ *   Decisions count includes it, and once handled it is archived again.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -32,7 +35,6 @@ afterEach(async () => {
 
 interface ListModel {
   sections: InboxListSection[];
-  archived_count: number;
   projects: { id: string; threads: number; unread: number }[];
 }
 interface ArchivedModel {
@@ -76,7 +78,7 @@ async function setup() {
     expect(sent.isError ?? false).toBe(false);
     return sent.structuredContent;
   };
-  return { server, billing, docs, send, reply };
+  return { server, client, billing, docs, send, reply };
 }
 
 const url = (server: InboxServer, path: string) => `http://127.0.0.1:${server.port}${path}`;
@@ -103,12 +105,10 @@ describe("archived threads", () => {
 
     const before = await getJson<ListModel>(server, "/api/inbox/threads");
     expect(before.sections.find((s) => s.id === "quiet")!.threads.map((r) => r.thread_id)).toContain(gone.thread_id);
-    expect(before.archived_count).toBe(1);
 
     const model = await getJson<ListModel>(server, "/api/inbox/threads?archived=exclude");
     expect(model.sections.map((s) => s.id)).toEqual(before.sections.map((s) => s.id));
     expect(ids(allRows(model))).toEqual([kept.thread_id]);
-    expect(model.archived_count).toBe(1);
     // The sidebar's folder counts are the same either way.
     expect(model.projects).toEqual(before.projects);
 
@@ -174,7 +174,6 @@ describe("archived threads", () => {
     const row = allRows(model).find((r) => r.thread_id === t.thread_id)!;
     expect(row.resolved_at).toBeNull();
     expect(row.section).not.toBe("quiet");
-    expect(model.archived_count).toBe(0);
   });
 
   test("an agent's reply into an archived thread brings it back to the list and out of the archived set; it stays resolved", async () => {
@@ -188,9 +187,8 @@ describe("archived threads", () => {
     const model = await getJson<ListModel>(server, "/api/inbox/threads?archived=exclude");
     const row = allRows(model).find((r) => r.thread_id === t.thread_id)!;
     // News again, placed by its question; still resolved until the person acts.
-    expect(row).toMatchObject({ section: "waiting", unread: true, agent_after_archive: true });
+    expect(row).toMatchObject({ section: "waiting", unread: true, agent_after_archive: true, back_from_archive: true });
     expect(row.resolved_at).not.toBeNull();
-    expect(model.archived_count).toBe(0);
     expect((await getJson<ArchivedModel>(server, "/api/inbox/threads/archived")).total).toBe(0);
     // The default list (the phone) places it the same way.
     const phone = await getJson<ListModel>(server, "/api/inbox/threads");
@@ -207,5 +205,59 @@ describe("archived threads", () => {
     const read = await getJson<{ row: InboxListRow | null }>(server, `/api/inbox/threads/${t.thread_id}`);
     expect(read.row).toMatchObject({ thread_id: t.thread_id, section: "quiet" });
     expect(read.row!.resolved_at).not.toBeNull();
+  });
+
+  test("a came-back thread is answerable without unarchiving; the answer reaches wait_for_reply; events and Decisions see the question open; handled, it is archived again", async () => {
+    const { server, client, billing, send } = await setup();
+    const t = await send(billing, "Release notes");
+    await resolve(server, t.thread_id, true);
+    const asked = (await client.callTool({
+      name: "send_message",
+      arguments: {
+        project_path: billing,
+        agent_session: "ses_arch",
+        agent_name: "Claude Code",
+        reply_to: t.thread_id,
+        body: ":::question\nShip it today?\n\nDecision: when answered\n\n- [ ] Yes\n- [ ] No\n:::",
+      },
+    })) as { structuredContent: { message_id: string } };
+    const messageId = asked.structuredContent.message_id;
+
+    // The event stream's question line, replayed from the start: open, so notifications and the sound fire.
+    const controller = new AbortController();
+    const events = await fetch(url(server, "/api/inbox/events?cursor=0"), { signal: controller.signal });
+    const reader = events.body!.getReader();
+    let text = "";
+    while (!text.includes(messageId) || !text.includes('"kind":"question"')) text += new TextDecoder().decode((await reader.read()).value);
+    controller.abort();
+    const questionEvent = text.split("\n").find((line) => line.startsWith("data:") && line.includes('"kind":"question"') && line.includes(messageId))!;
+    expect(JSON.parse(questionEvent.slice(5)).question.state).toBe("open");
+
+    // The Decisions count includes the came-back question.
+    const list = await getJson<ListModel & { decisions_waiting: number }>(server, "/api/inbox/threads?archived=exclude");
+    expect(list.decisions_waiting).toBe(1);
+
+    // The agent waits; the person answers without unarchiving.
+    const waiting = client.callTool({ name: "wait_for_reply", arguments: { thread_id: t.thread_id, agent_session: "ses_arch", timeout_seconds: 20 } });
+    const thread = await getJson<{ thread: { messages: { id: string; questions?: { key: string; revision: number }[] }[] } }>(server, `/api/inbox/threads/${t.thread_id}`);
+    const q = thread.thread.messages.find((m) => m.id === messageId)!.questions![0]!;
+    const picked = await fetch(url(server, `/api/inbox/messages/${messageId}/picks`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serverSession: server.serverSession, questions: [{ key: q.key, revision: q.revision, answer: { v: 1, key: q.key, kind: "single", prompt: "Ship it today?", selected: ["Yes"] } }] }),
+    });
+    expect(picked.status).toBe(200);
+    const sent = await fetch(url(server, `/api/inbox/messages/${messageId}/reply`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serverSession: server.serverSession, idempotency_key: "k-came-back", words: "Ship it.", questions: [{ key: q.key, revision: q.revision + 1 }] }),
+    });
+    expect(sent.status).toBe(200);
+    const got = (await waiting) as { structuredContent: { status?: string; reply?: { body: string } } };
+    expect(got.structuredContent.reply?.body).toContain("Ship it.");
+    // The agent has the reply, nothing waits: the thread is archived again, by itself, still resolved.
+    const archived = await getJson<ArchivedModel>(server, "/api/inbox/threads/archived");
+    expect(ids(archived.threads)).toContain(t.thread_id);
+    expect(ids(allRows(await getJson<ListModel>(server, "/api/inbox/threads?archived=exclude")))).not.toContain(t.thread_id);
   });
 });

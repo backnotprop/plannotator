@@ -25,7 +25,7 @@ import {
   type InboxQuestion,
   type InboxQuestionRecord,
 } from "@plannotator/core/inbox-types";
-import { inboxDecisionRecording, inboxDecisionWords, toInboxQuestion } from "@plannotator/core/inbox-questions";
+import { inboxDecisionRecording, inboxDecisionWords } from "@plannotator/core/inbox-questions";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 
@@ -64,10 +64,9 @@ function agentOf(author: { kind: string; host?: string | null; session?: string 
   return author.kind === "agent" ? { host: author.host ?? null, session: author.session ?? null, name: author.name ?? null } : null;
 }
 
+/** The store's one question state (a question asked after the archive line is live). */
 function questionWire(store: InboxStore, record: InboxQuestionRecord): InboxQuestion {
-  const message = store.message(record.message_id);
-  const root = message ? store.message(message.thread_id) : null;
-  return toInboxQuestion(record, root?.resolved_at != null);
+  return store.questionWire(record);
 }
 
 function parseDraft(value: unknown): InboxDecisionDraft | null {
@@ -98,7 +97,7 @@ export function setQuestionDecision(
 ): InboxQuestion {
   const message = store.message(messageId);
   if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
-  if (store.message(message.thread_id)?.resolved_at != null) {
+  if (!store.messageAnswerable(message.id)) {
     throw new InboxError("thread_resolved", "This thread is resolved; reopen it to answer.");
   }
   if (typeof input.key !== "string") throw new InboxError("validation_error", "key: required.", { field: "key" });

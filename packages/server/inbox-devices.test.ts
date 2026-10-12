@@ -306,7 +306,7 @@ describe("the device door, on the binary", () => {
 
   test("7.5 to 7.9: the list, projects, a thread, seen (key required), the event stream", async () => {
     const list = (await (await door("threads")).json()) as Json;
-    expect(Object.keys(list).sort()).toEqual(["archived_count", "cursor", "decisions_waiting", "notice", "project", "projects", "sections", "serverSession", "update", "updated", "version"]);
+    expect(Object.keys(list).sort()).toEqual(["cursor", "decisions_waiting", "notice", "project", "projects", "sections", "serverSession", "update", "updated", "version"]);
     expect(list.sections.map((s: Json) => s.id)).toEqual(["stopped", "holding", "waiting", "new", "sent", "quiet"]);
     const row = list.sections.flatMap((s: Json) => s.threads).find((t: Json) => t.thread_id === threadId);
     expect(row).toMatchObject({ section: "waiting", unread: true, questions: { open: 2 } });
@@ -467,7 +467,6 @@ describe("the device door, on the binary", () => {
     const list = (await (await door("threads")).json()) as Json;
     const quiet = list.sections.find((s: Json) => s.id === "quiet").threads.map((t: Json) => t.thread_id);
     expect(quiet).toContain(threadId);
-    expect(list.archived_count).toBeGreaterThanOrEqual(1);
     const apart = (await (await door("threads?archived=exclude")).json()) as Json;
     expect(apart.sections.flatMap((s: Json) => s.threads).map((t: Json) => t.thread_id)).not.toContain(threadId);
     const archived = (await (await door("threads/archived")).json()) as Json;

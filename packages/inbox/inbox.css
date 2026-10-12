@@ -1211,6 +1211,8 @@ pre code.pn-code[data-keep-layout] {
   .ib-spage { padding: 0 16px calc(32px + env(safe-area-inset-bottom)); }
   .ib-shead { min-height: calc(52px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); margin: 0 0 12px -12px; gap: 4px; }
   .ib-srow { flex-wrap: wrap; min-height: 44px; }
+  /* Archived in Settings: Unarchive and Show more are 44 px tall on a phone. */
+  .ib-arcrow .ib-btn, .ib-sblock[data-settings-archived] .ib-btn { min-height: 44px; }
   .ib-sblock > p, .ib-note, .ib-srow { overflow-wrap: anywhere; }
   .pn-inbox .ib-sw { width: 50px; height: 30px; }
   .ib-sw::after { width: 24px; height: 24px; }

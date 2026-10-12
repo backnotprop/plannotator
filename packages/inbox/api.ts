@@ -51,8 +51,6 @@ export interface ListModel {
   sections: InboxListSection[];
   /** Questions in every project that record a decision once sent: the sidebar's Decisions count. */
   decisions_waiting: number;
-  /** Archived threads in the shown scope; the window asks for the list without them (Settings lists them). */
-  archived_count?: number;
 }
 
 /** GET /api/inbox/threads/archived: Settings' Archived block, newest archived first, a page at a time. */

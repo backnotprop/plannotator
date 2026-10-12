@@ -55,7 +55,6 @@ import {
   type InboxProject,
   type InboxProjectRepo,
 } from "@plannotator/core/inbox-types";
-import { toInboxQuestion } from "@plannotator/core/inbox-questions";
 import { checkServerSession, createServerSessionNonce, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { extractDirName, extractRepoName } from "@plannotator/core/project";
 import {
@@ -524,8 +523,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Quiet included, and Settings lists them (GET /api/inbox/threads/archived).
       // Without it they stay in Quiet, as an older window and the phone expect.
       sections: inboxListSections(archived === "exclude" ? scoped.filter((row) => !inboxRowArchived(row)) : scoped),
-      /** Archived threads in the shown scope (additive): Settings' Archived block counts them. */
-      archived_count: scoped.filter(inboxRowArchived).length,
       /** Questions in every project that record a decision once answered and sent: the sidebar's Decisions count. */
       decisions_waiting: waitingDecisions(store).length,
     };
@@ -821,10 +818,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return { seq: line.seq, kind: line.kind, id: line.id, project: line.record };
       case "message":
         return { seq: line.seq, kind: line.kind, id: line.id, message: line.record };
-      case "question": {
-        const root = store.message(store.message(line.record.message_id)?.thread_id ?? "");
-        return { seq: line.seq, kind: line.kind, id: line.id, question: toInboxQuestion(line.record, root?.resolved_at != null) };
-      }
+      case "question":
+        // The store's one question state: a question an agent asked after the archive line is live (notifications, the sound).
+        return { seq: line.seq, kind: line.kind, id: line.id, question: store.questionWire(line.record) };
       case "decision":
         return { seq: line.seq, kind: line.kind, id: line.id, decision: line.record };
       case "annotation":
