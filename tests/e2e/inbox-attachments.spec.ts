@@ -467,6 +467,82 @@ test('the HTML prototype opens full screen: its image and frame load from its fo
   expect(page.url()).not.toContain('file=');
 });
 
+/**
+ * The open reply box's chips (picks, skip, annotations): each inside the box,
+ * none overflowing its own box, each label on one line. Problems as text, so a
+ * failure names the chip.
+ */
+async function replyChipProblems(page: Page, sentenceMayWrap = false): Promise<string[]> {
+  return page.evaluate((sentenceMayWrap) => {
+    const box = [...document.querySelectorAll<HTMLElement>('section.ib-pane .ib-rbox')].find((b) => b.getClientRects().length > 0);
+    if (!box) return ['no reply box on screen'];
+    const outer = box.getBoundingClientRect();
+    const chips = [...box.querySelectorAll<HTMLElement>('.ib-rfoot .ib-rchip, .ib-rfoot .ib-skipchip')];
+    if (chips.length < 2) return [`expected at least two chips, found ${chips.length}`];
+    const problems: string[] = [];
+    for (const chip of chips) {
+      const name = chip.textContent?.replace(/\s+/g, ' ').trim() ?? '?';
+      const r = chip.getBoundingClientRect();
+      if (r.left < outer.left - 0.5 || r.right > outer.right + 0.5 || r.top < outer.top - 0.5 || r.bottom > outer.bottom + 0.5) problems.push(`"${name}" leaves the reply box`);
+      // What the chip draws (its text, icon and button; not a phone's invisible ::after hit area) stays inside it.
+      const range = document.createRange();
+      range.selectNodeContents(chip);
+      const drawn = [...range.getClientRects()].filter((rect) => rect.width > 0);
+      if (drawn.some((d) => d.left < r.left - 0.5 || d.right > r.right + 0.5 || d.top < r.top - 0.5 || d.bottom > r.bottom + 0.5)) problems.push(`"${name}" overflows itself`);
+      const tops = new Set(drawn.map((rect) => Math.round(rect.top + rect.height / 2)));
+      const lines = [...tops].sort((a, b) => a - b).filter((t, i, all) => i === 0 || t - all[i - 1]! > 4);
+      // A label chip ("3 annotations", "1 pick") never breaks; the skip chip is a sentence and may wrap inside itself on a phone.
+      if (lines.length > 1 && (!sentenceMayWrap || chip.classList.contains('ib-rchip'))) problems.push(`"${name}" breaks across ${lines.length} lines`);
+    }
+    return problems;
+  }, sentenceMayWrap);
+}
+
+test("the reply box's chips wrap inside it beside a file, stacked and on a phone; no chip breaks its own label", async () => {
+  const page = world.page;
+  // The reply box is open (picks, the skip chip, 3 annotations) from the tests above.
+  await page.getByRole('button', { name: 'Open admin-view.html' }).click();
+  const pane = page.locator(`[data-attachment-pane="${world.attachments.html}"]`);
+  await pane.getByRole('button', { name: 'Exit full screen' }).click();
+  await expect(pane).not.toHaveClass(/ib-full/);
+  // The 440 px thread column beside the file.
+  await expect(page.locator('section.ib-pane .ib-rfoot [data-annotations-chip]')).toHaveText('3 annotations');
+  expect(await replyChipProblems(page)).toEqual([]);
+  await pane.getByRole('button', { name: 'Close admin-view.html' }).click();
+  await expect(pane).toHaveCount(0);
+  // The two-pane desktop, a stacked iPad, a narrow window, and phones.
+  try {
+    for (const size of [
+      { width: 1440, height: 900 },
+      { width: 810, height: 1080 },
+      { width: 900, height: 900 },
+      { width: 390, height: 844, phone: true },
+      { width: 320, height: 640, phone: true },
+    ]) {
+      await page.setViewportSize({ width: size.width, height: size.height });
+      await expect(page.locator('section.ib-pane .ib-rbox').filter({ visible: true })).toHaveCount(1);
+      expect(await replyChipProblems(page, 'phone' in size), `${size.width} by ${size.height}`).toEqual([]);
+      if (size.width === 1440) {
+        // The two-pane desktop draws the chips as before: one row, each 26 px tall.
+        const rows = await page.locator('section.ib-pane .ib-rfoot > *').evaluateAll((els) =>
+          els.map((el) => {
+            const chip = (el.matches('.ib-annchip') ? el.firstElementChild! : el).getBoundingClientRect();
+            return { top: Math.round(chip.top), height: Math.round(chip.height) };
+          }),
+        );
+        expect(new Set(rows.map((r) => r.top)).size).toBe(1);
+        expect(rows.every((r) => r.height === 26)).toBe(true);
+      }
+      if (size.width === 390) {
+        await page.locator('section.ib-pane .ib-rbox').filter({ visible: true }).scrollIntoViewIfNeeded();
+        await shot('2.4e-reply-chips-phone');
+      }
+    }
+  } finally {
+    await page.setViewportSize({ width: 1440, height: 900 });
+  }
+});
+
 test('leaving full screen keeps the file beside the thread with ‹ Inbox leading its header; ‹ Inbox closes the file and brings the list back', async () => {
   // Design record "inbox-file-back-to-list", variant 1, approved 2026-10-12.
   const page = world.page;

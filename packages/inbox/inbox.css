@@ -284,6 +284,9 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox .ib-rtext:focus-visible { outline: none; }
 .ib-rtext::placeholder { color: var(--muted-foreground); }
 .ib-rfoot { display: flex; gap: 6px; padding: 6px 8px 8px; }
+/* The chips wrap as a row inside the box (a 440 px thread beside a file, a stacked pane, a phone); a chip never shrinks or breaks its own label. */
+.ib-rfoot { flex-wrap: wrap; }
+.ib-rfoot > *, .ib-rfoot .ib-rchip { flex: none; white-space: nowrap; }
 .ib-rchip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border-radius: 6px; background: var(--muted); font-size: 12.5px; font-weight: 500; color: var(--foreground); }
 .ib-rchip .ib-ic { color: var(--muted-foreground); }
 .ib-delivered { font-size: 12.5px; color: var(--muted-foreground); display: flex; align-items: center; gap: 6px; margin-top: 10px; }
@@ -936,6 +939,9 @@ pre code.pn-code[data-keep-layout] {
 .pn-inbox .ib-skipchip button { color: var(--primary); font-weight: 550; height: 22px; padding: 0 6px; border-radius: 5px; }
 .pn-inbox .ib-skipchip button:hover { background: color-mix(in oklch, var(--primary) 10%, transparent); }
 .ib-keep .ib-skipchip { color: var(--foreground); }
+/* In the reply box the skip chip is a sentence: where the box is narrower than it (a phone), its words wrap inside it rather than running out of the box. Where it fits it draws as before (26 px, one line). */
+.pn-inbox .ib-rfoot .ib-skipchip { flex: 0 1 auto; max-width: 100%; height: auto; min-height: 26px; white-space: normal; }
+.pn-inbox .ib-rfoot .ib-skipchip button { flex: none; white-space: nowrap; }
 /* The list: a quiet hover action on rows that wait on the person. */
 .ib-rw { position: relative; }
 .pn-inbox .ib-ract { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); display: none; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 8px; border-radius: 7px; border: 1px solid var(--border); background: var(--card); font-size: 12.5px; font-weight: 550; color: var(--foreground); box-shadow: 0 4px 12px -6px rgba(0, 0, 0, 0.3); }
