@@ -11,9 +11,9 @@
  * What regresses if this fails:
  *  - a decision arriving after the runtime went stale crashes Pi, or is not
  *    recorded for `review-status`;
- *  - a session end leaves event-API reviews open (their tab offers a decision
- *    nobody receives), forgets a decision made before, or leaves a closed
- *    review reading "pending" forever.
+ *  - a tab left open across /reload stops recording its decision for
+ *    `review-status` (the README's recovery promise), or its decision is
+ *    emitted onto the replaced runtime's dead bus.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -193,7 +193,10 @@ describe("plannotator:request plan-review across a session replacement", () => {
 		expect(harness.results).toEqual([expect.objectContaining({ reviewId, approved: false, feedback: "rework" })]);
 	});
 
-	test("session end closes open reviews, tells their tab, and keeps a decision made before", async () => {
+	// The README promises `review-status` lets a caller recover across session
+	// restarts, so the tab stays usable after /reload: its decision is recorded
+	// for the replacement to read, and nothing is emitted onto the dead bus.
+	test("after session end the tab still decides: recorded for review-status, never emitted", async () => {
 		const dir = sandbox();
 		const harness = createHarness(dir);
 		await harness.startSession();
@@ -201,26 +204,20 @@ describe("plannotator:request plan-review across a session replacement", () => {
 		const open = await openPlanReview(harness, "Still open");
 		expect((await postJson(`${decided.url}/api/approve`, {})).status).toBe(200);
 		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(harness.results).toHaveLength(1);
 
-		// Watch the open tab's stream, then end the session (/reload).
-		const stream = await fetch(`${open.url}/api/external-annotations/stream`);
-		const reader = stream.body!.getReader();
-		await reader.read(); // the snapshot: subscribed
-		await harness.shutdown();
-		const decoder = new TextDecoder();
-		let text = "";
-		const deadline = Date.now() + 3000;
-		while (!text.includes("session-closed") && Date.now() < deadline) {
-			const { value, done } = await reader.read();
-			if (done) break;
-			text += decoder.decode(value, { stream: true });
-		}
-		await reader.cancel().catch(() => undefined);
-		expect(text).toContain('"type":"session-closed"');
-
-		// The server is gone: nothing can post a decision that would go nowhere.
-		await expect(fetch(`${open.url}/api/plan`)).rejects.toThrow();
-		expect(await harness.reviewStatus(open.reviewId)).toEqual({ status: "closed" });
+		await harness.shutdown(); // /reload: shutdown, then the runtime goes stale
+		const { logged } = await captureErrors(async () => {
+			const fatal = await trapFatal(async () => {
+				const res = await postJson(`${open.url}/api/approve`, { feedback: "after reload" });
+				expect(res.status).toBe(200);
+			});
+			expect(fatal).toEqual([]);
+		});
+		// Not attempted at all (a stale emit would have been logged).
+		expect(logged.filter((line) => line.includes("could not emit"))).toEqual([]);
+		expect(harness.results).toHaveLength(1);
+		expect(await harness.reviewStatus(open.reviewId)).toMatchObject({ status: "completed", approved: true, feedback: "after reload" });
 		expect(await harness.reviewStatus(decided.reviewId)).toMatchObject({ status: "completed", approved: true });
 	});
 });

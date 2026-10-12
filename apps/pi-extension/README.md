@@ -280,9 +280,9 @@ Plan review is asynchronous:
 - Plannotator opens the browser review and immediately responds with `{ status: "handled", result: { status: "pending", reviewId } }`
 - when the human approves or rejects in the browser, Plannotator emits `plannotator:review-result` with `{ reviewId, approved, feedback, savedPath?, agentSwitch?, permissionMode? }`
 - callers can query `review-status` with the same `reviewId` to recover from startup races or session restarts
-- a review belongs to the Pi session that asked for it: when that session ends (`/reload`, a session switch, quit) before the reviewer decides, the review is closed, its open tab says so (the reviewer's draft is kept), and `review-status` answers `{ status: "closed" }`. A decision made before the session ended stays `completed`. Send a new `plan-review` to ask again.
+- the review tab outlives `/reload` and session switches: a decision made there after the session was replaced is recorded for `review-status` (the replaced runtime emits nothing, since its event bus is gone), so the new session can pick it up
 
-The other shared actions remain request/response flows. Their reviews are also closed when the requesting session ends, since the answer would go to a requester that was replaced with it. Payloads are intentionally minimal and only include fields the shared implementation actually uses.
+The other shared actions remain request/response flows. Payloads are intentionally minimal and only include fields the shared implementation actually uses.
 
 #### External plan execution handoff
 
