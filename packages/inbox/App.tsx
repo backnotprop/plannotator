@@ -51,14 +51,17 @@ import { lookBoundary } from './folding';
 import { isPhone, trackKeyboard, usePhone } from './phone';
 import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH, useStack } from './stack';
 import { backTo, pushScreen } from './history';
+import { adoptSavedTheme, inboxThemeSync } from './theme';
 
 // The Inbox has no /api/config and no browser-agent tools: settings stay in
-// the page's own cookies, and WebMCP is off.
+// the page's own cookies, except the theme, which goes to config.json `theme`
+// through the Inbox's settings route so plan review follows it (theme.ts).
+// WebMCP is off.
 // No image uploads and no skill catalog either: a comment's image would need
 // an upload route the Inbox does not have, so the composer says so instead of
 // posting nowhere.
 configurePlannotatorUI({
-  serverSync: () => {},
+  serverSync: inboxThemeSync,
   // Images in a message load from the Inbox's per-message route (#1813).
   imageSrcResolver: inboxImageSrcResolver,
   webmcp: { enabled: false, namePrefix: 'plannotator.' },
@@ -352,7 +355,9 @@ function Inbox() {
 
   const refreshSettings = useCallback(async () => {
     try {
-      setSettings(await inboxApi.settings());
+      const next = await inboxApi.settings();
+      adoptSavedTheme(next.theme);
+      setSettings(next);
     } catch (cause) {
       setSettingsError(cause instanceof Error ? cause.message : String(cause));
     }

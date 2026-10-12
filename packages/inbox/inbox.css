@@ -114,6 +114,24 @@
 @keyframes ib-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .ib-spin { animation: none; border-right-color: currentColor; opacity: 0.6; } }
 .ib-nav.ib-quiet { color: var(--muted-foreground); }
+/* The Settings row and its light/dark toggle: two buttons, the toggle laid over the row's right end
+   (the row keeps its full-width highlight, its text stops short of the toggle). */
+.ib-setrow { position: relative; }
+.ib-setrow > .ib-nav { padding-right: 40px; }
+.pn-inbox .ib-theme-tg { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--muted-foreground); }
+.pn-inbox .ib-theme-tg:hover { background: var(--muted); color: var(--foreground); }
+.pn-inbox .ib-theme-tg:focus-visible { outline-offset: 0; }
+.ib-theme-tg .ib-ic { width: 15px; height: 15px; }
+/* Under reduced motion a theme switch lands in one frame (theme.ts holds this class for two frames). */
+html.ib-theme-instant, html.ib-theme-instant *, html.ib-theme-instant *::before, html.ib-theme-instant *::after { transition: none !important; }
+/* Settings → Appearance: Light, Dark, Match system, as one segmented control of native radios. */
+.ib-seg { display: inline-flex; padding: 2px; gap: 2px; border-radius: 8px; background: var(--muted); border: 1px solid var(--border); }
+.ib-seg-o { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: 6px; font-size: 13px; color: var(--muted-foreground); cursor: pointer; white-space: nowrap; }
+.ib-seg-o:hover { color: var(--foreground); }
+.ib-seg-o[data-on] { background: var(--card); color: var(--foreground); font-weight: 550; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.ib-seg-o input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+.ib-seg-o:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
+.pn-inbox .ib-seg-o input:focus-visible { outline: none; }
 
 /* The update dialogs: native <dialog> (focus stays inside, Escape closes). */
 .pn-inbox .ib-dlg, dialog.ib-dlg { position: fixed; inset: 0; margin: auto; height: fit-content; width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); color: var(--foreground); box-shadow: 0 24px 60px -20px oklch(0 0 0 / 0.55); overflow-y: auto; }
@@ -1217,6 +1235,10 @@ pre code.pn-code[data-keep-layout] {
   /* the navigation sheet and the dialogs */
   .ib-sb-sheet { width: calc(var(--sidebar-width) + env(safe-area-inset-left)); padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left); background: var(--background); }
   .ib-nav { height: 44px; font-size: 15.5px; flex: none; }
+  .ib-setrow > .ib-nav { padding-right: 50px; }
+  .pn-inbox .ib-theme-tg { width: 40px; height: 40px; right: 2px; border-radius: 8px; }
+  .ib-theme-tg .ib-ic { width: 18px; height: 18px; }
+  .ib-seg-o { height: 40px; }
   /* a phone on its side is about 400 px tall: the projects scroll, the rest keeps its height */
   .ib-sb-sheet-in > .ib-side { overflow-y: auto; }
   .ib-sb-sheet-in .ib-brand, .ib-sb-sheet-in .ib-side-foot { flex: none; }

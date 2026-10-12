@@ -156,6 +156,11 @@ export interface SettingsModel {
   updates?: UpdateSwitches;
   /** Whether this Inbox serves phones (PLANNOTATOR_INBOX_PHONES): the Phones block shows only then. */
   phones: boolean;
+  /**
+   * Plannotator's appearance in config.json (`theme`), the value plan review
+   * reads too: null when never chosen. Absent from an Inbox that predates it.
+   */
+  theme?: InboxThemeConfig | null;
   store: {
     dir: string;
     bytes: number;
@@ -275,6 +280,13 @@ async function post<T>(path: string, body: Record<string, unknown>): Promise<T> 
   );
 }
 
+/** config.json `theme`: the mode and the palette for each half (ThemeConfig in @plannotator/core/config-types). */
+export interface InboxThemeConfig {
+  mode?: 'light' | 'dark' | 'system';
+  light?: string;
+  dark?: string;
+}
+
 export const inboxApi = {
   list: () => get<ListModel>('/api/inbox/threads'),
   thread: (threadId: string) => get<ThreadModel>(`/api/inbox/threads/${encodeURIComponent(threadId)}`),
@@ -337,6 +349,8 @@ export const inboxApi = {
   saveSound: (change: { enabled?: boolean; volume?: number }) => post<{ sound: InboxSoundSettings }>('/api/inbox/settings', { sound: change }),
   /** Ask to show the one-time sound dialog: `show` is true for the first page that ever asks after an update, and only that one. */
   claimSoundDialog: () => post<{ show: boolean; sound: InboxSoundSettings }>('/api/inbox/sound/dialog', {}),
+  /** Plannotator's appearance, written to config.json `theme` (shared with plan review). */
+  saveTheme: (theme: InboxThemeConfig) => post<{ theme: InboxThemeConfig | null }>('/api/inbox/settings', { theme }),
   saveTailscale: (on: boolean, replaceExposed = false) =>
     post<{ tailscale: TailscaleSettings }>('/api/inbox/settings', { tailscale: replaceExposed ? { on, replace_exposed: true } : { on } }),
   // Step 2: attachments (by id only), annotations, deleting.

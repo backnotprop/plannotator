@@ -72,6 +72,7 @@ import {
   configuredInboxTool,
   type InboxToolHost,
   type PlannotatorConfig,
+  type ThemeConfig,
 } from "@plannotator/shared/config";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { normalizeStableVersion, readUpdateState } from "@plannotator/shared/update-check";
@@ -126,6 +127,8 @@ type RequestVia = "local" | "tailnet";
 const SERVE_HEADERS = ["tailscale-headers-info", "tailscale-user-login", "x-forwarded-for"] as const;
 
 const LOOPBACK = "127.0.0.1";
+/** A palette id as packages/ui/themes names them (`plannotator`, `tokyo-night`). */
+const THEME_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** Remote mode's fixed port: the Inbox never takes it. */
 export const INBOX_FORBIDDEN_PORT = 19432;
 const SSE_HEARTBEAT_MS = 15_000;
@@ -643,6 +646,54 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * Plannotator's appearance (config.json `theme`, the same value plan
+   * review, code review and annotate read and write through POST
+   * /api/config): the mode and the palette for each half. The Inbox's
+   * light/dark toggle and its Settings row write it here, so a choice made in
+   * the Inbox holds in the next plan review too, and one made there holds
+   * here. null: never chosen (the cookies, else the OS, decide).
+   */
+  const themeState = (): ThemeConfig | null => {
+    const theme = loadConfig().theme;
+    return theme && typeof theme === "object" ? theme : null;
+  };
+
+  const saveTheme = (input: unknown, validateOnly = false) => {
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw new InboxError("validation_error", "theme: { mode?, light?, dark? }.", { field: "theme" });
+    }
+    const next: ThemeConfig = {};
+    for (const [field, value] of Object.entries(input as Record<string, unknown>)) {
+      switch (field) {
+        case "mode":
+          if (value !== "light" && value !== "dark" && value !== "system") {
+            throw new InboxError("validation_error", "theme.mode: light, dark or system.", { field: "theme.mode" });
+          }
+          next.mode = value;
+          break;
+        case "light":
+        case "dark":
+          // A palette id (packages/ui/themes); the page resolves an unknown one to its default.
+          if (typeof value !== "string" || !THEME_ID.test(value)) {
+            throw new InboxError("validation_error", `theme.${field}: a palette id.`, { field: `theme.${field}` });
+          }
+          next[field] = value;
+          break;
+        default:
+          throw new InboxError("validation_error", `theme.${field}: not a setting (mode, light, dark).`, { field: `theme.${field}` });
+      }
+    }
+    if (Object.keys(next).length === 0) throw new InboxError("validation_error", "theme: mode, light or dark is required.", { field: "theme" });
+    if (validateOnly) return themeState();
+    saveConfig({ theme: next });
+    const saved = themeState();
+    if (!saved || Object.entries(next).some(([key, value]) => saved[key as keyof ThemeConfig] !== value)) {
+      throw new InboxError("config_not_saved", "config.json could not be written; nothing changed.");
+    }
+    return saved;
+  };
+
+  /**
    * The one-time sound dialog, claimed by the page that will show it: a
    * compare-and-set from `dialogDueFor` to `dialogShownFor`, so of several
    * tabs (or a reload) only the first ever gets `show: true`. Only on this
@@ -720,6 +771,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     sound: soundState(),
     /** Settings → About: update notices and automatic updates. */
     updates: updatesState(),
+    /** Plannotator's appearance (config.json `theme`), shared with plan review; null when never chosen. */
+    theme: themeState(),
     store: store.diskUsage(),
     /** Whether this Inbox serves phones; the window shows the Phones block only then. */
     phones: phonesOn,
@@ -1118,8 +1171,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const updateSwitches = body.update_check !== undefined || body.auto_update !== undefined;
-        if (body.inbox_tool === undefined && body.notifications === undefined && body.sound === undefined && body.tailscale === undefined && !updateSwitches) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, update_check or auto_update is required.");
+        if (body.inbox_tool === undefined && body.notifications === undefined && body.sound === undefined && body.tailscale === undefined && body.theme === undefined && !updateSwitches) {
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, update_check or auto_update is required.");
         }
         // Updating changes this computer: never from a page that came through the tailnet.
         if (updateSwitches && via === "tailnet") return localOnly();
@@ -1147,13 +1200,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.sound !== undefined) saveSound(body.sound, true);
         if (body.inbox_tool !== undefined) saveInboxTool(body.inbox_tool, true);
         if (updateSwitches) saveUpdateSwitches(body, true);
+        if (body.theme !== undefined) saveTheme(body.theme, true);
         const tailnet = tailscaleChange === undefined ? tailscale.state() : tailscale.set(tailscaleChange.on, { via, replaceExposed: tailscaleChange.replaceExposed });
         const notifications = body.notifications === undefined ? notificationsState() : saveNotifications(body.notifications);
         const sound = body.sound === undefined ? soundState() : saveSound(body.sound);
         const inboxTool = body.inbox_tool === undefined ? inboxToolState() : saveInboxTool(body.inbox_tool);
         const updateState = updateSwitches ? saveUpdateSwitches(body) : updatesState();
         if (updateSwitches) updates.refresh();
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState });
+        const theme = body.theme === undefined ? themeState() : saveTheme(body.theme);
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme });
       }
       // The one-time sound dialog: the page asks to show it, and only the first ask ever gets `show: true`.
       if (path === "/api/inbox/sound/dialog") {
