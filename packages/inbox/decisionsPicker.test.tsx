@@ -157,6 +157,12 @@ async function renderDecisions(projectId: string) {
 const trigger = (el: HTMLElement) => el.querySelector('[data-project-picker-trigger]') as HTMLButtonElement;
 const list = (el: HTMLElement) => el.querySelector('[role="listbox"]') as HTMLElement | null;
 const option = (el: HTMLElement, projectId: string) => el.querySelector(`[data-project-option="${projectId}"]`) as HTMLElement;
+/** A primary pointer press as a browser makes it: pointerdown, pointerup, then the click (detail 1), in one task. */
+const primaryPress = (target: HTMLElement) => {
+  target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, buttons: 1 }));
+  target.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0 }));
+  target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
+};
 const press = (target: HTMLElement, key: string) =>
   act(() => {
     target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
@@ -251,20 +257,53 @@ test.skipIf(!hasDom)('the press that closes the list never also opens what lay u
   const row = () => el.querySelector('[data-decision-group="settled"] [data-decision-id]') as HTMLButtonElement;
   act(() => trigger(el).click());
   expect(list(el)).not.toBeNull();
-  // A real press: pointerdown, then the click on the same row.
-  act(() => {
-    row().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-  });
+  // A real press: pointerdown, pointerup, then the pointer's click (detail 1) on the same row, in one task.
+  act(() => primaryPress(row()));
   expect(list(el)).toBeNull();
-  act(() => row().click());
   expect(window.location.hash).toBe(`#decisions=${worlds[0]!.project}`);
   expect(el.querySelector('[data-decision-pane]')).toBeNull();
   // The list is closed now: the next press opens the decision.
-  act(() => {
-    row().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-  });
-  act(() => row().click());
+  act(() => primaryPress(row()));
   expect(window.location.hash).toContain('&decision=dec_');
+});
+
+test.skipIf(!hasDom)('a press that makes no click (a right click, a cancelled touch) never eats a later keyboard click', async () => {
+  const el = await renderDecisions(worlds[0]!.project);
+  await until(() => el.querySelector('[data-decision-group="waiting"] [data-waiting-question] button') !== null, 'the waiting rows');
+  const openButton = () => el.querySelector('[data-decision-group="waiting"] [data-waiting-question] button') as HTMLButtonElement;
+  const sub = () => el.querySelector('.ib-dsub') as HTMLElement;
+
+  // A right click outside: pointerdown with the secondary button, then contextmenu, no click.
+  act(() => trigger(el).click());
+  act(() => {
+    sub().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 2, buttons: 2 }));
+    sub().dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 2 }));
+    sub().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
+  });
+  expect(list(el)).toBeNull();
+  press(document.body, 'Escape');
+  // Enter on a Waiting row's Open: the keyboard's click (detail 0) opens its thread on the first press.
+  openButton().focus();
+  act(() => openButton().click());
+  expect(window.location.hash).toStartWith('#thread=');
+
+  // A touch that turns into a scroll: pointerdown, pointercancel, no click. The swallower disarms on the next tick.
+  window.location.hash = `#decisions=${worlds[0]!.project}`;
+  await until(() => el.querySelector('[data-decision-group="waiting"] [data-waiting-question] button') !== null, 'the Decisions page again');
+  act(() => trigger(el).click());
+  act(() => {
+    sub().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, buttons: 1 }));
+    sub().dispatchEvent(new PointerEvent('pointercancel', { bubbles: true }));
+  });
+  expect(list(el)).toBeNull();
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 10));
+  });
+  // Even a pointer's click after that is not swallowed.
+  act(() => {
+    openButton().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
+  });
+  expect(window.location.hash).toStartWith('#thread=');
 });
 
 test.skipIf(!hasDom)("the browser's Back, or any route change, closes the list", async () => {
@@ -345,6 +384,16 @@ test.skipIf(!hasDom)('on a phone the button carries one whole count, the name it
   expect(closeButton.getAttribute('aria-label')).toBe('Close the project list');
   expect(list(el)!.contains(closeButton)).toBe(false);
   expect(list(el)!.querySelectorAll('[role="option"]')).toHaveLength(2);
+  // Tab moves between the list and Close, inside the sheet (Shift+Tab back); the sheet stays open.
+  const selected = list(el)!.querySelector('[aria-selected="true"]') as HTMLElement;
+  expect(document.activeElement).toBe(selected);
+  press(selected, 'Tab');
+  expect(document.activeElement).toBe(closeButton);
+  act(() => {
+    closeButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }));
+  });
+  expect(document.activeElement).toBe(selected);
+  expect(el.querySelector('[data-project-sheet]')).not.toBeNull();
   act(() => closeButton.click());
   expect(el.querySelector('[data-project-sheet]')).toBeNull();
   expect(document.activeElement).toBe(trigger(el));

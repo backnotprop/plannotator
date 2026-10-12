@@ -17,7 +17,8 @@ import { Icon } from '../icons';
  * button open it on the current project; in the list ArrowDown / ArrowUp,
  * Home / End and type-ahead move (the same letter again cycles through the
  * projects it starts; Space joins a name being typed), Enter or Space picks,
- * Escape and Tab close and put focus back on the button. A press outside
+ * Escape and Tab close and put focus back on the button (in a phone's sheet
+ * Tab moves between the list and Close instead). A press outside
  * closes it and that press's click is swallowed, so it never also opens what
  * lay under the list. A route change (the browser's Back) closes it too.
  */
@@ -84,6 +85,7 @@ export function DecisionsProjectPicker(props: DecisionsProjectPickerProps) {
   /** The popup: the listbox on a desktop, the sheet (its head and the listbox) on a phone. */
   const popRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   /** Closed from the keyboard or by a pick: focus goes back to the button (not after a press elsewhere). */
   const refocus = useRef(false);
   const typed = useRef({ text: '', at: 0 });
@@ -108,9 +110,14 @@ export function DecisionsProjectPicker(props: DecisionsProjectPickerProps) {
     }
   }, [open]);
 
+  /** Disarms the click swallower an outside press armed (see below), if it is still armed. */
+  const disarm = useRef<(() => void) | null>(null);
+  useEffect(() => () => disarm.current?.(), []);
+
   // The route moved under the list (a pick, or the browser's Back on a phone): the list closes.
   useEffect(() => {
     setOpen(false);
+    disarm.current?.();
   }, [current.id]);
   useEffect(() => {
     if (!open) return;
@@ -121,6 +128,9 @@ export function DecisionsProjectPicker(props: DecisionsProjectPickerProps) {
 
   // A press outside the list or its button closes it, focus left where the press put it, and
   // the click that press makes is swallowed, so it does not also open what lay under the list.
+  // Only a primary press arms the swallower, only a pointer's click (detail > 0) is swallowed,
+  // and it disarms on the tick after the press ends, so a press that makes no click (a right
+  // click, a touch that turned into a scroll) never eats a later keyboard click.
   useEffect(() => {
     if (!open) return;
     const inside = (target: EventTarget | null) =>
@@ -128,19 +138,31 @@ export function DecisionsProjectPicker(props: DecisionsProjectPickerProps) {
     const onDown = (event: PointerEvent) => {
       if (inside(event.target)) return;
       close(false);
+      if (event.button !== 0) return;
+      disarm.current?.();
+      let timer: ReturnType<typeof setTimeout> | null = null;
       const swallow = (click: MouseEvent) => {
-        done();
+        if (click.detail === 0) return;
+        off();
         if (inside(click.target)) return;
         click.preventDefault();
         click.stopPropagation();
       };
-      // The next press starts over: a press that made no click (a drag) leaves nothing behind.
-      const done = () => {
+      // The click, when there is one, comes in the same task as pointerup: disarm on the next tick.
+      const ended = () => {
+        if (timer === null) timer = setTimeout(off, 0);
+      };
+      const off = () => {
+        if (timer !== null) clearTimeout(timer);
         document.removeEventListener('click', swallow, true);
-        document.removeEventListener('pointerdown', done, true);
+        document.removeEventListener('pointerup', ended, true);
+        document.removeEventListener('pointercancel', ended, true);
+        if (disarm.current === off) disarm.current = null;
       };
       document.addEventListener('click', swallow, true);
-      document.addEventListener('pointerdown', done, true);
+      document.addEventListener('pointerup', ended, true);
+      document.addEventListener('pointercancel', ended, true);
+      disarm.current = off;
     };
     document.addEventListener('pointerdown', onDown, true);
     return () => document.removeEventListener('pointerdown', onDown, true);
@@ -194,6 +216,17 @@ export function DecisionsProjectPicker(props: DecisionsProjectPickerProps) {
       event.stopPropagation();
       const id = items[at]!.getAttribute('data-project-option');
       if (id) pick(id);
+      return;
+    } else if (event.key === 'Tab' && phone) {
+      // The sheet holds two stops, the list and its Close: Tab and Shift+Tab move between them.
+      event.preventDefault();
+      event.stopPropagation();
+      const closeButton = closeRef.current;
+      if (document.activeElement === closeButton) {
+        const back = items.find((o) => o.getAttribute('aria-selected') === 'true') ?? items[0];
+        back?.focus();
+        back?.scrollIntoView?.({ block: 'nearest' });
+      } else closeButton?.focus();
       return;
     } else if (event.key === 'Escape' || event.key === 'Tab') {
       event.preventDefault();
@@ -292,7 +325,7 @@ export function DecisionsProjectPicker(props: DecisionsProjectPickerProps) {
           <div className="ib-ppick-list ib-ppick-sheet" ref={popRef} onKeyDown={onPopKey} data-project-sheet="">
             <div className="ib-ppick-h">
               <b>Project</b>
-              <button type="button" className="ib-iconbtn ib-ppick-x" aria-label="Close the project list" onClick={() => close(true)} data-project-sheet-close="">
+              <button type="button" ref={closeRef} className="ib-iconbtn ib-ppick-x" aria-label="Close the project list" onClick={() => close(true)} data-project-sheet-close="">
                 <Icon name="x" size={18} />
               </button>
             </div>

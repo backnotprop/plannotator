@@ -1547,13 +1547,21 @@ export class InboxStore {
       .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
   }
 
-  /** Every decision of every project, unordered: for one-pass counts. */
-  allDecisions(): IterableIterator<InboxDecision> {
+  /**
+   * Every decision of every project, unordered: for one-pass counts. A live
+   * view of the store's map: iterate it at once, never hold it across a write
+   * or a reload().
+   */
+  allDecisions(): Iterable<Readonly<InboxDecision>> {
     return this.decisions.values();
   }
 
-  /** Every question record of every project, unordered: for one-pass counts. */
-  allQuestionRecords(): IterableIterator<InboxQuestionRecord> {
+  /**
+   * Every question record of every project, unordered: for one-pass counts.
+   * A live view of the store's map: iterate it at once, never hold it across
+   * a write or a reload().
+   */
+  allQuestionRecords(): Iterable<Readonly<InboxQuestionRecord>> {
     return this.questions.values();
   }
 
