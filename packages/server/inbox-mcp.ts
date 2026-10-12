@@ -342,7 +342,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
       inputSchema: z
         .object({
           body: z.string().min(1).describe(
-            "The message, markdown. Question blocks render as answerable cards. In a block, `Stopped: <why>` marks a question that leaves you nothing else to work on; `Holds up: <work>; <work>` names the work that waits while you go on.",
+            "The message, markdown. Question blocks render as answerable cards. In a block, add `Stopped: <why>` only for a question that leaves you nothing else to work on (otherwise leave the line out, never `Stopped: no`); `Holds up: <work>; <work>` names the work that waits while you go on.",
           ),
           ...SEND_ROUTING_FIELDS,
           attachments: z
@@ -407,7 +407,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         const askedBy = input.asked_by ?? (session ? "me" : "anyone");
         if (askedBy === "me" && !session) throw new InboxError("validation_error", "asked_by: \"me\" needs agent_session.");
         let threads = store.listRows({ projectId: project.id, session: askedBy === "me" ? session : null });
-        if (!input.include_resolved) threads = threads.filter((t) => t.resolved_at === null);
+        // A thread an agent wrote in after its archive line still takes a reply: listed like an open one.
+        if (!input.include_resolved) threads = threads.filter((t) => t.resolved_at === null || t.agent_after_archive === true);
         const limit = input.limit ?? 20;
         const total = threads.length;
         threads = threads.slice(0, limit);
@@ -474,7 +475,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             const projectId = input.project_path ? (await context.resolveProject(input.project_path)).id : null;
             threadIds = store
               .listRows({ projectId, session })
-              .filter((t) => t.resolved_at === null)
+              .filter((t) => t.resolved_at === null || t.agent_after_archive === true)
               .map((t) => t.thread_id);
           }
           const caller = input.agent_session?.trim() || null;
@@ -498,7 +499,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           const existing = findExisting();
           if (existing) return replyResult(store, existing, context.baseUrl());
           // A resolved thread takes no reply: say so now instead of holding the call.
-          if (single && store.message(single)?.resolved_at != null) {
+          // (An agent that wrote after the archive line can still get a reply there.)
+          if (single && store.message(single)?.resolved_at != null && !store.agentAfterArchive(single)) {
             return ok(`Thread ${single} is resolved; no reply will come.`, { status: "resolved", thread_id: single, cursor: store.cursor() });
           }
 
@@ -524,7 +526,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
                 if (threshold === undefined) return;
                 if (message.author.kind === "person" && forCaller(message) && line.seq > threshold && store.messageCursor(message.id) === line.seq) {
                   finish({ kind: "reply", message });
-                } else if (message.id === message.thread_id && message.resolved_at !== null && threadIds.length === 1) {
+                } else if (message.id === message.thread_id && message.resolved_at !== null && threadIds.length === 1 && !store.agentAfterArchive(message.id)) {
                   finish({ kind: "resolved", threadId: message.id });
                 }
               });

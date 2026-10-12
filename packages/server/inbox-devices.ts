@@ -88,6 +88,8 @@ const ALLOWLIST: readonly { method: "GET" | "POST"; route: RegExp; window: (m: R
   { method: "GET", route: /^health$/, window: () => "/api/inbox/health" },
   { method: "GET", route: /^threads$/, window: () => "/api/inbox/threads" },
   { method: "GET", route: /^projects$/, window: () => "/api/inbox/projects" },
+  // The archived threads (Settings' Archived block), read only; before threads/:id, which would also match it.
+  { method: "GET", route: /^threads\/archived$/, window: () => "/api/inbox/threads/archived" },
   { method: "GET", route: /^threads\/([^/]+)$/, window: (m) => `/api/inbox/threads/${m[1]}` },
   { method: "POST", route: /^threads\/([^/]+)\/seen$/, window: (m) => `/api/inbox/threads/${m[1]}/seen` },
   // Mark read and its Undo.

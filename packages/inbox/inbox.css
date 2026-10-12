@@ -114,6 +114,24 @@
 @keyframes ib-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .ib-spin { animation: none; border-right-color: currentColor; opacity: 0.6; } }
 .ib-nav.ib-quiet { color: var(--muted-foreground); }
+/* The Settings row and its light/dark toggle: two buttons, the toggle laid over the row's right end
+   (the row keeps its full-width highlight, its text stops short of the toggle). */
+.ib-setrow { position: relative; }
+.ib-setrow > .ib-nav { padding-right: 40px; }
+.pn-inbox .ib-theme-tg { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--muted-foreground); }
+.pn-inbox .ib-theme-tg:hover { background: var(--muted); color: var(--foreground); }
+.pn-inbox .ib-theme-tg:focus-visible { outline-offset: 0; }
+.ib-theme-tg .ib-ic { width: 15px; height: 15px; }
+/* Under reduced motion a theme switch lands in one frame (theme.ts holds this class for two frames). */
+html.ib-theme-instant, html.ib-theme-instant *, html.ib-theme-instant *::before, html.ib-theme-instant *::after { transition: none !important; }
+/* Settings → Appearance: Light, Dark, Match system, as one segmented control of native radios. */
+.ib-seg { display: inline-flex; padding: 2px; gap: 2px; border-radius: 8px; background: var(--muted); border: 1px solid var(--border); }
+.ib-seg-o { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: 6px; font-size: 13px; color: var(--muted-foreground); cursor: pointer; white-space: nowrap; }
+.ib-seg-o:hover { color: var(--foreground); }
+.ib-seg-o[data-on] { background: var(--card); color: var(--foreground); font-weight: 550; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.ib-seg-o input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+.ib-seg-o:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
+.pn-inbox .ib-seg-o input:focus-visible { outline: none; }
 
 /* The update dialogs: native <dialog> (focus stays inside, Escape closes). */
 .pn-inbox .ib-dlg, dialog.ib-dlg { position: fixed; inset: 0; margin: auto; height: fit-content; width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); color: var(--foreground); box-shadow: 0 24px 60px -20px oklch(0 0 0 / 0.55); overflow-y: auto; }
@@ -373,6 +391,18 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-stbl .ib-fold { display: inline-flex; align-items: center; gap: 6px; }
 .pn-inbox .ib-del-l { font-size: 12.5px; color: var(--destructive); font-weight: 500; }
 .pn-inbox .ib-del-l:disabled { opacity: 0.45; }
+/* Archived in Settings (owner ruling 2026-10-12): Settings' own rows, one per archived thread. */
+.ib-arclist { list-style: none; margin: 0; padding: 0; }
+.ib-arcrow { border-bottom: 1px solid color-mix(in oklch, var(--border) 45%, transparent); }
+.ib-arcrow:last-child { border-bottom: 0; }
+.ib-arcinfo { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.ib-arcsub { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 13.5px; font-weight: 500; }
+.ib-arcsub .ib-st { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ib-arcinfo .ib-d { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-arcnone { margin: 0 0 4px; font-size: 13.5px; color: var(--muted-foreground); }
+.ib-arcgroup + .ib-arcgroup { margin-top: 10px; }
+.ib-arcghead { margin: 10px 0 0; padding-bottom: 6px; font-size: 12.5px; font-weight: 600; border-bottom: 1px solid color-mix(in oklch, var(--border) 45%, transparent); }
+.ib-arcghead .ib-d { font-weight: 400; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 /* Phones in Settings (not in the design record; built on Settings' own rows and tokens). */
 .ib-pair { display: flex; gap: 22px; align-items: flex-start; padding: 16px; margin: 6px 0 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
 .ib-qr-wrap { flex: none; width: 196px; height: 196px; border-radius: 8px; overflow: hidden; box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); }
@@ -997,11 +1027,17 @@ pre code.pn-code[data-keep-layout] {
 /* The reply box's skip chip, and its twin in the foot. */
 .pn-inbox .ib-skipchip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 4px 0 9px; border-radius: 6px; font-size: 12.5px; font-weight: 500; box-shadow: inset 0 0 0 1px var(--border); color: var(--muted-foreground); white-space: nowrap; }
 .ib-skipchip .ib-ic { width: 14px; height: 14px; }
+.ib-skip-s { display: inline-flex; align-items: center; gap: 6px; }
 .pn-inbox .ib-skipchip button { color: var(--primary); font-weight: 550; height: 22px; padding: 0 6px; border-radius: 5px; }
 .pn-inbox .ib-skipchip button:hover { background: color-mix(in oklch, var(--primary) 10%, transparent); }
 .ib-keep .ib-skipchip { color: var(--foreground); }
-/* In the reply box the skip chip is a sentence: where the box is narrower than it (a phone), its words wrap inside it rather than running out of the box. Where it fits it draws as before (26 px, one line). */
-.pn-inbox .ib-rfoot .ib-skipchip { flex: 0 1 auto; max-width: 100%; height: auto; min-height: 26px; white-space: normal; }
+/* In the reply box the skip chip is a sentence: where the box is narrower than it (a phone), Keep open / Skip them
+   moves under the sentence and the sentence wraps, all inside the chip, at any width and with any font's metrics
+   (a box narrower than its longest word breaks the word rather than drawing outside). Where it fits it draws as
+   before (26 px, one line). */
+.pn-inbox .ib-rfoot .ib-skipchip { flex: 0 1 auto; max-width: 100%; min-width: 0; height: auto; min-height: 26px; white-space: normal; flex-wrap: wrap; row-gap: 2px; }
+.ib-rfoot .ib-skip-s { display: block; flex: 0 1 auto; min-width: 0; overflow-wrap: break-word; }
+.ib-rfoot .ib-skip-s > .ib-ic { display: inline-block; vertical-align: -2px; margin-right: 6px; }
 .pn-inbox .ib-rfoot .ib-skipchip button { flex: none; white-space: nowrap; }
 /* The list: a quiet hover action on rows that wait on the person. */
 .ib-rw { position: relative; }
@@ -1245,6 +1281,8 @@ pre code.pn-code[data-keep-layout] {
   .ib-spage { padding: 0 16px calc(32px + env(safe-area-inset-bottom)); }
   .ib-shead { min-height: calc(52px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); margin: 0 0 12px -12px; gap: 4px; }
   .ib-srow { flex-wrap: wrap; min-height: 44px; }
+  /* Archived in Settings: Unarchive and Show more are 44 px tall on a phone. */
+  .ib-arcrow .ib-btn, .ib-sblock[data-settings-archived] .ib-btn { min-height: 44px; }
   .ib-sblock > p, .ib-note, .ib-srow { overflow-wrap: anywhere; }
   .pn-inbox .ib-sw { width: 50px; height: 30px; }
   .ib-sw::after { width: 24px; height: 24px; }
@@ -1263,6 +1301,12 @@ pre code.pn-code[data-keep-layout] {
   /* the navigation sheet and the dialogs */
   .ib-sb-sheet { width: calc(var(--sidebar-width) + env(safe-area-inset-left)); padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left); background: var(--background); }
   .ib-nav { height: 44px; font-size: 15.5px; flex: none; }
+  .ib-setrow > .ib-nav { padding-right: 50px; }
+  .pn-inbox .ib-theme-tg { width: 40px; height: 40px; right: 2px; border-radius: 8px; }
+  /* drawn at 40 px, hit at 44 px (the row's height) */
+  .pn-inbox .ib-theme-tg::after { content: ""; position: absolute; inset: -2px; }
+  .ib-theme-tg .ib-ic { width: 18px; height: 18px; }
+  .ib-seg-o { height: 40px; }
   /* a phone on its side is about 400 px tall: the projects scroll, the rest keeps its height */
   .ib-sb-sheet-in > .ib-side { overflow-y: auto; }
   .ib-sb-sheet-in .ib-brand, .ib-sb-sheet-in .ib-side-foot { flex: none; }

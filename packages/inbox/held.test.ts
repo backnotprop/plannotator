@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { heldNotice, refreshHeldRows } from './held';
+import { heldNotice, markHeldRowArchived, refreshHeldRows } from './held';
 
 function row(id: string, project: string, last_at: string, last_author: 'agent' | 'person'): InboxListRow {
   return { thread_id: id, project: { id: `prj_${project}`, name: project }, last_at, last_author } as InboxListRow;
@@ -57,5 +57,23 @@ describe('refreshHeldRows', () => {
     // The row with a newer agent message keeps what was on screen, and still counts behind "N new".
     expect(next[0]!.threads[0]).toBe(other);
     expect(heldNotice(next, latest).count).toBe(1);
+  });
+});
+
+describe('markHeldRowArchived', () => {
+  // The failure this guards: the window's list leaves archived threads out, so
+  // refreshHeldRows keeps a row whose thread was just archived as it was (bold,
+  // "Waiting") for as long as the person stays in the thread.
+  test('the archived row shows archived in place; the others and the order stay; the next list read keeps it', () => {
+    const a = { ...row('a', 'billing-svc', '2026-10-07T10:00:00Z', 'agent'), section: 'waiting', unread: true, resolved_at: null } as InboxListRow;
+    const b = { ...row('b', 'docs-site', '2026-10-07T09:00:00Z', 'agent'), section: 'waiting', unread: true, resolved_at: null } as InboxListRow;
+    const marked = markHeldRowArchived(sections(a, b), 'a', '2026-10-07T10:30:00Z');
+    expect(marked[0]!.threads.map((r) => r.thread_id)).toEqual(['a', 'b']);
+    expect(marked[0]!.threads[0]).toMatchObject({ resolved_at: '2026-10-07T10:30:00Z', section: 'quiet', unread: false });
+    expect(marked[0]!.threads[1]).toBe(b);
+    // The next read of the list (archived left out) keeps it as shown.
+    expect(refreshHeldRows(marked, sections(b))[0]!.threads[0]).toBe(marked[0]!.threads[0]);
+    // Unarchived again: the list has it, and its fresh state replaces the archived one.
+    expect(refreshHeldRows(marked, sections(a, b))[0]!.threads[0]).toBe(a);
   });
 });

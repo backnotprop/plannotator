@@ -498,6 +498,26 @@ async function replyChipProblems(page: Page, sentenceMayWrap = false): Promise<s
   }, sentenceMayWrap);
 }
 
+/** Wait until the open reply box keeps its place and size for 150 ms: the layout a new window size settles on. */
+async function replyBoxSettled(page: Page): Promise<void> {
+  const rect = () =>
+    page.evaluate(() => {
+      const box = [...document.querySelectorAll<HTMLElement>('section.ib-pane .ib-rbox')].find((b) => b.getClientRects().length > 0);
+      const r = box?.getBoundingClientRect();
+      return r ? [r.left, r.top, r.width, r.height].map(Math.round).join(',') : '';
+    });
+  let last = await rect();
+  await expect
+    .poll(async () => {
+      await page.waitForTimeout(150);
+      const now = await rect();
+      const same = now !== '' && now === last;
+      last = now;
+      return same;
+    })
+    .toBe(true);
+}
+
 /**
  * The "N annotations ride this reply" list, opened from the reply box's chip:
  * inside the window (its close button too), and every quote and comment
@@ -555,6 +575,9 @@ test("the reply box's chips wrap inside it beside a file, stacked and on a phone
     ]) {
       await page.setViewportSize({ width: size.width, height: size.height });
       await expect(page.locator('section.ib-pane .ib-rbox').filter({ visible: true })).toHaveCount(1);
+      // Measure the layout this size settles on, not the frame before the window's own resize reaches React
+      // (the docked sidebar still beside a 134 px reply box at 390 px; the narrow-box step below proves that frame).
+      await replyBoxSettled(page);
       expect(await replyChipProblems(page, 'phone' in size), `${size.width} by ${size.height}`).toEqual([]);
       expect(await annotationListProblems(page, size.width === 1440 ? '2.4f-annotation-list-inside-the-window' : undefined), `the list at ${size.width} by ${size.height}`).toEqual([]);
       if (size.width === 1440) {
@@ -571,6 +594,15 @@ test("the reply box's chips wrap inside it beside a file, stacked and on a phone
       if (size.width === 390) {
         await page.locator('section.ib-pane .ib-rbox').filter({ visible: true }).scrollIntoViewIfNeeded();
         await shot('2.4e-reply-chips-phone');
+        // A reply box narrower than the skip chip's sentence and its button side by side (on CI, the frame after a
+        // resize to 390 px before the phone layout lands): the chip wraps inside itself, whatever the font's metrics.
+        const narrow = await page.addStyleTag({ content: 'section.ib-pane .ib-rbox { width: 134px !important; }' });
+        try {
+          expect(await replyChipProblems(page, true), 'a 134 px reply box').toEqual([]);
+          await shot('2.4h-reply-chips-narrow-box');
+        } finally {
+          await narrow.evaluate((el) => el.remove());
+        }
       }
     }
   } finally {

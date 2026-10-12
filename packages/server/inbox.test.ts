@@ -677,6 +677,36 @@ describe("the window's routes: settings, restart, favicon", () => {
     }
   });
 
+  test("the theme saves into config.json `theme`, the value plan review reads, keeping the palettes", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      // A choice plan review already made: dark mode and a palette per half.
+      mkdirSync(dataDir, { recursive: true });
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ theme: { mode: "dark", light: "adwaita", dark: "tokyo-night" } }));
+      const server = await start(dataDir);
+      const read = async () => (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()).theme;
+      expect(await read()).toEqual({ mode: "dark", light: "adwaita", dark: "tokyo-night" });
+      for (const bad of [{ mode: "sepia" }, { light: "../x" }, { accent: "red" }, {}, "light"]) {
+        const refused = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, theme: bad });
+        expect(refused.status).toBe(422);
+      }
+      const cross = await post(server, "/api/inbox/settings", { theme: { mode: "light" } }, { Origin: "https://evil.example" });
+      expect(cross.status).toBe(403);
+      expect(await read()).toEqual({ mode: "dark", light: "adwaita", dark: "tokyo-night" });
+
+      const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, theme: { mode: "light" } });
+      expect(saved.status).toBe(200);
+      expect((await saved.json()).theme).toEqual({ mode: "light", light: "adwaita", dark: "tokyo-night" });
+      expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).theme).toEqual({ mode: "light", light: "adwaita", dark: "tokyo-night" });
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
   test("the two writing routes refuse a foreign Host before anything is written or stopped", async () => {
     const root = tempRoot();
     const dataDir = join(root, "data");
