@@ -181,7 +181,8 @@ describe('review entry assets', () => {
   //   registration marker is asserted ABSENT from both bundles: since Mermaid
   //   12 the plan editor loads the runtime lazily by policy, and an eager
   //   import creeping back in would only show up as a bigger portal entry
-  //   chunk. The review bundle carries no Mermaid at all.
+  //   chunk. The review bundle carries Mermaid and Graphviz for its Markdown
+  //   preview, loaded the same lazy way (never registered eagerly).
   // - Presence markers (a KaTeX class name, a Mermaid diagram id, an
   //   Emscripten symbol from Graphviz, the bridge global), which only say the
   //   runtime is still inlined by inlineDynamicImports. KaTeX is inlined
@@ -194,7 +195,7 @@ describe('review entry assets', () => {
   const REGISTRATION_MARKERS = ['plannotator-math-eager', 'uniqueUsernameGenerator'];
   const markerExpectations: Array<[bundle: string, present: string[], absent: string[]]> = [
     ['apps/hook/dist/index.html', [...REGISTRATION_MARKERS, 'katex-display', 'flowchart-v2', 'viz_set_y_invert', '__plannotatorLiveConfig'], ['plannotator-mermaid-eager']],
-    ['apps/review/dist/index.html', [...REGISTRATION_MARKERS, 'katex-display', '__plannotatorLiveConfig'], ['plannotator-mermaid-eager', 'flowchart-v2']],
+    ['apps/review/dist/index.html', [...REGISTRATION_MARKERS, 'katex-display', 'flowchart-v2', 'viz_set_y_invert', '__plannotatorLiveConfig'], ['plannotator-mermaid-eager']],
   ];
   for (const [path, present, absent] of markerExpectations) {
     test.skipIf(!existsSync(resolve(root, path)))(`${path} carries the eager registration and renderer markers`, () => {
