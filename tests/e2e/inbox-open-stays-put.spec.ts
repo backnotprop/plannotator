@@ -25,7 +25,7 @@
 
 import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
@@ -39,7 +39,7 @@ const BEAT_MS = 160;
 
 const NEWS = ['Search index built', 'Install page links fixed', 'Changelog drafted', 'Docs deploy finished'];
 
-type ProjectKey = 'desk' | 'reduce' | 'phone' | 'stacked' | 'framesDark' | 'framesLight' | 'mouse';
+type ProjectKey = 'desk' | 'reduce' | 'phone' | 'stacked' | 'framesDark' | 'framesLight' | 'mouse' | 'held';
 
 interface World {
   root: string;
@@ -74,9 +74,15 @@ test.beforeAll(async () => {
   expect(started.status, started.stderr).toBe(0);
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const projects = {} as World['projects'];
-  for (const key of ['desk', 'reduce', 'phone', 'stacked', 'framesDark', 'framesLight', 'mouse'] as const) {
+  for (const key of ['desk', 'reduce', 'phone', 'stacked', 'framesDark', 'framesLight', 'mouse', 'held'] as const) {
     const path = scratchProject(join(root, 'src'), key === 'desk' ? 'docs-site' : `docs-${key}`);
     const threads = await seed(agent, path, key);
+    if (key === 'held') {
+      // Newest, so first in New: a thread with a file, for the sidebar #1871 holds closed beside it.
+      writeFileSync(join(path, 'notes.md'), '# Notes\n\nThe plan, in short.\n');
+      const filed = await agent.send({ project_path: path, subject: 'Notes attached', body: 'The notes are attached.', attachments: ['notes.md'], agent_session: 'ses_held_file' } as Parameters<SimAgent['send']>[0]);
+      threads.unshift(String(filed.thread_id));
+    }
     projects[key] = { path, id: '', threads };
   }
   const url = started.stdout.trim();
@@ -125,6 +131,7 @@ interface Frame {
   ghosts: number;
   /** A thread pane is on screen. */
   pane: boolean;
+  listWidth: number;
 }
 
 /** Sample every frame for `ms` from now (rows' tops, settle animations, fading copies). */
@@ -142,6 +149,7 @@ async function sampleFrames(page: Page, ms: number): Promise<void> {
         anims: document.getAnimations().filter((a) => a.id === 'ib-settle' && a.playState === 'running').length,
         ghosts: document.querySelectorAll('.ib-settle-ghost').length,
         pane: document.querySelector('section.ib-pane') !== null,
+        listWidth: document.querySelector('.ib-listcol')?.getBoundingClientRect().width ?? 0,
       });
       if (performance.now() - start < duration) requestAnimationFrame(tick);
     };
@@ -287,7 +295,7 @@ for (const layout of [
     let own: Browser | null = null;
     let context: BrowserContext;
     if (layout.key === 'phone') {
-      own = await webkit.launch();
+      own = await webkit.launch({ args: [] });
       context = await own.newContext({ ...devices['iPhone 15'], colorScheme: 'dark' });
     } else {
       context = await browser.newContext({ viewport: { width: 900, height: 900 }, colorScheme: 'dark' });
@@ -362,5 +370,32 @@ test('desktop, the mouse: a close hands no row focus, no Mark read action shows,
   await page.keyboard.press('e');
   await page.waitForTimeout(300);
   expect(marked).toEqual([]);
+  await context.close();
+});
+
+test('a window of about 1000 px with the sidebar held closed beside a file: the rows slide only once the sidebar is back, from the final column width', async ({ browser }: { browser: Browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1000, height: 900 }, colorScheme: 'dark' });
+  const page = await context.newPage();
+  const { id, threads } = world.projects.held;
+  const filed = threads[0]!;
+  await page.goto(`${world.url}/#project=${id}`);
+  await expect(page.locator(`.ib-lbody [data-thread-id="${filed}"]`)).toBeVisible();
+  await page.locator(`.ib-lbody [data-thread-id="${filed}"]`).click();
+  await page.locator('section.ib-pane [data-attachment-name="notes.md"]').first().click();
+  await page.locator('section.ib-pane [data-file-back]').click();
+  // The file closed; the list is beside the thread, the sidebar held closed.
+  await expect(page.locator('.ib-listcol')).toBeVisible();
+  await expect(page.locator('section.ib-pane')).toBeVisible();
+  await page.waitForTimeout(700);
+  await sampleFrames(page, 1600);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(1700);
+  const frames = (await framesOf(page)).filter((f) => !f.pane);
+  const last = frames.at(-1)!;
+  const firstSlide = frames.find((f) => f.anims > 0);
+  expect(firstSlide, 'the rows slid').toBeTruthy();
+  // The slide starts from the column's final width: the sidebar's spring is over.
+  expect(Math.abs(firstSlide!.listWidth - last.listWidth)).toBeLessThan(1.5);
+  expect(await sectionOf(page, filed)).toBeNull();
   await context.close();
 });

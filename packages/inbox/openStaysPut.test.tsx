@@ -83,7 +83,7 @@ async function agentSends(body: string): Promise<string> {
   return (JSON.parse(await readLine()) as { sent: string }).sent;
 }
 
-const TESTS = 7;
+const TESTS = 8;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -218,6 +218,17 @@ function pointerDown(target: EventTarget = document.body) {
   });
 }
 
+/**
+ * A mouse click: a pointer down, then a click that counts one click. (`el.click()` counts none,
+ * which is how a screen reader presses a control.)
+ */
+function mouseClick(el: HTMLElement) {
+  pointerDown(el);
+  act(() => {
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
+  });
+}
+
 test.skipIf(!hasDom)('opening a New row unbolds it where it is, keeps it selected and keeps focus on it', async () => {
   const el = await renderApp(`#project=${world.project}`);
   // By id, never by position: rows written in the same millisecond order by id.
@@ -337,8 +348,7 @@ test.skipIf(!hasDom)('a phone: Back shows the list as it was left, and it settle
   // A tap on Back: the list as left, and no row is handed focus (nothing the person did not choose).
   // (A real phone hides the list under the thread, which takes focus off the row opened; happy-dom does not.)
   act(() => (document.activeElement as HTMLElement | null)?.blur?.());
-  pointerDown();
-  act(() => (el.querySelector('section.ib-pane [data-phone-back]') as HTMLButtonElement).click());
+  mouseClick(el.querySelector('section.ib-pane [data-phone-back]') as HTMLButtonElement);
   await until(() => el.querySelector('section.ib-pane') === null, 'Back');
   expect(sectionOfRow(el, second!)).toBe('new');
   expect(document.activeElement?.closest('[data-thread-id]') ?? null).toBeNull();
@@ -352,12 +362,9 @@ test.skipIf(!hasDom)('after a mouse close the window hands no row focus, and E m
   const asked = await agentSends('One question:\n\n:::question\nShip it?\n\n- [ ] Yes\n- [ ] No\n:::');
   act(() => pokeStream!());
   await until(() => el.querySelector('[data-inbox-notice]') !== null, 'the "1 new" notice');
-  pointerDown();
-  act(() => (el.querySelector('[data-inbox-notice]') as HTMLButtonElement).click());
+  mouseClick(el.querySelector('[data-inbox-notice]') as HTMLButtonElement);
   await until(() => rowOf(el, asked) !== null, 'Show');
-  const close = el.querySelector('section.ib-pane [aria-label="Close the thread"]') as HTMLButtonElement;
-  pointerDown(close);
-  act(() => close.click());
+  mouseClick(el.querySelector('section.ib-pane [aria-label="Close the thread"]') as HTMLButtonElement);
   await wait(SETTLE_BEAT_MS + 120);
   await until(() => rowOf(el, first) === null, 'the settle');
   expect(document.activeElement?.closest('[data-thread-id]') ?? null).toBeNull();
@@ -387,4 +394,16 @@ test.skipIf(!hasDom)('Mark read inside an open thread: the toast says the row wi
   closeThread();
   await wait(SETTLE_BEAT_MS + 60);
   await until(() => rowOf(el, asked) === null, 'the settle');
+});
+
+test.skipIf(!hasDom)('a screen reader closing the thread (a click with no pointer and no key before it) keeps focus on the row', async () => {
+  const el = await renderApp(`#project=${world.project}`);
+  const first = world.news[0]!;
+  await openRow(el, first);
+  // The person used a mouse earlier; then their screen reader presses Close, which is a click counting none.
+  pointerDown();
+  act(() => (document.activeElement as HTMLElement | null)?.blur?.());
+  act(() => (el.querySelector('section.ib-pane [aria-label="Close the thread"]') as HTMLButtonElement).click());
+  await until(() => el.querySelector('section.ib-pane') === null, 'the close');
+  expect(document.activeElement).toBe(rowOf(el, first));
 });

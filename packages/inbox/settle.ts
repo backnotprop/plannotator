@@ -19,6 +19,8 @@
  * prefers-reduced-motion: the list changes in one frame.
  */
 
+import { shellSpring } from './shell/shell-motion';
+
 /**
  * Where the thread covers the list (a phone, a stacked window): when does the
  * list catch up? Owner's answer, 2026-10-12: "The list exactly as you left
@@ -38,6 +40,14 @@ export const COVERED_LIST_SETTLES: 'while-covered' | 'on-back' = 'while-covered'
  * short enough that the settle still reads as the result of closing.
  */
 export const SETTLE_BEAT_MS = 160;
+
+/**
+ * The beat when the close also gives the docked sidebar back (#1871 held it
+ * closed beside a file): the column narrows on the sidebar's spring, and its
+ * rows may change shape on the way, so the rows wait for the spring to end and
+ * slide from the column's final width.
+ */
+export const SETTLE_AFTER_SIDEBAR_MS = Math.round(shellSpring.duration * 1000) + 40;
 
 /**
  * Rows already on screen moving to new places: an on-screen move, so a

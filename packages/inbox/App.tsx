@@ -35,6 +35,7 @@ import {
   playSettle,
   prefersReducedMotion,
   rowInSlot,
+  SETTLE_AFTER_SIDEBAR_MS,
   SETTLE_BEAT_MS,
   stopSettle,
   type SettleSnapshot,
@@ -222,6 +223,11 @@ let lastInput: 'keyboard' | 'pointer' | null = null;
 if (typeof window !== 'undefined') {
   window.addEventListener('keydown', () => (lastInput = 'keyboard'), true);
   window.addEventListener('pointerdown', () => (lastInput = 'pointer'), true);
+  // A screen reader (or switch access) presses a control with a click that no key or pointer came
+  // before, and that counts no clicks (`detail` 0): the person is not using a mouse.
+  window.addEventListener('click', (event) => {
+    if (event.detail === 0) lastInput = 'keyboard';
+  }, true);
 }
 
 /**
@@ -522,6 +528,8 @@ function Inbox() {
   // After a keyboard close, focus that the closed pane took with it goes to
   // the thread's row.
   const lastRoute = useRef({ page: route.page, project: route.project ?? null, thread: route.thread });
+  /** The docked sidebar is held closed beside a file (#1871); the close gives it back, so the settle waits for its spring. */
+  const sidebarHeldNow = useRef(false);
   useLayoutEffect(() => {
     const before = lastRoute.current;
     const now = { page: route.page, project: route.project ?? null, thread: route.thread };
@@ -545,7 +553,7 @@ function Inbox() {
     if (body && lastInput === 'keyboard' && (!active || active === document.body)) rowElement(body, closed)?.focus({ preventScroll: true });
     if (listCovered() && COVERED_LIST_SETTLES === 'while-covered') return;
     if (prefersReducedMotion()) settleList('own', false);
-    else settleTimer.current = setTimeout(() => settleList('own', true), SETTLE_BEAT_MS);
+    else settleTimer.current = setTimeout(() => settleList('own', true), sidebarHeldNow.current ? SETTLE_AFTER_SIDEBAR_MS : SETTLE_BEAT_MS);
   }, [route.page, route.project, route.thread, settleList, cancelSettle]);
 
   useEffect(() => {
@@ -619,6 +627,7 @@ function Inbox() {
   // thread, as the open file kept it, without writing the person's choice. It comes back once there is room,
   // when the thread closes, or when the person opens it.
   const [sidebarHeld, setSidebarHeld] = useState(false);
+  sidebarHeldNow.current = sidebarHeld;
   const stack = useStack(rootRef, phone, [hashOf(route), sidebarOpen, sidebarHeld]);
   useEffect(() => {
     if (!sidebarHeld) return;
