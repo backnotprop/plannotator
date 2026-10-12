@@ -154,6 +154,7 @@ jobs:
           packages/ui/utils/blockTargeting.blocks.test.tsx
           packages/ui/components/blocks/BlockquoteBlock.test.tsx
           packages/ui/components/RenderedMarkdown.hostSeams.test.tsx
+          packages/ui/components/plan-diff/PlanCleanDiffView.seams.test.tsx
           packages/ui/components/AnnotationPanel.questions.test.tsx
           packages/ui/hooks/useActiveSection.test.tsx
           packages/editor/hooks/useQuestionAnswers.test.tsx

@@ -2240,6 +2240,12 @@ Plannotator's servers issue one random `serverSession` nonce per process (new `@
 - **`headingAnchors?: boolean`**: headings get the plan Viewer's slug ids (`buildHeadingSlugMap`, GitHub's `-1` dedup), so a host can scroll `#section` links itself. Absent, headings carry no id.
 - Each provider wraps the output only when its prop is passed, so an enclosing provider (a `Viewer`'s) still applies when a prop is absent. A host that passes none of these renders exactly as before (`RenderedMarkdown.hostSeams.test.tsx` compares the DOM with the pre-seam body).
 
+## Plan diff line ranges, folding, and `PlanCleanDiffView` seams (unreleased; additive, no core change)
+
+- **`PlanDiffBlock.oldStart/oldEnd/newStart/newEnd`** (`utils/planDiffEngine`): `computePlanDiff` now fills the 1-based inclusive source lines of each block on each side, trimmed of blank lines; a side with no non-blank line has none (added blocks have no old range, removed blocks no new range). Every other field is unchanged.
+- **`foldUnchangedPlanDiff(blocks, { context = 1, minHidden = 2 })`** → `PlanDiffSegment[]`: pure. Changed blocks pass through; an unchanged block keeps `context` sections next to each neighbouring change and folds the rest into a `PlanDiffFold` (`pieces`, `sectionCount`, up to three plain `headings`, line span, stable `key`) when at least `minHidden` would be hidden.
+- **`PlanCleanDiffView`** gains optional `renderBlock(block, orderedIndex, side)` (`side` is `'old'` for removed content and the old half of a modified block), `lineGutter` (a `data-plan-diff-gutter` column: "11–12", "old 15–16", both on a modified block; `annotation-exclude`, `aria-hidden`, unselectable), `foldUnchanged` (a `data-plan-diff-fold` row that expands in place) and `unchangedClassName`. Plannotator's code review uses them for its rendered Markdown diff. Plan review passes none and renders the same DOM as before (`PlanCleanDiffView.seams.test.tsx`).
+
 ## The law (guardrails for anyone editing `@plannotator/ui`)
 
 These are enforced socially and, where possible, by CI. They exist because a prior from-scratch reimplementation of this UI broke the app and was reverted.
