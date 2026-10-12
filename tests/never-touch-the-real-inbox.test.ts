@@ -14,7 +14,11 @@
  *       multi-line join, a variable assigned from `homedir()`, the literal
  *       "~/.plannotator" used as a path), outside tests/helpers/real-data-dir.ts;
  *     - a `startInboxServer(...)` call that does not name its `dataDir`, or a
- *       script that starts one without pointing PLANNOTATOR_DATA_DIR at it.
+ *       script that starts one without pointing PLANNOTATOR_DATA_DIR at it;
+ *     - a path from the real home directory to an agent's own folder
+ *       (`~/.codex`, `~/.cursor`, `~/.config/opencode`, the Claude app's
+ *       settings…), or connecting agents with no agent environment (it would
+ *       run the real agent CLIs against the real home).
  *  2. The guards themselves: the real data dir (default or relocated) is
  *     refused however it is spelled, the import-time sandbox replaces it with
  *     a temp folder with no bunfig at all, and a pid that is not provably the
@@ -31,7 +35,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { provenInbox, signalProvenInbox } from "./helpers/inbox-process";
 import { accountHome as accountHomeOf, isRealDataDir, isScratchDataDir, realDataDirs, refuseRealDataDir } from "./helpers/real-data-dir";
-import { homePathFindings, inboxServerFindings, OWN_CHILD_MARK, signalFindings } from "./helpers/real-inbox-scan";
+import { agentConnectFindings, agentHomeFindings, homePathFindings, inboxServerFindings, OWN_CHILD_MARK, signalFindings } from "./helpers/real-inbox-scan";
 
 const repoRoot = resolve(import.meta.dir, "..");
 
@@ -64,6 +68,8 @@ function sources(dir = repoRoot, found: string[] = []): string[] {
 const SCANNER_FILES = new Set(["tests/helpers/real-inbox-scan.ts", "tests/never-touch-the-real-inbox.test.ts"]);
 const SIGNAL_ALLOWED = new Set(["tests/helpers/inbox-process.ts", ...SCANNER_FILES]);
 const HOME_PATH_ALLOWED = new Set(["tests/helpers/real-data-dir.ts", ...SCANNER_FILES]);
+/** vibe-plan.test.ts only compares the default it resolves (~/.vibe/plans) with the expected path; it reads and writes nothing there. */
+const AGENT_HOME_ALLOWED = new Set(["apps/hook/server/vibe-plan.test.ts", ...SCANNER_FILES]);
 
 const isStandaloneScript = (rel: string) => !/\.(?:test|spec)\.(?:ts|tsx|mts|js|mjs)$/.test(rel);
 
@@ -95,6 +101,11 @@ describe("the source scan", () => {
     expect(collect(SCANNER_FILES, (text, file) => inboxServerFindings(text, isStandaloneScript(file)))).toEqual([]);
   });
 
+  test("no path from the real home to an agent's own folder, and no agent connection without a scratch environment", () => {
+    expect(collect(AGENT_HOME_ALLOWED, (text) => agentHomeFindings(text))).toEqual([]);
+    expect(collect(SCANNER_FILES, (text) => agentConnectFindings(text))).toEqual([]);
+  });
+
   test("the scan catches what it is for (fixtures in memory, not on disk)", () => {
     const inboxFile = (body: string) => `const { pid } = JSON.parse(readFileSync(join(dataDir, "inbox", "inbox.json"), "utf8"));\n${body}\n`;
     // Signals.
@@ -120,6 +131,13 @@ describe("the source scan", () => {
     expect(homePathFindings('const dir = join(homedir(), ".plannotator-resolve-file-");')).toEqual([]);
     expect(homePathFindings('const home = join(root, "home");\nconst dir = join(home, ".plannotator");')).toEqual([]);
     expect(homePathFindings("// never ~/.plannotator: join(homedir(), \".plannotator\")")).toEqual([]);
+    // Agents' own folders.
+    expect(agentHomeFindings('const file = join(homedir(), ".codex", "config.toml");')).toHaveLength(1);
+    expect(agentHomeFindings('const home = os.homedir();\nconst file = join(home, ".config", "opencode", "AGENTS.md");')).toHaveLength(1);
+    expect(agentHomeFindings('writeFileSync("~/.cursor/mcp.json", "{}");')).toHaveLength(1);
+    expect(agentHomeFindings('const file = join(fake.home, ".codex", "config.toml");')).toEqual([]);
+    expect(agentConnectFindings('await fetch(`${url}/api/inbox/control/connect`, { method: "POST" });')).toHaveLength(1);
+    expect(agentConnectFindings('startInboxServer({ dataDir, agentEnvironment: env });\nawait s.connectAgents();')).toEqual([]);
     // Inbox servers.
     expect(inboxServerFindings('startInboxServer({ version: "x", phones: true })', false)).toHaveLength(1);
     expect(inboxServerFindings('startInboxServer({\n  // dataDir comes later\n  version: "x" })', false)).toHaveLength(1);

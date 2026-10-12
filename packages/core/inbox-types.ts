@@ -754,3 +754,80 @@ export const INBOX_SOUND_MAX_VOLUME = 100;
 export function isInboxSoundVolume(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= INBOX_SOUND_MIN_VOLUME && value <= INBOX_SOUND_MAX_VOLUME;
 }
+
+/**
+ * The agents the Inbox connects itself to on `plannotator inbox` (the
+ * approved "inbox-agent-awareness" design; packages/server/inbox-agents.ts).
+ * Terminal agents and the Claude desktop app; editors keep their one-click
+ * link or snippet in Settings and are never written to automatically.
+ */
+export type InboxAgentId =
+  | "claude-code"
+  | "codex"
+  | "gemini"
+  | "cursor"
+  | "windsurf"
+  | "amp"
+  | "cline"
+  | "kiro"
+  | "pi"
+  | "opencode"
+  | "claude-app";
+
+export const INBOX_AGENT_IDS: readonly InboxAgentId[] = [
+  "claude-code",
+  "codex",
+  "gemini",
+  "cursor",
+  "windsurf",
+  "amp",
+  "cline",
+  "kiro",
+  "pi",
+  "opencode",
+  "claude-app",
+];
+
+export const INBOX_AGENT_LABELS: Readonly<Record<InboxAgentId, string>> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  gemini: "Gemini CLI",
+  cursor: "Cursor",
+  windsurf: "Windsurf / Devin",
+  amp: "Amp",
+  cline: "Cline",
+  kiro: "Kiro",
+  pi: "Pi",
+  opencode: "OpenCode",
+  "claude-app": "Claude app",
+};
+
+/** "Codex", "Codex and Amp", "Codex, Amp and Pi". */
+export function inboxAgentList(ids: readonly InboxAgentId[]): string {
+  const names = ids.map((id) => INBOX_AGENT_LABELS[id]);
+  if (names.length <= 1) return names.join("");
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+/** What one `plannotator inbox` run did to the agents on this computer. */
+export interface InboxConnectReport {
+  at: string;
+  /** The first run that connected anything on this computer; later runs say "new on this computer". */
+  first: boolean;
+  /** Skipped as a whole: `PLANNOTATOR_INBOX_CONNECT=0`, or a test sandbox whose home is the real one. */
+  skipped?: "env" | "sandbox";
+  /** Connected by this run. */
+  added: InboxAgentId[];
+  /** Already reached the Inbox before this run (found, or connected earlier). */
+  already: InboxAgentId[];
+  /** Could not be connected; nothing was changed. Tried again at the next run. */
+  failed: { agent: InboxAgentId; reason: string; path: string | null }[];
+  /** Have a `plannotator-inbox` entry that runs something else; left alone. */
+  foreign: { agent: InboxAgentId; path: string | null }[];
+  /** Found, but only a person can connect them (no CLI on PATH, a config file Plannotator does not edit). */
+  manual: InboxAgentId[];
+  /** Did not finish within the time limits; tried again at the next run. */
+  unfinished: InboxAgentId[];
+  /** Claude Code's plugin gives it the `plannotator_inbox` tool already. */
+  claude_code: boolean;
+}

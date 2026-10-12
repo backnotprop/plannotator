@@ -118,6 +118,14 @@ import { createInboxRelay } from "./inbox-relay";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { createInboxTailscale, PHONES_TAILNET_HTTPS_PORT, type InboxTailscale } from "./inbox-tailscale";
 import { createInboxUpdates, type InboxUpdatesOptions } from "./inbox-updates";
+import {
+  connectInboxAgents,
+  createAgentEnvironment,
+  displayPath,
+  readInboxAgents,
+  type AgentEnvironment,
+} from "./inbox-agents";
+import type { InboxConnectReport } from "@plannotator/core/inbox-types";
 
 /** Where a request came in: the window's loopback port, or the tailnet-only listener `tailscale serve` points at. */
 type RequestVia = "local" | "tailnet";
@@ -222,6 +230,12 @@ export interface InboxServerOptions {
    * window's Undo lasts 7 s). Default `INBOX_SET_ASIDE_DELAY_MS`. Tests shorten it.
    */
   setAsideDelayMs?: number;
+  /**
+   * Where the agents the Inbox connects itself to live (home, environment,
+   * PATH, running their CLIs; inbox-agents.ts). Default: this process's.
+   * Tests give temp folders and fake CLIs.
+   */
+  agentEnvironment?: AgentEnvironment;
 }
 
 /**
@@ -245,6 +259,12 @@ export interface InboxServer {
   registry: InboxRegistryEntry;
   /** "Over your tailnet": its state, the window's switch and the run's flag. */
   tailscale: InboxTailscale;
+  /**
+   * Connect the agents on this computer (inbox-agents.ts): what
+   * `plannotator inbox` runs, here or over `/api/inbox/control/connect`. One
+   * run at a time; a call while one runs gets that run's report.
+   */
+  connectAgents: () => Promise<InboxConnectReport>;
   stop: () => void;
 }
 
@@ -593,6 +613,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     : version !== "dev"
       ? [process.execPath]
       : ["plannotator"];
+
+  /** The agents on this computer (inbox-agents.ts): connected by `plannotator inbox`, one run at a time. */
+  const agentEnvironment = options.agentEnvironment ?? createAgentEnvironment();
+  let connecting: Promise<InboxConnectReport> | null = null;
+  const connectAgents = (): Promise<InboxConnectReport> => {
+    connecting ??= connectInboxAgents({ dataDir, selfCommand, environment: agentEnvironment }).finally(() => {
+      connecting = null;
+    });
+    return connecting;
+  };
+  /** What the window reads about the agents: the records (paths shown with ~), the last run's report, and whether a run is going. */
+  const agentsModel = () => {
+    const file = readInboxAgents(dataDir);
+    const agents = Object.fromEntries(
+      Object.entries(file.agents).map(([id, record]) => [id, { ...record, path: displayPath(record!.path, agentEnvironment) }]),
+    );
+    return { agents, last_report: file.last_report ?? null, connecting: connecting !== null };
+  };
 
   /** The agent tool knob per host: the effective value, and whether the env var decides it. */
   const inboxToolState = () => {
@@ -1139,6 +1177,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         return json({ tailscale: tailscale.enableForRun() });
       }
+      // `plannotator inbox` while this Inbox runs (an agent started it with
+      // --background): connect the agents on this computer, as a start does.
+      if (path === "/api/inbox/control/connect") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        return json({ connect: await connectAgents() });
+      }
       if (path === INBOX_BRIDGE_POLL_PATH || path === INBOX_BRIDGE_EVENT_PATH) {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         try {
@@ -1220,6 +1264,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ ...updates.details(), checked });
         }
         return json({ error: "Not found", code: "not_found" }, 404);
+      }
+      // The agents on this computer: paths in the person's home, so only on this computer.
+      if (path === "/api/inbox/agents") {
+        if (via === "tailnet") return localOnly();
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        return json(agentsModel());
       }
       if (path === "/api/inbox/settings") {
         if (req.method === "GET") return json(settingsModel(via));
@@ -1554,7 +1604,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     tailnetStopFailedPort = tailscale.stop().failedPort;
   };
 
-  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, stop };
+  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, stop };
 }
 
 /** Print where the Inbox is, and open it when a person asked for it. */

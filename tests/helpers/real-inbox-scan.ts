@@ -149,6 +149,49 @@ export function homePathFindings(source: string): string[] {
   return [...byLine.values()];
 }
 
+/** The agents' own folders the Inbox writes to (packages/server/inbox-agents.ts, its notes). */
+const AGENT_DIR = String.raw`(?:\.claude|\.codex|\.gemini|\.cursor|\.kiro|\.pi|\.vibe|\.copilot|\.config["'\`]?\s*,\s*["'\`](?:opencode|amp|devin|Claude)|\.config[/\\](?:opencode|amp|devin|Claude)|Library[/\\]Application Support[/\\]Claude|Library["'\`]\s*,\s*["'\`]Application Support)(?![\w.-])`;
+
+/**
+ * A path from the real home directory to an agent's own folder (`~/.codex`,
+ * `~/.cursor`, `~/.config/opencode`, the Claude app's settings…): tests point
+ * HOME at a scratch folder and use that, never `homedir()`. Same line, a
+ * multi-line `join(`, a variable assigned from `homedir()`, or the literal
+ * `~/.codex` used as a path.
+ */
+export function agentHomeFindings(source: string): string[] {
+  const text = stripComments(source);
+  const found: string[] = [];
+  const add = (index: number, what: string) => found.push(`${lineOf(text, index)}: ${what.replace(/\s+/g, " ").trim()}`);
+  for (const m of text.matchAll(new RegExp(`${HOME_EXPR}[^\\n]*?["'\`/\\\\]${AGENT_DIR}`, "g"))) add(m.index!, m[0]);
+  const names = [...text.matchAll(new RegExp(`\\b(?:const|let|var)\\s+(\\w+)\\s*(?::\\s*string\\s*)?=\\s*${HOME_EXPR}`, "g"))].map((m) => m[1]!);
+  const home = names.length > 0 ? `(?:${HOME_EXPR}|\\b(?:${names.join("|")})\\b)` : HOME_EXPR;
+  for (const m of text.matchAll(new RegExp(`\\b(?:join|resolve)\\(\\s*${home}\\s*,\\s*["'\`]${AGENT_DIR}`, "g"))) add(m.index!, m[0]);
+  const literalAsPath = new RegExp(`\\b(?:join|resolve|readFileSync|writeFileSync|appendFileSync|rmSync|mkdirSync|existsSync|readdirSync|statSync|realpathSync|symlinkSync)\\b[^\\n]*["'\`]~[/\\\\]${AGENT_DIR}`, "g");
+  for (const m of text.matchAll(literalAsPath)) add(m.index!, m[0]);
+  const byLine = new Map<string, string>();
+  for (const finding of found) {
+    const line = finding.slice(0, finding.indexOf(":"));
+    if (!byLine.has(line)) byLine.set(line, finding);
+  }
+  return [...byLine.values()];
+}
+
+/**
+ * Connecting agents (`connectInboxAgents`, an Inbox's `connectAgents`, the
+ * `/api/inbox/control/connect` route) in a file that never gives an agent
+ * environment: it would run the real agent CLIs against the real home.
+ */
+export function agentConnectFindings(source: string): string[] {
+  const text = stripComments(source);
+  if (/\b(?:agentEnvironment|environment)\s*:|createAgentEnvironmentFor\b|PLANNOTATOR_INBOX_CONNECT["'\`]?\s*:\s*["'\`]0/.test(text)) return [];
+  const found: string[] = [];
+  for (const m of text.matchAll(/\bconnectInboxAgents\s*\(|\.connectAgents\s*\(|\/api\/inbox\/control\/connect/g)) {
+    found.push(`${lineOf(text, m.index!)}: ${m[0]} with no agent environment`);
+  }
+  return found;
+}
+
 /**
  * `startInboxServer` calls that do not name `dataDir`. In a standalone script
  * (not a *.test / *.spec file, which runs under the preload's sandbox) the
