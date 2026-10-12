@@ -21,8 +21,25 @@ function rowsById(sections: readonly InboxListSection[]): Map<string, InboxListR
 }
 
 /**
+ * When the row's latest agent message arrived: `last_agent_at`, or, from an
+ * Inbox older than that field, `last_at` while the last message is an agent's.
+ * The person's replies and the Inbox's own notes (Mark read's set-aside note,
+ * a late Undo's reopened note) move `last_at` but are never agent activity,
+ * and a note written after an agent message must not hide that message.
+ */
+function lastAgentAt(row: InboxListRow): string | null {
+  if (row.last_agent_at !== undefined) return row.last_agent_at;
+  return row.last_author === 'agent' ? row.last_at : null;
+}
+
+/**
  * `row` carries agent activity the row on screen (`old`) lacks: a thread an
- * agent started, or a newer agent message. One exception: a thread not on
+ * agent started, or a newer agent message (by `lastAgentAt`, so the Inbox's
+ * notes never hide one). A row counts only while its last real message is an
+ * agent's (`sent` null: `sent` reads past the notes): an agent message the
+ * person replied after (in the thread they had open, say) is not news, and
+ * neither is a thread unarchived elsewhere whose last word is the person's
+ * (Sent, or Quiet after the agent read it). One more exception: a thread not on
  * screen that the person opened in this tab (`openedHere`: a link, a
  * notification, Settings' Unarchive) and whose agent messages they have all
  * seen (`unseen` 0) came in by their own hand (it was archived, say, and they
@@ -30,8 +47,15 @@ function rowsById(sections: readonly InboxListSection[]): Map<string, InboxListR
  * exempt: this tab has not shown it, so it stays news here.
  */
 function hasNewAgentActivity(old: InboxListRow | undefined, row: InboxListRow, openedHere?: ReadonlySet<string>): boolean {
-  if (old === undefined) return row.last_author === 'agent' && !(openedHere?.has(row.thread_id) && row.unseen === 0);
-  return row.last_author === 'agent' && row.last_at > old.last_at;
+  const at = lastAgentAt(row);
+  // The person's own reply came after the agent's last message (`sent` reads
+  // past the notes): whatever the agent wrote before it, they answered, on
+  // screen or not. Without notes this is the old `last_author === 'agent'` rule.
+  if (at === null || (row.sent ?? null) !== null) return false;
+  if (old === undefined) return !(openedHere?.has(row.thread_id) && row.unseen === 0);
+  // An older row on screen without the field: compare with its last_at, as before.
+  const before = old.last_agent_at !== undefined ? (old.last_agent_at ?? '') : old.last_at;
+  return at > before;
 }
 
 /**

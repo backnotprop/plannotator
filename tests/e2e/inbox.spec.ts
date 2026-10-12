@@ -526,10 +526,17 @@ test("a Sent row follows the agent's read in place, without an action: its state
   await expect(pane).toHaveCount(0);
 });
 
-test('Settings: the agent tool knob applies to the next session, the compact picker, the store on disk', async () => {
+test('Settings: in sections; the agent tool knob applies to the next session, the compact picker, the store on disk', async () => {
   const { page } = world;
   await side(page).getByRole('button', { name: 'Settings' }).click();
-  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+  // A focused page (design of record inbox-settings-tabs): General first, the section nav beside it.
+  await expect(page.getByRole('heading', { name: 'General', level: 1 })).toBeVisible();
+  const nav = page.getByRole('navigation', { name: 'Settings sections' });
+  await expect(nav.getByRole('link')).toHaveText(['General', 'Agents', 'Devices', 'Archived', 'Storage', 'About']);
+  await nav.getByRole('link', { name: 'Agents' }).click();
+  await expect(page).toHaveURL(/#settings\/agents$/);
+  await expect(nav.getByRole('link', { name: 'Agents' })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeFocused();
   const claudeSwitch = page.getByRole('switch', { name: 'The Inbox tool in Claude Code' });
   const piSwitch = page.getByRole('switch', { name: 'The Inbox tool in Pi' });
   await expect(claudeSwitch).toHaveAttribute('aria-checked', 'true');
@@ -546,13 +553,15 @@ test('Settings: the agent tool knob applies to the next session, the compact pic
   await expect(other.locator('pre').nth(1)).toHaveText(`http://127.0.0.1:${registry().port}/mcp`);
   await expectCodeUnclipped(page);
 
+  await shot('7.1-settings');
+  await nav.getByRole('link', { name: 'Storage' }).click();
   const store = page.locator('.ib-stbl');
   await expect(store.locator('[data-store-project="billing-svc"]')).toContainText('2 threads');
   await expect(store.locator('[data-store-project="docs-site"]')).toContainText('2 threads');
   // Delete thread and delete project are live since step 2 (proved in inbox-attachments.spec.ts).
   await expect(store.getByRole('button', { name: /Delete project/ }).first()).toBeEnabled();
-  await shot('7.1-settings');
 
+  await nav.getByRole('link', { name: 'Agents' }).click();
   await piSwitch.click();
   await expect(piSwitch).toHaveAttribute('aria-checked', 'true');
   // The switch moves at the click; the save lands when the POST answers.
@@ -565,9 +574,11 @@ test('Settings: the agent tool knob applies to the next session, the compact pic
       }
     })
     .toEqual({ pi: true });
-  await page.locator('.ib-spage').evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  await nav.getByRole('link', { name: 'Storage' }).click();
   await shot('7.2-settings-storage');
-  await side(page).getByRole('button', { name: /^Inbox/ }).click();
+  // The sidebar slid away for Settings; "← Inbox" is the way back.
+  await page.locator('[data-settings-back]').click();
+  await expect(page).not.toHaveURL(/#settings/);
 });
 
 // Before the restart, whose gap (the old Inbox gone, the new one not yet up)

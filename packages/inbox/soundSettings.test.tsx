@@ -114,7 +114,9 @@ describe.if(hasDom)('Settings: the sound row', () => {
     const block = renderSettings(sound);
     const row = block.querySelector('[data-settings-sound]') as HTMLElement;
     expect(row.getAttribute('data-settings-sound')).toBe('on');
-    expect(row.textContent).toBe('Play a soundwhen an agent asks you');
+    // The label, then when it rings (Settings in sections: the row's description, .product/approved/inbox-settings-tabs/).
+    expect(row.querySelector('#ib-sound-label')?.textContent).toBe('Play a sound');
+    expect(row.textContent).toContain('When an agent asks you');
     const slider = row.querySelector('input[type="range"]') as HTMLInputElement;
     expect([slider.min, slider.max, slider.step, slider.value]).toEqual(['10', '100', '10', '60']);
     expect(slider.getAttribute('aria-label')).toBe('Volume');

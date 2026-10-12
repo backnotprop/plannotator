@@ -10,7 +10,7 @@ Event sequences with the list state the Inbox gives after each step. A phone kit
 | `name`, `description` | The trace and what it shows |
 | `source`, `seed` | `"hand"` (seed `null`) or `"generated"` (the fast-check seed it came from) |
 | `clock` | `start` and `step_ms`: everything written at step n is stamped `start + n * step_ms`. No two steps share a time, so no `last_at` or `resolved_at` ties: a thread id ends in random characters, and a tie's order would change from run to run. Break ties on the thread id yourself; the store's own test exercises that |
-| `known_violations` | A list, empty when none: `{ step, kind, test, rule, spec, today }` for each step where the Inbox breaks a rule of the model (`kind` `A`, `B` or `C`, as in the model doc). `expect` records what it does today; `spec` says what the rule wants. Skip those steps, or assert today's answer, until the fix lands |
+| `known_violations` | A list, empty when none: `{ step, kind, test, rule, spec, today }` for each step where the Inbox breaks a rule of the model (`kind` `A`, `B` or `C`, as in the model doc). `expect` records what it does then; `spec` says what the rule wants. A, B and C are fixed, so every list is empty now: every step's `expect` is the rule's answer. The field stays in the format for a violation found later |
 | `steps` | One entry per event, in order |
 
 ## A step
@@ -63,4 +63,4 @@ PLANNOTATOR_INBOX_TRACES=write bun test packages/shared/inbox/store.test.ts
 
 `PLANNOTATOR_INBOX_TRACES=resample` also draws the generated traces' events again from their seeds; use it only when `traceOpArb` itself changes.
 
-A change of this format goes in a new `v2` folder; `v1` changes only when the Inbox's behaviour does.
+A change of this format goes in a new `v2` folder; `v1` changes only when the Inbox's behaviour does. The fix of violations A, B and C (2026-10-12) was such a change: the format is the same, the files were regenerated in place (their `known_violations` emptied, the steps that met them now expecting the rule's answer), and `hand-16-undo-reopens-only-its-own-mark-read` and `hand-17-came-back-mark-read-then-reply` were added. A kit that skipped the steps listed in `known_violations` can stop skipping them.

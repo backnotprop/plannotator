@@ -27,6 +27,24 @@ test("the boundary is the later of the person's last look and their last reply; 
   expect([...newSinceLook(messages, null)]).toEqual([]);
 });
 
+test("the Inbox's own notes (set-aside, reopened) are not a look: news before a note stays new", () => {
+  const messages = [
+    msg('m1', AGENT, 2, { person_seen_seq: 2 }),
+    msg('m2', AGENT, 4),
+    msg('m3', PERSON, 6, { set_aside: ['m1/q-1'] }),
+    msg('m4', PERSON, 8, { reopened: ['m1/q-1'] }),
+  ];
+  expect(lookBoundary(thread(messages))).toBe(2);
+  expect([...newSinceLook(messages, lookBoundary(thread(messages)))]).toEqual(['m2']);
+  // The person's real reply still is one.
+  expect(lookBoundary(thread([...messages, msg('m5', PERSON, 9)]))).toBe(9);
+});
+
+test("the fold plan keeps the last real message open when the Inbox's notes trail it (its reply line sits there)", () => {
+  const messages = [msg('m1', AGENT, 2), msg('m2', AGENT, 3), msg('m3', PERSON, 5), msg('m4', PERSON, 7, { set_aside: ['m1/q-1'] })];
+  expect([...planFolds(messages, new Set(), 9).folded]).toEqual(['m1', 'm2']);
+});
+
 test('the fold plan: open when new, holding an unsent pick, or last; each read run of 4 or more hides all but its first and last two', () => {
   const ids = Array.from({ length: 9 }, (_, i) => `m${i + 1}`);
   const messages = ids.map((id, i) => msg(id, i % 2 ? PERSON : AGENT, i + 1));

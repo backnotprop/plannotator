@@ -151,6 +151,17 @@ export type InboxAuthor =
     };
 
 /** The hosts whose names the Inbox knows, keyed by `author.host`. */
+/**
+ * One of the Inbox's own notes to the asking agent: Mark read's set-aside
+ * note (`set_aside`) or a late Undo's reopened note (`reopened`). They are
+ * stored as the person's messages so they reach the agent like any reply,
+ * but they are not the person's reply and not a look: the list's `sent`,
+ * `unseen`, the look boundary and "came back" all read past them.
+ */
+export function isInboxNote(message: { author: { kind: string }; set_aside?: readonly string[] | null; reopened?: readonly string[] | null }): boolean {
+  return message.author.kind === "person" && ((message.set_aside?.length ?? 0) > 0 || (message.reopened?.length ?? 0) > 0);
+}
+
 export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   "claude-code": "Claude Code",
   claude: "Claude Code",
@@ -425,6 +436,14 @@ export interface InboxQuestionRecord {
 /** A question Mark read closed (`InboxQuestionRecord.set_aside`). */
 export interface InboxQuestionSetAside {
   at: string;
+  /**
+   * The Mark read that closed it: the root's `person_read_seq` then. Undo
+   * reopens only the questions its own Mark read closed (owner ruling
+   * 2026-10-12); one an earlier Mark read closed stays closed. Absent on
+   * records older than the ruling, which match by `at` (the Mark read's
+   * `person_read_at`).
+   */
+  read_seq?: number;
   previous: Pick<InboxQuestionRecord, "answer" | "revision" | "sent_revision" | "picked_by" | "picked_at">;
 }
 
@@ -526,7 +545,11 @@ export interface InboxThreadSummary {
   message_count: number;
   resolved_at: string | null;
   questions: InboxQuestionSummary;
-  /** The last message is an agent's and the thread is open: it waits on the person. */
+  /**
+   * The last message is an agent's and the thread is open: it waits on the
+   * person. The Inbox's own notes (`isInboxNote`) are read past, and it is
+   * false while a Mark read stands (nothing waits on the person then).
+   */
   waiting_on_person: boolean;
 }
 
@@ -558,10 +581,22 @@ export interface InboxListRow extends InboxThreadSummary {
   answered_not_sent: boolean;
   /** When the oldest open question was asked, or null when none is open. */
   waiting_since: string | null;
-  /** Agent messages after the person's last look (a reply of theirs counts as a look). */
+  /**
+   * Agent messages after the person's last look (a reply of theirs counts as
+   * a look; the Inbox's own notes, `isInboxNote`, do not).
+   */
   unseen: number;
-  /** The person's reply is the last message: when, and when the agent read it (null until it has). */
+  /**
+   * The person's reply is the last message, the Inbox's own notes read past:
+   * when, and when the agent read it (null until it has).
+   */
   sent: { at: string; checked_at: string | null } | null;
+  /**
+   * When the latest agent message arrived (`last_at` also moves on the
+   * person's messages and the Inbox's notes). The window's held list counts
+   * agent activity by it. Absent from an older Inbox.
+   */
+  last_agent_at?: string | null;
   /** A message in the thread carries a guided review: the row's "Guided review" mark. */
   guide: boolean;
   /**
@@ -582,9 +617,10 @@ export interface InboxListRow extends InboxThreadSummary {
    * `agent_after_archive`, and something there still waits: an agent
    * message after the archive the person has not looked at, a live question
    * open or picked, or the person's reply after the archive the agent has not
-   * read. The thread is back in the list, placed as an open thread would be;
-   * once handled it returns to the archive on its own. Derived. Absent from an
-   * older Inbox.
+   * read (not once a Mark read made after it stands: Mark read sends a
+   * came-back thread back to the archive). The thread is back in the list,
+   * placed as an open thread would be; once handled it returns to the archive
+   * on its own. Derived. Absent from an older Inbox.
    */
   back_from_archive?: boolean;
 }

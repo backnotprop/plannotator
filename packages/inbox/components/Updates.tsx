@@ -499,6 +499,11 @@ export function WhatsNewPage({
 
 // ───────────────────────────── Settings → About ─────────────────────────────
 
+/**
+ * Settings → About (design of record `.product/approved/inbox-settings-tabs/`):
+ * the version with its status, Check now, Update now when a release is
+ * available, the two update switches, and where things are on this computer.
+ */
 export function AboutBlock({
   version,
   details,
@@ -507,6 +512,10 @@ export function AboutBlock({
   error,
   onCheckNow,
   onToggle,
+  update,
+  onUpdate,
+  onWhatsNew,
+  where,
 }: {
   version: string;
   details: UpdateDetails | null;
@@ -515,6 +524,12 @@ export function AboutBlock({
   error: string | null;
   onCheckNow: () => void;
   onToggle: (change: { update_check?: boolean; auto_update?: boolean }) => void;
+  /** The sidebar's update state: Update now while a release is available, ready or failed. */
+  update?: InboxHealth['update'];
+  onUpdate?: () => void;
+  onWhatsNew?: (version: string) => void;
+  /** "Where things are": the data folder and the MCP address and command. */
+  where?: { data: string; mcpUrl: string; mcpCommand: string } | null;
 }) {
   const latest = details?.latest;
   const last = details?.check.last_attempt_at;
@@ -530,66 +545,122 @@ export function AboutBlock({
   const checks = switches?.update_check;
   const auto = switches?.auto_update;
   const autoSupported = details?.auto_update.supported ?? false;
+  const available = update?.version ?? (latest && newerThan(latest.version, version) ? latest.version : null);
+  const updateLabel = update?.state === 'ready' ? 'Restart to update' : update?.state === 'failed' ? 'Update failed…' : 'Update now';
+  const locked = (checks?.env !== null && checks?.env !== undefined) || (auto?.env !== null && auto?.env !== undefined);
   return (
-    <div className="ib-sblock" data-settings-about="">
-      <h2>About</h2>
-      <div className="ib-srow" style={{ paddingTop: 0 }}>
-        Plannotator {version}
-        <span className="ib-d" data-update-status="">
-          {[checked, status].filter(Boolean).join(' · ')}
-        </span>
-        <span className="ib-r">
-          <button type="button" className="ib-btn ib-sm" onClick={onCheckNow} disabled={checking || version === 'dev'}>
-            {checking ? 'Checking…' : 'Check now'}
-          </button>
-        </span>
-      </div>
-      <div className="ib-srow">
-        Tell me when a new version is out
-        <span className="ib-d">once a day, from this computer</span>
-        <span className="ib-r">
-          <button
-            type="button"
-            role="switch"
-            className="ib-sw"
-            aria-checked={checks?.on ?? true}
-            aria-label="Tell me when a new version is out"
-            disabled={!checks || checks.env !== null}
-            onClick={() => onToggle({ update_check: !(checks?.on ?? true) })}
-          />
-        </span>
-      </div>
-      <div className="ib-srow">
-        Keep Plannotator up to date
-        <span className="ib-d">
-          {!autoSupported ? 'only for the binary the install script manages' : checks && !checks.on ? 'needs update checks' : 'installs new versions automatically'}
-        </span>
-        <span className="ib-r">
-          <button
-            type="button"
-            role="switch"
-            className="ib-sw"
-            aria-checked={auto?.on ?? false}
-            aria-label="Keep Plannotator up to date"
-            disabled={!auto || auto.env !== null || !autoSupported || (checks !== undefined && !checks.on)}
-            onClick={() => onToggle({ auto_update: !(auto?.on ?? false) })}
-          />
-        </span>
-      </div>
-      {(checks?.env !== null && checks?.env !== undefined) || (auto?.env !== null && auto?.env !== undefined) ? (
+    <>
+      <section className="ib-sgroup ib-sgroup-first" data-settings-about="" aria-label="Version and updates">
+        <div className="ib-card">
+          <div className="ib-prow">
+            <span className="ib-tile">
+              <Icon name="inbox" />
+            </span>
+            <span className="ib-txt">
+              <span className="ib-l">
+                Plannotator {version}
+                {available && update?.state !== 'updating' && <span className="ib-chip ib-chip-pri">{available} is available</span>}
+              </span>
+              <span className="ib-desc" data-update-status="">
+                {[checked, status]
+                  .filter(Boolean)
+                  .join(' · ')
+                  .replace(/^./, (first) => first.toUpperCase())}
+                {available && onWhatsNew && (
+                  <>
+                    {' · '}
+                    <button type="button" className="ib-lnk" onClick={() => onWhatsNew(available)}>
+                      What&apos;s new in {available}
+                    </button>
+                  </>
+                )}
+              </span>
+            </span>
+            <span className="ib-ctl">
+              {update && onUpdate && (
+                <button type="button" className="ib-btn ib-sm ib-pri" onClick={onUpdate} disabled={update.state === 'updating'} data-about-update="">
+                  {update.state === 'updating' ? 'Updating…' : updateLabel}
+                </button>
+              )}
+              <button type="button" className="ib-btn ib-sm" onClick={onCheckNow} disabled={checking || version === 'dev'}>
+                {checking ? 'Checking…' : 'Check now'}
+              </button>
+            </span>
+          </div>
+          <div className="ib-prow">
+            <span className="ib-txt">
+              <span className="ib-l" id="ib-upd-check">
+                Tell me when a new version is out
+              </span>
+              <span className="ib-desc">Once a day, from this computer</span>
+            </span>
+            <span className="ib-ctl">
+              <button
+                type="button"
+                role="switch"
+                className="ib-sw"
+                aria-checked={checks?.on ?? true}
+                aria-labelledby="ib-upd-check"
+                disabled={!checks || checks.env !== null}
+                onClick={() => onToggle({ update_check: !(checks?.on ?? true) })}
+              />
+            </span>
+          </div>
+          <div className="ib-prow">
+            <span className="ib-txt">
+              <span className="ib-l" id="ib-upd-auto">
+                Keep Plannotator up to date
+              </span>
+              <span className="ib-desc">
+                {!autoSupported ? 'Only for the binary the install script manages' : checks && !checks.on ? 'Needs update checks' : 'Installs new versions automatically'}
+              </span>
+            </span>
+            <span className="ib-ctl">
+              <button
+                type="button"
+                role="switch"
+                className="ib-sw"
+                aria-checked={auto?.on ?? false}
+                aria-labelledby="ib-upd-auto"
+                disabled={!auto || auto.env !== null || !autoSupported || (checks !== undefined && !checks.on)}
+                onClick={() => onToggle({ auto_update: !(auto?.on ?? false) })}
+              />
+            </span>
+          </div>
+        </div>
         <div className="ib-note">
           <Icon name="info" />
-          {checks?.env !== null && checks?.env !== undefined
-            ? `PLANNOTATOR_UPDATE_CHECK is set in this Inbox's environment, so update checks are ${checks.env ? 'on' : 'off'}.`
-            : `PLANNOTATOR_AUTO_UPDATE is set in this Inbox's environment, so automatic updates are ${auto?.env ? 'on' : 'off'}.`}
+          {locked
+            ? checks?.env !== null && checks?.env !== undefined
+              ? `PLANNOTATOR_UPDATE_CHECK is set in this Inbox's environment, so update checks are ${checks.env ? 'on' : 'off'}.`
+              : `PLANNOTATOR_AUTO_UPDATE is set in this Inbox's environment, so automatic updates are ${auto?.env ? 'on' : 'off'}.`
+            : 'Off makes no request to GitHub at all. Check now always asks.'}
         </div>
-      ) : (
-        <div className="ib-note">
-          <Icon name="info" />
-          Off makes no request to GitHub at all. Check now always asks.
-        </div>
+        {error && <div className="ib-error">{error}</div>}
+      </section>
+      {where && (
+        <section className="ib-sgroup" aria-labelledby="ib-g-where">
+          <h2 id="ib-g-where">Where things are</h2>
+          <div className="ib-card">
+            <div className="ib-prow">
+              <span className="ib-txt">
+                <span className="ib-l">Data</span>
+                <span className="ib-desc">
+                  <code>{where.data}</code>
+                </span>
+              </span>
+            </div>
+            <div className="ib-prow">
+              <span className="ib-txt">
+                <span className="ib-l">MCP for other agents</span>
+                <span className="ib-desc">
+                  <code>{where.mcpUrl}</code> · or the command <code>{where.mcpCommand}</code>
+                </span>
+              </span>
+            </div>
+          </div>
+        </section>
       )}
-      {error && <div className="ib-error">{error}</div>}
-    </div>
+    </>
   );
 }
