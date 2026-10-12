@@ -16,6 +16,7 @@
     "./gitbutler-core": "./gitbutler-core.ts",
     "./review-core": "./review-core.ts",
     "./review-image": "./review-image.ts",
+    "./review-markdown-image": "./review-markdown-image.ts",
     "./review-progress": "./review-progress.ts",
     "./commit-history": "./commit-history.ts",
     "./review-workspace": "./review-workspace.ts",

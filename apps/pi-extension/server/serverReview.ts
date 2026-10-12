@@ -81,6 +81,10 @@ import {
 	readPRImageSide,
 } from "../generated/review-image.ts";
 import {
+	REVIEW_MARKDOWN_IMAGE_ENDPOINT,
+	handleReviewMarkdownImageRequest,
+} from "../generated/review-markdown-image.ts";
+import {
 	getGitButlerContextRevision,
 	getGitButlerPatchFingerprint,
 } from "../generated/gitbutler-core.ts";
@@ -1880,6 +1884,55 @@ export async function startReviewServer(options: {
 	// no repository, and P4 drops binary files from its patch entirely.
 	const imagePreviewSupported = !isStaticPatchMode;
 	const runImageRead = createConcurrencyLimiter(REVIEW_IMAGE_READ_CONCURRENCY);
+	// Markdown preview capability advert: the preview renders the full file, so
+	// it is offered wherever /api/file-content can read one (never a static
+	// patch). Its images (/api/review-markdown-image) follow imagePreviewSupported.
+	const markdownPreviewSupported = !isStaticPatchMode;
+	// Where the current mode reads one side of a repository path, as bytes:
+	// shared by /api/review-image (#1598) and the Markdown preview's
+	// /api/review-markdown-image, mirroring packages/server/review.ts.
+	const readReviewSide = async (
+		side: DiffSide,
+		filePath: string,
+		oldPath: string | undefined,
+		maxBytes: number,
+		signal?: AbortSignal,
+	): Promise<FileBytesRead> => {
+		if (workspace) return workspace.getFileBytes(filePath, oldPath, side, maxBytes);
+		const prCwd = (options.worktreePool && prMeta) ? options.worktreePool.resolve(prMeta.url) : options.agentCwd;
+		if (isPRMode && currentPRDiffScope === "full-stack" && prCwd && prMeta?.defaultBranch) {
+			const baseRef = await resolvePRFullStackBaseRef(reviewRuntime, prMeta.defaultBranch, prCwd);
+			if (!baseRef) return { kind: "missing" };
+			return getFileBytesForDiffCore(reviewRuntime, "merge-base", baseRef, filePath, oldPath, side, maxBytes, prCwd);
+		}
+		if (hasLocalAccess && !isPRMode) {
+			return getVcsFileBytesForDiff(
+				currentDiffType as DiffType,
+				currentBase,
+				filePath,
+				oldPath,
+				side,
+				maxBytes,
+				options.gitContext?.cwd,
+			);
+		}
+		if (isPRMode && prMeta && prRef) {
+			const ref = prRef;
+			return readPRImageSide({
+				gitRuntime: reviewRuntime,
+				poolCwd: prCwd,
+				oldSha: prMeta.mergeBaseSha ?? prMeta.baseSha,
+				headSha: prMeta.headSha,
+				side,
+				filePath,
+				oldPath,
+				maxBytes,
+				fetchBytes: (sha, path, max) => fetchPRFileBytes(ref, sha, path, max),
+				signal,
+			});
+		}
+		return { kind: "unavailable" };
+	};
 	const sourceKindAdvert = isStaticPatchMode
 		? ({ sourceKind: "patch" } as const)
 		: ({} as Record<string, never>);
@@ -2321,6 +2374,7 @@ export async function startReviewServer(options: {
 				approvalNotesSupported,
 				serverSession,
 				imagePreviewSupported,
+				markdownPreviewSupported,
 				...sourceKindAdvert,
 				// Mount is the only place the pin matters, so it rides /api/diff
 				// alone (not the switch endpoints).
@@ -2665,6 +2719,7 @@ export async function startReviewServer(options: {
 						approvalNotesSupported,
 						serverSession,
 						imagePreviewSupported,
+						markdownPreviewSupported,
 						...sourceKindAdvert,
 						diffType: currentDiffType,
 						diffOptions: workspace.diffOptions,
@@ -2818,6 +2873,7 @@ export async function startReviewServer(options: {
 					approvalNotesSupported,
 					serverSession,
 					imagePreviewSupported,
+					markdownPreviewSupported,
 					...sourceKindAdvert,
 					diffType: currentDiffType,
 					// Echo the base the server actually used. resolveBaseBranch
@@ -2884,6 +2940,7 @@ export async function startReviewServer(options: {
 						approvalNotesSupported,
 						serverSession,
 						imagePreviewSupported,
+						markdownPreviewSupported,
 						...sourceKindAdvert,
 						prDiffScope: currentPRDiffScope,
 						...(layerPatchIncomplete ? { prPatchIncomplete: true, prPatchUpgradeAvailable: layerUpgradeAvailable } : {}),
@@ -2955,6 +3012,7 @@ export async function startReviewServer(options: {
 						approvalNotesSupported,
 						serverSession,
 						imagePreviewSupported,
+						markdownPreviewSupported,
 						...sourceKindAdvert,
 						prDiffScope: currentPRDiffScope,
 						...(layerPatchIncomplete ? { prPatchIncomplete: true, prPatchUpgradeAvailable: layerUpgradeAvailable } : {}),
@@ -3000,6 +3058,7 @@ export async function startReviewServer(options: {
 					approvalNotesSupported,
 					serverSession,
 					imagePreviewSupported,
+					markdownPreviewSupported,
 					...sourceKindAdvert,
 					prDiffScope: currentPRDiffScope,
 					semanticDiff: await getSemanticDiffAdvert(),
@@ -3090,6 +3149,7 @@ export async function startReviewServer(options: {
 					approvalNotesSupported,
 					serverSession,
 					imagePreviewSupported,
+					markdownPreviewSupported,
 					...sourceKindAdvert,
 					prMetadata: pr.metadata,
 					// The new PR's checkout (null while warming) so Open-in re-roots
@@ -3293,52 +3353,31 @@ export async function startReviewServer(options: {
 				console.error("[plannotator] /api/pr-viewed error:", message);
 				json(res, { error: message }, 500);
 			}
+		} else if (url.pathname === REVIEW_MARKDOWN_IMAGE_ENDPOINT && req.method === "GET") {
+			// An image a reviewed Markdown file shows, read at that side's
+			// revision. Mirrors packages/server/review.ts.
+			const requestAbort = new AbortController();
+			res.on("close", () => {
+				if (!res.writableEnded) requestAbort.abort();
+			});
+			const result = await handleReviewMarkdownImageRequest({
+				params: url.searchParams,
+				ifNoneMatch: typeof req.headers["if-none-match"] === "string" ? req.headers["if-none-match"] : null,
+				available: imagePreviewSupported,
+				patch: currentPatch,
+				markdownExtensions: getExtraMarkdownExtensions(),
+				isCurrentSnapshot: (snapshot) => snapshot === currentSnapshotId(),
+				signal: requestAbort.signal,
+				readSide: (side, filePath, oldPath, maxBytes, signal) =>
+					runImageRead(() => readReviewSide(side, filePath, oldPath, maxBytes, signal), signal),
+			});
+			if (requestAbort.signal.aborted) return;
+			res.writeHead(result.status, result.headers);
+			res.end(result.body ?? undefined);
 		} else if (url.pathname === REVIEW_IMAGE_ENDPOINT && req.method === "GET") {
 			// One side of a changed image, as bytes (#1598). Mirrors
 			// packages/server/review.ts: every decision is in the shared handler;
-			// this closure only says where the current mode reads a side from.
-			const readSide = async (
-				side: DiffSide,
-				filePath: string,
-				oldPath: string | undefined,
-				maxBytes: number,
-				signal?: AbortSignal,
-			): Promise<FileBytesRead> => {
-				if (workspace) return workspace.getFileBytes(filePath, oldPath, side, maxBytes);
-				const prCwd = (options.worktreePool && prMeta) ? options.worktreePool.resolve(prMeta.url) : options.agentCwd;
-				if (isPRMode && currentPRDiffScope === "full-stack" && prCwd && prMeta?.defaultBranch) {
-					const baseRef = await resolvePRFullStackBaseRef(reviewRuntime, prMeta.defaultBranch, prCwd);
-					if (!baseRef) return { kind: "missing" };
-					return getFileBytesForDiffCore(reviewRuntime, "merge-base", baseRef, filePath, oldPath, side, maxBytes, prCwd);
-				}
-				if (hasLocalAccess && !isPRMode) {
-					return getVcsFileBytesForDiff(
-						currentDiffType as DiffType,
-						currentBase,
-						filePath,
-						oldPath,
-						side,
-						maxBytes,
-						options.gitContext?.cwd,
-					);
-				}
-				if (isPRMode && prMeta && prRef) {
-					const ref = prRef;
-					return readPRImageSide({
-						gitRuntime: reviewRuntime,
-						poolCwd: prCwd,
-						oldSha: prMeta.mergeBaseSha ?? prMeta.baseSha,
-						headSha: prMeta.headSha,
-						side,
-						filePath,
-						oldPath,
-						maxBytes,
-						fetchBytes: (sha, path, max) => fetchPRFileBytes(ref, sha, path, max),
-						signal,
-					});
-				}
-				return { kind: "unavailable" };
-			};
+			// readReviewSide only says where the current mode reads a side from.
 			// node:http has no request signal: abort when the client closes the
 			// socket before the response is written.
 			const requestAbort = new AbortController();
@@ -3353,7 +3392,7 @@ export async function startReviewServer(options: {
 				isCurrentSnapshot: (snapshot) => snapshot === currentSnapshotId(),
 				signal: requestAbort.signal,
 				readSide: (side, filePath, oldPath, maxBytes, signal) =>
-					runImageRead(() => readSide(side, filePath, oldPath, maxBytes, signal), signal),
+					runImageRead(() => readReviewSide(side, filePath, oldPath, maxBytes, signal), signal),
 			});
 			if (requestAbort.signal.aborted) return;
 			res.writeHead(result.status, result.headers);

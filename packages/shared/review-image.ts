@@ -40,7 +40,11 @@ export type ReviewImageErrorReason =
   | "not-image"
   | "lfs-pointer"
   | "fetch-failed"
-  | "aborted";
+  | "aborted"
+  /** `/api/review-markdown-image` only: the source climbs above the repository root. */
+  | "outside-repo"
+  /** `/api/review-markdown-image` only: the Markdown file does not show that image. */
+  | "not-referenced";
 
 export interface ReviewImageErrorBody {
   reason: ReviewImageErrorReason;
@@ -376,7 +380,8 @@ export interface ReviewImageRequest {
 
 const IMAGE_RESPONSE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'";
 
-function errorResponse(status: number, body: ReviewImageErrorBody): ReviewImageResponse {
+/** A JSON refusal with the image routes' no-store / nosniff headers. */
+export function reviewImageErrorResponse(status: number, body: ReviewImageErrorBody): ReviewImageResponse {
   return {
     status,
     headers: {
@@ -399,31 +404,31 @@ function isEligibleEntry(entry: PatchFileEntry): boolean {
 /** Resolve one `GET /api/review-image` request to a transport-neutral response. */
 export async function handleReviewImageRequest(request: ReviewImageRequest): Promise<ReviewImageResponse> {
   if (!request.available) {
-    return errorResponse(400, { reason: "unavailable", error: "Image preview is unavailable for this review" });
+    return reviewImageErrorResponse(400, { reason: "unavailable", error: "Image preview is unavailable for this review" });
   }
   const path = request.params.get("path");
   const side = request.params.get("side");
   const snapshot = request.params.get("snapshot");
   if (!path || (side !== "old" && side !== "new") || !snapshot) {
-    return errorResponse(400, { reason: "bad-request", error: "Expected path, side=old|new and snapshot" });
+    return reviewImageErrorResponse(400, { reason: "bad-request", error: "Expected path, side=old|new and snapshot" });
   }
   if (!request.isCurrentSnapshot(snapshot)) {
-    return errorResponse(409, { reason: "stale", error: "Diff snapshot is stale; refresh the review" });
+    return reviewImageErrorResponse(409, { reason: "stale", error: "Diff snapshot is stale; refresh the review" });
   }
 
   const entry = findPatchFileEntry(request.patch, path);
   if (!entry || !isEligibleEntry(entry)) {
-    return errorResponse(404, { reason: "not-in-diff", error: "No previewable image by that path in this diff" });
+    return reviewImageErrorResponse(404, { reason: "not-in-diff", error: "No previewable image by that path in this diff" });
   }
   const sidePath = side === "old" ? entry.oldPath : entry.newPath;
   if (!sidePath) {
-    return errorResponse(404, { reason: "absent", error: `This file has no ${side === "old" ? "before" : "after"} version` });
+    return reviewImageErrorResponse(404, { reason: "absent", error: `This file has no ${side === "old" ? "before" : "after"} version` });
   }
   try {
     validateFilePath(sidePath);
     if (entry.newPath) validateFilePath(entry.newPath);
   } catch {
-    return errorResponse(404, { reason: "not-in-diff", error: "Invalid file path" });
+    return reviewImageErrorResponse(404, { reason: "not-in-diff", error: "Invalid file path" });
   }
 
   let read: FileBytesRead;
@@ -439,21 +444,35 @@ export async function handleReviewImageRequest(request: ReviewImageRequest): Pro
   } catch (error) {
     if (error instanceof ReviewImageAbortError || request.signal?.aborted) {
       // Nobody is listening; the status only matters to logs.
-      return errorResponse(499, { reason: "aborted", error: "The request was aborted" });
+      return reviewImageErrorResponse(499, { reason: "aborted", error: "The request was aborted" });
     }
-    return errorResponse(502, {
+    return reviewImageErrorResponse(502, {
       reason: "fetch-failed",
       error: error instanceof Error ? error.message : "Failed to read the image",
     });
   }
 
+  return reviewImageBytesResponse(read, request.ifNoneMatch);
+}
+
+/**
+ * The image answer for bytes a side reader returned: the read's own refusals,
+ * the byte and pixel caps, the LFS-pointer refusal, the magic-byte content
+ * type, the dimension headers, and the sandboxed response headers (with the
+ * ETag / 304 path). Shared by `/api/review-image` and the Markdown preview's
+ * `/api/review-markdown-image`, so both answer an image exactly alike.
+ */
+export function reviewImageBytesResponse(
+  read: FileBytesRead,
+  ifNoneMatch?: string | null,
+): ReviewImageResponse {
   switch (read.kind) {
     case "unavailable":
-      return errorResponse(400, { reason: "unavailable", error: "Image preview is unavailable for this review" });
+      return reviewImageErrorResponse(400, { reason: "unavailable", error: "Image preview is unavailable for this review" });
     case "missing":
-      return errorResponse(404, { reason: "missing", error: "The file could not be found at this version" });
+      return reviewImageErrorResponse(404, { reason: "missing", error: "The file could not be found at this version" });
     case "too-large":
-      return errorResponse(413, {
+      return reviewImageErrorResponse(413, {
         reason: "too-large",
         error: `The file is larger than ${formatMegabytes(MAX_REVIEW_IMAGE_PREVIEW_BYTES)}`,
         bytes: read.size,
@@ -462,22 +481,22 @@ export async function handleReviewImageRequest(request: ReviewImageRequest): Pro
 
   const bytes = read.bytes;
   if (bytes.byteLength > MAX_REVIEW_IMAGE_PREVIEW_BYTES) {
-    return errorResponse(413, {
+    return reviewImageErrorResponse(413, {
       reason: "too-large",
       error: `The file is larger than ${formatMegabytes(MAX_REVIEW_IMAGE_PREVIEW_BYTES)}`,
       bytes: bytes.byteLength,
     });
   }
   if (isLfsPointer(bytes)) {
-    return errorResponse(415, { reason: "lfs-pointer", error: "The file is stored in Git LFS" });
+    return reviewImageErrorResponse(415, { reason: "lfs-pointer", error: "The file is stored in Git LFS" });
   }
   const contentType = sniffImageContentType(bytes);
   if (!contentType) {
-    return errorResponse(415, { reason: "not-image", error: "The file is not a recognized image format" });
+    return reviewImageErrorResponse(415, { reason: "not-image", error: "The file is not a recognized image format" });
   }
   const dims = readImageDimensions(bytes, contentType);
   if (dims && dims.width * dims.height > MAX_REVIEW_IMAGE_PREVIEW_PIXELS) {
-    return errorResponse(413, {
+    return reviewImageErrorResponse(413, {
       reason: "too-large",
       error: `The image is ${dims.width} × ${dims.height} px, over the preview limit`,
       width: dims.width,
@@ -495,7 +514,7 @@ export async function handleReviewImageRequest(request: ReviewImageRequest): Pro
     ...(read.etag ? { ETag: read.etag } : {}),
     ...(dims ? { "X-Image-Width": String(dims.width), "X-Image-Height": String(dims.height) } : {}),
   };
-  if (read.etag && request.ifNoneMatch && request.ifNoneMatch === read.etag) {
+  if (read.etag && ifNoneMatch && ifNoneMatch === read.etag) {
     const { "Content-Length": _length, ...rest } = headers;
     return { status: 304, headers: rest, body: null };
   }
