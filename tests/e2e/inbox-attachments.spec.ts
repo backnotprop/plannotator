@@ -11,7 +11,9 @@
  * Clean under the `plannotator-grid-enabled=false` cookie), a selection comment listed in the reply box's
  * annotations chip; the HTML prototype full screen with its relative image
  * resolved, its iframe loading the sibling page (never the Inbox, #1554), the
- * frame unable to read the Inbox API, a marker pinned on "Retry all"; a node
+ * frame unable to read the Inbox API, a marker pinned on "Retry all"; leaving
+ * full screen keeps the file beside the thread with `‹ Inbox` leading its
+ * header, which closes the file and brings the list back (focus on its row); a node
  * comment on a Mermaid diagram; the file edited on disk and the changed line,
  * with "Open the version it sent" showing the bytes sent; Send carrying the
  * picks and the annotations, read back by wait_for_reply; a path outside the
@@ -463,6 +465,64 @@ test('the HTML prototype opens full screen: its image and frame load from its fo
   await pane.getByRole('button', { name: 'Close admin-view.html' }).click();
   await expect(pane).toHaveCount(0);
   expect(page.url()).not.toContain('file=');
+});
+
+test('leaving full screen keeps the file beside the thread with ‹ Inbox leading its header; ‹ Inbox closes the file and brings the list back', async () => {
+  // Design record "inbox-file-back-to-list", variant 1, approved 2026-10-12.
+  const page = world.page;
+  const nav = page.getByRole('complementary', { name: 'Inbox navigation' });
+  const thread = page.locator('section.ib-pane');
+  const back = thread.locator('.ib-phead [data-file-back]');
+  // No file open: the header is as before.
+  await expect(back).toHaveCount(0);
+  await expect(thread.getByRole('button', { name: 'Close the thread' })).toBeVisible();
+  await page.getByRole('button', { name: 'Open admin-view.html' }).click();
+  const pane = page.locator(`[data-attachment-pane="${world.attachments.html}"]`);
+  await expect(pane).toHaveClass(/ib-full/);
+  const exit = pane.getByRole('button', { name: 'Exit full screen' });
+  await exit.focus();
+  await page.keyboard.press('Enter');
+  await expect(pane).not.toHaveClass(/ib-full/);
+  // Focus stays on the toggle, now Full screen; the way back is in view at the top left, ahead of Archive.
+  await expect(pane.getByRole('button', { name: 'Full screen' })).toBeFocused();
+  await expect(back).toBeVisible();
+  await expect(back).toHaveAccessibleName('Back to Inbox');
+  await expect(back).toHaveText('Inbox');
+  await expect(thread.locator('.ib-phead > *').first()).toHaveAttribute('data-file-back', '');
+  await expect(thread.getByRole('button', { name: 'Close the thread' })).toHaveCount(0);
+  await expect(nav).toBeHidden();
+  await expect(page.locator('.ib-listcol')).toHaveCount(0);
+  const backBox = (await back.boundingBox())!;
+  expect(backBox.x).toBeLessThan(40);
+  expect(backBox.y).toBeLessThan(20);
+  await shot('2.4b-after-full-screen-back-to-inbox');
+
+  await back.click();
+  await expect(pane).toHaveCount(0);
+  expect(page.url()).not.toContain('file=');
+  expect(page.url()).toContain(`thread=${world.threads.billing}`);
+  // The sidebar returns to the person's choice (open), the list returns beside the thread, focus on its row.
+  await expect(nav).toBeVisible();
+  const row = page.locator(`.ib-listcol .ib-lbody [data-thread-id="${world.threads.billing}"]`);
+  await expect(row).toBeVisible();
+  await expect(row).toBeFocused();
+  await expect(thread).toBeVisible();
+  await expect(back).toHaveCount(0);
+  await expect(thread.getByRole('button', { name: 'Close the thread' })).toBeVisible();
+  await page.waitForTimeout(400);
+  await shot('2.4c-back-to-inbox-list-returns');
+
+  // A file that opens beside the thread (markdown) gets the same way back; the keyboard reaches it too.
+  await page.getByRole('button', { name: 'Open retry-plan.md' }).click();
+  await expect(page.locator(`[data-attachment-pane="${world.attachments.plan}"]`)).not.toHaveClass(/ib-full/);
+  await expect(back).toBeVisible();
+  await back.hover();
+  await page.waitForTimeout(400);
+  await shot('2.4d-file-beside-back-to-inbox-hover');
+  await back.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-attachment-pane]')).toHaveCount(0);
+  await expect(row).toBeFocused();
 });
 
 test('a Mermaid diagram opens beside its thread and takes a node comment', async () => {

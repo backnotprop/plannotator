@@ -340,6 +340,14 @@ export interface ThreadPaneProps {
   stacked?: boolean;
   /** A window too narrow for a file beside the thread (stack.ts): an open file takes the whole window. */
   fileStacked?: boolean;
+  /**
+   * A file open beside the thread on a desktop hides the list and the
+   * sidebar: the header then leads with `‹ Inbox` (`backLabel`), which closes
+   * the file (through the pane's unsaved-comment question, as the file's ×
+   * does) and calls this with the file's name, so the window can bring the
+   * list back and put focus on this thread's row. Absent: no such button.
+   */
+  onBackToList?: (fileName: string | null) => void;
 }
 
 /** The thread's attachments as they are now and the annotations waiting for a Send, kept fresh. */
@@ -371,7 +379,7 @@ function useThreadAttachments(threadId: string, revision: unknown) {
   return { model, load, patch };
 }
 
-export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile, onOpenGuide, lookSeq, row, onMarkRead, onArchive, replyRequest, onReplyOpened, backLabel = 'Inbox', phone = false, stacked = false, fileStacked = false }: ThreadPaneProps) {
+export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile, onOpenGuide, lookSeq, row, onMarkRead, onArchive, replyRequest, onReplyOpened, backLabel = 'Inbox', phone = false, stacked = false, fileStacked = false, onBackToList }: ThreadPaneProps) {
   const root = thread.messages[0]!;
   const asker = agentName(root.author);
   const resolved = thread.resolved_at !== null;
@@ -1177,6 +1185,18 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
 
   const openAttachment = file ? attachments.find((a) => a.id === file.id) ?? null : null;
   const fileOpen = openAttachment !== null;
+  // A file beside the thread hides the list (App.tsx `fileOpen`, from the route, so before the
+  // attachments load too): the way back to it leads the header, as on an iPad (approved 2026-10-12).
+  const backBesideFile = file !== null && !phone && !stacked && !fileStacked && onBackToList !== undefined;
+  const backToList = () => {
+    const name = openAttachment?.name ?? null;
+    const go = () => {
+      setFull(false);
+      onBackToList!(name);
+    };
+    if (paneRef.current) paneRef.current.leave(null, go);
+    else go();
+  };
 
   const archiveButton = (
     <button
@@ -1239,6 +1259,23 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                 <span className="ib-vsep" aria-hidden="true" />
               </>
             )}
+            {/* A file beside the thread hides the list: the same way back leads; it closes the file. */}
+            {backBesideFile && (
+              <>
+                <button
+                  type="button"
+                  className="ib-pback"
+                  onClick={backToList}
+                  aria-label={`Back to ${backLabel}`}
+                  title={openAttachment ? `Close ${openAttachment.name} and show the list` : `Back to ${backLabel}`}
+                  data-file-back=""
+                >
+                  <Icon name="chevL" size={16} />
+                  <span className="ib-pback-l">{backLabel}</span>
+                </button>
+                <span className="ib-vsep" aria-hidden="true" />
+              </>
+            )}
             {archiveButton}
             {markReadOffered && (
               <>
@@ -1274,7 +1311,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
             {markReadButton}
             {archiveButton}
           </>
-        ) : stacked ? null : (
+        ) : stacked || backBesideFile ? null : (
           <button type="button" className="ib-iconbtn" onClick={onClose} title="Close" aria-label="Close the thread">
             <Icon name="x" />
           </button>

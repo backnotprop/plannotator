@@ -898,10 +898,20 @@ function Inbox() {
   const decisionFocus = useRef<string | null>(null);
   const returnDecision = useRef<string | null>(null);
   const focusFrom = useRef<{ view: string; thread: string | null; decision: string | null }>({ view, thread: null, decision: null });
+  // `‹ Inbox` in the thread's header with a file beside it: the thread whose row takes focus once the file
+  // has closed and the list is back (the list is not drawn while the file is open, so it waits for the view).
+  const backFromFile = useRef<string | null>(null);
   useEffect(() => {
     const before = focusFrom.current;
     focusFrom.current = { view, thread: view === 'thread' ? route.thread : null, decision: view === 'decision' ? (route.decision ?? null) : null };
-    if (phone || before.view === view) return;
+    if (before.view === view) return;
+    const fromFile = backFromFile.current;
+    backFromFile.current = null;
+    if (phone) return;
+    if (fromFile && before.view === 'file' && view === 'thread' && route.thread === fromFile) {
+      focusFirst([`.ib-listcol .ib-lbody [data-thread-id="${CSS.escape(fromFile)}"]`, 'section.ib-pane h2.ib-subject']);
+      return;
+    }
     if (stack.thread && view === 'thread' && before.view === 'list') {
       focusFirst(['section.ib-pane [data-stack-back]', 'section.ib-pane h2.ib-subject']);
     } else if (stack.thread && view === 'list' && before.view === 'thread' && before.thread) {
@@ -1080,6 +1090,12 @@ function Inbox() {
             phone={phone}
             stacked={stack.thread}
             fileStacked={stack.file}
+            onBackToList={(fileName) => {
+              // The file's own close (its ×), then focus on this thread's row and one line for a screen reader.
+              backFromFile.current = thread.thread_id;
+              closeTo({ ...routeRef.current, file: null });
+              say(`${filterProject?.name ?? 'Inbox'} list shown.${fileName ? ` ${fileName} closed.` : ''}`);
+            }}
           />
         )}
       </>
