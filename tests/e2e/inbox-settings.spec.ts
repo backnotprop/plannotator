@@ -148,7 +148,8 @@ test('desktop: a focused page with a section nav; addresses, keyboard, focus, Ba
 });
 
 test('iPhone (WebKit): the list of sections, a section with ‹ Settings, and Pair a phone from step 1 to the code', async () => {
-  const phoneBrowser = await webkit.launch();
+  // The config's launch args are Chromium-only; Linux WebKit refuses them (inbox-mobile.spec.ts does the same).
+  const phoneBrowser = await webkit.launch({ args: [] });
   try {
     const context = await phoneBrowser.newContext({ ...devices['iPhone 15'] });
     const page = await context.newPage();
