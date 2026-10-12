@@ -134,6 +134,24 @@ export const INBOX_TOOL_WAKE_NOTE =
   "When the person replies to a message you sent, their reply arrives in this session by itself once it is idle, as a message headed `Plannotator Inbox: <subject> (<reply id>)`: end your turn, or go on with other work; do not call wait_for_reply. When they need to hear back, answer with send_message reply_to."
 
 /**
+ * The one-line reminder a session that has `plannotator_inbox` gets once, at
+ * its start (the Claude Code mod's `prompt.context` block, Pi's hidden
+ * before_agent_start message, OpenCode's fixed system line), when the
+ * `inboxReminder` switch allows it. Fixed text: it sits in the cached prompt
+ * prefix and must never change within a session. For hosts with the wake
+ * (the reply comes back as a turn).
+ */
+export const INBOX_REMINDER_TEXT =
+  "Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with plannotator_inbox send_message and keep going. Their reply comes back here."
+
+/**
+ * The same line for a host without the wake (OpenCode 1): the reply does not
+ * come back by itself there, so it names wait_for_reply instead.
+ */
+export const INBOX_REMINDER_TEXT_NO_WAKE =
+  "Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with plannotator_inbox send_message and keep going. Call wait_for_reply when you need their answer."
+
+/**
  * The agent tool: name, description and input schema, built from the Inbox's
  * own tools. Null when it offers none. `wakes: false` for a host that cannot
  * deliver a reply as a turn (OpenCode 1): the description then says nothing

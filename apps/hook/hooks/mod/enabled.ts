@@ -125,3 +125,34 @@ export function resolveInboxToolEnabled(envValue: string | undefined, configText
   }
   return INBOX_TOOL_DEFAULT
 }
+
+/**
+ * Whether a session that has the `plannotator_inbox` tool starts with the
+ * Inbox's one-line reminder (INBOX_REMINDER_TEXT, a `prompt.context` block).
+ * Never without the tool; then on unless turned off with:
+ *
+ *   { "inboxReminder": false }                       (config.json, every host)
+ *   { "inboxReminder": { "claude-code": false } }    (this host only; the Inbox's Settings writes this)
+ *
+ * There is no env var of its own: PLANNOTATOR_INBOX_TOOL decides it through
+ * the tool. Mirrors `resolveInboxReminder(config, env, 'claude-code')` in
+ * packages/shared/config.ts. Read once, at the first session.start, with the tool.
+ */
+export function resolveInboxReminderEnabled(inboxToolEnv: string | undefined, configText: string | null | undefined): boolean {
+  if (!resolveInboxToolEnabled(inboxToolEnv, configText)) return false
+  if (!configText) return true
+  let value: unknown
+  try {
+    value = (JSON.parse(configText) as Record<string, unknown> | null)?.inboxReminder
+  } catch {
+    return true
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) value = (value as Record<string, unknown>)['claude-code']
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase()
+    if (v === 'true' || v === '1') return true
+    if (v === 'false' || v === '0') return false
+  }
+  return true
+}

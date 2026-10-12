@@ -20,7 +20,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { loadConfig, resolveSharingEnabled } from "@plannotator/shared/config";
+import { loadConfig, resolveInboxReminder, resolveSharingEnabled } from "@plannotator/shared/config";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import {
@@ -50,7 +50,7 @@ import { shouldFallbackAfterEmbeddedError } from "./prompt-delivery-error";
 import { executeSubmitPlan } from "./submit-plan-executor";
 import { getPlanningPrompt } from "./planning-prompt";
 import { announceSessionUrl } from "./session-url";
-import { findInboxConnection, inboxToolArgs } from "./inbox";
+import { addInboxReminderOpenCode1, findInboxConnection, inboxToolArgs } from "./inbox";
 import { inboxAgentTool } from "@plannotator/shared/inbox/connection";
 import {
   appendCommandFeedback,
@@ -734,6 +734,17 @@ Do NOT proceed with implementation until your plan is approved.`;
           },
         }),
       };
+      // The Inbox reminder, decided with the tool: one fixed system line on
+      // every request (OpenCode 1 rebuilds the system prompt per request, so a
+      // fixed line keeps the prefix stable), the no-wake wording since replies
+      // do not come back by themselves here. `inboxReminder` turns it off.
+      if (resolveInboxReminder(loadConfig(), process.env, "opencode")) {
+        const planTransform = plugin["experimental.chat.system.transform"];
+        plugin["experimental.chat.system.transform"] = async (input, output) => {
+          await planTransform?.(input, output);
+          addInboxReminderOpenCode1(output.system);
+        };
+      }
     }
   } catch (error) {
     console.error(`[Plannotator] Could not register the plannotator_inbox tool: ${error instanceof Error ? error.message : String(error)}`);

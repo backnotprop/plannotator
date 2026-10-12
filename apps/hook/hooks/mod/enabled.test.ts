@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { AGENT_TOOL_DEFAULTS, INBOX_TOOL_DEFAULTS, resolveAgentTool, resolveClaudeCodeMod, resolveInboxTool } from '@plannotator/shared/config'
-import { AGENT_TOOL_DEFAULT, INBOX_TOOL_DEFAULT, resolveAgentToolEnabled, resolveClaudeModEnabled, resolveInboxToolEnabled } from './enabled'
+import { AGENT_TOOL_DEFAULTS, INBOX_TOOL_DEFAULTS, resolveAgentTool, resolveClaudeCodeMod, resolveInboxReminder, resolveInboxTool } from '@plannotator/shared/config'
+import { AGENT_TOOL_DEFAULT, INBOX_TOOL_DEFAULT, resolveAgentToolEnabled, resolveClaudeModEnabled, resolveInboxReminderEnabled, resolveInboxToolEnabled } from './enabled'
 
 // The mod cannot import packages/shared, so it mirrors resolveClaudeCodeMod.
 // The failure this guards: the two drift, and the CLI docs/settings say the
@@ -87,5 +87,33 @@ describe('inbox tool switch', () => {
 
   test('inboxTool is its own key: agentTool off leaves it on', () => {
     expect(resolveInboxToolEnabled(undefined, '{"agentTool":false}')).toBe(INBOX_TOOL_DEFAULT)
+  })
+})
+
+// The reminder's mirror: the failure is the mod adding the session-start line
+// for a user who turned it off, or to a session without the Inbox tool.
+describe('inbox reminder switch', () => {
+  const envs = [undefined, '', '1', 'off', '0', 'garbage']
+  const tools: unknown[] = [undefined, true, false, { 'claude-code': false }, { pi: true }]
+  const reminders: unknown[] = [undefined, true, false, 'false', '1', { 'claude-code': false }, { 'claude-code': true }, { pi: false }, [], null]
+
+  test('the mod and packages/shared resolve every combination the same way', () => {
+    for (const env of envs) {
+      for (const tool of tools) {
+        for (const reminder of reminders) {
+          const config: Record<string, unknown> = {}
+          if (tool !== undefined) config.inboxTool = tool
+          if (reminder !== undefined) config.inboxReminder = reminder
+          const shared = resolveInboxReminder(config as never, env === undefined ? {} : { PLANNOTATOR_INBOX_TOOL: env }, 'claude-code')
+          expect([env, tool, reminder, resolveInboxReminderEnabled(env, JSON.stringify(config))]).toEqual([env, tool, reminder, shared])
+        }
+      }
+    }
+    expect(resolveInboxReminderEnabled(undefined, '{ not json')).toBe(resolveInboxReminder({}, {}, 'claude-code'))
+  })
+
+  test('never without the tool, whatever the reminder key says', () => {
+    expect(resolveInboxReminderEnabled('0', '{"inboxReminder":true}')).toBe(false)
+    expect(resolveInboxReminderEnabled(undefined, '{"inboxTool":false,"inboxReminder":true}')).toBe(false)
   })
 })

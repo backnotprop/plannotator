@@ -174,16 +174,26 @@ const QUESTION = [
 ].join('\n')
 
 describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () => {
-  test('no registry: no tool and nothing polls; once the Inbox ran, the tool carries exactly what its /mcp offers', async () => {
+  test('no registry: the tool from the bundled list, nothing polls or writes, and the first call starts the Inbox; once the Inbox ran, the tool carries exactly what its /mcp offers', async () => {
     const w = world('01-registry-and-tool-list')
     const silent = await open(w, 'session-silent')
-    expect(silent.inboxTools).toBeNull()
-    expect(silent.mod.inbox).toBeNull()
+    // Before this computer ever ran the Inbox: the list bundled with the mod (pinned to a real Inbox by inbox-default-tools.test.ts).
+    expect(silent.inboxTools?.map((tool) => tool.name)).toEqual([...INBOX_TOOL_ACTIONS])
+    expect(silent.mod.inbox).not.toBeNull()
     await Bun.sleep(2_500)
     expect(silent.host.fetches).toEqual([])
-    w.proof('no inbox/inbox.json: inboxTools null, no InboxLink, 0 HTTP requests in 2.5 s')
+    expect(existsSync(join(w.dataDir, 'claude-code-mod', 'session-silent', 'inbox'))).toBe(false)
+    expect(existsSync(join(w.dataDir, 'inbox'))).toBe(false)
+    w.proof('no inbox/inbox.json: plannotator_inbox from the bundled list, 0 HTTP requests and no files in 2.5 s')
 
-    startInbox(w)
+    // The first call starts the Inbox (plannotator inbox --background, no tab) and the message lands.
+    const first = await send(silent, w, 'Is the staging deploy green?')
+    expect((await thread(w, first.thread_id)).messages[0]?.author).toMatchObject({ host: 'claude-code', session: 'session-silent' })
+    expect(existsSync(w.browserMarker)).toBe(false)
+    // And from then on the wake polls this session's replies.
+    await waitFor('the wake to poll the new Inbox', () => silent.host.fetches.some((url) => url.endsWith('/api/inbox/bridge/poll')))
+    w.proof(`the first call started the Inbox (pid ${registry(w).pid}) and landed thread ${first.thread_id}; the wake polls it now`)
+    silent.quit()
     const session = await open(w, 'session-1')
     const names = session.inboxTools?.map((tool) => tool.name)
     // What this Inbox's /mcp lists, asked directly: the tool carries exactly those it can (an older

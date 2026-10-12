@@ -3,13 +3,15 @@
  * `plannotator_inbox` tool and the reply wake. One `InboxLink` per session,
  * owned by that session's `PlannotatorMod`.
  *
- * Found or not: only where `inbox/inbox.json` exists at session start (the
- * person ran the Inbox once) and the inbox tool switch allows it
- * (`resolveInboxToolEnabled`); otherwise nothing is registered and nothing
- * polls. The tool's actions are the Inbox's own MCP tools, read from its
- * `/mcp` once at session start (`discoverInboxTools`); an older Inbox offers
- * fewer, and the tool simply has fewer actions. The tool list never changes
- * under a running session.
+ * Registered wherever the inbox tool switch allows it
+ * (`resolveInboxToolEnabled`, on by default), also before this computer ever
+ * ran the Inbox. The tool's actions are the Inbox's own MCP tools, read from
+ * its `/mcp` once at session start (`discoverInboxTools`): from a running
+ * Inbox, else the list one last answered with, else the list bundled with the
+ * mod (`INBOX_DEFAULT_TOOLS`, generated from a real Inbox). An older Inbox
+ * offers fewer, and the tool simply has fewer actions. The tool list never
+ * changes under a running session. With no `inbox/inbox.json` the link stays
+ * silent (no HTTP, no files) until a call starts the Inbox.
  *
  * The tool: each call re-reads the registry (never caching the port or
  * token), starts a stopped Inbox with `plannotator inbox --background` (it
@@ -43,6 +45,7 @@ import type { Host, HttpResult } from './host'
 import {
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
+  INBOX_REMINDER_TEXT,
   inboxToolCall,
   inboxToolCallParams,
   inboxToolResultText,
@@ -55,12 +58,26 @@ import {
   type InboxReplyCommand,
   type InboxToolInfo,
 } from './inbox-contract'
+import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
 import { privateDirArgv } from './launch'
 
 /** The host this connection names on its messages and deliveries. */
 export const INBOX_HOST = 'claude-code'
 /** How the person sees this agent in the Inbox. */
 export const INBOX_AGENT_NAME = 'Claude Code'
+/** The `prompt.context` block that carries the Inbox reminder. */
+export const INBOX_REMINDER_BLOCK = 'plannotatorInbox'
+
+/**
+ * The first message's context blocks with the Inbox reminder last
+ * (INBOX_REMINDER_TEXT, fixed text). Never twice: a block of that name
+ * already there (a hook above added it) is left as it is.
+ */
+export function withInboxReminder<T extends { name: string; text: string }>(blocks: readonly T[]): Array<T | { name: string; text: string }> {
+  if (blocks.some((block) => block?.name === INBOX_REMINDER_BLOCK)) return [...blocks]
+  return [...blocks, { name: INBOX_REMINDER_BLOCK, text: INBOX_REMINDER_TEXT }]
+}
+
 /** `$.store` key: the Inbox tool list last read live, used when the Inbox is stopped at session start. */
 export const STORE_INBOX_TOOLS = 'inboxTools'
 
@@ -165,15 +182,15 @@ async function within<T>(host: Host, ms: number, work: Promise<T>): Promise<T | 
 
 /**
  * The Inbox tools this session's `plannotator_inbox` tool carries, decided
- * once at session start; null: no tool (no registry, or nothing known about
- * the Inbox's tools). A running Inbox is asked (`tools/list`) and its answer
- * remembered; a stopped one is described by the list it last answered with,
- * and is started by the first call.
+ * once at session start. A running Inbox is asked (`tools/list`) and its
+ * answer remembered; a stopped one is described by the list it last answered
+ * with; with neither (this computer never ran the Inbox, or nothing was
+ * remembered), the list bundled with the mod. The first call starts a stopped
+ * Inbox (`plannotator inbox --background`).
  */
-export async function discoverInboxTools(host: Host, dataDir: string): Promise<InboxToolInfo[] | null> {
+export async function discoverInboxTools(host: Host, dataDir: string): Promise<InboxToolInfo[]> {
   const path = inboxRegistryPathOf(dataDir)
-  if (!(await host.exists(path))) return null
-  const registry = parseInboxRegistry(await host.readFile(path).catch(() => null))
+  const registry = (await host.exists(path)) ? parseInboxRegistry(await host.readFile(path).catch(() => null)) : null
   if (registry) {
     const answer = await within(host, INBOX_DISCOVER_TIMEOUT_MS, mcpCall(host, registry.port, 'tools/list', {})).catch(() => null)
     const tools = answer && 'result' in answer ? parseInboxToolList(answer.result) : []
@@ -183,7 +200,7 @@ export async function discoverInboxTools(host: Host, dataDir: string): Promise<I
     }
   }
   const remembered = parseInboxToolList(await host.storeGet(STORE_INBOX_TOOLS).catch(() => null))
-  return remembered.length > 0 ? remembered : null
+  return remembered.length > 0 ? remembered : INBOX_DEFAULT_TOOLS.map((tool) => ({ ...tool }))
 }
 
 interface InboxLease {
@@ -291,7 +308,10 @@ export class InboxLink {
   async touch(): Promise<void> {
     this.touchedAt = await this.host.now()
     if (this.disposed) return
-    if (await this.ensureDir()) await this.holdLease(this.touchedAt)
+    // No Inbox has ever run here: nothing to deliver, so nothing is written;
+    // the lease is taken on the first tick after a call starts the Inbox.
+    if (!(await this.host.exists(this.registryPath))) this.leaseCheckedAt = Number.NEGATIVE_INFINITY
+    else if (await this.ensureDir()) await this.holdLease(this.touchedAt)
     else this.leaseCheckedAt = Number.NEGATIVE_INFINITY
   }
 
@@ -405,7 +425,8 @@ export class InboxLink {
   }
 
   private async tick(): Promise<void> {
-    if (this.disposed || !(await this.ensureDir())) return
+    // Silent until an Inbox exists (the first plannotator_inbox call starts one): no HTTP, no files.
+    if (this.disposed || !(await this.host.exists(this.registryPath)) || !(await this.ensureDir())) return
     const busy = this.options.isBusy()
     this.idleTicks = busy ? 0 : this.idleTicks + 1
     const now = await this.host.now()
