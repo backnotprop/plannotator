@@ -148,6 +148,7 @@ jobs:
           packages/inbox/attachmentsHeader.test.tsx
           packages/inbox/themeToggle.test.tsx
           packages/inbox/agentsCard.test.tsx
+          packages/inbox/agentsSettings.test.tsx
           packages/ui/components/MenuVersionSection.test.tsx
           packages/ui/components/blocks/QuestionBlock.test.tsx
           packages/ui/components/blocks/QuestionBlock.host.test.tsx
