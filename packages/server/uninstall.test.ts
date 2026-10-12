@@ -2081,7 +2081,7 @@ describe("the Inbox's agent connections (inbox-agents.ts)", () => {
     const fixture = createFixture();
     seed(fixture);
     const result = await runPlannotatorUninstall({ purge: false, dryRun: true }, fixture.environment);
-    expect(result.planned).toContain("MCP server plannotator-inbox from Cursor (~/.cursor/mcp.json, that entry only)");
+    expect(result.planned).toContain(`MCP server plannotator-inbox from Cursor (${join("~", ".cursor", "mcp.json")}, that entry only)`);
     expect((readJson(cursorFile(fixture)).mcpServers as Record<string, unknown>)["plannotator-inbox"]).toEqual(ours);
   });
 
@@ -2089,7 +2089,7 @@ describe("the Inbox's agent connections (inbox-agents.ts)", () => {
     const fixture = createFixture();
     seed(fixture);
     const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
-    expect(result.removed).toContain("MCP server plannotator-inbox from Cursor (~/.cursor/mcp.json, that entry only)");
+    expect(result.removed).toContain(`MCP server plannotator-inbox from Cursor (${join("~", ".cursor", "mcp.json")}, that entry only)`);
     expect(readJson(cursorFile(fixture)).mcpServers).toEqual({ mine: { command: "x" } });
     expect((readJson(join(fixture.dataDir, "inbox", "agents.json")).agents as Record<string, unknown>).cursor).toBeUndefined();
   });
