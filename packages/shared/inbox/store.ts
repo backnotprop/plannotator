@@ -683,12 +683,20 @@ export class InboxStore {
     // handled. Derived; the thread stays resolved until the person acts.
     const archiveSeq = this.archiveSeq(threadId);
     const agentAfterArchive = archiveSeq !== null && messages.some((m) => m.author.kind === "agent" && seqOf(m) > archiveSeq);
+    // The person's last real reply: Mark read's set-aside note and its Undo's
+    // reopened note are the Inbox's, not a reply that waits on the agent (as readAt).
+    const lastReal = [...messages].reverse().find((m) => !(m.author.kind === "person" && (m.set_aside || m.reopened)));
+    const replyUnread =
+      lastReal !== undefined &&
+      lastReal.author.kind === "person" &&
+      seqOf(lastReal) > (archiveSeq ?? 0) &&
+      (root.agent_checked_seq ?? 0) < seqOf(lastReal);
     const backFromArchive =
       agentAfterArchive &&
       (messages.some((m) => m.author.kind === "agent" && seqOf(m) > archiveSeq! && seqOf(m) > seenSeq) ||
         summary.questions.open > 0 ||
         summary.questions.picked > 0 ||
-        (sent !== null && sent.checked_at === null && seqOf(last) > archiveSeq!));
+        replyUnread);
     const facts = {
       ...summary,
       agent_after_archive: agentAfterArchive,
@@ -1702,7 +1710,20 @@ export class InboxStore {
     const isResolved = root.resolved_at !== null;
     if (isResolved !== resolved) {
       const at = this.stamp();
-      this.appendMessage({ ...root, resolved_at: resolved ? at : null }, at);
+      // Unarchive drops a Mark read made while the thread was archived (on
+      // what came back): it covered only the part after the archive line, and
+      // must not hold the reopened thread in Quiet over the questions the
+      // archive had closed. Written in the same root line, so a replay agrees.
+      const archiveSeq = this.archiveSeq(root.id);
+      const readWhileArchived = !resolved && archiveSeq !== null && root.person_read_seq != null && root.person_read_seq > archiveSeq;
+      this.appendMessage(
+        {
+          ...root,
+          resolved_at: resolved ? at : null,
+          ...(readWhileArchived ? { person_read_seq: null, person_read_at: null, person_seen_before_read: undefined } : {}),
+        },
+        at,
+      );
     }
     return this.threadSummary(root.id)!;
   }

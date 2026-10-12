@@ -119,4 +119,48 @@ describe("a thread that came back from the archive", () => {
     store.resolveThread(root.id, true);
     expect(store.listRow(root.id)).toMatchObject({ agent_after_archive: false, back_from_archive: false, section: "quiet" });
   });
+
+  // The failure this guards: Mark read's set-aside note is a person message the
+  // agent has not read, and counted as a reply waiting on the agent, so about
+  // 10 s after "went back to Archived" the thread left the archive for Quiet.
+  test("after Mark read, the set-aside note does not bring it back: it stays archived, live and after replay", () => {
+    const { store, dir } = open();
+    const { root, after } = cameBack(store);
+    store.markRead(root.id, true);
+    const notes = store.tellSetAside(root.id, 0);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]!.reply_to).toBe(after.id);
+    const row = store.listRow(root.id)!;
+    expect(row).toMatchObject({ back_from_archive: false, section: "quiet" });
+    expect(inboxRowArchived(row)).toBe(true);
+    expect(InboxStore.open(dir).listRow(root.id)).toEqual(row);
+  });
+
+  // The failure this guards: Unarchive reopened the questions the archive had
+  // closed while the Mark read made on what came back still held the thread
+  // in Quiet "Read", with an open question in it.
+  test("Unarchive drops a Mark read made while archived: the reopened thread waits on its open question, live and after replay", () => {
+    const { store, dir } = open();
+    const { root } = cameBack(store);
+    store.markRead(root.id, true);
+    store.tellSetAside(root.id, 0);
+    store.resolveThread(root.id, false);
+    const row = store.listRow(root.id)!;
+    expect(row.resolved_at).toBeNull();
+    expect(row.read_at ?? null).toBeNull();
+    expect(store.questionsOf(root.id)[0]!.state).toBe("open");
+    expect(row).toMatchObject({ section: "waiting", unread: true });
+    expect(InboxStore.open(dir).listRow(root.id)).toEqual(row);
+  });
+
+  test("Unarchive keeps a Mark read made before the archive (it is not this rule's)", () => {
+    const { store } = open();
+    const project = store.ensureProject({ name: "billing", root: "/work/billing" });
+    const root = store.sendMessage({ project_id: project.id, author: AGENT, body: "A note." }).message;
+    store.markRead(root.id, true);
+    const readSeq = store.message(root.id)!.person_read_seq;
+    store.resolveThread(root.id, true);
+    store.resolveThread(root.id, false);
+    expect(store.message(root.id)!.person_read_seq).toBe(readSeq);
+  });
 });
