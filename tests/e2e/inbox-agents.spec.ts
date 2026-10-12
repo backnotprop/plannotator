@@ -30,7 +30,7 @@ async function shot(page: Page, name: string): Promise<void> {
   for (const scheme of ['dark', 'light'] as const) {
     await page.emulateMedia({ colorScheme: scheme });
     // The window follows the OS scheme on the next frame.
-    await page.waitForFunction((dark) => document.documentElement.classList.contains('dark') === dark, scheme === 'dark').catch(() => {});
+    await page.waitForFunction((dark) => document.documentElement.classList.contains('dark') === dark, scheme === 'dark', { timeout: 1500 }).catch(() => {});
     await page.screenshot({ path: join(shots, `${name}-${scheme}.png`) });
   }
   await page.emulateMedia({ colorScheme: 'dark' });
