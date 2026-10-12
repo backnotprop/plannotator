@@ -72,12 +72,23 @@ export interface WaitingDecision {
   asked_at: string;
 }
 
+/** One project's counts for the Decisions page's project switch. */
+export interface DecisionProjectCounts {
+  project_id: string;
+  /** Questions that record a decision once answered and sent. */
+  waiting: number;
+  /** Decisions that hold (state `current`). */
+  settled: number;
+}
+
 export interface DecisionsModel {
   serverSession: string;
   cursor: number;
   project_id: string;
   waiting: WaitingDecision[];
   decisions: InboxDecision[];
+  /** Every project's counts, for the project switch. Absent from an older Inbox. */
+  project_counts?: DecisionProjectCounts[];
 }
 
 export interface ReplyResult {

@@ -865,6 +865,12 @@ function Inbox() {
     for (const project of projects) counts.set(project.id, waitingCount(latestSections, project.id));
     return counts;
   }, [projects, latestSections]);
+  // The Decisions switch's counts: every project's, from the last Decisions read of any project,
+  // so they stay on screen while another project's decisions load.
+  const decisionCounts = useMemo(() => {
+    const list = decisions?.project_counts;
+    return list ? new Map(list.map((c) => [c.project_id, c])) : null;
+  }, [decisions]);
 
   const context: ConnectContext | null = settings
     ? { command: settings.mcp_command, mcpUrl: settings.mcp_url, platform: platformOf() }
@@ -1062,6 +1068,8 @@ function Inbox() {
         onReplace={replaceDecision}
         phone={phone}
         stacked={stack.decision}
+        counts={decisionCounts}
+        home={settings?.home ?? null}
       />
     );
   } else if (route.page === 'decisions') {

@@ -180,3 +180,38 @@ test("refusals: a stale version, an ended decision, a reused key with other word
   });
   expect(crossSite.status).toBe(403);
 });
+
+test("the Decisions route carries every project's waiting and settled counts, for the project switch", async () => {
+  const { dataDir, project } = world();
+  const server = await start(dataDir);
+  const call = await agent(server);
+  // billing-svc: one question waiting on a decision, two decisions recorded, one of them then retired.
+  const asked = await call("send_message", { project_path: project, body: ASK, agent_name: "Claude Code", agent_host: "claude-code" });
+  await call("record_decision", { project_path: project, text: "Webhooks are verified first.", idempotency_key: "a" });
+  const retired = await call("record_decision", { project_path: project, text: "Refunds stay a person's call.", idempotency_key: "b" });
+  expect((await post(server, `/api/inbox/decisions/${retired.decision.id}/retire`, { version: 1 })).status).toBe(200);
+  // docs: a project with nothing to decide.
+  const docs = join(dataDir, "..", "docs");
+  mkdirSync(docs);
+  await call("send_message", { project_path: docs, body: "The docs build is green." });
+
+  const projects = (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/projects`)).json()).projects as { id: string; name: string }[];
+  const billing = projects.find((p) => p.name === "billing-svc")!;
+  const quiet = projects.find((p) => p.name === "docs")!;
+  const model = await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/decisions?project=${quiet.id}`)).json();
+  // Asked from one project, every project's counts come back, in the sidebar's order.
+  expect(model.project_counts).toEqual([
+    { project_id: billing.id, waiting: 1, settled: 1 },
+    { project_id: quiet.id, waiting: 0, settled: 0 },
+  ]);
+  expect(model.project_counts.map((c: { project_id: string }) => c.project_id)).toEqual(projects.map((p) => p.id));
+
+  // The answer sent with its switch on: no longer waiting, one more settled.
+  const key = asked.questions[0].key as string;
+  const before = (await thread(server, asked.thread_id)).thread.messages[0].questions[0] as InboxQuestion;
+  const answer = { v: 1, key, kind: before.kind, prompt: before.prompt, selected: ["Fail the job"] };
+  await post(server, `/api/inbox/messages/${asked.message_id}/picks`, { questions: [{ key, revision: 0, answer }] });
+  await post(server, `/api/inbox/messages/${asked.message_id}/reply`, { idempotency_key: "send", questions: [{ key, revision: 1 }] });
+  const after = await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/decisions?project=${billing.id}`)).json();
+  expect(after.project_counts[0]).toEqual({ project_id: billing.id, waiting: 0, settled: 2 });
+});

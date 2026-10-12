@@ -301,9 +301,37 @@ export function waitingDecisions(store: InboxStore, projectId?: string | null): 
   return out;
 }
 
-/** The Decisions page for one project: what waits on a call, then every decision. */
+/** One project's counts for the Decisions page's project switch. */
+export interface InboxDecisionProjectCounts {
+  project_id: string;
+  /** Questions that record a decision once answered and sent (the Waiting group). */
+  waiting: number;
+  /** Decisions that hold (state `current`, the Settled group). */
+  settled: number;
+}
+
+/** Every project's waiting and settled counts, in the store's project order (the sidebar's). */
+export function decisionProjectCounts(store: InboxStore): InboxDecisionProjectCounts[] {
+  const waiting = new Map<string, number>();
+  for (const item of waitingDecisions(store)) waiting.set(item.project_id, (waiting.get(item.project_id) ?? 0) + 1);
+  return store.listProjects().map((project) => ({
+    project_id: project.id,
+    waiting: waiting.get(project.id) ?? 0,
+    settled: store.decisionsOf(project.id).filter((d) => d.state === "current").length,
+  }));
+}
+
+/**
+ * The Decisions page for one project: what waits on a call, then every
+ * decision, and (additive) every project's counts for the project switch.
+ */
 export function decisionsModel(store: InboxStore, projectId: string) {
-  return { project_id: projectId, waiting: waitingDecisions(store, projectId), decisions: store.decisionsOf(projectId) };
+  return {
+    project_id: projectId,
+    waiting: waitingDecisions(store, projectId),
+    decisions: store.decisionsOf(projectId),
+    project_counts: decisionProjectCounts(store),
+  };
 }
 
 /** The decisions a thread's questions link to, for its "Settled: ..." lines. */
