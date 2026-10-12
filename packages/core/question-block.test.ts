@@ -718,6 +718,25 @@ describe("long task-list choices (picked as written)", () => {
     expect(canonicalQuestionAnswer(twin, stored).selected).toEqual([cut]);
   });
 
+  test("the export prints the full label for an answer an older build cut at 200 characters", () => {
+    const index = indexQuestionBlocks([{ id: "b", type: "directive", directiveKind: "question", content: block(LONG_SPIKE), startLine: 1 }]);
+    const q = index[0].question;
+    const cut: QuestionAnswer = { v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: [LONG_SPIKE.slice(0, 200)] };
+    const out = formatQuestionAnswersSection(questionExportItems(index), [cut]);
+    expect(out).toContain(`Answer: ${LONG_SPIKE}`);
+  });
+
+  test("a long label adds no looser matching: only its exact 200-character cut maps", () => {
+    const q = parseQuestionBlock("question", block(LONG_SPIKE))!;
+    expect(q.choices.some((c) => c.aliases)).toBe(false);
+    const stored = (label: string): QuestionAnswer => ({ v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: [label] });
+    // Case or punctuation never maps here, as in a question with no long label.
+    const loose = stored("ship it now.");
+    expect(canonicalQuestionAnswer(q, loose)).toBe(loose);
+    const cutLoose = stored(LONG_SPIKE.slice(0, 200).toUpperCase());
+    expect(canonicalQuestionAnswer(q, cutLoose)).toBe(cutLoose);
+  });
+
   test("selected stays bounded: a label longer than any block body is cut", () => {
     const parsed = parseQuestionAnswer(answer({ selected: ["x".repeat(30_000)] }))!;
     expect(parsed.selected[0].length).toBe(20_000);

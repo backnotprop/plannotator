@@ -10,6 +10,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxAuthor } from "@plannotator/core/inbox-types";
+import { composeInboxReplyBody } from "@plannotator/core/inbox-questions";
 import { InboxStore } from "./store";
 
 const roots: string[] = [];
@@ -61,5 +62,16 @@ describe("a long choice", () => {
     const answer = { v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: [LONG.slice(0, 200)] } as never;
     const [picked] = store.savePicks(message.id, [{ key: q.key, revision: 0, answer }]);
     expect(picked!.answer!.selected).toEqual([LONG]);
+  });
+
+  test("the reply's answers section prints the full label for an answer cut at 200 characters", () => {
+    const { store } = open();
+    const project = store.ensureProject({ name: "billing", root: "/work/billing" });
+    const message = store.sendMessage({ project_id: project.id, author: AGENT, body: ask(LONG) }).message;
+    const q = store.questionsOf(message.id)[0]!;
+    const record = store.questionRecord(`${message.id}/${q.key}`)!;
+    const cut = { v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: [LONG.slice(0, 200)] } as const;
+    const body = composeInboxReplyBody({ questions: [record], sent: [{ ...cut, selected: [...cut.selected] }], earlier: [], words: undefined });
+    expect(body).toContain(`Answer: ${LONG}`);
   });
 });

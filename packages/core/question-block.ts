@@ -891,22 +891,24 @@ export const canonicalQuestionAnswer = <A extends QuestionAnswer>(
   if (answer.selected.length === 0) return answer;
   const labels = new Set(question.choices.map((c) => c.label));
   if (answer.selected.every((stored) => labels.has(stored))) return answer;
-  // Through 0.28.17 an answer's labels were cut at
-  // MAX_QUESTION_CHOICE_LABEL_CHARS, so a long label or alias is also matched
-  // in that cut form (an answer saved then maps back to its choice).
-  const legacyCut = (name: string): string[] => {
-    const trimmed = name.trim();
-    return trimmed.length > MAX_QUESTION_CHOICE_LABEL_CHARS ? [cap(trimmed, MAX_QUESTION_CHOICE_LABEL_CHARS)] : [];
-  };
-  const names = question.choices.map((c) => [
-    ...legacyCut(c.label),
-    ...(c.aliases ?? []).flatMap((alias) => [alias, ...legacyCut(alias)]),
-  ]);
-  if (names.every((list) => list.length === 0)) return answer;
   // The one choice a stored label names, or -1 when none or several do: an
   // ambiguous label (two bullets that shared a first line, or names that only
   // differ in case or emphasis) stays as stored rather than picking one.
   const only = (hits: number[]): number => (hits.length === 1 ? hits[0] : -1);
+  // Through 0.28.17 an answer's labels were cut at
+  // MAX_QUESTION_CHOICE_LABEL_CHARS: a stored label that is exactly a long
+  // label's first 200 characters names that choice. Exact only, never
+  // normalized, so a question with a long label matches nothing else looser.
+  const cutLabels = question.choices.map((c) => legacyCutName(c.label));
+  const cutHit = (stored: string): number =>
+    only(question.choices.flatMap((_, i) => (cutLabels[i] === stored ? [i] : [])));
+  const hasAliases = question.choices.some((c) => c.aliases?.length);
+  // Answers were capped on validation, so a long alias is matched cut too.
+  const names = question.choices.map((c) =>
+    (c.aliases ?? []).flatMap((alias) => {
+      const cut = legacyCutName(alias);
+      return cut === null ? [alias] : [alias, cut];
+    }));
   const exactHit = (stored: string): number =>
     only(question.choices.flatMap((_, i) => (names[i].includes(stored) ? [i] : [])));
   const normalizedHit = (stored: string): number => {
@@ -918,14 +920,29 @@ export const canonicalQuestionAnswer = <A extends QuestionAnswer>(
   let changed = false;
   const selected = answer.selected.map((stored) => {
     if (labels.has(stored)) return stored;
-    let hit = exactHit(stored);
-    if (hit === -1) hit = normalizedHit(stored);
+    let hit = hasAliases ? exactHit(stored) : -1;
+    if (hit === -1) hit = cutHit(stored);
+    if (hit === -1 && hasAliases) hit = normalizedHit(stored);
     if (hit === -1) return stored;
     changed = true;
     return question.choices[hit].label;
   });
   return changed ? { ...answer, selected: [...new Set(selected)] } : answer;
 };
+
+/** A name as a build through 0.28.17 stored it in an answer when it was
+ *  longer than MAX_QUESTION_CHOICE_LABEL_CHARS (cut to that length), else
+ *  null (such a name was stored whole). */
+const legacyCutName = (name: string): string | null => {
+  const trimmed = name.trim();
+  return trimmed.length > MAX_QUESTION_CHOICE_LABEL_CHARS ? cap(trimmed, MAX_QUESTION_CHOICE_LABEL_CHARS) : null;
+};
+
+/** Whether the export needs a question's choices to print an answer's
+ *  current label: a choice has older names, or a label long enough that an
+ *  older build stored it cut. */
+export const questionChoicesNeedCanonicalLabels = (choices: ReadonlyArray<Pick<QuestionChoice, 'label' | 'aliases'>>): boolean =>
+  choices.some((c) => (c.aliases?.length ?? 0) > 0 || legacyCutName(c.label) !== null);
 
 /** A choice was picked, "Other…" was filled, or free text was written. */
 export const isQuestionAnswered = (answer: QuestionAnswer): boolean =>
@@ -1086,7 +1103,7 @@ export const questionExportItems = (indexed: ReadonlyArray<IndexedQuestion>): Qu
     ...(question.suggestedText ? { suggestedText: question.suggestedText } : {}),
     settled: question.choices.some((c) => c.settled),
     settledLabels: question.choices.filter((c) => c.settled).map((c) => c.label),
-    ...(question.choices.some((c) => c.aliases) ? { choices: question.choices.map(({ label, aliases }) => ({ label, ...(aliases ? { aliases } : {}) })) } : {}),
+    ...(questionChoicesNeedCanonicalLabels(question.choices) ? { choices: question.choices.map(({ label, aliases }) => ({ label, ...(aliases ? { aliases } : {}) })) } : {}),
   }));
 
 export const QUESTION_ANSWERS_HEADING = 'Answers to your questions';
