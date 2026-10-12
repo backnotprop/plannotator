@@ -29,6 +29,7 @@ import {
 	registry,
 	startInbox,
 	stopInbox,
+	removeStubbedHtml,
 	stubBuiltHtml,
 	SUBJECT,
 	thread,
@@ -66,8 +67,7 @@ beforeAll(async () => {
 	({ RpcClient } = (await import(pathToFileURL(join(piPackage, "dist", "modes", "rpc", "rpc-client.js")).href)) as never);
 });
 afterAll(() => {
-	const { rmSync } = require("node:fs") as typeof import("node:fs");
-	for (const path of stubs) rmSync(path, { force: true });
+	removeStubbedHtml(stubs);
 });
 afterEach(async () => {
 	for (const pi of pis.splice(0)) await pi.stop().catch(() => undefined);

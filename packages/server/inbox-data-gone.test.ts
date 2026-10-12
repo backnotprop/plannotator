@@ -1,8 +1,10 @@
 /**
  * An Inbox whose data folder is gone stops instead of running on headless:
  * its `inbox/` folder removed (a test's temp dir, a hand-deleted
- * ~/.plannotator/inbox), made again at the same path, or `inbox.json` naming
- * another Inbox. And a running Inbox rewrites `inbox.json` only while it is
+ * ~/.plannotator/inbox) or made again empty, or `inbox.json` naming another
+ * Inbox (`probeInboxData`). Only that evidence counts: an unreadable or
+ * half-written `inbox.json`, or the same files in another folder (a remount,
+ * a moved copy), never stop it. And a running Inbox rewrites `inbox.json` only while it is
  * its own, and never makes a removed folder again (`updateOwnInboxRegistry`):
  * a stopping Inbox used to rewrite whatever entry it read, so it dropped its
  * successor's tailnet record, and a SIGTERM after the folder was removed made
@@ -10,7 +12,7 @@
  * `tailscale`.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inboxRegistryPath, readInboxRegistry, writeInboxRegistry, updateOwnInboxRegistry, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
@@ -90,13 +92,66 @@ describe("an Inbox whose data folder is gone", () => {
     expect(existsSync(root)).toBe(false);
   });
 
-  test("the inbox folder removed and made again at the same path: it stops", async () => {
+  test("the inbox folder removed and made again empty at the same path: it stops (inbox.json is gone)", async () => {
     const { dataDir } = world();
     const { server, gone } = await start(dataDir);
     rmSync(join(dataDir, "inbox"), { recursive: true, force: true });
     mkdirSync(join(dataDir, "inbox"));
-    expect(await within(gone, 5000, "the stop")).toContain("made again");
+    expect(await within(gone, 5000, "the stop")).toContain("inbox.json is gone");
     expect(await listening(server)).toBe(false);
+  });
+
+  test("another folder at the same path still holding this Inbox's entry (a remount, a moved copy): it keeps running", async () => {
+    const { dataDir } = world();
+    const { server, gone } = await start(dataDir);
+    // A new device and inode, the same files.
+    renameSync(join(dataDir, "inbox"), join(dataDir, "inbox.moved"));
+    cpSync(join(dataDir, "inbox.moved"), join(dataDir, "inbox"), { recursive: true });
+    const reported = await Promise.race([gone, Bun.sleep(400).then(() => null)]);
+    expect(reported).toBeNull();
+    expect(await listening(server)).toBe(true);
+  });
+
+  test("inbox.json unreadable (EACCES) or not parsing for several checks: it cannot tell, so it keeps running", async () => {
+    if (process.getuid?.() === 0) return; // root reads a 000 file
+    const { dataDir } = world();
+    const { server, gone } = await start(dataDir);
+    const file = join(dataDir, "inbox", "inbox.json");
+    const entry = readFileSync(file, "utf8");
+    chmodSync(file, 0o000);
+    try {
+      // Three checks and more at 50 ms.
+      expect(await Promise.race([gone, Bun.sleep(400).then(() => null)])).toBeNull();
+      expect(await listening(server)).toBe(true);
+    } finally {
+      chmodSync(file, 0o600);
+    }
+    writeFileSync(file, "{ half an entr");
+    expect(await Promise.race([gone, Bun.sleep(400).then(() => null)])).toBeNull();
+    expect(await listening(server)).toBe(true);
+    writeFileSync(file, entry);
+  });
+
+  test("a tailnet take-down that fails at the data-gone stop: stderr names the manual command", async () => {
+    const { root, dataDir } = world();
+    // The e2e's shape: the fake `tailscale` lived in the removed folder, so every call fails once it is gone.
+    const goneWithRoot: TailscaleRunner = (args) => (existsSync(root) ? fakeTailscale(args) : { status: 127, stdout: "", stderr: "tailscale: not found" });
+    const { server, gone } = await start(dataDir, { tailscale: goneWithRoot, publishTailnet: true });
+    expect(server.tailscale.state().url).toContain("box.tail0000.ts.net");
+    const written: string[] = [];
+    const write = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      written.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      rmSync(root, { recursive: true, force: true });
+      await within(gone, 5000, "the stop");
+    } finally {
+      process.stderr.write = write;
+    }
+    expect(written.join("")).toContain(`tailscale serve --https=${server.port} off`);
+    expect(existsSync(root)).toBe(false);
   });
 
   test("inbox.json naming another Inbox: it stops (one writer per store)", async () => {

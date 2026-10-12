@@ -29,6 +29,7 @@ import {
   QUESTION,
   registry,
   startInbox,
+  removeStubbedHtml,
   stubBuiltHtml,
   SUBJECT,
   thread,
@@ -54,8 +55,7 @@ beforeAll(() => {
   stubs = stubBuiltHtml();
 });
 afterAll(() => {
-  const { rmSync } = require("node:fs") as typeof import("node:fs");
-  for (const file of stubs) rmSync(file, { force: true });
+  removeStubbedHtml(stubs);
 });
 afterEach(async () => {
   for (const host of hosts.splice(0)) await host.stop();

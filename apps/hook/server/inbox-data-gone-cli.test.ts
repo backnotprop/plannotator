@@ -12,7 +12,7 @@ import { chmodSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { INBOX_DATA_CHECK_MS } from "@plannotator/server/inbox";
 import { isPidAlive } from "@plannotator/shared/inbox/registry";
-import { createInboxWorld, registry, stubBuiltHtml, worldEnv, type InboxWorld } from "../../../tests/helpers/inbox-world";
+import { createInboxWorld, registry, removeStubbedHtml, stubBuiltHtml, worldEnv, type InboxWorld } from "../../../tests/helpers/inbox-world";
 
 const worlds: InboxWorld[] = [];
 const pids = new Set<number>();
@@ -28,7 +28,7 @@ afterEach(() => {
   }
   pids.clear();
   for (const w of worlds.splice(0)) rmSync(w.root, { recursive: true, force: true });
-  for (const path of stubs.splice(0)) rmSync(path, { force: true });
+  removeStubbedHtml(stubs.splice(0));
 });
 
 /** `tailscale` as a script in the world: the owner, an empty serve config, serve on and off. Removed with the world. */

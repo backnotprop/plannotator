@@ -33,13 +33,34 @@ export function inboxBinary(): string | undefined {
   return process.env.PLANNOTATOR_INBOX_TEST_BINARY || undefined;
 }
 
-/** The CLI from source imports the built HTML; the Inbox never serves it. Returns what to remove after. */
+/** What a stub page holds, marked so `removeStubbedHtml` can tell it from a real build. */
+const STUB_HTML = "<!doctype html><title>test</title><!-- plannotator test stub: tests/helpers/inbox-world.ts -->";
+
+/**
+ * The CLI from source imports the built HTML; the Inbox never serves it.
+ * Returns what to remove after, with `removeStubbedHtml`.
+ */
 export function stubBuiltHtml(): string[] {
   if (inboxBinary()) return [];
   mkdirSync(distDir, { recursive: true });
   const made = ["index.html", "review.html", "inbox.html"].map((name) => join(distDir, name)).filter((path) => !existsSync(path));
-  for (const path of made) writeFileSync(path, "<!doctype html><title>test</title>");
+  for (const path of made) writeFileSync(path, STUB_HTML);
   return made;
+}
+
+/**
+ * Remove the stubs `stubBuiltHtml` wrote, and only them: a build that ran
+ * meanwhile (`build:hook` in another terminal) replaced a stub with the real
+ * page, which stays.
+ */
+export function removeStubbedHtml(paths: readonly string[]): void {
+  for (const path of paths) {
+    try {
+      if (readFileSync(path, "utf8") === STUB_HTML) rmSync(path, { force: true });
+    } catch {
+      // Already gone.
+    }
+  }
 }
 
 export function createInboxWorld(prefix: string, name: string, proofSubdir: string, options: { phones?: boolean } = {}): InboxWorld {

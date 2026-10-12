@@ -9,10 +9,10 @@
  * `tailscale` never runs and ~/.plannotator is never touched.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isPidAlive } from "@plannotator/shared/inbox/registry";
-import { createInboxWorld, destroyInboxWorld, registry, stubBuiltHtml, waitFor, worldEnv, type InboxWorld } from "../../../tests/helpers/inbox-world";
+import { createInboxWorld, destroyInboxWorld, registry, removeStubbedHtml, stubBuiltHtml, waitFor, worldEnv, type InboxWorld } from "../../../tests/helpers/inbox-world";
 
 type Json = Record<string, any>;
 
@@ -88,7 +88,7 @@ describe("plannotator inbox --tailscale (processes, a fake tailscale on PATH)", 
 
   afterAll(() => {
     if (w) destroyInboxWorld(w);
-    for (const path of stubs) rmSync(path, { force: true });
+    removeStubbedHtml(stubs);
   });
 
   test("PLANNOTATOR_INBOX_TAILSCALE=1: an agent's --background start publishes; only the owner gets in; the connection surface stays local; SIGTERM takes the mapping down", async () => {

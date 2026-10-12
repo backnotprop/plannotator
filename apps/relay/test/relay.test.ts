@@ -45,7 +45,7 @@ import { join, resolve } from "node:path";
 import { createHmac } from "node:crypto";
 import { decryptWithKey, deriveRelayKeys, encryptWithKey } from "@plannotator/core/crypto";
 import { SimAgent } from "../../../scripts/inbox-sim";
-import { createInboxWorld, destroyInboxWorld, registry, stopInbox, stubBuiltHtml, worldEnv, type InboxWorld } from "../../../tests/helpers/inbox-world";
+import { createInboxWorld, destroyInboxWorld, registry, stopInbox, removeStubbedHtml, stubBuiltHtml, worldEnv, type InboxWorld } from "../../../tests/helpers/inbox-world";
 import { GUIDE_BRIEF_EXAMPLE } from "../../../packages/server/inbox-guides";
 import { apnsBody } from "../../../packages/server/inbox-relay";
 import { fcmMessage } from "../src/fcm";
@@ -417,7 +417,7 @@ describe("the relay with an Inbox, under wrangler dev", () => {
   afterAll(async () => {
     await agent?.close().catch(() => {});
     if (w) destroyInboxWorld(w);
-    for (const path of stubs) rmSync(path, { force: true });
+    removeStubbedHtml(stubs);
     relay?.stop();
     apple?.close();
   });
@@ -752,7 +752,7 @@ describe("the carriage: a phone reads and answers the Inbox through the relay al
   afterAll(async () => {
     await agent?.close().catch(() => {});
     if (w) destroyInboxWorld(w);
-    for (const path of stubs) rmSync(path, { force: true });
+    removeStubbedHtml(stubs);
     relay?.stop();
   });
 
@@ -1172,7 +1172,7 @@ describe("FCM: an Android phone gets its pushes through Google's hosts, played l
   afterAll(async () => {
     await agent?.close().catch(() => {});
     if (w) destroyInboxWorld(w);
-    for (const path of stubs) rmSync(path, { force: true });
+    removeStubbedHtml(stubs);
     relay?.stop();
     google?.close();
   });

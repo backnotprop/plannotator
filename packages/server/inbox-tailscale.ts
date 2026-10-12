@@ -401,20 +401,22 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
    * A clean stop: the mapping and the listener go, so nothing is published
    * while the Inbox is stopped; the switch stays as saved and the next start
    * publishes again. A take-down that fails keeps the record for the next
-   * start or `uninstall --purge`.
+   * start or `uninstall --purge`, and answers its port (`failedPort`) so a
+   * caller with nobody else to tell can print the manual command.
    */
-  const stop = () => {
-    if (httpsPort === null && !listener && !record()) return;
-    const port = httpsPort;
+  const stop = (): { failedPort: number | null } => {
+    if (httpsPort === null && !listener && !record()) return { failedPort: null };
+    const port = httpsPort ?? record()?.https_port ?? null;
     if (unpublish() === "failed") {
-      keepRecord(`Could not take the tailnet address down; run "tailscale serve --https=${port ?? record()?.https_port} off".`);
+      keepRecord(`Could not take the tailnet address down; run "tailscale serve --https=${port} off".`);
       closeListener();
       httpsPort = null;
       guardProcess(false);
       state.url = null;
-    } else if (record()) {
-      save(undefined);
+      return { failedPort: port };
     }
+    if (record()) save(undefined);
+    return { failedPort: null };
   };
 
   /** The window's switch: saved to config.json, applied now. `via`: the request came through the tailnet. */

@@ -128,6 +128,14 @@ export function writeInboxRegistry(dataDir: string, entry: InboxRegistryEntry): 
  * and nothing written, when the file is gone (the data folder was removed:
  * never make it again) or names another Inbox (one that started since owns
  * the file: a stopping Inbox must not rewrite its successor's entry).
+ *
+ * Read, then write: not atomic across processes. An Inbox that writes its
+ * own entry between the read and the rename (a start overlapping this one's
+ * stop, within one file read) is overwritten with this Inbox's entry. The
+ * newer Inbox's data-gone check then finds another session in the file and
+ * exits, and the next agent call starts a fresh Inbox: a lost start, never
+ * two writers on the store and never a dead pid left for callers to wait on
+ * (this Inbox is stopping). Closing it would take a lock around every write.
  */
 export function updateOwnInboxRegistry(
   dataDir: string,
@@ -142,36 +150,59 @@ export function updateOwnInboxRegistry(
   return true;
 }
 
-/** Device and inode of a folder, to tell it from one made again at the same path. */
-export interface InboxDirIdentity {
-  dev: number;
-  ino: number;
+/** What the running Inbox's data-gone check saw (`probeInboxData`). */
+export type InboxDataProbe =
+  | { state: "ok" }
+  /** Its data is gone: the reason, for stderr. */
+  | { state: "gone"; reason: string }
+  /** Could not tell (a permission, an I/O error, a file being replaced): neither a miss nor a pass. */
+  | { state: "unknown"; detail: string };
+
+function errnoOf(error: unknown): string | undefined {
+  return (error as NodeJS.ErrnoException | undefined)?.code;
 }
 
-export function inboxDirIdentity(dataDir: string): InboxDirIdentity | null {
-  try {
-    const stat = statSync(inboxDir(dataDir));
-    return stat.isDirectory() ? { dev: stat.dev, ino: stat.ino } : null;
-  } catch {
-    return null;
-  }
-}
+const isMissing = (code: string | undefined) => code === "ENOENT" || code === "ENOTDIR";
 
 /**
- * Why a running Inbox can no longer work, or null while it can: its
- * `inbox/` folder (the store, the registry) is gone or was made again, or
- * `inbox.json` is gone or names another Inbox. Such an Inbox is reachable by
- * no agent (they find an Inbox through the file) and has no store to keep.
+ * Whether the running Inbox `serverSession` still has its data: `inbox.json`
+ * exists and names it. Gone ONLY on evidence: the file (or a folder above
+ * it) does not exist (ENOENT, ENOTDIR), or it parses and names another
+ * Inbox. Any other failure (EACCES, EIO, ESTALE, EMFILE, EBUSY, a file that
+ * does not parse) is unknown: a network mount waking up or a permission
+ * change must never end an Inbox. Not the folder's device and inode: a
+ * remount after sleep or a data dir reached through a moved copy's symlink
+ * changes them while the Inbox and its file are fine.
+ *
+ * Unlike `readInboxRegistry` (null on anything, for callers that only ask
+ * "is there an entry"), this keeps the errno.
  */
-export function inboxDataGoneReason(dataDir: string, serverSession: string, identity: InboxDirIdentity): string | null {
+export function probeInboxData(dataDir: string, serverSession: string): InboxDataProbe {
   const dir = inboxDir(dataDir);
-  const now = inboxDirIdentity(dataDir);
-  if (!now) return `its data folder ${dir} is gone`;
-  if (now.dev !== identity.dev || now.ino !== identity.ino) return `its data folder ${dir} was removed and made again`;
-  const entry = readInboxRegistry(dataDir);
-  if (!entry) return `${inboxRegistryPath(dataDir)} is gone`;
-  if (entry.serverSession !== serverSession) return `another Inbox (pid ${entry.pid}) owns ${dir} now`;
-  return null;
+  const path = inboxRegistryPath(dataDir);
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    const code = errnoOf(error);
+    if (!isMissing(code)) return { state: "unknown", detail: `${path}: ${code ?? String(error)}` };
+    let folderGone = false;
+    try {
+      statSync(dir);
+    } catch (folderError) {
+      folderGone = isMissing(errnoOf(folderError));
+    }
+    return { state: "gone", reason: folderGone ? `its data folder ${dir} is gone` : `${path} is gone` };
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return { state: "unknown", detail: `${path} does not parse` };
+  }
+  if (!isEntry(value)) return { state: "unknown", detail: `${path} is not an Inbox entry` };
+  if (value.serverSession !== serverSession) return { state: "gone", reason: `another Inbox (pid ${value.pid}) owns ${dir} now` };
+  return { state: "ok" };
 }
 
 export function isPidAlive(pid: number): boolean {

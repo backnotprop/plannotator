@@ -7,12 +7,12 @@
  * part of this proof; OpenCode 2 is proved on the real host in inbox-v2.test.ts.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { tool } from "@opencode-ai/plugin";
 import { INBOX_TOOL_WAKE_NOTE } from "@plannotator/shared/inbox/connection";
 import PlannotatorPlugin from "./index";
-import { createInboxWorld, destroyInboxWorld, QUESTION, startInbox, stubBuiltHtml, thread, type InboxWorld } from "../../tests/helpers/inbox-world";
+import { createInboxWorld, destroyInboxWorld, QUESTION, startInbox, removeStubbedHtml, stubBuiltHtml, thread, type InboxWorld } from "../../tests/helpers/inbox-world";
 
 let stubs: string[] = [];
 const worlds: InboxWorld[] = [];
@@ -22,7 +22,7 @@ beforeAll(() => {
   stubs = stubBuiltHtml();
 });
 afterAll(() => {
-  for (const file of stubs) rmSync(file, { force: true });
+  removeStubbedHtml(stubs);
 });
 afterEach(() => {
   for (const key of ["PLANNOTATOR_DATA_DIR", "PLANNOTATOR_INBOX_TOOL", "PLANNOTATOR_BIN"]) {
