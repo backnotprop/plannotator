@@ -502,12 +502,14 @@ function blockGutterLabels(block: PlanDiffBlock): string[] {
 }
 
 /** A block beside its source-line gutter. The gutter is never selectable or part of a quote. */
+// Baseline alignment puts the label beside the first line of text, past a
+// heading's top margin.
 const GutterRow: React.FC<{ labels: string[]; children: React.ReactNode }> = ({ labels, children }) => (
-  <div className="flex items-start gap-3">
+  <div className="flex items-baseline gap-3">
     <div
       data-plan-diff-gutter=""
       aria-hidden="true"
-      className="annotation-exclude w-[4.5rem] flex-none select-none pt-1 text-right font-mono text-[11px] leading-4 tabular-nums text-muted-foreground/70"
+      className="annotation-exclude w-[4.5rem] flex-none select-none text-right font-mono text-[11px] leading-4 tabular-nums text-muted-foreground/70"
     >
       {labels.map((label, i) => (
         <div key={i}>{label}</div>

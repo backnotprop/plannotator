@@ -3,8 +3,8 @@
  * review tab, the header Comment button works in the preview, navigation that
  * targets diff lines switches back to the diff, a deletion previews the old
  * document, images resolve against the file's own folder (or show a
- * placeholder when the working tree is not the revision on screen), and the
- * toggle appears only where a preview can work.
+ * placeholder when the server reads no images for the review), and the
+ * Source | Preview switch appears only where a preview can work.
  *
  * DOM-gated (DOM_TESTS=1) and registered in .github/workflows/test.yml's
  * "Run diff-renderer DOM tests" step (real @pierre/diffs).
@@ -15,6 +15,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { CodeAnnotation, SelectedLineRange } from '@plannotator/ui/types';
 import { setExtraMarkdownExtensions } from '@plannotator/ui/utils/markdownExtensions';
+import { markdownPreviewImageUrl } from '../utils/markdownPreview';
 
 const realResolveSyntaxTheme = (await import('@plannotator/ui/utils/syntaxTheme')).resolveSyntaxTheme;
 
@@ -148,16 +149,29 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
     });
   }
 
-  async function togglePreview(el: HTMLElement) {
-    await act(async () => {
-      el.querySelector<HTMLButtonElement>(TOGGLE)!.click();
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    });
+  function isPreviewOn(el: HTMLElement): boolean {
+    return el.querySelector(TOGGLE)?.getAttribute('data-markdown-preview-on') === 'true';
   }
 
-  function isPreviewOn(el: HTMLElement): boolean {
-    return el.querySelector(TOGGLE)?.getAttribute('aria-pressed') === 'true';
+  // Source | Preview: press the segment that is not selected. Turning the
+  // preview on waits for its (lazily loaded) view to mount.
+  async function togglePreview(el: HTMLElement) {
+    const on = isPreviewOn(el);
+    await act(async () => {
+      el.querySelector<HTMLButtonElement>(on ? '[data-markdown-preview-source]' : '[data-markdown-preview-preview]')!.click();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    if (on) return;
+    const start = Date.now();
+    while (el.querySelector('[data-markdown-preview-view="pending"]') || !el.querySelector(PREVIEW)) {
+      if (Date.now() - start > 3000) throw new Error('the preview did not mount');
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    }
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
   }
+
+  const imageUrl = (doc: string, src: string, side: 'old' | 'new' = 'new') =>
+    markdownPreviewImageUrl({ doc, side, src, snapshot: 'snap-1' });
 
   function click(target: Element): MouseEvent {
     const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
@@ -318,18 +332,19 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
     expect(isPreviewOn(el)).toBe(true);
   });
 
-  test('a deleted file previews the old document, without loading its images', async () => {
+  test('a deleted file previews the old document, its images read from the old side', async () => {
     const doc = '# Retired guide\n\n![diagram](img/flow.png)\n';
     const el = await render({
       patch: deletedPatch('docs/old.md', doc),
       filePath: 'docs/old.md',
       status: 'deleted',
-      markdownImageRoot: '/repo',
+      imagePreviewAvailable: true,
+      imageSnapshotId: 'snap-1',
     }, { oldContent: doc, newContent: null });
     await togglePreview(el);
     expect(el.querySelector(`${PREVIEW} h1`)?.textContent).toBe('Retired guide');
-    expect(el.querySelector(`${PREVIEW} img`)).toBeNull();
-    expect(el.querySelector(`${PREVIEW} [data-image-unavailable]`)?.textContent).toBe('diagram');
+    expect(el.querySelector(`${PREVIEW} img[alt="diagram"]`)?.getAttribute('src'))
+      .toBe(imageUrl('docs/old.md', 'img/flow.png', 'old'));
   });
 
   test('stale or missing full contents say so instead of rendering', async () => {
@@ -397,24 +412,24 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
       '',
     ].join('\n');
     const el = await render({
-      patch: addedPatch('docs/README.md', doc), filePath: 'docs/README.md', status: 'added', markdownImageRoot: '/repo',
+      patch: addedPatch('docs/README.md', doc), filePath: 'docs/README.md', status: 'added',
+      imagePreviewAvailable: true, imageSnapshotId: 'snap-1',
     }, { oldContent: null, newContent: doc });
     await togglePreview(el);
     const preview = el.querySelector(PREVIEW)!;
     expect(preview.querySelector('[srcset]')).toBeNull();
     expect(preview.querySelector('source')).toBeNull();
     expect(preview.querySelector('video')).toBeNull();
-    expect(preview.querySelector('img[alt="themed"]')?.getAttribute('src'))
-      .toBe(`/api/image?path=${encodeURIComponent('/repo/docs/img/light.png')}`);
-    // Every remaining image goes through /api/image or is a placeholder.
+    expect(preview.querySelector('img[alt="themed"]')?.getAttribute('src')).toBe(imageUrl('docs/README.md', 'img/light.png'));
+    // Every remaining image goes through the per-revision route or is a placeholder.
     for (const img of Array.from(preview.querySelectorAll('img'))) {
-      expect(img.getAttribute('src')!.startsWith('/api/image?path=')).toBe(true);
+      expect(img.getAttribute('src')!.startsWith('/api/review-markdown-image?')).toBe(true);
     }
     const labels = Array.from(preview.querySelectorAll('[data-image-unavailable]')).map((n) => n.textContent);
     expect(labels).toContain('Video');
 
-    // An image that does not exist (an absolute filesystem path, say) shows
-    // the placeholder instead of a broken image once it fails to load.
+    // An image the server refuses (an absolute path, say) shows the
+    // placeholder instead of a broken image once it fails to load.
     const absent = preview.querySelector<HTMLImageElement>('img[alt="absent"]')!;
     await act(async () => {
       absent.dispatchEvent(new Event('error'));
@@ -426,11 +441,11 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
     expect(preview.querySelector('img[alt="hi-dpi"]')).toBeNull();
   });
 
-  test('images resolve against the Markdown file\'s own folder', async () => {
+  test('images load from the reviewed revision, named as the document wrote them', async () => {
     const doc = [
       '# Shots',
       '',
-      '![near](img/a.png) ![up](../top.png) ![root](/assets/r.png) ![escape](../../../x.png) ![remote](https://example.com/r.png)',
+      '![near](img/a.png) ![up](../top.png) ![root](/assets/r.png) ![remote](https://example.com/r.png)',
       '',
       '<p><img src="img/b.png" alt="raw"></p>',
       '',
@@ -439,30 +454,28 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
       patch: addedPatch('docs/guide/README.md', doc),
       filePath: 'docs/guide/README.md',
       status: 'added',
-      markdownImageRoot: '/repo',
+      imagePreviewAvailable: true,
+      imageSnapshotId: 'snap-1',
     }, { oldContent: null, newContent: doc });
     await togglePreview(el);
 
     const src = (alt: string) => el.querySelector<HTMLImageElement>(`${PREVIEW} img[alt="${alt}"]`)?.getAttribute('src');
-    const api = (abs: string) => `/api/image?path=${encodeURIComponent(abs)}`;
-    expect(src('near')).toBe(api('/repo/docs/guide/img/a.png'));
-    expect(src('up')).toBe(api('/repo/docs/top.png'));
-    expect(src('root')).toBe(api('/repo/assets/r.png'));
+    // The server resolves each against the document's folder at that side
+    // and serves only what the document references.
+    expect(src('near')).toBe(imageUrl('docs/guide/README.md', 'img/a.png'));
+    expect(src('up')).toBe(imageUrl('docs/guide/README.md', '../top.png'));
+    expect(src('root')).toBe(imageUrl('docs/guide/README.md', '/assets/r.png'));
+    expect(src('raw')).toBe(imageUrl('docs/guide/README.md', 'img/b.png'));
     expect(src('remote')).toBe('https://example.com/r.png');
-    expect(src('raw')).toBe(api('/repo/docs/guide/img/b.png'));
-    // Above the repository root: a placeholder, never a guess.
-    expect(src('escape')).toBeUndefined();
-    const placeholders = Array.from(el.querySelectorAll(`${PREVIEW} [data-image-unavailable]`)).map((n) => n.textContent);
-    expect(placeholders).toEqual(['escape']);
   });
 
-  test('without a working-tree image root, repository images show placeholders', async () => {
+  test('without server image support, repository images show placeholders', async () => {
     const doc = '# Shots\n\n![near](img/a.png)\n\n<p><img src="img/b.png" alt="raw"></p>\n';
     const el = await render({
       patch: addedPatch('docs/README.md', doc),
       filePath: 'docs/README.md',
       status: 'added',
-      markdownImageRoot: null,
+      imagePreviewAvailable: false,
     }, { oldContent: null, newContent: doc });
     await togglePreview(el);
     expect(el.querySelector(`${PREVIEW} img`)).toBeNull();
@@ -495,11 +508,16 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
     await rerender({ patch: addedPatch('book.livemd', doc), filePath: 'book.livemd', status: 'added', isFocused: true });
     expect(el.querySelector(TOGGLE)).not.toBeNull();
 
-    // One accessible name in both states; aria-pressed carries the state.
+    // A labelled group of two pressed/unpressed segments.
     await togglePreview(el);
     el = host!;
-    expect(el.querySelector(TOGGLE)?.getAttribute('aria-label')).toBe('Markdown preview');
-    expect(el.querySelector(TOGGLE)?.getAttribute('aria-pressed')).toBe('true');
+    expect(el.querySelector(TOGGLE)?.getAttribute('role')).toBe('group');
+    expect(el.querySelector('[data-markdown-preview-preview]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(el.querySelector('[data-markdown-preview-source]')?.getAttribute('aria-pressed')).toBe('false');
+
+    // A server that does not advertise the preview shows no switch.
+    await rerender({ patch: addedPatch('a.md', doc), filePath: 'a.md', status: 'added', markdownPreviewSupported: false });
+    expect(el.querySelector(TOGGLE)).toBeNull();
   });
 
   test('a large file asks before rendering', async () => {
@@ -525,7 +543,8 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
       el.querySelector<HTMLButtonElement>('[data-markdown-preview-anyway]')!.click();
       await new Promise((resolve) => setTimeout(resolve, 10));
     });
-    expect(el.querySelector(`${PREVIEW} h1`)?.textContent).toBe('Big');
+    // The rendered diff: the old heading struck, the new one added.
+    expect(el.querySelector(`${PREVIEW} .plan-diff-added h1`)?.textContent).toBe('Big');
   });
 
   test('a non-Markdown binary file keeps its notice above the file comments', async () => {

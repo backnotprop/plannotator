@@ -138,7 +138,9 @@ export const ReviewDiffPanel: React.FC<IDockviewPanelProps> = (props) => {
         onTokenHoverLeave={state.onTokenHoverLeave}
         reviewFilePaths={reviewFilePaths}
         onOpenReviewFile={state.openDiffFile}
-        markdownImageRoot={state.markdownPreviewImageRoot}
+        markdownPreviewSupported={!!state.markdownPreview}
+        markdownPreviewed={state.markdownPreview ? state.markdownPreview.isPreviewed(file.path) : false}
+        onMarkdownPreviewChange={state.markdownPreview ? (on) => state.markdownPreview!.setFilePreview(file.path, on) : undefined}
       />
     </div>
   );

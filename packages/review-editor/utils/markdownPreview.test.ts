@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  isMarkdownPreviewFile,
+  isMarkdownPreviewOn,
   markdownPreviewDocument,
-  markdownPreviewImageRoot,
+  markdownPreviewImageUrl,
+  markdownPreviewSides,
   markdownPreviewSourcePath,
   resolveReviewRelativePath,
 } from './markdownPreview';
@@ -38,31 +41,6 @@ describe('markdownPreviewSourcePath', () => {
   test('a rename away from Markdown offers no preview', () => {
     expect(markdownPreviewSourcePath('notes.txt', 'notes.md', 'renamed', [])).toBeNull();
     expect(markdownPreviewSourcePath('notes.md', 'notes.txt', 'renamed', [])).toBe('notes.md');
-  });
-});
-
-describe('markdownPreviewImageRoot', () => {
-  const local = {
-    isStaticPatch: false,
-    isPRMode: false,
-    isWorkspace: false,
-    vcsType: 'git',
-    activeDiffBase: 'uncommitted',
-    worktreePath: null,
-    repoRoot: '/repo',
-  };
-
-  test('only a Git working tree that is the new side', () => {
-    expect(markdownPreviewImageRoot(local)).toBe('/repo');
-    expect(markdownPreviewImageRoot({ ...local, activeDiffBase: 'since-base' })).toBe('/repo');
-    expect(markdownPreviewImageRoot({ ...local, worktreePath: '/wt' })).toBe('/wt');
-    for (const activeDiffBase of ['staged', 'last-commit', 'branch', 'merge-base', 'all', 'commit:abc1234']) {
-      expect(markdownPreviewImageRoot({ ...local, activeDiffBase })).toBeNull();
-    }
-    expect(markdownPreviewImageRoot({ ...local, isPRMode: true })).toBeNull();
-    expect(markdownPreviewImageRoot({ ...local, isWorkspace: true })).toBeNull();
-    expect(markdownPreviewImageRoot({ ...local, isStaticPatch: true })).toBeNull();
-    expect(markdownPreviewImageRoot({ ...local, vcsType: 'jj' })).toBeNull();
   });
 });
 
@@ -113,5 +91,60 @@ describe('markdownPreviewDocument', () => {
     const added = '--- /dev/null\n+++ b/a.md\n@@ -0,0 +1,1 @@\n+# New\n';
     expect(markdownPreviewDocument(added, null, '# New\n', 'added').kind).toBe('ready');
     expect(markdownPreviewDocument(added, null, '# New\nmore\n', 'added').kind).toBe('stale');
+  });
+});
+
+describe('markdownPreviewSides', () => {
+  const patch = [
+    '--- a/a.md',
+    '+++ b/a.md',
+    '@@ -1,3 +1,3 @@',
+    ' # Title',
+    '-old',
+    '+new',
+    ' end',
+    '',
+  ].join('\n');
+
+  test('the rendered diff needs both sides, each agreeing with the patch', () => {
+    expect(markdownPreviewSides(patch, '# Title\nold\nend\n', '# Title\nnew\nend\n', 'modified'))
+      .toEqual({ kind: 'ready', old: '# Title\nold\nend\n', new: '# Title\nnew\nend\n' });
+    expect(markdownPreviewSides(patch, null, '# Title\nnew\nend\n', 'modified').kind).toBe('missing');
+    // An old side that no longer matches the patch never renders as the base.
+    expect(markdownPreviewSides(patch, '# Title\nolder\nend\n', '# Title\nnew\nend\n', 'modified').kind).toBe('stale');
+  });
+
+  test('an added file has no old side and a deleted file no new side', () => {
+    const added = '--- /dev/null\n+++ b/a.md\n@@ -0,0 +1,1 @@\n+# New\n';
+    expect(markdownPreviewSides(added, null, '# New\n', 'added')).toEqual({ kind: 'ready', old: null, new: '# New\n' });
+    const deleted = '--- a/a.md\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-# Gone\n';
+    expect(markdownPreviewSides(deleted, '# Gone\n', null, 'deleted')).toEqual({ kind: 'ready', old: '# Gone\n', new: null });
+  });
+});
+
+describe('markdownPreviewImageUrl', () => {
+  test('names the document, the side and the source as written', () => {
+    const url = new URL(markdownPreviewImageUrl({ doc: 'docs/a b.md', side: 'old', src: '../img/x.png?raw=1', snapshot: 's1' }), 'http://x');
+    expect(url.pathname).toBe('/api/review-markdown-image');
+    expect(url.searchParams.get('doc')).toBe('docs/a b.md');
+    expect(url.searchParams.get('side')).toBe('old');
+    expect(url.searchParams.get('src')).toBe('../img/x.png?raw=1');
+    expect(url.searchParams.get('snapshot')).toBe('s1');
+  });
+});
+
+describe('preview state', () => {
+  test("a file's own choice wins over the switch for every file", () => {
+    const overrides = new Map([['a.md', false], ['b.md', true]]);
+    expect(isMarkdownPreviewOn('a.md', overrides, true)).toBe(false);
+    expect(isMarkdownPreviewOn('b.md', overrides, false)).toBe(true);
+    expect(isMarkdownPreviewOn('c.md', overrides, true)).toBe(true);
+    expect(isMarkdownPreviewOn('c.md', overrides, false)).toBe(false);
+  });
+
+  test('only Markdown files offer a preview', () => {
+    expect(isMarkdownPreviewFile({ path: 'docs/a.md', status: 'modified' }, [])).toBe(true);
+    expect(isMarkdownPreviewFile({ path: 'src/a.ts', status: 'modified' }, [])).toBe(false);
+    expect(isMarkdownPreviewFile({ path: 'notes.txt', oldPath: 'notes.md', status: 'renamed' }, [])).toBe(false);
   });
 });

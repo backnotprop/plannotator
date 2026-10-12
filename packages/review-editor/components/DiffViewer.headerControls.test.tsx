@@ -69,6 +69,16 @@ const TEXT_PATCH = [
 const VIEWED_BUTTON = 'button[title*="viewed (V)"]';
 const STAGE_BUTTON = 'button[title*="this file (A)"]';
 
+async function waitFor<T>(read: () => T | null | undefined, timeoutMs = 3000): Promise<T> {
+  const start = Date.now();
+  for (;;) {
+    const value = read();
+    if (value) return value;
+    if (Date.now() - start > timeoutMs) throw new Error('waitFor timed out');
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+  }
+}
+
 describe.if(hasDom)('header control visibility (DOM)', () => {
   let root: Root | null = null;
   let host: HTMLDivElement | null = null;
@@ -152,7 +162,7 @@ describe.if(hasDom)('header control visibility (DOM)', () => {
     expect(el.querySelector(VIEWED_BUTTON)).not.toBeNull();
   });
 
-  test('Markdown preview renders the complete updated document and returns to the diff', async () => {
+  test('Markdown preview renders the change, then the whole new version, and returns to the diff', async () => {
     const oldContent = '# Old\n\nold text\n';
     const newContent = '# New\n\n| Feature | Status |\n| --- | --- |\n| Preview | **Ready** |\n';
     const el = await render(
@@ -160,19 +170,25 @@ describe.if(hasDom)('header control visibility (DOM)', () => {
       { oldContent, newContent },
     );
 
-    const toggle = el.querySelector<HTMLButtonElement>('[data-markdown-preview-toggle]');
-    // Deliberate: one accessible name in both states (aria-pressed carries it).
-    expect(toggle?.getAttribute('aria-label')).toBe('Markdown preview');
-    await act(async () => toggle!.click());
+    const toggle = el.querySelector('[data-markdown-preview-toggle]');
+    expect(toggle?.getAttribute('data-markdown-preview-on')).toBe('false');
+    await act(async () => el.querySelector<HTMLButtonElement>('[data-markdown-preview-preview]')!.click());
+    const switchEl = await waitFor(() => el.querySelector('[data-markdown-preview-view-switch]'));
 
-    expect(el.querySelector('h1')?.textContent).toBe('New');
+    // The rendered diff: the old heading struck, the new one added.
+    expect(el.querySelector('.plan-diff-removed h1')?.textContent).toBe('Old');
+    expect(el.querySelector('.plan-diff-added h1')?.textContent).toBe('New');
     expect(el.querySelector('table')).not.toBeNull();
     expect(el.textContent).toContain('Ready');
-    expect(el.querySelector('[data-markdown-preview-toggle]')?.getAttribute('aria-pressed')).toBe('true');
 
-    await act(async () => el.querySelector<HTMLButtonElement>('[data-markdown-preview-toggle]')!.click());
+    // The whole new version.
+    const whole = Array.from(switchEl.querySelectorAll('button')).find((b) => b.textContent === 'Whole file')!;
+    await act(async () => whole.click());
+    expect(Array.from(el.querySelectorAll('h1')).map((h) => h.textContent)).toEqual(['New']);
+
+    await act(async () => el.querySelector<HTMLButtonElement>('[data-markdown-preview-source]')!.click());
     expect(el.querySelector('h1')).toBeNull();
-    expect(el.querySelector('[data-markdown-preview-toggle]')?.getAttribute('aria-pressed')).toBe('false');
+    expect(el.querySelector('[data-markdown-preview-toggle]')?.getAttribute('data-markdown-preview-on')).toBe('false');
   });
 
   test('non-Markdown files do not show the preview toggle', async () => {

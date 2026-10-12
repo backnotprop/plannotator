@@ -14,10 +14,10 @@ import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { useOverlayViewport } from '@plannotator/ui/hooks/useOverlayViewport';
 import { FileHeader } from './FileHeader';
-import { RenderedMarkdown } from '@plannotator/ui/components/RenderedMarkdown';
-import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
-import type { ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
-import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
+// Lazy: the preview brings the text highlighter (which needs a DOM at import)
+// and the diagram engine; a review that never previews never loads them.
+const MarkdownFilePreview = React.lazy(async () => ({ default: (await import('./MarkdownFilePreview')).MarkdownFilePreview }));
+import type { MarkdownPreviewView } from '../hooks/useMarkdownPreview';
 import { BinaryFileNotice } from './BinaryFileNotice';
 import { FileCommentBanner } from './FileCommentBanner';
 import { DiffHScrollbar } from './DiffHScrollbar';
@@ -30,14 +30,7 @@ import type { AnnotationScrollTarget } from '../types';
 import { getLineNumberFromNode, getSideFromNode, getDiffSelection } from '../utils/diffSelection';
 import { isContentConsistentWithPatch } from '../utils/patchConsistency';
 import { hashString } from '../utils/hashString';
-import {
-  MARKDOWN_PREVIEW_SIZE_LIMIT,
-  joinRepoPath,
-  markdownPreviewDocument,
-  markdownPreviewSourcePath,
-  resolveReviewRelativePath,
-  utf8ByteLength,
-} from '../utils/markdownPreview';
+import { markdownPreviewSourcePath } from '../utils/markdownPreview';
 import { InlineAnnotation } from './InlineAnnotation';
 import { InlineAIMarker } from './InlineAIMarker';
 import type { AIChatEntry } from '../hooks/useAIChat';
@@ -261,11 +254,27 @@ interface DiffViewerProps {
   reviewFilePaths?: ReadonlySet<string>;
   /** Open another file of this review (a link in the Markdown preview). */
   onOpenReviewFile?: (filePath: string) => void;
-  /** Absolute folder the Markdown preview reads repository images from, or
-   *  null/absent when the working tree is not the revision under review (the
-   *  preview then shows a placeholder per image). See markdownPreviewImageRoot. */
-  markdownImageRoot?: string | null;
+  /**
+   * Markdown preview state when the host owns it (review state: the
+   * "Preview .md" switch and per-file choices). Absent: the viewer keeps its
+   * own per-file toggle. `markdownPreviewSupported: false` hides the toggle.
+   */
+  markdownPreviewed?: boolean;
+  onMarkdownPreviewChange?: (on: boolean) => void;
+  markdownPreviewSupported?: boolean;
+  /** Without review state: the preview's view (rendered diff / whole file). */
+  markdownPreviewView?: MarkdownPreviewView;
+  onMarkdownPreviewViewChange?: (view: MarkdownPreviewView) => void;
 }
+
+/** Shown while the preview's code loads (it is split from the diff view). */
+const MarkdownPreviewPending: React.FC = () => (
+  <div className="min-h-full px-4 py-4 sm:px-6" data-markdown-preview="" data-markdown-preview-view="pending">
+    <div role="status" data-markdown-preview-state="loading" className="mx-auto max-w-3xl rounded-md border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground">
+      Loading the full Markdown file…
+    </div>
+  </div>
+);
 
 export const DiffViewer: React.FC<DiffViewerProps> = ({
   patch,
@@ -328,7 +337,11 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   onTokenHoverLeave,
   reviewFilePaths,
   onOpenReviewFile,
-  markdownImageRoot = null,
+  markdownPreviewed,
+  onMarkdownPreviewChange,
+  markdownPreviewSupported = true,
+  markdownPreviewView,
+  onMarkdownPreviewViewChange,
 }) => {
   const pierreTheme = usePierreTheme({ fontFamily, fontSize, compactTouchLayout });
   // Worker-pool highlighting: keep the pool's theme pair in step with the UI
@@ -421,23 +434,29 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   }, [patch, filePath]);
 
   // Fetch full file contents for expandable context (and the Markdown preview)
-  const { fileContents, loading: fileContentsLoading, stale: fileContentsStale } = useFileContents({
+  const fileContentsResult = useFileContents({
     filePath,
     oldPath,
     reviewBase,
     reviewSnapshotId,
     enabled: contextExpansionAvailable,
   });
+  const { fileContents } = fileContentsResult;
   // The document the preview shows: the new file, or the old one for a
   // deletion. Null when that path is not Markdown (incl. a rename away from
   // Markdown), so no preview is offered.
   const markdownSourcePath = markdownPreviewSourcePath(filePath, oldPath, status);
   // A static patch has no full file behind it, so the preview could never
   // show anything: no toggle at all.
-  const canPreviewMarkdown = contextExpansionAvailable && markdownSourcePath !== null;
-  const [markdownPreviewFilePath, setMarkdownPreviewFilePath] = useState<string | null>(null);
-  const markdownPreviewEnabled = canPreviewMarkdown && markdownPreviewFilePath === filePath;
-  const [largePreviewAcceptedFor, setLargePreviewAcceptedFor] = useState<string | null>(null);
+  const canPreviewMarkdown = markdownPreviewSupported && contextExpansionAvailable && markdownSourcePath !== null;
+  const [localPreviewFilePath, setLocalPreviewFilePath] = useState<string | null>(null);
+  const previewControlled = markdownPreviewed !== undefined;
+  const markdownPreviewEnabled = canPreviewMarkdown
+    && (previewControlled ? markdownPreviewed === true : localPreviewFilePath === filePath);
+  const setMarkdownPreview = useCallback((on: boolean) => {
+    if (previewControlled) onMarkdownPreviewChange?.(on);
+    else setLocalPreviewFilePath(on ? filePath : null);
+  }, [previewControlled, onMarkdownPreviewChange, filePath]);
 
   // Re-parse the patch with full file contents so hunk indices are computed
   // against the complete file (isPartial: false), enabling expansion.
@@ -471,34 +490,25 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     }
   }, [patch, filePath, oldPath, fileContents, fileDiff]);
 
-  // Preview the complete post-change document (or the old document for a
-  // deletion), never the partial patch or contents fetched after the snapshot.
-  const markdownPreviewDoc = useMemo(() => {
-    if (markdownSourcePath === null || !fileContents || fileContents.forPath !== filePath) return null;
-    return markdownPreviewDocument(patch, fileContents.old, fileContents.new, status);
-  }, [fileContents, filePath, markdownSourcePath, patch, status]);
-  const markdownPreviewContent = markdownPreviewDoc?.kind === 'ready' ? markdownPreviewDoc.content : null;
-  // This file changed since the diff (content check), or the whole diff did
-  // (the server refused the snapshot with 409).
-  const markdownPreviewStale = markdownPreviewDoc?.kind === 'stale' || fileContentsStale;
-
-  const markdownPreviewBytes = useMemo(
-    () => (markdownPreviewContent === null ? 0 : utf8ByteLength(markdownPreviewContent)),
-    [markdownPreviewContent],
-  );
-  const showLargePreviewGate =
-    markdownPreviewBytes > MARKDOWN_PREVIEW_SIZE_LIMIT && largePreviewAcceptedFor !== filePath;
-
   const toggleMarkdownPreview = useCallback(() => {
-    if (markdownPreviewFilePath === filePath) {
-      setMarkdownPreviewFilePath(null);
+    if (markdownPreviewEnabled) {
+      setMarkdownPreview(false);
       return;
     }
     // The line selection and its composer live in the diff the preview
     // replaces; drop them rather than leave a selection nothing shows.
     onLineSelection(null);
-    setMarkdownPreviewFilePath(filePath);
-  }, [filePath, markdownPreviewFilePath, onLineSelection]);
+    setMarkdownPreview(true);
+  }, [markdownPreviewEnabled, onLineSelection, setMarkdownPreview]);
+
+  // Turned on from elsewhere (the "Preview .md" switch, `P`): the line
+  // selection lives in the diff the preview replaces.
+  const wasPreviewEnabledRef = useRef(markdownPreviewEnabled);
+  useEffect(() => {
+    if (markdownPreviewEnabled && !wasPreviewEnabledRef.current && pendingSelection && isFocused) onLineSelection(null);
+    wasPreviewEnabledRef.current = markdownPreviewEnabled;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [markdownPreviewEnabled]);
 
   // Navigation that targets diff lines (a search hit, a semantic-diff / AI
   // "scroll to lines", a requested line selection) switches the file back to
@@ -515,73 +525,9 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     prevActiveSearchMatchIdRef.current = activeSearchMatchId;
     if (!markdownPreviewEnabled) return;
     if ((selectionChanged && pendingSelection && isFocused) || (searchChanged && activeSearchMatchId)) {
-      setMarkdownPreviewFilePath(null);
+      setMarkdownPreview(false);
     }
-  }, [pendingSelection, activeSearchMatch, markdownPreviewEnabled, isFocused]);
-
-  // Links in the preview never navigate this tab: a file of this review opens
-  // in the review, any other local path renders inert.
-  const resolvePreviewLink = useCallback<LocalLinkResolver>((href) => {
-    if (markdownSourcePath === null) return null;
-    const target = resolveReviewRelativePath(markdownSourcePath, href);
-    if (target !== null && onOpenReviewFile && reviewFilePaths?.has(target)) {
-      return { kind: 'open', open: () => onOpenReviewFile(target), title: `Open ${target} in this review` };
-    }
-    return { kind: 'unavailable', title: 'Not in this review' };
-  }, [markdownSourcePath, onOpenReviewFile, reviewFilePaths]);
-
-  // Images resolve against the Markdown file's own folder, never the server's
-  // cwd, and only when the working tree is the revision shown; otherwise a
-  // placeholder rather than a possibly wrong image.
-  // TODO(review-image-route): serve these from the reviewed revision through
-  // a per-revision route (like /api/review-image) so the old side, PRs and
-  // committed diffs can show them too.
-  const resolvePreviewImage = useCallback<ImageResolver>((src) => {
-    const trimmed = src.trim();
-    if (/^(https?:|data:|blob:)/i.test(trimmed)) return null;
-    if (status === 'deleted') {
-      return { kind: 'unavailable', title: 'Images are not shown for a deleted file' };
-    }
-    if (!markdownImageRoot || markdownSourcePath === null) {
-      return { kind: 'unavailable', title: 'Images are not shown in the preview for this diff' };
-    }
-    const relative = resolveReviewRelativePath(markdownSourcePath, trimmed);
-    if (relative === null) {
-      return { kind: 'unavailable', title: 'Image is outside the repository' };
-    }
-    return { kind: 'src', src: getImageSrc(joinRepoPath(markdownImageRoot, relative)) };
-  }, [markdownImageRoot, markdownSourcePath, status]);
-
-  // Safety net for anchors the resolver never sees (in-page `#anchors`, links
-  // in raw HTML the renderer left alone): never a same-tab navigation.
-  const handlePreviewClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    const anchor = (event.target as Element | null)?.closest?.('a');
-    if (!anchor || !event.currentTarget.contains(anchor)) return;
-    if (anchor.hasAttribute('data-local-link')) return; // handled by the renderer
-    const href = anchor.getAttribute('href');
-    if (!href) return;
-    if (/^https?:/i.test(href) || href.startsWith('//')) {
-      if (anchor.getAttribute('target') === '_blank') return;
-      event.preventDefault();
-      window.open(href, '_blank', 'noopener,noreferrer');
-      return;
-    }
-    if (/^(mailto|tel):/i.test(href)) return;
-    event.preventDefault();
-    if (href.startsWith('#') && href.length > 1) {
-      let id = href.slice(1);
-      try { id = decodeURIComponent(id); } catch { /* keep as written */ }
-      const target = Array.from(event.currentTarget.querySelectorAll('[id]')).find((el) => el.id === id);
-      target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  }, []);
-
-  const handlePreviewAuxClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    const anchor = (event.target as Element | null)?.closest?.('a');
-    if (!anchor || !event.currentTarget.contains(anchor)) return;
-    const href = anchor.getAttribute('href');
-    if (href && !/^https?:/i.test(href) && !href.startsWith('//')) event.preventDefault();
-  }, []);
+  }, [pendingSelection, activeSearchMatch, markdownPreviewEnabled, isFocused, setMarkdownPreview]);
 
   const previousScrollFilePathRef = useRef(filePath);
   useLayoutEffect(() => {
@@ -658,11 +604,23 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     if (handledScrollTargetRef.current === scrollTargetAnnotation) return;
     const targetId = scrollTargetAnnotation.id;
 
+    const target = annotationsRef.current.find((ann) => ann.id === targetId);
+    if (target?.markdownPreview) {
+      // A comment made in the preview lives there: show the preview, whose
+      // highlighter scrolls to the selected comment.
+      if (!markdownPreviewEnabled && canPreviewMarkdown) {
+        setMarkdownPreview(true);
+        return;
+      }
+      if (markdownPreviewEnabled) {
+        handledScrollTargetRef.current = scrollTargetAnnotation;
+        return;
+      }
+    }
     if (markdownPreviewEnabled) {
-      const target = annotationsRef.current.find((ann) => ann.id === targetId);
       if (!target) return; // another file's comment
       if (!isFileScopedAnnotation(target)) {
-        setMarkdownPreviewFilePath(null);
+        setMarkdownPreview(false);
         return;
       }
     }
@@ -938,6 +896,10 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     () => annotations.filter(isFileScopedAnnotation),
     [annotations],
   );
+  const fileCommentsOutsidePreview = useMemo(
+    () => fileComments.filter((comment) => !comment.markdownPreview),
+    [fileComments],
+  );
 
   // Files over the review size cap arrive as a contents-free stub, which
   // renders as an empty body. Say so instead of showing a bare header.
@@ -1020,57 +982,31 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         >
           {markdownPreviewEnabled ? (
             <>
+              {/* Comments made in the preview are highlighted in it; the
+                  banner keeps the header's file comments. */}
               <FileCommentBanner
-                comments={fileComments}
+                comments={fileCommentsOutsidePreview}
                 selectedAnnotationId={selectedAnnotationId}
                 onSelect={onSelectAnnotation}
                 onEdit={onEditAnnotation}
                 onDelete={onDeleteAnnotation}
               />
-              <div
-                className="min-h-full p-6 sm:p-8"
-                data-markdown-preview=""
-                onClickCapture={handlePreviewClickCapture}
-                onAuxClickCapture={handlePreviewAuxClickCapture}
-              >
-                {markdownPreviewContent === null ? (
-                  <div
-                    role="status"
-                    data-markdown-preview-state={fileContentsLoading ? 'loading' : markdownPreviewStale ? 'stale' : 'unavailable'}
-                    className="mx-auto max-w-3xl rounded-md border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground"
-                  >
-                    {fileContentsLoading
-                      ? 'Loading the full Markdown file…'
-                      : markdownPreviewStale
-                        ? 'This file changed after the diff was captured. Refresh the diff to preview it.'
-                        : 'The full file content is unavailable for this review. Switch back to the diff to review the available changes.'}
-                  </div>
-                ) : showLargePreviewGate ? (
-                  <div
-                    role="status"
-                    data-markdown-preview-large=""
-                    className="mx-auto flex max-w-3xl items-center justify-between gap-3 rounded-md border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground"
-                  >
-                    <span>Large file · {Math.round(markdownPreviewBytes / 1024)} KB</span>
-                    <button
-                      type="button"
-                      data-markdown-preview-anyway=""
-                      className="rounded px-2 py-1 text-xs text-foreground hover:bg-muted"
-                      onClick={() => setLargePreviewAcceptedFor(filePath)}
-                    >
-                      Preview anyway
-                    </button>
-                  </div>
-                ) : (
-                  <RenderedMarkdown
-                    markdown={markdownPreviewContent}
-                    className="md-compact mx-auto max-w-3xl"
-                    resolveLocalLink={resolvePreviewLink}
-                    resolveImage={resolvePreviewImage}
-                    headingAnchors
-                  />
-                )}
-              </div>
+              <React.Suspense fallback={<MarkdownPreviewPending />}>
+              <MarkdownFilePreview
+                filePath={filePath}
+                oldPath={oldPath}
+                status={status}
+                patch={patch}
+                contents={fileContentsResult}
+                imageSnapshotId={imageSnapshotId ?? reviewSnapshotId}
+                imagesAvailable={imagePreviewAvailable}
+                reviewFilePaths={reviewFilePaths}
+                onOpenReviewFile={onOpenReviewFile}
+                variant="single"
+                view={markdownPreviewView}
+                onViewChange={onMarkdownPreviewViewChange}
+              />
+              </React.Suspense>
             </>
           ) : (
             <>

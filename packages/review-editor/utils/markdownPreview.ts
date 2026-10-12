@@ -3,8 +3,8 @@
  *
  * Which files offer a preview, which side of the change it shows, how a link
  * or image path inside the document resolves to a path in the repository,
- * and when the working tree is the revision the preview shows (the only case
- * where `/api/image` can read the right image today).
+ * where its images load from, and whether the full contents still agree with
+ * the patch on screen.
  */
 import { getExtraMarkdownExtensions } from '@plannotator/ui/utils/markdownExtensions';
 import type { DiffFileStatus } from '../types';
@@ -91,45 +91,50 @@ export function resolveReviewRelativePath(fromFile: string, target: string): str
   return segments.length === 0 ? null : segments.join('/');
 }
 
-/**
- * Git diff types whose NEW side is the working tree (the same rows as
- * `resolveDiffSideSources`' `worktree(...)` sides). Only for these does a
- * working-tree read through `/api/image` show the revision under review.
- */
-const WORKING_TREE_NEW_SIDE = new Set(['uncommitted', 'unstaged', 'since-base', 'local-vs-remote']);
+/** Where the preview loads an image a Markdown file references (both runtimes). */
+export const MARKDOWN_PREVIEW_IMAGE_ENDPOINT = '/api/review-markdown-image';
 
 /**
- * The folder preview images may be read from, or null when they must not be
- * shown: static patches, PR reviews, multi-repo workspaces, non-Git VCS
- * (jj, GitButler, P4), and every diff type whose new side is not the working
- * tree (staged, last commit, branch, a single commit, ...).
- *
- * TODO(review-image-route): read preview images from the reviewed revision
- * through a per-revision route (like `/api/review-image`) instead of the
- * working tree, so every mode and the old side of a deletion can show them.
+ * The URL of one image the Markdown file `doc` (its path as the patch names
+ * it) references, read at that side's revision. The server serves it only
+ * when the document at that side really references `src`, resolved against
+ * the document's own folder, so a link or a guessed path never reads another
+ * file.
  */
-export function markdownPreviewImageRoot(options: {
-  isStaticPatch: boolean;
-  isPRMode: boolean;
-  isWorkspace: boolean;
-  vcsType: string | undefined;
-  activeDiffBase: string;
-  worktreePath: string | null;
-  /** `gitContext.root`, the repository top level. Never the cwd the review
-   *  was started from: patch paths are relative to the top level, so a
-   *  subfolder would double the folder (and could find another file). */
-  repoRoot: string | null | undefined;
-}): string | null {
-  if (options.isStaticPatch || options.isPRMode || options.isWorkspace) return null;
-  if (options.vcsType !== 'git') return null;
-  if (!WORKING_TREE_NEW_SIDE.has(options.activeDiffBase)) return null;
-  return options.worktreePath ?? options.repoRoot ?? null;
+export function markdownPreviewImageUrl(options: {
+  doc: string;
+  side: 'old' | 'new';
+  src: string;
+  snapshot?: string;
+}): string {
+  const params = new URLSearchParams({ doc: options.doc, side: options.side, src: options.src });
+  if (options.snapshot) params.set('snapshot', options.snapshot);
+  return `${MARKDOWN_PREVIEW_IMAGE_ENDPOINT}?${params}`;
 }
 
-/** Join an absolute folder and a repository-relative path. */
-export function joinRepoPath(root: string, relative: string): string {
-  const trimmed = root.replace(/[\\/]+$/, '');
-  return `${trimmed}/${relative}`;
+/** True for an image source the page may load as written (remote or inline). */
+export function isExternalImageSource(src: string): boolean {
+  return /^(https?:|data:|blob:)/i.test(src.trim());
+}
+
+/** Whether a file offers a Markdown preview at all (by name, before any fetch). */
+export function isMarkdownPreviewFile(
+  file: { path: string; oldPath?: string; status?: DiffFileStatus },
+  extra?: readonly string[],
+): boolean {
+  return markdownPreviewSourcePath(file.path, file.oldPath, file.status, extra) !== null;
+}
+
+/**
+ * A file's effective preview state: its own choice when it has one, else the
+ * "Preview .md" switch for every Markdown file.
+ */
+export function isMarkdownPreviewOn(
+  path: string,
+  overrides: ReadonlyMap<string, boolean>,
+  all: boolean,
+): boolean {
+  return overrides.get(path) ?? all;
 }
 
 const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
@@ -248,4 +253,29 @@ export function markdownPreviewDocument(
     }
   }
   return { kind: 'ready', content };
+}
+
+export type MarkdownPreviewSides =
+  | { kind: 'ready'; old: string | null; new: string | null }
+  | { kind: 'missing' }
+  | { kind: 'stale' };
+
+/**
+ * Both sides the rendered diff compares, only while each still agrees with
+ * the patch on screen. An added file has no old side and a deleted file no
+ * new side; any other file needs both.
+ */
+export function markdownPreviewSides(
+  patch: string,
+  oldContent: string | null,
+  newContent: string | null,
+  status: DiffFileStatus | undefined,
+): MarkdownPreviewSides {
+  const shown = markdownPreviewDocument(patch, oldContent, newContent, status);
+  if (shown.kind !== 'ready') return shown;
+  if (status === 'added') return { kind: 'ready', old: null, new: newContent };
+  if (status === 'deleted') return { kind: 'ready', old: oldContent, new: null };
+  if (oldContent == null) return { kind: 'missing' };
+  if (!patchAgreesWithContent(patch, oldContent, 'old')) return { kind: 'stale' };
+  return { kind: 'ready', old: oldContent, new: newContent };
 }

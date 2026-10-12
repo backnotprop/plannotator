@@ -68,6 +68,31 @@ export const ReviewDockRightActions: React.FC<IDockviewHeaderActionsProps> = (pr
           </svg>
         </button>
       )}
+      {/* Every Markdown file at once, beside (never part of) Split | Unified,
+          which keeps meaning layout. A file's own Source | Preview choice
+          wins until this is pressed again. */}
+      {state?.markdownPreview?.hasMarkdownFiles && (
+        <button
+          type="button"
+          onClick={state.markdownPreview.toggleAll}
+          aria-pressed={state.markdownPreview.all}
+          data-markdown-preview-all=""
+          className={`flex items-center gap-1 px-2 py-1 text-xs rounded-md border transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 ${
+            state.markdownPreview.all
+              ? 'border-primary/40 bg-primary/10 text-primary'
+              : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted'
+          }`}
+          title={state.markdownPreview.all
+            ? 'Show every Markdown file as source (Shift+P)'
+            : 'Preview every Markdown file, rendered (Shift+P)'}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+          Preview .md
+        </button>
+      )}
       <div className="flex items-center gap-1 bg-muted rounded-lg p-0.5">
         <button
           onClick={() => setDiffStyle('split')}

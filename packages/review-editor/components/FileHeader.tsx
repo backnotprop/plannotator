@@ -56,6 +56,30 @@ interface FileHeaderProps {
   onToggleMarkdownPreview?: () => void;
 }
 
+const EYE_ICON_PATH = 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z';
+
+function EyeIcon({ className }: { className: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d={EYE_ICON_PATH} />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function SourceIcon({ className }: { className: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="m8 6-6 6 6 6M16 6l6 6-6 6" />
+    </svg>
+  );
+}
+
+/**
+ * Source | Preview for a Markdown file. Desktop: a two-segment switch before
+ * Viewed (each segment a pressed/unpressed button). Compact touch: one 44 px
+ * eye button whose pressed state is the preview.
+ */
 function MarkdownPreviewToggle({
   enabled,
   compact,
@@ -67,38 +91,67 @@ function MarkdownPreviewToggle({
   compactTouchLayout: boolean;
   onToggle: () => void;
 }) {
-  // One name in both states; aria-pressed carries the state, so a screen
-  // reader hears "Markdown preview, toggle button, pressed / not pressed".
-  const buttonClassName = compactTouchLayout
-    ? `ml-1 flex h-9 w-9 flex-none items-center justify-center rounded transition-colors ${enabled ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`
-    : `text-xs rounded transition-colors flex items-center ${compact ? 'px-1.5 py-1' : 'gap-1 px-2 py-1'} ${enabled ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`;
-
-  return (
-    <button
-      type="button"
-      data-markdown-preview-toggle
-      aria-label="Markdown preview"
-      aria-pressed={enabled}
-      onClick={(event) => {
-        event.stopPropagation();
-        onToggle();
-      }}
-      className={buttonClassName}
-      title="Show the rendered Markdown instead of the diff"
-    >
-      <svg
-        className={compactTouchLayout ? 'w-4 h-4' : 'w-3.5 h-3.5'}
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-        strokeWidth={2}
-        aria-hidden="true"
+  if (compactTouchLayout) {
+    // One name in both states; aria-pressed carries the state, so a screen
+    // reader hears "Markdown preview, toggle button, pressed / not pressed".
+    return (
+      <button
+        type="button"
+        data-markdown-preview-toggle
+        aria-label="Markdown preview"
+        aria-pressed={enabled}
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggle();
+        }}
+        className={`ml-1 flex h-9 w-9 flex-none items-center justify-center rounded transition-colors ${enabled ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}
+        title={enabled ? 'Show the source diff' : 'Show the rendered Markdown'}
       >
-        <path strokeLinecap="round" strokeLinejoin="round" d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
-        <circle cx="12" cy="12" r="3" />
-      </svg>
-      {!compactTouchLayout && !compact && <span>Preview</span>}
-    </button>
+        <EyeIcon className="w-4 h-4" />
+      </button>
+    );
+  }
+  const segment = (active: boolean) =>
+    `flex items-center rounded ${compact ? 'px-1.5' : 'gap-1 px-2'} py-0.5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 ${
+      active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+    }`;
+  const select = (preview: boolean) => (event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (preview !== enabled) onToggle();
+  };
+  return (
+    <div
+      role="group"
+      aria-label="Show this Markdown file as"
+      data-markdown-preview-toggle
+      data-markdown-preview-on={enabled ? 'true' : 'false'}
+      className="flex items-center gap-0.5 rounded-md bg-muted/70 p-0.5 text-xs"
+    >
+      <button
+        type="button"
+        aria-pressed={!enabled}
+        aria-label={compact ? 'Source' : undefined}
+        data-markdown-preview-source=""
+        onClick={select(false)}
+        className={segment(!enabled)}
+        title="Show the source diff (P)"
+      >
+        <SourceIcon className="w-3.5 h-3.5" />
+        {!compact && <span>Source</span>}
+      </button>
+      <button
+        type="button"
+        aria-pressed={enabled}
+        aria-label={compact ? 'Preview' : undefined}
+        data-markdown-preview-preview=""
+        onClick={select(true)}
+        className={segment(enabled)}
+        title="Show the rendered Markdown (P)"
+      >
+        <EyeIcon className="w-3.5 h-3.5" />
+        {!compact && <span>Preview</span>}
+      </button>
+    </div>
   );
 }
 

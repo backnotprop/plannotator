@@ -184,6 +184,9 @@ jobs:
           packages/review-editor/components/AllFilesCodeView.generated.test.tsx
           packages/review-editor/components/AllFilesCodeView.autoViewed.test.tsx
           packages/review-editor/components/AllFilesCodeView.imagePreview.test.tsx
+          packages/review-editor/components/AllFilesCodeView.markdownPreview.test.tsx
+          packages/review-editor/components/MarkdownFilePreview.test.tsx
+          packages/review-editor/hooks/useMarkdownPreview.test.tsx
           packages/review-editor/components/DiffViewer.compactTouchSelection.test.tsx
           packages/guide-viewer/GuideSectionCard.test.tsx
           packages/guide-viewer/GuideView.test.tsx
