@@ -2232,11 +2232,13 @@ Unchanged: GitHub alerts (`> [!NOTE]` … keep their old body text and `AlertBlo
 
 Plannotator's servers issue one random `serverSession` nonce per process (new `@plannotator/core/server-session`) and refuse a decision that echoes a different one with `409 { code: "session_mismatch" }`, so a tab left open on a reused port cannot decide a new session. The client half is `utils/serverSession` (`adoptServerSession`, `withServerSession`, `withServerSessionQuery`, `noteServerSessionMismatch`, `useServerSessionReplaced`) plus `components/ServerSessionReplacedBanner`. Hosts that post decisions to their own backend need none of it: nothing in the shared components sends the field on its own, and a request without it is always accepted.
 
-## `RenderedMarkdown` `resolveLocalLink` and `resolveImage` (unreleased; additive, no core change)
+## `RenderedMarkdown` `resolveLocalLink`, `resolveImage` and `headingAnchors` (unreleased; additive, no core change)
 
 - **`resolveLocalLink?: LocalLinkResolver`** on `RenderedMarkdown`: the same contract as Viewer's `resolveLocalLink` (see above), provided through `LocalLinkContext` to every block it renders. Plannotator's code review passes it for the Markdown preview so a relative link opens the linked file in the review, or renders inert ("Not in this review"), and never navigates the tab.
 - **`resolveImage?: ImageResolver`** on `RenderedMarkdown` (`components/ImageResolverContext.tsx`): asked about every markdown image and raw-HTML `<img src>`, with the source as written. `{ kind: 'src', src }` loads that URL; `{ kind: 'unavailable', title }` draws an inert placeholder span (the alt text, `title` as its tooltip, `data-image-unavailable`) instead of an `<img>`, so nothing is fetched; `null` keeps the default resolution (`getImageSrc` / remote URLs as is).
-- Each provider wraps the output only when its prop is passed, so an enclosing provider (a `Viewer`'s) still applies when a prop is absent. A host that passes neither renders exactly as before.
+- With `resolveImage`, the host speaks for every media URL, so nothing loads from the page origin unvetted. Raw-HTML blocks are rewritten on an inert `<template>` before insertion (no request goes out first): `<img srcset>` / `sizes` are dropped (the resolved `src` stays), `<picture><source>` is dropped (its `<img>` is the fallback), and `<video>` (with its `src`, `poster` and `<source>`s) becomes a placeholder, because the resolver answers for images only. An image the resolver chose that then fails to load (`error`) turns into the same placeholder instead of a broken-image icon, in markdown and raw HTML alike.
+- **`headingAnchors?: boolean`**: headings get the plan Viewer's slug ids (`buildHeadingSlugMap`, GitHub's `-1` dedup), so a host can scroll `#section` links itself. Absent, headings carry no id.
+- Each provider wraps the output only when its prop is passed, so an enclosing provider (a `Viewer`'s) still applies when a prop is absent. A host that passes none of these renders exactly as before (`RenderedMarkdown.hostSeams.test.tsx` compares the DOM with the pre-seam body).
 
 ## The law (guardrails for anyone editing `@plannotator/ui`)
 

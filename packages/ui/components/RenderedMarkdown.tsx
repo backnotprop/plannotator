@@ -3,6 +3,7 @@ import { parseMarkdownToBlocks, groupBlocks, computeListIndices } from '../utils
 import { BlockRenderer } from './BlockRenderer';
 import { LocalLinkContext, type LocalLinkResolver } from './LocalLinkContext';
 import { ImageResolverContext, type ImageResolver } from './ImageResolverContext';
+import { buildHeadingSlugMap } from '../utils/slugify';
 
 /**
  * Full markdown renderer for surfaces outside the plan editor (e.g. the PR
@@ -32,6 +33,11 @@ export interface RenderedMarkdownProps {
    * Absent, images resolve exactly as before.
    */
   resolveImage?: ImageResolver;
+  /**
+   * Optional: give headings slug ids (Viewer's slugger, GitHub dedup), so a
+   * host can scroll to `#section` links. Absent/false, headings carry no id.
+   */
+  headingAnchors?: boolean;
 }
 
 export const RenderedMarkdown: React.FC<RenderedMarkdownProps> = ({
@@ -44,8 +50,14 @@ export const RenderedMarkdown: React.FC<RenderedMarkdownProps> = ({
   repoHost,
   resolveLocalLink,
   resolveImage,
+  headingAnchors = false,
 }) => {
-  const groups = useMemo(() => groupBlocks(parseMarkdownToBlocks(markdown)), [markdown]);
+  const blocks = useMemo(() => parseMarkdownToBlocks(markdown), [markdown]);
+  const groups = useMemo(() => groupBlocks(blocks), [blocks]);
+  const headingSlugMap = useMemo(
+    () => (headingAnchors ? buildHeadingSlugMap(blocks) : null),
+    [blocks, headingAnchors],
+  );
   const cb = { onImageClick, onOpenLinkedDoc, onOpenCodeFile, githubRepo, repoHost };
 
   let body = (
@@ -57,13 +69,13 @@ export const RenderedMarkdown: React.FC<RenderedMarkdownProps> = ({
             return (
               <div key={group.key}>
                 {group.blocks.map((block, i) => (
-                  <BlockRenderer key={block.id} block={block} orderedIndex={indices[i]} {...cb} />
+                  <BlockRenderer key={block.id} block={block} orderedIndex={indices[i]} headingAnchorId={headingSlugMap?.get(block.id)} {...cb} />
                 ))}
               </div>
             );
           })()
         ) : (
-          <BlockRenderer key={group.block.id} block={group.block} {...cb} />
+          <BlockRenderer key={group.block.id} block={group.block} headingAnchorId={headingSlugMap?.get(group.block.id)} {...cb} />
         ),
       )}
     </div>

@@ -473,6 +473,35 @@ function emitPlainTextWithBareUrls(
   }
 }
 
+/** An image a host resolver chose; a load failure shows the placeholder. */
+const HostResolvedImage: React.FC<{
+  src: string;
+  alt: string;
+  onImageClick?: (src: string, alt: string) => void;
+}> = ({ src, alt, onImageClick }) => {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  if (failedSrc === src) {
+    return (
+      <span className={UNAVAILABLE_IMAGE_CLASS} title="Image could not be loaded" data-image-unavailable="">
+        {alt || 'Image'}
+      </span>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className="max-w-full rounded my-2 cursor-zoom-in"
+      loading="lazy"
+      onError={() => setFailedSrc(src)}
+      onClick={(e) => {
+        e.stopPropagation();
+        onImageClick?.(src, alt);
+      }}
+    />
+  );
+};
+
 /**
  * Scanner that walks a text string and emits React nodes for inline markdown:
  * emphasis (**bold**, *italic*, _italic_, ***both***), `code`, ~~strikethrough~~,
@@ -994,17 +1023,23 @@ export const InlineMarkdown: React.FC<{
           ? src
           : getImageSrc(src, imageBaseDir);
       parts.push(
-        <img
-          key={key++}
-          src={imgSrc}
-          alt={alt}
-          className="max-w-full rounded my-2 cursor-zoom-in"
-          loading="lazy"
-          onClick={(e) => {
-            e.stopPropagation();
-            onImageClick?.(imgSrc, alt);
-          }}
-        />,
+        resolveImage ? (
+          // With a host resolver, an image that fails to load becomes the
+          // same placeholder instead of a broken-image icon.
+          <HostResolvedImage key={key++} src={imgSrc} alt={alt} onImageClick={onImageClick} />
+        ) : (
+          <img
+            key={key++}
+            src={imgSrc}
+            alt={alt}
+            className="max-w-full rounded my-2 cursor-zoom-in"
+            loading="lazy"
+            onClick={(e) => {
+              e.stopPropagation();
+              onImageClick?.(imgSrc, alt);
+            }}
+          />
+        ),
       );
       remaining = remaining.slice(match[0].length);
       previousChar = match[0][match[0].length - 1] || previousChar;
