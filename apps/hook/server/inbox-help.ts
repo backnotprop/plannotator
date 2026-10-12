@@ -111,7 +111,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
   resolve_message: {
     args: ["message_id", "resolved"],
     lines: [
-      "Close the thread a message belongs to once you have what you needed. `message_id` is any message in the thread, or the thread id; `resolved: false` reopens it. Its questions then read as closed.",
+      "Archive the thread a message belongs to for the person; use it only when nothing in it is left for them to read or answer. `message_id` is any message in the thread, or the thread id; `resolved: false` reopens it. Its questions then read as closed.",
     ],
   },
   wait_for_reply: {

@@ -39,7 +39,7 @@ export const INBOX_MCP_INSTRUCTIONS = [
   "- send_message posts markdown. Your messages join your session's thread until the person resolves it; pass `thread` (a short name) to keep separate work apart, or reply_to to answer a message. Pass an idempotency_key so a retry never posts twice. The question syntax is in send_message's description.",
   "- attachments: paths of files to show the person (a plan, a screenshot, an HTML mock, any file), absolute or relative to project_path. Link one from the body (`[the mock](mock.html)`) to open it beside the thread. The person's annotations come back in their reply.",
   "- wait_for_reply (thread_id) returns the reply as soon as it lands, or { status: \"waiting\", cursor } after about 50 seconds: call it again with that cursor. Call it when you need the answer, after the work that does not depend on it.",
-  "- read_thread reads one thread (thread_id) or lists yours. When an open question of yours no longer fits, send into its thread with `supersedes` instead of leaving it to be answered. resolve_message closes a thread once the work it was about is done.",
+  "- read_thread reads one thread (thread_id) or lists yours. When an open question of yours no longer fits, send with reply_to into its thread with `supersedes` instead of leaving it open. resolve_message archives the thread for the person; use it only when nothing in it is left for them to read or answer.",
   "- list_decisions reads what holds in this project; record_decision records one you settled with the person. `Decision: when answered` in a question block records its answer.",
   "- To walk the person through a code change: get_guide_brief, write the guide, then submit_guide with the exact patch.",
   "",
@@ -423,7 +423,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
     "resolve_message",
     {
       title: "Resolve a thread",
-      description: "Close the thread a message belongs to once you have what you needed (resolved: false reopens it). Its questions read as closed; the person sees the thread as Archived.",
+      description:
+        "Archive the thread a message belongs to for the person; use it only when nothing in it is left for them to read or answer. resolved: false reopens it. Its questions read as closed; the person sees the thread as Archived.",
       inputSchema: z
         .object({
           message_id: z.string().describe("Any message id in the thread, or the thread id."),

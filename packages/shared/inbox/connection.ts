@@ -144,7 +144,7 @@ function leadOf(description: string): string {
 
 /** What the agent tool says, before the per-action lines. Fixed text. */
 export const INBOX_TOOL_LEAD =
-  "The Plannotator Inbox on this machine: message the person and get their answer later, without holding this session open. Use it when the person may not be watching this chat: a decision only they can make (ask it as a :::question block, then go on with work that does not depend on it), finished long work to hand over (a short summary, files to look at in `attachments`), or when they ask you to. Ask in the chat when they are there; never send routine progress. Set `action` to one of the tools below with that tool's fields; the project and this session are filled in."
+  "The Plannotator Inbox on this machine: message the person and get their answer later, without holding this session open. Use it when the person may not be watching this chat: a decision only they can make (ask it as a :::question block, then go on with work that does not depend on it), finished long work to hand over (a short summary, files to look at in `attachments`), or when they ask you to. Ask in the chat when they are there; never send routine progress. If another agent started you, report to it instead. Set `action` to a tool below and pass its fields; the project and this session are filled in."
 
 /**
  * Fixed text: how a reply comes back. The connection delivers the person's
@@ -153,7 +153,7 @@ export const INBOX_TOOL_LEAD =
  * OpenCode 2 as a user message, and all three carry the wake's first line.
  */
 export const INBOX_TOOL_WAKE_NOTE =
-  "When the person replies to a message you sent, their reply arrives in this session by itself once it is idle, as a message headed `Plannotator Inbox: <subject> (<reply id>)`: end your turn instead of calling wait_for_reply. Answer with send_message reply_to; resolve_message a thread once the work it was about is done."
+  "When the person replies to a message you sent, their reply arrives in this session by itself once it is idle, as a message headed `Plannotator Inbox: <subject> (<reply id>)`: end your turn, or go on with other work; do not call wait_for_reply. When they need to hear back, answer with send_message reply_to."
 
 /**
  * The agent tool: name, description and input schema, built from the Inbox's

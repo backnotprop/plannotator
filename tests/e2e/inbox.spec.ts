@@ -171,8 +171,8 @@ test('first run: the three connections, Use MCP instead below the row, the harne
   await expect(page.getByRole('heading', { name: 'No agent has written yet', exact: true })).toBeVisible();
   const lines = {
     'claude-code': ['Claude Code', "Plannotator's mod writes here. Nothing to install."],
-    pi: ['Pi', "Plannotator's extension writes here once its Inbox tool is on in Settings."],
-    opencode: ['OpenCode', "Plannotator's plugin writes here once its Inbox tool is on in Settings."],
+    pi: ['Pi', "Plannotator's extension writes here once its Inbox tool is on in Settings, from the next Pi session."],
+    opencode: ['OpenCode', "Plannotator's plugin writes here once its Inbox tool is on in Settings, from the next OpenCode start."],
   } as const;
   for (const [host, [name, line]] of Object.entries(lines)) {
     const card = page.locator(`[data-host="${host}"]`);
