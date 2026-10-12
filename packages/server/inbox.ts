@@ -55,7 +55,6 @@ import {
   type InboxProject,
   type InboxProjectRepo,
 } from "@plannotator/core/inbox-types";
-import { toInboxQuestion } from "@plannotator/core/inbox-questions";
 import { checkServerSession, createServerSessionNonce, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { extractDirName, extractRepoName } from "@plannotator/core/project";
 import {
@@ -80,7 +79,7 @@ import { isLoopbackHostHeader } from "@plannotator/shared/loopback-host";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { inboxListSections } from "@plannotator/shared/inbox/list";
+import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "@plannotator/shared/inbox/list";
 import {
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_MAX_MS,
@@ -230,6 +229,10 @@ export interface InboxServerOptions {
  * 3 s to spare (a slow click, a slow network), so an Undo never reaches an agent.
  */
 export const INBOX_SET_ASIDE_DELAY_MS = 10_000;
+
+/** Settings' Archived block: rows per page of `GET /api/inbox/threads/archived`, and the most one page may ask for. */
+export const INBOX_ARCHIVED_PAGE = 50;
+export const INBOX_ARCHIVED_PAGE_MAX = 200;
 
 export interface InboxServer {
   port: number;
@@ -505,9 +508,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * the project as a label and an optional filter (`?project=prj_...`), which
    * keeps the sections and drops other projects' rows.
    */
-  const listModel = (projectFilter: string | null) => {
+  const listModel = (projectFilter: string | null, archived: "include" | "exclude") => {
     // One pass over the store feeds both the folders' counts and the sections.
     const rows = store.listRows();
+    const scoped = projectFilter ? rows.filter((row) => row.project.id === projectFilter) : rows;
     return {
       serverSession,
       version,
@@ -518,7 +522,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       notice: portChanged ? "The Inbox moved to a new port: allow notifications again on this page." : null,
       projects: projectFolders(rows),
       project: projectFilter,
-      sections: inboxListSections(projectFilter ? rows.filter((row) => row.project.id === projectFilter) : rows),
+      // `?archived=exclude` (the window): archived threads leave every section,
+      // Quiet included, and Settings lists them (GET /api/inbox/threads/archived).
+      // Without it they stay in Quiet, as an older window and the phone expect.
+      sections: inboxListSections(archived === "exclude" ? scoped.filter((row) => !inboxRowArchived(row)) : scoped),
       /** Questions in every project that record a decision once answered and sent: the sidebar's Decisions count. */
       decisions_waiting: waitingDecisionCount(store),
     };
@@ -530,6 +537,55 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (!isInboxId("prj", value)) throw new InboxError("validation_error", "project: a prj_ id.", { field: "project" });
     if (!store.project(value)) throw new InboxError("project_not_found", `No project ${value}.`);
     return value;
+  };
+
+  /** `?archived=include|exclude` on the list: where archived threads go. Default `include` (in Quiet). */
+  const archivedModeOf = (url: URL): "include" | "exclude" => {
+    const value = url.searchParams.get("archived");
+    if (value === null || value === "" || value === "include") return "include";
+    if (value === "exclude") return "exclude";
+    throw new InboxError("validation_error", "archived: include or exclude.", { field: "archived" });
+  };
+
+  /** A whole number from a query parameter, within bounds; absent or empty is the default. */
+  const queryCount = (url: URL, name: string, fallback: number, min: number, max: number): number => {
+    const value = url.searchParams.get(name);
+    if (value === null || value === "") return fallback;
+    const n = /^[0-9]+$/.test(value) ? Number(value) : Number.NaN;
+    if (!Number.isSafeInteger(n) || n < min || n > max) {
+      throw new InboxError("validation_error", `${name}: a whole number from ${min} to ${max}.`, { field: name });
+    }
+    return n;
+  };
+
+  /**
+   * Settings' Archived block: the archived threads, newest archived first, a
+   * page at a time (`offset`, `limit` up to 200), with every project that has
+   * any and how many, for its project filter. `total` is the count in the
+   * filtered scope, so the page says how many lie beyond it.
+   */
+  const archivedModel = (url: URL) => {
+    const projectFilter = projectFilterOf(url);
+    const offset = queryCount(url, "offset", 0, 0, Number.MAX_SAFE_INTEGER);
+    const limit = queryCount(url, "limit", INBOX_ARCHIVED_PAGE, 1, INBOX_ARCHIVED_PAGE_MAX);
+    const archived = inboxArchivedRows(store.listRows());
+    const counts = new Map<string, { id: string; name: string; archived: number }>();
+    for (const row of archived) {
+      const entry = counts.get(row.project.id) ?? { id: row.project.id, name: row.project.name, archived: 0 };
+      entry.archived += 1;
+      counts.set(row.project.id, entry);
+    }
+    const scoped = projectFilter ? archived.filter((row) => row.project.id === projectFilter) : archived;
+    return {
+      serverSession,
+      cursor: store.cursor(),
+      project: projectFilter,
+      projects: [...counts.values()].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)),
+      total: scoped.length,
+      offset,
+      limit,
+      threads: scoped.slice(offset, offset + limit),
+    };
   };
 
   const selfCommand = options.selfCommand?.length
@@ -815,10 +871,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return { seq: line.seq, kind: line.kind, id: line.id, project: line.record };
       case "message":
         return { seq: line.seq, kind: line.kind, id: line.id, message: line.record };
-      case "question": {
-        const root = store.message(store.message(line.record.message_id)?.thread_id ?? "");
-        return { seq: line.seq, kind: line.kind, id: line.id, question: toInboxQuestion(line.record, root?.resolved_at != null) };
-      }
+      case "question":
+        // The store's one question state: a question an agent asked after the archive line is live (notifications, the sound).
+        return { seq: line.seq, kind: line.kind, id: line.id, question: store.questionWire(line.record) };
       case "decision":
         return { seq: line.seq, kind: line.kind, id: line.id, decision: line.record };
       case "annotation":
@@ -1111,7 +1166,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
     try {
       if (path === "/api/inbox/health" && req.method === "GET") return json(health());
-      if (path === "/api/inbox/threads" && req.method === "GET") return json(listModel(projectFilterOf(url)));
+      if (path === "/api/inbox/threads" && req.method === "GET") return json(listModel(projectFilterOf(url), archivedModeOf(url)));
+      if (path === "/api/inbox/threads/archived" && req.method === "GET") return json(archivedModel(url));
       if (path === "/api/inbox/projects" && req.method === "GET") return json({ serverSession, cursor: store.cursor(), projects: projectFolders() });
       if (path === "/api/inbox/events" && req.method === "GET") return eventStream(req, url);
       if (path === "/api/inbox/restart") {
@@ -1226,7 +1282,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!thread) return json({ error: "No such thread.", code: "thread_not_found" }, 404);
         const decisionIds = thread.messages.flatMap((m) => (m.questions ?? []).map((q) => q.decision_id));
         const withRepo = { ...thread, project: { ...thread.project, repo: repos.get(thread.project.root) } };
-        return json({ serverSession, cursor: store.cursor(), thread: withRepo, decisions: threadDecisions(store, decisionIds) });
+        // `row` (additive): the thread's list row, also for an archived thread, which the window's list leaves out.
+        return json({ serverSession, cursor: store.cursor(), thread: withRepo, decisions: threadDecisions(store, decisionIds), row: store.listRow(thread.thread_id) });
       }
 
       const seenMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/seen$/.exec(path);

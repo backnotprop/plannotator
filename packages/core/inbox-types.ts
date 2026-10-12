@@ -570,6 +570,23 @@ export interface InboxListRow extends InboxThreadSummary {
    * Absent from an older Inbox.
    */
   read_at?: string | null;
+  /**
+   * The thread is archived (resolved) and an agent wrote in it after the
+   * archive line (a reply_to reply). Those later messages behave as an open
+   * thread's (their questions live and answerable, a reply goes to them);
+   * the thread stays resolved until the person acts. Derived from the log,
+   * never stored. Absent from an older Inbox.
+   */
+  agent_after_archive?: boolean;
+  /**
+   * `agent_after_archive`, and something there still waits: an agent
+   * message after the archive the person has not looked at, a live question
+   * open or picked, or the person's reply after the archive the agent has not
+   * read. The thread is back in the list, placed as an open thread would be;
+   * once handled it returns to the archive on its own. Derived. Absent from an
+   * older Inbox.
+   */
+  back_from_archive?: boolean;
 }
 
 export interface InboxListSection {
@@ -590,6 +607,13 @@ export interface InboxThread {
   /** The thread's name, or null for a session's default thread. */
   thread_name: string | null;
   resolved_at: string | null;
+  /**
+   * The window's read only (`GET /api/inbox/threads/:id`): the seq of the
+   * archive line of a resolved thread, null for an open one. A message whose
+   * `seq` is after it arrived after the archive and behaves as an open
+   * thread's. Absent from an older Inbox and from the MCP tools.
+   */
+  archive_seq?: number | null;
   messages: InboxMessageWire[];
 }
 

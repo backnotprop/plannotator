@@ -383,7 +383,16 @@ function useThreadAttachments(threadId: string, revision: unknown) {
 export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile, onOpenGuide, lookSeq, row, onMarkRead, onArchive, replyRequest, onReplyOpened, backLabel = 'Inbox', phone = false, stacked = false, fileStacked = false, onBackToList }: ThreadPaneProps) {
   const root = thread.messages[0]!;
   const asker = agentName(root.author);
-  const resolved = thread.resolved_at !== null;
+  // Archived (resolved). What an agent wrote after the archive line behaves as
+  // an open thread's: its questions are live, Reply goes to it, its files take
+  // comments; the thread stays archived. `resolved` is the thread with nothing
+  // after the archive: read only, as before.
+  const archived = thread.resolved_at !== null;
+  const archiveSeq = thread.archive_seq ?? null;
+  const afterArchive = (message: InboxMessageWire) => archived && archiveSeq !== null && (message.seq ?? 0) > archiveSeq;
+  const liveMessage = (message: InboxMessageWire) => !archived || afterArchive(message);
+  const cameBack = archived && thread.messages.some((m) => m.author.kind === 'agent' && afterArchive(m));
+  const resolved = archived && !cameBack;
   const agentMessages = thread.messages.filter((m) => m.author.kind === 'agent');
   const lastAgent = agentMessages[agentMessages.length - 1] ?? root;
 
@@ -1224,9 +1233,9 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     <button
       type="button"
       className="ib-iconbtn"
-      onClick={() => void resolve(!resolved)}
-      title={resolved ? 'Unarchive' : 'Archive: the thread ends; the next message starts a new one'}
-      aria-label={resolved ? 'Unarchive the thread' : 'Archive the thread'}
+      onClick={() => void resolve(!archived)}
+      title={archived ? 'Unarchive' : 'Archive: the thread ends; the next message starts a new one'}
+      aria-label={archived ? 'Unarchive the thread' : 'Archive the thread'}
       data-archive=""
     >
       <Icon name="archive" />
@@ -1570,7 +1579,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                 <div className="ib-tm">
                   {isNew && <span className="ib-newtag">New</span>}
                   {time}
-                  {isAgent && !resolved && (
+                  {isAgent && liveMessage(message) && (
                     <button type="button" className="ib-mut" onClick={() => openBox(picksCount > 0)} title="Reply" aria-label="Reply">
                       <Icon name="reply" size={15} />
                     </button>
@@ -1599,7 +1608,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                   projectRoot={thread.project.root}
                   repo={thread.project.repo ?? null}
                   onOpenAttachment={openFromMessage}
-                  readOnly={!isAgent || resolved || questions.length === 0 || allSent}
+                  readOnly={!isAgent || !liveMessage(message) || questions.length === 0 || allSent}
                   answers={answersOf(message)}
                   onPick={(key, answer) => pick(message.id, key, answer)}
                   footerFor={footerFor(message)}
@@ -1639,7 +1648,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                   />
                 )}
                 {message.guide && <GuideCard guide={message.guide} onOpen={() => onOpenGuide(message.id)} />}
-                {message === lastAgent && !resolved && waitingHoldsUp.length > 0 && (
+                {message === lastAgent && liveMessage(lastAgent) && waitingHoldsUp.length > 0 && (
                   <div className="ib-waitfoot">
                     <b>Waiting on this answer</b>
                     <span className="ib-badge">Holds up {waitingHoldsUp.length}</span>
@@ -1685,6 +1694,14 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         <div role="status" id={noteId} data-asker-note="">
           {showAskerNote && asking && <AskerEndedNote asking={asking} project={thread.project.name} anyLive={anyOtherLive} />}
         </div>
+        {cameBack && (
+          <div className="ib-acts ib-archnote" data-came-back="">
+            <span className="ib-st">Archived · {asker} wrote after you archived it. Your reply goes to it; the thread stays archived.</span>
+            <button type="button" className="ib-btn" onClick={() => void resolve(false)}>
+              Unarchive
+            </button>
+          </div>
+        )}
         {resolved ? (
           <div className="ib-acts">
             <span className="ib-st">Archived. The next message from {asker} starts a new thread.</span>
@@ -1790,7 +1807,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                   Cancel
                 </button>
                 <span className="ib-sp" />
-                <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />
+                {!archived && <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />}
               </div>
             )}
           </>
@@ -1810,7 +1827,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
               <Icon name="reply" size={15} />
               {waiting ? 'Edit the reply' : 'Reply'}
             </button>
-            <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />
+            {!archived && <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />}
             {waiting && unanswered.length > 0 && (
               <>
                 <span className="ib-sp" />
@@ -1822,7 +1839,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
           </div>
           </>
         )}
-        {!resolved && (
+        {!archived && (
           <NewMessagePopover
             thread={thread}
             asker={asker}
@@ -1869,7 +1886,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         onToggleFull={() => setFull((v) => !v)}
         focusId={file!.focus}
         focusRequest={paneFocus}
-        readOnly={resolved}
+        readOnly={!liveMessage(thread.messages.find((m) => m.id === openAttachment.message_id) ?? root)}
         onSaved={saveRecord}
         onRemoved={dropRecord}
         onOpenAt={(attachmentId, version, focus) => onOpenFile({ id: attachmentId, version, focus }, { replace: true })}
@@ -1905,8 +1922,11 @@ function SkipChip({ count, keepOpen, onToggle }: { count: number; keepOpen: bool
   const them = count === 1 ? 'it' : 'them';
   return (
     <span className="ib-skipchip" data-skip-chip={keepOpen ? 'keep' : 'skip'}>
-      {!keepOpen && <Icon name="forward" size={14} />}
-      {keepOpen ? `${plural(count, 'unanswered question')} ${count === 1 ? 'stays' : 'stay'} open` : `${plural(count, 'unanswered question')} will be skipped`}
+      {/* The icon and the sentence are one item, so where the chip wraps (a narrow reply box) the icon stays with its words. */}
+      <span className="ib-skip-s">
+        {!keepOpen && <Icon name="forward" size={14} />}
+        {keepOpen ? `${plural(count, 'unanswered question')} ${count === 1 ? 'stays' : 'stay'} open` : `${plural(count, 'unanswered question')} will be skipped`}
+      </span>
       <button type="button" onClick={onToggle} data-skip-toggle="">
         {keepOpen ? `Skip ${them}` : 'Keep open'}
       </button>

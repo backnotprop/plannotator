@@ -20,9 +20,16 @@ function rowsById(sections: readonly InboxListSection[]): Map<string, InboxListR
   return out;
 }
 
-/** `row` carries agent activity the row on screen (`old`) lacks: a thread an agent started, or a newer agent message. */
+/**
+ * `row` carries agent activity the row on screen (`old`) lacks: a thread an
+ * agent started, or a newer agent message. A thread not on screen whose agent
+ * messages the person has all seen (`unseen` 0) is not: it came back by the
+ * person's own hand (Unarchive in Settings or in the thread), or they opened
+ * it from a link.
+ */
 function hasNewAgentActivity(old: InboxListRow | undefined, row: InboxListRow): boolean {
-  return old === undefined ? row.last_author === 'agent' : row.last_author === 'agent' && row.last_at > old.last_at;
+  if (old === undefined) return row.last_author === 'agent' && (row.unseen ?? 1) > 0;
+  return row.last_author === 'agent' && row.last_at > old.last_at;
 }
 
 /**
@@ -75,7 +82,8 @@ function newestFirst(left: InboxListRow, right: InboxListRow): number {
  * list on screen was drawn, which still waits behind "N new · Show". A thread
  * the list on screen lacks and an agent started stays out; a row with a newer
  * agent message keeps the state it had on screen and the place that state
- * gives it. A thread gone from `latest` leaves. Show adopts `latest` whole.
+ * gives it. A thread gone from `latest` leaves (an archived one, archived while
+ * it was open). Show adopts `latest` whole.
  */
 export function settleOwn(shown: readonly InboxListSection[], latest: readonly InboxListSection[]): InboxListSection[] {
   const before = rowsById(shown);
@@ -90,11 +98,30 @@ export function settleOwn(shown: readonly InboxListSection[], latest: readonly I
     for (const row of section.threads) {
       const old = before.get(row.thread_id);
       if (!hasNewAgentActivity(old, row)) put(section.id, row);
+      // Archived by the person while it was open (markHeldRowArchived): the archive settles (the row
+      // leaves); the agent's message that brought it back waits behind "N new", like any agent activity.
+      else if (old && (old.resolved_at ?? null) !== null && old.back_from_archive !== true) continue;
       // Held: the state on screen, in the section that state sits in.
       else if (old) put(known.has(old.section) ? old.section : section.id, old);
     }
   }
   return latest.map((section) => ({ ...section, threads: (buckets.get(section.id) ?? []).sort(newestFirst) }));
+}
+
+/**
+ * The person archived a thread while its row is on screen (the thread is
+ * open). The list the window reads leaves archived threads out, so
+ * refreshHeldRows would keep the row as it was; this shows it archived in
+ * place instead ("Archived", not bold), where it stays until the person
+ * leaves the thread and the list catches up without it.
+ */
+export function markHeldRowArchived(shown: readonly InboxListSection[], threadId: string, at: string): InboxListSection[] {
+  return shown.map((section) => ({
+    ...section,
+    threads: section.threads.map((row) =>
+      row.thread_id === threadId ? { ...row, resolved_at: row.resolved_at ?? at, section: 'quiet' as const, unread: false } : row,
+    ),
+  }));
 }
 
 /** One project's rows only; the sections stay, empty ones included. */

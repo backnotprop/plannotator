@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { heldNotice, refreshHeldRows, settleOwn } from './held';
+import { heldNotice, markHeldRowArchived, refreshHeldRows, settleOwn } from './held';
 
 function row(id: string, project: string, last_at: string, last_author: 'agent' | 'person'): InboxListRow {
   return { thread_id: id, project: { id: `prj_${project}`, name: project }, last_at, last_author } as InboxListRow;
@@ -100,5 +100,59 @@ describe('settleOwn', () => {
     const settled = settleOwn(shown, latest);
     expect(settled.map((s) => s.id)).toEqual(['stopped', 'holding', 'waiting', 'new', 'sent', 'quiet']);
     expect(ids(settled)).toEqual({ new: ['kept'] });
+  });
+
+  // The failure this guards: a thread archived while it was open (held in
+  // place by markHeldRowArchived) stayed in the list after the close, or an
+  // agent's message that brought it back from the archive came in with the
+  // close instead of waiting behind "N new".
+  test('a thread archived while open leaves at the settle; an agent bringing it back waits for Show', () => {
+    const open = { ...r('archived', 'waiting', 3), resolved_at: null, unread: true } as InboxListRow;
+    const other = { ...r('other', 'waiting', 2), resolved_at: null } as InboxListRow;
+    const shown = markHeldRowArchived(six({ waiting: [open, other] }), 'archived', at(4));
+    // The list the window reads leaves the archived thread out.
+    expect(ids(settleOwn(shown, six({ waiting: [other] })))).toEqual({ waiting: ['other'] });
+    // An agent wrote in it after the archive: it is back in the list, as news, which waits.
+    const cameBack = { ...r('archived', 'new', 6), resolved_at: at(4), back_from_archive: true } as InboxListRow;
+    const latest = six({ new: [cameBack], waiting: [other] });
+    expect(ids(settleOwn(shown, latest))).toEqual({ waiting: ['other'] });
+    expect(heldNotice(settleOwn(shown, latest), latest).count).toBe(1);
+  });
+});
+
+describe('a thread the person brought back', () => {
+  // The failure this guards: a thread the person unarchived from inside it
+  // (or opened from a link) is not on screen and its last message is an
+  // agent's, so it read as agent activity: "1 new" while open, and held out
+  // of the list after the close until Show.
+  test("a thread not on screen whose agent messages were all seen is the person's own: it settles in, and is no news", () => {
+    const other = { ...row('other', 'docs-site', '2026-10-12T10:00:00Z', 'agent'), section: 'waiting', unseen: 1 } as InboxListRow;
+    const back = { ...row('back', 'docs-site', '2026-10-12T09:00:00Z', 'agent'), section: 'waiting', unseen: 0 } as InboxListRow;
+    const fresh = { ...row('fresh', 'docs-site', '2026-10-12T11:00:00Z', 'agent'), section: 'new', unseen: 1 } as InboxListRow;
+    const shown: InboxListSection[] = [{ id: 'waiting', label: 'Waiting on you', threads: [other] }];
+    const latest: InboxListSection[] = [
+      { id: 'waiting', label: 'Waiting on you', threads: [other, back] },
+      { id: 'new', label: 'New since you looked', threads: [fresh] },
+    ];
+    expect(heldNotice(shown, latest)).toEqual({ count: 1, text: '1 new in docs-site' });
+    expect(settleOwn(shown, latest).map((s) => s.threads.map((t) => t.thread_id))).toEqual([['other', 'back'], []]);
+  });
+});
+
+describe('markHeldRowArchived', () => {
+  // The failure this guards: the window's list leaves archived threads out, so
+  // refreshHeldRows keeps a row whose thread was just archived as it was (bold,
+  // "Waiting") for as long as the person stays in the thread.
+  test('the archived row shows archived in place; the others and the order stay; the next list read keeps it', () => {
+    const a = { ...row('a', 'billing-svc', '2026-10-07T10:00:00Z', 'agent'), section: 'waiting', unread: true, resolved_at: null } as InboxListRow;
+    const b = { ...row('b', 'docs-site', '2026-10-07T09:00:00Z', 'agent'), section: 'waiting', unread: true, resolved_at: null } as InboxListRow;
+    const marked = markHeldRowArchived(sections(a, b), 'a', '2026-10-07T10:30:00Z');
+    expect(marked[0]!.threads.map((r) => r.thread_id)).toEqual(['a', 'b']);
+    expect(marked[0]!.threads[0]).toMatchObject({ resolved_at: '2026-10-07T10:30:00Z', section: 'quiet', unread: false });
+    expect(marked[0]!.threads[1]).toBe(b);
+    // The next read of the list (archived left out) keeps it as shown.
+    expect(refreshHeldRows(marked, sections(b))[0]!.threads[0]).toBe(marked[0]!.threads[0]);
+    // Unarchived again: the list has it, and its fresh state replaces the archived one.
+    expect(refreshHeldRows(marked, sections(a, b))[0]!.threads[0]).toBe(a);
   });
 });

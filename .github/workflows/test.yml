@@ -140,6 +140,7 @@ jobs:
           packages/inbox/endedSession.test.tsx
           packages/inbox/markRead.test.tsx
           packages/inbox/fileBack.test.tsx
+          packages/inbox/archived.test.tsx
           packages/inbox/decisionsPicker.test.tsx
           packages/inbox/openStaysPut.test.tsx
           packages/inbox/phoneList.test.tsx

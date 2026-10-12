@@ -36,6 +36,8 @@ export interface SettingsPageProps {
   about?: ReactNode;
   /** The question sound's row, under the notifications switch (sound.ts). */
   sound?: InboxSound;
+  /** Archived threads, out of the list (components/Archived.tsx): above the store on disk. */
+  archived?: ReactNode;
 }
 
 const PERMISSION_LABEL: Record<NotificationPermission | 'unsupported', string> = {
@@ -397,6 +399,7 @@ export function SettingsPage({
   onDeleteProject,
   about,
   sound,
+  archived,
 }: SettingsPageProps) {
   const env = settings?.inbox_tool.env ?? null;
   return (
@@ -453,6 +456,7 @@ export function SettingsPage({
         )}
         {settings?.phones && <PhonesBlock />}
         {about}
+        {archived}
         {settings && (
           <div className="ib-sblock">
             <h2>Stored on this machine</h2>
