@@ -268,6 +268,8 @@ interface DiffViewerProps {
   markdownView?: MarkdownFileView;
   onMarkdownViewChange?: (view: MarkdownFileView, how: 'chosen' | 'shown') => void;
   markdownPreviewSupported?: boolean;
+  /** Set while the file's view cannot change (All files holds it in an edit session). */
+  markdownViewDisabledReason?: string | null;
 }
 
 /** Shown while the preview's code loads (it is split from the diff view). */
@@ -343,6 +345,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   markdownView: markdownViewProp,
   onMarkdownViewChange,
   markdownPreviewSupported = true,
+  markdownViewDisabledReason = null,
 }) => {
   const pierreTheme = usePierreTheme({ fontFamily, fontSize, compactTouchLayout });
   // Worker-pool highlighting: keep the pool's theme pair in step with the UI
@@ -983,6 +986,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
               onChoose={chooseMarkdownView}
               iconOnly={iconOnly}
               touch={touch}
+              disabledReason={markdownViewDisabledReason}
             />
           )
           : undefined}

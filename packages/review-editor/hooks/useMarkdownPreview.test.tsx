@@ -34,9 +34,11 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let controller: MarkdownPreviewController | undefined;
 
+const lockedNotes: string[] = [];
+
 function Harness({ supported = true, targetPath = 'docs/a.md', enabled = true }: { supported?: boolean; targetPath?: string | null | (() => string | null); enabled?: boolean }) {
   controller = useMarkdownPreview({ files: FILES, supported });
-  useMarkdownPreviewKeys({ controller, targetPath, files: FILES, enabled });
+  useMarkdownPreviewKeys({ controller, targetPath, files: FILES, enabled, onLocked: (reason) => lockedNotes.push(reason) });
   return <input data-test-input="" />;
 }
 
@@ -76,6 +78,7 @@ afterEach(async () => {
   root = null;
   host = null;
   controller = undefined;
+  lockedNotes.length = 0;
   resetStorageBackend();
 });
 
@@ -187,9 +190,30 @@ describe.if(hasDom)('Markdown file views', () => {
     expect(controller!.viewOf('docs/a.md')).toBe('source');
     expect(stored.has(MARKDOWN_VIEW_COOKIE)).toBe(false);
 
+    // P on the locked file says why instead of doing nothing.
+    expect(lockedNotes).toEqual(['Finish editing first']);
+
     await act(async () => controller!.setEditingFile(null));
     await press('p');
     expect(controller!.viewOf('docs/a.md')).toBe('changes');
+  });
+
+  test('a pick or P on another file moves the others but never the file being edited', async () => {
+    await mount({ targetPath: 'docs/b.md' });
+    await act(async () => controller!.setEditingFile('docs/a.md'));
+    await act(async () => controller!.choose('docs/new.md', 'read'));
+    // b and new follow the pick; a (being edited, never set by hand) keeps Source.
+    expect(views()).toEqual(['source', 'read', 'read']);
+    await press('p'); // b: Read -> Source
+    await press('p'); // b: Source -> Changes
+    expect(views()).toEqual(['source', 'changes', 'read']);
+    expect(controller!.previewedPaths.has('docs/a.md')).toBe(false);
+
+    // Once the edit ends the file keeps the view it was edited in, until picked.
+    await act(async () => controller!.setEditingFile(null));
+    expect(controller!.viewOf('docs/a.md')).toBe('source');
+    await act(async () => controller!.choose('docs/a.md', 'read'));
+    expect(controller!.viewOf('docs/a.md')).toBe('read');
   });
 
   test('in All files P reads its target when pressed', async () => {

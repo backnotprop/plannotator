@@ -527,6 +527,16 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
     expect(el.querySelector(TOGGLE)).toBeNull();
   });
 
+  test('while All files holds the file in an edit session, its menu here is disabled and says why', async () => {
+    const doc = '# A\n';
+    const el = await render({
+      patch: addedPatch('a.md', doc), filePath: 'a.md', status: 'added', markdownViewDisabledReason: 'Finish editing first',
+    }, { oldContent: null, newContent: doc });
+    const button = el.querySelector<HTMLButtonElement>(TOGGLE)!;
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute('title')).toBe('Finish editing first');
+  });
+
   test('a large file asks before rendering', async () => {
     const tail = Array.from({ length: 6000 }, (_, i) => `line ${i} ${'y'.repeat(50)}`).join('\n');
     const oldDoc = `# Old\n\n\`\`\`\n${tail}\n\`\`\`\n`;

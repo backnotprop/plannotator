@@ -1898,13 +1898,18 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       handle.updateItem(item);
       if (!want) syncHeaderMetrics(id);
     }
+    // editingItemId: a swap held back for the editing file runs once it ends.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewItemIds, identity]);
+  }, [previewItemIds, identity, editSession.editingItemId]);
 
   // A search hit in a previewed file shows that file as Source (v1: hits are
   // in the diff text).
+  // The file in an edit session always shows its diff (the swap never takes
+  // it out from under the editor), so a hit there scrolls, whatever its view.
+  const activeMatchItemId = activeSearchMatch != null ? filePathToItemId.get(activeSearchMatch.filePath) ?? '' : '';
   const activeMatchPreviewed = activeSearchMatch != null
-    && previewItemIds.has(filePathToItemId.get(activeSearchMatch.filePath) ?? '');
+    && previewItemIds.has(activeMatchItemId)
+    && activeMatchItemId !== editSession.editingItemId;
 
   useEffect(() => {
     if (!isActive) return;
@@ -2668,7 +2673,15 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const viewer = viewerRef.current?.getInstance();
     const isPreviewable = markdownPreviewRef.current?.isPreviewable;
     if (viewer == null || !isPreviewable) return null;
-    const rendered = viewer.getRenderedItems();
+    // Only files in the viewport count (rendered items include overscan), so
+    // P never switches a file the person cannot see.
+    const container = viewer.getContainerElement();
+    const view = container?.getBoundingClientRect();
+    const rendered = viewer.getRenderedItems().filter((item) => {
+      if (!view) return true;
+      const rect = item.element.getBoundingClientRect();
+      return rect.bottom > view.top + 1 && rect.top < view.bottom - 1;
+    });
     const markdownPathOf = (itemId: string): string | null => {
       const file = itemIdToFile.get(itemId);
       return file && isPreviewable(file) ? file.path : null;
@@ -2688,15 +2701,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       });
       if (under) return markdownPathOf(under.id);
     }
-    // 3. The top-most Markdown file intersecting the viewport.
-    const container = viewer.getContainerElement();
-    const view = container?.getBoundingClientRect();
+    // 3. The top-most Markdown file in the viewport.
     for (const item of rendered) {
       const path = markdownPathOf(item.id);
-      if (!path) continue;
-      if (!view) return path;
-      const rect = item.element.getBoundingClientRect();
-      if (rect.bottom > view.top + 1 && rect.top < view.bottom - 1) return path;
+      if (path) return path;
     }
     return null;
   });

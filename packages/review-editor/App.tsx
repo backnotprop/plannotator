@@ -3030,6 +3030,7 @@ const ReviewApp: React.FC = () => {
         : null,
     files,
     enabled: !guideOpen && (isDiffPanelActive || isAllFilesActive),
+    onLocked: (reason) => toast(reason, { id: 'markdown-view-locked' }),
   });
 
   // Shared function: apply a PR response (used by both initial load and PR switch)

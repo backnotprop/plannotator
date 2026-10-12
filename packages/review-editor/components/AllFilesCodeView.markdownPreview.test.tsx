@@ -22,6 +22,7 @@ let lastCodeViewProps: Record<string, unknown> | null = null;
 let renderedItems: Array<{ id: string; element: HTMLElement }> = [];
 let viewport: HTMLElement | undefined;
 let fakeEditingItemId: string | null = null;
+const scrolls: string[] = [];
 const updatedItems: Array<{ id: string; fileDiff: { hunks: unknown[]; cacheKey?: string } }> = [];
 
 const realPierreDiffs = { ...(await import('@pierre/diffs')) };
@@ -71,7 +72,7 @@ mock.module('@pierre/diffs/react', () => ({
         return true;
       },
       updateItemId: () => true,
-      scrollTo: () => {},
+      scrollTo: (target: { id?: string }) => { scrolls.push(target.id ?? ''); },
       setSelectedLines: () => {},
       getSelectedLines: () => null,
       clearSelectedLines: () => {},
@@ -223,6 +224,7 @@ afterEach(async () => {
   renderedItems = [];
   viewport = undefined;
   fakeEditingItemId = null;
+  scrolls.length = 0;
 });
 
 afterAll(() => {
@@ -286,6 +288,56 @@ describe.if(hasDom)('Markdown previews in the all-files view', () => {
       onAddSuggestionsForFile: () => {},
     });
     expect(editing.at(-1)).toBeNull();
+  });
+
+  test('the file in an edit session keeps its diff; the swap held back runs once the edit ends, and search scrolls there', async () => {
+    const calls: Array<[string, string]> = [];
+    // Stable files: only the edit session changes between the renders below.
+    const editProps = { files: [mdFile, codeFile], enableEditSuggestions: true, onAddSuggestionsForFile: () => {} };
+    fakeEditingItemId = mdFile.path;
+    await render({ markdownPreview: preview([], calls), ...editProps });
+    // Asked to show it rendered mid-edit: the editor's diff stays. One object
+    // from here on, so only the edit session changes between renders.
+    const held = preview([mdFile.path], calls);
+    await rerender({ markdownPreview: held, ...editProps });
+    expect(updatedItems.some((u) => u.id === mdFile.path)).toBe(false);
+
+    // A search hit in it scrolls to the line instead of asking for Source.
+    const match = { id: 'm1', filePath: mdFile.path, side: 'addition', lineNumber: 1, text: '# New', matchStart: 2, matchEnd: 5 };
+    await rerender({ markdownPreview: held, ...editProps, activeSearchMatch: match as never, activeSearchMatchId: 'm1' });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 40)); });
+    expect(calls).not.toContainEqual([mdFile.path, 'source']);
+    expect(scrolls).toContain(mdFile.path);
+
+    // The edit ends: the held-back swap runs.
+    fakeEditingItemId = null;
+    await rerender({ markdownPreview: held, ...editProps, activeSearchMatch: match as never, activeSearchMatchId: 'm1' });
+    expect(updatedItems.filter((u) => u.id === mdFile.path).at(-1)?.fileDiff.hunks).toEqual([]);
+  });
+
+  test('P never picks a file in the overscan: focus counts only inside the viewport', async () => {
+    let resolve: (() => string | null) | null = null;
+    const secondMd: DiffFile = { ...mdFile, path: 'docs/notes.md', patch: mdFile.patch.replaceAll('docs/guide.md', 'docs/notes.md') };
+    const box = (top: number, bottom: number) => {
+      const el = document.createElement('div');
+      el.tabIndex = 0;
+      el.getBoundingClientRect = () => ({ top, bottom, left: 0, right: 800, width: 800, height: bottom - top, x: 0, y: top, toJSON: () => ({}) });
+      document.body.appendChild(el);
+      return el;
+    };
+    viewport = box(0, 600);
+    const offscreen = box(700, 900); // rendered as overscan below the viewport
+    renderedItems = [
+      { id: mdFile.path, element: box(0, 400) },
+      { id: secondMd.path, element: offscreen },
+    ];
+    await render({
+      files: [mdFile, secondMd],
+      markdownPreview: { ...preview([], []), registerViewTarget: (fn: (() => string | null) | null) => { resolve = fn; } },
+    });
+    offscreen.focus();
+    expect(document.activeElement).toBe(offscreen);
+    expect(resolve!()).toBe(mdFile.path);
   });
 
   test('P acts on the Markdown file under the pointer, else the top-most Markdown file in view (never just the last)', async () => {

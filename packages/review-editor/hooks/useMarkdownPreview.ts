@@ -128,7 +128,7 @@ export function useMarkdownPreview(options: {
   const { files, supported } = options;
   const [startingView, setStartingView] = useState<MarkdownFileView>(() => readStartingMarkdownView());
   const [overrides, setOverrides] = useState<ReadonlyMap<string, MarkdownFileView>>(() => new Map());
-  const [editingFile, setEditingFile] = useState<string | null>(null);
+  const [editingFile, setEditingFileState] = useState<string | null>(null);
   const viewTargetRef = useRef<(() => string | null) | null>(null);
   const lockReason = useCallback(
     (path: string) => (editingFile !== null && path === editingFile ? MARKDOWN_VIEW_EDITING_REASON : null),
@@ -149,6 +149,23 @@ export function useMarkdownPreview(options: {
     if (!file) return 'source';
     return resolveMarkdownView(overrides.get(path) ?? startingView, markdownViewsFor(file));
   }, [markdownFiles, overrides, startingView]);
+  const viewOfRef = useRef(viewOf);
+  viewOfRef.current = viewOf;
+
+  // Locking a file pins the view it shows now, so a pick on another file
+  // (which moves every file not set by hand) cannot move it mid-edit.
+  const setEditingFile = useCallback((path: string | null) => {
+    if (path !== null && markdownFiles.has(path)) {
+      const pinned = viewOfRef.current(path);
+      setOverrides((current) => {
+        if (current.get(path) === pinned) return current;
+        const next = new Map(current);
+        next.set(path, pinned);
+        return next;
+      });
+    }
+    setEditingFileState(path);
+  }, [markdownFiles]);
 
   const setOverride = useCallback((path: string, view: MarkdownFileView) => {
     if (lockReason(path)) return;
@@ -211,7 +228,7 @@ export function useMarkdownPreview(options: {
           previewedPaths,
         }
       : undefined),
-    [supported, isPreviewable, viewOf, isPreviewed, choose, setOverride, lockReason, registerViewTarget, resolveViewTarget, cycle, startingView, markdownFiles, previewedPaths],
+    [supported, isPreviewable, viewOf, isPreviewed, choose, setOverride, lockReason, setEditingFile, registerViewTarget, resolveViewTarget, cycle, startingView, markdownFiles, previewedPaths],
   );
 }
 
@@ -228,22 +245,27 @@ export function useMarkdownPreviewKeys(options: {
   files: readonly DiffFile[];
   /** False while the surface on screen is not a diff (the guide, a panel). */
   enabled: boolean;
+  /** `P` on a file whose view is locked (it holds the edit session): say why. */
+  onLocked?: (reason: string) => void;
 }): void {
-  const { controller, targetPath, files, enabled } = options;
+  const { controller, targetPath, files, enabled, onLocked } = options;
   useReviewMarkdownPreviewShortcuts({
     handlers: {
       cycleMarkdownView: {
         when: (event) => {
           if (!controller || !enabled || event.defaultPrevented || isTypingKeyEvent(event)) return false;
           const path = typeof targetPath === 'function' ? targetPath() : targetPath;
-          if (!path || controller.lockReason(path)) return false;
+          if (!path) return false;
           const file = files.find((candidate) => candidate.path === path);
           return !!file && controller.isPreviewable(file);
         },
         handle: (event) => {
           event.preventDefault();
           const path = typeof targetPath === 'function' ? targetPath() : targetPath;
-          if (path) controller?.cycle(path);
+          if (!path || !controller) return;
+          const locked = controller.lockReason(path);
+          if (locked) onLocked?.(locked);
+          else controller.cycle(path);
         },
       },
     },
