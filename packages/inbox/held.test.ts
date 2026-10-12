@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { heldNotice, markHeldRowArchived, refreshHeldRows } from './held';
+import { heldNotice, markHeldRowArchived, refreshHeldRows, settleOwn } from './held';
 
 function row(id: string, project: string, last_at: string, last_author: 'agent' | 'person'): InboxListRow {
   return { thread_id: id, project: { id: `prj_${project}`, name: project }, last_at, last_author } as InboxListRow;
@@ -69,6 +69,101 @@ describe('refreshHeldRows', () => {
     // The row with a newer agent message keeps what was on screen, and still counts behind "N new".
     expect(next[0]!.threads[0]).toBe(other);
     expect(heldNotice(next, latest).count).toBe(1);
+  });
+});
+
+describe('settleOwn', () => {
+  const at = (minute: number) => `2026-10-12T10:${String(minute).padStart(2, '0')}:00Z`;
+  const r = (id: string, section: InboxListRow['section'], minute: number, last_author: 'agent' | 'person' = 'agent') =>
+    ({ ...row(id, 'docs-site', at(minute), last_author), section }) as InboxListRow;
+  const six = (by: Partial<Record<InboxListRow['section'], InboxListRow[]>>): InboxListSection[] =>
+    (['stopped', 'holding', 'waiting', 'new', 'sent', 'quiet'] as const).map((id) => ({ id, label: id, threads: by[id] ?? [] }));
+  const ids = (sections: InboxListSection[]) => Object.fromEntries(sections.filter((s) => s.threads.length).map((s) => [s.id, s.threads.map((t) => t.thread_id)]));
+
+  // The failure this guards: closing a thread brought in what agents did
+  // while the person read (owner's decision 4: that waits for Show), or kept
+  // the person's own reads where they were.
+  test("the person's own reads and actions take their places; agent activity stays as it was on screen", () => {
+    const shown = six({ new: [r('read', 'new', 5), r('next', 'new', 4)], stopped: [r('answered', 'stopped', 3)], waiting: [r('wrote', 'waiting', 2)] });
+    const latest = six({
+      // The look moved "read" to Quiet; the person's Send moved "answered" to Sent.
+      quiet: [r('read', 'quiet', 5)],
+      sent: [r('answered', 'sent', 6, 'person')],
+      new: [r('next', 'new', 4)],
+      // An agent wrote in "wrote" and started "fresh": both wait behind "N new".
+      stopped: [r('fresh', 'stopped', 8), r('wrote', 'stopped', 7)],
+    });
+    const settled = settleOwn(shown, latest);
+    expect(ids(settled)).toEqual({ waiting: ['wrote'], new: ['next'], sent: ['answered'], quiet: ['read'] });
+    // The held row keeps the state that was on screen.
+    expect(settled.find((s) => s.id === 'waiting')!.threads[0]!.last_at).toBe(at(2));
+    expect(heldNotice(settled, latest)).toEqual({ count: 2, text: '2 new in docs-site' });
+  });
+
+  test("each section is in the list's order (newest first, ties on the id), with held rows among the rest", () => {
+    const shown = six({ waiting: [r('b', 'waiting', 4), r('held', 'waiting', 3)] });
+    const latest = six({ waiting: [r('a', 'waiting', 5, 'person'), r('b', 'waiting', 4), r('c', 'waiting', 4, 'person')], stopped: [r('held', 'stopped', 9)] });
+    expect(ids(settleOwn(shown, latest))).toEqual({ waiting: ['a', 'b', 'c', 'held'] });
+  });
+
+  test('a thread gone from the store leaves; the section list is the latest one, empty sections included', () => {
+    const shown = six({ new: [r('gone', 'new', 1), r('kept', 'new', 2)] });
+    const latest = six({ new: [r('kept', 'new', 2)] });
+    const settled = settleOwn(shown, latest);
+    expect(settled.map((s) => s.id)).toEqual(['stopped', 'holding', 'waiting', 'new', 'sent', 'quiet']);
+    expect(ids(settled)).toEqual({ new: ['kept'] });
+  });
+
+  // The failure this guards: a thread archived while it was open (held in
+  // place by markHeldRowArchived) stayed in the list after the close, or an
+  // agent's message that brought it back from the archive came in with the
+  // close instead of waiting behind "N new".
+  test('a thread archived while open leaves at the settle; an agent bringing it back waits for Show', () => {
+    const open = { ...r('archived', 'waiting', 3), resolved_at: null, unread: true } as InboxListRow;
+    const other = { ...r('other', 'waiting', 2), resolved_at: null } as InboxListRow;
+    const shown = markHeldRowArchived(six({ waiting: [open, other] }), 'archived', at(4));
+    // The list the window reads leaves the archived thread out.
+    expect(ids(settleOwn(shown, six({ waiting: [other] })))).toEqual({ waiting: ['other'] });
+    // An agent wrote in it after the archive: it is back in the list, as news, which waits.
+    const cameBack = { ...r('archived', 'new', 6), resolved_at: at(4), back_from_archive: true } as InboxListRow;
+    const latest = six({ new: [cameBack], waiting: [other] });
+    expect(ids(settleOwn(shown, latest))).toEqual({ waiting: ['other'] });
+    expect(heldNotice(settleOwn(shown, latest), latest).count).toBe(1);
+  });
+});
+
+describe('a thread the person brought back', () => {
+  // The failure this guards: a thread the person unarchived from inside it
+  // (or opened from a link) is not on screen and its last message is an
+  // agent's, so it read as agent activity: "1 new" while open, and held out
+  // of the list after the close until Show.
+  test("a thread not on screen whose agent messages were all seen is the person's own: it settles in, and is no news", () => {
+    const other = { ...row('other', 'docs-site', '2026-10-12T10:00:00Z', 'agent'), section: 'waiting', unseen: 1 } as InboxListRow;
+    const back = { ...row('back', 'docs-site', '2026-10-12T09:00:00Z', 'agent'), section: 'waiting', unseen: 0 } as InboxListRow;
+    const fresh = { ...row('fresh', 'docs-site', '2026-10-12T11:00:00Z', 'agent'), section: 'new', unseen: 1 } as InboxListRow;
+    const shown: InboxListSection[] = [{ id: 'waiting', label: 'Waiting on you', threads: [other] }];
+    const latest: InboxListSection[] = [
+      { id: 'waiting', label: 'Waiting on you', threads: [other, back] },
+      { id: 'new', label: 'New since you looked', threads: [fresh] },
+    ];
+    const here = new Set(['back']);
+    expect(heldNotice(shown, latest, here)).toEqual({ count: 1, text: '1 new in docs-site' });
+    expect(settleOwn(shown, latest, here).map((s) => s.threads.map((t) => t.thread_id))).toEqual([['other', 'back'], []]);
+  });
+
+  // The failure this guards: the exemption reached threads this tab never
+  // showed, so a thread an agent started and the person read on their phone
+  // dropped out of "N new" while its row was still not on screen.
+  test('an agent starts a thread and it is read elsewhere (unseen 0): this tab still shows 1 new, and the close leaves it for Show', () => {
+    const other = { ...row('other', 'docs-site', '2026-10-12T10:00:00Z', 'agent'), section: 'waiting', unseen: 1 } as InboxListRow;
+    const readOnPhone = { ...row('phone', 'docs-site', '2026-10-12T11:00:00Z', 'agent'), section: 'quiet', unseen: 0 } as InboxListRow;
+    const shown: InboxListSection[] = [{ id: 'waiting', label: 'Waiting on you', threads: [other] }];
+    const latest: InboxListSection[] = [
+      { id: 'waiting', label: 'Waiting on you', threads: [other] },
+      { id: 'quiet', label: 'Quiet', threads: [readOnPhone] },
+    ];
+    expect(heldNotice(shown, latest, new Set(['other']))).toEqual({ count: 1, text: '1 new in docs-site' });
+    expect(settleOwn(shown, latest, new Set(['other'])).map((s) => s.threads.map((t) => t.thread_id))).toEqual([['other'], []]);
   });
 });
 

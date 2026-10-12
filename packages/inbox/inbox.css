@@ -194,8 +194,12 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-lhead { height: 60px; display: flex; align-items: center; gap: 12px; padding: 0 22px; flex: none; }
 .ib-lhead h1 { font-size: 20px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
 .ib-lhead .ib-path { font-family: var(--font-mono); font-size: 12px; color: var(--muted-foreground); }
-.ib-lbody { padding: 0 10px 10px; overflow-y: auto; flex: 1; min-height: 0; }
-.ib-band { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: 8px; background: var(--ib-band); font-size: 13px; font-weight: 600; width: 100%; text-align: left; }
+.ib-lbody { padding: 0 10px 10px; overflow-y: auto; flex: 1; min-height: 0; position: relative; }
+/* A row that left the rows on screen when the list settled (settle.ts): a copy drawn where it was, fading
+   out under the rows sliding past it (they are opaque and sit above it while they move). */
+.ib-lbody > .ib-settle-ghost { position: absolute; margin: 0; z-index: 0; pointer-events: none; background: var(--card); }
+.ib-lbody > .ib-group > .ib-rw { background: var(--card); }
+.ib-band { position: relative; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: 8px; background: var(--ib-band); font-size: 13px; font-weight: 600; width: 100%; text-align: left; }
 .ib-group + .ib-group { margin-top: 12px; }
 .ib-band .ib-n { font-weight: 500; color: var(--muted-foreground); }
 .ib-band .ib-ic { margin-left: auto; color: var(--muted-foreground); }
@@ -1039,13 +1043,14 @@ pre code.pn-code[data-keep-layout] {
 .ib-rfoot .ib-skip-s { display: block; flex: 0 1 auto; min-width: 0; overflow-wrap: break-word; }
 .ib-rfoot .ib-skip-s > .ib-ic { display: inline-block; vertical-align: -2px; margin-right: 6px; }
 .pn-inbox .ib-rfoot .ib-skipchip button { flex: none; white-space: nowrap; }
-/* The list: a quiet hover action on rows that wait on the person. */
+/* The list: a quiet hover action on rows that wait on the person, shown on hover or KEYBOARD focus (`:focus-visible`):
+   focus the window puts on a row after a mouse action (a close, a settle) must not raise it. */
 .ib-rw { position: relative; }
 .pn-inbox .ib-ract { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); display: none; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 8px; border-radius: 7px; border: 1px solid var(--border); background: var(--card); font-size: 12.5px; font-weight: 550; color: var(--foreground); box-shadow: 0 4px 12px -6px rgba(0, 0, 0, 0.3); }
 .pn-inbox .ib-ract:hover { background: color-mix(in oklch, var(--muted) 60%, var(--card)); }
-.ib-rw:hover .ib-ract, .ib-rw:focus-within .ib-ract { display: inline-flex; }
-.ib-rw:hover:has(.ib-ract) .ib-row .ib-t, .ib-rw:focus-within:has(.ib-ract) .ib-row .ib-t, .ib-rw:hover:has(.ib-ract) .ib-row .ib-c, .ib-rw:focus-within:has(.ib-ract) .ib-row .ib-c { visibility: hidden; }
-.ib-rw:hover:has(.ib-ract) .ib-nrow .ib-l1 .ib-t, .ib-rw:focus-within:has(.ib-ract) .ib-nrow .ib-l1 .ib-t, .ib-rw:hover:has(.ib-ract) .ib-nrow .ib-l1 .ib-c, .ib-rw:focus-within:has(.ib-ract) .ib-nrow .ib-l1 .ib-c { visibility: hidden; }
+.ib-rw:hover .ib-ract, .ib-rw:has(:focus-visible) .ib-ract { display: inline-flex; }
+.ib-rw:hover:has(.ib-ract) .ib-row .ib-t, .ib-rw:has(:focus-visible):has(.ib-ract) .ib-row .ib-t, .ib-rw:hover:has(.ib-ract) .ib-row .ib-c, .ib-rw:has(:focus-visible):has(.ib-ract) .ib-row .ib-c { visibility: hidden; }
+.ib-rw:hover:has(.ib-ract) .ib-nrow .ib-l1 .ib-t, .ib-rw:has(:focus-visible):has(.ib-ract) .ib-nrow .ib-l1 .ib-t, .ib-rw:hover:has(.ib-ract) .ib-nrow .ib-l1 .ib-c, .ib-rw:has(:focus-visible):has(.ib-ract) .ib-nrow .ib-l1 .ib-c { visibility: hidden; }
 .pn-inbox .ib-rw .ib-nrow + .ib-ract { top: 8px; transform: none; height: 26px; }
 /* Quiet rows say why they are there: Read, Archived. */
 .ib-c.ib-qlabel { color: var(--muted-foreground); }

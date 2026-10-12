@@ -248,7 +248,18 @@ test('the authored guide opens with its file left out under "Everything else"', 
 test('a guide naming a file not in the patch, or a file twice, is refused by name and lands nothing', async () => {
   const { pi, claude, page } = world;
   const { example } = await pi.guideBrief();
-  const rowsBefore = await page.locator('.ib-lbody [data-thread-id]').count();
+  // The last test closed a thread: the list settles a beat later (packages/inbox/settle.ts). Count once
+  // no settle animation runs and the count holds across more than the beat.
+  const rows = page.locator('.ib-lbody [data-thread-id]');
+  await expect
+    .poll(async () => {
+      const first = await rows.count();
+      await new Promise((r) => setTimeout(r, 250));
+      const settling = await page.evaluate(() => document.getAnimations().some((a) => a.id === 'ib-settle'));
+      return !settling && (await rows.count()) === first;
+    })
+    .toBe(true);
+  const rowsBefore = await rows.count();
   const section = example.guide.sections[0];
 
   await expect(
