@@ -263,7 +263,9 @@ for (const phone of [
     let contexts: BrowserContext[] = [];
     // A describe group cannot pick a browser through test.use (it forces a new worker), so it launches its own.
     test.beforeAll(async () => {
-      browser = await (phone.browserName === 'webkit' ? webkit : chromium).launch();
+      // The config's launch options are Chromium flags (--use-mock-keychain, --password-store=basic), and the
+      // runner applies them to every launch. WebKit on Linux exits on flags it does not know, so it launches with none.
+      browser = phone.browserName === 'webkit' ? await webkit.launch({ args: [] }) : await chromium.launch();
     });
     test.afterEach(async () => {
       await Promise.all(contexts.map((c) => c.close()));
