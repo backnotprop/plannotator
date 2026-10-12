@@ -810,6 +810,46 @@ test.describe('a desktop window', () => {
     expect(await page.evaluate(() => window.location.hash)).toBe(`#thread=${world.threads.holding}`);
   });
 
+  test('a pick with a question left unanswered: the foot keeps Send and Keep open whole at 1280 and 1440 (it ran past the pane in 0.28.16)', async ({ page }) => {
+    for (const width of [1280, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(`${world.url}#thread=${world.threads.stopped}`);
+      const pane = page.locator('section.ib-pane');
+      await expect(pane.getByRole('heading', { name: /Stripe 409/ })).toBeVisible();
+      // Beside the list, not stacked.
+      await expect(page.locator('.ib-listcol.ib-narrow')).toBeVisible();
+      await pane.getByText('Retry with the same idempotency key').click();
+      const foot = pane.locator('.ib-pfoot');
+      const send = foot.getByRole('button', { name: 'Send', exact: true });
+      const keep = foot.getByRole('button', { name: 'Keep open' });
+      await expect(send).toBeVisible();
+      await expect(keep).toBeVisible();
+      const [paneBox, footBox, sendBox, keepBox, chipBox, notSent] = await Promise.all([
+        pane.boundingBox(),
+        foot.boundingBox(),
+        send.boundingBox(),
+        keep.boundingBox(),
+        foot.locator('.ib-skipchip').boundingBox(),
+        foot.getByText('Not sent', { exact: true }).boundingBox(),
+      ]);
+      const right = Math.min(paneBox!.x + paneBox!.width, width);
+      for (const [name, box] of [['Send', sendBox], ['Keep open', keepBox], ['the skip chip', chipBox]] as const) {
+        expect(box!.x, `${name} at ${width}px`).toBeGreaterThanOrEqual(footBox!.x);
+        expect(box!.x + box!.width, `${name} at ${width}px`).toBeLessThanOrEqual(right);
+        expect(box!.y + box!.height, `${name} at ${width}px`).toBeLessThanOrEqual(footBox!.y + footBox!.height);
+      }
+      // "Not sent" stays one line (it was squeezed to two).
+      expect(notSent!.height, `at ${width}px`).toBeLessThan(24);
+      // A tap on Keep open lands on it.
+      await keep.click();
+      await expect(foot.getByRole('button', { name: /^Skip/ })).toBeVisible();
+      await page.screenshot({ path: join(proofDir, `desktop-${width}-foot.png`) });
+      // Back to skipping, for the next width.
+      await foot.getByRole('button', { name: /^Skip/ }).click();
+      await expect(keep).toBeVisible();
+    }
+  });
+
   test('a window just wide enough keeps the list beside the thread, which keeps 480 px', async ({ page }) => {
     await page.setViewportSize({ width: 1100, height: 800 });
     await page.goto(`${world.url}#thread=${world.threads.stopped}`);

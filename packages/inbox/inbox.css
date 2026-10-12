@@ -274,6 +274,10 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-acts { display: flex; align-items: center; gap: 8px; }
 .ib-acts .ib-st { font-size: 13px; color: var(--muted-foreground); margin-right: 4px; }
 .ib-acts .ib-sp { flex: 1; }
+/* The thread's foot wraps whenever it does not fit: Not sent, Send, Edit the reply, New message and
+   the skip chip need about 774 px, more than the pane beside the list has under about 1450 px. When
+   it fits, nothing moves; when it does not, the chip goes to a second row instead of being cut off. */
+.ib-pfoot > .ib-acts { flex-wrap: wrap; }
 .ib-reply-l { font-size: 12.5px; color: var(--muted-foreground); margin-bottom: 6px; }
 .ib-rbox { border: 1px solid color-mix(in oklch, var(--primary) 60%, transparent); box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 14%, transparent); border-radius: 8px; background: var(--card); margin-bottom: 10px; }
 .ib-rtext { display: block; width: 100%; padding: 10px 12px 6px; font: inherit; font-size: 14px; line-height: 1.55; min-height: 52px; max-height: 240px; border: 0; outline: none; resize: none; field-sizing: content; background: transparent; color: var(--foreground); }
@@ -973,8 +977,6 @@ pre code.pn-code[data-keep-layout] {
 .pn-inbox .ib-pback { display: inline-flex; align-items: center; gap: 2px; flex: 0 1 auto; min-width: 0; max-width: 40%; height: 30px; padding: 0 9px 0 4px; border-radius: 7px; color: var(--primary); font-size: 13.5px; font-weight: 550; white-space: nowrap; }
 .pn-inbox .ib-pback:hover { background: color-mix(in oklch, var(--primary) 10%, transparent); }
 .ib-pback-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-/* The thread's foot (Send, Edit the reply, New message, the skip chip) wraps rather than running off a stacked thread. */
-.pn-inbox[data-stack~="thread"] .ib-pfoot > .ib-acts { flex-wrap: wrap; row-gap: 8px; }
 /* The full-screen file's foot names the reply in a sentence that a narrow window wraps. */
 .pn-inbox[data-stack~="file"] .ib-vfoot { flex-wrap: wrap; row-gap: 8px; padding-top: 8px; padding-bottom: 8px; }
 .pn-inbox[data-stack~="file"] .ib-vreply { flex-wrap: wrap; row-gap: 6px; }
