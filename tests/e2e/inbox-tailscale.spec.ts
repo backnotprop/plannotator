@@ -133,7 +133,7 @@ test.afterAll(async () => {
 
 test('the switch publishes at once and shows the tailnet address; off takes it down', async () => {
   const { page } = world;
-  await page.goto(`${world.url}#settings`);
+  await page.goto(`${world.url}#settings/devices`);
   const block = page.locator('[data-settings-tailscale]');
   await expect(block.getByRole('heading', { name: 'Over your tailnet' })).toBeVisible();
   const toggle = block.getByRole('switch', { name: 'Reach the Inbox over Tailscale' });
@@ -166,7 +166,7 @@ test('the switch publishes at once and shows the tailnet address; off takes it d
 test('Tailscale stopped: the switch stays on and the error says why, and one click turns it off', async () => {
   const { page } = world;
   writeFileSync(join(world.root, 'mode'), 'down');
-  await page.goto(`${world.url}#settings`);
+  await page.goto(`${world.url}#settings/devices`);
   const block = page.locator('[data-settings-tailscale]');
   const toggle = block.getByRole('switch', { name: 'Reach the Inbox over Tailscale' });
   await toggle.click();
@@ -187,7 +187,7 @@ test('started with --tailscale: on for this run, and "Keep it on at every start"
   const { page } = world;
   // The same port and hash as before: a fresh document, not a same-document hop.
   await page.goto('about:blank');
-  await page.goto(`${world.url}#settings`);
+  await page.goto(`${world.url}#settings/devices`);
   const block = page.locator('[data-settings-tailscale]');
   await expect(block).toContainText('On for this run (plannotator inbox --tailscale).');
   await expect(block.getByRole('switch', { name: 'Reach the Inbox over Tailscale' })).toHaveAttribute('aria-checked', 'true');
@@ -204,7 +204,7 @@ test("a hand-made mapping onto the window's own port: Settings says it exposes t
   const { page } = world;
   const { port } = registry();
   await page.goto('about:blank');
-  await page.goto(`${world.url}#settings`);
+  await page.goto(`${world.url}#settings/devices`);
   const block = page.locator('[data-settings-tailscale]');
   const toggle = block.getByRole('switch', { name: 'Reach the Inbox over Tailscale' });
   await toggle.click();
@@ -214,7 +214,7 @@ test("a hand-made mapping onto the window's own port: Settings says it exposes t
   const through = await fetch(`http://127.0.0.1:${port}/api/inbox/threads`, { headers: { 'X-Forwarded-For': '100.64.0.9', 'Tailscale-User-Login': 'someone@example.com' } });
   expect(through.status).toBe(403);
   await page.goto('about:blank');
-  await page.goto(`${world.url}#settings`);
+  await page.goto(`${world.url}#settings/devices`);
   await expect(block.locator('[data-tailscale-exposed]')).toContainText('exposes the whole Inbox');
   await shot('settings-tailscale-exposed');
   await block.getByRole('button', { name: 'Replace it with the owner-only address' }).click();

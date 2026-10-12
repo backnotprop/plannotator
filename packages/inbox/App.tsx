@@ -53,6 +53,7 @@ import { isPhone, trackKeyboard, usePhone } from './phone';
 import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH, useStack } from './stack';
 import { backTo, pushScreen } from './history';
 import { adoptSavedTheme, inboxThemeSync } from './theme';
+import { parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
 
 // The Inbox has no /api/config and no browser-agent tools: settings stay in
 // the page's own cookies, except the theme, which goes to config.json `theme`
@@ -89,11 +90,20 @@ interface Route {
   file?: { id: string; version: 'current' | 'sent'; focus: string | null } | null;
   /** The message whose guided review is open over the window (`#thread=…&guide=msg_…`). */
   guide?: string | null;
+  /** Settings' section (`#settings/<section>`); null is `#settings` alone (settingsRoute.ts). */
+  section?: SettingsSection | null;
+  /** `#settings/devices/pair`: Pair a phone is open. */
+  pair?: boolean;
 }
 
 function readRoute(): Route {
-  const hash = window.location.hash.replace(/^#/, '');
-  if (hash === 'settings') return { page: 'settings', project: null, thread: null };
+  return routeOf(window.location.hash);
+}
+
+function routeOf(fullHash: string): Route {
+  const hash = fullHash.replace(/^#/, '');
+  const settingsAt = parseSettingsHash(hash);
+  if (settingsAt) return { page: 'settings', project: null, thread: null, section: settingsAt.section, pair: settingsAt.pair };
   const params = new URLSearchParams(hash);
   if (params.has('whats-new')) return { page: 'whats-new', project: null, thread: null, version: params.get('whats-new') };
   if (params.has('decisions')) {
@@ -113,7 +123,7 @@ function readRoute(): Route {
 /** The route's hash, `#thread=…` (empty for the list at rest). */
 function hashOf(route: Route): string {
   let hash = '';
-  if (route.page === 'settings') hash = 'settings';
+  if (route.page === 'settings') hash = settingsHash({ section: route.section ?? null, pair: route.pair });
   else if (route.page === 'whats-new') hash = new URLSearchParams({ 'whats-new': route.version ?? '' }).toString();
   else if (route.page === 'decisions') {
     const params = new URLSearchParams();
@@ -440,6 +450,34 @@ function Inbox() {
       void loadUpdateDetails();
     }
   }, [route.page, refreshSettings, loadUpdateDetails]);
+
+  // Settings' Archived count in its nav: read while Settings is open, again whenever the store moves.
+  const [archivedTotal, setArchivedTotal] = useState<number | null>(null);
+  const storeCursor = latest?.cursor ?? null;
+  useEffect(() => {
+    if (route.page !== 'settings') return;
+    let cancelled = false;
+    inboxApi
+      .archived({ limit: 1 })
+      .then((model) => !cancelled && setArchivedTotal(model.total))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [route.page, storeCursor]);
+
+  // "← Inbox" returns to where the person was before Settings: the last hash that was not a Settings page,
+  // so moving between sections never changes where Back goes (Workspaces' BackLink).
+  const settingsReturn = useRef('');
+  if (route.page !== 'settings') settingsReturn.current = hashOf(route);
+
+  // Settings is a focused page (design of record inbox-settings-tabs): the sidebar slides away while it
+  // is open and comes back on leaving, without writing the person's stored choice. ⌘B there opens it
+  // for this visit only.
+  const [settingsSidebar, setSettingsSidebar] = useState(false);
+  useEffect(() => {
+    if (route.page !== 'settings') setSettingsSidebar(false);
+  }, [route.page]);
 
   const decisionsProject = route.page === 'decisions' ? decisionsProjectOf(route, latest) : null;
   useEffect(() => {
@@ -1075,6 +1113,8 @@ function Inbox() {
         onDeleteProject={deleteProject}
         sound={settings?.sound ? sound : undefined}
         archived={<ArchivedBlock refreshKey={latest?.cursor ?? null} onUnarchive={unarchiveFromSettings} />}
+        archivedTotal={archivedTotal}
+        aboutDot={!!update}
         about={
           <AboutBlock
             version={latest?.version ?? settings?.version ?? 'dev'}
@@ -1084,8 +1124,32 @@ function Inbox() {
             error={null}
             onCheckNow={() => void checkNow()}
             onToggle={(change) => void saveUpdateSwitches(change)}
+            update={update}
+            onUpdate={pressUpdate}
+            onWhatsNew={openWhatsNew}
+            where={
+              settings
+                ? { data: tildePath(settings.data_dir, settings.home), mcpUrl: settings.mcp_url, mcpCommand: [...settings.mcp_command].join(' ') }
+                : null
+            }
           />
         }
+        section={route.section ?? null}
+        pairing={route.pair === true}
+        phone={phone}
+        onSection={(section) =>
+          section === null && phone ? close({ page: 'settings', project: null, thread: null, section: null }) : go({ page: 'settings', project: null, thread: null, section })
+        }
+        onPairing={(open) =>
+          open
+            ? go({ page: 'settings', project: null, thread: null, section: 'devices', pair: true })
+            : close({ page: 'settings', project: null, thread: null, section: 'devices' })
+        }
+        onBack={() => go(routeOf(settingsReturn.current))}
+        onRetry={() => {
+          setSettingsError(null);
+          void refreshSettings();
+        }}
       />
     );
   } else if (route.page === 'whats-new') {
@@ -1205,8 +1269,12 @@ function Inbox() {
       {/* A file beside the thread takes the sidebar's room (record 2.2): it closes on the same spring, and the person's choice stays as it was. */}
       <SidebarShell
         className="ib-shell"
-        open={sidebarOpen && !fileOpen && !sidebarHeld}
+        open={route.page === 'settings' ? settingsSidebar : sidebarOpen && !fileOpen && !sidebarHeld}
         onOpenChange={(next) => {
+          if (routeRef.current.page === 'settings') {
+            setSettingsSidebar(next);
+            return;
+          }
           setSidebarHeld(false);
           changeSidebar(next);
         }}

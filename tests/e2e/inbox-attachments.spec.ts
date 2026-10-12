@@ -904,7 +904,7 @@ test('Send carries the picks and then the annotations as feedback; wait_for_repl
 
 test('Settings: the store size counts the sent files; delete thread removes its blobs and the size falls', async () => {
   const page = world.page;
-  await page.goto(`${world.url}#settings`);
+  await page.goto(`${world.url}#settings/storage`);
   // A fresh page, so the size read below is the store as it is now, not Settings as an earlier visit left it.
   await page.reload();
   const bytesOf = async () => Number(await page.locator('[data-store-bytes]').getAttribute('data-store-bytes'));

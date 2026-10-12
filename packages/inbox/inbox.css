@@ -379,8 +379,6 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox .ib-sw[aria-checked="true"] { background: var(--primary); border-color: var(--primary); }
 .ib-sw[aria-checked="true"]::after { left: 16px; background: #fff; }
 .ib-note { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted-foreground); margin-top: 6px; }
-.ib-fp { margin: -4px 0 4px; font-size: 12px; color: var(--muted-foreground); }
-.ib-fp span { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.02em; margin-left: 6px; color: var(--foreground); overflow-wrap: anywhere; }
 .pn-inbox .ib-note svg.ib-ic { width: 14px; height: 14px; }
 .ib-stbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .ib-stbl td { padding: 8px 0; border-bottom: 1px solid color-mix(in oklch, var(--border) 45%, transparent); }
@@ -403,22 +401,174 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-arcgroup + .ib-arcgroup { margin-top: 10px; }
 .ib-arcghead { margin: 10px 0 0; padding-bottom: 6px; font-size: 12.5px; font-weight: 600; border-bottom: 1px solid color-mix(in oklch, var(--border) 45%, transparent); }
 .ib-arcghead .ib-d { font-weight: 400; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
-/* Phones in Settings (not in the design record; built on Settings' own rows and tokens). */
-.ib-pair { display: flex; gap: 22px; align-items: flex-start; padding: 16px; margin: 6px 0 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+/* The pairing code: the QR, black on white, and the six digits. */
 .ib-qr-wrap { flex: none; width: 196px; height: 196px; border-radius: 8px; overflow: hidden; box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); }
 .ib-qr-wrap.ib-stale { opacity: 0.25; }
 .ib-qr { display: block; width: 100%; height: 100%; }
-.ib-pair-t { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
-.ib-pair-t h3 { font-size: 15px; font-weight: 600; margin: 0; }
-.ib-pair-t > p { margin: 0; font-size: 13.5px; color: var(--muted-foreground); }
 .ib-pair-code { font-family: var(--font-mono); font-size: 30px; font-weight: 600; letter-spacing: 0.12em; font-variant-numeric: tabular-nums; margin: 6px 0 2px; }
-.ib-pair-foot { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
-.ib-pair-foot > span { margin-right: 4px; }
-.ib-devices { margin-top: 4px; border-top: 1px solid color-mix(in oklch, var(--border) 45%, transparent); }
-.ib-devices .ib-srow { border-bottom: 1px solid color-mix(in oklch, var(--border) 45%, transparent); }
 .ib-srow > .ib-ic { color: var(--muted-foreground); }
-.ib-srow .ib-paired { display: inline-flex; align-items: center; gap: 5px; }
-.ib-srow .ib-paired .ib-ic { color: var(--primary); }
+
+/* Settings in sections (design of record .product/approved/inbox-settings-tabs/): Workspaces' SettingsFrame
+   in the Inbox's scale. "← Inbox", a 184 px section nav beside one section's page, cards of rows. */
+.ib-spage.ib-sframe { padding: 0; }
+.ib-sframe-in { margin: 0 auto; max-width: 1000px; padding: 26px 40px 56px; }
+.pn-inbox .ib-sback { display: inline-flex; align-items: center; gap: 7px; height: 28px; margin: 0 0 18px -6px; padding: 0 6px; font-size: 13.5px; font-weight: 500; color: var(--muted-foreground); border-radius: 6px; }
+.pn-inbox .ib-sback:hover { color: var(--foreground); background: color-mix(in oklch, var(--muted) 55%, transparent); }
+.ib-scols { display: flex; gap: 44px; align-items: flex-start; }
+.ib-snav { width: 184px; flex: none; position: sticky; top: 0; }
+.ib-snav ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.ib-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted-foreground); padding: 0 10px 8px; }
+.ib-snav a { display: flex; align-items: center; gap: 9px; height: 30px; padding: 0 10px; border-radius: 7px; font-size: 13.5px; font-weight: 500; color: var(--muted-foreground); text-decoration: none; }
+.ib-snav a:hover { background: color-mix(in oklch, var(--muted) 55%, transparent); color: var(--foreground); }
+.ib-snav a[aria-current="page"] { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
+.pn-inbox .ib-snav a svg.ib-ic { width: 15px; height: 15px; }
+.ib-scount { margin-left: auto; font-size: 12px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-dot { margin-left: auto; width: 7px; height: 7px; border-radius: 50%; background: var(--primary); flex: none; }
+.ib-dot.ib-warn { background: var(--warning, oklch(0.75 0.15 85)); }
+.ib-spg { flex: 1; min-width: 0; max-width: 720px; }
+.ib-spg > h1 { font-size: 20px; font-weight: 650; margin: 2px 0 4px; letter-spacing: -0.01em; }
+/* The headings take focus to move a screen reader to a new section or step; they are not controls, so no ring. */
+.pn-inbox .ib-spg > h1:focus, .pn-inbox .ib-spg > h1:focus-visible { outline: none; }
+.ib-lede { margin: 0 0 6px; font-size: 13.5px; color: var(--muted-foreground); line-height: 1.55; }
+.ib-lede b { color: var(--foreground); font-weight: 600; }
+.ib-sgroup { margin-top: 24px; }
+.ib-spg > .ib-sgroup-first, .ib-spg > .ib-lede + .ib-sgroup-first { margin-top: 20px; }
+.ib-sgroup > h2 { font-size: 13.5px; font-weight: 600; margin: 0 0 3px; }
+.ib-sgroup > p { margin: 0 0 10px; font-size: 13px; color: var(--muted-foreground); line-height: 1.5; }
+.ib-sgroup > h2 + .ib-card { margin-top: 8px; }
+.ib-sgroup > .ib-callout { margin-bottom: 10px; }
+.ib-spg > .ib-callout { margin-top: 16px; }
+.ib-card { border: 1px solid var(--ib-line); border-radius: 10px; overflow: hidden; background: var(--card); }
+.ib-card-pad { padding: 4px 16px 12px; }
+.ib-prow { display: flex; align-items: center; gap: 14px; min-height: 58px; padding: 11px 16px; border-bottom: 1px solid var(--ib-hair); }
+.ib-prow:last-child { border-bottom: 0; }
+.ib-prow .ib-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ib-prow .ib-l { font-size: 14px; font-weight: 500; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--foreground); }
+.ib-prow .ib-desc { font-size: 12.5px; color: var(--muted-foreground); line-height: 1.45; overflow-wrap: anywhere; }
+.ib-prow .ib-desc a { color: var(--primary); text-decoration: none; }
+.ib-prow .ib-desc a:hover { text-decoration: underline; }
+.ib-prow .ib-desc code, .ib-sframe code { font-family: var(--font-mono); font-size: 11.5px; color: var(--foreground); }
+.ib-prow .ib-ctl { display: flex; align-items: center; gap: 10px; flex: none; }
+.ib-prow .ib-paired { display: inline-flex; align-items: center; gap: 5px; color: var(--foreground); }
+.ib-prow .ib-paired .ib-ic { color: var(--success, var(--primary)); }
+.ib-sfp { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.02em; color: var(--foreground); }
+.ib-tile { width: 30px; height: 30px; border-radius: 8px; background: var(--muted); display: inline-flex; align-items: center; justify-content: center; flex: none; color: var(--muted-foreground); }
+.pn-inbox .ib-tile svg.ib-ic { width: 16px; height: 16px; }
+.ib-tsmark { display: block; flex: none; }
+.ib-chip { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: 999px; font-size: 11.5px; font-weight: 550; background: color-mix(in oklch, var(--muted) 80%, transparent); color: var(--muted-foreground); white-space: nowrap; }
+.ib-chip-on { background: color-mix(in oklch, var(--success, oklch(0.72 0.17 150)) 16%, transparent); color: color-mix(in oklch, var(--success, oklch(0.72 0.17 150)) 75%, var(--foreground)); }
+.ib-chip-warn { background: color-mix(in oklch, var(--warning, oklch(0.75 0.15 85)) 16%, transparent); color: color-mix(in oklch, var(--warning, oklch(0.75 0.15 85)) 70%, var(--foreground)); }
+.ib-chip-err { background: color-mix(in oklch, var(--destructive) 14%, transparent); color: var(--destructive); }
+.ib-chip-pri { background: color-mix(in oklch, var(--primary) 14%, transparent); color: var(--primary); }
+.ib-callout { display: flex; gap: 9px; align-items: flex-start; padding: 10px 12px; border-radius: 8px; font-size: 12.5px; line-height: 1.5; border: 1px solid var(--ib-line); color: var(--muted-foreground); }
+.pn-inbox .ib-callout > svg.ib-ic { width: 15px; height: 15px; margin-top: 1px; }
+.ib-callout b { font-weight: 600; color: var(--foreground); }
+.ib-callout.ib-warn { border-color: color-mix(in oklch, var(--warning, oklch(0.75 0.15 85)) 40%, transparent); background: color-mix(in oklch, var(--warning, oklch(0.75 0.15 85)) 8%, transparent); color: var(--foreground); }
+.pn-inbox .ib-callout.ib-warn > svg.ib-ic { color: var(--warning, oklch(0.75 0.15 85)); }
+.ib-callout.ib-err { border-color: color-mix(in oklch, var(--destructive) 38%, transparent); background: color-mix(in oklch, var(--destructive) 7%, transparent); color: var(--foreground); }
+.pn-inbox .ib-callout.ib-err > svg.ib-ic { color: var(--destructive); }
+.ib-callout.ib-in-card { margin: 0 16px 12px; }
+.pn-inbox .ib-sframe .ib-lnk { margin-top: 0; display: inline; font-size: inherit; }
+.pn-inbox .ib-sframe .ib-lnk:hover { text-decoration: underline; text-underline-offset: 2px; }
+.ib-sframe .ib-note { align-items: flex-start; margin-top: 8px; line-height: 1.5; }
+.pn-inbox .ib-sframe .ib-note svg.ib-ic { margin-top: 2px; }
+.ib-sempty { padding: 24px 16px; text-align: center; color: var(--muted-foreground); font-size: 13px; line-height: 1.55; }
+.pn-inbox .ib-sempty svg.ib-ic { width: 22px; height: 22px; display: block; margin: 0 auto 8px; }
+.ib-skel { height: 58px; border-radius: 10px; background: color-mix(in oklch, var(--muted) 50%, transparent); margin-top: 14px; }
+.ib-sframe .ib-stbl td { padding: 9px 16px; border-bottom: 1px solid var(--ib-hair); }
+.ib-sframe .ib-stbl tr:last-child td { border-bottom: 0; }
+.ib-sframe .ib-stbl tr.ib-sub td:first-child { padding-left: 42px; }
+.ib-sframe .ib-stbl td.ib-a { width: 140px; }
+.ib-sframe .ib-card .ib-connect { margin: 0; }
+.ib-vslider { width: 120px; accent-color: var(--primary); margin: 0; }
+.ib-vslider:disabled { opacity: 0.45; }
+.pn-inbox .ib-sw:disabled { opacity: 0.45; }
+/* Settings → Archived: the archived rows drawn as the section's card rows. */
+.ib-card .ib-arcrow { padding: 10px 16px; border-bottom: 1px solid var(--ib-hair); }
+.ib-card .ib-arcrow:last-child { border-bottom: 0; }
+.ib-arcblock .ib-arcnone { margin: 14px 0 8px; }
+.ib-arcblock .ib-arcghead { border-bottom: 0; margin: 14px 0 6px; }
+
+/* Pair a phone, step by step (design of record, section 4). */
+.ib-flow { border: 1px solid var(--border); border-radius: 12px; background: var(--background); overflow: hidden; }
+.ib-flow-head { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--ib-hair); }
+.ib-flow-head h3 { margin: 0; font-size: 14.5px; font-weight: 600; }
+.ib-steps { display: flex; gap: 14px; list-style: none; margin: 0 0 0 auto; padding: 0; font-size: 12.5px; color: var(--muted-foreground); }
+.ib-steps li { display: inline-flex; align-items: center; gap: 6px; }
+.ib-steps .ib-n { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--border); display: inline-grid; place-items: center; font-size: 11px; font-weight: 600; }
+.ib-steps li[aria-current="step"] { color: var(--foreground); font-weight: 550; }
+.ib-steps li[aria-current="step"] .ib-n { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
+.ib-steps li.ib-done .ib-n { background: color-mix(in oklch, var(--success, oklch(0.72 0.17 150)) 20%, transparent); border-color: transparent; color: var(--success, oklch(0.72 0.17 150)); }
+.pn-inbox .ib-steps .ib-n svg.ib-ic { width: 11px; height: 11px; stroke-width: 2.4; }
+.ib-flow-body { padding: 16px; }
+.ib-flow-body h4 { margin: 0 0 3px; font-size: 15px; font-weight: 600; }
+.pn-inbox .ib-flow-body h4:focus, .pn-inbox .ib-flow-body h4:focus-visible { outline: none; }
+.ib-flow-body .ib-lead { margin: 0 0 14px; font-size: 13px; color: var(--muted-foreground); line-height: 1.5; }
+.ib-ways { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ib-way { border: 1px solid var(--ib-line); border-radius: 10px; background: var(--card); display: flex; flex-direction: column; min-width: 0; }
+.ib-way.ib-is-on { border-color: color-mix(in oklch, var(--primary) 55%, var(--border)); box-shadow: 0 0 0 1px color-mix(in oklch, var(--primary) 30%, transparent); }
+.ib-way-h { display: flex; align-items: flex-start; gap: 11px; padding: 13px 14px 10px; }
+.ib-way-h .ib-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ib-way-h b { font-size: 14.5px; font-weight: 600; }
+.ib-way-h .ib-why { font-size: 12.5px; color: var(--muted-foreground); margin-top: 2px; line-height: 1.45; }
+.ib-way-sec { padding: 0 14px 10px; }
+.ib-way-sec h5, .ib-before h5 { margin: 0 0 5px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted-foreground); }
+.ib-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; line-height: 1.45; }
+.ib-checks li { display: flex; gap: 7px; align-items: flex-start; }
+.pn-inbox .ib-checks svg.ib-ic, .ib-checks .ib-tsmark { width: 14px; height: 14px; margin-top: 1.5px; flex: none; color: var(--muted-foreground); }
+.pn-inbox .ib-checks .ib-ck-ok svg.ib-ic { color: var(--success, oklch(0.72 0.17 150)); }
+.pn-inbox .ib-checks .ib-ck-warn svg.ib-ic { color: var(--warning, oklch(0.75 0.15 85)); }
+.pn-inbox .ib-checks .ib-ck-fail svg.ib-ic { color: var(--destructive); }
+.ib-checks .ib-fix { display: block; color: var(--muted-foreground); }
+.ib-way-f { margin-top: auto; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--ib-hair); font-size: 12.5px; color: var(--muted-foreground); }
+.ib-way-addr { flex: 1 1 150px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-way-addr code { font-size: 12px; white-space: nowrap; }
+.ib-way-btns { margin-left: auto; display: flex; gap: 8px; flex: none; }
+.ib-flow-f { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+.ib-flow-f .ib-hint { font-size: 12.5px; color: var(--muted-foreground); }
+.ib-right { margin-left: auto; display: flex; gap: 8px; }
+.pn-inbox .ib-btn.ib-dim { opacity: 0.55; }
+.ib-later { margin: 12px 0 0; font-size: 12.5px; color: var(--muted-foreground); display: flex; gap: 7px; align-items: flex-start; }
+.pn-inbox .ib-later svg.ib-ic { margin-top: 1.5px; }
+.ib-flow-body > .ib-callout { margin-top: 12px; }
+.ib-scan { display: flex; gap: 22px; align-items: flex-start; }
+.ib-scan .ib-qr-wrap { position: relative; }
+.ib-qr-wrap.ib-stale > svg { opacity: 0.18; }
+.ib-qr-wrap.ib-stale { opacity: 1; }
+.ib-qr-over { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; font-size: 12.5px; font-weight: 600; color: #333; padding: 20px; background: rgba(255, 255, 255, 0.55); }
+.ib-scan-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.ib-scan-t > p { margin: 0; font-size: 13px; color: var(--muted-foreground); line-height: 1.5; }
+.ib-scan .ib-pair-code { margin: 0; }
+.ib-reach { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ib-reach > span { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--ib-line); font-size: 12.5px; }
+.pn-inbox .ib-reach svg.ib-ic, .ib-reach .ib-tsmark { color: var(--muted-foreground); }
+.ib-reach code { color: var(--muted-foreground); overflow-wrap: anywhere; }
+.ib-before { border: 1px solid var(--ib-line); border-radius: 9px; padding: 9px 12px; }
+.ib-notes { display: flex; flex-direction: column; gap: 6px; }
+.ib-notes:empty { display: none; }
+.ib-wait { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 12.5px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-wait .ib-spin { color: var(--primary); }
+.ib-trouble { margin-top: 14px; border-top: 1px solid var(--ib-hair); padding-top: 12px; }
+.ib-trouble h5 { margin: 0 0 8px; font-size: 13px; font-weight: 600; display: flex; gap: 8px; align-items: center; }
+.pn-inbox .ib-trouble h5 svg.ib-ic { color: var(--warning, oklch(0.75 0.15 85)); }
+.ib-trouble ol { list-style: decimal; margin: 0; padding-left: 20px; font-size: 12.5px; line-height: 1.55; display: flex; flex-direction: column; gap: 6px; }
+.ib-trouble ol li::marker { color: var(--muted-foreground); }
+.ib-done-big { display: flex; gap: 14px; align-items: flex-start; }
+.ib-ok-ring { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in oklch, var(--success, oklch(0.72 0.17 150)) 16%, transparent); color: var(--success, oklch(0.72 0.17 150)); flex: none; }
+.pn-inbox .ib-ok-ring svg.ib-ic { width: 20px; height: 20px; stroke-width: 2; }
+.ib-done-big h4 { margin: 2px 0 4px; font-size: 16px; }
+.ib-done-big p { margin: 0 0 12px; font-size: 13px; color: var(--muted-foreground); line-height: 1.55; }
+/* The phone's list of sections. */
+.ib-plist { flex: 1; min-width: 0; }
+.ib-plist-h { display: flex; align-items: center; gap: 4px; min-height: 52px; }
+.ib-plist-h h1 { font-size: 24px; font-weight: 650; margin: 0 0 0 4px; }
+.ib-plist .ib-card { list-style: none; margin: 14px 0 0; padding: 0; }
+.ib-plist .ib-card a { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 12px; border-bottom: 1px solid var(--ib-hair); text-decoration: none; color: var(--foreground); font-size: 15px; }
+.ib-plist .ib-card li:last-child a { border-bottom: 0; }
+.ib-plist .ib-v { margin-left: auto; color: var(--muted-foreground); font-size: 13.5px; }
+.ib-plist .ib-dot, .ib-plist .ib-scount { margin-left: 0; }
+.pn-inbox .ib-plist .ib-chev { width: 15px; height: 15px; color: var(--muted-foreground); }
+.ib-sphead { display: flex; align-items: center; min-height: 52px; margin: 0 -6px 4px; }
 
 /* "Waiting on this answer" at the foot of the asking message */
 .ib-waitfoot { margin-top: 18px; border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); padding: 10px 0; display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
@@ -1279,8 +1429,27 @@ pre code.pn-code[data-keep-layout] {
   .ib-stbl td.ib-n { width: auto; padding-left: 8px; white-space: nowrap; }
   .ib-stbl td.ib-a { width: auto; padding-left: 8px; }
   .pn-inbox .ib-del-l { min-height: 44px; }
-  .ib-pair { flex-direction: column; align-items: center; text-align: center; }
-  .ib-pair-foot { flex-wrap: wrap; justify-content: center; }
+  /* Settings on a phone (design of record inbox-settings-tabs, shots 30 to 34): one section at a time. */
+  .ib-sframe-in { padding: env(safe-area-inset-top) 16px calc(32px + env(safe-area-inset-bottom)); }
+  .ib-scols { display: block; }
+  .ib-spg { max-width: none; }
+  .ib-spg > h1 { font-size: 24px; margin-top: 4px; }
+  .ib-prow { flex-wrap: wrap; min-height: 56px; }
+  .ib-prow .ib-txt { flex-basis: 60%; }
+  .ib-ways { grid-template-columns: minmax(0, 1fr); }
+  .ib-scan { flex-direction: column; align-items: center; }
+  .ib-scan-t { width: 100%; }
+  .ib-flow-head { flex-wrap: wrap; }
+  .ib-steps { margin: 0; width: 100%; gap: 10px; }
+  .ib-flow-f { flex-wrap: wrap; }
+  .ib-flow-f .ib-right, .ib-wait .ib-right { width: 100%; }
+  .ib-flow-f .ib-right .ib-btn, .ib-wait .ib-right .ib-btn { flex: 1; justify-content: center; }
+  .ib-sframe .ib-stbl td.ib-n-threads { display: none; }
+  .ib-sframe .ib-stbl td { padding: 9px 10px; }
+  .ib-sframe .ib-stbl tr.ib-sub td:first-child { padding-left: 26px; }
+  .ib-sframe .ib-stbl td.ib-a { width: auto; }
+  .ib-seg { flex-wrap: wrap; }
+  .pn-inbox .ib-sframe .ib-lnk { min-height: 0; }
   .ib-ctab, .ib-connect.ib-compact .ib-ctab { height: 44px; }
   .pn-inbox .ib-copy { height: 36px; }
   .ib-wn { padding: 4px 16px calc(40px + env(safe-area-inset-bottom)); }

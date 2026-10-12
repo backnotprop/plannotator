@@ -128,7 +128,9 @@ describe("the device door, on the binary", () => {
   test("7.1: the window makes an offer, with the QR link, the six digits, the computer and its addresses", async () => {
     const before = Date.now();
     const made = await offer();
-    expect(Object.keys(made).sort()).toEqual(["addresses", "computer", "link", "offer"]);
+    expect(Object.keys(made).sort()).toEqual(["addresses", "computer", "link", "offer", "reachable"]);
+    // No way switched on: the window shows no code for it (Pair a phone's step 1 is the gate).
+    expect(made.reachable).toBe(false);
     expect(made.offer.code).toMatch(/^\d{6}$/);
     const ttl = Date.parse(made.offer.expires_at) - before;
     expect(ttl).toBeGreaterThan(9.9 * 60_000);
