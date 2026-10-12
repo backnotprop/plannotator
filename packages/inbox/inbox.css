@@ -943,7 +943,7 @@ pre code.pn-code[data-keep-layout] {
 /* Quiet rows say why they are there: Read, Archived. */
 .ib-c.ib-qlabel { color: var(--muted-foreground); }
 /* The toast, over the bottom of the window. */
-.ib-toast { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 12px; min-height: 42px; max-width: min(620px, calc(100% - 32px)); padding: 8px 8px 8px 14px; border-radius: 10px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); box-shadow: 0 16px 40px -16px rgba(0, 0, 0, 0.55); font-size: 13.5px; animation: ib-toast-in 180ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-toast { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 30; display: flex; width: max-content; align-items: center; gap: 12px; min-height: 42px; max-width: min(620px, calc(100% - 32px)); padding: 8px 8px 8px 14px; border-radius: 10px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); box-shadow: 0 16px 40px -16px rgba(0, 0, 0, 0.55); font-size: 13.5px; animation: ib-toast-in 180ms cubic-bezier(0.23, 1, 0.32, 1); }
 @keyframes ib-toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 .ib-toast > .ib-ic { color: var(--muted-foreground); flex: none; }
 .ib-toast .ib-tmsg { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
@@ -956,9 +956,28 @@ pre code.pn-code[data-keep-layout] {
 /* A phone: the toast spans the window above the home indicator, and the key hints go. */
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-wide { display: none; }
-  .ib-toast { left: 12px; right: 12px; bottom: calc(20px + env(safe-area-inset-bottom)); transform: none; max-width: none; animation: none; }
+  .ib-toast { left: 12px; right: 12px; bottom: calc(20px + env(safe-area-inset-bottom)); transform: none; width: auto; max-width: none; animation: none; }
   .pn-inbox .ib-toast .ib-tb, .pn-inbox .ib-toast .ib-tx { height: 44px; min-width: 44px; }
 }
+
+/* ───────────── A window too narrow for two panes ─────────────
+   An iPad in portrait, a narrow desktop window (packages/inbox/stack.ts): a
+   thread covers the list when the two do not fit at their narrowest (380 +
+   480 px), and a file covers its thread (full screen) when the two do not
+   (440 + 480 px). The desktop chrome stays: the docked sidebar, the headers,
+   the close buttons. App.tsx sets `data-stack` (`thread`, `file`) on
+   .pn-inbox; a wide window never gets it, so it is drawn as before. */
+.pn-inbox[data-stack~="thread"] .ib-main { position: relative; }
+.pn-inbox[data-stack~="thread"][data-view="thread"] .ib-listcol { position: absolute; inset: 0; visibility: hidden; }
+.pn-inbox[data-stack~="file"][data-view="file"] .ib-pane.ib-withfile { display: none; }
+.pn-inbox .ib-pback { display: inline-flex; align-items: center; gap: 2px; flex: 0 1 auto; min-width: 0; max-width: 40%; height: 30px; padding: 0 9px 0 4px; border-radius: 7px; color: var(--primary); font-size: 13.5px; font-weight: 550; white-space: nowrap; }
+.pn-inbox .ib-pback:hover { background: color-mix(in oklch, var(--primary) 10%, transparent); }
+.ib-pback-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The thread's foot (Send, Edit the reply, New message, the skip chip) wraps rather than running off a stacked thread. */
+.pn-inbox[data-stack~="thread"] .ib-pfoot > .ib-acts { flex-wrap: wrap; row-gap: 8px; }
+/* The full-screen file's foot names the reply in a sentence that a narrow window wraps. */
+.pn-inbox[data-stack~="file"] .ib-vfoot { flex-wrap: wrap; row-gap: 8px; padding-top: 8px; padding-bottom: 8px; }
+.pn-inbox[data-stack~="file"] .ib-vreply { flex-wrap: wrap; row-gap: 6px; }
 
 /* ───────────── The Inbox on a phone ─────────────
    One screen at a time, like a mail app: the list, then a thread (Back to
@@ -1164,4 +1183,49 @@ pre code.pn-code[data-keep-layout] {
   .pn-inbox .ib-upd-btn { height: 44px; }
   .pn-inbox .ib-dlg, dialog.ib-dlg { max-height: calc(100dvh - 32px); width: calc(100vw - 24px); }
   .pn-inbox .ib-btn.ib-icon, .pn-inbox .ib-btn.ib-sm.ib-icon { width: 44px; height: 44px; }
+}
+
+/* ── Phone polish (follow-ups to the phone layout) ── */
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  /* The toast: one line and Undo, above the thread's foot rather than over it. */
+  .ib-toast.ib-toast-phone { min-height: 44px; padding: 0 2px 0 14px; gap: 10px; }
+  .ib-toast-phone .ib-tline { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pn-inbox .ib-toast-phone .ib-tb { flex: none; }
+  .pn-inbox[data-view="thread"] .ib-toast { bottom: calc(76px + env(safe-area-inset-bottom)); }
+  /* The file's reply strip: "ride your next Send" wraps under itself rather than being cut. */
+  .ib-vfoot-row .ib-sp { white-space: normal; text-overflow: clip; line-height: 1.25; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  /* 44 px hit areas for small controls that keep their look: the reply's
+     Keep open / Skip them, the question card's "Records a decision" (ui), and
+     the file's toolstrip, Global comment and Copy file (ui). */
+  .pn-inbox .ib-skipchip button,
+  .ib-body [data-question-decision-toggle],
+  .ib-body [data-question-decision-open],
+  .ib-phone .ib-toolstrip button,
+  .ib-phone [data-sticky-actions] button { position: relative; }
+  .pn-inbox .ib-skipchip button::after,
+  .ib-body [data-question-decision-toggle]::after,
+  .ib-body [data-question-decision-open]::after,
+  .ib-phone .ib-toolstrip button::after,
+  .ib-phone [data-sticky-actions] button::after {
+    content: ''; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%);
+  }
+  /* ui's toolstrip buttons clip their sliding label with overflow, which would clip the hit area too: clip with
+     a path instead, at the sides as before (3 px out, for the active button's shadow), and 8 px above and
+     below, so the hit area is 28 + 16 = 44 px tall. Drawn the same. */
+  .ib-phone .ib-toolstrip button { overflow: visible; clip-path: inset(-8px -3px round 6px); }
+}
+/* An iPhone SE's width has no room for the strip's sentence beside its chip and button. */
+@media (max-width: 359px) {
+  .ib-vfoot-row .ib-sp { visibility: hidden; }
+}
+/* A phone on its side: the stepping bar and the reply strip share one row, and the comments sheet takes the file's height. */
+@media (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-vfoot.ib-vfoot-phone { flex-direction: row; align-items: center; gap: 10px; min-height: 0; padding-top: 6px; padding-bottom: calc(6px + env(safe-area-inset-bottom)); }
+  .ib-vfoot-phone .ib-stepper.ib-stepphone { flex: none; gap: 6px; }
+  .pn-inbox .ib-vfoot-phone .ib-stepbig { width: 44px; padding: 0; }
+  .ib-vfoot-phone .ib-stepbig-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .pn-inbox .ib-vfoot-phone .ib-steppos.ib-stepmid { flex: none; padding: 0 12px; }
+  .ib-vfoot-phone .ib-vfoot-row { flex: 1; }
+  .ib-vfoot-phone .ib-vfoot-row .ib-sp { -webkit-line-clamp: 1; }
+  .ib-phone.ib-panel-open .ib-apanel { height: calc(100% - 8px); }
 }

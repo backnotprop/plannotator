@@ -43,6 +43,8 @@ export interface AttachmentPaneProps {
   version: 'current' | 'sent';
   onVersion: (version: 'current' | 'sent') => void;
   full: boolean;
+  /** Full screen is the only way the window can show the file (a phone, a narrow window: stack.ts), so there is no toggle. */
+  fullLocked?: boolean;
   onToggleFull: () => void;
   /** An annotation to select when the file opens (from the chip's list). */
   focusId: string | null;
@@ -614,10 +616,12 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           </button>
         ) : (
           <>
-            <button type="button" className="ib-btn ib-sm" onClick={props.onToggleFull}>
-              <Icon name={props.full ? 'collapse' : 'expand'} size={14} />
-              {props.full ? 'Exit full screen' : 'Full screen'}
-            </button>
+            {!props.fullLocked && (
+              <button type="button" className="ib-btn ib-sm" onClick={props.onToggleFull}>
+                <Icon name={props.full ? 'collapse' : 'expand'} size={14} />
+                {props.full ? 'Exit full screen' : 'Full screen'}
+              </button>
+            )}
             <button type="button" className="ib-iconbtn" onClick={close} aria-label={`Close ${attachment.name}`} title="Close">
               <Icon name="x" />
             </button>

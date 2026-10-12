@@ -49,6 +49,7 @@ import { InboxToast, type InboxToastModel } from './components/Toast';
 import { canToggleRead, MARK_READ_UNDO_MS, markReadToast } from './markRead';
 import { lookBoundary } from './folding';
 import { isPhone, trackKeyboard, usePhone } from './phone';
+import { useStack } from './stack';
 import { backTo, pushScreen } from './history';
 
 // The Inbox has no /api/config and no browser-agent tools: settings stay in
@@ -462,6 +463,9 @@ function Inbox() {
   // A phone shows one screen at a time (phone.ts, inbox.css), and its keyboard shrinks the window.
   const phone = usePhone();
   useEffect(() => (phone ? trackKeyboard() : undefined), [phone]);
+  // A window too narrow for two panes (an iPad in portrait, a narrow desktop window): the pane on top covers the one under it (stack.ts).
+  const rootRef = useRef<HTMLDivElement>(null);
+  const stack = useStack(rootRef, phone);
 
   const openRow = (row: InboxListRow) => go({ page: 'inbox', project: route.project, thread: row.thread_id });
 
@@ -560,7 +564,7 @@ function Inbox() {
     }
     await afterWrite();
     if (next) {
-      showToast({ text: 'Archived. The next message starts a new thread.', onUndo: () => void archive(threadId, rootId, false) });
+      showToast({ text: 'Archived. The next message starts a new thread.', short: 'Archived.', onUndo: () => void archive(threadId, rootId, false) });
       say('Archived.');
     } else {
       dismissToast();
@@ -919,7 +923,8 @@ function Inbox() {
           path={filterProject ? tildePath(filterProject.root, settings?.home) : null}
           sections={filterSections(shown, route.project)}
           filtered={filterProject !== null}
-          narrow={route.thread !== null}
+          // A stacked thread covers the list, which keeps its own width (and scroll) under it.
+          narrow={route.thread !== null && !stack.thread}
           selectedThreadId={route.thread}
           notice={notice}
           ask={
@@ -959,6 +964,8 @@ function Inbox() {
             lookSeq={look?.threadId === thread.thread_id ? look.seq : undefined}
             backLabel={filterProject?.name ?? 'Inbox'}
             phone={phone}
+            stacked={stack.thread}
+            fileStacked={stack.file}
           />
         )}
       </>
@@ -966,7 +973,13 @@ function Inbox() {
   }
 
   return (
-    <div className="pn-inbox" data-view={view} data-enter={entered.current ?? undefined}>
+    <div
+      ref={rootRef}
+      className="pn-inbox"
+      data-view={view}
+      data-enter={entered.current ?? undefined}
+      data-stack={stack.thread || stack.file ? [stack.thread && 'thread', stack.file && 'file'].filter(Boolean).join(' ') : undefined}
+    >
       {/* A file beside the thread takes the sidebar's room (record 2.2): it closes on the same spring, and the person's choice stays as it was. */}
       <SidebarShell
         className="ib-shell"
@@ -1041,7 +1054,7 @@ function Inbox() {
           }}
         />
       )}
-      {toast && soundDialog !== 'open' && <InboxToast toast={toast} onDismiss={dismissToast} />}
+      {toast && soundDialog !== 'open' && <InboxToast toast={toast} onDismiss={dismissToast} phone={phone} />}
       <div className="ib-sr" aria-live="polite" data-inbox-live="">
         {said}
       </div>

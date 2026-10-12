@@ -34,6 +34,8 @@ export function offersRowMarkRead(row: Pick<InboxListRow, 'section' | 'unseen' |
 export interface MarkReadToast {
   text: string;
   sub: string;
+  /** A phone's one line (the thread's banner says the rest). */
+  short: string;
   /** An agent was stopped or held up on the thread: the toast warns and offers Reply. */
   warn: boolean;
 }
@@ -47,9 +49,10 @@ export function markReadToast(before: Pick<InboxListRow, 'subject' | 'author' | 
   const text = `Read: “${before.subject ?? '(no subject)'}” moved to Quiet.`;
   const what = closed === 1 ? 'the question' : plural(closed, 'question');
   const told = closed > 0 ? `${agent} is told not to wait on ${what}.` : '';
-  if (before.questions.stopped) return { text, sub: `${agent} was stopped on it. ${told}`.trim(), warn: true };
+  const short = 'Read. Moved to Quiet.';
+  if (before.questions.stopped) return { text, short, sub: `${agent} was stopped on it. ${told}`.trim(), warn: true };
   if (before.questions.holds_up.length > 0) {
-    return { text, sub: `It held up ${plural(before.questions.holds_up.length, 'thing')}. ${told}`.trim(), warn: true };
+    return { text, short, sub: `It held up ${plural(before.questions.holds_up.length, 'thing')}. ${told}`.trim(), warn: true };
   }
-  return { text, sub: `It comes back when ${agent} writes again.${told ? ` ${told}` : ''}`, warn: false };
+  return { text, short, sub: `It comes back when ${agent} writes again.${told ? ` ${told}` : ''}`, warn: false };
 }

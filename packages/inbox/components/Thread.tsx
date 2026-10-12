@@ -333,6 +333,13 @@ export interface ThreadPaneProps {
   backLabel?: string;
   /** A phone: one screen at a time, so an open file takes the whole window (phone.ts). */
   phone?: boolean;
+  /**
+   * A window too narrow for the list beside the thread (stack.ts): the thread
+   * covers the list, and its header leads with the way back to it.
+   */
+  stacked?: boolean;
+  /** A window too narrow for a file beside the thread (stack.ts): an open file takes the whole window. */
+  fileStacked?: boolean;
 }
 
 /** The thread's attachments as they are now and the annotations waiting for a Send, kept fresh. */
@@ -364,7 +371,7 @@ function useThreadAttachments(threadId: string, revision: unknown) {
   return { model, load, patch };
 }
 
-export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile, onOpenGuide, lookSeq, row, onMarkRead, onArchive, replyRequest, onReplyOpened, backLabel = 'Inbox', phone = false }: ThreadPaneProps) {
+export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile, onOpenGuide, lookSeq, row, onMarkRead, onArchive, replyRequest, onReplyOpened, backLabel = 'Inbox', phone = false, stacked = false, fileStacked = false }: ThreadPaneProps) {
   const root = thread.messages[0]!;
   const asker = agentName(root.author);
   const resolved = thread.resolved_at !== null;
@@ -1222,6 +1229,16 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
           </button>
         ) : (
           <>
+            {/* A stacked thread covers the list: the way back to it leads, where the list was. */}
+            {stacked && (
+              <>
+                <button type="button" className="ib-pback" onClick={onClose} aria-label={`Back to ${backLabel}`} title={`Back to ${backLabel}`} data-stack-back="">
+                  <Icon name="chevL" size={16} />
+                  <span className="ib-pback-l">{backLabel}</span>
+                </button>
+                <span className="ib-vsep" aria-hidden="true" />
+              </>
+            )}
             {archiveButton}
             {markReadOffered && (
               <>
@@ -1257,7 +1274,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
             {markReadButton}
             {archiveButton}
           </>
-        ) : (
+        ) : stacked ? null : (
           <button type="button" className="ib-iconbtn" onClick={onClose} title="Close" aria-label="Close the thread">
             <Icon name="x" />
           </button>
@@ -1489,7 +1506,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                     attachments={attachments.filter((a) => a.message_id === message.id)}
                     annotationCounts={countsByPath}
                     onOpen={openFromMessage}
-                    openId={file && !full && !phone ? file.id : null}
+                    openId={file && !full && !phone && !fileStacked ? file.id : null}
                   />
                 )}
                 {message.guide && <GuideCard guide={message.guide} onOpen={() => onOpenGuide(message.id)} />}
@@ -1714,7 +1731,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         repo={thread.project.repo ?? null}
         version={file!.version}
         onVersion={(version) => onOpenFile({ id: openAttachment.id, version, focus: null })}
-        full={full || phone}
+        full={full || phone || fileStacked}
+        fullLocked={phone || fileStacked}
         phone={phone}
         steps={steps}
         // A step keeps the frame the person is in, and replaces the route.

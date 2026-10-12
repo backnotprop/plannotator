@@ -188,7 +188,7 @@ export function AttachmentStepper(props: AttachmentStepperProps) {
       <nav className="ib-stepper ib-stepphone" aria-label="Attachments in this thread" data-attachment-stepper="">
         <button type="button" className="ib-stepbig" aria-label={prevLabel} aria-disabled={prev ? undefined : 'true'} onClick={() => props.onStep(-1, 'button')} data-step-prev="">
           <Icon name="chevL" size={16} />
-          Previous
+          <span className="ib-stepbig-l">Previous</span>
         </button>
         <button
           type="button"
@@ -214,7 +214,7 @@ export function AttachmentStepper(props: AttachmentStepperProps) {
           <Icon name="chevD" size={13} />
         </button>
         <button type="button" className="ib-stepbig" aria-label={nextLabel} aria-disabled={next ? undefined : 'true'} onClick={() => props.onStep(1, 'button')} data-step-next="">
-          Next
+          <span className="ib-stepbig-l">Next</span>
           <Icon name="chevR" size={16} />
         </button>
         {list}
