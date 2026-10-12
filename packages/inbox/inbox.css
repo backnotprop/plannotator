@@ -433,7 +433,28 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-dpage.ib-narrow { flex: none; width: 460px; padding: 28px 22px; border-right: 1px solid var(--ib-line); }
 .ib-dh { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
 .ib-dh h1 { font-size: 22px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
-.pn-inbox .ib-select { height: 30px; padding: 0 28px 0 10px; border-radius: 7px; border: 1px solid var(--border); font: inherit; font-size: 13.5px; background: var(--card); color: var(--foreground); appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m19.5 8.25-7.5 7.5-7.5-7.5'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 9px center; background-size: 13px 13px; }
+/* The Decisions page's project switch (DecisionsProjectPicker): a button, then a listbox of every project with its folder and counts. */
+.ib-ppick { position: relative; min-width: 0; flex: 0 1 auto; }
+.pn-inbox .ib-ppick-t { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; height: 32px; padding: 0 9px 0 11px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: 13.5px; text-align: left; }
+.pn-inbox .ib-ppick-t:hover { background: color-mix(in oklch, var(--muted) 45%, var(--card)); }
+.pn-inbox .ib-ppick-t:focus-visible { outline: 2px solid color-mix(in oklch, var(--primary) 60%, transparent); outline-offset: 1px; }
+.pn-inbox .ib-ppick-t[aria-expanded="true"] { border-color: color-mix(in oklch, var(--primary) 45%, var(--border)); }
+.ib-ppick-tn { font-weight: 550; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-ppick-tc { color: var(--muted-foreground); font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ib-ppick-t > svg { flex: none; color: var(--muted-foreground); }
+.ib-ppick-list { position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; width: 400px; max-width: calc(100vw - 24px); max-height: min(440px, 62vh); overflow-y: auto; overscroll-behavior: contain; background: var(--popover); color: var(--popover-foreground, var(--foreground)); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22); padding: 6px; }
+.ib-ppick-o { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 7px; cursor: pointer; font-size: 13.5px; outline: none; }
+.ib-ppick-o:hover, .ib-ppick-o:focus-visible, .ib-ppick-o:focus { background: color-mix(in oklch, var(--primary) 11%, transparent); }
+.ib-ppick-o[aria-selected="true"] { background: color-mix(in oklch, var(--primary) 7%, transparent); }
+.ib-ppick-o[aria-selected="true"]:focus, .ib-ppick-o[aria-selected="true"]:hover { background: color-mix(in oklch, var(--primary) 14%, transparent); }
+.ib-ppick-ck { width: 16px; flex: none; display: inline-flex; color: var(--primary); }
+.ib-ppick-ot { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.ib-ppick-ot b { font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-ppick-p { font-size: 12px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: ltr; }
+.ib-ppick-oc { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; flex: none; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ib-ppick-w { color: var(--foreground); font-weight: 550; }
+.ib-ppick-w::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 1px; transform: rotate(45deg) translateY(-1px); background: var(--primary); }
+.ib-ppick-s, .ib-ppick-none { color: var(--muted-foreground); }
 .ib-dsub { color: var(--muted-foreground); font-size: 14px; margin: 0 0 22px; }
 .ib-dpage .ib-group + .ib-group { margin-top: 18px; }
 .ib-drow { display: grid; grid-template-columns: 22px minmax(0, 1fr) 300px 120px 90px; align-items: center; gap: 12px; min-height: 50px; padding: 0 12px; border-bottom: 1px solid var(--ib-hair); font-size: 14px; width: 100%; text-align: left; }
@@ -1197,7 +1218,21 @@ pre code.pn-code[data-keep-layout] {
   .ib-dpage { padding: 0 0 calc(24px + env(safe-area-inset-bottom)); }
   .ib-dh { min-height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0 4px; gap: 6px; margin-bottom: 6px; }
   .ib-dh h1 { font-size: 22px; flex: none; }
-  .pn-inbox .ib-select { height: 44px; flex: 1 1 0; min-width: 0; text-overflow: ellipsis; overflow: hidden; }
+  .ib-ppick { flex: 1 1 0; }
+  .pn-inbox .ib-ppick-t { height: 44px; width: 100%; font-size: 15px; }
+  /* the button carries one count, whole (never a cut number); the name gives way (the sheet shows everything) */
+  .pn-inbox .ib-ppick-t .ib-ppick-tn { flex: 0 1 auto; }
+  .pn-inbox .ib-ppick-t .ib-ppick-tc { flex: none; margin-left: auto; }
+  .pn-inbox .ib-ppick-t > svg { margin-left: auto; }
+  .pn-inbox .ib-ppick-t .ib-ppick-tc + svg { margin-left: 0; }
+  /* the list is a sheet from the bottom edge, like New message's sessions and the decision card */
+  .ib-ppick-scrim { position: fixed; inset: 0; z-index: 59; background: rgb(0 0 0 / 0.35); }
+  .ib-ppick-list.ib-ppick-sheet { position: fixed; left: 0; right: 0; bottom: 0; top: auto; width: auto; max-width: none; max-height: 72%; z-index: 60; border-radius: 16px 16px 0 0; border-bottom: 0; padding: 0 8px calc(10px + env(safe-area-inset-bottom)); box-shadow: 0 -16px 48px rgba(0, 0, 0, 0.28); }
+  .ib-ppick-h { position: sticky; top: 0; z-index: 1; height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 0 0 0 8px; font-size: 15px; background: var(--popover); border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); margin-bottom: 4px; }
+  .ib-ppick-h b { font-weight: 600; }
+  .ib-ppick-o { min-height: 56px; padding: 8px 10px; font-size: 15px; }
+  .ib-ppick-p { font-size: 13px; }
+  .ib-ppick-oc { font-size: 13px; }
   .ib-dsub { margin: 0 16px 14px; }
   .ib-dpage .ib-band { border-radius: 0; padding: 0 16px; }
   .ib-dpage button.ib-band { height: 44px; }

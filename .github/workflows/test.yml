@@ -141,6 +141,7 @@ jobs:
           packages/inbox/markRead.test.tsx
           packages/inbox/fileBack.test.tsx
           packages/inbox/archived.test.tsx
+          packages/inbox/decisionsPicker.test.tsx
           packages/inbox/phoneList.test.tsx
           packages/inbox/toastPhone.test.tsx
           packages/inbox/attachmentsHeader.test.tsx

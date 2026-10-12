@@ -141,7 +141,7 @@ The allowlist. Each row is the window's handler as it is today, with the request
 | `GET messages/:id/guide` | same | | `{ message_id, guide, snapshot }` | 7.19 |
 | `POST messages/:id/guide/reviewed` | same | `{ idempotency_key, reviewed: boolean[] }` | `{ message_id, reviewed }` | 7.20 |
 | `POST messages/:id/decision` | same | `{ idempotency_key, key, recording?, draft? }` | `{ question }` | 7.21 |
-| `GET decisions?project=prj_...` | same | | `{ serverSession, cursor, project_id, waiting, decisions }` | 7.22 |
+| `GET decisions?project=prj_...` | same | | `{ serverSession, cursor, project_id, waiting, decisions, project_counts }` (`project_counts`, added later, is every project's `{ project_id, waiting, settled }`; a phone may ignore it) | 7.22 |
 | `GET threads/:id/sessions` | same | | `{ serverSession, home, project, sessions }` | 7.23 |
 | `POST threads/:id/message` | same | `{ idempotency_key, session, body }` | `{ message, replayed }` | 7.24 |
 | `POST revoke` | (the door's own) | `{}` | `{ device }` | 7.25 |

@@ -103,7 +103,7 @@ import {
   INBOX_DECISION_ERROR_STATUS,
   recordDecisionsForReply,
   threadDecisions,
-  waitingDecisions,
+  waitingDecisionCount,
 } from "./inbox-decisions";
 import { inboxGuideRoute } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
@@ -524,7 +524,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Without it they stay in Quiet, as an older window and the phone expect.
       sections: inboxListSections(archived === "exclude" ? scoped.filter((row) => !inboxRowArchived(row)) : scoped),
       /** Questions in every project that record a decision once answered and sent: the sidebar's Decisions count. */
-      decisions_waiting: waitingDecisions(store).length,
+      decisions_waiting: waitingDecisionCount(store),
     };
   };
 
