@@ -1,0 +1,391 @@
+{
+  "format": "plannotator-inbox-thread-state",
+  "version": 1,
+  "name": "hand-03-mark-read-and-undo",
+  "description": "Mark read closes both questions (a saved pick included) and Undo puts them back; after the set-aside note went, Undo writes one reopened note.",
+  "source": "hand",
+  "seed": null,
+  "clock": {
+    "start": "2026-10-12T10:00:00.000Z",
+    "step_ms": 1000
+  },
+  "known_violation": null,
+  "steps": [
+    {
+      "event": {
+        "type": "agent_message",
+        "project": "repo0",
+        "session": "ses_a",
+        "reply_to": null,
+        "body": "Two calls.\n\n:::question\nKeep the old route?\n\n- [ ] Yes\n- [ ] No\n:::\n\n:::question\nWhich region first?\n\nStopped: the deploy waits on this.\n\n- [ ] East\n- [ ] West\n:::"
+      },
+      "outcome": "ok",
+      "created": [
+        "m1"
+      ],
+      "lands_in": "t1",
+      "expect": {
+        "sections": {
+          "stopped": [
+            "t1"
+          ],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [
+            "t1"
+          ],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 1,
+          "unread": 1,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m1",
+            "questions": {
+              "m1/q-4c7ff6e3": "open",
+              "m1/q-24de5340": "open"
+            }
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "pick",
+        "message": "m1",
+        "key": "q-4c7ff6e3",
+        "choice": "Yes"
+      },
+      "outcome": "ok",
+      "created": [],
+      "expect": {
+        "sections": {
+          "stopped": [
+            "t1"
+          ],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [
+            "t1"
+          ],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 1,
+          "unread": 1,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m1",
+            "questions": {
+              "m1/q-4c7ff6e3": "picked",
+              "m1/q-24de5340": "open"
+            }
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "mark_read",
+        "thread": "t1"
+      },
+      "outcome": "ok",
+      "created": [],
+      "expect": {
+        "sections": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": [
+            "t1"
+          ]
+        },
+        "sections_exclude_archived": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": [
+            "t1"
+          ]
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 0,
+          "unread": 0,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "quiet",
+            "unread": false,
+            "unseen": 0,
+            "read": true,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m1",
+            "questions": {
+              "m1/q-4c7ff6e3": "closed",
+              "m1/q-24de5340": "closed"
+            }
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "unread",
+        "thread": "t1"
+      },
+      "outcome": "ok",
+      "created": [],
+      "expect": {
+        "sections": {
+          "stopped": [
+            "t1"
+          ],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [
+            "t1"
+          ],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 1,
+          "unread": 1,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m1",
+            "questions": {
+              "m1/q-4c7ff6e3": "picked",
+              "m1/q-24de5340": "open"
+            }
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "mark_read",
+        "thread": "t1"
+      },
+      "outcome": "ok",
+      "created": [],
+      "expect": {
+        "sections": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": [
+            "t1"
+          ]
+        },
+        "sections_exclude_archived": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": [
+            "t1"
+          ]
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 0,
+          "unread": 0,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "quiet",
+            "unread": false,
+            "unseen": 0,
+            "read": true,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m1",
+            "questions": {
+              "m1/q-4c7ff6e3": "closed",
+              "m1/q-24de5340": "closed"
+            }
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "set_aside_note",
+        "thread": "t1"
+      },
+      "outcome": "ok",
+      "created": [
+        "m2"
+      ],
+      "expect": {
+        "sections": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": [
+            "t1"
+          ]
+        },
+        "sections_exclude_archived": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": [
+            "t1"
+          ]
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 0,
+          "unread": 0,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "quiet",
+            "unread": false,
+            "unseen": 0,
+            "read": true,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m2",
+            "questions": {
+              "m1/q-4c7ff6e3": "closed",
+              "m1/q-24de5340": "closed"
+            }
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "unread",
+        "thread": "t1"
+      },
+      "outcome": "ok",
+      "created": [
+        "m3"
+      ],
+      "expect": {
+        "sections": {
+          "stopped": [
+            "t1"
+          ],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [
+            "t1"
+          ],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 1,
+          "unread": 1,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 0,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m3",
+            "questions": {
+              "m1/q-4c7ff6e3": "picked",
+              "m1/q-24de5340": "open"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1945,6 +1945,8 @@ Sorting and the rest:
 - `?project=prj_…` keeps the sections and drops other projects' rows.
 - The list is linear in the store: about 10 ms for 4,000 threads.
 
+**The thread-state model**: `adr/implementation/inbox-thread-state.md` (sections, events, the transition table, invariants, known violations), checked by `packages/shared/inbox/store.test.ts`, with trace fixtures for the phones in `packages/shared/inbox/fixtures/thread-state/v1/`.
+
 **Archived** (owner ruling 2026-10-12: "Archived messages should move out of the Quiet list … only visible within a panel on the Settings page … the ability to unarchive them").
 - **Came back** (mail apps' rule). An agent's `reply_to` reply into an archived thread lands after its archive line. Messages after that line behave as an open thread's; messages before it stay as the archive left them; the thread stays resolved (`resolved_at` kept) until the person acts, and nothing unarchives it implicitly (not even a Send: that would reopen the archive-closed questions and change the agent's default-thread routing).
   - The line: the store keeps, per root, the seq of the root line that set its current `resolved_at` (`resolvedSeq`, rebuilt in seq order by every replay and cleared by `reload`; a look or any other root rewrite with the same `resolved_at` does not move it). `closedByArchive(message)` = the thread is resolved and the message's first line is before that seq. Derived, never written.

@@ -1,0 +1,14 @@
+{
+  "format": "plannotator-inbox-thread-state",
+  "version": 1,
+  "name": "gen-seed-1012",
+  "description": "A generated sequence (store.test.ts, traceOpArb), only the events that wrote something.",
+  "source": "generated",
+  "seed": 1012,
+  "clock": {
+    "start": "2026-10-12T10:00:00.000Z",
+    "step_ms": 1000
+  },
+  "known_violation": null,
+  "steps": []
+}

@@ -1,0 +1,406 @@
+{
+  "format": "plannotator-inbox-thread-state",
+  "version": 1,
+  "name": "gen-seed-1005",
+  "description": "A generated sequence (store.test.ts, traceOpArb), only the events that wrote something.",
+  "source": "generated",
+  "seed": 1005,
+  "clock": {
+    "start": "2026-10-12T10:00:00.000Z",
+    "step_ms": 1000
+  },
+  "known_violation": null,
+  "steps": [
+    {
+      "event": {
+        "type": "agent_message",
+        "project": "repo1",
+        "session": "ses_b",
+        "reply_to": null,
+        "body": "Two calls.\n\n:::question\nKeep the old route?\n\n- [ ] Yes\n- [ ] No\n:::\n\n:::question\nWhich region first?\n\nStopped: the deploy waits on this.\n\n- [ ] East\n- [ ] West\n:::"
+      },
+      "outcome": "ok",
+      "created": [
+        "m1"
+      ],
+      "lands_in": "t1",
+      "expect": {
+        "sections": {
+          "stopped": [
+            "t1"
+          ],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [
+            "t1"
+          ],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 1,
+          "unread": 1,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m1",
+            "questions": {
+              "m1/q-4c7ff6e3": "open",
+              "m1/q-24de5340": "open"
+            }
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "pick",
+        "message": "m1",
+        "key": "q-4c7ff6e3",
+        "choice": "Yes"
+      },
+      "outcome": "ok",
+      "created": [],
+      "expect": {
+        "sections": {
+          "stopped": [
+            "t1"
+          ],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [
+            "t1"
+          ],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 1,
+          "unread": 1,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m1",
+            "questions": {
+              "m1/q-4c7ff6e3": "picked",
+              "m1/q-24de5340": "open"
+            }
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "seen",
+        "thread": "t1"
+      },
+      "outcome": "ok",
+      "created": [],
+      "expect": {
+        "sections": {
+          "stopped": [
+            "t1"
+          ],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [
+            "t1"
+          ],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 1,
+          "unread": 1,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 0,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m1",
+            "questions": {
+              "m1/q-4c7ff6e3": "picked",
+              "m1/q-24de5340": "open"
+            }
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "agent_message",
+        "project": "repo0",
+        "session": "ses_b",
+        "reply_to": null,
+        "body": "Two calls.\n\n:::question\nKeep the old route?\n\n- [ ] Yes\n- [ ] No\n:::\n\n:::question\nWhich region first?\n\nStopped: the deploy waits on this.\n\n- [ ] East\n- [ ] West\n:::"
+      },
+      "outcome": "ok",
+      "created": [
+        "m2"
+      ],
+      "lands_in": "t2",
+      "expect": {
+        "sections": {
+          "stopped": [
+            "t2",
+            "t1"
+          ],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [
+            "t2",
+            "t1"
+          ],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 2,
+          "unread": 2,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 0,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m1",
+            "questions": {
+              "m1/q-4c7ff6e3": "picked",
+              "m1/q-24de5340": "open"
+            }
+          },
+          "t2": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m2",
+            "questions": {
+              "m2/q-4c7ff6e3": "open",
+              "m2/q-24de5340": "open"
+            }
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "agent_message",
+        "project": "repo1",
+        "reply_to": "m1",
+        "body": "Two calls.\n\n:::question\nKeep the old route?\n\n- [ ] Yes\n- [ ] No\n:::\n\n:::question\nWhich region first?\n\nStopped: the deploy waits on this.\n\n- [ ] East\n- [ ] West\n:::"
+      },
+      "outcome": "ok",
+      "created": [
+        "m3"
+      ],
+      "lands_in": "t1",
+      "expect": {
+        "sections": {
+          "stopped": [
+            "t1",
+            "t2"
+          ],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [
+            "t1",
+            "t2"
+          ],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 2,
+          "unread": 2,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m3",
+            "questions": {
+              "m1/q-4c7ff6e3": "picked",
+              "m1/q-24de5340": "open",
+              "m3/q-4c7ff6e3": "open",
+              "m3/q-24de5340": "open"
+            }
+          },
+          "t2": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m2",
+            "questions": {
+              "m2/q-4c7ff6e3": "open",
+              "m2/q-24de5340": "open"
+            }
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "agent_message",
+        "project": "repo0",
+        "reply_to": "m2",
+        "supersedes": [
+          "m2/q-4c7ff6e3"
+        ],
+        "body": "The nightly build is green."
+      },
+      "outcome": "ok",
+      "created": [
+        "m4"
+      ],
+      "lands_in": "t2",
+      "expect": {
+        "sections": {
+          "stopped": [
+            "t2",
+            "t1"
+          ],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [
+            "t2",
+            "t1"
+          ],
+          "holding": [],
+          "waiting": [],
+          "new": [],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 2,
+          "unread": 2,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m3",
+            "questions": {
+              "m1/q-4c7ff6e3": "picked",
+              "m1/q-24de5340": "open",
+              "m3/q-4c7ff6e3": "open",
+              "m3/q-24de5340": "open"
+            }
+          },
+          "t2": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 2,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m4",
+            "questions": {
+              "m2/q-4c7ff6e3": "superseded",
+              "m2/q-24de5340": "open"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
