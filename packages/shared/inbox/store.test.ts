@@ -671,8 +671,8 @@ interface ModelQuestion {
   decision: boolean;
   answer: ModelAnswer;
   sent: boolean;
-  /** Closed by a Mark read; what an Undo puts back. */
-  setAside: { answer: ModelAnswer; sent: boolean } | null;
+  /** Closed by a Mark read (`by`: the step of that Mark read); what an Undo puts back. */
+  setAside: { answer: ModelAnswer; sent: boolean; by: number } | null;
   superseded: boolean;
   decided: boolean;
 }
@@ -719,6 +719,8 @@ class ThreadStateModel {
   private readonly sessionRoots = new Map<string, string>();
   private created: readonly string[] = [];
   private used = 0;
+  /** What the last event did that a known violation covers. */
+  tags: { kind: "C"; threadId: string; earlier: number }[] = [];
 
   // ── what the model derives ──
 
@@ -758,14 +760,21 @@ class ThreadStateModel {
   }
 
   /**
-   * Where "new since you looked" starts: the last look, or the latest person
-   * message. Mirrors the store, which counts the Inbox's own notes as the
-   * person's (see the KNOWN VIOLATION A test below).
+   * Where "new since you looked" starts: the last look, or the person's
+   * latest real reply. The intended rule, written independently of the
+   * store: the Inbox's own notes (set-aside, reopened) are neither the
+   * person's reply nor a look. The store counts them as both; where that
+   * changes a row, `checkThreadState` reports it as KNOWN VIOLATION A.
    */
   private lookTick(t: ModelThread): number {
     let look = t.seen;
-    for (const m of t.messages) if (m.author === "person") look = Math.max(look, m.tick);
+    for (const m of t.messages) if (m.author === "person" && m.note === null) look = Math.max(look, m.tick);
     return look;
+  }
+
+  /** The thread holds one of the Inbox's own notes. */
+  hasNote(t: ModelThread): boolean {
+    return t.messages.some((m) => m.note !== null);
   }
 
   unseen(t: ModelThread): number {
@@ -813,7 +822,8 @@ class ThreadStateModel {
     const c = this.counts(t);
     if (c.open > 0) return c.stopped ? "stopped" : c.holds ? "holding" : "waiting";
     if (c.picked > 0) return "new";
-    const last = t.messages.at(-1)!;
+    // The person's reply is the last message, the Inbox's notes aside.
+    const last = [...t.messages].reverse().find((m) => m.note === null)!;
     if (last.author === "person" && t.checked < last.tick) return "sent";
     if (this.unseen(t) > 0) return "new";
     return "quiet";
@@ -885,6 +895,7 @@ class ThreadStateModel {
   apply(op: Op, target: string | undefined, created: readonly string[], store: InboxStore, tick: number): Outcome {
     this.created = created;
     this.used = 0;
+    this.tags = [];
     const outcome = this.event(op, target, store, tick);
     expect(this.used).toBe(created.length);
     return outcome;
@@ -979,13 +990,10 @@ class ThreadStateModel {
         }
         return "ok";
       case "seen": {
-        let seen = thread.seen;
+        // A look covers every agent message so far.
         let latestAgent = 0;
-        for (const m of thread.messages) {
-          if (m.author === "person") seen = Math.max(seen, m.tick);
-          else latestAgent = Math.max(latestAgent, m.tick);
-        }
-        if (latestAgent > seen) thread.seen = latestAgent;
+        for (const m of thread.messages) if (m.author === "agent") latestAgent = Math.max(latestAgent, m.tick);
+        if (latestAgent > this.lookTick(thread)) thread.seen = latestAgent;
         return "ok";
       }
       case "read": {
@@ -1003,7 +1011,7 @@ class ThreadStateModel {
             thread.read = tick;
             thread.seen = Math.max(thread.seen, latestAgent);
             for (const q of waiting) {
-              q.setAside = { answer: q.answer, sent: q.sent };
+              q.setAside = { answer: q.answer, sent: q.sent, by: tick };
               q.answer = "skip";
             }
           }
@@ -1011,6 +1019,10 @@ class ThreadStateModel {
         }
         const closed = live.flatMap((m) => m.questions).filter((q) => q.setAside);
         if (thread.read === null && closed.length === 0) return "ok";
+        // The ruling: Undo reopens only what its own Mark read closed. The
+        // store reopens every set-aside question (KNOWN VIOLATION C).
+        const earlier = closed.filter((q) => q.setAside!.by !== thread.read).length;
+        if (earlier > 0) this.tags.push({ kind: "C", threadId: thread.id, earlier });
         if (thread.read !== null) {
           if (this.readHolds(thread) && thread.seenBeforeRead !== undefined) thread.seen = thread.seenBeforeRead;
           thread.read = null;
@@ -1073,6 +1085,12 @@ const STATE_START = Date.parse("2026-10-12T10:00:00.000Z");
 const STATE_STEP_MS = 1000;
 const isoAt = (tick: number) => new Date(STATE_START + tick * STATE_STEP_MS).toISOString();
 
+/** A rule the store breaks today, met at a step (see "known violations" below). */
+type StepViolation =
+  | { kind: "A"; threadId: string; spec: { section: InboxSectionId; unseen: number }; today: { section: InboxSectionId; unseen: number } }
+  | { kind: "B"; threadId: string; today: InboxSectionId }
+  | { kind: "C"; threadId: string; earlier: number; today: InboxSectionId };
+
 interface StateWorld {
   dir: string;
   store: InboxStore;
@@ -1080,14 +1098,28 @@ interface StateWorld {
   ids: string[];
   clock: { now: number };
   tick: number;
+  /** The clock time of each step (steps may share one: the sort's tie-break). */
+  timeOf: Map<number, number>;
   /** The last successful Mark read, for the Mark read then Undo check. */
   lastRead: { threadId: string; before: ReturnType<typeof readSnapshot> } | null;
+  /** Rows the tie-break ordered (equal `last_at` in a section, or equal `resolved_at` in the archived list). */
+  ties: number;
 }
 
 function stateWorld(): StateWorld {
   const dir = dataDir();
   const clock = { now: STATE_START };
-  return { dir, store: InboxStore.open(dir, { now: () => new Date(clock.now) }), model: new ThreadStateModel(), ids: [], clock, tick: 0, lastRead: null };
+  return {
+    dir,
+    store: InboxStore.open(dir, { now: () => new Date(clock.now) }),
+    model: new ThreadStateModel(),
+    ids: [],
+    clock,
+    tick: 0,
+    timeOf: new Map(),
+    lastRead: null,
+    ties: 0,
+  };
 }
 
 /** A thread's questions and row as a Mark read then Undo must give them back (revisions move by two; nothing else may). */
@@ -1101,9 +1133,31 @@ function readSnapshot(world: StateWorld, threadId: string) {
   };
 }
 
-/** The invariants of the doc's "Invariants", on the store's own output, plus agreement with the model. */
-function checkThreadState(world: StateWorld): void {
+/** Where KNOWN VIOLATION A may show: the look and what follows from it. */
+const LOOK_FIELDS = ["section", "unseen", "back", "archived"] as const;
+
+/**
+ * Every row signature of KNOWN VIOLATION A the generated runs may meet: the
+ * section the rule wants > the store's, and how `unseen` moved. Each has a
+ * `test.failing` below. A new one fails the run: a variant nobody has looked at.
+ */
+const KNOWN_A_SIGNATURES = new Set(["new>sent unseen-", "asks>asks unseen-", "new>quiet unseen-", "quiet>sent", "new>new unseen-", "quiet>quiet unseen-"]);
+const seenSignatures = new Set<string>();
+
+function violationASignature(spec: { section: InboxSectionId; unseen: number }, today: { section: InboxSectionId; unseen: number }): string {
+  const cls = (s: InboxSectionId) => (SHW.includes(s) ? "asks" : s);
+  const unseen = today.unseen < spec.unseen ? " unseen-" : today.unseen > spec.unseen ? " unseen+" : "";
+  return `${cls(spec.section)}>${cls(today.section)}${unseen}`;
+}
+
+/**
+ * The invariants of the doc's "Invariants", on the store's own output, plus
+ * agreement with the model. Returns the rows where the store breaks the
+ * notes rule (KNOWN VIOLATION A); any other disagreement fails.
+ */
+function checkThreadState(world: StateWorld): StepViolation[] {
   const { store, model } = world;
+  const violations: StepViolation[] = [];
   const rows = store.listRows();
   const views = listViews(rows);
   const all = [...model.threads.keys()].sort();
@@ -1119,6 +1173,7 @@ function checkThreadState(world: StateWorld): void {
       for (let i = 1; i < section.threads.length; i++) {
         const a = section.threads[i - 1]!;
         const b = section.threads[i]!;
+        if (a.last_at === b.last_at) world.ties += 1;
         expect(a.last_at > b.last_at || (a.last_at === b.last_at && a.thread_id < b.thread_id)).toBe(true);
       }
     }
@@ -1130,12 +1185,13 @@ function checkThreadState(world: StateWorld): void {
   for (let i = 1; i < views.archived.length; i++) {
     const a = views.archived[i - 1]!;
     const b = views.archived[i]!;
+    if (a.resolved_at === b.resolved_at) world.ties += 1;
     expect(a.resolved_at! > b.resolved_at! || (a.resolved_at === b.resolved_at && a.thread_id < b.thread_id)).toBe(true);
   }
   for (const row of rows) {
     const t = model.threads.get(row.thread_id)!;
     // The model and the store agree on the row...
-    expect({
+    const today = {
       section: row.section,
       archived: inboxRowArchived(row),
       read: (row.read_at ?? null) !== null,
@@ -1144,16 +1200,30 @@ function checkThreadState(world: StateWorld): void {
       unseen: row.unseen,
       last_at: row.last_at,
       messages: row.message_count,
-    }).toEqual({
+    };
+    const spec = {
       section: model.section(t),
       archived: model.archived(t),
       read: model.readHolds(t),
       back: model.back(t),
       after: model.agentAfter(t),
       unseen: model.unseen(t),
-      last_at: isoAt(t.messages.at(-1)!.tick),
+      last_at: new Date(world.timeOf.get(t.messages.at(-1)!.tick)!).toISOString(),
       messages: t.messages.length,
-    });
+    };
+    const differs = (Object.keys(spec) as (keyof typeof spec)[]).filter((k) => spec[k] !== today[k]);
+    if (differs.length > 0) {
+      // ...except where the store counts its own notes as the person's reply
+      // and as a look (KNOWN VIOLATION A): only on a thread holding a note,
+      // only in the look and what follows from it, and only in a shape a
+      // known-violation test pins.
+      expect(model.hasNote(t)).toBe(true);
+      for (const k of differs) expect(LOOK_FIELDS as readonly string[]).toContain(k);
+      const signature = violationASignature(spec, today);
+      seenSignatures.add(signature);
+      expect(KNOWN_A_SIGNATURES).toContain(signature);
+      violations.push({ kind: "A", threadId: t.id, spec: { section: spec.section, unseen: spec.unseen }, today: { section: today.section, unseen: today.unseen } });
+    }
     // ...on where each message landed and on every question's state.
     for (const m of t.messages) {
       expect(store.message(m.id)?.thread_id).toBe(t.id);
@@ -1164,7 +1234,10 @@ function checkThreadState(world: StateWorld): void {
     // An archived thread never counts.
     if (inboxRowArchived(row)) expect(row.unread).toBe(false);
   }
-  // Counts: the sidebar's (rows waiting on the person), the folders' unread (bold rows), the Decisions count.
+  // Counts. The first two follow from the sections by construction (the
+  // sidebar counts the rows in Stopped, Holding and Waiting; `unread` is
+  // defined from the section), so they guard the counting code more than the
+  // rules. The Decisions count is checked against the model's own account.
   const inSections = (sections: readonly InboxListSection[], ids: readonly InboxSectionId[]) =>
     sections.filter((s) => ids.includes(s.id)).reduce((n, s) => n + s.threads.length, 0);
   const waiting = rows.filter((r) => SHW.includes(r.section)).length;
@@ -1180,12 +1253,25 @@ function checkThreadState(world: StateWorld): void {
   expect(waitingDecisionCount(store)).toBe(model.decisionsWaiting());
   // Replay determinism: the store read again from disk gives the same rows and threads.
   expect(windowView(InboxStore.open(world.dir))).toEqual(windowView(store));
+  return violations;
 }
 
-/** Run one op on the store and the model, then check the step's own rules and every invariant. */
-function stateStep(world: StateWorld, op: Op): { outcome: Outcome; target: string | undefined; created: string[] } {
+interface StepResult {
+  outcome: Outcome;
+  target: string | undefined;
+  created: string[];
+  violations: StepViolation[];
+}
+
+/**
+ * Run one op on the store and the model, then check the step's own rules and
+ * every invariant. `sameTick`: the step shares the previous step's clock
+ * time, so `last_at` and `resolved_at` can tie.
+ */
+function stateStep(world: StateWorld, op: Op, sameTick = false): StepResult {
   const tick = ++world.tick;
-  world.clock.now = STATE_START + tick * STATE_STEP_MS;
+  if (!sameTick || tick === 1) world.clock.now += STATE_STEP_MS;
+  world.timeOf.set(tick, world.clock.now);
   const target = targetOf(op, world.ids);
   const thread = target ? world.model.threadOf(target) : undefined;
   const wasResolved = thread?.resolved ?? false;
@@ -1205,11 +1291,12 @@ function stateStep(world: StateWorld, op: Op): { outcome: Outcome; target: strin
     stop();
   }
   expect(outcome).toBe(world.model.apply(op, target, created, world.store, tick));
-  checkThreadState(world);
+  const violations = checkThreadState(world);
+  for (const tag of world.model.tags) violations.push({ ...tag, today: world.store.listRow(tag.threadId)!.section });
 
   const lastRead = world.lastRead;
   world.lastRead = null;
-  if (outcome !== "ok" || !thread) return { outcome, target, created };
+  if (outcome !== "ok" || !thread) return { outcome, target, created, violations };
   const row = world.store.listRow(thread.id)!;
   const inList = () => placedIds(listViews(world.store.listRows()).exclude).includes(thread.id);
   if ((op.op === "reply" || op.op === "supersede") && wasResolved) {
@@ -1217,11 +1304,15 @@ function stateStep(world: StateWorld, op: Op): { outcome: Outcome; target: strin
     expect(row.back_from_archive).toBe(true);
     expect(inList()).toBe(true);
   }
-  if (op.op === "read" && op.read && wasResolved && !replyUnread) {
-    // Mark read on a came-back thread returns it to Archived (not while the
-    // person's own reply waits on the agent: the KNOWN VIOLATION B test).
-    expect(inboxRowArchived(row)).toBe(true);
-    expect(inList()).toBe(false);
+  if (op.op === "read" && op.read && wasResolved && thread.messages.some((m) => m.author === "agent" && m.tick > thread.archive)) {
+    if (replyUnread && !inboxRowArchived(row)) {
+      // The person's own reply still waits on the agent: KNOWN VIOLATION B.
+      violations.push({ kind: "B", threadId: thread.id, today: row.section });
+    } else {
+      // Mark read on a came-back thread returns it to Archived.
+      expect(inboxRowArchived(row)).toBe(true);
+      expect(inList()).toBe(false);
+    }
   }
   if (op.op === "read" && op.read && readBefore && readBefore.read_at === null && noSetAsideBefore) {
     // Kept for the Mark read then Undo check (a thread with questions an
@@ -1245,7 +1336,7 @@ function stateStep(world: StateWorld, op: Op): { outcome: Outcome; target: strin
     // Unarchive clears a read made while archived, in the same root line.
     expect(world.store.message(thread.id)!.person_read_seq ?? null).toBeNull();
   }
-  return { outcome, target, created };
+  return { outcome, target, created, violations };
 }
 
 /** The index in `ids` of a thread's first message, so an op can aim at the thread. */
@@ -1254,13 +1345,20 @@ const rootIndex = (world: StateWorld, threadId: string) => world.ids.indexOf(thr
 describe("the thread-state model", () => {
   // Deterministic: the seeds are fixed, so a failure names a seed and a path to rerun.
   test("generated sequences: the store agrees with the model, and every invariant holds after every step", () => {
+    let ties = 0;
     fc.assert(
-      fc.property(fc.array(stateOpArb, { minLength: 15, maxLength: 45, size: "max" }), (ops) => {
+      // About one step in four shares the previous step's clock time, so `last_at` and `resolved_at` tie.
+      fc.property(fc.array(fc.tuple(stateOpArb, fc.nat(3)), { minLength: 15, maxLength: 45, size: "max" }), (steps) => {
         const world = stateWorld();
-        for (const op of ops) stateStep(world, op);
+        for (const [op, roll] of steps) stateStep(world, op, roll === 0);
+        ties += world.ties;
       }),
       { numRuns: 300, seed: 20261012 },
     );
+    // The sort's tie-break on the thread id was exercised, not only defined.
+    expect(ties).toBeGreaterThan(0);
+    // Every shape of KNOWN VIOLATION A the runs may meet was met (a fix that removes one updates the list).
+    expect([...seenSignatures].sort()).toEqual([...KNOWN_A_SIGNATURES].sort());
   });
 
   test("Mark read then Undo, on every thread after a generated history, gives the thread back exactly as it was", () => {
@@ -1297,7 +1395,10 @@ describe("the thread-state model", () => {
   });
 
   test("every hand-written edge runs clean through the model", () => {
-    for (const trace of HAND_TRACES) runTrace(trace.events);
+    for (const trace of HAND_TRACES) {
+      const { violations } = runTrace(trace.events);
+      expect(violations.map((v) => ({ step: v.step, kind: v.kind }))).toEqual(trace.violations ?? []);
+    }
   });
 });
 
@@ -1321,7 +1422,8 @@ interface TraceDef {
   name: string;
   description: string;
   events: TraceEvent[];
-  known_violation?: { step: number; rule: string; spec: string; today: string; test: string };
+  /** The known violations this trace meets, by step: checked against what the steps detect. */
+  violations?: { step: number; kind: StepViolation["kind"] }[];
 }
 
 /** The labels a trace uses: m1, m2, … for messages in the order they were written; t1, t2, … for threads. */
@@ -1483,26 +1585,54 @@ function traceExpect(world: StateWorld, labels: TraceLabels) {
   };
 }
 
-/** Run a trace's events through checked steps on a fresh store; returns each step as the fixture records it. */
+const VIOLATION_RULES: Record<StepViolation["kind"], { test: string; rule: string }> = {
+  A: { test: "KNOWN VIOLATION A", rule: "The Inbox's own notes (set-aside, reopened) are neither the person's reply nor a look." },
+  B: { test: "KNOWN VIOLATION B", rule: "Mark read on a came-back thread returns it to Archived." },
+  C: { test: "KNOWN VIOLATION C", rule: "Undo reopens only the questions its own Mark read closed." },
+};
+
+/** A step's known violation as the fixture records it. */
+function violationRecord(step: number, v: StepViolation, labels: TraceLabels) {
+  const t = labels.threadLabel(v.threadId);
+  const { test, rule } = VIOLATION_RULES[v.kind];
+  const [spec, today] =
+    v.kind === "A"
+      ? [`${t} in ${v.spec.section}, unseen ${v.spec.unseen}`, `${t} in ${v.today.section}, unseen ${v.today.unseen}`]
+      : v.kind === "B"
+        ? [`${t} archived`, `${t} in ${v.today}, still back from the archive`]
+        : [`${t}: only the questions this Mark read closed reopen`, `${t} in ${v.today}: ${v.earlier} question(s) an earlier Mark read closed reopened too`];
+  return { step, kind: v.kind, test, rule, spec, today };
+}
+
+/** Run a trace's events through checked steps on a fresh store; returns each step as the fixture records it, and the known violations met. */
 function runTrace(events: readonly TraceEvent[]) {
   const world = stateWorld();
   const labels = new TraceLabels();
-  return events.map((event, i) => {
+  const violations: ReturnType<typeof violationRecord>[] = [];
+  const steps = events.map((event, i) => {
     const op = traceOp(event, world, labels, i + 1);
-    const { outcome, created } = stateStep(world, op);
-    const names = created.map((id) => labels.name(id, world.store));
-    const landsIn = event.type === "agent_message" && outcome === "ok" ? labels.threadLabel(world.store.message(created[0]!)!.thread_id) : undefined;
-    return { event, outcome, created: names, ...(landsIn ? { lands_in: landsIn } : {}), expect: traceExpect(world, labels) };
+    const result = stateStep(world, op);
+    const names = result.created.map((id) => labels.name(id, world.store));
+    for (const v of result.violations) violations.push(violationRecord(i + 1, v, labels));
+    const landsIn = event.type === "agent_message" && result.outcome === "ok" ? labels.threadLabel(world.store.message(result.created[0]!)!.thread_id) : undefined;
+    return { event, outcome: result.outcome, created: names, ...(landsIn ? { lands_in: landsIn } : {}), expect: traceExpect(world, labels) };
   });
+  return { steps, violations };
 }
 
-/** A generated sequence as trace events: each op run once, and only those that wrote something kept. */
+/**
+ * A generated sequence as trace events: a root first (so no trace is
+ * empty), then each sampled op run once, and only those that wrote
+ * something kept. Used only to make a missing file: once written, a
+ * generated trace's events are data, replayed from the file.
+ */
 function generatedEvents(seed: number): TraceEvent[] {
   const [ops] = fc.sample(fc.array(traceOpArb, { minLength: 14, maxLength: 24 }), { seed, numRuns: 1 });
+  const first: Op = { op: "send", root: 0, body: STATE_BODIES.ask, key: null, session: "ses_a" };
   const world = stateWorld();
   const labels = new TraceLabels();
   const kept: TraceEvent[] = [];
-  for (const op of ops!) {
+  for (const op of [first, ...ops!]) {
     const event = traceEventOf(op, world, labels);
     const { outcome, created } = stateStep(world, op);
     for (const id of created) labels.name(id, world.store);
@@ -1546,18 +1676,14 @@ const HAND_TRACES: TraceDef[] = [
     name: "hand-03-mark-read-and-undo",
     description: "Mark read closes both questions (a saved pick included) and Undo puts them back; after the set-aside note went, Undo writes one reopened note.",
     events: [ROOT(STATE_BODIES.two), PICK("m1", KEY.keepRoute, "Yes"), ON("mark_read", "t1"), ON("unread", "t1"), ON("mark_read", "t1"), ON("set_aside_note", "t1"), ON("unread", "t1")],
+    // The late Undo's reopened note counts as a look: unseen 0 where step 4 had 1.
+    violations: [{ step: 7, kind: "A" }],
   },
   {
     name: "hand-04-mark-read-racing-agent-message",
     description: "Mark read, then the agent writes news inside the Undo window, then the set-aside note goes.",
     events: [ROOT(STATE_BODIES.ask), ON("mark_read", "t1"), REPLY("m1", STATE_BODIES.news), ON("set_aside_note", "t1")],
-    known_violation: {
-      step: 4,
-      rule: "An agent's message after a Mark read makes the row New until the person looks.",
-      spec: "t1 in new, unseen 1",
-      today: "t1 in sent, unseen 0: the set-aside note counts as the person's reply and as a look",
-      test: "KNOWN VIOLATION A",
-    },
+    violations: [{ step: 4, kind: "A" }],
   },
   {
     name: "hand-05-mark-read-then-agent-asks",
@@ -1600,13 +1726,7 @@ const HAND_TRACES: TraceDef[] = [
     name: "hand-09-came-back-mark-read-with-unread-reply",
     description: "A came-back thread whose question the person answered with Keep open (their reply unread by the agent) is marked read.",
     events: [ROOT(STATE_BODIES.news), ON("archive", "t1"), REPLY("m1", STATE_BODIES.ask), SEND("m2", "thinking", false), ON("mark_read", "t1"), ON("agent_read", "t1")],
-    known_violation: {
-      step: 5,
-      rule: "Mark read on a came-back thread returns it to Archived.",
-      spec: "t1 archived, not in sections_exclude_archived",
-      today: "t1 stays back_from_archive (Quiet, Read) until the agent reads the reply",
-      test: "KNOWN VIOLATION B",
-    },
+    violations: [{ step: 5, kind: "B" }],
   },
   {
     name: "hand-10-supersede-chain",
@@ -1658,13 +1778,7 @@ const HAND_TRACES: TraceDef[] = [
     name: "hand-14-undo-after-an-earlier-mark-read",
     description: "Mark read, the agent writes news (New, the question stays closed), Mark read again, Undo.",
     events: [ROOT(STATE_BODIES.ask), ON("mark_read", "t1"), REPLY("m1", STATE_BODIES.news), ON("mark_read", "t1"), ON("unread", "t1")],
-    known_violation: {
-      step: 5,
-      rule: "Mark read then Undo reopens exactly the questions that Mark read closed.",
-      spec: "t1 in new, m1's question closed",
-      today: "t1 in waiting: Undo also reopens the question the first Mark read closed",
-      test: "KNOWN VIOLATION C",
-    },
+    violations: [{ step: 5, kind: "C" }],
   },
   {
     name: "hand-15-archive-holds-the-set-aside-note",
@@ -1678,7 +1792,14 @@ const TRACE_SEEDS = Array.from({ length: 24 }, (_, i) => 1001 + i);
 
 const TRACE_DIR = join(import.meta.dir, "fixtures", "thread-state", "v1");
 
-function buildTraceFiles(): Map<string, unknown> {
+/** The events of a generated trace already on disk (its data), or null when the file is missing. */
+function generatedEventsOnDisk(name: string): TraceEvent[] | null {
+  const file = join(TRACE_DIR, `${name}.json`);
+  if (!existsSync(file)) return null;
+  return (JSON.parse(readFileSync(file, "utf8")) as { steps: { event: TraceEvent }[] }).steps.map((step) => step.event);
+}
+
+function buildTraceFiles(resample: boolean): Map<string, unknown> {
   const files = new Map<string, unknown>();
   const head = (name: string, description: string, source: "hand" | "generated", seed: number | null) => ({
     format: "plannotator-inbox-thread-state",
@@ -1690,14 +1811,19 @@ function buildTraceFiles(): Map<string, unknown> {
     clock: { start: isoAt(0), step_ms: STATE_STEP_MS },
   });
   for (const trace of HAND_TRACES) {
-    files.set(`${trace.name}.json`, { ...head(trace.name, trace.description, "hand", null), known_violation: trace.known_violation ?? null, steps: runTrace(trace.events) });
+    const { steps, violations } = runTrace(trace.events);
+    // What the steps detect is what the trace declares.
+    expect(violations.map((v) => ({ step: v.step, kind: v.kind }))).toEqual(trace.violations ?? []);
+    files.set(`${trace.name}.json`, { ...head(trace.name, trace.description, "hand", null), known_violations: violations, steps });
   }
   for (const seed of TRACE_SEEDS) {
     const name = `gen-seed-${seed}`;
+    const events = (!resample && generatedEventsOnDisk(name)) || generatedEvents(seed);
+    const { steps, violations } = runTrace(events);
     files.set(`${name}.json`, {
-      ...head(name, "A generated sequence (store.test.ts, traceOpArb), only the events that wrote something.", "generated", seed),
-      known_violation: null,
-      steps: runTrace(generatedEvents(seed)),
+      ...head(name, "A generated sequence (store.test.ts, traceOpArb): a root, then the sampled events that wrote something.", "generated", seed),
+      known_violations: violations,
+      steps,
     });
   }
   files.set("index.json", {
@@ -1709,9 +1835,13 @@ function buildTraceFiles(): Map<string, unknown> {
 }
 
 describe("thread-state trace fixtures (fixtures/thread-state/v1)", () => {
-  test("the files are what the store does now; PLANNOTATOR_INBOX_TRACES=write regenerates them", () => {
-    const files = buildTraceFiles();
-    if (process.env.PLANNOTATOR_INBOX_TRACES === "write") {
+  // PLANNOTATOR_INBOX_TRACES=write rewrites the files from the hand traces
+  // and the generated traces' stored events; =resample also draws the
+  // generated events again from their seeds (after a change to traceOpArb).
+  test("the files are what the store does now", () => {
+    const mode = process.env.PLANNOTATOR_INBOX_TRACES;
+    const files = buildTraceFiles(mode === "resample");
+    if (mode === "write" || mode === "resample") {
       mkdirSync(TRACE_DIR, { recursive: true });
       for (const name of readdirSync(TRACE_DIR)) if (name.endsWith(".json") && !files.has(name)) rmSync(join(TRACE_DIR, name));
       for (const [name, body] of files) writeFileSync(join(TRACE_DIR, name), `${JSON.stringify(body, null, 2)}\n`);
@@ -1730,31 +1860,140 @@ describe("thread-state trace fixtures (fixtures/thread-state/v1)", () => {
 // turns red once it is fixed, so the fix flips it to `test` (and regenerates
 // the trace fixtures). The product fix is a separate change.
 
-describe("the thread-state model: known violations", () => {
-  function opened() {
-    const dir = dataDir();
-    const clock = { now: STATE_START };
-    const store = InboxStore.open(dir, { now: () => new Date((clock.now += STATE_STEP_MS)) });
-    const project = store.ensureProject({ name: "repo0", root: "/work/repo0" });
-    const agent = { kind: "agent" as const, host: "test", session: "ses_a", name: null };
-    const say = (body: string, reply_to?: string) => store.sendMessage({ project_id: project.id, author: agent, body, ...(reply_to ? { reply_to } : {}) }).message;
-    return { store, say };
-  }
+/** A store on a clock that moves one step per write, with one agent session. */
+function knownStore() {
+  const dir = dataDir();
+  const clock = { now: STATE_START };
+  const store = InboxStore.open(dir, { now: () => new Date((clock.now += STATE_STEP_MS)) });
+  const project = store.ensureProject({ name: "repo0", root: "/work/repo0" });
+  const agent = { kind: "agent" as const, host: "test", session: "ses_a", name: null };
+  const say = (body: string, reply_to?: string) => store.sendMessage({ project_id: project.id, author: agent, body, ...(reply_to ? { reply_to } : {}) }).message;
+  const pick = (messageId: string, label: string) => {
+    const q = store.questionsOf(messageId)[0]!;
+    store.savePicks(messageId, [{ key: q.key, revision: q.revision, answer: { v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: [label] } }]);
+  };
+  return { store, say, pick };
+}
 
-  // KNOWN VIOLATION A. Sequence: the agent asks (m1); Mark read; the agent
-  // writes news (m2) inside the Undo window; the set-aside note goes.
-  // Rule: an agent's message after a Mark read brings the row back as New
-  // until the person looks. Today the note (a person-authored line) counts as
-  // the person's reply and as a look: the row reads Sent, unseen 0, though the
-  // person never saw m2.
-  test.failing("KNOWN VIOLATION A: news that lands before the set-aside note stays New", () => {
-    const { store, say } = opened();
-    const m1 = say(STATE_BODIES.ask);
-    store.markRead(m1.id, true);
-    say(STATE_BODIES.news, m1.id);
-    expect(store.tellSetAside(m1.id, 0)).toHaveLength(1);
-    expect(store.listRow(m1.id)).toMatchObject({ section: "new", unseen: 1 });
+describe("the thread-state model: known violations", () => {
+  // KNOWN VIOLATION A, one minimal case per shape the generated runs meet
+  // (KNOWN_A_SIGNATURES). Rule: the Inbox's own notes (Mark read's set-aside
+  // note, a late Undo's reopened note) are neither the person's reply nor a
+  // look. Today both notes are person-authored lines and the store counts
+  // them as both: a row reads Sent though the person wrote nothing, and
+  // agent messages the person never saw stop counting as unseen.
+  const A_CASES: { signature: string; sequence: string; run: (k: ReturnType<typeof knownStore>) => string; spec: { section: InboxSectionId; unseen: number } }[] = [
+    {
+      signature: "new>sent unseen-",
+      sequence: "the agent asks; Mark read; the agent writes news inside the Undo window; the set-aside note goes",
+      run: ({ store, say }) => {
+        const m1 = say(STATE_BODIES.ask);
+        store.markRead(m1.id, true);
+        say(STATE_BODIES.news, m1.id);
+        store.tellSetAside(m1.id, 0);
+        return m1.id;
+      },
+      spec: { section: "new", unseen: 1 },
+    },
+    {
+      signature: "asks>asks unseen-",
+      sequence: "the agent asks; Mark read; the agent asks a new question; the set-aside note goes",
+      run: ({ store, say }) => {
+        const m1 = say(STATE_BODIES.ask);
+        store.markRead(m1.id, true);
+        say(STATE_BODIES.decide, m1.id);
+        store.tellSetAside(m1.id, 0);
+        return m1.id;
+      },
+      spec: { section: "waiting", unseen: 1 },
+    },
+    {
+      signature: "asks>asks unseen-",
+      sequence: "the agent asks, never opened; Mark read; the set-aside note goes; Undo (its reopened note)",
+      run: ({ store, say }) => {
+        const m1 = say(STATE_BODIES.ask);
+        store.markRead(m1.id, true);
+        store.tellSetAside(m1.id, 0);
+        store.markRead(m1.id, false);
+        return m1.id;
+      },
+      spec: { section: "waiting", unseen: 1 },
+    },
+    {
+      signature: "new>quiet unseen-",
+      sequence: "the agent asks; Mark read; the agent writes news; the set-aside note goes; an agent reads the thread",
+      run: ({ store, say }) => {
+        const m1 = say(STATE_BODIES.ask);
+        store.markRead(m1.id, true);
+        say(STATE_BODIES.news, m1.id);
+        store.tellSetAside(m1.id, 0);
+        store.markAgentChecked(m1.id);
+        return m1.id;
+      },
+      spec: { section: "new", unseen: 1 },
+    },
+    {
+      signature: "quiet>sent",
+      sequence: "the agent asks; Mark read; the agent writes news; the person opens the thread; the set-aside note goes",
+      run: ({ store, say }) => {
+        const m1 = say(STATE_BODIES.ask);
+        store.markRead(m1.id, true);
+        say(STATE_BODIES.news, m1.id);
+        store.markSeen(m1.id);
+        store.tellSetAside(m1.id, 0);
+        return m1.id;
+      },
+      spec: { section: "quiet", unseen: 0 },
+    },
+    {
+      signature: "new>new unseen-",
+      sequence: "the agent asks; Mark read; the agent asks again; the person picks; the set-aside note goes",
+      run: ({ store, say, pick }) => {
+        const m1 = say(STATE_BODIES.ask);
+        store.markRead(m1.id, true);
+        const m2 = say(STATE_BODIES.decide, m1.id);
+        pick(m2.id, "Postgres");
+        store.tellSetAside(m1.id, 0);
+        return m1.id;
+      },
+      spec: { section: "new", unseen: 1 },
+    },
+    {
+      signature: "quiet>quiet unseen-",
+      sequence: "the agent asks; Mark read; the agent writes news; the set-aside note goes; archive",
+      run: ({ store, say }) => {
+        const m1 = say(STATE_BODIES.ask);
+        store.markRead(m1.id, true);
+        say(STATE_BODIES.news, m1.id);
+        store.tellSetAside(m1.id, 0);
+        store.resolveThread(m1.id, true);
+        return m1.id;
+      },
+      spec: { section: "quiet", unseen: 1 },
+    },
+  ];
+
+  test("every shape of A has a case below", () => {
+    expect([...new Set(A_CASES.map((c) => c.signature))].sort()).toEqual([...KNOWN_A_SIGNATURES].sort());
   });
+
+  // So each failing test below fails for its own reason: today's row has exactly the case's shape.
+  test("each case of A shows its shape on today's store", () => {
+    for (const c of A_CASES) {
+      const k = knownStore();
+      const row = k.store.listRow(c.run(k))!;
+      expect([c.sequence, violationASignature(c.spec, { section: row.section, unseen: row.unseen })]).toEqual([c.sequence, c.signature]);
+    }
+  });
+
+  for (const c of A_CASES) {
+    test.failing(`KNOWN VIOLATION A (${c.signature}): ${c.sequence}`, () => {
+      const k = knownStore();
+      const threadId = c.run(k);
+      const row = k.store.listRow(threadId)!;
+      expect({ section: row.section, unseen: row.unseen }).toEqual(c.spec);
+    });
+  }
 
   // KNOWN VIOLATION B. Sequence: news (m1); archive; the agent asks (m2,
   // came back, Waiting); the person replies with Keep open (m3, the question
@@ -1763,7 +2002,7 @@ describe("the thread-state model: known violations", () => {
   // person's unread reply keeps `back_from_archive`, so the thread stays in
   // the list (Quiet, Read) until the agent reads m3.
   test.failing("KNOWN VIOLATION B: Mark read on a came-back thread whose reply the agent has not read returns it to Archived", () => {
-    const { store, say } = opened();
+    const { store, say } = knownStore();
     const m1 = say(STATE_BODIES.news);
     store.resolveThread(m1.id, true);
     const m2 = say(STATE_BODIES.ask, m1.id);
@@ -1772,14 +2011,13 @@ describe("the thread-state model: known violations", () => {
     expect(inboxRowArchived(store.listRow(m1.id)!)).toBe(true);
   });
 
-  // KNOWN VIOLATION C. Sequence: the agent asks (m1); Mark read (its question
-  // closes); the agent writes news (m2: New, the question stays closed); Mark
-  // read; Undo. Rule: Undo puts back what that Mark read did, so the thread
-  // is New again with the question closed. Today Undo reopens every question
-  // any Mark read closed: the first one's question reopens and the thread
-  // jumps to Waiting.
+  // KNOWN VIOLATION C (ruled: Undo reopens only what its own Mark read
+  // closed). Sequence: the agent asks (m1); Mark read (its question closes);
+  // the agent writes news (m2: New, the question stays closed); Mark read;
+  // Undo. Today Undo reopens every question any Mark read closed: the first
+  // one's question reopens and the thread jumps to Waiting.
   test.failing("KNOWN VIOLATION C: Undo reopens only what its own Mark read closed", () => {
-    const { store, say } = opened();
+    const { store, say } = knownStore();
     const m1 = say(STATE_BODIES.ask);
     store.markRead(m1.id, true);
     say(STATE_BODIES.news, m1.id);
@@ -1787,5 +2025,75 @@ describe("the thread-state model: known violations", () => {
     store.markRead(m1.id, false);
     expect(store.listRow(m1.id)!.section).toBe("new");
     expect(store.questionsOf(m1.id)[0]!.state).toBe("closed");
+  });
+});
+
+// The Archived column of the doc's transition table, on a real store: an
+// archived thread refuses the person's writes only while no agent wrote
+// after the archive line. One that came back and returned to the archive
+// takes Mark read, Undo, and picks and Sends on its later messages.
+describe("the thread-state model: the Archived column", () => {
+  const refused = (f: () => unknown) => {
+    try {
+      f();
+      return null;
+    } catch (error) {
+      return error instanceof InboxError ? error.code : String(error);
+    }
+  };
+
+  test("no agent wrote after the archive line: pick, Send, Mark read and Undo are refused", () => {
+    const { store, say, pick } = knownStore();
+    const m1 = say(STATE_BODIES.ask);
+    store.resolveThread(m1.id, true);
+    expect(refused(() => pick(m1.id, "Yes"))).toBe("thread_resolved");
+    expect(refused(() => store.sendReply(m1.id, { words: "ok", idempotency_key: "k1" }))).toBe("thread_resolved");
+    expect(refused(() => store.markRead(m1.id, true))).toBe("thread_resolved");
+    expect(refused(() => store.markRead(m1.id, false))).toBe("thread_resolved");
+    expect(inboxRowArchived(store.listRow(m1.id)!)).toBe(true);
+  });
+
+  test("came back and returned: Mark read and Undo are taken and it stays Archived; a Send on the later message brings it back as Sent", () => {
+    const { store, say } = knownStore();
+    const m1 = say(STATE_BODIES.news);
+    store.resolveThread(m1.id, true);
+    const m2 = say(STATE_BODIES.news, m1.id);
+    store.markSeen(m1.id);
+    expect(inboxRowArchived(store.listRow(m1.id)!)).toBe(true);
+    expect(refused(() => store.markRead(m1.id, true))).toBeNull();
+    expect(store.listRow(m1.id)).toMatchObject({ section: "quiet", back_from_archive: false });
+    expect(refused(() => store.markRead(m1.id, false))).toBeNull();
+    expect(inboxRowArchived(store.listRow(m1.id)!)).toBe(true);
+    // The message before the line still refuses; the later one takes the Send.
+    expect(refused(() => store.sendReply(m1.id, { words: "x", idempotency_key: "k0" }))).toBe("thread_resolved");
+    expect(refused(() => store.sendReply(m2.id, { words: "thanks", idempotency_key: "k1" }))).toBeNull();
+    expect(store.listRow(m1.id)).toMatchObject({ section: "sent", back_from_archive: true });
+  });
+
+  test("came back and returned: a pick on a later question is taken and brings it back as New", () => {
+    const { store, say, pick } = knownStore();
+    const m1 = say(STATE_BODIES.news);
+    store.resolveThread(m1.id, true);
+    const m2 = say(STATE_BODIES.ask, m1.id);
+    pick(m2.id, "Yes");
+    const q = store.questionsOf(m2.id)[0]!;
+    store.sendReply(m2.id, { idempotency_key: "k1", questions: [{ key: q.key, revision: q.revision }] });
+    store.markAgentChecked(m1.id);
+    expect(inboxRowArchived(store.listRow(m1.id)!)).toBe(true);
+    expect(refused(() => pick(m2.id, "No"))).toBeNull();
+    expect(store.listRow(m1.id)).toMatchObject({ section: "new", back_from_archive: true });
+  });
+
+  test("Mark read sends a came-back thread to the archive; Undo brings it back as it was (Waiting, unseen put back)", () => {
+    const { store, say } = knownStore();
+    const m1 = say(STATE_BODIES.news);
+    store.resolveThread(m1.id, true);
+    say(STATE_BODIES.ask, m1.id);
+    const before = store.listRow(m1.id)!;
+    expect(before).toMatchObject({ section: "waiting", back_from_archive: true, unseen: 2 });
+    store.markRead(m1.id, true);
+    expect(inboxRowArchived(store.listRow(m1.id)!)).toBe(true);
+    store.markRead(m1.id, false);
+    expect(store.listRow(m1.id)).toMatchObject({ section: "waiting", back_from_archive: true, unseen: 2 });
   });
 });

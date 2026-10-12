@@ -9,7 +9,7 @@
     "start": "2026-10-12T10:00:00.000Z",
     "step_ms": 1000
   },
-  "known_violation": null,
+  "known_violations": [],
   "steps": [
     {
       "event": {

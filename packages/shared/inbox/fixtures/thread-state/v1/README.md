@@ -9,8 +9,8 @@ Event sequences with the list state the Inbox gives after each step. A phone kit
 | `format`, `version` | `"plannotator-inbox-thread-state"`, `1` |
 | `name`, `description` | The trace and what it shows |
 | `source`, `seed` | `"hand"` (seed `null`) or `"generated"` (the fast-check seed it came from) |
-| `clock` | `start` and `step_ms`: everything written at step n is stamped `start + n * step_ms` |
-| `known_violation` | `null`, or `{ step, rule, spec, today, test }`: at that step the Inbox breaks a rule of the model. `expect` records what it does today; `spec` says what the rule wants. Skip the trace, or assert today's answer, until the fix lands |
+| `clock` | `start` and `step_ms`: everything written at step n is stamped `start + n * step_ms`. No two steps share a time, so no `last_at` or `resolved_at` ties: a thread id ends in random characters, and a tie's order would change from run to run. Break ties on the thread id yourself; the store's own test exercises that |
+| `known_violations` | A list, empty when none: `{ step, kind, test, rule, spec, today }` for each step where the Inbox breaks a rule of the model (`kind` `A`, `B` or `C`, as in the model doc). `expect` records what it does today; `spec` says what the rule wants. Skip those steps, or assert today's answer, until the fix lands |
 | `steps` | One entry per event, in order |
 
 ## A step
@@ -29,7 +29,7 @@ Labels: `m1`, `m2`, ... are messages in the order they were written; `t1`, `t2`,
 
 | `type` | Fields | What it is |
 |---|---|---|
-| `agent_message` | `project` (`repo0` or `repo1`), `session` (roots only: `ses_a`, `ses_b` or `null`), `reply_to` (a message label or `null`), `supersedes` (optional, one entry: the replied-to message, or its first question), `body` | An agent's `send_message`. Without `reply_to` it routes to the session's newest open unnamed thread in the project, else starts a thread; `lands_in` says where it went. The body is Markdown with `:::question` blocks |
+| `agent_message` | `project` (`repo0` or `repo1`), `session` (roots only: `ses_a`, `ses_b` or `null`), `reply_to` (a message label or `null`), `supersedes` (optional, one entry: the replied-to message, or its first question), `body` | An agent's `send_message`. Without `reply_to` it joins the newest unnamed thread that session started in the project, only while that thread is open (never an older open one), else starts a thread; with no session it always starts one. `lands_in` says where it went. The body is Markdown with `:::question` blocks |
 | `seen` | `thread` | The person opened the thread |
 | `pick` | `message`, `key`, `choice` (a choice label) or `text` | The person saved an answer, not sent |
 | `send` | `message`, `words`, `skip_unanswered` | The person's Send on that message: every picked question on it, plus the words; `skip_unanswered: true` also sends its open questions as skips (`false` is Keep open). Each Send uses its own idempotency key |
@@ -53,12 +53,14 @@ Labels: `m1`, `m2`, ... are messages in the order they were written; `t1`, `t2`,
 `packages/shared/inbox/store.test.ts` writes and checks them (`buildTraceFiles`). Every step runs against the real store and the test's independent model, with every invariant checked, before it is recorded.
 
 - `hand-*.json`: the hand-written edges (`HAND_TRACES`): Mark read racing a new agent message, archive then the agent writes again, supersede chains, the Send that skips with Keep open, and the rest.
-- `gen-seed-*.json`: generated sequences. Seeds 1001 to 1024; each is `fc.sample(fc.array(traceOpArb, { minLength: 14, maxLength: 24 }), { seed, numRuns: 1 })` (fast-check 4.9.0), with only the events that wrote something kept, then replayed from a fresh store.
+- `gen-seed-*.json`: generated sequences. Seeds 1001 to 1024; each began as `fc.sample(fc.array(traceOpArb, { minLength: 14, maxLength: 24 }), { seed, numRuns: 1 })` (fast-check 4.9.0) after one root message, with only the events that wrote something kept. Once written, a file's events are data: the test replays them from the file and never samples again, so a fast-check upgrade changes nothing here.
 
-The test fails when a file differs from what the store does now. To regenerate after a change to the rules (from the repo root):
+The test fails when a file differs from what the store does now. To regenerate after a change to the rules (from the repo root), keeping every trace's events:
 
 ```bash
 PLANNOTATOR_INBOX_TRACES=write bun test packages/shared/inbox/store.test.ts
 ```
+
+`PLANNOTATOR_INBOX_TRACES=resample` also draws the generated traces' events again from their seeds; use it only when `traceOpArb` itself changes.
 
 A change of this format goes in a new `v2` folder; `v1` changes only when the Inbox's behaviour does.

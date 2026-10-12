@@ -9,13 +9,16 @@
     "start": "2026-10-12T10:00:00.000Z",
     "step_ms": 1000
   },
-  "known_violation": {
-    "step": 5,
-    "rule": "Mark read then Undo reopens exactly the questions that Mark read closed.",
-    "spec": "t1 in new, m1's question closed",
-    "today": "t1 in waiting: Undo also reopens the question the first Mark read closed",
-    "test": "KNOWN VIOLATION C"
-  },
+  "known_violations": [
+    {
+      "step": 5,
+      "kind": "C",
+      "test": "KNOWN VIOLATION C",
+      "rule": "Undo reopens only the questions its own Mark read closed.",
+      "spec": "t1: only the questions this Mark read closed reopen",
+      "today": "t1 in waiting: 1 question(s) an earlier Mark read closed reopened too"
+    }
+  ],
   "steps": [
     {
       "event": {

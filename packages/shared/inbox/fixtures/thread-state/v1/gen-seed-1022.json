@@ -2,20 +2,20 @@
   "format": "plannotator-inbox-thread-state",
   "version": 1,
   "name": "gen-seed-1022",
-  "description": "A generated sequence (store.test.ts, traceOpArb), only the events that wrote something.",
+  "description": "A generated sequence (store.test.ts, traceOpArb): a root, then the sampled events that wrote something.",
   "source": "generated",
   "seed": 1022,
   "clock": {
     "start": "2026-10-12T10:00:00.000Z",
     "step_ms": 1000
   },
-  "known_violation": null,
+  "known_violations": [],
   "steps": [
     {
       "event": {
         "type": "agent_message",
-        "project": "repo1",
-        "session": null,
+        "project": "repo0",
+        "session": "ses_a",
         "reply_to": null,
         "body": ":::question\nShip it today?\n\n- [ ] Yes\n- [ ] No\n:::"
       },
@@ -70,6 +70,186 @@
     },
     {
       "event": {
+        "type": "pick",
+        "message": "m1",
+        "key": "q-c0f244f5",
+        "choice": "Yes"
+      },
+      "outcome": "ok",
+      "created": [],
+      "expect": {
+        "sections": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [],
+          "new": [
+            "t1"
+          ],
+          "sent": [],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [],
+          "new": [
+            "t1"
+          ],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 0,
+          "unread": 1,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "new",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m1",
+            "questions": {
+              "m1/q-c0f244f5": "picked"
+            }
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "pick",
+        "message": "m1",
+        "key": "q-c0f244f5",
+        "choice": "Yes"
+      },
+      "outcome": "ok",
+      "created": [],
+      "expect": {
+        "sections": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [],
+          "new": [
+            "t1"
+          ],
+          "sent": [],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [],
+          "new": [
+            "t1"
+          ],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 0,
+          "unread": 1,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "new",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m1",
+            "questions": {
+              "m1/q-c0f244f5": "picked"
+            }
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "agent_message",
+        "project": "repo1",
+        "session": null,
+        "reply_to": null,
+        "body": ":::question\nShip it today?\n\n- [ ] Yes\n- [ ] No\n:::"
+      },
+      "outcome": "ok",
+      "created": [
+        "m2"
+      ],
+      "lands_in": "t2",
+      "expect": {
+        "sections": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [
+            "t2"
+          ],
+          "new": [
+            "t1"
+          ],
+          "sent": [],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [],
+          "holding": [],
+          "waiting": [
+            "t2"
+          ],
+          "new": [
+            "t1"
+          ],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 1,
+          "unread": 2,
+          "decisions_waiting": 0
+        },
+        "threads": {
+          "t1": {
+            "section": "new",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m1",
+            "questions": {
+              "m1/q-c0f244f5": "picked"
+            }
+          },
+          "t2": {
+            "section": "waiting",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m2",
+            "questions": {
+              "m2/q-c0f244f5": "open"
+            }
+          }
+        }
+      }
+    },
+    {
+      "event": {
         "type": "send",
         "message": "m1",
         "words": "",
@@ -77,13 +257,15 @@
       },
       "outcome": "ok",
       "created": [
-        "m2"
+        "m3"
       ],
       "expect": {
         "sections": {
           "stopped": [],
           "holding": [],
-          "waiting": [],
+          "waiting": [
+            "t2"
+          ],
           "new": [],
           "sent": [
             "t1"
@@ -93,7 +275,9 @@
         "sections_exclude_archived": {
           "stopped": [],
           "holding": [],
-          "waiting": [],
+          "waiting": [
+            "t2"
+          ],
           "new": [],
           "sent": [
             "t1"
@@ -102,8 +286,8 @@
         },
         "archived": [],
         "counts": {
-          "waiting": 0,
-          "unread": 0,
+          "waiting": 1,
+          "unread": 1,
           "decisions_waiting": 0
         },
         "threads": {
@@ -115,9 +299,22 @@
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m2",
+            "last": "m3",
             "questions": {
               "m1/q-c0f244f5": "sent"
+            }
+          },
+          "t2": {
+            "section": "waiting",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m2",
+            "questions": {
+              "m2/q-c0f244f5": "open"
             }
           }
         }
@@ -133,16 +330,18 @@
       },
       "outcome": "ok",
       "created": [
-        "m3"
+        "m4"
       ],
-      "lands_in": "t2",
+      "lands_in": "t3",
       "expect": {
         "sections": {
           "stopped": [
-            "t2"
+            "t3"
           ],
           "holding": [],
-          "waiting": [],
+          "waiting": [
+            "t2"
+          ],
           "new": [],
           "sent": [
             "t1"
@@ -151,10 +350,12 @@
         },
         "sections_exclude_archived": {
           "stopped": [
-            "t2"
+            "t3"
           ],
           "holding": [],
-          "waiting": [],
+          "waiting": [
+            "t2"
+          ],
           "new": [],
           "sent": [
             "t1"
@@ -163,8 +364,8 @@
         },
         "archived": [],
         "counts": {
-          "waiting": 1,
-          "unread": 1,
+          "waiting": 2,
+          "unread": 2,
           "decisions_waiting": 0
         },
         "threads": {
@@ -176,12 +377,25 @@
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m2",
+            "last": "m3",
             "questions": {
               "m1/q-c0f244f5": "sent"
             }
           },
           "t2": {
+            "section": "waiting",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m2",
+            "questions": {
+              "m2/q-c0f244f5": "open"
+            }
+          },
+          "t3": {
             "section": "stopped",
             "unread": true,
             "unseen": 1,
@@ -189,10 +403,10 @@
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m3",
+            "last": "m4",
             "questions": {
-              "m3/q-4c7ff6e3": "open",
-              "m3/q-24de5340": "open"
+              "m4/q-4c7ff6e3": "open",
+              "m4/q-24de5340": "open"
             }
           }
         }
@@ -201,17 +415,19 @@
     {
       "event": {
         "type": "unread",
-        "thread": "t2"
+        "thread": "t3"
       },
       "outcome": "ok",
       "created": [],
       "expect": {
         "sections": {
           "stopped": [
-            "t2"
+            "t3"
           ],
           "holding": [],
-          "waiting": [],
+          "waiting": [
+            "t2"
+          ],
           "new": [],
           "sent": [
             "t1"
@@ -220,10 +436,12 @@
         },
         "sections_exclude_archived": {
           "stopped": [
-            "t2"
+            "t3"
           ],
           "holding": [],
-          "waiting": [],
+          "waiting": [
+            "t2"
+          ],
           "new": [],
           "sent": [
             "t1"
@@ -232,8 +450,8 @@
         },
         "archived": [],
         "counts": {
-          "waiting": 1,
-          "unread": 1,
+          "waiting": 2,
+          "unread": 2,
           "decisions_waiting": 0
         },
         "threads": {
@@ -245,12 +463,25 @@
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m2",
+            "last": "m3",
             "questions": {
               "m1/q-c0f244f5": "sent"
             }
           },
           "t2": {
+            "section": "waiting",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m2",
+            "questions": {
+              "m2/q-c0f244f5": "open"
+            }
+          },
+          "t3": {
             "section": "stopped",
             "unread": true,
             "unseen": 1,
@@ -258,10 +489,10 @@
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m3",
+            "last": "m4",
             "questions": {
-              "m3/q-4c7ff6e3": "open",
-              "m3/q-24de5340": "open"
+              "m4/q-4c7ff6e3": "open",
+              "m4/q-24de5340": "open"
             }
           }
         }
@@ -270,8 +501,8 @@
     {
       "event": {
         "type": "pick",
-        "message": "m3",
-        "key": "q-4c7ff6e3",
+        "message": "m2",
+        "key": "q-c0f244f5",
         "choice": "No"
       },
       "outcome": "ok",
@@ -279,11 +510,13 @@
       "expect": {
         "sections": {
           "stopped": [
-            "t2"
+            "t3"
           ],
           "holding": [],
           "waiting": [],
-          "new": [],
+          "new": [
+            "t2"
+          ],
           "sent": [
             "t1"
           ],
@@ -291,11 +524,13 @@
         },
         "sections_exclude_archived": {
           "stopped": [
-            "t2"
+            "t3"
           ],
           "holding": [],
           "waiting": [],
-          "new": [],
+          "new": [
+            "t2"
+          ],
           "sent": [
             "t1"
           ],
@@ -304,7 +539,7 @@
         "archived": [],
         "counts": {
           "waiting": 1,
-          "unread": 1,
+          "unread": 2,
           "decisions_waiting": 0
         },
         "threads": {
@@ -316,12 +551,25 @@
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m2",
+            "last": "m3",
             "questions": {
               "m1/q-c0f244f5": "sent"
             }
           },
           "t2": {
+            "section": "new",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m2",
+            "questions": {
+              "m2/q-c0f244f5": "picked"
+            }
+          },
+          "t3": {
             "section": "stopped",
             "unread": true,
             "unseen": 1,
@@ -329,10 +577,10 @@
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m3",
+            "last": "m4",
             "questions": {
-              "m3/q-4c7ff6e3": "picked",
-              "m3/q-24de5340": "open"
+              "m4/q-4c7ff6e3": "open",
+              "m4/q-24de5340": "open"
             }
           }
         }
@@ -348,18 +596,20 @@
       },
       "outcome": "ok",
       "created": [
-        "m4"
+        "m5"
       ],
-      "lands_in": "t3",
+      "lands_in": "t4",
       "expect": {
         "sections": {
           "stopped": [
-            "t3",
-            "t2"
+            "t4",
+            "t3"
           ],
           "holding": [],
           "waiting": [],
-          "new": [],
+          "new": [
+            "t2"
+          ],
           "sent": [
             "t1"
           ],
@@ -367,12 +617,14 @@
         },
         "sections_exclude_archived": {
           "stopped": [
-            "t3",
-            "t2"
+            "t4",
+            "t3"
           ],
           "holding": [],
           "waiting": [],
-          "new": [],
+          "new": [
+            "t2"
+          ],
           "sent": [
             "t1"
           ],
@@ -381,7 +633,7 @@
         "archived": [],
         "counts": {
           "waiting": 2,
-          "unread": 2,
+          "unread": 3,
           "decisions_waiting": 0
         },
         "threads": {
@@ -393,23 +645,22 @@
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m2",
+            "last": "m3",
             "questions": {
               "m1/q-c0f244f5": "sent"
             }
           },
           "t2": {
-            "section": "stopped",
+            "section": "new",
             "unread": true,
             "unseen": 1,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m3",
+            "last": "m2",
             "questions": {
-              "m3/q-4c7ff6e3": "picked",
-              "m3/q-24de5340": "open"
+              "m2/q-c0f244f5": "picked"
             }
           },
           "t3": {
@@ -422,7 +673,21 @@
             "back_from_archive": false,
             "last": "m4",
             "questions": {
-              "m4/q-eeceb667": "open"
+              "m4/q-4c7ff6e3": "open",
+              "m4/q-24de5340": "open"
+            }
+          },
+          "t4": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m5",
+            "questions": {
+              "m5/q-eeceb667": "open"
             }
           }
         }
@@ -431,23 +696,25 @@
     {
       "event": {
         "type": "send",
-        "message": "m3",
+        "message": "m5",
         "words": "ok",
         "skip_unanswered": false
       },
       "outcome": "ok",
       "created": [
-        "m5"
+        "m6"
       ],
       "expect": {
         "sections": {
           "stopped": [
-            "t2",
+            "t4",
             "t3"
           ],
           "holding": [],
           "waiting": [],
-          "new": [],
+          "new": [
+            "t2"
+          ],
           "sent": [
             "t1"
           ],
@@ -455,12 +722,14 @@
         },
         "sections_exclude_archived": {
           "stopped": [
-            "t2",
+            "t4",
             "t3"
           ],
           "holding": [],
           "waiting": [],
-          "new": [],
+          "new": [
+            "t2"
+          ],
           "sent": [
             "t1"
           ],
@@ -469,7 +738,7 @@
         "archived": [],
         "counts": {
           "waiting": 2,
-          "unread": 2,
+          "unread": 3,
           "decisions_waiting": 0
         },
         "threads": {
@@ -481,23 +750,22 @@
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m2",
+            "last": "m3",
             "questions": {
               "m1/q-c0f244f5": "sent"
             }
           },
           "t2": {
-            "section": "stopped",
+            "section": "new",
             "unread": true,
-            "unseen": 0,
+            "unseen": 1,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m5",
+            "last": "m2",
             "questions": {
-              "m3/q-4c7ff6e3": "sent",
-              "m3/q-24de5340": "open"
+              "m2/q-c0f244f5": "picked"
             }
           },
           "t3": {
@@ -510,7 +778,21 @@
             "back_from_archive": false,
             "last": "m4",
             "questions": {
-              "m4/q-eeceb667": "open"
+              "m4/q-4c7ff6e3": "open",
+              "m4/q-24de5340": "open"
+            }
+          },
+          "t4": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 0,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m6",
+            "questions": {
+              "m5/q-eeceb667": "open"
             }
           }
         }
@@ -526,20 +808,22 @@
       },
       "outcome": "ok",
       "created": [
-        "m6"
+        "m7"
       ],
-      "lands_in": "t4",
+      "lands_in": "t5",
       "expect": {
         "sections": {
           "stopped": [
-            "t2",
+            "t4",
             "t3"
           ],
           "holding": [],
           "waiting": [
-            "t4"
+            "t5"
           ],
-          "new": [],
+          "new": [
+            "t2"
+          ],
           "sent": [
             "t1"
           ],
@@ -547,14 +831,16 @@
         },
         "sections_exclude_archived": {
           "stopped": [
-            "t2",
+            "t4",
             "t3"
           ],
           "holding": [],
           "waiting": [
-            "t4"
+            "t5"
           ],
-          "new": [],
+          "new": [
+            "t2"
+          ],
           "sent": [
             "t1"
           ],
@@ -563,7 +849,7 @@
         "archived": [],
         "counts": {
           "waiting": 3,
-          "unread": 3,
+          "unread": 4,
           "decisions_waiting": 1
         },
         "threads": {
@@ -575,112 +861,7 @@
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m2",
-            "questions": {
-              "m1/q-c0f244f5": "sent"
-            }
-          },
-          "t2": {
-            "section": "stopped",
-            "unread": true,
-            "unseen": 0,
-            "read": false,
-            "archived": false,
-            "agent_after_archive": false,
-            "back_from_archive": false,
-            "last": "m5",
-            "questions": {
-              "m3/q-4c7ff6e3": "sent",
-              "m3/q-24de5340": "open"
-            }
-          },
-          "t3": {
-            "section": "stopped",
-            "unread": true,
-            "unseen": 1,
-            "read": false,
-            "archived": false,
-            "agent_after_archive": false,
-            "back_from_archive": false,
-            "last": "m4",
-            "questions": {
-              "m4/q-eeceb667": "open"
-            }
-          },
-          "t4": {
-            "section": "waiting",
-            "unread": true,
-            "unseen": 1,
-            "read": false,
-            "archived": false,
-            "agent_after_archive": false,
-            "back_from_archive": false,
-            "last": "m6",
-            "questions": {
-              "m6/q-5ca0ee11": "open"
-            }
-          }
-        }
-      }
-    },
-    {
-      "event": {
-        "type": "pick",
-        "message": "m3",
-        "key": "q-24de5340",
-        "choice": "West"
-      },
-      "outcome": "ok",
-      "created": [],
-      "expect": {
-        "sections": {
-          "stopped": [
-            "t3"
-          ],
-          "holding": [],
-          "waiting": [
-            "t4"
-          ],
-          "new": [
-            "t2"
-          ],
-          "sent": [
-            "t1"
-          ],
-          "quiet": []
-        },
-        "sections_exclude_archived": {
-          "stopped": [
-            "t3"
-          ],
-          "holding": [],
-          "waiting": [
-            "t4"
-          ],
-          "new": [
-            "t2"
-          ],
-          "sent": [
-            "t1"
-          ],
-          "quiet": []
-        },
-        "archived": [],
-        "counts": {
-          "waiting": 2,
-          "unread": 3,
-          "decisions_waiting": 1
-        },
-        "threads": {
-          "t1": {
-            "section": "sent",
-            "unread": false,
-            "unseen": 0,
-            "read": false,
-            "archived": false,
-            "agent_after_archive": false,
-            "back_from_archive": false,
-            "last": "m2",
+            "last": "m3",
             "questions": {
               "m1/q-c0f244f5": "sent"
             }
@@ -688,15 +869,14 @@
           "t2": {
             "section": "new",
             "unread": true,
-            "unseen": 0,
+            "unseen": 1,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m5",
+            "last": "m2",
             "questions": {
-              "m3/q-4c7ff6e3": "sent",
-              "m3/q-24de5340": "picked"
+              "m2/q-c0f244f5": "picked"
             }
           },
           "t3": {
@@ -709,10 +889,24 @@
             "back_from_archive": false,
             "last": "m4",
             "questions": {
-              "m4/q-eeceb667": "open"
+              "m4/q-4c7ff6e3": "open",
+              "m4/q-24de5340": "open"
             }
           },
           "t4": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 0,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m6",
+            "questions": {
+              "m5/q-eeceb667": "open"
+            }
+          },
+          "t5": {
             "section": "waiting",
             "unread": true,
             "unseen": 1,
@@ -720,9 +914,9 @@
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m6",
+            "last": "m7",
             "questions": {
-              "m6/q-5ca0ee11": "open"
+              "m7/q-5ca0ee11": "open"
             }
           }
         }
@@ -731,41 +925,43 @@
     {
       "event": {
         "type": "pick",
-        "message": "m1",
-        "key": "q-c0f244f5",
-        "choice": "No"
+        "message": "m7",
+        "key": "q-5ca0ee11",
+        "choice": "SQLite"
       },
       "outcome": "ok",
       "created": [],
       "expect": {
         "sections": {
           "stopped": [
+            "t4",
             "t3"
           ],
           "holding": [],
-          "waiting": [
-            "t4"
-          ],
+          "waiting": [],
           "new": [
-            "t2",
+            "t5",
+            "t2"
+          ],
+          "sent": [
             "t1"
           ],
-          "sent": [],
           "quiet": []
         },
         "sections_exclude_archived": {
           "stopped": [
+            "t4",
             "t3"
           ],
           "holding": [],
-          "waiting": [
-            "t4"
-          ],
+          "waiting": [],
           "new": [
-            "t2",
+            "t5",
+            "t2"
+          ],
+          "sent": [
             "t1"
           ],
-          "sent": [],
           "quiet": []
         },
         "archived": [],
@@ -776,30 +972,29 @@
         },
         "threads": {
           "t1": {
+            "section": "sent",
+            "unread": false,
+            "unseen": 0,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m3",
+            "questions": {
+              "m1/q-c0f244f5": "sent"
+            }
+          },
+          "t2": {
             "section": "new",
             "unread": true,
-            "unseen": 0,
+            "unseen": 1,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
             "last": "m2",
             "questions": {
-              "m1/q-c0f244f5": "picked"
-            }
-          },
-          "t2": {
-            "section": "new",
-            "unread": true,
-            "unseen": 0,
-            "read": false,
-            "archived": false,
-            "agent_after_archive": false,
-            "back_from_archive": false,
-            "last": "m5",
-            "questions": {
-              "m3/q-4c7ff6e3": "sent",
-              "m3/q-24de5340": "picked"
+              "m2/q-c0f244f5": "picked"
             }
           },
           "t3": {
@@ -812,20 +1007,152 @@
             "back_from_archive": false,
             "last": "m4",
             "questions": {
-              "m4/q-eeceb667": "open"
+              "m4/q-4c7ff6e3": "open",
+              "m4/q-24de5340": "open"
             }
           },
           "t4": {
-            "section": "waiting",
+            "section": "stopped",
             "unread": true,
-            "unseen": 1,
+            "unseen": 0,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
             "last": "m6",
             "questions": {
-              "m6/q-5ca0ee11": "open"
+              "m5/q-eeceb667": "open"
+            }
+          },
+          "t5": {
+            "section": "new",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m7",
+            "questions": {
+              "m7/q-5ca0ee11": "picked"
+            }
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "pick",
+        "message": "m5",
+        "key": "q-eeceb667",
+        "choice": "Table"
+      },
+      "outcome": "ok",
+      "created": [],
+      "expect": {
+        "sections": {
+          "stopped": [
+            "t3"
+          ],
+          "holding": [],
+          "waiting": [],
+          "new": [
+            "t5",
+            "t4",
+            "t2"
+          ],
+          "sent": [
+            "t1"
+          ],
+          "quiet": []
+        },
+        "sections_exclude_archived": {
+          "stopped": [
+            "t3"
+          ],
+          "holding": [],
+          "waiting": [],
+          "new": [
+            "t5",
+            "t4",
+            "t2"
+          ],
+          "sent": [
+            "t1"
+          ],
+          "quiet": []
+        },
+        "archived": [],
+        "counts": {
+          "waiting": 1,
+          "unread": 4,
+          "decisions_waiting": 1
+        },
+        "threads": {
+          "t1": {
+            "section": "sent",
+            "unread": false,
+            "unseen": 0,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m3",
+            "questions": {
+              "m1/q-c0f244f5": "sent"
+            }
+          },
+          "t2": {
+            "section": "new",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m2",
+            "questions": {
+              "m2/q-c0f244f5": "picked"
+            }
+          },
+          "t3": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m4",
+            "questions": {
+              "m4/q-4c7ff6e3": "open",
+              "m4/q-24de5340": "open"
+            }
+          },
+          "t4": {
+            "section": "new",
+            "unread": true,
+            "unseen": 0,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m6",
+            "questions": {
+              "m5/q-eeceb667": "picked"
+            }
+          },
+          "t5": {
+            "section": "new",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m7",
+            "questions": {
+              "m7/q-5ca0ee11": "picked"
             }
           }
         }
@@ -841,9 +1168,9 @@
       },
       "outcome": "ok",
       "created": [
-        "m7"
+        "m8"
       ],
-      "lands_in": "t4",
+      "lands_in": "t5",
       "expect": {
         "sections": {
           "stopped": [
@@ -851,13 +1178,15 @@
           ],
           "holding": [],
           "waiting": [
-            "t4"
+            "t5"
           ],
           "new": [
-            "t2",
+            "t4",
+            "t2"
+          ],
+          "sent": [
             "t1"
           ],
-          "sent": [],
           "quiet": []
         },
         "sections_exclude_archived": {
@@ -866,13 +1195,15 @@
           ],
           "holding": [],
           "waiting": [
-            "t4"
+            "t5"
           ],
           "new": [
-            "t2",
+            "t4",
+            "t2"
+          ],
+          "sent": [
             "t1"
           ],
-          "sent": [],
           "quiet": []
         },
         "archived": [],
@@ -883,30 +1214,29 @@
         },
         "threads": {
           "t1": {
+            "section": "sent",
+            "unread": false,
+            "unseen": 0,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m3",
+            "questions": {
+              "m1/q-c0f244f5": "sent"
+            }
+          },
+          "t2": {
             "section": "new",
             "unread": true,
-            "unseen": 0,
+            "unseen": 1,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
             "last": "m2",
             "questions": {
-              "m1/q-c0f244f5": "picked"
-            }
-          },
-          "t2": {
-            "section": "new",
-            "unread": true,
-            "unseen": 0,
-            "read": false,
-            "archived": false,
-            "agent_after_archive": false,
-            "back_from_archive": false,
-            "last": "m5",
-            "questions": {
-              "m3/q-4c7ff6e3": "sent",
-              "m3/q-24de5340": "picked"
+              "m2/q-c0f244f5": "picked"
             }
           },
           "t3": {
@@ -919,10 +1249,24 @@
             "back_from_archive": false,
             "last": "m4",
             "questions": {
-              "m4/q-eeceb667": "open"
+              "m4/q-4c7ff6e3": "open",
+              "m4/q-24de5340": "open"
             }
           },
           "t4": {
+            "section": "new",
+            "unread": true,
+            "unseen": 0,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m6",
+            "questions": {
+              "m5/q-eeceb667": "picked"
+            }
+          },
+          "t5": {
             "section": "waiting",
             "unread": true,
             "unseen": 2,
@@ -930,10 +1274,10 @@
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m7",
+            "last": "m8",
             "questions": {
-              "m6/q-5ca0ee11": "open",
-              "m7/q-c0f244f5": "open"
+              "m7/q-5ca0ee11": "picked",
+              "m8/q-c0f244f5": "open"
             }
           }
         }
@@ -943,41 +1287,45 @@
       "event": {
         "type": "agent_message",
         "project": "repo0",
-        "reply_to": "m6",
+        "reply_to": "m7",
         "body": "Two calls.\n\n:::question\nKeep the old route?\n\n- [ ] Yes\n- [ ] No\n:::\n\n:::question\nWhich region first?\n\nStopped: the deploy waits on this.\n\n- [ ] East\n- [ ] West\n:::"
       },
       "outcome": "ok",
       "created": [
-        "m8"
+        "m9"
       ],
-      "lands_in": "t4",
+      "lands_in": "t5",
       "expect": {
         "sections": {
           "stopped": [
-            "t4",
+            "t5",
             "t3"
           ],
           "holding": [],
           "waiting": [],
           "new": [
-            "t2",
+            "t4",
+            "t2"
+          ],
+          "sent": [
             "t1"
           ],
-          "sent": [],
           "quiet": []
         },
         "sections_exclude_archived": {
           "stopped": [
-            "t4",
+            "t5",
             "t3"
           ],
           "holding": [],
           "waiting": [],
           "new": [
-            "t2",
+            "t4",
+            "t2"
+          ],
+          "sent": [
             "t1"
           ],
-          "sent": [],
           "quiet": []
         },
         "archived": [],
@@ -988,30 +1336,29 @@
         },
         "threads": {
           "t1": {
+            "section": "sent",
+            "unread": false,
+            "unseen": 0,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m3",
+            "questions": {
+              "m1/q-c0f244f5": "sent"
+            }
+          },
+          "t2": {
             "section": "new",
             "unread": true,
-            "unseen": 0,
+            "unseen": 1,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
             "last": "m2",
             "questions": {
-              "m1/q-c0f244f5": "picked"
-            }
-          },
-          "t2": {
-            "section": "new",
-            "unread": true,
-            "unseen": 0,
-            "read": false,
-            "archived": false,
-            "agent_after_archive": false,
-            "back_from_archive": false,
-            "last": "m5",
-            "questions": {
-              "m3/q-4c7ff6e3": "sent",
-              "m3/q-24de5340": "picked"
+              "m2/q-c0f244f5": "picked"
             }
           },
           "t3": {
@@ -1024,10 +1371,24 @@
             "back_from_archive": false,
             "last": "m4",
             "questions": {
-              "m4/q-eeceb667": "open"
+              "m4/q-4c7ff6e3": "open",
+              "m4/q-24de5340": "open"
             }
           },
           "t4": {
+            "section": "new",
+            "unread": true,
+            "unseen": 0,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m6",
+            "questions": {
+              "m5/q-eeceb667": "picked"
+            }
+          },
+          "t5": {
             "section": "stopped",
             "unread": true,
             "unseen": 3,
@@ -1035,12 +1396,12 @@
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m8",
+            "last": "m9",
             "questions": {
-              "m6/q-5ca0ee11": "open",
-              "m7/q-c0f244f5": "open",
-              "m8/q-4c7ff6e3": "open",
-              "m8/q-24de5340": "open"
+              "m7/q-5ca0ee11": "picked",
+              "m8/q-c0f244f5": "open",
+              "m9/q-4c7ff6e3": "open",
+              "m9/q-24de5340": "open"
             }
           }
         }
@@ -1049,37 +1410,41 @@
     {
       "event": {
         "type": "seen",
-        "thread": "t1"
+        "thread": "t2"
       },
       "outcome": "ok",
       "created": [],
       "expect": {
         "sections": {
           "stopped": [
-            "t4",
+            "t5",
             "t3"
           ],
           "holding": [],
           "waiting": [],
           "new": [
-            "t2",
+            "t4",
+            "t2"
+          ],
+          "sent": [
             "t1"
           ],
-          "sent": [],
           "quiet": []
         },
         "sections_exclude_archived": {
           "stopped": [
-            "t4",
+            "t5",
             "t3"
           ],
           "holding": [],
           "waiting": [],
           "new": [
-            "t2",
+            "t4",
+            "t2"
+          ],
+          "sent": [
             "t1"
           ],
-          "sent": [],
           "quiet": []
         },
         "archived": [],
@@ -1090,16 +1455,16 @@
         },
         "threads": {
           "t1": {
-            "section": "new",
-            "unread": true,
+            "section": "sent",
+            "unread": false,
             "unseen": 0,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m2",
+            "last": "m3",
             "questions": {
-              "m1/q-c0f244f5": "picked"
+              "m1/q-c0f244f5": "sent"
             }
           },
           "t2": {
@@ -1110,10 +1475,9 @@
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m5",
+            "last": "m2",
             "questions": {
-              "m3/q-4c7ff6e3": "sent",
-              "m3/q-24de5340": "picked"
+              "m2/q-c0f244f5": "picked"
             }
           },
           "t3": {
@@ -1126,10 +1490,24 @@
             "back_from_archive": false,
             "last": "m4",
             "questions": {
-              "m4/q-eeceb667": "open"
+              "m4/q-4c7ff6e3": "open",
+              "m4/q-24de5340": "open"
             }
           },
           "t4": {
+            "section": "new",
+            "unread": true,
+            "unseen": 0,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m6",
+            "questions": {
+              "m5/q-eeceb667": "picked"
+            }
+          },
+          "t5": {
             "section": "stopped",
             "unread": true,
             "unseen": 3,
@@ -1137,12 +1515,12 @@
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m8",
+            "last": "m9",
             "questions": {
-              "m6/q-5ca0ee11": "open",
-              "m7/q-c0f244f5": "open",
-              "m8/q-4c7ff6e3": "open",
-              "m8/q-24de5340": "open"
+              "m7/q-5ca0ee11": "picked",
+              "m8/q-c0f244f5": "open",
+              "m9/q-4c7ff6e3": "open",
+              "m9/q-24de5340": "open"
             }
           }
         }

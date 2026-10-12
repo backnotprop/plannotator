@@ -9,13 +9,16 @@
     "start": "2026-10-12T10:00:00.000Z",
     "step_ms": 1000
   },
-  "known_violation": {
-    "step": 5,
-    "rule": "Mark read on a came-back thread returns it to Archived.",
-    "spec": "t1 archived, not in sections_exclude_archived",
-    "today": "t1 stays back_from_archive (Quiet, Read) until the agent reads the reply",
-    "test": "KNOWN VIOLATION B"
-  },
+  "known_violations": [
+    {
+      "step": 5,
+      "kind": "B",
+      "test": "KNOWN VIOLATION B",
+      "rule": "Mark read on a came-back thread returns it to Archived.",
+      "spec": "t1 archived",
+      "today": "t1 in quiet, still back from the archive"
+    }
+  ],
   "steps": [
     {
       "event": {

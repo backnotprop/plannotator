@@ -9,13 +9,16 @@
     "start": "2026-10-12T10:00:00.000Z",
     "step_ms": 1000
   },
-  "known_violation": {
-    "step": 4,
-    "rule": "An agent's message after a Mark read makes the row New until the person looks.",
-    "spec": "t1 in new, unseen 1",
-    "today": "t1 in sent, unseen 0: the set-aside note counts as the person's reply and as a look",
-    "test": "KNOWN VIOLATION A"
-  },
+  "known_violations": [
+    {
+      "step": 4,
+      "kind": "A",
+      "test": "KNOWN VIOLATION A",
+      "rule": "The Inbox's own notes (set-aside, reopened) are neither the person's reply nor a look.",
+      "spec": "t1 in new, unseen 1",
+      "today": "t1 in sent, unseen 0"
+    }
+  ],
   "steps": [
     {
       "event": {
