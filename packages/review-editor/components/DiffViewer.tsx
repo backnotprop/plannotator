@@ -13,6 +13,7 @@ import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { useOverlayViewport } from '@plannotator/ui/hooks/useOverlayViewport';
 import { FileHeader } from './FileHeader';
+import { RenderedMarkdown } from '@plannotator/ui/components/RenderedMarkdown';
 import { BinaryFileNotice } from './BinaryFileNotice';
 import { FileCommentBanner } from './FileCommentBanner';
 import { DiffHScrollbar } from './DiffHScrollbar';
@@ -40,6 +41,8 @@ import {
   resolveLineSelectionBehavior,
   type LineSelectionSource,
 } from '../utils/lineSelectionBehavior';
+
+const MARKDOWN_PATH_RE = /\.mdx?$/i;
 
 interface PierreDiffContentProps {
   filePath: string;
@@ -397,10 +400,15 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 
   // Fetch full file contents for expandable context
   const [fileContents, setFileContents] = useState<{ forPath: string; old: string | null; new: string | null } | null>(null);
+  const [fileContentsLoading, setFileContentsLoading] = useState(contextExpansionAvailable);
+  const [markdownPreviewFilePath, setMarkdownPreviewFilePath] = useState<string | null>(null);
+  const markdownPreviewEnabled = markdownPreviewFilePath === filePath;
+  const isMarkdownFile = MARKDOWN_PATH_RE.test(filePath) || (!!oldPath && MARKDOWN_PATH_RE.test(oldPath));
 
   useEffect(() => {
     const controller = new AbortController();
     setFileContents(null);
+    setFileContentsLoading(contextExpansionAvailable);
     // Nothing to expand into: the patch is the whole content of the session.
     if (!contextExpansionAvailable) return;
     const params = new URLSearchParams({ path: filePath });
@@ -414,7 +422,10 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           setFileContents({ forPath: filePath, old: data.oldContent, new: data.newContent });
         }
       })
-      .catch(() => {}); // Silent fallback — no expansion in demo mode
+      .catch(() => {}) // Silent fallback — no expansion in demo mode
+      .finally(() => {
+        if (!controller.signal.aborted) setFileContentsLoading(false);
+      });
     return () => controller.abort();
   }, [filePath, oldPath, reviewBase, reviewSnapshotId, contextExpansionAvailable]);
 
@@ -449,6 +460,18 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       return fileDiff;
     }
   }, [patch, filePath, oldPath, fileContents, fileDiff]);
+
+  // Preview the complete post-change document (or the old document for a
+  // deletion), never the partial patch or contents fetched after the snapshot.
+  const markdownPreviewContent = useMemo(() => {
+    if (
+      !isMarkdownFile ||
+      !fileContents ||
+      fileContents.forPath !== filePath ||
+      !isContentConsistentWithPatch(patch, fileContents.old, fileContents.new)
+    ) return null;
+    return status === 'deleted' ? fileContents.old : fileContents.new;
+  }, [fileContents, filePath, isMarkdownFile, patch, status]);
 
   const previousScrollFilePathRef = useRef(filePath);
   useLayoutEffect(() => {
@@ -844,108 +867,134 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         showStageControl={showStageControls}
         stageError={stageError}
         onFileComment={setFileCommentAnchor}
+        isMarkdownPreview={markdownPreviewEnabled}
+        onToggleMarkdownPreview={isMarkdownFile
+          ? () => setMarkdownPreviewFilePath((currentPath) => currentPath === filePath ? null : filePath)
+          : undefined}
       />
-      {!collapsed && diffOverflow !== 'wrap' && (
+      {!collapsed && !markdownPreviewEnabled && diffOverflow !== 'wrap' && (
         <DiffHScrollbar className="absolute inset-x-2 bottom-0 z-30" />
       )}
       </div>
 
-      {!collapsed && <OverlayScrollArea
-        className={`flex-1 min-h-0 relative ${isDraggingSplit ? 'select-none' : ''}`}
-        overflowX="scroll"
-        overflowY="auto"
-        onViewportReady={onViewportReady}
-      >
-        {/* Specific first, general second, and never both: whichever applies,
-            a card with no hunks to draw says why instead of reading as empty. */}
-        {isImagePreview ? (
-          <ImageDiffPreview
-            filePath={filePath}
-            status={status ?? 'modified'}
-            snapshotId={imageSnapshotId ?? reviewSnapshotId}
-            variant="single"
-            compact={compactTouchLayout}
-            fallback={isOversizedStub ? <OversizedFileNotice /> : isContentlessBinary ? <BinaryFileNotice /> : null}
-            tooLargeFallback={isOversizedStub ? <OversizedFileNotice /> : undefined}
+      {!collapsed && (
+        <OverlayScrollArea
+          className={`flex-1 min-h-0 relative ${isDraggingSplit ? 'select-none' : ''}`}
+          overflowX="scroll"
+          overflowY="auto"
+          onViewportReady={onViewportReady}
+        >
+          <FileCommentBanner
+            comments={fileComments}
+            selectedAnnotationId={selectedAnnotationId}
+            onSelect={onSelectAnnotation}
+            onEdit={onEditAnnotation}
+            onDelete={onDeleteAnnotation}
           />
-        ) : (
-          <>
-            {isOversizedStub && <OversizedFileNotice />}
-            {isContentlessBinary && <BinaryFileNotice />}
-          </>
-        )}
-        <FileCommentBanner
-          comments={fileComments}
-          selectedAnnotationId={selectedAnnotationId}
-          onSelect={onSelectAnnotation}
-          onEdit={onEditAnnotation}
-          onDelete={onDeleteAnnotation}
-        />
-        <div className="p-4" ref={diffContentRef}>
-          <div ref={splitSurfaceRef} className="relative min-w-0" style={splitGridStyle}>
-            {isSplitLayout && diffOverflow !== 'wrap' && (
-              <div
-                className="absolute top-0 bottom-0 z-10 cursor-col-resize group"
-                style={{ left: `${splitRatio * 100}%`, width: 9, marginLeft: -4 }}
-                onPointerDown={handleSplitDragStart}
-                onDoubleClick={resetSplitRatio}
-              >
-                <div className="pointer-events-none absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-border transition-[width,background-color] group-hover:w-0.5 group-hover:bg-primary/50 group-active:w-0.5 group-active:bg-primary/70" />
+          {markdownPreviewEnabled ? (
+            <div className="min-h-full p-6 sm:p-8">
+              {markdownPreviewContent !== null ? (
+                <RenderedMarkdown
+                  markdown={markdownPreviewContent}
+                  className="md-compact mx-auto max-w-3xl"
+                />
+              ) : (
+                <div
+                  role="status"
+                  className="mx-auto max-w-3xl rounded-md border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground"
+                >
+                  {fileContentsLoading
+                    ? 'Loading the full Markdown file…'
+                    : 'The full file content is unavailable for this review. Switch back to the diff to review the available changes.'}
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              {/* Specific first, general second, and never both: whichever applies,
+                  a card with no hunks to draw says why instead of reading as empty. */}
+              {isImagePreview ? (
+                <ImageDiffPreview
+                  filePath={filePath}
+                  status={status ?? 'modified'}
+                  snapshotId={imageSnapshotId ?? reviewSnapshotId}
+                  variant="single"
+                  compact={compactTouchLayout}
+                  fallback={isOversizedStub ? <OversizedFileNotice /> : isContentlessBinary ? <BinaryFileNotice /> : null}
+                  tooLargeFallback={isOversizedStub ? <OversizedFileNotice /> : undefined}
+                />
+              ) : (
+                <>
+                  {isOversizedStub && <OversizedFileNotice />}
+                  {isContentlessBinary && <BinaryFileNotice />}
+                </>
+              )}
+              <div className="p-4" ref={diffContentRef}>
+                <div ref={splitSurfaceRef} className="relative min-w-0" style={splitGridStyle}>
+                  {isSplitLayout && diffOverflow !== 'wrap' && (
+                    <div
+                      className="absolute top-0 bottom-0 z-10 cursor-col-resize group"
+                      style={{ left: `${splitRatio * 100}%`, width: 9, marginLeft: -4 }}
+                      onPointerDown={handleSplitDragStart}
+                      onDoubleClick={resetSplitRatio}
+                    >
+                      <div className="pointer-events-none absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-border transition-[width,background-color] group-hover:w-0.5 group-hover:bg-primary/50 group-active:w-0.5 group-active:bg-primary/70" />
+                    </div>
+                  )}
+                  <PierreDiffContent
+                    filePath={filePath}
+                    fileDiff={augmentedDiff}
+                    pierreTheme={pierreTheme}
+                    diffStyle={diffStyle}
+                    diffOverflow={diffOverflow}
+                    diffIndicators={diffIndicators}
+                    lineDiffType={lineDiffType}
+                    disableLineNumbers={disableLineNumbers}
+                    disableBackground={disableBackground}
+                    expandUnchanged={expandUnchanged}
+                    mergedAnnotations={mergedAnnotations}
+                    pendingSelection={pendingSelection ?? selectedAnnotationRange}
+                    onLineSelectionEnd={handlePierreLineSelectionEnd}
+                    onLineSelectionChange={compactTouchLayout ? handlePierreLineSelectionChange : undefined}
+                    onGutterUtilityClick={handleGutterUtilityClick}
+                    renderAnnotation={renderAnnotation}
+                    onTokenClick={handleTokenClick}
+                    onTokenEnter={handleTokenEnter}
+                    onTokenLeave={handleTokenLeave}
+                  />
+                </div>
               </div>
-            )}
-            <PierreDiffContent
-              filePath={filePath}
-              fileDiff={augmentedDiff}
-              pierreTheme={pierreTheme}
-              diffStyle={diffStyle}
-              diffOverflow={diffOverflow}
-              diffIndicators={diffIndicators}
-              lineDiffType={lineDiffType}
-              disableLineNumbers={disableLineNumbers}
-              disableBackground={disableBackground}
-              expandUnchanged={expandUnchanged}
-              mergedAnnotations={mergedAnnotations}
-              pendingSelection={pendingSelection ?? selectedAnnotationRange}
-              onLineSelectionEnd={handlePierreLineSelectionEnd}
-              onLineSelectionChange={compactTouchLayout ? handlePierreLineSelectionChange : undefined}
-              onGutterUtilityClick={handleGutterUtilityClick}
-              renderAnnotation={renderAnnotation}
-              onTokenClick={handleTokenClick}
-              onTokenEnter={handleTokenEnter}
-              onTokenLeave={handleTokenLeave}
-            />
-          </div>
-        </div>
-
-      <ToolbarHost
-        ref={toolbarHostRef}
-        patch={patch}
-        filePath={filePath}
-        isFocused={isFocused}
-        onLineSelection={onLineSelection}
-        onAddAnnotation={onAddAnnotation}
-        onEditAnnotation={onEditAnnotation}
-        aiAvailable={aiAvailable}
-        onAskAI={onAskAI}
-        isAILoading={isAILoading}
-        onViewAIResponse={onViewAIResponse}
-        aiHistoryMessages={aiHistoryMessages}
-      />
-
-      {fileCommentAnchor && (
-        <CommentPopover
-          anchorEl={fileCommentAnchor}
-          contextText={filePath.split('/').pop() || filePath}
-          isGlobal={false}
-          draftKey={`file:${prUrl ?? ''}:${prDiffScope ?? ''}:${filePath}`}
-          onSubmit={(text) => {
-            onAddFileComment(text);
-            setFileCommentAnchor(null);
-          }}
-          onClose={() => setFileCommentAnchor(null)}
-        />
+              <ToolbarHost
+                ref={toolbarHostRef}
+                patch={patch}
+                filePath={filePath}
+                isFocused={isFocused}
+                onLineSelection={onLineSelection}
+                onAddAnnotation={onAddAnnotation}
+                onEditAnnotation={onEditAnnotation}
+                aiAvailable={aiAvailable}
+                onAskAI={onAskAI}
+                isAILoading={isAILoading}
+                onViewAIResponse={onViewAIResponse}
+                aiHistoryMessages={aiHistoryMessages}
+              />
+              {fileCommentAnchor && (
+                <CommentPopover
+                  anchorEl={fileCommentAnchor}
+                  contextText={filePath.split('/').pop() || filePath}
+                  isGlobal={false}
+                  draftKey={`file:${prUrl ?? ''}:${prDiffScope ?? ''}:${filePath}`}
+                  onSubmit={(text) => {
+                    onAddFileComment(text);
+                    setFileCommentAnchor(null);
+                  }}
+                  onClose={() => setFileCommentAnchor(null)}
+                />
+              )}
+            </>
+          )}
+        </OverlayScrollArea>
       )}
-      </OverlayScrollArea>}
     </div>
   );
 };

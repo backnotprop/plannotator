@@ -37,6 +37,22 @@ const { DiffViewer } = await import('./DiffViewer');
 
 const hasDom = typeof document !== 'undefined';
 
+const MARKDOWN_PATCH = [
+  'diff --git a/README.md b/README.md',
+  'index 0000000..1111111 100644',
+  '--- a/README.md',
+  '+++ b/README.md',
+  '@@ -1,3 +1,5 @@',
+  '-# Old',
+  '+# New',
+  ' ',
+  '-old text',
+  '+| Feature | Status |',
+  '+| --- | --- |',
+  '+| Preview | **Ready** |',
+  '',
+].join('\n');
+
 const TEXT_PATCH = [
   'diff --git a/calc.ts b/calc.ts',
   'index 0000000..1111111 100644',
@@ -58,9 +74,12 @@ describe.if(hasDom)('header control visibility (DOM)', () => {
   let host: HTMLDivElement | null = null;
   const originalFetch = globalThis.fetch;
 
-  async function render(node: React.ReactElement) {
+  async function render(
+    node: React.ReactElement,
+    contents: { oldContent: string | null; newContent: string | null } = { oldContent: null, newContent: null },
+  ) {
     globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ oldContent: null, newContent: null }), {
+      new Response(JSON.stringify(contents), {
         headers: { 'content-type': 'application/json' },
       })) as typeof fetch;
 
@@ -131,6 +150,33 @@ describe.if(hasDom)('header control visibility (DOM)', () => {
     const el = await render(view({ showStageControls: false }, () => {}));
     expect(el.querySelector(STAGE_BUTTON)).toBeNull();
     expect(el.querySelector(VIEWED_BUTTON)).not.toBeNull();
+  });
+
+  test('Markdown preview renders the complete updated document and returns to the diff', async () => {
+    const oldContent = '# Old\n\nold text\n';
+    const newContent = '# New\n\n| Feature | Status |\n| --- | --- |\n| Preview | **Ready** |\n';
+    const el = await render(
+      view({ patch: MARKDOWN_PATCH, filePath: 'README.md' }, () => {}),
+      { oldContent, newContent },
+    );
+
+    const toggle = el.querySelector<HTMLButtonElement>('[data-markdown-preview-toggle]');
+    expect(toggle?.getAttribute('aria-label')).toBe('Show rendered Markdown preview');
+    await act(async () => toggle!.click());
+
+    expect(el.querySelector('h1')?.textContent).toBe('New');
+    expect(el.querySelector('table')).not.toBeNull();
+    expect(el.textContent).toContain('Ready');
+    expect(el.querySelector('[data-markdown-preview-toggle]')?.getAttribute('aria-pressed')).toBe('true');
+
+    await act(async () => el.querySelector<HTMLButtonElement>('[data-markdown-preview-toggle]')!.click());
+    expect(el.querySelector('h1')).toBeNull();
+    expect(el.querySelector('[data-markdown-preview-toggle]')?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  test('non-Markdown files do not show the preview toggle', async () => {
+    const el = await render(view({}, () => {}));
+    expect(el.querySelector('[data-markdown-preview-toggle]')).toBeNull();
   });
 
 });

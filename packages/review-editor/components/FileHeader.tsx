@@ -51,6 +51,59 @@ interface FileHeaderProps {
    * "generated" tag next to the +/- counts. Collapse seeding is the owner's
    * concern; this prop is display-only. */
   isGenerated?: boolean;
+  /** Optional rendered-Markdown preview toggle for markdown files. */
+  isMarkdownPreview?: boolean;
+  onToggleMarkdownPreview?: () => void;
+}
+
+function MarkdownPreviewToggle({
+  enabled,
+  compact,
+  compactTouchLayout,
+  onToggle,
+}: {
+  enabled: boolean;
+  compact: boolean;
+  compactTouchLayout: boolean;
+  onToggle: () => void;
+}) {
+  const icon = enabled ? (
+    <path strokeLinecap="round" strokeLinejoin="round" d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+  ) : (
+    <>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  );
+  const label = enabled ? 'Show source diff' : 'Show rendered Markdown preview';
+  const buttonClassName = compactTouchLayout
+    ? `ml-1 flex h-9 w-9 flex-none items-center justify-center rounded transition-colors ${enabled ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`
+    : `text-xs rounded transition-colors flex items-center ${compact ? 'px-1.5 py-1' : 'gap-1 px-2 py-1'} ${enabled ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`;
+
+  return (
+    <button
+      data-markdown-preview-toggle
+      aria-label={label}
+      aria-pressed={enabled}
+      onClick={(event) => {
+        event.stopPropagation();
+        onToggle();
+      }}
+      className={buttonClassName}
+      title={enabled ? 'Show source diff' : 'Preview rendered Markdown'}
+    >
+      <svg
+        className={compactTouchLayout ? 'w-4 h-4' : 'w-3.5 h-3.5'}
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={2}
+      >
+        {icon}
+      </svg>
+      {!compactTouchLayout && !compact && <span>{enabled ? 'Diff' : 'Preview'}</span>}
+    </button>
+  );
 }
 
 function splitFilePath(filePath: string): { directory: string; name: string } {
@@ -135,6 +188,8 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   compactTouchLayout,
   readOnly = false,
   isGenerated = false,
+  isMarkdownPreview = false,
+  onToggleMarkdownPreview,
 }) => {
   const [headerWidth, setHeaderWidth] = useState<number>(0);
   const state = useReviewStateOptional();
@@ -242,6 +297,14 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
         )}
       </div>
       {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 ${isCompact ? 'gap-1' : 'gap-2'}`}>
+        {onToggleMarkdownPreview && (
+          <MarkdownPreviewToggle
+            enabled={isMarkdownPreview}
+            compact={isCompact}
+            compactTouchLayout={false}
+            onToggle={onToggleMarkdownPreview}
+          />
+        )}
         {showViewedControl && onToggleViewed && (
           <button
             onClick={onToggleViewed}
@@ -357,6 +420,14 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           }
         />}
       </div>}
+      {isCompactTouchLayout && onToggleMarkdownPreview && (
+        <MarkdownPreviewToggle
+          enabled={isMarkdownPreview}
+          compact={false}
+          compactTouchLayout
+          onToggle={onToggleMarkdownPreview}
+        />
+      )}
     </div>
   );
 };
