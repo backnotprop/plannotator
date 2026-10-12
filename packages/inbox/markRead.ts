@@ -20,15 +20,20 @@ export function waitsOnPerson(row: Pick<InboxListRow, 'section' | 'unseen' | 'an
   return row.section === 'stopped' || row.section === 'holding' || row.section === 'waiting' || (row.section === 'new' && (row.unseen > 0 || row.answered_not_sent));
 }
 
-/** The thread can be marked read now, or is marked read (the pressed button moves it back). Never an archived thread. */
-export function canToggleRead(row: Pick<InboxListRow, 'section' | 'unseen' | 'answered_not_sent' | 'resolved_at' | 'read_at'>): boolean {
-  if (row.resolved_at !== null) return false;
+/**
+ * The thread can be marked read now, or is marked read (the pressed button
+ * moves it back). Never an archived thread, except for what an agent wrote
+ * after the archive (`agent_after_archive`): Mark read handles that, and the
+ * thread goes back to the archive.
+ */
+export function canToggleRead(row: Pick<InboxListRow, 'section' | 'unseen' | 'answered_not_sent' | 'resolved_at' | 'read_at' | 'agent_after_archive'>): boolean {
+  if (row.resolved_at !== null && row.agent_after_archive !== true) return false;
   return (row.read_at ?? null) !== null || waitsOnPerson(row);
 }
 
 /** The list row's quiet hover action: on rows that wait on the person, never on Sent or Quiet. */
-export function offersRowMarkRead(row: Pick<InboxListRow, 'section' | 'unseen' | 'answered_not_sent' | 'resolved_at'>): boolean {
-  return row.resolved_at === null && waitsOnPerson(row);
+export function offersRowMarkRead(row: Pick<InboxListRow, 'section' | 'unseen' | 'answered_not_sent' | 'resolved_at' | 'back_from_archive'>): boolean {
+  return (row.resolved_at === null || row.back_from_archive === true) && waitsOnPerson(row);
 }
 
 export interface MarkReadToast {
@@ -42,14 +47,32 @@ export interface MarkReadToast {
 
 /**
  * The toast after Mark read, from the row as it was before (`before`) and the
- * number of questions the Mark read closed.
+ * number of questions the Mark read closed. `deferred`: a thread is open, so
+ * the list holds still and the row moves to Quiet when the list next settles
+ * (settle.ts); the toast must not say it already moved.
  */
-export function markReadToast(before: Pick<InboxListRow, 'subject' | 'author' | 'questions'>, closed: number): MarkReadToast {
+export function markReadToast(
+  before: Pick<InboxListRow, 'subject' | 'author' | 'questions'> & { resolved_at?: string | null },
+  closed: number,
+  deferred = false,
+): MarkReadToast {
   const agent = agentName(before.author);
-  const text = `Read: “${before.subject ?? '(no subject)'}” moved to Quiet.`;
+  const subject = `“${before.subject ?? '(no subject)'}”`;
+  // A thread that came back from the archive goes back there; any other goes to Quiet. With a thread
+  // open the row holds its place until the list settles (settle.ts), so the move is still to come.
+  const archived = (before.resolved_at ?? null) !== null;
+  const text = archived
+    ? `Read: ${subject} ${deferred ? 'will go' : 'went'} back to Archived.`
+    : `Read: ${subject} ${deferred ? 'will move' : 'moved'} to Quiet.`;
   const what = closed === 1 ? 'the question' : plural(closed, 'question');
   const told = closed > 0 ? `${agent} is told not to wait on ${what}.` : '';
-  const short = 'Read. Moved to Quiet.';
+  const short = archived
+    ? deferred
+      ? 'Read. Will go back to Archived.'
+      : 'Read. Back in Archived.'
+    : deferred
+      ? 'Read. Will move to Quiet.'
+      : 'Read. Moved to Quiet.';
   if (before.questions.stopped) return { text, short, sub: `${agent} was stopped on it. ${told}`.trim(), warn: true };
   if (before.questions.holds_up.length > 0) {
     return { text, short, sub: `It held up ${plural(before.questions.holds_up.length, 'thing')}. ${told}`.trim(), warn: true };

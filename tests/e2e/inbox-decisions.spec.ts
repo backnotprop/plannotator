@@ -338,7 +338,8 @@ test('the Decisions page: Waiting, then Settled; the Settled link opens the row 
 
   await detail.getByRole('button', { name: 'Close the decision' }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Decisions' })).toBeVisible();
-  await expect(page.getByRole('combobox', { name: 'Project' })).toHaveValue(/^prj_/);
+  // The project switch names the project and its counts (the question just asked waits, the decision is settled).
+  await expect(page.getByRole('button', { name: /^Project: billing-svc, / })).toHaveAccessibleName(/\d+ waiting · \d+ settled$/);
   await expect(page.getByText('What holds true in billing-svc, and what waits on a call.')).toBeVisible();
   const waitingRow = page.locator(`[data-decision-group="waiting"] [data-waiting-question="${waiting.message_id}/${waiting.questions[0].key}"]`);
   await expect(waitingRow).toContainText('Which queue holds the dead letters?');

@@ -55,7 +55,6 @@ import {
   type InboxProject,
   type InboxProjectRepo,
 } from "@plannotator/core/inbox-types";
-import { toInboxQuestion } from "@plannotator/core/inbox-questions";
 import { checkServerSession, createServerSessionNonce, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { extractDirName, extractRepoName } from "@plannotator/core/project";
 import {
@@ -72,6 +71,7 @@ import {
   configuredInboxTool,
   type InboxToolHost,
   type PlannotatorConfig,
+  type ThemeConfig,
 } from "@plannotator/shared/config";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { normalizeStableVersion, readUpdateState } from "@plannotator/shared/update-check";
@@ -79,7 +79,7 @@ import { isLoopbackHostHeader } from "@plannotator/shared/loopback-host";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { inboxListSections } from "@plannotator/shared/inbox/list";
+import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "@plannotator/shared/inbox/list";
 import {
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_MAX_MS,
@@ -104,7 +104,7 @@ import {
   INBOX_DECISION_ERROR_STATUS,
   recordDecisionsForReply,
   threadDecisions,
-  waitingDecisions,
+  waitingDecisionCount,
 } from "./inbox-decisions";
 import { inboxGuideRoute } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
@@ -114,6 +114,7 @@ import { inboxMessageImageRoute } from "./inbox-message-images";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { createInboxLiveSessions } from "./inbox-sessions";
 import { createInboxDevices, DOOR_PREFIX } from "./inbox-devices";
+import type { PairingProbes } from "./inbox-pairing-checks";
 import { createInboxRelay } from "./inbox-relay";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { createInboxTailscale, PHONES_TAILNET_HTTPS_PORT, type InboxTailscale } from "./inbox-tailscale";
@@ -126,6 +127,8 @@ type RequestVia = "local" | "tailnet";
 const SERVE_HEADERS = ["tailscale-headers-info", "tailscale-user-login", "x-forwarded-for"] as const;
 
 const LOOPBACK = "127.0.0.1";
+/** A palette id as packages/ui/themes names them (`plannotator`, `tokyo-night`). */
+const THEME_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** Remote mode's fixed port: the Inbox never takes it. */
 export const INBOX_FORBIDDEN_PORT = 19432;
 const SSE_HEARTBEAT_MS = 15_000;
@@ -199,6 +202,8 @@ export interface InboxServerOptions {
   now?: () => Date;
   /** How "Reach from my tailnet" runs the `tailscale` CLI. Default: the CLI on PATH. */
   tailscale?: TailscaleRunner;
+  /** Tests: how step 1 of Pair a phone reads this computer (packages/server/inbox-pairing-checks.ts). Default: its own tools. */
+  pairingProbes?: Partial<PairingProbes>;
   /**
    * Phones: pairing, the device door, the tailnet and Wi-Fi listeners, the
    * relay and Settings' Phones block. Default: `resolveInboxPhones`
@@ -227,6 +232,10 @@ export interface InboxServerOptions {
  * 3 s to spare (a slow click, a slow network), so an Undo never reaches an agent.
  */
 export const INBOX_SET_ASIDE_DELAY_MS = 10_000;
+
+/** Settings' Archived block: rows per page of `GET /api/inbox/threads/archived`, and the most one page may ask for. */
+export const INBOX_ARCHIVED_PAGE = 50;
+export const INBOX_ARCHIVED_PAGE_MAX = 200;
 
 export interface InboxServer {
   port: number;
@@ -502,9 +511,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * the project as a label and an optional filter (`?project=prj_...`), which
    * keeps the sections and drops other projects' rows.
    */
-  const listModel = (projectFilter: string | null) => {
+  const listModel = (projectFilter: string | null, archived: "include" | "exclude") => {
     // One pass over the store feeds both the folders' counts and the sections.
     const rows = store.listRows();
+    const scoped = projectFilter ? rows.filter((row) => row.project.id === projectFilter) : rows;
     return {
       serverSession,
       version,
@@ -515,9 +525,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       notice: portChanged ? "The Inbox moved to a new port: allow notifications again on this page." : null,
       projects: projectFolders(rows),
       project: projectFilter,
-      sections: inboxListSections(projectFilter ? rows.filter((row) => row.project.id === projectFilter) : rows),
+      // `?archived=exclude` (the window): archived threads leave every section,
+      // Quiet included, and Settings lists them (GET /api/inbox/threads/archived).
+      // Without it they stay in Quiet, as an older window and the phone expect.
+      sections: inboxListSections(archived === "exclude" ? scoped.filter((row) => !inboxRowArchived(row)) : scoped),
       /** Questions in every project that record a decision once answered and sent: the sidebar's Decisions count. */
-      decisions_waiting: waitingDecisions(store).length,
+      decisions_waiting: waitingDecisionCount(store),
     };
   };
 
@@ -527,6 +540,55 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (!isInboxId("prj", value)) throw new InboxError("validation_error", "project: a prj_ id.", { field: "project" });
     if (!store.project(value)) throw new InboxError("project_not_found", `No project ${value}.`);
     return value;
+  };
+
+  /** `?archived=include|exclude` on the list: where archived threads go. Default `include` (in Quiet). */
+  const archivedModeOf = (url: URL): "include" | "exclude" => {
+    const value = url.searchParams.get("archived");
+    if (value === null || value === "" || value === "include") return "include";
+    if (value === "exclude") return "exclude";
+    throw new InboxError("validation_error", "archived: include or exclude.", { field: "archived" });
+  };
+
+  /** A whole number from a query parameter, within bounds; absent or empty is the default. */
+  const queryCount = (url: URL, name: string, fallback: number, min: number, max: number): number => {
+    const value = url.searchParams.get(name);
+    if (value === null || value === "") return fallback;
+    const n = /^[0-9]+$/.test(value) ? Number(value) : Number.NaN;
+    if (!Number.isSafeInteger(n) || n < min || n > max) {
+      throw new InboxError("validation_error", `${name}: a whole number from ${min} to ${max}.`, { field: name });
+    }
+    return n;
+  };
+
+  /**
+   * Settings' Archived block: the archived threads, newest archived first, a
+   * page at a time (`offset`, `limit` up to 200), with every project that has
+   * any and how many, for its project filter. `total` is the count in the
+   * filtered scope, so the page says how many lie beyond it.
+   */
+  const archivedModel = (url: URL) => {
+    const projectFilter = projectFilterOf(url);
+    const offset = queryCount(url, "offset", 0, 0, Number.MAX_SAFE_INTEGER);
+    const limit = queryCount(url, "limit", INBOX_ARCHIVED_PAGE, 1, INBOX_ARCHIVED_PAGE_MAX);
+    const archived = inboxArchivedRows(store.listRows());
+    const counts = new Map<string, { id: string; name: string; archived: number }>();
+    for (const row of archived) {
+      const entry = counts.get(row.project.id) ?? { id: row.project.id, name: row.project.name, archived: 0 };
+      entry.archived += 1;
+      counts.set(row.project.id, entry);
+    }
+    const scoped = projectFilter ? archived.filter((row) => row.project.id === projectFilter) : archived;
+    return {
+      serverSession,
+      cursor: store.cursor(),
+      project: projectFilter,
+      projects: [...counts.values()].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)),
+      total: scoped.length,
+      offset,
+      limit,
+      threads: scoped.slice(offset, offset + limit),
+    };
   };
 
   const selfCommand = options.selfCommand?.length
@@ -643,6 +705,54 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * Plannotator's appearance (config.json `theme`, the same value plan
+   * review, code review and annotate read and write through POST
+   * /api/config): the mode and the palette for each half. The Inbox's
+   * light/dark toggle and its Settings row write it here, so a choice made in
+   * the Inbox holds in the next plan review too, and one made there holds
+   * here. null: never chosen (the cookies, else the OS, decide).
+   */
+  const themeState = (): ThemeConfig | null => {
+    const theme = loadConfig().theme;
+    return theme && typeof theme === "object" ? theme : null;
+  };
+
+  const saveTheme = (input: unknown, validateOnly = false) => {
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw new InboxError("validation_error", "theme: { mode?, light?, dark? }.", { field: "theme" });
+    }
+    const next: ThemeConfig = {};
+    for (const [field, value] of Object.entries(input as Record<string, unknown>)) {
+      switch (field) {
+        case "mode":
+          if (value !== "light" && value !== "dark" && value !== "system") {
+            throw new InboxError("validation_error", "theme.mode: light, dark or system.", { field: "theme.mode" });
+          }
+          next.mode = value;
+          break;
+        case "light":
+        case "dark":
+          // A palette id (packages/ui/themes); the page resolves an unknown one to its default.
+          if (typeof value !== "string" || !THEME_ID.test(value)) {
+            throw new InboxError("validation_error", `theme.${field}: a palette id.`, { field: `theme.${field}` });
+          }
+          next[field] = value;
+          break;
+        default:
+          throw new InboxError("validation_error", `theme.${field}: not a setting (mode, light, dark).`, { field: `theme.${field}` });
+      }
+    }
+    if (Object.keys(next).length === 0) throw new InboxError("validation_error", "theme: mode, light or dark is required.", { field: "theme" });
+    if (validateOnly) return themeState();
+    saveConfig({ theme: next });
+    const saved = themeState();
+    if (!saved || Object.entries(next).some(([key, value]) => saved[key as keyof ThemeConfig] !== value)) {
+      throw new InboxError("config_not_saved", "config.json could not be written; nothing changed.");
+    }
+    return saved;
+  };
+
+  /**
    * The one-time sound dialog, claimed by the page that will show it: a
    * compare-and-set from `dialogDueFor` to `dialogShownFor`, so of several
    * tabs (or a reload) only the first ever gets `show: true`. Only on this
@@ -720,6 +830,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     sound: soundState(),
     /** Settings → About: update notices and automatic updates. */
     updates: updatesState(),
+    /** Plannotator's appearance (config.json `theme`), shared with plan review; null when never chosen. */
+    theme: themeState(),
     store: store.diskUsage(),
     /** Whether this Inbox serves phones; the window shows the Phones block only then. */
     phones: phonesOn,
@@ -762,10 +874,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return { seq: line.seq, kind: line.kind, id: line.id, project: line.record };
       case "message":
         return { seq: line.seq, kind: line.kind, id: line.id, message: line.record };
-      case "question": {
-        const root = store.message(store.message(line.record.message_id)?.thread_id ?? "");
-        return { seq: line.seq, kind: line.kind, id: line.id, question: toInboxQuestion(line.record, root?.resolved_at != null) };
-      }
+      case "question":
+        // The store's one question state: a question an agent asked after the archive line is live (notifications, the sound).
+        return { seq: line.seq, kind: line.kind, id: line.id, question: store.questionWire(line.record) };
       case "decision":
         return { seq: line.seq, kind: line.kind, id: line.id, decision: line.record };
       case "annotation":
@@ -1055,10 +1166,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (via === "tailnet" && req.method === "POST" && (path === "/api/inbox/pairing" || path === "/api/inbox/tailnet" || path === "/api/inbox/lan")) {
       return localOnly();
     }
+    // What reached the pairing code, and step 1's checks of this computer, are this computer's own business too.
+    if (via === "tailnet" && (path === "/api/inbox/pairing" || path === "/api/inbox/pairing/checks")) return localOnly();
 
     try {
       if (path === "/api/inbox/health" && req.method === "GET") return json(health());
-      if (path === "/api/inbox/threads" && req.method === "GET") return json(listModel(projectFilterOf(url)));
+      if (path === "/api/inbox/threads" && req.method === "GET") return json(listModel(projectFilterOf(url), archivedModeOf(url)));
+      if (path === "/api/inbox/threads/archived" && req.method === "GET") return json(archivedModel(url));
       if (path === "/api/inbox/projects" && req.method === "GET") return json({ serverSession, cursor: store.cursor(), projects: projectFolders() });
       if (path === "/api/inbox/events" && req.method === "GET") return eventStream(req, url);
       if (path === "/api/inbox/restart") {
@@ -1118,8 +1232,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const updateSwitches = body.update_check !== undefined || body.auto_update !== undefined;
-        if (body.inbox_tool === undefined && body.notifications === undefined && body.sound === undefined && body.tailscale === undefined && !updateSwitches) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, update_check or auto_update is required.");
+        if (body.inbox_tool === undefined && body.notifications === undefined && body.sound === undefined && body.tailscale === undefined && body.theme === undefined && !updateSwitches) {
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, update_check or auto_update is required.");
         }
         // Updating changes this computer: never from a page that came through the tailnet.
         if (updateSwitches && via === "tailnet") return localOnly();
@@ -1147,13 +1261,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.sound !== undefined) saveSound(body.sound, true);
         if (body.inbox_tool !== undefined) saveInboxTool(body.inbox_tool, true);
         if (updateSwitches) saveUpdateSwitches(body, true);
+        if (body.theme !== undefined) saveTheme(body.theme, true);
         const tailnet = tailscaleChange === undefined ? tailscale.state() : tailscale.set(tailscaleChange.on, { via, replaceExposed: tailscaleChange.replaceExposed });
         const notifications = body.notifications === undefined ? notificationsState() : saveNotifications(body.notifications);
         const sound = body.sound === undefined ? soundState() : saveSound(body.sound);
         const inboxTool = body.inbox_tool === undefined ? inboxToolState() : saveInboxTool(body.inbox_tool);
         const updateState = updateSwitches ? saveUpdateSwitches(body) : updatesState();
         if (updateSwitches) updates.refresh();
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState });
+        const theme = body.theme === undefined ? themeState() : saveTheme(body.theme);
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme });
       }
       // The one-time sound dialog: the page asks to show it, and only the first ask ever gets `show: true`.
       if (path === "/api/inbox/sound/dialog") {
@@ -1171,7 +1287,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!thread) return json({ error: "No such thread.", code: "thread_not_found" }, 404);
         const decisionIds = thread.messages.flatMap((m) => (m.questions ?? []).map((q) => q.decision_id));
         const withRepo = { ...thread, project: { ...thread.project, repo: repos.get(thread.project.root) } };
-        return json({ serverSession, cursor: store.cursor(), thread: withRepo, decisions: threadDecisions(store, decisionIds) });
+        // `row` (additive): the thread's list row, also for an archived thread, which the window's list leaves out.
+        return json({ serverSession, cursor: store.cursor(), thread: withRepo, decisions: threadDecisions(store, decisionIds), row: store.listRow(thread.thread_id) });
       }
 
       const seenMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/seen$/.exec(path);
@@ -1373,6 +1490,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       dispatch: fetch,
       now: options.now,
       tailscale: options.tailscale,
+      probes: options.pairingProbes,
       relay: { paired: async (device) => (relay ? relay.paired(device) : null), revoked: (device) => relay?.revoked(device) },
     });
     phones = devices;

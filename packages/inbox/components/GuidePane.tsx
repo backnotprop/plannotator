@@ -49,7 +49,9 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
   const [records, setRecords] = useState<InboxAnnotationRecord[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scrollTarget, setScrollTarget] = useState<{ id: string; token: number } | null>(null);
-  const readOnly = thread.resolved_at !== null;
+  // Read only once archived, unless the guide arrived after the archive line (it behaves as an open thread's).
+  const archiveSeq = thread.archive_seq ?? null;
+  const readOnly = thread.resolved_at !== null && !(archiveSeq !== null && (message.seq ?? 0) > archiveSeq);
   /**
    * Bumped by every local save or removal: a read of the thread's annotations
    * that started before it answers with the store as it was, and must not put

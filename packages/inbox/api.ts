@@ -53,12 +53,28 @@ export interface ListModel {
   decisions_waiting: number;
 }
 
+/** GET /api/inbox/threads/archived: Settings' Archived block, newest archived first, a page at a time. */
+export interface ArchivedModel {
+  serverSession: string;
+  cursor: number;
+  project: string | null;
+  /** Every project with archived threads, and how many, for the block's project filter. */
+  projects: { id: string; name: string; archived: number }[];
+  /** Archived threads in the filtered scope, beyond this page too. */
+  total: number;
+  offset: number;
+  limit: number;
+  threads: InboxListRow[];
+}
+
 export interface ThreadModel {
   serverSession: string;
   cursor: number;
   thread: InboxThread;
   /** The decisions this thread's questions recorded, for the "Settled: ..." lines. */
   decisions: InboxDecision[];
+  /** The thread's list row, an archived thread's too (the window's list leaves those out). Absent from an older Inbox. */
+  row?: InboxListRow | null;
 }
 
 /** A question that records a decision once answered and sent (the Decisions page's Waiting group). */
@@ -72,12 +88,23 @@ export interface WaitingDecision {
   asked_at: string;
 }
 
+/** One project's counts for the Decisions page's project switch. */
+export interface DecisionProjectCounts {
+  project_id: string;
+  /** Questions that record a decision once answered and sent. */
+  waiting: number;
+  /** Decisions that hold (state `current`). */
+  settled: number;
+}
+
 export interface DecisionsModel {
   serverSession: string;
   cursor: number;
   project_id: string;
   waiting: WaitingDecision[];
   decisions: InboxDecision[];
+  /** Every project's counts, for the project switch. Absent from an older Inbox. */
+  project_counts?: DecisionProjectCounts[];
 }
 
 export interface ReplyResult {
@@ -156,6 +183,11 @@ export interface SettingsModel {
   updates?: UpdateSwitches;
   /** Whether this Inbox serves phones (PLANNOTATOR_INBOX_PHONES): the Phones block shows only then. */
   phones: boolean;
+  /**
+   * Plannotator's appearance in config.json (`theme`), the value plan review
+   * reads too: null when never chosen. Absent from an Inbox that predates it.
+   */
+  theme?: InboxThemeConfig | null;
   store: {
     dir: string;
     bytes: number;
@@ -213,6 +245,45 @@ export interface PairingOffer {
   link: string;
   computer: { name: string };
   addresses: { tailnet: string | null; lan: string | null; fingerprint: string | null };
+  /** The code carries an address a phone can use (a way is on and working). Absent from an older Inbox. */
+  reachable?: boolean;
+}
+
+/** What reached the door while a code showed (GET /api/inbox/pairing, packages/server/inbox-devices.ts). */
+export interface PairingAttempt {
+  via: 'wifi' | 'tailnet' | 'local';
+  result: 'wrong_code' | 'code_over_wifi' | 'old_code' | 'expired' | 'redeemed';
+  at: string;
+  tries_left?: number;
+  device?: string;
+}
+
+/** The last pairing offer as the window reads it: never its secret or code. */
+export interface PairingOfferView {
+  expires_at: string;
+  state: 'open' | 'expired' | 'closed' | 'redeemed';
+  tries_left: number;
+  attempts: PairingAttempt[];
+}
+
+/** Step 1 of Pair a phone: what this computer can tell about each way (packages/server/inbox-pairing-checks.ts). Advisory only. */
+export interface PairingChecks {
+  wifi: {
+    address: string | null;
+    network: string | null;
+    openssl: boolean;
+    certificate: boolean;
+    bonjour: boolean;
+    firewall: 'off' | 'on' | 'block_all' | 'unknown';
+  };
+  tailscale: {
+    /** `cli_missing`: no `tailscale` command on PATH; `no_answer`: it did not answer in time. */
+    state: 'running' | 'stopped' | 'signed_out' | 'needs_approval' | 'starting' | 'cli_missing' | 'no_answer' | 'unknown';
+    login: string | null;
+    https_certs: boolean | null;
+    port_free: boolean | null;
+    error: string | null;
+  };
 }
 
 /** "Reach from my tailnet": the switch, the address while it works, and why not when it does not. */
@@ -275,8 +346,25 @@ async function post<T>(path: string, body: Record<string, unknown>): Promise<T> 
   );
 }
 
+/** config.json `theme`: the mode and the palette for each half (ThemeConfig in @plannotator/core/config-types). */
+export interface InboxThemeConfig {
+  mode?: 'light' | 'dark' | 'system';
+  light?: string;
+  dark?: string;
+}
+
 export const inboxApi = {
-  list: () => get<ListModel>('/api/inbox/threads'),
+  // Archived threads leave the window's list (Settings lists them): an older
+  // window and the phone, which ask without this, still get them in Quiet.
+  list: () => get<ListModel>('/api/inbox/threads?archived=exclude'),
+  archived: (input: { project?: string | null; offset?: number; limit?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (input.project) query.set('project', input.project);
+    if (input.offset) query.set('offset', String(input.offset));
+    if (input.limit) query.set('limit', String(input.limit));
+    const qs = query.toString();
+    return get<ArchivedModel>(`/api/inbox/threads/archived${qs ? `?${qs}` : ''}`);
+  },
   thread: (threadId: string) => get<ThreadModel>(`/api/inbox/threads/${encodeURIComponent(threadId)}`),
   settings: () => get<SettingsModel>('/api/inbox/settings'),
   seen: (threadId: string) => post<unknown>(`/api/inbox/threads/${encodeURIComponent(threadId)}/seen`, {}),
@@ -337,6 +425,8 @@ export const inboxApi = {
   saveSound: (change: { enabled?: boolean; volume?: number }) => post<{ sound: InboxSoundSettings }>('/api/inbox/settings', { sound: change }),
   /** Ask to show the one-time sound dialog: `show` is true for the first page that ever asks after an update, and only that one. */
   claimSoundDialog: () => post<{ show: boolean; sound: InboxSoundSettings }>('/api/inbox/sound/dialog', {}),
+  /** Plannotator's appearance, written to config.json `theme` (shared with plan review). */
+  saveTheme: (theme: InboxThemeConfig) => post<{ theme: InboxThemeConfig | null }>('/api/inbox/settings', { theme }),
   saveTailscale: (on: boolean, replaceExposed = false) =>
     post<{ tailscale: TailscaleSettings }>('/api/inbox/settings', { tailscale: replaceExposed ? { on, replace_exposed: true } : { on } }),
   // Step 2: attachments (by id only), annotations, deleting.
@@ -363,6 +453,9 @@ export const inboxApi = {
     post<{ message: InboxMessage; replayed: boolean }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/message`, input),
   // Phones: pairing, the paired devices, the tailnet and Wi-Fi switches (packages/server/inbox-devices.ts).
   pairPhone: () => post<PairingOffer>('/api/inbox/pairing', {}),
+  pairingOffer: () => get<{ offer: PairingOfferView | null }>('/api/inbox/pairing'),
+  /** `fresh`: skip the answer the Inbox keeps a few seconds (Check again, after a switch). */
+  pairingChecks: (fresh = false) => get<{ checks: PairingChecks; lan: LanState; tailnet: TailnetState }>(`/api/inbox/pairing/checks${fresh ? '?fresh=1' : ''}`),
   devices: () => get<{ devices: PairedDevice[] }>('/api/inbox/devices'),
   removeDevice: (id: string) => post<{ device: PairedDevice }>(`/api/inbox/devices/${encodeURIComponent(id)}/revoke`, {}),
   tailnet: () => get<{ tailnet: TailnetState }>('/api/inbox/tailnet'),

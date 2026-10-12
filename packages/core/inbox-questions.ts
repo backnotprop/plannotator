@@ -11,6 +11,11 @@
  *   Stopped: <why>                the asker cannot go on until this is answered
  *   Holds up: <name>; <name>      the asker goes on; these pieces of work wait
  *
+ * One guard on top of Workspaces' reading: a value that is only a negative
+ * word (`Stopped: no`, a `Holds up:` entry `none`) is no stop and holds
+ * nothing up; see `isNegativeWaitValue`. An empty `Stopped:` is still a stop
+ * (a claim with no why), as Workspaces reads it.
+ *
  * A third, `Replaces: <message id>/<key>`, is read by core's parser itself
  * (`ParsedQuestion.replaces`) when every token on it is id-shaped: it is then
  * never the prompt and never context. Any other `Replaces:` line is prose.
@@ -28,6 +33,7 @@ import {
   MAX_QUESTION_PROMPT_CHARS,
   parseQuestionAnswer,
   parseQuestionBlock,
+  questionChoicesNeedCanonicalLabels,
   type QuestionAnswer,
   type QuestionChoice,
   type QuestionExportItem,
@@ -108,16 +114,42 @@ export function parseInboxQuestionBlocks(markdown: string): ParsedInboxQuestion[
   return out;
 }
 
-/** The `Stopped:` and `Holds up:` lines of a block's context; the first of each wins. */
+/**
+ * A `Stopped:` value or `Holds up:` entry that is only a negative word: no,
+ * none, n/a, na, nothing, false, nil, null, or a dash, in any case, with
+ * trailing punctuation and whitespace allowed. An agent filling in a template
+ * writes `Stopped: no`; that is not a stop.
+ *
+ * Only a bare negative word counts, and the guard errs toward a stop:
+ * `no API key yet`, `none of the fixtures load`, `No; I need the DB password
+ * first`, `no, the key is missing` are all real stops. An empty value is not
+ * a negative word (an empty `Stopped:` is a claim with no why, still a stop).
+ */
+const NEGATIVE_WAIT_RE = /^(?:no|none|n\/a|na|nothing|false|nil|null|[-\u2013\u2014]+)[\s.,;:!?\-\u2013\u2014]*$/i;
+
+/** Whether a `Stopped:` value or `Holds up:` entry is only a negative word. */
+export function isNegativeWaitValue(value: string): boolean {
+  return NEGATIVE_WAIT_RE.test(value.trim());
+}
+
+/**
+ * The `Stopped:` and `Holds up:` lines of a block's context; the first of each
+ * wins. A first `Stopped:` that is a bare negative (`Stopped: no`) decides
+ * there is no stop; bare-negative `Holds up:` entries are dropped. The lines
+ * stay in the context either way.
+ */
 function waitsOf(context: string): { stopped: string | null; holds_up: string[] } {
   let stopped: string | null = null;
+  let sawStopped = false;
   let holdsUp: string[] | null = null;
   for (const raw of context.split("\n")) {
     const line = raw.trim();
-    if (stopped === null) {
+    if (!sawStopped) {
       const match = STOPPED_RE.exec(line);
       if (match !== null) {
-        stopped = (match[1] ?? "").trim();
+        sawStopped = true;
+        const why = (match[1] ?? "").trim();
+        if (!isNegativeWaitValue(why)) stopped = why;
         continue;
       }
     }
@@ -127,7 +159,7 @@ function waitsOf(context: string): { stopped: string | null; holds_up: string[] 
         holdsUp = (match[1] ?? "")
           .split(";")
           .map((name) => name.trim())
-          .filter((name) => name !== "");
+          .filter((name) => name !== "" && !isNegativeWaitValue(name));
       }
     }
   }
@@ -277,7 +309,9 @@ export function checkInboxAnswer(
 
 function exportItem(record: InboxQuestionRecord, number: number): QuestionExportItem {
   const settled = record.parsed.choices.filter((c) => c.settled).map((c) => c.label);
-  const hasAliases = record.parsed.aliases.some((a) => a !== null);
+  // The export prints current labels for answers stored under an older name
+  // or cut at 200 characters by a build through 0.28.17.
+  const needsChoices = questionChoicesNeedCanonicalLabels(storedChoices(record));
   return {
     key: record.key,
     number,
@@ -287,7 +321,7 @@ function exportItem(record: InboxQuestionRecord, number: number): QuestionExport
     ...(record.parsed.suggested_text === null ? {} : { suggestedText: record.parsed.suggested_text }),
     settled: settled.length > 0,
     settledLabels: settled,
-    ...(hasAliases
+    ...(needsChoices
       ? {
           choices: record.parsed.choices.map((c, i) => ({
             label: c.label,

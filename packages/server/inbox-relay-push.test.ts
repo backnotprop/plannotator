@@ -102,3 +102,23 @@ test("a replacement pushes the new open question on the same collapse id", async
   expect(replaced.summary.question).toMatchObject({ key: second.questions![0]!.key, prompt: "How many retries before dead-letter?" });
   expect(replaced.summary.subject).toBe("How many retries before dead-letter?");
 });
+
+// A thread that came back from the archive: the agent's reply_to after the
+// archive line asks a question the person can answer without unarchiving, so
+// the push offers it on the lock screen; the archive-closed question never is.
+test("a question asked after the archive line is pushed answerable; the archive-closed one is not offered", async () => {
+  const w = await world();
+  const first = w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: QUESTION("Retry a 409?") }).message;
+  await w.nextPush(0);
+  w.store.resolveThread(first.id, true);
+  const later = w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: QUESTION("Ship it today?"), reply_to: first.id }).message;
+  const pushed = await w.nextPush(1);
+  expect(pushed.summary.message_id).toBe(later.id);
+  expect(pushed.summary.question).toMatchObject({ prompt: "Ship it today?", key: later.questions![0]!.key });
+  // The lock-screen answer goes through: the message is answerable while the thread stays resolved.
+  const q = w.store.questionsOf(later.id)[0]!;
+  w.store.savePicks(later.id, [{ key: q.key, revision: 0, answer: { v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: ["Yes"] } }]);
+  expect(w.store.questionsOf(later.id)[0]!.state).toBe("picked");
+  expect(w.store.questionsOf(first.id)[0]!.state).toBe("closed");
+  expect(w.store.message(first.id)!.resolved_at).not.toBeNull();
+});

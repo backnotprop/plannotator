@@ -14,7 +14,7 @@ import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import { attachmentSequence } from '../stepping';
 import { AnnotationsChip } from './AnnotationsChip';
 import { agentName, clockTime, dayWords, plural } from '../format';
-import { answerWords, foldSnippet, holdingsOf, isDelivered, lookBoundary, newSinceLook, planFolds, snippetText, type FoldSnippet, type Holding } from '../folding';
+import { answerWords, foldSnippet, holdingsOf, isDelivered, isPersonReply, lastNonNote, lookBoundary, newSinceLook, planFolds, snippetText, type FoldSnippet, type Holding } from '../folding';
 import { AuthorMark, DecisionDiamond, Icon } from '../icons';
 import { DecisionCard } from './DecisionCard';
 import { GuideCard } from './GuideCard';
@@ -293,9 +293,10 @@ export function MessageBody({
 export interface ThreadPaneProps {
   thread: InboxThread;
   /**
-   * The thread's list row's `sent`: the person's reply is the last message,
-   * and when the agent read it (by the store's seq, so a reply the agent was
-   * not given still reads as unread), or null.
+   * The thread's list row's `sent`: the person's reply is the last message
+   * (the Inbox's own notes read past), and when the agent read it (by the
+   * store's seq, so a reply the agent was not given still reads as unread),
+   * or null.
    */
   sent: { at: string; checked_at: string | null } | null;
   /** The thread's questions changed through a pick (the response's questions for that message). */
@@ -383,7 +384,16 @@ function useThreadAttachments(threadId: string, revision: unknown) {
 export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile, onOpenGuide, lookSeq, row, onMarkRead, onArchive, replyRequest, onReplyOpened, backLabel = 'Inbox', phone = false, stacked = false, fileStacked = false, onBackToList }: ThreadPaneProps) {
   const root = thread.messages[0]!;
   const asker = agentName(root.author);
-  const resolved = thread.resolved_at !== null;
+  // Archived (resolved). What an agent wrote after the archive line behaves as
+  // an open thread's: its questions are live, Reply goes to it, its files take
+  // comments; the thread stays archived. `resolved` is the thread with nothing
+  // after the archive: read only, as before.
+  const archived = thread.resolved_at !== null;
+  const archiveSeq = thread.archive_seq ?? null;
+  const afterArchive = (message: InboxMessageWire) => archived && archiveSeq !== null && (message.seq ?? 0) > archiveSeq;
+  const liveMessage = (message: InboxMessageWire) => !archived || afterArchive(message);
+  const cameBack = archived && thread.messages.some((m) => m.author.kind === 'agent' && afterArchive(m));
+  const resolved = archived && !cameBack;
   const agentMessages = thread.messages.filter((m) => m.author.kind === 'agent');
   const lastAgent = agentMessages[agentMessages.length - 1] ?? root;
 
@@ -449,7 +459,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   // A reply the person sends during this visit is a look at everything before
   // it (the list's rule), so what it answers stops being new at once.
   const boundary = useMemo(
-    () => (opened === null ? null : Math.max(opened, ...thread.messages.filter((m) => m.author.kind === 'person').map((m) => m.seq ?? 0))),
+    () => (opened === null ? null : Math.max(opened, ...thread.messages.filter(isPersonReply).map((m) => m.seq ?? 0))),
     [opened, thread.messages],
   );
   const fresh = useMemo(() => newSinceLook(thread.messages, boundary), [thread.messages, boundary]);
@@ -522,7 +532,9 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     anchorRef.current = { id, top: id ? (articleOf(id)?.getBoundingClientRect().top ?? 0) : 0, focus: null, folding: false };
     if (allOpen) {
       const last = thread.messages[thread.messages.length - 1]!;
-      setFoldState((current) => (current ? { ...current, folded: new Set(thread.messages.filter((m) => m !== last).map((m) => m.id)), revealed: new Set() } : current));
+      // The last real message stays open with it when notes trail it (it carries the reply's line).
+      const lastReal = lastNonNote(thread.messages);
+      setFoldState((current) => (current ? { ...current, folded: new Set(thread.messages.filter((m) => m !== last && m !== lastReal).map((m) => m.id)), revealed: new Set() } : current));
       setHeaderFiles({ threadId: thread.thread_id, open: new Set([...headerOpen].filter((id) => id === last.id)) });
       announce('Earlier messages folded');
     } else {
@@ -974,7 +986,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   const picksCount = picked.length;
   // Picks the agent's replacement dropped since the person's last reply: the
   // reply box shows them struck, never in "N picks".
-  const lastReplyAt = thread.messages.filter((m) => m.author.kind === 'person').at(-1)?.created_at ?? '';
+  const lastReplyAt = thread.messages.filter(isPersonReply).at(-1)?.created_at ?? '';
   const dropped = thread.messages.flatMap((m) =>
     (m.questions ?? []).filter((q) => {
       if (q.state !== 'superseded' || q.answer === null) return false;
@@ -1140,8 +1152,11 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   };
 
   // The last message is the person's: say where it is. A New message names
-  // the session's host it went to, and is delivered as a turn (step 8).
-  const last = thread.messages[thread.messages.length - 1]!;
+  // the session's host it went to, and is delivered as a turn (step 8). The
+  // Inbox's own notes (Mark read's set-aside note, a late Undo's reopened
+  // note) are read past: they are not the person's reply, and the line stays
+  // on the reply before them.
+  const last = lastNonNote(thread.messages) ?? thread.messages[0]!;
   const askedBy = (message: InboxMessageWire) => (message.reply_to ? thread.messages.find((m) => m.id === message.reply_to) : undefined);
   // A reply the person sent to another session names the session that took it
   // ("Claude Code (another session)" when it is the asker's own host).
@@ -1224,9 +1239,9 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     <button
       type="button"
       className="ib-iconbtn"
-      onClick={() => void resolve(!resolved)}
-      title={resolved ? 'Unarchive' : 'Archive: the thread ends; the next message starts a new one'}
-      aria-label={resolved ? 'Unarchive the thread' : 'Archive the thread'}
+      onClick={() => void resolve(!archived)}
+      title={archived ? 'Unarchive' : 'Archive: the thread ends; the next message starts a new one'}
+      aria-label={archived ? 'Unarchive the thread' : 'Archive the thread'}
       data-archive=""
     >
       <Icon name="archive" />
@@ -1370,7 +1385,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
           <div className="ib-tmeta" data-thread-meta="">
             <span>{plural(thread.messages.length, 'message')}</span>
             <span className="ib-tdot" aria-hidden="true" />
-            <span>{spanWords(root.created_at, last.created_at)}</span>
+            <span>{spanWords(root.created_at, thread.messages[thread.messages.length - 1]!.created_at)}</span>
             {showNew && (
               <>
                 <span className="ib-tdot" aria-hidden="true" />
@@ -1570,7 +1585,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                 <div className="ib-tm">
                   {isNew && <span className="ib-newtag">New</span>}
                   {time}
-                  {isAgent && !resolved && (
+                  {isAgent && liveMessage(message) && (
                     <button type="button" className="ib-mut" onClick={() => openBox(picksCount > 0)} title="Reply" aria-label="Reply">
                       <Icon name="reply" size={15} />
                     </button>
@@ -1599,7 +1614,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                   projectRoot={thread.project.root}
                   repo={thread.project.repo ?? null}
                   onOpenAttachment={openFromMessage}
-                  readOnly={!isAgent || resolved || questions.length === 0 || allSent}
+                  readOnly={!isAgent || !liveMessage(message) || questions.length === 0 || allSent}
                   answers={answersOf(message)}
                   onPick={(key, answer) => pick(message.id, key, answer)}
                   footerFor={footerFor(message)}
@@ -1639,7 +1654,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                   />
                 )}
                 {message.guide && <GuideCard guide={message.guide} onOpen={() => onOpenGuide(message.id)} />}
-                {message === lastAgent && !resolved && waitingHoldsUp.length > 0 && (
+                {message === lastAgent && liveMessage(lastAgent) && waitingHoldsUp.length > 0 && (
                   <div className="ib-waitfoot">
                     <b>Waiting on this answer</b>
                     <span className="ib-badge">Holds up {waitingHoldsUp.length}</span>
@@ -1685,6 +1700,14 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         <div role="status" id={noteId} data-asker-note="">
           {showAskerNote && asking && <AskerEndedNote asking={asking} project={thread.project.name} anyLive={anyOtherLive} />}
         </div>
+        {cameBack && (
+          <div className="ib-acts ib-archnote" data-came-back="">
+            <span className="ib-st">Archived · {asker} wrote after you archived it. Your reply goes to it; the thread stays archived.</span>
+            <button type="button" className="ib-btn" onClick={() => void resolve(false)}>
+              Unarchive
+            </button>
+          </div>
+        )}
         {resolved ? (
           <div className="ib-acts">
             <span className="ib-st">Archived. The next message from {asker} starts a new thread.</span>
@@ -1790,7 +1813,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                   Cancel
                 </button>
                 <span className="ib-sp" />
-                <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />
+                {!archived && <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />}
               </div>
             )}
           </>
@@ -1810,7 +1833,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
               <Icon name="reply" size={15} />
               {waiting ? 'Edit the reply' : 'Reply'}
             </button>
-            <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />
+            {!archived && <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />}
             {waiting && unanswered.length > 0 && (
               <>
                 <span className="ib-sp" />
@@ -1822,7 +1845,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
           </div>
           </>
         )}
-        {!resolved && (
+        {!archived && (
           <NewMessagePopover
             thread={thread}
             asker={asker}
@@ -1869,7 +1892,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         onToggleFull={() => setFull((v) => !v)}
         focusId={file!.focus}
         focusRequest={paneFocus}
-        readOnly={resolved}
+        readOnly={!liveMessage(thread.messages.find((m) => m.id === openAttachment.message_id) ?? root)}
         onSaved={saveRecord}
         onRemoved={dropRecord}
         onOpenAt={(attachmentId, version, focus) => onOpenFile({ id: attachmentId, version, focus }, { replace: true })}
@@ -1905,8 +1928,11 @@ function SkipChip({ count, keepOpen, onToggle }: { count: number; keepOpen: bool
   const them = count === 1 ? 'it' : 'them';
   return (
     <span className="ib-skipchip" data-skip-chip={keepOpen ? 'keep' : 'skip'}>
-      {!keepOpen && <Icon name="forward" size={14} />}
-      {keepOpen ? `${plural(count, 'unanswered question')} ${count === 1 ? 'stays' : 'stay'} open` : `${plural(count, 'unanswered question')} will be skipped`}
+      {/* The icon and the sentence are one item, so where the chip wraps (a narrow reply box) the icon stays with its words. */}
+      <span className="ib-skip-s">
+        {!keepOpen && <Icon name="forward" size={14} />}
+        {keepOpen ? `${plural(count, 'unanswered question')} ${count === 1 ? 'stays' : 'stay'} open` : `${plural(count, 'unanswered question')} will be skipped`}
+      </span>
       <button type="button" onClick={onToggle} data-skip-toggle="">
         {keepOpen ? `Skip ${them}` : 'Keep open'}
       </button>

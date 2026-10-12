@@ -27,16 +27,29 @@ import {
   type UpdateDetails,
   type WhatsNewModel,
 } from './api';
-import { filterSections, heldNotice, refreshHeldRows, waitingCount } from './held';
+import { filterSections, heldNotice, markHeldRowArchived, refreshHeldRows, settleOwn, waitingCount } from './held';
+import {
+  captureSettle,
+  COVERED_LIST_SETTLES,
+  listBody,
+  playSettle,
+  prefersReducedMotion,
+  rowInSlot,
+  SETTLE_AFTER_SIDEBAR_MS,
+  SETTLE_BEAT_MS,
+  stopSettle,
+  type SettleSnapshot,
+} from './settle';
 import { tildePath } from './format';
 import { inboxImageSrcResolver } from './images';
-import type { ConnectContext } from './harnesses';
+import { shellLine, type ConnectContext } from './harnesses';
 import { Sidebar } from './components/Sidebar';
 import { SidebarShell } from './shell/SidebarShell';
 import { InboxList } from './components/InboxList';
 import { ThreadPane } from './components/Thread';
 import { EmptyState } from './components/EmptyState';
 import { SettingsPage } from './components/Settings';
+import { ArchivedBlock } from './components/Archived';
 import { NotificationAsk } from './components/NotificationAsk';
 import { useInboxNotifications } from './notify';
 import { useInboxSound } from './sound';
@@ -51,14 +64,18 @@ import { lookBoundary } from './folding';
 import { isPhone, trackKeyboard, usePhone } from './phone';
 import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH, useStack } from './stack';
 import { backTo, pushScreen } from './history';
+import { adoptSavedTheme, inboxThemeSync } from './theme';
+import { parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
 
 // The Inbox has no /api/config and no browser-agent tools: settings stay in
-// the page's own cookies, and WebMCP is off.
+// the page's own cookies, except the theme, which goes to config.json `theme`
+// through the Inbox's settings route so plan review follows it (theme.ts).
+// WebMCP is off.
 // No image uploads and no skill catalog either: a comment's image would need
 // an upload route the Inbox does not have, so the composer says so instead of
 // posting nowhere.
 configurePlannotatorUI({
-  serverSync: () => {},
+  serverSync: inboxThemeSync,
   // Images in a message load from the Inbox's per-message route (#1813).
   imageSrcResolver: inboxImageSrcResolver,
   webmcp: { enabled: false, namePrefix: 'plannotator.' },
@@ -85,11 +102,20 @@ interface Route {
   file?: { id: string; version: 'current' | 'sent'; focus: string | null } | null;
   /** The message whose guided review is open over the window (`#thread=…&guide=msg_…`). */
   guide?: string | null;
+  /** Settings' section (`#settings/<section>`); null is `#settings` alone (settingsRoute.ts). */
+  section?: SettingsSection | null;
+  /** `#settings/devices/pair`: Pair a phone is open. */
+  pair?: boolean;
 }
 
 function readRoute(): Route {
-  const hash = window.location.hash.replace(/^#/, '');
-  if (hash === 'settings') return { page: 'settings', project: null, thread: null };
+  return routeOf(window.location.hash);
+}
+
+function routeOf(fullHash: string): Route {
+  const hash = fullHash.replace(/^#/, '');
+  const settingsAt = parseSettingsHash(hash);
+  if (settingsAt) return { page: 'settings', project: null, thread: null, section: settingsAt.section, pair: settingsAt.pair };
   const params = new URLSearchParams(hash);
   if (params.has('whats-new')) return { page: 'whats-new', project: null, thread: null, version: params.get('whats-new') };
   if (params.has('decisions')) {
@@ -109,7 +135,7 @@ function readRoute(): Route {
 /** The route's hash, `#thread=…` (empty for the list at rest). */
 function hashOf(route: Route): string {
   let hash = '';
-  if (route.page === 'settings') hash = 'settings';
+  if (route.page === 'settings') hash = settingsHash({ section: route.section ?? null, pair: route.pair });
   else if (route.page === 'whats-new') hash = new URLSearchParams({ 'whats-new': route.version ?? '' }).toString();
   else if (route.page === 'decisions') {
     const params = new URLSearchParams();
@@ -187,6 +213,48 @@ function leavesCoveringPane(route: Route): boolean {
   return false;
 }
 
+/** The thread covers the list (a phone, a stacked window): the list is out of sight while a thread is open. */
+function listCovered(): boolean {
+  return isPhone() || covering.thread;
+}
+
+/** A row of the list on screen, by its thread (one element per row: the wide, two-line or phone row). */
+function rowElement(body: ParentNode, threadId: string): HTMLElement | null {
+  return body.querySelector<HTMLElement>(`[data-thread-id="${CSS.escape(threadId)}"]`);
+}
+
+/**
+ * The person's last way of acting: a key, or a pointer (a mouse, a finger,
+ * a pen). The window moves focus for the person (to a closed thread's row, to
+ * the row now in a gone row's slot, to the first row Show brought in) only
+ * after a key: after a mouse or a tap it would put a row under the keyboard
+ * that the person never chose, and `E` would mark it read.
+ */
+let lastInput: 'keyboard' | 'pointer' | null = null;
+if (typeof window !== 'undefined') {
+  window.addEventListener('keydown', () => (lastInput = 'keyboard'), true);
+  window.addEventListener('pointerdown', () => (lastInput = 'pointer'), true);
+  // A screen reader (or switch access) presses a control with a click that no key or pointer came
+  // before, and that counts no clicks (`detail` 0): the person is not using a mouse.
+  window.addEventListener('click', (event) => {
+    if (event.detail === 0) lastInput = 'keyboard';
+  }, true);
+}
+
+/**
+ * The element the person aimed a key at on purpose: one with keyboard focus
+ * (`:focus-visible`). A row that holds focus because it was clicked, or because
+ * the window put focus there after a mouse action, is not.
+ */
+function keyboardFocused(el: Element): boolean {
+  try {
+    return el.matches(':focus-visible');
+  } catch {
+    // A DOM without the selector (tests): focus counts.
+    return true;
+  }
+}
+
 /** Focus the first element on screen that matches one of `selectors`, in order (a list draws some rows twice, one hidden). */
 function focusFirst(selectors: readonly string[]): void {
   for (const selector of selectors) {
@@ -229,6 +297,8 @@ function Inbox() {
   const [shown, setShown] = useState<InboxListSection[] | null>(null);
   const [thread, setThread] = useState<InboxThread | null>(null);
   const [threadDecisions, setThreadDecisions] = useState<InboxDecision[]>([]);
+  /** The open thread's own list row, from its read: an archived thread has none in the list. */
+  const [threadRow, setThreadRow] = useState<InboxListRow | null>(null);
   /** The open thread's "new since you looked" boundary (folding.ts), from before this look. */
   const [look, setLook] = useState<{ threadId: string; seq: number | null } | null>(null);
   const [decisions, setDecisions] = useState<DecisionsModel | null>(null);
@@ -272,7 +342,9 @@ function Inbox() {
     // Silent only when the bell can ring: on, and armed by a click in this tab.
     silent: () => sound.settings.enabled && sound.armed,
     onSettings: (next) => setSettings((current) => (current ? { ...current, notifications: next } : current)),
-    // A click on a notification: the thread opens, and the list on screen catches up.
+    // A click on a notification: the thread opens, and the list on screen catches up, even with a
+    // thread open. The one exception to "the list holds still while a thread is open" (settle.ts):
+    // the person was away, and the thread notified may not be on screen at all.
     openThread: (threadId) => {
       writeRoute({ page: 'inbox', project: null, thread: threadId });
       void refreshList(true);
@@ -295,12 +367,56 @@ function Inbox() {
     };
   }, []);
 
-  /** Read the list; `adopt` puts it on screen (an action, Show, or nothing on screen yet). */
-  const refreshList = useCallback(async (adopt: boolean) => {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const latestRef = useRef(latest);
+  latestRef.current = latest;
+  /**
+   * The threads opened in this tab (a row, a link, a notification, Settings'
+   * Unarchive). One not on screen whose messages are all seen came in by the
+   * person's own hand, not an agent's (held.ts).
+   */
+  const openedHere = useRef(new Set<string>());
+  if (route.thread) openedHere.current.add(route.thread);
+  /** The rows as they were just before the list on screen changes, when that change slides (settle.ts). */
+  const slideFrom = useRef<SettleSnapshot | null>(null);
+  /** Measure the rows now, so the next change of the list on screen slides from here. Nothing under reduced motion. */
+  const armSlide = useCallback(() => {
+    const body = prefersReducedMotion() ? null : listBody(rootRef.current);
+    slideFrom.current = body ? captureSettle(body) : null;
+  }, []);
+  /** The settle waiting out its beat after a thread closed (settle.ts). */
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelSettle = useCallback(() => {
+    if (settleTimer.current) clearTimeout(settleTimer.current);
+    settleTimer.current = null;
+  }, []);
+  /**
+   * The list on screen catches up: with the person's own reads and actions
+   * (`own`: closing a thread; agent activity still waits behind "N new"), or
+   * with everything (`all`: Show, another folder or page).
+   */
+  const settleList = useCallback(
+    (what: 'own' | 'all', slide: boolean) => {
+      cancelSettle();
+      const next = latestRef.current;
+      if (!next) return;
+      if (slide) armSlide();
+      setShown((current) => (what === 'all' || current === null || !hasRows(current) ? next.sections : settleOwn(current, next.sections, openedHere.current)));
+    },
+    [armSlide, cancelSettle],
+  );
+  useEffect(() => cancelSettle, [cancelSettle]);
+
+  /**
+   * Read the list; `adopt` puts it on screen (an action, Show, or nothing on
+   * screen yet), sliding the rows to their places when `slide` says so.
+   */
+  const refreshList = useCallback(async (adopt: boolean, slide = false) => {
     try {
       const next = await inboxApi.list();
       setPageSession(next.serverSession);
       setLatest(next);
+      if (adopt && slide) armSlide();
       setUpdate(next.update);
       setUpdated(next.updated ?? null);
       // Held: the order waits for an action, but each row's own state (a delivery, an agent's read) follows at once.
@@ -311,7 +427,7 @@ function Inbox() {
       setLoadError(cause instanceof Error ? cause.message : String(cause));
       return null;
     }
-  }, []);
+  }, [armSlide]);
 
   const refreshThread = useCallback(async (threadId: string) => {
     try {
@@ -319,6 +435,7 @@ function Inbox() {
       if (routeRef.current.thread === threadId) {
         setThread(next.thread);
         setThreadDecisions(next.decisions);
+        setThreadRow(next.row ?? null);
         // What is new since the last look, from the first read of this thread:
         // it lands before the window records the look, and is kept until the person leaves the thread.
         setLook((current) => (current?.threadId === threadId ? current : { threadId, seq: lookBoundary(next.thread) }));
@@ -347,12 +464,12 @@ function Inbox() {
       setDecisionsError(cause instanceof Error ? cause.message : String(cause));
     }
   }, []);
-  const latestRef = useRef(latest);
-  latestRef.current = latest;
 
   const refreshSettings = useCallback(async () => {
     try {
-      setSettings(await inboxApi.settings());
+      const next = await inboxApi.settings();
+      adoptSavedTheme(next.theme);
+      setSettings(next);
     } catch (cause) {
       setSettingsError(cause instanceof Error ? cause.message : String(cause));
     }
@@ -398,17 +515,16 @@ function Inbox() {
     };
   }, [refreshList, refreshSettings, refreshThread, observeEvent, flushNotifications, refreshDecisions, decisionsProjectOf]);
 
-  // Leaving a thread (Esc, Close, the browser's Back) or opening another is an
-  // action: the rows held while the person was in the thread take their places.
-  useEffect(() => {
-    if (latestRef.current) setShown(latestRef.current.sections);
-  }, [route.thread]);
-
-  // Opening a thread: read it, record the look, and put the list as it now is on screen.
+  // Opening a thread: read it, record the look, and update its row in place.
+  // While any thread is open the list holds still (settle.ts): the look
+  // unbolds the row where it is and does not re-sort the list. Where the
+  // thread covers the list, the list catches up now, out of sight, before the
+  // look (so the row being opened keeps its place): Back shows it as left.
   useEffect(() => {
     const threadId = route.thread;
     if (!threadId) {
       setThread(null);
+      setThreadRow(null);
       setLook(null);
       return;
     }
@@ -416,13 +532,51 @@ function Inbox() {
     void (async () => {
       const opened = await refreshThread(threadId);
       if (cancelled || !opened) return;
+      if (listCovered() && COVERED_LIST_SETTLES === 'while-covered') settleList('own', false);
       await inboxApi.seen(threadId).catch(() => {});
-      if (!cancelled) await refreshList(true);
+      if (!cancelled) await refreshList(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [route.thread, refreshThread, refreshList]);
+  }, [route.thread, refreshThread, refreshList, settleList]);
+
+  // When the list on screen catches up as the route changes (settle.ts).
+  // Another page or folder: the list there is drawn as it is now. A thread
+  // opening, or replacing another: nothing moves (a slide still playing
+  // stops). The thread closing: the person's own reads and actions settle, a
+  // beat after the list has widened (at once under reduced motion, with no
+  // slide); where the thread covered the list, COVERED_LIST_SETTLES decides.
+  // After a keyboard close, focus that the closed pane took with it goes to
+  // the thread's row.
+  const lastRoute = useRef({ page: route.page, project: route.project ?? null, thread: route.thread });
+  /** The docked sidebar is held closed beside a file (#1871); the close gives it back, so the settle waits for its spring. */
+  const sidebarHeldNow = useRef(false);
+  useLayoutEffect(() => {
+    const before = lastRoute.current;
+    const now = { page: route.page, project: route.project ?? null, thread: route.thread };
+    lastRoute.current = now;
+    if (before.page === now.page && before.project === now.project && before.thread === now.thread) return;
+    if (!(before.page === 'inbox' && now.page === 'inbox' && before.project === now.project)) {
+      settleList('all', false);
+      return;
+    }
+    const body = listBody(rootRef.current);
+    if (now.thread) {
+      // A thread opens: the list holds still, so a settle waiting out its beat
+      // never comes, and one still sliding stops where the rows belong.
+      cancelSettle();
+      if (body) stopSettle(body);
+      return;
+    }
+    const closed = before.thread;
+    if (!closed) return;
+    const active = document.activeElement;
+    if (body && lastInput === 'keyboard' && (!active || active === document.body)) rowElement(body, closed)?.focus({ preventScroll: true });
+    if (listCovered() && COVERED_LIST_SETTLES === 'while-covered') return;
+    if (prefersReducedMotion()) settleList('own', false);
+    else settleTimer.current = setTimeout(() => settleList('own', true), sidebarHeldNow.current ? SETTLE_AFTER_SIDEBAR_MS : SETTLE_BEAT_MS);
+  }, [route.page, route.project, route.thread, settleList, cancelSettle]);
 
   useEffect(() => {
     if (route.page === 'settings') {
@@ -430,6 +584,34 @@ function Inbox() {
       void loadUpdateDetails();
     }
   }, [route.page, refreshSettings, loadUpdateDetails]);
+
+  // Settings' Archived count in its nav: read while Settings is open, again whenever the store moves.
+  const [archivedTotal, setArchivedTotal] = useState<number | null>(null);
+  const storeCursor = latest?.cursor ?? null;
+  useEffect(() => {
+    if (route.page !== 'settings') return;
+    let cancelled = false;
+    inboxApi
+      .archived({ limit: 1 })
+      .then((model) => !cancelled && setArchivedTotal(model.total))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [route.page, storeCursor]);
+
+  // "← Inbox" returns to where the person was before Settings: the last hash that was not a Settings page,
+  // so moving between sections never changes where Back goes (Workspaces' BackLink).
+  const settingsReturn = useRef('');
+  if (route.page !== 'settings') settingsReturn.current = hashOf(route);
+
+  // Settings is a focused page (design of record inbox-settings-tabs): the sidebar slides away while it
+  // is open and comes back on leaving, without writing the person's stored choice. ⌘B there opens it
+  // for this visit only.
+  const [settingsSidebar, setSettingsSidebar] = useState(false);
+  useEffect(() => {
+    if (route.page !== 'settings') setSettingsSidebar(false);
+  }, [route.page]);
 
   const decisionsProject = route.page === 'decisions' ? decisionsProjectOf(route, latest) : null;
   useEffect(() => {
@@ -481,27 +663,21 @@ function Inbox() {
   }, [soundDialogDue, soundDialogBlocked]);
 
 
-  const go = (next: Route) => {
-    writeRoute(next);
-    // Changing the view is an action: the list on screen catches up.
-    if (latest) setShown(latest.sections);
-  };
+  // The list on screen catches up as the route changes (the layout effect above), not here.
+  const go = (next: Route) => writeRoute(next);
   /** Back to the screen under this one (closeTo): a thread's list, a file's thread. */
-  const close = (next: Route) => {
-    closeTo(next);
-    if (latest) setShown(latest.sections);
-  };
+  const close = (next: Route) => closeTo(next);
 
   // A phone shows one screen at a time (phone.ts, inbox.css), and its keyboard shrinks the window.
   const phone = usePhone();
   useEffect(() => (phone ? trackKeyboard() : undefined), [phone]);
   // A window too narrow for two panes (an iPad in portrait, a narrow desktop window): the pane on top covers the one under it (stack.ts).
-  const rootRef = useRef<HTMLDivElement>(null);
   // `‹ Inbox` from a file beside the thread in a window with room for the list and the thread but not for
   // the sidebar too (about 920 to 1050 px): the sidebar stays closed on screen so the list shows beside the
   // thread, as the open file kept it, without writing the person's choice. It comes back once there is room,
   // when the thread closes, or when the person opens it.
   const [sidebarHeld, setSidebarHeld] = useState(false);
+  sidebarHeldNow.current = sidebarHeld;
   const stack = useStack(rootRef, phone, [hashOf(route), sidebarOpen, sidebarHeld]);
   useEffect(() => {
     if (!sidebarHeld) return;
@@ -535,14 +711,14 @@ function Inbox() {
     );
     // While a thread is open the person's own writes never reorder the list
     // (owner ruling 2026-10-11): each row shows its new state in place, and
-    // the list catches up when they leave the thread or open another.
-    void refreshList(!routeRef.current.thread);
+    // the list catches up when the thread closes (settle.ts).
+    void refreshList(!routeRef.current.thread, true);
   };
 
   const afterWrite = async () => {
     const open = routeRef.current.thread;
     if (open) await refreshThread(open);
-    await refreshList(!open);
+    await refreshList(!open, true);
   };
 
   const rowOf = (threadId: string): InboxListRow | undefined =>
@@ -579,6 +755,8 @@ function Inbox() {
    */
   const markRead = async (threadId: string, read: boolean) => {
     const before = rowOf(threadId);
+    // With a thread open the list holds still: the row moves to Quiet when the list next settles.
+    const deferred = routeRef.current.thread !== null;
     try {
       await inboxApi.markRead(threadId, read);
     } catch (cause) {
@@ -588,12 +766,13 @@ function Inbox() {
     await afterWrite();
     if (!read) {
       dismissToast();
-      say('Moved back to the top.');
+      // With a thread open the row has not left its place, so it has nowhere to come back from yet.
+      say(deferred ? 'Moved back.' : 'Moved back to the top.');
       return;
     }
     if (!before) return;
     const closed = before.questions.open + before.questions.picked;
-    const copy = markReadToast(before, closed);
+    const copy = markReadToast(before, closed, deferred);
     showToast({
       ...copy,
       onUndo: () => void markRead(threadId, false),
@@ -609,7 +788,8 @@ function Inbox() {
           }
         : {}),
     });
-    say(`Read. ${before.subject ?? 'The thread'} moved to Quiet.`);
+    // The toast's own words (Quiet or Archived, moved or still to move).
+    say(copy.text);
   };
 
   /** Archive (the MCP's resolve) or Unarchive, with Undo. */
@@ -620,6 +800,13 @@ function Inbox() {
       showToast({ text: cause instanceof Error ? cause.message : 'The thread did not change.', warn: true });
       return;
     }
+    // The list leaves archived threads out (Settings lists them). While the
+    // thread is open its row stays where it is, shown archived; it goes when
+    // the person leaves the thread.
+    if (next && routeRef.current.thread === threadId) {
+      const at = new Date().toISOString();
+      setShown((current) => (current ? markHeldRowArchived(current, threadId, at) : current));
+    }
     await afterWrite();
     if (next) {
       showToast({ text: 'Archived. The next message starts a new thread.', short: 'Archived.', onUndo: () => void archive(threadId, rootId, false) });
@@ -628,6 +815,28 @@ function Inbox() {
       dismissToast();
       say('Unarchived.');
     }
+  };
+
+  /**
+   * Settings' Unarchive: the thread goes back to the list, in whatever
+   * section its state puts it, and opens there (owner ruling 2026-10-12).
+   */
+  const unarchiveFromSettings = async (row: InboxListRow): Promise<boolean> => {
+    try {
+      await inboxApi.resolve(row.thread_id, false);
+    } catch (cause) {
+      showToast({ text: cause instanceof Error ? cause.message : 'The thread did not change.', warn: true });
+      return false;
+    }
+    go({ page: 'inbox', project: null, thread: row.thread_id });
+    await refreshList(true);
+    const subject = row.subject ?? 'The thread';
+    showToast({
+      text: `Moved back to your Inbox: “${subject}”.`,
+      short: 'Unarchived.',
+      onUndo: () => void archive(row.thread_id, row.thread_id, true),
+    });
+    return true;
   };
 
   // E marks the open thread (or the focused row) read, and again moves it
@@ -660,8 +869,10 @@ function Inbox() {
         return;
       }
       if (routeRef.current.page !== 'inbox') return;
-      // A row the keyboard is on wins over the thread open beside the list.
-      const rowId = target?.closest('.ib-listcol [data-row]')?.getAttribute('data-row') ?? null;
+      // A row the keyboard is on wins over the thread open beside the list; a
+      // row that merely holds focus (clicked, or put there after a mouse close) does not.
+      const rowEl = target?.closest('.ib-listcol [data-row]') ?? null;
+      const rowId = rowEl && target && keyboardFocused(target) ? rowEl.getAttribute('data-row') : null;
       const threadId = rowId ?? (open && open.thread_id === routeRef.current.thread ? open.thread_id : null);
       if (!threadId) return;
       const row = rowOf(threadId);
@@ -860,11 +1071,22 @@ function Inbox() {
 
   const projects = latest?.projects ?? [];
   const latestSections = latest?.sections ?? [];
+  // The open thread's row: the list's, else its own read's (an archived thread is not in the list).
+  const openThreadRow = thread
+    ? (latestSections.flatMap((section) => section.threads).find((row) => row.thread_id === thread.thread_id) ??
+      (threadRow?.thread_id === thread.thread_id ? threadRow : null))
+    : null;
   const projectCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const project of projects) counts.set(project.id, waitingCount(latestSections, project.id));
     return counts;
   }, [projects, latestSections]);
+  // The Decisions switch's counts: every project's, from the last Decisions read of any project,
+  // so they stay on screen while another project's decisions load.
+  const decisionCounts = useMemo(() => {
+    const list = decisions?.project_counts;
+    return list ? new Map(list.map((c) => [c.project_id, c])) : null;
+  }, [decisions]);
 
   const context: ConnectContext | null = settings
     ? { command: settings.mcp_command, mcpUrl: settings.mcp_url, platform: platformOf() }
@@ -882,7 +1104,7 @@ function Inbox() {
   };
 
   const filterProject = route.page === 'inbox' && route.project ? projects.find((p) => p.id === route.project) ?? null : null;
-  const notice = shown && latest ? heldNotice(filterSections(shown, route.project), filterSections(latest.sections, route.project)).text : null;
+  const notice = shown && latest ? heldNotice(filterSections(shown, route.project), filterSections(latest.sections, route.project), openedHere.current).text : null;
   const firstRun = latest !== null && projects.length === 0;
   // A file beside the thread takes the list's and the sidebar's room (record 2.2).
   const fileOpen = route.page === 'inbox' && !!route.thread && !!route.file;
@@ -968,14 +1190,43 @@ function Inbox() {
   useEffect(() => {
     const onFocusIn = (event: FocusEvent) => {
       const target = event.target as HTMLElement | null;
-      const row = target?.closest?.('.ib-listcol [data-thread-id]');
-      listFocus.current = row ? row.getAttribute('data-thread-id') : null;
+      // A row, or its hover action beside it (`.ib-rw[data-row]`).
+      const row = target?.closest?.('.ib-listcol [data-thread-id], .ib-listcol [data-row]');
+      listFocus.current = row ? (row.getAttribute('data-thread-id') ?? row.getAttribute('data-row')) : null;
       const decisionRow = target?.closest?.('.ib-dpage [data-decision-id]');
       decisionFocus.current = decisionRow ? decisionRow.getAttribute('data-decision-id') : null;
     };
     document.addEventListener('focusin', onFocusIn);
     return () => document.removeEventListener('focusin', onFocusIn);
   }, []);
+
+  // The list on screen changed: play the slide when one was armed (settle.ts),
+  // and, after a key, never leave focus on the page. A row that had focus and
+  // left the rows on screen (for folded Quiet) hands it to the row now in its
+  // slot; Show (whose line goes away) hands it to the first row it brought in.
+  const listOrder = useRef<string[]>([]);
+  const focusAfterShow = useRef(false);
+  useLayoutEffect(() => {
+    const body = listBody(rootRef.current);
+    const from = slideFrom.current;
+    slideFrom.current = null;
+    const order = from?.order ?? listOrder.current;
+    if (body && from) playSettle(body, from);
+    const shownAll = focusAfterShow.current;
+    focusAfterShow.current = false;
+    const gone = listFocus.current;
+    const active = document.activeElement;
+    const lost = !active || active === document.body;
+    if (body && lost && shownAll) {
+      const rows = [...body.querySelectorAll<HTMLElement>('[data-thread-id]')];
+      (rows.find((row) => !order.includes(row.getAttribute('data-thread-id')!)) ?? rows[0])?.focus({ preventScroll: true });
+    } else if (body && lastInput === 'keyboard' && gone && lost && !rowElement(body, gone)) {
+      const next = rowInSlot(order, gone, (id) => rowElement(body, id) !== null);
+      const target = next ? rowElement(body, next) : body.querySelector<HTMLElement>('button.ib-band');
+      target?.focus({ preventScroll: true });
+    }
+    listOrder.current = body ? [...body.querySelectorAll('[data-thread-id]')].map((el) => el.getAttribute('data-thread-id')!) : [];
+  }, [shown]);
   const stackedBefore = useRef({ thread: stack.thread, decision: stack.decision });
   useEffect(() => {
     const was = stackedBefore.current;
@@ -1024,6 +1275,9 @@ function Inbox() {
         onDeleteThread={deleteThread}
         onDeleteProject={deleteProject}
         sound={settings?.sound ? sound : undefined}
+        archived={<ArchivedBlock refreshKey={latest?.cursor ?? null} onUnarchive={unarchiveFromSettings} />}
+        archivedTotal={archivedTotal}
+        aboutDot={!!update}
         about={
           <AboutBlock
             version={latest?.version ?? settings?.version ?? 'dev'}
@@ -1033,8 +1287,32 @@ function Inbox() {
             error={null}
             onCheckNow={() => void checkNow()}
             onToggle={(change) => void saveUpdateSwitches(change)}
+            update={update}
+            onUpdate={pressUpdate}
+            onWhatsNew={openWhatsNew}
+            where={
+              settings
+                ? { data: tildePath(settings.data_dir, settings.home), mcpUrl: settings.mcp_url, mcpCommand: shellLine(settings.mcp_command) }
+                : null
+            }
           />
         }
+        section={route.section ?? null}
+        pairing={route.pair === true}
+        phone={phone}
+        onSection={(section) =>
+          section === null && phone ? close({ page: 'settings', project: null, thread: null, section: null }) : go({ page: 'settings', project: null, thread: null, section })
+        }
+        onPairing={(open) =>
+          open
+            ? go({ page: 'settings', project: null, thread: null, section: 'devices', pair: true })
+            : close({ page: 'settings', project: null, thread: null, section: 'devices' })
+        }
+        onBack={() => go(routeOf(settingsReturn.current))}
+        onRetry={() => {
+          setSettingsError(null);
+          void refreshSettings();
+        }}
       />
     );
   } else if (route.page === 'whats-new') {
@@ -1062,6 +1340,8 @@ function Inbox() {
         onReplace={replaceDecision}
         phone={phone}
         stacked={stack.decision}
+        counts={decisionCounts}
+        home={settings?.home ?? null}
       />
     );
   } else if (route.page === 'decisions') {
@@ -1095,7 +1375,12 @@ function Inbox() {
               />
             )
           }
-          onShowNew={() => setShown(latest.sections)}
+          onShowNew={() => {
+            // Show's line goes away with the press: after a key, focus goes to the first row it brought in.
+            focusAfterShow.current = lastInput === 'keyboard';
+            listOrder.current = [...(listBody(rootRef.current)?.querySelectorAll('[data-thread-id]') ?? [])].map((el) => el.getAttribute('data-thread-id')!);
+            settleList('all', true);
+          }}
           onOpen={openRow}
           onMarkRead={(row) => void markRead(row.thread_id, true)}
           phone={phone}
@@ -1104,8 +1389,8 @@ function Inbox() {
         {route.thread && thread && thread.thread_id === route.thread && (
           <ThreadPane
             thread={thread}
-            sent={latestSections.flatMap((section) => section.threads).find((row) => row.thread_id === thread.thread_id)?.sent ?? null}
-            row={latestSections.flatMap((section) => section.threads).find((row) => row.thread_id === thread.thread_id) ?? null}
+            sent={openThreadRow?.sent ?? null}
+            row={openThreadRow}
             onMarkRead={(read) => void markRead(thread.thread_id, read)}
             onArchive={(next) => void archive(thread.thread_id, thread.messages[0]!.id, next)}
             replyRequest={replyFor}
@@ -1152,8 +1437,12 @@ function Inbox() {
       {/* A file beside the thread takes the sidebar's room (record 2.2): it closes on the same spring, and the person's choice stays as it was. */}
       <SidebarShell
         className="ib-shell"
-        open={sidebarOpen && !fileOpen && !sidebarHeld}
+        open={route.page === 'settings' ? settingsSidebar : sidebarOpen && !fileOpen && !sidebarHeld}
         onOpenChange={(next) => {
+          if (routeRef.current.page === 'settings') {
+            setSettingsSidebar(next);
+            return;
+          }
           setSidebarHeld(false);
           changeSidebar(next);
         }}

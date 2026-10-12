@@ -23,10 +23,13 @@ Two limits exist because pairing cannot work without them: an offer lives 10 min
 | `addresses.tailnet` | `host:port` of the tailnet publication, or null when "Reach from my tailnet" is off |
 | `addresses.lan` | `ip:port` of the LAN listener, or null when "Reach from this Wi-Fi" is off |
 | `addresses.fingerprint` | The LAN certificate's SHA-256 (section 3), or null with the LAN off |
+| `reachable` | The code carries an address a phone can use (added 2026-10-12 for the window's Pair a phone flow, which shows a code only once a way is on; the phone never reads this answer) |
+
+The window also reads, for Pair a phone (window routes, never on the door; the phone's exchanges are unchanged): `GET /api/inbox/pairing`, the last offer's state and what reached the door while it showed (`attempts`: which listener, and wrong code, digits over the Wi-Fi, an older code, after it closed, or redeemed; never the secret or the code), and `GET /api/inbox/pairing/checks`, what this computer can tell about the two ways before any is on.
 
 An offer is single use. It closes when it is redeemed, when it expires, after 5 wrong codes, or when the window makes a new one: one offer is open at a time, so six digits always name one offer. The offer lives in the server's memory only; a restart closes it.
 
-Pairing needs the phone to reach the computer once, over the same Wi-Fi or the tailnet; the relay does not carry a redemption in v1. With both addresses null the offer still answers (a simulator reaches the Inbox on `127.0.0.1`), and "Pair a phone" offers the "Reach from this Wi-Fi" switch in place.
+Pairing needs the phone to reach the computer once, over the same Wi-Fi or the tailnet; the relay does not carry a redemption in v1. With both addresses null the offer still answers (a simulator reaches the Inbox on `127.0.0.1`, `reachable: false`), and the window never shows such a code: Pair a phone starts at "How will your phone reach this computer?" and shows the code only once a way is switched on.
 
 ### The tailnet publication
 
@@ -122,11 +125,12 @@ The allowlist. Each row is the window's handler as it is today, with the request
 | Door route | Window route | Request | Answer | Exchange |
 |---|---|---|---|---|
 | `GET health` | `GET /api/inbox/health` | | `{ ok, app, version, serverSession, pid, update }`; the cheapest read, the phone's reachability probe for 9.2 | 7.4 |
-| `GET threads[?project=prj_...]` | `GET /api/inbox/threads` | | the list model: `{ serverSession, version, cursor, update, notice, projects, project, sections, decisions_waiting }` | 7.5 |
+| `GET threads[?project=prj_...][&archived=include\|exclude]` | `GET /api/inbox/threads` | | the list model: `{ serverSession, version, cursor, update, notice, projects, project, sections, decisions_waiting }`. Archived threads stay in the Quiet section unless the phone asks `archived=exclude` (added 2026-10-12, when the window moved them out of its list into Settings; the default keeps this exchange as it was, so a phone that draws the sections loses no thread). "Archived" means resolved and not come back: an agent's `reply_to` reply after the archive line brings the thread back into the sections while something there waits (as news, Waiting when it asks, Sent after the reply), with the additive row fields `agent_after_archive` and `back_from_archive`, in both modes; once handled it is archived again by itself. Its later messages are answerable without unarchiving (picks, reply, decision switch, annotations, the lock-screen answer), its earlier ones stay closed, and the thread stays resolved | 7.5 |
+| `GET threads/archived[?project=prj_...&offset=n&limit=n]` | `GET /api/inbox/threads/archived` | | `{ serverSession, cursor, project, projects: [{ id, name, archived }], total, offset, limit, threads: [row] }`: the archived threads, newest archived first, a page at a time (`limit` 1 to 200, default 50). An explicit allowlist row (GET, read only), before `threads/:id`; added 2026-10-12, no exchange of its own | |
 | `GET projects` | `GET /api/inbox/projects` | | `{ serverSession, cursor, projects: [{ id, key, name, root, created_at, threads, unread }] }` | 7.6 |
-| `GET threads/:id` | `GET /api/inbox/threads/:id` | | `{ serverSession, cursor, thread, decisions }` | 7.7 |
+| `GET threads/:id` | `GET /api/inbox/threads/:id` | | `{ serverSession, cursor, thread, decisions, row }` (`row`, the thread's list row, and `thread.archive_seq`, the archive line's seq or null, additive since 2026-10-12) | 7.7 |
 | `POST threads/:id/seen` | same | `{ idempotency_key }` | `{ thread: row }` | 7.8 |
-| `POST threads/:id/read`, `POST threads/:id/unread` | same | `{ idempotency_key }` | `{ thread: row }`: Mark read (the row goes to Quiet, its waiting questions close unanswered) and its Undo; added after section 7, no exchange of its own | |
+| `POST threads/:id/read`, `POST threads/:id/unread` | same | `{ idempotency_key }` | `{ thread: row }`: Mark read (the row goes to Quiet, its waiting questions close unanswered; on a thread that came back from the archive it goes back to Archived at once, even while the person's earlier reply there waits on the agent) and its Undo (it reopens only the questions that Mark read closed; one an earlier Mark read closed stays closed); added after section 7, no exchange of its own. Row semantics since 2026-10-12, the wire unchanged: the Inbox's own notes to the agent (person messages carrying `set_aside` or `reopened`) are neither the person's reply nor a look, so a row's `sent`, `unseen`, `waiting_on_person` and `back_from_archive` read past them (and `waiting_on_person` is false while a Mark read stands), and the row gains the additive `last_agent_at` (the latest agent message's time; `last_at` and `last_author` still count the notes). The thread-state model (`adr/implementation/inbox-thread-state.md`) and its trace fixtures say the same | |
 | `GET events[?cursor=n]` | `GET /api/inbox/events` | `Last-Event-ID` or `?cursor=` | SSE: `hello`, `record` per store line (`id:` = seq), `status`, a heartbeat every 15 s | 7.9 |
 | `POST messages/:id/picks` | same | `{ idempotency_key, questions: [{ key, revision, answer or null }] }` | `{ message_id, questions, reply: null }` | 7.10 |
 | `POST messages/:id/reply` | same | `{ idempotency_key, words?, questions?, feedback?, annotation_ids?, skip_unanswered? }` (`skip_unanswered: true` skips the message's questions left without a pick) | `{ message_id, questions, reply, replayed, decisions, decisions_refused }` | 7.11 |
@@ -140,7 +144,7 @@ The allowlist. Each row is the window's handler as it is today, with the request
 | `GET messages/:id/guide` | same | | `{ message_id, guide, snapshot }` | 7.19 |
 | `POST messages/:id/guide/reviewed` | same | `{ idempotency_key, reviewed: boolean[] }` | `{ message_id, reviewed }` | 7.20 |
 | `POST messages/:id/decision` | same | `{ idempotency_key, key, recording?, draft? }` | `{ question }` | 7.21 |
-| `GET decisions?project=prj_...` | same | | `{ serverSession, cursor, project_id, waiting, decisions }` | 7.22 |
+| `GET decisions?project=prj_...` | same | | `{ serverSession, cursor, project_id, waiting, decisions, project_counts }` (`project_counts`, added later, is every project's `{ project_id, waiting, settled }`; a phone may ignore it) | 7.22 |
 | `GET threads/:id/sessions` | same | | `{ serverSession, home, project, sessions }` | 7.23 |
 | `POST threads/:id/message` | same | `{ idempotency_key, session, body }` | `{ message, replayed }` | 7.24 |
 | `POST revoke` | (the door's own) | `{}` | `{ device }` | 7.25 |

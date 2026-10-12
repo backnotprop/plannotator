@@ -128,7 +128,9 @@ describe("the device door, on the binary", () => {
   test("7.1: the window makes an offer, with the QR link, the six digits, the computer and its addresses", async () => {
     const before = Date.now();
     const made = await offer();
-    expect(Object.keys(made).sort()).toEqual(["addresses", "computer", "link", "offer"]);
+    expect(Object.keys(made).sort()).toEqual(["addresses", "computer", "link", "offer", "reachable"]);
+    // No way switched on: the window shows no code for it (Pair a phone's step 1 is the gate).
+    expect(made.reachable).toBe(false);
     expect(made.offer.code).toMatch(/^\d{6}$/);
     const ttl = Date.parse(made.offer.expires_at) - before;
     expect(ttl).toBeGreaterThan(9.9 * 60_000);
@@ -318,7 +320,7 @@ describe("the device door, on the binary", () => {
     expect(Object.keys(projects.projects[0]).sort()).toEqual(["created_at", "id", "key", "name", "root", "threads", "unread"]);
 
     const thread = (await (await door(`threads/${threadId}`)).json()) as Json;
-    expect(Object.keys(thread).sort()).toEqual(["cursor", "decisions", "serverSession", "thread"]);
+    expect(Object.keys(thread).sort()).toEqual(["cursor", "decisions", "row", "serverSession", "thread"]);
     expect(thread.thread.messages[0].questions).toHaveLength(2);
     expect(thread.thread.messages[0].questions[0]).toMatchObject({ kind: "single", state: "open", revision: 0, recommendation: "Yes" });
 
@@ -435,7 +437,7 @@ describe("the device door, on the binary", () => {
     expect(decision.status).toBe(200);
     expect(((await decision.json()) as Json).question).toMatchObject({ key: open.key, decision_recording: true, decision_draft: { text: "Ship behind a flag.", reason: null } });
     const decisions = (await (await door(`decisions?project=${thread.thread.project.id}`)).json()) as Json;
-    expect(Object.keys(decisions).sort()).toEqual(["cursor", "decisions", "project_id", "serverSession", "waiting"]);
+    expect(Object.keys(decisions).sort()).toEqual(["cursor", "decisions", "project_counts", "project_id", "serverSession", "waiting"]);
     expect(decisions.waiting.map((d: Json) => d.prompt)).toContain("Ship it behind a flag?");
 
     // No live session yet: New message writes nothing.
@@ -462,6 +464,15 @@ describe("the device door, on the binary", () => {
   test("7.12 and 7.13: resolve, then delete the thread", async () => {
     const resolved = await door(`messages/${threadId}/resolve`, { body: { idempotency_key: keys(), resolved: true } });
     expect(((await resolved.json()) as Json).thread.resolved_at).toBeTruthy();
+    // The window moved archived threads out of its list (Settings lists them);
+    // the phone's list is unchanged unless it asks: the thread stays in Quiet.
+    const list = (await (await door("threads")).json()) as Json;
+    const quiet = list.sections.find((s: Json) => s.id === "quiet").threads.map((t: Json) => t.thread_id);
+    expect(quiet).toContain(threadId);
+    const apart = (await (await door("threads?archived=exclude")).json()) as Json;
+    expect(apart.sections.flatMap((s: Json) => s.threads).map((t: Json) => t.thread_id)).not.toContain(threadId);
+    const archived = (await (await door("threads/archived")).json()) as Json;
+    expect(archived.threads.map((t: Json) => t.thread_id)).toContain(threadId);
     const deleted = await door(`threads/${threadId}/delete`, { body: { idempotency_key: keys() } });
     expect(deleted.status).toBe(200);
     const body = (await deleted.json()) as Json;
