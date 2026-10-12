@@ -2189,7 +2189,7 @@ Sorting and the rest:
 - Nothing that arrives through the tailnet listener reaches `/mcp`, a connection route or the device door (403 `local_only`), whatever Host it claims.
 - State-changing window routes run `isSameOriginOrNoOrigin` (403 `cross_origin`), then the `serverSession` stale-tab guard (409 `session_mismatch`).
 - No CORS headers on the Inbox's routes. The one exception is annotate's asset route for an attached HTML page's folder.
-- The window's CSP: `default-src 'self'`, inline script and style, `connect-src 'self'`, `frame-ancestors 'none'`, `base-uri 'self'`, `form-action 'none'`.
+- The window's CSP: `default-src 'self'`, inline script and style, `'wasm-unsafe-eval'` in `script-src` (the Graphviz engine, `@viz-js/viz`, compiles WebAssembly to render `.dot`/`.gv` attachments; it allows no `eval()` or `new Function()`, and there is no `'unsafe-eval'`), `connect-src 'self'`, `frame-ancestors 'none'`, `base-uri 'self'`, `form-action 'none'`. An attached HTML page's srcdoc frame inherits this policy.
 - Agent text reaches the page only through React and Plannotator's markdown renderer.
 - The device door (`/api/inbox/device/*`): no Origin, the phone's bearer token, the allowlist (see "Phones"). The tailnet and the Wi-Fi reach only the door, each through its own listener (see "Local only by default").
 - DAST (`.github/workflows/dast.yml`) scans a seeded Inbox on port 19435, the door's refusals included.

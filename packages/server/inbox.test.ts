@@ -331,6 +331,9 @@ describe("security refusals, by real requests", () => {
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain("connect-src 'self'");
     expect(csp).toContain("default-src 'self'");
+    // Graphviz attachments compile WebAssembly; eval stays off.
+    expect(csp).toContain("'wasm-unsafe-eval'");
+    expect(csp).not.toMatch(/'unsafe-eval'/);
     expect(page.headers.get("access-control-allow-origin")).toBeNull();
     // A sentinel string: the embedded window is what `/` serves.
     expect(await page.text()).toContain("data-window-sentinel");

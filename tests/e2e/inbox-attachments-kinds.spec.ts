@@ -15,7 +15,9 @@
  * with Plannotator's image annotator and commented; a code file opens in the
  * code view and takes a line comment; Send carries both, and the agent reads
  * the image comment with its marked-up copy's path, and the code comment with
- * its lines.
+ * its lines. A Graphviz (.dot) attachment renders as a diagram in the pane:
+ * the engine compiles WebAssembly, which the window's CSP must allow
+ * ('wasm-unsafe-eval'), and no CSP violation is logged.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-attachments-kinds.spec.ts`.
@@ -95,6 +97,17 @@ export async function retryRefund(id, attempt = 1) {
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 `;
 
+/** The retry worker's states as Graphviz, rendered by @viz-js/viz (WebAssembly). */
+const RETRY_DOT = `digraph refund_retry {
+  rankdir=LR;
+  created -> pending;
+  pending -> succeeded;
+  pending -> retry_wait [label="failed"];
+  retry_wait -> pending [label="backoff"];
+  retry_wait -> marked_failed [label="attempt > 5"];
+}
+`;
+
 interface World {
   root: string;
   dataDir: string;
@@ -105,6 +118,8 @@ interface World {
   context: BrowserContext;
   page: Page;
   errors: string[];
+  /** Console messages about the Content Security Policy (a blocked WebAssembly compile is one). */
+  csp: string[];
   threadId: string;
   ids: Record<string, string>;
   zipBytes: Buffer;
@@ -171,6 +186,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   writeFileSync(join(billing, 'docs', 'refund-states.svg'), STATES_SVG);
   writeFileSync(join(billing, 'docs', 'payments-api-refunds.pdf'), PDF);
   writeFileSync(join(billing, 'workers', 'retry-worker.mjs'), WORKER);
+  writeFileSync(join(billing, 'docs', 'refund-retry.dot'), RETRY_DOT);
   const zipBytes = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00, 0x08, 0x00, ...Array.from({ length: 64 }, (_, i) => (i * 37) & 0xff)]);
   writeFileSync(join(billing, 'refund-fixtures.zip'), zipBytes);
   // A screenshot tool's own folder, outside the project.
@@ -182,7 +198,11 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light', acceptDownloads: true });
   const page = await context.newPage();
   const errors: string[] = [];
+  const csp: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => {
+    if (/Content Security Policy|wasm-unsafe-eval|unsafe-eval/i.test(message.text())) csp.push(message.text());
+  });
   page.on('response', (response) => {
     if (response.status() >= 400) errors.push(`HTTP ${response.status()} ${new URL(response.url()).pathname}`);
   });
@@ -196,6 +216,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     context,
     page,
     errors,
+    csp,
     threadId: '',
     ids: {},
     zipBytes,
@@ -360,5 +381,29 @@ test('Send carries the image comment with its marked-up copy and the code commen
   expect(body).toContain('## workers/retry-worker.mjs');
   expect(body).toContain('(line 4) Feedback on: "export const MAX_ATTEMPTS = 5;"');
   expect(body).toContain('> Five attempts with doubling');
+  expect(world.errors.filter((e) => !/HTTP 404 \/favicon/.test(e))).toEqual([]);
+});
+
+test('a Graphviz attachment renders as a diagram in the pane (WebAssembly is allowed by the window CSP)', async () => {
+  const page = world.page;
+  const sent = await world.claude.send({
+    project_path: world.billing,
+    subject: 'The retry worker as a graph',
+    body: 'Here is the retry loop as a Graphviz diagram.',
+    attachments: ['docs/refund-retry.dot'],
+  });
+  const dot = (sent.attachments as { name: string; kind: string; id: string }[])[0]!;
+  expect(dot.kind).toBe('graphviz');
+  await page.goto(`${world.url}#thread=${sent.thread_id}`);
+  await page.locator(`button[data-attachment-id="${dot.id}"]`).click();
+  const pane = page.locator(`[data-attachment-pane="${dot.id}"]`);
+  await expect(pane).toBeVisible();
+  // Graphviz names each node in its <title>: the file's own node ids are in the drawn svg.
+  const svg = pane.locator('[data-diagram-svg] svg');
+  await expect(svg).toBeVisible({ timeout: 30_000 });
+  await expect(svg.locator('g.node title', { hasText: /^retry_wait$/ })).toHaveCount(1);
+  await expect(svg.locator('g.node title', { hasText: /^marked_failed$/ })).toHaveCount(1);
+  await shot('9-graphviz-diagram');
+  expect(world.csp).toEqual([]);
   expect(world.errors.filter((e) => !/HTTP 404 \/favicon/.test(e))).toEqual([]);
 });
