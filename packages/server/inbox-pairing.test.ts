@@ -16,7 +16,7 @@
  * `local_only`, and another site's read is `cross_origin`.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
@@ -258,6 +258,68 @@ describe("GET /api/inbox/pairing/checks", () => {
     const slow = await runQuietly("sleep", ["5"], 200);
     expect((slow.error as NodeJS.ErrnoException | undefined)?.code).toBe("ETIMEDOUT");
     expect(performance.now() - started).toBeLessThan(2000);
+  });
+
+  test("runQuietly holds its limit through a shell wrapper whose child keeps the pipes (the Mac app's tailscale), and leaves no orphan", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-pairing-wrapper-")));
+    roots.push(dir);
+    const wrapper = join(dir, "tailscale");
+    const pidFile = join(dir, "child.pid");
+    // Runs its program as a child, without exec, as /usr/local/bin/tailscale does: the child keeps stdout open.
+    writeFileSync(wrapper, `#!/bin/sh\nsleep 6 &\necho $! > '${pidFile}'\nwait\n`);
+    chmodSync(wrapper, 0o755);
+    const started = performance.now();
+    const result = await runQuietly(wrapper, ["status"], 500);
+    const took = performance.now() - started;
+    expect((result.error as NodeJS.ErrnoException | undefined)?.code).toBe("ETIMEDOUT");
+    expect(took).toBeLessThan(2000);
+    const child = Number(readFileSync(pidFile, "utf8").trim());
+    expect(child).toBeGreaterThan(0);
+    // The whole process group was killed: the grandchild is gone too.
+    let alive = true;
+    for (let i = 0; i < 20 && alive; i++) {
+      try {
+        process.kill(child, 0);
+        await Bun.sleep(50);
+      } catch {
+        alive = false;
+      }
+    }
+    expect(alive).toBe(false);
+  });
+
+  test("a read that never answers ends at the deadline as not answering, and never stays the shared read", async () => {
+    const dataDir = world();
+    const ts = fakeTailscale();
+    let statusRuns = 0;
+    const hung = (args: string[]) => {
+      if (args[0] === "status") statusRuns += 1;
+      return new Promise<never>(() => {});
+    };
+    const devices = createInboxDevices({
+      dataDir,
+      serverSession: "ses_test",
+      port: () => 1,
+      registry: () => ({ v: 1, pid: process.pid, port: 1, url: "http://localhost:1/", version: "dev", token: "t", serverSession: "ses_test", startedAt: new Date().toISOString() }),
+      readBody: async (req) => (await req.json()) as Record<string, unknown>,
+      dispatch: async () => new Response("{}"),
+      tailscale: ts.run,
+      checksTailscale: hung,
+      checksDeadlineMs: 300,
+      probes: probes({ network: () => new Promise<never>(() => {}) }),
+    });
+    const route = (path: string) => devices.windowRoute(new Request(`http://127.0.0.1:1${path}`), new URL(`http://127.0.0.1:1${path}`));
+    const started = performance.now();
+    const answer = (await (await route("/api/inbox/pairing/checks"))!.json()).checks;
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(answer.tailscale.state).toBe("no_answer");
+    expect(answer.wifi.network).toBeNull();
+    // Check again starts a new read: the one that never answered is not joined.
+    const again = (await (await route("/api/inbox/pairing/checks?fresh=1"))!.json()).checks;
+    expect(again.tailscale.state).toBe("no_answer");
+    expect(statusRuns).toBe(2);
+    devices.stopTailnet();
+    devices.stopLan();
   });
 
   test("the Inbox's own mapping on 8443 counts as free, and the switches' state comes along", async () => {

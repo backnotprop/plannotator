@@ -77,7 +77,7 @@ export function tailscaleCheckLines(checks: PairingChecks['tailscale']): CheckLi
         {
           status: 'fail',
           text: "The tailscale command isn't on PATH.",
-          fix: 'Install Tailscale (https://tailscale.com/download) and sign in with tailscale up, then Check again.',
+          fix: 'With the Tailscale app, turn on its command-line tool (Tailscale → Settings → Install CLI); otherwise install Tailscale from https://tailscale.com/download and sign in with tailscale up. Then Check again.',
         },
       ];
     case 'no_answer':

@@ -10,17 +10,19 @@
  * the owner, decision 4): `tailscale status` runs with `--peers=false`, and
  * the phone side is stated, never guessed.
  *
- * Every probe is asynchronous (child processes through `Bun.spawn`, each with
- * its own time limit), so a slow `tailscale` never holds the Inbox's event
- * loop: MCP waits, connection polls and the relay socket keep running while
- * the checks are read. The caller shares one read in flight and keeps its
- * answer a few seconds (inbox-devices.ts).
+ * Every probe is asynchronous (child processes, each with its own time limit
+ * that kills its whole process group, `runQuietly`), and the whole read has a
+ * deadline, so a slow or hung `tailscale` never holds the Inbox's event loop
+ * or the read: MCP waits, connection polls and the relay socket keep running
+ * while the checks are read. The caller shares one read in flight and keeps
+ * its answer a few seconds (inbox-devices.ts).
  *
  * Each probe is a seam (`PairingProbes`, and the Tailscale runner), so tests
  * never run the real `tailscale`, `openssl` or system tools against real
  * state.
  */
 
+import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { join } from "node:path";
@@ -86,33 +88,83 @@ export type PairingTailscaleRunner = (args: string[], timeoutMs: number) => Tail
 const PROBE_TIMEOUT_MS = 2_000;
 const SOCKETFILTERFW = "/usr/libexec/ApplicationFirewall/socketfilterfw";
 
-/** A child process run without a shell, its stdout read, killed at `timeoutMs`. `ENOENT` / `ETIMEDOUT` as error codes. */
-export async function runQuietly(command: string, args: string[], timeoutMs: number): Promise<TailscaleRunResult> {
+/**
+ * A child process run without a shell, its output read, with a hard time
+ * limit. `ENOENT` / `ETIMEDOUT` as error codes.
+ *
+ * The limit holds even when the command is a shell wrapper that runs its
+ * real program as a child without `exec` (the Mac app's
+ * `/usr/local/bin/tailscale` is one): such a grandchild keeps the pipes open
+ * after the wrapper dies. So the child starts in a process group of its own
+ * (`detached`), and at the limit the whole group is killed, the pipes are
+ * let go, and the answer settles at once, never waiting for the pipes to
+ * close. Settling on exit alone would not hold either, for the same reason:
+ * `close` waits for the pipes, so only the timer ends a lingering read.
+ */
+export function runQuietly(command: string, args: string[], timeoutMs: number): Promise<TailscaleRunResult> {
   const path = command.includes("/") ? (existsSync(command) ? command : null) : Bun.which(command);
-  if (!path) return { error: Object.assign(new Error(`${command}: not found on PATH`), { code: "ENOENT" }), status: null, stdout: "", stderr: "" };
-  let proc: ReturnType<typeof Bun.spawn>;
-  try {
-    proc = Bun.spawn([path, ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe", windowsHide: true });
-  } catch (cause) {
-    return { error: cause instanceof Error ? cause : new Error(String(cause)), status: null, stdout: "", stderr: "" };
-  }
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    proc.kill("SIGKILL");
-  }, timeoutMs);
-  try {
-    const [stdout, stderr, status] = await Promise.all([
-      new Response(proc.stdout as ReadableStream).text(),
-      new Response(proc.stderr as ReadableStream).text(),
-      proc.exited,
-    ]);
-    if (timedOut) return { error: Object.assign(new Error(`${command} did not answer in time`), { code: "ETIMEDOUT" }), status: null, stdout, stderr };
-    return { status, stdout, stderr };
-  } finally {
-    clearTimeout(timer);
-  }
+  if (!path) return Promise.resolve({ error: Object.assign(new Error(`${command}: not found on PATH`), { code: "ENOENT" }), status: null, stdout: "", stderr: "" });
+  const group = process.platform !== "win32";
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let child: ChildProcess;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (result: TailscaleRunResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    try {
+      child = spawn(path, args, { stdio: ["ignore", "pipe", "pipe"], detached: group, windowsHide: true });
+    } catch (cause) {
+      finish({ error: cause instanceof Error ? cause : new Error(String(cause)), status: null, stdout: "", stderr: "" });
+      return;
+    }
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => (stdout += chunk));
+    child.stderr?.on("data", (chunk: string) => (stderr += chunk));
+    child.on("error", (error) => finish({ error, status: null, stdout, stderr }));
+    child.on("close", (status) => finish({ status, stdout, stderr }));
+    timer = setTimeout(() => {
+      try {
+        if (group && child.pid) process.kill(-child.pid, "SIGKILL");
+        else child.kill("SIGKILL");
+      } catch {
+        // Already gone.
+      }
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      finish({ error: Object.assign(new Error(`${command} did not answer in time`), { code: "ETIMEDOUT" }), status: null, stdout, stderr });
+    }, timeoutMs);
+  });
 }
+
+/**
+ * `value`, or `fallback` once `ms` have passed: no probe (a seam that never
+ * answers included) can hold a read of the checks past its deadline.
+ */
+function withDeadline<T>(value: T | Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms);
+    Promise.resolve(value).then(
+      (answer) => {
+        clearTimeout(timer);
+        resolve(answer);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(fallback);
+      },
+    );
+  });
+}
+
+/** The most one read of the checks takes: past it, a probe that has not answered reads as not answering. */
+export const PAIRING_CHECKS_DEADLINE_MS = 15_000;
 
 /** The default Tailscale runner for the checks: the CLI on PATH, asynchronously. */
 export const runTailscaleQuietly: PairingTailscaleRunner = (args, timeoutMs) => runQuietly("tailscale", args, timeoutMs);
@@ -217,6 +269,8 @@ export interface PairingChecksContext {
   /** Proxy targets a mapping of the Inbox's own points at (its door listener now or last run). */
   ownTargets: () => string[];
   probes?: Partial<PairingProbes>;
+  /** The whole read's deadline. Default `PAIRING_CHECKS_DEADLINE_MS`. */
+  deadlineMs?: number;
 }
 
 async function tailscaleChecks(context: PairingChecksContext): Promise<PairingChecks["tailscale"]> {
@@ -255,10 +309,12 @@ export async function readPairingChecks(context: PairingChecksContext): Promise<
   const address = probes.lanAddress();
   const bonjourTool = process.platform === "darwin" ? "dns-sd" : "avahi-publish";
   const tls = inboxTlsDir(context.dataDir);
+  const deadline = context.deadlineMs ?? PAIRING_CHECKS_DEADLINE_MS;
+  const silent: PairingChecks["tailscale"] = { state: "no_answer", login: null, https_certs: null, port_free: null, error: null };
   const [network, firewall, tailscale] = await Promise.all([
-    address ? probes.network(address) : null,
-    probes.firewall(),
-    tailscaleChecks(context),
+    address ? withDeadline(probes.network(address), deadline, null) : null,
+    withDeadline(probes.firewall(), deadline, "unknown" as FirewallState),
+    withDeadline(tailscaleChecks(context), deadline, silent),
   ]);
   return {
     wifi: {
