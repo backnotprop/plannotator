@@ -9,16 +9,7 @@
     "start": "2026-10-12T10:00:00.000Z",
     "step_ms": 1000
   },
-  "known_violations": [
-    {
-      "step": 4,
-      "kind": "A",
-      "test": "KNOWN VIOLATION A",
-      "rule": "The Inbox's own notes (set-aside, reopened) are neither the person's reply nor a look.",
-      "spec": "t1 in new, unseen 1",
-      "today": "t1 in sent, unseen 0"
-    }
-  ],
+  "known_violations": [],
   "steps": [
     {
       "event": {
@@ -198,33 +189,33 @@
           "stopped": [],
           "holding": [],
           "waiting": [],
-          "new": [],
-          "sent": [
+          "new": [
             "t1"
           ],
+          "sent": [],
           "quiet": []
         },
         "sections_exclude_archived": {
           "stopped": [],
           "holding": [],
           "waiting": [],
-          "new": [],
-          "sent": [
+          "new": [
             "t1"
           ],
+          "sent": [],
           "quiet": []
         },
         "archived": [],
         "counts": {
           "waiting": 0,
-          "unread": 0,
+          "unread": 1,
           "decisions_waiting": 0
         },
         "threads": {
           "t1": {
-            "section": "sent",
-            "unread": false,
-            "unseen": 0,
+            "section": "new",
+            "unread": true,
+            "unseen": 1,
             "read": false,
             "archived": false,
             "agent_after_archive": false,

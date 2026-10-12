@@ -9,16 +9,7 @@
     "start": "2026-10-12T10:00:00.000Z",
     "step_ms": 1000
   },
-  "known_violations": [
-    {
-      "step": 7,
-      "kind": "A",
-      "test": "KNOWN VIOLATION A",
-      "rule": "The Inbox's own notes (set-aside, reopened) are neither the person's reply nor a look.",
-      "spec": "t1 in stopped, unseen 1",
-      "today": "t1 in stopped, unseen 0"
-    }
-  ],
+  "known_violations": [],
   "steps": [
     {
       "event": {
@@ -382,7 +373,7 @@
           "t1": {
             "section": "stopped",
             "unread": true,
-            "unseen": 0,
+            "unseen": 1,
             "read": false,
             "archived": false,
             "agent_after_archive": false,

@@ -18,9 +18,26 @@ function rowsById(sections: readonly InboxListSection[]): Map<string, InboxListR
   return out;
 }
 
+/**
+ * When the row's latest agent message arrived: `last_agent_at`, or, from an
+ * Inbox older than that field, `last_at` while the last message is an agent's.
+ * The person's replies and the Inbox's own notes (Mark read's set-aside note,
+ * a late Undo's reopened note) move `last_at` but are never agent activity,
+ * and a note written after an agent message must not hide that message.
+ */
+function lastAgentAt(row: InboxListRow): string | null {
+  if (row.last_agent_at !== undefined) return row.last_agent_at;
+  return row.last_author === 'agent' ? row.last_at : null;
+}
+
 /** `row` carries agent activity the row on screen (`old`) lacks: a thread an agent started, or a newer agent message. */
 function hasNewAgentActivity(old: InboxListRow | undefined, row: InboxListRow): boolean {
-  return old === undefined ? row.last_author === 'agent' : row.last_author === 'agent' && row.last_at > old.last_at;
+  const at = lastAgentAt(row);
+  if (at === null) return false;
+  if (old === undefined) return true;
+  // An older row on screen without the field: compare with its last_at, as before.
+  const before = old.last_agent_at !== undefined ? (old.last_agent_at ?? '') : old.last_at;
+  return at > before;
 }
 
 /**

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Viewer } from '@plannotator/ui/components/Viewer';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
-import type { InboxDecision, InboxDecisionDraft, InboxListRow, InboxMessageWire, InboxProjectRepo, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
+import { isInboxNote, type InboxDecision, type InboxDecisionDraft, type InboxListRow, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxThread } from '@plannotator/core/inbox-types';
 import type { IndexedQuestion, QuestionAnswer } from '@plannotator/core/question-block';
 import { inboxDecisionWords } from '@plannotator/core/inbox-questions';
 import { isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState } from '@plannotator/core/inbox-types';
@@ -14,7 +14,7 @@ import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import { attachmentSequence } from '../stepping';
 import { AnnotationsChip } from './AnnotationsChip';
 import { agentName, clockTime, dayWords, plural } from '../format';
-import { answerWords, foldSnippet, holdingsOf, isDelivered, lookBoundary, newSinceLook, planFolds, snippetText, type FoldSnippet, type Holding } from '../folding';
+import { answerWords, foldSnippet, holdingsOf, isDelivered, isPersonReply, lookBoundary, newSinceLook, planFolds, snippetText, type FoldSnippet, type Holding } from '../folding';
 import { AuthorMark, DecisionDiamond, Icon } from '../icons';
 import { DecisionCard } from './DecisionCard';
 import { GuideCard } from './GuideCard';
@@ -293,9 +293,10 @@ export function MessageBody({
 export interface ThreadPaneProps {
   thread: InboxThread;
   /**
-   * The thread's list row's `sent`: the person's reply is the last message,
-   * and when the agent read it (by the store's seq, so a reply the agent was
-   * not given still reads as unread), or null.
+   * The thread's list row's `sent`: the person's reply is the last message
+   * (the Inbox's own notes read past), and when the agent read it (by the
+   * store's seq, so a reply the agent was not given still reads as unread),
+   * or null.
    */
   sent: { at: string; checked_at: string | null } | null;
   /** The thread's questions changed through a pick (the response's questions for that message). */
@@ -458,7 +459,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   // A reply the person sends during this visit is a look at everything before
   // it (the list's rule), so what it answers stops being new at once.
   const boundary = useMemo(
-    () => (opened === null ? null : Math.max(opened, ...thread.messages.filter((m) => m.author.kind === 'person').map((m) => m.seq ?? 0))),
+    () => (opened === null ? null : Math.max(opened, ...thread.messages.filter(isPersonReply).map((m) => m.seq ?? 0))),
     [opened, thread.messages],
   );
   const fresh = useMemo(() => newSinceLook(thread.messages, boundary), [thread.messages, boundary]);
@@ -983,7 +984,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   const picksCount = picked.length;
   // Picks the agent's replacement dropped since the person's last reply: the
   // reply box shows them struck, never in "N picks".
-  const lastReplyAt = thread.messages.filter((m) => m.author.kind === 'person').at(-1)?.created_at ?? '';
+  const lastReplyAt = thread.messages.filter(isPersonReply).at(-1)?.created_at ?? '';
   const dropped = thread.messages.flatMap((m) =>
     (m.questions ?? []).filter((q) => {
       if (q.state !== 'superseded' || q.answer === null) return false;
@@ -1149,8 +1150,11 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   };
 
   // The last message is the person's: say where it is. A New message names
-  // the session's host it went to, and is delivered as a turn (step 8).
-  const last = thread.messages[thread.messages.length - 1]!;
+  // the session's host it went to, and is delivered as a turn (step 8). The
+  // Inbox's own notes (Mark read's set-aside note, a late Undo's reopened
+  // note) are read past: they are not the person's reply, and the line stays
+  // on the reply before them.
+  const last = [...thread.messages].reverse().find((m) => !isInboxNote(m)) ?? thread.messages[0]!;
   const askedBy = (message: InboxMessageWire) => (message.reply_to ? thread.messages.find((m) => m.id === message.reply_to) : undefined);
   // A reply the person sent to another session names the session that took it
   // ("Claude Code (another session)" when it is the asker's own host).
@@ -1379,7 +1383,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
           <div className="ib-tmeta" data-thread-meta="">
             <span>{plural(thread.messages.length, 'message')}</span>
             <span className="ib-tdot" aria-hidden="true" />
-            <span>{spanWords(root.created_at, last.created_at)}</span>
+            <span>{spanWords(root.created_at, thread.messages[thread.messages.length - 1]!.created_at)}</span>
             {showNew && (
               <>
                 <span className="ib-tdot" aria-hidden="true" />

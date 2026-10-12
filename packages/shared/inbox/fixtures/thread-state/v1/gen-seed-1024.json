@@ -9,16 +9,7 @@
     "start": "2026-10-12T10:00:00.000Z",
     "step_ms": 1000
   },
-  "known_violations": [
-    {
-      "step": 13,
-      "kind": "C",
-      "test": "KNOWN VIOLATION C",
-      "rule": "Undo reopens only the questions its own Mark read closed.",
-      "spec": "t1: only the questions this Mark read closed reopen",
-      "today": "t1 in waiting: 1 question(s) an earlier Mark read closed reopened too"
-    }
-  ],
+  "known_violations": [],
   "steps": [
     {
       "event": {
@@ -814,7 +805,7 @@
         "counts": {
           "waiting": 1,
           "unread": 2,
-          "decisions_waiting": 2
+          "decisions_waiting": 1
         },
         "threads": {
           "t1": {
@@ -828,7 +819,7 @@
             "last": "m5",
             "questions": {
               "m1/q-c0f244f5": "closed",
-              "m2/q-5ca0ee11": "open",
+              "m2/q-5ca0ee11": "closed",
               "m4/q-c681ca8f": "open",
               "m5/q-5ca0ee11": "open"
             }
@@ -883,7 +874,7 @@
         "counts": {
           "waiting": 1,
           "unread": 2,
-          "decisions_waiting": 2
+          "decisions_waiting": 1
         },
         "threads": {
           "t1": {
@@ -897,7 +888,7 @@
             "last": "m5",
             "questions": {
               "m1/q-c0f244f5": "open",
-              "m2/q-5ca0ee11": "open",
+              "m2/q-5ca0ee11": "closed",
               "m4/q-c681ca8f": "open",
               "m5/q-5ca0ee11": "open"
             }
@@ -960,7 +951,7 @@
         "counts": {
           "waiting": 1,
           "unread": 2,
-          "decisions_waiting": 1
+          "decisions_waiting": 0
         },
         "threads": {
           "t1": {
@@ -974,7 +965,7 @@
             "last": "m6",
             "questions": {
               "m1/q-c0f244f5": "open",
-              "m2/q-5ca0ee11": "open",
+              "m2/q-5ca0ee11": "closed",
               "m4/q-c681ca8f": "open",
               "m5/q-5ca0ee11": "superseded"
             }
@@ -1037,7 +1028,7 @@
         "counts": {
           "waiting": 1,
           "unread": 2,
-          "decisions_waiting": 1
+          "decisions_waiting": 0
         },
         "threads": {
           "t1": {
@@ -1051,7 +1042,7 @@
             "last": "m7",
             "questions": {
               "m1/q-c0f244f5": "superseded",
-              "m2/q-5ca0ee11": "open",
+              "m2/q-5ca0ee11": "closed",
               "m4/q-c681ca8f": "open",
               "m5/q-5ca0ee11": "superseded"
             }

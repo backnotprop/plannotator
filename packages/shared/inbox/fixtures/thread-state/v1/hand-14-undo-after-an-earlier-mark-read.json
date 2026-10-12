@@ -9,16 +9,7 @@
     "start": "2026-10-12T10:00:00.000Z",
     "step_ms": 1000
   },
-  "known_violations": [
-    {
-      "step": 5,
-      "kind": "C",
-      "test": "KNOWN VIOLATION C",
-      "rule": "Undo reopens only the questions its own Mark read closed.",
-      "spec": "t1: only the questions this Mark read closed reopen",
-      "today": "t1 in waiting: 1 question(s) an earlier Mark read closed reopened too"
-    }
-  ],
+  "known_violations": [],
   "steps": [
     {
       "event": {
@@ -246,32 +237,32 @@
         "sections": {
           "stopped": [],
           "holding": [],
-          "waiting": [
+          "waiting": [],
+          "new": [
             "t1"
           ],
-          "new": [],
           "sent": [],
           "quiet": []
         },
         "sections_exclude_archived": {
           "stopped": [],
           "holding": [],
-          "waiting": [
+          "waiting": [],
+          "new": [
             "t1"
           ],
-          "new": [],
           "sent": [],
           "quiet": []
         },
         "archived": [],
         "counts": {
-          "waiting": 1,
+          "waiting": 0,
           "unread": 1,
           "decisions_waiting": 0
         },
         "threads": {
           "t1": {
-            "section": "waiting",
+            "section": "new",
             "unread": true,
             "unseen": 1,
             "read": false,
@@ -280,7 +271,7 @@
             "back_from_archive": false,
             "last": "m2",
             "questions": {
-              "m1/q-c0f244f5": "open"
+              "m1/q-c0f244f5": "closed"
             }
           }
         }

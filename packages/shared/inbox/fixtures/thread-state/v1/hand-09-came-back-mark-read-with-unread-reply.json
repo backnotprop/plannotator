@@ -9,16 +9,7 @@
     "start": "2026-10-12T10:00:00.000Z",
     "step_ms": 1000
   },
-  "known_violations": [
-    {
-      "step": 5,
-      "kind": "B",
-      "test": "KNOWN VIOLATION B",
-      "rule": "Mark read on a came-back thread returns it to Archived.",
-      "spec": "t1 archived",
-      "today": "t1 in quiet, still back from the archive"
-    }
-  ],
+  "known_violations": [],
   "steps": [
     {
       "event": {
@@ -259,11 +250,11 @@
           "waiting": [],
           "new": [],
           "sent": [],
-          "quiet": [
-            "t1"
-          ]
+          "quiet": []
         },
-        "archived": [],
+        "archived": [
+          "t1"
+        ],
         "counts": {
           "waiting": 0,
           "unread": 0,
@@ -275,9 +266,9 @@
             "unread": false,
             "unseen": 0,
             "read": true,
-            "archived": false,
+            "archived": true,
             "agent_after_archive": true,
-            "back_from_archive": true,
+            "back_from_archive": false,
             "last": "m3",
             "questions": {
               "m2/q-c0f244f5": "closed"

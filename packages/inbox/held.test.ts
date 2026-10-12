@@ -28,6 +28,18 @@ describe('heldNotice', () => {
     const across = sections(...fresh[0]!.threads, row('d', 'billing-svc', '2026-10-07T10:08:00Z', 'agent'));
     expect(heldNotice(shown, across)).toEqual({ count: 3, text: '3 new' });
   });
+
+  // The failure this guards: the Inbox's set-aside note is a person-authored
+  // line, so an agent message followed by the note before the list read again
+  // made the row's last message the person's, and the agent's message slipped
+  // in without "N new".
+  test("an agent message followed by the Inbox's note still counts; the note alone does not", () => {
+    const shown = sections({ ...row('a', 'billing-svc', '2026-10-07T10:00:00Z', 'agent'), last_agent_at: '2026-10-07T10:00:00Z' } as InboxListRow);
+    const noteOnly = sections({ ...row('a', 'billing-svc', '2026-10-07T10:00:10Z', 'person'), last_agent_at: '2026-10-07T10:00:00Z' } as InboxListRow);
+    expect(heldNotice(shown, noteOnly).count).toBe(0);
+    const agentThenNote = sections({ ...row('a', 'billing-svc', '2026-10-07T10:00:10Z', 'person'), last_agent_at: '2026-10-07T10:00:05Z' } as InboxListRow);
+    expect(heldNotice(shown, agentThenNote)).toEqual({ count: 1, text: '1 new in billing-svc' });
+  });
 });
 
 describe('refreshHeldRows', () => {

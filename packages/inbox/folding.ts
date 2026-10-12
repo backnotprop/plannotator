@@ -6,21 +6,28 @@
  * (components/Thread.tsx) draws what these decide.
  */
 
-import type { InboxMessageWire, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
+import { isInboxNote, type InboxMessageWire, type InboxQuestion, type InboxThread } from '@plannotator/core/inbox-types';
 import { QUESTION_ANSWERS_HEADING, type QuestionAnswer } from '@plannotator/core/question-block';
 
 /**
  * Where "new since you looked" starts: the seq of the person's last look at
  * the thread, or of their own last reply (a reply is a look at everything
- * before it), whichever is later. Read from the thread as it was BEFORE the
- * window records the next look, and kept until the person leaves the thread.
- * Null when the payload carries no seqs (an older Inbox): nothing is new then.
+ * before it), whichever is later. The Inbox's own notes (Mark read's
+ * set-aside note, a late Undo's reopened note) are not a reply and not a
+ * look. Read from the thread as it was BEFORE the window records the next
+ * look, and kept until the person leaves the thread. Null when the payload
+ * carries no seqs (an older Inbox): nothing is new then.
  */
 export function lookBoundary(thread: InboxThread): number | null {
   if (thread.messages.length === 0 || thread.messages.some((m) => typeof m.seq !== 'number')) return null;
   let seen = thread.messages[0]!.person_seen_seq ?? 0;
-  for (const message of thread.messages) if (message.author.kind === 'person') seen = Math.max(seen, message.seq!);
+  for (const message of thread.messages) if (isPersonReply(message)) seen = Math.max(seen, message.seq!);
   return seen;
+}
+
+/** The person's own message (a reply or a New message), never one of the Inbox's notes. */
+export function isPersonReply(message: InboxMessageWire): boolean {
+  return message.author.kind === 'person' && !isInboxNote(message);
 }
 
 /** The agent messages after the boundary: new since the person's last look. */
