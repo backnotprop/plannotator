@@ -1617,9 +1617,6 @@ pre code.pn-code[data-keep-layout] {
 .ib-amore[aria-expanded="true"] svg.ib-ic { transform: rotate(90deg); }
 .ib-amore .ib-mut { font-size: 12.5px; color: var(--muted-foreground); }
 .ib-aundet { padding: 0 14px 14px; }
-.ib-alock { margin: 0 0 12px; display: flex; gap: 8px; align-items: flex-start; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--background); font-size: 12.5px; color: var(--muted-foreground); line-height: 1.5; }
-.pn-inbox .ib-alock svg.ib-ic { width: 14px; height: 14px; margin-top: 1px; flex: none; }
-.ib-alock code { color: var(--foreground); }
 @media (prefers-reduced-motion: reduce) {
   .ib-conn-fold svg.ib-ic, .ib-byhand svg.ib-ic, .ib-amore svg.ib-ic { transition: none; }
 }
