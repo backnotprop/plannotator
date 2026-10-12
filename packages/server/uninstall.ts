@@ -538,7 +538,8 @@ async function removeInboxAgentConnections(
   environment: UninstallEnvironment,
   state: MutableUninstallResult,
 ): Promise<void> {
-  const plan = planInboxAgentRemoval(state.dataDir, agentEnvironmentOf(environment));
+  // With no record (agents.json lost), only an entry that runs exactly this binary is taken as ours.
+  const plan = planInboxAgentRemoval(state.dataDir, agentEnvironmentOf(environment), [environment.execPath, "inbox", "mcp"]);
   for (const skipped of plan.skipped) state.warnings.push(`Skipped: ${skipped}.`);
   if (request.dryRun) {
     for (const item of plan.items) state.planned.push(item.describe);

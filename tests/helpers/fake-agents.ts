@@ -40,11 +40,20 @@ const fs = require("fs");
 const path = require("path");
 const name = process.argv[2];
 const args = process.argv.slice(3);
+// Each real CLI's --version line (FAKE_<NAME>_VERSION overrides it), answered before anything is recorded.
+if (args[0] === "--version") {
+  const versions = { codex: "codex-cli 0.160.0", gemini: "0.43.0", devin: "devin 2026.7.16 (4723f912)", amp: "0.0.1781669741-g230fdd (released 2026-06-17)", pi: "0.99.1" };
+  const override = process.env["FAKE_" + name.toUpperCase().replace(/-/g, "_") + "_VERSION"];
+  process.stdout.write((override !== undefined ? override : versions[name] || "1.0.0") + "\n");
+  process.exit(0);
+}
 fs.appendFileSync(process.env.FAKE_AGENT_LOG, JSON.stringify({ name, args }) + "\n");
 const list = (v) => (v || "").split(",").filter(Boolean);
 if (list(process.env.FAKE_AGENT_HANG).includes(name)) setInterval(() => {}, 1000);
 else main();
 function main() {
+  // A grandchild that keeps our stdout open after we exit (a daemon an agent CLI leaves behind).
+  if (list(process.env.FAKE_AGENT_GRANDCHILD).includes(name)) require("child_process").spawn("sleep", ["30"], { stdio: "inherit" }).unref();
   if (list(process.env.FAKE_AGENT_FAIL).includes(name)) {
     process.stderr.write("boom: " + name + " could not write its config (permission denied)\n");
     process.exit(3);

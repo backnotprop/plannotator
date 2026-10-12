@@ -83,7 +83,7 @@ test("--background never connects; a person's run on that Inbox does; a later ru
 
   w.install("amp");
   const later = await cli(w, ["inbox", "--no-open"]);
-  expect(later.stderr).toContain("Connected Amp to the Inbox (new on this computer). Change it in Settings.");
+  expect(later.stderr).toContain("Connected Amp to the Inbox (new on this computer).");
   expect(readInboxAgents(join(w.home, ".plannotator")).agents.amp?.state).toBe("added");
 }, 60_000);
 

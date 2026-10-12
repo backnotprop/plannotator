@@ -11,6 +11,8 @@ import { loadConfig } from "@plannotator/shared/config";
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
 import {
   agentHomeAllowed,
+  codexHome,
+  geminiDir,
   connectInboxAgents,
   createAgentEnvironmentFor,
   formatConnectReport,
@@ -23,6 +25,7 @@ import {
 } from "./inbox-agents";
 
 const SELF = ["/opt/plannotator/bin/plannotator"];
+const OURS = [...SELF, "inbox", "mcp"];
 
 let fake: FakeAgents;
 let dataDir: string;
@@ -279,7 +282,7 @@ describe("Pi and OpenCode with Plannotator's extension or plugin: the tool switc
     expect(report.claude_code).toBe(true);
     expect(formatConnectReport(report)).toEqual([
       "Connected Codex to the Inbox (Claude Code was already on).",
-      "Agents use it from their next session. Change this in the Inbox's Settings.",
+      "Agents use it from their next session. PLANNOTATOR_INBOX_CONNECT=0 skips this step; plannotator uninstall removes what it added.",
     ]);
   });
 });
@@ -292,7 +295,7 @@ describe("later runs", () => {
     const report = await connect();
     expect(report.first).toBe(false);
     expect(report.added).toEqual(["amp"]);
-    expect(formatConnectReport(report)).toEqual(["Connected Amp to the Inbox (new on this computer). Change it in Settings."]);
+    expect(formatConnectReport(report)).toEqual(["Connected Amp to the Inbox (new on this computer)."]);
     expect(formatConnectReport(await connect())).toEqual([]);
   });
 });
@@ -303,7 +306,7 @@ describe("uninstall", () => {
     mkdirSync(join(fake.home, ".cursor"), { recursive: true });
     writeFileSync(join(fake.home, ".cursor", "mcp.json"), '{\n  "mcpServers": {\n    "other": { "command": "x" }\n  }\n}\n');
     await connect();
-    const plan = planInboxAgentRemoval(dataDir, environment());
+    const plan = planInboxAgentRemoval(dataDir, environment(), OURS);
     expect(plan.items.map((item) => item.describe)).toEqual([
       "MCP server plannotator-inbox from Codex (codex mcp remove plannotator-inbox)",
       "MCP server plannotator-inbox from Cursor (~/.cursor/mcp.json, that entry only)",
@@ -318,16 +321,26 @@ describe("uninstall", () => {
     mkdirSync(join(fake.home, ".cursor"), { recursive: true });
     await connect();
     writeFileSync(join(fake.home, ".cursor", "mcp.json"), '{"mcpServers":{"plannotator-inbox":{"command":"mine"}}}');
-    const plan = planInboxAgentRemoval(dataDir, environment());
+    const plan = planInboxAgentRemoval(dataDir, environment(), OURS);
     expect(plan.items).toEqual([]);
     expect(plan.skipped).toEqual([`Cursor's "plannotator-inbox" now runs something else (changed by hand), so it is yours`]);
   });
 
-  test("with the record gone, the known files are still scanned for an entry that runs Plannotator", () => {
+  test("with the record gone, only an entry that runs exactly this binary is taken; one the person added is left", () => {
     mkdirSync(join(fake.home, ".kiro", "settings"), { recursive: true });
-    writeFileSync(join(fake.home, ".kiro", "settings", "mcp.json"), JSON.stringify({ mcpServers: { "plannotator-inbox": { command: "plannotator", args: ["inbox", "mcp"] } } }));
-    const plan = planInboxAgentRemoval(dataDir, environment());
+    writeFileSync(join(fake.home, ".kiro", "settings", "mcp.json"), JSON.stringify({ mcpServers: { "plannotator-inbox": { command: SELF[0], args: ["inbox", "mcp"] } } }));
+    mkdirSync(join(fake.home, ".cursor"), { recursive: true });
+    writeFileSync(join(fake.home, ".cursor", "mcp.json"), JSON.stringify({ mcpServers: { "plannotator-inbox": { command: "plannotator", args: ["inbox", "mcp"] } } }));
+    const plan = planInboxAgentRemoval(dataDir, environment(), OURS);
     expect(plan.items.map((item) => item.agent)).toEqual(["kiro"]);
+  });
+
+  test("an entry Plannotator only found (the person added it) is never removed", async () => {
+    mkdirSync(join(fake.home, ".cursor"), { recursive: true });
+    writeFileSync(join(fake.home, ".cursor", "mcp.json"), JSON.stringify({ mcpServers: { "plannotator-inbox": { command: SELF[0], args: ["inbox", "mcp"] } } }));
+    await connect();
+    expect(readInboxAgents(dataDir).agents.cursor?.state).toBe("found");
+    expect(planInboxAgentRemoval(dataDir, environment(), OURS).items).toEqual([]);
   });
 });
 
@@ -337,4 +350,123 @@ test("isPlannotatorInboxCommand: our stdio entry under any path, a source checko
   expect(isPlannotatorInboxCommand(["/usr/bin/bun", "/src/plannotator/apps/hook/server/index.ts", "inbox", "mcp"])).toBe(true);
   expect(isPlannotatorInboxCommand(["npx", "some-server"])).toBe(false);
   expect(isPlannotatorInboxCommand(["/x/plannotator", "review"])).toBe(false);
+  expect(isPlannotatorInboxCommand(["/x/my-plannotator-proxy", "inbox", "mcp"])).toBe(false);
+  expect(isPlannotatorInboxCommand(["/home/plannotator/bin/other", "inbox", "mcp"])).toBe(false);
+});
+
+describe("a CLI is asked what it is before it is handed an mcp add", () => {
+  test("Pi before 0.99 (no `pi mcp`: the words would be a chat prompt) is left to the person, and nothing else runs", async () => {
+    fake.install("pi");
+    const report = await connect({ FAKE_PI_VERSION: "0.85.1" });
+    expect(report.manual).toEqual(["pi"]);
+    expect(fake.calls()).toEqual([]);
+  });
+
+  test("a program that only shares the name (cln's `pi` printing digits, amp.rs, another codex) is never handed an mcp add", async () => {
+    fake.install("pi", "amp", "codex");
+    const report = await connect({ FAKE_PI_VERSION: "3.14159265358979", FAKE_AMP_VERSION: "amp 0.6.2", FAKE_CODEX_VERSION: "codex 1.0" });
+    expect(report.manual.sort()).toEqual(["amp", "codex", "pi"]);
+    expect(fake.calls()).toEqual([]);
+  });
+
+  test("Cline is never run (its mcp add is not verified): left to the person", async () => {
+    fake.install("cline");
+    const report = await connect();
+    expect(report.manual).toEqual(["cline"]);
+    expect(fake.calls()).toEqual([]);
+  });
+
+  test("a grandchild holding the CLI's output open does not hold the run", async () => {
+    fake.install("codex");
+    const started = Date.now();
+    const report = await connect({ FAKE_AGENT_GRANDCHILD: "codex" }, { agentTimeoutMs: 8000 });
+    expect(report.added).toEqual(["codex"]);
+    expect(Date.now() - started).toBeLessThan(6000);
+  });
+});
+
+describe("Codex's config.toml is read as TOML (every form), and an entry Plannotator did not write is never replaced", () => {
+  const toml = (text: string) => {
+    mkdirSync(join(fake.home, ".codex"), { recursive: true });
+    writeFileSync(join(fake.home, ".codex", "config.toml"), text);
+  };
+  test.each([
+    ["an inline table under [mcp_servers]", '[mcp_servers]\nplannotator-inbox = { command = "my-server", args = [] }\n'],
+    ["a dotted root key", 'mcp_servers.plannotator-inbox.command = "my-server"\n'],
+    ["a quoted header part", '[mcp_servers."plannotator-inbox"]\ncommand = "my-server"\n'],
+    ["a literal-string header part", "[mcp_servers.'plannotator-inbox']\ncommand = 'my-server'\n"],
+  ])("%s: foreign, no mcp add", async (_name, text) => {
+    fake.install("codex");
+    toml(text);
+    const report = await connect();
+    expect(report.foreign.map((f) => f.agent)).toEqual(["codex"]);
+    expect(adds()).toEqual([]);
+    expect(readFileSync(join(fake.home, ".codex", "config.toml"), "utf8")).toBe(text);
+  });
+
+  test("not valid TOML: refused and left as it was", async () => {
+    fake.install("codex");
+    toml("a = = 1\n");
+    const report = await connect();
+    expect(report.failed[0]!.reason).toContain("it is not valid TOML");
+    expect(adds()).toEqual([]);
+  });
+
+  test("a relative CODEX_HOME resolves against the working folder, as Codex does", () => {
+    const e = createAgentEnvironmentFor({ platform: "linux", homeDir: fake.home, env: { ...fake.env, CODEX_HOME: "rel-codex" } });
+    expect(codexHome(e)).toBe(join(process.cwd(), "rel-codex"));
+  });
+
+  test("Gemini's folder follows GEMINI_CLI_HOME", () => {
+    const e = createAgentEnvironmentFor({ platform: "linux", homeDir: fake.home, env: { ...fake.env, GEMINI_CLI_HOME: join(fake.root, "gh") } });
+    expect(geminiDir(e)).toBe(join(fake.root, "gh", ".gemini"));
+  });
+});
+
+test("a lasting failure is said once; the run still tries again", async () => {
+  fake.install("codex");
+  const first = await connect({ FAKE_AGENT_FAIL: "codex" });
+  expect(first.failed).toHaveLength(1);
+  const second = await connect({ FAKE_AGENT_FAIL: "codex" });
+  expect(second.failed).toEqual([]);
+  expect(adds()).toHaveLength(2);
+});
+
+test("OpenCode 2's plugins in object form are found", async () => {
+  mkdirSync(join(fake.home, ".config", "opencode"), { recursive: true });
+  writeFileSync(join(fake.home, ".config", "opencode", "opencode.json"), JSON.stringify({ plugins: [{ package: "@plannotator/opencode@latest" }] }));
+  const report = await connect();
+  expect(report.added).toEqual(["opencode"]);
+});
+
+describe("a JSON edit changes only the one entry", () => {
+  const cursor = () => join(fake.home, ".cursor", "mcp.json");
+  const put = (text: string) => {
+    mkdirSync(join(fake.home, ".cursor"), { recursive: true });
+    writeFileSync(cursor(), text);
+  };
+  test("a compact file stays compact; big integers, 1.0 and \\u escapes stay as written; a BOM is kept", async () => {
+    const before = '﻿{"n":12345678901234567890,"f":1.0,"s":"caf\\u00e9","mcpServers":{"a":{"command":"x"}}}';
+    put(before);
+    await connect();
+    const after = readFileSync(cursor(), "utf8");
+    expect(after).toBe(`﻿{"n":12345678901234567890,"f":1.0,"s":"caf\\u00e9","mcpServers":{"a":{"command":"x"},"plannotator-inbox":{"command":"${SELF[0]}","args":["inbox","mcp"]}}}`);
+    expect(planInboxAgentRemoval(dataDir, environment(), OURS).items).toHaveLength(1);
+    await planInboxAgentRemoval(dataDir, environment(), OURS).items[0]!.apply();
+    expect(readFileSync(cursor(), "utf8")).toBe(before);
+  });
+
+  test("numeric keys keep their order; a duplicate key on the path is refused", async () => {
+    put('{"2":1,"1":2,"mcpServers":{}}');
+    await connect();
+    expect(readFileSync(cursor(), "utf8").startsWith('{"2":1,"1":2,"mcpServers":{"plannotator-inbox"')).toBe(true);
+  });
+
+  test("two mcpServers blocks: refused, the file untouched", async () => {
+    const before = '{"mcpServers":{"a":{"command":"x"}},"mcpServers":{"b":{"command":"y"}}}';
+    put(before);
+    const report = await connect();
+    expect(report.failed[0]!.reason).toContain("twice");
+    expect(readFileSync(cursor(), "utf8")).toBe(before);
+  });
 });

@@ -2073,7 +2073,7 @@ describe("the Inbox's agent connections (inbox-agents.ts)", () => {
     writeJson(cursorFile(fixture), { mcpServers: { mine: { command: "x" }, "plannotator-inbox": ours } });
     writeJson(join(fixture.dataDir, "inbox", "agents.json"), {
       v: 1,
-      agents: { cursor: { state: "added", reach: "mcp", path: cursorFile(fixture), at: "2026-10-12T00:00:00.000Z" } },
+      agents: { cursor: { state: "added", reach: "mcp", path: cursorFile(fixture), command: ["/old/bin/plannotator", "inbox", "mcp"], at: "2026-10-12T00:00:00.000Z" } },
     });
   }
 
