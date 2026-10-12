@@ -2,6 +2,7 @@ import type { InboxHealth } from '@plannotator/core/inbox-types';
 import type { ProjectFolder } from '../api';
 import { Icon } from '../icons';
 import { useSidebar } from '../shell/sidebar';
+import { useInboxTheme } from '../theme';
 import { TaterMark } from './TaterMark';
 import { UpdateButton } from './Updates';
 
@@ -113,16 +114,37 @@ export function Sidebar(props: SidebarProps) {
           onPress={pick(props.onUpdate)}
           onWhatsNew={(version) => pick(() => props.onWhatsNew(version))()}
         />
-        <button
-          type="button"
-          className={`ib-nav${props.page === 'settings' ? ' ib-on' : ''}`}
-          onClick={pick(props.onSettings)}
-          aria-current={props.page === 'settings' ? 'page' : undefined}
-        >
-          <Icon name="settings" />
-          Settings
-        </button>
+        {/* Two controls side by side, never one inside the other: the row opens Settings, the icon flips light and dark. */}
+        <div className="ib-setrow">
+          <button
+            type="button"
+            className={`ib-nav${props.page === 'settings' ? ' ib-on' : ''}`}
+            onClick={pick(props.onSettings)}
+            aria-current={props.page === 'settings' ? 'page' : undefined}
+          >
+            <Icon name="settings" />
+            Settings
+          </button>
+          <ThemeToggle />
+        </div>
       </div>
     </aside>
+  );
+}
+
+/**
+ * Light or dark in one click, at the far right of the Settings row. It writes
+ * an explicit choice, the opposite of what is on screen (Settings' Theme row
+ * goes back to matching the system). A click here never opens Settings and
+ * never closes the phone sheet or the peek.
+ */
+function ThemeToggle() {
+  const { shown, flip } = useInboxTheme();
+  const next = shown === 'dark' ? 'light' : 'dark';
+  const label = `Switch to ${next} mode`;
+  return (
+    <button type="button" className="ib-theme-tg" aria-label={label} title={label} data-theme-toggle={shown} onClick={flip}>
+      <Icon name={next === 'light' ? 'sun' : 'moon'} />
+    </button>
   );
 }

@@ -8,6 +8,7 @@ import { HostMark, Icon } from '../icons';
 import { ConnectPicker } from './ConnectPicker';
 import { PhonesBlock } from './Phones';
 import { SidebarTrigger } from '../shell/sidebar';
+import { useInboxTheme } from '../theme';
 
 const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'claude-code', name: 'Claude Code' },
@@ -160,6 +161,41 @@ function SoundRow({ sound }: { sound: InboxSound }) {
         </div>
       )}
     </>
+  );
+}
+
+const THEME_CHOICES = [
+  { id: 'light', label: 'Light', icon: 'sun' },
+  { id: 'dark', label: 'Dark', icon: 'moon' },
+  { id: 'system', label: 'Match system', icon: 'system' },
+] as const;
+
+/**
+ * Appearance: light, dark, or match this computer. The sidebar's toggle
+ * writes light or dark; this row is the way back to following the system.
+ * Plannotator's one theme preference, so plan review follows it too.
+ */
+function AppearanceBlock() {
+  const { mode, shown, choose } = useInboxTheme();
+  return (
+    <div className="ib-sblock" data-settings-theme={mode}>
+      <h2>Appearance</h2>
+      <div className="ib-srow" style={{ paddingTop: 0 }}>
+        <span id="ib-theme-label">Theme</span>
+        <span className="ib-d">{mode === 'system' ? `follows this computer, ${shown} now` : 'also plan review, code review and annotate'}</span>
+        <span className="ib-r">
+          <span className="ib-seg" role="radiogroup" aria-labelledby="ib-theme-label">
+            {THEME_CHOICES.map((choice) => (
+              <label key={choice.id} className="ib-seg-o" data-on={mode === choice.id ? '' : undefined}>
+                <input type="radio" name="ib-theme" value={choice.id} checked={mode === choice.id} onChange={() => choose(choice.id)} />
+                <Icon name={choice.icon} size={14} />
+                {choice.label}
+              </label>
+            ))}
+          </span>
+        </span>
+      </div>
+    </div>
   );
 }
 
@@ -434,6 +470,7 @@ export function SettingsPage({
             )}
           </div>
         )}
+        <AppearanceBlock />
         {settings && (
           <NotificationsBlock
             settings={settings.notifications}
