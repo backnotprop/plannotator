@@ -435,7 +435,7 @@ describe("the device door, on the binary", () => {
     expect(decision.status).toBe(200);
     expect(((await decision.json()) as Json).question).toMatchObject({ key: open.key, decision_recording: true, decision_draft: { text: "Ship behind a flag.", reason: null } });
     const decisions = (await (await door(`decisions?project=${thread.thread.project.id}`)).json()) as Json;
-    expect(Object.keys(decisions).sort()).toEqual(["cursor", "decisions", "project_id", "serverSession", "waiting"]);
+    expect(Object.keys(decisions).sort()).toEqual(["cursor", "decisions", "project_counts", "project_id", "serverSession", "waiting"]);
     expect(decisions.waiting.map((d: Json) => d.prompt)).toContain("Ship it behind a flag?");
 
     // No live session yet: New message writes nothing.

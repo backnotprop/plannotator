@@ -1,9 +1,10 @@
 import { useEffect, useId, useState } from 'react';
 import type { InboxDecision } from '@plannotator/core/inbox-types';
-import { InboxApiError, type DecisionsModel, type ProjectFolder, type WaitingDecision } from '../api';
+import { InboxApiError, type DecisionProjectCounts, type DecisionsModel, type ProjectFolder, type WaitingDecision } from '../api';
 import { agentName, dateTime, dayWords, shortTime } from '../format';
 import { DecisionDiamond, Icon } from '../icons';
 import { SidebarTrigger } from '../shell/sidebar';
+import { DecisionsProjectPicker } from './DecisionsProjectPicker';
 
 /**
  * The project's decisions (the window record's 3.2): a project switch, then
@@ -29,6 +30,10 @@ export interface DecisionsPageProps {
   phone?: boolean;
   /** A window too narrow for the Decisions list beside an open decision (stack.ts): the decision covers the list and leads with the way back. */
   stacked?: boolean;
+  /** Every project's waiting and settled counts, for the project switch (the Decisions route's `project_counts`). */
+  counts?: ReadonlyMap<string, DecisionProjectCounts> | null;
+  /** The home folder, for the switch's `~/…` paths. */
+  home?: string | null;
 }
 
 /** Who and how, in the row's two muted columns. */
@@ -311,13 +316,14 @@ export function DecisionsPage(props: DecisionsPageProps) {
         <div className="ib-dh">
           <SidebarTrigger />
           <h1>Decisions</h1>
-          <select className="ib-select" aria-label="Project" value={project.id} onChange={(event) => props.onProject(event.target.value)}>
-            {props.projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+          <DecisionsProjectPicker
+            projects={props.projects}
+            current={project}
+            counts={props.counts ?? null}
+            home={props.home ?? null}
+            phone={props.phone === true}
+            onPick={props.onProject}
+          />
         </div>
         <p className="ib-dsub">What holds true in {project.name}, and what waits on a call.</p>
         {props.error && <div className="ib-error">{props.error}</div>}

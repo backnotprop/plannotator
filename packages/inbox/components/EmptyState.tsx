@@ -8,8 +8,8 @@ type PlannotatorHost = 'claude-code' | 'pi' | 'opencode';
 
 const HOSTS: readonly { host: PlannotatorHost; name: string; line: string }[] = [
   { host: 'claude-code', name: 'Claude Code', line: "Plannotator's mod writes here. Nothing to install." },
-  { host: 'pi', name: 'Pi', line: "Plannotator's extension writes here. Nothing to install." },
-  { host: 'opencode', name: 'OpenCode', line: "Plannotator's plugin writes here. Nothing to install." },
+  { host: 'pi', name: 'Pi', line: "Plannotator's extension writes here once its Inbox tool is on in Settings, from the next Pi session." },
+  { host: 'opencode', name: 'OpenCode', line: "Plannotator's plugin writes here once its Inbox tool is on in Settings, from the next OpenCode start." },
 ];
 
 /**
