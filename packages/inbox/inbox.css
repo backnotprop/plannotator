@@ -986,11 +986,17 @@ pre code.pn-code[data-keep-layout] {
 /* The reply box's skip chip, and its twin in the foot. */
 .pn-inbox .ib-skipchip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 4px 0 9px; border-radius: 6px; font-size: 12.5px; font-weight: 500; box-shadow: inset 0 0 0 1px var(--border); color: var(--muted-foreground); white-space: nowrap; }
 .ib-skipchip .ib-ic { width: 14px; height: 14px; }
+.ib-skip-s { display: inline-flex; align-items: center; gap: 6px; }
 .pn-inbox .ib-skipchip button { color: var(--primary); font-weight: 550; height: 22px; padding: 0 6px; border-radius: 5px; }
 .pn-inbox .ib-skipchip button:hover { background: color-mix(in oklch, var(--primary) 10%, transparent); }
 .ib-keep .ib-skipchip { color: var(--foreground); }
-/* In the reply box the skip chip is a sentence: where the box is narrower than it (a phone), its words wrap inside it rather than running out of the box. Where it fits it draws as before (26 px, one line). */
-.pn-inbox .ib-rfoot .ib-skipchip { flex: 0 1 auto; max-width: 100%; height: auto; min-height: 26px; white-space: normal; }
+/* In the reply box the skip chip is a sentence: where the box is narrower than it (a phone), Keep open / Skip them
+   moves under the sentence and the sentence wraps, all inside the chip, at any width and with any font's metrics
+   (a box narrower than its longest word breaks the word rather than drawing outside). Where it fits it draws as
+   before (26 px, one line). */
+.pn-inbox .ib-rfoot .ib-skipchip { flex: 0 1 auto; max-width: 100%; min-width: 0; height: auto; min-height: 26px; white-space: normal; flex-wrap: wrap; row-gap: 2px; }
+.ib-rfoot .ib-skip-s { display: block; flex: 0 1 auto; min-width: 0; overflow-wrap: break-word; }
+.ib-rfoot .ib-skip-s > .ib-ic { display: inline-block; vertical-align: -2px; margin-right: 6px; }
 .pn-inbox .ib-rfoot .ib-skipchip button { flex: none; white-space: nowrap; }
 /* The list: a quiet hover action on rows that wait on the person. */
 .ib-rw { position: relative; }

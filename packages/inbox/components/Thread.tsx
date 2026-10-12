@@ -1905,8 +1905,11 @@ function SkipChip({ count, keepOpen, onToggle }: { count: number; keepOpen: bool
   const them = count === 1 ? 'it' : 'them';
   return (
     <span className="ib-skipchip" data-skip-chip={keepOpen ? 'keep' : 'skip'}>
-      {!keepOpen && <Icon name="forward" size={14} />}
-      {keepOpen ? `${plural(count, 'unanswered question')} ${count === 1 ? 'stays' : 'stay'} open` : `${plural(count, 'unanswered question')} will be skipped`}
+      {/* The icon and the sentence are one item, so where the chip wraps (a narrow reply box) the icon stays with its words. */}
+      <span className="ib-skip-s">
+        {!keepOpen && <Icon name="forward" size={14} />}
+        {keepOpen ? `${plural(count, 'unanswered question')} ${count === 1 ? 'stays' : 'stay'} open` : `${plural(count, 'unanswered question')} will be skipped`}
+      </span>
       <button type="button" onClick={onToggle} data-skip-toggle="">
         {keepOpen ? `Skip ${them}` : 'Keep open'}
       </button>
