@@ -119,13 +119,26 @@ import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { createInboxTailscale, PHONES_TAILNET_HTTPS_PORT, type InboxTailscale } from "./inbox-tailscale";
 import { createInboxUpdates, type InboxUpdatesOptions } from "./inbox-updates";
 import {
+  agentSpec,
   connectInboxAgents,
   createAgentEnvironment,
   displayPath,
+  inboxAgentReach,
+  inboxConnectDisabled,
   readInboxAgents,
+  setInboxAgentReach,
+  writeInboxAgents,
   type AgentEnvironment,
 } from "./inbox-agents";
-import type { InboxConnectReport } from "@plannotator/core/inbox-types";
+import { addInboxNote, INBOX_NOTE_BLOCK, noteStatus, removeInboxNote } from "./inbox-agent-notes";
+import {
+  INBOX_AGENT_IDS,
+  INBOX_AGENT_LABELS,
+  INBOX_NOTE_AGENT_IDS,
+  type InboxAgentId,
+  type InboxConnectReport,
+  type InboxNoteAgentId,
+} from "@plannotator/core/inbox-types";
 
 /** Where a request came in: the window's loopback port, or the tailnet-only listener `tailscale serve` points at. */
 type RequestVia = "local" | "tailnet";
@@ -626,10 +639,83 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** What the window reads about the agents: the records (paths shown with ~), the last run's report, and whether a run is going. */
   const agentsModel = () => {
     const file = readInboxAgents(dataDir);
-    const agents = Object.fromEntries(
+    const records = Object.fromEntries(
       Object.entries(file.agents).map(([id, record]) => [id, { ...record, path: displayPath(record!.path, agentEnvironment) }]),
     );
-    return { agents, last_report: file.last_report ?? null, connecting: connecting !== null };
+    const config = loadConfig();
+    const toolEnv = parseInboxToolEnv(agentEnvironment.env as NodeJS.ProcessEnv);
+    const agents = INBOX_AGENT_IDS.map((id) => {
+      const detected = agentSpec(id).detect(agentEnvironment);
+      const reach = inboxAgentReach(id, dataDir, agentEnvironment);
+      const host = (INBOX_TOOL_HOSTS as readonly string[]).includes(id) ? (id as InboxToolHost) : null;
+      const reminder = host
+        ? { on: resolveInboxReminder(config, agentEnvironment.env as NodeJS.ProcessEnv, host), locked: toolEnv !== undefined, needs_tool: !resolveInboxTool(config, agentEnvironment.env as NodeJS.ProcessEnv, host) }
+        : null;
+      const note = (INBOX_NOTE_AGENT_IDS as readonly string[]).includes(id) ? noteStatus(id as InboxNoteAgentId, dataDir, agentEnvironment) : null;
+      return { id, label: INBOX_AGENT_LABELS[id], detected, reach, reminder, note };
+    });
+    return {
+      agents,
+      records,
+      last_report: file.last_report ?? null,
+      connecting: connecting !== null,
+      connect_env_off: inboxConnectDisabled(agentEnvironment.env),
+      tool_env: toolEnv ?? null,
+      notes_offered: loadConfig().inboxAgentNotes?.offered === true,
+      note_text: INBOX_NOTE_BLOCK,
+    };
+  };
+
+  /** Settings → Agents: one agent's switches (reach, reminder, note). Each applies to that agent's next session. */
+  const saveAgent = async (body: Record<string, unknown>) => {
+    const id = body.agent;
+    if (typeof id !== "string" || !(INBOX_AGENT_IDS as readonly string[]).includes(id)) {
+      throw new InboxError("validation_error", "agent: one of the agents the Inbox knows.", { field: "agent" });
+    }
+    const agent = id as InboxAgentId;
+    for (const field of ["reach", "reminder", "note"] as const) {
+      if (body[field] !== undefined && typeof body[field] !== "boolean") throw new InboxError("validation_error", `${field}: a boolean.`, { field });
+    }
+    if (body.reach === undefined && body.reminder === undefined && body.note === undefined) {
+      throw new InboxError("validation_error", "body: reach, reminder or note is required.");
+    }
+    const problems: string[] = [];
+    if (typeof body.reach === "boolean") {
+      const problem = await setInboxAgentReach(agent, body.reach, { dataDir, selfCommand, environment: agentEnvironment });
+      if (problem) problems.push(problem);
+    }
+    if (typeof body.reminder === "boolean") {
+      if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "reminder: only Claude Code, Pi and OpenCode have one.", { field: "reminder" });
+      if (parseInboxToolEnv(agentEnvironment.env as NodeJS.ProcessEnv) !== undefined) problems.push("PLANNOTATOR_INBOX_TOOL decides this");
+      else {
+        const current = loadConfig().inboxReminder;
+        const next: Partial<Record<InboxToolHost, boolean>> = {};
+        for (const host of INBOX_TOOL_HOSTS) {
+          const value = configuredInboxReminder({ inboxReminder: current }, host);
+          if (value !== undefined) next[host] = value;
+        }
+        next[agent as InboxToolHost] = body.reminder;
+        saveConfig({ inboxReminder: next });
+        if (configuredInboxReminder(loadConfig(), agent as InboxToolHost) !== body.reminder) problems.push("Plannotator's config.json can't be written");
+      }
+    }
+    if (typeof body.note === "boolean") {
+      if (!(INBOX_NOTE_AGENT_IDS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "note: this agent has no instructions file.", { field: "note" });
+      const change = body.note ? addInboxNote(agent as InboxNoteAgentId, dataDir, agentEnvironment) : removeInboxNote(agent as InboxNoteAgentId, dataDir, agentEnvironment);
+      if (!change.ok) problems.push(change.reason);
+    }
+    return { ...agentsModel(), error: problems.length ? problems.join("; ") : null };
+  };
+
+  /** The first-open card's answer: add the notes the person ticked (none for Not now); the question is never asked again. */
+  const answerNotes = (body: Record<string, unknown>) => {
+    const add = body.add;
+    if (!Array.isArray(add) || add.some((id) => typeof id !== "string" || !(INBOX_NOTE_AGENT_IDS as readonly string[]).includes(id))) {
+      throw new InboxError("validation_error", "add: a list of agents (claude-code, codex, gemini, pi, opencode).", { field: "add" });
+    }
+    const results = [...new Set(add as InboxNoteAgentId[])].map((agent) => addInboxNote(agent, dataDir, agentEnvironment));
+    saveConfig({ inboxAgentNotes: { ...(loadConfig().inboxAgentNotes ?? {}), offered: true } });
+    return { results, ...agentsModel() };
   };
 
   /** The agent tool knob per host: the effective value, and whether the env var decides it. */
@@ -1266,10 +1352,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ error: "Not found", code: "not_found" }, 404);
       }
       // The agents on this computer: paths in the person's home, so only on this computer.
-      if (path === "/api/inbox/agents") {
+      if (path === "/api/inbox/agents" || path.startsWith("/api/inbox/agents/")) {
+        // The person's own agent files: only on this computer.
         if (via === "tailnet") return localOnly();
-        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
-        return json(agentsModel());
+        if (path === "/api/inbox/agents" && req.method === "GET") return json(agentsModel());
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        if (path === "/api/inbox/agents") return json(await saveAgent(body));
+        if (path === "/api/inbox/agents/notes") return json(answerNotes(body));
+        if (path === "/api/inbox/agents/seen") {
+          const file = readInboxAgents(dataDir);
+          if (file.last_report && !file.last_report.seen) writeInboxAgents(dataDir, { ...file, last_report: { ...file.last_report, seen: true } });
+          return json(agentsModel());
+        }
+        return json({ error: "Not found", code: "not_found" }, 404);
       }
       if (path === "/api/inbox/settings") {
         if (req.method === "GET") return json(settingsModel(via));

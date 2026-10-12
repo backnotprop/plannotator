@@ -32,7 +32,8 @@ import { inboxStatus, readInboxRegistry, stopInbox } from "@plannotator/shared/i
 import { INBOX_TAILNET_HTTPS_PORT, takeDownInboxTailnet } from "./inbox-devices";
 import { takeDownInboxTailscale } from "./inbox-tailscale";
 import { forgetInboxAgents, planInboxAgentRemoval, type AgentEnvironment } from "./inbox-agents";
-import type { InboxAgentId } from "@plannotator/core/inbox-types";
+import { planInboxNoteRemoval } from "./inbox-agent-notes";
+import { INBOX_AGENT_LABELS, type InboxAgentId } from "@plannotator/core/inbox-types";
 import {
   applyEdits,
   createScanner,
@@ -538,11 +539,20 @@ async function removeInboxAgentConnections(
   environment: UninstallEnvironment,
   state: MutableUninstallResult,
 ): Promise<void> {
-  const plan = planInboxAgentRemoval(state.dataDir, agentEnvironmentOf(environment));
+  const agents = agentEnvironmentOf(environment);
+  const plan = planInboxAgentRemoval(state.dataDir, agents);
+  // The notes (inbox-agent-notes.ts): only the marked section, as the person left it.
+  const notes = planInboxNoteRemoval(state.dataDir, agents, INBOX_AGENT_LABELS);
   for (const skipped of plan.skipped) state.warnings.push(`Skipped: ${skipped}.`);
   if (request.dryRun) {
     for (const item of plan.items) state.planned.push(item.describe);
+    for (const note of notes) state.planned.push(note.describe);
     return;
+  }
+  for (const note of notes) {
+    const result = note.apply();
+    if (result.ok) state.removed.push(note.describe);
+    else state.warnings.push(`Could not remove the note in ${note.path}: ${result.reason}.`);
   }
   const removed: InboxAgentId[] = [];
   for (const item of plan.items) {

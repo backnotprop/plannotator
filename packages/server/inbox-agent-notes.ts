@@ -1,0 +1,376 @@
+/**
+ * The Inbox note in each agent's own instructions file (the approved
+ * "inbox-agent-awareness" design, decision 5; HOOKS.md section 6.2).
+ *
+ * Written only with the person's yes: the window's one-time question, a
+ * Settings switch, or `plannotator inbox --notes <ids>` (the install prompt,
+ * after the person agreed in chat). Never by a start, the shim or a
+ * connection.
+ *
+ * Where (honouring CLAUDE_CONFIG_DIR, CODEX_HOME, OPENCODE_CONFIG_DIR /
+ * XDG_CONFIG_HOME, PI_CODING_AGENT_DIR and Gemini's `context.fileName`):
+ *  - Claude Code: `~/.claude/rules/plannotator-inbox.md`, a file Plannotator owns.
+ *  - Codex: `AGENTS.override.md` when it exists, else `AGENTS.md` (created only without an override).
+ *  - OpenCode: `~/.config/opencode/AGENTS.md`, ONLY when it exists: creating it
+ *    would stop OpenCode 1 reading the person's `~/.claude/CLAUDE.md`.
+ *  - Pi: the first that exists of `AGENTS.override.md`, `AGENTS.md`,
+ *    `AGENTS.MD`, `CLAUDE.md`, `CLAUDE.MD` (Pi reads only one); `AGENTS.md`
+ *    created only when none does.
+ *  - Gemini CLI: `~/.gemini/<context.fileName>`, default `GEMINI.md`.
+ *
+ * The block sits between markers at the END of the file. Exactly one start
+ * before exactly one end: the block is ours; none: appended; anything else:
+ * damaged, nothing is written. `inbox/agent-notes.json` keeps each block's
+ * SHA-256, so a block the person edited is theirs and never overwritten (a
+ * newer note version is written only over an untouched block). Writes keep
+ * line endings and mode, follow symlinks, are atomic, and are skipped when
+ * nothing changes (agent-files.ts).
+ */
+
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import {
+  INBOX_NOTE_AGENT_IDS,
+  type InboxAgentNoteStatus,
+  type InboxNoteAgentId,
+} from "@plannotator/core/inbox-types";
+import { inboxDir } from "@plannotator/shared/inbox/schema";
+import { readAgentFile, stripJsonComments, withLineEndings, writeAgentFileAtomic, describeFsError } from "./agent-files";
+import {
+  agentHomeAllowed,
+  claudeConfigDir,
+  codexHome,
+  displayPath,
+  geminiDir,
+  openCodeConfigDir,
+  piAgentDir,
+  type AgentEnvironment,
+} from "./inbox-agents";
+
+export const INBOX_NOTE_VERSION = 1;
+export const INBOX_NOTE_START = `<!-- plannotator-inbox:start v${INBOX_NOTE_VERSION} · added by Plannotator. Remove it in the Inbox's Settings or with \`plannotator uninstall\` -->`;
+export const INBOX_NOTE_END = "<!-- plannotator-inbox:end -->";
+
+/** The note (DESIGN.md section 2.3): true with or without the tool, so a session without it is not misled. */
+export const INBOX_NOTE_BODY = [
+  "## Plannotator Inbox",
+  "",
+  "The person keeps a Plannotator Inbox on this computer: a window where they read what agents send and answer when they can.",
+  "If you have a `plannotator_inbox` tool or a `plannotator-inbox` MCP server, use its `send_message` when the person isn't here to answer in this chat: to ask a decision only they can make (as a `:::question` block), or to hand over finished long work (put the files to read in `attachments`). Then keep working.",
+  "Their reply comes back to this session by itself where your agent supports that; otherwise call `wait_for_reply`. When they are here, ask in this chat instead.",
+].join("\n");
+
+export const INBOX_NOTE_BLOCK = `${INBOX_NOTE_START}\n${INBOX_NOTE_BODY}\n${INBOX_NOTE_END}`;
+
+export const INBOX_AGENT_NOTES_FILE = "agent-notes.json";
+
+/** Any version's start marker, and the end marker, each on its own line. */
+const START_LINE = /^<!-- plannotator-inbox:start\b[^\n]*-->[ \t]*$/gm;
+const END_LINE = /^<!-- plannotator-inbox:end -->[ \t]*$/gm;
+
+export interface InboxAgentNoteRecord {
+  /** The file written (a link's target). */
+  path: string;
+  /** Plannotator created the file. */
+  created: boolean;
+  version: number;
+  /** SHA-256 of the block as written (LF line endings). */
+  block_sha256: string;
+  at: string;
+}
+
+export interface InboxAgentNotesFile {
+  v: 1;
+  notes: Partial<Record<InboxNoteAgentId, InboxAgentNoteRecord>>;
+}
+
+export function inboxAgentNotesPath(dataDir: string): string {
+  return join(inboxDir(dataDir), INBOX_AGENT_NOTES_FILE);
+}
+
+export function readInboxAgentNotes(dataDir: string): InboxAgentNotesFile {
+  try {
+    const parsed = JSON.parse(readFileSync(inboxAgentNotesPath(dataDir), "utf8")) as Partial<InboxAgentNotesFile>;
+    if (parsed && parsed.v === 1 && parsed.notes && typeof parsed.notes === "object") {
+      const notes: InboxAgentNotesFile["notes"] = {};
+      for (const id of INBOX_NOTE_AGENT_IDS) {
+        const record = (parsed.notes as Record<string, unknown>)[id] as InboxAgentNoteRecord | undefined;
+        if (record && typeof record.path === "string" && typeof record.block_sha256 === "string") notes[id] = record;
+      }
+      return { v: 1, notes };
+    }
+  } catch {
+    // Missing or damaged: the files themselves still carry the markers.
+  }
+  return { v: 1, notes: {} };
+}
+
+function writeInboxAgentNotes(dataDir: string, file: InboxAgentNotesFile): void {
+  writeAgentFileAtomic(inboxAgentNotesPath(dataDir), `${JSON.stringify(file, null, 2)}\n`, 0o600);
+}
+
+const sha256 = (text: string) => createHash("sha256").update(text.replace(/\r\n/g, "\n")).digest("hex");
+
+// ---------------------------------------------------------------------------
+// Where each note goes
+
+interface NoteTarget {
+  /** The file the note goes in, or null when there is none to add to. */
+  path: string | null;
+  /** Adding it creates the file. */
+  create: boolean;
+  /** Why there is no file. */
+  reason: string | null;
+}
+
+/** Gemini's instruction file name (`context.fileName`, a string or a list; the first), default GEMINI.md. */
+function geminiContextFile(e: AgentEnvironment): string {
+  const read = readAgentFile(join(geminiDir(e), "settings.json"));
+  if (read.kind === "file") {
+    try {
+      const context = (JSON.parse(stripJsonComments(read.text)) as { context?: { fileName?: unknown } }).context;
+      const name = Array.isArray(context?.fileName) ? context?.fileName[0] : context?.fileName;
+      if (typeof name === "string" && /^[^/\\]+$/.test(name.trim())) return name.trim();
+    } catch {
+      // The default.
+    }
+  }
+  return "GEMINI.md";
+}
+
+export function noteTarget(agent: InboxNoteAgentId, e: AgentEnvironment): NoteTarget {
+  const exists = (path: string) => existsSync(path);
+  switch (agent) {
+    case "claude-code":
+      return { path: join(claudeConfigDir(e), "rules", "plannotator-inbox.md"), create: true, reason: null };
+    case "codex": {
+      const override = join(codexHome(e), "AGENTS.override.md");
+      if (exists(override)) return { path: override, create: false, reason: null };
+      const file = join(codexHome(e), "AGENTS.md");
+      return { path: file, create: !exists(file), reason: null };
+    }
+    case "opencode": {
+      const file = join(openCodeConfigDir(e), "AGENTS.md");
+      if (exists(file)) return { path: file, create: false, reason: null };
+      return { path: file, create: false, reason: "Creating this file would stop OpenCode 1 from reading your ~/.claude/CLAUDE.md, so Plannotator adds the note only to an AGENTS.md you already have." };
+    }
+    case "pi": {
+      const dir = piAgentDir(e);
+      for (const name of ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"]) {
+        if (exists(join(dir, name))) return { path: join(dir, name), create: false, reason: null };
+      }
+      return { path: join(dir, "AGENTS.md"), create: true, reason: null };
+    }
+    case "gemini": {
+      const file = join(geminiDir(e), geminiContextFile(e));
+      return { path: file, create: !exists(file), reason: null };
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Finding the block
+
+type BlockFind =
+  | { kind: "none" }
+  | { kind: "one"; start: number; end: number; block: string }
+  | { kind: "damaged" };
+
+/** The block's span in LF text: from its start marker to the end of its end marker line. */
+function findBlock(text: string): BlockFind {
+  const starts = [...text.matchAll(START_LINE)].map((m) => m.index!);
+  const ends = [...text.matchAll(END_LINE)].map((m) => ({ index: m.index!, length: m[0].length }));
+  if (starts.length === 0 && ends.length === 0) return { kind: "none" };
+  if (starts.length !== 1 || ends.length !== 1 || ends[0]!.index < starts[0]!) return { kind: "damaged" };
+  const start = starts[0]!;
+  const end = ends[0]!.index + ends[0]!.length;
+  return { kind: "one", start, end, block: text.slice(start, end) };
+}
+
+/** `text` (LF) with the block appended at the end, after one blank line. */
+function appendBlock(text: string): string {
+  if (!text.trim()) return `${INBOX_NOTE_BLOCK}\n`;
+  return `${text.endsWith("\n") ? text : `${text}\n`}\n${INBOX_NOTE_BLOCK}\n`;
+}
+
+/** `text` (LF) without the block at [start, end), its line break, and the one blank line the writer put before it. */
+function stripBlock(text: string, start: number, end: number): string {
+  let from = start;
+  let to = end;
+  if (text[to] === "\n") to += 1;
+  if (from >= 2 && text[from - 1] === "\n" && text[from - 2] === "\n") from -= 1;
+  return text.slice(0, from) + text.slice(to);
+}
+
+// ---------------------------------------------------------------------------
+// Status, add, remove
+
+export function noteStatus(agent: InboxNoteAgentId, dataDir: string, e: AgentEnvironment): InboxAgentNoteStatus {
+  const target = noteTarget(agent, e);
+  const record = readInboxAgentNotes(dataDir).notes[agent];
+  const base = { agent, path: displayPath(target.path, e), target: null, create: target.create, created: record?.created === true, reason: null };
+  if (!target.path) return { ...base, state: "unavailable", reason: target.reason };
+  const read = readAgentFile(target.path);
+  const linked = read.kind !== "missing" && read.target !== target.path ? displayPath(read.target, e) : null;
+  if (read.kind === "missing") {
+    return target.reason ? { ...base, state: "unavailable", reason: target.reason } : { ...base, state: "absent" };
+  }
+  if (read.kind === "refused") return { ...base, target: linked, state: "refused", reason: read.reason };
+  const found = findBlock(read.text.replace(/\r\n/g, "\n"));
+  if (found.kind === "none") return { ...base, target: linked, state: "absent" };
+  if (found.kind === "damaged") return { ...base, target: linked, state: "damaged", reason: "the Plannotator section's markers are broken; fix or delete it by hand" };
+  const hash = sha256(found.block);
+  const untouched = record ? record.block_sha256 === hash : hash === sha256(INBOX_NOTE_BLOCK);
+  return { ...base, target: linked, state: untouched ? "added" : "edited" };
+}
+
+export type NoteChange =
+  | { ok: true; agent: InboxNoteAgentId; action: "added" | "created" | "updated" | "unchanged" | "removed" | "deleted" | "kept-edited"; path: string }
+  | { ok: false; agent: InboxNoteAgentId; reason: string; path: string | null };
+
+function recordNote(dataDir: string, agent: InboxNoteAgentId, record: InboxAgentNoteRecord | null): void {
+  const file = readInboxAgentNotes(dataDir);
+  if (record) file.notes[agent] = record;
+  else delete file.notes[agent];
+  writeInboxAgentNotes(dataDir, file);
+}
+
+/** Add (or bring up to date) the note for one agent. Never overwrites a block the person edited. */
+export function addInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentEnvironment, now = new Date()): NoteChange {
+  const target = noteTarget(agent, e);
+  const shown = displayPath(target.path, e);
+  if (!agentHomeAllowed(e)) return { ok: false, agent, reason: "not in a test's scratch home", path: shown };
+  if (!target.path) return { ok: false, agent, reason: target.reason ?? "no file to add the note to", path: null };
+  const read = readAgentFile(target.path);
+  if (read.kind === "refused") return { ok: false, agent, reason: `${shown} can't be edited: ${read.reason}`, path: shown };
+  if (read.kind === "missing" && (!target.create || target.reason)) {
+    return { ok: false, agent, reason: target.reason ?? `${shown} does not exist`, path: shown };
+  }
+  const record = readInboxAgentNotes(dataDir).notes[agent];
+  const original = read.kind === "file" ? read.text : "";
+  const lf = original.replace(/\r\n/g, "\n");
+  const found = findBlock(lf);
+  if (found.kind === "damaged") return { ok: false, agent, reason: `the Plannotator section in ${shown} is damaged; fix or delete it by hand`, path: shown };
+  let next: string;
+  let action: "added" | "created" | "updated" | "unchanged";
+  if (found.kind === "one") {
+    const hash = sha256(found.block);
+    if (hash === sha256(INBOX_NOTE_BLOCK)) {
+      next = lf;
+      action = "unchanged";
+    } else if (record && record.block_sha256 === hash) {
+      next = lf.slice(0, found.start) + INBOX_NOTE_BLOCK + lf.slice(found.end);
+      action = "updated";
+    } else {
+      // The person's edit: theirs to keep.
+      return { ok: true, agent, action: "kept-edited", path: shown! };
+    }
+  } else {
+    next = appendBlock(lf);
+    action = read.kind === "missing" ? "created" : "added";
+  }
+  const crlf = read.kind === "file" ? read.crlf : false;
+  const text = withLineEndings(next, crlf);
+  const writeTo = read.target;
+  if (read.kind !== "file" || text !== read.text) {
+    try {
+      writeAgentFileAtomic(writeTo, text, read.kind === "file" ? read.mode : 0o644);
+    } catch (error) {
+      return { ok: false, agent, reason: `${shown} can't be written (${describeFsError(error)})`, path: shown };
+    }
+  }
+  recordNote(dataDir, agent, {
+    path: writeTo,
+    created: action === "created" || record?.created === true,
+    version: INBOX_NOTE_VERSION,
+    block_sha256: sha256(INBOX_NOTE_BLOCK),
+    at: now.toISOString(),
+  });
+  return { ok: true, agent, action, path: shown! };
+}
+
+/** Remove one agent's note (as the person left it). A file Plannotator created is deleted when nothing else is left. */
+export function removeInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentEnvironment, path?: string): NoteChange {
+  const record = readInboxAgentNotes(dataDir).notes[agent];
+  const file = path ?? record?.path ?? noteTarget(agent, e).path;
+  const shown = displayPath(file, e);
+  if (!agentHomeAllowed(e)) return { ok: false, agent, reason: "not in a test's scratch home", path: shown };
+  if (!file) return { ok: true, agent, action: "unchanged", path: "" };
+  const read = readAgentFile(file);
+  if (read.kind === "missing") {
+    recordNote(dataDir, agent, null);
+    return { ok: true, agent, action: "unchanged", path: shown! };
+  }
+  if (read.kind === "refused") return { ok: false, agent, reason: `${shown} can't be edited: ${read.reason}`, path: shown };
+  const lf = read.text.replace(/\r\n/g, "\n");
+  const found = findBlock(lf);
+  if (found.kind === "damaged") return { ok: false, agent, reason: `the Plannotator section in ${shown} is damaged; fix or delete it by hand`, path: shown };
+  if (found.kind === "none") {
+    recordNote(dataDir, agent, null);
+    return { ok: true, agent, action: "unchanged", path: shown! };
+  }
+  const rest = stripBlock(lf, found.start, found.end);
+  try {
+    if (record?.created && record.path === read.target && !rest.trim()) {
+      rmSync(read.target, { force: true });
+      recordNote(dataDir, agent, null);
+      return { ok: true, agent, action: "deleted", path: shown! };
+    }
+    writeAgentFileAtomic(read.target, withLineEndings(rest, read.crlf), read.mode);
+  } catch (error) {
+    return { ok: false, agent, reason: `${shown} can't be written (${describeFsError(error)})`, path: shown };
+  }
+  recordNote(dataDir, agent, null);
+  return { ok: true, agent, action: "removed", path: shown! };
+}
+
+/** Every file a note could be in for `agent` (for the uninstall scan when the record is gone). */
+function candidatePaths(agent: InboxNoteAgentId, e: AgentEnvironment): string[] {
+  switch (agent) {
+    case "codex":
+      return [join(codexHome(e), "AGENTS.override.md"), join(codexHome(e), "AGENTS.md")];
+    case "pi":
+      return ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"].map((name) => join(piAgentDir(e), name));
+    default: {
+      const target = noteTarget(agent, e);
+      return target.path ? [target.path] : [];
+    }
+  }
+}
+
+export interface NoteRemovalItem {
+  agent: InboxNoteAgentId;
+  path: string;
+  describe: string;
+  apply: () => NoteChange;
+}
+
+/** What uninstall removes: every recorded note, then any file that still holds our markers. */
+export function planInboxNoteRemoval(dataDir: string, e: AgentEnvironment, labels: Record<InboxNoteAgentId, string>): NoteRemovalItem[] {
+  if (!agentHomeAllowed(e)) return [];
+  const records = readInboxAgentNotes(dataDir).notes;
+  const items: NoteRemovalItem[] = [];
+  const seen = new Set<string>();
+  for (const agent of INBOX_NOTE_AGENT_IDS) {
+    const paths = [records[agent]?.path, ...candidatePaths(agent, e)].filter((p): p is string => !!p);
+    for (const path of paths) {
+      const read = readAgentFile(path);
+      if (read.kind !== "file" || seen.has(read.target)) continue;
+      const found = findBlock(read.text.replace(/\r\n/g, "\n"));
+      if (found.kind !== "one") continue;
+      seen.add(read.target);
+      const record = records[agent]?.path === read.target ? records[agent] : undefined;
+      const edited = sha256(found.block) !== (record?.block_sha256 ?? sha256(INBOX_NOTE_BLOCK));
+      const shown = displayPath(path, e)!;
+      const how = record?.created ? "created by Plannotator: file removed if empty" : "marked section only";
+      items.push({
+        agent,
+        path: shown,
+        describe: `Note for ${labels[agent]} (${shown}, ${how}${edited ? "; you edited it" : ""})`,
+        apply: () => removeInboxNote(agent, dataDir, e, path),
+      });
+    }
+  }
+  return items;
+}

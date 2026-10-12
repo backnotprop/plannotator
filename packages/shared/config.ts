@@ -306,6 +306,16 @@ export interface PlannotatorConfig {
     dialogShownFor?: string;
   };
   /**
+   * The Plannotator Inbox's note in each agent's own instructions file
+   * (packages/server/inbox-agent-notes.ts). `offered`: the one-time question
+   * on the window's first open was answered (Add or Not now), or
+   * `plannotator inbox --notes` ran; the window never asks again. Which notes
+   * exist is kept in `inbox/agent-notes.json`, beside the files they are in.
+   */
+  inboxAgentNotes?: {
+    offered?: boolean;
+  };
+  /**
    * The Plannotator Inbox's phone surface: pairing, the device door
    * (`/api/inbox/device/*`), the tailnet and Wi-Fi listeners, the relay and
    * Settings' Phones block. Hidden until the iPhone app ships, so `true` is

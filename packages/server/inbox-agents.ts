@@ -945,6 +945,92 @@ function cliRemoveArgs(id: InboxAgentId): { bin: string; args: string[] } | null
   }
 }
 
+// ---------------------------------------------------------------------------
+// Settings → Agents: one agent's reach, and the person's switch
+
+export interface InboxAgentReachState {
+  /** tool: Plannotator's plugin/extension (`inboxTool`); mcp: a plannotator-inbox entry; manual: only a person can add it; none: nothing to switch. */
+  kind: "tool" | "mcp" | "manual" | "none";
+  on: boolean;
+  state: "connected" | "off" | "removed" | "foreign" | "not_connected" | "manual" | "unreadable";
+  /** Where the entry is (`~` for home). */
+  path: string | null;
+  /** PLANNOTATOR_INBOX_TOOL decides the tool switch. */
+  locked: boolean;
+  reason: string | null;
+}
+
+/** How one agent reaches the Inbox now (read only). */
+export function inboxAgentReach(id: InboxAgentId, dataDir: string, e: AgentEnvironment): InboxAgentReachState {
+  const spec = agentSpec(id);
+  const way = id === "claude-code" ? ({ kind: "tool", host: "claude-code" } as const) : spec.way(e);
+  const file = spec.file(e);
+  const path = displayPath(file, e);
+  const record = readInboxAgents(dataDir).agents[id];
+  if (way.kind === "tool") {
+    const locked = parseInboxToolEnv(e.env as NodeJS.ProcessEnv) !== undefined;
+    const on = resolveInboxTool(loadConfig(), e.env as NodeJS.ProcessEnv, way.host);
+    return { kind: "tool", on, state: on ? "connected" : "off", path: null, locked, reason: null };
+  }
+  if (way.kind === "manual" || way.kind === "none") return { kind: way.kind, on: false, state: "manual", path, locked: false, reason: null };
+  const read = spec.read(e);
+  if (read?.kind === "ours") return { kind: "mcp", on: true, state: "connected", path, locked: false, reason: null };
+  if (read?.kind === "other") return { kind: "mcp", on: false, state: "foreign", path, locked: false, reason: null };
+  if (read?.kind === "unreadable") return { kind: "mcp", on: false, state: "unreadable", path, locked: false, reason: read.reason };
+  if (read === null && record && (record.state === "added" || record.state === "found")) {
+    return { kind: "mcp", on: true, state: "connected", path, locked: false, reason: null };
+  }
+  if (record?.state === "off") return { kind: "mcp", on: false, state: "off", path, locked: false, reason: null };
+  if (record && (record.state === "added" || record.state === "found")) return { kind: "mcp", on: false, state: "removed", path, locked: false, reason: null };
+  return { kind: "mcp", on: false, state: "not_connected", path, locked: false, reason: null };
+}
+
+/**
+ * The person's switch in Settings: on adds the entry (or turns the tool on)
+ * whatever the record says; off removes Plannotator's entry (never one that
+ * runs something else) and records `off`, so no later run adds it back.
+ * Returns an error reason, or null.
+ */
+export async function setInboxAgentReach(id: InboxAgentId, on: boolean, options: ConnectOptions): Promise<string | null> {
+  const e = options.environment;
+  if (!agentHomeAllowed(e)) return "not in a test's scratch home";
+  const at = (options.now ?? (() => new Date()))().toISOString();
+  const spec = agentSpec(id);
+  const way = id === "claude-code" ? ({ kind: "tool", host: "claude-code" } as const) : spec.way(e);
+  const file = readInboxAgents(options.dataDir);
+  if (way.kind === "manual" || way.kind === "none") return `${INBOX_AGENT_LABELS[id]} is connected by hand`;
+  if (way.kind === "tool") {
+    if (parseInboxToolEnv(e.env as NodeJS.ProcessEnv) !== undefined) return "PLANNOTATOR_INBOX_TOOL decides this";
+    const config = loadConfig();
+    const current = config.inboxTool;
+    const next: Partial<Record<InboxToolHost, boolean>> = {};
+    for (const host of ["claude-code", "pi", "opencode"] as const) {
+      const value = typeof current === "boolean" ? current : current?.[host];
+      if (typeof value === "boolean") next[host] = value;
+    }
+    next[way.host] = on;
+    saveConfig({ inboxTool: next });
+    if (configuredInboxTool(loadConfig(), way.host) !== on) return "Plannotator's config.json can't be written";
+    file.agents[id] = { state: on ? "added" : "off", reach: "tool", path: null, at };
+  } else if (on) {
+    delete file.agents[id];
+    const outcome = await connectOne(spec, options, at);
+    if (outcome.kind === "failed") return outcome.reason;
+    if (outcome.kind === "foreign") return `${displayPath(outcome.path, e) ?? INBOX_AGENT_LABELS[id]} has its own ${NAME} entry`;
+    if (outcome.kind === "manual") return `${INBOX_AGENT_LABELS[id]} is connected by hand`;
+    if ("record" in outcome && outcome.record) file.agents[id] = outcome.record;
+  } else {
+    const item = planInboxAgentRemoval(options.dataDir, e).items.find((candidate) => candidate.agent === id);
+    if (item) {
+      const problem = await item.apply();
+      if (problem) return problem;
+    }
+    file.agents[id] = { state: "off", reach: "mcp", path: spec.file(e), at };
+  }
+  writeInboxAgents(options.dataDir, file);
+  return null;
+}
+
 /** After a plain uninstall removed entries: forget their records, so a reinstall connects them again. */
 export function forgetInboxAgents(dataDir: string, ids: readonly InboxAgentId[]): void {
   if (ids.length === 0 || !existsSync(inboxAgentsPath(dataDir))) return;

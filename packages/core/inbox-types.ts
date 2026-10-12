@@ -831,3 +831,36 @@ export interface InboxConnectReport {
   /** Claude Code's plugin gives it the `plannotator_inbox` tool already. */
   claude_code: boolean;
 }
+
+/** The agents whose own instructions file can carry the Inbox note (packages/server/inbox-agent-notes.ts). */
+export type InboxNoteAgentId = "claude-code" | "codex" | "opencode" | "pi" | "gemini";
+export const INBOX_NOTE_AGENT_IDS: readonly InboxNoteAgentId[] = ["claude-code", "codex", "gemini", "pi", "opencode"];
+
+/**
+ * Where an agent's note would go and how it stands:
+ *  - absent: no note; `create` says whether adding it creates the file.
+ *  - added: the note Plannotator wrote is there, untouched.
+ *  - edited: the note is there but the person changed it; Plannotator never updates it.
+ *  - damaged: the markers are broken (one, several, or out of order); nothing is written.
+ *  - refused: the file cannot be edited (not a regular file, over 1 MiB, not UTF-8, unreadable).
+ *  - unavailable: no file to add to (OpenCode's AGENTS.md does not exist, and Plannotator never creates it).
+ */
+export interface InboxAgentNoteStatus {
+  agent: InboxNoteAgentId;
+  /** The file, `~` for the home folder. */
+  path: string | null;
+  /** The file is a link; `target` is where it leads (shown). */
+  target: string | null;
+  state: "absent" | "added" | "edited" | "damaged" | "refused" | "unavailable";
+  /** Adding it creates the file. */
+  create: boolean;
+  /** Plannotator created the file (removing the note deletes it when nothing else is left). */
+  created: boolean;
+  /** Why it is refused, damaged or unavailable. */
+  reason: string | null;
+}
+
+/** "Codex, Gemini CLI and Pi" for note agents. */
+export function inboxNoteAgentList(ids: readonly InboxNoteAgentId[]): string {
+  return inboxAgentList(ids);
+}

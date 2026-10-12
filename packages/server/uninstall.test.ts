@@ -2094,6 +2094,21 @@ describe("the Inbox's agent connections (inbox-agents.ts)", () => {
     expect((readJson(join(fixture.dataDir, "inbox", "agents.json")).agents as Record<string, unknown>).cursor).toBeUndefined();
   });
 
+  test("the notes: only the marked section, from a file the record no longer names too", async () => {
+    const fixture = createFixture();
+    const note = [
+      "<!-- plannotator-inbox:start v1 · added by Plannotator. Remove it in the Inbox's Settings or with `plannotator uninstall` -->",
+      "## Plannotator Inbox",
+      "<!-- plannotator-inbox:end -->",
+    ].join("\n");
+    writeText(join(fixture.homeDir, ".codex", "AGENTS.md"), `Mine.\n\n${note}\n`);
+    const dry = await runPlannotatorUninstall({ purge: false, dryRun: true }, fixture.environment);
+    expect(dry.planned).toContain("Note for Codex (~/.codex/AGENTS.md, marked section only; you edited it)");
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
+    expect(result.removed).toContain("Note for Codex (~/.codex/AGENTS.md, marked section only; you edited it)");
+    expect(readFileSync(join(fixture.homeDir, ".codex", "AGENTS.md"), "utf8")).toBe("Mine.\n");
+  });
+
   test("an entry that runs something else now is named and left", async () => {
     const fixture = createFixture();
     seed(fixture);
