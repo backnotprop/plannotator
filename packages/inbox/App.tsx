@@ -894,6 +894,9 @@ function Inbox() {
   // The list row that last had focus, and the one to return to on Back (see the resize effect below).
   const listFocus = useRef<string | null>(null);
   const returnRow = useRef<string | null>(null);
+  // The same for the Decisions list's rows.
+  const decisionFocus = useRef<string | null>(null);
+  const returnDecision = useRef<string | null>(null);
   const focusFrom = useRef<{ view: string; thread: string | null; decision: string | null }>({ view, thread: null, decision: null });
   useEffect(() => {
     const before = focusFrom.current;
@@ -909,40 +912,58 @@ function Inbox() {
     } else if (stack.decision && view === 'decision' && before.view === 'decisions') {
       focusFirst(['section.ib-dpane [data-stack-back]']);
     } else if (stack.decision && view === 'decisions' && before.view === 'decision' && before.decision) {
-      focusFirst([`.ib-dpage [data-decision-id="${CSS.escape(before.decision)}"]`]);
+      const row = returnDecision.current ?? before.decision;
+      returnDecision.current = null;
+      focusFirst([`.ib-dpage [data-decision-id="${CSS.escape(row)}"]`, `.ib-dpage [data-decision-id="${CSS.escape(before.decision)}"]`]);
     }
   }, [view, route.thread, route.decision, stack.thread, stack.decision, phone]);
 
-  // The window resized across the stacking width with a thread open. Into it: a list row that had focus is
-  // now hidden under the thread (and its rows redrawn wide), so focus would drop to the page; it goes to
-  // `‹ Inbox` instead, and Back returns it to that row. Out of it: `‹ Inbox` is gone, so focus goes to the
-  // row the person came from, now beside the thread.
+  // The window resized across the stacking width with a thread or a decision open. Into it: a list row that
+  // had focus is now hidden under the pane (and redrawn), so focus would drop to the page; it goes to the
+  // pane's `‹ Inbox` / `‹ Decisions` instead, and Back returns it to that row. Out of it: the pane's Back is
+  // gone, so focus goes to the row the person came from, now beside the pane.
   useEffect(() => {
     const onFocusIn = (event: FocusEvent) => {
-      const row = (event.target as HTMLElement | null)?.closest?.('.ib-listcol [data-thread-id]');
+      const target = event.target as HTMLElement | null;
+      const row = target?.closest?.('.ib-listcol [data-thread-id]');
       listFocus.current = row ? row.getAttribute('data-thread-id') : null;
+      const decisionRow = target?.closest?.('.ib-dpage [data-decision-id]');
+      decisionFocus.current = decisionRow ? decisionRow.getAttribute('data-decision-id') : null;
     };
     document.addEventListener('focusin', onFocusIn);
     return () => document.removeEventListener('focusin', onFocusIn);
   }, []);
-  const stackedBefore = useRef(stack.thread);
+  const stackedBefore = useRef({ thread: stack.thread, decision: stack.decision });
   useEffect(() => {
     const was = stackedBefore.current;
-    stackedBefore.current = stack.thread;
-    if (phone || was === stack.thread || view !== 'thread') return;
+    stackedBefore.current = { thread: stack.thread, decision: stack.decision };
+    if (phone) return;
     const active = document.activeElement as HTMLElement | null;
     const lost = !active || active === document.body || active.getClientRects().length === 0 || getComputedStyle(active).visibility === 'hidden';
-    if (stack.thread) {
-      if (listFocus.current && (lost || active?.closest('.ib-listcol'))) {
-        returnRow.current = listFocus.current;
-        focusFirst(['section.ib-pane [data-stack-back]', 'section.ib-pane h2.ib-subject']);
+    if (view === 'thread' && was.thread !== stack.thread) {
+      if (stack.thread) {
+        if (listFocus.current && (lost || active?.closest('.ib-listcol'))) {
+          returnRow.current = listFocus.current;
+          focusFirst(['section.ib-pane [data-stack-back]', 'section.ib-pane h2.ib-subject']);
+        }
+      } else if (lost) {
+        const row = returnRow.current ?? route.thread;
+        returnRow.current = null;
+        if (row) focusFirst([`.ib-listcol .ib-lbody [data-thread-id="${CSS.escape(row)}"]`]);
       }
-    } else if (lost) {
-      const row = returnRow.current ?? route.thread;
-      returnRow.current = null;
-      if (row) focusFirst([`.ib-listcol .ib-lbody [data-thread-id="${CSS.escape(row)}"]`]);
+    } else if (view === 'decision' && was.decision !== stack.decision) {
+      if (stack.decision) {
+        if (decisionFocus.current && (lost || active?.closest('.ib-dpage'))) {
+          returnDecision.current = decisionFocus.current;
+          focusFirst(['section.ib-dpane [data-stack-back]']);
+        }
+      } else if (lost) {
+        const row = returnDecision.current ?? route.decision ?? null;
+        returnDecision.current = null;
+        if (row) focusFirst([`.ib-dpage [data-decision-id="${CSS.escape(row)}"]`]);
+      }
     }
-  }, [stack.thread, view, route.thread, phone]);
+  }, [stack.thread, stack.decision, view, route.thread, route.decision, phone]);
 
   let main: ReactNode;
   const decisionsFolder = decisionsProject ? projects.find((p) => p.id === decisionsProject) ?? null : null;

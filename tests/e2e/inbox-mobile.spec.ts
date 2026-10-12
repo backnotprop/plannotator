@@ -996,6 +996,33 @@ test.describe('a desktop window', () => {
     await expect(page.locator('.ib-listcol')).toBeVisible();
     expect(await onPage()).toBe(false);
     await expect(rowOf(world.threads.stopped)).toBeFocused();
+
+    // The same for a decision open beside its list (1280), focus on its row: shrinking puts the decision over
+    // the list, focus goes to ‹ Decisions, and Back returns it to the row; growing back out returns it too.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const projects = (await page.evaluate(() => fetch('/api/inbox/projects').then((r) => r.json()))) as { projects: { id: string; name: string }[] };
+    await page.evaluate((hash) => (window.location.hash = hash), `#decisions=${projects.projects.find((p) => p.name === 'billing-svc')!.id}`);
+    const decisionRow = page.locator('.ib-dpage button[data-decision-id]', { hasText: 'Retry a Stripe 409 with the same idempotency key' }).filter({ visible: true }).first();
+    await decisionRow.click();
+    const dpane = page.locator('section.ib-dpane');
+    await expect(dpane.getByRole('heading', { name: 'Retry a Stripe 409 with the same idempotency key' })).toBeVisible();
+    await expect(page.locator('.ib-dpage')).toBeVisible();
+    await decisionRow.focus();
+    await expect(decisionRow).toBeFocused();
+    await page.setViewportSize({ width: 900, height: 800 });
+    await expect(page.locator('.ib-dpage')).toBeHidden();
+    expect(await onPage()).toBe(false);
+    await expect(dpane.locator('[data-stack-back]')).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.ib-dpage')).toBeVisible();
+    await expect(dpane).toHaveCount(0);
+    await expect(decisionRow).toBeFocused();
+    await decisionRow.click();
+    await expect(dpane.locator('[data-stack-back]')).toBeFocused();
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect(page.locator('.ib-dpage')).toBeVisible();
+    expect(await onPage()).toBe(false);
+    await expect(decisionRow).toBeFocused();
   });
 
   test('an iPad on its side (1080 px) keeps the list beside a 468 px thread, as main does', async ({ page }) => {
