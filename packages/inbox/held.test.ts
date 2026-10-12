@@ -41,6 +41,26 @@ describe('heldNotice', () => {
     expect(heldNotice(shown, agentThenNote)).toEqual({ count: 1, text: '1 new in billing-svc' });
   });
 
+  // The failure this guards (inbox-replaced.spec.ts): the agent replaced a
+  // question in the thread the person had open, the person then sent; counting
+  // by last_agent_at alone made that replacement "1 new" on close, so the
+  // notice the person pressed next was a stale one and a new thread stayed held.
+  test('an agent message the person replied after is not news, on screen or not; a later agent message is', () => {
+    const shown = sections({ ...row('a', 'billing-svc', '2026-10-12T10:00:00Z', 'agent'), last_agent_at: '2026-10-12T10:00:00Z', sent: null } as InboxListRow);
+    const replacedThenSent = { ...row('a', 'billing-svc', '2026-10-12T10:02:00Z', 'person'), last_agent_at: '2026-10-12T10:01:00Z', sent: { at: '2026-10-12T10:02:00Z', checked_at: null } } as InboxListRow;
+    expect(heldNotice(shown, sections(replacedThenSent)).count).toBe(0);
+    expect(settleOwn(shown, sections(replacedThenSent))[0]!.threads[0]).toBe(replacedThenSent);
+    // The same with a note after the reply: still the person's.
+    const noteAfter = { ...replacedThenSent, last_at: '2026-10-12T10:03:00Z' } as InboxListRow;
+    expect(heldNotice(shown, sections(noteAfter)).count).toBe(0);
+    // The agent writes after the reply: news.
+    const later = { ...row('a', 'billing-svc', '2026-10-12T10:04:00Z', 'agent'), last_agent_at: '2026-10-12T10:04:00Z', sent: null } as InboxListRow;
+    expect(heldNotice(shown, sections(later))).toEqual({ count: 1, text: '1 new in billing-svc' });
+    // Not on screen, a new thread beside it: only the new thread counts.
+    const fresh = { ...row('b', 'billing-svc', '2026-10-12T10:05:00Z', 'agent'), last_agent_at: '2026-10-12T10:05:00Z', sent: null } as InboxListRow;
+    expect(heldNotice(shown, sections(replacedThenSent, fresh))).toEqual({ count: 1, text: '1 new in billing-svc' });
+  });
+
   // The failure this guards: a row not on screen counted as news whenever it
   // held any agent message, so a thread unarchived on the phone or in another
   // tab whose last real word is the person's (Sent, or Quiet once the agent

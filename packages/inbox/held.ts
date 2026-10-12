@@ -35,10 +35,11 @@ function lastAgentAt(row: InboxListRow): string | null {
 /**
  * `row` carries agent activity the row on screen (`old`) lacks: a thread an
  * agent started, or a newer agent message (by `lastAgentAt`, so the Inbox's
- * notes never hide one). A thread not on screen counts only while its last
- * real message is an agent's (`sent` null: `sent` reads past the notes), so a
- * thread unarchived elsewhere whose last word is the person's (Sent, or Quiet
- * after the agent read it) is not news. One more exception: a thread not on
+ * notes never hide one). A row counts only while its last real message is an
+ * agent's (`sent` null: `sent` reads past the notes): an agent message the
+ * person replied after (in the thread they had open, say) is not news, and
+ * neither is a thread unarchived elsewhere whose last word is the person's
+ * (Sent, or Quiet after the agent read it). One more exception: a thread not on
  * screen that the person opened in this tab (`openedHere`: a link, a
  * notification, Settings' Unarchive) and whose agent messages they have all
  * seen (`unseen` 0) came in by their own hand (it was archived, say, and they
@@ -47,8 +48,11 @@ function lastAgentAt(row: InboxListRow): string | null {
  */
 function hasNewAgentActivity(old: InboxListRow | undefined, row: InboxListRow, openedHere?: ReadonlySet<string>): boolean {
   const at = lastAgentAt(row);
-  if (at === null) return false;
-  if (old === undefined) return !(openedHere?.has(row.thread_id) && row.unseen === 0) && (row.sent ?? null) === null;
+  // The person's own reply came after the agent's last message (`sent` reads
+  // past the notes): whatever the agent wrote before it, they answered, on
+  // screen or not. Without notes this is the old `last_author === 'agent'` rule.
+  if (at === null || (row.sent ?? null) !== null) return false;
+  if (old === undefined) return !(openedHere?.has(row.thread_id) && row.unseen === 0);
   // An older row on screen without the field: compare with its last_at, as before.
   const before = old.last_agent_at !== undefined ? (old.last_agent_at ?? '') : old.last_at;
   return at > before;
