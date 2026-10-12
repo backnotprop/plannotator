@@ -288,6 +288,18 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 /* the message body: Plannotator's Viewer without its document card */
 .ib-body [data-print-region="article"] { padding: 0; background: transparent; }
 .ib-body [data-print-region="article"] > .mt-4:first-child { margin-top: 0; }
+/* What an agent pastes (a long URL, a key in inline code, a bare token, a
+   choice that is one long ID) wraps inside the message: nothing in a message
+   scrolls the thread sideways. `break-word` breaks only what would overflow,
+   so a message that fits draws exactly as before. A fenced block keeps its
+   own lines (pre-wrap below, or its own scroll when it keeps its layout). The
+   question card never grows past the column; on a phone its tags wrap too
+   (the phone block at the end). */
+.ib-body { overflow-wrap: break-word; }
+.ib-body :not(pre) > code { overflow-wrap: break-word; word-break: break-word; }
+.ib-body [data-question-key] { min-width: 0; max-width: 100%; }
+/* The choices are a grid: its one column takes the card's width, not the longest choice's. */
+.ib-body [data-question-key] > :is([role="radiogroup"], [role="group"]) { grid-template-columns: minmax(0, 1fr); }
 .ib-qfoot-st { font-size: 12px; color: var(--muted-foreground); white-space: nowrap; }
 
 /* empty state and the connect picker: one vertical rhythm between the heading, the cards, Other agents and the tabs */
@@ -508,7 +520,6 @@ button.ib-drow:hover { background: color-mix(in oklch, var(--muted) 35%, transpa
 .ib-view.ib-phone .ib-vhead .ib-fn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ib-view.ib-phone .ib-vhead .ib-from, .ib-view.ib-phone .ib-vhead .ib-sp { display: none; }
 .ib-view.ib-phone .ib-vbody { grid-template-columns: minmax(0, 1fr); }
-.ib-view.ib-phone .ib-apanel { display: contents; }
 .ib-view.ib-phone .ib-changed { flex-wrap: wrap; padding: 7px 12px; font-size: 12.5px; }
 .ib-imgstage.ib-swipes { touch-action: pan-y pinch-zoom; }
 @media (prefers-reduced-motion: reduce) { .ib-endnote { transition: none; } }
@@ -891,10 +902,11 @@ pre code.pn-code[data-keep-layout] {
 .ib-sound-hint { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 9px; border-radius: 7px; width: 100%; text-align: left; font-size: 12.5px; color: var(--muted-foreground); }
 .pn-inbox .ib-sound-hint:hover { color: var(--foreground); background: color-mix(in oklch, var(--muted) 55%, transparent); }
 .pn-inbox .ib-sound-hint svg.ib-ic { width: 14px; height: 14px; }
-@media (max-width: 720px) {
+/* A phone (packages/inbox/phone.ts PHONE_QUERY): the dialog's buttons stack, a thumb's height each. */
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-dlg .ib-acts-row { flex-direction: column-reverse; align-items: stretch; }
   .ib-dlg .ib-acts-row .ib-left { margin-right: 0; }
-  .ib-dlg .ib-acts-row .ib-btn { height: 40px; justify-content: center; }
+  .ib-dlg .ib-acts-row .ib-btn { height: 44px; justify-content: center; }
   .ib-srow[data-settings-sound] { flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -941,7 +953,215 @@ pre code.pn-code[data-keep-layout] {
 .pn-inbox .ib-toast .ib-tb:hover { background: color-mix(in oklch, var(--primary) 10%, transparent); }
 .pn-inbox .ib-toast .ib-tx { color: var(--muted-foreground); width: 28px; justify-content: center; padding: 0; }
 @media (prefers-reduced-motion: reduce) { .ib-toast { animation: none; } }
-@media (max-width: 720px) {
+/* A phone: the toast spans the window above the home indicator, and the key hints go. */
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-wide { display: none; }
-  .ib-toast { left: 12px; right: 12px; bottom: 20px; transform: none; max-width: none; animation: none; }
+  .ib-toast { left: 12px; right: 12px; bottom: calc(20px + env(safe-area-inset-bottom)); transform: none; max-width: none; animation: none; }
+  .pn-inbox .ib-toast .ib-tb, .pn-inbox .ib-toast .ib-tx { height: 44px; min-width: 44px; }
+}
+
+/* ───────────── The Inbox on a phone ─────────────
+   One screen at a time, like a mail app: the list, then a thread (Back to
+   the list), then a file (Back to the thread). The query is PHONE_QUERY in
+   packages/inbox/phone.ts (a phone in portrait, or a short touch screen,
+   a phone in landscape): keep the two equal. The window under it is the
+   desktop layout, untouched. App.tsx sets `data-view` on .pn-inbox to the
+   screen on top; phone.ts keeps `--ib-vvh` at the height the keyboard
+   leaves. Every edge clears the safe areas (index.html has
+   viewport-fit=cover), touch targets are at least 44 px, and inputs are
+   16 px, so iOS never zooms the page when one takes focus. */
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox { height: var(--ib-vvh, 100%); background: var(--card); -webkit-tap-highlight-color: transparent; }
+  .ib-main { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); position: relative; overflow: hidden; }
+  body:has(.pn-inbox) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, select) { font-size: 16px !important; }
+  .ib-lbody, .ib-pbody, .ib-spage, .ib-dpage, .ib-docscroll, .ib-gbody, .ib-wn { overscroll-behavior: contain; }
+
+  /* one screen at a time: the list stays mounted under an open thread (its scroll kept for Back) */
+  .pn-inbox[data-view="thread"] .ib-listcol { position: absolute; inset: 0; visibility: hidden; }
+  .ib-lbody { overflow-anchor: none; }
+  .ib-listcol.ib-narrow { flex: 1; width: auto; border-right: 0; }
+  .pn-inbox[data-view="file"] .ib-pane.ib-withfile { display: none; }
+  .pn-inbox[data-view="decision"] .ib-dpage { display: none; }
+  .ib-pane.ib-dpane { flex: 1; }
+  @media (prefers-reduced-motion: no-preference) {
+    .pn-inbox[data-enter="thread"] .ib-pane, .pn-inbox[data-enter="decision"] .ib-pane { animation: ib-push 240ms cubic-bezier(0.22, 1, 0.36, 1); }
+    @keyframes ib-push { from { transform: translateX(28px); opacity: 0.4; } }
+  }
+
+  /* the list: a compact header, sticky section bands, mail rows */
+  .ib-lhead { height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0 4px; gap: 4px; border-bottom: 1px solid var(--ib-hair); }
+  .ib-lhead h1 { font-size: 22px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ib-lhead .ib-path { display: none; }
+  .pn-inbox .ib-sb-trigger { width: 44px; height: 44px; }
+  .ib-lbody { padding: 0 0 calc(24px + env(safe-area-inset-bottom)); }
+  .ib-lbody .ib-band { position: sticky; top: 0; z-index: 2; height: 34px; padding: 0 16px; border-radius: 0; font-size: 13px; }
+  .ib-lbody button.ib-band { height: 44px; }
+  .ib-group + .ib-group { margin-top: 0; }
+  .ib-notice { height: auto; min-height: 44px; margin: 10px 12px; width: calc(100% - 24px); }
+  .ib-askline { margin: 10px 12px; flex-wrap: wrap; }
+  .ib-portline { margin: 10px 12px; }
+  .ib-mrow { display: flex; flex-direction: column; gap: 3px; width: 100%; min-height: 64px; padding: 11px 16px 12px; border-bottom: 1px solid var(--ib-hair); text-align: left; }
+  .ib-mrow:active { background: color-mix(in oklch, var(--muted) 50%, transparent); }
+  .ib-m1 { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13.5px; color: var(--muted-foreground); }
+  .ib-m1 .ib-p { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ib-m1 .ib-t { flex: none; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .ib-m2 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-size: 15px; line-height: 1.35; color: var(--foreground); }
+  .ib-mrow.ib-u .ib-m1 .ib-p { color: var(--foreground); font-weight: 550; }
+  .ib-mrow.ib-u .ib-m1 .ib-t { color: var(--primary); font-weight: 550; }
+  .ib-mrow.ib-u .ib-m2 { font-weight: 600; }
+  .ib-mrow.ib-sent .ib-m2 { color: var(--muted-foreground); }
+  .ib-m3 { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; margin-top: 3px; }
+  .ib-m3 .ib-key { max-width: 100%; }
+  .ib-m3 .ib-key > .ib-keyt { max-width: none; }
+  .ib-m3 .ib-c, .ib-m3 .ib-att { font-size: 12.5px; color: var(--muted-foreground); white-space: nowrap; }
+
+  /* a thread: Back on the left, the actions on the right, the reply at the foot above the keyboard */
+  .ib-phead { height: calc(48px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 4px 0 0; gap: 0; }
+  .pn-inbox .ib-pback { display: inline-flex; align-items: center; gap: 0; flex: 0 1 auto; min-width: 44px; max-width: 46%; height: 44px; padding: 0 10px 0 4px; border-radius: 8px; color: var(--primary); font-size: 16px; font-weight: 500; }
+  .pn-inbox .ib-pback:active { background: color-mix(in oklch, var(--primary) 10%, transparent); }
+  .pn-inbox .ib-pback svg.ib-ic { width: 22px; height: 22px; stroke-width: 2; }
+  .ib-pback-l { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ib-phead > .ib-sp { flex: 1; }
+  .ib-phsubj { padding: 0 4px; text-align: center; }
+  .pn-inbox .ib-iconbtn { width: 44px; height: 44px; }
+  .pn-inbox .ib-ptool { min-width: 44px; height: 44px; justify-content: center; }
+  /* Mark read beside Back (no hover action on a phone's rows) */
+  .pn-inbox .ib-phead .ib-hbtn { height: 44px; padding: 0 10px; margin: 0 2px; }
+  .ib-ptool-l { display: none; }
+  .ib-pbody { padding: 16px 16px 24px; }
+  .ib-subject { font-size: 20px; overflow-wrap: anywhere; }
+  /* a phone breaks a long token anywhere, and the question card's eyebrow and tags wrap inside it (an iPhone SE's 320 px) */
+  .ib-msg, .ib-body { min-width: 0; }
+  .ib-body { overflow-wrap: anywhere; }
+  .ib-body [data-question-key] > [data-pinpoint-ignore]:first-child,
+  .ib-body [data-question-key] > [data-pinpoint-ignore]:first-child > span:last-child { flex-wrap: wrap; row-gap: 4px; }
+  .ib-msg, .ib-pane.ib-withfile .ib-msg { padding-left: 0; }
+  .ib-sender { gap: 10px; align-items: center; }
+  .ib-whobox { flex: 1; }
+  .ib-whobox > .ib-who, .ib-whobox > .ib-to { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ib-sender .ib-tm { flex: none; white-space: nowrap; }
+  .pn-inbox .ib-sender .ib-tm > button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; margin: -12px -10px -12px -6px; }
+  .ib-pbody.ib-folding .ib-who span { display: none; }
+  .pn-inbox .ib-fline { grid-template-columns: 24px minmax(0, 1fr) auto; grid-template-areas: "mk nm tm" ". sn sn" ". ch ch"; height: auto; min-height: 44px; padding: 8px; row-gap: 2px; }
+  .ib-fline > .ib-mk { grid-area: mk; }
+  .ib-fl-nm { grid-area: nm; }
+  .ib-fl-tm { grid-area: tm; }
+  .ib-fl-sn { grid-area: sn; }
+  .ib-fl-chips { grid-area: ch; flex-wrap: wrap; }
+  .ib-fl-chips:empty { display: none; }
+  .pn-inbox .ib-mfold-b { height: 44px; }
+  .ib-tmeta { margin-top: -6px; }
+  /* the question cards (ui's QuestionBlock): rows and buttons a thumb can hit */
+  .ib-body [data-question-option] { min-height: 44px; align-items: center; padding-top: 8px; padding-bottom: 8px; }
+  .ib-body [data-question-option] > input { width: 20px; height: 20px; margin-top: 0; }
+  .ib-body [data-question-part="choice"] { font-size: 15px; }
+  .ib-body [data-question-key] input[type="text"] { min-height: 40px; }
+  .ib-body [data-question-key] > [data-pinpoint-ignore]:last-child > button, .ib-body [data-question-key] > [data-pinpoint-ignore]:last-child > div > button { min-height: 44px; padding-left: 10px; padding-right: 10px; font-size: 14px; }
+  .ib-atts.ib-tiles { grid-template-columns: minmax(0, 1fr); }
+  .ib-att-t, .ib-pane.ib-withfile .ib-att-t, .ib-att-t.ib-guide { min-width: 0; width: 100%; min-height: 56px; }
+  .ib-waitfoot button { min-height: 44px; }
+  .pn-inbox .ib-btn { height: 44px; padding: 0 15px; font-size: 15px; border-radius: 9px; }
+  .pn-inbox .ib-btn.ib-sm { height: 44px; padding: 0 12px; font-size: 14px; }
+  .ib-pfoot { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
+  .ib-pfoot > .ib-acts { flex-wrap: wrap; }
+  .ib-pfoot > .ib-acts > .ib-btn.ib-pri { flex: 1; justify-content: center; }
+  .pn-inbox .ib-pfoot [data-new-message] { width: 44px; padding: 0; justify-content: center; margin-left: auto; flex: none; }
+  .pn-inbox .ib-pfoot [data-new-message] .ib-btn-l { display: none; }
+  .ib-rtext { font-size: 16px; max-height: 32vh; }
+  .ib-rfoot { flex-wrap: wrap; }
+  .pn-inbox .ib-rchip { height: 32px; }
+  .ib-route { padding: 10px 6px 8px; }
+  .ib-opt { min-height: 44px; }
+  /* menus are sheets from the bottom edge: New message's sessions, the annotations list, the decision card */
+  .ib-nmpop, .ib-menu.ib-nmpop, .ib-state.ib-nmpop, .ib-annpop {
+    position: fixed; left: 0; right: 0; bottom: 0; top: auto; width: auto; max-height: 72%; overflow-y: auto; z-index: 60;
+    border-radius: 16px 16px 0 0; border-bottom: 0; padding-bottom: calc(10px + env(safe-area-inset-bottom));
+    box-shadow: 0 -16px 48px rgba(0, 0, 0, 0.28);
+  }
+  .ib-menu.ib-nmpop { padding: 8px 8px calc(10px + env(safe-area-inset-bottom)); }
+  .pn-inbox .ib-menu .ib-mi { min-height: 52px; padding: 10px; }
+  .pn-inbox .ib-pane.ib-withfile .ib-annpop { width: auto; }
+  .pn-inbox .ib-arow .ib-aa { min-height: 36px; }
+  .ib-deccard { left: 0 !important; right: 0; top: auto !important; bottom: 0; width: auto; max-height: 85%; overflow-y: auto; border-radius: 16px 16px 0 0; padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+
+  /* a file: the whole window, Back to the thread, the comments as a sheet */
+  .ib-view.ib-full { z-index: 40; grid-template-rows: calc(48px + env(safe-area-inset-top)) auto minmax(0, 1fr) auto auto; padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+  .ib-vhead { gap: 4px; padding: env(safe-area-inset-top) 6px 0 0; }
+  .ib-vhead .ib-fn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 15px; }
+  .ib-vhead .ib-from, .ib-vhead .ib-sp { display: none; }
+  .pn-inbox .ib-vhead .ib-btn.ib-sm { min-width: 44px; height: 44px; justify-content: center; }
+  .ib-vbody { grid-template-columns: minmax(0, 1fr); position: relative; }
+  .ib-phone .ib-apanel { display: none; }
+  /* the file's own layers (the viewer draws at z-50) stay under the sheet */
+  .ib-phone .ib-docarea { isolation: isolate; z-index: 0; }
+  .ib-phone.ib-panel-open .ib-apanel { display: flex; position: absolute; left: 0; right: 0; bottom: 0; height: min(65%, 520px); z-index: 6; border-left: 0; border-top: 1px solid var(--border); border-radius: 16px 16px 0 0; box-shadow: 0 -16px 48px rgba(0, 0, 0, 0.25); padding-bottom: env(safe-area-inset-bottom); }
+  .ib-phone.ib-panel-open .ib-apanel > [data-annotation-panel] { border-radius: 0; }
+  .ib-sheet-h { flex: none; display: flex; align-items: center; gap: 8px; height: 52px; padding: 0 4px 0 16px; border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); font-size: 15px; }
+  .ib-sheet-h b { font-weight: 600; }
+  .ib-sheet-h .ib-sp { flex: 1; }
+  .ib-changed { flex-wrap: wrap; padding: 8px 14px; }
+  .ib-docscroll { padding: 56px 10px 24px; }
+  .ib-toolstrip { top: 10px; left: 10px; }
+  /* the stepping bar (Previous / N of M / Next, then the reply) clears the home indicator */
+  .ib-vfoot.ib-vfoot-phone { padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+  /* the viewer's Global comment and Copy float right on a desktop; on a phone they sit on their own line, so the file keeps the width */
+  .ib-phone [data-sticky-actions] { float: none; justify-content: flex-end; margin: 0 -4px 6px 0; }
+  .ib-imgstage { padding: 12px; }
+  .ib-imgcompose { flex-wrap: wrap; padding: 10px 12px; }
+  .pn-inbox .ib-imgcompose .ib-ta { flex: 1 1 100%; }
+  .ib-imgcompose > .ib-btn.ib-pri { margin-left: auto; }
+  .ib-att-t.ib-dlcard { flex-wrap: wrap; }
+
+  /* a guided review */
+  .ib-viewer { grid-template-rows: calc(48px + env(safe-area-inset-top)) minmax(0, 1fr); }
+  .ib-viewer .ib-vhead { padding: env(safe-area-inset-top) 4px 0 4px; }
+  .ib-viewer .ib-vhead .ib-fn { flex: 1; }
+  .pn-inbox .ib-back { height: 44px; }
+  .ib-vsep { display: none; }
+  .ib-gerror { padding: 12px 16px 0; }
+
+  /* decisions */
+  .ib-dpage { padding: 0 0 calc(24px + env(safe-area-inset-bottom)); }
+  .ib-dh { min-height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0 4px; gap: 6px; margin-bottom: 6px; }
+  .ib-dh h1 { font-size: 22px; flex: none; }
+  .pn-inbox .ib-select { height: 44px; flex: 1 1 0; min-width: 0; text-overflow: ellipsis; overflow: hidden; }
+  .ib-dsub { margin: 0 16px 14px; }
+  .ib-dpage .ib-band { border-radius: 0; padding: 0 16px; }
+  .ib-dpage button.ib-band { height: 44px; }
+  .ib-drow, .ib-drow.ib-dnarrow { min-height: 60px; padding: 10px 16px; }
+  .ib-dnone { margin: 12px 16px; }
+  .ib-dfacts { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .ib-dfacts dt { margin-top: 10px; }
+  .pn-inbox .ib-link { min-height: 44px; display: inline-flex; align-items: center; }
+
+  /* settings, What's new, the first run */
+  .ib-spage { padding: 0 16px calc(32px + env(safe-area-inset-bottom)); }
+  .ib-shead { min-height: calc(52px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); margin: 0 0 12px -12px; gap: 4px; }
+  .ib-srow { flex-wrap: wrap; min-height: 44px; }
+  .ib-sblock > p, .ib-note, .ib-srow { overflow-wrap: anywhere; }
+  .pn-inbox .ib-sw { width: 50px; height: 30px; }
+  .ib-sw::after { width: 24px; height: 24px; }
+  .ib-sw[aria-checked="true"]::after { left: 22px; }
+  .ib-stbl td.ib-n { width: auto; padding-left: 8px; white-space: nowrap; }
+  .ib-stbl td.ib-a { width: auto; padding-left: 8px; }
+  .pn-inbox .ib-del-l { min-height: 44px; }
+  .ib-pair { flex-direction: column; align-items: center; text-align: center; }
+  .ib-pair-foot { flex-wrap: wrap; justify-content: center; }
+  .ib-ctab, .ib-connect.ib-compact .ib-ctab { height: 44px; }
+  .pn-inbox .ib-copy { height: 36px; }
+  .ib-wn { padding: 4px 16px calc(40px + env(safe-area-inset-bottom)); }
+  .ib-empty { --ib-rhythm: 20px; padding: 0 16px calc(32px + env(safe-area-inset-bottom)); max-width: none; }
+  .ib-hcards { grid-template-columns: minmax(0, 1fr); }
+
+  /* the navigation sheet and the dialogs */
+  .ib-sb-sheet { width: calc(var(--sidebar-width) + env(safe-area-inset-left)); padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left); background: var(--background); }
+  .ib-nav { height: 44px; font-size: 15.5px; flex: none; }
+  /* a phone on its side is about 400 px tall: the projects scroll, the rest keeps its height */
+  .ib-sb-sheet-in > .ib-side { overflow-y: auto; }
+  .ib-sb-sheet-in .ib-brand, .ib-sb-sheet-in .ib-side-foot { flex: none; }
+  .ib-sb-sheet-in .ib-projs { flex: 0 1 auto; min-height: 88px; }
+  .ib-proj { height: 44px; font-size: 15px; flex: none; }
+  .pn-inbox .ib-upd-btn { height: 44px; }
+  .pn-inbox .ib-dlg, dialog.ib-dlg { max-height: calc(100dvh - 32px); width: calc(100vw - 24px); }
+  .pn-inbox .ib-btn.ib-icon, .pn-inbox .ib-btn.ib-sm.ib-icon { width: 44px; height: 44px; }
 }

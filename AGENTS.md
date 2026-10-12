@@ -1948,6 +1948,13 @@ Sorting and the rest:
   - the compact picker (Other MCP client: the command and `http://127.0.0.1:<port>/mcp`)
   - the store on disk per project and thread, with Delete thread and Delete project ("Delete? Click again")
 - Theme: it follows the OS unless Plannotator's theme cookies say otherwise. `configurePlannotatorUI` turns off `/api/config` sync and WebMCP.
+- On a phone (`PHONE_QUERY` in `packages/inbox/phone.ts`: under 768 px wide, or a touch screen under 500 px tall and under 1024 px wide, so a phone on its side too but not a short iPad window; the one phone `@media` block at the end of `inbox.css` spells the same query) the window shows one screen at a time, like a mail app:
+  - The list's rows are `PhoneRow`: the agent's mark, the project (the agent in one project's list) and the time on line 1; the subject on up to two lines; then the badge, the thread chip, the count and the guided review mark on a line that wraps. A phone never draws the wide row or the two-line row.
+  - A thread covers the list. The list stays mounted under it, hidden, so it keeps its scroll. The header leads with `‹ Inbox` (or the project) and moves Resolve to the right. A file covers the thread: `‹`, the name, Download, and a Comments button that opens the annotation panel (ui `presentation="embedded"`) as a sheet. Full screen goes away (the file is already the whole window). An open decision covers the Decisions list with `‹ Decisions`.
+  - New message's sessions, the annotations list and the decision card are sheets from the bottom edge. Primary targets are 44 px. Inputs are 16 px, so iOS does not zoom. Edges clear `env(safe-area-inset-*)`. `trackKeyboard()` keeps `--ib-vvh` at the height the keyboard leaves, so the reply foot sits on the keyboard.
+  - `.pn-inbox[data-view]` names the screen on top (`list`, `thread` once loaded, `file`, `decision`, or the page).
+  - History is a stack on a phone (`packages/inbox/history.ts`). Each screen's entry records the screen it was opened from. On a phone, Back, Escape and close are the browser's Back when they lead to that screen, so the iOS swipe and Android's back agree with them. A second press before that Back lands does nothing, so a double tap never leaves the Inbox. Otherwise, and always on a desktop, they push the screen as a new entry, so the browser's Back reopens what was closed, as before.
+  - Proved in WebKit (iPhone 15) and Chromium (Pixel 7) by `tests/e2e/inbox-mobile.spec.ts`. The surface the native apps host (`packages/inbox/surface`) is a different thing and is not affected.
 
 **Questions and Send.**
 - A row opens the thread beside a narrowed list and records a look.

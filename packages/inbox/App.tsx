@@ -48,6 +48,8 @@ import { unsentReply } from './unsent';
 import { InboxToast, type InboxToastModel } from './components/Toast';
 import { canToggleRead, MARK_READ_UNDO_MS, markReadToast } from './markRead';
 import { lookBoundary } from './folding';
+import { isPhone, trackKeyboard, usePhone } from './phone';
+import { backTo, pushScreen } from './history';
 
 // The Inbox has no /api/config and no browser-agent tools: settings stay in
 // the page's own cookies, and WebMCP is off.
@@ -103,12 +105,8 @@ function readRoute(): Route {
   };
 }
 
-/**
- * Write the route to the hash. `replace` swaps the current history entry
- * instead of adding one: stepping between a thread's attachments, so one
- * Back returns to the thread rather than through every file.
- */
-function writeRoute(route: Route, options: { replace?: boolean } = {}): void {
+/** The route's hash, `#thread=…` (empty for the list at rest). */
+function hashOf(route: Route): string {
   let hash = '';
   if (route.page === 'settings') hash = 'settings';
   else if (route.page === 'whats-new') hash = new URLSearchParams({ 'whats-new': route.version ?? '' }).toString();
@@ -129,12 +127,42 @@ function writeRoute(route: Route, options: { replace?: boolean } = {}): void {
     if (route.thread && route.guide) params.set('guide', route.guide);
     hash = params.toString();
   }
-  const next = hash ? `#${hash}` : window.location.pathname + window.location.search;
-  if (`#${hash}` !== window.location.hash) {
-    if (options.replace) window.history.replaceState(null, '', next);
-    else window.history.pushState(null, '', next);
+  return hash ? `#${hash}` : '';
+}
+
+/** The hash the page shows now, in hashOf's spelling (`#` alone reads as none). */
+function currentHash(): string {
+  return window.location.hash === '#' ? '' : window.location.hash;
+}
+
+/**
+ * Write the route to the hash. `replace` swaps the current history entry
+ * instead of adding one: stepping between a thread's attachments, so one
+ * Back returns to the thread rather than through every file. The entry keeps
+ * its state (the screen it was opened from, history.ts), so that Back is still
+ * the browser's Back on a phone.
+ */
+function writeRoute(route: Route, options: { replace?: boolean } = {}): void {
+  const hash = hashOf(route);
+  const next = hash || window.location.pathname + window.location.search;
+  if (options.replace) {
+    if (hash !== currentHash()) window.history.replaceState(window.history.state, '', next);
+  } else {
+    // Each entry remembers the one it was opened from, so a phone's way back can be the browser's own Back (closeTo).
+    pushScreen(hash, currentHash(), next);
   }
   window.dispatchEvent(new HashChangeEvent('hashchange'));
+}
+
+/**
+ * Leave the screen on top for the one under it (a thread for the list, a
+ * file for its thread). On a phone that is the browser's Back when this
+ * screen was opened from there (history.ts), so the swipe back and the Back
+ * button agree. On a desktop, and for a screen reached any other way, it is
+ * a new entry, so the browser's Back reopens what was just closed.
+ */
+function closeTo(route: Route): void {
+  if (!(isPhone() && backTo(hashOf(route)))) writeRoute(route);
 }
 
 function platformOf(): ConnectContext['platform'] {
@@ -384,7 +412,7 @@ function Inbox() {
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable)) return;
       // An open guided review closes first, back to its thread.
-      writeRoute(routeRef.current.guide ? { ...routeRef.current, guide: null } : { ...routeRef.current, thread: null });
+      closeTo(routeRef.current.guide ? { ...routeRef.current, guide: null } : { ...routeRef.current, thread: null });
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -425,6 +453,15 @@ function Inbox() {
     // Changing the view is an action: the list on screen catches up.
     if (latest) setShown(latest.sections);
   };
+  /** Back to the screen under this one (closeTo): a thread's list, a file's thread. */
+  const close = (next: Route) => {
+    closeTo(next);
+    if (latest) setShown(latest.sections);
+  };
+
+  // A phone shows one screen at a time (phone.ts, inbox.css), and its keyboard shrinks the window.
+  const phone = usePhone();
+  useEffect(() => (phone ? trackKeyboard() : undefined), [phone]);
 
   const openRow = (row: InboxListRow) => go({ page: 'inbox', project: route.project, thread: row.thread_id });
 
@@ -789,6 +826,27 @@ function Inbox() {
   const fileOpen = route.page === 'inbox' && !!route.thread && !!route.file;
   const guideMessage =
     route.guide && thread && thread.thread_id === route.thread ? (thread.messages.find((m) => m.id === route.guide && m.guide) ?? null) : null;
+  // The screen on top, which a phone shows alone (inbox.css): the list, a thread, a file, a decision.
+  // A thread is on top once it has loaded, so a phone keeps the list until there is a thread to show.
+  const view =
+    route.page === 'inbox'
+      ? fileOpen
+        ? 'file'
+        : route.thread && thread?.thread_id === route.thread
+          ? 'thread'
+          : 'list'
+      : route.page === 'decisions' && route.decision
+        ? 'decision'
+        : route.page;
+  // A screen pushed over a shallower one slides in on a phone (inbox.css `data-enter`); one uncovered by
+  // closing what was over it (a file back to its thread) does not slide again.
+  const viewDepth = (v: string) => (v === 'file' ? 2 : v === 'thread' || v === 'decision' ? 1 : 0);
+  const lastView = useRef(view);
+  const entered = useRef<string | null>(null);
+  if (lastView.current !== view) {
+    entered.current = viewDepth(view) > viewDepth(lastView.current) ? view : null;
+    lastView.current = view;
+  }
 
   let main: ReactNode;
   const decisionsFolder = decisionsProject ? projects.find((p) => p.id === decisionsProject) ?? null : null;
@@ -838,10 +896,11 @@ function Inbox() {
         error={decisionsError}
         openId={route.decision ?? null}
         onProject={(projectId) => go({ page: 'decisions', project: projectId, thread: null })}
-        onOpen={(decisionId) => go({ page: 'decisions', project: decisionsFolder.id, thread: null, decision: decisionId })}
+        onOpen={(decisionId) => (decisionId ? go : close)({ page: 'decisions', project: decisionsFolder.id, thread: null, decision: decisionId })}
         onOpenThread={(threadId) => go({ page: 'inbox', project: null, thread: threadId })}
         onRetire={retireDecision}
         onReplace={replaceDecision}
+        phone={phone}
       />
     );
   } else if (route.page === 'decisions') {
@@ -855,6 +914,7 @@ function Inbox() {
       <>
         {!fileOpen && (
         <InboxList
+          scope={route.project}
           title={filterProject?.name ?? 'Inbox'}
           path={filterProject ? tildePath(filterProject.root, settings?.home) : null}
           sections={filterSections(shown, route.project)}
@@ -876,6 +936,7 @@ function Inbox() {
           onShowNew={() => setShown(latest.sections)}
           onOpen={openRow}
           onMarkRead={(row) => void markRead(row.thread_id, true)}
+          phone={phone}
         />
         )}
         {route.thread && thread && thread.thread_id === route.thread && (
@@ -889,13 +950,15 @@ function Inbox() {
             onReplyOpened={() => setReplyFor(null)}
             onQuestions={patchQuestions}
             onChanged={afterWrite}
-            onClose={() => go({ ...route, thread: null, file: null })}
+            onClose={() => close({ ...route, thread: null, file: null })}
             decisions={threadDecisions}
             onOpenDecisionPage={(decision) => go({ page: 'decisions', project: decision.project_id, thread: null, decision: decision.id })}
             file={route.file ?? null}
-            onOpenFile={(file, options) => writeRoute({ ...routeRef.current, file }, options)}
+            onOpenFile={(file, options) => (file ? writeRoute({ ...routeRef.current, file }, options) : closeTo({ ...routeRef.current, file }))}
             onOpenGuide={(messageId) => go({ ...route, guide: messageId })}
             lookSeq={look?.threadId === thread.thread_id ? look.seq : undefined}
+            backLabel={filterProject?.name ?? 'Inbox'}
+            phone={phone}
           />
         )}
       </>
@@ -903,7 +966,7 @@ function Inbox() {
   }
 
   return (
-    <div className="pn-inbox">
+    <div className="pn-inbox" data-view={view} data-enter={entered.current ?? undefined}>
       {/* A file beside the thread takes the sidebar's room (record 2.2): it closes on the same spring, and the person's choice stays as it was. */}
       <SidebarShell
         className="ib-shell"
@@ -986,8 +1049,8 @@ function Inbox() {
         <GuidePane
           thread={thread}
           message={guideMessage}
-          onBack={() => go({ ...route, guide: null })}
-          onClose={() => go({ ...route, thread: null, guide: null })}
+          onBack={() => close({ ...route, guide: null })}
+          onClose={() => close({ ...route, thread: null, guide: null })}
         />
       )}
     </div>

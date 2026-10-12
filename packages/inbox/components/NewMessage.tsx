@@ -76,10 +76,12 @@ export function NewMessageButton({ live, mode, onClick }: { live: LiveSessionsMo
       data-live={none ? 'none' : live ? 'some' : undefined}
       aria-expanded={mode?.kind === 'pick' || mode?.kind === 'none'}
       data-new-message=""
+      aria-label="New message"
       onClick={onClick}
     >
       <Icon name="compose" size={15} />
-      New message
+      {/* A phone's reply foot keeps only the icon (inbox.css); the name stays on the button. */}
+      <span className="ib-btn-l">New message</span>
     </button>
   );
 }

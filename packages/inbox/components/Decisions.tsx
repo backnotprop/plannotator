@@ -25,6 +25,8 @@ export interface DecisionsPageProps {
   onOpenThread: (threadId: string) => void;
   onRetire: (decision: InboxDecision) => Promise<void>;
   onReplace: (decision: InboxDecision, text: string, reason: string) => Promise<void>;
+  /** A phone (phone.ts): two-line rows, and an open decision takes the window with a Back button. */
+  phone?: boolean;
 }
 
 /** Who and how, in the row's two muted columns. */
@@ -115,6 +117,7 @@ function DecisionPane({
   onOpenThread,
   onRetire,
   onReplace,
+  phone,
 }: {
   decision: InboxDecision;
   all: readonly InboxDecision[];
@@ -123,6 +126,7 @@ function DecisionPane({
   onOpenThread: (threadId: string) => void;
   onRetire: (decision: InboxDecision) => Promise<void>;
   onReplace: (decision: InboxDecision, text: string, reason: string) => Promise<void>;
+  phone: boolean;
 }) {
   const id = useId();
   const [replacing, setReplacing] = useState(false);
@@ -155,14 +159,22 @@ function DecisionPane({
   return (
     <section className="ib-pane ib-dpane" aria-label={decision.text} data-decision-pane={decision.id}>
       <div className="ib-phead">
+        {phone && (
+          <button type="button" className="ib-pback" onClick={onClose} aria-label="Back to Decisions" data-phone-back="">
+            <Icon name="chevL" size={18} />
+            <span className="ib-pback-l">Decisions</span>
+          </button>
+        )}
         <span className="ib-dstate">
           <DecisionDiamond />
           {STATE_WORDS[decision.state]}
         </span>
         <span className="ib-sp" />
-        <button type="button" className="ib-iconbtn" onClick={onClose} title="Close" aria-label="Close the decision">
-          <Icon name="x" />
-        </button>
+        {!phone && (
+          <button type="button" className="ib-iconbtn" onClick={onClose} title="Close" aria-label="Close the decision">
+            <Icon name="x" />
+          </button>
+        )}
       </div>
       <div className="ib-pbody">
         <h2 className="ib-subject">{decision.text}</h2>
@@ -276,6 +288,8 @@ export function DecisionsPage(props: DecisionsPageProps) {
   // A decision opened from history unfolds it, so its row shows where it went.
   const showEnded = foldOpen || (open !== null && open.state !== 'current');
   const narrow = open !== null;
+  // A phone draws the two-line rows always: the five columns need a desktop's width.
+  const narrowRows = narrow || props.phone === true;
 
   return (
     <>
@@ -301,7 +315,7 @@ export function DecisionsPage(props: DecisionsPageProps) {
                   Waiting <span className="ib-n">{model.waiting.length}</span>
                 </div>
                 {model.waiting.map((item) => (
-                  <WaitingRow key={item.question_id} item={item} narrow={narrow} onOpenThread={() => props.onOpenThread(item.thread_id)} />
+                  <WaitingRow key={item.question_id} item={item} narrow={narrowRows} onOpenThread={() => props.onOpenThread(item.thread_id)} />
                 ))}
               </div>
             )}
@@ -314,7 +328,7 @@ export function DecisionsPage(props: DecisionsPageProps) {
                 <DecisionRow
                   key={decision.id}
                   decision={decision}
-                  narrow={narrow}
+                  narrow={narrowRows}
                   selected={decision.id === props.openId}
                   onOpen={() => props.onOpen(decision.id)}
                 />
@@ -331,7 +345,7 @@ export function DecisionsPage(props: DecisionsPageProps) {
                     <DecisionRow
                       key={decision.id}
                       decision={decision}
-                      narrow={narrow}
+                      narrow={narrowRows}
                       selected={decision.id === props.openId}
                       onOpen={() => props.onOpen(decision.id)}
                     />
@@ -350,6 +364,7 @@ export function DecisionsPage(props: DecisionsPageProps) {
           onOpenThread={props.onOpenThread}
           onRetire={props.onRetire}
           onReplace={props.onReplace}
+          phone={props.phone === true}
         />
       )}
     </>

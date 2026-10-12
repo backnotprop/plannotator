@@ -23,6 +23,7 @@ import { useMotionValue } from "motion/react";
 import type { MotionValue } from "motion/react";
 import * as React from "react";
 
+import { usePhone } from "../phone";
 import { MotionStyleDiv, type MotionStyleValues } from "./motion-style-div";
 import { preloadShellAnimate, useCombinedMotionValue, useShellProgress } from "./shell-motion";
 
@@ -33,24 +34,10 @@ const SIDEBAR_WIDTH_PX = 232;
 const SIDEBAR_WIDTH_MOBILE = "260px";
 const SIDEBAR_KEYBOARD_SHORTCUT = "b";
 
-// The navigation becomes an off-canvas sheet only on phone widths.
-const MOBILE_BREAKPOINT = 768;
-
-function useIsMobile() {
-	const [isMobile, setIsMobile] = React.useState<boolean | undefined>(undefined);
-
-	React.useEffect(() => {
-		const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`);
-		const onChange = () => {
-			setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
-		};
-		mql.addEventListener("change", onChange);
-		setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
-		return () => mql.removeEventListener("change", onChange);
-	}, []);
-
-	return !!isMobile;
-}
+// The navigation becomes an off-canvas sheet only on a phone (packages/inbox/phone.ts:
+// under 768 px wide, or a short touch screen, a phone in landscape). Read
+// synchronously, so a phone never paints the docked sidebar first.
+const useIsMobile = usePhone;
 
 type SidebarContext = {
 	state: "expanded" | "collapsed";

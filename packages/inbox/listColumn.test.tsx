@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import { PHONE_QUERY } from './phone';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxList, WIDE_ROWS_MIN_LIST_WIDTH } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
@@ -268,9 +269,25 @@ describe.if(hasDom)('the list column beside an open thread', () => {
     act(() => root?.unmount());
     host?.remove();
     Object.defineProperty(window, 'innerWidth', { value: 375, configurable: true, writable: true });
-    const phone = render(true);
-    expect(phone.querySelector('[role="separator"]')).toBeNull();
-    expect(column(phone).style.width).toBe('');
-    expect(column(phone).classList.contains('ib-resizable')).toBe(false);
+    // A phone is a media query (phone.ts); happy-dom does not evaluate it against innerWidth, so it answers here.
+    const savedMatchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query === PHONE_QUERY,
+      media: query,
+      onchange: null,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+      dispatchEvent: () => false,
+    })) as typeof window.matchMedia;
+    try {
+      const phone = render(true);
+      expect(phone.querySelector('[role="separator"]')).toBeNull();
+      expect(column(phone).style.width).toBe('');
+      expect(column(phone).classList.contains('ib-resizable')).toBe(false);
+    } finally {
+      window.matchMedia = savedMatchMedia;
+    }
   });
 });

@@ -447,7 +447,10 @@ test('a long thread name plus the Guided review mark never pushes a row out of s
   for (const [i, name] of names.entries()) {
     // Every project below 900px of list draws the two-line row; one project
     // keeps the wide row. Both are measured the same way: the subject line is
-    // the wide row's subject cell or the two-line row's second line.
+    // the wide row's subject cell or the two-line row's second line. Below
+    // 768px (a phone, packages/inbox/phone.ts) every list draws the mail row
+    // (inbox-mobile.spec.ts): its chips line holds the chip and the mark, and
+    // the subject has a line of its own.
     const row = page.locator(`.ib-lbody [data-thread-id="${threads[i]}"]`);
     for (const route of ['', `#project=${ledger.id}`]) {
       await page.setViewportSize({ width: 1440, height: 900 });
@@ -455,7 +458,7 @@ test('a long thread name plus the Guided review mark never pushes a row out of s
       await expect(row).toBeVisible();
       await expect(row.locator('.ib-key')).toHaveText(name);
       await expect(row.locator('[data-guide-mark]')).toHaveCount(1);
-      // One project keeps the wide row down to phone widths: also 360, 500 and 520px there.
+      // One project keeps the wide row down to a phone's width, then the mail row: also 360, 500 and 520px there.
       for (const width of route ? [360, 500, 520, 556, 656, 820] : [556, 656, 820]) {
         await page.setViewportSize({ width, height: 900 });
         await expect(row).toBeVisible();
@@ -475,9 +478,10 @@ test('a long thread name plus the Guided review mark never pushes a row out of s
         const measured = await row.evaluate((el) => {
           const body = el.closest('.ib-lbody')!;
           const wideRow = el.querySelector('.ib-subj') !== null;
-          const line = (el.querySelector('.ib-subj') ?? el.querySelector('.ib-l2'))!.getBoundingClientRect();
+          const line = (el.querySelector('.ib-subj') ?? el.querySelector('.ib-l2') ?? el.querySelector('.ib-m3'))!.getBoundingClientRect();
           const box = (sel: string) => el.querySelector(sel)!.getBoundingClientRect();
-          const subject = box('.ib-s');
+          // A mail row's subject is its own line (.ib-m2); the others share the line with the chip.
+          const subject = box(el.querySelector('.ib-s') ? '.ib-s' : '.ib-m2');
           const nameEl = el.querySelector<HTMLElement>('.ib-keyt') ?? el.querySelector<HTMLElement>('.ib-key')!;
           return {
             listOverflow: body.scrollWidth - body.clientWidth,

@@ -27,6 +27,10 @@ export interface InboxListProps {
   onOpen: (row: InboxListRow) => void;
   /** The row's hover action (a row that waits on the person): Mark read, without opening it. Absent: no action. */
   onMarkRead?: (row: InboxListRow) => void;
+  /** A phone (phone.ts): the list fills the window and its rows are a mail app's. */
+  phone?: boolean;
+  /** The project shown (null: every project). A phone opens another project's list at its top, as a mail app opens another mailbox. */
+  scope?: string | null;
 }
 
 function badgeOf(row: InboxListRow): string | null {
@@ -216,8 +220,64 @@ function NarrowRow({ row, selected, filtered, onOpen }: { row: InboxListRow; sel
   );
 }
 
+/**
+ * A row on a phone, read like a mail app's: who and when on the first line
+ * (the agent's mark, the project, or the agent in one project's list, and the
+ * time), the subject on up to two lines, then what the thread holds (the
+ * badge, the thread's name, the question count, the guided review mark),
+ * which wraps rather than pushing anything off the row.
+ */
+function PhoneRow({ row, filtered, onOpen }: { row: InboxListRow; filtered: boolean; onOpen: () => void }) {
+  const badge = badgeOf(row);
+  const count = countOf(row);
+  const guide = row.guide && row.section !== 'sent';
+  return (
+    <button
+      type="button"
+      className={`ib-mrow${row.unread ? ' ib-u' : ''}${row.section === 'sent' ? ' ib-sent' : ''}`}
+      onClick={onOpen}
+      data-thread-id={row.thread_id}
+      data-section={row.section}
+    >
+      <span className="ib-m1">
+        <AuthorMark author={row.author} />
+        <span className="ib-p">{filtered ? agentName(row.author) : row.project.name}</span>
+        <span className="ib-t">{shortTime(row.last_at)}</span>
+      </span>
+      <span className="ib-m2">{subjectOf(row)}</span>
+      {(badge || row.thread_name || count || guide) && (
+        <span className="ib-m3">
+          {badge && <span className="ib-badge">{badge}</span>}
+          {row.thread_name && (
+            <span className="ib-key">
+              <span className="ib-keyt">{row.thread_name}</span>
+            </span>
+          )}
+          {count && <span className={`ib-c${row.section === 'quiet' ? ' ib-qlabel' : ''}`}>{count}</span>}
+          {guide && (
+            <span className="ib-att" data-guide-mark="" role="img" aria-label="Guided review" title="Guided review">
+              <Icon name="book" size={13} />
+              <span className="ib-att-l">Guided review</span>
+            </span>
+          )}
+        </span>
+      )}
+    </button>
+  );
+}
+
 export function InboxList(props: InboxListProps) {
   const [quietOpen, setQuietOpen] = useState(false);
+  // Another project on a phone: the list starts at its top. The list itself stays mounted (its Quiet fold and,
+  // across a resize past the phone width, its scroll are kept).
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const shownScope = useRef(props.scope ?? null);
+  useLayoutEffect(() => {
+    const scope = props.scope ?? null;
+    if (scope === shownScope.current) return;
+    shownScope.current = scope;
+    if (props.phone && bodyRef.current) bodyRef.current.scrollTop = 0;
+  }, [props.scope, props.phone]);
   const [listRef, narrowList] = useNarrowerThan(WIDE_ROWS_MIN_LIST_WIDTH, props.narrow);
   // Two-line rows in a list too narrow for the wide row's columns: beside an
   // open thread for every list (the column is 380px unless its edge was
@@ -241,7 +301,7 @@ export function InboxList(props: InboxListProps) {
         <h1>{props.title}</h1>
         {props.path && <span className="ib-path">{props.path}</span>}
       </div>
-      <div className="ib-lbody">
+      <div className="ib-lbody" ref={bodyRef}>
         {props.ask}
         {props.notice && (
           <button type="button" className="ib-notice" onClick={props.onShowNew} data-inbox-notice="">
@@ -266,15 +326,20 @@ export function InboxList(props: InboxListProps) {
                 </div>
               )}
               {open &&
-                section.threads.map((row) => (
-                  <RowWithAction key={row.thread_id} row={row} onMarkRead={props.onMarkRead}>
-                    {twoLine ? (
-                      <NarrowRow row={row} filtered={props.filtered} selected={row.thread_id === props.selectedThreadId} onOpen={() => props.onOpen(row)} />
-                    ) : (
-                      <WideRow row={row} filtered={props.filtered} selected={row.thread_id === props.selectedThreadId} onOpen={() => props.onOpen(row)} />
-                    )}
-                  </RowWithAction>
-                ))}
+                section.threads.map((row) =>
+                  // A phone's row has no hover action (a hover on a touch screen is a first tap): Mark read is in the thread's header there.
+                  props.phone ? (
+                    <PhoneRow key={row.thread_id} row={row} filtered={props.filtered} onOpen={() => props.onOpen(row)} />
+                  ) : (
+                    <RowWithAction key={row.thread_id} row={row} onMarkRead={props.onMarkRead}>
+                      {twoLine ? (
+                        <NarrowRow row={row} filtered={props.filtered} selected={row.thread_id === props.selectedThreadId} onOpen={() => props.onOpen(row)} />
+                      ) : (
+                        <WideRow row={row} filtered={props.filtered} selected={row.thread_id === props.selectedThreadId} onOpen={() => props.onOpen(row)} />
+                      )}
+                    </RowWithAction>
+                  ),
+                )}
             </div>
           );
         })}

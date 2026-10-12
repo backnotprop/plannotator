@@ -319,24 +319,10 @@ export interface ThreadPaneProps {
   /** The thread whose reply box should open (the warning toast's Reply); the pane calls `onReplyOpened` once it has. */
   replyRequest?: string | null;
   onReplyOpened?: () => void;
-}
-
-/**
- * A narrow window (a phone, under 768 px, where Plannotator's annotation panel
- * becomes an overlay): the open file takes the whole window.
- */
-function useNarrowWindow(): boolean {
-  const query = '(max-width: 767px)';
-  const [narrow, setNarrow] = useState(() => typeof matchMedia === 'function' && matchMedia(query).matches);
-  useEffect(() => {
-    if (typeof matchMedia !== 'function') return;
-    const list = matchMedia(query);
-    const onChange = () => setNarrow(list.matches);
-    onChange();
-    list.addEventListener?.('change', onChange);
-    return () => list.removeEventListener?.('change', onChange);
-  }, []);
-  return narrow;
+  /** On a phone the header leads with a Back button named for the screen under the thread ("Inbox", a project). */
+  backLabel?: string;
+  /** A phone: one screen at a time, so an open file takes the whole window (phone.ts). */
+  phone?: boolean;
 }
 
 /** The thread's attachments as they are now and the annotations waiting for a Send, kept fresh. */
@@ -368,7 +354,7 @@ function useThreadAttachments(threadId: string, revision: unknown) {
   return { model, load, patch };
 }
 
-export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile, onOpenGuide, lookSeq, row, onMarkRead, onArchive, replyRequest, onReplyOpened }: ThreadPaneProps) {
+export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile, onOpenGuide, lookSeq, row, onMarkRead, onArchive, replyRequest, onReplyOpened, backLabel = 'Inbox', phone = false }: ThreadPaneProps) {
   const root = thread.messages[0]!;
   const asker = agentName(root.author);
   const resolved = thread.resolved_at !== null;
@@ -590,7 +576,6 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   const takesAnnotations = attachments.length > 0 || records.length > 0 || thread.messages.some((m) => m.guide);
   const [full, setFull] = useState(false);
   /** A narrow window (a phone): the open file is always full screen. */
-  const phone = useNarrowWindow();
   /** Bumped when the person opens a file, so focus moves into its pane. */
   const [paneFocus, setPaneFocus] = useState(0);
   const paneRef = useRef<AttachmentPaneHandle>(null);
@@ -1176,6 +1161,40 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   const openAttachment = file ? attachments.find((a) => a.id === file.id) ?? null : null;
   const fileOpen = openAttachment !== null;
 
+  const archiveButton = (
+    <button
+      type="button"
+      className="ib-iconbtn"
+      onClick={() => void resolve(!resolved)}
+      title={resolved ? 'Unarchive' : 'Archive: the thread ends; the next message starts a new one'}
+      aria-label={resolved ? 'Unarchive the thread' : 'Archive the thread'}
+      data-archive=""
+    >
+      <Icon name="archive" />
+    </button>
+  );
+  const markReadButton = markReadOffered ? (
+    <button
+      type="button"
+      className="ib-hbtn"
+      data-mark-read=""
+      aria-pressed={readAt !== null}
+      disabled={!markReadEnabled}
+      onClick={() => onMarkRead!(readAt === null)}
+      title={
+        readAt !== null
+          ? 'Move it back to the top'
+          : markReadEnabled
+            ? `Out of the top until ${asker} writes again. Its waiting questions close unanswered.`
+            : 'Nothing here waits on you'
+      }
+    >
+      <Icon name="checkCircle" size={16} />
+      {readAt !== null ? 'Read' : 'Mark read'}
+      <kbd className="ib-kbd ib-wide">E</kbd>
+    </button>
+  ) : null;
+
   return (
     <>
     <section
@@ -1185,38 +1204,21 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       data-thread-id={thread.thread_id}
     >
       <div className="ib-phead">
-        <button
-          type="button"
-          className="ib-iconbtn"
-          onClick={() => void resolve(!resolved)}
-          title={resolved ? 'Unarchive' : 'Archive: the thread ends; the next message starts a new one'}
-          aria-label={resolved ? 'Unarchive the thread' : 'Archive the thread'}
-          data-archive=""
-        >
-          <Icon name="archive" />
-        </button>
-        {markReadOffered && (
+        {/* A phone leads with the way back to the list; Mark read and Archive move to the right, where the close was. */}
+        {phone ? (
+          <button type="button" className="ib-pback" onClick={onClose} aria-label={`Back to ${backLabel}`} data-phone-back="">
+            <Icon name="chevL" size={18} />
+            <span className="ib-pback-l">{backLabel}</span>
+          </button>
+        ) : (
           <>
-            <span className="ib-vsep" aria-hidden="true" />
-            <button
-              type="button"
-              className="ib-hbtn"
-              data-mark-read=""
-              aria-pressed={readAt !== null}
-              disabled={!markReadEnabled}
-              onClick={() => onMarkRead!(readAt === null)}
-              title={
-                readAt !== null
-                  ? 'Move it back to the top'
-                  : markReadEnabled
-                    ? `Out of the top until ${asker} writes again. Its waiting questions close unanswered.`
-                    : 'Nothing here waits on you'
-              }
-            >
-              <Icon name="checkCircle" size={16} />
-              {readAt !== null ? 'Read' : 'Mark read'}
-              <kbd className="ib-kbd ib-wide">E</kbd>
-            </button>
+            {archiveButton}
+            {markReadOffered && (
+              <>
+                <span className="ib-vsep" aria-hidden="true" />
+                {markReadButton}
+              </>
+            )}
           </>
         )}
         {one ? (
@@ -1240,9 +1242,16 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
             </button>
           </>
         )}
-        <button type="button" className="ib-iconbtn" onClick={onClose} title="Close" aria-label="Close the thread">
-          <Icon name="x" />
-        </button>
+        {phone ? (
+          <>
+            {markReadButton}
+            {archiveButton}
+          </>
+        ) : (
+          <button type="button" className="ib-iconbtn" onClick={onClose} title="Close" aria-label="Close the thread">
+            <Icon name="x" />
+          </button>
+        )}
       </div>
       <div className={`ib-pbody${one ? '' : ' ib-folding'}`} ref={bodyRef}>
         <h2 className="ib-subject">{thread.subject ?? '(no subject)'}</h2>

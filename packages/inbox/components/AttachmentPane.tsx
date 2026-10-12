@@ -71,7 +71,12 @@ export interface AttachmentPaneProps {
    * Back returns to the thread in one press.
    */
   onStep?: (attachmentId: string, version: 'current' | 'sent') => void;
-  /** A narrow window (a phone): Previous / Next buttons, and a swipe on a fitted image. */
+  /**
+   * A phone (phone.ts): the file takes the whole window, the header leads
+   * with Back to the thread, Previous / Next sit in the bar under it with a
+   * swipe on a fitted image, and the annotations open as a sheet from the
+   * header's Comments button instead of a column beside the file.
+   */
   phone?: boolean;
 }
 
@@ -198,7 +203,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const multi = steps.length > 1 && index >= 0;
   const phone = props.phone === true;
   const [menuOpen, setMenuOpen] = useState(false);
-  /** Phones: the annotations panel is a sheet the header's button opens (Plannotator's panel is an overlay below 768 px). */
+  /** Phones: the annotations panel is a sheet the header's button opens (inbox.css, the panel's touch presentation inside it). */
   const [sheet, setSheet] = useState(false);
   const [endNote, setEndNote] = useState<string | null>(null);
   const endTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -560,12 +565,18 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     <section
       ref={sectionRef}
       tabIndex={-1}
-      className={`ib-view${props.full ? ' ib-full' : ''}${phone ? ' ib-phone' : ''}`}
+      className={`ib-view${full ? ' ib-full' : ''}${phone ? ' ib-phone' : ''}${phone && sheet ? ' ib-panel-open' : ''}`}
       aria-label={multi ? `${attachment.name}, attachment ${index + 1} of ${steps.length}` : attachment.name}
       data-attachment-pane={attachment.id}
       data-version={effectiveVersion}
     >
       <div className="ib-vhead">
+        {/* A phone's way back to the thread (through the unsaved-comment guard, as the desktop's close). */}
+        {phone && (
+          <button type="button" className="ib-pback" onClick={close} aria-label="Back to the thread" data-phone-back="">
+            <Icon name="chevL" size={18} />
+          </button>
+        )}
         {/* With more than one file the bar under the file names it (a phone's bar has no room for the name). */}
         {(!multi || phone) && (
           <span className="ib-fn" data-header-name="">
@@ -582,33 +593,36 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           href={attachmentDownloadUrl(attachment, effectiveVersion)}
           download={attachment.name}
           title={`Download ${attachment.name}${effectiveVersion === 'sent' ? ' (the version it sent)' : ''}`}
+          aria-label={phone ? `Download ${attachment.name}` : undefined}
           data-attachment-download=""
         >
           <Icon name="download" size={14} />
-          Download
+          {!phone && 'Download'}
         </a>
-        {phone && (
+        {phone ? (
           <button
             type="button"
-            className="ib-iconbtn"
+            className={`ib-btn ib-sm ib-vcomments${sheet ? ' ib-on' : ''}`}
             onClick={() => setSheet((v) => !v)}
-            aria-label={`Annotations, ${annotations.length}`}
             aria-expanded={sheet}
+            aria-label={`Annotations, ${annotations.length}`}
             title="Annotations"
             data-annotations-sheet=""
           >
-            <Icon name="comment" />
+            <Icon name="comment" size={15} />
+            {annotations.length}
           </button>
+        ) : (
+          <>
+            <button type="button" className="ib-btn ib-sm" onClick={props.onToggleFull}>
+              <Icon name={props.full ? 'collapse' : 'expand'} size={14} />
+              {props.full ? 'Exit full screen' : 'Full screen'}
+            </button>
+            <button type="button" className="ib-iconbtn" onClick={close} aria-label={`Close ${attachment.name}`} title="Close">
+              <Icon name="x" />
+            </button>
+          </>
         )}
-        {!phone && (
-          <button type="button" className="ib-btn ib-sm" onClick={props.onToggleFull}>
-            <Icon name={props.full ? 'collapse' : 'expand'} size={14} />
-            {props.full ? 'Exit full screen' : 'Full screen'}
-          </button>
-        )}
-        <button type="button" className="ib-iconbtn" onClick={close} aria-label={`Close ${attachment.name}`} title="Close">
-          <Icon name="x" />
-        </button>
       </div>
       {line ? (
         <div className="ib-changed" data-changed-line="">
@@ -748,7 +762,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 inputMethod={isText ? inputMethod : 'drag'}
                 taterMode={false}
                 gridEnabled={gridEnabled}
-                maxWidth={props.full ? 760 : 640}
+                maxWidth={full ? 760 : 640}
                 stickyActions={false}
                 disableCodePathValidation
                 copyLabel="Copy file"
@@ -760,14 +774,30 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             </div>
           )}
         </div>
-        <div className="ib-apanel">
+        <div className="ib-apanel" role={phone ? 'region' : undefined} aria-label={phone ? 'Comments' : undefined}>
+          {/* A phone's sheet: its own title and close (the panel's touch presentation has neither). */}
+          {phone && (
+            <div className="ib-sheet-h">
+              <b>Comments</b>
+              <span className="ib-mut">{annotations.length}</span>
+              <span className="ib-sp" />
+              <button type="button" className="ib-iconbtn" onClick={() => setSheet(false)} aria-label="Close the comments">
+                <Icon name="x" />
+              </button>
+            </div>
+          )}
           <AnnotationPanel
+            // A phone draws the panel's touch presentation inside the sheet; the window-wide overlay it would otherwise draw below 768 px has no close here.
+            presentation={phone ? 'embedded' : undefined}
             emptyHint={isImage ? 'Comment below the image' : isCode ? 'Click a line to comment' : undefined}
-            isOpen={!phone || sheet}
-            onClose={phone ? () => setSheet(false) : undefined}
+            isOpen
             annotations={annotations}
             blocks={blocks}
-            onSelect={setSelectedId}
+            onSelect={(id) => {
+              setSelectedId(id);
+              // On a phone the sheet steps aside to show the comment in the file.
+              if (phone) setSheet(false);
+            }}
             onDelete={(id) => void remove(id)}
             onEdit={edit}
             selectedId={selectedId}
