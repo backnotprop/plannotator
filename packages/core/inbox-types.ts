@@ -860,6 +860,42 @@ export interface InboxAgentNoteStatus {
   reason: string | null;
 }
 
+/** One agent in `GET /api/inbox/agents` (Settings → Agents and the first-open card). */
+export interface InboxAgentRow {
+  id: InboxAgentId;
+  label: string;
+  /** Found on this computer (its command on PATH, its folder, Plannotator's plugin). */
+  detected: boolean;
+  reach: {
+    kind: "tool" | "mcp" | "manual" | "none";
+    on: boolean;
+    state: "connected" | "off" | "removed" | "foreign" | "not_connected" | "manual" | "unreadable";
+    path: string | null;
+    /** PLANNOTATOR_INBOX_TOOL decides it. */
+    locked: boolean;
+    reason: string | null;
+  };
+  /** Claude Code, Pi and OpenCode only. `needs_tool`: the tool is off, so there is no reminder. */
+  reminder: { on: boolean; locked: boolean; needs_tool: boolean } | null;
+  note: InboxAgentNoteStatus | null;
+}
+
+export interface InboxAgentsModel {
+  agents: InboxAgentRow[];
+  last_report: (InboxConnectReport & { seen?: boolean }) | null;
+  connecting: boolean;
+  /** PLANNOTATOR_INBOX_CONNECT turns the automatic step off. */
+  connect_env_off: boolean;
+  /** PLANNOTATOR_INBOX_TOOL's value when set. */
+  tool_env: boolean | null;
+  /** The one-time note question was answered. */
+  notes_offered: boolean;
+  /** The exact block a note writes, markers included. */
+  note_text: string;
+  /** A switch's refusal, after POST /api/inbox/agents. */
+  error?: string | null;
+}
+
 /** "Codex, Gemini CLI and Pi" for note agents. */
 export function inboxNoteAgentList(ids: readonly InboxNoteAgentId[]): string {
   return inboxAgentList(ids);

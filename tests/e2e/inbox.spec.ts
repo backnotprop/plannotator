@@ -164,24 +164,15 @@ async function firstRunLabels(page: Page): Promise<string[]> {
     .evaluateAll((els) => els.map((el) => (el.textContent ?? '').trim()));
 }
 
-test('first run: the three connections, Use MCP instead below the row, the harness picker, Copy copies the command', async () => {
+test('first run: Try it, the harness picker folded behind Connect another agent by hand, Copy copies the command', async () => {
   const { page, url } = world;
   await page.goto(url);
   const empty = page.locator('[data-inbox-empty]');
   await expect(page.getByRole('heading', { name: 'No agent has written yet', exact: true })).toBeVisible();
-  const lines = {
-    'claude-code': ['Claude Code', "Plannotator's mod writes here. Nothing to install."],
-    pi: ['Pi', "Plannotator's extension writes here once its Inbox tool is on in Settings, from the next Pi session."],
-    opencode: ['OpenCode', "Plannotator's plugin writes here once its Inbox tool is on in Settings, from the next OpenCode start."],
-  } as const;
-  for (const [host, [name, line]] of Object.entries(lines)) {
-    const card = page.locator(`[data-host="${host}"]`);
-    await expect(card.getByRole('heading', { name, exact: true })).toBeVisible();
-    await expect(card.locator('p')).toHaveText(line);
-    await expect(card.getByRole('button', { name: 'Use MCP instead', exact: true })).toHaveAttribute('aria-expanded', 'false');
-  }
-  await expect(empty.getByRole('heading', { name: 'Other agents', exact: true })).toBeVisible();
-  await expect(empty.getByText('Add the Inbox as a local MCP server.', { exact: true })).toBeVisible();
+  // An Inbox an agent started (--background) connected nothing, and this scratch home has no agent: no card.
+  await expect(empty.locator('[data-agents-card]')).toHaveCount(0);
+  await expect(empty.getByRole('heading', { name: 'Try it', exact: true })).toBeVisible();
+  await expect(empty.getByText('Send me a test message in my Plannotator Inbox.', { exact: true })).toBeVisible();
   await expect(page.getByText('Projects appear here when an agent writes from one.')).toBeVisible();
 
   // The Tater mark is Workspaces' sprite: 24 frames over 3.5 s, its first frame under reduced motion.
@@ -194,6 +185,12 @@ test('first run: the three connections, Use MCP instead below the row, the harne
   await page.emulateMedia({ reducedMotion: 'reduce' });
   expect((await motion()).startsWith('none ')).toBe(true);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
+
+  const byHand = empty.getByRole('button', { name: 'Connect another agent by hand', exact: true });
+  await expect(byHand).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('tab', { name: 'Codex' })).toHaveCount(0);
+  await byHand.click();
+  await expect(byHand).toHaveAttribute('aria-expanded', 'true');
 
   // Codex is selected: the command with Copy, one note, the folded Another way, no eyebrow repeating the name.
   const binary = realpathSync(world.binary);
@@ -210,39 +207,20 @@ test('first run: the three connections, Use MCP instead below the row, the harne
   await expect(panel.getByRole('button', { name: 'Copied' })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(command);
 
-  // One rhythm: the same gap between the heading, the cards, Other agents and the tabs.
+  // One rhythm: the same gap between the heading, Try it, the fold and the picker.
   const boxes = await empty.evaluate((el) => [...el.children].map((child) => child.getBoundingClientRect()).map((r) => ({ top: r.top, bottom: r.bottom })));
   const gaps = boxes.slice(1).map((box, i) => Math.round(box.top - boxes[i]!.bottom));
   expect(gaps.length).toBe(3);
   expect(new Set(gaps).size).toBe(1);
 
-  // The cards are one height, and "Use MCP instead" opens the command below the row without making its card taller.
-  const cards = page.locator('.ib-hcard');
-  const heights = async () => (await cards.evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().height))));
-  const before = await heights();
-  expect(new Set(before).size).toBe(1);
-  const claudeLink = page.locator('[data-host="claude-code"]').getByRole('button', { name: 'Use MCP instead', exact: true });
-  await claudeLink.click();
-  await expect(claudeLink).toHaveAttribute('aria-expanded', 'true');
-  const reveal = page.locator('.ib-hreveal');
-  await expect(reveal.locator('pre')).toHaveText(`claude mcp add --scope user plannotator-inbox -- ${binary} inbox mcp`);
-  expect(await heights()).toEqual(before);
-  const rowBottom = Math.max(...(await cards.evaluateAll((els) => els.map((el) => el.getBoundingClientRect().bottom))));
-  expect((await reveal.boundingBox())!.y).toBeGreaterThanOrEqual(rowBottom);
-  // The reveal above names the binary this test started by its absolute path, under a directory name long enough to wrap on any runner.
+  // Claude Code is in the picker too, with its user-scope command, the binary named by its absolute path.
+  await page.getByRole('tab', { name: 'Claude Code' }).click();
+  await expect(page.getByRole('tabpanel', { name: 'Claude Code' }).locator('pre').first()).toHaveText(`claude mcp add --scope user plannotator-inbox -- ${binary} inbox mcp`);
   expect(binary.startsWith('/') && binary.endsWith('/a-long-install-directory-name-so-every-connect-command-has-to-wrap/bin/plannotator')).toBe(true);
   await expectCodeUnclipped(page);
-  await expect(panel.getByRole('button', { name: 'Copy', exact: true })).toBeVisible();
   await page.mouse.move(0, 0);
   await shot('1.3-first-run-claude-code');
-
-  // One reveal at a time; the same link closes it.
-  await page.locator('[data-host="pi"]').getByRole('button', { name: 'Use MCP instead', exact: true }).click();
-  await expect(reveal.locator('pre')).toHaveText(`pi mcp add plannotator-inbox -- ${binary} inbox mcp`);
-  await expect(claudeLink).toHaveAttribute('aria-expanded', 'false');
-  expect(await heights()).toEqual(before);
-  await page.locator('[data-host="pi"]').getByRole('button', { name: 'Use MCP instead', exact: true }).click();
-  await expect(reveal).toHaveCount(0);
+  await page.getByRole('tab', { name: 'Codex' }).click();
 
   // Headers carry no comma: every heading and label, on every tab.
   for (const tab of await page.getByRole('tab').all()) {

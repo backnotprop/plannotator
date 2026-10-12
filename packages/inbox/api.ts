@@ -20,7 +20,7 @@ import type {
   InboxThread,
 } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
-import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
+import type { InboxAgentId, InboxAgentsModel, InboxAnnotationRecord, InboxAttachmentState, InboxNoteAgentId } from '@plannotator/core/inbox-types';
 
 export type AgentToolHost = 'claude-code' | 'pi' | 'opencode';
 
@@ -420,6 +420,16 @@ export const inboxApi = {
   setTailnet: (on: boolean) => post<{ tailnet: TailnetState }>('/api/inbox/tailnet', { on }),
   lan: () => get<{ lan: LanState }>('/api/inbox/lan'),
   setLan: (on: boolean) => post<{ lan: LanState }>('/api/inbox/lan', { on }),
+  /** Settings → Agents and the first-open card (packages/server/inbox-agents.ts, inbox-agent-notes.ts). */
+  agents: () => get<InboxAgentsModel>('/api/inbox/agents'),
+  saveAgent: (agent: InboxAgentId, change: { reach?: boolean; reminder?: boolean; note?: boolean }) =>
+    post<InboxAgentsModel>('/api/inbox/agents', { agent, ...change }),
+  answerNotes: (add: InboxNoteAgentId[]) =>
+    post<InboxAgentsModel & { results: ({ ok: true; agent: InboxNoteAgentId; action: string; path: string } | { ok: false; agent: InboxNoteAgentId; reason: string; path: string | null })[] }>(
+      '/api/inbox/agents/notes',
+      { add },
+    ),
+  agentsSeen: () => post<InboxAgentsModel>('/api/inbox/agents/seen', {}),
   deleteProject: (projectId: string) => post<{ store: SettingsModel['store'] }>(`/api/inbox/projects/${encodeURIComponent(projectId)}/delete`, {}),
 };
 

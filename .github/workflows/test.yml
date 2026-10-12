@@ -147,6 +147,7 @@ jobs:
           packages/inbox/toastPhone.test.tsx
           packages/inbox/attachmentsHeader.test.tsx
           packages/inbox/themeToggle.test.tsx
+          packages/inbox/agentsCard.test.tsx
           packages/ui/components/MenuVersionSection.test.tsx
           packages/ui/components/blocks/QuestionBlock.test.tsx
           packages/ui/components/blocks/QuestionBlock.host.test.tsx

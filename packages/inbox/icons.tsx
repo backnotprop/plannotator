@@ -110,7 +110,17 @@ export function HostMark({ host, big }: { host: string | null | undefined; big?:
   switch (host) {
     case 'claude-code':
     case 'claude':
+    case 'claude-app':
       mark = <ClaudeIcon />;
+      break;
+    case 'gemini':
+    case 'zed':
+    case 'vscode':
+      mark = (
+        <svg className="ib-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d={TAB_GLYPHS[host]} />
+        </svg>
+      );
       break;
     case 'pi':
       mark = <PiIcon />;

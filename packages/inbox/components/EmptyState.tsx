@@ -1,25 +1,30 @@
 import { useState } from 'react';
-import { hostMcpSnippet, OTHER_HARNESSES, type ConnectContext } from '../harnesses';
-import { HostMark } from '../icons';
-import { CodeBox, ConnectPicker } from './ConnectPicker';
+import type { InboxAgentsModel } from '@plannotator/core/inbox-types';
+import { HARNESSES, type ConnectContext } from '../harnesses';
+import { Icon } from '../icons';
+import { AgentsCard } from './AgentsCard';
+import { ConnectPicker } from './ConnectPicker';
 import { SidebarTrigger } from '../shell/sidebar';
 
-type PlannotatorHost = 'claude-code' | 'pi' | 'opencode';
-
-const HOSTS: readonly { host: PlannotatorHost; name: string; line: string }[] = [
-  { host: 'claude-code', name: 'Claude Code', line: "Plannotator's mod writes here. Nothing to install." },
-  { host: 'pi', name: 'Pi', line: "Plannotator's extension writes here once its Inbox tool is on in Settings, from the next Pi session." },
-  { host: 'opencode', name: 'OpenCode', line: "Plannotator's plugin writes here once its Inbox tool is on in Settings, from the next OpenCode start." },
-];
-
 /**
- * First run (record 1.3, the addendum "the empty state, as the owner saw it
- * built"): the three Plannotator connections, then every other agent's
- * harness. "Use MCP instead" opens that host's command below the row, so the
- * cards keep one height.
+ * First run (the approved "inbox-agent-awareness" design, 01): what
+ * `plannotator inbox` connected and the one-time note question (AgentsCard),
+ * a sentence to try it with, and the harness picker folded behind "Connect
+ * another agent by hand". The three "Nothing to install" cards it replaces
+ * were not true for Pi and OpenCode, whose tool is off until turned on.
  */
-export function EmptyState({ context }: { context: ConnectContext | null }) {
-  const [revealed, setRevealed] = useState<PlannotatorHost | null>(null);
+export function EmptyState({
+  context,
+  agents,
+  onAgents,
+  onSettings,
+}: {
+  context: ConnectContext | null;
+  agents: InboxAgentsModel | null;
+  onAgents: (next: InboxAgentsModel) => void;
+  onSettings: () => void;
+}) {
+  const [byHand, setByHand] = useState(false);
   return (
     <section className="ib-listcol" aria-label="Inbox">
       <div className="ib-lhead">
@@ -29,40 +34,23 @@ export function EmptyState({ context }: { context: ConnectContext | null }) {
       <div className="ib-lbody">
         <div className="ib-empty" data-inbox-empty="">
           <h2>No agent has written yet</h2>
+          {agents && <AgentsCard model={agents} onModel={onAgents} onSettings={onSettings} variant="empty" />}
+          <div className="ib-try">
+            <h3>Try it</h3>
+            <p>In a new session of any connected agent, ask:</p>
+            <div className="ib-try-quote">Send me a test message in my Plannotator Inbox.</div>
+          </div>
           {context && (
             <>
-              <div className="ib-hosts">
-                <div className="ib-hcards">
-                  {HOSTS.map(({ host, name, line }) => (
-                    <div className="ib-hcard" data-host={host} data-open={revealed === host || undefined} key={host}>
-                      <div className="ib-hh">
-                        <HostMark host={host} big />
-                        <h3>{name}</h3>
-                      </div>
-                      <p>{line}</p>
-                      <button
-                        type="button"
-                        className="ib-hlink"
-                        aria-expanded={revealed === host}
-                        aria-controls="ib-hreveal"
-                        onClick={() => setRevealed((open) => (open === host ? null : host))}
-                      >
-                        Use MCP instead
-                      </button>
-                    </div>
-                  ))}
+              <button type="button" className="ib-byhand" aria-expanded={byHand} aria-controls="ib-byhand" onClick={() => setByHand((open) => !open)}>
+                <Icon name="chevR" />
+                Connect another agent by hand
+              </button>
+              {byHand && (
+                <div id="ib-byhand">
+                  <ConnectPicker harnesses={HARNESSES} initial="codex" context={context} icons />
                 </div>
-                {revealed && (
-                  <div className="ib-hreveal" id="ib-hreveal" data-reveal={revealed}>
-                    <CodeBox text={hostMcpSnippet(revealed, context)} />
-                  </div>
-                )}
-              </div>
-              <div className="ib-others">
-                <h3>Other agents</h3>
-                <p>Add the Inbox as a local MCP server.</p>
-              </div>
-              <ConnectPicker harnesses={OTHER_HARNESSES} initial="codex" context={context} icons />
+              )}
             </>
           )}
         </div>

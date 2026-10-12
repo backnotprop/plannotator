@@ -48,6 +48,8 @@ import { SidebarShell } from './shell/SidebarShell';
 import { InboxList } from './components/InboxList';
 import { ThreadPane } from './components/Thread';
 import { EmptyState } from './components/EmptyState';
+import { AgentsCard } from './components/AgentsCard';
+import type { InboxAgentsModel } from '@plannotator/core/inbox-types';
 import { SettingsPage } from './components/Settings';
 import { ArchivedBlock } from './components/Archived';
 import { NotificationAsk } from './components/NotificationAsk';
@@ -294,6 +296,8 @@ function Inbox() {
   const [decisions, setDecisions] = useState<DecisionsModel | null>(null);
   const [decisionsError, setDecisionsError] = useState<string | null>(null);
   const [settings, setSettings] = useState<SettingsModel | null>(null);
+  /** The agents on this computer (GET /api/inbox/agents): the first-open card and Settings → Agents. Null on an older Inbox. */
+  const [agents, setAgents] = useState<InboxAgentsModel | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [update, setUpdate] = useState<InboxHealth['update']>(null);
   const [restarting, setRestarting] = useState(false);
@@ -464,6 +468,33 @@ function Inbox() {
       setSettingsError(cause instanceof Error ? cause.message : String(cause));
     }
   }, []);
+
+  /** Read the agents; while `plannotator inbox` is still connecting them, read again until it is done. */
+  const refreshAgents = useCallback(async () => {
+    try {
+      const next = await inboxApi.agents();
+      setAgents(next);
+      return next;
+    } catch {
+      return null;
+    }
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    // The page can load before the run that opened it starts connecting, so read once more a moment later.
+    let extra = 1;
+    const read = async () => {
+      const next = await refreshAgents();
+      if (cancelled) return;
+      if (next?.connecting || extra-- > 0) timer = setTimeout(() => void read(), next?.connecting ? 1500 : 2500);
+    };
+    void read();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [refreshAgents]);
 
   const loadUpdateDetails = useCallback(async () => {
     try {
@@ -1285,7 +1316,9 @@ function Inbox() {
   } else if (!latest || !shown) {
     main = <div className="ib-listcol">{loadError && <div className="ib-error" style={{ padding: 22 }}>{loadError}</div>}</div>;
   } else if (firstRun) {
-    main = <EmptyState context={context} />;
+    main = (
+      <EmptyState context={context} agents={agents} onAgents={setAgents} onSettings={() => go({ page: 'settings', project: null, thread: null })} />
+    );
   } else {
     main = (
       <>
@@ -1301,15 +1334,20 @@ function Inbox() {
           selectedThreadId={route.thread}
           notice={notice}
           ask={
-            notifications.ask &&
-            soundDialog === 'none' && (
-              <NotificationAsk
-                kind={notifications.ask}
-                soundOn={sound.settings.enabled}
-                onTurnOn={() => void notifications.turnOn()}
-                onNotNow={notifications.notNow}
-              />
-            )
+            <>
+              {/* The agents card sits above the notification ask; the two never merge. */}
+              {agents && !route.project && (
+                <AgentsCard model={agents} onModel={setAgents} onSettings={() => go({ page: 'settings', project: null, thread: null })} variant="list" />
+              )}
+              {notifications.ask && soundDialog === 'none' && (
+                <NotificationAsk
+                  kind={notifications.ask}
+                  soundOn={sound.settings.enabled}
+                  onTurnOn={() => void notifications.turnOn()}
+                  onNotNow={notifications.notNow}
+                />
+              )}
+            </>
           }
           onShowNew={() => {
             // Show's line goes away with the press: after a key, focus goes to the first row it brought in.
