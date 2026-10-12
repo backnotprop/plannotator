@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { storage } from '@plannotator/ui/utils/storage';
 import { useReviewMarkdownPreviewShortcuts } from '@plannotator/ui/shortcuts';
 import { isTypingTarget } from './useReviewSearch';
@@ -43,6 +43,20 @@ function writeStartingMarkdownView(view: MarkdownFileView): void {
   storage.removeItem(LEGACY_MARKDOWN_PREVIEW_ALL_COOKIE);
 }
 
+/** Why a file's view cannot change while it holds the edit session. */
+export const MARKDOWN_VIEW_EDITING_REASON = 'Finish editing first';
+
+/**
+ * True when a key event comes from somewhere the person types. Reads
+ * composedPath()[0]: at window level `event.target` is retargeted to a shadow
+ * host, so a keystroke in the Pierre editor's contenteditable (edit sessions)
+ * would otherwise look like a key pressed on the page.
+ */
+export function isTypingKeyEvent(event: KeyboardEvent): boolean {
+  const origin = (event.composedPath?.()[0] ?? event.target) as EventTarget | null;
+  return isTypingTarget(origin) || (origin as HTMLElement | null)?.tagName === 'SELECT';
+}
+
 /** Which rendered view a previewed file shows: the rendered diff or the whole document. */
 export type MarkdownPreviewView = 'diff' | 'whole';
 
@@ -78,9 +92,20 @@ export interface MarkdownPreviewController {
   choose: (path: string, view: MarkdownFileView) => void;
   /**
    * Navigation needs a view (a search hit in Source, a comment that lives in
-   * a rendered view): this file only, nothing remembered.
+   * a rendered view): this file only, nothing remembered. Like a pick, it
+   * pins the file: it keeps that view when a later pick moves the others.
    */
   show: (path: string, view: MarkdownFileView) => void;
+  /** Why this file's view cannot change right now (it holds the edit session), else null. */
+  lockReason: (path: string) => string | null;
+  /** The file the edit session holds (All files), or null: its view is locked. */
+  setEditingFile: (path: string | null) => void;
+  /**
+   * All files registers how to find the Markdown file `P` should act on (the
+   * file under focus or the pointer, else the top-most Markdown file in view).
+   */
+  registerViewTarget: (resolve: (() => string | null) | null) => void;
+  resolveViewTarget: () => string | null;
   /** `P`: the next view of this file (Source -> Changes -> Read -> Source). */
   cycle: (path: string) => void;
   /** The view files not set by hand start in. */
@@ -103,6 +128,12 @@ export function useMarkdownPreview(options: {
   const { files, supported } = options;
   const [startingView, setStartingView] = useState<MarkdownFileView>(() => readStartingMarkdownView());
   const [overrides, setOverrides] = useState<ReadonlyMap<string, MarkdownFileView>>(() => new Map());
+  const [editingFile, setEditingFile] = useState<string | null>(null);
+  const viewTargetRef = useRef<(() => string | null) | null>(null);
+  const lockReason = useCallback(
+    (path: string) => (editingFile !== null && path === editingFile ? MARKDOWN_VIEW_EDITING_REASON : null),
+    [editingFile],
+  );
 
   // Markdown files by path (the first, for a duplicate display path).
   const markdownFiles = useMemo(() => {
@@ -120,19 +151,26 @@ export function useMarkdownPreview(options: {
   }, [markdownFiles, overrides, startingView]);
 
   const setOverride = useCallback((path: string, view: MarkdownFileView) => {
+    if (lockReason(path)) return;
     setOverrides((current) => {
       if (current.get(path) === view) return current;
       const next = new Map(current);
       next.set(path, view);
       return next;
     });
-  }, []);
+  }, [lockReason]);
 
   const choose = useCallback((path: string, view: MarkdownFileView) => {
+    if (lockReason(path)) return;
     setOverride(path, view);
     setStartingView(view);
     writeStartingMarkdownView(view);
-  }, [setOverride]);
+  }, [setOverride, lockReason]);
+
+  const registerViewTarget = useCallback((resolve: (() => string | null) | null) => {
+    viewTargetRef.current = resolve;
+  }, []);
+  const resolveViewTarget = useCallback(() => viewTargetRef.current?.() ?? null, []);
 
   const cycle = useCallback((path: string) => {
     const file = markdownFiles.get(path);
@@ -163,13 +201,17 @@ export function useMarkdownPreview(options: {
           isPreviewed,
           choose,
           show: setOverride,
+          lockReason,
+          setEditingFile,
+          registerViewTarget,
+          resolveViewTarget,
           cycle,
           startingView,
           hasMarkdownFiles: markdownFiles.size > 0,
           previewedPaths,
         }
       : undefined),
-    [supported, isPreviewable, viewOf, isPreviewed, choose, setOverride, cycle, startingView, markdownFiles, previewedPaths],
+    [supported, isPreviewable, viewOf, isPreviewed, choose, setOverride, lockReason, registerViewTarget, resolveViewTarget, cycle, startingView, markdownFiles, previewedPaths],
   );
 }
 
@@ -180,8 +222,9 @@ export function useMarkdownPreview(options: {
  */
 export function useMarkdownPreviewKeys(options: {
   controller: MarkdownPreviewController | undefined;
-  /** The file `P` acts on: the open file, or the one at the top of All files. */
-  targetPath: string | null;
+  /** The file `P` acts on: the open file, or (a resolver, read at key time) the
+   *  Markdown file the person is looking at in All files. */
+  targetPath: string | null | (() => string | null);
   files: readonly DiffFile[];
   /** False while the surface on screen is not a diff (the guide, a panel). */
   enabled: boolean;
@@ -191,13 +234,16 @@ export function useMarkdownPreviewKeys(options: {
     handlers: {
       cycleMarkdownView: {
         when: (event) => {
-          if (!controller || !enabled || event.defaultPrevented || isTypingTarget(event.target) || !targetPath) return false;
-          const file = files.find((candidate) => candidate.path === targetPath);
+          if (!controller || !enabled || event.defaultPrevented || isTypingKeyEvent(event)) return false;
+          const path = typeof targetPath === 'function' ? targetPath() : targetPath;
+          if (!path || controller.lockReason(path)) return false;
+          const file = files.find((candidate) => candidate.path === path);
           return !!file && controller.isPreviewable(file);
         },
         handle: (event) => {
           event.preventDefault();
-          if (targetPath) controller?.cycle(targetPath);
+          const path = typeof targetPath === 'function' ? targetPath() : targetPath;
+          if (path) controller?.cycle(path);
         },
       },
     },

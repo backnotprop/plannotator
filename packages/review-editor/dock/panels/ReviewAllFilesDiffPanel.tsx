@@ -26,6 +26,7 @@ function ReviewMarkdownViewControl({ file, iconOnly, touch }: { file: DiffFile; 
       onChoose={(view) => preview.choose(file.path, view)}
       iconOnly={iconOnly}
       touch={touch}
+      disabledReason={preview.lockReason(file.path)}
     />
   );
 }
@@ -76,6 +77,8 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
             previewedPaths: preview.previewedPaths,
             isPreviewable: preview.isPreviewable,
             show: preview.show,
+            onEditingFileChange: preview.setEditingFile,
+            registerViewTarget: preview.registerViewTarget,
             renderViewControl: ({ file, iconOnly, touch }: { file: DiffFile; iconOnly: boolean; touch: boolean }) => (
               <ReviewMarkdownViewControl file={file} iconOnly={iconOnly} touch={touch} />
             ),

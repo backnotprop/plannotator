@@ -18,6 +18,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { DiffFile } from '../types';
 
 let lastCodeViewProps: Record<string, unknown> | null = null;
+// What the stand-in CodeView reports as on screen, and the edit session's file.
+let renderedItems: Array<{ id: string; element: HTMLElement }> = [];
+let viewport: HTMLElement | undefined;
+let fakeEditingItemId: string | null = null;
 const updatedItems: Array<{ id: string; fileDiff: { hunks: unknown[]; cacheKey?: string } }> = [];
 
 const realPierreDiffs = { ...(await import('@pierre/diffs')) };
@@ -72,7 +76,8 @@ mock.module('@pierre/diffs/react', () => ({
       getSelectedLines: () => null,
       clearSelectedLines: () => {},
       getInstance: () => ({
-        getRenderedItems: () => [],
+        getRenderedItems: () => renderedItems,
+        getContainerElement: () => viewport,
         getScrollTop: () => 0,
         getScrollHeight: () => 0,
         getHeight: () => 0,
@@ -99,6 +104,19 @@ mock.module('./ToolbarHost', () => ({
       startEdit: () => {},
     }));
     return null;
+  }),
+}));
+
+// An edit session stand-in: only which item it holds matters here.
+mock.module('../edit/useEditSession', () => ({
+  useEditSession: () => new Proxy({
+    editingItemId: fakeEditingItemId,
+    editingItemIdRef: { current: fakeEditingItemId },
+    editUnavailableRef: { current: new Map() },
+    dirtyStore: { subscribe: () => () => {}, getSnapshot: () => 0 },
+    createEditor: undefined,
+  } as Record<string | symbol, unknown>, {
+    get: (target, key) => (key in target ? target[key] : () => {}),
   }),
 }));
 
@@ -202,6 +220,9 @@ afterEach(async () => {
   host = headerHost = null;
   lastCodeViewProps = null;
   updatedItems.length = 0;
+  renderedItems = [];
+  viewport = undefined;
+  fakeEditingItemId = null;
 });
 
 afterAll(() => {
@@ -247,6 +268,67 @@ describe.if(hasDom)('Markdown previews in the all-files view', () => {
     await render({ markdownPreview: preview([mdFile.path], calls) });
     await rerender({ markdownPreview: preview([mdFile.path], calls), activeSearchMatch: match as never, activeSearchMatchId: 'm1' });
     expect(calls).toContainEqual([mdFile.path, 'source']);
+  });
+
+  test('tells the host which file the edit session holds, so its view is locked', async () => {
+    const editing: Array<string | null> = [];
+    fakeEditingItemId = mdFile.path;
+    await render({
+      markdownPreview: { ...preview([], []), onEditingFileChange: (path: string | null) => { editing.push(path); } },
+      enableEditSuggestions: true,
+      onAddSuggestionsForFile: () => {},
+    });
+    expect(editing.at(-1)).toBe(mdFile.path);
+    fakeEditingItemId = null;
+    await rerender({
+      markdownPreview: { ...preview([], []), onEditingFileChange: (path: string | null) => { editing.push(path); } },
+      enableEditSuggestions: true,
+      onAddSuggestionsForFile: () => {},
+    });
+    expect(editing.at(-1)).toBeNull();
+  });
+
+  test('P acts on the Markdown file under the pointer, else the top-most Markdown file in view (never just the last)', async () => {
+    let resolve: (() => string | null) | null = null;
+    const secondMd: DiffFile = { ...mdFile, path: 'docs/notes.md', patch: mdFile.patch.replaceAll('docs/guide.md', 'docs/notes.md') };
+    const box = (top: number, bottom: number) => {
+      const el = document.createElement('div');
+      el.getBoundingClientRect = () => ({ top, bottom, left: 0, right: 800, width: 800, height: bottom - top, x: 0, y: top, toJSON: () => ({}) });
+      document.body.appendChild(el);
+      return el;
+    };
+    viewport = box(0, 600);
+    // Everything fits: code at the top, two Markdown files below it.
+    renderedItems = [
+      { id: codeFile.path, element: box(0, 100) },
+      { id: mdFile.path, element: box(100, 300) },
+      { id: secondMd.path, element: box(300, 500) },
+    ];
+    await render({
+      files: [codeFile, mdFile, secondMd],
+      markdownPreview: { ...preview([], []), registerViewTarget: (fn: (() => string | null) | null) => { resolve = fn; } },
+    });
+    expect(resolve).not.toBeNull();
+    // No pointer, no focus: the top-most Markdown file in view.
+    expect(resolve!()).toBe(mdFile.path);
+
+    // The pointer over the second Markdown file.
+    const surface = host!.firstElementChild as HTMLElement;
+    await act(async () => {
+      surface.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 50, clientY: 400 }));
+    });
+    expect(resolve!()).toBe(secondMd.path);
+    // Over the code file: nothing to switch.
+    await act(async () => {
+      surface.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 50, clientY: 50 }));
+    });
+    expect(resolve!()).toBeNull();
+    // The pointer leaves (React derives pointerleave from pointerout): back
+    // to the top-most Markdown file in view.
+    await act(async () => {
+      surface.dispatchEvent(new MouseEvent('pointerout', { bubbles: true, relatedTarget: document.body }));
+    });
+    expect(resolve!()).toBe(mdFile.path);
   });
 
   test('without the host seam (guide chain, guides.show) nothing is previewed', async () => {

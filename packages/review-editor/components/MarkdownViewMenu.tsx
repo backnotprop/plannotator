@@ -14,11 +14,11 @@ import type { MarkdownFileView } from '../utils/markdownPreview';
 const LABEL: Record<MarkdownFileView, string> = { source: 'Source', changes: 'Changes', read: 'Read' };
 
 function describe(view: MarkdownFileView, status: MarkdownViewMenuProps['status']): string {
-  if (view === 'source') return 'The source diff · comment on lines';
-  if (view === 'changes') return 'Rendered, changes marked · select text to comment';
-  if (status === 'deleted') return 'The deleted version, rendered · select text to comment';
-  if (status === 'added') return 'The whole new file, rendered · select text to comment';
-  return 'The whole new version, rendered · select text to comment';
+  if (view === 'source') return 'The line diff · comment on lines';
+  if (view === 'changes') return 'Rendered, changes marked · select to comment';
+  if (status === 'deleted') return 'The deleted version, rendered · select to comment';
+  if (status === 'added') return 'The new file, rendered · select to comment';
+  return 'The new version, rendered · select to comment';
 }
 
 function ViewIcon({ view, className }: { view: MarkdownFileView; className: string }) {
@@ -43,6 +43,8 @@ export interface MarkdownViewMenuProps {
   iconOnly?: boolean;
   /** The compact touch shell: a 44 px button and a bottom sheet. */
   touch?: boolean;
+  /** Set while the view cannot change (the file holds the edit session): the button is disabled and says why. */
+  disabledReason?: string | null;
 }
 
 export const MarkdownViewMenu: React.FC<MarkdownViewMenuProps> = ({
@@ -53,11 +55,14 @@ export const MarkdownViewMenu: React.FC<MarkdownViewMenuProps> = ({
   status,
   iconOnly = false,
   touch = false,
+  disabledReason = null,
 }) => {
   const [open, setOpen] = useState(false);
   const rendered = view !== 'source';
   const name = filePath.slice(filePath.lastIndexOf('/') + 1);
-  const title = rendered
+  const title = disabledReason
+    ? disabledReason
+    : rendered
     ? `Showing ${LABEL[view]}. Select text to comment. P: next view`
     : 'Show this Markdown file as Source, Changes or Read. P: next view';
 
@@ -66,14 +71,14 @@ export const MarkdownViewMenu: React.FC<MarkdownViewMenuProps> = ({
     // edge), which the 44 px compact header leaves room for.
     <button
       type="button"
-      className={`relative ml-1 flex h-9 flex-none items-center gap-1 rounded-md px-2 text-xs transition-colors after:absolute after:-inset-1 after:content-[''] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 ${
+      className={`relative ml-1 flex h-9 flex-none items-center gap-1 rounded-md px-2 text-xs transition-colors after:absolute after:-inset-1 after:content-[''] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 disabled:opacity-50 ${
         rendered ? 'bg-primary/10 text-primary' : 'text-muted-foreground'
       }`}
     />
   ) : (
     <button
       type="button"
-      className={`flex flex-none items-center gap-1 rounded-md border text-xs leading-none transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 data-[popup-open]:bg-muted ${
+      className={`flex flex-none items-center gap-1 rounded-md border text-xs leading-none transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 data-[popup-open]:bg-muted disabled:cursor-not-allowed disabled:opacity-50 ${
         iconOnly ? 'px-1.5 py-[3px]' : 'px-2 py-[3px]'
       } ${
         rendered
@@ -84,13 +89,14 @@ export const MarkdownViewMenu: React.FC<MarkdownViewMenuProps> = ({
   );
 
   return (
-    <Menu.Root open={open} onOpenChange={setOpen} modal={touch}>
+    <Menu.Root open={open && !disabledReason} onOpenChange={setOpen} modal={touch} disabled={!!disabledReason}>
       <Menu.Trigger
         render={trigger}
+        disabled={!!disabledReason}
         data-markdown-view-menu=""
         data-markdown-view={view}
         aria-label={`${LABEL[view]} view of ${name}`}
-        title={touch ? undefined : title}
+        title={touch && !disabledReason ? undefined : title}
         // The header row toggles the file's collapse on click.
         onClick={(event) => event.stopPropagation()}
       >
@@ -117,7 +123,7 @@ export const MarkdownViewMenu: React.FC<MarkdownViewMenuProps> = ({
             data-markdown-view-popup={touch ? 'sheet' : 'menu'}
             className={touch
               ? 'w-full rounded-t-2xl border-t border-border bg-popover px-2 pt-2 pb-[max(env(safe-area-inset-bottom),12px)] text-popover-foreground shadow-[0_-12px_40px_-16px_rgba(15,23,42,0.45)] outline-none transition-[transform,opacity] duration-200 ease-out data-[ending-style]:opacity-0 data-[starting-style]:opacity-0 motion-safe:data-[ending-style]:translate-y-full motion-safe:data-[starting-style]:translate-y-full'
-              : 'w-80 origin-[var(--transform-origin)] rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg outline-none transition-[opacity,scale] duration-150 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0'}
+              : 'w-96 max-w-[calc(100vw-16px)] origin-[var(--transform-origin)] rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg outline-none transition-[opacity,scale] duration-150 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0'}
           >
             {touch && <div aria-hidden="true" className="mx-auto mb-2 h-1 w-9 rounded-full bg-muted-foreground/30" />}
             <Menu.RadioGroup

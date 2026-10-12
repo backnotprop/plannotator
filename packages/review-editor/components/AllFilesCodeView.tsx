@@ -220,6 +220,14 @@ export interface AllFilesCodeViewProps {
     show: (filePath: string, view: MarkdownFileView) => void;
     /** The file's Source / Changes / Read control, drawn in its header. */
     renderViewControl: (args: { file: DiffFile; iconOnly: boolean; touch: boolean }) => React.ReactNode;
+    /** The file the edit session holds (null when none): its view must not change mid-edit. */
+    onEditingFileChange?: (filePath: string | null) => void;
+    /**
+     * Registers how to find the Markdown file a view key should act on: the
+     * file holding focus or under the pointer, else the top-most Markdown
+     * file in view (never the last file just because the list fits).
+     */
+    registerViewTarget?: (resolve: (() => string | null) | null) => void;
     render: (args: { file: DiffFile; onHeightChange: () => void }) => React.ReactNode;
   };
   /** Compact coarse-pointer shell. Adjusts custom-header chrome and Pierre's
@@ -2643,6 +2651,62 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     onStage,
   ]);
 
+  // --- Markdown view: the editing file, and the file a view key acts on ------
+
+  const editingFilePath = editSession.editingItemId != null
+    ? itemIdToFilePath.get(editSession.editingItemId) ?? null
+    : null;
+  const onEditingFileChange = markdownPreview?.onEditingFileChange;
+  useEffect(() => {
+    onEditingFileChange?.(editingFilePath);
+  }, [onEditingFileChange, editingFilePath]);
+  useEffect(() => () => onEditingFileChange?.(null), [onEditingFileChange]);
+
+  // Last pointer position over this view (null once it leaves).
+  const pointerRef = useRef<{ x: number; y: number } | null>(null);
+  const resolveViewTarget = useStableCallback((): string | null => {
+    const viewer = viewerRef.current?.getInstance();
+    const isPreviewable = markdownPreviewRef.current?.isPreviewable;
+    if (viewer == null || !isPreviewable) return null;
+    const rendered = viewer.getRenderedItems();
+    const markdownPathOf = (itemId: string): string | null => {
+      const file = itemIdToFile.get(itemId);
+      return file && isPreviewable(file) ? file.path : null;
+    };
+    // 1. The file holding focus.
+    const active = document.activeElement;
+    if (active && active !== document.body) {
+      const holder = rendered.find((item) => item.element.contains(active));
+      if (holder) return markdownPathOf(holder.id);
+    }
+    // 2. The file under the pointer.
+    const pointer = pointerRef.current;
+    if (pointer) {
+      const under = rendered.find((item) => {
+        const rect = item.element.getBoundingClientRect();
+        return pointer.y >= rect.top && pointer.y < rect.bottom;
+      });
+      if (under) return markdownPathOf(under.id);
+    }
+    // 3. The top-most Markdown file intersecting the viewport.
+    const container = viewer.getContainerElement();
+    const view = container?.getBoundingClientRect();
+    for (const item of rendered) {
+      const path = markdownPathOf(item.id);
+      if (!path) continue;
+      if (!view) return path;
+      const rect = item.element.getBoundingClientRect();
+      if (rect.bottom > view.top + 1 && rect.top < view.bottom - 1) return path;
+    }
+    return null;
+  });
+  const registerViewTarget = markdownPreview?.registerViewTarget;
+  useEffect(() => {
+    if (!registerViewTarget) return;
+    registerViewTarget(resolveViewTarget);
+    return () => registerViewTarget(null);
+  }, [registerViewTarget, resolveViewTarget]);
+
   // --- Custom header render slot (the full Plannotator FileHeader) -----------
 
   const renderCustomHeader = useStableCallback((item: CodeViewItem<DiffAnnotationMetadata>) => {
@@ -2993,6 +3057,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     <div
       className="relative h-full"
       data-history-owner={editSession.editingItemId ? 'edit-session' : undefined}
+      onPointerMove={markdownPreview ? (event) => { pointerRef.current = { x: event.clientX, y: event.clientY }; } : undefined}
+      onPointerLeave={markdownPreview ? () => { pointerRef.current = null; } : undefined}
     >
       {/* EditProvider only mounts when the experimental flag is on; its
           factory declines attaches until the lazy editor chunk has loaded

@@ -14,8 +14,10 @@ import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { useOverlayViewport } from '@plannotator/ui/hooks/useOverlayViewport';
 import { FileHeader } from './FileHeader';
-// Lazy: the preview brings the text highlighter (which needs a DOM at import)
-// and the diagram engine; a review that never previews never loads them.
+// Lazy: the rendered views bring the text highlighter (which needs a DOM at
+// import), so it loads the first time a file is shown as Changes or Read.
+// (The single-file build inlines the chunk; no diagram engine is in it:
+// diagram fences render as code.)
 const MarkdownFilePreview = React.lazy(async () => ({ default: (await import('./MarkdownFilePreview')).MarkdownFilePreview }));
 import { fileViewOfRendered, renderedViewOf, type MarkdownPreviewView } from '../hooks/useMarkdownPreview';
 import { MarkdownViewMenu } from './MarkdownViewMenu';

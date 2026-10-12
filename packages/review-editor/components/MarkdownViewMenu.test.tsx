@@ -126,6 +126,15 @@ describe.if(hasDom)('MarkdownViewMenu', () => {
     expect(items()[1].textContent).toContain('The deleted version, rendered');
   });
 
+  test('while the file holds the edit session the button is disabled, says why, and opens nothing', async () => {
+    await mount({ disabledReason: 'Finish editing first' });
+    expect(trigger().disabled).toBe(true);
+    expect(trigger().getAttribute('title')).toBe('Finish editing first');
+    await open();
+    expect(menu()).toBeNull();
+    expect(chosen).toEqual([]);
+  });
+
   test('on a phone the same words open as a sheet titled with the file', async () => {
     await mount({ touch: true, view: 'changes' });
     await open();

@@ -34,7 +34,7 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let controller: MarkdownPreviewController | undefined;
 
-function Harness({ supported = true, targetPath = 'docs/a.md', enabled = true }: { supported?: boolean; targetPath?: string | null; enabled?: boolean }) {
+function Harness({ supported = true, targetPath = 'docs/a.md', enabled = true }: { supported?: boolean; targetPath?: string | null | (() => string | null); enabled?: boolean }) {
   controller = useMarkdownPreview({ files: FILES, supported });
   useMarkdownPreviewKeys({ controller, targetPath, files: FILES, enabled });
   return <input data-test-input="" />;
@@ -160,6 +160,46 @@ describe.if(hasDom)('Markdown file views', () => {
     await remount({ targetPath: 'docs/a.md', enabled: false });
     await press('p');
     expect([...controller!.previewedPaths]).toEqual([]);
+  });
+
+  test('typing p in an editor inside a shadow root (the Pierre edit session) never switches the view', async () => {
+    await mount({ targetPath: 'docs/a.md' });
+    const shadowHost = document.createElement('div');
+    document.body.appendChild(shadowHost);
+    const shadow = shadowHost.attachShadow({ mode: 'open' });
+    const editor = document.createElement('div');
+    editor.contentEditable = 'true';
+    shadow.appendChild(editor);
+    // composed: the event reaches window retargeted to the shadow host.
+    await press('p', { composed: true }, editor);
+    expect(controller!.viewOf('docs/a.md')).toBe('source');
+    shadowHost.remove();
+  });
+
+  test('the file the edit session holds keeps its view: P, a pick and navigation all leave it', async () => {
+    await mount({ targetPath: 'docs/a.md' });
+    await act(async () => controller!.setEditingFile('docs/a.md'));
+    expect(controller!.lockReason('docs/a.md')).toBe('Finish editing first');
+    expect(controller!.lockReason('docs/b.md')).toBeNull();
+    await press('p');
+    await act(async () => controller!.choose('docs/a.md', 'read'));
+    await act(async () => controller!.show('docs/a.md', 'read'));
+    expect(controller!.viewOf('docs/a.md')).toBe('source');
+    expect(stored.has(MARKDOWN_VIEW_COOKIE)).toBe(false);
+
+    await act(async () => controller!.setEditingFile(null));
+    await press('p');
+    expect(controller!.viewOf('docs/a.md')).toBe('changes');
+  });
+
+  test('in All files P reads its target when pressed', async () => {
+    let target: string | null = 'docs/b.md';
+    await mount({ targetPath: () => target });
+    await press('p');
+    expect(views()).toEqual(['changes', 'changes', 'read']);
+    target = null;
+    await press('p');
+    expect(controller!.viewOf('docs/b.md')).toBe('changes');
   });
 
   test('a server without the advert gets no views at all', async () => {

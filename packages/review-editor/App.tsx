@@ -3014,14 +3014,19 @@ const ReviewApp: React.FC = () => {
     return () => window.removeEventListener('keydown', handler);
   }, [files, activeFileIndex, isDiffPanelActive, guideOpen, handleToggleViewed, isPathStageable, stageFile]);
 
-  // `P`: the current Markdown file (the open one, or in All files the one at
-  // the top of the view) in its next view.
+  // `P`: the current Markdown file in its next view: the open one, or in All
+  // files the one holding focus or the pointer, else the top-most Markdown
+  // file in view (resolved when the key is pressed).
+  const resolveAllFilesViewTarget = useCallback(
+    () => markdownPreview?.resolveViewTarget() ?? null,
+    [markdownPreview],
+  );
   useMarkdownPreviewKeys({
     controller: markdownPreview,
     targetPath: isDiffPanelActive
       ? files[activeFileIndex]?.path ?? null
       : isAllFilesActive
-        ? allFilesVisibleFile
+        ? resolveAllFilesViewTarget
         : null,
     files,
     enabled: !guideOpen && (isDiffPanelActive || isAllFilesActive),
