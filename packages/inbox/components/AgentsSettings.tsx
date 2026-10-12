@@ -230,13 +230,9 @@ export function AgentsSettings({ model, onModel, context }: { model: InboxAgents
 
   return (
     <div data-settings-agents="">
-      <p className="ib-lede">
-        How each agent on this computer reaches the Inbox and learns when to use it. A change applies to that agent's next session; sessions already running
-        keep what they started with.
-      </p>
       {model.tool_env !== null && (
-        <div className="ib-alock" role="note">
-          <Icon name="info" />
+        <div className="ib-callout" role="note" data-tool-locked="">
+          <Icon name="lock" />
           <span>
             <code>PLANNOTATOR_INBOX_TOOL={model.tool_env ? '1' : '0'}</code> is set in this Inbox's environment, so the Inbox tool stays{' '}
             {model.tool_env ? 'on' : 'off'} in Claude Code, Pi and OpenCode, and so does their reminder. Notes and MCP servers are not affected.
@@ -244,7 +240,7 @@ export function AgentsSettings({ model, onModel, context }: { model: InboxAgents
         </div>
       )}
       {model.connect_env_off && (
-        <div className="ib-alock" role="note">
+        <div className="ib-callout" role="note">
           <Icon name="info" />
           <span>
             <code>PLANNOTATOR_INBOX_CONNECT=0</code> is set, so <code>plannotator inbox</code> doesn't connect agents by itself. The switches below still work.

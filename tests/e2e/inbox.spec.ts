@@ -526,8 +526,13 @@ test("a Sent row follows the agent's read in place, without an action: its state
   await expect(pane).toHaveCount(0);
 });
 
-test('Settings: in sections; the agent tool knob applies to the next session, the compact picker, the store on disk', async () => {
+test('Settings: in sections; Settings → Agents switches apply to the next session, the picker for the rest, the store on disk', async () => {
   const { page } = world;
+  // Plannotator's Claude Code plugin and Pi extension in this world's scratch home: both are found, each with its tool switch.
+  mkdirSync(join(world.env.HOME!, '.claude'), { recursive: true });
+  writeFileSync(join(world.env.HOME!, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'plannotator@plannotator': true } }));
+  mkdirSync(join(world.env.HOME!, '.pi', 'agent'), { recursive: true });
+  writeFileSync(join(world.env.HOME!, '.pi', 'agent', 'settings.json'), JSON.stringify({ packages: ['npm:@plannotator/pi-extension'] }));
   await side(page).getByRole('button', { name: 'Settings' }).click();
   // A focused page (design of record inbox-settings-tabs): General first, the section nav beside it.
   await expect(page.getByRole('heading', { name: 'General', level: 1 })).toBeVisible();
@@ -537,17 +542,19 @@ test('Settings: in sections; the agent tool knob applies to the next session, th
   await expect(page).toHaveURL(/#settings\/agents$/);
   await expect(nav.getByRole('link', { name: 'Agents' })).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeFocused();
-  const claudeSwitch = page.getByRole('switch', { name: 'The Inbox tool in Claude Code' });
-  const piSwitch = page.getByRole('switch', { name: 'The Inbox tool in Pi' });
+  const claudeSwitch = page.getByRole('switch', { name: 'Reaches the Inbox: Claude Code' });
+  const piSwitch = page.getByRole('switch', { name: 'Reaches the Inbox: Pi' });
   await expect(claudeSwitch).toHaveAttribute('aria-checked', 'true');
   await expect(piSwitch).toHaveAttribute('aria-checked', 'false');
-  await expect(page.getByRole('switch', { name: 'The Inbox tool in OpenCode' })).toHaveAttribute('aria-checked', 'false');
-  await expect(page.getByText('Applies to the next session. Sessions already running keep what they started with.')).toBeVisible();
+  await expect(page.getByRole('switch', { name: 'Reminder at session start: Pi' })).toBeDisabled();
+  await expect(page.getByText("A change applies to that agent's next session; sessions already running keep what they started with.")).toBeVisible();
   // Phones stay hidden until the iPhone app ships (PLANNOTATOR_INBOX_PHONES is unset here): no block, no mention.
   await expect(page.locator('[data-settings-phones]')).toHaveCount(0);
   await expect(page.getByText('Phones reach it only on a path you turn on below.')).toHaveCount(0);
 
   const binary = realpathSync(world.binary);
+  await page.getByRole('button', { name: /^Not found on this computer/ }).click();
+  await page.getByRole('tab', { name: 'Other MCP client' }).click();
   const other = page.getByRole('tabpanel', { name: 'Other MCP client' });
   await expect(other.locator('pre').nth(0)).toHaveText(`${binary} inbox mcp`);
   await expect(other.locator('pre').nth(1)).toHaveText(`http://127.0.0.1:${registry().port}/mcp`);
@@ -564,6 +571,7 @@ test('Settings: in sections; the agent tool knob applies to the next session, th
   await nav.getByRole('link', { name: 'Agents' }).click();
   await piSwitch.click();
   await expect(piSwitch).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByText("Pi's next session").first()).toBeVisible();
   // The switch moves at the click; the save lands when the POST answers.
   await expect
     .poll(() => {

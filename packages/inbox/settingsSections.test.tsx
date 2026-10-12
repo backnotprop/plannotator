@@ -258,10 +258,10 @@ test.skipIf(!hasDom)('every control lands in the section the design puts it in',
   expect(el.querySelector('[data-settings-tailscale]')).toBeNull();
 
   act(() => navLink(el, 'agents').click());
-  await until(() => switchNamed(el, 'The Inbox tool in Claude Code') !== null, 'Agents');
-  for (const name of ['Claude Code', 'Pi', 'OpenCode']) expect(switchNamed(el, `The Inbox tool in ${name}`)).not.toBeNull();
-  expect(el.querySelector('.ib-connect')).not.toBeNull();
-  expect(el.textContent).toContain('Applies to the next session.');
+  // Settings → Agents (components/AgentsSettings.tsx; agentsSettings.test.tsx covers its rows).
+  await until(() => el.querySelector('[data-settings-agents]') !== null, 'Agents');
+  expect(el.textContent).toContain("A change applies to that agent's next session");
+  expect([...el.querySelectorAll('button')].some((b) => b.textContent?.startsWith('Not found on this computer'))).toBe(true);
 
   act(() => navLink(el, 'devices').click());
   await until(() => el.querySelector('[data-settings-phones]') !== null, 'Devices');

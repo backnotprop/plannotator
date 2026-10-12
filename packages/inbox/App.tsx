@@ -505,6 +505,11 @@ function Inbox() {
       if (timer) clearTimeout(timer);
     };
   }, [refreshAgents]);
+  // Settings → Agents reads them again each time it opens: an agent installed meanwhile shows at once.
+  const agentsSection = route.page === 'settings' && route.section === 'agents';
+  useEffect(() => {
+    if (agentsSection) void refreshAgents();
+  }, [agentsSection, refreshAgents]);
 
   const loadUpdateDetails = useCallback(async () => {
     try {
@@ -1299,6 +1304,8 @@ function Inbox() {
         context={context}
         error={settingsError}
         onToggleTool={toggleTool}
+        agents={agents}
+        onAgents={setAgents}
         onToggleTailscale={(next, replaceExposed) => void toggleTailscale(next, replaceExposed)}
         tailscaleBusy={tailscaleBusy}
         permission={notifications.permission}
@@ -1381,7 +1388,7 @@ function Inbox() {
     main = <div className="ib-listcol">{loadError && <div className="ib-error" style={{ padding: 22 }}>{loadError}</div>}</div>;
   } else if (firstRun) {
     main = (
-      <EmptyState context={context} agents={agents} onAgents={setAgents} onSettings={() => go({ page: 'settings', project: null, thread: null })} />
+      <EmptyState context={context} agents={agents} onAgents={setAgents} onSettings={() => go({ page: 'settings', project: null, thread: null, section: 'agents' })} />
     );
   } else {
     main = (
@@ -1401,7 +1408,7 @@ function Inbox() {
             <>
               {/* The agents card sits above the notification ask; the two never merge. */}
               {agents && !route.project && (
-                <AgentsCard model={agents} onModel={setAgents} onSettings={() => go({ page: 'settings', project: null, thread: null })} variant="list" />
+                <AgentsCard model={agents} onModel={setAgents} onSettings={() => go({ page: 'settings', project: null, thread: null, section: 'agents' })} variant="list" />
               )}
               {notifications.ask && soundDialog === 'none' && (
                 <NotificationAsk

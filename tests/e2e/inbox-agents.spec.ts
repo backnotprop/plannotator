@@ -99,6 +99,18 @@ test('plannotator inbox connects the agents found; the card asks once about the 
     expect(off).toBe(200);
     expect(JSON.parse(readFileSync(join(fake.home, '.gemini', 'settings.json'), 'utf8')).mcpServers).toEqual({});
 
+    // Settings → Agents: Codex connected with its note, Gemini off (never re-added), the rest folded.
+    await page.goto(`${url}#settings/agents`);
+    const codex = page.locator('[data-agent="codex"]');
+    await expect(codex.getByRole('switch', { name: 'Reaches the Inbox: Codex' })).toHaveAttribute('aria-checked', 'true');
+    await expect(codex.getByRole('switch', { name: 'Note in its instructions: Codex' })).toHaveAttribute('aria-checked', 'true');
+    await expect(page.locator('[data-agent="gemini"]').getByRole('switch', { name: 'Reaches the Inbox: Gemini CLI' })).toHaveAttribute('aria-checked', 'false');
+    await shot(page, '05-settings-agents');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await shot(page, '06-settings-agents-phone');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(url);
+
     fake.install('amp');
     const later = run(['--no-open']);
     expect(later.status, later.stderr).toBe(0);

@@ -6,6 +6,8 @@ import { formatBytes, plural, tildePath } from '../format';
 import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon, type IconName } from '../icons';
 import { ConnectPicker } from './ConnectPicker';
+import { AgentsSettings } from './AgentsSettings';
+import type { InboxAgentsModel } from '@plannotator/core/inbox-types';
 import { DevicesSection, devicesNeedAttention, usePhones } from './Devices';
 import { SidebarTrigger } from '../shell/sidebar';
 import { useInboxTheme } from '../theme';
@@ -65,6 +67,9 @@ export interface SettingsPageProps {
   onRetry?: () => void;
   /** One screen at a time (phone.ts): the list of sections, then a section with "‹ Settings". */
   phone?: boolean;
+  /** Settings → Agents (components/AgentsSettings.tsx): the agents on this computer; null while unread. */
+  agents?: InboxAgentsModel | null;
+  onAgents?: (next: InboxAgentsModel) => void;
 }
 
 const PERMISSION_LABEL: Record<NotificationPermission | 'unsupported', string> = {
@@ -239,8 +244,32 @@ function GeneralSection({
   );
 }
 
-/** Agents: today's two blocks, unchanged (approval: the Agents design ships separately). */
-function AgentsSection({ settings, context, onToggleTool }: { settings: SettingsModel; context: ConnectContext | null; onToggleTool: (host: AgentToolHost, next: boolean) => void }) {
+/**
+ * Agents (the approved "inbox-agent-awareness" design, 08-09): one group per
+ * agent found, with its reach, reminder and note (components/AgentsSettings.tsx).
+ * Until the agents are read (or on an Inbox that cannot list them), the
+ * tool switches and the harness picker as before.
+ */
+function AgentsSection({
+  settings,
+  context,
+  onToggleTool,
+  agents,
+  onAgents,
+}: {
+  settings: SettingsModel;
+  context: ConnectContext | null;
+  onToggleTool: (host: AgentToolHost, next: boolean) => void;
+  agents?: InboxAgentsModel | null;
+  onAgents?: (next: InboxAgentsModel) => void;
+}) {
+  if (agents && onAgents) {
+    return (
+      <section className="ib-sgroup" aria-label="Agents">
+        <AgentsSettings model={agents} onModel={onAgents} context={context} />
+      </section>
+    );
+  }
   const env = settings.inbox_tool.env;
   return (
     <>
@@ -382,7 +411,7 @@ function StoreTable({
 
 const LEDE: Record<SettingsSection, string> = {
   general: 'How the Inbox looks, and how it gets your attention.',
-  agents: 'Which agents have the Inbox in their tools, and how to connect others.',
+  agents: "How each agent on this computer reaches the Inbox and learns when to use it. A change applies to that agent's next session; sessions already running keep what they started with.",
   devices: 'Your phone, and browsers on your other devices.',
   archived: 'Threads you archived stay out of the list. Unarchive one to put it back and open it.',
   storage: '',
@@ -469,6 +498,10 @@ export function SettingsPage(props: SettingsPageProps) {
       case 'general':
         return mode === 'system' ? 'Match system' : mode === 'light' ? 'Light' : 'Dark';
       case 'agents': {
+        if (props.agents) {
+          const connected = props.agents.agents.filter((row) => row.detected && row.reach.on).map((row) => row.label);
+          return connected.length === 0 ? 'None' : connected.length === 1 ? connected[0]! : `${connected.length} agents`;
+        }
         const on = TOOL_HOSTS.filter(({ host }) => settings.inbox_tool.hosts[host]).map(({ name }) => name);
         return on.length === 0 ? 'Off' : on.length === 1 ? on[0]! : `${on.length} agents`;
       }
@@ -491,7 +524,7 @@ export function SettingsPage(props: SettingsPageProps) {
         body = <GeneralSection settings={settings} permission={permission} onToggleNotifications={onToggleNotifications} sound={sound} />;
         break;
       case 'agents':
-        body = <AgentsSection settings={settings} context={context} onToggleTool={onToggleTool} />;
+        body = <AgentsSection settings={settings} context={context} onToggleTool={onToggleTool} agents={props.agents} onAgents={props.onAgents} />;
         break;
       case 'devices':
         body = (
