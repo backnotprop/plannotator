@@ -11,7 +11,7 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: '.',
-  testMatch: ['inbox.spec.ts', 'notifications.spec.ts', 'inbox-decisions.spec.ts', 'inbox-attachments.spec.ts', 'inbox-attachments-kinds.spec.ts', 'inbox-attachment-stepping.spec.ts', 'inbox-guides.spec.ts', 'inbox-new-message.spec.ts', 'inbox-ended-session.spec.ts', 'inbox-order.spec.ts', 'inbox-replaced.spec.ts', 'inbox-thread-folding.spec.ts', 'inbox-phones.spec.ts', 'inbox-sidebar.spec.ts', 'inbox-list-resize.spec.ts', 'inbox-message-images.spec.ts', 'inbox-message-links.spec.ts', 'inbox-tailscale.spec.ts', 'inbox-updates.spec.ts', 'inbox-sound.spec.ts', 'inbox-mark-read.spec.ts', 'inbox-archived.spec.ts', 'inbox-open-stays-put.spec.ts', 'inbox-mobile.spec.ts', 'toolstrip-stacking.spec.ts', 'surface.spec.ts'],
+  testMatch: ['inbox.spec.ts', 'notifications.spec.ts', 'inbox-decisions.spec.ts', 'inbox-attachments.spec.ts', 'inbox-attachments-kinds.spec.ts', 'inbox-attachment-stepping.spec.ts', 'inbox-guides.spec.ts', 'inbox-new-message.spec.ts', 'inbox-ended-session.spec.ts', 'inbox-order.spec.ts', 'inbox-replaced.spec.ts', 'inbox-thread-folding.spec.ts', 'inbox-phones.spec.ts', 'inbox-sidebar.spec.ts', 'inbox-list-resize.spec.ts', 'inbox-message-images.spec.ts', 'inbox-message-links.spec.ts', 'inbox-tailscale.spec.ts', 'inbox-updates.spec.ts', 'inbox-sound.spec.ts', 'inbox-mark-read.spec.ts', 'inbox-archived.spec.ts', 'inbox-open-stays-put.spec.ts', 'inbox-mobile.spec.ts', 'toolstrip-stacking.spec.ts', 'inbox-agents.spec.ts', 'surface.spec.ts'],
   outputDir: '../../.local/test-results',
   fullyParallel: false,
   workers: 1,
