@@ -40,6 +40,11 @@ test("the Inbox's own notes (set-aside, reopened) are not a look: news before a 
   expect(lookBoundary(thread([...messages, msg('m5', PERSON, 9)]))).toBe(9);
 });
 
+test("the fold plan keeps the last real message open when the Inbox's notes trail it (its reply line sits there)", () => {
+  const messages = [msg('m1', AGENT, 2), msg('m2', AGENT, 3), msg('m3', PERSON, 5), msg('m4', PERSON, 7, { set_aside: ['m1/q-1'] })];
+  expect([...planFolds(messages, new Set(), 9).folded]).toEqual(['m1', 'm2']);
+});
+
 test('the fold plan: open when new, holding an unsent pick, or last; each read run of 4 or more hides all but its first and last two', () => {
   const ids = Array.from({ length: 9 }, (_, i) => `m${i + 1}`);
   const messages = ids.map((id, i) => msg(id, i % 2 ? PERSON : AGENT, i + 1));

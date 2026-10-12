@@ -773,6 +773,15 @@ class ThreadStateModel {
     return t.messages.filter((m) => m.author === "agent" && m.tick > look).length;
   }
 
+  /**
+   * The summary's `waiting_on_person`: open (not archived), the last word
+   * (the Inbox's notes read past) is an agent's, and no Mark read stands.
+   */
+  waitingOnPerson(t: ModelThread): boolean {
+    const last = [...t.messages].reverse().find((m) => m.note === null)!;
+    return !t.resolved && last.author === "agent" && !this.readHolds(t);
+  }
+
   agentAfter(t: ModelThread): boolean {
     return t.resolved && t.messages.some((m) => m.author === "agent" && m.tick > t.archive);
   }
@@ -1168,6 +1177,7 @@ function checkThreadState(world: StateWorld): void {
       unseen: row.unseen,
       last_at: row.last_at,
       last_agent_at: row.last_agent_at ?? null,
+      waiting_on_person: row.waiting_on_person,
       messages: row.message_count,
     }).toEqual({
       section: model.section(t),
@@ -1178,6 +1188,7 @@ function checkThreadState(world: StateWorld): void {
       unseen: model.unseen(t),
       last_at: new Date(world.timeOf.get(t.messages.at(-1)!.tick)!).toISOString(),
       last_agent_at: lastAgent ? new Date(world.timeOf.get(lastAgent.tick)!).toISOString() : null,
+      waiting_on_person: model.waitingOnPerson(t),
       messages: t.messages.length,
     });
     // ...on where each message landed and on every question's state.

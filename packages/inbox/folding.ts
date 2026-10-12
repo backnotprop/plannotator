@@ -25,6 +25,12 @@ export function lookBoundary(thread: InboxThread): number | null {
   return seen;
 }
 
+/** A thread's last message with the Inbox's own notes read past (the one a reply's line sits on). */
+export function lastNonNote(messages: readonly InboxMessageWire[]): InboxMessageWire | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) if (!isInboxNote(messages[i]!)) return messages[i];
+  return undefined;
+}
+
 /** The person's own message (a reply or a New message), never one of the Inbox's notes. */
 export function isPersonReply(message: InboxMessageWire): boolean {
   return message.author.kind === 'person' && !isInboxNote(message);
@@ -71,13 +77,16 @@ export function planFolds(messages: readonly InboxMessageWire[], fresh: Readonly
   const hidden: string[][] = [];
   if (messages.length < 2 || boundary === null) return { folded, hidden };
   const last = messages[messages.length - 1]!;
+  // The last real message stays open too when the Inbox's notes trail it: it
+  // carries the reply's "Saved for / Delivered to" line.
+  const lastReal = lastNonNote(messages);
   let run: string[] = [];
   const flush = () => {
     if (run.length >= 4) hidden.push(run.slice(1, run.length - 2));
     run = [];
   };
   for (const message of messages) {
-    const open = fresh.has(message.id) || holdsUnsentPick(message) || message === last;
+    const open = fresh.has(message.id) || holdsUnsentPick(message) || message === last || message === lastReal;
     if (open) {
       flush();
       continue;

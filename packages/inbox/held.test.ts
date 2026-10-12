@@ -40,6 +40,28 @@ describe('heldNotice', () => {
     const agentThenNote = sections({ ...row('a', 'billing-svc', '2026-10-07T10:00:10Z', 'person'), last_agent_at: '2026-10-07T10:00:05Z' } as InboxListRow);
     expect(heldNotice(shown, agentThenNote)).toEqual({ count: 1, text: '1 new in billing-svc' });
   });
+
+  // The failure this guards: a row not on screen counted as news whenever it
+  // held any agent message, so a thread unarchived on the phone or in another
+  // tab whose last real word is the person's (Sent, or Quiet once the agent
+  // read the reply) raised "1 new" and stayed out of the list on settle.
+  test("a row not on screen whose last real message is the person's is not news; one whose agent message is followed only by a note is", () => {
+    const other = { ...row('other', 'docs-site', '2026-10-12T10:00:00Z', 'agent'), last_agent_at: '2026-10-12T10:00:00Z', sent: null, section: 'waiting', unseen: 1 } as InboxListRow;
+    const shown: InboxListSection[] = [{ id: 'waiting', label: 'Waiting on you', threads: [other] }];
+    const replied = { ...row('replied', 'docs-site', '2026-10-12T11:00:00Z', 'person'), last_agent_at: '2026-10-12T09:00:00Z', section: 'sent', unseen: 0, sent: { at: '2026-10-12T11:00:00Z', checked_at: null } } as InboxListRow;
+    const checked = { ...row('checked', 'docs-site', '2026-10-12T11:00:00Z', 'person'), last_agent_at: '2026-10-12T09:00:00Z', section: 'quiet', unseen: 0, sent: { at: '2026-10-12T11:00:00Z', checked_at: '2026-10-12T11:05:00Z' } } as InboxListRow;
+    // The agent wrote, then the Inbox's note went: `sent` reads past the note, so it is null and the row is news.
+    const noted = { ...row('noted', 'docs-site', '2026-10-12T11:10:00Z', 'person'), last_agent_at: '2026-10-12T11:09:00Z', section: 'new', unseen: 1, sent: null } as InboxListRow;
+    const latest: InboxListSection[] = [
+      { id: 'waiting', label: 'Waiting on you', threads: [other] },
+      { id: 'new', label: 'New since you looked', threads: [noted] },
+      { id: 'sent', label: 'Sent', threads: [replied] },
+      { id: 'quiet', label: 'Quiet', threads: [checked] },
+    ];
+    expect(heldNotice(shown, latest)).toEqual({ count: 1, text: '1 new in docs-site' });
+    const settled = settleOwn(shown, latest);
+    expect(Object.fromEntries(settled.map((s) => [s.id, s.threads.map((t) => t.thread_id)]))).toEqual({ waiting: ['other'], new: [], sent: ['replied'], quiet: ['checked'] });
+  });
 });
 
 describe('refreshHeldRows', () => {

@@ -547,7 +547,8 @@ export interface InboxThreadSummary {
   questions: InboxQuestionSummary;
   /**
    * The last message is an agent's and the thread is open: it waits on the
-   * person. The Inbox's own notes (`isInboxNote`) are read past.
+   * person. The Inbox's own notes (`isInboxNote`) are read past, and it is
+   * false while a Mark read stands (nothing waits on the person then).
    */
   waiting_on_person: boolean;
 }

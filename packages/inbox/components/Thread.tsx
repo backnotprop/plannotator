@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Viewer } from '@plannotator/ui/components/Viewer';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
-import { isInboxNote, type InboxDecision, type InboxDecisionDraft, type InboxListRow, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxDecision, InboxDecisionDraft, InboxListRow, InboxMessageWire, InboxProjectRepo, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import type { IndexedQuestion, QuestionAnswer } from '@plannotator/core/question-block';
 import { inboxDecisionWords } from '@plannotator/core/inbox-questions';
 import { isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState } from '@plannotator/core/inbox-types';
@@ -14,7 +14,7 @@ import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import { attachmentSequence } from '../stepping';
 import { AnnotationsChip } from './AnnotationsChip';
 import { agentName, clockTime, dayWords, plural } from '../format';
-import { answerWords, foldSnippet, holdingsOf, isDelivered, isPersonReply, lookBoundary, newSinceLook, planFolds, snippetText, type FoldSnippet, type Holding } from '../folding';
+import { answerWords, foldSnippet, holdingsOf, isDelivered, isPersonReply, lastNonNote, lookBoundary, newSinceLook, planFolds, snippetText, type FoldSnippet, type Holding } from '../folding';
 import { AuthorMark, DecisionDiamond, Icon } from '../icons';
 import { DecisionCard } from './DecisionCard';
 import { GuideCard } from './GuideCard';
@@ -532,7 +532,9 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     anchorRef.current = { id, top: id ? (articleOf(id)?.getBoundingClientRect().top ?? 0) : 0, focus: null, folding: false };
     if (allOpen) {
       const last = thread.messages[thread.messages.length - 1]!;
-      setFoldState((current) => (current ? { ...current, folded: new Set(thread.messages.filter((m) => m !== last).map((m) => m.id)), revealed: new Set() } : current));
+      // The last real message stays open with it when notes trail it (it carries the reply's line).
+      const lastReal = lastNonNote(thread.messages);
+      setFoldState((current) => (current ? { ...current, folded: new Set(thread.messages.filter((m) => m !== last && m !== lastReal).map((m) => m.id)), revealed: new Set() } : current));
       setHeaderFiles({ threadId: thread.thread_id, open: new Set([...headerOpen].filter((id) => id === last.id)) });
       announce('Earlier messages folded');
     } else {
@@ -1154,7 +1156,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   // Inbox's own notes (Mark read's set-aside note, a late Undo's reopened
   // note) are read past: they are not the person's reply, and the line stays
   // on the reply before them.
-  const last = [...thread.messages].reverse().find((m) => !isInboxNote(m)) ?? thread.messages[0]!;
+  const last = lastNonNote(thread.messages) ?? thread.messages[0]!;
   const askedBy = (message: InboxMessageWire) => (message.reply_to ? thread.messages.find((m) => m.id === message.reply_to) : undefined);
   // A reply the person sent to another session names the session that took it
   // ("Claude Code (another session)" when it is the asker's own host).

@@ -644,7 +644,8 @@ export class InboxStore {
       message_count: messages.length,
       resolved_at: root.resolved_at,
       questions: summarizeInboxQuestions(questions),
-      waiting_on_person: root.resolved_at === null && lastWord.author.kind === "agent",
+      // A standing Mark read means nothing here waits on the person.
+      waiting_on_person: root.resolved_at === null && lastWord.author.kind === "agent" && this.readAt(root, messages) === null,
     };
   }
 
