@@ -342,7 +342,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
       inputSchema: z
         .object({
           body: z.string().min(1).describe(
-            "The message, markdown. Question blocks render as answerable cards. In a block, `Stopped: <why>` marks a question that leaves you nothing else to work on; `Holds up: <work>; <work>` names the work that waits while you go on.",
+            "The message, markdown. Question blocks render as answerable cards. In a block, add `Stopped: <why>` only for a question that leaves you nothing else to work on (otherwise leave the line out, never `Stopped: no`); `Holds up: <work>; <work>` names the work that waits while you go on.",
           ),
           ...SEND_ROUTING_FIELDS,
           attachments: z

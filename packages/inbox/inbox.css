@@ -671,6 +671,17 @@ button.ib-drow:hover { background: color-mix(in oklch, var(--muted) 35%, transpa
 .ib-docarea { position: relative; overflow: hidden; background: var(--background); min-height: 0; }
 /* Plannotator's plan look: Grid is its card on the grid paper, Clean the document on the card colour (bg-grid or bg-card, Viewer's gridEnabled). */
 .ib-docscroll { position: absolute; inset: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; padding: 58px 24px 24px; }
+/* The open file is one layer under the pane's own chrome. ui's Viewer wraps
+   the document in a `relative z-50` layer (plan review's sticky lane sits at
+   z-60 above it); without a stacking context of its own here that layer
+   escaped into .ib-view and painted the document over the toolstrip (z 3),
+   the error line (z 5) and the stepping bar with its list (z 6). Isolated,
+   every z-index inside the file stays inside the file. A dialog the Viewer
+   portals into its own article (the table popout, `[data-popout]`) raises
+   the whole layer above the chrome while it is open, so it still covers the
+   toolstrip and the bar like a dialog should. */
+.ib-docscroll, .ib-codeview { isolation: isolate; }
+.ib-docscroll:has([data-popout]) { z-index: 7; }
 .ib-toolstrip { position: absolute; top: 14px; left: 16px; z-index: 3; padding: 3px; border-radius: 9px; background: var(--card); box-shadow: var(--card-shadow); }
 .ib-htmlframe { position: absolute; inset: 0; }
 .ib-view-error { position: absolute; top: 12px; left: 16px; right: 16px; z-index: 5; margin: 0; }
