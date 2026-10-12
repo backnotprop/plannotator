@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Annotation, Block, CodeAnnotation, ImageAttachment, MarkdownPreviewAnchor } from '@plannotator/ui/types';
 import { AnnotationType } from '@plannotator/ui/types';
@@ -6,7 +6,6 @@ import { BlockRenderer } from '@plannotator/ui/components/BlockRenderer';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { LocalLinkContext, type LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
-import { DiagramBlockPending } from '@plannotator/ui/components/diagram/DiagramPending';
 import { PlanCleanDiffView, type PlanDiffSide } from '@plannotator/ui/components/plan-diff/PlanCleanDiffView';
 import { useAnnotationHighlighter, type AnnotationRestoreReport } from '@plannotator/ui/hooks/useAnnotationHighlighter';
 import { computePlanDiff } from '@plannotator/ui/utils/planDiffEngine';
@@ -26,15 +25,11 @@ import {
   utf8ByteLength,
 } from '../utils/markdownPreview';
 
-const MermaidBlock = lazy(async () => ({ default: (await import('@plannotator/ui/components/MermaidBlock')).MermaidBlock }));
-const GraphvizBlock = lazy(async () => ({ default: (await import('@plannotator/ui/components/GraphvizBlock')).GraphvizBlock }));
-
-/** The fence languages the plan Viewer renders as diagrams (@plannotator/ui diagramLanguages). */
-function fenceLanguage(language?: string): string | undefined {
-  return language?.trim().split(/\s+/, 1)[0]?.toLowerCase();
-}
-const isMermaidLanguage = (language?: string) => fenceLanguage(language) === 'mermaid';
-const isGraphvizLanguage = (language?: string) => ['dot', 'graphviz', 'gv'].includes(fenceLanguage(language) ?? '');
+// Mermaid and Graphviz fences render as code here, never as diagrams: the
+// single-file review build inlines every dynamic import, so importing a
+// diagram engine anywhere in the review app (even lazily) puts the Mermaid and
+// Graphviz runtimes in every review's page. Owner decision (approval record,
+// 2026-10-12 amendment): performance wins. tests/entry-assets.test.ts guards it.
 
 export interface MarkdownFilePreviewProps {
   filePath: string;
@@ -201,22 +196,7 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
   const resolveNewImage = useMemo(() => makeImageResolver('new'), [makeImageResolver]);
 
   const renderBlock = useCallback((block: Block, orderedIndex: number | null, side: PlanDiffSide, headingAnchorId?: string) => {
-    let body: React.ReactNode;
-    if (block.type === 'code' && isMermaidLanguage(block.language)) {
-      body = (
-        <Suspense fallback={<DiagramBlockPending block={block} kind="mermaid" />}>
-          <MermaidBlock block={block} readOnly />
-        </Suspense>
-      );
-    } else if (block.type === 'code' && isGraphvizLanguage(block.language)) {
-      body = (
-        <Suspense fallback={<DiagramBlockPending block={block} kind="graphviz" />}>
-          <GraphvizBlock block={block} readOnly />
-        </Suspense>
-      );
-    } else {
-      body = <BlockRenderer block={block} orderedIndex={orderedIndex} headingAnchorId={headingAnchorId} />;
-    }
+    const body = <BlockRenderer block={block} orderedIndex={orderedIndex} headingAnchorId={headingAnchorId} />;
     return (
       <ImageResolverContext.Provider value={side === 'old' ? resolveOldImage : resolveNewImage}>
         {body}

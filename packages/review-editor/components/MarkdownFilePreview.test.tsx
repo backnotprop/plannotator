@@ -3,7 +3,8 @@
  * any rendered text, the composer opens, and the comment becomes a file
  * comment that carries the quote (and, in the rendered diff, the kind of
  * section it was in). The same comment shows in the other view by its text,
- * and says so when its text is not there. Mermaid fences render as diagrams.
+ * and says so when its text is not there. Mermaid and Graphviz fences render
+ * as code (the review bundle carries no diagram engine).
  *
  * DOM-gated (DOM_TESTS=1) and registered in .github/workflows/test.yml's
  * "Run UI seam-contract + DOM tests" step.
@@ -193,8 +194,8 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
     expect(note?.textContent).toContain('1 comment on this file is not in this view');
   });
 
-  test('Mermaid fences render through the diagram engine', async () => {
-    const withDiagram = `${NEW}\n\`\`\`mermaid\nflowchart LR\n  A --> B\n\`\`\`\n`;
+  test('Mermaid and Graphviz fences render as code, not diagrams', async () => {
+    const withDiagram = `${NEW}\n\`\`\`mermaid\nflowchart LR\n  A --> B\n\`\`\`\n\n\`\`\`dot\ndigraph { a -> b }\n\`\`\`\n`;
     const patch = [
       'diff --git a/docs/guide.md b/docs/guide.md',
       'new file mode 100644',
@@ -221,7 +222,9 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
       );
       await new Promise((r) => setTimeout(r, 30));
     });
-    for (let i = 0; i < 100 && !host.querySelector('[data-diagram-block]'); i++) await settle(20);
-    expect(host.querySelector('[data-diagram-block]')).not.toBeNull();
+    await settle(60);
+    expect(host.querySelector('[data-diagram-block]')).toBeNull();
+    const fences = Array.from(host.querySelectorAll('pre > code')).map((code) => code.textContent);
+    expect(fences).toEqual(['flowchart LR\n  A --> B', 'digraph { a -> b }']);
   });
 });
