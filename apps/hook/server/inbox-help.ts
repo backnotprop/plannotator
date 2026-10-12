@@ -235,7 +235,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     "## What it is",
     "",
-    `The Plannotator Inbox is one local window per machine where you leave the person messages, questions, files to annotate, guided reviews and decisions. It binds 127.0.0.1; the person may publish the window over their tailnet, but the MCP server and agent tools answer only on this computer. Its data lives in ${code(inboxPath)} (the data dir is set by \`PLANNOTATOR_DATA_DIR\`). The person reads your message there and answers when they can. Nothing holds your session open: you send, then keep working or end your turn.`,
+    `The Plannotator Inbox is one local window per machine where you leave the person messages, questions, files to annotate, guided reviews and decisions. It binds 127.0.0.1 whatever \`PLANNOTATOR_REMOTE\` and \`PLANNOTATOR_PORT\` say; the person may publish the window over their tailnet, but the MCP server and agent tools answer only on this computer. Its data lives in ${code(inboxPath)} (the data dir is set by \`PLANNOTATOR_DATA_DIR\`). The person reads your message there and answers when they can. Nothing holds your session open: you send, then keep working or end your turn.`,
     "",
     "## When to use it",
     "",
