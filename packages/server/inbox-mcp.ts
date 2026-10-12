@@ -340,7 +340,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
       description: SEND_MESSAGE_DESCRIPTION,
       inputSchema: z
         .object({
-          body: z.string().min(1).describe("The message, markdown. Question blocks render as answerable cards."),
+          body: z.string().min(1).describe(
+            "The message, markdown. Question blocks render as answerable cards. In a question block, add `Stopped: <why>` only when you cannot go on until it is answered; otherwise leave the line out (never `Stopped: no`).",
+          ),
           ...SEND_ROUTING_FIELDS,
           attachments: z
             .array(z.string())

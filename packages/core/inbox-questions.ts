@@ -11,6 +11,9 @@
  *   Stopped: <why>                the asker cannot go on until this is answered
  *   Holds up: <name>; <name>      the asker goes on; these pieces of work wait
  *
+ * A value that says "nothing" (`Stopped: no`, `Holds up: none`, empty) is no
+ * stop and holds nothing up; see `isNegativeWaitValue`.
+ *
  * A third, `Replaces: <message id>/<key>`, is read by core's parser itself
  * (`ParsedQuestion.replaces`) when every token on it is id-shaped: it is then
  * never the prompt and never context. Any other `Replaces:` line is prose.
@@ -108,26 +111,57 @@ export function parseInboxQuestionBlocks(markdown: string): ParsedInboxQuestion[
   return out;
 }
 
-/** The `Stopped:` and `Holds up:` lines of a block's context; the first of each wins. */
+/**
+ * A `Stopped:` or `Holds up:` value that says "nothing": empty, or only a
+ * negative word (no, none, n/a, na, nothing, false, nil, null, or a dash),
+ * any case, with trailing punctuation and whitespace allowed. An agent filling
+ * in a template writes `Stopped: no`; that is not a stop. A negative word may
+ * also be followed by `;` and a remark (`nothing; still working`), the way a
+ * template answer is set apart from a note.
+ *
+ * Only a bare negative counts: `no API key yet` and `none of the fixtures
+ * load` are real reasons, and so is anything after a comma or a dash
+ * (`no, the key is missing`), which cannot be told apart from a reason.
+ */
+const NEGATIVE_WAIT_RE = /^(?:no|none|n\/a|na|nothing|false|nil|null|[-\u2013\u2014]+)?[\s.,;:!?\-\u2013\u2014]*$/i;
+const NEGATIVE_WAIT_REMARK_RE = /^(?:no|none|n\/a|na|nothing|false|nil|null)\s*;/i;
+
+/** Whether a `Stopped:` / `Holds up:` value says there is nothing to wait on. */
+export function isNegativeWaitValue(value: string): boolean {
+  const text = value.trim();
+  return NEGATIVE_WAIT_RE.test(text) || NEGATIVE_WAIT_REMARK_RE.test(text);
+}
+
+/**
+ * The `Stopped:` and `Holds up:` lines of a block's context; the first of each
+ * wins, and a first line that says "nothing" (`Stopped: no`, `Holds up: none`)
+ * decides that there is none. The lines stay in the context either way.
+ */
 function waitsOf(context: string): { stopped: string | null; holds_up: string[] } {
   let stopped: string | null = null;
+  let sawStopped = false;
   let holdsUp: string[] | null = null;
   for (const raw of context.split("\n")) {
     const line = raw.trim();
-    if (stopped === null) {
+    if (!sawStopped) {
       const match = STOPPED_RE.exec(line);
       if (match !== null) {
-        stopped = (match[1] ?? "").trim();
+        sawStopped = true;
+        const why = (match[1] ?? "").trim();
+        if (!isNegativeWaitValue(why)) stopped = why;
         continue;
       }
     }
     if (holdsUp === null) {
       const match = HOLDS_UP_RE.exec(line);
       if (match !== null) {
-        holdsUp = (match[1] ?? "")
-          .split(";")
-          .map((name) => name.trim())
-          .filter((name) => name !== "");
+        const value = match[1] ?? "";
+        holdsUp = isNegativeWaitValue(value)
+          ? []
+          : value
+              .split(";")
+              .map((name) => name.trim())
+              .filter((name) => name !== "" && !isNegativeWaitValue(name));
       }
     }
   }
