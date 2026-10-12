@@ -148,7 +148,15 @@ export interface QuestionDecisionLink {
 export const MAX_QUESTION_BODY_CHARS = 20_000;
 export const MAX_QUESTION_CHOICES = 20;
 export const MAX_QUESTION_PROMPT_CHARS = 400;
+/** The longest label a plain-bullet choice takes before the rest moves to
+ *  its description (see capChoiceLabel). Task-list labels are not cut. */
 export const MAX_QUESTION_CHOICE_LABEL_CHARS = 200;
+/** The cap on each `selected` label of an answer. A picked label is a choice
+ *  label, and a choice lives in a block body of at most
+ *  MAX_QUESTION_BODY_CHARS, so any label a block can hold round-trips whole.
+ *  (Through 0.28.17 this was MAX_QUESTION_CHOICE_LABEL_CHARS, which cut a
+ *  task-list label over 200 characters, so it could never be picked.) */
+export const MAX_QUESTION_SELECTED_CHARS = MAX_QUESTION_BODY_CHARS;
 export const MAX_QUESTION_OTHER_CHARS = 2000;
 export const MAX_QUESTION_TEXT_CHARS = 4000;
 export const MAX_QUESTION_NOTE_CHARS = 2000;
@@ -258,10 +266,11 @@ const splitBoldLead = (raw: string): { label: string; description: string } | nu
   return { label, description };
 };
 
-/** A label longer than an answer may quote (`MAX_QUESTION_CHOICE_LABEL_CHARS`)
- *  could never show as picked, so it is cut at its first sentence end (else
- *  its last space) within the cap; the rest leads the description. Nothing
- *  is dropped. */
+/** A plain-bullet label longer than `MAX_QUESTION_CHOICE_LABEL_CHARS` is cut
+ *  at its first sentence end (else its last space) within the cap; the rest
+ *  leads the description, so the card shows a short name. Nothing is
+ *  dropped. Task-list labels keep their full length (an answer quotes up to
+ *  `MAX_QUESTION_SELECTED_CHARS`). */
 const capChoiceLabel = (split: { label: string; description?: string }): { label: string; description?: string } => {
   const { label, description } = split;
   if (label.length <= MAX_QUESTION_CHOICE_LABEL_CHARS) return split;
@@ -845,7 +854,7 @@ export const parseQuestionAnswer = (value: unknown): QuestionAnswer | null => {
   if (v.sourceLine !== undefined && !(Number.isInteger(v.sourceLine) && (v.sourceLine as number) > 0)) return null;
 
   const selected = [...new Set((v.selected as string[])
-    .map((s) => cap(s.trim(), MAX_QUESTION_CHOICE_LABEL_CHARS))
+    .map((s) => cap(s.trim(), MAX_QUESTION_SELECTED_CHARS))
     .filter(Boolean))]
     .slice(0, MAX_QUESTION_CHOICES);
   const other = typeof v.other === 'string' ? cap(v.other, MAX_QUESTION_OTHER_CHARS) : '';
@@ -880,11 +889,20 @@ export const canonicalQuestionAnswer = <A extends QuestionAnswer>(
   answer: A,
 ): A => {
   if (answer.selected.length === 0) return answer;
-  if (!question.choices.some((c) => c.aliases?.length)) return answer;
-  // Answers are capped on validation, so a long alias is matched capped too.
-  const names = question.choices.map((c) =>
-    (c.aliases ?? []).flatMap((alias) => [alias, cap(alias.trim(), MAX_QUESTION_CHOICE_LABEL_CHARS)]));
   const labels = new Set(question.choices.map((c) => c.label));
+  if (answer.selected.every((stored) => labels.has(stored))) return answer;
+  // Through 0.28.17 an answer's labels were cut at
+  // MAX_QUESTION_CHOICE_LABEL_CHARS, so a long label or alias is also matched
+  // in that cut form (an answer saved then maps back to its choice).
+  const legacyCut = (name: string): string[] => {
+    const trimmed = name.trim();
+    return trimmed.length > MAX_QUESTION_CHOICE_LABEL_CHARS ? [cap(trimmed, MAX_QUESTION_CHOICE_LABEL_CHARS)] : [];
+  };
+  const names = question.choices.map((c) => [
+    ...legacyCut(c.label),
+    ...(c.aliases ?? []).flatMap((alias) => [alias, ...legacyCut(alias)]),
+  ]);
+  if (names.every((list) => list.length === 0)) return answer;
   // The one choice a stored label names, or -1 when none or several do: an
   // ambiguous label (two bullets that shared a first line, or names that only
   // differ in case or emphasis) stays as stored rather than picking one.

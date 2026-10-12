@@ -160,6 +160,26 @@ describe('QuestionBlock', () => {
     expect(cards(el)[0].getAttribute('data-question-status')).toBe('answered');
   });
 
+  // The owner's 0.28.17 report: a choice longer than 200 characters was cut
+  // to 200 when the answer was read back, so it never showed as picked here
+  // and the Inbox refused it as "not one of the question's choices".
+  test.skipIf(!hasDom)('a choice longer than 200 characters is saved, shown and exported whole', async () => {
+    const long =
+      'Spike first. Find out what the sign-in grants (a Claude subscription paying for turns the platform runs?) and whether Anthropic allows it for a third-party product; the placeholder stays off the product until both answers are in';
+    for (const line of [long, `${long} — keeps it reversible`, `${long} - keeps it reversible`]) {
+      const el = await mount(<Harness markdown={`:::question\nWhich way first?\n\n- [ ] ${line}\n- [ ] Ship it now\n:::\n`} />);
+      await click(rowText(cards(el)[0], 'Spike first.'));
+      expect(answerOf(0)?.selected).toEqual([long]);
+      expect(cards(el)[0].getAttribute('data-question-status')).toBe('answered');
+      expect(cards(el)[0].querySelectorAll<HTMLInputElement>('input[type="radio"]:checked')).toHaveLength(1);
+      expect(latest[0].text).toBe(`Answer: ${long}`);
+      await act(async () => root!.unmount());
+      host!.remove();
+      root = null;
+      latest = [];
+    }
+  });
+
   test.skipIf(!hasDom)('multi choice keeps document order; "Other…" rides along; clearing everything removes the annotation', async () => {
     const el = await mount(<Harness markdown={DOC} />);
     const card = () => cards(el)[1];
