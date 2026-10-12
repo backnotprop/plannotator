@@ -4,13 +4,16 @@
  * the POST /api/config write that changes it.
  *
  * Only a Plannotator server that knows the session's tool host sends
- * `agentToolHost` (the Claude Code mod, Pi, OpenCode 2). Everything else, an
+ * `agentToolHost` (the Claude Code mod, Pi, Oh My Pi, OpenCode 2). Everything else, an
  * older server, OpenCode 1, Codex, a `@plannotator/ui` host such as
  * Workspaces, parses to undefined, and no toggle or offer is shown.
  */
 
-/** The hosts that register the `plannotator` agent tool. */
-export type AgentToolHost = 'claude-code' | 'pi' | 'opencode';
+/**
+ * The hosts that register the `plannotator` agent tool. `oh-my-pi` is the Pi
+ * extension running inside Oh My Pi, where the tool is on by default.
+ */
+export type AgentToolHost = 'claude-code' | 'pi' | 'oh-my-pi' | 'opencode';
 
 export interface AgentToolSetting {
   readonly host: AgentToolHost;
@@ -23,7 +26,7 @@ export interface AgentToolSetting {
 }
 
 function isAgentToolHost(value: unknown): value is AgentToolHost {
-  return value === 'claude-code' || value === 'pi' || value === 'opencode';
+  return value === 'claude-code' || value === 'pi' || value === 'oh-my-pi' || value === 'opencode';
 }
 
 /** Reads the agent tool fields out of a `serverConfig` payload, or undefined when the server reports no tool host. */
@@ -79,6 +82,7 @@ export async function saveAgentToolSetting(
 const HOST_NAMES: Record<AgentToolHost, string> = {
   'claude-code': 'Claude Code',
   pi: 'Pi',
+  'oh-my-pi': 'Oh My Pi',
   opencode: 'OpenCode',
 };
 
@@ -90,7 +94,8 @@ export function agentToolHostName(host: AgentToolHost): string {
  * When a change takes effect on this host: the tool list is part of the
  * model's prompt, so each host reads the setting once. Pi reads it per
  * session; the Claude Code mod and the OpenCode plugin decide once per
- * process (when the module or plugin loads), so those take a restart.
+ * process (when the module or plugin loads), so those take a restart, and so
+ * does Oh My Pi, which may keep the extension loaded across its sessions.
  */
 export function agentToolAppliesWhen(host: AgentToolHost): string {
   return host === 'pi' ? 'the next Pi session' : `the next time ${HOST_NAMES[host]} starts`;
@@ -99,10 +104,12 @@ export function agentToolAppliesWhen(host: AgentToolHost): string {
 /**
  * What the tool costs in context. Pi and OpenCode send its full definition
  * with every request; Claude Code defers it behind tool search, so it costs
- * about its name until it is used.
+ * about its name until it is used; Oh My Pi lists it as one line of its
+ * system prompt (about 210 characters, measured on OMP 18.10) and loads the
+ * schema only when the model reads it.
  */
 export function agentToolCostNote(host: AgentToolHost): string {
-  return host === 'claude-code'
-    ? 'Claude Code loads it only when needed.'
-    : 'Adds about 780 tokens to every request.';
+  if (host === 'claude-code') return 'Claude Code loads it only when needed.';
+  if (host === 'oh-my-pi') return 'Oh My Pi lists it in one short line (about 50 tokens) and loads the rest only when needed.';
+  return 'Adds about 780 tokens to every request.';
 }

@@ -70,7 +70,7 @@ import {
   resolveInboxTool,
   saveConfig,
   configuredInboxTool,
-  type AgentToolHost,
+  type InboxToolHost,
   type PlannotatorConfig,
 } from "@plannotator/shared/config";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
@@ -539,7 +539,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const inboxToolState = () => {
     const config = loadConfig();
     const env = parseInboxToolEnv();
-    const hosts = Object.fromEntries(INBOX_TOOL_HOSTS.map((host) => [host, resolveInboxTool(config, process.env, host)])) as Record<AgentToolHost, boolean>;
+    const hosts = Object.fromEntries(INBOX_TOOL_HOSTS.map((host) => [host, resolveInboxTool(config, process.env, host)])) as Record<InboxToolHost, boolean>;
     return { hosts, env: env ?? null };
   };
 
@@ -731,7 +731,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       throw new InboxError("validation_error", "inbox_tool: an object of host to boolean.", { field: "inbox_tool" });
     }
     const config = loadConfig();
-    const next: Partial<Record<AgentToolHost, boolean>> = {};
+    const next: Partial<Record<InboxToolHost, boolean>> = {};
     for (const host of INBOX_TOOL_HOSTS) {
       const current = configuredInboxTool(config, host);
       if (current !== undefined) next[host] = current;
@@ -743,13 +743,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (typeof value !== "boolean") {
         throw new InboxError("validation_error", `inbox_tool.${host}: must be a boolean.`, { field: `inbox_tool.${host}` });
       }
-      next[host as AgentToolHost] = value;
+      next[host as InboxToolHost] = value;
     }
     if (validateOnly) return inboxToolState();
     saveConfig({ inboxTool: next });
     const saved = loadConfig();
     for (const [host, value] of Object.entries(next)) {
-      if (configuredInboxTool(saved, host as AgentToolHost) !== value) {
+      if (configuredInboxTool(saved, host as InboxToolHost) !== value) {
         throw new InboxError("config_not_saved", "config.json could not be written; nothing changed.");
       }
     }

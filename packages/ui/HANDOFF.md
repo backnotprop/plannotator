@@ -2196,6 +2196,12 @@ New module `utils/askSessionSetupHint` (`askSessionSetupHint(origin, providers)`
 
 ---
 
+## Agent tool host `oh-my-pi` (unreleased; additive)
+
+`utils/agentToolSetting`'s `AgentToolHost` gains `'oh-my-pi'` (the Plannotator Pi extension running inside Oh My Pi, where the `plannotator` tool is on by default): `parseAgentToolSetting` accepts it, `agentToolHostName` answers "Oh My Pi", `agentToolAppliesWhen` "the next time Oh My Pi starts", and `agentToolCostNote` names OMP's one-line listing instead of Pi's per-request cost. `agentToolOfferApplies` / `agentToolOfferHostOf` never offer it (the offer is for hosts whose tool is off by default). A host that never sends `agentToolHost: 'oh-my-pi'` sees no change; code that switches exhaustively over `AgentToolHost` needs the new case.
+
+---
+
 ## `Viewer` `refRepo` (unreleased; additive; needs no new core subpath)
 
 New optional `refRepo?: { display: string; host?: string } | null` on `Viewer`: the repository bare `#123` / `@user` refs link into (#1840), without the repo badge `repoInfo` also draws. It wins over `repoInfo` for links only; `null` and absent both fall back to `repoInfo`, so links follow `repoInfo?.display` / `repoInfo?.host` exactly as before, so Plannotator's plan and review apps are unchanged. The Inbox passes it per message (a badge on every message would be noise).

@@ -246,6 +246,8 @@ describe.if(hasDom)("agent tool offer in the plan editor", () => {
     const sessions: Session[] = [
       // Claude Code: on by default.
       { origin: "claude-code", agentTool: { agentTool: true, agentToolConfigured: false, agentToolHost: "claude-code", agentToolEnabled: true } },
+      // Oh My Pi (the Pi extension inside OMP): on by default, nothing to offer.
+      { origin: "pi", agentTool: { agentTool: true, agentToolConfigured: false, agentToolHost: "oh-my-pi", agentToolEnabled: true } },
       // No tool host reported: OpenCode 1, Codex, a server older than the switch.
       { origin: "opencode" },
       { origin: "codex" },

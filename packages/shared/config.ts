@@ -256,12 +256,13 @@ export interface PlannotatorConfig {
   claudeCodeMod?: boolean;
   /**
    * The `plannotator` agent tool (packages/shared/plannotator-tool.ts) on the
-   * hosts that register it: the Claude Code mod, Pi and OpenCode 2. `true`
-   * puts it in the agent's tool list, `false` keeps it out (the slash commands
-   * are unchanged either way). Read once when a session starts, so a change
-   * applies to the next session. PLANNOTATOR_AGENT_TOOL wins over this key.
-   * Unset: the host's default, AGENT_TOOL_DEFAULTS (on for the Claude Code
-   * mod, off on Pi and OpenCode 2).
+   * hosts that register it: the Claude Code mod, Pi (and the Pi extension in
+   * Oh My Pi) and OpenCode 2. `true` puts it in the agent's tool list, `false`
+   * keeps it out (the slash commands are unchanged either way). Read once when
+   * a session starts, so a change applies to the next session.
+   * PLANNOTATOR_AGENT_TOOL wins over this key. Unset: the host's default,
+   * AGENT_TOOL_DEFAULTS (on for the Claude Code mod and Oh My Pi, off on Pi
+   * and OpenCode 2).
    */
   agentTool?: boolean;
   /**
@@ -272,7 +273,7 @@ export interface PlannotatorConfig {
    * so a change applies to the next session. PLANNOTATOR_INBOX_TOOL wins over
    * this key. Unset (or a host left out): INBOX_TOOL_DEFAULTS.
    */
-  inboxTool?: boolean | Partial<Record<AgentToolHost, boolean>>;
+  inboxTool?: boolean | Partial<Record<InboxToolHost, boolean>>;
   /**
    * The Plannotator Inbox's browser notifications, set from the Inbox page
    * (its one-time ask and its Settings), kept here rather than in the page's
@@ -1006,32 +1007,44 @@ export function resolveClaudeCodeMod(
   return coerceConfigBoolean(config.claudeCodeMod, true);
 }
 
-/** The hosts that register the `plannotator` agent tool. */
-export type AgentToolHost = "claude-code" | "pi" | "opencode";
+/**
+ * The hosts that register the `plannotator` agent tool. `oh-my-pi` is the Pi
+ * extension running inside Oh My Pi (a Pi fork), which the extension tells
+ * from plain Pi itself (`apps/pi-extension/pi-host.ts`): it is the same
+ * extension and the same session bridge (host `pi`), with its own default.
+ */
+export type AgentToolHost = "claude-code" | "pi" | "oh-my-pi" | "opencode";
 
 /**
  * Whether each host registers the `plannotator` agent tool when nothing is
  * set: the owner's call, and the one place it lives. On for the Claude Code
  * mod (the tool is deferred behind tool search there, so it costs only its
- * name until used), off on Pi and OpenCode 2 (a full tool definition in every
- * request). The mod's mirror (`apps/hook/hooks/mod/enabled.ts`) is kept equal
- * to the claude-code entry by `enabled.test.ts`.
+ * name until used) and for Oh My Pi (owner's call 2026-10-12: OMP lists an
+ * extension tool as one line in its system prompt, about 50 tokens, and loads
+ * the schema only when the model reads it); off on Pi and OpenCode 2 (a full
+ * tool definition, about 780 tokens, in every request). The mod's mirror
+ * (`apps/hook/hooks/mod/enabled.ts`) is kept equal to the claude-code entry by
+ * `enabled.test.ts`.
  */
 export const AGENT_TOOL_DEFAULTS: Readonly<Record<AgentToolHost, boolean>> = {
   "claude-code": true,
   pi: false,
+  "oh-my-pi": true,
   opencode: false,
 };
 
 /**
  * The tool host for a server's launching integration, or null. Callers pass
  * the session-bridge host that started the server (the Claude Code mod and
- * the OpenCode 2 plugin hand one to the CLI; Pi's servers run inside the Pi
- * extension), never the agent origin: an origin of claude-code or opencode
- * also covers the classic hook and OpenCode 1, which have no tool.
+ * the OpenCode 2 plugin hand one to the CLI), or, for the servers that run
+ * inside the Pi extension, the extension's own host (`pi` or `oh-my-pi`).
+ * Never the agent origin: an origin of claude-code or opencode also covers
+ * the classic hook and OpenCode 1, which have no tool, and the CLI's origin
+ * `oh-my-pi` is a `plannotator` run from OMP's shell, which has none either
+ * (the CLI only ever passes a session-bridge host, which is never `oh-my-pi`).
  */
 export function agentToolHostOf(host: string | null | undefined): AgentToolHost | null {
-  return host === "claude-code" || host === "pi" || host === "opencode" ? host : null;
+  return host === "claude-code" || host === "pi" || host === "oh-my-pi" || host === "opencode" ? host : null;
 }
 
 /** The PLANNOTATOR_AGENT_TOOL override, or undefined when it does not decide. */
@@ -1064,14 +1077,25 @@ export function resolveAgentTool(
 }
 
 /**
+ * The hosts that register the Inbox's `plannotator_inbox` tool. The Pi
+ * extension registers it as `pi` in Oh My Pi too: OMP has no Inbox host key
+ * of its own (yet), so `inboxTool.pi` and the Pi default decide there.
+ */
+export type InboxToolHost = "claude-code" | "pi" | "opencode";
+
+/**
  * Whether each host registers the Inbox's `plannotator_inbox` tool when
  * nothing is set: the agent tool's rule (on for the Claude Code mod, where
  * tools are deferred behind tool search; off on Pi and OpenCode 2, which send
  * every tool's full definition with each request).
  */
-export const INBOX_TOOL_DEFAULTS: Readonly<Record<AgentToolHost, boolean>> = AGENT_TOOL_DEFAULTS;
+export const INBOX_TOOL_DEFAULTS: Readonly<Record<InboxToolHost, boolean>> = {
+  "claude-code": AGENT_TOOL_DEFAULTS["claude-code"],
+  pi: AGENT_TOOL_DEFAULTS.pi,
+  opencode: AGENT_TOOL_DEFAULTS.opencode,
+};
 
-export const INBOX_TOOL_HOSTS: readonly AgentToolHost[] = ["claude-code", "pi", "opencode"];
+export const INBOX_TOOL_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode"];
 
 /** The PLANNOTATOR_INBOX_TOOL override, or undefined when it does not decide. */
 export function parseInboxToolEnv(env: NodeJS.ProcessEnv = process.env): boolean | undefined {
@@ -1082,7 +1106,7 @@ export function parseInboxToolEnv(env: NodeJS.ProcessEnv = process.env): boolean
 }
 
 /** config.inboxTool for one host: the shared boolean, the host's own entry, or undefined. */
-export function configuredInboxTool(config: PlannotatorConfig, host: AgentToolHost): boolean | undefined {
+export function configuredInboxTool(config: PlannotatorConfig, host: InboxToolHost): boolean | undefined {
   const value = config.inboxTool;
   if (value && typeof value === "object" && !Array.isArray(value)) {
     return parseConfigBoolean((value as Record<string, unknown>)[host]);
@@ -1099,7 +1123,7 @@ export function configuredInboxTool(config: PlannotatorConfig, host: AgentToolHo
 export function resolveInboxTool(
   config: PlannotatorConfig,
   env: NodeJS.ProcessEnv,
-  host: AgentToolHost,
+  host: InboxToolHost,
 ): boolean {
   return parseInboxToolEnv(env) ?? configuredInboxTool(config, host) ?? INBOX_TOOL_DEFAULTS[host];
 }

@@ -49,6 +49,7 @@ import {
 import { buildAdvertisedUrl, isRemoteSession, listenOnPort } from "./network.ts";
 
 import { agentToolSaveFailed, loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveFeedbackHistory, resolveSharingEnabled } from "../generated/config.ts";
+import { currentPiHost } from "../pi-host.ts";
 import { appendFeedbackRecord, type FeedbackDecision } from "../generated/feedback-archive.ts";
 import { isFaviconStyle, type FaviconStyle } from "../generated/favicon.ts";
 import { readImprovementHook, getImprovementHookExpectedPath } from "../generated/improvement-hooks.ts";
@@ -378,7 +379,7 @@ export async function startPlanReviewServer(options: {
 					archivePlans,
 					sharingEnabled,
 					shareBaseUrl,
-					serverConfig: getServerConfig(gitUser, "pi"),
+					serverConfig: getServerConfig(gitUser, currentPiHost()),
 				});
 			} else {
 				json(res, {
@@ -396,7 +397,7 @@ export async function startPlanReviewServer(options: {
 					pasteApiUrl,
 					repoInfo,
 					projectRoot: process.cwd(),
-					serverConfig: getServerConfig(gitUser, "pi"),
+					serverConfig: getServerConfig(gitUser, currentPiHost()),
 					...piUpdateAdvert(options.origin),
 				});
 			}

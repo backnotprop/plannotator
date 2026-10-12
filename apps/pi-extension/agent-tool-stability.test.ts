@@ -26,6 +26,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import plannotator, { type PlannotatorExtensionDeps } from "./index.ts";
+import { setPiHost } from "./pi-host.ts";
 import type { PlanReviewDecision } from "./plannotator-browser.ts";
 import {
 	PLANNOTATOR_TOOL_DESCRIPTION,
@@ -38,7 +39,12 @@ const PI_DEFAULT_TOOLS = ["read", "bash", "edit", "write"];
 const PLAN = "# Plan\n\n- [ ] Implement the change\n";
 
 const tempDirs: string[] = [];
-const savedEnv = { home: process.env.HOME, agentDir: process.env.PI_CODING_AGENT_DIR, agentTool: process.env.PLANNOTATOR_AGENT_TOOL };
+const savedEnv = {
+	home: process.env.HOME,
+	agentDir: process.env.PI_CODING_AGENT_DIR,
+	agentTool: process.env.PLANNOTATOR_AGENT_TOOL,
+	dataDir: process.env.PLANNOTATOR_DATA_DIR,
+};
 function restore(name: string, value: string | undefined): void {
 	if (value === undefined) delete process.env[name];
 	else process.env[name] = value;
@@ -51,6 +57,8 @@ afterEach(() => {
 	restore("HOME", savedEnv.home);
 	restore("PI_CODING_AGENT_DIR", savedEnv.agentDir);
 	restore("PLANNOTATOR_AGENT_TOOL", savedEnv.agentTool);
+	restore("PLANNOTATOR_DATA_DIR", savedEnv.dataDir);
+	setPiHost("pi");
 	for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -65,7 +73,7 @@ type PiActivation = "pre-0.99" | "0.99+";
 
 type ToolDefinition = Record<string, unknown> & { name: string; execute: (...args: unknown[]) => Promise<any> };
 
-function createPi(options: { activation: PiActivation; hasUI: boolean }) {
+function createPi(options: { activation: PiActivation; hasUI: boolean; ohMyPi?: boolean }) {
 	const cwd = makeTempDir("plannotator-tool-stability-");
 	// Isolate Pi-side config lookup (never the developer's ~/.pi).
 	const home = makeTempDir("plannotator-tool-stability-home-");
@@ -143,6 +151,9 @@ function createPi(options: { activation: PiActivation; hasUI: boolean }) {
 		commands = new Map();
 		const loaded: ToolDefinition[] = [];
 		const pi = {
+			// Oh My Pi's ExtensionAPI also carries its schema builder and SDK module
+			// (what apps/pi-extension/pi-host.ts reads); Pi's never does.
+			...(options.ohMyPi ? { arktype: () => undefined, pi: {} } : {}),
 			events: { on: () => () => undefined, emit: () => undefined },
 			on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => {
 				handlers.set(event, [...(handlers.get(event) ?? []), handler]);
@@ -370,6 +381,40 @@ describe("the plannotator tool stays put for the whole session", () => {
 			expect(pi.registrations.map((tool) => tool.name)).not.toContain(TOOL);
 			expect(pi.requests.filter((request) => request.active)).toEqual([]);
 			expect(pi.registrations.map((tool) => tool.name)).toContain("plannotator_submit_plan");
+		});
+	}
+
+	// Oh My Pi lists an extension tool as one short line, so the tool is on by
+	// default there (owner's call 2026-10-12), with the same lifecycle as Pi.
+	test("Oh My Pi, nothing set: registered and active at every request, never moved after the start", async () => {
+		delete process.env.PLANNOTATOR_AGENT_TOOL;
+		const pi = createPi({ activation: "0.99+", hasUI: true, ohMyPi: true });
+		await runLifecycle(pi);
+
+		expect(pi.registrations.filter((tool) => tool.name === TOOL)).toHaveLength(2);
+		expect(pi.requests.filter((request) => !request.active)).toEqual([]);
+		expect(toolFlips(pi)).toEqual([{ step: "session_start", before: false, after: true }]);
+	});
+
+	for (const [label, setup] of [
+		["PLANNOTATOR_AGENT_TOOL=0", () => (process.env.PLANNOTATOR_AGENT_TOOL = "0")],
+		[
+			'config.json { "agentTool": false }',
+			() => {
+				delete process.env.PLANNOTATOR_AGENT_TOOL;
+				const dataDir = makeTempDir("plannotator-tool-stability-data-");
+				writeFileSync(join(dataDir, "config.json"), JSON.stringify({ agentTool: false }));
+				process.env.PLANNOTATOR_DATA_DIR = dataDir;
+			},
+		],
+	] as const) {
+		test(`Oh My Pi, ${label}: never registered, never active`, async () => {
+			setup();
+			const pi = createPi({ activation: "pre-0.99", hasUI: true, ohMyPi: true });
+			await runLifecycle(pi);
+
+			expect(pi.registrations.map((tool) => tool.name)).not.toContain(TOOL);
+			expect(pi.requests.filter((request) => request.active)).toEqual([]);
 		});
 	}
 });

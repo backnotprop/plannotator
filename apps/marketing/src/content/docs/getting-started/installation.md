@@ -433,7 +433,7 @@ To update it later, run `pi update --extensions` (a plain `pi update` updates on
 
 Start plan mode with `pi --plan`, or toggle mid-session with `/plannotator-plan-mode` or `Ctrl+Alt+P`. Plan review does not make the agent wait: the agent ends its turn, and your decision arrives later as a message. The extension provides file-based plan review, code review (`/plannotator-review`), markdown annotation (`/plannotator-annotate`), bash safety gating during planning, and progress tracking during execution.
 
-The agent can also open Plannotator itself with a `plannotator` tool, for example when you ask it to "open notes.md in Plannotator". The tool returns at once, and your feedback arrives later as a message. The agent can list the reviews it opened and close one it no longer needs; closing keeps your unsent comments as a draft. The tool is off by default on Pi: turn it on with `PLANNOTATOR_AGENT_TOOL=1` or `{ "agentTool": true }` in `~/.plannotator/config.json` (applies to the next Pi session).
+The agent can also open Plannotator itself with a `plannotator` tool, for example when you ask it to "open notes.md in Plannotator". The tool returns at once, and your feedback arrives later as a message. The agent can list the reviews it opened and close one it no longer needs; closing keeps your unsent comments as a draft. The tool is off by default on Pi, because Pi sends its full definition (about 780 tokens) with every request: turn it on with `PLANNOTATOR_AGENT_TOOL=1` or `{ "agentTool": true }` in `~/.plannotator/config.json` (applies to the next Pi session). In Oh My Pi it is on by default (see below).
 
 See [Plannotator Meets Pi](/blog/plannotator-meets-pi) for the full walkthrough.
 
@@ -449,11 +449,13 @@ To update it later, run `omp plugin upgrade @plannotator/pi-extension`.
 
 Open reviews with the extension's commands: `/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`, and `/plannotator-plan-mode` for plan mode. Reviews opened this way can use **Ask this session**: Ask AI sends your question to the OMP session, and the answer streams back from it. Ask AI labels it "Ask this session · Pi".
 
-Reviews started by the `plannotator` CLI from OMP's shell do not get Ask this session. This includes the `/skill:plannotator-*` skills and the agent running `plannotator` with its bash tool. The CLI has no connection back to OMP. Ask AI then offers only the separate AI providers it can find, and the header badge reads "Oh My Pi" instead of "Pi". To let the agent open reviews with Ask this session, turn on the extension's `plannotator` tool with `PLANNOTATOR_AGENT_TOOL=1` or `{ "agentTool": true }`. OMP lists extension tools as `xd://` devices, so the agent finds it as `xd://plannotator`.
+Reviews started by the `plannotator` CLI from OMP's shell do not get Ask this session. This includes the `/skill:plannotator-*` skills and the agent running `plannotator` with its bash tool. The CLI has no connection back to OMP. Ask AI then offers only the separate AI providers it can find, and the header badge reads "Oh My Pi" instead of "Pi".
+
+The extension's `plannotator` tool, which lets the agent open reviews with Ask this session, is **on by default in OMP**. OMP lists extension tools as `xd://` devices, one short line each in its system prompt (about 50 tokens for this one), and loads the full description only when the agent reads it, so the agent finds it as `xd://plannotator`. Plain Pi sends the full definition with every request instead, which is why the tool is off by default there. To keep it out in OMP, set `PLANNOTATOR_AGENT_TOOL=0` or `{ "agentTool": false }` in `~/.plannotator/config.json` (the environment variable wins in both directions), then restart OMP.
 
 Start plan mode with `omp --plan` or `/plannotator-plan-mode`. With the extension loaded, `--plan` starts Plannotator's plan mode instead of choosing a plan model.
 
-Checked with OMP 18.8.9.
+Checked with OMP 18.8.9 and 18.10.2.
 
 ## Amp
 

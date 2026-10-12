@@ -28,6 +28,7 @@ import { getPlanVersion, getVersionCount, listVersions } from "../generated/stor
 import { computeAnnotateHistory, deriveAnnotateHistorySlug, persistAnnotateSubmission, type AnnotateHistoryResult } from "../generated/annotate-history.ts";
 import { htmlDiff } from "../generated/html-diff.ts";
 import { agentToolSaveFailed, saveConfig, detectGitUser, getServerConfig, isAgentTerminalSide, loadConfig, resolveAIEnabled, resolveSharingEnabled, resolveAnnotateHistory, resolveFeedbackHistory, type PromptRuntime } from "../generated/config.ts";
+import { currentPiHost } from "../pi-host.ts";
 import { appendFeedbackRecord, type FeedbackDecision, type FeedbackSurface } from "../generated/feedback-archive.ts";
 import { isFaviconStyle, type FaviconStyle } from "../generated/favicon.ts";
 import { getAnnotateFileFeedbackTemplate, getAnnotateMessageFeedbackTemplate } from "../generated/prompts.ts";
@@ -904,7 +905,7 @@ export async function startAnnotateServer(options: {
 				convertHtml: false,
 				repoInfo,
 				projectRoot: process.cwd(),
-				serverConfig: getServerConfig(gitUser, "pi"),
+				serverConfig: getServerConfig(gitUser, currentPiHost()),
 				...piUpdateAdvert(options.origin),
 				agentTerminal: agentTerminalCapability,
 				feedbackTemplates: {
@@ -980,7 +981,7 @@ export async function startAnnotateServer(options: {
 				// sibling docs the same way it linkifies .md ones.
 				markdownExtensions: getExtraMarkdownExtensions(),
 				...(annotateDrafts.documentsEnabled ? { documentDrafts: true } : {}),
-				serverConfig: getServerConfig(gitUser, "pi"),
+				serverConfig: getServerConfig(gitUser, currentPiHost()),
 				...piUpdateAdvert(options.origin),
 				agentTerminal: agentTerminalCapability,
 				...(options.recentMessages ? { recentMessages: options.recentMessages } : {}),

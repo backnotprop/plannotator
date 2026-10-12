@@ -15,6 +15,7 @@ import { handleHostControl, resolveHostControlToken, type HostControl } from "./
 import { createRequestHostGuard } from "./request-host-guard.ts";
 import { createReviewDraftSession, prDraftTargetKey, type ReviewDraftKeys } from "../generated/review-draft.ts";
 import { agentToolSaveFailed, loadConfig, saveConfig, detectGitUser, getServerConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolveSharingEnabled, resolveClaudeSandbox, resolveCursorSandbox, resolveFeedbackHistory, resolveGuideHistory, resolveGuideShareUrl, resolveGitRemoteCheck, resolveReviewProgress } from "../generated/config.ts";
+import { currentPiHost } from "../pi-host.ts";
 import { appendFeedbackRecord, countChangedFiles, deriveFeedbackProject, type FeedbackDecision, type FeedbackReviewTarget } from "../generated/feedback-archive.ts";
 import { isFaviconStyle, type FaviconStyle } from "../generated/favicon.ts";
 
@@ -2354,7 +2355,7 @@ export async function startReviewServer(options: {
 				...(servedError && { error: servedError }),
 				semanticDiff: await getSemanticDiffAdvert(servedDiffType as DiffType),
 				callFlow: await getCallFlowAdvert(servedDiffType as DiffType),
-				serverConfig: getServerConfig(gitUser, "pi"),
+				serverConfig: getServerConfig(gitUser, currentPiHost()),
 				...piUpdateAdvert(options.origin),
 			});
 		} else if (url.pathname === "/api/fetch-base" && req.method === "POST") {

@@ -11,13 +11,18 @@
  * `bun add @oh-my-pi/pi-coding-agent` in a temp dir:
  * `<dir>/node_modules/.bin/omp`). Everything runs under a temp HOME and a temp
  * OMP agent dir; the person's own ~/.omp and ~/.plannotator are never read.
- * Checked with OMP 18.8.9.
+ * Checked with OMP 18.8.9 and 18.10.2.
+ *
+ * The same run proves the `plannotator` tool's Oh My Pi default (on, with
+ * PLANNOTATOR_AGENT_TOOL and config.json unset): OMP lists it as one line of
+ * the system prompt (`xd://plannotator`), and the review window's Settings
+ * row reads the Oh My Pi host with the tool on.
  */
 import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { lastMessage, startScriptedModel } from "../../tests/helpers/scripted-model.ts";
+import { lastMessage, messageText, startScriptedModel } from "../../tests/helpers/scripted-model.ts";
 
 const ompBin = process.env.PLANNOTATOR_OMP_BIN;
 const extensionDir = import.meta.dir;
@@ -157,6 +162,18 @@ describe.skipIf(!ompBin || process.platform === "win32")("Oh My Pi: Ask this ses
 			expect(answer).toContain('"success":true');
 			// The question entered the OMP session as Plannotator's custom message.
 			expect(events.some((event) => event.type === "message_start" && event.message?.customType === "plannotator-ask")).toBe(true);
+
+			// The agent tool, on by default in Oh My Pi: one line of OMP's system
+			// prompt, never a full definition in the request's tool list.
+			const systemText = (request: (typeof model.requests)[number]) =>
+				request.messages.filter((message) => message.role === "system" || message.role === "developer").map((message) => messageText(message.content)).join("\n");
+			expect(model.requests.length).toBeGreaterThan(0);
+			for (const request of model.requests) {
+				expect(systemText(request)).toContain("xd://plannotator");
+				expect(request.tools).not.toContain("plannotator");
+			}
+			const plan = (await (await fetch(`${url}/api/plan`)).json()) as { serverConfig: Record<string, unknown> };
+			expect(plan.serverConfig).toMatchObject({ agentToolHost: "oh-my-pi", agentToolEnabled: true, agentToolConfigured: false });
 		} finally {
 			omp.stdin.end();
 			await Promise.race([omp.exited, Bun.sleep(5_000)]);

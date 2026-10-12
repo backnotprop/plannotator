@@ -125,4 +125,14 @@ describe('Settings agent tool switch', () => {
     await mount({ mode: 'plan', initial: PI_OFF, save: async () => {} });
     expect(document.querySelector(ROW)?.textContent).toContain('780');
   });
+
+  // Oh My Pi defaults the tool on: the row must show it on and must not
+  // quote Pi's per-request cost, which OMP does not pay.
+  test.skipIf(!hasDom)('Oh My Pi: shown on by default, with its own cost and when it applies', async () => {
+    await mount({ mode: 'plan', initial: { host: 'oh-my-pi', enabled: true, configured: false }, save: async () => {} });
+    expect(document.querySelector(ROW)?.getAttribute('data-agent-tool-setting')).toBe('oh-my-pi');
+    expect(toggle()?.getAttribute('aria-checked')).toBe('true');
+    expect(document.querySelector(ROW)?.textContent).not.toContain('780');
+    expect(document.querySelector(ROW)?.textContent).toContain('next time Oh My Pi starts');
+  });
 });
