@@ -1905,7 +1905,7 @@ One long-lived local server per machine. Agents leave messages, `:::question` bl
 - Questions:
   - A question record keeps Workspaces' `Question` wire fields beside Plannotator's `QuestionAnswer` v1 (`packages/core/inbox-types.ts`).
   - State (`open | picked | sent | closed | superseded`) is derived, never stored. `superseded` (the question record's additive `superseded_by: { message_id, key | null }`) wins over `closed`; see "Replaced questions".
-  - `Stopped:` and `Holds up:` lines are read as Workspaces reads them (`packages/core/inbox-questions.ts`, over core's `findQuestionBlocks` and `parseQuestionBlock`, so keys equal the card's).
+  - `Stopped:` and `Holds up:` lines are read as Workspaces reads them (`packages/core/inbox-questions.ts`, over core's `findQuestionBlocks` and `parseQuestionBlock`, so keys equal the card's), with one guard Workspaces' parser is to add as well: a `Stopped:` value or `Holds up:` entry that is only a negative word (no, none, n/a, na, nothing, false, nil, null, a dash; any case, trailing punctuation allowed) is no stop and holds nothing up (`isNegativeWaitValue`). Anything else still stops, an empty `Stopped:` and `No; I need the DB password first` included. Records keep the value read at send time.
 - Idempotency:
   - An agent's send is idempotent on its `idempotency_key`. The key is checked before routing. Another body, `reply_to` or thread name under the same key is `409 idempotency_key_reused`.
   - A person's Send is idempotent on its own key.

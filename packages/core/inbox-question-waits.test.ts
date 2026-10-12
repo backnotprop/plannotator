@@ -1,8 +1,10 @@
 /**
- * `Stopped:` and `Holds up:` values that say "nothing". An agent filling in a
- * template wrote `Stopped: no`, and the thread jumped to "Stopped on you"
- * (found by eval, 2026-10-12). A bare negative is no stop; a real reason,
- * even one that starts with "no " or "none of", still is.
+ * `Stopped:` values and `Holds up:` entries that are only a negative word. An
+ * agent filling in a template wrote `Stopped: no`, and the thread jumped to
+ * "Stopped on you" (found by eval, 2026-10-12). A bare negative word is no
+ * stop; everything else errs toward a stop: a real reason (even one that
+ * starts with "no " or "none of"), a negative word followed by a remark, and
+ * an empty `Stopped:` (a claim with no why, as Workspaces reads it).
  */
 import { describe, expect, test } from "bun:test";
 import { isNegativeWaitValue, parseInboxQuestionBlocks } from "./inbox-questions";
@@ -18,7 +20,6 @@ function only(lines: string[]) {
 }
 
 const NEGATIVES = [
-  "",
   "no",
   "No",
   "NO.",
@@ -36,9 +37,8 @@ const NEGATIVES = [
   "—",
   "–",
   "no -",
+  "no;",
   "  none  ",
-  "nothing; still working",
-  "none; I keep going meanwhile",
 ];
 
 const REASONS = [
@@ -48,6 +48,9 @@ const REASONS = [
   "nothing builds without the schema",
   "not sure which layout",
   "no, the key is missing",
+  "No; I need the DB password first",
+  "None; blocked on the region choice",
+  "nothing; still working",
   "nobody has access",
   "nan values break the chart",
   "the list cannot be built without this",
@@ -68,6 +71,11 @@ describe("Stopped:", () => {
     });
   }
 
+  test("an empty Stopped: is still a stop, a claim with no why", () => {
+    expect(isNegativeWaitValue("")).toBe(false);
+    expect(only(["Stopped:"]).stopped).toBe("");
+  });
+
   test("the first Stopped: line decides, so a later one never turns a negative into a stop", () => {
     expect(only(["Stopped: no", "Stopped: waiting on the key"]).stopped).toBeNull();
     expect(only(["Stopped: waiting on the key", "Stopped: no"]).stopped).toBe("waiting on the key");
@@ -76,13 +84,16 @@ describe("Stopped:", () => {
 
 describe("Holds up:", () => {
   test("a bare negative holds nothing up", () => {
-    for (const value of ["", "none", "N/A", "nothing", "-", "none; still working"]) {
+    for (const value of ["", "none", "N/A", "nothing", "-", "none; no"]) {
       expect(only([`Holds up: ${value}`]).holds_up).toEqual([]);
     }
   });
 
-  test("negative entries are dropped from a list of names; real names are kept", () => {
-    expect(only(["Holds up: billing export; none"]).holds_up).toEqual(["billing export"]);
+  test("bare-negative entries are dropped wherever they sit; real names are kept in order", () => {
+    expect(only(["Holds up: none; the migration"]).holds_up).toEqual(["the migration"]);
+    expect(only(["Holds up: the migration; none"]).holds_up).toEqual(["the migration"]);
+    expect(only(["Holds up: no; deploy; tests"]).holds_up).toEqual(["deploy", "tests"]);
+    expect(only(["Holds up: deploy; N/A; tests"]).holds_up).toEqual(["deploy", "tests"]);
     expect(only(["Holds up: none of the reports; the export"]).holds_up).toEqual(["none of the reports", "the export"]);
   });
 });

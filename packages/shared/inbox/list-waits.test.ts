@@ -48,14 +48,17 @@ test("a `Stopped: no` question sits in Waiting on you, not Stopped on you", () =
 });
 
 test("other bare negatives and `Holds up: none` leave the thread in Waiting on you", () => {
-  for (const line of ["Stopped: N/A", "Stopped:", "Stopped: nothing; still working", "Holds up: none"]) {
+  for (const line of ["Stopped: N/A", "Stopped: None.", "Holds up: none"]) {
     expect(sectionFor(line).section).toBe("waiting");
   }
 });
 
-test("a real reason that starts with \"no\" still stops", () => {
+test("a real reason, a negative with a remark, and an empty Stopped: still stop", () => {
   const stopped = sectionFor("Stopped: no API key yet");
   expect(stopped.section).toBe("stopped");
   expect(stopped.questions[0]!.stopped).toBe("no API key yet");
-  expect(sectionFor("Holds up: the billing export").section).toBe("holding");
+  expect(sectionFor("Stopped: No; I need the DB password first").section).toBe("stopped");
+  // An empty Stopped: is a claim with no why, as Workspaces reads it.
+  expect(sectionFor("Stopped:").section).toBe("stopped");
+  expect(sectionFor("Holds up: none; the billing export").section).toBe("holding");
 });

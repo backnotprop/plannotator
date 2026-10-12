@@ -304,7 +304,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     "Four more lines a question block can carry, each on its own line (the first other line is always the question):",
     "",
-    `- \`Stopped: <why>\`: you cannot go on until this is answered. The person's list shows the thread first, under "${SECTION_LABEL("stopped")}".`,
+    `- \`Stopped: <why>\`: you cannot go on until this is answered. The person's list shows the thread first, under "${SECTION_LABEL("stopped")}". Add it only when you cannot go on; otherwise leave the line out, never \`Stopped: no\`.`,
     `- \`Holds up: <name>; <name>\`: you go on, and these pieces of work wait. The list shows it under "${SECTION_LABEL("holding")}", the most held-up first.`,
     "- `Decision: when answered` (at the start of a line): when the person sends their answer, it is recorded as a project decision (list_decisions). The person can turn that off on the card.",
     "- `Replaces: <message id>/<key>`: this question replaces an earlier one of the same thread (send with `reply_to` into that thread). The old card then reads \"Replaced\", links to this one, and can no longer be answered; a pick the person saved on it is never sent. It is never read as the question, wherever it sits in the block. Get the key from read_thread; several ids may follow, separated by commas. An id that names no open question of the thread refuses the whole send with `invalid_supersedes: …`. send_message's `supersedes` does the same for a whole message or when you ask nothing new.",

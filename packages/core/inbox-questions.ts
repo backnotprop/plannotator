@@ -11,8 +11,10 @@
  *   Stopped: <why>                the asker cannot go on until this is answered
  *   Holds up: <name>; <name>      the asker goes on; these pieces of work wait
  *
- * A value that says "nothing" (`Stopped: no`, `Holds up: none`, empty) is no
- * stop and holds nothing up; see `isNegativeWaitValue`.
+ * One guard on top of Workspaces' reading: a value that is only a negative
+ * word (`Stopped: no`, a `Holds up:` entry `none`) is no stop and holds
+ * nothing up; see `isNegativeWaitValue`. An empty `Stopped:` is still a stop
+ * (a claim with no why), as Workspaces reads it.
  *
  * A third, `Replaces: <message id>/<key>`, is read by core's parser itself
  * (`ParsedQuestion.replaces`) when every token on it is id-shaped: it is then
@@ -112,30 +114,28 @@ export function parseInboxQuestionBlocks(markdown: string): ParsedInboxQuestion[
 }
 
 /**
- * A `Stopped:` or `Holds up:` value that says "nothing": empty, or only a
- * negative word (no, none, n/a, na, nothing, false, nil, null, or a dash),
- * any case, with trailing punctuation and whitespace allowed. An agent filling
- * in a template writes `Stopped: no`; that is not a stop. A negative word may
- * also be followed by `;` and a remark (`nothing; still working`), the way a
- * template answer is set apart from a note.
+ * A `Stopped:` value or `Holds up:` entry that is only a negative word: no,
+ * none, n/a, na, nothing, false, nil, null, or a dash, in any case, with
+ * trailing punctuation and whitespace allowed. An agent filling in a template
+ * writes `Stopped: no`; that is not a stop.
  *
- * Only a bare negative counts: `no API key yet` and `none of the fixtures
- * load` are real reasons, and so is anything after a comma or a dash
- * (`no, the key is missing`), which cannot be told apart from a reason.
+ * Only a bare negative word counts, and the guard errs toward a stop:
+ * `no API key yet`, `none of the fixtures load`, `No; I need the DB password
+ * first`, `no, the key is missing` are all real stops. An empty value is not
+ * a negative word (an empty `Stopped:` is a claim with no why, still a stop).
  */
-const NEGATIVE_WAIT_RE = /^(?:no|none|n\/a|na|nothing|false|nil|null|[-\u2013\u2014]+)?[\s.,;:!?\-\u2013\u2014]*$/i;
-const NEGATIVE_WAIT_REMARK_RE = /^(?:no|none|n\/a|na|nothing|false|nil|null)\s*;/i;
+const NEGATIVE_WAIT_RE = /^(?:no|none|n\/a|na|nothing|false|nil|null|[-\u2013\u2014]+)[\s.,;:!?\-\u2013\u2014]*$/i;
 
-/** Whether a `Stopped:` / `Holds up:` value says there is nothing to wait on. */
+/** Whether a `Stopped:` value or `Holds up:` entry is only a negative word. */
 export function isNegativeWaitValue(value: string): boolean {
-  const text = value.trim();
-  return NEGATIVE_WAIT_RE.test(text) || NEGATIVE_WAIT_REMARK_RE.test(text);
+  return NEGATIVE_WAIT_RE.test(value.trim());
 }
 
 /**
  * The `Stopped:` and `Holds up:` lines of a block's context; the first of each
- * wins, and a first line that says "nothing" (`Stopped: no`, `Holds up: none`)
- * decides that there is none. The lines stay in the context either way.
+ * wins. A first `Stopped:` that is a bare negative (`Stopped: no`) decides
+ * there is no stop; bare-negative `Holds up:` entries are dropped. The lines
+ * stay in the context either way.
  */
 function waitsOf(context: string): { stopped: string | null; holds_up: string[] } {
   let stopped: string | null = null;
@@ -155,13 +155,10 @@ function waitsOf(context: string): { stopped: string | null; holds_up: string[] 
     if (holdsUp === null) {
       const match = HOLDS_UP_RE.exec(line);
       if (match !== null) {
-        const value = match[1] ?? "";
-        holdsUp = isNegativeWaitValue(value)
-          ? []
-          : value
-              .split(";")
-              .map((name) => name.trim())
-              .filter((name) => name !== "" && !isNegativeWaitValue(name));
+        holdsUp = (match[1] ?? "")
+          .split(";")
+          .map((name) => name.trim())
+          .filter((name) => name !== "" && !isNegativeWaitValue(name));
       }
     }
   }
