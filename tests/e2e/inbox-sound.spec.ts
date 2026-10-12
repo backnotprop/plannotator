@@ -28,6 +28,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
+import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const shots = resolve(process.env.PLANNOTATOR_SOUND_SHOTS ?? join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'sound'));
@@ -211,7 +212,7 @@ test.beforeAll(() => {
   expect(existsSync(join(repo, 'apps/hook/dist/inbox.html')), 'build the apps first (bun run build:review && bun run build:hook)').toBe(true);
   rmSync(shots, { recursive: true, force: true });
   mkdirSync(shots, { recursive: true });
-  scratch = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-sound-')));
+  scratch = inboxScratch('plannotator-inbox-sound-');
   // A `tailscale` that always fails, first on PATH: the real one never runs.
   trapDir = join(scratch, 'trap');
   mkdirSync(trapDir);
@@ -221,17 +222,15 @@ test.beforeAll(() => {
 });
 
 test.afterAll(async () => {
-  for (const world of worlds) {
-    await Promise.all(world.agents.map((a) => a.close().catch(() => {})));
-    await world.context.close().catch(() => {});
-    try {
-      const registry = JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8')) as { pid: number };
-      process.kill(registry.pid, 'SIGTERM');
-    } catch {
-      // Already gone.
+  try {
+    for (const world of worlds) {
+      await Promise.all(world.agents.map((a) => a.close().catch(() => {})));
+      await world.context.close().catch(() => {});
     }
+  } finally {
+    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
+    await removeInboxScratch();
   }
-  if (scratch) rmSync(scratch, { recursive: true, force: true });
 });
 
 let fresh: World;

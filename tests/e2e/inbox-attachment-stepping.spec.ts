@@ -24,10 +24,10 @@
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
+import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -122,7 +122,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(builtBinary), `build the binary first: ${builtBinary}`).toBe(true);
   rmSync(shotsDir, { recursive: true, force: true });
   mkdirSync(shotsDir, { recursive: true });
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-stepping-')));
+  const root = inboxScratch('plannotator-inbox-stepping-');
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
   const trap = join(root, 'trap');
@@ -173,16 +173,14 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 });
 
 test.afterAll(async () => {
-  if (!world) return;
-  await world.claude.close().catch(() => {});
-  await world.context.close();
   try {
-    const registry = JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8')) as { pid: number };
-    process.kill(registry.pid, 'SIGTERM');
-  } catch {
-    // Already gone.
+    if (!world) return;
+    await world.claude.close().catch(() => {});
+    await world.context.close();
+  } finally {
+    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
+    await removeInboxScratch();
   }
-  rmSync(world.root, { recursive: true, force: true });
 });
 
 test('one agent sends five files of five kinds across two messages of one thread', async () => {

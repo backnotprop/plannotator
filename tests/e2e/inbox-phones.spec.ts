@@ -32,11 +32,11 @@
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { qrModules } from '../../packages/inbox/qr';
 import { pinnedRequest } from '../helpers/pinned-phone';
+import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -91,7 +91,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   rmSync(proofDir, { recursive: true, force: true });
   mkdirSync(proofDir, { recursive: true });
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-phones-e2e-')));
+  const root = inboxScratch('plannotator-inbox-phones-e2e-');
   const dataDir = join(root, 'data');
   const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: 'none', PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_INBOX_PHONES: '1' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
@@ -104,14 +104,13 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 });
 
 test.afterAll(async () => {
-  if (!world) return;
-  await world.context.close();
   try {
-    process.kill(JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8')).pid, 'SIGTERM');
-  } catch {
-    // Already gone.
+    if (!world) return;
+    await world.context.close();
+  } finally {
+    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
+    await removeInboxScratch();
   }
-  rmSync(world.root, { recursive: true, force: true });
 });
 
 test('Pair a phone: the QR is the offer\'s link, the digits are the offer\'s code, a countdown runs; the phone that redeems it joins the list', async () => {
@@ -178,7 +177,7 @@ test('a code closed by five wrong tries, and the tailnet switch\'s two error sta
   await block.getByRole('button', { name: 'Done' }).click();
 
   // A second Inbox whose `tailscale` is a script on PATH, so CI and this Mac show the same states without a tailnet.
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-phones-tailscale-')));
+  const root = inboxScratch('plannotator-inbox-phones-tailscale-');
   const bin = join(root, 'bin');
   mkdirSync(bin);
   writeFileSync(
@@ -207,13 +206,9 @@ test('a code closed by five wrong tries, and the tailnet switch\'s two error sta
     }
   } finally {
     world.page = page;
-    await other.close();
-    try {
-      process.kill(JSON.parse(readFileSync(join(root, 'data', 'inbox', 'inbox.json'), 'utf8')).pid, 'SIGTERM');
-    } catch {
-      // Already gone.
-    }
-    rmSync(root, { recursive: true, force: true });
+    await other.close().catch(() => {});
+    // This test's Inbox, then its folder (inbox-scratch.ts).
+    await removeInboxScratch(root);
   }
 });
 
@@ -268,7 +263,7 @@ test('Reach from this Wi-Fi: the panel turns it on, the row shows the address an
 test('Reach from this Wi-Fi where nothing can announce it (no Bonjour) and where openssl fails', async () => {
   const { page } = world;
   // A second Inbox whose PATH holds only `openssl`: no dns-sd, no avahi-publish. The script fails while the mode file says so.
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-phones-lan-')));
+  const root = inboxScratch('plannotator-inbox-phones-lan-');
   const bin = join(root, 'bin');
   mkdirSync(bin);
   const real = onPath('openssl');
@@ -327,13 +322,9 @@ test('Reach from this Wi-Fi where nothing can announce it (no Bonjour) and where
     expect(kept().lan).toEqual({ port, on: false });
   } finally {
     world.page = page;
-    await other.close();
-    try {
-      process.kill(JSON.parse(readFileSync(join(root, 'data', 'inbox', 'inbox.json'), 'utf8')).pid, 'SIGTERM');
-    } catch {
-      // Already gone.
-    }
-    rmSync(root, { recursive: true, force: true });
+    await other.close().catch(() => {});
+    // This test's Inbox, then its folder (inbox-scratch.ts).
+    await removeInboxScratch(root);
   }
 });
 

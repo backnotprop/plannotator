@@ -44,7 +44,7 @@ import {
   saveConfig,
   type InboxTailscaleSource,
 } from "@plannotator/shared/config";
-import { readInboxRegistry, writeInboxRegistry, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
+import { readInboxRegistry, updateOwnInboxRegistry, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { checkTailnetIdentity, isServedTailnetHost, normalizeTailnetLogin, tailnetFetchSiteAllowed } from "@plannotator/shared/inbox/tailnet";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import {
@@ -161,14 +161,19 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
 
   const record = () => context.registry().tailscale;
 
-  /** Keep the state in inbox.json (and this run's entry), so a reader of the file sees the address or the reason. */
+  /**
+   * Keep the state in inbox.json (and this run's entry), so a reader of the
+   * file sees the address or the reason. The file only while it is still this
+   * Inbox's: a stopping Inbox must never write its own pid over the entry of
+   * one that started since, nor make a removed data folder again.
+   */
   const save = (value: InboxRegistryEntry["tailscale"] | undefined) => {
-    const entry = { ...(readInboxRegistry(context.dataDir) ?? context.registry()) };
-    for (const target of [entry, context.registry()]) {
+    const apply = (target: InboxRegistryEntry) => {
       if (value) target.tailscale = { ...value };
       else delete target.tailscale;
-    }
-    writeInboxRegistry(context.dataDir, entry);
+    };
+    apply(context.registry());
+    updateOwnInboxRegistry(context.dataDir, context.registry().serverSession, apply);
   };
 
   /** The record with its ports kept (a mapping may exist), and why. */

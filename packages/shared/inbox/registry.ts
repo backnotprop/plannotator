@@ -121,6 +121,59 @@ export function writeInboxRegistry(dataDir: string, entry: InboxRegistryEntry): 
   renameSync(temp, path);
 }
 
+/**
+ * The running Inbox `serverSession` rewriting its own entry (a tailnet or
+ * Wi-Fi change), from the entry in the file: `change` gets a copy and the
+ * result is written, only while the file still names `serverSession`. False,
+ * and nothing written, when the file is gone (the data folder was removed:
+ * never make it again) or names another Inbox (one that started since owns
+ * the file: a stopping Inbox must not rewrite its successor's entry).
+ */
+export function updateOwnInboxRegistry(
+  dataDir: string,
+  serverSession: string,
+  change: (entry: InboxRegistryEntry) => void,
+): boolean {
+  const current = readInboxRegistry(dataDir);
+  if (current?.serverSession !== serverSession) return false;
+  const entry = { ...current };
+  change(entry);
+  writeInboxRegistry(dataDir, entry);
+  return true;
+}
+
+/** Device and inode of a folder, to tell it from one made again at the same path. */
+export interface InboxDirIdentity {
+  dev: number;
+  ino: number;
+}
+
+export function inboxDirIdentity(dataDir: string): InboxDirIdentity | null {
+  try {
+    const stat = statSync(inboxDir(dataDir));
+    return stat.isDirectory() ? { dev: stat.dev, ino: stat.ino } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Why a running Inbox can no longer work, or null while it can: its
+ * `inbox/` folder (the store, the registry) is gone or was made again, or
+ * `inbox.json` is gone or names another Inbox. Such an Inbox is reachable by
+ * no agent (they find an Inbox through the file) and has no store to keep.
+ */
+export function inboxDataGoneReason(dataDir: string, serverSession: string, identity: InboxDirIdentity): string | null {
+  const dir = inboxDir(dataDir);
+  const now = inboxDirIdentity(dataDir);
+  if (!now) return `its data folder ${dir} is gone`;
+  if (now.dev !== identity.dev || now.ino !== identity.ino) return `its data folder ${dir} was removed and made again`;
+  const entry = readInboxRegistry(dataDir);
+  if (!entry) return `${inboxRegistryPath(dataDir)} is gone`;
+  if (entry.serverSession !== serverSession) return `another Inbox (pid ${entry.pid}) owns ${dir} now`;
+  return null;
+}
+
 export function isPidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);

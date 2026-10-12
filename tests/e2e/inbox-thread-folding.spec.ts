@@ -19,10 +19,10 @@
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
+import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -146,7 +146,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   rmSync(proofDir, { recursive: true, force: true });
   mkdirSync(proofDir, { recursive: true });
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-folding-e2e-')));
+  const root = inboxScratch('plannotator-inbox-folding-e2e-');
   const dataDir = join(root, 'data');
   // Nothing here may reach the real tailscale CLI: a trap fails loudly first on PATH.
   const trap = join(root, 'bin');
@@ -206,15 +206,14 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 });
 
 test.afterAll(async () => {
-  if (!world) return;
-  await world.claude.close().catch(() => {});
-  await world.context.close();
   try {
-    process.kill(JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8')).pid, 'SIGTERM');
-  } catch {
-    // Already gone.
+    if (!world) return;
+    await world.claude.close().catch(() => {});
+    await world.context.close();
+  } finally {
+    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
+    await removeInboxScratch();
   }
-  rmSync(world.root, { recursive: true, force: true });
 });
 
 test('opened, the thread lands at "New since you looked" with the last read line above it; the subject moves into the header', async () => {

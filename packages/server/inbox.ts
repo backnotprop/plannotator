@@ -89,6 +89,8 @@ import {
 } from "@plannotator/shared/inbox/connection";
 import {
   createInboxToken,
+  inboxDataGoneReason,
+  inboxDirIdentity,
   inboxRegistryPath,
   readInboxRegistry,
   writeInboxRegistry,
@@ -129,6 +131,12 @@ const LOOPBACK = "127.0.0.1";
 export const INBOX_FORBIDDEN_PORT = 19432;
 const SSE_HEARTBEAT_MS = 15_000;
 const DEFAULT_HEALTH_TICK_MS = 60_000;
+/**
+ * How often the Inbox checks that its data folder and its registry entry are
+ * still there and still its own; two misses in a row end it, so an Inbox whose
+ * folder was removed stops within about twice this.
+ */
+export const INBOX_DATA_CHECK_MS = 5_000;
 /** `http://localhost:52817`: an origin as the page reports it, nothing more. */
 function isPageOrigin(value: string): boolean {
   try {
@@ -153,6 +161,15 @@ export interface InboxServerOptions {
   healthTickMs?: number;
   /** Called after the stop route was used, once the server has stopped. */
   onStopRequested?: () => void;
+  /**
+   * Called once the Inbox found its data folder gone (removed, or made again
+   * at the same path) or `inbox.json` gone or naming another Inbox, after it
+   * has stopped (`inboxDataGoneReason`): nothing can find it and it has no
+   * store, so the caller ends the process. Absent: the server only stops.
+   */
+  onDataGone?: (reason: string) => void;
+  /** How often that is checked. Default `INBOX_DATA_CHECK_MS`. Tests shorten it. */
+  dataCheckMs?: number;
   /**
    * Called after the window's Restart (the "A new version is ready" line),
    * once this server has stopped listening: the caller starts the binary on
@@ -1366,6 +1383,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   }
 
   updates.start();
+  // An Inbox whose data folder was removed (a test's temp dir, an uninstall
+  // that could not reach it, a person deleting ~/.plannotator/inbox) is found
+  // by no agent and keeps no store; it must not run on headless for days. Two
+  // misses in a row, so a check that races an atomic rename never ends it.
+  const dataIdentity = inboxDirIdentity(dataDir);
+  let dataMisses = 0;
+  const dataCheck = dataIdentity
+    ? setInterval(() => {
+        if (stopped) return;
+        const reason = inboxDataGoneReason(dataDir, serverSession, dataIdentity);
+        dataMisses = reason ? dataMisses + 1 : 0;
+        if (!reason || dataMisses < 2) return;
+        process.stderr.write(`Plannotator Inbox: ${reason}; stopping.\n`);
+        stop();
+        options.onDataGone?.(reason);
+      }, options.dataCheckMs ?? INBOX_DATA_CHECK_MS)
+    : null;
+  (dataCheck as { unref?: () => void } | null)?.unref?.();
   // Every known project's `origin`, after the server is listening; the cache
   // runs at most a few gits at once and queues the rest.
   setTimeout(() => {
@@ -1380,6 +1415,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const stop = () => {
     if (stopped) return;
     stopped = true;
+    if (dataCheck) clearInterval(dataCheck);
     for (const timer of setAsideTimers) clearTimeout(timer);
     setAsideTimers.clear();
     updates.stop();

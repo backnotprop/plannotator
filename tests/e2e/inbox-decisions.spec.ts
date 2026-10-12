@@ -23,10 +23,10 @@
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DEMO_MESSAGES, SimAgent, scratchProject } from '../../scripts/inbox-sim';
+import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -139,7 +139,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   rmSync(proofDir, { recursive: true, force: true });
   mkdirSync(proofDir, { recursive: true });
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-decisions-e2e-')));
+  const root = inboxScratch('plannotator-inbox-decisions-e2e-');
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
   mkdirSync(home);
@@ -176,23 +176,21 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 });
 
 test.afterAll(async () => {
-  if (!world) return;
-  await Promise.all([world.claude.close().catch(() => {}), world.opencode.close().catch(() => {})]);
-  await world.context.close();
   try {
-    const entry = JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8'));
-    process.kill(entry.pid, 'SIGTERM');
-  } catch {
-    // Already gone.
+    if (!world) return;
+    await Promise.all([world.claude.close().catch(() => {}), world.opencode.close().catch(() => {})]);
+    await world.context.close();
+    const names = [...new Set(readdirSync(proofDir).filter((f) => f.endsWith('-light.png')).map((f) => f.replace(/-light\.png$/, '')))].sort();
+    writeFileSync(
+      join(proofDir, 'index.html'),
+      `<!doctype html><meta charset="utf-8"><title>Plannotator Inbox decisions: proof</title><style>body{font:14px system-ui;margin:24px;background:#e9eaee}h2{font-size:15px;margin:24px 0 8px}.pair{display:flex;gap:12px}.pair img{width:calc(50% - 6px);box-shadow:0 0 0 1px #0002;border-radius:6px}</style><h1>Plannotator Inbox decisions: every proved state, light and dark, 1440 by 900</h1>${names
+        .map((n) => `<section><h2>${n}</h2><div class="pair"><img src="${n}-light.png" alt="${n} light"><img src="${n}-dark.png" alt="${n} dark"></div></section>`)
+        .join('\n')}`,
+    );
+  } finally {
+    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
+    await removeInboxScratch();
   }
-  rmSync(world.root, { recursive: true, force: true });
-  const names = [...new Set(readdirSync(proofDir).filter((f) => f.endsWith('-light.png')).map((f) => f.replace(/-light\.png$/, '')))].sort();
-  writeFileSync(
-    join(proofDir, 'index.html'),
-    `<!doctype html><meta charset="utf-8"><title>Plannotator Inbox decisions: proof</title><style>body{font:14px system-ui;margin:24px;background:#e9eaee}h2{font-size:15px;margin:24px 0 8px}.pair{display:flex;gap:12px}.pair img{width:calc(50% - 6px);box-shadow:0 0 0 1px #0002;border-radius:6px}</style><h1>Plannotator Inbox decisions: every proved state, light and dark, 1440 by 900</h1>${names
-      .map((n) => `<section><h2>${n}</h2><div class="pair"><img src="${n}-light.png" alt="${n} light"><img src="${n}-dark.png" alt="${n} dark"></div></section>`)
-      .join('\n')}`,
-  );
 });
 
 test('the tag is on for a `Decision: when answered` question and off for a plain one', async () => {

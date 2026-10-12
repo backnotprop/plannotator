@@ -45,7 +45,7 @@ import {
   publicDevice,
   type InboxDevice,
 } from "@plannotator/shared/inbox/devices";
-import { readInboxRegistry, writeInboxRegistry, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
+import { readInboxRegistry, updateOwnInboxRegistry, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { runTailscale, serveStatusProxy, TAILSCALE_SERVE_TIMEOUT_MS, type TailscaleRunner } from "@plannotator/shared/tailscale";
 import { createInboxLan, LanUnavailableError } from "./inbox-lan";
@@ -465,9 +465,12 @@ export function createInboxDevices(context: InboxDevicesContext) {
 
   /** Keep "Reach from this Wi-Fi" in inbox.json (and this run's entry): `lan: { port, on }`, the port kept while off. */
   const saveLan = (value: { port: number; on: boolean }) => {
-    const entry = { ...(readInboxRegistry(context.dataDir) ?? context.registry()) };
-    for (const target of [entry, context.registry()]) target.lan = { ...value };
-    writeInboxRegistry(context.dataDir, entry);
+    const apply = (target: InboxRegistryEntry) => {
+      target.lan = { ...value };
+    };
+    apply(context.registry());
+    // Never another Inbox's entry, never into a removed data folder.
+    updateOwnInboxRegistry(context.dataDir, context.registry().serverSession, apply);
   };
   const lan = createInboxLan({
     dataDir: context.dataDir,
@@ -503,14 +506,14 @@ export function createInboxDevices(context: InboxDevicesContext) {
     [doorServer?.port, context.registry().tailnet?.door_port].filter((p): p is number => !!p).map((p) => `http://127.0.0.1:${p}`);
 
   const saveSwitch = (on: boolean) => {
-    const entry = { ...(readInboxRegistry(context.dataDir) ?? context.registry()) };
     const value = on && doorServer ? { https_port: INBOX_TAILNET_HTTPS_PORT, door_port: doorServer.port as number } : undefined;
-    if (value) entry.tailnet = value;
-    else delete entry.tailnet;
-    writeInboxRegistry(context.dataDir, entry);
-    const live = context.registry();
-    if (value) live.tailnet = value;
-    else delete live.tailnet;
+    const apply = (target: InboxRegistryEntry) => {
+      if (value) target.tailnet = { ...value };
+      else delete target.tailnet;
+    };
+    // Never another Inbox's entry, never into a removed data folder.
+    updateOwnInboxRegistry(context.dataDir, context.registry().serverSession, apply);
+    apply(context.registry());
   };
 
   const tailnetWords = (error: unknown): { code: string; message: string } => {

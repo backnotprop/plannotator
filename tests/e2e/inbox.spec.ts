@@ -19,10 +19,10 @@
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DEMO_MESSAGES, SimAgent, scratchProject } from '../../scripts/inbox-sim';
+import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -47,14 +47,6 @@ let world: World;
 
 function registry(): { pid: number; port: number; serverSession: string; url: string } {
   return JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8'));
-}
-
-function stopInbox(): void {
-  try {
-    process.kill(registry().pid, 'SIGTERM');
-  } catch {
-    // Already gone.
-  }
 }
 
 /**
@@ -94,7 +86,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   // Only this spec's own captures: decisions, attachments and guided reviews keep theirs in proof/decisions/, proof/attachments/ and proof/guides/.
   mkdirSync(proofDir, { recursive: true });
   for (const file of readdirSync(proofDir)) if (file.endsWith('.png') || file === 'index.html') rmSync(join(proofDir, file));
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-e2e-')));
+  const root = inboxScratch('plannotator-inbox-e2e-');
   // A copy the restart proof can replace on disk, as install.sh does.
   // A long directory name of our own, so the code boxes must wrap the command on any runner.
   const binDir = join(root, 'a-long-install-directory-name-so-every-connect-command-has-to-wrap', 'bin');
@@ -135,12 +127,15 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 });
 
 test.afterAll(async () => {
-  if (!world) return;
-  await Promise.all(world.agents.map((a) => a.close().catch(() => {})));
-  await world.context.close();
-  stopInbox();
-  rmSync(world.root, { recursive: true, force: true });
-  writeContactSheet();
+  try {
+    if (!world) return;
+    await Promise.all(world.agents.map((a) => a.close().catch(() => {})));
+    await world.context.close();
+    writeContactSheet();
+  } finally {
+    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
+    await removeInboxScratch();
+  }
 });
 
 function writeContactSheet(): void {

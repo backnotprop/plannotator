@@ -18,9 +18,9 @@
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -86,16 +86,34 @@ function startInbox(args: string[]): string {
   // PATH: the fake first, then this Node; no system directory, so no real tailscale is ever reachable.
   const env = { PATH: `${world.bin}:${dirname(process.execPath)}`, HOME: world.root, PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_BROWSER: 'none', PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9' };
   const started = spawnSync(binary, ['inbox', '--background', ...args], { env, encoding: 'utf8', timeout: 60_000 });
+  // Every start's pid, before anything can fail: the teardown signals each one.
+  rememberInboxOf(world.dataDir);
   expect(started.status, started.stderr).toBe(0);
   return started.stdout.trim();
 }
 
-function stopInbox(): void {
+const isAlive = (pid: number) => {
   try {
-    process.kill(registry().pid, 'SIGTERM');
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * SIGTERM, then wait until the PROCESS is gone, not only its port: a stopping
+ * Inbox still runs its clean stop (the tailnet mapping) after it stops
+ * listening, and the next start must not overlap it.
+ */
+async function stopInbox(): Promise<void> {
+  const { pid } = registry();
+  try {
+    process.kill(pid, 'SIGTERM');
   } catch {
     // Already gone.
   }
+  await expect.poll(() => (isAlive(pid) ? 'alive' : 'gone')).toBe('gone');
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -104,7 +122,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   rmSync(proofDir, { recursive: true, force: true });
   mkdirSync(proofDir, { recursive: true });
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-tailscale-e2e-')));
+  const root = inboxScratch('plannotator-inbox-tailscale-e2e-');
   const bin = join(root, 'bin');
   mkdirSync(bin);
   writeFileSync(join(root, 'fake-tailscale.cjs'), FAKE);
@@ -119,12 +137,12 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 });
 
 test.afterAll(async () => {
-  if (!world) return;
-  await world.context.close();
-  const { pid } = registry();
-  stopInbox();
-  await expect.poll(() => { try { process.kill(pid, 0); return 'alive'; } catch { return 'gone'; } }).toBe('gone');
-  rmSync(world.root, { recursive: true, force: true });
+  try {
+    await world?.context.close();
+  } finally {
+    // Every Inbox this spec started (each start's pid, and inbox.json's), then the folder.
+    await removeInboxScratch();
+  }
 });
 
 test('the switch publishes at once and shows the tailnet address; off takes it down', async () => {
@@ -177,7 +195,7 @@ test('Tailscale stopped: the switch stays on and the error says why, and one cli
 });
 
 test('started with --tailscale: on for this run, and "Keep it on at every start" saves the switch', async () => {
-  stopInbox();
+  await stopInbox();
   await expect.poll(() => fetch(`${world.url}api/inbox/health`).then(() => 'up', () => 'down')).toBe('down');
   world.url = startInbox(['--tailscale']);
   const { page } = world;

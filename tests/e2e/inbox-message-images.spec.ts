@@ -12,10 +12,10 @@
 
 import { expect, test } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
+import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -25,7 +25,7 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 
 test('a relative image in a message loads from the message route; one outside the project does not', async ({ browser }) => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-images-e2e-')));
+  const root = inboxScratch('plannotator-inbox-images-e2e-');
   const dataDir = join(root, 'data');
   const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: 'none' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
@@ -69,12 +69,8 @@ test('a relative image in a message loads from the message route; one outside th
     expect(await outside.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(0);
   } finally {
     await agent.close().catch(() => {});
-    await context.close();
-    try {
-      process.kill(JSON.parse(readFileSync(join(dataDir, 'inbox', 'inbox.json'), 'utf8')).pid, 'SIGTERM');
-    } catch {
-      // Already gone.
-    }
-    rmSync(root, { recursive: true, force: true });
+    await context.close().catch(() => {});
+    // This test's Inbox, then its folder (inbox-scratch.ts).
+    await removeInboxScratch(root);
   }
 });

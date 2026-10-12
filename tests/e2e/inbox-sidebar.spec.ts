@@ -14,10 +14,10 @@
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DEMO_MESSAGES, SimAgent, scratchProject } from '../../scripts/inbox-sim';
+import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -93,7 +93,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(builtBinary), `build the binary first: ${builtBinary}`).toBe(true);
   mkdirSync(proofDir, { recursive: true });
   for (const file of readdirSync(proofDir)) rmSync(join(proofDir, file), { recursive: true, force: true });
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-sidebar-e2e-')));
+  const root = inboxScratch('plannotator-inbox-sidebar-e2e-');
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
   mkdirSync(home);
@@ -121,19 +121,18 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 });
 
 test.afterAll(async () => {
-  if (!world) return;
-  await world.agent.close().catch(() => {});
-  const video = world.page.video();
-  await world.context.close();
-  if (video) await video.saveAs(join(proofDir, 'sidebar.webm')).catch(() => {});
-  if (video) await video.delete().catch(() => {});
   try {
-    process.kill(registry().pid, 'SIGTERM');
-  } catch {
-    // Already gone.
+    if (!world) return;
+    await world.agent.close().catch(() => {});
+    const video = world.page.video();
+    await world.context.close();
+    if (video) await video.saveAs(join(proofDir, 'sidebar.webm')).catch(() => {});
+    if (video) await video.delete().catch(() => {});
+    writeFileSync(join(proofDir, 'curves.json'), JSON.stringify(curves, null, 1));
+  } finally {
+    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
+    await removeInboxScratch();
   }
-  rmSync(world.root, { recursive: true, force: true });
-  writeFileSync(join(proofDir, 'curves.json'), JSON.stringify(curves, null, 1));
 });
 
 test('the toggle closes and opens the sidebar on the spring, and the list takes the width', async () => {

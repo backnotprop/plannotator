@@ -12,10 +12,11 @@
 
 import { expect, test } from '@playwright/test';
 import { execSync, spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const entry = join(repo, 'apps/hook/server/index.ts');
@@ -32,7 +33,7 @@ let url = '';
 test.beforeAll(async () => {
   expect(existsSync(join(repo, 'apps/hook/dist/inbox.html')), 'build the apps first (bun run build:hook)').toBe(true);
   mkdirSync(proofDir, { recursive: true });
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-updates-e2e-')));
+  root = inboxScratch('plannotator-inbox-updates-e2e-');
   dataDir = join(root, 'data');
   home = join(root, 'home');
   mkdirSync(dataDir, { recursive: true });
@@ -79,9 +80,13 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  inbox?.kill('SIGTERM');
-  installer?.close();
-  if (root) rmSync(root, { recursive: true, force: true });
+  try {
+    inbox?.kill('SIGTERM');
+    installer?.close();
+  } finally {
+    // The Inbox (waited for, SIGKILL if it hangs), then the folder (inbox-scratch.ts).
+    await removeInboxScratch();
+  }
 });
 
 test('an available release shows Update; the dialog runs the install script once with Update now', async ({ page }) => {

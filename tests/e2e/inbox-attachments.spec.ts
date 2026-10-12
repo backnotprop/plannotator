@@ -25,10 +25,10 @@
 
 import { expect, test, type Browser, type BrowserContext, type FrameLocator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync, appendFileSync, unlinkSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync, appendFileSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DEMO_MESSAGES, SimAgent, scratchProject } from '../../scripts/inbox-sim';
+import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -190,7 +190,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(builtBinary), `build the binary first: ${builtBinary}`).toBe(true);
   rmSync(proofDir, { recursive: true, force: true });
   mkdirSync(proofDir, { recursive: true });
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-att-')));
+  const root = inboxScratch('plannotator-inbox-att-');
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
   mkdirSync(home);
@@ -236,17 +236,15 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 });
 
 test.afterAll(async () => {
-  if (!world) return;
-  await Promise.all([world.claude.close().catch(() => {}), world.opencode.close().catch(() => {})]);
-  await world.context.close();
   try {
-    const registry = JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8')) as { pid: number };
-    process.kill(registry.pid, 'SIGTERM');
-  } catch {
-    // Already gone.
+    if (!world) return;
+    await Promise.all([world.claude.close().catch(() => {}), world.opencode.close().catch(() => {})]);
+    await world.context.close();
+    writeContactSheet();
+  } finally {
+    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
+    await removeInboxScratch();
   }
-  rmSync(world.root, { recursive: true, force: true });
-  writeContactSheet();
 });
 
 test('agents attach a markdown plan, an HTML prototype and a Mermaid diagram; blobs hold the bytes sent', async () => {

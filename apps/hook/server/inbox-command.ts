@@ -213,6 +213,10 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
       publishTailnet: tailscale,
       // The stop route (uninstall --purge) ends the process.
       onStopRequested: () => process.exit(0),
+      // Its data folder (or inbox.json) is gone or another Inbox's: nothing
+      // can reach this one and it has no store, so it ends (the server has
+      // stopped and said why on stderr) instead of running on headless.
+      onDataGone: () => process.exit(0),
       // The window's Restart: this server has stopped listening, so the
       // registry reads stopped; start the binary on disk detached (its own
       // start lock, the last port first) and end this process. A run

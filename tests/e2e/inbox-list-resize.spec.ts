@@ -14,10 +14,10 @@
 
 import { chromium, expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DEMO_MESSAGES, SimAgent, scratchProject } from '../../scripts/inbox-sim';
+import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -71,7 +71,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(builtBinary), `build the binary first: ${builtBinary}`).toBe(true);
   mkdirSync(proofDir, { recursive: true });
   for (const file of readdirSync(proofDir)) rmSync(join(proofDir, file), { recursive: true, force: true });
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-list-resize-e2e-')));
+  const root = inboxScratch('plannotator-inbox-list-resize-e2e-');
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
   mkdirSync(home);
@@ -102,15 +102,14 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 });
 
 test.afterAll(async () => {
-  if (!world) return;
-  await world.agent.close().catch(() => {});
-  await world.context.close();
   try {
-    process.kill(registry().pid, 'SIGTERM');
-  } catch {
-    // Already gone.
+    if (!world) return;
+    await world.agent.close().catch(() => {});
+    await world.context.close();
+  } finally {
+    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
+    await removeInboxScratch();
   }
-  rmSync(world.root, { recursive: true, force: true });
 });
 
 test('the full list has no edge; an open thread narrows it to 380px with the edge and two-line rows', async () => {
