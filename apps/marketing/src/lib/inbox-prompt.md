@@ -27,13 +27,27 @@ Note the absolute path of the binary: `command -v plannotator` (PowerShell: `(Ge
 ## 2. Start the Inbox and open it
 
 1. Run `plannotator inbox --background`. It starts the Inbox without a browser (or finds the running one), prints its URL and exits.
-2. Run `plannotator inbox`. With the Inbox running, it opens the window in the browser and exits. If no browser opens (SSH, container, headless), give the person the URL from step 2.1 and tell them to open it on this machine.
+2. Run `plannotator inbox`. With the Inbox running, it opens the window in the browser, connects the agents it finds on this computer that are not connected yet, and exits. Its stderr names them ("Connected Codex and Gemini CLI to the Inbox"). Keep that line for step 3. If no browser opens (SSH, container, headless), give the person the URL from step 2.1 and tell them to open it on this machine.
 
 ## 3. Read the guide and connect yourself
 
-Run `plannotator inbox --help` and read all of it. It is the installed release's guide for agents: the tools, threads and questions. Then follow its "Connecting yourself" section for your host (Claude Code, Pi, OpenCode, Codex, Cursor or another MCP client; ask the person if you cannot tell which you are). Use the absolute path from step 1 wherever a command names `plannotator`. Tell the person when a restart is needed.
+Run `plannotator inbox --help` and read all of it. It is the installed release's guide for agents: the tools, threads and questions.
 
-A connection takes effect when a session starts, never in the session that is running now. Do not wait for it: step 4 works without it.
+Name your own host first. Your system instructions say which agent you are (Claude Code, Codex, Cursor, VS Code's agent, Zed's agent, Goose, Pi, OpenCode and so on). Tell the person which one you found.
+
+- If step 2.2 already connected you, or your host's config already has a `plannotator-inbox` server that runs the `plannotator` binary, you are done here.
+- Otherwise follow the guide's "Connecting yourself" section for your host. Do this even when you are an editor's agent (VS Code, Zed, JetBrains, Goose): `plannotator inbox` never changes editors by itself, so you add the entry for yourself. Use the absolute path from step 1 wherever a command names `plannotator`.
+- If you notice other editors or agents on this computer that are not connected, ask the person before you add an entry for any of them, and add only the ones they agree to.
+
+Tell the person when a restart is needed. A connection takes effect when a session starts, never in the session that is running now. Do not wait for it: step 4 works without it.
+
+## 3b. Offer the note in each agent's instructions
+
+Plannotator can add a short note about the Inbox to each agent's own instructions file, so agents send decisions and finished work there while the person is away. The guide's "A note in each agent's instructions" section lists every file it would write on this computer and whether it adds a marked section or creates the file.
+
+1. Show the person that list (agent and exact path) and ask which agents should get the note.
+2. Only with their yes in this chat, run `plannotator inbox --notes <ids>` with only the agents they agreed to, comma-separated (for example `plannotator inbox --notes codex,gemini`). It prints what it wrote.
+3. Without a yes, run nothing. The Inbox window asks the person once itself.
 
 ## 4. Send the first message
 

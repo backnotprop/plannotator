@@ -30,6 +30,9 @@ import { INBOX_MCP_TOOLS, INBOX_WAIT_DEFAULT_MS, INBOX_WAIT_MAX_SECONDS } from "
 import { INBOX_TOOL_DEFAULTS, INBOX_TOOL_HOSTS } from "@plannotator/shared/config";
 import { INBOX_FILLED_ARGUMENTS, INBOX_TOOL_NAME } from "@plannotator/shared/inbox/connection";
 import { INBOX_COMMAND_USAGE } from "./cli";
+import { createAgentEnvironment, displayPath, type AgentEnvironment } from "@plannotator/server/inbox-agents";
+import { noteTarget } from "@plannotator/server/inbox-agent-notes";
+import { INBOX_AGENT_LABELS, INBOX_NOTE_AGENT_IDS } from "@plannotator/core/inbox-types";
 
 export type InboxMcpToolName = (typeof INBOX_MCP_TOOLS)[number];
 
@@ -203,6 +206,8 @@ export interface InboxHelpOptions {
   /** The resolved data dir (`getPlannotatorDataDir()`). */
   dataDir: string;
   platform?: ConnectContext["platform"];
+  /** Where the agents' instructions files are (for the note section). Default: this process's home and environment. */
+  agentEnvironment?: AgentEnvironment;
 }
 
 export function inboxHelpPlatform(platform: NodeJS.Platform = process.platform): ConnectContext["platform"] {
@@ -222,6 +227,13 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
   const ctx: ConnectContext = { command: mcpCommand, mcpUrl: INBOX_HELP_MCP_URL, platform: options.platform ?? inboxHelpPlatform() };
   const inboxPath = join(options.dataDir, "inbox");
   const configPath = join(options.dataDir, "config.json");
+  const agents = options.agentEnvironment ?? createAgentEnvironment();
+  const noteLines = INBOX_NOTE_AGENT_IDS.map((id) => {
+    const target = noteTarget(id, agents);
+    const shown = displayPath(target.path, agents);
+    if (target.reason) return `- ${INBOX_AGENT_LABELS[id]} (\`${id}\`): none. ${target.reason}`;
+    return `- ${INBOX_AGENT_LABELS[id]} (\`${id}\`): ${code(shown ?? "")}, ${target.create ? "creates the file" : "adds a marked section"}.`;
+  });
   const on = INBOX_TOOL_HOSTS.filter((host) => INBOX_TOOL_DEFAULTS[host]).map(hostLabel);
   const off = INBOX_TOOL_HOSTS.filter((host) => !INBOX_TOOL_DEFAULTS[host]).map(hostLabel);
   const defaults = [on.length ? `on by default in ${on.join(" and ")}` : "", off.length ? `off by default in ${off.join(" and ")}` : ""]
@@ -332,6 +344,12 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     ...HARNESSES.map((harness) => harnessHelpLine(harness, ctx)),
     "",
     `The \`${INBOX_TOOL_NAME}\` tool is ${defaults}. \`PLANNOTATOR_INBOX_TOOL=1\` or \`0\` turns it on or off everywhere, and config.json \`inboxTool\` takes \`true\`, \`false\` or one per host (\`{ "pi": true }\`); the environment variable wins. A host decides once, at start (Claude Code and OpenCode when the process starts, Pi per session or \`/reload\`), and registers the tool only if the Inbox has run once on this machine by then (\`inbox/inbox.json\` exists); Claude Code registers it anyway, and its first call starts the Inbox. So the tool appears in sessions started after that, never in one already running. A session with the tool also gets one line at its start saying when to use the Inbox; config.json \`inboxReminder\` (\`false\`, or one per host) turns that line off.`,
+    "",
+    "## A note in each agent's instructions",
+    "",
+    "Plannotator can add a short, marked note about the Inbox to an agent's own instructions file, so it sends decisions and finished work here while the person is away. Only with the person's yes: show them this list, then run `plannotator inbox --notes <ids>` with only the agents they agreed to (comma-separated). It never overwrites a note the person edited; the Inbox's Settings and `plannotator uninstall` remove it. On this computer:",
+    "",
+    ...noteLines,
     "",
     "## Commands and flags",
     "",
