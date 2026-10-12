@@ -190,10 +190,13 @@ const serverPlugin = {
     // found, decided here once per plugin setup (the tool list is part of the
     // prompt). Wrapped like the tool above: a failure must not take the plugin down.
     if (hasToolTransform) {
-      let inboxRegistered = false;
+      let inboxFound = false;
       try {
         const inbox = await findInboxConnection();
-        if (inbox) inboxRegistered = await registerInboxOpenCode2(ctx.tool as unknown as InboxToolDomainLike, v2, inbox, (sessionID) => resolveRootSession(v2, sessionID));
+        if (inbox) {
+          inboxFound = true;
+          await registerInboxOpenCode2(ctx.tool as unknown as InboxToolDomainLike, v2, inbox, (sessionID) => resolveRootSession(v2, sessionID));
+        }
       } catch (error) {
         console.error(`[Plannotator] Could not register the plannotator_inbox tool: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -201,8 +204,11 @@ const serverPlugin = {
       // every request of a primary agent that carries plannotator_inbox, so
       // it is there from the first request and never changes under a session
       // (decided here, with the tool, once per plugin setup). `inboxReminder`
-      // turns it off.
-      if (inboxRegistered && hasSessionHooks && resolveInboxReminder(loadConfig(), process.env, "opencode")) {
+      // turns it off. Gated on the connection, not on registerInboxOpenCode2's
+      // answer: OpenCode 2 applies a tool transform lazily, per request, so
+      // that answer is still false here; `addInboxReminder` checks each
+      // request's own tool list instead.
+      if (inboxFound && hasSessionHooks && resolveInboxReminder(loadConfig(), process.env, "opencode")) {
         try {
           await ctx.session.hook("context", async (event) => {
             await addInboxReminder(event, getAgents);
