@@ -161,7 +161,8 @@ describe.if(hasDom)('header control visibility (DOM)', () => {
     );
 
     const toggle = el.querySelector<HTMLButtonElement>('[data-markdown-preview-toggle]');
-    expect(toggle?.getAttribute('aria-label')).toBe('Show rendered Markdown preview');
+    // Deliberate: one accessible name in both states (aria-pressed carries it).
+    expect(toggle?.getAttribute('aria-label')).toBe('Markdown preview');
     await act(async () => toggle!.click());
 
     expect(el.querySelector('h1')?.textContent).toBe('New');

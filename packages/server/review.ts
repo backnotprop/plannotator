@@ -158,6 +158,7 @@ import { countUnsentDraftComments, hostSessionClosedEvent } from "@plannotator/s
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 import { isAIEndpointPath, isLongLivedAIEndpointPath, type AIEndpoints, type SessionBridge } from "@plannotator/ai";
 import { isWSL } from "./browser";
+import { getExtraMarkdownExtensions } from "@plannotator/shared/resolve-file";
 import { handleOpenInApps, handleOpenIn } from "./open-in";
 import type { LocalWorkspaceReview, WorkspaceDiffType } from "./review-workspace";
 import { handleCodeNavResolve, handleCodeNavHover, extractChangedFiles } from "./code-nav";
@@ -2332,6 +2333,9 @@ export async function startReviewServer(
               shareBaseUrl,
               repoInfo,
               isWSL: wslFlag,
+              // config.json `markdownExtensions`: extra extensions the review
+              // UI's Markdown preview treats as Markdown.
+              markdownExtensions: getExtraMarkdownExtensions(),
               // PR mode advertises the ready PR checkout (null while warming), so
               // the Open-in button gates correctly from the initial load — not
               // the launch repo. Non-PR keeps the workspace/local cwd.

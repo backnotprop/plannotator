@@ -18,6 +18,7 @@ import { agentToolSaveFailed, loadConfig, saveConfig, detectGitUser, getServerCo
 import { currentPiHost } from "../pi-host.ts";
 import { appendFeedbackRecord, countChangedFiles, deriveFeedbackProject, type FeedbackDecision, type FeedbackReviewTarget } from "../generated/feedback-archive.ts";
 import { isFaviconStyle, type FaviconStyle } from "../generated/favicon.ts";
+import { getExtraMarkdownExtensions } from "../generated/resolve-file.ts";
 
 export type {
 	DiffOption,
@@ -2328,6 +2329,9 @@ export async function startReviewServer(options: {
 				pasteApiUrl,
 				repoInfo,
 				isWSL: wslFlag,
+				// config.json `markdownExtensions`: extra extensions the review
+				// UI's Markdown preview treats as Markdown.
+				markdownExtensions: getExtraMarkdownExtensions(),
 				// PR mode advertises the ready PR checkout (null while warming), so
 				// the Open-in button gates correctly from the initial load — not the
 				// launch repo. Non-PR keeps the workspace/local cwd.

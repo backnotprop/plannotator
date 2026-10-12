@@ -76,6 +76,10 @@ export interface ReviewState {
   /** The snapshot the server is serving (every mode, PR included); image
    *  preview requests are bound to it. */
   snapshotId?: string;
+  /** Absolute folder the single-file Markdown preview reads repository images
+   *  from; null when the working tree is not the revision on screen (PR,
+   *  workspace, static patch, committed diffs, non-Git VCS). */
+  markdownPreviewImageRoot?: string | null;
 
   // Annotations
   allAnnotations: CodeAnnotation[];

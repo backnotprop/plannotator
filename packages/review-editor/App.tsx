@@ -223,6 +223,8 @@ import { DEMO_TOUR_ID } from './demoTour';
 import { GuideScreen } from './components/guide/GuideScreen';
 import { DEMO_GUIDE_ID } from './demoGuide';
 import { buildPRArtifacts } from './utils/prArtifacts';
+import { markdownPreviewImageRoot } from './utils/markdownPreview';
+import { setExtraMarkdownExtensions } from '@plannotator/ui/utils/markdownExtensions';
 import {
   submitPlatformReviewTargets,
 } from './utils/platformReviewSubmission';
@@ -1710,6 +1712,17 @@ const ReviewApp: React.FC = () => {
   const canUseLiveWorkspaceActions = !isStaticPatch &&
     !activeDiffBase.startsWith('gitbutler:stack:') &&
     !activeDiffBase.startsWith('gitbutler:branch:');
+  // Where the single-file Markdown preview may read repository images: only
+  // a Git working tree that is the diff's new side (see markdownPreviewImageRoot).
+  const markdownPreviewImageRootPath = useMemo(() => markdownPreviewImageRoot({
+    isStaticPatch,
+    isPRMode: !!prMetadata,
+    isWorkspace: reviewMode === 'workspace',
+    vcsType: gitContext?.vcsType,
+    activeDiffBase,
+    worktreePath: activeWorktreePath,
+    repoCwd: gitContext?.cwd,
+  }), [isStaticPatch, prMetadata, reviewMode, gitContext?.vcsType, gitContext?.cwd, activeDiffBase, activeWorktreePath]);
   const visibleEditorAnnotations = useMemo(
     () => canUseLiveWorkspaceActions ? editorAnnotations : [],
     [canUseLiveWorkspaceActions, editorAnnotations],
@@ -2287,6 +2300,7 @@ const ReviewApp: React.FC = () => {
         gitContext?: GitContext;
         diffOptions?: DiffOption[];
         agentCwd?: string | null;
+        markdownExtensions?: string[];
         sharingEnabled?: boolean;
         approvalNotesSupported?: boolean;
         serverSession?: string;
@@ -2362,6 +2376,9 @@ const ReviewApp: React.FC = () => {
           setCommittedBase(initial);
         }
         if (data.agentCwd !== undefined) setAgentCwd(data.agentCwd);
+        // `markdownExtensions` in config.json: extra extensions the Markdown
+        // preview (and local-link detection) treat as Markdown.
+        setExtraMarkdownExtensions(data.markdownExtensions);
         if (data.sharingEnabled !== undefined) setSharingEnabled(data.sharingEnabled);
         setApprovalNotesSupported(readApprovalNotesAdvert(data.approvalNotesSupported));
         // Stale-tab guard: every decision echoes this server's nonce.
@@ -3851,6 +3868,7 @@ const ReviewApp: React.FC = () => {
     contextExpansionAvailable: !isStaticPatch,
     imagePreviewAvailable: imagePreviewSupported && !isStaticPatch,
     snapshotId,
+    markdownPreviewImageRoot: markdownPreviewImageRootPath,
     // Outdated comments (#1590) carry line numbers from an earlier version of
     // the PR: they stay in the sidebar and the export, never on the diff.
     allAnnotations: diffAnnotations,
@@ -3963,7 +3981,7 @@ const ReviewApp: React.FC = () => {
   }), [
     files, diffData?.rawPatch, activeFileIndex, guideOpen, effectiveDiffStyle, handleDiffStyleChange, isCompactTouchLayout, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
-    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions, isStaticPatch, imagePreviewSupported, snapshotId,
+    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions, isStaticPatch, imagePreviewSupported, snapshotId, markdownPreviewImageRootPath,
     diffAnnotations, externalAnnotations,
     visibleDescriptionAnnotations, selectedDescriptionAnnotationId, handleAddDescriptionAnnotation,
     handleSelectDescriptionAnnotation, handleDeleteDescriptionAnnotation, handleAskAIForDescription,

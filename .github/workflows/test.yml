@@ -80,6 +80,7 @@ jobs:
           packages/review-editor/components/DiffViewer.binaryNotice.test.tsx
           packages/review-editor/components/DiffViewer.imagePreview.test.tsx
           packages/review-editor/components/DiffViewer.headerControls.test.tsx
+          packages/review-editor/components/DiffViewer.markdownPreview.test.tsx
 
       # Seam contracts + the remaining DOM-gated tests. Scoped to the DOM files
       # (not the whole ui suite) to keep this process light. Files get isolated

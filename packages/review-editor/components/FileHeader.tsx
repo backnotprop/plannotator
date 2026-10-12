@@ -67,30 +67,24 @@ function MarkdownPreviewToggle({
   compactTouchLayout: boolean;
   onToggle: () => void;
 }) {
-  const icon = enabled ? (
-    <path strokeLinecap="round" strokeLinejoin="round" d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
-  ) : (
-    <>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
-      <circle cx="12" cy="12" r="3" />
-    </>
-  );
-  const label = enabled ? 'Show source diff' : 'Show rendered Markdown preview';
+  // One name in both states; aria-pressed carries the state, so a screen
+  // reader hears "Markdown preview, toggle button, pressed / not pressed".
   const buttonClassName = compactTouchLayout
     ? `ml-1 flex h-9 w-9 flex-none items-center justify-center rounded transition-colors ${enabled ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`
     : `text-xs rounded transition-colors flex items-center ${compact ? 'px-1.5 py-1' : 'gap-1 px-2 py-1'} ${enabled ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`;
 
   return (
     <button
+      type="button"
       data-markdown-preview-toggle
-      aria-label={label}
+      aria-label="Markdown preview"
       aria-pressed={enabled}
       onClick={(event) => {
         event.stopPropagation();
         onToggle();
       }}
       className={buttonClassName}
-      title={enabled ? 'Show source diff' : 'Preview rendered Markdown'}
+      title="Show the rendered Markdown instead of the diff"
     >
       <svg
         className={compactTouchLayout ? 'w-4 h-4' : 'w-3.5 h-3.5'}
@@ -98,10 +92,12 @@ function MarkdownPreviewToggle({
         viewBox="0 0 24 24"
         stroke="currentColor"
         strokeWidth={2}
+        aria-hidden="true"
       >
-        {icon}
+        <path strokeLinecap="round" strokeLinejoin="round" d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+        <circle cx="12" cy="12" r="3" />
       </svg>
-      {!compactTouchLayout && !compact && <span>{enabled ? 'Diff' : 'Preview'}</span>}
+      {!compactTouchLayout && !compact && <span>Preview</span>}
     </button>
   );
 }
