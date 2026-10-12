@@ -69,6 +69,8 @@ import {
   resolveInboxTool,
   saveConfig,
   configuredInboxTool,
+  configuredInboxReminder,
+  resolveInboxReminder,
   type InboxToolHost,
   type PlannotatorConfig,
   type ThemeConfig,

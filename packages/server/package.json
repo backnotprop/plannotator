@@ -34,7 +34,8 @@
     "./inbox": "./inbox.ts",
     "./inbox-tailscale": "./inbox-tailscale.ts",
     "./inbox-mcp": "./inbox-mcp.ts",
-    "./inbox-agents": "./inbox-agents.ts"
+    "./inbox-agents": "./inbox-agents.ts",
+    "./inbox-agent-notes": "./inbox-agent-notes.ts"
   },
   "files": [
     "*.ts",

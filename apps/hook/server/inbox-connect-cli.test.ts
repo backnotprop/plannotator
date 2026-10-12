@@ -7,6 +7,7 @@
  * installed since and says so once; PLANNOTATOR_INBOX_CONNECT=0 skips it.
  */
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { readInboxAgents } from "@plannotator/server/inbox-agents";
 import { createFakeAgents, type FakeAgents } from "../../../tests/helpers/fake-agents";
@@ -109,4 +110,23 @@ test("a person's run that starts the Inbox connects once it listens; PLANNOTATOR
   expect(err).toContain("Plannotator Inbox: http://localhost:");
   expect(err).toContain("Connected Codex to the Inbox.");
   expect(adds(w)).toEqual(["codex"]);
+}, 60_000);
+
+test("plannotator inbox --notes adds only the notes named, starts nothing, and answers the window's question", async () => {
+  const w = world();
+  mkdirSync(join(w.home, ".codex"), { recursive: true });
+  writeFileSync(join(w.home, ".codex", "AGENTS.md"), "Mine.\n");
+  const result = await cli(w, ["inbox", "--notes", "codex,gemini"]);
+  expect(result.code).toBe(0);
+  expect(result.stdout).toBe("");
+  expect(result.stderr).toContain("Codex: Added a marked section to ~/.codex/AGENTS.md.");
+  expect(result.stderr).toContain("Gemini CLI: Created ~/.gemini/GEMINI.md.");
+  expect(readFileSync(join(w.home, ".codex", "AGENTS.md"), "utf8")).toContain("<!-- plannotator-inbox:start v1");
+  expect(existsSync(join(w.home, ".pi"))).toBe(false);
+  expect(existsSync(join(w.home, ".plannotator", "inbox", "inbox.json"))).toBe(false);
+  expect(JSON.parse(readFileSync(join(w.home, ".plannotator", "config.json"), "utf8")).inboxAgentNotes).toEqual({ offered: true });
+
+  const bad = await cli(w, ["inbox", "--notes", "vscode"]);
+  expect(bad.code).toBe(1);
+  expect(bad.stderr).toContain("Unknown agent for --notes: vscode");
 }, 60_000);

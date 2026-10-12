@@ -52,11 +52,11 @@ test("the connect route needs the registry's token and connects the agents found
   expect(body.connect.added).toEqual(["codex"]);
 
   const agents = (await (await fetch(`http://127.0.0.1:${s.port}/api/inbox/agents`)).json()) as {
-    agents: Record<string, { state: string; path: string }>;
+    records: Record<string, { state: string; path: string }>;
     last_report: { added: string[]; seen: boolean };
     connecting: boolean;
   };
-  expect(agents.agents.codex).toMatchObject({ state: "added", path: "~/.codex/config.toml" });
+  expect(agents.records.codex).toMatchObject({ state: "added", path: "~/.codex/config.toml" });
   expect(agents.last_report).toMatchObject({ added: ["codex"], seen: false });
   expect(agents.connecting).toBe(false);
 });

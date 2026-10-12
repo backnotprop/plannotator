@@ -32,8 +32,10 @@ import {
 import { handleInboxServerReady, startInboxServer } from "@plannotator/server/inbox";
 import { exposureWarning, type InboxTailscaleState } from "@plannotator/server/inbox-tailscale";
 import { openBrowser } from "@plannotator/server/browser";
-import { formatConnectReport, inboxConnectDisabled } from "@plannotator/server/inbox-agents";
-import type { InboxConnectReport } from "@plannotator/core/inbox-types";
+import { createAgentEnvironment, formatConnectReport, inboxConnectDisabled } from "@plannotator/server/inbox-agents";
+import { addInboxNote } from "@plannotator/server/inbox-agent-notes";
+import { loadConfig, saveConfig } from "@plannotator/shared/config";
+import { INBOX_AGENT_LABELS, INBOX_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { writeUrlQr } from "@plannotator/server/qr";
 import { getCliVersion } from "./cli";
 import { inboxHostSessionFromEnv, runInboxMcpShim } from "./inbox-mcp-shim";
@@ -287,6 +289,45 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
   return new Promise<never>(() => {});
 }
 
+/**
+ * `plannotator inbox --notes codex,gemini`: add the Inbox note to these
+ * agents' instructions files (inbox-agent-notes.ts), for the install prompt
+ * once the person agreed in chat, and mark the window's one-time question as
+ * answered. Starts nothing. Exit 0 when every note is there, 1 otherwise.
+ */
+function writeNotes(dataDir: string, list: string): number {
+  const ids = [...new Set(list.split(",").map((id) => id.trim()).filter(Boolean))];
+  const unknown = ids.filter((id) => !(INBOX_NOTE_AGENT_IDS as readonly string[]).includes(id));
+  if (ids.length === 0 || unknown.length > 0) {
+    process.stderr.write(`Unknown agent${unknown.length === 1 ? "" : "s"} for --notes: ${unknown.join(", ") || "(none)"}. Use any of: ${INBOX_NOTE_AGENT_IDS.join(", ")}.\n`);
+    return 1;
+  }
+  const environment = createAgentEnvironment();
+  let ok = true;
+  for (const id of ids as InboxNoteAgentId[]) {
+    const change = addInboxNote(id, dataDir, environment);
+    const label = INBOX_AGENT_LABELS[id];
+    if (!change.ok) {
+      ok = false;
+      process.stderr.write(`${label}: not added (${change.reason}).\n`);
+      continue;
+    }
+    const said = {
+      added: `Added a marked section to ${change.path}`,
+      created: `Created ${change.path}`,
+      updated: `Updated the note in ${change.path}`,
+      unchanged: `${change.path} already has the note`,
+      "kept-edited": `${change.path} has the note as you edited it; left as it is`,
+      removed: "",
+      deleted: "",
+    }[change.action];
+    process.stderr.write(`${label}: ${said}.\n`);
+  }
+  saveConfig({ inboxAgentNotes: { ...(loadConfig().inboxAgentNotes ?? {}), offered: true } });
+  if (ok) process.stderr.write("Each agent reads it from its next session. Remove it in the Inbox's Settings or with plannotator uninstall.\n");
+  return ok ? 0 : 1;
+}
+
 function usageError(message: string): never {
   process.stderr.write(`${message}\nRun 'plannotator inbox --help' for usage.\n`);
   process.exit(1);
@@ -316,6 +357,11 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     process.exit(0);
   }
 
+  if (args[0] === "--notes") {
+    if (args.length !== 2) usageError("--notes takes one list of agents, e.g. --notes codex,gemini, and no other option.");
+    process.exit(writeNotes(dataDir, args[1]!));
+  }
+
   let background = false;
   let noOpen = false;
   let tailscale = false;
@@ -323,6 +369,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     if (arg === "--background") background = true;
     else if (arg === "--no-open") noOpen = true;
     else if (arg === "--tailscale") tailscale = true;
+    else if (arg === "--notes") usageError("--notes goes first and alone: plannotator inbox --notes codex,gemini");
     else usageError(`Unknown inbox option: ${arg}`);
   }
 
