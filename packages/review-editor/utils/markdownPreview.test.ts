@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   isMarkdownPreviewFile,
+  isRemoteImageSource,
   markdownViewsFor,
   nextMarkdownView,
   parseMarkdownFileView,
@@ -133,6 +134,31 @@ describe('markdownPreviewImageUrl', () => {
     expect(url.searchParams.get('side')).toBe('old');
     expect(url.searchParams.get('src')).toBe('../img/x.png?raw=1');
     expect(url.searchParams.get('snapshot')).toBe('s1');
+  });
+});
+
+describe('isRemoteImageSource', () => {
+  test('anything a browser would fetch from another server', () => {
+    for (const src of [
+      'https://tracker.example/p.png',
+      'http://tracker.example/p.png',
+      '//cdn.example/b.svg',
+      'https:tracker.example/a.png',
+      'https:/tracker.example/b.png',
+      'https:\\\\tracker.example\\c.png',
+      '\\\\tracker.example\\d.png',
+      '/\\tracker.example/e.png',
+      ' HTTPS://tracker.example/f.png',
+      'ht\ttps://tracker.example/g.png',
+    ]) {
+      expect(isRemoteImageSource(src)).toBe(true);
+    }
+  });
+
+  test('repository paths and inline images are not remote', () => {
+    for (const src of ['img/a.png', '/img/a.png', './https/a.png', 'data:image/png;base64,AA==', 'blob:x', 'httpsdocs/a.png']) {
+      expect(isRemoteImageSource(src)).toBe(false);
+    }
   });
 });
 

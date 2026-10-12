@@ -112,9 +112,18 @@ export function markdownPreviewImageUrl(options: {
   return `${MARKDOWN_PREVIEW_IMAGE_ENDPOINT}?${params}`;
 }
 
-/** True for an image on another server (`https://…`, `http://…`, `//host/…`). */
+/**
+ * True for an image a browser would fetch from another server. Read the way a
+ * URL parser reads it: tabs and line breaks anywhere and leading controls or
+ * spaces are dropped, and a backslash counts as a slash. So `https:host/a.png`,
+ * `https:/host/a.png` and `https:\\host\\a.png` are remote (on a page of the
+ * other scheme a parser reads each as `https://host/…`), as is any `//host`
+ * or `\\host`. Every http(s): source counts, even one a parser would resolve
+ * against this page: holding one image too many is harmless.
+ */
 export function isRemoteImageSource(src: string): boolean {
-  return /^(https?:)?\/\//i.test(src.trim());
+  const normalized = src.replace(/[\t\n\r]/g, '').replace(/^[\u0000-\u0020]+/, '');
+  return /^https?:/i.test(normalized) || /^[\\/]{2}/.test(normalized);
 }
 
 /** The title of a remote image a PR review holds back until the reviewer loads it. */

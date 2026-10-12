@@ -279,6 +279,27 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
     expect(el.querySelector('[data-markdown-preview-remote-images]')).toBeNull();
   });
 
+  test('slash-less, single-slash and backslash remote sources are held and counted too', async () => {
+    // A browser reads each of these as https://tracker.example/…; a check for
+    // `//` alone let them load at once.
+    const doc = [
+      '<p><img alt="noslash" src="https:tracker.example/a.png"></p>',
+      '',
+      '<p><img alt="oneslash" src="https:/tracker.example/b.png"></p>',
+      '',
+      '<p><img alt="backslash" src="https:\\\\tracker.example\\c.png"></p>',
+      '',
+      '<p><img alt="unc" src="\\\\tracker.example\\d.png"></p>',
+      '',
+      '![local](img/a.png)',
+      '',
+    ].join('\n');
+    const el = await mountAdded(doc, { prMetadata: { url: 'https://github.com/o/r/pull/1' } });
+    await settle(30);
+    expect(imgSrcs(el)).toEqual(['/api/review-markdown-image?doc=docs%2Fguide.md&side=new&src=img%2Fa.png&snapshot=snap-1']);
+    expect(el.querySelector('[data-markdown-preview-remote-images]')?.textContent).toContain('4 remote images are not loaded');
+  });
+
   test('the notice button loads held remote images too', async () => {
     const el = await mountAdded(REMOTE_DOC, { prMetadata: { url: 'https://github.com/o/r/pull/1' } });
     await settle(30);
