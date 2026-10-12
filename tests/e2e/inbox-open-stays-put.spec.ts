@@ -39,7 +39,7 @@ const BEAT_MS = 160;
 
 const NEWS = ['Search index built', 'Install page links fixed', 'Changelog drafted', 'Docs deploy finished'];
 
-type ProjectKey = 'desk' | 'reduce' | 'phone' | 'stacked' | 'framesDark' | 'framesLight';
+type ProjectKey = 'desk' | 'reduce' | 'phone' | 'stacked' | 'framesDark' | 'framesLight' | 'mouse';
 
 interface World {
   root: string;
@@ -74,7 +74,7 @@ test.beforeAll(async () => {
   expect(started.status, started.stderr).toBe(0);
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const projects = {} as World['projects'];
-  for (const key of ['desk', 'reduce', 'phone', 'stacked', 'framesDark', 'framesLight'] as const) {
+  for (const key of ['desk', 'reduce', 'phone', 'stacked', 'framesDark', 'framesLight', 'mouse'] as const) {
     const path = scratchProject(join(root, 'src'), key === 'desk' ? 'docs-site' : `docs-${key}`);
     const threads = await seed(agent, path, key);
     projects[key] = { path, id: '', threads };
@@ -222,9 +222,13 @@ test('desktop: opening rows moves nothing; closing settles with a slide; agent n
   expect(await sectionOf(page, String(late.thread_id))).toBeNull();
   await shot(page, '04-after-close');
 
-  // Show brings the agent's message in.
-  await page.locator('[data-inbox-notice]').click();
+  // Show from the keyboard brings the agent's message in; its line goes away and focus goes to that row,
+  // whose Mark read action shows for the keyboard.
+  await page.locator('[data-inbox-notice]').focus();
+  await page.keyboard.press('Enter');
   await expect.poll(() => sectionOf(page, String(late.thread_id))).toBe('new');
+  await expect.poll(() => focused(page)).toBe(String(late.thread_id));
+  await expect(page.locator(`.ib-lbody [data-row="${late.thread_id}"] [data-row-mark-read]`)).toBeVisible();
   expect(errors).toEqual([]);
   const video = page.video();
   await context.close();
@@ -297,20 +301,27 @@ for (const layout of [
       const news = await page.locator('[data-section-id="new"] [data-thread-id]').evaluateAll((rows) => rows.map((r) => r.getAttribute('data-thread-id')!));
       expect(news.length).toBeGreaterThanOrEqual(2);
       const [first, second] = news;
-      // A tap on a phone (WebKit gives a tapped button no focus); the keyboard on the stacked window.
+      // A tap on a phone, the mouse on the stacked window (a keyboard path is the desktop test's).
       if (layout.key === 'phone') await page.locator(`.ib-lbody [data-thread-id="${first}"]`).tap();
-      else await openWithKeyboard(page, first!);
+      else await page.locator(`.ib-lbody [data-thread-id="${first}"]`).click();
       await expect(page.locator('section.ib-pane')).toBeVisible();
       await expect.poll(() => isBold(page, first!)).toBe(false);
       await shot(page, `05-${layout.key}-thread`);
       await page.locator(`section.ib-pane ${layout.back}`).click();
       await expect(page.locator('section.ib-pane')).toHaveCount(0);
       await page.waitForTimeout(BEAT_MS + 300);
-      // As left: same order, the read row in New, no longer bold, with focus on it.
+      // As left: same order, the read row in New, no longer bold.
       expect(await rowsOf(page)).toEqual(before);
       expect(await sectionOf(page, first!)).toBe('new');
       expect(await isBold(page, first!)).toBe(false);
-      expect(await focused(page)).toBe(first);
+      // A tap hands no row focus. The stacked window returns focus to the row (as it did before), but a
+      // mouse Back is no keyboard focus: the row's Mark read action stays hidden.
+      if (layout.key === 'phone') expect(await focused(page)).not.toBe(first);
+      else {
+        expect(await focused(page)).toBe(first);
+        await page.mouse.move(2, 450);
+        await expect(page.locator('.ib-lbody [data-row-mark-read]:visible')).toHaveCount(0);
+      }
       await shot(page, `06-${layout.key}-after-back`);
       // The next thread covers the list, and the first read row settles behind it.
       if (layout.key === 'phone') await page.locator(`.ib-lbody [data-thread-id="${second}"]`).tap();
@@ -328,3 +339,28 @@ for (const layout of [
     }
   });
 }
+
+test('desktop, the mouse: a close hands no row focus, no Mark read action shows, and E marks nothing', async ({ browser }: { browser: Browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' });
+  const page = await context.newPage();
+  const marked: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/read')) marked.push(request.url());
+  });
+  const { id, threads } = world.projects.mouse;
+  await page.goto(`${world.url}/#project=${id}`);
+  await expect(page.locator('[data-section-id="new"] [data-thread-id]')).toHaveCount(4);
+  // Clicked, never by position: the row opened is named.
+  await page.locator(`.ib-lbody [data-thread-id="${threads[0]}"]`).click();
+  await expect.poll(() => isBold(page, threads[0]!)).toBe(false);
+  await page.locator('section.ib-pane [aria-label="Close the thread"]').click();
+  await expect(page.locator('section.ib-pane')).toHaveCount(0);
+  await expect.poll(() => sectionOf(page, threads[0]!)).toBeNull();
+  await page.mouse.move(2, 450);
+  await expect(page.locator('.ib-lbody [data-row-mark-read]:visible')).toHaveCount(0);
+  expect(threads).not.toContain(await focused(page));
+  await page.keyboard.press('e');
+  await page.waitForTimeout(300);
+  expect(marked).toEqual([]);
+  await context.close();
+});

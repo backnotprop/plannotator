@@ -36,6 +36,7 @@ import {
   prefersReducedMotion,
   rowInSlot,
   SETTLE_BEAT_MS,
+  stopSettle,
   type SettleSnapshot,
 } from './settle';
 import { tildePath } from './format';
@@ -210,6 +211,33 @@ function rowElement(body: ParentNode, threadId: string): HTMLElement | null {
   return body.querySelector<HTMLElement>(`[data-thread-id="${CSS.escape(threadId)}"]`);
 }
 
+/**
+ * The person's last way of acting: a key, or a pointer (a mouse, a finger,
+ * a pen). The window moves focus for the person (to a closed thread's row, to
+ * the row now in a gone row's slot, to the first row Show brought in) only
+ * after a key: after a mouse or a tap it would put a row under the keyboard
+ * that the person never chose, and `E` would mark it read.
+ */
+let lastInput: 'keyboard' | 'pointer' | null = null;
+if (typeof window !== 'undefined') {
+  window.addEventListener('keydown', () => (lastInput = 'keyboard'), true);
+  window.addEventListener('pointerdown', () => (lastInput = 'pointer'), true);
+}
+
+/**
+ * The element the person aimed a key at on purpose: one with keyboard focus
+ * (`:focus-visible`). A row that holds focus because it was clicked, or because
+ * the window put focus there after a mouse action, is not.
+ */
+function keyboardFocused(el: Element): boolean {
+  try {
+    return el.matches(':focus-visible');
+  } catch {
+    // A DOM without the selector (tests): focus counts.
+    return true;
+  }
+}
+
 /** Focus the first element on screen that matches one of `selectors`, in order (a list draws some rows twice, one hidden). */
 function focusFirst(selectors: readonly string[]): void {
   for (const selector of selectors) {
@@ -295,7 +323,9 @@ function Inbox() {
     // Silent only when the bell can ring: on, and armed by a click in this tab.
     silent: () => sound.settings.enabled && sound.armed,
     onSettings: (next) => setSettings((current) => (current ? { ...current, notifications: next } : current)),
-    // A click on a notification: the thread opens, and the list on screen catches up.
+    // A click on a notification: the thread opens, and the list on screen catches up, even with a
+    // thread open. The one exception to "the list holds still while a thread is open" (settle.ts):
+    // the person was away, and the thread notified may not be on screen at all.
     openThread: (threadId) => {
       writeRoute({ page: 'inbox', project: null, thread: threadId });
       void refreshList(true);
@@ -485,11 +515,12 @@ function Inbox() {
 
   // When the list on screen catches up as the route changes (settle.ts).
   // Another page or folder: the list there is drawn as it is now. A thread
-  // opening, or replacing another: nothing moves. The thread closing: the
-  // person's own reads and actions settle, a beat after the list has widened
-  // (at once under reduced motion, with no slide); where the thread covered
-  // the list, COVERED_LIST_SETTLES decides. Focus that the closed pane took
-  // with it goes to the thread's row.
+  // opening, or replacing another: nothing moves (a slide still playing
+  // stops). The thread closing: the person's own reads and actions settle, a
+  // beat after the list has widened (at once under reduced motion, with no
+  // slide); where the thread covered the list, COVERED_LIST_SETTLES decides.
+  // After a keyboard close, focus that the closed pane took with it goes to
+  // the thread's row.
   const lastRoute = useRef({ page: route.page, project: route.project ?? null, thread: route.thread });
   useLayoutEffect(() => {
     const before = lastRoute.current;
@@ -500,15 +531,18 @@ function Inbox() {
       settleList('all', false);
       return;
     }
+    const body = listBody(rootRef.current);
     if (now.thread) {
+      // A thread opens: the list holds still, so a settle waiting out its beat
+      // never comes, and one still sliding stops where the rows belong.
       cancelSettle();
+      if (body) stopSettle(body);
       return;
     }
     const closed = before.thread;
     if (!closed) return;
-    const body = listBody(rootRef.current);
     const active = document.activeElement;
-    if (body && (!active || active === document.body)) rowElement(body, closed)?.focus({ preventScroll: true });
+    if (body && lastInput === 'keyboard' && (!active || active === document.body)) rowElement(body, closed)?.focus({ preventScroll: true });
     if (listCovered() && COVERED_LIST_SETTLES === 'while-covered') return;
     if (prefersReducedMotion()) settleList('own', false);
     else settleTimer.current = setTimeout(() => settleList('own', true), SETTLE_BEAT_MS);
@@ -673,7 +707,8 @@ function Inbox() {
     await afterWrite();
     if (!read) {
       dismissToast();
-      say('Moved back to the top.');
+      // With a thread open the row has not left its place, so it has nowhere to come back from yet.
+      say(deferred ? 'Moved back.' : 'Moved back to the top.');
       return;
     }
     if (!before) return;
@@ -745,8 +780,10 @@ function Inbox() {
         return;
       }
       if (routeRef.current.page !== 'inbox') return;
-      // A row the keyboard is on wins over the thread open beside the list.
-      const rowId = target?.closest('.ib-listcol [data-row]')?.getAttribute('data-row') ?? null;
+      // A row the keyboard is on wins over the thread open beside the list; a
+      // row that merely holds focus (clicked, or put there after a mouse close) does not.
+      const rowEl = target?.closest('.ib-listcol [data-row]') ?? null;
+      const rowId = rowEl && target && keyboardFocused(target) ? rowEl.getAttribute('data-row') : null;
       const threadId = rowId ?? (open && open.thread_id === routeRef.current.thread ? open.thread_id : null);
       if (!threadId) return;
       const row = rowOf(threadId);
@@ -1070,18 +1107,26 @@ function Inbox() {
   }, []);
 
   // The list on screen changed: play the slide when one was armed (settle.ts),
-  // and never leave keyboard focus on the page. A row that had focus and left
-  // the rows on screen (for folded Quiet) hands it to the row now in its slot.
+  // and, after a key, never leave focus on the page. A row that had focus and
+  // left the rows on screen (for folded Quiet) hands it to the row now in its
+  // slot; Show (whose line goes away) hands it to the first row it brought in.
   const listOrder = useRef<string[]>([]);
+  const focusAfterShow = useRef(false);
   useLayoutEffect(() => {
     const body = listBody(rootRef.current);
     const from = slideFrom.current;
     slideFrom.current = null;
     const order = from?.order ?? listOrder.current;
     if (body && from) playSettle(body, from);
+    const shownAll = focusAfterShow.current;
+    focusAfterShow.current = false;
     const gone = listFocus.current;
     const active = document.activeElement;
-    if (body && gone && (!active || active === document.body) && !rowElement(body, gone)) {
+    const lost = !active || active === document.body;
+    if (body && lost && shownAll) {
+      const rows = [...body.querySelectorAll<HTMLElement>('[data-thread-id]')];
+      (rows.find((row) => !order.includes(row.getAttribute('data-thread-id')!)) ?? rows[0])?.focus({ preventScroll: true });
+    } else if (body && lastInput === 'keyboard' && gone && lost && !rowElement(body, gone)) {
       const next = rowInSlot(order, gone, (id) => rowElement(body, id) !== null);
       const target = next ? rowElement(body, next) : body.querySelector<HTMLElement>('button.ib-band');
       target?.focus({ preventScroll: true });
@@ -1209,7 +1254,12 @@ function Inbox() {
               />
             )
           }
-          onShowNew={() => settleList('all', true)}
+          onShowNew={() => {
+            // Show's line goes away with the press: after a key, focus goes to the first row it brought in.
+            focusAfterShow.current = lastInput === 'keyboard';
+            listOrder.current = [...(listBody(rootRef.current)?.querySelectorAll('[data-thread-id]') ?? [])].map((el) => el.getAttribute('data-thread-id')!);
+            settleList('all', true);
+          }}
           onOpen={openRow}
           onMarkRead={(row) => void markRead(row.thread_id, true)}
           phone={phone}

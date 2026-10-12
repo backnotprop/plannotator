@@ -25,7 +25,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { InboxListSection } from '@plannotator/core/inbox-types';
 import { PHONE_QUERY } from './phone';
-import { SETTLE_BEAT_MS } from './settle';
+import { rowInSlot, SETTLE_BEAT_MS } from './settle';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
@@ -46,6 +46,7 @@ let savedEventSource: unknown;
 let savedMatchMedia: typeof window.matchMedia;
 /** The window's event stream, which the test fires by hand (the stream itself is not needed). */
 let pokeStream: (() => void) | null = null;
+let posted: string[] = [];
 
 function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
@@ -82,7 +83,7 @@ async function agentSends(body: string): Promise<string> {
   return (JSON.parse(await readLine()) as { sent: string }).sent;
 }
 
-const TESTS = 6;
+const TESTS = 7;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -120,7 +121,9 @@ beforeEach(() => {
   world = worlds.shift()!;
   media = { phone: false, reduce: false };
   savedFetch = globalThis.fetch;
+  posted = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if ((init?.method ?? 'GET') === 'POST') posted.push(String(input));
     const answer = await loopback(String(input), init?.method ?? 'GET', init?.body ? String(init.body) : undefined);
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
@@ -187,7 +190,6 @@ const rowOf = (el: HTMLElement, id: string) => el.querySelector<HTMLElement>(`.i
 const sectionOfRow = (el: HTMLElement, id: string) => rowOf(el, id)?.closest('[data-section-id]')?.getAttribute('data-section-id') ?? null;
 /** The thread ids in the order the list shows them. */
 const order = (el: HTMLElement) => [...el.querySelectorAll('.ib-listcol .ib-lbody [data-thread-id]')].map((r) => r.getAttribute('data-thread-id')!);
-const newRows = (el: HTMLElement) => [...el.querySelectorAll('[data-section-id="new"] [data-thread-id]')].map((r) => r.getAttribute('data-thread-id')!);
 
 /** Open a row the way a keyboard does: focus it, then press it. */
 async function openRow(el: HTMLElement, id: string, looked: 'quiet' | null = 'quiet') {
@@ -202,15 +204,25 @@ async function openRow(el: HTMLElement, id: string, looked: 'quiet' | null = 'qu
   await wait(120);
 }
 
+/** Close the thread with the keyboard (Escape). */
 function closeThread() {
   act(() => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   });
 }
 
+/** A mouse or a finger lands (the window's last way of acting becomes a pointer). */
+function pointerDown(target: EventTarget = document.body) {
+  act(() => {
+    target.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+  });
+}
+
 test.skipIf(!hasDom)('opening a New row unbolds it where it is, keeps it selected and keeps focus on it', async () => {
   const el = await renderApp(`#project=${world.project}`);
-  const first = newRows(el)[0]!;
+  // By id, never by position: rows written in the same millisecond order by id.
+  const first = world.news[0]!;
+  expect(sectionOfRow(el, first)).toBe('new');
   expect(rowOf(el, first)!.classList.contains('ib-u')).toBe(true);
   const before = order(el);
   await openRow(el, first);
@@ -225,7 +237,7 @@ test.skipIf(!hasDom)('opening a New row unbolds it where it is, keeps it selecte
 
 test.skipIf(!hasDom)('opening a second row while one is open moves nothing; closing settles both, and focus goes to the row now in the slot', async () => {
   const el = await renderApp(`#project=${world.project}`);
-  const [first, second] = newRows(el);
+  const [first, second] = world.news;
   const before = order(el);
   await openRow(el, first!);
   await openRow(el, second!);
@@ -244,13 +256,15 @@ test.skipIf(!hasDom)('opening a second row while one is open moves nothing; clos
   await until(() => rowOf(el, first!) === null && rowOf(el, second!) === null, 'the settle');
   expect(el.querySelector('[data-section-id="quiet"] .ib-n')?.textContent).toBe('2');
   // Focus is never dropped to the page: the row that now sits in the closed row's slot has it.
-  const slot = before.slice(before.indexOf(second!) + 1).find((id) => rowOf(el, id) !== null)!;
+  // (The next row on screen, else the one before: which rows follow depends on ids when times tie.)
+  const slot = rowInSlot(before, second!, (id) => rowOf(el, id) !== null)!;
+  expect(slot).toBeTruthy();
   expect(document.activeElement).toBe(rowOf(el, slot));
 });
 
 test.skipIf(!hasDom)("an agent's message that arrives while reading stays behind Show after the close; Show brings it in", async () => {
   const el = await renderApp(`#project=${world.project}`);
-  const first = newRows(el)[0]!;
+  const first = world.news[0]!;
   await openRow(el, first);
   const late = await agentSends('A late note from the agent.');
   act(() => pokeStream!());
@@ -265,10 +279,17 @@ test.skipIf(!hasDom)("an agent's message that arrives while reading stays behind
   expect(rowOf(el, late)).toBeNull();
   expect(el.querySelector('[data-inbox-notice]')!.textContent).toContain('1 new in');
 
-  act(() => (el.querySelector('[data-inbox-notice]') as HTMLButtonElement).click());
+  // Show from the keyboard: its line goes away, and focus goes to the row it brought in, not to the page.
+  const notice = el.querySelector('[data-inbox-notice]') as HTMLButtonElement;
+  act(() => {
+    notice.focus();
+    notice.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    notice.click();
+  });
   await until(() => rowOf(el, late) !== null, 'Show');
   expect(sectionOfRow(el, late)).toBe('new');
   expect(el.querySelector('[data-inbox-notice]')).toBeNull();
+  expect(document.activeElement).toBe(rowOf(el, late));
 });
 
 test.skipIf(!hasDom)('under reduced motion the close settles at once, with nothing animated', async () => {
@@ -281,7 +302,7 @@ test.skipIf(!hasDom)('under reduced motion the close settles at once, with nothi
   };
   try {
     const el = await renderApp(`#project=${world.project}`);
-    const first = newRows(el)[0]!;
+    const first = world.news[0]!;
     await openRow(el, first);
     closeThread();
     // No beat: the list is settled in the same commit as the close.
@@ -296,26 +317,60 @@ test.skipIf(!hasDom)('under reduced motion the close settles at once, with nothi
 test.skipIf(!hasDom)('a phone: Back shows the list as it was left, and it settles while the next thread covers it', async () => {
   media.phone = true;
   const el = await renderApp(`#project=${world.project}`);
-  const [first, second] = newRows(el);
+  const [first, second] = world.news;
   const before = order(el);
   await openRow(el, first!);
-  act(() => (el.querySelector('section.ib-pane [data-phone-back]') as HTMLButtonElement).click());
+  // Back from the keyboard (Escape).
+  closeThread();
   await until(() => el.querySelector('section.ib-pane') === null, 'Back');
   await wait(SETTLE_BEAT_MS + 60);
   // As left: the row read is in place, no longer bold, with focus on it.
   expect(order(el)).toEqual(before);
   expect(rowOf(el, first!)!.classList.contains('ib-u')).toBe(false);
   expect(document.activeElement).toBe(rowOf(el, first!));
+  act(() => (document.activeElement as HTMLElement).blur());
 
   await openRow(el, second!);
   // Behind the thread the list caught up: the first read row went to Quiet; the one opened kept its place.
   expect(rowOf(el, first!)).toBeNull();
   expect(sectionOfRow(el, second!)).toBe('new');
+  // A tap on Back: the list as left, and no row is handed focus (nothing the person did not choose).
+  // (A real phone hides the list under the thread, which takes focus off the row opened; happy-dom does not.)
+  act(() => (document.activeElement as HTMLElement | null)?.blur?.());
+  pointerDown();
+  act(() => (el.querySelector('section.ib-pane [data-phone-back]') as HTMLButtonElement).click());
+  await until(() => el.querySelector('section.ib-pane') === null, 'Back');
+  expect(sectionOfRow(el, second!)).toBe('new');
+  expect(document.activeElement?.closest('[data-thread-id]') ?? null).toBeNull();
+});
+
+test.skipIf(!hasDom)('after a mouse close the window hands no row focus, and E marks nothing the person did not choose', async () => {
+  const el = await renderApp(`#project=${world.project}`);
+  const first = world.news[0]!;
+  await openRow(el, first);
+  // A row that waits on the person (a question), so Mark read would apply to it.
+  const asked = await agentSends('One question:\n\n:::question\nShip it?\n\n- [ ] Yes\n- [ ] No\n:::');
+  act(() => pokeStream!());
+  await until(() => el.querySelector('[data-inbox-notice]') !== null, 'the "1 new" notice');
+  pointerDown();
+  act(() => (el.querySelector('[data-inbox-notice]') as HTMLButtonElement).click());
+  await until(() => rowOf(el, asked) !== null, 'Show');
+  const close = el.querySelector('section.ib-pane [aria-label="Close the thread"]') as HTMLButtonElement;
+  pointerDown(close);
+  act(() => close.click());
+  await wait(SETTLE_BEAT_MS + 120);
+  await until(() => rowOf(el, first) === null, 'the settle');
+  expect(document.activeElement?.closest('[data-thread-id]') ?? null).toBeNull();
+  act(() => {
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', bubbles: true }));
+  });
+  await wait(150);
+  expect(posted.filter((path) => path.endsWith('/read'))).toEqual([]);
 });
 
 test.skipIf(!hasDom)('Mark read inside an open thread: the toast says the row will move, and it moves when the list settles', async () => {
   const el = await renderApp(`#project=${world.project}`);
-  const first = newRows(el)[0]!;
+  const first = world.news[0]!;
   await openRow(el, first);
   // A New row once looked at waits on nobody (Mark read is off): a question from an agent does.
   const asked = await agentSends('One question:\n\n:::question\nShip it?\n\n- [ ] Yes\n- [ ] No\n:::');

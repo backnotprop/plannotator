@@ -144,8 +144,12 @@ export interface SettleSnapshot {
   scrollTop: number;
 }
 
-/** Stop a settle that is still playing (its rows jump to their places) and drop its fading copies. */
-function stopPlaying(body: HTMLElement): void {
+/**
+ * Stop a settle that is still playing (its rows jump to their places) and
+ * drop its fading copies: a new settle starts, or a thread opens and the list
+ * narrows under the slide.
+ */
+export function stopSettle(body: HTMLElement): void {
   for (const ghost of body.querySelectorAll('.ib-settle-ghost')) ghost.remove();
   if (typeof body.getAnimations !== 'function') return;
   for (const animation of body.getAnimations({ subtree: true })) if (animation.id === SETTLE_ANIMATION_ID) animation.cancel();
@@ -169,7 +173,7 @@ export function captureSettle(body: HTMLElement): SettleSnapshot {
  * writes (the animations), never interleaved. Returns the plan it played.
  */
 export function playSettle(body: HTMLElement, before: SettleSnapshot): SettlePlan {
-  stopPlaying(body);
+  stopSettle(body);
   const now = movers(body);
   const after = new Map<string, Box>();
   for (const [key, el] of now) after.set(key, boxOf(el));
