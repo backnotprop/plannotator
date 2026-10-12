@@ -67,7 +67,11 @@ export interface InboxToolDomainLike {
 
 /**
  * OpenCode 2: register `plannotator_inbox` and start the wake. Returns whether
- * the host's tool draft took it.
+ * the host's tool draft took it, which is known only where the host applies
+ * the transform at once: OpenCode 2 applies it lazily, when a request builds
+ * its tool list, so this usually answers false while the tool is on its way.
+ * The wake is therefore never disposed here on that answer; a draft without
+ * `add` disposes it when the callback finally runs.
  */
 export async function registerInboxOpenCode2(
   toolDomain: InboxToolDomainLike | undefined,
@@ -81,7 +85,11 @@ export async function registerInboxOpenCode2(
   const wakes = typeof v2.session?.prompt === "function" ? new OpenCode2Wakes(v2, connection, resolveRoot) : null;
   let added = false;
   await transform((tools) => {
-    if (typeof tools?.add !== "function") return;
+    if (typeof tools?.add !== "function") {
+      // An older draft that cannot take a tool: nothing will ever call it, so no wake either.
+      wakes?.dispose();
+      return;
+    }
     added = true;
     tools.add({
       name: spec.name,
@@ -102,7 +110,6 @@ export async function registerInboxOpenCode2(
       },
     });
   });
-  if (!added) wakes?.dispose();
   return added;
 }
 
