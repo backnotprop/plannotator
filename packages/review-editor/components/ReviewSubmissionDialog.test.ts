@@ -313,3 +313,40 @@ describe('file-scoped comments on GitHub (#1599)', () => {
     expect(retried.fileLevelComments).toBeUndefined();
   });
 });
+
+describe('comments made in a Markdown preview', () => {
+  const previewComment: CodeAnnotation = {
+    id: 'md-1',
+    type: 'comment',
+    scope: 'file',
+    filePath: 'docs/guide.md',
+    lineStart: 1,
+    lineEnd: 1,
+    side: 'new',
+    text: 'Link the installer page.',
+    createdAt: 1,
+    markdownPreview: { originalText: 'new installer', view: 'diff', diffContext: 'added' },
+  };
+
+  // The quote is rendered text, which maps to no line: never inline, never a
+  // file-level thread, always the review body with the quote.
+  for (const platform of ['github', 'gitlab', 'bitbucket'] as const) {
+    test(`go into the review body with their quote (${platform})`, () => {
+      const submission = buildReviewSubmission(
+        [previewComment],
+        [],
+        'https://example.com/pr/1',
+        new Set(['docs/guide.md']),
+        { number: 1, title: 'Docs', repo: 'acme/docs' },
+        undefined,
+        platform,
+      );
+      const target = submission.targets[0];
+      expect(target.fileComments).toEqual([]);
+      expect(target.fileLevelComments).toEqual([]);
+      expect(target.fileScopedBody).toContain('docs/guide.md');
+      expect(target.fileScopedBody).toContain('> new installer');
+      expect(target.fileScopedBody).toContain('Link the installer page.');
+    });
+  }
+});

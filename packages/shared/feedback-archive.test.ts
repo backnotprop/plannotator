@@ -111,6 +111,22 @@ describe("feedback archive: record shape", () => {
     expect(record.annotations?.find((a) => a.id === "l1")?.scope).toBeUndefined();
   });
 
+  test("a comment made in a Markdown preview records the text it quotes", () => {
+    const dataDir = useTempDataDir();
+    appendFeedbackRecord({
+      project: PROJECT,
+      surface: "review",
+      decision: "feedback",
+      feedback: "preview comment",
+      annotations: [
+        { id: "m1", type: "comment", scope: "file", filePath: "docs/a.md", lineStart: 1, lineEnd: 1, text: "Link it", markdownPreview: { originalText: "new installer", view: "diff" } },
+      ],
+    });
+    const record = readIndex(dataDir)[0];
+    expect(record.annotations?.[0]?.originalText).toBe("new installer");
+    expect(record.annotations?.[0]?.scope).toBe("file");
+  });
+
   test("provenance is preserved so `source == null` filters the reviewer's own comments", () => {
     // Regression: external/WebMCP/agent findings are archived (the submitted
     // text already embeds them) but must stay distinguishable, or "analyze my
