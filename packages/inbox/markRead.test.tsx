@@ -6,8 +6,9 @@
  * loopback. What is proved: the reply box's skip chip and Keep open, the
  * header's Mark read button and its pressed "Read" state, `E` and `Z`, the
  * Undo toast, the warning (with Reply) when an agent is stopped on the
- * thread, the row's hover action, and that the person's own action never
- * reorders the list while the thread stays open.
+ * thread, the row's hover action, that the person's own action never
+ * reorders the list while the thread stays open, and that one Send is one
+ * reply when one session wrote the thread.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
  */
@@ -29,8 +30,21 @@ const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-se
 let child: ReturnType<typeof Bun.spawn> | null = null;
 let port = 0;
 /** One seeded project per test: the window keeps the first server session it saw, so every test shares one server. */
-let worlds: { project: string; stopped: string; waiting: string; mixed: string; update: string; filed: string; attachment: string }[] = [];
-let ids = { project: '', stopped: '', waiting: '', mixed: '', update: '', filed: '', attachment: '' };
+type World = {
+  project: string;
+  stopped: string;
+  waiting: string;
+  mixed: string;
+  update: string;
+  same: string;
+  sameUpdate: string;
+  picked: string;
+  pickedUpdate: string;
+  filed: string;
+  attachment: string;
+};
+let worlds: World[] = [];
+let ids: World = { project: '', stopped: '', waiting: '', mixed: '', update: '', same: '', sameUpdate: '', picked: '', pickedUpdate: '', filed: '', attachment: '' };
 let dir: string | null = null;
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -66,7 +80,7 @@ async function serverSection(threadId: string): Promise<string | undefined> {
   return model.sections.find((s) => s.threads.some((t) => t.thread_id === threadId))?.id;
 }
 
-const TESTS = 8;
+const TESTS = 11;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -329,6 +343,57 @@ test.skipIf(!hasDom)('session A asked, session B posted a later update: the skip
   const words = model.thread.messages.find((m) => m.author.kind === 'person' && m.body.includes('Thanks, carry on.'))!;
   expect(words.reply_to).toBe(ids.update);
   expect((await questionStates(ids.mixed)).map((q) => q.state)).toEqual(['sent']);
+});
+
+type ThreadMessages = { thread: { messages: { id: string; author: { kind: string }; reply_to: string | null; body: string }[] } };
+const personMessages = async (threadId: string) =>
+  (await api<ThreadMessages>(`/api/inbox/threads/${threadId}`)).thread.messages.filter((m) => m.author.kind === 'person');
+
+test.skipIf(!hasDom)('one session asked, then posted a later update: a words-only Send is ONE reply, carrying the skip and the words', async () => {
+  const el = await renderApp(`#thread=${ids.same}`);
+  act(() => button(el, 'Reply').click());
+  await settle();
+  expect(el.querySelector('[data-skip-chip]')?.textContent).toContain('1 unanswered question will be skipped');
+  type(el, 'Ship it as it is.');
+  act(() => button(el, 'Send').click());
+  await until(() => el.querySelector('textarea') === null, 'the Send');
+  const replies = posted.filter((p) => p.path.endsWith('/reply'));
+  expect(replies.map((p) => p.path)).toEqual([`/api/inbox/messages/${ids.same}/reply`]);
+  expect(replies[0]!.body).toMatchObject({ words: 'Ship it as it is.', questions: [], skip_unanswered: true });
+  // On the server: one person message, the skip and the words together.
+  const mine = await personMessages(ids.same);
+  expect(mine).toHaveLength(1);
+  expect(mine[0]!.reply_to).toBe(ids.same);
+  expect(mine[0]!.body).toStartWith('Skipped 1 question.');
+  expect(mine[0]!.body).toContain('Ship it as it is.');
+  expect((await questionStates(ids.same)).map((q) => q.state)).toEqual(['sent']);
+});
+
+test.skipIf(!hasDom)('one session, a pick waiting: a picks-only Send is one reply to the message asked, with no words', async () => {
+  const el = await renderApp(`#thread=${ids.picked}`);
+  act(() => button(el.querySelector('.ib-pfoot') as HTMLElement, 'Send').click());
+  await until(() => posted.some((p) => p.path.endsWith('/reply')) && el.querySelector('.ib-pfoot button[disabled]') === null, 'the Send');
+  await settle();
+  const replies = posted.filter((p) => p.path.endsWith('/reply'));
+  expect(replies.map((p) => p.path)).toEqual([`/api/inbox/messages/${ids.picked}/reply`]);
+  expect(replies[0]!.body).toMatchObject({ words: '', skip_unanswered: true });
+  expect((replies[0]!.body.questions as unknown[]).length).toBe(1);
+  expect(await personMessages(ids.picked)).toHaveLength(1);
+  expect((await questionStates(ids.picked)).map((q) => q.state)).toEqual(['sent']);
+});
+
+test.skipIf(!hasDom)('one session, Keep open: the words alone go to the latest message, the question stays open', async () => {
+  const el = await renderApp(`#thread=${ids.same}`);
+  act(() => button(el, 'Reply').click());
+  await settle();
+  act(() => button(el.querySelector('[data-skip-chip]')!, 'Keep open').click());
+  type(el, 'Still deciding.');
+  act(() => button(el, 'Send').click());
+  await until(() => el.querySelector('textarea') === null, 'the Send');
+  const replies = posted.filter((p) => p.path.endsWith('/reply'));
+  expect(replies.map((p) => p.path)).toEqual([`/api/inbox/messages/${ids.sameUpdate}/reply`]);
+  expect(replies[0]!.body).toMatchObject({ words: 'Still deciding.', questions: [], skip_unanswered: false });
+  expect((await questionStates(ids.same)).map((q) => q.state)).toEqual(['open']);
 });
 
 test.skipIf(!hasDom)('with a file open beside the thread, E stands down in the viewer and on the page; aimed at the thread it still marks read', async () => {

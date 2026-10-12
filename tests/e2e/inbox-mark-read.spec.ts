@@ -10,6 +10,9 @@
  *  - a words-only reply in a Waiting thread skips its questions: the row does
  *    not move while the thread stays open, and sits in Sent, below New, once
  *    the person leaves it;
+ *  - in a thread ONE session wrote (it asked, then posted a later update), a
+ *    words-only Send is one reply: one new person message, carrying the skip
+ *    and the words, to the message that asked;
  *  - Mark read moves a thread to Quiet ("Read"), and an agent's new message
  *    brings it back to the top;
  *  - Mark read on a thread an agent is stopped on warns, and Z undoes it;
@@ -204,6 +207,36 @@ test('a words-only reply skips the questions; the row keeps its place while the 
   expect(order.indexOf('sent')).toBeGreaterThan(order.indexOf('new'));
   expect(order[0]).toBe('stopped');
   await shot('04-list-after-reply', ['light', 'dark']);
+});
+
+test('one session asked, then posted an update: a words-only Send writes exactly one person message', async () => {
+  const { page, agents, project } = world;
+  const asked = await agents.claude.send({ project_path: project, subject: 'Status page: which index?', body: SEARCH.replace('docs site', 'status page') });
+  await agents.claude.send({ project_path: project, reply_to: asked.message_id as string, body: 'Update: the status page builds now.' });
+  const threadId = asked.thread_id as string;
+  type Model = { thread: { messages: { author: { kind: string }; reply_to: string | null; body: string }[] } };
+  const persons = async () =>
+    ((await (await fetch(new URL(`/api/inbox/threads/${threadId}`, world.url))).json()) as Model).thread.messages.filter((m) => m.author.kind === 'person');
+  expect(await persons()).toHaveLength(0);
+  await page.goto(`${world.url}#thread=${threadId}`);
+  const pane = page.locator('section.ib-pane');
+  await expect(pane.getByRole('heading', { name: 'Status page: which index?' })).toBeVisible();
+  await page.locator('.ib-pfoot').getByRole('button', { name: 'Reply' }).click();
+  await expect(page.locator('[data-skip-chip]')).toContainText('1 unanswered question will be skipped');
+  await page.locator('.ib-rtext').fill('Ship it as it is.');
+  await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
+  await expect(page.locator('.ib-rtext')).toHaveCount(0);
+  await expect(pane.getByText(/^Skipped with your reply · /).first()).toBeVisible();
+  // Give a second reply every chance to land before counting.
+  await page.waitForTimeout(500);
+  const mine = await persons();
+  expect(mine).toHaveLength(1);
+  expect(mine[0]!.reply_to).toBe(asked.message_id);
+  expect(mine[0]!.body).toMatch(/^Skipped 1 question\./);
+  expect(mine[0]!.body).toContain('Ship it as it is.');
+  await shot('04b-one-session-one-reply');
+  await page.keyboard.press('Escape');
+  await expect(pane).toHaveCount(0);
 });
 
 test('Mark read moves the thread to Quiet ("Read"); a new agent message brings it back to the top', async () => {
