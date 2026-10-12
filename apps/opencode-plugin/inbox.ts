@@ -38,8 +38,7 @@ import {
   InboxWake,
   type InboxWakeTarget,
 } from "@plannotator/shared/inbox/agent-link";
-import { INBOX_REMINDER_TEXT_NO_WAKE, inboxAgentTool } from "@plannotator/shared/inbox/connection";
-import { composeSystemPrompt } from "./plan-mode";
+import { INBOX_REMINDER_TEXT_NO_WAKE, INBOX_TOOL_NAME, inboxAgentTool } from "@plannotator/shared/inbox/connection";
 import { createOpenCodeMessageId } from "./opencode-session-bridge";
 import type { V2ContextLike } from "./v2-client";
 
@@ -62,19 +61,43 @@ export async function findInboxConnection(): Promise<InboxAgentConnection | null
 }
 
 /**
- * OpenCode 1: the Inbox reminder on one request's system prompt (strings),
- * composed into the single system part as the plan reminders are (#1114).
- * The no-wake wording: OpenCode 1 cannot deliver a reply as a turn. Never on
- * a title request; never twice.
+ * OpenCode 1: the Inbox reminder on one request's system prompt, appended as
+ * its own part (OpenCode 1 lays the system prompt out in parts it caches on
+ * their own; merging would change the parts before it). The no-wake wording:
+ * OpenCode 1 cannot deliver a reply as a turn. Never on a title request;
+ * never twice. The caller decides whether the request's agent has the tool
+ * (`openCode1AgentHasInbox`).
  */
 export function addInboxReminderOpenCode1(system: string[]): void {
-  const text = system.join("\n");
-  const lower = text.toLowerCase();
+  const lower = system.join("\n").toLowerCase();
   if (lower.includes("title generator") || lower.includes("generate a title")) return;
-  if (text.includes(INBOX_REMINDER_TEXT_NO_WAKE)) return;
-  const composed = composeSystemPrompt(system, [INBOX_REMINDER_TEXT_NO_WAKE]);
-  system.length = 0;
-  system.push(...composed);
+  if (system.some((part) => part.includes(INBOX_REMINDER_TEXT_NO_WAKE))) return;
+  system.push(INBOX_REMINDER_TEXT_NO_WAKE);
+}
+
+/** A name against an OpenCode tool-switch key, which may hold `*` wildcards. */
+function toolKeyMatches(key: string, name: string): boolean {
+  if (!key.includes("*")) return key === name;
+  const pattern = key.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*");
+  return new RegExp(`^${pattern}$`).test(name);
+}
+
+/**
+ * Whether an OpenCode 1 agent has `plannotator_inbox`: never a subagent, and
+ * not an agent whose `tools` switches it off (the last key that names it
+ * decides, wildcards included). An agent we know nothing about (a request we
+ * could not attribute) counts as having it: the tool is registered for every
+ * agent, and a stable answer keeps the system prompt the same per session.
+ */
+export function openCode1AgentHasInbox(agent: { mode?: unknown; tools?: unknown } | undefined): boolean {
+  if (!agent) return true;
+  if (agent.mode === "subagent") return false;
+  const tools = agent.tools && typeof agent.tools === "object" ? (agent.tools as Record<string, unknown>) : {};
+  let enabled = true;
+  for (const [key, value] of Object.entries(tools)) {
+    if (typeof value === "boolean" && toolKeyMatches(key, INBOX_TOOL_NAME)) enabled = value;
+  }
+  return enabled;
 }
 
 /** The part of OpenCode 2's tool domain the tool needs (probed: older hosts differ). */

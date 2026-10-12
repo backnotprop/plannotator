@@ -32,10 +32,10 @@ afterEach(async () => {
   for (const w of worlds.splice(0)) await destroyInboxWorld(w);
 });
 
-async function loadPlugin(w: InboxWorld): Promise<Record<string, any>> {
+async function loadPlugin(w: InboxWorld, client: Record<string, unknown> = {}): Promise<Record<string, any>> {
   process.env.PLANNOTATOR_DATA_DIR = w.dataDir;
   process.env.PLANNOTATOR_BIN = path.join(w.bin, "plannotator");
-  return (await PlannotatorPlugin({ client: {}, directory: w.project } as never, { workflow: "manual" } as never)) as Record<string, any>;
+  return (await PlannotatorPlugin({ client, directory: w.project } as never, { workflow: "manual" } as never)) as Record<string, any>;
 }
 
 // The world's `plannotator` wrapper is a /bin/sh script.
@@ -72,31 +72,45 @@ describe.skipIf(process.platform === "win32")("OpenCode 1 ↔ Plannotator Inbox 
     w.proof(`> plannotator_inbox send_message (OpenCode 1)\n${answer}\n\nthread author ${JSON.stringify(t.messages[0]?.author)}`);
   }, 60_000);
 
-  test("the reminder: one fixed system line (no-wake wording) on every request, only with the tool; inboxReminder off sends none", async () => {
+  test("the reminder: one fixed system line (no-wake wording), its own part, on every request of an agent with the tool; none for a subagent or an agent with the tool off; inboxReminder off sends none", async () => {
     const w = createInboxWorld("plannotator-inbox-oc1-", "04-opencode1-reminder", "opencode1");
     worlds.push(w);
     startInbox(w);
     mkdirSync(w.dataDir, { recursive: true });
+    // OpenCode 1's client as the transform reads it: the session's last user message names its agent.
+    const agents = [
+      { name: "build", mode: "primary" },
+      { name: "explore", mode: "subagent" },
+      { name: "docs", mode: "primary", tools: { "plannotator*": false } },
+    ];
+    const client = (agent: string) => ({
+      session: { messages: async () => ({ data: [{ info: { role: "user", agent } }] }) },
+      app: { agents: async () => ({ data: agents }) },
+    });
     const system = async (plugin: Record<string, any>) => {
-      const output = { system: ["You are OpenCode."] };
+      const output = { system: ["You are OpenCode.", "Project instructions."] };
       await plugin["experimental.chat.system.transform"]?.({ sessionID: "ses_1" }, output);
-      return output.system.join("\n");
+      return output.system;
     };
 
     writeFileSync(path.join(w.dataDir, "config.json"), JSON.stringify({ inboxTool: { opencode: false } }));
-    expect(await system(await loadPlugin(w))).not.toContain(INBOX_REMINDER_TEXT_NO_WAKE);
+    expect((await system(await loadPlugin(w, client("build")))).join("\n")).not.toContain(INBOX_REMINDER_TEXT_NO_WAKE);
 
     writeFileSync(path.join(w.dataDir, "config.json"), JSON.stringify({ inboxTool: { opencode: true } }));
-    const on = await loadPlugin(w);
+    const on = await loadPlugin(w, client("build"));
     const first = await system(on);
-    expect(first.split(INBOX_REMINDER_TEXT_NO_WAKE)).toHaveLength(2);
-    expect(first).not.toContain("Their reply comes back here");
-    expect(await system(on)).toBe(first);
-    w.proof(`OpenCode 1 with the tool: the system prompt every request\n\n${first}`);
+    // The host's parts stay as they were; the line is a part of its own.
+    expect(first).toEqual(["You are OpenCode.", "Project instructions.", INBOX_REMINDER_TEXT_NO_WAKE]);
+    expect(await system(on)).toEqual(first);
+    w.proof(`OpenCode 1 with the tool: the system parts every request\n\n${JSON.stringify(first, null, 2)}`);
+
+    expect(await system(await loadPlugin(w, client("explore")))).toEqual(["You are OpenCode.", "Project instructions."]);
+    expect(await system(await loadPlugin(w, client("docs")))).toEqual(["You are OpenCode.", "Project instructions."]);
+    w.proof("a subagent, and an agent whose tools switch plannotator* off: no line");
 
     writeFileSync(path.join(w.dataDir, "config.json"), JSON.stringify({ inboxTool: { opencode: true }, inboxReminder: { opencode: false } }));
-    const quiet = await loadPlugin(w);
+    const quiet = await loadPlugin(w, client("build"));
     expect(quiet.tool?.plannotator_inbox).toBeDefined();
-    expect(await system(quiet)).not.toContain(INBOX_REMINDER_TEXT_NO_WAKE);
+    expect((await system(quiet)).join("\n")).not.toContain(INBOX_REMINDER_TEXT_NO_WAKE);
   }, 60_000);
 });

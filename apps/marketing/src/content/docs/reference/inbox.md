@@ -109,11 +109,17 @@ The setting is read when a session starts and never during one, because a change
 
 ### The reminder at session start
 
-A session that has the tool also gets one line when it starts, so the agent knows when the Inbox is the right place:
+Once you have run the Inbox on this computer, a session that has the tool also gets one line, so the agent knows when the Inbox is the right place:
 
 > Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with plannotator_inbox send_message and keep going. Their reply comes back here.
 
-On OpenCode 1, which cannot bring a reply back by itself, the last sentence says to call `wait_for_reply` instead. The line is said once and never changes during a session, so it costs little and does not invalidate the prompt cache. It never appears without the tool. To turn it off, set `inboxReminder` in `~/.plannotator/config.json`: `false` for every host, or one per host, for example `{ "inboxReminder": { "claude-code": false } }`.
+Where it goes:
+
+- **Claude Code:** once, in the context of the conversation's first message. It names the tool by its full name (`mcp__…__plannotator_inbox`), so Claude can find it.
+- **Pi:** once, as a hidden message with the session's first prompt.
+- **OpenCode:** a line in the system prompt of every request. On OpenCode 1, and on an OpenCode 2 that cannot bring a reply back by itself, the last sentence says to call `wait_for_reply` instead.
+
+The text is fixed and never changes during a session, so it costs little and does not invalidate the prompt cache. It never appears without the tool. To turn it off, set `inboxReminder` in `~/.plannotator/config.json`: `false` for every host, or one per host, for example `{ "inboxReminder": { "claude-code": false } }`.
 
 ## Other agents
 
@@ -211,7 +217,7 @@ This stops a running Inbox first, then deletes `~/.plannotator/inbox/` with the 
 
 ### The agent has no plannotator_inbox tool
 
-- Run `plannotator inbox` once, then restart Claude Code or OpenCode, or start a new Pi session. A session that started before the Inbox was installed does not get the tool.
+- On Pi and OpenCode, run `plannotator inbox` once, then restart OpenCode or start a new Pi session. A session that started before the Inbox was installed does not get the tool. Claude Code gets the tool without that step, but a Claude Code process that started before you changed the setting needs a restart.
 - On Pi and OpenCode, turn the inbox tool setting on: it is off by default there.
 - On Claude Code, check that the mod is on (see [Turning the mod off](/docs/guides/claude-code/#turning-the-mod-off)). Without it, use `plannotator inbox mcp`.
 - Check `PLANNOTATOR_INBOX_TOOL`: when set, it decides for every host, and the switches in **Settings** are disabled.

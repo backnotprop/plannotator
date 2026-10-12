@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig, resolveAgentTool, resolveInboxReminder, resolveSharingEnabled } from "@plannotator/shared/config";
-import { INBOX_REMINDER_TEXT, INBOX_TOOL_NAME } from "@plannotator/shared/inbox/connection";
+import { INBOX_REMINDER_TEXT, INBOX_TOOL_NAME, inboxReminderText } from "@plannotator/shared/inbox/connection";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import { composeSystemPrompt, stripConflictingPlanModeRules } from "./plan-mode";
@@ -210,8 +210,11 @@ const serverPlugin = {
       // request's own tool list instead.
       if (inboxFound && hasSessionHooks && resolveInboxReminder(loadConfig(), process.env, "opencode")) {
         try {
+          // A host without session.prompt registers the tool without the wake
+          // (registerInboxOpenCode2): its line names wait_for_reply instead.
+          const reminder = openCode2InboxReminder(v2);
           await ctx.session.hook("context", async (event) => {
-            await addInboxReminder(event, getAgents);
+            await addInboxReminder(event, getAgents, reminder);
           });
         } catch (error) {
           console.error(`[Plannotator] Could not register the Inbox reminder: ${error instanceof Error ? error.message : String(error)}`);
@@ -645,6 +648,15 @@ export function pushComposedSystemReminder(
 }
 
 /**
+ * The reminder line for this OpenCode 2 host: the wake's wording where the
+ * host can deliver a reply as a turn (`session.prompt`), else the no-wake one,
+ * as `registerInboxOpenCode2` registers the tool `wakes: false` there.
+ */
+export function openCode2InboxReminder(v2: { session?: { prompt?: unknown } }): string {
+  return inboxReminderText(INBOX_TOOL_NAME, { wakes: typeof v2.session?.prompt === "function" });
+}
+
+/**
  * The Inbox reminder on one OpenCode 2 request: only where the request offers
  * `plannotator_inbox` (so it never names a tool the agent lacks), never for a
  * subagent or a title request, composed into the system part (#1114).
@@ -653,14 +665,15 @@ export function pushComposedSystemReminder(
 export async function addInboxReminder(
   event: { agent?: string; system: SystemPart[]; tools?: Record<string, unknown> },
   getAgents: () => Promise<OpenCodeBridgeAgent[]>,
+  reminder: string = INBOX_REMINDER_TEXT,
 ): Promise<void> {
   if (!event.tools?.[INBOX_TOOL_NAME]) return;
   const systemText = event.system.map((part) => part.text).join("\n").toLowerCase();
   if (systemText.includes("title generator") || systemText.includes("generate a title")) return;
   const agent = (await getAgents()).find((candidate) => candidate.name === event.agent);
   if (agent?.mode === "subagent") return;
-  if (systemText.includes(INBOX_REMINDER_TEXT.toLowerCase())) return;
-  pushComposedSystemReminder(event.system, INBOX_REMINDER_TEXT);
+  if (systemText.includes(reminder.toLowerCase())) return;
+  pushComposedSystemReminder(event.system, reminder);
 }
 
 function replaceStrictPlanReminder(messages: unknown[]): void {

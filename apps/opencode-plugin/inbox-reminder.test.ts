@@ -7,8 +7,8 @@
  * inbox-v2.test.ts.
  */
 import { describe, expect, test } from "bun:test";
-import { INBOX_REMINDER_TEXT } from "@plannotator/shared/inbox/connection";
-import { addInboxReminder } from "./server";
+import { INBOX_REMINDER_TEXT, INBOX_REMINDER_TEXT_NO_WAKE } from "@plannotator/shared/inbox/connection";
+import { addInboxReminder, openCode2InboxReminder } from "./server";
 
 const agents = async () => [
   { name: "build", mode: "primary" },
@@ -30,6 +30,18 @@ describe("addInboxReminder", () => {
     expect(second.system).toEqual(first.system);
     await addInboxReminder(first, agents);
     expect(first.system).toEqual(second.system);
+  });
+
+  // The failure: a host without session.prompt registers the tool without the
+  // wake, and a line saying "Their reply comes back here" would be untrue there.
+  test("a host that cannot deliver a reply as a turn gets the wait_for_reply wording", async () => {
+    expect(openCode2InboxReminder({ session: { prompt: () => undefined } })).toBe(INBOX_REMINDER_TEXT);
+    expect(openCode2InboxReminder({ session: {} })).toBe(INBOX_REMINDER_TEXT_NO_WAKE);
+    expect(openCode2InboxReminder({})).toBe(INBOX_REMINDER_TEXT_NO_WAKE);
+    const event = request("build");
+    await addInboxReminder(event, agents, openCode2InboxReminder({}));
+    expect(event.system[0]!.text).toContain(INBOX_REMINDER_TEXT_NO_WAKE);
+    expect(event.system[0]!.text).not.toContain(INBOX_REMINDER_TEXT);
   });
 
   test("no line without the tool, for a subagent, or on a title request", async () => {

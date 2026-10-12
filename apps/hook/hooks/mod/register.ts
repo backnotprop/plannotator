@@ -46,7 +46,8 @@
  *   list bundled with the mod, so the tool is there before the Inbox ever
  *   ran; the first call starts it), and the reply wake: the person's Send in
  *   the Inbox reaches the session that asked as a turn once it is idle. With
- *   the tool, a one-line reminder (INBOX_REMINDER_TEXT) rides the
+ *   the tool, and once the Inbox has run here (`inbox/inbox.json` at session
+ *   start), a one-line reminder naming the tool's full name rides the
  *   conversation's first message as a `prompt.context` block, unless
  *   `{ "inboxReminder": false }` turns it off.
  * - `PLANNOTATOR_SESSION_TAG=claude-code:<session id>` in the environment
@@ -60,7 +61,7 @@
 import { PlannotatorMod } from './controller'
 import { resolveAgentToolEnabled, resolveClaudeModEnabled, resolveInboxReminderEnabled, resolveInboxToolEnabled } from './enabled'
 import type { Host } from './host'
-import { discoverInboxTools, withInboxReminder } from './inbox'
+import { discoverInboxTools, inboxRegistryPathOf, withInboxReminder } from './inbox'
 import { inboxAgentTool, type InboxToolInfo } from './inbox-contract'
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
 import { COMMANDS, dataDirOf, debugAppendArgv, isModCommand, waitArgv } from './launch'
@@ -176,6 +177,8 @@ let allowed: Allowed | null = null
 let inboxTools: readonly InboxToolInfo[] | null = null
 /** `mcp__<plugin server>__plannotator_inbox` as the engine registered it; null until then. */
 let inboxToolName: string | null = null
+/** `inbox/inbox.json` existed at the first session.start: the person has run the Inbox here (the reminder's gate). */
+let inboxRanHere = false
 let mod: PlannotatorMod | null = null
 let switching: Promise<PlannotatorMod | null> | null = null
 
@@ -285,6 +288,8 @@ async function registerTool($: Engine): Promise<void> {
  */
 async function registerInboxTool($: Engine, settings: Allowed): Promise<void> {
   const host = hostOf($, settings.debugPath)
+  // The reminder speaks only for an Inbox that has run here; the tool is there either way.
+  inboxRanHere = await host.exists(inboxRegistryPathOf(settings.dataDir)).catch(() => false)
   const tools = await discoverInboxTools(host, settings.dataDir).catch(() => INBOX_DEFAULT_TOOLS.map((tool) => ({ ...tool })))
   const spec = tools.length > 0 ? inboxAgentTool(tools) : null
   if (!spec) return
@@ -322,13 +327,15 @@ export function register(on: On) {
   })
 
   // The Inbox reminder: one fixed line in the context of the conversation's
-  // first message, only in a process that registered plannotator_inbox and
-  // with the switch on (both decided once, at the first session.start). The
-  // engine renders this once per conversation, after the system prompt and
-  // the tools, so it never moves a cached prefix; it is never invalidated.
+  // first message, only in a process that registered plannotator_inbox, where
+  // the Inbox had run (inbox/inbox.json at the first session.start) and with
+  // the switch on, all decided once then. It names the tool by its registered
+  // full name, so tool search finds the deferred tool. The engine renders it
+  // once per conversation, after the system prompt and the tools, so it never
+  // moves a cached prefix; it is never invalidated.
   on('prompt.context', async ($: Engine, e: any, next: Next) => {
-    if (!allowed?.inboxReminder || !inboxToolName) return next(e)
-    return next({ ...e, blocks: withInboxReminder(Array.isArray(e.blocks) ? e.blocks : []) })
+    if (!allowed?.inboxReminder || !inboxRanHere || !inboxToolName) return next(e)
+    return next({ ...e, blocks: withInboxReminder(Array.isArray(e.blocks) ? e.blocks : [], inboxToolName) })
   })
 
   on('session.end', async ($: Engine, e: any, next: Next) => {

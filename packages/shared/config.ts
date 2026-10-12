@@ -277,9 +277,10 @@ export interface PlannotatorConfig {
   /**
    * The Plannotator Inbox's one-line reminder at session start
    * (INBOX_REMINDER_TEXT), on the hosts that register `plannotator_inbox`
-   * (the Claude Code mod, Pi, OpenCode), set from the Inbox's Settings:
-   * `true` / `false` for every host, or one boolean per host. It only ever
-   * applies where that session has the Inbox tool, so the tool switch
+   * (the Claude Code mod, Pi, OpenCode), set in this file: `true` / `false`
+   * for every host, or one boolean per host. It only ever applies where that
+   * session has the Inbox tool and the Inbox has run on this computer
+   * (`inbox/inbox.json` exists at session start), so the tool switch
    * (PLANNOTATOR_INBOX_TOOL, `inboxTool`) turns it off too; there is no env
    * var of its own. Read once when a session starts. Unset (or a host left
    * out): on wherever the tool is on.
