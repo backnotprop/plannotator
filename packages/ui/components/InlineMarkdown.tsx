@@ -7,6 +7,7 @@ import { useFenceTheme } from "../hooks/useFenceTheme";
 import { transformPlainText } from "../utils/inlineTransforms";
 import { hasLinkedDocExtension } from "../utils/markdownExtensions";
 import { getImageSrc } from "./ImageThumbnail";
+import { UNAVAILABLE_IMAGE_CLASS, useImageResolver } from "./ImageResolverContext";
 import { useCodePathValidation, type CodePathValidationContextValue } from "./CodePathValidationContext";
 import { isLocalLinkTarget, isNewTabClick, useLocalLinkResolver } from "./LocalLinkContext";
 import type { ValidationEntry } from "../hooks/useValidatedCodePaths";
@@ -510,6 +511,7 @@ export const InlineMarkdown: React.FC<{
 }> = ({ text, onOpenLinkedDoc, resolveLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo, repoHost }) => {
   const validation = useCodePathValidation();
   const resolveLocalLink = useLocalLinkResolver();
+  const resolveImage = useImageResolver();
   const refLinks = forgeRefLinks({ display: githubRepo, host: repoHost });
   const parts: React.ReactNode[] = [];
   let remaining = text;
@@ -968,9 +970,29 @@ export const InlineMarkdown: React.FC<{
     if (match) {
       const alt = match[1];
       const src = match[2];
-      const imgSrc = /^(https?:\/\/|data:|blob:)/i.test(src)
-        ? src
-        : getImageSrc(src, imageBaseDir);
+      // A host's resolver (RenderedMarkdown `resolveImage`) decides first;
+      // null from it, or no resolver, keeps the default resolution.
+      const resolvedImage = resolveImage ? resolveImage(src) : null;
+      if (resolvedImage?.kind === 'unavailable') {
+        parts.push(
+          <span
+            key={key++}
+            className={UNAVAILABLE_IMAGE_CLASS}
+            title={resolvedImage.title}
+            data-image-unavailable=""
+          >
+            {alt || 'Image'}
+          </span>,
+        );
+        remaining = remaining.slice(match[0].length);
+        previousChar = match[0][match[0].length - 1] || previousChar;
+        continue;
+      }
+      const imgSrc = resolvedImage?.kind === 'src'
+        ? resolvedImage.src
+        : /^(https?:\/\/|data:|blob:)/i.test(src)
+          ? src
+          : getImageSrc(src, imageBaseDir);
       parts.push(
         <img
           key={key++}

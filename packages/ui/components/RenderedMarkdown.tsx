@@ -1,6 +1,8 @@
 import React, { useMemo } from 'react';
 import { parseMarkdownToBlocks, groupBlocks, computeListIndices } from '../utils/parser';
 import { BlockRenderer } from './BlockRenderer';
+import { LocalLinkContext, type LocalLinkResolver } from './LocalLinkContext';
+import { ImageResolverContext, type ImageResolver } from './ImageResolverContext';
 
 /**
  * Full markdown renderer for surfaces outside the plan editor (e.g. the PR
@@ -19,6 +21,17 @@ export interface RenderedMarkdownProps {
   onOpenCodeFile?: (path: string) => void;
   githubRepo?: string;
   repoHost?: string;
+  /**
+   * Optional: decides what a link to a local path does (open it in the host,
+   * or render it inert). Same contract as Viewer's `resolveLocalLink`.
+   * Absent, links render exactly as before.
+   */
+  resolveLocalLink?: LocalLinkResolver;
+  /**
+   * Optional: decides where an image loads from, or that it is not shown.
+   * Absent, images resolve exactly as before.
+   */
+  resolveImage?: ImageResolver;
 }
 
 export const RenderedMarkdown: React.FC<RenderedMarkdownProps> = ({
@@ -29,11 +42,13 @@ export const RenderedMarkdown: React.FC<RenderedMarkdownProps> = ({
   onOpenCodeFile,
   githubRepo,
   repoHost,
+  resolveLocalLink,
+  resolveImage,
 }) => {
   const groups = useMemo(() => groupBlocks(parseMarkdownToBlocks(markdown)), [markdown]);
   const cb = { onImageClick, onOpenLinkedDoc, onOpenCodeFile, githubRepo, repoHost };
 
-  return (
+  let body = (
     <div className={className}>
       {groups.map((group) =>
         group.type === 'list-group' ? (
@@ -53,4 +68,13 @@ export const RenderedMarkdown: React.FC<RenderedMarkdownProps> = ({
       )}
     </div>
   );
+  // Provide only what the caller passed, so an enclosing provider still
+  // applies when a prop is absent.
+  if (resolveImage) {
+    body = <ImageResolverContext.Provider value={resolveImage}>{body}</ImageResolverContext.Provider>;
+  }
+  if (resolveLocalLink) {
+    body = <LocalLinkContext.Provider value={resolveLocalLink}>{body}</LocalLinkContext.Provider>;
+  }
+  return body;
 };

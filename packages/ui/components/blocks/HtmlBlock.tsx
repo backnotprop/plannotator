@@ -3,6 +3,7 @@ import { isCodeFilePath } from "@plannotator/core/code-file";
 import type { Block } from "../../types";
 import { sanitizeBlockHtml } from "../../utils/sanitizeHtml";
 import { getImageSrc } from "../ImageThumbnail";
+import { UNAVAILABLE_IMAGE_CLASS, useImageResolver, type ImageResolver } from "../ImageResolverContext";
 import { isLocalLinkTarget, isNewTabClick, useLocalLinkResolver, type LocalLinkResolver } from "../LocalLinkContext";
 
 interface HtmlBlockProps {
@@ -27,12 +28,29 @@ function rewriteRelativeRefs(
   onOpenCodeFile?: (path: string) => void,
   onNavigateAnchor?: (hash: string) => void,
   resolveLocalLink?: LocalLinkResolver | null,
+  resolveImage?: ImageResolver | null,
 ): (() => void) {
   const cleanups: (() => void)[] = [];
 
   root.querySelectorAll('img').forEach((img) => {
     const src = img.getAttribute('src');
     if (!src) return;
+    // A host's resolver (RenderedMarkdown `resolveImage`) decides first, as
+    // InlineMarkdown does; null keeps the default resolution below.
+    const resolved = resolveImage ? resolveImage(src) : null;
+    if (resolved?.kind === 'unavailable') {
+      const placeholder = img.ownerDocument.createElement('span');
+      placeholder.className = UNAVAILABLE_IMAGE_CLASS;
+      placeholder.title = resolved.title;
+      placeholder.setAttribute('data-image-unavailable', '');
+      placeholder.textContent = img.getAttribute('alt') || 'Image';
+      img.replaceWith(placeholder);
+      return;
+    }
+    if (resolved?.kind === 'src') {
+      img.setAttribute('src', resolved.src);
+      return;
+    }
     if (/^(https?:|data:|blob:)/i.test(src)) return;
     img.setAttribute('src', getImageSrc(src, imageBaseDir));
   });
@@ -131,6 +149,7 @@ function rewriteRelativeRefs(
 const HtmlBlockImpl: React.FC<HtmlBlockProps> = ({ block, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor }) => {
   const ref = useRef<HTMLDivElement>(null);
   const resolveLocalLink = useLocalLinkResolver();
+  const resolveImage = useImageResolver();
   const sanitized = React.useMemo(
     () => sanitizeBlockHtml(block.content),
     [block.content],
@@ -140,9 +159,9 @@ const HtmlBlockImpl: React.FC<HtmlBlockProps> = ({ block, imageBaseDir, onOpenLi
     if (ref.current.innerHTML !== sanitized) {
       ref.current.innerHTML = sanitized;
     }
-    const cleanup = rewriteRelativeRefs(ref.current, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink);
+    const cleanup = rewriteRelativeRefs(ref.current, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage);
     return cleanup;
-  }, [sanitized, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink]);
+  }, [sanitized, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage]);
   return (
     <div
       ref={ref}
