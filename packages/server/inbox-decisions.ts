@@ -25,7 +25,7 @@ import {
   type InboxQuestion,
   type InboxQuestionRecord,
 } from "@plannotator/core/inbox-types";
-import { inboxDecisionRecording, inboxDecisionWords, toInboxQuestion } from "@plannotator/core/inbox-questions";
+import { inboxDecisionRecording, inboxDecisionWords } from "@plannotator/core/inbox-questions";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 
@@ -64,10 +64,9 @@ function agentOf(author: { kind: string; host?: string | null; session?: string 
   return author.kind === "agent" ? { host: author.host ?? null, session: author.session ?? null, name: author.name ?? null } : null;
 }
 
+/** The store's one question state (a question asked after the archive line is live). */
 function questionWire(store: InboxStore, record: InboxQuestionRecord): InboxQuestion {
-  const message = store.message(record.message_id);
-  const root = message ? store.message(message.thread_id) : null;
-  return toInboxQuestion(record, root?.resolved_at != null);
+  return store.questionWire(record);
 }
 
 function parseDraft(value: unknown): InboxDecisionDraft | null {
@@ -98,7 +97,7 @@ export function setQuestionDecision(
 ): InboxQuestion {
   const message = store.message(messageId);
   if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
-  if (store.message(message.thread_id)?.resolved_at != null) {
+  if (!store.messageAnswerable(message.id)) {
     throw new InboxError("thread_resolved", "This thread is resolved; reopen it to answer.");
   }
   if (typeof input.key !== "string") throw new InboxError("validation_error", "key: required.", { field: "key" });
@@ -277,15 +276,20 @@ export function recordAgentDecision(
   return { decision, replayed: false };
 }
 
+/** The Waiting rule: a question that records a decision once answered and sent, not sent yet (open or picked). */
+function waitsOnDecision(store: InboxStore, record: InboxQuestionRecord): boolean {
+  if (record.decision_id !== null || !inboxDecisionRecording(record)) return false;
+  const state = questionWire(store, record).state;
+  return state === "open" || state === "picked";
+}
+
 /** Questions that record a decision once answered and sent, in an open thread; one project's, or every project's. */
 export function waitingDecisions(store: InboxStore, projectId?: string | null): InboxWaitingDecision[] {
   const projects = projectId ? [projectId] : store.listProjects().map((p) => p.id);
   const out: InboxWaitingDecision[] = [];
   for (const id of projects) {
     for (const record of store.questionRecordsOf(id)) {
-      if (record.decision_id !== null || !inboxDecisionRecording(record)) continue;
-      const state = questionWire(store, record).state;
-      if (state !== "open" && state !== "picked") continue;
+      if (!waitsOnDecision(store, record)) continue;
       const message = store.message(record.message_id)!;
       out.push({
         question_id: record.id,
@@ -301,9 +305,60 @@ export function waitingDecisions(store: InboxStore, projectId?: string | null): 
   return out;
 }
 
-/** The Decisions page for one project: what waits on a call, then every decision. */
+/** One project's counts for the Decisions page's project switch. */
+export interface InboxDecisionProjectCounts {
+  project_id: string;
+  /** Questions that record a decision once answered and sent (the Waiting group). */
+  waiting: number;
+  /** Decisions that hold (state `current`, the Settled group). */
+  settled: number;
+}
+
+/** Waiting questions per project, in one pass over every question record (no sort, nothing built per question). */
+function waitingByProject(store: InboxStore): Map<string, number> {
+  const waiting = new Map<string, number>();
+  for (const record of store.allQuestionRecords()) {
+    if (waitsOnDecision(store, record)) waiting.set(record.project_id, (waiting.get(record.project_id) ?? 0) + 1);
+  }
+  return waiting;
+}
+
+/** How many questions in every project record a decision once sent: the sidebar's Decisions count (one pass). */
+export function waitingDecisionCount(store: InboxStore): number {
+  let total = 0;
+  for (const count of waitingByProject(store).values()) total += count;
+  return total;
+}
+
+/**
+ * Every project's waiting and settled counts, in the store's project order
+ * (the sidebar's): one pass over the question records and one over the
+ * decisions, grouped by project, whatever the number of projects.
+ */
+export function decisionProjectCounts(store: InboxStore): InboxDecisionProjectCounts[] {
+  const waiting = waitingByProject(store);
+  const settled = new Map<string, number>();
+  for (const decision of store.allDecisions()) {
+    if (decision.state === "current") settled.set(decision.project_id, (settled.get(decision.project_id) ?? 0) + 1);
+  }
+  return store.listProjects().map((project) => ({
+    project_id: project.id,
+    waiting: waiting.get(project.id) ?? 0,
+    settled: settled.get(project.id) ?? 0,
+  }));
+}
+
+/**
+ * The Decisions page for one project: what waits on a call, then every
+ * decision, and (additive) every project's counts for the project switch.
+ */
 export function decisionsModel(store: InboxStore, projectId: string) {
-  return { project_id: projectId, waiting: waitingDecisions(store, projectId), decisions: store.decisionsOf(projectId) };
+  return {
+    project_id: projectId,
+    waiting: waitingDecisions(store, projectId),
+    decisions: store.decisionsOf(projectId),
+    project_counts: decisionProjectCounts(store),
+  };
 }
 
 /** The decisions a thread's questions link to, for its "Settled: ..." lines. */

@@ -53,12 +53,28 @@ export interface ListModel {
   decisions_waiting: number;
 }
 
+/** GET /api/inbox/threads/archived: Settings' Archived block, newest archived first, a page at a time. */
+export interface ArchivedModel {
+  serverSession: string;
+  cursor: number;
+  project: string | null;
+  /** Every project with archived threads, and how many, for the block's project filter. */
+  projects: { id: string; name: string; archived: number }[];
+  /** Archived threads in the filtered scope, beyond this page too. */
+  total: number;
+  offset: number;
+  limit: number;
+  threads: InboxListRow[];
+}
+
 export interface ThreadModel {
   serverSession: string;
   cursor: number;
   thread: InboxThread;
   /** The decisions this thread's questions recorded, for the "Settled: ..." lines. */
   decisions: InboxDecision[];
+  /** The thread's list row, an archived thread's too (the window's list leaves those out). Absent from an older Inbox. */
+  row?: InboxListRow | null;
 }
 
 /** A question that records a decision once answered and sent (the Decisions page's Waiting group). */
@@ -72,12 +88,23 @@ export interface WaitingDecision {
   asked_at: string;
 }
 
+/** One project's counts for the Decisions page's project switch. */
+export interface DecisionProjectCounts {
+  project_id: string;
+  /** Questions that record a decision once answered and sent. */
+  waiting: number;
+  /** Decisions that hold (state `current`). */
+  settled: number;
+}
+
 export interface DecisionsModel {
   serverSession: string;
   cursor: number;
   project_id: string;
   waiting: WaitingDecision[];
   decisions: InboxDecision[];
+  /** Every project's counts, for the project switch. Absent from an older Inbox. */
+  project_counts?: DecisionProjectCounts[];
 }
 
 export interface ReplyResult {
@@ -156,6 +183,11 @@ export interface SettingsModel {
   updates?: UpdateSwitches;
   /** Whether this Inbox serves phones (PLANNOTATOR_INBOX_PHONES): the Phones block shows only then. */
   phones: boolean;
+  /**
+   * Plannotator's appearance in config.json (`theme`), the value plan review
+   * reads too: null when never chosen. Absent from an Inbox that predates it.
+   */
+  theme?: InboxThemeConfig | null;
   store: {
     dir: string;
     bytes: number;
@@ -275,8 +307,25 @@ async function post<T>(path: string, body: Record<string, unknown>): Promise<T> 
   );
 }
 
+/** config.json `theme`: the mode and the palette for each half (ThemeConfig in @plannotator/core/config-types). */
+export interface InboxThemeConfig {
+  mode?: 'light' | 'dark' | 'system';
+  light?: string;
+  dark?: string;
+}
+
 export const inboxApi = {
-  list: () => get<ListModel>('/api/inbox/threads'),
+  // Archived threads leave the window's list (Settings lists them): an older
+  // window and the phone, which ask without this, still get them in Quiet.
+  list: () => get<ListModel>('/api/inbox/threads?archived=exclude'),
+  archived: (input: { project?: string | null; offset?: number; limit?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (input.project) query.set('project', input.project);
+    if (input.offset) query.set('offset', String(input.offset));
+    if (input.limit) query.set('limit', String(input.limit));
+    const qs = query.toString();
+    return get<ArchivedModel>(`/api/inbox/threads/archived${qs ? `?${qs}` : ''}`);
+  },
   thread: (threadId: string) => get<ThreadModel>(`/api/inbox/threads/${encodeURIComponent(threadId)}`),
   settings: () => get<SettingsModel>('/api/inbox/settings'),
   seen: (threadId: string) => post<unknown>(`/api/inbox/threads/${encodeURIComponent(threadId)}/seen`, {}),
@@ -337,6 +386,8 @@ export const inboxApi = {
   saveSound: (change: { enabled?: boolean; volume?: number }) => post<{ sound: InboxSoundSettings }>('/api/inbox/settings', { sound: change }),
   /** Ask to show the one-time sound dialog: `show` is true for the first page that ever asks after an update, and only that one. */
   claimSoundDialog: () => post<{ show: boolean; sound: InboxSoundSettings }>('/api/inbox/sound/dialog', {}),
+  /** Plannotator's appearance, written to config.json `theme` (shared with plan review). */
+  saveTheme: (theme: InboxThemeConfig) => post<{ theme: InboxThemeConfig | null }>('/api/inbox/settings', { theme }),
   saveTailscale: (on: boolean, replaceExposed = false) =>
     post<{ tailscale: TailscaleSettings }>('/api/inbox/settings', { tailscale: replaceExposed ? { on, replace_exposed: true } : { on } }),
   // Step 2: attachments (by id only), annotations, deleting.

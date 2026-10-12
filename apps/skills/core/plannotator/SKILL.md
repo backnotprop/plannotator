@@ -1,6 +1,6 @@
 ---
 name: plannotator
-description: "Reference for using Plannotator (its `plannotator` tool when you have one, otherwise the CLI): plan review, code review, annotating files, URLs, folders, and running local apps, annotating the last assistant message, browsing archived plan decisions, exporting or sharing Guided Reviews, and the Plannotator Inbox (messages and questions the person answers later, without blocking you). Invoke when asked to use Plannotator for anything not covered by a more specific plannotator-* skill."
+description: "Reference for using Plannotator (its `plannotator` tool when you have one, otherwise the CLI): plan review, code review, annotating files, URLs, folders, and running local apps, annotating the last assistant message, browsing archived plan decisions, exporting or sharing Guided Reviews, and the Plannotator Inbox (messages and questions the person answers later, without blocking you). Invoke when asked to use Plannotator for anything not covered by a more specific plannotator-* skill, and before you leave the person a decision, a question or finished work while they are away from the chat (if another agent started you, report to it instead)."
 ---
 
 # Plannotator CLI Reference
@@ -180,7 +180,7 @@ The Plannotator Inbox is one local window per machine where agents leave the per
 
 Run `plannotator inbox --help` for the full guide: when to use the Inbox, every tool and its arguments, how threads route, where replies arrive, the question syntax, and how to connect other agents.
 
-- Use the Inbox for what can wait: a question that does not hold up everything, status to read, a file to look at later. Use a review (plan review, `annotate`, `review`) when you need a decision on this document or diff before you go on.
+- Use the Inbox when the person may not be watching this chat: a decision only they can make (a `:::question` block, then go on with work that does not depend on it), long work you finished (one short summary, with the files to look at in `attachments`), or when they ask. Ask in the chat when they are there, and do not send routine progress. Use a review (plan review, `annotate`, `review`) when you need a decision on this document or diff before you go on.
 - If you have a `plannotator_inbox` tool, use it; its `action` names one of the tools below. Claude Code has it with the Plannotator mod (on by default); Pi and OpenCode only when `PLANNOTATOR_INBOX_TOOL=1` or `{ "inboxTool": true }` was set before the session started. The person's reply then arrives in your session as a new message once you are idle (OpenCode 1 excepted), so end your turn if you need the answer.
 - Replies come back to the session that sent the message: send with your `plannotator_inbox` tool; inside Claude Code or Pi, a command your session runs also carries the session's identity.
 - Any other agent uses the stdio MCP server `plannotator inbox mcp` (for example `claude mcp add plannotator-inbox -- plannotator inbox mcp`). Tools: `send_message`, `read_thread`, `wait_for_reply`, `resolve_message`, `list_decisions`, `record_decision`, `get_guide_brief`, `submit_guide`. Nothing wakes you there: call `wait_for_reply`, which returns the reply as soon as it is sent, or a cursor to wait again after 50 seconds.

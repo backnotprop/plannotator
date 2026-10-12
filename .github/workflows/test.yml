@@ -140,9 +140,12 @@ jobs:
           packages/inbox/endedSession.test.tsx
           packages/inbox/markRead.test.tsx
           packages/inbox/fileBack.test.tsx
+          packages/inbox/archived.test.tsx
+          packages/inbox/decisionsPicker.test.tsx
           packages/inbox/phoneList.test.tsx
           packages/inbox/toastPhone.test.tsx
           packages/inbox/attachmentsHeader.test.tsx
+          packages/inbox/themeToggle.test.tsx
           packages/ui/components/MenuVersionSection.test.tsx
           packages/ui/components/blocks/QuestionBlock.test.tsx
           packages/ui/components/blocks/QuestionBlock.host.test.tsx

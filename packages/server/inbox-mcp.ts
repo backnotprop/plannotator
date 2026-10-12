@@ -32,17 +32,18 @@ export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "resolve_message"
 
 /** Under Claude Code's 2,048-character cap on server instructions. */
 export const INBOX_MCP_INSTRUCTIONS = [
-  "Plannotator Inbox: send the person a message and get their answer without holding your session on a review tab. The Inbox runs on this machine; the person reads your message there and answers when they can.",
+  "Plannotator Inbox: a local window on this machine where the person reads what you send and answers when they can, without holding your session open.",
   "",
-  "- send_message posts markdown to the person. Your messages land in one thread, your session's, until the person resolves it; pass `thread` (a short name) to keep separate work in its own thread, or to join another session's thread of that name; reply_to answers one message. Ask what you cannot decide alone as question blocks (:::question, :::question-multi, :::question-text); send_message's description has the syntax. Pass an idempotency_key so a retry never posts twice.",
-  "- After sending, either go on with other work or call wait_for_reply with the thread_id. It returns the person's reply as soon as it lands, or { status: \"waiting\", cursor } after about 50 seconds; call it again with that cursor to keep waiting.",
-  "- To show the person files (a plan, a screenshot, a prototype, a PDF, any file), pass their paths in send_message's attachments, e.g. [\"docs/plan.md\", \"/tmp/shot.png\"]. They open and annotate them in the Inbox; annotations come back in the reply. A link to one in your message (`[the mock](mock.html)`) opens it beside the thread.",
-  "- read_thread reads one thread (thread_id) or lists the threads you sent in, in this project.",
-  "- resolve_message closes a thread once you have what you needed.",
-  "- list_decisions reads what holds in this project: decisions the person recorded from answers, or agents recorded. record_decision records one you settled with the person. Add `Decision: when answered` to a question block to have its answer recorded.",
-  "- To walk the person through a code change, call get_guide_brief, write the guide, then submit_guide with the guide and the exact patch: it opens in Plannotator's guide viewer.",
+  "Use it when the person may not be watching this chat: a decision only they can make (ask it as a :::question block, then go on with other work), finished long work to hand over (a short summary, the files to look at in `attachments`), or when they ask you to. Ask in the chat instead when they are there; do not send routine progress.",
   "",
-  "The reply is the person's answer to you, framed as theirs: their words, then an \"Answers to your questions\" section. There is no tool to answer or approve on the person's behalf.",
+  "- send_message posts markdown. Your messages join your session's thread until the person resolves it; pass `thread` (a short name) to keep separate work apart, or reply_to to answer a message. Pass an idempotency_key so a retry never posts twice. The question syntax is in send_message's description.",
+  "- attachments: paths of files to show the person (a plan, a screenshot, an HTML mock, any file), absolute or relative to project_path. Link one from the body (`[the mock](mock.html)`) to open it beside the thread. The person's annotations come back in their reply.",
+  "- wait_for_reply (thread_id) returns the reply as soon as it lands, or { status: \"waiting\", cursor } after about 50 seconds: call it again with that cursor. Call it when you need the answer, after the work that does not depend on it.",
+  "- read_thread reads one thread (thread_id) or lists yours. When an open question of yours no longer fits, send with reply_to into its thread with `supersedes` instead of leaving it open. resolve_message archives the thread for the person; use it only when nothing in it is left for them to read or answer.",
+  "- list_decisions reads what holds in this project; record_decision records one you settled with the person. `Decision: when answered` in a question block records its answer.",
+  "- To walk the person through a code change: get_guide_brief, write the guide, then submit_guide with the exact patch.",
+  "",
+  "The reply is the person's answer, framed as theirs: their words, then \"Answers to your questions\". No tool answers or approves on the person's behalf.",
 ].join("\n");
 
 /**
@@ -52,7 +53,7 @@ export const INBOX_MCP_INSTRUCTIONS = [
  * own description, and the guide's rules on WHAT to ask still reach the model.
  */
 export const SEND_MESSAGE_DESCRIPTION = [
-  "Message the person in the Plannotator Inbox (markdown), in your session's open thread (see `thread`). The answer comes back via wait_for_reply.",
+  "Message the person in the Plannotator Inbox (markdown), in your session's open thread (see `thread`). One message per real need.",
   "",
   QUESTION_AUTHORING_GUIDE,
 ].join("\n");
@@ -341,7 +342,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
       inputSchema: z
         .object({
           body: z.string().min(1).describe(
-            "The message, markdown. Question blocks render as answerable cards. In a question block, add `Stopped: <why>` only when you cannot go on until it is answered; otherwise leave the line out (never `Stopped: no`).",
+            "The message, markdown. Question blocks render as answerable cards. In a block, add `Stopped: <why>` only for a question that leaves you nothing else to work on (otherwise leave the line out, never `Stopped: no`); `Holds up: <work>; <work>` names the work that waits while you go on.",
           ),
           ...SEND_ROUTING_FIELDS,
           attachments: z
@@ -406,7 +407,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         const askedBy = input.asked_by ?? (session ? "me" : "anyone");
         if (askedBy === "me" && !session) throw new InboxError("validation_error", "asked_by: \"me\" needs agent_session.");
         let threads = store.listRows({ projectId: project.id, session: askedBy === "me" ? session : null });
-        if (!input.include_resolved) threads = threads.filter((t) => t.resolved_at === null);
+        // A thread an agent wrote in after its archive line still takes a reply: listed like an open one.
+        if (!input.include_resolved) threads = threads.filter((t) => t.resolved_at === null || t.agent_after_archive === true);
         const limit = input.limit ?? 20;
         const total = threads.length;
         threads = threads.slice(0, limit);
@@ -422,7 +424,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
     "resolve_message",
     {
       title: "Resolve a thread",
-      description: "Close the thread a message belongs to once you have what you needed (resolved: false reopens it). Its questions read as closed; the person sees the thread as Archived.",
+      description:
+        "Archive the thread a message belongs to for the person; use it only when nothing in it is left for them to read or answer. resolved: false reopens it. Its questions read as closed; the person sees the thread as Archived.",
       inputSchema: z
         .object({
           message_id: z.string().describe("Any message id in the thread, or the thread id."),
@@ -472,7 +475,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             const projectId = input.project_path ? (await context.resolveProject(input.project_path)).id : null;
             threadIds = store
               .listRows({ projectId, session })
-              .filter((t) => t.resolved_at === null)
+              .filter((t) => t.resolved_at === null || t.agent_after_archive === true)
               .map((t) => t.thread_id);
           }
           const caller = input.agent_session?.trim() || null;
@@ -496,7 +499,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           const existing = findExisting();
           if (existing) return replyResult(store, existing, context.baseUrl());
           // A resolved thread takes no reply: say so now instead of holding the call.
-          if (single && store.message(single)?.resolved_at != null) {
+          // (An agent that wrote after the archive line can still get a reply there.)
+          if (single && store.message(single)?.resolved_at != null && !store.agentAfterArchive(single)) {
             return ok(`Thread ${single} is resolved; no reply will come.`, { status: "resolved", thread_id: single, cursor: store.cursor() });
           }
 
@@ -522,7 +526,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
                 if (threshold === undefined) return;
                 if (message.author.kind === "person" && forCaller(message) && line.seq > threshold && store.messageCursor(message.id) === line.seq) {
                   finish({ kind: "reply", message });
-                } else if (message.id === message.thread_id && message.resolved_at !== null && threadIds.length === 1) {
+                } else if (message.id === message.thread_id && message.resolved_at !== null && threadIds.length === 1 && !store.agentAfterArchive(message.id)) {
                   finish({ kind: "resolved", threadId: message.id });
                 }
               });
