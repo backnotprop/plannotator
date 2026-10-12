@@ -49,7 +49,7 @@ describe('markdownPreviewImageRoot', () => {
     vcsType: 'git',
     activeDiffBase: 'uncommitted',
     worktreePath: null,
-    repoCwd: '/repo',
+    repoRoot: '/repo',
   };
 
   test('only a Git working tree that is the new side', () => {
@@ -92,6 +92,14 @@ describe('markdownPreviewDocument', () => {
   test('context lines compare without whitespace (hide-whitespace diffs)', () => {
     expect(markdownPreviewDocument(patch, '# Title\nold\nend\n', '#  Title\nnew\nend  \n', 'modified').kind)
       .toBe('ready');
+  });
+
+  test('CRLF files match an LF patch (core.autocrlf, eol=crlf)', () => {
+    expect(markdownPreviewDocument(patch, '# Title\r\nold\r\nend\r\n', '# Title\r\nnew\r\nend\r\n', 'modified'))
+      .toEqual({ kind: 'ready', content: '# Title\r\nnew\r\nend\r\n' });
+    // A real edit is still caught under CRLF.
+    expect(markdownPreviewDocument(patch, '# Title\r\nold\r\nend\r\n', '# Title\r\nnewer\r\nend\r\n', 'modified').kind)
+      .toBe('stale');
   });
 
   test('a deletion previews the old side', () => {

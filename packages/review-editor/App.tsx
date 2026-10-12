@@ -1721,8 +1721,8 @@ const ReviewApp: React.FC = () => {
     vcsType: gitContext?.vcsType,
     activeDiffBase,
     worktreePath: activeWorktreePath,
-    repoCwd: gitContext?.cwd,
-  }), [isStaticPatch, prMetadata, reviewMode, gitContext?.vcsType, gitContext?.cwd, activeDiffBase, activeWorktreePath]);
+    repoRoot: gitContext?.root,
+  }), [isStaticPatch, prMetadata, reviewMode, gitContext?.vcsType, gitContext?.root, activeDiffBase, activeWorktreePath]);
   const visibleEditorAnnotations = useMemo(
     () => canUseLiveWorkspaceActions ? editorAnnotations : [],
     [canUseLiveWorkspaceActions, editorAnnotations],

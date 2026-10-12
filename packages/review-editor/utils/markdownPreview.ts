@@ -115,12 +115,15 @@ export function markdownPreviewImageRoot(options: {
   vcsType: string | undefined;
   activeDiffBase: string;
   worktreePath: string | null;
-  repoCwd: string | null | undefined;
+  /** `gitContext.root`, the repository top level. Never the cwd the review
+   *  was started from: patch paths are relative to the top level, so a
+   *  subfolder would double the folder (and could find another file). */
+  repoRoot: string | null | undefined;
 }): string | null {
   if (options.isStaticPatch || options.isPRMode || options.isWorkspace) return null;
   if (options.vcsType !== 'git') return null;
   if (!WORKING_TREE_NEW_SIDE.has(options.activeDiffBase)) return null;
-  return options.worktreePath ?? options.repoCwd ?? null;
+  return options.worktreePath ?? options.repoRoot ?? null;
 }
 
 /** Join an absolute folder and a repository-relative path. */
@@ -139,7 +142,9 @@ const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
  * (even to the same length) must not be shown as the reviewed version.
  */
 export function patchAgreesWithContent(patch: string, content: string, side: 'old' | 'new'): boolean {
-  const lines = content.split('\n');
+  // Line endings never count: with core.autocrlf or `eol=crlf` git prints LF
+  // while the file on disk (what /api/file-content returns) has CRLF.
+  const lines = content.split('\n').map(stripCarriageReturn);
   const patchLines = patch.split('\n');
   let i = 0;
   while (i < patchLines.length) {
@@ -153,7 +158,7 @@ export function patchAgreesWithContent(patch: string, content: string, side: 'ol
     while (i < patchLines.length && (oldLeft > 0 || newLeft > 0)) {
       const line = patchLines[i];
       const tag = line === '' ? ' ' : line[0];
-      const text = line.slice(1);
+      const text = stripCarriageReturn(line.slice(1));
       if (tag === '\\') {
         i += 1;
         continue;
@@ -177,6 +182,10 @@ export function patchAgreesWithContent(patch: string, content: string, side: 'ol
     }
   }
   return true;
+}
+
+function stripCarriageReturn(text: string): string {
+  return text.endsWith('\r') ? text.slice(0, -1) : text;
 }
 
 function squashWhitespace(text: string): string {

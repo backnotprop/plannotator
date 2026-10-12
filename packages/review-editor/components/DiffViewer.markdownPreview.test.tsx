@@ -9,7 +9,7 @@
  * DOM-gated (DOM_TESTS=1) and registered in .github/workflows/test.yml's
  * "Run diff-renderer DOM tests" step (real @pierre/diffs).
  */
-import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -84,6 +84,20 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
   let host: HTMLDivElement | null = null;
   const originalFetch = globalThis.fetch;
 
+  // happy-dom fires `error` at once for an <img> whose relative src it cannot
+  // parse against about:blank; give the page an http origin, as the review
+  // app has, so only the error events a test dispatches count. (Image loading
+  // itself stays off in happy-dom.)
+  type HappyWindow = { happyDOM?: { setURL?: (url: string) => void } };
+  let originalUrl = '';
+  beforeAll(() => {
+    originalUrl = window.location.href;
+    (window as unknown as HappyWindow).happyDOM?.setURL?.('http://localhost:19611/');
+  });
+  afterAll(() => {
+    (window as unknown as HappyWindow).happyDOM?.setURL?.(originalUrl);
+  });
+
   function view(props: ViewProps) {
     return (
       <DiffViewer
@@ -105,9 +119,12 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
     );
   }
 
-  async function render(props: ViewProps, contents: Contents | 'fail') {
+  async function render(props: ViewProps, contents: Contents | 'fail' | 'stale-snapshot') {
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.startsWith('/api/file-content') && contents === 'stale-snapshot') {
+        return new Response(JSON.stringify({ error: 'Diff snapshot is stale' }), { status: 409 });
+      }
       if (url.startsWith('/api/file-content') && contents !== 'fail') {
         return new Response(JSON.stringify(contents), { headers: { 'content-type': 'application/json' } });
       }
@@ -335,6 +352,78 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
     await togglePreview(failed);
     expect(failed.querySelector(`${PREVIEW} h1`)).toBeNull();
     expect(failed.querySelector('[data-markdown-preview-state]')?.getAttribute('data-markdown-preview-state')).toBe('unavailable');
+    await act(async () => root!.unmount());
+    root = null;
+    host?.remove();
+
+    // The whole diff is stale (the server refuses the snapshot with 409).
+    const staleDiff = await render({
+      patch: addedPatch('doc.md', doc), filePath: 'doc.md', status: 'added', reviewSnapshotId: 'old',
+    }, 'stale-snapshot');
+    await togglePreview(staleDiff);
+    expect(staleDiff.querySelector('[data-markdown-preview-state]')?.getAttribute('data-markdown-preview-state')).toBe('stale');
+  });
+
+  test('in-page #anchors scroll to the slugged heading in the preview', async () => {
+    const doc = '# Top\n\nGo to [part two](#section-two).\n\n## Section two\n\nHere.\n';
+    const el = await render({
+      patch: addedPatch('doc.md', doc), filePath: 'doc.md', status: 'added',
+    }, { oldContent: null, newContent: doc });
+    await togglePreview(el);
+    const heading = el.querySelector(`${PREVIEW} h2`)!;
+    expect(heading.id).toBe('section-two');
+    let scrolled: Element | null = null;
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled = this; };
+    try {
+      expect(click(linkByText(el, 'part two')!).defaultPrevented).toBe(true);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+    expect(scrolled).toBe(heading);
+  });
+
+  test('responsive images, <picture> sources and videos never load from the page', async () => {
+    const doc = [
+      '# Media',
+      '',
+      '<p><img src="img/a.png" srcset="img/a@2x.png 2x" alt="hi-dpi"></p>',
+      '',
+      '<picture><source srcset="img/dark.png" media="(prefers-color-scheme: dark)"><img src="img/light.png" alt="themed"></picture>',
+      '',
+      '<video src="clip.mp4" poster="poster.png" controls></video>',
+      '',
+      '![absent](/tmp/x.png)',
+      '',
+    ].join('\n');
+    const el = await render({
+      patch: addedPatch('docs/README.md', doc), filePath: 'docs/README.md', status: 'added', markdownImageRoot: '/repo',
+    }, { oldContent: null, newContent: doc });
+    await togglePreview(el);
+    const preview = el.querySelector(PREVIEW)!;
+    expect(preview.querySelector('[srcset]')).toBeNull();
+    expect(preview.querySelector('source')).toBeNull();
+    expect(preview.querySelector('video')).toBeNull();
+    expect(preview.querySelector('img[alt="themed"]')?.getAttribute('src'))
+      .toBe(`/api/image?path=${encodeURIComponent('/repo/docs/img/light.png')}`);
+    // Every remaining image goes through /api/image or is a placeholder.
+    for (const img of Array.from(preview.querySelectorAll('img'))) {
+      expect(img.getAttribute('src')!.startsWith('/api/image?path=')).toBe(true);
+    }
+    const labels = Array.from(preview.querySelectorAll('[data-image-unavailable]')).map((n) => n.textContent);
+    expect(labels).toContain('Video');
+
+    // An image that does not exist (an absolute filesystem path, say) shows
+    // the placeholder instead of a broken image once it fails to load.
+    const absent = preview.querySelector<HTMLImageElement>('img[alt="absent"]')!;
+    await act(async () => {
+      absent.dispatchEvent(new Event('error'));
+    });
+    expect(preview.querySelector('img[alt="absent"]')).toBeNull();
+    expect(Array.from(preview.querySelectorAll('[data-image-unavailable]')).map((n) => n.textContent)).toContain('absent');
+    const raw = preview.querySelector<HTMLImageElement>('img[alt="hi-dpi"]')!;
+    raw.dispatchEvent(new Event('error'));
+    expect(preview.querySelector('img[alt="hi-dpi"]')).toBeNull();
   });
 
   test('images resolve against the Markdown file\'s own folder', async () => {

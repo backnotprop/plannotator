@@ -421,7 +421,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   }, [patch, filePath]);
 
   // Fetch full file contents for expandable context (and the Markdown preview)
-  const { fileContents, loading: fileContentsLoading } = useFileContents({
+  const { fileContents, loading: fileContentsLoading, stale: fileContentsStale } = useFileContents({
     filePath,
     oldPath,
     reviewBase,
@@ -478,6 +478,9 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     return markdownPreviewDocument(patch, fileContents.old, fileContents.new, status);
   }, [fileContents, filePath, markdownSourcePath, patch, status]);
   const markdownPreviewContent = markdownPreviewDoc?.kind === 'ready' ? markdownPreviewDoc.content : null;
+  // This file changed since the diff (content check), or the whole diff did
+  // (the server refused the snapshot with 409).
+  const markdownPreviewStale = markdownPreviewDoc?.kind === 'stale' || fileContentsStale;
 
   const markdownPreviewBytes = useMemo(
     () => (markdownPreviewContent === null ? 0 : utf8ByteLength(markdownPreviewContent)),
@@ -1033,12 +1036,12 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                 {markdownPreviewContent === null ? (
                   <div
                     role="status"
-                    data-markdown-preview-state={fileContentsLoading ? 'loading' : markdownPreviewDoc?.kind === 'stale' ? 'stale' : 'unavailable'}
+                    data-markdown-preview-state={fileContentsLoading ? 'loading' : markdownPreviewStale ? 'stale' : 'unavailable'}
                     className="mx-auto max-w-3xl rounded-md border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground"
                   >
                     {fileContentsLoading
                       ? 'Loading the full Markdown file…'
-                      : markdownPreviewDoc?.kind === 'stale'
+                      : markdownPreviewStale
                         ? 'This file changed after the diff was captured. Refresh the diff to preview it.'
                         : 'The full file content is unavailable for this review. Switch back to the diff to review the available changes.'}
                   </div>
@@ -1064,6 +1067,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                     className="md-compact mx-auto max-w-3xl"
                     resolveLocalLink={resolvePreviewLink}
                     resolveImage={resolvePreviewImage}
+                    headingAnchors
                   />
                 )}
               </div>
