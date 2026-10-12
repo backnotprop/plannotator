@@ -258,7 +258,7 @@ test.skipIf(!hasDom)('E marks the open thread read; a stopped thread warns with 
   expect(head().textContent).toContain('Read');
   expect(el.querySelector('[data-read-line]')?.textContent).toContain('2 questions were closed unanswered');
   const toast = document.querySelector('[data-inbox-toast]') as HTMLElement;
-  expect(toast.textContent).toContain('moved to Quiet');
+  expect(toast.textContent).toContain('will move to Quiet');
   expect(toast.textContent).toContain('Claude Code was stopped on it.');
   expect(toast.querySelector('[data-toast-reply]')).not.toBeNull();
   expect((await questionStates(ids.stopped)).map((q) => q.state)).toEqual(['closed', 'closed']);

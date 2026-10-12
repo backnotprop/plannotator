@@ -33,6 +33,7 @@ import {
   MAX_QUESTION_PROMPT_CHARS,
   parseQuestionAnswer,
   parseQuestionBlock,
+  questionChoicesNeedCanonicalLabels,
   type QuestionAnswer,
   type QuestionChoice,
   type QuestionExportItem,
@@ -308,7 +309,9 @@ export function checkInboxAnswer(
 
 function exportItem(record: InboxQuestionRecord, number: number): QuestionExportItem {
   const settled = record.parsed.choices.filter((c) => c.settled).map((c) => c.label);
-  const hasAliases = record.parsed.aliases.some((a) => a !== null);
+  // The export prints current labels for answers stored under an older name
+  // or cut at 200 characters by a build through 0.28.17.
+  const needsChoices = questionChoicesNeedCanonicalLabels(storedChoices(record));
   return {
     key: record.key,
     number,
@@ -318,7 +321,7 @@ function exportItem(record: InboxQuestionRecord, number: number): QuestionExport
     ...(record.parsed.suggested_text === null ? {} : { suggestedText: record.parsed.suggested_text }),
     settled: settled.length > 0,
     settledLabels: settled,
-    ...(hasAliases
+    ...(needsChoices
       ? {
           choices: record.parsed.choices.map((c, i) => ({
             label: c.label,
