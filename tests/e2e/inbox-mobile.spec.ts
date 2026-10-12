@@ -100,6 +100,8 @@ test.beforeAll(async () => {
     return made;
   };
   const pi = await agent('Pi', 'pi');
+  // A settled decision, for the Decisions page with one open.
+  await pi.recordDecision({ project_path: billing, text: 'Retry a Stripe 409 with the same idempotency key', reason: 'Stripe deduplicates on the key, so a retry can never charge twice.', idempotency_key: 'mobile-decision' });
   const long = await pi.send({
     project_path: docs,
     thread: 'nightly-reconciliation-of-stripe-payouts-against-the-ledger',
@@ -600,6 +602,25 @@ for (const phone of [
       const tools = await shortHitAreas(page, '.ib-phone .ib-toolstrip button, .ib-phone [data-sticky-actions] button');
       expect(tools.measured).toBeGreaterThanOrEqual(4);
       expect(tools.short).toEqual([]);
+      // The keyboard's focus ring on a toolstrip button lies inside its clip (4 px out at the sides, 8 above and
+      // below). Reached with Tab so the browser draws it; checked in Chromium (WebKit's Tab skips buttons by default).
+      if (phone.browserName === 'chromium') {
+        for (let i = 0; i < 60; i++) {
+          if (await page.evaluate(() => !!document.activeElement?.closest('.ib-toolstrip'))) break;
+          await page.keyboard.press('Tab');
+        }
+        const ring = await page.evaluate(() => {
+          const el = document.activeElement!;
+          const style = getComputedStyle(el);
+          return { inStrip: !!el.closest('.ib-toolstrip'), visible: el.matches(':focus-visible'), style: style.outlineStyle, reach: parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset), clip: style.clipPath };
+        });
+        expect(ring.inStrip).toBe(true);
+        expect(ring.visible).toBe(true);
+        expect(ring.style).not.toBe('none');
+        expect(ring.reach).toBeLessThanOrEqual(4);
+        expect(ring.clip).toContain('-8px -4px');
+        await shot(page, '13b-toolstrip-focus');
+      }
       await shot(page, '13-file-targets');
     });
 
@@ -616,13 +637,34 @@ for (const phone of [
       await expect(toast).toBeVisible();
       await expect(toast.getByRole('button', { name: 'Undo' })).toBeVisible();
       await shot(page, '14-toast');
-      const [toastBox, footBox, textBox] = await Promise.all([toast.boundingBox(), pane.locator('.ib-pfoot').boundingBox(), toast.locator('.ib-tline').boundingBox()]);
+      const [toastBox, footBox, lines] = await Promise.all([
+        toast.boundingBox(),
+        pane.locator('.ib-pfoot').boundingBox(),
+        // The text's line boxes (one rect per line).
+        toast.locator('.ib-tline').evaluate((el) => {
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          return new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size;
+        }),
+      ]);
       // One line (44 px, not the 171 px of three wrapped lines), clear of the foot.
       expect(toastBox!.height).toBeLessThanOrEqual(48);
-      expect(textBox!.height).toBeLessThan(26);
+      expect(lines).toBe(1);
       expect(toastBox!.y + toastBox!.height).toBeLessThanOrEqual(footBox!.y);
       // The thread's banner says the rest; Undo puts it back.
       await expect(pane.locator('[data-read-line]')).toBeVisible();
+      await toast.getByRole('button', { name: 'Undo' }).click();
+      await expect(read).toHaveAttribute('aria-pressed', 'false');
+
+      // With the reply box open the foot is much taller: the toast still sits above it.
+      await pane.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit the reply)$/ }).click();
+      await expect(pane.locator('.ib-pfoot textarea')).toBeVisible();
+      await read.click();
+      await expect(toast).toBeVisible();
+      const [tallFoot, tallToast] = await Promise.all([pane.locator('.ib-pfoot').boundingBox(), toast.boundingBox()]);
+      expect(tallFoot!.height).toBeGreaterThan(120);
+      expect(tallToast!.y + tallToast!.height).toBeLessThanOrEqual(tallFoot!.y);
+      await shot(page, '14b-toast-reply-open');
       await toast.getByRole('button', { name: 'Undo' }).click();
       await expect(read).toHaveAttribute('aria-pressed', 'false');
     });
@@ -738,12 +780,32 @@ for (const narrow of [
         await back.click();
         await expect(page.locator('.ib-listcol')).toBeVisible();
         await expect(pane).toHaveCount(0);
-        // As on a desktop, closing is a new history entry: the browser's Back reopens the thread.
-        await page.goBack();
+        // The thread covered the list, so ‹ Inbox was the browser's Back (an iPad's swipe back agrees with it):
+        // Forward reopens the thread, and no entry was added.
+        expect(await page.evaluate(() => window.location.hash)).toBe('');
+        await page.goForward();
         await expect(pane.getByRole('heading', { name: /Stripe 409/ })).toBeVisible();
 
+        // An open decision covers the Decisions list (460 px beside it would leave the decision 120 to 210 px).
+        const projects = (await page.evaluate(() => fetch('/api/inbox/projects').then((r) => r.json()))) as { projects: { id: string; name: string }[] };
+        // (A hash change, not page.goto: WebKit's goto to the same document can wait for a load that never comes.)
+        await page.evaluate((hash) => (window.location.hash = hash), `#decisions=${projects.projects.find((p) => p.name === 'billing-svc')!.id}`);
+        await page.locator('.ib-dpage button', { hasText: 'Retry a Stripe 409 with the same idempotency key' }).filter({ visible: true }).first().click();
+        const dpane = page.locator('section.ib-dpane');
+        await expect(dpane.getByRole('heading', { name: 'Retry a Stripe 409 with the same idempotency key' })).toBeVisible();
+        await expect(page.locator('.ib-dpage')).toBeHidden();
+        const [dpaneBox, dmainBox] = await Promise.all([dpane.boundingBox(), page.locator('.ib-main').boundingBox()]);
+        expect(Math.abs(dpaneBox!.width - dmainBox!.width)).toBeLessThan(2);
+        await page.screenshot({ path: join(proofDir, `${tag}-4-decision.png`) });
+        expect(await sideways(page)).toEqual([]);
+        expect(await overlaps(page, 'section.ib-dpane .ib-phead', '.ib-pback, .ib-dstate')).toEqual([]);
+        await expect(dpane.getByRole('button', { name: 'Close the decision' })).toHaveCount(0);
+        await dpane.getByRole('button', { name: 'Back to Decisions' }).click();
+        await expect(page.locator('.ib-dpage')).toBeVisible();
+        await expect(dpane).toHaveCount(0);
+
         // A file covers the thread, full screen, with its desktop close and Back to the thread.
-        await page.goto(`${world.url}#thread=${world.threads.attach}`);
+        await page.evaluate((hash) => (window.location.hash = hash), `#thread=${world.threads.attach}`);
         await pane.locator('.ib-att-t', { hasText: 'retry-policy.md' }).click();
         const view = page.locator('section.ib-view');
         await expect(view.getByText('Failed refunds are retried with exponential backoff')).toBeVisible();
@@ -848,6 +910,45 @@ test.describe('a desktop window', () => {
       await foot.getByRole('button', { name: /^Skip/ }).click();
       await expect(keep).toBeVisible();
     }
+  });
+
+  test('at 1000 px the thread covers the list: focus goes to ‹ Inbox and back to its row, and ‹ Inbox and Escape are the browser Back', async ({ page }) => {
+    await page.setViewportSize({ width: 1000, height: 800 });
+    await page.goto(world.url);
+    const row = page.locator(`.ib-lbody [data-thread-id="${world.threads.stopped}"]`);
+    await row.click();
+    const pane = page.locator('section.ib-pane');
+    await expect(pane.getByRole('heading', { name: /Stripe 409/ })).toBeVisible();
+    await expect(page.locator('.ib-listcol')).toBeHidden();
+    // The row clicked is under the thread now: focus moves to the way back.
+    const back = pane.locator('[data-stack-back]');
+    await expect(back).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.ib-listcol')).toBeVisible();
+    await expect(pane).toHaveCount(0);
+    // Back on the list, focus is on the row of the thread just closed.
+    await expect(row).toBeFocused();
+    // ‹ Inbox went back in history (no new entry): Forward reopens the thread.
+    expect(await page.evaluate(() => window.location.hash)).toBe('');
+    await page.goForward();
+    await expect(pane.getByRole('heading', { name: /Stripe 409/ })).toBeVisible();
+    // Escape is the same Back.
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.ib-listcol')).toBeVisible();
+    expect(await page.evaluate(() => window.location.hash)).toBe('');
+    await page.goForward();
+    await expect(pane.getByRole('heading', { name: /Stripe 409/ })).toBeVisible();
+  });
+
+  test('an iPad on its side (1080 px) keeps the list beside a 468 px thread, as main does', async ({ page }) => {
+    await page.setViewportSize({ width: 1080, height: 810 });
+    await page.goto(`${world.url}#thread=${world.threads.stopped}`);
+    const pane = page.locator('section.ib-pane');
+    await expect(pane.getByRole('heading', { name: /Stripe 409/ })).toBeVisible();
+    await expect(page.locator('.ib-listcol.ib-narrow')).toBeVisible();
+    expect(Math.round((await pane.boundingBox())!.width)).toBe(1080 - 232 - 380);
+    await expect(pane.getByRole('button', { name: 'Close the thread' })).toBeVisible();
+    expect(await page.evaluate(() => document.querySelector('.pn-inbox')!.getAttribute('data-stack'))).toBeNull();
   });
 
   test('a window just wide enough keeps the list beside the thread, which keeps 480 px', async ({ page }) => {

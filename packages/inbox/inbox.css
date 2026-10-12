@@ -974,6 +974,7 @@ pre code.pn-code[data-keep-layout] {
 .pn-inbox[data-stack~="thread"] .ib-main { position: relative; }
 .pn-inbox[data-stack~="thread"][data-view="thread"] .ib-listcol { position: absolute; inset: 0; visibility: hidden; }
 .pn-inbox[data-stack~="file"][data-view="file"] .ib-pane.ib-withfile { display: none; }
+.pn-inbox[data-stack~="decision"][data-view="decision"] .ib-dpage { display: none; }
 .pn-inbox .ib-pback { display: inline-flex; align-items: center; gap: 2px; flex: 0 1 auto; min-width: 0; max-width: 40%; height: 30px; padding: 0 9px 0 4px; border-radius: 7px; color: var(--primary); font-size: 13.5px; font-weight: 550; white-space: nowrap; }
 .pn-inbox .ib-pback:hover { background: color-mix(in oklch, var(--primary) 10%, transparent); }
 .ib-pback-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -1189,11 +1190,12 @@ pre code.pn-code[data-keep-layout] {
 
 /* ── Phone polish (follow-ups to the phone layout) ── */
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  /* The toast: one line and Undo, above the thread's foot rather than over it. */
+  /* The toast: Undo beside its words, above the thread's foot whatever the foot's height (Toast.tsx measures
+     it). A short note (Read, Archived) is one line; anything else, an error, wraps. */
   .ib-toast.ib-toast-phone { min-height: 44px; padding: 0 2px 0 14px; gap: 10px; }
-  .ib-toast-phone .ib-tline { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ib-toast-phone .ib-tline { flex: 1; min-width: 0; padding: 7px 0; overflow-wrap: anywhere; }
+  .ib-toast-phone .ib-tline.ib-tone { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .pn-inbox .ib-toast-phone .ib-tb { flex: none; }
-  .pn-inbox[data-view="thread"] .ib-toast { bottom: calc(76px + env(safe-area-inset-bottom)); }
   /* The file's reply strip: "ride your next Send" wraps under itself rather than being cut. */
   .ib-vfoot-row .ib-sp { white-space: normal; text-overflow: clip; line-height: 1.25; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   /* 44 px hit areas for small controls that keep their look: the reply's
@@ -1212,9 +1214,9 @@ pre code.pn-code[data-keep-layout] {
     content: ''; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%);
   }
   /* ui's toolstrip buttons clip their sliding label with overflow, which would clip the hit area too: clip with
-     a path instead, at the sides as before (3 px out, for the active button's shadow), and 8 px above and
-     below, so the hit area is 28 + 16 = 44 px tall. Drawn the same. */
-  .ib-phone .ib-toolstrip button { overflow: visible; clip-path: inset(-8px -3px round 6px); }
+     a path instead: 4 px out at the sides (the active button's shadow and the whole focus ring) and 8 px
+     above and below, so the hit area is 28 + 16 = 44 px tall. Drawn the same. */
+  .ib-phone .ib-toolstrip button { overflow: visible; clip-path: inset(-8px -4px round 8px); }
 }
 /* An iPhone SE's width has no room for the strip's sentence beside its chip and button. */
 @media (max-width: 359px) {

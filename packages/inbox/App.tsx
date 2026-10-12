@@ -10,7 +10,7 @@
  * agents.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { configurePlannotatorUI } from '@plannotator/ui/configure';
 import { storage } from '@plannotator/ui/utils/storage';
@@ -163,7 +163,22 @@ function writeRoute(route: Route, options: { replace?: boolean } = {}): void {
  * a new entry, so the browser's Back reopens what was just closed.
  */
 function closeTo(route: Route): void {
-  if (!(isPhone() && backTo(hashOf(route)))) writeRoute(route);
+  if (!((isPhone() || leavesCoveringThread(route)) && backTo(hashOf(route)))) writeRoute(route);
+}
+
+/**
+ * The thread on screen covers the list (a window too narrow for both,
+ * stack.ts), kept in step by the window. Closing that thread back to its list
+ * is then the browser's Back, as on a phone, so an iPad's swipe back and
+ * `‹ Inbox` agree. Every other close, and every close beside the list, stays
+ * a new entry, as on a desktop.
+ */
+let threadCoversList = false;
+
+function leavesCoveringThread(route: Route): boolean {
+  if (!threadCoversList || route.page !== 'inbox' || route.thread) return false;
+  const from = readRoute();
+  return from.page === 'inbox' && !!from.thread && !from.file && !from.guide;
 }
 
 function platformOf(): ConnectContext['platform'] {
@@ -465,7 +480,10 @@ function Inbox() {
   useEffect(() => (phone ? trackKeyboard() : undefined), [phone]);
   // A window too narrow for two panes (an iPad in portrait, a narrow desktop window): the pane on top covers the one under it (stack.ts).
   const rootRef = useRef<HTMLDivElement>(null);
-  const stack = useStack(rootRef, phone);
+  const stack = useStack(rootRef, phone, [hashOf(route), sidebarOpen]);
+  useLayoutEffect(() => {
+    threadCoversList = stack.thread;
+  }, [stack.thread]);
 
   const openRow = (row: InboxListRow) => go({ page: 'inbox', project: route.project, thread: row.thread_id });
 
@@ -852,6 +870,22 @@ function Inbox() {
     lastView.current = view;
   }
 
+  // A thread that covers the list (stack.ts) takes the focus with it, and gives it back to its row: the
+  // list is hidden under the thread, so focus left on the row clicked (or on the thread's Back) would sit
+  // on something nobody can see.
+  const focusFrom = useRef<{ view: string; thread: string | null }>({ view, thread: null });
+  useEffect(() => {
+    const before = focusFrom.current;
+    focusFrom.current = { view, thread: view === 'thread' ? route.thread : null };
+    if (!stack.thread || phone || before.view === view) return;
+    if (view === 'thread' && before.view === 'list') {
+      const target = document.querySelector<HTMLElement>('section.ib-pane [data-stack-back]') ?? document.querySelector<HTMLElement>('section.ib-pane h2.ib-subject');
+      target?.focus();
+    } else if (view === 'list' && before.view === 'thread' && before.thread) {
+      document.querySelector<HTMLElement>(`.ib-listcol .ib-lbody [data-thread-id="${CSS.escape(before.thread)}"]`)?.focus();
+    }
+  }, [view, route.thread, stack.thread, phone]);
+
   let main: ReactNode;
   const decisionsFolder = decisionsProject ? projects.find((p) => p.id === decisionsProject) ?? null : null;
   if (route.page === 'settings') {
@@ -905,6 +939,7 @@ function Inbox() {
         onRetire={retireDecision}
         onReplace={replaceDecision}
         phone={phone}
+        stacked={stack.decision}
       />
     );
   } else if (route.page === 'decisions') {
@@ -978,7 +1013,7 @@ function Inbox() {
       className="pn-inbox"
       data-view={view}
       data-enter={entered.current ?? undefined}
-      data-stack={stack.thread || stack.file ? [stack.thread && 'thread', stack.file && 'file'].filter(Boolean).join(' ') : undefined}
+      data-stack={stack.thread || stack.file || stack.decision ? [stack.thread && 'thread', stack.file && 'file', stack.decision && 'decision'].filter(Boolean).join(' ') : undefined}
     >
       {/* A file beside the thread takes the sidebar's room (record 2.2): it closes on the same spring, and the person's choice stays as it was. */}
       <SidebarShell

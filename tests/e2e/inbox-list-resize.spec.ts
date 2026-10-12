@@ -249,15 +249,13 @@ test('a narrower window draws it clamped, keeping the thread pane its 480px', as
   await page.setViewportSize(VIEWPORT);
 });
 
-test('a window with no room for the list beside a 480px thread: the thread covers the list, and there is no separator', async () => {
+test('a window that leaves no room to widen into shows no separator', async () => {
   const { page } = world;
-  // 232 + 380 + 480 = 1092: at 1080 the list and a readable thread do not both fit (packages/inbox/stack.ts).
+  // 232 + 380 + 480 = 1092: at 1080 there is nothing to drag.
   await page.setViewportSize({ width: 1080, height: 900 });
   await expect(edge(page)).toHaveCount(0);
-  await expect(page.locator('.ib-listcol')).toBeHidden();
-  expect(await width(page, '.ib-pane')).toBe(1080 - SIDEBAR);
+  expect(await width(page, '.ib-listcol')).toBe(LIST_MIN);
   await page.setViewportSize(VIEWPORT);
-  await expect(page.locator('.ib-listcol')).toBeVisible();
   // Back with the room (the separator itself is a zero-width line).
   await expect(edge(page)).toHaveCount(1);
 });

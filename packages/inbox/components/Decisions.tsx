@@ -27,6 +27,8 @@ export interface DecisionsPageProps {
   onReplace: (decision: InboxDecision, text: string, reason: string) => Promise<void>;
   /** A phone (phone.ts): two-line rows, and an open decision takes the window with a Back button. */
   phone?: boolean;
+  /** A window too narrow for the Decisions list beside an open decision (stack.ts): the decision covers the list and leads with the way back. */
+  stacked?: boolean;
 }
 
 /** Who and how, in the row's two muted columns. */
@@ -118,6 +120,7 @@ function DecisionPane({
   onRetire,
   onReplace,
   phone,
+  stacked,
 }: {
   decision: InboxDecision;
   all: readonly InboxDecision[];
@@ -127,6 +130,7 @@ function DecisionPane({
   onRetire: (decision: InboxDecision) => Promise<void>;
   onReplace: (decision: InboxDecision, text: string, reason: string) => Promise<void>;
   phone: boolean;
+  stacked: boolean;
 }) {
   const id = useId();
   const [replacing, setReplacing] = useState(false);
@@ -165,12 +169,22 @@ function DecisionPane({
             <span className="ib-pback-l">Decisions</span>
           </button>
         )}
+        {/* A stacked decision covers the list: the way back leads, where the list was. */}
+        {stacked && !phone && (
+          <>
+            <button type="button" className="ib-pback" onClick={onClose} aria-label="Back to Decisions" title="Back to Decisions" data-stack-back="">
+              <Icon name="chevL" size={16} />
+              <span className="ib-pback-l">Decisions</span>
+            </button>
+            <span className="ib-vsep" aria-hidden="true" />
+          </>
+        )}
         <span className="ib-dstate">
           <DecisionDiamond />
           {STATE_WORDS[decision.state]}
         </span>
         <span className="ib-sp" />
-        {!phone && (
+        {!phone && !stacked && (
           <button type="button" className="ib-iconbtn" onClick={onClose} title="Close" aria-label="Close the decision">
             <Icon name="x" />
           </button>
@@ -365,6 +379,7 @@ export function DecisionsPage(props: DecisionsPageProps) {
           onRetire={props.onRetire}
           onReplace={props.onReplace}
           phone={props.phone === true}
+          stacked={props.stacked === true}
         />
       )}
     </>

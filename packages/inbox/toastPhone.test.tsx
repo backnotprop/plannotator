@@ -37,11 +37,25 @@ test.skipIf(!hasDom)('a phone: the short line and Undo, which undoes', () => {
   let undone = 0;
   const toast = render(true, () => undone++, () => {});
   expect(toast.querySelector('.ib-tline')?.textContent).toBe('Read. Moved to Quiet.');
+  // One line (inbox.css .ib-tone): the thread's banner says the rest.
+  expect(toast.querySelector('.ib-tline')?.classList.contains('ib-tone')).toBe(true);
   expect(toast.querySelector('small')).toBeNull();
   const buttons = [...toast.querySelectorAll('button')].map((b) => b.textContent?.trim());
   expect(buttons).toEqual(['Undo']);
   act(() => (toast.querySelector('[data-toast-undo]') as HTMLButtonElement).click());
   expect(undone).toBe(1);
+});
+
+test.skipIf(!hasDom)('a phone: an error (no short line) keeps its words whole and may wrap, with a close', () => {
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+  act(() => root!.render(<InboxToast toast={{ id: 2, text: 'The thread did not change: the Inbox could not be reached.', warn: true }} onDismiss={() => {}} phone />));
+  const toast = host.querySelector('[data-inbox-toast]') as HTMLElement;
+  const line = toast.querySelector('.ib-tline')!;
+  expect(line.textContent).toBe('The thread did not change: the Inbox could not be reached.');
+  expect(line.classList.contains('ib-tone')).toBe(false);
+  expect(toast.querySelector('[aria-label="Dismiss"]')).not.toBeNull();
 });
 
 test.skipIf(!hasDom)('a desktop window: the sentence, its details, Reply, Undo and the close', () => {
