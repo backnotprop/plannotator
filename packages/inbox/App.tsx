@@ -360,6 +360,13 @@ function Inbox() {
   const rootRef = useRef<HTMLDivElement>(null);
   const latestRef = useRef(latest);
   latestRef.current = latest;
+  /**
+   * The threads opened in this tab (a row, a link, a notification, Settings'
+   * Unarchive). One not on screen whose messages are all seen came in by the
+   * person's own hand, not an agent's (held.ts).
+   */
+  const openedHere = useRef(new Set<string>());
+  if (route.thread) openedHere.current.add(route.thread);
   /** The rows as they were just before the list on screen changes, when that change slides (settle.ts). */
   const slideFrom = useRef<SettleSnapshot | null>(null);
   /** Measure the rows now, so the next change of the list on screen slides from here. Nothing under reduced motion. */
@@ -384,7 +391,7 @@ function Inbox() {
       const next = latestRef.current;
       if (!next) return;
       if (slide) armSlide();
-      setShown((current) => (what === 'all' || current === null || !hasRows(current) ? next.sections : settleOwn(current, next.sections)));
+      setShown((current) => (what === 'all' || current === null || !hasRows(current) ? next.sections : settleOwn(current, next.sections, openedHere.current)));
     },
     [armSlide, cancelSettle],
   );
@@ -1059,7 +1066,7 @@ function Inbox() {
   };
 
   const filterProject = route.page === 'inbox' && route.project ? projects.find((p) => p.id === route.project) ?? null : null;
-  const notice = shown && latest ? heldNotice(filterSections(shown, route.project), filterSections(latest.sections, route.project)).text : null;
+  const notice = shown && latest ? heldNotice(filterSections(shown, route.project), filterSections(latest.sections, route.project), openedHere.current).text : null;
   const firstRun = latest !== null && projects.length === 0;
   // A file beside the thread takes the list's and the sidebar's room (record 2.2).
   const fileOpen = route.page === 'inbox' && !!route.thread && !!route.file;

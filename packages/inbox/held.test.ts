@@ -134,8 +134,24 @@ describe('a thread the person brought back', () => {
       { id: 'waiting', label: 'Waiting on you', threads: [other, back] },
       { id: 'new', label: 'New since you looked', threads: [fresh] },
     ];
-    expect(heldNotice(shown, latest)).toEqual({ count: 1, text: '1 new in docs-site' });
-    expect(settleOwn(shown, latest).map((s) => s.threads.map((t) => t.thread_id))).toEqual([['other', 'back'], []]);
+    const here = new Set(['back']);
+    expect(heldNotice(shown, latest, here)).toEqual({ count: 1, text: '1 new in docs-site' });
+    expect(settleOwn(shown, latest, here).map((s) => s.threads.map((t) => t.thread_id))).toEqual([['other', 'back'], []]);
+  });
+
+  // The failure this guards: the exemption reached threads this tab never
+  // showed, so a thread an agent started and the person read on their phone
+  // dropped out of "N new" while its row was still not on screen.
+  test('an agent starts a thread and it is read elsewhere (unseen 0): this tab still shows 1 new, and the close leaves it for Show', () => {
+    const other = { ...row('other', 'docs-site', '2026-10-12T10:00:00Z', 'agent'), section: 'waiting', unseen: 1 } as InboxListRow;
+    const readOnPhone = { ...row('phone', 'docs-site', '2026-10-12T11:00:00Z', 'agent'), section: 'quiet', unseen: 0 } as InboxListRow;
+    const shown: InboxListSection[] = [{ id: 'waiting', label: 'Waiting on you', threads: [other] }];
+    const latest: InboxListSection[] = [
+      { id: 'waiting', label: 'Waiting on you', threads: [other] },
+      { id: 'quiet', label: 'Quiet', threads: [readOnPhone] },
+    ];
+    expect(heldNotice(shown, latest, new Set(['other']))).toEqual({ count: 1, text: '1 new in docs-site' });
+    expect(settleOwn(shown, latest, new Set(['other'])).map((s) => s.threads.map((t) => t.thread_id))).toEqual([['other'], []]);
   });
 });
 

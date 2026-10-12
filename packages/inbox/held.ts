@@ -22,13 +22,15 @@ function rowsById(sections: readonly InboxListSection[]): Map<string, InboxListR
 
 /**
  * `row` carries agent activity the row on screen (`old`) lacks: a thread an
- * agent started, or a newer agent message. A thread not on screen whose agent
- * messages the person has all seen (`unseen` 0) is not: it came back by the
- * person's own hand (Unarchive in Settings or in the thread), or they opened
- * it from a link.
+ * agent started, or a newer agent message. One exception: a thread not on
+ * screen that the person opened in this tab (`openedHere`: a link, a
+ * notification, Settings' Unarchive) and whose agent messages they have all
+ * seen (`unseen` 0) came in by their own hand (it was archived, say, and they
+ * unarchived it). A thread read somewhere else (a phone, another tab) is not
+ * exempt: this tab has not shown it, so it stays news here.
  */
-function hasNewAgentActivity(old: InboxListRow | undefined, row: InboxListRow): boolean {
-  if (old === undefined) return row.last_author === 'agent' && (row.unseen ?? 1) > 0;
+function hasNewAgentActivity(old: InboxListRow | undefined, row: InboxListRow, openedHere?: ReadonlySet<string>): boolean {
+  if (old === undefined) return row.last_author === 'agent' && !(openedHere?.has(row.thread_id) && row.unseen === 0);
   return row.last_author === 'agent' && row.last_at > old.last_at;
 }
 
@@ -37,12 +39,12 @@ function hasNewAgentActivity(old: InboxListRow | undefined, row: InboxListRow): 
  * show: a thread it lacks, or one whose last message is a newer agent
  * message. The person's own picks, replies and looks never count.
  */
-export function heldNotice(shown: readonly InboxListSection[], latest: readonly InboxListSection[]): HeldNotice {
+export function heldNotice(shown: readonly InboxListSection[], latest: readonly InboxListSection[], openedHere?: ReadonlySet<string>): HeldNotice {
   const before = rowsById(shown);
   const projects = new Set<string>();
   let count = 0;
   for (const row of rowsById(latest).values()) {
-    if (!hasNewAgentActivity(before.get(row.thread_id), row)) continue;
+    if (!hasNewAgentActivity(before.get(row.thread_id), row, openedHere)) continue;
     count += 1;
     projects.add(row.project.name);
   }
@@ -85,7 +87,7 @@ function newestFirst(left: InboxListRow, right: InboxListRow): number {
  * gives it. A thread gone from `latest` leaves (an archived one, archived while
  * it was open). Show adopts `latest` whole.
  */
-export function settleOwn(shown: readonly InboxListSection[], latest: readonly InboxListSection[]): InboxListSection[] {
+export function settleOwn(shown: readonly InboxListSection[], latest: readonly InboxListSection[], openedHere?: ReadonlySet<string>): InboxListSection[] {
   const before = rowsById(shown);
   const known = new Set(latest.map((section) => section.id));
   const buckets = new Map<string, InboxListRow[]>();
@@ -97,7 +99,7 @@ export function settleOwn(shown: readonly InboxListSection[], latest: readonly I
   for (const section of latest) {
     for (const row of section.threads) {
       const old = before.get(row.thread_id);
-      if (!hasNewAgentActivity(old, row)) put(section.id, row);
+      if (!hasNewAgentActivity(old, row, openedHere)) put(section.id, row);
       // Archived by the person while it was open (markHeldRowArchived): the archive settles (the row
       // leaves); the agent's message that brought it back waits behind "N new", like any agent activity.
       else if (old && (old.resolved_at ?? null) !== null && old.back_from_archive !== true) continue;
