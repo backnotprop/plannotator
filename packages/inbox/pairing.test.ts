@@ -29,7 +29,8 @@ describe('the gate on the code', () => {
 
 describe('the checks', () => {
   test('each failing check carries its fix in one line', () => {
-    for (const line of [...wifiCheckLines(failingWifi), ...tailscaleCheckLines(failingTailscale)]) {
+    const more = (['cli_missing', 'no_answer', 'stopped', 'needs_approval', 'unknown'] as const).flatMap((state) => tailscaleCheckLines({ ...failingTailscale, state }));
+    for (const line of [...wifiCheckLines(failingWifi), ...tailscaleCheckLines(failingTailscale), ...more]) {
       if (line.status === 'fail' || line.status === 'warn') expect(line.fix?.length ?? 0).toBeGreaterThan(0);
     }
   });
@@ -37,6 +38,9 @@ describe('the checks', () => {
   test('an unknown firewall (not a Mac) adds no line; a certificate already made stands in for openssl', () => {
     const lines = wifiCheckLines({ address: '10.0.0.2', network: null, openssl: false, certificate: true, bonjour: true, firewall: 'unknown' });
     expect(lines.map((l) => l.status)).toEqual(['ok', 'ok', 'ok']);
+    // A missing `tailscale` command and a slow one are not "Tailscale is not installed".
+    expect(tailscaleCheckLines({ ...failingTailscale, state: 'cli_missing' }).map((l) => l.status)).toEqual(['fail']);
+    expect(tailscaleCheckLines({ ...failingTailscale, state: 'no_answer' }).map((l) => l.status)).toEqual(['warn']);
   });
 });
 
@@ -48,8 +52,10 @@ describe('what reached the door', () => {
       { via: 'tailnet', result: 'wrong_code', at: '3', tries_left: 3 },
       { via: 'tailnet', result: 'redeemed', at: '4', device: 'iPhone' },
     ]);
-    expect(notes.map((n) => n.key)).toEqual(['wrong_code-3', 'code_over_wifi-2']);
-    expect(notes[0]!.text).toContain('3 tries left');
+    expect(notes.map((n) => [n.kind, n.via, n.triesLeft])).toEqual([
+      ['wrong_code', 'tailnet', 3],
+      ['code_over_wifi', 'wifi', undefined],
+    ]);
     expect(pairedVia([{ via: 'wifi', result: 'redeemed', at: '4' }])).toBe('wifi');
   });
 

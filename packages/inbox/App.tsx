@@ -30,7 +30,7 @@ import {
 import { filterSections, heldNotice, markHeldRowArchived, refreshHeldRows, waitingCount } from './held';
 import { tildePath } from './format';
 import { inboxImageSrcResolver } from './images';
-import type { ConnectContext } from './harnesses';
+import { shellLine, type ConnectContext } from './harnesses';
 import { Sidebar } from './components/Sidebar';
 import { SidebarShell } from './shell/SidebarShell';
 import { InboxList } from './components/InboxList';
@@ -1129,7 +1129,7 @@ function Inbox() {
             onWhatsNew={openWhatsNew}
             where={
               settings
-                ? { data: tildePath(settings.data_dir, settings.home), mcpUrl: settings.mcp_url, mcpCommand: [...settings.mcp_command].join(' ') }
+                ? { data: tildePath(settings.data_dir, settings.home), mcpUrl: settings.mcp_url, mcpCommand: shellLine(settings.mcp_command) }
                 : null
             }
           />

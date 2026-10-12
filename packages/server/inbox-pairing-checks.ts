@@ -7,13 +7,20 @@
  * answer is advisory: the window shows a failing check with its fix, and the
  * only gate on the pairing code is a way being switched on (the owner's
  * no-loop rule). Nothing here reads the tailnet's other devices (dropped by
- * the owner, decision 4): the phone side is stated, never guessed.
+ * the owner, decision 4): `tailscale status` runs with `--peers=false`, and
+ * the phone side is stated, never guessed.
  *
- * Each probe is a seam (`PairingProbes`), so tests never run the real
- * `tailscale`, `openssl` or system tools against real state.
+ * Every probe is asynchronous (child processes through `Bun.spawn`, each with
+ * its own time limit), so a slow `tailscale` never holds the Inbox's event
+ * loop: MCP waits, connection polls and the relay socket keep running while
+ * the checks are read. The caller shares one read in flight and keeps its
+ * answer a few seconds (inbox-devices.ts).
+ *
+ * Each probe is a seam (`PairingProbes`, and the Tailscale runner), so tests
+ * never run the real `tailscale`, `openssl` or system tools against real
+ * state.
  */
 
-import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { join } from "node:path";
@@ -22,14 +29,19 @@ import {
   serveStatusProxy,
   TAILSCALE_CLI_TIMEOUT_MS,
   TAILSCALE_SERVE_TIMEOUT_MS,
-  type TailscaleRunner,
+  type TailscaleRunResult,
 } from "@plannotator/shared/tailscale";
 import { inboxTlsDir, lanAddress } from "./inbox-lan";
 
-/** The macOS application firewall: off, on (macOS asks per app), or blocking every incoming connection. */
+/** The macOS application firewall: off, on (macOS asks per app), or blocking every incoming connection. Unknown elsewhere. */
 export type FirewallState = "off" | "on" | "block_all" | "unknown";
 
-export type TailscaleBackend = "running" | "stopped" | "signed_out" | "needs_approval" | "starting" | "not_installed" | "unknown";
+/**
+ * `cli_missing`: no `tailscale` command on PATH (Tailscale may still be
+ * installed, as the Mac App Store app is without its command-line tool).
+ * `no_answer`: the command did not answer within its time limit.
+ */
+export type TailscaleBackend = "running" | "stopped" | "signed_out" | "needs_approval" | "starting" | "cli_missing" | "no_answer" | "unknown";
 
 export interface PairingChecks {
   wifi: {
@@ -62,14 +74,48 @@ export interface PairingChecks {
 export interface PairingProbes {
   lanAddress: () => string | null;
   /** The Wi-Fi network's name for the interface holding `address`, or null. */
-  network: (address: string | null) => string | null;
+  network: (address: string | null) => string | null | Promise<string | null>;
   /** The path of a command on PATH, or null. */
   which: (command: string) => string | null;
-  firewall: () => FirewallState;
+  firewall: () => FirewallState | Promise<FirewallState>;
 }
+
+/** How the checks run `tailscale`: a sync seam (tests' scripted runners) or the async default. */
+export type PairingTailscaleRunner = (args: string[], timeoutMs: number) => TailscaleRunResult | Promise<TailscaleRunResult>;
 
 const PROBE_TIMEOUT_MS = 2_000;
 const SOCKETFILTERFW = "/usr/libexec/ApplicationFirewall/socketfilterfw";
+
+/** A child process run without a shell, its stdout read, killed at `timeoutMs`. `ENOENT` / `ETIMEDOUT` as error codes. */
+export async function runQuietly(command: string, args: string[], timeoutMs: number): Promise<TailscaleRunResult> {
+  const path = command.includes("/") ? (existsSync(command) ? command : null) : Bun.which(command);
+  if (!path) return { error: Object.assign(new Error(`${command}: not found on PATH`), { code: "ENOENT" }), status: null, stdout: "", stderr: "" };
+  let proc: ReturnType<typeof Bun.spawn>;
+  try {
+    proc = Bun.spawn([path, ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe", windowsHide: true });
+  } catch (cause) {
+    return { error: cause instanceof Error ? cause : new Error(String(cause)), status: null, stdout: "", stderr: "" };
+  }
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    proc.kill("SIGKILL");
+  }, timeoutMs);
+  try {
+    const [stdout, stderr, status] = await Promise.all([
+      new Response(proc.stdout as ReadableStream).text(),
+      new Response(proc.stderr as ReadableStream).text(),
+      proc.exited,
+    ]);
+    if (timedOut) return { error: Object.assign(new Error(`${command} did not answer in time`), { code: "ETIMEDOUT" }), status: null, stdout, stderr };
+    return { status, stdout, stderr };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The default Tailscale runner for the checks: the CLI on PATH, asynchronously. */
+export const runTailscaleQuietly: PairingTailscaleRunner = (args, timeoutMs) => runQuietly("tailscale", args, timeoutMs);
 
 /**
  * `socketfilterfw --getglobalstate` and `--getblockall`, as macOS prints them
@@ -125,15 +171,6 @@ export function parseTailscaleBackend(stdout: string): { state: TailscaleBackend
   return { state, login, https_certs: state === "running" ? Array.isArray(certs) && certs.length > 0 : null };
 }
 
-function run(command: string, args: string[]): string | null {
-  try {
-    const out = spawnSync(command, args, { encoding: "utf8", timeout: PROBE_TIMEOUT_MS, windowsHide: true });
-    return out.status === 0 ? (out.stdout ?? "") : null;
-  } catch {
-    return null;
-  }
-}
-
 /** The interface that holds `address` (en0 for the Wi-Fi on most Macs). */
 function interfaceOf(address: string): string | null {
   for (const [name, entries] of Object.entries(networkInterfaces())) {
@@ -142,35 +179,39 @@ function interfaceOf(address: string): string | null {
   return null;
 }
 
+async function stdoutOf(command: string, args: string[]): Promise<string | null> {
+  const result = await runQuietly(command, args, PROBE_TIMEOUT_MS);
+  return !result.error && result.status === 0 ? result.stdout : null;
+}
+
 export const defaultPairingProbes: PairingProbes = {
   lanAddress,
-  network: (address) => {
+  network: async (address) => {
     if (!address) return null;
     if (process.platform === "darwin") {
       const iface = interfaceOf(address);
       if (!iface) return null;
-      const summary = run("/usr/sbin/ipconfig", ["getsummary", iface]);
+      const summary = await stdoutOf("/usr/sbin/ipconfig", ["getsummary", iface]);
       return summary ? parseIpconfigSsid(summary) : null;
     }
     if (process.platform === "linux") {
-      const iwgetid = Bun.which("iwgetid");
-      const name = iwgetid ? run(iwgetid, ["-r"])?.trim() : "";
+      const name = (await stdoutOf("iwgetid", ["-r"]))?.trim();
       return name || null;
     }
     return null;
   },
   which: (command) => Bun.which(command),
-  firewall: () => {
+  firewall: async () => {
     if (process.platform !== "darwin" || !existsSync(SOCKETFILTERFW)) return "unknown";
-    const global = run(SOCKETFILTERFW, ["--getglobalstate"]);
+    const [global, blockAll] = await Promise.all([stdoutOf(SOCKETFILTERFW, ["--getglobalstate"]), stdoutOf(SOCKETFILTERFW, ["--getblockall"])]);
     if (global === null) return "unknown";
-    return parseFirewallState(global, run(SOCKETFILTERFW, ["--getblockall"]) ?? "");
+    return parseFirewallState(global, blockAll ?? "");
   },
 };
 
 export interface PairingChecksContext {
   dataDir: string;
-  tailscale: TailscaleRunner;
+  tailscale: PairingTailscaleRunner;
   /** The HTTPS port phones reach the tailnet door on (8443). */
   httpsPort: number;
   /** Proxy targets a mapping of the Inbox's own points at (its door listener now or last run). */
@@ -178,43 +219,56 @@ export interface PairingChecksContext {
   probes?: Partial<PairingProbes>;
 }
 
-/** Read every check once. Turns nothing on, makes no certificate, publishes nothing. */
-export function readPairingChecks(context: PairingChecksContext): PairingChecks {
-  const probes = { ...defaultPairingProbes, ...context.probes };
-  const address = probes.lanAddress();
-  const bonjourTool = process.platform === "darwin" ? "dns-sd" : "avahi-publish";
-  const wifi: PairingChecks["wifi"] = {
-    address,
-    network: address ? probes.network(address) : null,
-    openssl: probes.which("openssl") !== null,
-    certificate: existsSync(join(inboxTlsDir(context.dataDir), "cert.pem")) && existsSync(join(inboxTlsDir(context.dataDir), "key.pem")),
-    bonjour: probes.which(bonjourTool) !== null,
-    firewall: probes.firewall(),
-  };
-
+async function tailscaleChecks(context: PairingChecksContext): Promise<PairingChecks["tailscale"]> {
   const tailscale: PairingChecks["tailscale"] = { state: "unknown", login: null, https_certs: null, port_free: null, error: null };
-  const status = context.tailscale(["status", "--json"], TAILSCALE_CLI_TIMEOUT_MS);
+  // `--peers=false`: this computer only; the tailnet's other devices are never read.
+  const status = await context.tailscale(["status", "--json", "--peers=false"], TAILSCALE_CLI_TIMEOUT_MS);
   if (status.error) {
     const code = (status.error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") tailscale.state = "not_installed";
+    if (code === "ENOENT") tailscale.state = "cli_missing";
+    else if (code === "ETIMEDOUT") tailscale.state = "no_answer";
     else tailscale.error = status.error.message;
-  } else {
-    const parsed = parseTailscaleBackend(status.stdout);
-    Object.assign(tailscale, parsed);
-    if (parsed.state === "unknown") {
-      const said = `${status.stderr}\n${status.stdout}`.trim();
-      // The daemon is not running: the CLI cannot reach it and says so.
-      if (/failed to connect|is tailscale(d)? running|not running|connection refused/i.test(said)) tailscale.state = "stopped";
-      else tailscale.error = said.split("\n")[0] || null;
-    }
+    return tailscale;
+  }
+  const parsed = parseTailscaleBackend(status.stdout);
+  Object.assign(tailscale, parsed);
+  if (parsed.state === "unknown") {
+    const said = `${status.stderr}\n${status.stdout}`.trim();
+    // The daemon is not running: the CLI cannot reach it and says so.
+    if (/failed to connect|is tailscale(d)? running|not running|connection refused/i.test(said)) tailscale.state = "stopped";
+    else tailscale.error = said.split("\n")[0] || null;
   }
   if (tailscale.state === "running") {
-    const serve = context.tailscale(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
+    const serve = await context.tailscale(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
     if (!serve.error && serve.status === 0) {
       const mapped = serveStatusProxy(serve.stdout, context.httpsPort);
       if (mapped.state === "free") tailscale.port_free = true;
       else if (mapped.state === "mapped") tailscale.port_free = context.ownTargets().includes(mapped.proxy);
     }
   }
-  return { wifi, tailscale };
+  return tailscale;
+}
+
+/** Read every check once, the probes side by side. Turns nothing on, makes no certificate, publishes nothing. */
+export async function readPairingChecks(context: PairingChecksContext): Promise<PairingChecks> {
+  const probes = { ...defaultPairingProbes, ...context.probes };
+  const address = probes.lanAddress();
+  const bonjourTool = process.platform === "darwin" ? "dns-sd" : "avahi-publish";
+  const tls = inboxTlsDir(context.dataDir);
+  const [network, firewall, tailscale] = await Promise.all([
+    address ? probes.network(address) : null,
+    probes.firewall(),
+    tailscaleChecks(context),
+  ]);
+  return {
+    wifi: {
+      address,
+      network,
+      openssl: probes.which("openssl") !== null,
+      certificate: existsSync(join(tls, "cert.pem")) && existsSync(join(tls, "key.pem")),
+      bonjour: probes.which(bonjourTool) !== null,
+      firewall,
+    },
+    tailscale,
+  };
 }

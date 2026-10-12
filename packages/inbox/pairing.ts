@@ -53,7 +53,8 @@ export function wifiCheckLines(checks: PairingChecks['wifi']): CheckLine[] {
     });
   if (checks.bonjour) lines.push({ status: 'ok', text: 'Phones nearby can find it by name (Bonjour)' });
   else lines.push({ status: 'warn', text: 'Phones nearby will not list this computer by name.', fix: 'Scanning the code still pairs them.' });
-  if (checks.firewall === 'off') lines.push({ status: 'ok', text: 'The firewall lets phones connect' });
+  // Only the macOS application firewall can be read; elsewhere (`unknown`) nothing is claimed.
+  if (checks.firewall === 'off') lines.push({ status: 'ok', text: 'The macOS firewall is off' });
   else if (checks.firewall === 'on')
     lines.push({ status: 'warn', text: 'The macOS firewall is on.', fix: 'If macOS asks whether Plannotator may accept incoming connections, choose Allow.' });
   else if (checks.firewall === 'block_all')
@@ -70,8 +71,17 @@ export function tailscaleCheckLines(checks: PairingChecks['tailscale']): CheckLi
   const installed: CheckLine = { status: 'ok', text: 'Tailscale is installed' };
   const later: CheckLine = { status: 'later', text: 'The rest is checked once it runs.' };
   switch (checks.state) {
-    case 'not_installed':
-      return [{ status: 'fail', text: 'Tailscale is not installed on this computer.', fix: 'Install it from tailscale.com, sign in, then Check again.' }];
+    case 'cli_missing':
+      // ENOENT: the command is missing, which the Mac App Store app is until its command-line tool is turned on.
+      return [
+        {
+          status: 'fail',
+          text: "The tailscale command isn't on PATH.",
+          fix: 'Install Tailscale (https://tailscale.com/download) and sign in with tailscale up, then Check again.',
+        },
+      ];
+    case 'no_answer':
+      return [{ status: 'warn', text: "Tailscale didn't answer in time.", fix: 'Check again in a moment.' }];
     case 'stopped':
       return [installed, { status: 'fail', text: 'Tailscale is not running on this computer.', fix: 'Open Tailscale, then Check again.' }, later];
     case 'signed_out':
@@ -132,8 +142,18 @@ const VIA: Record<PairingAttempt['via'], string> = { wifi: 'over Wi-Fi', tailnet
  * phone that came and failed says what to do. A pairing is not a note
  * (step 3 says it).
  */
-export function attemptNotes(attempts: readonly PairingAttempt[]): { key: string; title: string; text: string }[] {
-  const notes: { key: string; title: string; text: string }[] = [];
+export interface AttemptNote {
+  key: string;
+  kind: PairingAttempt['result'];
+  via: PairingAttempt['via'];
+  /** `wrong_code`: tries left on the code. */
+  triesLeft?: number;
+  title: string;
+  text: string;
+}
+
+export function attemptNotes(attempts: readonly PairingAttempt[]): AttemptNote[] {
+  const notes: AttemptNote[] = [];
   const seen = new Set<string>();
   for (const attempt of [...attempts].reverse()) {
     if (attempt.result === 'redeemed' || seen.has(attempt.result)) continue;
@@ -143,15 +163,17 @@ export function attemptNotes(attempts: readonly PairingAttempt[]): { key: string
       const left = attempt.tries_left ?? 0;
       notes.push({
         key,
+        kind: attempt.result, via: attempt.via,
+        triesLeft: left,
         title: `A phone reached this computer ${VIA[attempt.via]}, but the six digits did not match.`,
         text: left > 0 ? `${left} ${left === 1 ? 'try' : 'tries'} left. Check the digits, or scan the code instead.` : 'The code closed after five wrong tries. Make a new code.',
       });
     } else if (attempt.result === 'code_over_wifi') {
-      notes.push({ key, title: 'A phone reached this computer over Wi-Fi and typed the code.', text: 'Over Wi-Fi, pairing works only by scanning. Scan the code instead.' });
+      notes.push({ key, kind: attempt.result, via: attempt.via, title: 'A phone reached this computer over Wi-Fi and typed the code.', text: 'Over Wi-Fi, pairing works only by scanning. Scan the code instead.' });
     } else if (attempt.result === 'old_code') {
-      notes.push({ key, title: `A phone reached this computer ${VIA[attempt.via]} with an older code.`, text: 'Scan the code on screen now.' });
+      notes.push({ key, kind: attempt.result, via: attempt.via, title: `A phone reached this computer ${VIA[attempt.via]} with an older code.`, text: 'Scan the code on screen now.' });
     } else if (attempt.result === 'expired') {
-      notes.push({ key, title: `A phone reached this computer ${VIA[attempt.via]} after the code closed.`, text: 'Make a new code and scan it.' });
+      notes.push({ key, kind: attempt.result, via: attempt.via, title: `A phone reached this computer ${VIA[attempt.via]} after the code closed.`, text: 'Make a new code and scan it.' });
     }
   }
   return notes;

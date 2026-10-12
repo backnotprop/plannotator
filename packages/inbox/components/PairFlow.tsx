@@ -110,14 +110,16 @@ export function PairFlow({ lan, tailnet, busy, error, onSwitchLan, onSwitchTailn
   const [paired, setPaired] = useState<{ name: string; via: PairingAttempt['via'] | null } | null>(null);
   /** "Show the code" pressed with no way on: say so beside the button (the gate). */
   const [needWay, setNeedWay] = useState(false);
+  /** Another window made a newer code: this one is closed. */
+  const [replaced, setReplaced] = useState(false);
   const known = useRef<Set<string> | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const firstStep = useRef(true);
 
-  const runChecks = useCallback(async () => {
+  const runChecks = useCallback(async (fresh = false) => {
     setChecking(true);
     try {
-      const answer = await inboxApi.pairingChecks();
+      const answer = await inboxApi.pairingChecks(fresh);
       setChecks(answer.checks);
       setChecksError(null);
     } catch (cause) {
@@ -143,7 +145,11 @@ export function PairFlow({ lan, tailnet, busy, error, onSwitchLan, onSwitchTailn
     if (gateOpen) setNeedWay(false);
   }, [gateOpen]);
 
+  // A ref, not state: two presses in one frame both see the state from before the first.
+  const makingRef = useRef(false);
   const makeCode = async () => {
+    if (makingRef.current) return;
+    makingRef.current = true;
     setFlowError(null);
     setMaking(true);
     try {
@@ -151,16 +157,20 @@ export function PairFlow({ lan, tailnet, busy, error, onSwitchLan, onSwitchTailn
       const made = await inboxApi.pairPhone();
       setOffer(made);
       setView(null);
+      setReplaced(false);
       setNow(Date.now());
       setStep('scan');
     } catch (cause) {
       setFlowError(cause instanceof Error ? cause.message : 'No pairing code was made.');
     } finally {
+      makingRef.current = false;
       setMaking(false);
     }
   };
 
   const showCode = () => {
+    // One code at a time (makeCode's guard): a second press while the first is being made would open a
+    // second offer, and the answers could land out of order, showing a code the Inbox already closed.
     if (!gateOpen) {
       setNeedWay(true);
       return;
@@ -175,7 +185,9 @@ export function PairFlow({ lan, tailnet, busy, error, onSwitchLan, onSwitchTailn
     const poll = async () => {
       try {
         const [list, read] = await Promise.all([readDevices(), inboxApi.pairingOffer().catch(() => null)]);
-        if (read) setView(read.offer);
+        // The Inbox keeps one offer: another window's New code replaces this one. Its state and attempts are not ours.
+        if (read) setReplaced(read.offer !== null && read.offer.expires_at !== offer.offer.expires_at);
+        if (read) setView(read.offer && read.offer.expires_at === offer.offer.expires_at ? read.offer : null);
         const fresh = list.find((d) => !known.current?.has(d.id));
         known.current = new Set(list.map((d) => d.id));
         if (fresh) {
@@ -218,7 +230,7 @@ export function PairFlow({ lan, tailnet, busy, error, onSwitchLan, onSwitchTailn
     // A switch changes what the checks can see (the mapping on 8443, the listener): read them again after it.
     const switchWay = async (next: boolean) => {
       await (isWifi ? onSwitchLan : onSwitchTailnet)(next);
-      void runChecks();
+      void runChecks(true);
     };
     return (
       <section className={`ib-way${isOn ? ' ib-is-on' : ''}`} data-pair-way={kind} data-way-on={isOn ? 'true' : 'false'} aria-labelledby={`ib-way-${kind}`}>
@@ -267,7 +279,7 @@ export function PairFlow({ lan, tailnet, busy, error, onSwitchLan, onSwitchTailn
               </span>
               <span className="ib-way-btns">
                 {failing && (
-                  <button type="button" className="ib-btn ib-sm" disabled={checking} onClick={() => (onRefreshWays(), void runChecks())} data-check-again="">
+                  <button type="button" className="ib-btn ib-sm" disabled={checking} onClick={() => (onRefreshWays(), void runChecks(true))} data-check-again="">
                     <Icon name="refresh" size={14} /> Check again
                   </button>
                 )}
@@ -283,9 +295,9 @@ export function PairFlow({ lan, tailnet, busy, error, onSwitchLan, onSwitchTailn
   };
 
   const left = offer ? Date.parse(offer.offer.expires_at) - now : 0;
-  const expired = offer !== null && (left <= 0 || view?.state === 'expired' || view?.state === 'closed');
+  const expired = offer !== null && (replaced || left <= 0 || view?.state === 'expired' || view?.state === 'closed');
   const notes = view ? attemptNotes(view.attempts) : [];
-  const seenNothing = expired && (view?.attempts.length ?? 0) === 0;
+  const seenNothing = expired && !replaced && (view?.attempts.length ?? 0) === 0;
   const closedByTries = view?.state === 'closed' && view.tries_left === 0;
   const tailnetAddress = offer?.addresses.tailnet ?? null;
   const lanAddress = offer?.addresses.lan && offer.addresses.fingerprint ? offer.addresses.lan : null;
@@ -334,7 +346,7 @@ export function PairFlow({ lan, tailnet, busy, error, onSwitchLan, onSwitchTailn
               </div>
             )}
             <div className="ib-flow-f">
-              <span className="ib-hint" role="status" data-pair-hint="">
+              <span className="ib-hint" role="status" data-pair-hint={needWay ? 'need-way' : on.wifi || on.tailscale ? 'ready' : 'none'}>
                 {needWay ? 'Turn on This Wi-Fi or Tailscale above first: the code carries the address your phone uses.' : continueHint(on, network)}
               </span>
               <span className="ib-right">
@@ -364,14 +376,22 @@ export function PairFlow({ lan, tailnet, busy, error, onSwitchLan, onSwitchTailn
             <div className="ib-scan" data-pair-offer="" data-expired={expired ? 'true' : 'false'}>
               <div className={`ib-qr-wrap${expired ? ' ib-stale' : ''}`}>
                 <QrCode link={offer.link} />
-                {expired && <span className="ib-qr-over">This code expired</span>}
+                {expired && <span className="ib-qr-over">{replaced ? 'This code was replaced' : 'This code expired'}</span>}
               </div>
               <div className="ib-scan-t">
                 <h4 ref={heading} tabIndex={-1}>
                   Scan with Plannotator on your iPhone
                 </h4>
                 {expired ? (
-                  <p>{closedByTries ? 'The code closed after five wrong tries. Make a new code to try again.' : seenNothing ? 'Make a new code to try again. Check the list below first.' : 'Make a new code to try again.'}</p>
+                  <p data-pair-closed={replaced ? 'replaced' : closedByTries ? 'tries' : 'expired'}>
+                    {replaced
+                      ? 'Another window made a newer code, so this one no longer pairs. Make a new code here, or scan the one in that window.'
+                      : closedByTries
+                        ? 'The code closed after five wrong tries. Make a new code to try again.'
+                        : seenNothing
+                          ? 'Make a new code to try again. Check the list below first.'
+                          : 'Make a new code to try again.'}
+                  </p>
                 ) : tailnetAddress ? (
                   <>
                     <p>Or enter the code in the app:</p>
@@ -379,9 +399,9 @@ export function PairFlow({ lan, tailnet, busy, error, onSwitchLan, onSwitchTailn
                       {offer.offer.code.slice(0, 3)} {offer.offer.code.slice(3)}
                     </div>
                   </>
-                ) : (
+                ) : lanAddress ? (
                   <p data-pair-scan-only="">Over Wi-Fi the phone pairs by scanning only.</p>
-                )}
+                ) : null}
                 <div className="ib-reach">
                   {lanAddress && (
                     <span data-pair-address="wifi">
@@ -430,7 +450,7 @@ export function PairFlow({ lan, tailnet, busy, error, onSwitchLan, onSwitchTailn
                 )}
                 <div role="status" className="ib-notes" data-pair-notes="">
                   {notes.map((note) => (
-                    <div key={note.key} className="ib-callout ib-warn" data-pair-note="">
+                    <div key={note.key} className="ib-callout ib-warn" data-pair-note={note.kind} data-via={note.via} data-tries-left={note.triesLeft}>
                       <Icon name="warn" />
                       <span>
                         <b>{note.title}</b> {note.text}
@@ -440,7 +460,7 @@ export function PairFlow({ lan, tailnet, busy, error, onSwitchLan, onSwitchTailn
                 </div>
                 <div className="ib-wait">
                   {expired ? (
-                    <span>{closedByTries ? 'Closed after five wrong tries.' : 'Expired after 10 minutes.'}</span>
+                    <span>{replaced ? 'Replaced by a newer code.' : closedByTries ? 'Closed after five wrong tries.' : 'Expired after 10 minutes.'}</span>
                   ) : (
                     <>
                       <span className="ib-spin" aria-hidden="true" />

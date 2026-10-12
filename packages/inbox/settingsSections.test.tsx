@@ -53,6 +53,8 @@ let savedFetch: typeof fetch;
 let savedEventSource: unknown;
 let savedMatchMedia: typeof window.matchMedia;
 let phone = false;
+/** Every request the window made in this test, as `METHOD path`. */
+const requests: string[] = [];
 
 function call(port: number, path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
@@ -117,7 +119,9 @@ beforeEach(() => {
   machine({});
   storage.removeItem(SIDEBAR_COOKIE);
   savedFetch = globalThis.fetch;
+  requests.length = 0;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requests.push(`${init?.method ?? 'GET'} ${String(input)}`);
     const answer = await call(current!.port, String(input), init?.method ?? 'GET', init?.body ? String(init.body) : undefined);
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
@@ -294,19 +298,29 @@ test.skipIf(!hasDom)('Pair a phone: step 1 first; no code until a way is on; the
 
   // The gate: with no way on, Show the code makes no code and says why.
   const show = () => el.querySelector('[data-show-code]') as HTMLButtonElement;
+  // Deliberate pin: the button's two action labels are the design's decision (shots 11 and 12), not incidental copy.
   expect(show().textContent).toBe('Show the code');
   expect(show().getAttribute('aria-disabled')).toBe('true');
   act(() => show().click());
-  await until(() => el.querySelector('[data-pair-hint]')?.textContent?.startsWith('Turn on This Wi-Fi or Tailscale above first') === true, 'the hint');
+  await until(() => el.querySelector('[data-pair-hint]')?.getAttribute('data-pair-hint') === 'need-way', 'the hint to turn a way on');
   expect(el.querySelector('[data-pair-offer]')).toBeNull();
   expect(JSON.parse((await call(current!.port, '/api/inbox/pairing')).text).offer).toBeNull();
 
   act(() => (el.querySelector('[data-turn-on="tailscale"]') as HTMLButtonElement).click());
   await until(() => el.querySelector('[data-pair-way="tailscale"]')?.getAttribute('data-way-on') === 'true', 'Tailscale on');
+  // Deliberate pin, as above.
   await until(() => show().textContent === 'Continue to the code', 'Continue to the code');
   expect(show().getAttribute('aria-disabled')).toBe('false');
-  act(() => show().click());
+  // A double click makes one code: the second press waits for the first answer.
+  act(() => {
+    show().click();
+    show().click();
+  });
   await until(() => el.querySelector('[data-pair-offer]') !== null, 'the code');
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 300));
+  });
+  expect(requests.filter((r) => r === 'POST /api/inbox/pairing')).toHaveLength(1);
   const code = el.querySelector('[data-pair-code]')!.getAttribute('data-pair-code')!;
   expect(code).toMatch(/^\d{6}$/);
   expect(el.querySelector('[data-pair-address="tailscale"]')?.textContent).toContain('macbook.tail0000.ts.net:8443');
@@ -316,8 +330,9 @@ test.skipIf(!hasDom)('Pair a phone: step 1 first; no code until a way is on; the
   const doorPort = (JSON.parse(readFileSync(join(current!.dataDir, 'inbox', 'inbox.json'), 'utf8')) as { tailnet: { door_port: number } }).tailnet.door_port;
   const wrong = code === '000000' ? '000001' : '000000';
   expect((await call(doorPort, '/api/inbox/device/pair', 'POST', JSON.stringify({ code: wrong, name: 'x', platform: 'ios' }))).status).toBe(401);
-  await until(() => el.querySelector('[data-pair-note]')?.textContent?.includes('over Tailscale, but the six digits did not match') === true, 'the wrong-digits note');
-  expect(el.querySelector('[data-pair-note]')?.textContent).toContain('4 tries left');
+  await until(() => el.querySelector('[data-pair-note="wrong_code"]') !== null, 'the wrong-digits note');
+  expect(el.querySelector('[data-pair-note="wrong_code"]')?.getAttribute('data-via')).toBe('tailnet');
+  expect(el.querySelector('[data-pair-note="wrong_code"]')?.getAttribute('data-tries-left')).toBe('4');
 
   expect((await call(doorPort, '/api/inbox/device/pair', 'POST', JSON.stringify({ code, name: 'Test iPhone', platform: 'ios' }))).status).toBe(201);
   await until(() => el.querySelector('[data-pair-done]') !== null, 'Paired');
@@ -335,14 +350,15 @@ test.skipIf(!hasDom)('the no-loop rule: with a way on and every check failing, C
   expect((await call(current!.port, '/api/inbox/tailnet', 'POST', JSON.stringify({ on: true }))).status).toBe(200);
   const el = await renderApp('#settings/devices/pair');
   await until(() => el.querySelectorAll('[data-pair-way] [data-check]').length > 0, 'the checks');
-  const lines = [...el.querySelectorAll('[data-pair-way] [data-check]')];
-  // Nothing passes but the fact that Tailscale is installed.
-  expect(lines.filter((li) => li.getAttribute('data-check') === 'ok').map((li) => li.textContent)).toEqual(['Ready: Tailscale is installed']);
-  expect(lines.filter((li) => li.getAttribute('data-check') === 'fail').length).toBe(3);
+  // Nothing on the Wi-Fi passes; on Tailscale only the line before "signed out" (the command answered).
+  expect(el.querySelectorAll('[data-pair-way="wifi"] [data-check="ok"]').length).toBe(0);
+  expect(el.querySelectorAll('[data-pair-way="tailscale"] [data-check="ok"]').length).toBe(1);
+  expect(el.querySelectorAll('[data-pair-way] [data-check="fail"]').length).toBe(3);
   expect(el.querySelector('[data-pair-way="tailscale"]')?.getAttribute('data-way-on')).toBe('true');
   // No "neither works" stop: a way is on.
   expect(el.querySelector('[data-neither-works]')).toBeNull();
   const show = el.querySelector('[data-show-code]') as HTMLButtonElement;
+  // Deliberate pin: the design's action label once a way is on.
   expect(show.textContent).toBe('Continue to the code');
   expect(show.getAttribute('aria-disabled')).toBe('false');
   expect(show.disabled).toBe(false);
@@ -358,6 +374,7 @@ test.skipIf(!hasDom)('step 1 is always first, even with a way already on; neithe
   act(() => buttonText(el, 'Pair a phone')!.click());
   await until(() => el.querySelector('[data-pair-step="reach"]') !== null, 'step 1');
   await until(() => el.querySelector('[data-pair-way="tailscale"] [data-way-state="on"]') !== null, 'Tailscale says it is on');
+  // Deliberate pin: the design's action label once a way is on.
   expect((el.querySelector('[data-show-code]') as HTMLButtonElement).textContent).toBe('Continue to the code');
 
   await call(current!.port, '/api/inbox/tailnet', 'POST', JSON.stringify({ on: false }));
@@ -377,6 +394,20 @@ test.skipIf(!hasDom)('step 1 is always first, even with a way already on; neithe
   expect(none.querySelector('[data-pair-offer]')).toBeNull();
 });
 
+test.skipIf(!hasDom)('a code another window replaced reads as replaced, not as this tab\'s own state', async () => {
+  expect((await call(current!.port, '/api/inbox/tailnet', 'POST', JSON.stringify({ on: true }))).status).toBe(200);
+  const el = await renderApp('#settings/devices/pair');
+  await until(() => (el.querySelector('[data-show-code]') as HTMLButtonElement | null)?.getAttribute('aria-disabled') === 'false', 'a way on');
+  act(() => (el.querySelector('[data-show-code]') as HTMLButtonElement).click());
+  await until(() => el.querySelector('[data-pair-offer]')?.getAttribute('data-expired') === 'false', 'the code');
+  // Another window's New code: the Inbox keeps one offer, so this tab's code no longer pairs.
+  expect((await call(current!.port, '/api/inbox/pairing', 'POST', '{}')).status).toBe(201);
+  await until(() => el.querySelector('[data-pair-closed]')?.getAttribute('data-pair-closed') === 'replaced', 'the code shown as replaced');
+  expect(el.querySelector('[data-pair-offer]')?.getAttribute('data-expired')).toBe('true');
+  // Not this tab's expiry: no troubleshooting list for a code nobody could reach.
+  expect(el.querySelector('[data-pair-trouble]')).toBeNull();
+});
+
 test.skipIf(!hasDom)('phones off (the released default): Devices is Over your tailnet only, and #settings/devices/pair opens no flow', async () => {
   current = plainServer;
   const el = await renderApp('#settings/devices/pair');
@@ -384,7 +415,8 @@ test.skipIf(!hasDom)('phones off (the released default): Devices is Over your ta
   expect(el.querySelector('[data-settings-phones]')).toBeNull();
   expect(el.querySelector('[data-pair-flow]')).toBeNull();
   expect(buttonText(el, 'Pair a phone')).toBeNull();
-  expect(el.querySelector('.ib-lede')?.textContent).toBe('Browsers on your other devices.');
+  // Over your tailnet is the section's only group.
+  expect([...el.querySelectorAll('.ib-spg .ib-sgroup')].map((g) => g.hasAttribute('data-settings-tailscale'))).toEqual([true]);
 });
 
 test.skipIf(!hasDom)('on a phone: #settings is the list of sections; a section opens with ‹ Settings, which goes back to the list', async () => {
@@ -401,4 +433,6 @@ test.skipIf(!hasDom)('on a phone: #settings is the list of sections; a section o
   expect(back.textContent).toContain('Settings');
   act(() => back.click());
   await until(() => el.querySelector('[data-settings-list]') !== null, 'the list again');
+  // Focus returns to the row of the section just left.
+  await until(() => document.activeElement === el.querySelector('[data-settings-list] [data-settings-link="devices"]'), 'focus on the Devices row');
 });

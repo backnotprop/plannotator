@@ -22,7 +22,7 @@ import { join } from "node:path";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createInboxDevices } from "./inbox-devices";
-import { parseFirewallState, parseIpconfigSsid, parseTailscaleBackend, type PairingProbes } from "./inbox-pairing-checks";
+import { parseFirewallState, parseIpconfigSsid, parseTailscaleBackend, runQuietly, type PairingProbes } from "./inbox-pairing-checks";
 import { resetServedHostnamesForTests } from "./request-host-guard";
 
 type Json = Record<string, any>;
@@ -75,13 +75,14 @@ function probes(overrides: Partial<PairingProbes> = {}): Partial<PairingProbes> 
 }
 
 /** Tailscale as a scripted CLI: its backend state, who owns this machine, HTTPS certificates, and serve's mappings. */
-function fakeTailscale(state: { backend?: string; missing?: boolean; certs?: boolean; stderr?: string } = {}) {
+function fakeTailscale(state: { backend?: string; missing?: boolean; certs?: boolean; stderr?: string; timeout?: boolean } = {}) {
   const serve = new Map<number, string>();
   const calls: string[][] = [];
   const run: TailscaleRunner = (args) => {
     calls.push(args);
     const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
     if (state.missing) return { error: Object.assign(new Error("spawn tailscale ENOENT"), { code: "ENOENT" }), status: null, stdout: "", stderr: "" };
+    if (state.timeout) return { error: Object.assign(new Error("tailscale did not answer in time"), { code: "ETIMEDOUT" }), status: null, stdout: "", stderr: "" };
     if (args[0] === "status") {
       if (state.stderr) return { status: 1, stdout: "", stderr: state.stderr };
       return ok(
@@ -169,7 +170,8 @@ describe("GET /api/inbox/pairing/checks", () => {
     expect(body.lan).toMatchObject({ on: false, address: null });
     expect(body.tailnet).toEqual({ on: false, address: null, error: null });
     // Read only: no serve on or off ran, no certificate was made, no listener opened.
-    expect(ts.calls.every((args) => args.join(" ") === "status --json" || args.join(" ") === "serve status --json")).toBe(true);
+    // `--peers=false`: the tailnet's other devices are never read.
+    expect(ts.calls.map((args) => args.join(" ")).sort()).toEqual(["serve status --json", "status --json --peers=false"]);
     expect(existsSync(join(dataDir, "inbox", "tls"))).toBe(false);
     expect(p.calls).toContain(`network:192.168.1.42`);
   });
@@ -180,22 +182,82 @@ describe("GET /api/inbox/pairing/checks", () => {
     const inbox = await start(dataDir, ts.run, {
       pairingProbes: probes({ lanAddress: () => null, which: () => null, firewall: () => "block_all" }),
     });
-    const missing = (await get(inbox, "/api/inbox/pairing/checks")).body.checks;
+    const read = async () => (await get(inbox, "/api/inbox/pairing/checks?fresh=1")).body.checks;
+    const missing = await read();
     expect(missing.wifi).toEqual({ address: null, network: null, openssl: false, certificate: false, bonjour: false, firewall: "block_all" });
-    expect(missing.tailscale).toEqual({ state: "not_installed", login: null, https_certs: null, port_free: null, error: null });
+    // No `tailscale` command on PATH (the Mac App Store app has none until its CLI is turned on): not "not installed".
+    expect(missing.tailscale).toEqual({ state: "cli_missing", login: null, https_certs: null, port_free: null, error: null });
 
     ts.state.missing = false;
+    ts.state.timeout = true;
+    expect((await read()).tailscale).toMatchObject({ state: "no_answer", error: null });
+    ts.state.timeout = false;
     ts.state.stderr = "failed to connect to local tailscaled; it doesn't appear to be running";
-    expect((await get(inbox, "/api/inbox/pairing/checks")).body.checks.tailscale.state).toBe("stopped");
+    expect((await read()).tailscale.state).toBe("stopped");
     ts.state.stderr = undefined;
     ts.state.backend = "NeedsLogin";
-    expect((await get(inbox, "/api/inbox/pairing/checks")).body.checks.tailscale).toMatchObject({ state: "signed_out", port_free: null });
+    expect((await read()).tailscale).toMatchObject({ state: "signed_out", port_free: null });
     ts.state.backend = "Running";
     ts.state.certs = false;
-    expect((await get(inbox, "/api/inbox/pairing/checks")).body.checks.tailscale).toMatchObject({ state: "running", https_certs: false, port_free: true });
+    expect((await read()).tailscale).toMatchObject({ state: "running", https_certs: false, port_free: true });
     ts.state.certs = true;
     ts.serve.set(8443, "http://127.0.0.1:9999");
-    expect((await get(inbox, "/api/inbox/pairing/checks")).body.checks.tailscale.port_free).toBe(false);
+    expect((await read()).tailscale.port_free).toBe(false);
+  });
+
+  test("one read in flight is shared and kept a few seconds; fresh skips a kept answer; a slow tailscale never holds the Inbox", async () => {
+    const dataDir = world();
+    const ts = fakeTailscale();
+    let release = () => {};
+    const gate = new Promise<void>((done) => (release = done));
+    let statusRuns = 0;
+    // An asynchronous runner that answers only when released: what a slow `tailscale` looks like to the Inbox.
+    const slow = async (args: string[], timeout: number) => {
+      if (args[0] === "status") statusRuns += 1;
+      await gate;
+      return ts.run(args, timeout);
+    };
+    // An Inbox in this process: its health answering while the checks wait shows the event loop is free.
+    const inbox = await start(dataDir, ts.run, { pairingProbes: probes() });
+    const devices = createInboxDevices({
+      dataDir,
+      serverSession: "ses_test",
+      port: () => 1,
+      registry: () => ({ v: 1, pid: process.pid, port: 1, url: "http://localhost:1/", version: "dev", token: "t", serverSession: "ses_test", startedAt: new Date().toISOString() }),
+      readBody: async (req) => (await req.json()) as Record<string, unknown>,
+      dispatch: async () => new Response("{}"),
+      tailscale: ts.run,
+      checksTailscale: slow,
+      probes: probes(),
+    });
+    const route = (path: string) => devices.windowRoute(new Request(`http://127.0.0.1:1${path}`), new URL(`http://127.0.0.1:1${path}`));
+    const first = route("/api/inbox/pairing/checks");
+    const second = route("/api/inbox/pairing/checks?fresh=1");
+    // While both wait on tailscale, the Inbox still answers.
+    const started = performance.now();
+    expect((await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/health`)).status).toBe(200);
+    expect(performance.now() - started).toBeLessThan(1000);
+    release();
+    const [a, b] = await Promise.all([first, second]);
+    expect((await a!.json()).checks.tailscale.state).toBe("running");
+    expect((await b!.json()).checks.tailscale.state).toBe("running");
+    expect(statusRuns).toBe(1);
+    // Kept: a plain read inside the window runs nothing; fresh reads again.
+    await route("/api/inbox/pairing/checks");
+    expect(statusRuns).toBe(1);
+    await route("/api/inbox/pairing/checks?fresh=1");
+    expect(statusRuns).toBe(2);
+    devices.stopTailnet();
+    devices.stopLan();
+  });
+
+  test("runQuietly: a command not on PATH is ENOENT and one past its time limit is ETIMEDOUT, without blocking", async () => {
+    const missing = await runQuietly("plannotator-no-such-command-xyz", [], 1000);
+    expect((missing.error as NodeJS.ErrnoException | undefined)?.code).toBe("ENOENT");
+    const started = performance.now();
+    const slow = await runQuietly("sleep", ["5"], 200);
+    expect((slow.error as NodeJS.ErrnoException | undefined)?.code).toBe("ETIMEDOUT");
+    expect(performance.now() - started).toBeLessThan(2000);
   });
 
   test("the Inbox's own mapping on 8443 counts as free, and the switches' state comes along", async () => {

@@ -137,7 +137,8 @@ test("Pair a phone: step 1 first; no code until a way is on; the QR is the offer
   await expect(page).toHaveURL(/#settings\/devices\/pair$/);
   const flow = block.locator('[data-pair-flow]');
   await expect(flow.getByRole('heading', { name: 'How will your phone reach this computer?' })).toBeFocused();
-  await expect(flow.locator('[data-pair-way="tailscale"]')).toContainText('Tailscale is running, signed in as e2e@example.com');
+  // The scripted status names this login; step 1 reads it (with --peers=false: no other device is read).
+  await expect(flow.locator('[data-pair-way="tailscale"] [data-check="ok"]').first()).toContainText('e2e@example.com');
   await expect(flow).toContainText('is not available yet');
   await shot('settings-phones-pair-1-choose');
 
@@ -150,7 +151,7 @@ test("Pair a phone: step 1 first; no code until a way is on; the QR is the offer
   });
   // aria-disabled, so Playwright would wait for it to enable: the press is forced, as a person's click lands on it.
   await showCode(page).click({ force: true });
-  await expect(flow.locator('[data-pair-hint]')).toContainText('Turn on This Wi-Fi or Tailscale above first');
+  await expect(flow.locator('[data-pair-hint]')).toHaveAttribute('data-pair-hint', 'need-way');
   expect(made).toBe(0);
 
   await flow.getByRole('button', { name: 'Turn on Tailscale' }).click();
@@ -177,8 +178,9 @@ test("Pair a phone: step 1 first; no code until a way is on; the QR is the offer
   // A phone over the tailnet types the wrong digits: the code's screen says so.
   const wrong = offer.offer.code === '000000' ? '000001' : '000000';
   expect((await door('pair', { base: tailnetDoor(), body: { code: wrong, name: 'x', platform: 'ios' } })).status).toBe(401);
-  await expect(panel.locator('[data-pair-note]')).toContainText('A phone reached this computer over Tailscale, but the six digits did not match.');
-  await expect(panel.locator('[data-pair-note]')).toContainText('4 tries left');
+  const note = panel.locator('[data-pair-note="wrong_code"]');
+  await expect(note).toHaveAttribute('data-via', 'tailnet');
+  await expect(note).toHaveAttribute('data-tries-left', '4');
   await shot('settings-phones-pair-2-wrong-digits');
 
   // The phone scans the QR: the link's secret, redeemed at the tailnet's door.
@@ -224,7 +226,7 @@ test("the owner's no-loop rule: Tailscale's check says signed out, its switch is
     await page.goto(`${world.url}#settings/devices/pair`);
     const flow = page.locator('[data-pair-flow]');
     const way = flow.locator('[data-pair-way="tailscale"]');
-    await expect(way.locator('[data-check="fail"]')).toContainText('Tailscale is signed out on this computer.');
+    await expect(way.locator('[data-check="fail"]')).toHaveCount(1);
     // Turn on stays offered beside Check again: a failing check never takes the way away.
     await expect(way.locator('[data-check-again]')).toBeVisible();
     await way.getByRole('button', { name: 'Turn on Tailscale' }).click();
@@ -260,7 +262,7 @@ test("a code closed by five wrong tries, and the Tailscale switch's two error st
   for (let i = 0; i < 5; i++) expect((await door('pair', { base: tailnetDoor(), body: { code: wrong, name: 'x', platform: 'ios' } })).status).toBe(401);
   expect((await door('pair', { base: tailnetDoor(), body: { code: offer.offer.code, name: 'x', platform: 'ios' } })).status).toBe(410);
   await expect(flow.locator('[data-pair-offer]')).toHaveAttribute('data-expired', 'true', { timeout: 10_000 });
-  await expect(flow).toContainText('The code closed after five wrong tries.');
+  await expect(flow.locator('[data-pair-closed]')).toHaveAttribute('data-pair-closed', 'tries');
   await shot('settings-phones-code-closed-by-wrong-tries');
   await flow.getByRole('button', { name: 'Cancel' }).click();
   const mine = page.getByRole('switch', { name: 'Tailscale', exact: true });
@@ -328,14 +330,14 @@ test('This Wi-Fi: turned on in step 1, the code carries the address and the cert
   expect(await panel.locator('[data-pair-qr] path').getAttribute('d')).toBe(qrModules(offer.link).d);
   // Over Wi-Fi the phone pairs by scanning only: no digits on screen.
   await expect(panel.locator('[data-pair-code]')).toHaveCount(0);
-  await expect(panel.locator('[data-pair-scan-only]')).toHaveText('Over Wi-Fi the phone pairs by scanning only.');
+  await expect(panel.locator('[data-pair-scan-only]')).toBeVisible();
   await expect(panel.locator('[data-pair-address="wifi"]')).toContainText(lan);
   await shot('settings-phones-lan-pair');
 
   // The phone types the digits over the Wi-Fi: refused there, and the code's screen says so.
   const typed = await pinnedRequest(lan, fingerprint, { method: 'POST', path: '/api/inbox/device/pair', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: offer.offer.code, name: 'x', platform: 'ios' }) });
   expect(typed.status).toBe(400);
-  await expect(panel.locator('[data-pair-note]')).toContainText('Over Wi-Fi, pairing works only by scanning.');
+  await expect(panel.locator('[data-pair-note="code_over_wifi"]')).toHaveAttribute('data-via', 'wifi');
 
   // The phone scans the QR: it pins fp and redeems the secret at the LAN address.
   const secret = new URL(offer.link.replace('plannotator://', 'https://x/')).searchParams.get('secret')!;

@@ -428,10 +428,19 @@ export function SettingsPage(props: SettingsPageProps) {
   const heading = useRef<HTMLHeadingElement>(null);
   const firstSection = useRef(true);
 
-  // A new section takes focus to its heading, so a keyboard or screen reader starts at the top of it.
+  // A new section takes focus to its heading, so a keyboard or screen reader starts at the top of it. Back to
+  // a phone's list of sections ("‹ Settings"), focus goes to the row of the section just left.
+  const lastSection = useRef<SettingsSection | null>(section);
+  const list = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    const left = lastSection.current;
+    lastSection.current = section;
     if (firstSection.current) {
       firstSection.current = false;
+      return;
+    }
+    if (section === null) {
+      if (left) list.current?.querySelector<HTMLElement>(`[data-settings-link="${left}"]`)?.focus();
       return;
     }
     heading.current?.focus();
@@ -543,7 +552,7 @@ export function SettingsPage(props: SettingsPageProps) {
 
   const page =
     phone && section === null ? (
-      <div className="ib-plist" data-settings-list="">
+      <div className="ib-plist" data-settings-list="" ref={list}>
         <div className="ib-plist-h">
           <SidebarTrigger />
           <h1>Settings</h1>

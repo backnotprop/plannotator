@@ -49,7 +49,7 @@ import { readInboxRegistry, updateOwnInboxRegistry, type InboxRegistryEntry } fr
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { runTailscale, serveStatusProxy, TAILSCALE_SERVE_TIMEOUT_MS, type TailscaleRunner } from "@plannotator/shared/tailscale";
 import { createInboxLan, LanUnavailableError } from "./inbox-lan";
-import { readPairingChecks, type PairingProbes } from "./inbox-pairing-checks";
+import { readPairingChecks, runTailscaleQuietly, type PairingChecks, type PairingProbes, type PairingTailscaleRunner } from "./inbox-pairing-checks";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { enableTailscaleServe, removeTailscaleServe, TailscaleServeError } from "./tailscale-serve";
 
@@ -141,6 +141,9 @@ export interface PairingAttempt {
   device?: string;
 }
 
+/** How long one read of Pair a phone's checks answers again: the flow asks on open, on Check again and after each switch. */
+export const PAIRING_CHECKS_FRESH_MS = 3_000;
+
 /** The most attempts one offer keeps (a phone retrying in a loop must not grow it without end). */
 const PAIRING_ATTEMPTS_KEPT = 20;
 
@@ -184,6 +187,8 @@ export interface InboxDevicesContext {
   dispatch: (req: Request) => Promise<Response>;
   now?: () => Date;
   tailscale?: TailscaleRunner;
+  /** Tests: how step 1's checks run `tailscale` (may be asynchronous). Default: `tailscale` when given, else the CLI as a child process. */
+  checksTailscale?: PairingTailscaleRunner;
   /** Step 1 of Pair a phone: how its checks are read (inbox-pairing-checks.ts). Default: this computer's own tools. */
   probes?: Partial<PairingProbes>;
   /** The relay (packages/server/inbox-relay.ts): told of each pairing, whose answer carries the mailbox, and of each removal. */
@@ -714,6 +719,36 @@ export function createInboxDevices(context: InboxDevicesContext) {
   };
   const crossOrigin = () => refuse(403, "cross_origin", "Cross-origin requests are not accepted.");
 
+  /**
+   * Step 1's checks: one read in flight at a time, shared by every caller,
+   * and kept `PAIRING_CHECKS_FRESH_MS` after it lands. `fresh` (Check again,
+   * after a switch) skips a kept answer but still joins a read in flight.
+   */
+  let checks: { at: number; done: boolean; value: Promise<PairingChecks> } | null = null;
+  const pairingChecks = (fresh: boolean): Promise<PairingChecks> => {
+    if (checks && (!checks.done || (!fresh && Date.now() - checks.at < PAIRING_CHECKS_FRESH_MS))) return checks.value;
+    const value = readPairingChecks({
+      dataDir: context.dataDir,
+      // Tests hand in a scripted runner; this computer's own `tailscale` runs as a child process, never blocking the Inbox.
+      tailscale: context.checksTailscale ?? context.tailscale ?? runTailscaleQuietly,
+      httpsPort: INBOX_TAILNET_HTTPS_PORT,
+      ownTargets,
+      probes: context.probes,
+    });
+    const entry = { at: Date.now(), done: false, value };
+    checks = entry;
+    value.then(
+      () => {
+        entry.done = true;
+        entry.at = Date.now();
+      },
+      () => {
+        if (checks === entry) checks = null;
+      },
+    );
+    return value;
+  };
+
   const windowRoute = async (req: Request, url: URL): Promise<Response | null> => {
     const path = url.pathname;
     if (path === "/api/inbox/pairing") {
@@ -727,8 +762,8 @@ export function createInboxDevices(context: InboxDevicesContext) {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
       if (crossSiteRead(req)) return crossOrigin();
       // Step 1 of Pair a phone: advisory only. Reads, never turns anything on.
-      const checks = readPairingChecks({ dataDir: context.dataDir, tailscale, httpsPort: INBOX_TAILNET_HTTPS_PORT, ownTargets, probes: context.probes });
-      return json({ checks, lan: lan.state(), tailnet });
+      const answer = await pairingChecks(url.searchParams.get("fresh") === "1");
+      return json({ checks: answer, lan: lan.state(), tailnet });
     }
     if (path === "/api/inbox/devices") {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -750,6 +785,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
       const stale = staleTab(body);
       if (stale) return stale;
       if (typeof body.on !== "boolean") throw new InboxError("validation_error", "on: must be a boolean.", { field: "on" });
+      checks = null;
       return setTailnet(body.on);
     }
     if (path === "/api/inbox/lan") {
@@ -759,6 +795,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
       const stale = staleTab(body);
       if (stale) return stale;
       if (typeof body.on !== "boolean") throw new InboxError("validation_error", "on: must be a boolean.", { field: "on" });
+      checks = null;
       try {
         return json({ lan: lan.set(body.on) });
       } catch (error) {

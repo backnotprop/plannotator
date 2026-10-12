@@ -277,7 +277,8 @@ export interface PairingChecks {
     firewall: 'off' | 'on' | 'block_all' | 'unknown';
   };
   tailscale: {
-    state: 'running' | 'stopped' | 'signed_out' | 'needs_approval' | 'starting' | 'not_installed' | 'unknown';
+    /** `cli_missing`: no `tailscale` command on PATH; `no_answer`: it did not answer in time. */
+    state: 'running' | 'stopped' | 'signed_out' | 'needs_approval' | 'starting' | 'cli_missing' | 'no_answer' | 'unknown';
     login: string | null;
     https_certs: boolean | null;
     port_free: boolean | null;
@@ -453,7 +454,8 @@ export const inboxApi = {
   // Phones: pairing, the paired devices, the tailnet and Wi-Fi switches (packages/server/inbox-devices.ts).
   pairPhone: () => post<PairingOffer>('/api/inbox/pairing', {}),
   pairingOffer: () => get<{ offer: PairingOfferView | null }>('/api/inbox/pairing'),
-  pairingChecks: () => get<{ checks: PairingChecks; lan: LanState; tailnet: TailnetState }>('/api/inbox/pairing/checks'),
+  /** `fresh`: skip the answer the Inbox keeps a few seconds (Check again, after a switch). */
+  pairingChecks: (fresh = false) => get<{ checks: PairingChecks; lan: LanState; tailnet: TailnetState }>(`/api/inbox/pairing/checks${fresh ? '?fresh=1' : ''}`),
   devices: () => get<{ devices: PairedDevice[] }>('/api/inbox/devices'),
   removeDevice: (id: string) => post<{ device: PairedDevice }>(`/api/inbox/devices/${encodeURIComponent(id)}/revoke`, {}),
   tailnet: () => get<{ tailnet: TailnetState }>('/api/inbox/tailnet'),
