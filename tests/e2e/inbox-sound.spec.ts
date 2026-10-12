@@ -328,7 +328,7 @@ test('Settings: the row, Play always plays, and the switch off silences the next
   const block = page.locator('[data-settings-notifications]');
   const row = block.locator('[data-settings-sound]');
   await expect(row).toContainText('Play a sound');
-  await expect(row).toContainText('when an agent asks you');
+  await expect(row).toContainText('When an agent asks you');
   await expect(row.getByRole('slider', { name: 'Volume' })).toHaveValue('60');
   await page.locator('.ib-spage').evaluate((el) => el.scrollTo(0, el.scrollHeight));
   await shot(page, 'settings-sound-row');

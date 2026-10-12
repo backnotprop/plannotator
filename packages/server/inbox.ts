@@ -114,6 +114,7 @@ import { inboxMessageImageRoute } from "./inbox-message-images";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { createInboxLiveSessions } from "./inbox-sessions";
 import { createInboxDevices, DOOR_PREFIX } from "./inbox-devices";
+import type { PairingProbes } from "./inbox-pairing-checks";
 import { createInboxRelay } from "./inbox-relay";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { createInboxTailscale, PHONES_TAILNET_HTTPS_PORT, type InboxTailscale } from "./inbox-tailscale";
@@ -201,6 +202,8 @@ export interface InboxServerOptions {
   now?: () => Date;
   /** How "Reach from my tailnet" runs the `tailscale` CLI. Default: the CLI on PATH. */
   tailscale?: TailscaleRunner;
+  /** Tests: how step 1 of Pair a phone reads this computer (packages/server/inbox-pairing-checks.ts). Default: its own tools. */
+  pairingProbes?: Partial<PairingProbes>;
   /**
    * Phones: pairing, the device door, the tailnet and Wi-Fi listeners, the
    * relay and Settings' Phones block. Default: `resolveInboxPhones`
@@ -1163,6 +1166,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (via === "tailnet" && req.method === "POST" && (path === "/api/inbox/pairing" || path === "/api/inbox/tailnet" || path === "/api/inbox/lan")) {
       return localOnly();
     }
+    // What reached the pairing code, and step 1's checks of this computer, are this computer's own business too.
+    if (via === "tailnet" && (path === "/api/inbox/pairing" || path === "/api/inbox/pairing/checks")) return localOnly();
 
     try {
       if (path === "/api/inbox/health" && req.method === "GET") return json(health());
@@ -1490,6 +1495,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       dispatch: fetch,
       now: options.now,
       tailscale: options.tailscale,
+      probes: options.pairingProbes,
       relay: { paired: async (device) => (relay ? relay.paired(device) : null), revoked: (device) => relay?.revoked(device) },
     });
     phones = devices;

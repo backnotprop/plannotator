@@ -307,6 +307,9 @@ test('a phone width: the sidebar is a sheet the toggle opens, a pick and Escape 
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.setViewportSize({ width: 1440, height: 900 });
+  // Settings is a focused page on a desktop: the sidebar stays away until the person leaves it.
+  await expect(side(page)).toHaveCount(0);
+  await page.locator('[data-settings-back]').click();
   await expect(side(page)).toBeVisible();
   expect(world.errors).toEqual([]);
 });

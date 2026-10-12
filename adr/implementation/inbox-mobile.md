@@ -23,10 +23,13 @@ Two limits exist because pairing cannot work without them: an offer lives 10 min
 | `addresses.tailnet` | `host:port` of the tailnet publication, or null when "Reach from my tailnet" is off |
 | `addresses.lan` | `ip:port` of the LAN listener, or null when "Reach from this Wi-Fi" is off |
 | `addresses.fingerprint` | The LAN certificate's SHA-256 (section 3), or null with the LAN off |
+| `reachable` | The code carries an address a phone can use (added 2026-10-12 for the window's Pair a phone flow, which shows a code only once a way is on; the phone never reads this answer) |
+
+The window also reads, for Pair a phone (window routes, never on the door; the phone's exchanges are unchanged): `GET /api/inbox/pairing`, the last offer's state and what reached the door while it showed (`attempts`: which listener, and wrong code, digits over the Wi-Fi, an older code, after it closed, or redeemed; never the secret or the code), and `GET /api/inbox/pairing/checks`, what this computer can tell about the two ways before any is on.
 
 An offer is single use. It closes when it is redeemed, when it expires, after 5 wrong codes, or when the window makes a new one: one offer is open at a time, so six digits always name one offer. The offer lives in the server's memory only; a restart closes it.
 
-Pairing needs the phone to reach the computer once, over the same Wi-Fi or the tailnet; the relay does not carry a redemption in v1. With both addresses null the offer still answers (a simulator reaches the Inbox on `127.0.0.1`), and "Pair a phone" offers the "Reach from this Wi-Fi" switch in place.
+Pairing needs the phone to reach the computer once, over the same Wi-Fi or the tailnet; the relay does not carry a redemption in v1. With both addresses null the offer still answers (a simulator reaches the Inbox on `127.0.0.1`, `reachable: false`), and the window never shows such a code: Pair a phone starts at "How will your phone reach this computer?" and shows the code only once a way is switched on.
 
 ### The tailnet publication
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { inboxApi, type ArchivedModel } from '../api';
 import { agentName, dayWords, plural } from '../format';
-import { AuthorMark } from '../icons';
+import { AuthorMark, Icon } from '../icons';
 
 /** Rows the block reads at a time ("Show more" reads the next ones). The server allows up to 200 per read. */
 export const ARCHIVED_PAGE = 50;
@@ -82,7 +82,9 @@ function groupByProject(rows: readonly InboxListRow[]): { id: string; name: stri
 }
 
 /**
- * Settings' Archived block (owner ruling 2026-10-12): archived threads leave
+ * Settings → Archived (owner ruling 2026-10-12; drawn as the Archived
+ * section of the design of record `.product/approved/inbox-settings-tabs/`,
+ * whose heading and lede the section supplies): archived threads leave
  * the list altogether and are listed here, newest archived first. When
  * several projects have some, the rows sit under a small header per project
  * with its count ("billing · 2"). Unarchive puts the thread back in the list
@@ -151,25 +153,24 @@ export function ArchivedBlock({ refreshKey, onUnarchive }: ArchivedBlockProps) {
   const grouped = (loaded?.projects.length ?? 0) > 1;
   const left = loaded ? loaded.total - loaded.rows.length : 0;
   const renderRows = (rows: readonly InboxListRow[], label: string) => (
-    <ul className="ib-arclist" aria-label={label}>
+    <ul className="ib-arclist ib-card" aria-label={label}>
       {rows.map((row) => (
         <ArchivedRow key={row.thread_id} row={row} busy={busy !== null} onUnarchive={() => void unarchive(row)} />
       ))}
     </ul>
   );
   return (
-    <div className="ib-sblock" data-settings-archived={loaded ? loaded.total : ''}>
-      <h2>Archived</h2>
-      <p>Threads you archived stay out of the list. Unarchive one to put it back and open it.</p>
+    <div className="ib-arcblock" data-settings-archived={loaded ? loaded.total : ''}>
       {loaded && loaded.total > 0 && (
         <p className="ib-arcnone" data-archived-count="">
           {plural(loaded.total, 'archived thread')}
         </p>
       )}
       {loaded && loaded.rows.length === 0 && (
-        <p className="ib-arcnone" data-archived-empty="">
-          Nothing archived.
-        </p>
+        <div className="ib-card ib-sempty" data-archived-empty="">
+          <Icon name="archive" />
+          Nothing archived. Archive a thread from its header to move it here.
+        </div>
       )}
       {loaded && loaded.rows.length > 0 && !grouped && renderRows(loaded.rows, 'Archived threads')}
       {loaded &&

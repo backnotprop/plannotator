@@ -24,9 +24,10 @@
  * session writes three messages in: three files (one changed on disk after it
  * was sent), then none, then one; the world adds `files` (`{ thread, first,
  * middle, last, ids: { <name>: <attachment id> } }`). Without it the seed is
- * exactly as before.
+ * exactly as before. With `phones` instead, the Inbox serves phones (see
+ * `machine.json` below); the seed is the same.
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { startInboxServer } from "../../packages/server/inbox";
 import { recordInboxAttachments } from "../../packages/shared/inbox/attachments";
@@ -67,7 +68,58 @@ const STOPPED = [
 
 const WAITING = ["The docs site needs a search index.", "", ":::question", "Which search index should the docs use?", "", "- [ ] Pagefind", "- [ ] Orama", ":::"].join("\n");
 
-const server = await startInboxServer({ dataDir, setAsideDelayMs: 60_000, phones: false });
+/**
+ * With a fourth argument `phones`: the Inbox serves phones, with Tailscale and
+ * step 1's checks scripted from `<data dir>/machine.json`, read on every call
+ * (`{ backend, tsMissing, serveFails, noAddress, noOpenssl, noBonjour, firewall }`), so a
+ * test sets what this computer looks like and never runs the real
+ * `tailscale`, `openssl` or system tools. The serve mappings it records are
+ * real loopback ports: the tailnet's door listener answers on them.
+ */
+const machine = (): Record<string, any> => {
+  try {
+    return JSON.parse(readFileSync(join(dataDir, "machine.json"), "utf8"));
+  } catch {
+    return {};
+  }
+};
+const serve = new Map<number, string>();
+const phonesMode = extra === "phones";
+const tailscale = (args: string[]) => {
+  const m = machine();
+  const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
+  if (m.tsMissing) return { error: Object.assign(new Error("spawn tailscale ENOENT"), { code: "ENOENT" }), status: null, stdout: "", stderr: "" };
+  if (args[0] === "status") {
+    return ok(JSON.stringify({ BackendState: m.backend ?? "Running", Self: { DNSName: "macbook.tail0000.ts.net.", UserID: 1 }, User: { "1": { LoginName: "ramos@example.com" } }, CertDomains: ["macbook.tail0000.ts.net"] }));
+  }
+  if (args[1] === "status") {
+    if (serve.size === 0) return ok("{}");
+    const TCP = Object.fromEntries([...serve.keys()].map((p) => [String(p), { HTTPS: true }]));
+    const Web = Object.fromEntries([...serve].map(([p, proxy]) => [`macbook.tail0000.ts.net:${p}`, { Handlers: { "/": { Proxy: proxy } } }]));
+    return ok(JSON.stringify({ TCP, Web }));
+  }
+  const httpsPort = Number(/--https=(\d+)/.exec(args.join(" "))![1]);
+  if (args.includes("off")) {
+    serve.delete(httpsPort);
+    return ok();
+  }
+  if (m.serveFails) return { status: 1, stdout: "", stderr: "Tailscale is stopped." };
+  serve.set(httpsPort, args.at(-1)!);
+  return ok(`Available within your tailnet:\n\nhttps://macbook.tail0000.ts.net:${httpsPort}/\n`);
+};
+const pairingProbes = {
+  lanAddress: () => (machine().noAddress ? null : "192.168.1.42"),
+  network: () => (machine().noAddress ? null : "Ramos Home"),
+  which: (command: string) =>
+    (command === "openssl" && machine().noOpenssl) || (command !== "openssl" && machine().noBonjour) ? null : `/usr/bin/${command}`,
+  firewall: () => (machine().firewall ?? "off") as "off" | "on" | "block_all" | "unknown",
+};
+const server = await startInboxServer({
+  dataDir,
+  setAsideDelayMs: 60_000,
+  phones: phonesMode,
+  ...(phonesMode ? { tailscale, pairingProbes } : {}),
+});
 const store = server.store;
 type World = {
   project: string;
