@@ -51,6 +51,22 @@ export interface ListModel {
   sections: InboxListSection[];
   /** Questions in every project that record a decision once sent: the sidebar's Decisions count. */
   decisions_waiting: number;
+  /** Archived threads in the shown scope; the window asks for the list without them (Settings lists them). */
+  archived_count?: number;
+}
+
+/** GET /api/inbox/threads/archived: Settings' Archived block, newest archived first, a page at a time. */
+export interface ArchivedModel {
+  serverSession: string;
+  cursor: number;
+  project: string | null;
+  /** Every project with archived threads, and how many, for the block's project filter. */
+  projects: { id: string; name: string; archived: number }[];
+  /** Archived threads in the filtered scope, beyond this page too. */
+  total: number;
+  offset: number;
+  limit: number;
+  threads: InboxListRow[];
 }
 
 export interface ThreadModel {
@@ -59,6 +75,8 @@ export interface ThreadModel {
   thread: InboxThread;
   /** The decisions this thread's questions recorded, for the "Settled: ..." lines. */
   decisions: InboxDecision[];
+  /** The thread's list row, an archived thread's too (the window's list leaves those out). Absent from an older Inbox. */
+  row?: InboxListRow | null;
 }
 
 /** A question that records a decision once answered and sent (the Decisions page's Waiting group). */
@@ -276,7 +294,17 @@ async function post<T>(path: string, body: Record<string, unknown>): Promise<T> 
 }
 
 export const inboxApi = {
-  list: () => get<ListModel>('/api/inbox/threads'),
+  // Archived threads leave the window's list (Settings lists them): an older
+  // window and the phone, which ask without this, still get them in Quiet.
+  list: () => get<ListModel>('/api/inbox/threads?archived=exclude'),
+  archived: (input: { project?: string | null; offset?: number; limit?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (input.project) query.set('project', input.project);
+    if (input.offset) query.set('offset', String(input.offset));
+    if (input.limit) query.set('limit', String(input.limit));
+    const qs = query.toString();
+    return get<ArchivedModel>(`/api/inbox/threads/archived${qs ? `?${qs}` : ''}`);
+  },
   thread: (threadId: string) => get<ThreadModel>(`/api/inbox/threads/${encodeURIComponent(threadId)}`),
   settings: () => get<SettingsModel>('/api/inbox/settings'),
   seen: (threadId: string) => post<unknown>(`/api/inbox/threads/${encodeURIComponent(threadId)}/seen`, {}),

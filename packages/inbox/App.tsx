@@ -27,7 +27,7 @@ import {
   type UpdateDetails,
   type WhatsNewModel,
 } from './api';
-import { filterSections, heldNotice, refreshHeldRows, waitingCount } from './held';
+import { filterSections, heldNotice, markHeldRowArchived, refreshHeldRows, waitingCount } from './held';
 import { tildePath } from './format';
 import { inboxImageSrcResolver } from './images';
 import type { ConnectContext } from './harnesses';
@@ -37,6 +37,7 @@ import { InboxList } from './components/InboxList';
 import { ThreadPane } from './components/Thread';
 import { EmptyState } from './components/EmptyState';
 import { SettingsPage } from './components/Settings';
+import { ArchivedBlock } from './components/Archived';
 import { NotificationAsk } from './components/NotificationAsk';
 import { useInboxNotifications } from './notify';
 import { useInboxSound } from './sound';
@@ -229,6 +230,8 @@ function Inbox() {
   const [shown, setShown] = useState<InboxListSection[] | null>(null);
   const [thread, setThread] = useState<InboxThread | null>(null);
   const [threadDecisions, setThreadDecisions] = useState<InboxDecision[]>([]);
+  /** The open thread's own list row, from its read: an archived thread has none in the list. */
+  const [threadRow, setThreadRow] = useState<InboxListRow | null>(null);
   /** The open thread's "new since you looked" boundary (folding.ts), from before this look. */
   const [look, setLook] = useState<{ threadId: string; seq: number | null } | null>(null);
   const [decisions, setDecisions] = useState<DecisionsModel | null>(null);
@@ -319,6 +322,7 @@ function Inbox() {
       if (routeRef.current.thread === threadId) {
         setThread(next.thread);
         setThreadDecisions(next.decisions);
+        setThreadRow(next.row ?? null);
         // What is new since the last look, from the first read of this thread:
         // it lands before the window records the look, and is kept until the person leaves the thread.
         setLook((current) => (current?.threadId === threadId ? current : { threadId, seq: lookBoundary(next.thread) }));
@@ -409,6 +413,7 @@ function Inbox() {
     const threadId = route.thread;
     if (!threadId) {
       setThread(null);
+      setThreadRow(null);
       setLook(null);
       return;
     }
@@ -620,6 +625,13 @@ function Inbox() {
       showToast({ text: cause instanceof Error ? cause.message : 'The thread did not change.', warn: true });
       return;
     }
+    // The list leaves archived threads out (Settings lists them). While the
+    // thread is open its row stays where it is, shown archived; it goes when
+    // the person leaves the thread.
+    if (next && routeRef.current.thread === threadId) {
+      const at = new Date().toISOString();
+      setShown((current) => (current ? markHeldRowArchived(current, threadId, at) : current));
+    }
     await afterWrite();
     if (next) {
       showToast({ text: 'Archived. The next message starts a new thread.', short: 'Archived.', onUndo: () => void archive(threadId, rootId, false) });
@@ -628,6 +640,28 @@ function Inbox() {
       dismissToast();
       say('Unarchived.');
     }
+  };
+
+  /**
+   * Settings' Unarchive: the thread goes back to the list, in whatever
+   * section its state puts it, and opens there (owner ruling 2026-10-12).
+   */
+  const unarchiveFromSettings = async (row: InboxListRow): Promise<boolean> => {
+    try {
+      await inboxApi.resolve(row.thread_id, false);
+    } catch (cause) {
+      showToast({ text: cause instanceof Error ? cause.message : 'The thread did not change.', warn: true });
+      return false;
+    }
+    go({ page: 'inbox', project: null, thread: row.thread_id });
+    await refreshList(true);
+    const subject = row.subject ?? 'The thread';
+    showToast({
+      text: `Moved back to your Inbox: “${subject}”.`,
+      short: 'Unarchived.',
+      onUndo: () => void archive(row.thread_id, row.thread_id, true),
+    });
+    return true;
   };
 
   // E marks the open thread (or the focused row) read, and again moves it
@@ -860,6 +894,11 @@ function Inbox() {
 
   const projects = latest?.projects ?? [];
   const latestSections = latest?.sections ?? [];
+  // The open thread's row: the list's, else its own read's (an archived thread is not in the list).
+  const openThreadRow = thread
+    ? (latestSections.flatMap((section) => section.threads).find((row) => row.thread_id === thread.thread_id) ??
+      (threadRow?.thread_id === thread.thread_id ? threadRow : null))
+    : null;
   const projectCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const project of projects) counts.set(project.id, waitingCount(latestSections, project.id));
@@ -1024,6 +1063,7 @@ function Inbox() {
         onDeleteThread={deleteThread}
         onDeleteProject={deleteProject}
         sound={settings?.sound ? sound : undefined}
+        archived={<ArchivedBlock refreshKey={latest?.cursor ?? null} onUnarchive={unarchiveFromSettings} />}
         about={
           <AboutBlock
             version={latest?.version ?? settings?.version ?? 'dev'}
@@ -1104,8 +1144,8 @@ function Inbox() {
         {route.thread && thread && thread.thread_id === route.thread && (
           <ThreadPane
             thread={thread}
-            sent={latestSections.flatMap((section) => section.threads).find((row) => row.thread_id === thread.thread_id)?.sent ?? null}
-            row={latestSections.flatMap((section) => section.threads).find((row) => row.thread_id === thread.thread_id) ?? null}
+            sent={openThreadRow?.sent ?? null}
+            row={openThreadRow}
             onMarkRead={(read) => void markRead(thread.thread_id, read)}
             onArchive={(next) => void archive(thread.thread_id, thread.messages[0]!.id, next)}
             replyRequest={replyFor}

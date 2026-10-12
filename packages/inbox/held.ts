@@ -61,6 +61,22 @@ export function refreshHeldRows(shown: readonly InboxListSection[], latest: read
   }));
 }
 
+/**
+ * The person archived a thread while its row is on screen (the thread is
+ * open). The list the window reads leaves archived threads out, so
+ * refreshHeldRows would keep the row as it was; this shows it archived in
+ * place instead ("Archived", not bold), where it stays until the person
+ * leaves the thread and the list catches up without it.
+ */
+export function markHeldRowArchived(shown: readonly InboxListSection[], threadId: string, at: string): InboxListSection[] {
+  return shown.map((section) => ({
+    ...section,
+    threads: section.threads.map((row) =>
+      row.thread_id === threadId ? { ...row, resolved_at: row.resolved_at ?? at, section: 'quiet' as const, unread: false } : row,
+    ),
+  }));
+}
+
 /** One project's rows only; the sections stay, empty ones included. */
 export function filterSections(sections: readonly InboxListSection[], projectId: string | null): InboxListSection[] {
   if (!projectId) return sections.map((s) => ({ ...s }));

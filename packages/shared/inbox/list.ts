@@ -35,6 +35,12 @@
  * new message, or the person's reply (which in most cases moves it to Sent).
  * Picks, looks and reads move it between sections only. Ties break on the
  * thread id, so the order is total.
+ *
+ * Archived threads (owner ruling 2026-10-12): the window keeps them out of the
+ * list altogether and shows them in Settings' Archived block instead. The
+ * list model still places them in Quiet unless the caller asks for them apart
+ * (`GET /api/inbox/threads?archived=exclude`), so an older window and the
+ * phone, which may draw these sections, read exactly what they read before.
  */
 
 import {
@@ -84,4 +90,19 @@ export function inboxListSections(rows: readonly InboxListRow[]): InboxListSecti
     label,
     threads: rows.filter((row) => row.section === id).sort(newestFirst),
   }));
+}
+
+/** Archived (resolved): the thread ended. Not shown in the window's list; Settings lists it. */
+export function inboxRowArchived(row: Pick<InboxListRow, "resolved_at">): boolean {
+  return row.resolved_at !== null;
+}
+
+/** Newest archived first (the Archived block's order); ties on the thread id. */
+function newestArchivedFirst(left: InboxListRow, right: InboxListRow): number {
+  return (right.resolved_at ?? "").localeCompare(left.resolved_at ?? "") || byId(left, right);
+}
+
+/** The archived rows, newest archived first. */
+export function inboxArchivedRows(rows: readonly InboxListRow[]): InboxListRow[] {
+  return rows.filter(inboxRowArchived).sort(newestArchivedFirst);
 }
