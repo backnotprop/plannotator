@@ -17,13 +17,17 @@ import { inboxApi, type InboxThemeConfig } from './api';
 
 /**
  * The config store's server write-back, for the Inbox: it has no /api/config,
- * so only `theme` goes anywhere (to config.json through the Inbox's settings
- * route); every other server-synced setting stays in the page's cookies.
+ * so only the theme's MODE goes anywhere (to config.json through the Inbox's
+ * settings route, which merges per field); every other server-synced setting
+ * stays in the page's cookies. The store hands over the whole pair, but the
+ * Inbox only ever changes the mode, and its copy of the palettes can be days
+ * old (a palette picked in plan review since this tab loaded) or the defaults
+ * (a page with no cookies): sending them would undo the person's palettes.
  */
 export const inboxThemeSync: ServerSyncFn = (payload) => {
-  const theme = payload.theme;
-  if (theme && typeof theme === 'object' && !Array.isArray(theme)) {
-    void inboxApi.saveTheme(theme as InboxThemeConfig).catch(() => {});
+  const mode = (payload.theme as InboxThemeConfig | undefined)?.mode;
+  if (mode === 'light' || mode === 'dark' || mode === 'system') {
+    void inboxApi.saveTheme({ mode }).catch(() => {});
   }
 };
 
@@ -39,6 +43,12 @@ export function adoptSavedTheme(theme: InboxThemeConfig | null | undefined): voi
   if (adopted) return;
   adopted = true;
   if (theme && !chosenHere) configStore.init({ theme });
+}
+
+/** Tests only: forget the first settings read and any choice, as a fresh page would. */
+export function resetInboxThemeForTests(): void {
+  adopted = false;
+  chosenHere = false;
 }
 
 /**
