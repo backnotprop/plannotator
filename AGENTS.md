@@ -272,7 +272,7 @@ a replacement session. The Esc-aborts-the-review behavior of the old blocking
 tool is gone: leaving plan mode is how to abandon a review. Closing it first
 calls the plan server's in-process `closeKeepingDraft()` (never reachable over
 HTTP, where a plan review stays unclosable): open tabs get the `session-closed`
-event with `by: "session"` (the tab says plan mode ended, not "Closed by the
+event with `by: "session"` (the tab shows "Review Closed", not "Closed by the
 Agent", which stays for `by: "agent"` host closes), and a late approve/deny
 answers `409`. The saved draft survives the close, but the server stops right
 after, so the last unsaved keystrokes (the draft autosave's debounce window)

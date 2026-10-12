@@ -116,7 +116,7 @@ export interface PlanServerResult {
 	 * session that opened this review is going away (/reload, a session
 	 * switch, leaving plan mode), so nothing could deliver a decision. Tells
 	 * open tabs over the external-annotation stream (`session-closed` with
-	 * `by: "session"`: the tab says plan mode ended and keeps its saved draft)
+	 * `by: "session"`: the tab says the agent session ended and keeps its saved draft)
 	 * and refuses any later decision. The caller stops the server afterwards.
 	 */
 	closeKeepingDraft: () => HostCloseOutcome;

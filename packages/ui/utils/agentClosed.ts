@@ -35,14 +35,16 @@ export function agentClosedSubtitle(unsentAnnotations: number, surface: AgentClo
 /**
  * Copy for a plan review closed because plan mode or the agent session ended
  * (`session-closed` with `by: "session"`, Pi's plan review), not because the
- * agent asked to close it.
+ * agent asked to close it. Neutral on purpose: it also runs on /reload and
+ * session switches, after which plan mode may come back.
  */
-export const SESSION_CLOSED_TITLE = 'Plan Mode Ended';
+export const SESSION_CLOSED_TITLE = 'Review Closed';
 
 export function sessionClosedSubtitle(unsentAnnotations: number): string {
-  if (unsentAnnotations <= 0) return 'Plan mode ended in the agent session.';
+  const ended = 'The agent session that opened this plan review ended.';
+  if (unsentAnnotations <= 0) return ended;
   const comments = unsentAnnotations === 1 ? 'Your comment is' : `Your ${unsentAnnotations} comments are`;
-  return `Plan mode ended in the agent session. ${comments} saved.`;
+  return `${ended} ${comments} saved.`;
 }
 
 /** Title and subtitle for a closed review, by who closed it. */

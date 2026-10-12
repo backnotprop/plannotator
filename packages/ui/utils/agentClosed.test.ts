@@ -30,7 +30,9 @@ describe("closedReviewCopy", () => {
     }
   });
 
-  test("with nothing unsent the session copy claims no saved comments", () => {
+  test("with nothing unsent the session copy is its first sentence only, claiming no saved comments", () => {
     expect(sessionClosedSubtitle(0)).not.toContain("saved");
+    expect(sessionClosedSubtitle(3).startsWith(`${sessionClosedSubtitle(0)} `)).toBe(true);
+    expect(sessionClosedSubtitle(1)).toContain("Your comment is saved.");
   });
 });
