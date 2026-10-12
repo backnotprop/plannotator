@@ -62,6 +62,24 @@ Each entry runs `<your plannotator binary> inbox mcp`. The agent uses it from it
 - `PLANNOTATOR_INBOX_CONNECT=0` skips this step.
 - `plannotator uninstall` removes every entry it added. `--dry-run` lists them first.
 
+### A note in each agent's instructions
+
+The first time you open the Inbox after it connected your agents, it asks once whether to add a short note about the Inbox to each agent's own instructions file, so agents send you decisions and finished work there while you are away. It shows each file before it writes anything:
+
+| Agent | File |
+|-------|------|
+| Claude Code | `~/.claude/rules/plannotator-inbox.md` (a file of its own) |
+| Codex | `~/.codex/AGENTS.override.md` when you have one, else `~/.codex/AGENTS.md` |
+| Gemini CLI | `~/.gemini/GEMINI.md` (or your `context.fileName`) |
+| Pi | the one instructions file Pi reads in `~/.pi/agent/` |
+| OpenCode | `~/.config/opencode/AGENTS.md`, only when you already have it: creating it would stop OpenCode 1 reading your `~/.claude/CLAUDE.md` |
+
+The note sits between two marker lines at the end of the file. Plannotator never overwrites a note you edited, and removing it removes only that section. `plannotator inbox --notes codex,gemini` adds it from the terminal (the agent install prompt runs this only after you say yes). `plannotator inbox --help` lists the exact files on your computer.
+
+### Settings → Agents
+
+Settings lists each agent found on this computer with up to three switches: **Reaches the Inbox** (its MCP entry, or the inbox tool for Claude Code, Pi and OpenCode), **Reminder at session start** (Claude Code, Pi and OpenCode: one line at the start of each session that has the inbox tool) and **Note in its instructions**. A change applies to that agent's next session. An agent you turn off here is never connected again by `plannotator inbox`. Agents not found are folded under **Not found on this computer**, with the command or one-click link for each, editors included.
+
 ## What you see
 
 - **The list.** One row per thread, in sections: Stopped on you, Holding up work, Waiting on you, New since you looked, Sent, and Quiet (folded). Sent waits on the agent, not on you, so it sits below what is new. A row shows the project, the agent, the subject and how many questions wait. New agent activity does not reorder the rows under you. It waits behind "N new in <project>" until you act. Nothing you do in an open thread reorders the list either: the list catches up when you leave the thread.
