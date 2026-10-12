@@ -7,16 +7,19 @@
  * A pid read from an `inbox/inbox.json` proves nothing: the file can outlive
  * its Inbox, the pid can be reused, and a test that read the wrong folder (or
  * ran without its data-dir sandbox) would name the person's own Inbox. So an
- * entry `{ pid, port, serverSession }` is proven for a scratch `root` when:
+ * entry `{ pid, port, serverSession }` is proven for `root` when:
  *
+ *  - `root` is a scratch folder (inside the OS temp dir or the test sandbox;
+ *    never the person's data dir, default or relocated);
  *  - the process is alive and its command line runs the Inbox
  *    (`.../plannotator inbox ...` or `... index.ts inbox ...`, never
- *    `inbox mcp`), and then either
+ *    `inbox mcp`);
  *  - `GET http://127.0.0.1:<port>/api/inbox/health` answers that entry's pid
- *    AND serverSession, or
- *  - nothing answers on the port (stopped with SIGSTOP, still starting, or
- *    shutting down) and the process's working directory is inside `root` (a
- *    detached Inbox runs in `<data dir>/inbox`).
+ *    AND serverSession, or nothing answers on the port (stopped with SIGSTOP,
+ *    still starting, or shutting down); and
+ *  - its working directory is inside `root` (a detached Inbox runs in
+ *    `<data dir>/inbox`). This must be readable when nothing answers; when
+ *    health answered it is checked whenever `/proc` or `lsof` can read it.
  *
  * Anything else (a reused pid, another Inbox, the person's own) is never
  * signalled. Node-safe (no Bun APIs): the Playwright specs use it too.
@@ -25,7 +28,7 @@ import "../setup/sandbox-data-dir";
 import { spawnSync } from "node:child_process";
 import { readFileSync, readlinkSync, realpathSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
-import { isRealDataDir } from "./real-data-dir";
+import { isScratchDataDir } from "./real-data-dir";
 
 /** What an Inbox wrote about itself: enough to recognise it again. */
 export interface InboxEntry {
@@ -48,7 +51,7 @@ export function readInboxEntry(file: string): InboxEntry | null {
 
 /** The entry in `<dataDir>/inbox/inbox.json`. Refuses the real data directory outright. */
 export function inboxEntryOf(dataDir: string): InboxEntry | null {
-  if (isRealDataDir(dataDir)) throw new Error(`refusing to read the real Plannotator data directory: ${dataDir}`);
+  if (!isScratchDataDir(dataDir)) throw new Error(`refusing to read ${dataDir}: not a scratch data dir (it may be a real Inbox)`);
   return readInboxEntry(join(dataDir, "inbox", "inbox.json"));
 }
 
@@ -103,12 +106,16 @@ const inside = (path: string, root: string) => path === root || path.startsWith(
 
 /** This entry's process is the Inbox the scratch folder `root` started (see the header). */
 export async function provenInbox(entry: InboxEntry, root: string): Promise<boolean> {
+  // The test's own folder: a scratch folder, never the person's data dir or a folder holding it.
+  if (!isScratchDataDir(root)) return false;
   if (entry.pid === process.pid || !isAlive(entry.pid) || !runsInbox(entry.pid)) return false;
   const answer = await health(entry.port);
   if (answer === "other") return false;
-  if (answer !== "nothing") return answer.pid === entry.pid && answer.serverSession === entry.serverSession;
+  if (answer !== "nothing" && (answer.pid !== entry.pid || answer.serverSession !== entry.serverSession)) return false;
+  // Its working directory, whenever it can be read, must be inside the test's folder; with nothing
+  // answering on the port it is the only evidence left, so it must be readable then.
   const cwd = cwdOf(entry.pid);
-  if (cwd === null) return false;
+  if (cwd === null) return answer !== "nothing";
   const realRoot = realOrResolved(root);
   return inside(cwd, realRoot) || inside(realOrResolved(cwd), realRoot);
 }

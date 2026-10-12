@@ -3,19 +3,22 @@
  *
  * Two halves:
  *
- *  1. A source scan of every test and dev script. It fails on
- *     - a raw `process.kill(<pid>, <signal>)` in a file that handles Inbox
- *       processes or registries, outside tests/helpers/inbox-process.ts (the
- *       one place that signals, and only once the pid is proven to be the
- *       Inbox that test started);
- *     - a path built from the home directory to `.plannotator`, outside
- *       tests/helpers/real-data-dir.ts (the one place that names it, to refuse it);
- *     - a `startInboxServer(...)` call that does not name its `dataDir` (it
- *       would fall back to the default data dir).
- *  2. The guards themselves: the real data dir (and anything inside it) is
- *     refused however it is spelled, the import-time sandbox works with no
- *     bunfig at all, and a pid that is not provably the test's Inbox is never
- *     signalled.
+ *  1. A source scan of every test and dev script (tests/helpers/real-inbox-scan.ts).
+ *     It fails on
+ *     - a signal in a file that handles Inbox processes or registries,
+ *       outside tests/helpers/inbox-process.ts (the one place that signals,
+ *       and only once the pid is proven to be the Inbox that test started):
+ *       `process.kill` with any signal but 0, `kill`/`pkill`/`killall` through
+ *       spawn/exec or in a shell string, `kill` taken off `process`;
+ *     - a path from the home directory to `.plannotator` (same line, a
+ *       multi-line join, a variable assigned from `homedir()`, the literal
+ *       "~/.plannotator" used as a path), outside tests/helpers/real-data-dir.ts;
+ *     - a `startInboxServer(...)` call that does not name its `dataDir`, or a
+ *       script that starts one without pointing PLANNOTATOR_DATA_DIR at it.
+ *  2. The guards themselves: the real data dir (default or relocated) is
+ *     refused however it is spelled, the import-time sandbox replaces it with
+ *     a temp folder with no bunfig at all, and a pid that is not provably the
+ *     test's Inbox is never signalled.
  *
  * Never reads, writes or signals anything under the real data dir: the
  * refusals are checked as path arithmetic and through child processes that
@@ -27,7 +30,8 @@ import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathS
 import { homedir, tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { provenInbox, signalProvenInbox } from "./helpers/inbox-process";
-import { accountHome as accountHomeOf, isRealDataDir, realDataDirs, refuseRealDataDir } from "./helpers/real-data-dir";
+import { accountHome as accountHomeOf, isRealDataDir, isScratchDataDir, realDataDirs, refuseRealDataDir } from "./helpers/real-data-dir";
+import { homePathFindings, inboxServerFindings, OWN_CHILD_MARK, signalFindings } from "./helpers/real-inbox-scan";
 
 const repoRoot = resolve(import.meta.dir, "..");
 
@@ -56,60 +60,18 @@ function sources(dir = repoRoot, found: string[] = []): string[] {
   return found;
 }
 
-/** The argument list of the call whose `(` is at `open`, split at top-level commas. */
-function callArgs(text: string, open: number): string[] {
-  const args: string[] = [];
-  let depth = 0;
-  let start = open + 1;
-  let quote: string | null = null;
-  for (let i = open; i < text.length; i++) {
-    const c = text[i]!;
-    if (quote) {
-      if (c === "\\") i++;
-      else if (c === quote) quote = null;
-      continue;
-    }
-    // Comments are skipped (an apostrophe in one is not a quote); they still count as argument text.
-    if (c === "/" && text[i + 1] === "/") {
-      const end = text.indexOf("\n", i);
-      i = end === -1 ? text.length : end;
-      continue;
-    }
-    if (c === "/" && text[i + 1] === "*") {
-      const end = text.indexOf("*/", i + 2);
-      i = end === -1 ? text.length : end + 1;
-      continue;
-    }
-    if (c === '"' || c === "'" || c === "`") quote = c;
-    else if (c === "(" || c === "[" || c === "{") depth++;
-    else if (c === ")" || c === "]" || c === "}") {
-      depth--;
-      if (depth === 0) {
-        args.push(text.slice(start, i).trim());
-        return args.filter((a) => a.length > 0);
-      }
-    } else if (c === "," && depth === 1) {
-      args.push(text.slice(start, i).trim());
-      start = i + 1;
-    }
-  }
-  return args;
-}
+/** The scan's own module and this file hold its fixtures (regexes and strings); everything else is scanned. */
+const SCANNER_FILES = new Set(["tests/helpers/real-inbox-scan.ts", "tests/never-touch-the-real-inbox.test.ts"]);
+const SIGNAL_ALLOWED = new Set(["tests/helpers/inbox-process.ts", ...SCANNER_FILES]);
+const HOME_PATH_ALLOWED = new Set(["tests/helpers/real-data-dir.ts", ...SCANNER_FILES]);
 
-const lineOf = (text: string, index: number) => text.slice(0, index).split("\n").length;
-
-/** A file that handles Inbox processes or their registries. */
-const HANDLES_INBOX = /inbox\.json|readInboxRegistry|inboxEntryOf|InboxRegistry|startInbox|inbox-world|inbox-scratch|["']inbox["'],\s*["']--background["']|\/api\/inbox\//;
-
-// This file holds the scan's own fixtures (in strings) and signals only children it spawned.
-const SIGNAL_ALLOWED = new Set(["tests/helpers/inbox-process.ts", "tests/never-touch-the-real-inbox.test.ts"]);
-const HOME_PATH_ALLOWED = new Set(["tests/helpers/real-data-dir.ts", "tests/never-touch-the-real-inbox.test.ts"]);
-
-/** `homedir()` (or $HOME) and `.plannotator` (as a whole path segment) on one line. */
-const HOME_DATA_DIR = /(?:\bhomedir\(\)|userInfo\(\)\.homedir|process\.env\.HOME\b|Bun\.env\.HOME\b)[^\n]*?["'`/\\]\.plannotator(?![\w.-])/;
+const isStandaloneScript = (rel: string) => !/\.(?:test|spec)\.(?:ts|tsx|mts|js|mjs)$/.test(rel);
 
 describe("the source scan", () => {
   const files = sources();
+  const read = (file: string) => readFileSync(join(repoRoot, file), "utf8");
+  const collect = (allowed: Set<string>, scan: (text: string, file: string) => string[]) =>
+    files.filter((file) => !allowed.has(file)).flatMap((file) => scan(read(file), file).map((finding) => `${file}:${finding}`));
 
   test("finds the test and script sources it guards", () => {
     // Sentinels: if the walk stops reaching these, the scan proves nothing.
@@ -119,59 +81,51 @@ describe("the source scan", () => {
   });
 
   test("no raw signal to an Inbox pid outside tests/helpers/inbox-process.ts", () => {
-    const found: string[] = [];
-    for (const file of files) {
-      if (SIGNAL_ALLOWED.has(file)) continue;
-      const text = readFileSync(join(repoRoot, file), "utf8");
-      if (!HANDLES_INBOX.test(text)) continue;
-      for (const match of text.matchAll(/\bprocess\.kill\s*\(/g)) {
-        const args = callArgs(text, match.index! + match[0].length - 1);
-        if (args[1] === "0") continue; // An existence probe sends nothing.
-        found.push(`${file}:${lineOf(text, match.index!)}: process.kill(${args.join(", ")})`);
-      }
-      for (const match of text.matchAll(/\[\s*["'](?:kill|pkill|killall)["']|\b(?:pkill|killall)\s/g)) {
-        found.push(`${file}:${lineOf(text, match.index!)}: ${match[0].trim()}`);
-      }
-    }
     // Use signalInbox / stopInbox (tests/helpers/inbox-world.ts), stopScratchInbox
-    // (tests/e2e/inbox-scratch.ts) or the inbox-process helpers instead.
-    expect(found).toEqual([]);
+    // (tests/e2e/inbox-scratch.ts) or the inbox-process helpers instead; a test's
+    // own non-Inbox child may be marked with OWN_CHILD_MARK on the line.
+    expect(collect(SIGNAL_ALLOWED, (text) => signalFindings(text))).toEqual([]);
   });
 
   test("no path from the home directory to .plannotator outside tests/helpers/real-data-dir.ts", () => {
-    const found: string[] = [];
-    for (const file of files) {
-      if (HOME_PATH_ALLOWED.has(file)) continue;
-      const lines = readFileSync(join(repoRoot, file), "utf8").split("\n");
-      lines.forEach((line, i) => {
-        if (HOME_DATA_DIR.test(line)) found.push(`${file}:${i + 1}: ${line.trim()}`);
-      });
-    }
-    expect(found).toEqual([]);
+    expect(collect(HOME_PATH_ALLOWED, (text) => homePathFindings(text))).toEqual([]);
   });
 
-  test("every startInboxServer call names its dataDir", () => {
-    const found: string[] = [];
-    for (const file of files) {
-      if (file === "tests/never-touch-the-real-inbox.test.ts") continue; // Its fixtures name the call in strings.
-      const text = readFileSync(join(repoRoot, file), "utf8");
-      for (const match of text.matchAll(/\bstartInboxServer\s*\(/g)) {
-        const args = callArgs(text, match.index! + match[0].length - 1);
-        // `start(overrides)` wrappers spread an options object that names it; the call itself must.
-        if (!/\bdataDir\b/.test(args[0] ?? "")) found.push(`${file}:${lineOf(text, match.index!)}`);
-      }
-    }
-    expect(found).toEqual([]);
+  test("every startInboxServer call names its dataDir, and a script points PLANNOTATOR_DATA_DIR at it (config.json follows the env)", () => {
+    expect(collect(SCANNER_FILES, (text, file) => inboxServerFindings(text, isStandaloneScript(file)))).toEqual([]);
   });
 
-  test("the scan catches what it is for (a fixture in memory, not on disk)", () => {
-    const text = `const { pid } = JSON.parse(readFileSync(join(dataDir, "inbox", "inbox.json"), "utf8"));\nprocess.kill(pid, "SIGKILL");\nprocess.kill(pid, 0);\n`;
-    const calls = [...text.matchAll(/\bprocess\.kill\s*\(/g)].map((m) => callArgs(text, m.index! + m[0].length - 1));
-    expect(HANDLES_INBOX.test(text)).toBe(true);
-    expect(calls.filter((args) => args[1] !== "0")).toEqual([["pid", '"SIGKILL"']]);
-    expect(HOME_DATA_DIR.test(`const dir = join(homedir(), ".plannotator", "inbox");`)).toBe(true);
-    expect(HOME_DATA_DIR.test(`const dir = join(homedir(), ".plannotator-resolve-file-");`)).toBe(false);
-    expect(callArgs(`startInboxServer({ version: "x", phones: true })`, 16)[0]).not.toMatch(/\bdataDir\b/);
+  test("the scan catches what it is for (fixtures in memory, not on disk)", () => {
+    const inboxFile = (body: string) => `const { pid } = JSON.parse(readFileSync(join(dataDir, "inbox", "inbox.json"), "utf8"));\n${body}\n`;
+    // Signals.
+    expect(signalFindings(inboxFile('process.kill(pid, "SIGKILL");'))).toHaveLength(1);
+    expect(signalFindings(inboxFile("process.kill(pid);"))).toHaveLength(1);
+    expect(signalFindings(inboxFile("process.kill(pid, 0);"))).toEqual([]);
+    expect(signalFindings(inboxFile("execSync(`kill -9 ${pid}`);"))).not.toEqual([]);
+    expect(signalFindings(inboxFile('spawnSync("kill", [String(pid)]);'))).not.toEqual([]);
+    expect(signalFindings(inboxFile('Bun.spawnSync(["pkill", "-f", "plannotator inbox"]);'))).not.toEqual([]);
+    expect(signalFindings(inboxFile("const { kill } = process;\nkill(pid, 9);"))).not.toEqual([]);
+    expect(signalFindings(inboxFile("const stop = process.kill;"))).not.toEqual([]);
+    expect(signalFindings(inboxFile('// kill -9 the old one, process.kill(pid, "SIGKILL")'))).toEqual([]);
+    expect(signalFindings(inboxFile('child.kill("SIGKILL");'))).toEqual([]);
+    expect(signalFindings(inboxFile(`// ${OWN_CHILD_MARK}\nprocess.kill(child.pid, "SIGKILL");`))).toEqual([]);
+    expect(signalFindings('process.kill(child.pid, "SIGKILL");')).toEqual([]); // Not an Inbox file.
+    // Home paths.
+    expect(homePathFindings('const dir = join(homedir(), ".plannotator", "inbox");')).toHaveLength(1);
+    expect(homePathFindings('const dir = join(\n  homedir(),\n  ".plannotator",\n);')).toHaveLength(1);
+    expect(homePathFindings('const home = homedir();\nconst dir = join(home, ".plannotator");')).toHaveLength(1);
+    expect(homePathFindings("const home = os.homedir();\nconst dir = `${home}/.plannotator/inbox`;")).toHaveLength(1);
+    expect(homePathFindings('process.env.PLANNOTATOR_DATA_DIR = "~/.plannotator";')).toHaveLength(1);
+    expect(homePathFindings("expect(text).toContain('~/.plannotator/update.log');")).toEqual([]); // Shown, not used.
+    expect(homePathFindings('const dir = join(homedir(), ".plannotator-resolve-file-");')).toEqual([]);
+    expect(homePathFindings('const home = join(root, "home");\nconst dir = join(home, ".plannotator");')).toEqual([]);
+    expect(homePathFindings("// never ~/.plannotator: join(homedir(), \".plannotator\")")).toEqual([]);
+    // Inbox servers.
+    expect(inboxServerFindings('startInboxServer({ version: "x", phones: true })', false)).toHaveLength(1);
+    expect(inboxServerFindings('startInboxServer({\n  // dataDir comes later\n  version: "x" })', false)).toHaveLength(1);
+    expect(inboxServerFindings("startInboxServer({ dataDir })", false)).toEqual([]);
+    expect(inboxServerFindings("startInboxServer({ dataDir })", true)).toHaveLength(1);
+    expect(inboxServerFindings("process.env.PLANNOTATOR_DATA_DIR = dataDir;\nstartInboxServer({ dataDir })", true)).toEqual([]);
   });
 });
 
@@ -250,26 +204,44 @@ describe("the import-time sandbox works with no bunfig", () => {
     const result = await bun([probe], cwd, baseEnv());
     expect(result.code, result.stderr).toBe(0);
     const dir = result.stdout.trim();
-    expect(dir.length).toBeGreaterThan(0);
-    expect(isRealDataDir(dir)).toBe(false);
-    expect(realpathSync(tmpdir()) === dir || dir.startsWith(tmpdir()) || dir.startsWith(realpathSync(tmpdir()))).toBe(true);
+    expect(isScratchDataDir(dir)).toBe(true);
   });
 
-  test("PLANNOTATOR_DATA_DIR naming the real data dir: the import refuses before anything runs", async () => {
+  test("a scratch value (CI's mktemp -d) is kept", async () => {
     const cwd = scratch("plannotator-no-bunfig-");
-    for (const value of ["~/.plannotator", join(accountHome, ".plannotator")]) {
+    const result = await bun([probe], cwd, { ...baseEnv(), PLANNOTATOR_DATA_DIR: join(cwd, "data") });
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe(join(cwd, "data"));
+  });
+
+  test("the real data dir, default or relocated (/custom), is replaced by a temp folder, never used", async () => {
+    const cwd = scratch("plannotator-no-bunfig-");
+    // The probe only prints: nothing is created or read at these paths.
+    const values = ["~/.plannotator", join(accountHome, ".plannotator"), "/opt/plannotator-relocated-data-probe"];
+    for (const value of values) {
       const result = await bun([probe], cwd, { ...baseEnv(), PLANNOTATOR_DATA_DIR: value });
-      expect(result.code).not.toBe(0);
-      expect(result.stderr).toContain("real Plannotator data directory");
-      expect(result.stdout).toBe("");
+      expect(result.code, result.stderr).toBe(0);
+      const dir = result.stdout.trim();
+      expect(dir).not.toBe(value);
+      expect(isScratchDataDir(dir)).toBe(true);
+      expect(result.stderr).toContain("is not a scratch folder");
     }
   });
 
   test("HOME pointed elsewhere does not hide the account's own ~/.plannotator", async () => {
     const cwd = scratch("plannotator-no-bunfig-");
-    const result = await bun([probe], cwd, { ...baseEnv(), HOME: cwd, PLANNOTATOR_DATA_DIR: join(accountHome, ".plannotator") });
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain("real Plannotator data directory");
+    const value = join(accountHome, ".plannotator");
+    const result = await bun([probe], cwd, { ...baseEnv(), HOME: cwd, PLANNOTATOR_DATA_DIR: value });
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout.trim()).not.toBe(value);
+    expect(isScratchDataDir(result.stdout.trim())).toBe(true);
+  });
+
+  test("the helpers' own check refuses a relocated data dir too", () => {
+    expect(isScratchDataDir("/opt/plannotator-relocated-data-probe")).toBe(false);
+    expect(() => refuseRealDataDir("/opt/plannotator-relocated-data-probe", "probe")).toThrow(/not a scratch folder/);
+    expect(isScratchDataDir(join(tmpdir(), "x", "data"))).toBe(true);
+    expect(isScratchDataDir(tmpdir())).toBe(false); // The temp root itself is not a sandbox.
   });
 
   test("the Inbox dev scripts refuse the default data dir, and DAST refuses none", async () => {
@@ -351,8 +323,25 @@ describe("a pid is signalled only once it is proven to be the test's own Inbox",
       await Bun.sleep(200);
       expect(await provenInbox({ pid: fake.pid, port: other.port as number, serverSession: "ours" }, root)).toBe(false);
       expect(await provenInbox({ pid: fake.pid, port: other.port as number, serverSession: "the-other-one" }, root)).toBe(true);
+      // The same answering process is never the test's when `root` is not a scratch folder.
+      expect(await provenInbox({ pid: fake.pid, port: other.port as number, serverSession: "the-other-one" }, join(accountHome, ".plannotator"))).toBe(false);
+      expect(await provenInbox({ pid: fake.pid, port: other.port as number, serverSession: "the-other-one" }, "/opt/plannotator-relocated-data-probe")).toBe(false);
     } finally {
       other.stop(true);
+    }
+  }, 20_000);
+
+  test("health answering for the entry is not enough: the process's folder must be the test's", async () => {
+    const root = scratch("plannotator-proof-");
+    const elsewhere = scratch("plannotator-proof-elsewhere-");
+    const fake = fakeInbox(elsewhere, join(root, "bin"));
+    const answering = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => Response.json({ pid: fake.pid, serverSession: "s" }) });
+    try {
+      await Bun.sleep(200);
+      expect(await provenInbox({ pid: fake.pid, port: answering.port as number, serverSession: "s" }, root)).toBe(false);
+      expect(await provenInbox({ pid: fake.pid, port: answering.port as number, serverSession: "s" }, elsewhere)).toBe(true);
+    } finally {
+      answering.stop(true);
     }
   }, 20_000);
 });

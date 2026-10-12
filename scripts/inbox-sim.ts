@@ -21,7 +21,7 @@ import { dirname, join, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { INBOX_WAKES_META_KEY } from '../packages/shared/inbox/connection';
-import { isRealDataDir, refuseRealDataDir } from '../tests/helpers/real-data-dir';
+import { refuseRealDataDir } from '../tests/helpers/real-data-dir';
 
 export interface SimAgentOptions {
   /** The compiled `plannotator` binary. */
@@ -195,9 +195,12 @@ async function main(): Promise<void> {
     process.stderr.write('Usage: bun scripts/inbox-sim.ts --binary <plannotator> --data-dir <scratch data dir>\n');
     process.exit(2);
   }
-  // A scratch folder only: the simulated agents write threads into this Inbox and start it.
-  if (isRealDataDir(flag('--data-dir')!)) {
-    process.stderr.write(`inbox-sim: refusing ${dataDir}, the real Plannotator data directory. Pass a scratch folder.\n`);
+  // A scratch folder only (inside the OS temp dir or /tmp): the simulated agents
+  // write threads into this Inbox and start it, and a data dir anywhere else may be a real Inbox.
+  try {
+    refuseRealDataDir(flag('--data-dir')!, 'inbox-sim');
+  } catch (error) {
+    process.stderr.write(`${(error as Error).message}\n`);
     process.exit(2);
   }
   mkdirSync(dataDir, { recursive: true });

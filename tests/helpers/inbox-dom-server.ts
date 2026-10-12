@@ -30,6 +30,9 @@ if (!dataDir || !projectsDir || !Number.isInteger(count) || count < 1) {
 }
 // A scratch data dir only, never the person's real one.
 refuseRealDataDir(dataDir, "inbox-dom-server.ts");
+// startInboxServer reads and writes config.json through getPlannotatorDataDir()
+// even when it is given dataDir: point the env at the same scratch folder.
+process.env.PLANNOTATOR_DATA_DIR = dataDir;
 
 const STOPPED = [
   "Before I build the invoice list:",

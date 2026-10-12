@@ -12,11 +12,16 @@
  * inside one of them. Paths compare after `realpath` (as far as they exist)
  * and case-insensitively on macOS and Windows, whose default file systems are.
  *
+ * A relocated data dir (PLANNOTATOR_DATA_DIR=/custom in the person's shell) is
+ * just as real, and cannot be told from a test's by its path, so the refusals
+ * accept only scratch folders: inside the OS temp dir (or /tmp), or the test
+ * sandbox the preload marked (`isScratchDataDir`).
+ *
  * Node-safe (no Bun APIs): the Playwright specs run it under node.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readlinkSync, realpathSync } from "node:fs";
-import { homedir, userInfo } from "node:os";
+import { homedir, tmpdir, userInfo } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { getDefaultPlannotatorDataDir } from "../../packages/shared/data-dir";
 
@@ -117,7 +122,48 @@ export function isRealDataDir(dir: string): boolean {
   });
 }
 
-/** Throw unless `dir` is set and is not (inside) the person's real data directory. Returns `dir`. */
+/**
+ * The marker the test preload (tests/setup/feedback-archive-off.ts) and the
+ * import-time sandbox (tests/setup/sandbox-data-dir.ts) set to the temp data
+ * dir they made: a data dir at or inside it is a sandbox whatever TMPDIR says.
+ */
+export const TEST_SANDBOX_ENV = "PLANNOTATOR_TEST_SANDBOX";
+
+/** The folders a scratch data dir lives under: the OS temp dir, $TMPDIR, /tmp and /var/tmp. */
+function scratchRoots(): string[] {
+  const roots = new Set<string>([tmpdir()]);
+  if (process.env.TMPDIR && isAbsolute(process.env.TMPDIR)) roots.add(process.env.TMPDIR);
+  if (process.platform !== "win32") {
+    roots.add("/tmp");
+    roots.add("/var/tmp");
+  }
+  const marker = process.env[TEST_SANDBOX_ENV]?.trim();
+  if (marker && isAbsolute(marker)) roots.add(marker);
+  return [...roots].map(canonical);
+}
+
+/**
+ * `dir` is a scratch folder: strictly inside a temp root (or at/inside the
+ * sandbox marker) and not a real data dir. A data dir anywhere else may be
+ * the person's own: PLANNOTATOR_DATA_DIR=/custom in their shell IS their
+ * real Inbox, so "not ~/.plannotator" is not enough.
+ */
+export function isScratchDataDir(dir: string): boolean {
+  if (isRealDataDir(dir)) return false;
+  const marker = process.env[TEST_SANDBOX_ENV]?.trim();
+  const markerPath = marker && isAbsolute(marker) ? canonical(marker) : null;
+  const roots = scratchRoots();
+  return expansions(dir).every((candidate) => {
+    const path = canonical(candidate);
+    if (markerPath && (path === markerPath || path.startsWith(`${markerPath}${sep}`))) return true;
+    return roots.some((root) => path.startsWith(`${root}${sep}`));
+  });
+}
+
+/**
+ * Throw unless `dir` is set and is a scratch folder (see `isScratchDataDir`):
+ * never the person's real data directory, default or relocated. Returns `dir`.
+ */
 export function refuseRealDataDir(dir: string | undefined, what: string): string {
   if (!dir || !dir.trim()) {
     throw new Error(`${what}: no data directory. Set PLANNOTATOR_DATA_DIR to a scratch folder; tests and dev scripts never use the default ~/.plannotator.`);
@@ -125,14 +171,16 @@ export function refuseRealDataDir(dir: string | undefined, what: string): string
   if (isRealDataDir(dir)) {
     throw new Error(`${what}: refusing ${dir}, the real Plannotator data directory (${realDataDirs().join(", ")}). Use a scratch folder.`);
   }
+  if (!isScratchDataDir(dir)) {
+    throw new Error(`${what}: refusing ${dir}: not a scratch folder (inside ${tmpdir()} or /tmp). A data dir anywhere else may be a real Inbox.`);
+  }
   return dir;
 }
 
 /**
- * Throw unless PLANNOTATOR_DATA_DIR is set and is not the real data directory.
- * Every Inbox test helper calls it before it starts, signals or removes
- * anything, so a test run that skipped the bunfig preload (run from a folder
- * without one, or by absolute path) fails instead of reaching ~/.plannotator.
+ * Throw unless PLANNOTATOR_DATA_DIR is set and is a scratch folder. Every
+ * Inbox test helper calls it before it starts, signals or removes anything,
+ * so a test that pointed the env somewhere real fails instead of reaching it.
  */
 export function assertSandboxedDataDir(what = "Plannotator test"): string {
   return refuseRealDataDir(process.env.PLANNOTATOR_DATA_DIR, what);

@@ -25,6 +25,11 @@ on:
       - 'apps/hook/server/inbox*'
       - 'scripts/inbox-sim.ts'
       - 'tests/helpers/inbox-world.ts'
+      - 'tests/helpers/inbox-process.ts'
+      - 'tests/helpers/real-data-dir.ts'
+      - 'tests/helpers/hook-dist-stub.ts'
+      - 'tests/setup/sandbox-data-dir.ts'
+      - 'packages/shared/data-dir.ts'
       - 'bun.lock'
       - '.github/workflows/relay.yml'
   push:
@@ -41,6 +46,11 @@ on:
       - 'apps/hook/server/inbox*'
       - 'scripts/inbox-sim.ts'
       - 'tests/helpers/inbox-world.ts'
+      - 'tests/helpers/inbox-process.ts'
+      - 'tests/helpers/real-data-dir.ts'
+      - 'tests/helpers/hook-dist-stub.ts'
+      - 'tests/setup/sandbox-data-dir.ts'
+      - 'packages/shared/data-dir.ts'
       - 'bun.lock'
       - '.github/workflows/relay.yml'
 

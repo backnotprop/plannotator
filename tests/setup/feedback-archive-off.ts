@@ -10,6 +10,9 @@ import { join } from "node:path";
  */
 const testDataDir = mkdtempSync(join(tmpdir(), "plannotator-test-"));
 process.env.PLANNOTATOR_DATA_DIR = testDataDir;
+// Marks the sandbox for tests/helpers/real-data-dir.ts (the scratch check the
+// Inbox helpers and tests/setup/sandbox-data-dir.ts apply).
+process.env.PLANNOTATOR_TEST_SANDBOX = testDataDir;
 
 // A preload's global afterAll runs after file hooks and their awaited subprocesses.
 // Use the runner lifecycle: bun test does not reliably emit process "exit".
