@@ -77,8 +77,8 @@ function SourceIcon({ className }: { className: string }) {
 
 /**
  * Source | Preview for a Markdown file. Desktop: a two-segment switch before
- * Viewed (each segment a pressed/unpressed button). Compact touch: one 44 px
- * eye button whose pressed state is the preview.
+ * Viewed (each segment a pressed/unpressed button). Compact touch: one eye
+ * button (a 44 px hit area) whose pressed state is the preview.
  */
 function MarkdownPreviewToggle({
   enabled,
@@ -104,7 +104,9 @@ function MarkdownPreviewToggle({
           event.stopPropagation();
           onToggle();
         }}
-        className={`ml-1 flex h-9 w-9 flex-none items-center justify-center rounded transition-colors ${enabled ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}
+        // Drawn 36 px; the ::after box makes the hit area 44 px (4 px past
+        // each edge), which the 44 px header leaves room for.
+        className={`relative ml-1 flex h-9 w-9 flex-none items-center justify-center rounded transition-colors after:absolute after:-inset-1 after:content-[''] ${enabled ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}
         title={enabled ? 'Show the source diff' : 'Show the rendered Markdown'}
       >
         <EyeIcon className="w-4 h-4" />
