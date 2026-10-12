@@ -122,7 +122,7 @@ function leadOf(description: string): string {
 
 /** What the agent tool says, before the per-action lines. Fixed text. */
 export const INBOX_TOOL_LEAD =
-  "The Plannotator Inbox on this machine: message the person and get their answer without holding this session open. Set `action` to one of the Inbox's tools below and pass that tool's fields; the project and this session are filled in for you."
+  "The Plannotator Inbox on this machine: message the person and get their answer later, without holding this session open. Use it when the person may not be watching this chat: a decision only they can make (ask it as a :::question block, then go on with work that does not depend on it), finished long work to hand over (a short summary, files to look at in `attachments`), or when they ask you to. Ask in the chat when they are there; never send routine progress. Set `action` to one of the tools below with that tool's fields; the project and this session are filled in."
 
 /**
  * Fixed text: how a reply comes back. The connection delivers the person's
@@ -131,7 +131,7 @@ export const INBOX_TOOL_LEAD =
  * OpenCode 2 as a user message, and all three carry the wake's first line.
  */
 export const INBOX_TOOL_WAKE_NOTE =
-  "When the person replies to a message you sent, their reply arrives in this session by itself once the session is idle, as a message with the line `Plannotator Inbox: <subject> (<reply id>)`: you can end your turn instead of waiting with wait_for_reply."
+  "When the person replies to a message you sent, their reply arrives in this session by itself once it is idle, as a message headed `Plannotator Inbox: <subject> (<reply id>)`: end your turn instead of calling wait_for_reply. Answer with send_message reply_to; resolve_message a thread once the work it was about is done."
 
 /**
  * The agent tool: name, description and input schema, built from the Inbox's
