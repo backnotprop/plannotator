@@ -243,6 +243,12 @@ export class InboxStore {
   private readonly messages = new Map<string, InboxMessage>();
   /** The seq of a message's first line: its place in the event log. */
   private readonly messageSeq = new Map<string, number>();
+  /**
+   * A resolved thread's archive line: the seq of the root line that set its
+   * current `resolved_at`. Derived from the log in seq order, so a replay
+   * finds the same value; nothing is written for it.
+   */
+  private readonly resolvedSeq = new Map<string, number>();
   private readonly questions = new Map<string, InboxQuestionRecord>();
   /** Each message's question ids (a question's message never changes, so the index only grows). */
   private readonly messageQuestions = new Map<string, Set<string>>();
@@ -352,7 +358,11 @@ export class InboxStore {
         this.projectsById.set(line.record.id, line.record);
         this.projectsByRoot.set(line.record.root, line.record);
         break;
-      case "message":
+      case "message": {
+        // The archive line: the root line whose resolved_at differs from the one before it.
+        const before = previous?.kind === "message" ? previous.record.resolved_at : null;
+        if (line.record.resolved_at == null) this.resolvedSeq.delete(line.record.id);
+        else if (before !== line.record.resolved_at || !this.resolvedSeq.has(line.record.id)) this.resolvedSeq.set(line.record.id, line.seq);
         this.messages.set(line.record.id, line.record);
         if (!this.messageSeq.has(line.record.id)) {
           this.messageSeq.set(line.record.id, line.seq);
@@ -362,6 +372,7 @@ export class InboxStore {
           this.indexRoot(line.record);
         }
         break;
+      }
       case "question": {
         this.questions.set(line.record.id, line.record);
         const ids = this.messageQuestions.get(line.record.message_id);
@@ -463,11 +474,24 @@ export class InboxStore {
     return this.messages.get(threadId)?.resolved_at != null;
   }
 
+  /**
+   * A message's questions read as closed because the person archived its
+   * thread after it arrived. A message an agent sent after the archive line
+   * (a reply that brings the thread back) keeps its questions live, so the
+   * list places the thread by them; the thread stays resolved.
+   */
+  private closedByArchive(message: InboxMessage): boolean {
+    const root = this.messages.get(message.thread_id);
+    if (!root || root.resolved_at == null) return false;
+    const archiveSeq = this.resolvedSeq.get(root.id) ?? Number.MAX_SAFE_INTEGER;
+    return (this.messageSeq.get(message.id) ?? 0) < archiveSeq;
+  }
+
   questionsOf(messageId: string): InboxQuestion[] {
     const message = this.messages.get(messageId);
     if (!message) return [];
-    const resolved = this.isResolved(message.thread_id);
-    return this.questionRecords(messageId).map((record) => toInboxQuestion(record, resolved));
+    const closed = this.closedByArchive(message);
+    return this.questionRecords(messageId).map((record) => toInboxQuestion(record, closed));
   }
 
   private wire(message: InboxMessage): InboxMessageWire {
@@ -618,12 +642,17 @@ export class InboxStore {
       last.author.kind === "person"
         ? { at: last.created_at, checked_at: (root.agent_checked_seq ?? 0) >= seqOf(last) ? (root.agent_checked_at ?? null) : null }
         : null;
+    // An agent wrote after the person archived the thread: it is news again
+    // (mail apps' rule). The thread stays resolved until the person acts.
+    const archiveSeq = root.resolved_at !== null ? (this.resolvedSeq.get(threadId) ?? Number.MAX_SAFE_INTEGER) : null;
+    const agentAfterArchive = archiveSeq !== null && messages.some((m) => m.author.kind === "agent" && seqOf(m) > archiveSeq);
     const facts = {
       ...summary,
+      agent_after_archive: agentAfterArchive,
       read_at: this.readAt(root, messages),
       project: { id: project.id, name: project.name },
       thread_name: root.thread_name ?? null,
-      answered_not_sent: root.resolved_at === null && summary.questions.open === 0 && summary.questions.picked > 0,
+      answered_not_sent: (root.resolved_at === null || agentAfterArchive) && summary.questions.open === 0 && summary.questions.picked > 0,
       waiting_since: waitingSince,
       unseen,
       sent,
@@ -1232,11 +1261,11 @@ export class InboxStore {
   /** A thread's questions that may still be superseded (open, or picked and not sent), with their prompts. */
   openQuestionsOf(threadId: string | null): { id: string; prompt: string }[] {
     if (threadId === null) return [];
-    const resolved = this.isResolved(threadId);
     const out: { id: string; prompt: string }[] = [];
     for (const message of this.threadMessages(threadId)) {
+      const closed = this.closedByArchive(message);
       for (const record of this.questionRecords(message.id)) {
-        if (isInboxQuestionSupersedable(inboxQuestionState(record, resolved))) out.push({ id: record.id, prompt: record.prompt });
+        if (isInboxQuestionSupersedable(inboxQuestionState(record, closed))) out.push({ id: record.id, prompt: record.prompt });
       }
     }
     return out;
@@ -1266,7 +1295,6 @@ export class InboxStore {
       ),
     ];
     if (requests.length === 0) return plan;
-    const resolved = threadId !== null && this.isResolved(threadId);
     const problems: string[] = [];
     // Which new block's Replaces: line claimed each old question: two blocks
     // cannot both replace one question.
@@ -1293,6 +1321,7 @@ export class InboxStore {
         problems.push(`${where} ${ref}: message ${target.message_id} has no question ${target.key}.`);
         continue;
       }
+      const resolved = this.closedByArchive(message);
       const open = records.filter((r) => isInboxQuestionSupersedable(inboxQuestionState(r, resolved)));
       if (open.length === 0) {
         problems.push(

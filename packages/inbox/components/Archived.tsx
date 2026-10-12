@@ -28,18 +28,19 @@ interface Loaded {
   rows: InboxListRow[];
 }
 
-/** Read the first `count` archived rows of the scope, as many reads as the server's page limit needs. */
-async function readArchived(project: string | null, count: number): Promise<Loaded> {
+/** Read the first `count` archived rows, as many reads as the server's page limit needs. */
+async function readArchived(count: number): Promise<Loaded> {
   const rows: InboxListRow[] = [];
   let model: ArchivedModel | null = null;
   do {
-    model = await inboxApi.archived({ project, offset: rows.length, limit: Math.min(READ_MAX, count - rows.length) });
+    model = await inboxApi.archived({ offset: rows.length, limit: Math.min(READ_MAX, count - rows.length) });
     rows.push(...model.threads);
   } while (rows.length < count && rows.length < model.total && model.threads.length > 0);
   return { projects: model.projects, total: model.total, rows };
 }
 
-function ArchivedRow({ row, filtered, busy, onUnarchive }: { row: InboxListRow; filtered: boolean; busy: boolean; onUnarchive: () => void }) {
+/** One archived thread: no project label, since a header names it when several projects have some. */
+function ArchivedRow({ row, busy, onUnarchive }: { row: InboxListRow; busy: boolean; onUnarchive: () => void }) {
   const subject = row.subject ?? '(no subject)';
   return (
     <li className="ib-srow ib-arcrow" data-archived-thread={row.thread_id}>
@@ -50,7 +51,6 @@ function ArchivedRow({ row, filtered, busy, onUnarchive }: { row: InboxListRow; 
           <span className="ib-st">{subject}</span>
         </span>
         <span className="ib-d">
-          {!filtered && <>{row.project.name} · </>}
           {agentName(row.author)} · Archived {row.resolved_at ? dayWords(row.resolved_at) : ''} · {plural(row.message_count, 'message')}
         </span>
       </span>
@@ -70,14 +70,25 @@ function ArchivedRow({ row, filtered, busy, onUnarchive }: { row: InboxListRow; 
   );
 }
 
+/** The loaded rows grouped by project, a group per project in the order its newest archived row appears. */
+function groupByProject(rows: readonly InboxListRow[]): { id: string; name: string; rows: InboxListRow[] }[] {
+  const groups = new Map<string, { id: string; name: string; rows: InboxListRow[] }>();
+  for (const row of rows) {
+    const group = groups.get(row.project.id) ?? { id: row.project.id, name: row.project.name, rows: [] };
+    group.rows.push(row);
+    groups.set(row.project.id, group);
+  }
+  return [...groups.values()];
+}
+
 /**
  * Settings' Archived block (owner ruling 2026-10-12): archived threads leave
- * the list altogether and are listed here, newest archived first, with a
- * project filter when several projects have some. Unarchive puts the thread
- * back in the list and opens it there.
+ * the list altogether and are listed here, newest archived first. When
+ * several projects have some, the rows sit under a small header per project
+ * with its count ("billing · 2"). Unarchive puts the thread back in the list
+ * and opens it there.
  */
 export function ArchivedBlock({ refreshKey, onUnarchive }: ArchivedBlockProps) {
-  const [project, setProject] = useState<string | null>(null);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -86,16 +97,11 @@ export function ArchivedBlock({ refreshKey, onUnarchive }: ArchivedBlockProps) {
   const want = useRef(ARCHIVED_PAGE);
   const generation = useRef(0);
 
-  const load = useCallback(async (scope: string | null) => {
+  const load = useCallback(async () => {
     const mine = ++generation.current;
     try {
-      const next = await readArchived(scope, want.current);
+      const next = await readArchived(want.current);
       if (mine !== generation.current) return;
-      // The filtered project has nothing archived any more (the last one came back): every project.
-      if (scope !== null && !next.projects.some((p) => p.id === scope)) {
-        setProject(null);
-        return;
-      }
       setLoaded(next);
       setError(null);
     } catch (cause) {
@@ -104,14 +110,14 @@ export function ArchivedBlock({ refreshKey, onUnarchive }: ArchivedBlockProps) {
   }, []);
 
   useEffect(() => {
-    void load(project);
-  }, [load, project, refreshKey]);
+    void load();
+  }, [load, refreshKey]);
 
   const showMore = async () => {
     if (!loaded) return;
     setMore(true);
     try {
-      const page = await inboxApi.archived({ project, offset: loaded.rows.length, limit: ARCHIVED_PAGE });
+      const page = await inboxApi.archived({ offset: loaded.rows.length, limit: ARCHIVED_PAGE });
       const seen = new Set(loaded.rows.map((row) => row.thread_id));
       const rows = [...loaded.rows, ...page.threads.filter((row) => !seen.has(row.thread_id))];
       want.current = Math.max(want.current, rows.length);
@@ -130,57 +136,55 @@ export function ArchivedBlock({ refreshKey, onUnarchive }: ArchivedBlockProps) {
     if (!done) return;
     // The window has usually moved to the thread by now; if not, the row leaves here.
     setLoaded((current) =>
-      current ? { ...current, total: Math.max(0, current.total - 1), rows: current.rows.filter((r) => r.thread_id !== row.thread_id) } : current,
+      current
+        ? {
+            projects: current.projects
+              .map((p) => (p.id === row.project.id ? { ...p, archived: p.archived - 1 } : p))
+              .filter((p) => p.archived > 0),
+            total: Math.max(0, current.total - 1),
+            rows: current.rows.filter((r) => r.thread_id !== row.thread_id),
+          }
+        : current,
     );
   };
 
-  const all = loaded?.projects.reduce((n, p) => n + p.archived, 0) ?? 0;
+  const grouped = (loaded?.projects.length ?? 0) > 1;
   const left = loaded ? loaded.total - loaded.rows.length : 0;
+  const renderRows = (rows: readonly InboxListRow[], label: string) => (
+    <ul className="ib-arclist" aria-label={label}>
+      {rows.map((row) => (
+        <ArchivedRow key={row.thread_id} row={row} busy={busy !== null} onUnarchive={() => void unarchive(row)} />
+      ))}
+    </ul>
+  );
   return (
-    <div className="ib-sblock" data-settings-archived={loaded ? all : ''}>
+    <div className="ib-sblock" data-settings-archived={loaded ? loaded.total : ''}>
       <h2>Archived</h2>
       <p>Threads you archived stay out of the list. Unarchive one to put it back and open it.</p>
-      {loaded && all > 0 && (
-        <div className="ib-srow ib-arcfilter">
-          {loaded.projects.length > 1 && (
-            <select
-              className="ib-select"
-              aria-label="Project"
-              data-archived-project=""
-              value={project ?? ''}
-              onChange={(event) => setProject(event.target.value || null)}
-            >
-              <option value="">All projects ({all})</option>
-              {loaded.projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} ({p.archived})
-                </option>
-              ))}
-            </select>
-          )}
-          <span className="ib-d" data-archived-count="">
-            {plural(loaded.total, 'archived thread')}
-          </span>
-        </div>
+      {loaded && loaded.total > 0 && (
+        <p className="ib-arcnone" data-archived-count="">
+          {plural(loaded.total, 'archived thread')}
+        </p>
       )}
       {loaded && loaded.rows.length === 0 && (
         <p className="ib-arcnone" data-archived-empty="">
           Nothing archived.
         </p>
       )}
-      {loaded && loaded.rows.length > 0 && (
-        <ul className="ib-arclist" aria-label="Archived threads">
-          {loaded.rows.map((row) => (
-            <ArchivedRow
-              key={row.thread_id}
-              row={row}
-              filtered={project !== null || loaded.projects.length === 1}
-              busy={busy !== null}
-              onUnarchive={() => void unarchive(row)}
-            />
-          ))}
-        </ul>
-      )}
+      {loaded && loaded.rows.length > 0 && !grouped && renderRows(loaded.rows, 'Archived threads')}
+      {loaded &&
+        grouped &&
+        groupByProject(loaded.rows).map((group) => {
+          const count = loaded.projects.find((p) => p.id === group.id)?.archived ?? group.rows.length;
+          return (
+            <section key={group.id} className="ib-arcgroup" data-archived-group={group.id} aria-label={`${group.name}, ${plural(count, 'archived thread')}`}>
+              <h3 className="ib-arcghead">
+                {group.name} <span className="ib-d">· {count}</span>
+              </h3>
+              {renderRows(group.rows, `Archived in ${group.name}`)}
+            </section>
+          );
+        })}
       {loaded && left > 0 && (
         <div className="ib-srow">
           <span className="ib-d" data-archived-shown="">

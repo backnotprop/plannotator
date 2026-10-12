@@ -381,8 +381,10 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-arcsub { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 13.5px; font-weight: 500; }
 .ib-arcsub .ib-st { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .ib-arcinfo .ib-d { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ib-arcfilter { padding-top: 0; }
-.ib-arcnone { margin: 0; font-size: 13.5px; color: var(--muted-foreground); }
+.ib-arcnone { margin: 0 0 4px; font-size: 13.5px; color: var(--muted-foreground); }
+.ib-arcgroup + .ib-arcgroup { margin-top: 10px; }
+.ib-arcghead { margin: 10px 0 0; padding-bottom: 6px; font-size: 12.5px; font-weight: 600; border-bottom: 1px solid color-mix(in oklch, var(--border) 45%, transparent); }
+.ib-arcghead .ib-d { font-weight: 400; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 /* Phones in Settings (not in the design record; built on Settings' own rows and tokens). */
 .ib-pair { display: flex; gap: 22px; align-items: flex-start; padding: 16px; margin: 6px 0 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
 .ib-qr-wrap { flex: none; width: 196px; height: 196px; border-radius: 8px; overflow: hidden; box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); }

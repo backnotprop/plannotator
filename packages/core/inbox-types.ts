@@ -570,6 +570,13 @@ export interface InboxListRow extends InboxThreadSummary {
    * Absent from an older Inbox.
    */
   read_at?: string | null;
+  /**
+   * The thread is archived (resolved) and an agent wrote in it after the
+   * archive line (a reply_to reply): it is news again and back in the list,
+   * placed as an open thread would be, while it stays resolved until the
+   * person acts. Derived from the log, never stored. Absent from an older Inbox.
+   */
+  agent_after_archive?: boolean;
 }
 
 export interface InboxListSection {

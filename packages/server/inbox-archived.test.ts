@@ -67,7 +67,16 @@ async function setup() {
     const threadId = sent.structuredContent.thread_id;
     return { thread_id: threadId, project_id: server.store.thread(threadId)!.project.id };
   };
-  return { server, billing, docs, send };
+  /** An agent's reply_to reply into a thread (archived or not). */
+  const reply = async (projectPath: string, messageId: string, body: string) => {
+    const sent = (await client.callTool({
+      name: "send_message",
+      arguments: { project_path: projectPath, agent_session: "ses_arch", agent_name: "Claude Code", reply_to: messageId, body },
+    })) as { structuredContent: { thread_id: string }; isError?: boolean };
+    expect(sent.isError ?? false).toBe(false);
+    return sent.structuredContent;
+  };
+  return { server, billing, docs, send, reply };
 }
 
 const url = (server: InboxServer, path: string) => `http://127.0.0.1:${server.port}${path}`;
@@ -166,6 +175,29 @@ describe("archived threads", () => {
     expect(row.resolved_at).toBeNull();
     expect(row.section).not.toBe("quiet");
     expect(model.archived_count).toBe(0);
+  });
+
+  test("an agent's reply into an archived thread brings it back to the list and out of the archived set; it stays resolved", async () => {
+    const { server, billing, send, reply } = await setup();
+    const t = await send(billing, "Release notes");
+    await resolve(server, t.thread_id, true);
+    expect(ids(allRows(await getJson<ListModel>(server, "/api/inbox/threads?archived=exclude")))).not.toContain(t.thread_id);
+
+    const back = await reply(billing, t.thread_id, "One more call.\n\n:::question\nShip it today?\n\n- [ ] Yes\n- [ ] No\n:::");
+    expect(back.thread_id).toBe(t.thread_id);
+    const model = await getJson<ListModel>(server, "/api/inbox/threads?archived=exclude");
+    const row = allRows(model).find((r) => r.thread_id === t.thread_id)!;
+    // News again, placed by its question; still resolved until the person acts.
+    expect(row).toMatchObject({ section: "waiting", unread: true, agent_after_archive: true });
+    expect(row.resolved_at).not.toBeNull();
+    expect(model.archived_count).toBe(0);
+    expect((await getJson<ArchivedModel>(server, "/api/inbox/threads/archived")).total).toBe(0);
+    // The default list (the phone) places it the same way.
+    const phone = await getJson<ListModel>(server, "/api/inbox/threads");
+    expect(phone.sections.find((s) => s.id === "waiting")!.threads.map((r) => r.thread_id)).toContain(t.thread_id);
+    // Its read still says archived.
+    const read = await getJson<{ thread: { resolved_at: string | null } }>(server, `/api/inbox/threads/${t.thread_id}`);
+    expect(read.thread.resolved_at).not.toBeNull();
   });
 
   test("a thread's read carries its row, an archived thread's too", async () => {

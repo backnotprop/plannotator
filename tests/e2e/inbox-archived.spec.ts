@@ -10,8 +10,12 @@
  *    the person leaves the thread; then it is in no section, Quiet included,
  *    while a thread marked read stays in Quiet;
  *  - Settings' Archived block lists the archived threads newest first, with a
- *    project filter when several projects have some;
- *  - Unarchive opens the thread back in the main list.
+ *    small header per project ("billing · 2") when several projects have
+ *    some, and no dropdown;
+ *  - Unarchive opens the thread back in the main list;
+ *  - an agent's reply_to reply into an archived thread brings it back to the
+ *    list (placed by its question) and out of the Archived block, while its
+ *    foot still says Archived.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  * PNGs at 1440 by 900 land in .local/proof/archived/.
@@ -32,6 +36,7 @@ const SEARCH = ['Search for the docs site.', '', ':::question', 'Which search in
 
 interface World {
   url: string;
+  billing: string;
   agents: SimAgent[];
   context: BrowserContext;
   page: Page;
@@ -110,6 +115,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const search = await codex.send({ project_path: docs, subject: 'Search for the docs site', thread: 'search', body: SEARCH });
   world = {
     url,
+    billing,
     agents: [claude, codex],
     context,
     page,
@@ -179,23 +185,22 @@ test('the archived open thread keeps its row until the person leaves; then no se
   await shot('04-list-after');
 });
 
-test('Settings lists the archived threads newest first, with a project filter', async () => {
+test('Settings lists the archived threads newest first, grouped by project with counts', async () => {
   const { page, threads } = world;
   await page.goto(new URL('#settings', world.url).href);
   const block = page.locator('[data-settings-archived]');
   await expect(block.locator('[data-archived-thread]')).toHaveCount(3);
   const order = await block.locator('[data-archived-thread]').evaluateAll((rows) => rows.map((r) => r.getAttribute('data-archived-thread')));
-  expect(order).toEqual([threads.notes, threads.deploy, threads.build]);
+  // Grouped by project (newest archived project first), newest archived first inside each.
+  expect(order).toEqual([threads.notes, threads.build, threads.deploy]);
   await expect(block.locator('[data-archived-count]')).toHaveText('3 archived threads');
-  const select = block.locator('[data-archived-project]');
-  await expect(select.locator('option')).toHaveText(['All projects (3)', 'billing (2)', 'docs-site (1)']);
+  await expect(block.locator('select')).toHaveCount(0);
+  await expect(block.locator('[data-archived-group] h3')).toHaveText(['billing · 2', 'docs-site · 1']);
+  const billing = block.locator('[data-archived-group]').first().locator('[data-archived-thread]');
+  expect(await billing.evaluateAll((rows) => rows.map((r) => r.getAttribute('data-archived-thread')))).toEqual([threads.notes, threads.build]);
+  await expect(block.locator('[data-archived-group]').nth(1)).toContainText('Preview deploy is up');
   await block.scrollIntoViewIfNeeded();
   await shot('05-settings-archived');
-  await select.selectOption({ label: 'docs-site (1)' });
-  await expect(block.locator('[data-archived-thread]')).toHaveCount(1);
-  await expect(block.locator(`[data-archived-thread="${threads.deploy}"]`)).toContainText('Preview deploy is up');
-  await select.selectOption({ label: 'All projects (3)' });
-  await expect(block.locator('[data-archived-thread]')).toHaveCount(3);
 });
 
 test('Unarchive opens the thread back in the main list', async () => {
@@ -211,5 +216,32 @@ test('Unarchive opens the thread back in the main list', async () => {
   await shot('06-unarchived-open', ['light']);
   await page.goto(new URL('#settings', world.url).href);
   await expect(page.locator('[data-settings-archived] [data-archived-thread]')).toHaveCount(2);
+  expect(world.errors).toEqual([]);
+});
+
+test("an agent's reply into an archived thread brings it back to the list and out of the Archived block", async () => {
+  const { page, threads } = world;
+  await page.goto(new URL('#settings', world.url).href);
+  const block = page.locator('[data-settings-archived]');
+  await expect(block.locator(`[data-archived-thread="${threads.build}"]`)).toBeVisible();
+  const claude = world.agents[0]!;
+  await claude.send({
+    project_path: world.billing,
+    reply_to: threads.build,
+    body: 'The nightly build broke again.\n\n:::question\nRoll back the last deploy?\n\n- [ ] Yes\n- [ ] No\n:::',
+  });
+  // The block reads again as the store moves: the thread leaves it.
+  await expect(block.locator(`[data-archived-thread="${threads.build}"]`)).toHaveCount(0);
+  await expect(block.locator('[data-archived-thread]')).toHaveCount(1);
+  // The sidebar's Inbox is an action: the list on screen catches up (held order).
+  await page.getByRole('complementary', { name: 'Inbox navigation' }).getByRole('button', { name: /^Inbox/ }).click();
+  const row = page.locator(`.ib-lbody [data-row="${threads.build}"]`);
+  await expect(row).toBeVisible();
+  await expect(page.locator(`[data-section-id="waiting"] [data-row="${threads.build}"]`)).toBeVisible();
+  await shot('07-agent-reply-back');
+  await page.locator(`.ib-lbody [data-thread-id="${threads.build}"]`).click();
+  await expect(page.locator('.ib-pfoot')).toContainText('Archived. The next message from');
+  await expect(page.locator('section.ib-pane')).toContainText('Roll back the last deploy?');
+  await shot('08-agent-reply-thread', ['light']);
   expect(world.errors).toEqual([]);
 });

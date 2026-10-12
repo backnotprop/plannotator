@@ -7,8 +7,9 @@
  * the thread, then the row is gone from every section; Settings lists it with
  * its project, agent and message count; Unarchive puts it back in the list
  * and opens it there; a deep link still opens an archived thread with
- * Unarchive in its foot; several projects get a project filter; nothing
- * archived says so.
+ * Unarchive in its foot; several projects group the rows under a header
+ * per project (no dropdown); an agent's reply into an archived thread brings
+ * it back to the list and out of the block; nothing archived says so.
  *
  * The tests share one server (the window keeps the first server session it
  * saw), so each archives its own world's threads and puts back what it took.
@@ -225,7 +226,7 @@ test.skipIf(!hasDom)('a deep link opens an archived thread with Unarchive in its
   }
 });
 
-test.skipIf(!hasDom)('several projects: a project filter with counts, and newest archived first', async () => {
+test.skipIf(!hasDom)('several projects: rows grouped under a header per project with its count, newest archived first, no dropdown', async () => {
   const [a, b] = [worlds[0]!, worlds[1]!];
   await setArchived(a.stopped, true);
   await setArchived(b.waiting, true);
@@ -233,20 +234,67 @@ test.skipIf(!hasDom)('several projects: a project filter with counts, and newest
   try {
     const el = await renderApp('#settings');
     await until(() => el.querySelectorAll('[data-archived-thread]').length === 3, 'three archived rows');
-    expect([...el.querySelectorAll('[data-archived-thread]')].map((r) => r.getAttribute('data-archived-thread'))).toEqual([a.filed, b.waiting, a.stopped]);
-    const select = el.querySelector('[data-archived-project]') as HTMLSelectElement;
-    expect([...select.options].map((o) => o.textContent)).toEqual(['All projects (3)', expect.stringMatching(/ \(2\)$/), expect.stringMatching(/ \(1\)$/)]);
-    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
-    act(() => {
-      setter.call(select, a.project);
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    await until(() => el.querySelectorAll('[data-archived-thread]').length === 2, 'the filtered rows');
-    expect([...el.querySelectorAll('[data-archived-thread]')].map((r) => r.getAttribute('data-archived-thread'))).toEqual([a.filed, a.stopped]);
-    expect(el.querySelector('[data-archived-count]')?.textContent).toBe('2 archived threads');
+    const block = el.querySelector('[data-settings-archived]')!;
+    expect(block.querySelector('select')).toBeNull();
+    expect(el.querySelector('[data-archived-count]')?.textContent).toBe('3 archived threads');
+    const groups = [...block.querySelectorAll('[data-archived-group]')];
+    // The project archived most recently first, each with its own rows in order.
+    expect(groups.map((g) => g.getAttribute('data-archived-group'))).toEqual([a.project, b.project]);
+    expect(groups.map((g) => g.querySelector('h3')?.textContent?.replace(/\s+/g, ' ').trim())).toEqual([expect.stringMatching(/ · 2$/), expect.stringMatching(/ · 1$/)]);
+    expect([...groups[0]!.querySelectorAll('[data-archived-thread]')].map((r) => r.getAttribute('data-archived-thread'))).toEqual([a.filed, a.stopped]);
+    expect([...groups[1]!.querySelectorAll('[data-archived-thread]')].map((r) => r.getAttribute('data-archived-thread'))).toEqual([b.waiting]);
   } finally {
     await setArchived(a.stopped, false);
     await setArchived(b.waiting, false);
     await setArchived(a.filed, false);
+  }
+});
+
+/** An agent's reply_to reply, over the Inbox's own MCP (stateless: one tools/call). */
+function agentReply(replyTo: string, body: string): Promise<{ status: number; text: string }> {
+  const payload = JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/call',
+    params: { name: 'send_message', arguments: { project_path: join(dir!, 'projects', 'billing-1'), agent_session: 'ses_reply', agent_name: 'Claude Code', reply_to: replyTo, body } },
+  });
+  return new Promise((done, fail) => {
+    const req = request(
+      { host: '127.0.0.1', port, path: '/mcp', method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Host: `127.0.0.1:${port}` } },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => done({ status: res.statusCode ?? 0, text: Buffer.concat(chunks).toString('utf8') }));
+      },
+    );
+    req.on('error', fail);
+    req.write(payload);
+    req.end();
+  });
+}
+
+test.skipIf(!hasDom)("an agent's reply into an archived thread brings it back to the list and out of the Archived block", async () => {
+  const world = worlds[1]!;
+  await setArchived(world.filed, true);
+  try {
+    const el = await renderApp('#settings');
+    await until(() => archivedRow(el, world.filed) !== null, 'the archived row');
+    const answer = await agentReply(world.filed, 'One more thing.\n\n:::question\nShip the CSV export today?\n\n- [ ] Yes\n- [ ] No\n:::');
+    expect(answer.status).toBe(200);
+    expect(answer.text).not.toContain('"isError":true');
+    // The event stream is stubbed here, so load the window again to read the store as it now is.
+    act(() => root?.unmount());
+    host?.remove();
+    const list = await renderApp('#');
+    await until(() => listRow(list, world.filed) !== null, 'the row back in the list');
+    expect(listRow(list, world.filed)!.closest('[data-section-id]')?.getAttribute('data-section-id')).toBe('waiting');
+    await go('#settings');
+    await until(() => list.querySelector('[data-settings-archived]')?.getAttribute('data-settings-archived') === '0', 'the Archived block without it');
+    expect(archivedRow(list, world.filed)).toBeNull();
+    // Opened, it still says archived, with Unarchive in its foot.
+    await go(`#thread=${world.filed}`);
+    await until(() => list.textContent?.includes('Archived. The next message from') ?? false, 'the archived foot');
+  } finally {
+    await setArchived(world.filed, false);
   }
 });
