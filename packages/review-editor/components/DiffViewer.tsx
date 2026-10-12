@@ -4,6 +4,7 @@ import { getSingularPatch, processFile } from '@pierre/diffs';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/types';
 import type { DiffTokenEventBaseProps } from '@pierre/diffs';
 import { usePierreTheme } from '../hooks/usePierreTheme';
+import { useFileContents } from '../hooks/useFileContents';
 import { useWorkerPoolThemeSync } from '../workerPool';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { storage } from '@plannotator/ui/utils/storage';
@@ -398,36 +399,17 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     return parsed;
   }, [patch, filePath]);
 
-  // Fetch full file contents for expandable context
-  const [fileContents, setFileContents] = useState<{ forPath: string; old: string | null; new: string | null } | null>(null);
-  const [fileContentsLoading, setFileContentsLoading] = useState(contextExpansionAvailable);
+  // Fetch full file contents for expandable context (and the Markdown preview)
+  const { fileContents, loading: fileContentsLoading } = useFileContents({
+    filePath,
+    oldPath,
+    reviewBase,
+    reviewSnapshotId,
+    enabled: contextExpansionAvailable,
+  });
   const [markdownPreviewFilePath, setMarkdownPreviewFilePath] = useState<string | null>(null);
   const markdownPreviewEnabled = markdownPreviewFilePath === filePath;
   const isMarkdownFile = MARKDOWN_PATH_RE.test(filePath) || (!!oldPath && MARKDOWN_PATH_RE.test(oldPath));
-
-  useEffect(() => {
-    const controller = new AbortController();
-    setFileContents(null);
-    setFileContentsLoading(contextExpansionAvailable);
-    // Nothing to expand into: the patch is the whole content of the session.
-    if (!contextExpansionAvailable) return;
-    const params = new URLSearchParams({ path: filePath });
-    if (oldPath) params.set('oldPath', oldPath);
-    if (reviewBase) params.set('base', reviewBase);
-    if (reviewSnapshotId) params.set('snapshot', reviewSnapshotId);
-    fetch(`/api/file-content?${params}`, { signal: controller.signal })
-      .then(res => res.ok ? res.json() : null)
-      .then((data: { oldContent: string | null; newContent: string | null } | null) => {
-        if (data && (data.oldContent != null || data.newContent != null)) {
-          setFileContents({ forPath: filePath, old: data.oldContent, new: data.newContent });
-        }
-      })
-      .catch(() => {}) // Silent fallback — no expansion in demo mode
-      .finally(() => {
-        if (!controller.signal.aborted) setFileContentsLoading(false);
-      });
-    return () => controller.abort();
-  }, [filePath, oldPath, reviewBase, reviewSnapshotId, contextExpansionAvailable]);
 
   // Re-parse the patch with full file contents so hunk indices are computed
   // against the complete file (isPartial: false), enabling expansion.
