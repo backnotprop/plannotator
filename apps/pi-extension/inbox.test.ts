@@ -17,7 +17,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { INBOX_WAKE_INSTRUCTION, inboxWakeText } from "./generated/inbox/connection.ts";
+import { INBOX_REMINDER_TEXT, INBOX_WAKE_INSTRUCTION, inboxWakeText } from "./generated/inbox/connection.ts";
+import { entriesCarryReminder, PI_INBOX_REMINDER_CUSTOM_TYPE } from "./inbox.ts";
 import { INBOX_INSTALL_TEXT } from "./generated/inbox/agent-link.ts";
 import {
 	createInboxWorld,
@@ -37,7 +38,21 @@ import {
 	worldEnv,
 	type InboxWorld,
 } from "../../tests/helpers/inbox-world.ts";
-import { lastMessage, messageText, startScriptedModel, type ScriptedModel, type ScriptedRequest, type ScriptedTurn } from "../../tests/helpers/scripted-model.ts";
+import { messageText, startScriptedModel, type ScriptedModel, type ScriptedRequest, type ScriptedTurn } from "../../tests/helpers/scripted-model.ts";
+
+/**
+ * The last message of a request that is not the Inbox reminder: Pi appends the
+ * reminder after the session's first prompt, and the scripts answer the prompt.
+ */
+function lastMessage(request: ScriptedRequest): { role: string; text: string } {
+	for (let i = request.messages.length - 1; i >= 0; i--) {
+		const message = request.messages[i]!;
+		const text = messageText(message.content);
+		if (text.includes(INBOX_REMINDER_TEXT)) continue;
+		return { role: message.role, text };
+	}
+	return { role: "", text: "" };
+}
 
 const piPackage = join(import.meta.dir, "node_modules", "@earendil-works", "pi-coding-agent");
 /** Pi runs on Node 22.19+ (its engines field); where no such node is on PATH there is no Pi to prove against. The world's `plannotator` wrapper is a /bin/sh script. */
@@ -238,6 +253,48 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		expect((tool.parameters as { required?: string[] }).required).toEqual(["action"]);
 		w.proof(`Inbox running, switch on for pi: plannotator_inbox sent to the model with actions ${JSON.stringify(actions)}\n\n${tool.description}`);
 	}, 120_000);
+
+	test("the reminder: one hidden line at the session's first prompt, only with the tool; later requests keep it in place and add none; reopening the session adds none; inboxReminder off sends none", async () => {
+		const w = world("01b-reminder");
+		const m = model(askingScript());
+		startInbox(w);
+		const carrying = (request: ScriptedRequest) => request.messages.filter((message) => messageText(message.content).includes(INBOX_REMINDER_TEXT));
+
+		knob(w, false);
+		const off = await openPi(w, m);
+		await ask(off, "hello");
+		expect(carrying(m.requests.at(-1)!)).toEqual([]);
+		await off.client.stop();
+
+		knob(w, true);
+		const on = await openPi(w, m);
+		const from = m.requests.length;
+		await ask(on, "first");
+		await ask(on, "second");
+		const [first, second] = [m.requests[from]!, m.requests.at(-1)!];
+		expect(first.tools).toContain("plannotator_inbox");
+		expect(carrying(first)).toHaveLength(1);
+		expect(carrying(second)).toHaveLength(1);
+		// Cache-safe: the second request starts with every message the first one sent, the reminder where it was.
+		expect(second.messages.slice(0, first.messages.length)).toEqual(first.messages);
+		// A conversation message, never the system prompt.
+		expect(messageText(first.messages.find((message) => message.role === "system")?.content)).not.toContain(INBOX_REMINDER_TEXT);
+		w.proof(`first prompt: ${first.messages.length} messages, one carries the reminder; second prompt keeps it in place and adds none`);
+		await on.client.stop();
+
+		const reopened = await openPi(w, m, { session: on.sessionFile });
+		await ask(reopened, "third");
+		expect(carrying(m.requests.at(-1)!)).toHaveLength(1);
+		w.proof("the same session reopened (--session): still exactly one reminder");
+		await reopened.client.stop();
+
+		writeFileSync(join(w.dataDir, "config.json"), JSON.stringify({ inboxTool: { pi: true }, inboxReminder: { pi: false } }));
+		const quiet = await openPi(w, m);
+		await ask(quiet, "hello");
+		expect(m.requests.at(-1)?.tools).toContain("plannotator_inbox");
+		expect(carrying(m.requests.at(-1)!)).toEqual([]);
+		w.proof("inboxReminder.pi false: the tool, no reminder");
+	}, 180_000);
 
 	test("the person's Send wakes the asking Pi session once, as a follow-up: the stable header, the fixed line, the reply verbatim; Delivered to Pi; the answer lands in the same thread", async () => {
 		const w = world("02-send-wakes-the-session");
@@ -463,4 +520,19 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		expect(delivered?.host).toBe("pi");
 		w.proof(`Pi ${process.env.PI_TEST_OLD_CLI}: no agent_settled event; 1 wake; delivered at ${delivered?.at}`);
 	}, 120_000);
+});
+
+// The reminder's latch reads the session path: the failure is a resumed
+// session repeating it, or a compaction that summarized it away leaving the
+// session without it.
+describe("the reminder's latch", () => {
+	const reminder = (id: string) => ({ id, type: "custom_message", customType: PI_INBOX_REMINDER_CUSTOM_TYPE });
+	test("a path that holds it carries it; a compaction that kept it still does; one that summarized it away does not", () => {
+		expect(entriesCarryReminder([])).toBe(false);
+		expect(entriesCarryReminder([{ id: "a", type: "message" }, reminder("b")])).toBe(true);
+		expect(entriesCarryReminder([reminder("a"), { id: "b", type: "message" }, { id: "c", type: "compaction", firstKeptEntryId: "a" }])).toBe(true);
+		expect(entriesCarryReminder([reminder("a"), { id: "b", type: "message" }, { id: "c", type: "compaction", firstKeptEntryId: "b" }])).toBe(false);
+		expect(entriesCarryReminder([reminder("a"), { id: "c", type: "compaction", firstKeptEntryId: "b" }, reminder("d")])).toBe(true);
+		expect(entriesCarryReminder([{ id: "a", type: "custom_message", customType: "plannotator-framing" }])).toBe(false);
+	});
 });

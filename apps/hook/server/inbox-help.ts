@@ -331,7 +331,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     ...HARNESSES.map((harness) => harnessHelpLine(harness, ctx)),
     "",
-    `The \`${INBOX_TOOL_NAME}\` tool is ${defaults}. \`PLANNOTATOR_INBOX_TOOL=1\` or \`0\` turns it on or off everywhere, and config.json \`inboxTool\` takes \`true\`, \`false\` or one per host (\`{ "pi": true }\`); the environment variable wins. A host decides once, at start (Claude Code and OpenCode when the process starts, Pi per session or \`/reload\`), and registers the tool only if the Inbox has run once on this machine by then (\`inbox/inbox.json\` exists). So the tool appears in sessions started after that, never in one already running.`,
+    `The \`${INBOX_TOOL_NAME}\` tool is ${defaults}. \`PLANNOTATOR_INBOX_TOOL=1\` or \`0\` turns it on or off everywhere, and config.json \`inboxTool\` takes \`true\`, \`false\` or one per host (\`{ "pi": true }\`); the environment variable wins. A host decides once, at start (Claude Code and OpenCode when the process starts, Pi per session or \`/reload\`), and registers the tool only if the Inbox has run once on this machine by then (\`inbox/inbox.json\` exists); Claude Code registers it anyway, and its first call starts the Inbox. So the tool appears in sessions started after that, never in one already running. A session with the tool also gets one line at its start saying when to use the Inbox; config.json \`inboxReminder\` (\`false\`, or one per host) turns that line off.`,
     "",
     "## Commands and flags",
     "",

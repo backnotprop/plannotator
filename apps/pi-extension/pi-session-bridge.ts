@@ -51,6 +51,14 @@ import {
 
 export const PLANNOTATOR_ASK_CUSTOM_TYPE = "plannotator-ask";
 
+/**
+ * The Inbox's session-start reminder (inbox.ts): a hidden custom message
+ * `before_agent_start` adds to the first run of a session, which may be the
+ * run answering our question. It is no one's prompt, so it never takes the
+ * question over.
+ */
+export const PI_INBOX_REMINDER_CUSTOM_TYPE = "plannotator-inbox-reminder";
+
 /** How long a sent question may take to show up in the session before it is reported as failed. */
 const START_WATCHDOG_MS = 15_000;
 
@@ -173,6 +181,7 @@ export function createPiSessionBridgeHub(
 			clearWatchdog(ask);
 			return;
 		}
+		if (message.role === "custom" && message.customType === PI_INBOX_REMINDER_CUSTOM_TYPE) return;
 		if (ask.started && (message.role === "user" || (message.role === "custom" && inPrelude))) {
 			// Someone else's prompt entered the run answering our question: the
 			// rest of it answers them. Settle now and leave the run alone.

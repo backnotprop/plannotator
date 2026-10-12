@@ -10,7 +10,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { tool } from "@opencode-ai/plugin";
-import { INBOX_TOOL_WAKE_NOTE } from "@plannotator/shared/inbox/connection";
+import { INBOX_REMINDER_TEXT_NO_WAKE, INBOX_TOOL_WAKE_NOTE } from "@plannotator/shared/inbox/connection";
 import PlannotatorPlugin from "./index";
 import { createInboxWorld, destroyInboxWorld, QUESTION, startInbox, removeStubbedHtml, stubBuiltHtml, thread, type InboxWorld } from "../../tests/helpers/inbox-world";
 
@@ -70,5 +70,33 @@ describe.skipIf(process.platform === "win32")("OpenCode 1 ↔ Plannotator Inbox 
     expect(t.project.root).toBe(w.project);
     expect(t.messages[0]?.author).toMatchObject({ kind: "agent", host: "opencode", name: "OpenCode", session: "ses_opencode1" });
     w.proof(`> plannotator_inbox send_message (OpenCode 1)\n${answer}\n\nthread author ${JSON.stringify(t.messages[0]?.author)}`);
+  }, 60_000);
+
+  test("the reminder: one fixed system line (no-wake wording) on every request, only with the tool; inboxReminder off sends none", async () => {
+    const w = createInboxWorld("plannotator-inbox-oc1-", "04-opencode1-reminder", "opencode1");
+    worlds.push(w);
+    startInbox(w);
+    mkdirSync(w.dataDir, { recursive: true });
+    const system = async (plugin: Record<string, any>) => {
+      const output = { system: ["You are OpenCode."] };
+      await plugin["experimental.chat.system.transform"]?.({ sessionID: "ses_1" }, output);
+      return output.system.join("\n");
+    };
+
+    writeFileSync(path.join(w.dataDir, "config.json"), JSON.stringify({ inboxTool: { opencode: false } }));
+    expect(await system(await loadPlugin(w))).not.toContain(INBOX_REMINDER_TEXT_NO_WAKE);
+
+    writeFileSync(path.join(w.dataDir, "config.json"), JSON.stringify({ inboxTool: { opencode: true } }));
+    const on = await loadPlugin(w);
+    const first = await system(on);
+    expect(first.split(INBOX_REMINDER_TEXT_NO_WAKE)).toHaveLength(2);
+    expect(first).not.toContain("Their reply comes back here");
+    expect(await system(on)).toBe(first);
+    w.proof(`OpenCode 1 with the tool: the system prompt every request\n\n${first}`);
+
+    writeFileSync(path.join(w.dataDir, "config.json"), JSON.stringify({ inboxTool: { opencode: true }, inboxReminder: { opencode: false } }));
+    const quiet = await loadPlugin(w);
+    expect(quiet.tool?.plannotator_inbox).toBeDefined();
+    expect(await system(quiet)).not.toContain(INBOX_REMINDER_TEXT_NO_WAKE);
   }, 60_000);
 });

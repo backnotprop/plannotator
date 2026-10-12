@@ -86,7 +86,7 @@ How to write questions is described in [Questions in Plans and Documents](/docs/
 
 ### Claude Code
 
-With the Plannotator plugin and [the Plannotator mod](/docs/guides/claude-code/#the-plannotator-mod) (Claude Code 2.1.287 or newer), Claude Code gets a `plannotator_inbox` tool when the Inbox is installed. The tool is on by default for Claude Code. Run `plannotator inbox` once, then restart Claude Code: the tool is added when Claude Code starts, not when you start a new conversation in a running one. When you send a reply, it arrives in that session as a new turn after Claude finishes what it is doing. The thread then shows "Delivered to Claude Code".
+With the Plannotator plugin and [the Plannotator mod](/docs/guides/claude-code/#the-plannotator-mod) (Claude Code 2.1.287 or newer), Claude Code gets a `plannotator_inbox` tool. The tool is on by default for Claude Code, also before you ever ran the Inbox: the first time Claude uses it, it starts the Inbox in the background. The tool is added when Claude Code starts, not when you start a new conversation in a running one, so restart Claude Code after you change the setting. When you send a reply, it arrives in that session as a new turn after Claude finishes what it is doing. The thread then shows "Delivered to Claude Code".
 
 The mod is off in `claude -p`, in SDK runs and on Windows. There the tool is not added. Use the MCP server instead (see [Other agents](#other-agents)).
 
@@ -116,10 +116,12 @@ You can open one Pi session twice (`pi -c` or `--session`), or run two OpenCode 
 
 ## The inbox tool setting
 
-The `plannotator_inbox` tool is one tool. Its actions are the Inbox's MCP tools (listed below). It files messages under the project of the agent's working folder; an agent working in another folder (a notes folder, say) can pass `project_path` to name the repository or folder the message is about. Your host adds it only when both of these are true at session start:
+The `plannotator_inbox` tool is one tool. Its actions are the Inbox's MCP tools (listed below). It files messages under the project of the agent's working folder; an agent working in another folder (a notes folder, say) can pass `project_path` to name the repository or folder the message is about. Pi and OpenCode add it only when both of these are true at session start:
 
 - the Inbox is installed (you ran `plannotator inbox` once), and
 - the inbox tool setting is on for that host.
+
+Claude Code needs only the setting: before the Inbox was ever installed, the tool's first call starts it.
 
 | Host | Default |
 |------|---------|
@@ -134,6 +136,14 @@ There are three ways to change it. The first that decides wins:
 3. The default in the table above.
 
 The setting is read when a session starts and never during one, because a change to the tool list mid-session would invalidate the model's prompt cache. After a change, restart Claude Code or OpenCode, or start a new Pi session (or `/reload`).
+
+### The reminder at session start
+
+A session that has the tool also gets one line when it starts, so the agent knows when the Inbox is the right place:
+
+> Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with plannotator_inbox send_message and keep going. Their reply comes back here.
+
+On OpenCode 1, which cannot bring a reply back by itself, the last sentence says to call `wait_for_reply` instead. The line is said once and never changes during a session, so it costs little and does not invalidate the prompt cache. It never appears without the tool. To turn it off, set `inboxReminder` in `~/.plannotator/config.json`: `false` for every host, or one per host, for example `{ "inboxReminder": { "claude-code": false } }`.
 
 ## Other agents
 
@@ -216,7 +226,7 @@ Everything lives under `~/.plannotator/inbox/` (or `$PLANNOTATOR_DATA_DIR/inbox/
 | `agents.json` | The agents `plannotator inbox` found or connected, so it never adds one back that you turned off |
 | `claims/`, `leases/` and `connection-tools.json` | Bookkeeping for the Pi and OpenCode connections |
 
-The Inbox stores the files agents attached as they were when sent, the messages and your replies. It sets no size limits. To free space, use **Delete thread** or **Delete project** in **Settings**, which also remove sent files that nothing else uses. Your choices for the inbox tool, notifications and the tailnet are kept in `~/.plannotator/config.json` (`inboxTool`, `inboxNotifications`, `inboxSound`, `inboxTailscale`, `inboxTailscaleAllow`).
+The Inbox stores the files agents attached as they were when sent, the messages and your replies. It sets no size limits. To free space, use **Delete thread** or **Delete project** in **Settings**, which also remove sent files that nothing else uses. Your choices for the inbox tool, notifications and the tailnet are kept in `~/.plannotator/config.json` (`inboxTool`, `inboxReminder`, `inboxNotifications`, `inboxSound`, `inboxTailscale`, `inboxTailscaleAllow`).
 
 ## Uninstall
 

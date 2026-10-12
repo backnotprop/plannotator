@@ -19,7 +19,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
-import { INBOX_WAKE_INSTRUCTION, inboxWakeText } from "@plannotator/shared/inbox/connection";
+import { INBOX_REMINDER_TEXT, INBOX_WAKE_INSTRUCTION, inboxWakeText } from "@plannotator/shared/inbox/connection";
 import {
   createInboxWorld,
   destroyInboxWorld,
@@ -37,7 +37,7 @@ import {
   worldEnv,
   type InboxWorld,
 } from "../../tests/helpers/inbox-world";
-import { lastMessage, startScriptedModel, type ScriptedModel, type ScriptedRequest, type ScriptedTurn } from "../../tests/helpers/scripted-model";
+import { lastMessage, messageText, startScriptedModel, type ScriptedModel, type ScriptedRequest, type ScriptedTurn } from "../../tests/helpers/scripted-model";
 
 const opencodeBin = process.env.OPENCODE2_BIN;
 const tarball = process.env.OPENCODE_PLUGIN_TARBALL;
@@ -312,6 +312,16 @@ describe.skipIf(!opencodeBin || !tarball)("OpenCode 2 ↔ Plannotator Inbox (the
     expect(actions).toContain("send_message");
     expect(tool.description).toContain("Plannotator Inbox: <subject> (<reply id>)");
     w.proof(`Inbox running (port ${registry(w).port}), switch on for opencode: plannotator_inbox sent with actions ${JSON.stringify(actions)}`);
+
+    // The reminder: one fixed system line from the first request, the same bytes on the next one.
+    const systemOf = (request: (typeof m.requests)[number]) => request.messages.filter((message) => message.role === "system" || message.role === "developer").map((message) => messageText(message.content)).join("\n");
+    expect(systemOf(sent).split(INBOX_REMINDER_TEXT)).toHaveLength(2);
+    const second = m.requests.length;
+    await type(host, session, "and again");
+    await waitFor("the second model turn", () => m.requests.slice(second).some((request) => request.tools.length > 0), 60_000);
+    await idle(host, session);
+    expect(systemOf(m.requests.filter((request) => request.tools.length > 0).at(-1)!)).toBe(systemOf(sent));
+    w.proof("the reminder rides the system prompt once, identical on the session's next request");
   }, 900_000);
 
   test("send_message lands a thread; the person's Send is queued into the idle session once (never steer), Delivered to OpenCode; a typed prompt goes first and takes the wake's turn over", async () => {

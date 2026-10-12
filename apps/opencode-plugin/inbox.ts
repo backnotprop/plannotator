@@ -38,7 +38,8 @@ import {
   InboxWake,
   type InboxWakeTarget,
 } from "@plannotator/shared/inbox/agent-link";
-import { inboxAgentTool } from "@plannotator/shared/inbox/connection";
+import { INBOX_REMINDER_TEXT_NO_WAKE, inboxAgentTool } from "@plannotator/shared/inbox/connection";
+import { composeSystemPrompt } from "./plan-mode";
 import { createOpenCodeMessageId } from "./opencode-session-bridge";
 import type { V2ContextLike } from "./v2-client";
 
@@ -58,6 +59,22 @@ export async function findInboxConnection(): Promise<InboxAgentConnection | null
   if (!existsSync(inboxRegistryFileOf(dataDir))) return null;
   const tools = await discoverInboxTools(dataDir);
   return tools ? new InboxAgentConnection({ dataDir, host: OPENCODE_INBOX_HOST, agentName: OPENCODE_INBOX_AGENT_NAME, tools }) : null;
+}
+
+/**
+ * OpenCode 1: the Inbox reminder on one request's system prompt (strings),
+ * composed into the single system part as the plan reminders are (#1114).
+ * The no-wake wording: OpenCode 1 cannot deliver a reply as a turn. Never on
+ * a title request; never twice.
+ */
+export function addInboxReminderOpenCode1(system: string[]): void {
+  const text = system.join("\n");
+  const lower = text.toLowerCase();
+  if (lower.includes("title generator") || lower.includes("generate a title")) return;
+  if (text.includes(INBOX_REMINDER_TEXT_NO_WAKE)) return;
+  const composed = composeSystemPrompt(system, [INBOX_REMINDER_TEXT_NO_WAKE]);
+  system.length = 0;
+  system.push(...composed);
 }
 
 /** The part of OpenCode 2's tool domain the tool needs (probed: older hosts differ). */

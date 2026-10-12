@@ -34,7 +34,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { existsSync } from "node:fs";
-import { loadConfig, resolveInboxTool } from "./generated/config.ts";
+import { loadConfig, resolveInboxReminder, resolveInboxTool } from "./generated/config.ts";
 import { getPlannotatorDataDir } from "./generated/data-dir.ts";
 import {
 	discoverInboxTools,
@@ -42,8 +42,16 @@ import {
 	inboxRegistryFileOf,
 	InboxWake,
 } from "./generated/inbox/agent-link.ts";
-import { inboxAgentTool, type InboxReplyCommand } from "./generated/inbox/connection.ts";
+import { INBOX_REMINDER_TEXT, inboxAgentTool, type InboxReplyCommand } from "./generated/inbox/connection.ts";
 import { isCtxAlive } from "./current-pi-session.ts";
+import { PI_INBOX_REMINDER_CUSTOM_TYPE } from "./pi-session-bridge.ts";
+
+/**
+ * The Inbox reminder's custom message (INBOX_REMINDER_TEXT, `display: false`),
+ * delivered once per session by `before_agent_start`. Defined beside the "Ask
+ * this session" bridge, which never reads it as a take-over.
+ */
+export { PI_INBOX_REMINDER_CUSTOM_TYPE };
 
 export const PI_INBOX_HOST = "pi";
 export const PI_INBOX_AGENT_NAME = "Pi";
@@ -67,17 +75,49 @@ export interface PiInboxOptions {
  * Inbox connection applies to this Pi; undefined (and nothing done) otherwise.
  */
 export function setupPiInbox(pi: InboxPi, options: PiInboxOptions): Promise<void> | undefined {
-	if (!resolveInboxTool(loadConfig(), process.env, "pi")) return undefined;
+	const config = loadConfig();
+	if (!resolveInboxTool(config, process.env, "pi")) return undefined;
 	const dataDir = getPlannotatorDataDir();
 	if (!existsSync(inboxRegistryFileOf(dataDir))) return undefined;
+	// Decided with the tool, once per extension instance (each session, /reload).
+	const reminder = resolveInboxReminder(config, process.env, "pi");
 	return discoverInboxTools(dataDir).then((tools) => {
 		if (!tools) return;
 		registerPiInbox(
 			pi,
 			new InboxAgentConnection({ dataDir, host: PI_INBOX_HOST, agentName: PI_INBOX_AGENT_NAME, tools }),
-			options,
+			{ ...options, reminder },
 		);
 	});
+}
+
+type BranchEntry = { id?: string; type?: string; customType?: string; firstKeptEntryId?: string };
+
+/**
+ * Whether the context the model reads on this path already carries the
+ * reminder (a resumed or reloaded session, a branch that had it): a reminder
+ * entry the latest compaction kept (from its first kept entry on), or any one
+ * when nothing was compacted. Exported for the tests.
+ */
+export function entriesCarryReminder(entries: readonly BranchEntry[]): boolean {
+	let from = 0;
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const entry = entries[i];
+		if (entry?.type !== "compaction") continue;
+		const kept = entries.findIndex((candidate) => candidate?.id !== undefined && candidate.id === entry.firstKeptEntryId);
+		from = kept >= 0 ? kept : i;
+		break;
+	}
+	return entries.slice(from).some((entry) => entry?.type === "custom_message" && entry.customType === PI_INBOX_REMINDER_CUSTOM_TYPE);
+}
+
+function branchHasReminder(ctx: ExtensionContext): boolean {
+	try {
+		return entriesCarryReminder(ctx.sessionManager.getBranch() as BranchEntry[]);
+	} catch {
+		// Unknown: say nothing rather than twice.
+		return true;
+	}
 }
 
 function userText(message: { content?: unknown } | undefined): string {
@@ -89,7 +129,7 @@ function userText(message: { content?: unknown } | undefined): string {
 		.join("");
 }
 
-function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options: PiInboxOptions): void {
+function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options: PiInboxOptions & { reminder: boolean }): void {
 	const spec = inboxAgentTool(connection.tools);
 	if (!spec) return;
 
@@ -111,6 +151,10 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 	let ctx: ExtensionContext | null = null;
 	let wake: InboxWake | null = null;
 	let activationSettled = false;
+	/** The tool is active in this instance's session (an interactive UI): only then is there a reminder to give. */
+	let toolActive = false;
+	/** The reminder is already in the session's current path; set from the branch at session start and /tree. */
+	let reminderDelivered = false;
 	/** Pi emits `agent_settled` (0.80.4+): a run counts as over only when it settled. */
 	let settleEvents = false;
 	let runOpen = false;
@@ -177,7 +221,9 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 			const isActive = active.includes(spec.name);
 			if (startCtx.hasUI && !isActive) pi.setActiveTools([...active, spec.name]);
 			else if (!startCtx.hasUI && isActive) pi.setActiveTools(active.filter((tool) => tool !== spec.name));
+			toolActive = startCtx.hasUI;
 		}
+		reminderDelivered = branchHasReminder(startCtx);
 		const sessionId = startCtx.sessionManager.getSessionId();
 		if (wake && wake.sessionId !== sessionId) {
 			wake.dispose();
@@ -188,6 +234,28 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 			wake.start();
 		}
 	});
+
+	// The reminder (INBOX_REMINDER_TEXT): one hidden custom message on the
+	// session's first prompt, only where the tool is active and `inboxReminder`
+	// allows it. A conversation-suffix append, never `systemPrompt`, so it
+	// moves no cached prefix. Not again after /reload or /resume (the branch
+	// already holds it); again after a compaction that summarized it away
+	// (which has invalidated the cache anyway, the plan framing's rule).
+	if (options.reminder) {
+		pi.on("before_agent_start", () => {
+			if (!toolActive || reminderDelivered) return undefined;
+			reminderDelivered = true;
+			return {
+				message: { customType: PI_INBOX_REMINDER_CUSTOM_TYPE, content: INBOX_REMINDER_TEXT, display: false },
+			};
+		});
+		pi.on("session_compact", (_event, compactCtx: ExtensionContext) => {
+			reminderDelivered = compactCtx ? branchHasReminder(compactCtx) : false;
+		});
+		pi.on("session_tree", (_event, treeCtx: ExtensionContext) => {
+			reminderDelivered = branchHasReminder(treeCtx);
+		});
+	}
 
 	pi.on("session_shutdown", () => {
 		wake?.dispose();

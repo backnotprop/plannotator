@@ -275,6 +275,17 @@ export interface PlannotatorConfig {
    */
   inboxTool?: boolean | Partial<Record<InboxToolHost, boolean>>;
   /**
+   * The Plannotator Inbox's one-line reminder at session start
+   * (INBOX_REMINDER_TEXT), on the hosts that register `plannotator_inbox`
+   * (the Claude Code mod, Pi, OpenCode), set from the Inbox's Settings:
+   * `true` / `false` for every host, or one boolean per host. It only ever
+   * applies where that session has the Inbox tool, so the tool switch
+   * (PLANNOTATOR_INBOX_TOOL, `inboxTool`) turns it off too; there is no env
+   * var of its own. Read once when a session starts. Unset (or a host left
+   * out): on wherever the tool is on.
+   */
+  inboxReminder?: boolean | Partial<Record<InboxToolHost, boolean>>;
+  /**
    * The Plannotator Inbox's browser notifications, set from the Inbox page
    * (its one-time ask and its Settings), kept here rather than in the page's
    * localStorage so they survive the Inbox moving to another port (another
@@ -1136,6 +1147,30 @@ export function resolveInboxTool(
   host: InboxToolHost,
 ): boolean {
   return parseInboxToolEnv(env) ?? configuredInboxTool(config, host) ?? INBOX_TOOL_DEFAULTS[host];
+}
+
+/** config.inboxReminder for one host: the shared boolean, the host's own entry, or undefined. */
+export function configuredInboxReminder(config: PlannotatorConfig, host: InboxToolHost): boolean | undefined {
+  const value = config.inboxReminder;
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return parseConfigBoolean((value as Record<string, unknown>)[host]);
+  }
+  return parseConfigBoolean(value);
+}
+
+/**
+ * Resolve whether a `host` session starts with the Inbox's one-line reminder
+ * (INBOX_REMINDER_TEXT): only where that session gets the Inbox tool
+ * (resolveInboxTool), then config.inboxReminder (shared or per host), on by
+ * default. No env var of its own: PLANNOTATOR_INBOX_TOOL decides it through
+ * the tool. Hosts call it once per session start, with the tool.
+ */
+export function resolveInboxReminder(
+  config: PlannotatorConfig,
+  env: NodeJS.ProcessEnv,
+  host: InboxToolHost,
+): boolean {
+  return resolveInboxTool(config, env, host) && (configuredInboxReminder(config, host) ?? true);
 }
 
 /**
