@@ -115,7 +115,7 @@ describe('shortcuts', () => {
       'History',
       'File Navigation',
       'All-Files View',
-      'Markdown Preview',
+      'Markdown Files',
       'Annotations',
       'Suggestion Editor',
       'AI Assistant',

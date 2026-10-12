@@ -6,8 +6,9 @@
  * The contract under guard: a previewed Markdown file's card replaces its
  * diff rows. Its CodeView item carries a hunkless diff (so Pierre draws
  * nothing under the header slot that holds the preview) and gets the real
- * diff back the moment the file goes back to Source; the header offers
- * Source | Preview; a search hit in a previewed file sends it back to Source.
+ * diff back the moment the file goes back to Source; the header carries the
+ * host's view control (the Source / Changes / Read menu) for Markdown files
+ * only; a search hit in a previewed file sends it back to Source.
  * A host that passes no `markdownPreview` (the guide chain, guides.show) gets
  * none of it.
  */
@@ -180,11 +181,14 @@ async function mountHeader(id: string) {
   return headerHost;
 }
 
-function preview(paths: string[], calls: Array<[string, boolean]>) {
+function preview(paths: string[], calls: Array<[string, string]>) {
   return {
     previewedPaths: new Set(paths),
     isPreviewable: (file: DiffFile) => file.path.endsWith('.md'),
-    setPreview: (path: string, on: boolean) => { calls.push([path, on]); },
+    show: (path: string, view: string) => { calls.push([path, view]); },
+    renderViewControl: ({ file, touch }: { file: DiffFile; iconOnly: boolean; touch: boolean }) => (
+      <span data-test-md-view-control={file.path} data-touch={String(touch)} />
+    ),
     render: ({ file }: { file: DiffFile }) => <div data-test-md-preview={file.path} />,
   };
 }
@@ -207,7 +211,7 @@ afterAll(() => {
 
 describe.if(hasDom)('Markdown previews in the all-files view', () => {
   test('a previewed Markdown file shows its card instead of diff rows; code files are untouched', async () => {
-    const calls: Array<[string, boolean]> = [];
+    const calls: Array<[string, string]> = [];
     await render({ markdownPreview: preview([mdFile.path], calls) });
 
     expect(seededItem(mdFile.path).fileDiff.hunks).toEqual([]);
@@ -216,16 +220,14 @@ describe.if(hasDom)('Markdown previews in the all-files view', () => {
 
     const header = await mountHeader(mdFile.path);
     expect(header.querySelector(`[data-test-md-preview="${mdFile.path}"]`)).not.toBeNull();
-    expect(header.querySelector('[data-markdown-preview-toggle]')?.getAttribute('data-markdown-preview-on')).toBe('true');
-    await act(async () => header.querySelector<HTMLButtonElement>('[data-markdown-preview-source]')!.click());
-    expect(calls).toEqual([[mdFile.path, false]]);
+    expect(header.querySelector(`[data-test-md-view-control="${mdFile.path}"]`)?.getAttribute('data-touch')).toBe('false');
 
     const codeHeader = await mountHeader(codeFile.path);
-    expect(codeHeader.querySelector('[data-markdown-preview-toggle]')).toBeNull();
+    expect(codeHeader.querySelector('[data-test-md-view-control]')).toBeNull();
   });
 
-  test('Source swaps the real diff back in place, and Preview swaps it out again', async () => {
-    const calls: Array<[string, boolean]> = [];
+  test('Source swaps the real diff back in place, and a rendered view swaps it out again', async () => {
+    const calls: Array<[string, string]> = [];
     await render({ markdownPreview: preview([], calls) });
     expect(seededItem(mdFile.path).fileDiff.hunks.length).toBe(1);
 
@@ -240,17 +242,18 @@ describe.if(hasDom)('Markdown previews in the all-files view', () => {
   });
 
   test('a search hit in a previewed file sends it back to Source', async () => {
-    const calls: Array<[string, boolean]> = [];
+    const calls: Array<[string, string]> = [];
     const match = { id: 'm1', filePath: mdFile.path, side: 'addition', lineNumber: 1, text: '# New', matchStart: 2, matchEnd: 5 };
     await render({ markdownPreview: preview([mdFile.path], calls) });
     await rerender({ markdownPreview: preview([mdFile.path], calls), activeSearchMatch: match as never, activeSearchMatchId: 'm1' });
-    expect(calls).toContainEqual([mdFile.path, false]);
+    expect(calls).toContainEqual([mdFile.path, 'source']);
   });
 
   test('without the host seam (guide chain, guides.show) nothing is previewed', async () => {
     await render();
     expect(seededItem(mdFile.path).fileDiff.hunks.length).toBe(1);
     const header = await mountHeader(mdFile.path);
-    expect(header.querySelector('[data-markdown-preview-toggle]')).toBeNull();
+    expect(header.querySelector('[data-test-md-view-control]')).toBeNull();
+    expect(header.querySelector('[data-markdown-view-menu]')).toBeNull();
   });
 });

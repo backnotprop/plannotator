@@ -3,21 +3,14 @@ import { createShortcutScopeHook } from '../runtime';
 
 export const reviewMarkdownPreviewShortcuts = defineShortcutScope({
   id: 'review-markdown-preview',
-  title: 'Markdown Preview',
+  title: 'Markdown Files',
   shortcuts: {
-    toggleFilePreview: {
-      description: 'Switch the current Markdown file between source and preview',
+    cycleMarkdownView: {
+      description: 'Show the current Markdown file as Source, Changes or Read (next view)',
       bindings: ['P'],
-      section: 'Markdown Preview',
-      hint: 'Markdown files only: the open file, or in All files the file at the top of the view.',
+      section: 'Markdown Files',
+      hint: 'The open file, or in All files the file at the top of the view. New and deleted files have no Changes view. Markdown files you have not set by hand follow your choice.',
       displayOrder: 10,
-    },
-    toggleAllPreviews: {
-      description: 'Preview every Markdown file, or show them all as source',
-      bindings: ['Shift+P'],
-      section: 'Markdown Preview',
-      hint: 'Same as the "Preview .md" button next to Split | Unified; resets each file to it.',
-      displayOrder: 20,
     },
   },
 });

@@ -14,7 +14,7 @@ import { buildHeadingSlugMap } from '@plannotator/ui/utils/slugify';
 import type { DiffFileStatus } from '../types';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
 import { useFileContents, type UseFileContentsResult } from '../hooks/useFileContents';
-import type { MarkdownPreviewView } from '../hooks/useMarkdownPreview';
+import { fileViewOfRendered, renderedViewOf, type MarkdownPreviewView } from '../hooks/useMarkdownPreview';
 import {
   MARKDOWN_PREVIEW_SIZE_LIMIT,
   REMOTE_IMAGE_HELD_TITLE,
@@ -54,7 +54,8 @@ export interface MarkdownFilePreviewProps {
   variant: 'single' | 'all-files';
   /** All files: the card's height changed (re-measure the virtualized item). */
   onHeightChange?: () => void;
-  /** Without review state (a bare DiffViewer): the view to show and its setter. */
+  /** The view to show and its setter (the single-file view passes both; in
+   *  All files the file's view comes from review state). */
   view?: MarkdownPreviewView;
   onViewChange?: (view: MarkdownPreviewView) => void;
   /**
@@ -99,28 +100,13 @@ function diffContextOf(mark: Element | null | undefined): MarkdownPreviewAnchor[
   return 'unchanged';
 }
 
-function SegmentedButton({ active, onClick, children, label }: { active: boolean; onClick: () => void; children: React.ReactNode; label?: string }) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      aria-label={label}
-      onClick={onClick}
-      className={`px-2 py-0.5 text-xs rounded transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 ${
-        active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
 /**
- * A Markdown file of the review, rendered. Two views: the rendered diff
- * (plan review's clean diff view with this app's block renderer, unchanged
- * runs folded, source lines in a gutter) and the whole new version. Select
- * any text to comment on it, the PR description's experience: the comment is
- * a file comment that carries the quote.
+ * A Markdown file of the review, rendered. Two views, picked on the file's
+ * header menu: Changes, the rendered diff (plan review's clean diff view with
+ * this app's block renderer, unchanged runs folded, source lines in a
+ * gutter), and Read, the whole new version with no diff marks. Select any
+ * text to comment on it, the PR description's experience: the comment is a
+ * file comment that carries the quote.
  */
 export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
   filePath,
@@ -151,8 +137,13 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
   const { fileContents, loading, stale: snapshotStale } = providedContents ?? ownContents;
 
   const [localView, setLocalView] = useState<MarkdownPreviewView>('diff');
-  const view = state?.markdownPreview?.view ?? viewProp ?? localView;
-  const setView = state?.markdownPreview?.setView ?? onViewChange ?? setLocalView;
+  const controller = state?.markdownPreview;
+  const view = viewProp ?? (controller ? renderedViewOf(controller.viewOf(filePath)) : localView);
+  const setView = useCallback((next: MarkdownPreviewView) => {
+    if (onViewChange) onViewChange(next);
+    else if (controller) controller.show(filePath, fileViewOfRendered(next));
+    else setLocalView(next);
+  }, [onViewChange, controller, filePath]);
 
   const sourcePath = markdownPreviewSourcePath(filePath, oldPath, status);
   const sides = useMemo(() => {
@@ -465,16 +456,12 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
     );
   }
 
-  const banner = ready && !tooLarge
-    ? status === 'added'
-      ? { tone: 'added' as const, label: 'New file', text: 'The whole document is new.' }
-      : status === 'deleted'
-        ? { tone: 'removed' as const, label: 'Deleted', text: 'The version before this change.' }
-        : unchangedRename
-          ? { tone: 'neutral' as const, label: 'Renamed', text: oldPath ? `From ${oldPath} · contents unchanged.` : 'Contents unchanged.' }
-          : null
+  // The header's status letter and the green or red rail already say "new"
+  // or "deleted"; only a rename with no change needs a word.
+  const renamedNote = ready && !tooLarge && unchangedRename
+    ? (oldPath ? `Renamed from ${oldPath} · contents unchanged.` : 'Renamed · contents unchanged.')
     : null;
-  const showViewSwitch = !!ready && !tooLarge && !singleSide && !unchangedRename;
+  const bothViews = !!ready && !tooLarge && !singleSide && !unchangedRename;
   const unanchoredCount = fileComments.filter((ann) => unanchored.has(ann.id)).length;
 
   return (
@@ -484,38 +471,9 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
       data-markdown-preview=""
       data-markdown-preview-view={effectiveView}
     >
-      {(showViewSwitch || banner) && (
-        <div className="mx-auto mb-3 flex max-w-4xl flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          {banner && (
-            <span className="inline-flex items-center gap-2">
-              <span
-                className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
-                  banner.tone === 'added'
-                    ? 'bg-success/15 text-success'
-                    : banner.tone === 'removed'
-                      ? 'bg-destructive/15 text-destructive'
-                      : 'bg-muted text-muted-foreground'
-                }`}
-              >
-                {banner.label}
-              </span>
-              <span>{banner.text}</span>
-            </span>
-          )}
-          {showViewSwitch && (
-            <div
-              role="group"
-              aria-label="Preview shows"
-              data-markdown-preview-view-switch=""
-              className="inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5"
-            >
-              <SegmentedButton active={effectiveView === 'diff'} onClick={() => setView('diff')}>Changes</SegmentedButton>
-              <SegmentedButton active={effectiveView === 'whole'} onClick={() => setView('whole')}>Whole file</SegmentedButton>
-            </div>
-          )}
-          {commentsEnabled && (
-            <span className="ml-auto hidden sm:inline">Select text to comment. Line comments stay in Source.</span>
-          )}
+      {renamedNote && (
+        <div data-markdown-preview-renamed="" className="mx-auto mb-3 max-w-4xl text-xs text-muted-foreground">
+          {renamedNote}
         </div>
       )}
       {heldRemoteCount > 0 && (
@@ -541,13 +499,14 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
       {unanchoredCount > 0 && (
         <div role="status" data-markdown-preview-unanchored="" className="mx-auto mb-3 max-w-4xl text-xs text-muted-foreground">
           {unanchoredCount === 1 ? '1 comment on this file is' : `${unanchoredCount} comments on this file are`} not in this view.
-          {showViewSwitch && (
+          {bothViews && (
             <button
               type="button"
+              data-markdown-preview-show-view=""
               className="ml-1 text-primary hover:underline"
               onClick={() => setView(effectiveView === 'diff' ? 'whole' : 'diff')}
             >
-              {effectiveView === 'diff' ? 'Show the whole file' : 'Show the changes'}
+              {effectiveView === 'diff' ? 'Show in Read' : 'Show in Changes'}
             </button>
           )}
         </div>

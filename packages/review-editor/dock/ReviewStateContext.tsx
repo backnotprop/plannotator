@@ -77,8 +77,8 @@ export interface ReviewState {
   /** The snapshot the server is serving (every mode, PR included); image
    *  preview requests are bound to it. */
   snapshotId?: string;
-  /** Rendered Markdown previews (Source | Preview per Markdown file, and the
-   *  "Preview .md" switch). Absent when the server did not advertise
+  /** Markdown file views (Source / Changes / Read, one menu per Markdown
+   *  file). Absent when the server did not advertise
    *  `markdownPreviewSupported` or has no full contents (static patch): no
    *  preview UI renders anywhere. */
   markdownPreview?: MarkdownPreviewController;

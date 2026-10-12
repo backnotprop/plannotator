@@ -134,15 +134,40 @@ export function isMarkdownPreviewFile(
 }
 
 /**
- * A file's effective preview state: its own choice when it has one, else the
- * "Preview .md" switch for every Markdown file.
+ * How a Markdown file is shown: its source diff, its rendered changes, or the
+ * whole document rendered with no diff marks. The same three words, in this
+ * order, on the header menu, the phone sheet, the shortcut help and the docs.
  */
-export function isMarkdownPreviewOn(
-  path: string,
-  overrides: ReadonlyMap<string, boolean>,
-  all: boolean,
-): boolean {
-  return overrides.get(path) ?? all;
+export type MarkdownFileView = 'source' | 'changes' | 'read';
+
+export const MARKDOWN_FILE_VIEWS: readonly MarkdownFileView[] = ['source', 'changes', 'read'];
+const SINGLE_SIDE_VIEWS: readonly MarkdownFileView[] = ['source', 'read'];
+
+export function parseMarkdownFileView(value: string | null | undefined): MarkdownFileView | null {
+  return value === 'source' || value === 'changes' || value === 'read' ? value : null;
+}
+
+/**
+ * The views a Markdown file offers. Added and deleted files have one side, so
+ * "Changes" would be that side again with every line marked: Source and Read
+ * only. So does a rename that changed nothing (no hunks to show).
+ */
+export function markdownViewsFor(file: { status?: DiffFileStatus; patch?: string }): readonly MarkdownFileView[] {
+  if (file.status === 'added' || file.status === 'deleted') return SINGLE_SIDE_VIEWS;
+  if (file.status === 'renamed' && !/^@@ /m.test(file.patch ?? '')) return SINGLE_SIDE_VIEWS;
+  return MARKDOWN_FILE_VIEWS;
+}
+
+/** `wanted` when the file offers it; a rendered wish stays rendered (Changes -> Read). */
+export function resolveMarkdownView(wanted: MarkdownFileView, views: readonly MarkdownFileView[]): MarkdownFileView {
+  if (views.includes(wanted)) return wanted;
+  return wanted === 'changes' && views.includes('read') ? 'read' : 'source';
+}
+
+/** The view after `current` in Source -> Changes -> Read -> Source, skipping what the file lacks. */
+export function nextMarkdownView(current: MarkdownFileView, views: readonly MarkdownFileView[]): MarkdownFileView {
+  const index = views.indexOf(current);
+  return views[(index + 1) % views.length] ?? 'source';
 }
 
 const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;

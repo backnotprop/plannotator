@@ -27,7 +27,7 @@ import { SidebarActionRow, SemanticDiffRow, CallFlowRow, AllFilesRow } from './P
 import { PanelControlsRow, PanelSearchField } from './PanelChrome';
 
 interface FileTreeProps {
-  /** Markdown files shown as a rendered preview (an eye after the name). */
+  /** Markdown files shown rendered, Changes or Read (an eye after the name). */
   markdownPreviewedPaths?: ReadonlySet<string>;
   files: DiffFile[];
   activeFileIndex: number;

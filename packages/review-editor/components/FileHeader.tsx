@@ -51,110 +51,12 @@ interface FileHeaderProps {
    * "generated" tag next to the +/- counts. Collapse seeding is the owner's
    * concern; this prop is display-only. */
   isGenerated?: boolean;
-  /** Optional rendered-Markdown preview toggle for markdown files. */
-  isMarkdownPreview?: boolean;
-  onToggleMarkdownPreview?: () => void;
-}
-
-const EYE_ICON_PATH = 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z';
-
-function EyeIcon({ className }: { className: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" d={EYE_ICON_PATH} />
-      <circle cx="12" cy="12" r="3" />
-    </svg>
-  );
-}
-
-function SourceIcon({ className }: { className: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" d="m8 6-6 6 6 6M16 6l6 6-6 6" />
-    </svg>
-  );
-}
-
-/**
- * Source | Preview for a Markdown file. Desktop: a two-segment switch before
- * Viewed (each segment a pressed/unpressed button). Compact touch: one eye
- * button (a 44 px hit area) whose pressed state is the preview.
- */
-function MarkdownPreviewToggle({
-  enabled,
-  compact,
-  compactTouchLayout,
-  onToggle,
-}: {
-  enabled: boolean;
-  compact: boolean;
-  compactTouchLayout: boolean;
-  onToggle: () => void;
-}) {
-  if (compactTouchLayout) {
-    // One name in both states; aria-pressed carries the state, so a screen
-    // reader hears "Markdown preview, toggle button, pressed / not pressed".
-    return (
-      <button
-        type="button"
-        data-markdown-preview-toggle
-        aria-label="Markdown preview"
-        aria-pressed={enabled}
-        onClick={(event) => {
-          event.stopPropagation();
-          onToggle();
-        }}
-        // Drawn 36 px; the ::after box makes the hit area 44 px (4 px past
-        // each edge), which the 44 px header leaves room for.
-        className={`relative ml-1 flex h-9 w-9 flex-none items-center justify-center rounded transition-colors after:absolute after:-inset-1 after:content-[''] ${enabled ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}
-        title={enabled ? 'Show the source diff' : 'Show the rendered Markdown'}
-      >
-        <EyeIcon className="w-4 h-4" />
-      </button>
-    );
-  }
-  const segment = (active: boolean) =>
-    `flex items-center rounded ${compact ? 'px-1.5' : 'gap-1 px-2'} py-0.5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 ${
-      active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-    }`;
-  const select = (preview: boolean) => (event: React.MouseEvent) => {
-    event.stopPropagation();
-    if (preview !== enabled) onToggle();
-  };
-  return (
-    <div
-      role="group"
-      aria-label="Show this Markdown file as"
-      data-markdown-preview-toggle
-      data-markdown-preview-on={enabled ? 'true' : 'false'}
-      className="flex items-center gap-0.5 rounded-md bg-muted/70 p-0.5 text-xs"
-    >
-      <button
-        type="button"
-        aria-pressed={!enabled}
-        aria-label={compact ? 'Source' : undefined}
-        data-markdown-preview-source=""
-        onClick={select(false)}
-        className={segment(!enabled)}
-        title="Show the source diff (P)"
-      >
-        <SourceIcon className="w-3.5 h-3.5" />
-        {!compact && <span>Source</span>}
-      </button>
-      <button
-        type="button"
-        aria-pressed={enabled}
-        aria-label={compact ? 'Preview' : undefined}
-        data-markdown-preview-preview=""
-        onClick={select(true)}
-        className={segment(enabled)}
-        title="Show the rendered Markdown (P)"
-      >
-        <EyeIcon className="w-3.5 h-3.5" />
-        {!compact && <span>Preview</span>}
-      </button>
-    </div>
-  );
+  /**
+   * A Markdown file's view control (Source / Changes / Read), drawn by the
+   * caller so read-only hosts (the guides.show viewer) never carry it.
+   * `iconOnly` on a tight header; `touch` in the compact touch shell.
+   */
+  renderMarkdownView?: (fit: { iconOnly: boolean; touch: boolean }) => React.ReactNode;
 }
 
 function splitFilePath(filePath: string): { directory: string; name: string } {
@@ -239,8 +141,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   compactTouchLayout,
   readOnly = false,
   isGenerated = false,
-  isMarkdownPreview = false,
-  onToggleMarkdownPreview,
+  renderMarkdownView,
 }) => {
   const [headerWidth, setHeaderWidth] = useState<number>(0);
   const state = useReviewStateOptional();
@@ -348,14 +249,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
         )}
       </div>
       {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 ${isCompact ? 'gap-1' : 'gap-2'}`}>
-        {onToggleMarkdownPreview && (
-          <MarkdownPreviewToggle
-            enabled={isMarkdownPreview}
-            compact={isCompact}
-            compactTouchLayout={false}
-            onToggle={onToggleMarkdownPreview}
-          />
-        )}
+        {renderMarkdownView?.({ iconOnly: isVeryTight, touch: false })}
         {showViewedControl && onToggleViewed && (
           <button
             onClick={onToggleViewed}
@@ -471,14 +365,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           }
         />}
       </div>}
-      {isCompactTouchLayout && onToggleMarkdownPreview && (
-        <MarkdownPreviewToggle
-          enabled={isMarkdownPreview}
-          compact={false}
-          compactTouchLayout
-          onToggle={onToggleMarkdownPreview}
-        />
-      )}
+      {isCompactTouchLayout && renderMarkdownView?.({ iconOnly: false, touch: true })}
     </div>
   );
 };

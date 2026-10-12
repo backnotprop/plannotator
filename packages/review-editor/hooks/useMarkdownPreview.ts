@@ -3,55 +3,97 @@ import { storage } from '@plannotator/ui/utils/storage';
 import { useReviewMarkdownPreviewShortcuts } from '@plannotator/ui/shortcuts';
 import { isTypingTarget } from './useReviewSearch';
 import type { DiffFile } from '../types';
-import { isMarkdownPreviewFile, isMarkdownPreviewOn } from '../utils/markdownPreview';
+import {
+  isMarkdownPreviewFile,
+  markdownViewsFor,
+  nextMarkdownView,
+  parseMarkdownFileView,
+  resolveMarkdownView,
+  type MarkdownFileView,
+} from '../utils/markdownPreview';
+
+export type { MarkdownFileView } from '../utils/markdownPreview';
 
 /**
- * The "Preview .md" switch, remembered across reviews in a cookie (cookie-only,
- * never a server config write). Deliberately not a settings-registry entry:
- * the registry is bundled into the portable guides.show viewer.
+ * The view Markdown files start in, remembered across reviews in a cookie
+ * (cookie-only, never a server config write). Deliberately not a
+ * settings-registry entry: the registry is bundled into the portable
+ * guides.show viewer.
  */
-export const MARKDOWN_PREVIEW_ALL_COOKIE = 'plannotator-markdown-preview-all';
+export const MARKDOWN_VIEW_COOKIE = 'plannotator-markdown-view';
+/** The earlier "Preview .md" switch: `true` reads once as Changes. */
+export const LEGACY_MARKDOWN_PREVIEW_ALL_COOKIE = 'plannotator-markdown-preview-all';
 
-export function readMarkdownPreviewAll(): boolean {
-  return storage.getItem(MARKDOWN_PREVIEW_ALL_COOKIE) === 'true';
+/**
+ * The remembered starting view. An old "Preview .md" cookie that was on is
+ * carried over as Changes (and rewritten under the new name) the first time.
+ */
+export function readStartingMarkdownView(): MarkdownFileView {
+  const remembered = parseMarkdownFileView(storage.getItem(MARKDOWN_VIEW_COOKIE));
+  if (remembered) return remembered;
+  const legacy = storage.getItem(LEGACY_MARKDOWN_PREVIEW_ALL_COOKIE);
+  if (legacy === null) return 'source';
+  const migrated: MarkdownFileView = legacy === 'true' ? 'changes' : 'source';
+  writeStartingMarkdownView(migrated);
+  return migrated;
 }
 
-function writeMarkdownPreviewAll(on: boolean): void {
-  storage.setItem(MARKDOWN_PREVIEW_ALL_COOKIE, String(on));
+function writeStartingMarkdownView(view: MarkdownFileView): void {
+  storage.setItem(MARKDOWN_VIEW_COOKIE, view);
+  storage.removeItem(LEGACY_MARKDOWN_PREVIEW_ALL_COOKIE);
 }
 
-/** Which view a previewed file shows: the rendered diff or the whole new version. */
+/** Which rendered view a previewed file shows: the rendered diff or the whole document. */
 export type MarkdownPreviewView = 'diff' | 'whole';
 
-/**
- * Everything the review surfaces need to know about Markdown previews. Absent
- * from review state when the server did not advertise `markdownPreviewSupported`
- * (or has no full file contents to show), so no preview UI renders at all.
- */
-export interface MarkdownPreviewController {
-  /** True when this file offers a preview (by name; before any fetch). */
-  isPreviewable: (file: Pick<DiffFile, 'path' | 'oldPath' | 'status'>) => boolean;
-  /** The file's effective state: its own choice, else the switch for all. */
-  isPreviewed: (path: string) => boolean;
-  setFilePreview: (path: string, on: boolean) => void;
-  toggleFile: (path: string) => void;
-  /** The "Preview .md" switch (every Markdown file). */
-  all: boolean;
-  /** Press the switch: flips it and resets every file to it. */
-  toggleAll: () => void;
-  /** Whether this review has any Markdown file (the switch hides otherwise). */
-  hasMarkdownFiles: boolean;
-  /** Paths of the review's files currently shown as a preview. */
-  previewedPaths: ReadonlySet<string>;
-  /** Rendered diff or whole new version, remembered for the session. */
-  view: MarkdownPreviewView;
-  setView: (view: MarkdownPreviewView) => void;
+export function renderedViewOf(view: MarkdownFileView): MarkdownPreviewView {
+  return view === 'read' ? 'whole' : 'diff';
+}
+
+/** The file view a comment made in a rendered view lives in. */
+export function fileViewOfRendered(view: MarkdownPreviewView): MarkdownFileView {
+  return view === 'whole' ? 'read' : 'changes';
 }
 
 /**
- * Per-file preview choices live for the session; the switch for every
- * Markdown file is remembered (cookie). A file's own choice wins until the
- * switch is pressed again, which resets every file to it.
+ * Everything the review surfaces need to know about Markdown views. Absent
+ * from review state when the server did not advertise
+ * `markdownPreviewSupported` (or has no full file contents to show), so no
+ * view control renders at all.
+ */
+export interface MarkdownPreviewController {
+  /** True when this file offers rendered views (by name; before any fetch). */
+  isPreviewable: (file: Pick<DiffFile, 'path' | 'oldPath' | 'status'>) => boolean;
+  /** The views this file offers (added / deleted: Source and Read). */
+  viewsFor: (file: Pick<DiffFile, 'status' | 'patch'>) => readonly MarkdownFileView[];
+  /** The view a file shows: its own when set by hand, else the starting view. */
+  viewOf: (path: string) => MarkdownFileView;
+  /** True when the file shows a rendered view (Changes or Read). */
+  isPreviewed: (path: string) => boolean;
+  /**
+   * The person picked a view for a file (the header menu, `P`): the file
+   * keeps it, and it becomes the starting view for every Markdown file not
+   * set by hand, in this review and the next.
+   */
+  choose: (path: string, view: MarkdownFileView) => void;
+  /**
+   * Navigation needs a view (a search hit in Source, a comment that lives in
+   * a rendered view): this file only, nothing remembered.
+   */
+  show: (path: string, view: MarkdownFileView) => void;
+  /** `P`: the next view of this file (Source -> Changes -> Read -> Source). */
+  cycle: (path: string) => void;
+  /** The view files not set by hand start in. */
+  startingView: MarkdownFileView;
+  /** Whether this review has any Markdown file. */
+  hasMarkdownFiles: boolean;
+  /** Paths of the review's files currently shown rendered. */
+  previewedPaths: ReadonlySet<string>;
+}
+
+/**
+ * Per-file views set by hand live for the session; the starting view for
+ * everything else is the last view the person picked, remembered (cookie).
  */
 export function useMarkdownPreview(options: {
   files: readonly DiffFile[];
@@ -59,50 +101,54 @@ export function useMarkdownPreview(options: {
   supported: boolean;
 }): MarkdownPreviewController | undefined {
   const { files, supported } = options;
-  const [all, setAll] = useState<boolean>(() => readMarkdownPreviewAll());
-  const [overrides, setOverrides] = useState<ReadonlyMap<string, boolean>>(() => new Map());
-  const [view, setView] = useState<MarkdownPreviewView>('diff');
+  const [startingView, setStartingView] = useState<MarkdownFileView>(() => readStartingMarkdownView());
+  const [overrides, setOverrides] = useState<ReadonlyMap<string, MarkdownFileView>>(() => new Map());
 
-  const markdownPaths = useMemo(
-    () => new Set(files.filter((file) => isMarkdownPreviewFile(file)).map((file) => file.path)),
-    [files],
-  );
+  // Markdown files by path (the first, for a duplicate display path).
+  const markdownFiles = useMemo(() => {
+    const map = new Map<string, DiffFile>();
+    for (const file of files) {
+      if (!map.has(file.path) && isMarkdownPreviewFile(file)) map.set(file.path, file);
+    }
+    return map;
+  }, [files]);
 
-  const isPreviewed = useCallback(
-    (path: string) => markdownPaths.has(path) && isMarkdownPreviewOn(path, overrides, all),
-    [markdownPaths, overrides, all],
-  );
+  const viewOf = useCallback((path: string): MarkdownFileView => {
+    const file = markdownFiles.get(path);
+    if (!file) return 'source';
+    return resolveMarkdownView(overrides.get(path) ?? startingView, markdownViewsFor(file));
+  }, [markdownFiles, overrides, startingView]);
 
-  const setFilePreview = useCallback((path: string, on: boolean) => {
+  const setOverride = useCallback((path: string, view: MarkdownFileView) => {
     setOverrides((current) => {
-      if (current.get(path) === on) return current;
+      if (current.get(path) === view) return current;
       const next = new Map(current);
-      next.set(path, on);
+      next.set(path, view);
       return next;
     });
   }, []);
 
-  const toggleFile = useCallback((path: string) => {
-    setFilePreview(path, !isMarkdownPreviewOn(path, overrides, all));
-  }, [overrides, all, setFilePreview]);
+  const choose = useCallback((path: string, view: MarkdownFileView) => {
+    setOverride(path, view);
+    setStartingView(view);
+    writeStartingMarkdownView(view);
+  }, [setOverride]);
 
-  const toggleAll = useCallback(() => {
-    setAll((current) => {
-      const next = !current;
-      writeMarkdownPreviewAll(next);
-      return next;
-    });
-    setOverrides(new Map());
-  }, []);
+  const cycle = useCallback((path: string) => {
+    const file = markdownFiles.get(path);
+    if (!file) return;
+    choose(path, nextMarkdownView(viewOf(path), markdownViewsFor(file)));
+  }, [markdownFiles, viewOf, choose]);
 
   const previewedPaths = useMemo(() => {
     const set = new Set<string>();
-    for (const path of markdownPaths) {
-      if (isMarkdownPreviewOn(path, overrides, all)) set.add(path);
+    for (const path of markdownFiles.keys()) {
+      if (viewOf(path) !== 'source') set.add(path);
     }
     return set;
-  }, [markdownPaths, overrides, all]);
+  }, [markdownFiles, viewOf]);
 
+  const isPreviewed = useCallback((path: string) => previewedPaths.has(path), [previewedPaths]);
   const isPreviewable = useCallback(
     (file: Pick<DiffFile, 'path' | 'oldPath' | 'status'>) => isMarkdownPreviewFile(file),
     [],
@@ -112,25 +158,25 @@ export function useMarkdownPreview(options: {
     () => (supported
       ? {
           isPreviewable,
+          viewsFor: markdownViewsFor,
+          viewOf,
           isPreviewed,
-          setFilePreview,
-          toggleFile,
-          all,
-          toggleAll,
-          hasMarkdownFiles: markdownPaths.size > 0,
+          choose,
+          show: setOverride,
+          cycle,
+          startingView,
+          hasMarkdownFiles: markdownFiles.size > 0,
           previewedPaths,
-          view,
-          setView,
         }
       : undefined),
-    [supported, isPreviewable, isPreviewed, setFilePreview, toggleFile, all, toggleAll, markdownPaths, previewedPaths, view],
+    [supported, isPreviewable, viewOf, isPreviewed, choose, setOverride, cycle, startingView, markdownFiles, previewedPaths],
   );
 }
 
 /**
- * `P` switches the current Markdown file between Source and Preview;
- * `Shift+P` presses the "Preview .md" switch. Never while typing, while the
- * surface is not a diff, or for a file that is not Markdown.
+ * `P` shows the current Markdown file in its next view (Source -> Changes ->
+ * Read). Never while typing, while the surface is not a diff, or for a file
+ * that is not Markdown.
  */
 export function useMarkdownPreviewKeys(options: {
   controller: MarkdownPreviewController | undefined;
@@ -141,26 +187,17 @@ export function useMarkdownPreviewKeys(options: {
   enabled: boolean;
 }): void {
   const { controller, targetPath, files, enabled } = options;
-  const usable = (event: KeyboardEvent) =>
-    !!controller && enabled && !event.defaultPrevented && !isTypingTarget(event.target);
   useReviewMarkdownPreviewShortcuts({
     handlers: {
-      toggleFilePreview: {
+      cycleMarkdownView: {
         when: (event) => {
-          if (!usable(event) || !targetPath) return false;
+          if (!controller || !enabled || event.defaultPrevented || isTypingTarget(event.target) || !targetPath) return false;
           const file = files.find((candidate) => candidate.path === targetPath);
-          return !!file && !!controller?.isPreviewable(file);
+          return !!file && controller.isPreviewable(file);
         },
         handle: (event) => {
           event.preventDefault();
-          if (targetPath) controller?.toggleFile(targetPath);
-        },
-      },
-      toggleAllPreviews: {
-        when: (event) => usable(event) && !!controller?.hasMarkdownFiles,
-        handle: (event) => {
-          event.preventDefault();
-          controller?.toggleAll();
+          if (targetPath) controller?.cycle(targetPath);
         },
       },
     },

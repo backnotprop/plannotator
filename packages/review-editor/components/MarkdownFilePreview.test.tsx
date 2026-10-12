@@ -63,7 +63,12 @@ function Harness({ initial = [], oldText = OLD, newText = NEW, patch = PATCH }: 
     snapshotId: 'snap-1',
     imagePreviewAvailable: true,
     openDiffFile: () => {},
-    markdownPreview: { view, setView } as unknown as ReviewState['markdownPreview'],
+    // The file's view comes from review state (All files); the "not in this
+    // view" action shows the other one on this file only.
+    markdownPreview: {
+      viewOf: () => (view === 'whole' ? 'read' : 'changes'),
+      show: (_path: string, next: string) => setView(next === 'read' ? 'whole' : 'diff'),
+    } as unknown as ReviewState['markdownPreview'],
     onAddMarkdownPreviewComment: (filePath: string, comment: { id: string; text: string; anchor: MarkdownPreviewAnchor }) => {
       added.push({ filePath, text: comment.text, anchor: comment.anchor });
       setAnnotations((current) => [...current, {
@@ -192,6 +197,12 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
     expect(marksText(el)).toBe('');
     const note = el.querySelector('[data-markdown-preview-unanchored]');
     expect(note?.textContent).toContain('1 comment on this file is not in this view');
+
+    // Its action shows the view the comment is in.
+    await act(async () => note!.querySelector<HTMLButtonElement>('[data-markdown-preview-show-view]')!.click());
+    await settle(60);
+    expect(el.querySelector('[data-markdown-preview-view="diff"]')).not.toBeNull();
+    expect(marksText(el)).toBe('old installer');
   });
 
   /** An added Markdown file, previewed whole, under the given review state. */

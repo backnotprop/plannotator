@@ -139,8 +139,10 @@ export const ReviewDiffPanel: React.FC<IDockviewPanelProps> = (props) => {
         reviewFilePaths={reviewFilePaths}
         onOpenReviewFile={state.openDiffFile}
         markdownPreviewSupported={!!state.markdownPreview}
-        markdownPreviewed={state.markdownPreview ? state.markdownPreview.isPreviewed(file.path) : false}
-        onMarkdownPreviewChange={state.markdownPreview ? (on) => state.markdownPreview!.setFilePreview(file.path, on) : undefined}
+        markdownView={state.markdownPreview ? state.markdownPreview.viewOf(file.path) : 'source'}
+        onMarkdownViewChange={state.markdownPreview
+          ? (view, how) => (how === 'chosen' ? state.markdownPreview!.choose : state.markdownPreview!.show)(file.path, view)
+          : undefined}
       />
     </div>
   );

@@ -162,7 +162,7 @@ describe.if(hasDom)('header control visibility (DOM)', () => {
     expect(el.querySelector(VIEWED_BUTTON)).not.toBeNull();
   });
 
-  test('Markdown preview renders the change, then the whole new version, and returns to the diff', async () => {
+  test('one header menu: Changes renders the change, Read the whole new version, Source the diff again', async () => {
     const oldContent = '# Old\n\nold text\n';
     const newContent = '# New\n\n| Feature | Status |\n| --- | --- |\n| Preview | **Ready** |\n';
     const el = await render(
@@ -170,10 +170,15 @@ describe.if(hasDom)('header control visibility (DOM)', () => {
       { oldContent, newContent },
     );
 
-    const toggle = el.querySelector('[data-markdown-preview-toggle]');
-    expect(toggle?.getAttribute('data-markdown-preview-on')).toBe('false');
-    await act(async () => el.querySelector<HTMLButtonElement>('[data-markdown-preview-preview]')!.click());
-    const switchEl = await waitFor(() => el.querySelector('[data-markdown-preview-view-switch]'));
+    const menuButton = () => el.querySelector<HTMLButtonElement>('[data-markdown-view-menu]')!;
+    const choose = async (view: string) => {
+      await act(async () => menuButton().click());
+      const option = await waitFor(() => document.querySelector<HTMLElement>(`[data-markdown-view-option="${view}"]`));
+      await act(async () => option.click());
+    };
+    expect(menuButton().getAttribute('data-markdown-view')).toBe('source');
+    await choose('changes');
+    await waitFor(() => el.querySelector('.plan-diff-added h1'));
 
     // The rendered diff: the old heading struck, the new one added.
     expect(el.querySelector('.plan-diff-removed h1')?.textContent).toBe('Old');
@@ -181,14 +186,15 @@ describe.if(hasDom)('header control visibility (DOM)', () => {
     expect(el.querySelector('table')).not.toBeNull();
     expect(el.textContent).toContain('Ready');
 
-    // The whole new version.
-    const whole = Array.from(switchEl.querySelectorAll('button')).find((b) => b.textContent === 'Whole file')!;
-    await act(async () => whole.click());
+    // The whole new version, no diff marks; the header menu is the file's only view control.
+    await choose('read');
     expect(Array.from(el.querySelectorAll('h1')).map((h) => h.textContent)).toEqual(['New']);
+    expect(el.querySelector('.plan-diff-removed, .plan-diff-added')).toBeNull();
+    expect(el.querySelectorAll('[data-markdown-view-menu]').length).toBe(1);
 
-    await act(async () => el.querySelector<HTMLButtonElement>('[data-markdown-preview-source]')!.click());
+    await choose('source');
     expect(el.querySelector('h1')).toBeNull();
-    expect(el.querySelector('[data-markdown-preview-toggle]')?.getAttribute('data-markdown-preview-on')).toBe('false');
+    expect(menuButton().getAttribute('data-markdown-view')).toBe('source');
   });
 
   test('non-Markdown files do not show the preview toggle', async () => {

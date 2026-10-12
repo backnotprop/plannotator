@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import {
   isMarkdownPreviewFile,
-  isMarkdownPreviewOn,
+  markdownViewsFor,
+  nextMarkdownView,
+  parseMarkdownFileView,
+  resolveMarkdownView,
   markdownPreviewDocument,
   markdownPreviewImageUrl,
   markdownPreviewSides,
@@ -133,13 +136,23 @@ describe('markdownPreviewImageUrl', () => {
   });
 });
 
-describe('preview state', () => {
-  test("a file's own choice wins over the switch for every file", () => {
-    const overrides = new Map([['a.md', false], ['b.md', true]]);
-    expect(isMarkdownPreviewOn('a.md', overrides, true)).toBe(false);
-    expect(isMarkdownPreviewOn('b.md', overrides, false)).toBe(true);
-    expect(isMarkdownPreviewOn('c.md', overrides, true)).toBe(true);
-    expect(isMarkdownPreviewOn('c.md', overrides, false)).toBe(false);
+describe('file views', () => {
+  const MODIFIED = '@@ -1 +1 @@\n-a\n+b\n';
+  test('added, deleted and unchanged renames offer Source and Read; everything else all three', () => {
+    expect(markdownViewsFor({ status: 'modified', patch: MODIFIED })).toEqual(['source', 'changes', 'read']);
+    expect(markdownViewsFor({ status: 'renamed', patch: MODIFIED })).toEqual(['source', 'changes', 'read']);
+    expect(markdownViewsFor({ status: 'added', patch: MODIFIED })).toEqual(['source', 'read']);
+    expect(markdownViewsFor({ status: 'deleted', patch: MODIFIED })).toEqual(['source', 'read']);
+    expect(markdownViewsFor({ status: 'renamed', patch: 'similarity index 100%\nrename from a.md\nrename to b.md\n' })).toEqual(['source', 'read']);
+  });
+
+  test('a rendered wish stays rendered where Changes is missing; P wraps around what the file has', () => {
+    expect(resolveMarkdownView('changes', ['source', 'read'])).toBe('read');
+    expect(resolveMarkdownView('read', ['source', 'changes', 'read'])).toBe('read');
+    expect(nextMarkdownView('source', ['source', 'read'])).toBe('read');
+    expect(nextMarkdownView('read', ['source', 'changes', 'read'])).toBe('source');
+    expect(parseMarkdownFileView('changes')).toBe('changes');
+    expect(parseMarkdownFileView('true')).toBeNull();
   });
 
   test('only Markdown files offer a preview', () => {

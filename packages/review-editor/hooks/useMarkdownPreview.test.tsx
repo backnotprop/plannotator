@@ -1,8 +1,9 @@
 /**
- * The Markdown preview's state and keys: Source everywhere until the
- * "Preview .md" switch is pressed, which is remembered (cookie only); a
- * file's own choice wins until the switch is pressed again; `P` toggles the
- * current Markdown file and `Shift+P` the switch.
+ * Markdown file views (Source / Changes / Read): every file starts in Source;
+ * a view picked on any file becomes the starting view for every file not set
+ * by hand, remembered for the next review (cookie only); a file set by hand
+ * keeps its view; an old "Preview .md" cookie that was on reads as Changes;
+ * `P` steps the current file through its views.
  *
  * DOM-gated (DOM_TESTS=1) and registered in .github/workflows/test.yml's
  * "Run UI seam-contract + DOM tests" step.
@@ -14,7 +15,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { resetStorageBackend, setStorageBackend } from '@plannotator/ui/utils/storage';
 import type { DiffFile } from '../types';
 import {
-  MARKDOWN_PREVIEW_ALL_COOKIE,
+  LEGACY_MARKDOWN_PREVIEW_ALL_COOKIE,
+  MARKDOWN_VIEW_COOKIE,
   useMarkdownPreview,
   useMarkdownPreviewKeys,
   type MarkdownPreviewController,
@@ -22,8 +24,10 @@ import {
 
 const hasDom = typeof document !== 'undefined';
 
-const file = (path: string): DiffFile => ({ path, patch: '', additions: 1, deletions: 0, status: 'modified' });
-const FILES = [file('docs/a.md'), file('docs/b.md'), file('src/c.ts')];
+const file = (path: string, status: DiffFile['status'] = 'modified'): DiffFile => ({
+  path, patch: '@@ -1 +1 @@\n-a\n+b\n', additions: 1, deletions: 1, status,
+});
+const FILES = [file('docs/a.md'), file('docs/b.md'), file('docs/new.md', 'added'), file('src/c.ts')];
 
 let stored: Map<string, string>;
 let root: Root | null = null;
@@ -55,6 +59,8 @@ async function press(key: string, init: KeyboardEventInit = {}, target: EventTar
   });
 }
 
+const views = () => ['docs/a.md', 'docs/b.md', 'docs/new.md'].map((path) => controller!.viewOf(path));
+
 beforeEach(() => {
   stored = new Map();
   setStorageBackend({
@@ -73,45 +79,74 @@ afterEach(async () => {
   resetStorageBackend();
 });
 
-describe.if(hasDom)('Markdown preview state and keys', () => {
-  test('Source everywhere by default; the switch is remembered once pressed', async () => {
+describe.if(hasDom)('Markdown file views', () => {
+  test('Source everywhere at first; a pick on one file sets the files not set by hand, and is remembered', async () => {
     await mount();
-    expect(controller!.all).toBe(false);
+    expect(views()).toEqual(['source', 'source', 'source']);
     expect([...controller!.previewedPaths]).toEqual([]);
 
-    await act(async () => controller!.toggleAll());
-    expect([...controller!.previewedPaths].sort()).toEqual(['docs/a.md', 'docs/b.md']);
-    expect(stored.get(MARKDOWN_PREVIEW_ALL_COOKIE)).toBe('true');
+    await act(async () => controller!.choose('docs/a.md', 'changes'));
+    // The added file has no Changes view: it follows as Read (still rendered).
+    expect(views()).toEqual(['changes', 'changes', 'read']);
+    expect(controller!.viewOf('src/c.ts')).toBe('source');
+    expect([...controller!.previewedPaths].sort()).toEqual(['docs/a.md', 'docs/b.md', 'docs/new.md']);
+    expect(stored.get(MARKDOWN_VIEW_COOKIE)).toBe('changes');
 
-    // A later review starts from the remembered switch.
+    // The next review starts there.
     await remount();
-    expect(controller!.all).toBe(true);
-    expect(controller!.isPreviewed('docs/a.md')).toBe(true);
-    expect(controller!.isPreviewed('src/c.ts')).toBe(false);
+    expect(views()).toEqual(['changes', 'changes', 'read']);
   });
 
-  test("a file's own choice wins until the switch is pressed again", async () => {
+  test('a file set by hand keeps its view when another pick moves the rest', async () => {
     await mount();
-    await act(async () => controller!.toggleAll()); // every Markdown file on
-    await act(async () => controller!.toggleFile('docs/b.md')); // b back to Source
-    expect(controller!.isPreviewed('docs/a.md')).toBe(true);
-    expect(controller!.isPreviewed('docs/b.md')).toBe(false);
-
-    await act(async () => controller!.toggleAll()); // every file follows the switch: off
-    await act(async () => controller!.toggleAll()); // and on again
-    expect(controller!.isPreviewed('docs/b.md')).toBe(true);
+    await act(async () => controller!.choose('docs/b.md', 'read'));
+    await act(async () => controller!.choose('docs/a.md', 'source'));
+    expect(views()).toEqual(['source', 'read', 'source']);
+    await act(async () => controller!.choose('docs/new.md', 'read'));
+    // a and b were set by hand; nothing else is left to follow.
+    expect(views()).toEqual(['source', 'read', 'read']);
+    expect(stored.get(MARKDOWN_VIEW_COOKIE)).toBe('read');
   });
 
-  test('P toggles the current Markdown file, Shift+P every Markdown file', async () => {
+  test('navigation shows a view on one file without moving the others or the memory', async () => {
+    await mount();
+    await act(async () => controller!.show('docs/a.md', 'read'));
+    expect(views()).toEqual(['read', 'source', 'source']);
+    expect(stored.has(MARKDOWN_VIEW_COOKIE)).toBe(false);
+  });
+
+  test('an old "Preview .md" cookie that was on starts files on Changes, under the new name', async () => {
+    stored.set(LEGACY_MARKDOWN_PREVIEW_ALL_COOKIE, 'true');
+    await mount();
+    expect(views()).toEqual(['changes', 'changes', 'read']);
+    expect(stored.get(MARKDOWN_VIEW_COOKIE)).toBe('changes');
+    expect(stored.has(LEGACY_MARKDOWN_PREVIEW_ALL_COOKIE)).toBe(false);
+
+    stored.clear();
+    stored.set(LEGACY_MARKDOWN_PREVIEW_ALL_COOKIE, 'false');
+    await remount();
+    expect(views()).toEqual(['source', 'source', 'source']);
+  });
+
+  test('P steps the current file Source -> Changes -> Read -> Source, skipping Changes where there is none', async () => {
     await mount({ targetPath: 'docs/a.md' });
+    const seen: string[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      await press('p');
+      seen.push(controller!.viewOf('docs/a.md'));
+    }
+    expect(seen).toEqual(['changes', 'read', 'source']);
+    // Each press is a pick: the last one is remembered.
+    expect(stored.get(MARKDOWN_VIEW_COOKIE)).toBe('source');
+
+    await remount({ targetPath: 'docs/new.md' });
     await press('p');
-    expect([...controller!.previewedPaths]).toEqual(['docs/a.md']);
-    await press('P', { shiftKey: true });
-    expect(controller!.all).toBe(true);
-    expect([...controller!.previewedPaths].sort()).toEqual(['docs/a.md', 'docs/b.md']);
+    expect(controller!.viewOf('docs/new.md')).toBe('read');
+    await press('p');
+    expect(controller!.viewOf('docs/new.md')).toBe('source');
   });
 
-  test('P does nothing on a code file, while typing, or off the diff', async () => {
+  test('P does nothing on a code file, while typing, off the diff, or with Shift', async () => {
     await mount({ targetPath: 'src/c.ts' });
     await press('p');
     expect([...controller!.previewedPaths]).toEqual([]);
@@ -119,6 +154,7 @@ describe.if(hasDom)('Markdown preview state and keys', () => {
     await remount({ targetPath: 'docs/a.md' });
     const input = host!.querySelector('[data-test-input]')!;
     await press('p', {}, input);
+    await press('P', { shiftKey: true });
     expect([...controller!.previewedPaths]).toEqual([]);
 
     await remount({ targetPath: 'docs/a.md', enabled: false });
@@ -126,7 +162,7 @@ describe.if(hasDom)('Markdown preview state and keys', () => {
     expect([...controller!.previewedPaths]).toEqual([]);
   });
 
-  test('a server without the advert gets no preview at all', async () => {
+  test('a server without the advert gets no views at all', async () => {
     await mount({ supported: false });
     expect(controller).toBeUndefined();
   });

@@ -3,10 +3,32 @@ import type { IDockviewPanelProps } from 'dockview-react';
 import { AllFilesCodeView } from '../../components/AllFilesCodeView';
 import { CommitDescriptionHeader } from '../../components/CommitDescriptionHeader';
 import { ImageDiffPreview } from '../../components/ImageDiffPreview';
+import { MarkdownViewMenu } from '../../components/MarkdownViewMenu';
 // Lazy: loaded the first time a Markdown file is previewed.
 const MarkdownFilePreview = React.lazy(async () => ({ default: (await import('../../components/MarkdownFilePreview')).MarkdownFilePreview }));
 import type { DiffFile } from '../../types';
-import { useReviewState } from '../ReviewStateContext';
+import { useReviewState, useReviewStateOptional } from '../ReviewStateContext';
+
+/**
+ * A Markdown card's view control. Reads review state itself: Pierre's header
+ * slot republishes only on updateItem, but a context consumer inside it still
+ * re-renders, so Changes <-> Read updates the label without touching the item.
+ */
+function ReviewMarkdownViewControl({ file, iconOnly, touch }: { file: DiffFile; iconOnly: boolean; touch: boolean }) {
+  const preview = useReviewStateOptional()?.markdownPreview;
+  if (!preview) return null;
+  return (
+    <MarkdownViewMenu
+      filePath={file.path}
+      view={preview.viewOf(file.path)}
+      views={preview.viewsFor(file)}
+      status={file.status}
+      onChoose={(view) => preview.choose(file.path, view)}
+      iconOnly={iconOnly}
+      touch={touch}
+    />
+  );
+}
 
 export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
   const state = useReviewState();
@@ -40,9 +62,9 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
     [state.imagePreviewAvailable, snapshotId, compact],
   );
 
-  // Rendered Markdown previews (Source | Preview per Markdown file and the
-  // "Preview .md" switch). The card fetches its own contents, lazily, when
-  // CodeView mounts its header slot.
+  // Rendered Markdown views (one Source / Changes / Read menu per Markdown
+  // file). The card fetches its own contents, lazily, when CodeView mounts
+  // its header slot.
   const preview = state.markdownPreview;
   const reviewBase = state.reviewBase;
   const reviewSnapshotId = state.feedbackDiffContext?.snapshotId;
@@ -53,7 +75,10 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
         ? {
             previewedPaths: preview.previewedPaths,
             isPreviewable: preview.isPreviewable,
-            setPreview: preview.setFilePreview,
+            show: preview.show,
+            renderViewControl: ({ file, iconOnly, touch }: { file: DiffFile; iconOnly: boolean; touch: boolean }) => (
+              <ReviewMarkdownViewControl file={file} iconOnly={iconOnly} touch={touch} />
+            ),
             render: ({ file, onHeightChange }: { file: DiffFile; onHeightChange: () => void }) => (
               <React.Suspense key={`${reviewSnapshotId ?? ''}:${file.path}`} fallback={null}>
               <MarkdownFilePreview

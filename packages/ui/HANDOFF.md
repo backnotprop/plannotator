@@ -2246,7 +2246,7 @@ Plannotator's servers issue one random `serverSession` nonce per process (new `@
 - **`foldUnchangedPlanDiff(blocks, { context = 1, minHidden = 2 })`** → `PlanDiffSegment[]`: pure. Changed blocks pass through; an unchanged block keeps `context` sections next to each neighbouring change and folds the rest into a `PlanDiffFold` (`pieces`, `sectionCount`, up to three plain `headings`, line span, stable `key`) when at least `minHidden` would be hidden.
 - **`PlanCleanDiffView`** gains optional `renderBlock(block, orderedIndex, side)` (`side` is `'old'` for removed content and the old half of a modified block), `lineGutter` (a `data-plan-diff-gutter` column: "11–12", "old 15–16", both on a modified block; `annotation-exclude`, `aria-hidden`, unselectable), `foldUnchanged` (a `data-plan-diff-fold` row that expands in place) and `unchangedClassName`. Plannotator's code review uses them for its rendered Markdown diff. Plan review passes none and renders the same DOM as before (`PlanCleanDiffView.seams.test.tsx`). The gutter sits on the first line of text (baseline-aligned), past a heading's top margin.
 - **`CodeAnnotation.markdownPreview?: MarkdownPreviewAnchor`** (`types`): additive. Code review sets it on a file comment made by selecting text in a Markdown preview (`originalText`, `view`, optional `diffContext` and web-highlighter positions). Hosts that never set it see no change.
-- **`reviewMarkdownPreviewShortcuts`** (`shortcuts`, code-review scope `review-markdown-preview`: `P`, `Shift+P`): additive.
+- **`reviewMarkdownPreviewShortcuts`** (`shortcuts`, code-review scope `review-markdown-preview`, section "Markdown Files": `P`, the next Markdown view): additive.
 
 ## The law (guardrails for anyone editing `@plannotator/ui`)
 

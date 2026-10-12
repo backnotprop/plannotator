@@ -2631,9 +2631,10 @@ const ReviewApp: React.FC = () => {
   }, [identity, withPRContext, addCodeAnnotationsWithHistory]);
 
   // --- Markdown preview (rendered Markdown files in the review) ---
-  // Per-file Source | Preview choices for the session, plus the remembered
-  // "Preview .md" switch. Off entirely when the server has no full contents
-  // to show (old server, static patch).
+  // One Source / Changes / Read menu per Markdown file: a file set by hand
+  // keeps its view for the session; every other file starts in the last view
+  // picked (remembered). Off entirely when the server has no full contents to
+  // show (old server, static patch).
   const markdownPreview = useMarkdownPreview({
     files,
     supported: markdownPreviewSupported && !isStaticPatch,
@@ -3013,8 +3014,8 @@ const ReviewApp: React.FC = () => {
     return () => window.removeEventListener('keydown', handler);
   }, [files, activeFileIndex, isDiffPanelActive, guideOpen, handleToggleViewed, isPathStageable, stageFile]);
 
-  // `P` / `Shift+P`: the current Markdown file (the open one, or in All
-  // files the one at the top of the view) / every Markdown file.
+  // `P`: the current Markdown file (the open one, or in All files the one at
+  // the top of the view) in its next view.
   useMarkdownPreviewKeys({
     controller: markdownPreview,
     targetPath: isDiffPanelActive

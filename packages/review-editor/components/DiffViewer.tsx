@@ -17,7 +17,8 @@ import { FileHeader } from './FileHeader';
 // Lazy: the preview brings the text highlighter (which needs a DOM at import)
 // and the diagram engine; a review that never previews never loads them.
 const MarkdownFilePreview = React.lazy(async () => ({ default: (await import('./MarkdownFilePreview')).MarkdownFilePreview }));
-import type { MarkdownPreviewView } from '../hooks/useMarkdownPreview';
+import { fileViewOfRendered, renderedViewOf, type MarkdownPreviewView } from '../hooks/useMarkdownPreview';
+import { MarkdownViewMenu } from './MarkdownViewMenu';
 import { BinaryFileNotice } from './BinaryFileNotice';
 import { FileCommentBanner } from './FileCommentBanner';
 import { DiffHScrollbar } from './DiffHScrollbar';
@@ -30,7 +31,7 @@ import type { AnnotationScrollTarget } from '../types';
 import { getLineNumberFromNode, getSideFromNode, getDiffSelection } from '../utils/diffSelection';
 import { isContentConsistentWithPatch } from '../utils/patchConsistency';
 import { hashString } from '../utils/hashString';
-import { markdownPreviewSourcePath } from '../utils/markdownPreview';
+import { markdownPreviewSourcePath, markdownViewsFor, resolveMarkdownView, type MarkdownFileView } from '../utils/markdownPreview';
 import { InlineAnnotation } from './InlineAnnotation';
 import { InlineAIMarker } from './InlineAIMarker';
 import type { AIChatEntry } from '../hooks/useAIChat';
@@ -255,16 +256,16 @@ interface DiffViewerProps {
   /** Open another file of this review (a link in the Markdown preview). */
   onOpenReviewFile?: (filePath: string) => void;
   /**
-   * Markdown preview state when the host owns it (review state: the
-   * "Preview .md" switch and per-file choices). Absent: the viewer keeps its
-   * own per-file toggle. `markdownPreviewSupported: false` hides the toggle.
+   * A Markdown file's view (Source / Changes / Read) when the host owns it
+   * (review state: per-file choices and the remembered starting view).
+   * `how` says whether the person picked it (the header menu) or navigation
+   * needed it (a search hit, a comment that lives in another view). Absent:
+   * the viewer keeps its own view. `markdownPreviewSupported: false` hides
+   * the control.
    */
-  markdownPreviewed?: boolean;
-  onMarkdownPreviewChange?: (on: boolean) => void;
+  markdownView?: MarkdownFileView;
+  onMarkdownViewChange?: (view: MarkdownFileView, how: 'chosen' | 'shown') => void;
   markdownPreviewSupported?: boolean;
-  /** Without review state: the preview's view (rendered diff / whole file). */
-  markdownPreviewView?: MarkdownPreviewView;
-  onMarkdownPreviewViewChange?: (view: MarkdownPreviewView) => void;
 }
 
 /** Shown while the preview's code loads (it is split from the diff view). */
@@ -337,11 +338,9 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   onTokenHoverLeave,
   reviewFilePaths,
   onOpenReviewFile,
-  markdownPreviewed,
-  onMarkdownPreviewChange,
+  markdownView: markdownViewProp,
+  onMarkdownViewChange,
   markdownPreviewSupported = true,
-  markdownPreviewView,
-  onMarkdownPreviewViewChange,
 }) => {
   const pierreTheme = usePierreTheme({ fontFamily, fontSize, compactTouchLayout });
   // Worker-pool highlighting: keep the pool's theme pair in step with the UI
@@ -449,14 +448,25 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   // A static patch has no full file behind it, so the preview could never
   // show anything: no toggle at all.
   const canPreviewMarkdown = markdownPreviewSupported && contextExpansionAvailable && markdownSourcePath !== null;
-  const [localPreviewFilePath, setLocalPreviewFilePath] = useState<string | null>(null);
-  const previewControlled = markdownPreviewed !== undefined;
-  const markdownPreviewEnabled = canPreviewMarkdown
-    && (previewControlled ? markdownPreviewed === true : localPreviewFilePath === filePath);
-  const setMarkdownPreview = useCallback((on: boolean) => {
-    if (previewControlled) onMarkdownPreviewChange?.(on);
-    else setLocalPreviewFilePath(on ? filePath : null);
-  }, [previewControlled, onMarkdownPreviewChange, filePath]);
+  const markdownViews = useMemo(() => markdownViewsFor({ status, patch }), [status, patch]);
+  const [localMarkdownView, setLocalMarkdownView] = useState<{ path: string; view: MarkdownFileView } | null>(null);
+  const viewControlled = markdownViewProp !== undefined;
+  const markdownView: MarkdownFileView = canPreviewMarkdown
+    ? resolveMarkdownView(
+      viewControlled
+        ? markdownViewProp
+        : localMarkdownView?.path === filePath ? localMarkdownView.view : 'source',
+      markdownViews,
+    )
+    : 'source';
+  const markdownPreviewEnabled = markdownView !== 'source';
+  const setMarkdownView = useCallback((view: MarkdownFileView, how: 'chosen' | 'shown') => {
+    if (viewControlled) onMarkdownViewChange?.(view, how);
+    else setLocalMarkdownView({ path: filePath, view });
+  }, [viewControlled, onMarkdownViewChange, filePath]);
+  const setMarkdownPreview = useCallback((on: boolean, rendered: MarkdownPreviewView = 'diff') => {
+    setMarkdownView(on ? fileViewOfRendered(rendered) : 'source', 'shown');
+  }, [setMarkdownView]);
 
   // Re-parse the patch with full file contents so hunk indices are computed
   // against the complete file (isPartial: false), enabling expansion.
@@ -490,19 +500,15 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     }
   }, [patch, filePath, oldPath, fileContents, fileDiff]);
 
-  const toggleMarkdownPreview = useCallback(() => {
-    if (markdownPreviewEnabled) {
-      setMarkdownPreview(false);
-      return;
-    }
-    // The line selection and its composer live in the diff the preview
+  const chooseMarkdownView = useCallback((view: MarkdownFileView) => {
+    // The line selection and its composer live in the diff a rendered view
     // replaces; drop them rather than leave a selection nothing shows.
-    onLineSelection(null);
-    setMarkdownPreview(true);
-  }, [markdownPreviewEnabled, onLineSelection, setMarkdownPreview]);
+    if (view !== 'source' && !markdownPreviewEnabled) onLineSelection(null);
+    setMarkdownView(view, 'chosen');
+  }, [markdownPreviewEnabled, onLineSelection, setMarkdownView]);
 
-  // Turned on from elsewhere (the "Preview .md" switch, `P`): the line
-  // selection lives in the diff the preview replaces.
+  // Turned on from elsewhere (`P`, another file's choice it follows): the
+  // line selection lives in the diff the preview replaces.
   const wasPreviewEnabledRef = useRef(markdownPreviewEnabled);
   useEffect(() => {
     if (markdownPreviewEnabled && !wasPreviewEnabledRef.current && pendingSelection && isFocused) onLineSelection(null);
@@ -609,7 +615,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       // A comment made in the preview lives there: show the preview, whose
       // highlighter scrolls to the selected comment.
       if (!markdownPreviewEnabled && canPreviewMarkdown) {
-        setMarkdownPreview(true);
+        setMarkdownPreview(true, target.markdownPreview.view);
         return;
       }
       if (markdownPreviewEnabled) {
@@ -965,8 +971,19 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         showStageControl={showStageControls}
         stageError={stageError}
         onFileComment={setFileCommentAnchor}
-        isMarkdownPreview={markdownPreviewEnabled}
-        onToggleMarkdownPreview={canPreviewMarkdown ? toggleMarkdownPreview : undefined}
+        renderMarkdownView={canPreviewMarkdown
+          ? ({ iconOnly, touch }) => (
+            <MarkdownViewMenu
+              filePath={filePath}
+              view={markdownView}
+              views={markdownViews}
+              status={status}
+              onChoose={chooseMarkdownView}
+              iconOnly={iconOnly}
+              touch={touch}
+            />
+          )
+          : undefined}
       />
       {!collapsed && !markdownPreviewEnabled && diffOverflow !== 'wrap' && (
         <DiffHScrollbar className="absolute inset-x-2 bottom-0 z-30" />
@@ -1003,8 +1020,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                 reviewFilePaths={reviewFilePaths}
                 onOpenReviewFile={onOpenReviewFile}
                 variant="single"
-                view={markdownPreviewView}
-                onViewChange={onMarkdownPreviewViewChange}
+                view={renderedViewOf(markdownView)}
+                onViewChange={(view) => setMarkdownPreview(true, view)}
               />
               </React.Suspense>
             </>

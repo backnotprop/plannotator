@@ -407,9 +407,9 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                   <span
                     data-annotation-markdown-preview=""
                     className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary"
-                    title="Made in the rendered Markdown preview"
+                    title="Made in the rendered Markdown (Changes or Read)"
                   >
-                    preview
+                    rendered
                   </span>
                 )}
                 {annotation.callFlowTargets?.length ? (

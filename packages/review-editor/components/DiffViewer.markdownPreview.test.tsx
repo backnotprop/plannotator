@@ -4,7 +4,7 @@
  * targets diff lines switches back to the diff, a deletion previews the old
  * document, images resolve against the file's own folder (or show a
  * placeholder when the server reads no images for the review), and the
- * Source | Preview switch appears only where a preview can work.
+ * Source / Changes / Read menu appears only where a rendered view can work.
  *
  * DOM-gated (DOM_TESTS=1) and registered in .github/workflows/test.yml's
  * "Run diff-renderer DOM tests" step (real @pierre/diffs).
@@ -40,7 +40,7 @@ const { DiffViewer } = await import('./DiffViewer');
 
 const hasDom = typeof document !== 'undefined';
 
-const TOGGLE = '[data-markdown-preview-toggle]';
+const TOGGLE = '[data-markdown-view-menu]';
 const PREVIEW = '[data-markdown-preview]';
 
 function contentLines(content: string): string[] {
@@ -150,15 +150,23 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
   }
 
   function isPreviewOn(el: HTMLElement): boolean {
-    return el.querySelector(TOGGLE)?.getAttribute('data-markdown-preview-on') === 'true';
+    const view = el.querySelector(TOGGLE)?.getAttribute('data-markdown-view');
+    return view != null && view !== 'source';
   }
 
-  // Source | Preview: press the segment that is not selected. Turning the
-  // preview on waits for its (lazily loaded) view to mount.
+  // Source <-> rendered (Changes, or Read where a file has no Changes).
+  // Turning a rendered view on waits for its (lazily loaded) view to mount.
   async function togglePreview(el: HTMLElement) {
     const on = isPreviewOn(el);
     await act(async () => {
-      el.querySelector<HTMLButtonElement>(on ? '[data-markdown-preview-source]' : '[data-markdown-preview-preview]')!.click();
+      el.querySelector<HTMLButtonElement>(TOGGLE)!.click();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    const target = on
+      ? 'source'
+      : document.querySelector('[data-markdown-view-option="changes"]') ? 'changes' : 'read';
+    await act(async () => {
+      document.querySelector<HTMLElement>(`[data-markdown-view-option="${target}"]`)!.click();
       await new Promise((resolve) => setTimeout(resolve, 10));
     });
     if (on) return;
@@ -508,12 +516,11 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
     await rerender({ patch: addedPatch('book.livemd', doc), filePath: 'book.livemd', status: 'added', isFocused: true });
     expect(el.querySelector(TOGGLE)).not.toBeNull();
 
-    // A labelled group of two pressed/unpressed segments.
+    // An added file has no Changes view: rendered means Read.
     await togglePreview(el);
     el = host!;
-    expect(el.querySelector(TOGGLE)?.getAttribute('role')).toBe('group');
-    expect(el.querySelector('[data-markdown-preview-preview]')?.getAttribute('aria-pressed')).toBe('true');
-    expect(el.querySelector('[data-markdown-preview-source]')?.getAttribute('aria-pressed')).toBe('false');
+    expect(el.querySelector(TOGGLE)?.getAttribute('data-markdown-view')).toBe('read');
+    expect(el.querySelector('[data-markdown-preview-view]')?.getAttribute('data-markdown-preview-view')).toBe('whole');
 
     // A server that does not advertise the preview shows no switch.
     await rerender({ patch: addedPatch('a.md', doc), filePath: 'a.md', status: 'added', markdownPreviewSupported: false });

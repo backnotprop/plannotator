@@ -26,6 +26,7 @@ import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { usePierreTheme } from '../hooks/usePierreTheme';
 import { useIsWorkerPoolReadyOrDisabled, useWorkerPoolThemeSync } from '../workerPool';
 import type { DiffFile, AnnotationScrollTarget } from '../types';
+import type { MarkdownFileView } from '../utils/markdownPreview';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
 import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
 import { getDiffSelection, getLineNumberFromNode, getSideFromNode } from '../utils/diffSelection';
@@ -214,7 +215,11 @@ export interface AllFilesCodeViewProps {
   markdownPreview?: {
     previewedPaths: ReadonlySet<string>;
     isPreviewable: (file: DiffFile) => boolean;
-    setPreview: (filePath: string, on: boolean) => void;
+    /** Navigation needs a view for a file (a search hit: Source; a comment
+     *  made in a rendered view: that view). */
+    show: (filePath: string, view: MarkdownFileView) => void;
+    /** The file's Source / Changes / Read control, drawn in its header. */
+    renderViewControl: (args: { file: DiffFile; iconOnly: boolean; touch: boolean }) => React.ReactNode;
     render: (args: { file: DiffFile; onHeightChange: () => void }) => React.ReactNode;
   };
   /** Compact coarse-pointer shell. Adjusts custom-header chrome and Pierre's
@@ -1899,7 +1904,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const itemId = filePathToItemId.get(activeSearchMatch.filePath);
     if (itemId == null) return;
     if (activeMatchPreviewed) {
-      markdownPreviewRef.current?.setPreview(activeSearchMatch.filePath, false);
+      markdownPreviewRef.current?.show(activeSearchMatch.filePath, 'source');
       return;
     }
     const handle = viewerRef.current;
@@ -2501,11 +2506,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const previewControl = markdownPreviewRef.current;
     const previewed = previewItemIdsRef.current.has(itemId);
     if (previewControl && ann.markdownPreview && !previewed) {
-      previewControl.setPreview(ann.filePath, true);
+      previewControl.show(ann.filePath, ann.markdownPreview.view === 'whole' ? 'read' : 'changes');
       return;
     }
     if (previewControl && previewed && !isFileScopedAnnotation(ann)) {
-      previewControl.setPreview(ann.filePath, false);
+      previewControl.show(ann.filePath, 'source');
       return;
     }
     handledScrollTargetRef.current = scrollTargetAnnotation;
@@ -2696,8 +2701,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         editDisabledReason={editDisabledReason}
         isViewed={viewedFiles?.has(filePath)}
         isGenerated={generatedFiles?.has(filePath) === true}
-        isMarkdownPreview={previewed}
-        onToggleMarkdownPreview={previewable ? () => previewControl!.setPreview(filePath, !previewed) : undefined}
+        renderMarkdownView={previewable ? (fit) => previewControl!.renderViewControl({ file, ...fit }) : undefined}
         onToggleViewed={onToggleViewed ? () => handleToggleViewedAndCollapse(filePath, item.id) : undefined}
         showViewedControl={showViewedControls}
         isStaged={stagedFiles?.has(filePath)}
