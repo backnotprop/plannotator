@@ -797,6 +797,13 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 		review.settled = true;
 		if (review.tracked) openReviews.remove(review.tracked);
 		try {
+			// The open tab learns it was closed (draft kept) instead of offering
+			// a decision nothing could deliver.
+			review.session.closeKeepingDraft?.();
+		} catch (err) {
+			console.error(`Plannotator: failed to tell the plan review tab it closed: ${err instanceof Error ? err.message : String(err)}`);
+		}
+		try {
 			review.session.stop();
 		} catch (err) {
 			console.error(`Plannotator: failed to close the plan review: ${err instanceof Error ? err.message : String(err)}`);

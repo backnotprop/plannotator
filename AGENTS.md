@@ -269,7 +269,19 @@ review is open, so the planning write gate still holds. The open review is
 closed (and its decision dropped) when plan mode is left, when a `/tree` path is
 not planning, and on `session_shutdown`; a plan decision is never re-targeted to
 a replacement session. The Esc-aborts-the-review behavior of the old blocking
-tool is gone: leaving plan mode is how to abandon a review.
+tool is gone: leaving plan mode is how to abandon a review. Closing it first
+calls the plan server's in-process `closeKeepingDraft()` (never reachable over
+HTTP, where a plan review stays unclosable): open tabs get the `session-closed`
+event and show the review closed with the draft kept, and a late approve/deny
+answers `409`. Reviews opened through the `plannotator:request` event API
+(`plannotator-events.ts`) are closed the same way on `session_shutdown`
+(request/response reviews through their `hostControl.close()`), and a
+`plan-review` closed undecided records `review-status` `{ status: "closed" }`;
+a decision recorded before stays `completed`. Decision listeners run on a
+microtask (`publishDecision` in `serverPlan.ts`) and every emit/respond toward
+another extension is wrapped, because a replaced runtime's `pi.events.emit`
+throws Pi's stale-ctx error synchronously and an escape inside the HTTP
+handler ends the Pi process (#1864).
 
 **Revisions while a review is open update the same tab**: a resubmission while a review is pending calls the Pi plan
 server's `updatePlan`, which saves a new history version (slug from the revised

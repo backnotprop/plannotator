@@ -1,0 +1,226 @@
+/**
+ * The shared `plannotator:request` event API across a session replacement
+ * (#1864). A `plan-review` opened through it used to keep its server after
+ * /reload; a decision from that tab ran the replaced runtime's listener,
+ * whose `pi.events.emit` threw Pi's stale-ctx error inside the HTTP handler
+ * and ended the Pi process.
+ *
+ * Driven with the real Pi plan server behind a fake Pi whose bus throws the
+ * stale-ctx error once the runtime is replaced.
+ *
+ * What regresses if this fails:
+ *  - a decision arriving after the runtime went stale crashes Pi, or is not
+ *    recorded for `review-status`;
+ *  - a session end leaves event-API reviews open (their tab offers a decision
+ *    nobody receives), forgets a decision made before, or leaves a closed
+ *    review reading "pending" forever.
+ */
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+	PLANNOTATOR_REQUEST_CHANNEL,
+	PLANNOTATOR_REVIEW_RESULT_CHANNEL,
+	registerPlannotatorEventListeners,
+	type PlannotatorReviewStatusResult,
+} from "./plannotator-events.ts";
+import { startPlanReviewServer, type PlanServerResult } from "./server/serverPlan.ts";
+
+const MINIMAL_HTML = "<html><body>Plannotator</body></html>";
+const STALE_MESSAGE =
+	"This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload().";
+const ENV_KEYS = ["PLANNOTATOR_DATA_DIR", "PLANNOTATOR_AI", "PLANNOTATOR_PORT", "PLANNOTATOR_REMOTE", "PLANNOTATOR_FEEDBACK_HISTORY"] as const;
+
+const tempDirs: string[] = [];
+const servers: PlanServerResult[] = [];
+const savedEnv: Record<string, string | undefined> = {};
+
+function sandbox(): string {
+	for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
+	const dir = mkdtempSync(join(tmpdir(), "plannotator-pi-events-"));
+	tempDirs.push(dir);
+	process.env.PLANNOTATOR_DATA_DIR = join(dir, "data");
+	process.env.PLANNOTATOR_AI = "disabled";
+	process.env.PLANNOTATOR_REMOTE = "0";
+	process.env.PLANNOTATOR_FEEDBACK_HISTORY = "0";
+	delete process.env.PLANNOTATOR_PORT;
+	return dir;
+}
+
+afterEach(() => {
+	for (const server of servers.splice(0)) server.stop();
+	for (const key of ENV_KEYS) {
+		if (savedEnv[key] === undefined) delete process.env[key];
+		else process.env[key] = savedEnv[key]!;
+	}
+	for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+type Handler = (data: unknown, ctx?: unknown) => unknown;
+
+function createHarness(dir: string) {
+	const sessionHandlers = new Map<string, Handler[]>();
+	const busHandlers = new Map<string, Handler[]>();
+	const results: unknown[] = [];
+	let stale = false;
+	const pi = {
+		on: (event: string, handler: Handler) => sessionHandlers.set(event, [...(sessionHandlers.get(event) ?? []), handler]),
+		events: {
+			on: (channel: string, handler: Handler) => busHandlers.set(channel, [...(busHandlers.get(channel) ?? []), handler]),
+			// Pi's guard: a replaced runtime's bus throws synchronously.
+			emit: (channel: string, data: unknown) => {
+				if (stale) throw new Error(STALE_MESSAGE);
+				if (channel === PLANNOTATOR_REVIEW_RESULT_CHANNEL) results.push(data);
+				for (const handler of busHandlers.get(channel) ?? []) void handler(data);
+			},
+		},
+	};
+	registerPlannotatorEventListeners(pi as never, {
+		reviewStatusPath: join(dir, "review-status.json"),
+		startPlanReviewSession: async (_ctx, planContent) => {
+			const server = await startPlanReviewServer({ plan: planContent, htmlContent: MINIMAL_HTML });
+			servers.push(server);
+			return {
+				url: server.url,
+				reviewId: server.reviewId,
+				waitForDecision: server.waitForDecision,
+				stop: server.stop,
+				hostControl: server.hostControl,
+				onDecision: server.onDecision,
+				updatePlan: server.updatePlan,
+				closeKeepingDraft: server.closeKeepingDraft,
+			};
+		},
+	});
+
+	/** Send a request straight to the listener (the bus may be stale) and wait for its answer. */
+	const request = (action: string, payload: unknown) =>
+		new Promise<any>((resolve) => {
+			for (const handler of busHandlers.get(PLANNOTATOR_REQUEST_CHANNEL) ?? []) {
+				void handler({ requestId: `r-${Math.random()}`, action, payload, respond: resolve });
+			}
+		});
+
+	return {
+		results,
+		request,
+		async startSession() {
+			for (const handler of sessionHandlers.get("session_start") ?? []) await handler({ reason: "startup" }, { hasUI: true, cwd: dir });
+		},
+		async shutdown() {
+			for (const handler of sessionHandlers.get("session_shutdown") ?? []) await handler({ type: "session_shutdown", reason: "reload" });
+			stale = true;
+		},
+		/** A teardown that never reaches our session_shutdown handler. */
+		goStale() {
+			stale = true;
+		},
+		async reviewStatus(reviewId: string): Promise<PlannotatorReviewStatusResult> {
+			const response = await request("review-status", { reviewId });
+			return response.result;
+		},
+	};
+}
+
+async function openPlanReview(harness: ReturnType<typeof createHarness>, title: string) {
+	const response = await harness.request("plan-review", { planContent: `# ${title} ${Math.random()}\n` });
+	expect(response).toMatchObject({ status: "handled", result: { status: "pending" } });
+	const reviewId: string = response.result.reviewId;
+	const server = servers.find((s) => s.reviewId === reviewId)!;
+	return { reviewId, url: server.url };
+}
+
+async function trapFatal(run: () => Promise<void>): Promise<unknown[]> {
+	const fatal: unknown[] = [];
+	const onFatal = (err: unknown) => fatal.push(err);
+	process.on("uncaughtException", onFatal);
+	process.on("unhandledRejection", onFatal);
+	try {
+		await run();
+		await new Promise((resolve) => setTimeout(resolve, 50));
+	} finally {
+		process.off("uncaughtException", onFatal);
+		process.off("unhandledRejection", onFatal);
+	}
+	return fatal;
+}
+
+async function captureErrors<T>(run: () => Promise<T>): Promise<{ value: T; logged: string[] }> {
+	const logged: string[] = [];
+	const original = console.error;
+	console.error = (...args: unknown[]) => {
+		logged.push(args.map(String).join(" "));
+	};
+	try {
+		return { value: await run(), logged };
+	} finally {
+		console.error = original;
+	}
+}
+
+const postJson = (url: string, body: unknown) =>
+	fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+describe("plannotator:request plan-review across a session replacement", () => {
+	test("a decision after the runtime went stale is answered, recorded, and does not crash Pi", async () => {
+		const dir = sandbox();
+		const harness = createHarness(dir);
+		await harness.startSession();
+		const { reviewId, url } = await openPlanReview(harness, "Stale emit");
+
+		// The issue's path: the runtime was replaced and its bus now throws.
+		harness.goStale();
+		const { logged } = await captureErrors(async () => {
+			const fatal = await trapFatal(async () => {
+				const res = await postJson(`${url}/api/approve`, { feedback: "ship it" });
+				expect(res.status).toBe(200);
+			});
+			expect(fatal).toEqual([]);
+		});
+		// The emit's own guard caught it (not only publishDecision's backstop).
+		expect(logged.some((line) => line.includes(`could not emit the review result for ${reviewId}`))).toBe(true);
+		expect(await harness.reviewStatus(reviewId)).toMatchObject({ status: "completed", reviewId, approved: true, feedback: "ship it" });
+	});
+
+	test("a decision on a live session still emits the review result", async () => {
+		const dir = sandbox();
+		const harness = createHarness(dir);
+		await harness.startSession();
+		const { reviewId, url } = await openPlanReview(harness, "Live emit");
+		expect((await postJson(`${url}/api/deny`, { feedback: "rework" })).status).toBe(200);
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(harness.results).toEqual([expect.objectContaining({ reviewId, approved: false, feedback: "rework" })]);
+	});
+
+	test("session end closes open reviews, tells their tab, and keeps a decision made before", async () => {
+		const dir = sandbox();
+		const harness = createHarness(dir);
+		await harness.startSession();
+		const decided = await openPlanReview(harness, "Decided before");
+		const open = await openPlanReview(harness, "Still open");
+		expect((await postJson(`${decided.url}/api/approve`, {})).status).toBe(200);
+		await new Promise((resolve) => setTimeout(resolve, 20));
+
+		// Watch the open tab's stream, then end the session (/reload).
+		const stream = await fetch(`${open.url}/api/external-annotations/stream`);
+		const reader = stream.body!.getReader();
+		await reader.read(); // the snapshot: subscribed
+		await harness.shutdown();
+		const decoder = new TextDecoder();
+		let text = "";
+		const deadline = Date.now() + 3000;
+		while (!text.includes("session-closed") && Date.now() < deadline) {
+			const { value, done } = await reader.read();
+			if (done) break;
+			text += decoder.decode(value, { stream: true });
+		}
+		await reader.cancel().catch(() => undefined);
+		expect(text).toContain('"type":"session-closed"');
+
+		// The server is gone: nothing can post a decision that would go nowhere.
+		await expect(fetch(`${open.url}/api/plan`)).rejects.toThrow();
+		expect(await harness.reviewStatus(open.reviewId)).toEqual({ status: "closed" });
+		expect(await harness.reviewStatus(decided.reviewId)).toMatchObject({ status: "completed", approved: true });
+	});
+});

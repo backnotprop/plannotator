@@ -5,7 +5,7 @@ import { likelyAppHtmlEncoding, prewarmAppHtml } from "../generated/app-html.ts"
 import { createServer } from "node:http";
 
 import { contentHash, deleteDraft, loadDraft } from "../generated/draft.ts";
-import { countUnsentDraftComments } from "../generated/host-control.ts";
+import { countUnsentDraftComments, hostSessionClosedEvent, type HostCloseOutcome } from "../generated/host-control.ts";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
 import { createRequestHostGuard } from "./request-host-guard.ts";
@@ -111,6 +111,15 @@ export interface PlanServerResult {
 	stop: () => void;
 	/** Host-only status (no close: a plan review ends with the reviewer's decision). */
 	hostControl: HostControl;
+	/**
+	 * In-process only (over HTTP a plan review stays unclosable): the Pi
+	 * session that opened this review is going away (/reload, a session
+	 * switch, leaving plan mode), so nothing could deliver a decision. Tells
+	 * open tabs over the external-annotation stream (`session-closed`, the
+	 * agent-close event: the tab shows the review closed, its draft kept) and
+	 * refuses any later decision. The caller stops the server afterwards.
+	 */
+	closeKeepingDraft: () => HostCloseOutcome;
 }
 
 export async function startPlanReviewServer(options: {
@@ -240,14 +249,22 @@ export async function startPlanReviewServer(options: {
 	const decisionPromise = new Promise<PlanReviewDecision>((r) => {
 		resolveDecision = r;
 	});
+	// Set by closeKeepingDraft: the session that opened the review is gone.
+	let closedByHost = false;
 	const publishDecision = (result: PlanReviewDecision): boolean => {
 		if (decisionSettled) return false;
 		decisionSettled = true;
 		resolveDecision(result);
 		for (const listener of decisionListeners) {
-			Promise.resolve(listener(result)).catch((error) => {
-				console.error("[Plan Review] Decision listener failed:", error);
-			});
+			// Each listener runs on a microtask, so a SYNCHRONOUS throw becomes a
+			// rejection the catch below logs. This runs inside an HTTP handler: a
+			// listener that throws there (a replaced Pi runtime's stale-ctx emit,
+			// #1864) must never escape into it, where it kills the Pi process.
+			Promise.resolve()
+				.then(() => listener(result))
+				.catch((error) => {
+					console.error("[Plan Review] Decision listener failed:", error);
+				});
 		}
 		return true;
 	};
@@ -283,6 +300,9 @@ export async function startPlanReviewServer(options: {
 	 */
 	const isStaleRevision = (body: Record<string, unknown>): boolean =>
 		typeof body.planRevision === "number" && body.planRevision !== planRevision;
+	const refuseClosed = (res: Parameters<typeof json>[0]): void => {
+		json(res, { error: "This review was closed: the session that opened it ended.", code: "already_decided" }, 409);
+	};
 	const refuseStaleRevision = (res: Parameters<typeof json>[0]): void => {
 		json(res, {
 			error: "The plan was revised while you were reviewing it. Review the new version, then decide again.",
@@ -506,6 +526,10 @@ export async function startPlanReviewServer(options: {
 				json(res, { ok: true, duplicate: true });
 				return;
 			}
+			if (closedByHost) {
+				refuseClosed(res);
+				return;
+			}
 			let feedback: string | undefined;
 			let agentSwitch: string | undefined;
 			let requestedPermissionMode: string | undefined;
@@ -607,6 +631,10 @@ export async function startPlanReviewServer(options: {
 				json(res, { ok: true, duplicate: true });
 				return;
 			}
+			if (closedByHost) {
+				refuseClosed(res);
+				return;
+			}
 			let feedback = "Plan rejected by user";
 			let planSaveEnabled = true;
 			let planSaveCustomPath: string | undefined;
@@ -668,6 +696,16 @@ export async function startPlanReviewServer(options: {
 		url: buildAdvertisedUrl(port),
 		waitForDecision: () => decisionPromise,
 		hostControl,
+		closeKeepingDraft: () => {
+			if (decisionSettled || decisionClaimed) return { closed: false, reason: "decided" };
+			if (options.mode === "archive") return { closed: false, reason: "not-closable" };
+			closedByHost = true;
+			// updatePlan refuses from here on, as after a decision.
+			decisionClaimed = true;
+			const unsentAnnotations = draftKey ? countUnsentDraftComments(loadDraft(draftKey)) : 0;
+			externalAnnotations?.broadcast(hostSessionClosedEvent(unsentAnnotations));
+			return { closed: true, unsentAnnotations };
+		},
 		onDecision: (listener) => {
 			decisionListeners.add(listener);
 			return () => {

@@ -15,6 +15,7 @@ import {
 } from "./plannotator-browser-runtime.ts";
 
 type PlannotatorBrowserModule = typeof import("./plannotator-browser.ts");
+type BrowserDecisionSession<T> = import("./plannotator-browser.ts").BrowserDecisionSession<T>;
 
 /** Start a plan-review browser session after loading the browser/server graph on demand. */
 export function startPlanReviewBrowserSession(
@@ -165,6 +166,12 @@ export interface PlannotatorReviewStatusPayload {
 export type PlannotatorReviewStatusResult =
 	| { status: "pending" }
 	| ({ status: "completed" } & PlannotatorReviewResultEvent)
+	/**
+	 * The Pi session that opened the review ended (/reload, a session switch,
+	 * quit) before the reviewer decided, so the review was closed: no decision
+	 * will arrive for it. Send a new `plan-review` to ask again.
+	 */
+	| { status: "closed" }
 	| { status: "missing" };
 
 export interface PlannotatorCodeReviewPayload {
@@ -250,14 +257,16 @@ function isPlannotatorAction(value: unknown): value is PlannotatorAction {
 	);
 }
 
-const REVIEW_STATUS_PATH = join(homedir(), ".pi", "plannotator-review-status.json");
+function defaultReviewStatusPath(): string {
+	return join(homedir(), ".pi", "plannotator-review-status.json");
+}
 
 type StoredReviewStatus = Record<string, PlannotatorReviewStatusResult>;
 
-function readStoredReviewStatuses(): StoredReviewStatus {
+function readStoredReviewStatuses(path: string): StoredReviewStatus {
 	try {
-		if (!existsSync(REVIEW_STATUS_PATH)) return {};
-		const raw = readFileSync(REVIEW_STATUS_PATH, "utf-8");
+		if (!existsSync(path)) return {};
+		const raw = readFileSync(path, "utf-8");
 		const parsed = JSON.parse(raw) as StoredReviewStatus;
 		return parsed && typeof parsed === "object" ? parsed : {};
 	} catch {
@@ -265,19 +274,23 @@ function readStoredReviewStatuses(): StoredReviewStatus {
 	}
 }
 
-function writeStoredReviewStatuses(statuses: StoredReviewStatus): void {
-	mkdirSync(dirname(REVIEW_STATUS_PATH), { recursive: true });
-	writeFileSync(REVIEW_STATUS_PATH, JSON.stringify(statuses, null, 2));
+function writeStoredReviewStatuses(path: string, statuses: StoredReviewStatus): void {
+	mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, JSON.stringify(statuses, null, 2));
 }
 
-function setStoredReviewStatus(reviewId: string, status: PlannotatorReviewStatusResult): void {
-	const statuses = readStoredReviewStatuses();
+function setStoredReviewStatus(path: string, reviewId: string, status: PlannotatorReviewStatusResult): void {
+	const statuses = readStoredReviewStatuses(path);
 	statuses[reviewId] = status;
-	writeStoredReviewStatuses(statuses);
+	writeStoredReviewStatuses(path, statuses);
 }
 
-function getStoredReviewStatus(reviewId: string): PlannotatorReviewStatusResult {
-	return readStoredReviewStatuses()[reviewId] ?? { status: "missing" };
+function getStoredReviewStatus(path: string, reviewId: string): PlannotatorReviewStatusResult {
+	return readStoredReviewStatuses(path)[reviewId] ?? { status: "missing" };
+}
+
+function describeError(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
 }
 
 function createActiveSessionContext() {
@@ -301,6 +314,16 @@ export interface PlannotatorEventListenerOptions {
 		mode: NonNullable<PlannotatorPlanModePayload["mode"]>,
 		ctx: ExtensionContext,
 	) => Promise<PlannotatorPlanModeResult> | PlannotatorPlanModeResult;
+	/** Test seam: where `review-status` is kept (default `~/.pi/plannotator-review-status.json`). */
+	reviewStatusPath?: string;
+	/** Test seam: starts the `plan-review` browser session (default: the real plan server). */
+	startPlanReviewSession?: typeof startPlanReviewBrowserSession;
+}
+
+/** A review this listener opened, closed when its Pi session ends. */
+interface OpenEventReview {
+	/** Tell the open tab the review closed (draft kept), then stop its server. */
+	close(): void;
 }
 
 export function registerPlannotatorEventListeners(
@@ -308,11 +331,95 @@ export function registerPlannotatorEventListeners(
 	options: PlannotatorEventListenerOptions = {},
 ): void {
 	const activeSessionContext = createActiveSessionContext();
+	const reviewStatusPath = options.reviewStatusPath ?? defaultReviewStatusPath();
+	const startPlanReview = options.startPlanReviewSession ?? startPlanReviewBrowserSession;
+	const openReviews = new Set<OpenEventReview>();
+	/**
+	 * Cleared when this extension instance's session ends. Pi builds a new
+	 * instance (with its own listeners) for the replacement session, and this
+	 * instance's `pi` and `ctx` go stale: every use throws.
+	 */
+	let sessionLive = true;
+
+	// Results go to whoever asked, through Pi's event bus or the request's own
+	// callback. Both run code another extension instance owns, which throws
+	// once that instance was replaced (/reload, a session switch: Pi's
+	// stale-ctx guard). Nothing here may let that escape: these run from HTTP
+	// handlers and timers, where an uncaught throw ends the Pi process (#1864).
+	const emitReviewResult = (result: PlannotatorReviewResultEvent): void => {
+		try {
+			pi.events.emit(PLANNOTATOR_REVIEW_RESULT_CHANNEL, result);
+		} catch (err) {
+			console.error(`Plannotator: could not emit the review result for ${result.reviewId}: ${describeError(err)}`);
+		}
+	};
+	const respond = (request: { respond: (response: never) => void }, response: unknown): void => {
+		try {
+			request.respond(response as never);
+		} catch (err) {
+			console.error(`Plannotator: could not answer a ${PLANNOTATOR_REQUEST_CHANNEL} request: ${describeError(err)}`);
+		}
+	};
+	const storeReviewStatus = (reviewId: string, status: PlannotatorReviewStatusResult): void => {
+		try {
+			setStoredReviewStatus(reviewStatusPath, reviewId, status);
+		} catch (err) {
+			console.error(`Plannotator: could not record the status of review ${reviewId}: ${describeError(err)}`);
+		}
+	};
+
+	/**
+	 * Wait for a request/response review's decision, closing it if this
+	 * session ends first: its answer would go to a requester that was replaced
+	 * with it, so the open tab is told it closed rather than offering a
+	 * decision nobody receives.
+	 */
+	const awaitTracked = async <T>(session: BrowserDecisionSession<T>): Promise<T> => {
+		const entry: OpenEventReview = {
+			close: () => {
+				let closed = false;
+				try {
+					// Review and annotate servers settle as an agent close: the tab
+					// shows it, the draft is kept, and the decision (exit) ends the
+					// wait below, which stops the server.
+					closed = session.hostControl?.close?.().closed ?? false;
+				} catch (err) {
+					console.error(`Plannotator: could not close a review tab: ${describeError(err)}`);
+				}
+				if (!closed && !session.hostControl?.status().decided) session.stop();
+			},
+		};
+		// The session ended while the server was starting: close it at once.
+		if (sessionLive) openReviews.add(entry);
+		else entry.close();
+		try {
+			return await session.waitForDecision();
+		} finally {
+			openReviews.delete(entry);
+		}
+	};
 
 	// Plannotator event requests are handled against the latest active session.
 	// The active context is intentionally session-scoped and replaced on each session_start.
 	pi.on("session_start", async (_event, ctx) => {
+		sessionLive = true;
 		activeSessionContext.set(ctx);
+	});
+	// Event-API reviews belong to the session that asked for them, as the
+	// plan review `plannotator_submit_plan` opens does: on /reload or a session
+	// switch the requester is replaced too, so a decision could never reach it.
+	// Close them; a status already recorded (a decision made before) stays.
+	pi.on("session_shutdown", () => {
+		sessionLive = false;
+		activeSessionContext.clear();
+		for (const review of [...openReviews]) {
+			openReviews.delete(review);
+			try {
+				review.close();
+			} catch (err) {
+				console.error(`Plannotator: could not close a review on session end: ${describeError(err)}`);
+			}
+		}
 	});
 	pi.events.on(PLANNOTATOR_REQUEST_CHANNEL, async (data) => {
 		const request = data as Partial<PlannotatorRequest> | null;
@@ -321,47 +428,67 @@ export function registerPlannotatorEventListeners(
 		if (!request || typeof request.respond !== "function" || !isPlannotatorAction(request.action)) {
 			return;
 		}
+		const answer = (response: unknown) => respond(request as { respond: (response: never) => void }, response);
 
 		try {
 			if (request.action === "review-status") {
 				const reviewId = request.payload?.reviewId;
 				if (typeof reviewId !== "string" || !reviewId.trim()) {
-					request.respond({ status: "error", error: "Missing reviewId for review-status request." });
+					answer({ status: "error", error: "Missing reviewId for review-status request." });
 					return;
 				}
-				request.respond({ status: "handled", result: getStoredReviewStatus(reviewId) });
+				answer({ status: "handled", result: getStoredReviewStatus(reviewStatusPath, reviewId) });
 				return;
 			}
 
 			if (!ctx) {
-				request.respond({ status: "unavailable", error: "Plannotator context is not ready yet." });
+				answer({ status: "unavailable", error: "Plannotator context is not ready yet." });
 				return;
 			}
 
 			switch (request.action) {
 				case "plan-mode": {
 					if (!options.handlePlanMode) {
-						request.respond({ status: "unavailable", error: "Plan mode control is not available in this session." });
+						answer({ status: "unavailable", error: "Plan mode control is not available in this session." });
 						return;
 					}
 					const mode = request.payload?.mode ?? "toggle";
 					if (mode !== "enter" && mode !== "exit" && mode !== "toggle" && mode !== "status") {
-						request.respond({ status: "error", error: "Invalid plan-mode payload.mode." });
+						answer({ status: "error", error: "Invalid plan-mode payload.mode." });
 						return;
 					}
 					const result = await options.handlePlanMode(mode, ctx);
-					request.respond({ status: "handled", result });
+					answer({ status: "handled", result });
 					return;
 				}
 				case "plan-review": {
 					const planContent = request.payload?.planContent;
 					if (typeof planContent !== "string" || !planContent.trim()) {
-						request.respond({ status: "error", error: "Missing planContent for plan-review request." });
+						answer({ status: "error", error: "Missing planContent for plan-review request." });
 						return;
 					}
-					const session = await startPlanReviewBrowserSession(ctx, planContent);
-					setStoredReviewStatus(session.reviewId, { status: "pending" });
+					const session = await startPlanReview(ctx, planContent);
+					storeReviewStatus(session.reviewId, { status: "pending" });
+					const entry: OpenEventReview = {
+						close: () => {
+							let outcome: ReturnType<NonNullable<typeof session.closeKeepingDraft>> | undefined;
+							try {
+								// The open tab shows the review closed (draft kept) instead
+								// of offering a decision nobody could receive.
+								outcome = session.closeKeepingDraft?.();
+							} catch (err) {
+								console.error(`Plannotator: could not close plan review ${session.reviewId}: ${describeError(err)}`);
+							}
+							// A decision already being recorded completes, and records
+							// itself, on its own; this review will never be decided.
+							if (outcome?.closed === false) return;
+							storeReviewStatus(session.reviewId, { status: "closed" });
+							session.stop();
+						},
+					};
+					openReviews.add(entry);
 					session.onDecision((result) => {
+						openReviews.delete(entry);
 						const reviewResult = {
 							reviewId: session.reviewId,
 							approved: result.approved,
@@ -371,10 +498,20 @@ export function registerPlannotatorEventListeners(
 							permissionMode: result.permissionMode,
 							...(result.answersOnly ? { answersOnly: true } : {}),
 						} satisfies PlannotatorReviewResultEvent;
-						setStoredReviewStatus(session.reviewId, { status: "completed", ...reviewResult });
-						pi.events.emit(PLANNOTATOR_REVIEW_RESULT_CHANNEL, reviewResult);
+						// Recorded first, so `review-status` reports it whatever happens next.
+						storeReviewStatus(session.reviewId, { status: "completed", ...reviewResult });
+						// A replaced session's bus is gone; its replacement asks `review-status`.
+						if (!sessionLive) return;
+						emitReviewResult(reviewResult);
 					});
-					request.respond({
+					if (!sessionLive) {
+						// The session ended while the server was starting.
+						openReviews.delete(entry);
+						entry.close();
+						answer({ status: "unavailable", error: "The Pi session ended before the review opened." });
+						return;
+					}
+					answer({
 						status: "handled",
 						result: {
 							status: "pending",
@@ -384,7 +521,7 @@ export function registerPlannotatorEventListeners(
 					return;
 				}
 				case "code-review": {
-					const result = await openCodeReview(ctx, {
+					const result = await awaitTracked(await startCodeReviewBrowserSession(ctx, {
 						cwd: request.payload?.cwd,
 						defaultBranch: request.payload?.defaultBranch,
 						diffType: request.payload?.diffType,
@@ -392,18 +529,18 @@ export function registerPlannotatorEventListeners(
 						useLocal: request.payload?.useLocal,
 						prUrl: request.payload?.prUrl,
 						patchFile: request.payload?.patchFile,
-					});
-					request.respond({ status: "handled", result });
+					}));
+					answer({ status: "handled", result });
 					return;
 				}
 				case "annotate": {
 					const payload = request.payload;
 					if (!payload?.filePath) {
-						request.respond({ status: "error", error: "Missing filePath for annotate request." });
+						answer({ status: "error", error: "Missing filePath for annotate request." });
 						return;
 					}
 					const sourceConverted = /\.html?$/i.test(payload.filePath) || /^https?:\/\//i.test(payload.filePath);
-					const result = await openMarkdownAnnotation(
+					const result = await awaitTracked(await startMarkdownAnnotationSession(
 						ctx,
 						payload.filePath,
 						payload.markdown ?? "",
@@ -412,8 +549,8 @@ export function registerPlannotatorEventListeners(
 						undefined,
 						sourceConverted,
 						payload.gate,
-					);
-					request.respond({ status: "handled", result });
+					));
+					answer({ status: "handled", result });
 					return;
 				}
 				case "annotate-last": {
@@ -421,28 +558,30 @@ export function registerPlannotatorEventListeners(
 					const usePayloadText = !!payload?.markdown?.trim();
 					const lastText = usePayloadText ? payload!.markdown! : getLastAssistantMessageText(ctx);
 					if (!lastText) {
-						request.respond({ status: "unavailable", error: "No assistant message found in session." });
+						answer({ status: "unavailable", error: "No assistant message found in session." });
 						return;
 					}
 					const recent = usePayloadText ? [] : getRecentAssistantMessages(ctx, 25);
 					const pickerMessages = recent.length > 1 ? recent : undefined;
-					const result = await openLastMessageAnnotation(ctx, lastText, payload?.gate, pickerMessages);
-					request.respond({ status: "handled", result });
+					const result = await awaitTracked(
+						await startLastMessageAnnotationSession(ctx, lastText, payload?.gate, pickerMessages),
+					);
+					answer({ status: "handled", result });
 					return;
 				}
 				case "archive": {
 					const result = await openArchiveBrowserAction(ctx, request.payload?.customPlanPath);
-					request.respond({ status: "handled", result });
+					answer({ status: "handled", result });
 					return;
 				}
 			}
 		} catch (err) {
 			const message = getStartupErrorMessage(err);
 			if (/unavailable|not available/i.test(message)) {
-				request.respond({ status: "unavailable", error: message });
+				answer({ status: "unavailable", error: message });
 				return;
 			}
-			request.respond({ status: "error", error: message });
+			answer({ status: "error", error: message });
 		}
 	});
 }
