@@ -163,22 +163,39 @@ function writeRoute(route: Route, options: { replace?: boolean } = {}): void {
  * a new entry, so the browser's Back reopens what was just closed.
  */
 function closeTo(route: Route): void {
-  if (!((isPhone() || leavesCoveringThread(route)) && backTo(hashOf(route)))) writeRoute(route);
+  if (!((isPhone() || leavesCoveringPane(route)) && backTo(hashOf(route)))) writeRoute(route);
 }
 
 /**
- * The thread on screen covers the list (a window too narrow for both,
- * stack.ts), kept in step by the window. Closing that thread back to its list
- * is then the browser's Back, as on a phone, so an iPad's swipe back and
- * `‹ Inbox` agree. Every other close, and every close beside the list, stays
- * a new entry, as on a desktop.
+ * Which panes cover their list now (a window too narrow for both, stack.ts),
+ * kept in step by the window. Closing a covering thread back to the list, or a
+ * covering decision back to the Decisions list, is then the browser's Back, as
+ * on a phone, so an iPad's swipe back and `‹ Inbox` / `‹ Decisions` agree.
+ * Every other close, and every close beside the list, stays a new entry, as on
+ * a desktop.
  */
-let threadCoversList = false;
+const covering = { thread: false, decision: false };
 
-function leavesCoveringThread(route: Route): boolean {
-  if (!threadCoversList || route.page !== 'inbox' || route.thread) return false;
+function leavesCoveringPane(route: Route): boolean {
   const from = readRoute();
-  return from.page === 'inbox' && !!from.thread && !from.file && !from.guide;
+  if (covering.thread && route.page === 'inbox' && !route.thread) {
+    return from.page === 'inbox' && !!from.thread && !from.file && !from.guide;
+  }
+  if (covering.decision && route.page === 'decisions' && !route.decision) {
+    return from.page === 'decisions' && !!from.decision;
+  }
+  return false;
+}
+
+/** Focus the first element on screen that matches one of `selectors`, in order (a list draws some rows twice, one hidden). */
+function focusFirst(selectors: readonly string[]): void {
+  for (const selector of selectors) {
+    const el = [...document.querySelectorAll<HTMLElement>(selector)].find((candidate) => candidate.getClientRects().length > 0);
+    if (el) {
+      el.focus();
+      return;
+    }
+  }
 }
 
 function platformOf(): ConnectContext['platform'] {
@@ -482,8 +499,9 @@ function Inbox() {
   const rootRef = useRef<HTMLDivElement>(null);
   const stack = useStack(rootRef, phone, [hashOf(route), sidebarOpen]);
   useLayoutEffect(() => {
-    threadCoversList = stack.thread;
-  }, [stack.thread]);
+    covering.thread = stack.thread;
+    covering.decision = stack.decision;
+  }, [stack.thread, stack.decision]);
 
   const openRow = (row: InboxListRow) => go({ page: 'inbox', project: route.project, thread: row.thread_id });
 
@@ -870,21 +888,61 @@ function Inbox() {
     lastView.current = view;
   }
 
-  // A thread that covers the list (stack.ts) takes the focus with it, and gives it back to its row: the
-  // list is hidden under the thread, so focus left on the row clicked (or on the thread's Back) would sit
-  // on something nobody can see.
-  const focusFrom = useRef<{ view: string; thread: string | null }>({ view, thread: null });
+  // A thread or a decision that covers its list (stack.ts) takes the focus with it, and gives it back to
+  // its row: the list is hidden under it, so focus left on the row clicked (or on the pane's Back) would
+  // sit on something nobody can see.
+  // The list row that last had focus, and the one to return to on Back (see the resize effect below).
+  const listFocus = useRef<string | null>(null);
+  const returnRow = useRef<string | null>(null);
+  const focusFrom = useRef<{ view: string; thread: string | null; decision: string | null }>({ view, thread: null, decision: null });
   useEffect(() => {
     const before = focusFrom.current;
-    focusFrom.current = { view, thread: view === 'thread' ? route.thread : null };
-    if (!stack.thread || phone || before.view === view) return;
-    if (view === 'thread' && before.view === 'list') {
-      const target = document.querySelector<HTMLElement>('section.ib-pane [data-stack-back]') ?? document.querySelector<HTMLElement>('section.ib-pane h2.ib-subject');
-      target?.focus();
-    } else if (view === 'list' && before.view === 'thread' && before.thread) {
-      document.querySelector<HTMLElement>(`.ib-listcol .ib-lbody [data-thread-id="${CSS.escape(before.thread)}"]`)?.focus();
+    focusFrom.current = { view, thread: view === 'thread' ? route.thread : null, decision: view === 'decision' ? (route.decision ?? null) : null };
+    if (phone || before.view === view) return;
+    if (stack.thread && view === 'thread' && before.view === 'list') {
+      focusFirst(['section.ib-pane [data-stack-back]', 'section.ib-pane h2.ib-subject']);
+    } else if (stack.thread && view === 'list' && before.view === 'thread' && before.thread) {
+      // The row that had focus when the window stacked (below), else the thread's own row.
+      const row = returnRow.current ?? before.thread;
+      returnRow.current = null;
+      focusFirst([`.ib-listcol .ib-lbody [data-thread-id="${CSS.escape(row)}"]`, `.ib-listcol .ib-lbody [data-thread-id="${CSS.escape(before.thread)}"]`]);
+    } else if (stack.decision && view === 'decision' && before.view === 'decisions') {
+      focusFirst(['section.ib-dpane [data-stack-back]']);
+    } else if (stack.decision && view === 'decisions' && before.view === 'decision' && before.decision) {
+      focusFirst([`.ib-dpage [data-decision-id="${CSS.escape(before.decision)}"]`]);
     }
-  }, [view, route.thread, stack.thread, phone]);
+  }, [view, route.thread, route.decision, stack.thread, stack.decision, phone]);
+
+  // The window resized across the stacking width with a thread open. Into it: a list row that had focus is
+  // now hidden under the thread (and its rows redrawn wide), so focus would drop to the page; it goes to
+  // `‹ Inbox` instead, and Back returns it to that row. Out of it: `‹ Inbox` is gone, so focus goes to the
+  // row the person came from, now beside the thread.
+  useEffect(() => {
+    const onFocusIn = (event: FocusEvent) => {
+      const row = (event.target as HTMLElement | null)?.closest?.('.ib-listcol [data-thread-id]');
+      listFocus.current = row ? row.getAttribute('data-thread-id') : null;
+    };
+    document.addEventListener('focusin', onFocusIn);
+    return () => document.removeEventListener('focusin', onFocusIn);
+  }, []);
+  const stackedBefore = useRef(stack.thread);
+  useEffect(() => {
+    const was = stackedBefore.current;
+    stackedBefore.current = stack.thread;
+    if (phone || was === stack.thread || view !== 'thread') return;
+    const active = document.activeElement as HTMLElement | null;
+    const lost = !active || active === document.body || active.getClientRects().length === 0 || getComputedStyle(active).visibility === 'hidden';
+    if (stack.thread) {
+      if (listFocus.current && (lost || active?.closest('.ib-listcol'))) {
+        returnRow.current = listFocus.current;
+        focusFirst(['section.ib-pane [data-stack-back]', 'section.ib-pane h2.ib-subject']);
+      }
+    } else if (lost) {
+      const row = returnRow.current ?? route.thread;
+      returnRow.current = null;
+      if (row) focusFirst([`.ib-listcol .ib-lbody [data-thread-id="${CSS.escape(row)}"]`]);
+    }
+  }, [stack.thread, view, route.thread, phone]);
 
   let main: ReactNode;
   const decisionsFolder = decisionsProject ? projects.find((p) => p.id === decisionsProject) ?? null : null;

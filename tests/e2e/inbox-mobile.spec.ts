@@ -937,6 +937,67 @@ test.describe('a desktop window', () => {
     await expect(pane.getByRole('heading', { name: /Stripe 409/ })).toBeVisible();
   });
 
+  test('at 900 px an open decision covers its list: focus goes to ‹ Decisions and back to its row, and ‹ Decisions is the browser Back', async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 800 });
+    await page.goto(world.url);
+    await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
+    const projects = (await page.evaluate(() => fetch('/api/inbox/projects').then((r) => r.json()))) as { projects: { id: string; name: string }[] };
+    const project = projects.projects.find((p) => p.name === 'billing-svc')!.id;
+    await page.evaluate((hash) => (window.location.hash = hash), `#decisions=${project}`);
+    const row = page.locator('.ib-dpage button[data-decision-id]', { hasText: 'Retry a Stripe 409 with the same idempotency key' }).filter({ visible: true }).first();
+    const id = (await row.getAttribute('data-decision-id'))!;
+    await row.click();
+    const dpane = page.locator('section.ib-dpane');
+    await expect(dpane.getByRole('heading', { name: 'Retry a Stripe 409 with the same idempotency key' })).toBeVisible();
+    await expect(page.locator('.ib-dpage')).toBeHidden();
+    // The row clicked is under the decision now: focus moves to the way back.
+    await expect(dpane.locator('[data-stack-back]')).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.ib-dpage')).toBeVisible();
+    await expect(dpane).toHaveCount(0);
+    // Back on the list, focus is on the decision's row.
+    await expect(page.locator(`.ib-dpage [data-decision-id="${id}"]`).filter({ visible: true }).first()).toBeFocused();
+    // ‹ Decisions went back in history (no new entry): Forward reopens the decision.
+    expect(await page.evaluate(() => window.location.hash)).toBe(`#decisions=${project}`);
+    await page.goForward();
+    await expect(dpane.getByRole('heading', { name: 'Retry a Stripe 409 with the same idempotency key' })).toBeVisible();
+  });
+
+  test('at 900 px, a window that shrinks into stacking with a list row focused never drops focus to the page', async ({ page }) => {
+    const rowOf = (id: string) => page.locator(`.ib-lbody [data-thread-id="${id}"]`);
+    const onPage = () => page.evaluate(() => document.activeElement === document.body);
+    // The list alone: the row stays where it is, and keeps the focus.
+    await page.setViewportSize({ width: 1100, height: 800 });
+    await page.goto(world.url);
+    await rowOf(world.threads.holding).focus();
+    await page.setViewportSize({ width: 900, height: 800 });
+    await expect(rowOf(world.threads.holding)).toBeFocused();
+
+    // A thread beside the list, focus on another row: shrinking puts the thread over the list and hides that
+    // row, so focus goes to ‹ Inbox, and Back returns it to the row that had it.
+    await page.setViewportSize({ width: 1100, height: 800 });
+    await page.evaluate((hash) => (window.location.hash = hash), `#thread=${world.threads.stopped}`);
+    const pane = page.locator('section.ib-pane');
+    await expect(pane.getByRole('heading', { name: /Stripe 409/ })).toBeVisible();
+    await expect(page.locator('.ib-listcol')).toBeVisible();
+    await rowOf(world.threads.holding).focus();
+    await page.setViewportSize({ width: 900, height: 800 });
+    await expect(page.locator('.ib-listcol')).toBeHidden();
+    expect(await onPage()).toBe(false);
+    await expect(pane.locator('[data-stack-back]')).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.ib-listcol')).toBeVisible();
+    await expect(rowOf(world.threads.holding)).toBeFocused();
+
+    // And back out: a stacked thread whose ‹ Inbox has focus, then a wider window, puts focus on its row beside it.
+    await rowOf(world.threads.stopped).click();
+    await expect(pane.locator('[data-stack-back]')).toBeFocused();
+    await page.setViewportSize({ width: 1100, height: 800 });
+    await expect(page.locator('.ib-listcol')).toBeVisible();
+    expect(await onPage()).toBe(false);
+    await expect(rowOf(world.threads.stopped)).toBeFocused();
+  });
+
   test('an iPad on its side (1080 px) keeps the list beside a 468 px thread, as main does', async ({ page }) => {
     await page.setViewportSize({ width: 1080, height: 810 });
     await page.goto(`${world.url}#thread=${world.threads.stopped}`);
