@@ -59,6 +59,27 @@ function hasNewAgentActivity(old: InboxListRow | undefined, row: InboxListRow, o
 }
 
 /**
+ * The thread the held list treats as open (design record
+ * "inbox-new-in-open-thread", approved 2026-10-12): the thread the person
+ * has open, or the one they just closed until the list settles. While it is
+ * open, whatever arrives there is its own business (`asOf` absent). Once
+ * closed, `asOf` is its list row as it stood at the close (null when the list
+ * had none): only what arrived while it was open is exempt, and an agent
+ * message after the close is news like any other.
+ */
+export interface OpenThread {
+  threadId: string;
+  asOf?: InboxListRow | null;
+}
+
+/** `row` is the open thread's, and nothing an agent wrote after the close is in it. */
+function isOpenRow(row: InboxListRow, open: OpenThread | null | undefined): boolean {
+  if (!open || row.thread_id !== open.threadId) return false;
+  if (open.asOf === undefined) return true;
+  return open.asOf !== null && !hasNewAgentActivity(open.asOf, row);
+}
+
+/**
  * The threads in `latest` with agent activity the list on screen does not
  * show: a thread it lacks, or one whose last message is a newer agent
  * message. The person's own picks, replies and looks never count. `open`:
@@ -70,7 +91,7 @@ export function heldNotice(
   shown: readonly InboxListSection[],
   latest: readonly InboxListSection[],
   openedHere?: ReadonlySet<string>,
-  open?: string | null,
+  open?: OpenThread | null,
 ): HeldNotice {
   const before = rowsById(shown);
   const projects = new Set<string>();
@@ -78,7 +99,7 @@ export function heldNotice(
   for (const row of rowsById(latest).values()) {
     // The thread the person has open (or just closed, until the list settles)
     // is never news here: its own row and its pill say what arrived there.
-    if (row.thread_id === open) continue;
+    if (isOpenRow(row, open)) continue;
     if (!hasNewAgentActivity(before.get(row.thread_id), row, openedHere)) continue;
     count += 1;
     projects.add(row.project.name);
@@ -96,7 +117,7 @@ export function heldNotice(
  * reply. A row with new agent activity keeps what was on screen: that change
  * waits behind "N new". A row whose thread is gone stays as it was.
  */
-export function refreshHeldRows(shown: readonly InboxListSection[], latest: readonly InboxListSection[], open?: string | null): InboxListSection[] {
+export function refreshHeldRows(shown: readonly InboxListSection[], latest: readonly InboxListSection[], open?: OpenThread | null): InboxListSection[] {
   const fresh = rowsById(latest);
   return shown.map((section) => ({
     ...section,
@@ -104,7 +125,7 @@ export function refreshHeldRows(shown: readonly InboxListSection[], latest: read
       const next = fresh.get(row.thread_id);
       // The open thread's row always tells its state, in place: bold when an
       // agent message arrives, not bold once it is seen (it never moves).
-      return next && (row.thread_id === open || !hasNewAgentActivity(row, next)) ? next : row;
+      return next && (isOpenRow(next, open) || !hasNewAgentActivity(row, next)) ? next : row;
     }),
   }));
 }
@@ -131,7 +152,7 @@ export function settleOwn(
   shown: readonly InboxListSection[],
   latest: readonly InboxListSection[],
   openedHere?: ReadonlySet<string>,
-  open?: string | null,
+  open?: OpenThread | null,
 ): InboxListSection[] {
   const before = rowsById(shown);
   const known = new Set(latest.map((section) => section.id));
@@ -147,7 +168,7 @@ export function settleOwn(
       // The thread just closed settles where its state puts it, an agent
       // message that arrived while it was open included: seen, by its state
       // (often Quiet); not yet seen, back as unread (New, or Waiting when it asks).
-      if (row.thread_id === open || !hasNewAgentActivity(old, row, openedHere)) put(section.id, row);
+      if (isOpenRow(row, open) || !hasNewAgentActivity(old, row, openedHere)) put(section.id, row);
       // Archived by the person while it was open (markHeldRowArchived): the archive settles (the row
       // leaves); the agent's message that brought it back waits behind "N new", like any agent activity.
       else if (old && (old.resolved_at ?? null) !== null && old.back_from_archive !== true) continue;

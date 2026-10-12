@@ -27,7 +27,7 @@ import {
   type UpdateDetails,
   type WhatsNewModel,
 } from './api';
-import { filterSections, heldNotice, markHeldRowArchived, refreshHeldRows, settleOwn, settleThread, waitingCount } from './held';
+import { filterSections, heldNotice, markHeldRowArchived, refreshHeldRows, settleOwn, settleThread, waitingCount, type OpenThread } from './held';
 import {
   captureSettle,
   COVERED_LIST_SETTLES,
@@ -388,9 +388,17 @@ function Inbox() {
    * is never held (held.ts): never in "N new", its row kept as it now is, and
    * it settles where its state puts it (design record "inbox-new-in-open-thread").
    */
-  const closing = useRef<string | null>(null);
-  /** The thread the held list treats as open: the route's, else the one closing; the close's own render reads the route it leaves. */
-  const heldOpen = (): string | null => routeRef.current.thread ?? closing.current ?? lastRoute.current.thread;
+  const closing = useRef<OpenThread | null>(null);
+  /**
+   * The thread the held list treats as open: the route's, else the one
+   * closing (with its row as it stood at the close, so an agent message after
+   * the close waits behind "N new" like any other); the close's own render
+   * reads the route it leaves.
+   */
+  const heldOpen = (): OpenThread | null => {
+    const open = routeRef.current.thread ?? (closing.current ? null : lastRoute.current.thread);
+    return open ? { threadId: open } : closing.current;
+  };
   const cancelSettle = useCallback(() => {
     if (settleTimer.current) clearTimeout(settleTimer.current);
     settleTimer.current = null;
@@ -603,7 +611,7 @@ function Inbox() {
     }
     const closed = before.thread;
     if (!closed) return;
-    closing.current = closed;
+    closing.current = { threadId: closed, asOf: latestRef.current?.sections.flatMap((section) => section.threads).find((row) => row.thread_id === closed) ?? null };
     const active = document.activeElement;
     if (body && lastInput === 'keyboard' && (!active || active === document.body)) rowElement(body, closed)?.focus({ preventScroll: true });
     if (listCovered() && COVERED_LIST_SETTLES === 'while-covered') {
