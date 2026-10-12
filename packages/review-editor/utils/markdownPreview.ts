@@ -112,6 +112,14 @@ export function markdownPreviewImageUrl(options: {
   return `${MARKDOWN_PREVIEW_IMAGE_ENDPOINT}?${params}`;
 }
 
+/** True for an image on another server (`https://…`, `http://…`, `//host/…`). */
+export function isRemoteImageSource(src: string): boolean {
+  return /^(https?:)?\/\//i.test(src.trim());
+}
+
+/** The title of a remote image a PR review holds back until the reviewer loads it. */
+export const REMOTE_IMAGE_HELD_TITLE = 'Remote image, not loaded: loading it tells that server your IP address';
+
 /** True for an image source the page may load as written (remote or inline). */
 export function isExternalImageSource(src: string): boolean {
   return /^(https?:|data:|blob:)/i.test(src.trim());

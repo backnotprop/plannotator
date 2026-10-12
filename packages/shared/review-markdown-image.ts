@@ -14,14 +14,16 @@
  *  2. `doc` must be a file in the current patch whose path at that side is a
  *     Markdown file (`.md`, `.mdx`, `.markdown`, or a config.json
  *     `markdownExtensions` entry), and that side must exist.
- *  3. `src` must be a plain relative or root-relative path (no scheme, no
+ *  3. `src` (as written; leading and trailing whitespace dropped, as a
+ *     browser does) must be a plain relative or root-relative path (no scheme, no
  *     `//`, no backslash, no control characters, at most 2048 characters)
  *     naming an image by extension, checked before anything is read.
  *  4. It resolves against the doc's folder at that side (`/` = repository
  *     root, GitHub's README rule); one that climbs above the root is refused.
  *  5. The doc's text at that side must reference `src` as an image (a
- *     markdown image, a reference-style image definition, or an `<img src>`),
- *     so the route reads only what the file shows.
+ *     markdown image, a reference-style image definition, or an `<img src>`,
+ *     never one inside a code block or code span), so the route reads only
+ *     what the file shows.
  *  6. The image is read at that side and answered exactly like
  *     `/api/review-image` (caps, LFS pointer, sniffed type, headers, ETag).
  */
@@ -90,14 +92,61 @@ function normalizeLabel(label: string): string {
 }
 
 /**
+ * An image source with the leading and trailing ASCII whitespace a browser's
+ * URL parser strips (`<img src=" a.png">` loads `a.png`). The route applies it
+ * to the requested `src` and to every reference alike, so the client can send
+ * the source exactly as written.
+ */
+export function normalizeImageSource(src: string): string {
+  return src.replace(/^[\t\n\f\r ]+|[\t\n\f\r ]+$/g, "");
+}
+
+/** A fence opener: up to three spaces, then three or more backticks or tildes. */
+const FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+const FENCE_CLOSE_RE = /^ {0,3}(`{3,}|~{3,})\s*$/;
+/** An inline code span that stays inside one paragraph (CommonMark's backtick-run rule). */
+const INLINE_CODE_RE = /(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\r?\n)[\s\S])*?[^`]\1(?!`)/g;
+
+/**
+ * The Markdown text with its code taken out: fenced code blocks (``` or ~~~,
+ * to the matching close or the end of the text) become empty lines and inline
+ * code spans are removed. An image written inside code renders as code, so it
+ * is not an image the file shows.
+ */
+export function stripMarkdownCode(text: string): string {
+  const lines = text.split("\n");
+  let fence: { char: string; length: number } | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (fence) {
+      const close = FENCE_CLOSE_RE.exec(line);
+      if (close && close[1][0] === fence.char && close[1].length >= fence.length) fence = null;
+      lines[i] = "";
+      continue;
+    }
+    const open = FENCE_OPEN_RE.exec(line);
+    // A backtick fence's info string cannot hold a backtick (that is inline code).
+    if (open && !(open[1][0] === "`" && open[2].includes("`"))) {
+      fence = { char: open[1][0], length: open[1].length };
+      lines[i] = "";
+    }
+  }
+  return lines.join("\n").replace(INLINE_CODE_RE, "");
+}
+
+/**
  * Every image source the Markdown text names, as the preview's renderer
  * asks for it: a markdown image target as written (angle brackets removed),
  * a reference-style image's definition target, and each `<img src>` value
- * decoded. Remote, `data:` and `blob:` sources are left out.
+ * decoded, each through `normalizeImageSource`. Images inside code (fenced
+ * blocks, inline spans) are not shown and are left out, as are remote,
+ * `data:` and `blob:` sources.
  */
-export function markdownImageRefs(text: string): Set<string> {
+export function markdownImageRefs(markdown: string): Set<string> {
+  const text = stripMarkdownCode(markdown);
   const refs = new Set<string>();
-  const add = (src: string | undefined) => {
+  const add = (raw: string | undefined) => {
+    const src = raw === undefined ? "" : normalizeImageSource(raw);
     if (!src) return;
     if (/^(https?:|data:|blob:)/i.test(src)) return;
     refs.add(src);
@@ -240,7 +289,8 @@ export async function handleReviewMarkdownImageRequest(
   }
   const doc = request.params.get("doc");
   const side = request.params.get("side");
-  const src = request.params.get("src");
+  const rawSrc = request.params.get("src");
+  const src = rawSrc === null ? null : normalizeImageSource(rawSrc);
   const snapshot = request.params.get("snapshot");
   if (!doc || (side !== "old" && side !== "new") || !src || !snapshot) {
     return reviewImageErrorResponse(400, { reason: "bad-request", error: "Expected doc, side=old|new, src and snapshot" });

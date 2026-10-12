@@ -17,7 +17,9 @@ import { useFileContents, type UseFileContentsResult } from '../hooks/useFileCon
 import type { MarkdownPreviewView } from '../hooks/useMarkdownPreview';
 import {
   MARKDOWN_PREVIEW_SIZE_LIMIT,
+  REMOTE_IMAGE_HELD_TITLE,
   isExternalImageSource,
+  isRemoteImageSource,
   markdownPreviewImageUrl,
   markdownPreviewSides,
   markdownPreviewSourcePath,
@@ -55,6 +57,13 @@ export interface MarkdownFilePreviewProps {
   /** Without review state (a bare DiffViewer): the view to show and its setter. */
   view?: MarkdownPreviewView;
   onViewChange?: (view: MarkdownPreviewView) => void;
+  /**
+   * Hold remote images (`https://…`) behind a placeholder until the reviewer
+   * loads them, so opening a preview never tells a third-party server the
+   * reviewer's IP address. Default: on in a PR review (someone else's file),
+   * off otherwise.
+   */
+  holdRemoteImages?: boolean;
 }
 
 /** A comment made in this preview, as the text highlighter sees it. */
@@ -129,6 +138,7 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
   onHeightChange,
   view: viewProp,
   onViewChange,
+  holdRemoteImages,
 }) => {
   const state = useReviewStateOptional();
   const ownContents = useFileContents({
@@ -186,12 +196,22 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
 
   const snapshot = imageSnapshotId ?? state?.snapshotId;
   const canLoadImages = imagesAvailable || state?.imagePreviewAvailable === true;
+  const holdRemote = holdRemoteImages ?? !!state?.prMetadata;
+  const [remoteImagesLoaded, setRemoteImagesLoaded] = useState(false);
+  const holdingRemote = holdRemote && !remoteImagesLoaded;
   const makeImageResolver = useCallback((side: PlanDiffSide): ImageResolver => (src) => {
+    if (holdRemote && isRemoteImageSource(src)) {
+      return holdingRemote
+        ? { kind: 'unavailable', title: REMOTE_IMAGE_HELD_TITLE }
+        : { kind: 'src', src: src.trim() };
+    }
     if (isExternalImageSource(src)) return null;
     if (!canLoadImages) return { kind: 'unavailable', title: 'Images are not shown for this review' };
-    // The patch names the file by its display path (a deletion's is its old one).
-    return { kind: 'src', src: markdownPreviewImageUrl({ doc: filePath, side, src: src.trim(), snapshot }) };
-  }, [canLoadImages, filePath, snapshot]);
+    // The patch names the file by its display path (a deletion's is its old
+    // one). The source goes as written: the route normalizes it the same way
+    // it reads the file's references.
+    return { kind: 'src', src: markdownPreviewImageUrl({ doc: filePath, side, src, snapshot }) };
+  }, [canLoadImages, filePath, snapshot, holdRemote, holdingRemote]);
   const resolveOldImage = useMemo(() => makeImageResolver('old'), [makeImageResolver]);
   const resolveNewImage = useMemo(() => makeImageResolver('new'), [makeImageResolver]);
 
@@ -286,6 +306,18 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
     setUnanchored(new Set());
   }, [effectiveView]);
 
+  // How many remote images are held on screen (counted from the rendered
+  // placeholders, so folds and both views are counted as shown).
+  const [heldRemoteCount, setHeldRemoteCount] = useState(0);
+  useEffect(() => {
+    const container = containerRef.current;
+    const count = !holdingRemote || !container
+      ? 0
+      : Array.from(container.querySelectorAll('[data-image-unavailable]'))
+        .filter((el) => el.getAttribute('title') === REMOTE_IMAGE_HELD_TITLE).length;
+    setHeldRemoteCount((current) => (current === count ? current : count));
+  });
+
   // --- Height reporting (all files) -----------------------------------------
 
   const rootRef = useRef<HTMLDivElement>(null);
@@ -309,6 +341,14 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
   // else is inert. `#heading` scrolls within the preview.
   const handleClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     const target = event.target as Element | null;
+    const held = target?.closest?.('[data-image-unavailable]');
+    if (held && held.getAttribute('title') === REMOTE_IMAGE_HELD_TITLE) {
+      // A held remote image: a click on it loads the remote images (and
+      // never follows a link the image sits in).
+      event.preventDefault();
+      setRemoteImagesLoaded(true);
+      return;
+    }
     if (target?.closest?.('[data-plan-diff-fold]')) {
       // A fold opened or closed: re-anchor highlights once it has rendered.
       requestAnimationFrame(() => setRenderEpoch((n) => n + 1));
@@ -476,6 +516,26 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
           {commentsEnabled && (
             <span className="ml-auto hidden sm:inline">Select text to comment. Line comments stay in Source.</span>
           )}
+        </div>
+      )}
+      {heldRemoteCount > 0 && (
+        <div
+          role="status"
+          data-markdown-preview-remote-images=""
+          className="mx-auto mb-3 flex max-w-4xl flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
+        >
+          <span>
+            {heldRemoteCount === 1 ? '1 remote image is' : `${heldRemoteCount} remote images are`} not loaded.
+            {' '}Loading one tells its server your IP address.
+          </span>
+          <button
+            type="button"
+            data-markdown-preview-load-remote=""
+            className="text-primary hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 rounded"
+            onClick={() => setRemoteImagesLoaded(true)}
+          >
+            Load remote images
+          </button>
         </div>
       )}
       {unanchoredCount > 0 && (

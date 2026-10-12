@@ -9,7 +9,7 @@
  * DOM-gated (DOM_TESTS=1) and registered in .github/workflows/test.yml's
  * "Run UI seam-contract + DOM tests" step.
  */
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import React, { useMemo, useState } from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -192,6 +192,102 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
     expect(marksText(el)).toBe('');
     const note = el.querySelector('[data-markdown-preview-unanchored]');
     expect(note?.textContent).toContain('1 comment on this file is not in this view');
+  });
+
+  /** An added Markdown file, previewed whole, under the given review state. */
+  async function mountAdded(text: string, stateExtras: Record<string, unknown> = {}) {
+    const patch = [
+      'diff --git a/docs/guide.md b/docs/guide.md',
+      'new file mode 100644',
+      '--- /dev/null',
+      '+++ b/docs/guide.md',
+      `@@ -0,0 +1,${text.split('\n').length - 1} @@`,
+      ...text.split('\n').slice(0, -1).map((line) => `+${line}`),
+      '',
+    ].join('\n');
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(
+        <ReviewStateProvider value={{ files: [], allAnnotations: [], selectedAnnotationId: null, snapshotId: 'snap-1', imagePreviewAvailable: true, ...stateExtras } as unknown as ReviewState}>
+          <MarkdownFilePreview
+            filePath="docs/guide.md"
+            status="added"
+            patch={patch}
+            contents={{ fileContents: { forPath: 'docs/guide.md', old: null, new: text }, loading: false, stale: false }}
+            variant="single"
+          />
+        </ReviewStateProvider>,
+      );
+      await new Promise((r) => setTimeout(r, 30));
+    });
+    return host;
+  }
+
+  const REMOTE_DOC = [
+    '# Shots',
+    '',
+    '![pixel](https://tracker.example/p.png)',
+    '',
+    '<p><img alt="badge" src="//cdn.example/b.svg"></p>',
+    '',
+    '![local](img/a.png)',
+    '',
+  ].join('\n');
+  // happy-dom fires `error` at once for an <img> whose relative src it cannot
+  // parse against about:blank; give the page the http origin the review app has.
+  type HappyWindow = { happyDOM?: { setURL?: (url: string) => void } };
+  let originalUrl = '';
+  beforeAll(() => {
+    originalUrl = window.location.href;
+    (window as unknown as HappyWindow).happyDOM?.setURL?.('http://localhost:19611/');
+  });
+  afterAll(() => {
+    (window as unknown as HappyWindow).happyDOM?.setURL?.(originalUrl);
+  });
+  const imgSrcs = (el: HTMLElement) => Array.from(el.querySelectorAll('img')).map((img) => img.getAttribute('src'));
+
+  test('in a PR review, remote images wait behind a placeholder until the reviewer loads them', async () => {
+    const el = await mountAdded(REMOTE_DOC, { prMetadata: { url: 'https://github.com/o/r/pull/1' } });
+    await settle(30);
+    // Nothing remote is in the page; the repository image still loads through the review route.
+    expect(imgSrcs(el)).toEqual(['/api/review-markdown-image?doc=docs%2Fguide.md&side=new&src=img%2Fa.png&snapshot=snap-1']);
+    const notice = el.querySelector('[data-markdown-preview-remote-images]');
+    expect(notice?.textContent).toContain('2 remote images are not loaded');
+
+    // A click on a placeholder loads them.
+    const placeholder = el.querySelector('[data-image-unavailable]') as HTMLElement;
+    await act(async () => { placeholder.click(); await new Promise((r) => setTimeout(r, 30)); });
+    await settle(30);
+    expect(imgSrcs(el).sort()).toEqual([
+      '//cdn.example/b.svg',
+      '/api/review-markdown-image?doc=docs%2Fguide.md&side=new&src=img%2Fa.png&snapshot=snap-1',
+      'https://tracker.example/p.png',
+    ]);
+    expect(el.querySelector('[data-markdown-preview-remote-images]')).toBeNull();
+  });
+
+  test('the notice button loads held remote images too', async () => {
+    const el = await mountAdded(REMOTE_DOC, { prMetadata: { url: 'https://github.com/o/r/pull/1' } });
+    await settle(30);
+    const button = el.querySelector('[data-markdown-preview-load-remote]') as HTMLButtonElement;
+    await act(async () => { button.click(); await new Promise((r) => setTimeout(r, 30)); });
+    await settle(30);
+    expect(imgSrcs(el)).toContain('https://tracker.example/p.png');
+  });
+
+  test('outside a PR review remote images load as written', async () => {
+    const el = await mountAdded(REMOTE_DOC);
+    await settle(30);
+    expect(imgSrcs(el)).toContain('https://tracker.example/p.png');
+    expect(el.querySelector('[data-markdown-preview-remote-images]')).toBeNull();
+  });
+
+  test('an image source is sent to the route as written, never trimmed', async () => {
+    const el = await mountAdded('<p><img alt="x" src=" img/a.png"></p>\n');
+    await settle(30);
+    expect(imgSrcs(el)).toEqual(['/api/review-markdown-image?doc=docs%2Fguide.md&side=new&src=+img%2Fa.png&snapshot=snap-1']);
   });
 
   test('Mermaid and Graphviz fences render as code, not diagrams', async () => {

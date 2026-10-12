@@ -120,6 +120,35 @@ describe("markdownImageRefs", () => {
     ]);
   });
 
+  test("images inside fenced code blocks and inline code spans are not references", () => {
+    const refs = markdownImageRefs([
+      "```md",
+      "![fenced](img/fenced.png)",
+      '<img src="img/fenced-html.png">',
+      "```",
+      "~~~~",
+      "![tilde](img/tilde.png)",
+      "```",
+      "still inside the tilde fence ![t2](img/t2.png)",
+      "~~~~",
+      "Inline `![span](img/span.png)` and ``<img src=\"img/span2.png\">`` are code.",
+      "![shown](img/shown.png)",
+      "[logo]: assets/logo.png",
+      "```",
+      "![logo]",
+      "```",
+    ].join("\n"));
+    expect([...refs]).toEqual(["img/shown.png"]);
+    // An unclosed fence runs to the end of the text, as CommonMark has it.
+    expect(markdownImageRefs("```\n![a](a.png)\n").size).toBe(0);
+    // A stray backtick does not swallow the next paragraph's image.
+    expect([...markdownImageRefs("A `stray backtick.\n\n![b](b.png) and ` another")]).toEqual(["b.png"]);
+  });
+
+  test("sources are compared with leading and trailing whitespace dropped, as a browser does", () => {
+    expect([...markdownImageRefs('<img src=" img/a.png\t">')]).toEqual(["img/a.png"]);
+  });
+
   test("a link definition alone is not an image reference", () => {
     expect(markdownImageRefs("[logo]: assets/logo.png\n[see it][logo]\n").size).toBe(0);
   });
@@ -191,6 +220,24 @@ describe("handleReviewMarkdownImageRequest", () => {
     expect((await answer({ doc: "docs/guide.md", side: "new", src: "/assets/r.png" }, STORE)).response.status).toBe(200);
     expect((await answer({ doc: "gone.md", side: "old", src: "g.png" }, STORE)).response.headers["X-Image-Width"]).toBe("7");
     expect((await answer({ doc: "notes.livemd", side: "new", src: "n.png" }, STORE)).response.status).toBe(200);
+  });
+
+  test("the source is matched as written, whitespace around it dropped on both sides", async () => {
+    const spaced = await answer({ doc: "docs/guide.md", side: "new", src: " img/a.png " }, {
+      ...STORE,
+      "new:docs/guide.md": doc('<img src=" img/a.png">\n'),
+    });
+    expect(spaced.response.status).toBe(200);
+    expect(spaced.reads).toEqual(["new:docs/guide.md", "new:docs/img/a.png"]);
+  });
+
+  test("an image shown only inside a code block is refused without reading it", async () => {
+    const result = await answer({ doc: "docs/guide.md", side: "new", src: "img/a.png" }, {
+      ...STORE,
+      "new:docs/guide.md": doc("```\n![a](img/a.png)\n```\n"),
+    });
+    expect([result.response.status, result.reason]).toEqual([403, "not-referenced"]);
+    expect(result.reads).toEqual(["new:docs/guide.md"]);
   });
 
   test("a matching If-None-Match is a bodyless 304", async () => {
