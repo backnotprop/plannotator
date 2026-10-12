@@ -2194,6 +2194,25 @@ diffs-container {
   animation: overlay-fade-in 0.15s ease-out both;
 }
 
+/* Fenced code in a Markdown preview (including Mermaid and Graphviz fences,
+   which the review shows as code, never as diagrams): the plan editor's
+   `pre code.pn-code` layout (packages/editor/index.css), which this app's
+   stylesheet does not otherwise carry. */
+[data-markdown-preview] pre code.pn-code {
+  display: block;
+  padding: 1rem;
+  border-radius: var(--radius);
+  background: var(--code-bg) !important;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+[data-markdown-preview] pre code.pn-code[data-keep-layout] {
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
 /* Code navigation peek panel — strip the syntax theme's block background */
 .code-nav-peek code,
 .code-nav-peek .pn-code {
