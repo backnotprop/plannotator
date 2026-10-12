@@ -49,7 +49,7 @@ import { InboxToast, type InboxToastModel } from './components/Toast';
 import { canToggleRead, MARK_READ_UNDO_MS, markReadToast } from './markRead';
 import { lookBoundary } from './folding';
 import { isPhone, trackKeyboard, usePhone } from './phone';
-import { useStack } from './stack';
+import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH, useStack } from './stack';
 import { backTo, pushScreen } from './history';
 
 // The Inbox has no /api/config and no browser-agent tools: settings stay in
@@ -497,7 +497,29 @@ function Inbox() {
   useEffect(() => (phone ? trackKeyboard() : undefined), [phone]);
   // A window too narrow for two panes (an iPad in portrait, a narrow desktop window): the pane on top covers the one under it (stack.ts).
   const rootRef = useRef<HTMLDivElement>(null);
-  const stack = useStack(rootRef, phone, [hashOf(route), sidebarOpen]);
+  // `‹ Inbox` from a file beside the thread in a window with room for the list and the thread but not for
+  // the sidebar too (about 920 to 1050 px): the sidebar stays closed on screen so the list shows beside the
+  // thread, as the open file kept it, without writing the person's choice. It comes back once there is room,
+  // when the thread closes, or when the person opens it.
+  const [sidebarHeld, setSidebarHeld] = useState(false);
+  const stack = useStack(rootRef, phone, [hashOf(route), sidebarOpen, sidebarHeld]);
+  useEffect(() => {
+    if (!sidebarHeld) return;
+    const check = () => {
+      const now = routeRef.current;
+      if (now.page !== 'inbox' || !now.thread) {
+        setSidebarHeld(false);
+        return;
+      }
+      const root = rootRef.current;
+      if (!root) return;
+      const sidebar = root.querySelector('.ib-sb-inner')?.getBoundingClientRect().width ?? 0;
+      if (root.getBoundingClientRect().width - sidebar >= LIST_MIN_WIDTH + THREAD_BESIDE_FILE_WIDTH) setSidebarHeld(false);
+    };
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, [sidebarHeld, route]);
   useLayoutEffect(() => {
     covering.thread = stack.thread;
     covering.decision = stack.decision;
@@ -900,7 +922,7 @@ function Inbox() {
   const focusFrom = useRef<{ view: string; thread: string | null; decision: string | null }>({ view, thread: null, decision: null });
   // `‹ Inbox` in the thread's header with a file beside it: the thread whose row takes focus once the file
   // has closed and the list is back (the list is not drawn while the file is open, so it waits for the view).
-  const backFromFile = useRef<string | null>(null);
+  const backFromFile = useRef<{ thread: string; name: string | null; label: string } | null>(null);
   useEffect(() => {
     const before = focusFrom.current;
     focusFrom.current = { view, thread: view === 'thread' ? route.thread : null, decision: view === 'decision' ? (route.decision ?? null) : null };
@@ -908,8 +930,19 @@ function Inbox() {
     const fromFile = backFromFile.current;
     backFromFile.current = null;
     if (phone) return;
-    if (fromFile && before.view === 'file' && view === 'thread' && route.thread === fromFile) {
-      focusFirst([`.ib-listcol .ib-lbody [data-thread-id="${CSS.escape(fromFile)}"]`, 'section.ib-pane h2.ib-subject']);
+    if (fromFile && before.view === 'file' && view === 'thread' && route.thread === fromFile.thread) {
+      // After the stack is measured for the new layout: say what actually happened.
+      requestAnimationFrame(() => {
+        const covered = rootRef.current?.dataset.stack?.split(' ').includes('thread') ?? false;
+        if (!covered) {
+          focusFirst([`.ib-listcol .ib-lbody [data-thread-id="${CSS.escape(fromFile.thread)}"]`, 'section.ib-pane h2.ib-subject']);
+          say(`${fromFile.label} list shown.${fromFile.name ? ` ${fromFile.name} closed.` : ''}`);
+        } else {
+          // No room for the list beside the thread even without the sidebar: the thread covers it, as when stacked.
+          focusFirst(['section.ib-pane [data-stack-back]', 'section.ib-pane h2.ib-subject']);
+          say(`${fromFile.name ?? 'The file'} closed.`);
+        }
+      });
       return;
     }
     if (stack.thread && view === 'thread' && before.view === 'list') {
@@ -1092,9 +1125,15 @@ function Inbox() {
             fileStacked={stack.file}
             onBackToList={(fileName) => {
               // The file's own close (its ×), then focus on this thread's row and one line for a screen reader.
-              backFromFile.current = thread.thread_id;
+              const root = rootRef.current;
+              if (root && sidebarOpen) {
+                const width = root.getBoundingClientRect().width;
+                const sidebar = root.querySelector('.ib-sb-inner')?.getBoundingClientRect().width ?? 0;
+                const room = LIST_MIN_WIDTH + THREAD_BESIDE_FILE_WIDTH;
+                if (width >= room && width - sidebar < room) setSidebarHeld(true);
+              }
+              backFromFile.current = { thread: thread.thread_id, name: fileName, label: filterProject?.name ?? 'Inbox' };
               closeTo({ ...routeRef.current, file: null });
-              say(`${filterProject?.name ?? 'Inbox'} list shown.${fileName ? ` ${fileName} closed.` : ''}`);
             }}
           />
         )}
@@ -1113,8 +1152,11 @@ function Inbox() {
       {/* A file beside the thread takes the sidebar's room (record 2.2): it closes on the same spring, and the person's choice stays as it was. */}
       <SidebarShell
         className="ib-shell"
-        open={sidebarOpen && !fileOpen}
-        onOpenChange={changeSidebar}
+        open={sidebarOpen && !fileOpen && !sidebarHeld}
+        onOpenChange={(next) => {
+          setSidebarHeld(false);
+          changeSidebar(next);
+        }}
         navigation={
           <Sidebar
             page={route.page}

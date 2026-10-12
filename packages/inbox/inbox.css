@@ -286,7 +286,8 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-rfoot { display: flex; gap: 6px; padding: 6px 8px 8px; }
 /* The chips wrap as a row inside the box (a 440 px thread beside a file, a stacked pane, a phone); a chip never shrinks or breaks its own label. */
 .ib-rfoot { flex-wrap: wrap; }
-.ib-rfoot > *, .ib-rfoot .ib-rchip { flex: none; white-space: nowrap; }
+.ib-rfoot > * { flex: none; }
+.ib-rfoot > .ib-rchip, .ib-annchip > .ib-rchip { white-space: nowrap; }
 .ib-rchip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border-radius: 6px; background: var(--muted); font-size: 12.5px; font-weight: 500; color: var(--foreground); }
 .ib-rchip .ib-ic { color: var(--muted-foreground); }
 .ib-delivered { font-size: 12.5px; color: var(--muted-foreground); display: flex; align-items: center; gap: 6px; margin-top: 10px; }
@@ -537,7 +538,8 @@ button.ib-drow:hover { background: color-mix(in oklch, var(--muted) 35%, transpa
 .pn-inbox .ib-rchip.ib-ann.ib-on { background: color-mix(in oklch, var(--primary) 14%, transparent); color: var(--primary); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--primary) 40%, transparent); }
 .ib-rchip.ib-ann.ib-on .ib-ic { color: var(--primary); }
 .ib-rchip.ib-none { opacity: 0.55; }
-.ib-annpop { position: absolute; left: 0; bottom: calc(100% + 10px); width: 540px; max-height: 60vh; overflow-y: auto; background: var(--popover); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28); z-index: 30; }
+/* --ib-annpop-shift: AnnotationsChip moves the list left when it would run past the window (to the reply box's right edge). */
+.ib-annpop { position: absolute; left: var(--ib-annpop-shift, 0px); bottom: calc(100% + 10px); white-space: normal; width: 540px; max-height: 60vh; overflow-y: auto; background: var(--popover); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28); z-index: 30; }
 .ib-aph { display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 6px 0 14px; font-size: 13.5px; border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
 .ib-aph b { font-weight: 600; }
 .ib-aph .ib-sp, .ib-arow .ib-sp, .ib-abt .ib-sp { flex: 1; }

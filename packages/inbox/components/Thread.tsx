@@ -1318,7 +1318,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         )}
       </div>
       <div className={`ib-pbody${one ? '' : ' ib-folding'}`} ref={bodyRef}>
-        <h2 className="ib-subject">{thread.subject ?? '(no subject)'}</h2>
+        {/* A focus target (the way back's fallback, a stacked thread), never a tab stop. */}
+        <h2 className="ib-subject" tabIndex={-1}>{thread.subject ?? '(no subject)'}</h2>
         {readAt !== null && !resolved && (
           <div className="ib-readline" data-read-line="">
             <Icon name="checkCircle" size={16} />

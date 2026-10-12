@@ -498,6 +498,39 @@ async function replyChipProblems(page: Page, sentenceMayWrap = false): Promise<s
   }, sentenceMayWrap);
 }
 
+/**
+ * The "N annotations ride this reply" list, opened from the reply box's chip:
+ * inside the window (its close button too), and every quote and comment
+ * wrapped inside the list, the long ones over more than one line.
+ */
+async function annotationListProblems(page: Page, shotName?: string): Promise<string[]> {
+  const chip = page.locator('section.ib-pane .ib-rfoot [data-annotations-chip]');
+  await chip.click();
+  const list = page.getByRole('dialog', { name: /ride this reply/ });
+  await expect(list).toBeVisible();
+  const problems = await list.evaluate((pop) => {
+    const out: string[] = [];
+    const box = pop.getBoundingClientRect();
+    const view = document.documentElement.clientWidth;
+    if (box.left < 0 || box.right > view) out.push(`the list runs past the window (${Math.round(box.left)} to ${Math.round(box.right)} of ${view})`);
+    const close = pop.querySelector('[aria-label="Close the list"]')!.getBoundingClientRect();
+    if (close.right > view || close.left < 0) out.push('the close button is off screen');
+    let wrapped = 0;
+    for (const el of pop.querySelectorAll<HTMLElement>('.ib-aq, .ib-ac')) {
+      const r = el.getBoundingClientRect();
+      const text = (el.textContent ?? '').slice(0, 30);
+      if (el.scrollWidth > el.clientWidth + 1 || r.right > box.right + 0.5) out.push(`"${text}" does not wrap inside the list`);
+      if (r.height > parseFloat(getComputedStyle(el).lineHeight) * 1.5) wrapped++;
+    }
+    if (wrapped === 0) out.push('no comment needed more than one line, so wrapping was not proved');
+    return out;
+  });
+  if (shotName) await shot(shotName);
+  await page.keyboard.press('Escape');
+  await expect(list).toHaveCount(0);
+  return problems;
+}
+
 test("the reply box's chips wrap inside it beside a file, stacked and on a phone; no chip breaks its own label", async () => {
   const page = world.page;
   // The reply box is open (picks, the skip chip, 3 annotations) from the tests above.
@@ -508,6 +541,7 @@ test("the reply box's chips wrap inside it beside a file, stacked and on a phone
   // The 440 px thread column beside the file.
   await expect(page.locator('section.ib-pane .ib-rfoot [data-annotations-chip]')).toHaveText('3 annotations');
   expect(await replyChipProblems(page)).toEqual([]);
+  expect(await annotationListProblems(page)).toEqual([]);
   await pane.getByRole('button', { name: 'Close admin-view.html' }).click();
   await expect(pane).toHaveCount(0);
   // The two-pane desktop, a stacked iPad, a narrow window, and phones.
@@ -522,6 +556,7 @@ test("the reply box's chips wrap inside it beside a file, stacked and on a phone
       await page.setViewportSize({ width: size.width, height: size.height });
       await expect(page.locator('section.ib-pane .ib-rbox').filter({ visible: true })).toHaveCount(1);
       expect(await replyChipProblems(page, 'phone' in size), `${size.width} by ${size.height}`).toEqual([]);
+      expect(await annotationListProblems(page, size.width === 1440 ? '2.4f-annotation-list-inside-the-window' : undefined), `the list at ${size.width} by ${size.height}`).toEqual([]);
       if (size.width === 1440) {
         // The two-pane desktop draws the chips as before: one row, each 26 px tall.
         const rows = await page.locator('section.ib-pane .ib-rfoot > *').evaluateAll((els) =>
@@ -599,6 +634,64 @@ test('leaving full screen keeps the file beside the thread with ‹ Inbox leadin
   await page.keyboard.press('Enter');
   await expect(page.locator('[data-attachment-pane]')).toHaveCount(0);
   await expect(row).toBeFocused();
+});
+
+test('at 1000 px ‹ Inbox still ends with the list beside the thread: the sidebar stays closed on screen, its choice unchanged, and comes back with room', async () => {
+  const page = world.page;
+  const nav = page.getByRole('complementary', { name: 'Inbox navigation' });
+  const thread = page.locator('section.ib-pane');
+  const back = thread.locator('.ib-phead [data-file-back]');
+  const row = page.locator(`.ib-listcol .ib-lbody [data-thread-id="${world.threads.billing}"]`);
+  const live = page.locator('[data-inbox-live]');
+  const sidebarCookie = () => page.evaluate(() => document.cookie.split('; ').find((c) => c.startsWith('plannotator-inbox-sidebar-open=')) ?? null);
+  const before = await sidebarCookie();
+  try {
+    // 1000 px: room for the list (380) beside the thread (440), not for the sidebar (232) too.
+    await page.setViewportSize({ width: 1000, height: 900 });
+    await expect(nav).toBeVisible();
+    await page.getByRole('button', { name: 'Open retry-plan.md' }).click();
+    await expect(page.locator(`[data-attachment-pane="${world.attachments.plan}"]`)).toBeVisible();
+    await expect(back).toBeVisible();
+    await back.click();
+    await expect(page.locator('[data-attachment-pane]')).toHaveCount(0);
+    // The list beside the thread, not under it: no stacking, no second ‹ Inbox, focus on the row.
+    await expect(row).toBeVisible();
+    await expect(row).toBeFocused();
+    await expect(page.locator('.pn-inbox')).not.toHaveAttribute('data-stack', /thread/);
+    await expect(thread.locator('[data-stack-back]')).toHaveCount(0);
+    await expect(thread).toBeVisible();
+    await expect(live).toHaveText('Inbox list shown. retry-plan.md closed.');
+    // The sidebar is closed on screen only: the person's choice is not written.
+    await expect(nav).toBeHidden();
+    expect(await sidebarCookie()).toBe(before);
+    await shot('2.4g-back-to-inbox-at-1000');
+    // Room again: the sidebar comes back on its own.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(nav).toBeVisible();
+    await expect(row).toBeVisible();
+    // Held again at 1000: closing the thread brings the sidebar back too.
+    await page.getByRole('button', { name: 'Open retry-plan.md' }).click();
+    await page.setViewportSize({ width: 1000, height: 900 });
+    await back.click();
+    await expect(row).toBeFocused();
+    await expect(nav).toBeHidden();
+    await thread.getByRole('button', { name: 'Close the thread' }).click();
+    await expect(nav).toBeVisible();
+    expect(await sidebarCookie()).toBe(before);
+    // Held once more: the person's own toggle opens it (then the thread covers the list, as it always has at this width).
+    await row.click();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.getByRole('button', { name: 'Open retry-plan.md' }).click();
+    await page.setViewportSize({ width: 1000, height: 900 });
+    await back.click();
+    await expect(nav).toBeHidden();
+    await page.getByRole('button', { name: 'Toggle Sidebar' }).first().click();
+    await expect(nav).toBeVisible();
+    await expect(page.locator('.pn-inbox')).toHaveAttribute('data-stack', /thread/);
+  } finally {
+    await page.setViewportSize({ width: 1440, height: 900 });
+  }
+  await page.goto(`${world.url}#thread=${world.threads.billing}`);
 });
 
 test('a Mermaid diagram opens beside its thread and takes a node comment', async () => {
