@@ -6,6 +6,7 @@
 import React, { useMemo, useRef, useEffect } from 'react';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import type { Block } from '@plannotator/ui/types';
+import { MAX_QUOTE_DEPTH, isProseQuote, parseQuoteBody } from '@plannotator/ui/components/blocks/BlockquoteBlock';
 import { parseTableContent } from '@plannotator/ui/components/blocks/TableBlock';
 import { sanitizeInlineHtml } from '@plannotator/ui/utils/sanitizeHtml';
 import { renderInlineMarkdown } from '../utils/renderInlineMarkdown';
@@ -64,13 +65,17 @@ export function MarkdownBody({ markdown, textClassName = 'text-xs' }: { markdown
 }
 
 /** A quote holding more than paragraphs (a code fence, a list, a nested
- *  quote): its content is the quote's own markdown, rendered as blocks. */
-function quoteBlocks(content: string): Block[] | null {
-  const inner = parseMarkdownToBlocks(content, { frontmatter: false });
-  return inner.every((block) => block.type === 'paragraph') ? null : inner;
+ *  quote): its content is the quote's own markdown, rendered as blocks. Past
+ *  MAX_QUOTE_DEPTH nested quotes the rest is text (a PR comment can nest
+ *  `>` thousands deep, and each level recurses). */
+function quoteBlocks(content: string, depth: number): Block[] | null {
+  if (depth + 1 >= MAX_QUOTE_DEPTH) return null;
+  const inner = parseQuoteBody(content);
+  return isProseQuote(inner) ? null : inner;
 }
 
-function renderBlocks(blocks: Block[]): React.ReactNode[] {
+/** `depth`: the number of quotes around these blocks. */
+function renderBlocks(blocks: Block[], depth = 0): React.ReactNode[] {
   return blocks.map((block) => {
     switch (block.type) {
       case 'heading': {
@@ -100,10 +105,10 @@ function renderBlocks(blocks: Block[]): React.ReactNode[] {
           </div>
         );
       case 'blockquote': {
-        const inner = block.alertKind ? null : quoteBlocks(block.content);
+        const inner = block.alertKind ? null : quoteBlocks(block.content, depth);
         return (
           <blockquote key={block.id} className="border-l-2 border-border pl-2 text-muted-foreground italic">
-            {inner ? <div className="space-y-2.5">{renderBlocks(inner)}</div> : renderContent(block.content)}
+            {inner ? <div className="space-y-2.5">{renderBlocks(inner, depth + 1)}</div> : renderContent(block.content)}
           </blockquote>
         );
       }

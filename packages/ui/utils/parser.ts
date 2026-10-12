@@ -382,10 +382,13 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
     const prevLineWasBlank = lastLineWasBlank;
     lastLineWasBlank = false;
 
-    // Headings
-    if (trimmed.startsWith('#')) {
+    // Headings: one to six `#` followed by a space or the end of the line
+    // (CommonMark ATX). `#123 fixed`, `#hashtag` and `#!/bin/sh` are text,
+    // so an issue ref that starts a line keeps its link.
+    const headingMatch = trimmed.match(/^(#{1,6})(?:\s|$)/);
+    if (headingMatch) {
       flush();
-      const level = trimmed.match(/^#+/)?.[0].length || 1;
+      const level = headingMatch[1].length;
       blocks.push({
         id: `block-${currentId++}`,
         type: 'heading',

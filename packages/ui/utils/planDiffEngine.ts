@@ -213,6 +213,34 @@ function substituteFencedBlocks(
   });
 }
 
+// A quote (a run of `>` lines) that holds a code fence is one block in the
+// rendered plan, and each diff chunk renders as its own quote. Diffed line
+// by line, an edit inside the quoted fence split it into chunks holding half
+// a fence each, so one chunk opened a fence it never closed and rendered the
+// prose after it as code. The whole run is therefore one atomic unit, like
+// an unquoted fence. Quotes without a fence keep line-level diffing. Runs
+// after substituteFencedBlocks, so a `>` line inside an unquoted fence is
+// already behind its sentinel and never starts a run.
+const QUOTE_RUN_PATTERN = /^[ \t]*>[^\n]*(?:\n[ \t]*>[^\n]*)*/gm;
+const QUOTED_FENCE_LINE = /^[ \t]*(?:>[ \t]?)+[ \t]*`{3,}/m;
+
+function substituteQuotedFenceRuns(
+  text: string,
+  fenceMap: Map<string, string>,
+  fenceToId: Map<string, number>
+): string {
+  return text.replace(QUOTE_RUN_PATTERN, (match) => {
+    if (!QUOTED_FENCE_LINE.test(match)) return match;
+    let id = fenceToId.get(match);
+    if (id === undefined) {
+      id = fenceToId.size;
+      fenceMap.set(fenceSentinelFor(id), match);
+      fenceToId.set(match, id);
+    }
+    return fenceSentinelFor(id);
+  });
+}
+
 function restoreFencedBlocks(
   value: string,
   fenceMap: Map<string, string>
@@ -530,8 +558,16 @@ export function computePlanDiff(
   // FENCE_BLOCK_PATTERN for the failure this prevents.
   const fenceMap = new Map<string, string>();
   const fenceToId = new Map<string, number>();
-  const substOld = substituteFencedBlocks(oldText, fenceMap, fenceToId);
-  const substNew = substituteFencedBlocks(newText, fenceMap, fenceToId);
+  const substOld = substituteQuotedFenceRuns(
+    substituteFencedBlocks(oldText, fenceMap, fenceToId),
+    fenceMap,
+    fenceToId,
+  );
+  const substNew = substituteQuotedFenceRuns(
+    substituteFencedBlocks(newText, fenceMap, fenceToId),
+    fenceMap,
+    fenceToId,
+  );
 
   const rawChanges: Change[] = diffLines(substOld, substNew);
   // Restore the fenced-block content on each change value before the

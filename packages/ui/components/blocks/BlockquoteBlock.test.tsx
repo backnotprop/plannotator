@@ -34,6 +34,7 @@ const Viewer = viewerMod?.Viewer as typeof import('../Viewer')['Viewer'];
 const contextMod = hasDom ? await import('./QuestionContext') : null;
 const QuestionContext = contextMod?.QuestionContext as typeof import('./QuestionContext')['QuestionContext'];
 const targeting = hasDom ? await import('../../utils/blockTargeting') : null;
+const blockquoteMod = hasDom ? await import('./BlockquoteBlock') : null;
 
 const QUOTE = [
   '> Thanks for reporting this. It works:',
@@ -177,6 +178,58 @@ describe.skipIf(!hasDom)('BlockquoteBlock in the Viewer', () => {
     const graph = targeting!.buildSemanticTargetGraph(host);
     const quoteTargets = graph.targets.filter((t) => t.blockId === quoteBlockId(DOC) && graph.blockKeys.includes(t.key));
     expect(quoteTargets.map((t) => t.kind)).toEqual(['block']);
+  });
+});
+
+describe.skipIf(!hasDom)('issue refs, nesting depth and display math', () => {
+  async function mountWithRepo(markdown: string) {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    await act(async () => {
+      root = createRoot(host!);
+      root.render(
+        <Viewer
+          blocks={parseMarkdownToBlocks(markdown)}
+          markdown={markdown}
+          annotations={[]}
+          onAddAnnotation={() => {}}
+          onSelectAnnotation={() => {}}
+          selectedAnnotationId={null}
+          mode="comment"
+          taterMode={false}
+          disableCodePathValidation
+          refRepo={{ display: 'acme/app' }}
+        />,
+      );
+    });
+    return host!;
+  }
+
+  test('`#123 fixed` starting a line keeps its issue link, at top level and in a quote', async () => {
+    const el = await mountWithRepo('#123 fixed at top level\n\n> #456 fixed in a quote');
+    expect(el.querySelector('h1, h2, h3, h4, h5, h6')).toBeNull();
+    const hrefs = Array.from(el.querySelectorAll('a')).map((a) => a.getAttribute('href'));
+    expect(hrefs).toContain('https://github.com/acme/app/issues/123');
+    const quoteLink = el.querySelector('blockquote a');
+    expect(quoteLink?.getAttribute('href')).toBe('https://github.com/acme/app/issues/456');
+  });
+
+  test('quotes thousands deep render without overflowing, capped at MAX_QUOTE_DEPTH', async () => {
+    const markdown = `${'>'.repeat(8000)} deepest`;
+    const { host } = await mountViewer(markdown);
+    const quotes = host.querySelectorAll('blockquote');
+    expect(quotes.length).toBe(blockquoteMod!.MAX_QUOTE_DEPTH);
+    // The innermost quote shows the rest as text, its markers included.
+    expect(quotes[quotes.length - 1]!.textContent).toContain('> deepest');
+  });
+
+  test('a quote holding display math stays a text target', async () => {
+    const markdown = '> Before\n>\n> $$\n> x^2\n> $$';
+    const { host } = await mountViewer(markdown);
+    const graph = targeting!.buildSemanticTargetGraph(host);
+    const blockId = quoteBlockId(markdown);
+    const kinds = graph.targets.filter((t) => t.blockId === blockId && graph.blockKeys.includes(t.key)).map((t) => t.kind);
+    expect(kinds).toEqual(['block']);
   });
 });
 

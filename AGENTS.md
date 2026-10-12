@@ -2771,7 +2771,7 @@ interface Block {
 
 `parseMarkdownToBlocks(markdown)` splits markdown into Block objects. Handles:
 
-- Headings (`#`, `##`, etc.) with slug-derived anchor ids
+- Headings (1 to 6 `#` then a space or end of line, CommonMark ATX; `#123 fixed` and `#hashtag` are text) with slug-derived anchor ids
 - Code blocks (``` with language extraction)
 - List items (`-`, `*`, `1.`)
 - Blockquotes (`>`) — a run of consecutive `>` lines is ONE block whose `content` is the quote's own markdown (`>` plus one space stripped per line); `BlockquoteBlock` parses it again and renders fences, lists and nested quotes inside the one quote, with no `data-block-id` on the inner blocks, so the quote stays one annotatable block. GitHub alerts (`> [!NOTE|TIP|WARNING|CAUTION|IMPORTANT]`) set `alertKind` and keep `AlertBlock`

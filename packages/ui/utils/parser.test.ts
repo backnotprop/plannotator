@@ -870,6 +870,32 @@ describe("parseMarkdownToBlocks — ordered lists", () => {
   });
 });
 
+describe("parseMarkdownToBlocks — heading rule (CommonMark ATX)", () => {
+  const types = (md: string) => parseMarkdownToBlocks(md).map((b) => [b.type, b.content, b.level]);
+
+  test("`#` with no following space is text, not a heading", () => {
+    expect(types("#123 fixed")).toEqual([["paragraph", "#123 fixed", 0]]);
+    expect(types("#hashtag")).toEqual([["paragraph", "#hashtag", 0]]);
+    expect(types("#!/bin/sh")).toEqual([["paragraph", "#!/bin/sh", 0]]);
+  });
+
+  test("seven hashes are text", () => {
+    expect(types("####### seven")[0][0]).toBe("paragraph");
+  });
+
+  test("one to six hashes with a space, or alone, are headings", () => {
+    expect(types("# Title")).toEqual([["heading", "Title", 1]]);
+    expect(types("###### Six")).toEqual([["heading", "Six", 6]]);
+    expect(types("###")).toEqual([["heading", "", 3]]);
+  });
+
+  test("inside a quote the same rule applies", () => {
+    const [quote] = parseMarkdownToBlocks("> #123 fixed\n> # Title");
+    const inner = parseMarkdownToBlocks(quote.content, { frontmatter: false });
+    expect(inner.map((b) => [b.type, b.content])).toEqual([["paragraph", "#123 fixed"], ["heading", "Title"]]);
+  });
+});
+
 describe("parseMarkdownToBlocks — blockquotes", () => {
   test("consecutive '>' lines merge into one blockquote block", () => {
     const md = "> line one\n> line two\n> line three";

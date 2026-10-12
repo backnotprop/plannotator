@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { createContext, useContext, useMemo } from 'react';
 import type { Block } from '../../types';
 import { computeListIndices, groupBlocks, parseMarkdownToBlocks } from '../../utils/parser';
 import { isQuestionDirectiveKind } from '@plannotator/core/question-block';
@@ -41,6 +41,17 @@ export const parseQuoteBody = (content: string): Block[] =>
 export const isProseQuote = (inner: readonly Block[]): boolean =>
   inner.every((block) => block.type === 'paragraph');
 
+/**
+ * How deep quotes may nest before the rest renders as text. Each level is a
+ * component and a parse of its own, so `>>>>…` thousands deep (a third-party
+ * PR comment can hold anything) would otherwise overflow the stack and
+ * unmount the tree. GitHub stops drawing distinct levels long before this.
+ */
+export const MAX_QUOTE_DEPTH = 12;
+
+/** The number of quotes around the one rendering (0 at the top). */
+const QuoteDepthContext = createContext(0);
+
 export interface BlockquoteBlockProps {
   block: Block;
   onOpenLinkedDoc?: (path: string) => void;
@@ -63,9 +74,13 @@ export interface BlockquoteBlockProps {
  * question block (`findQuestionBlocks` agrees): it renders as a callout.
  */
 export const BlockquoteBlock: React.FC<BlockquoteBlockProps> = ({ block, ...inlineProps }) => {
-  const inner = useMemo(() => parseQuoteBody(block.content), [block.content]);
+  const depth = useContext(QuoteDepthContext);
+  // Past the cap the content is not parsed again: it renders as prose text,
+  // its remaining `>` markers included.
+  const atCap = depth + 1 >= MAX_QUOTE_DEPTH;
+  const inner = useMemo(() => (atCap ? [] : parseQuoteBody(block.content)), [atCap, block.content]);
 
-  if (isProseQuote(inner)) {
+  if (atCap || isProseQuote(inner)) {
     // The prose quote, unchanged: split on blank-line paragraph breaks so
     // `> a\n>\n> b` renders as two <p> children. Lines are trimmed as the
     // parser used to trim them, so the text is what it always was.
@@ -89,7 +104,9 @@ export const BlockquoteBlock: React.FC<BlockquoteBlockProps> = ({ block, ...inli
     <blockquote className={`${BLOCKQUOTE_CLASS_NAME} pn-quote-body`} data-block-id={block.id}>
       {/* React hoists this into <head> once for every quote. */}
       <style href="plannotator-quote-body" precedence="default">{QUOTE_BODY_CSS}</style>
-      <QuoteBody inner={inner} {...inlineProps} />
+      <QuoteDepthContext.Provider value={depth + 1}>
+        <QuoteBody inner={inner} {...inlineProps} />
+      </QuoteDepthContext.Provider>
     </blockquote>
   );
 };

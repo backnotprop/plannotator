@@ -252,9 +252,16 @@ export function buildSemanticTargetGraph(container: HTMLElement): SemanticTarget
     // the fence), and its table rows are not cells of the quote.
     const isQuote = block.tagName === 'BLOCKQUOTE';
     const codeElement = isQuote ? null : block.querySelector<HTMLElement>('pre > code.pn-code');
+    // Inline math in a quote keeps the paragraph rule (the quote targets the
+    // formula, as a paragraph with inline math does); a display-math block
+    // inside a quote is not the quote.
     const mathElement = block.matches('.math-annotatable,[data-math-tex]')
       ? block
-      : block.querySelector<HTMLElement>('.math-annotatable,[data-math-tex]');
+      : block.querySelector<HTMLElement>(
+          isQuote
+            ? '.math-annotatable:not([data-math-display="true"]),[data-math-tex]:not([data-math-display="true"])'
+            : '.math-annotatable,[data-math-tex]',
+        );
     const table = isQuote ? null : block.querySelector<HTMLTableElement>('table');
 
     if (codeElement) {
