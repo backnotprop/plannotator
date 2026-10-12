@@ -1,0 +1,335 @@
+/**
+ * The row you open stays put (design record "inbox-open-stays-put", variant
+ * B, approved 2026-10-12): the whole window (InboxApp) over a REAL Inbox in a
+ * temp data dir (its own process, tests/helpers/inbox-dom-server.ts with its
+ * plain agent news). What is proved: opening a "New since you looked" row
+ * unbolds it where it is, with focus kept on it; opening a second row moves
+ * nothing; closing the thread settles the list a beat later (at once under
+ * reduced motion, with no animation), and focus goes to the row now in the
+ * opened row's slot, never to the page; an agent's message that arrived while
+ * reading stays behind "N new · Show" after the close until Show; and where
+ * the thread covers the list (a phone), Back shows the list as it was left
+ * and it settles while the next thread covers it.
+ *
+ * The slide itself (its frames) is proved in a real browser by
+ * tests/e2e/inbox-open-stays-put.spec.ts; happy-dom lays nothing out.
+ *
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ */
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { request } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import type { InboxListSection } from '@plannotator/core/inbox-types';
+import { PHONE_QUERY } from './phone';
+import { SETTLE_BEAT_MS } from './settle';
+
+const hasDom = typeof document !== 'undefined';
+const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
+
+const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
+
+type World = { project: string; news: string[] };
+let child: ReturnType<typeof Bun.spawn> | null = null;
+let childOut: ReadableStreamDefaultReader<Uint8Array> | null = null;
+let port = 0;
+let worlds: World[] = [];
+let world: World = { project: '', news: [] };
+let dir: string | null = null;
+let root: Root | null = null;
+let host: HTMLElement | null = null;
+let savedFetch: typeof fetch;
+let savedEventSource: unknown;
+let savedMatchMedia: typeof window.matchMedia;
+/** The window's event stream, which the test fires by hand (the stream itself is not needed). */
+let pokeStream: (() => void) | null = null;
+
+function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
+  return new Promise((done, fail) => {
+    const req = request({ host: '127.0.0.1', port, path, method, headers: { 'Content-Type': 'application/json', Host: `127.0.0.1:${port}` } }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (c: Buffer) => chunks.push(c));
+      res.on('end', () => done({ status: res.statusCode ?? 0, text: Buffer.concat(chunks).toString('utf8') }));
+    });
+    req.on('error', fail);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+async function serverSection(threadId: string): Promise<string | undefined> {
+  const model = JSON.parse((await loopback('/api/inbox/threads')).text) as { sections: InboxListSection[] };
+  return model.sections.find((s) => s.threads.some((t) => t.thread_id === threadId))?.id;
+}
+
+async function readLine(): Promise<string> {
+  let line = '';
+  while (!line.includes('\n')) {
+    const { value, done } = await childOut!.read();
+    if (done) throw new Error('the Inbox stopped');
+    line += new TextDecoder().decode(value);
+  }
+  return line.trim();
+}
+
+/** An agent writes while the person reads (the server's stdin). */
+async function agentSends(body: string): Promise<string> {
+  (child!.stdin as import('bun').FileSink).write(`${JSON.stringify({ send: { project: world.project, session: 'ses_late', body } })}\n`);
+  (child!.stdin as import('bun').FileSink).flush();
+  return (JSON.parse(await readLine()) as { sent: string }).sent;
+}
+
+const TESTS = 6;
+
+beforeAll(async () => {
+  if (!hasDom) return;
+  dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-staysput-dom-')));
+  mkdirSync(join(dir, 'bin'));
+  writeFileSync(join(dir, 'bin', 'tailscale'), '#!/bin/sh\nexit 1\n');
+  chmodSync(join(dir, 'bin', 'tailscale'), 0o755);
+  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), String(TESTS), 'news'], {
+    env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: join(dir, 'data'), HOME: dir, PATH: `${join(dir, 'bin')}:${process.env.PATH}` },
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'inherit',
+  });
+  childOut = (child.stdout as ReadableStream<Uint8Array>).getReader();
+  const started = JSON.parse(await readLine()) as { port: number; worlds: World[] };
+  port = started.port;
+  worlds = started.worlds;
+});
+
+afterAll(async () => {
+  if (!hasDom) return;
+  childOut?.releaseLock();
+  child?.kill();
+  await child?.exited;
+  child = null;
+  if (dir) rmSync(dir, { recursive: true, force: true });
+  dir = null;
+});
+
+/** What the window's media queries answer in this test. */
+let media = { phone: false, reduce: false };
+
+beforeEach(() => {
+  if (!hasDom) return;
+  world = worlds.shift()!;
+  media = { phone: false, reduce: false };
+  savedFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const answer = await loopback(String(input), init?.method ?? 'GET', init?.body ? String(init.body) : undefined);
+    return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
+  }) as typeof fetch;
+  savedEventSource = (globalThis as Record<string, unknown>).EventSource;
+  (globalThis as Record<string, unknown>).EventSource = class {
+    addEventListener(type: string, listener: (event: MessageEvent<string>) => void) {
+      if (type === 'record') pokeStream = () => listener({ data: '' } as MessageEvent<string>);
+    }
+    close() {}
+  };
+  savedMatchMedia = window.matchMedia;
+  window.matchMedia = ((query: string) => ({
+    matches: query === PHONE_QUERY ? media.phone : query.includes('prefers-reduced-motion: reduce') ? media.reduce : false,
+    media: query,
+    onchange: null,
+    addEventListener() {},
+    removeEventListener() {},
+    addListener() {},
+    removeListener() {},
+    dispatchEvent: () => false,
+  })) as typeof window.matchMedia;
+  window.location.hash = '';
+});
+
+afterEach(() => {
+  if (!hasDom) return;
+  act(() => root?.unmount());
+  host?.remove();
+  root = null;
+  host = null;
+  pokeStream = null;
+  globalThis.fetch = savedFetch;
+  (globalThis as Record<string, unknown>).EventSource = savedEventSource;
+  window.matchMedia = savedMatchMedia;
+});
+
+async function wait(ms: number) {
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, ms));
+  });
+}
+
+async function until(check: () => boolean | Promise<boolean>, what: string) {
+  for (let i = 0; i < 100; i++) {
+    if (await check()) return;
+    await wait(50);
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+async function renderApp(hash: string): Promise<HTMLElement> {
+  window.location.hash = hash;
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(<InboxApp />);
+  });
+  await until(() => host!.querySelector('.ib-lbody [data-thread-id]') !== null, 'the list');
+  return host;
+}
+
+const rowOf = (el: HTMLElement, id: string) => el.querySelector<HTMLElement>(`.ib-listcol .ib-lbody [data-thread-id="${id}"]`);
+const sectionOfRow = (el: HTMLElement, id: string) => rowOf(el, id)?.closest('[data-section-id]')?.getAttribute('data-section-id') ?? null;
+/** The thread ids in the order the list shows them. */
+const order = (el: HTMLElement) => [...el.querySelectorAll('.ib-listcol .ib-lbody [data-thread-id]')].map((r) => r.getAttribute('data-thread-id')!);
+const newRows = (el: HTMLElement) => [...el.querySelectorAll('[data-section-id="new"] [data-thread-id]')].map((r) => r.getAttribute('data-thread-id')!);
+
+/** Open a row the way a keyboard does: focus it, then press it. */
+async function openRow(el: HTMLElement, id: string, looked: 'quiet' | null = 'quiet') {
+  const row = rowOf(el, id)!;
+  act(() => {
+    row.focus();
+    row.click();
+  });
+  await until(() => el.querySelector('section.ib-pane') !== null && window.location.hash.includes(id), `the thread ${id}`);
+  // The look is recorded and the list read again.
+  if (looked) await until(async () => (await serverSection(id)) === looked, 'the look on the server');
+  await wait(120);
+}
+
+function closeThread() {
+  act(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  });
+}
+
+test.skipIf(!hasDom)('opening a New row unbolds it where it is, keeps it selected and keeps focus on it', async () => {
+  const el = await renderApp(`#project=${world.project}`);
+  const first = newRows(el)[0]!;
+  expect(rowOf(el, first)!.classList.contains('ib-u')).toBe(true);
+  const before = order(el);
+  await openRow(el, first);
+  // On the server the look moved it to Quiet; on screen it has not moved.
+  expect(sectionOfRow(el, first)).toBe('new');
+  expect(order(el)).toEqual(before);
+  const row = rowOf(el, first)!;
+  expect(row.classList.contains('ib-u')).toBe(false);
+  expect(row.getAttribute('aria-current')).toBe('true');
+  expect(document.activeElement).toBe(row);
+});
+
+test.skipIf(!hasDom)('opening a second row while one is open moves nothing; closing settles both, and focus goes to the row now in the slot', async () => {
+  const el = await renderApp(`#project=${world.project}`);
+  const [first, second] = newRows(el);
+  const before = order(el);
+  await openRow(el, first!);
+  await openRow(el, second!);
+  expect(order(el)).toEqual(before);
+  expect(sectionOfRow(el, first!)).toBe('new');
+  expect(rowOf(el, first!)!.classList.contains('ib-u')).toBe(false);
+
+  closeThread();
+  // The list widened; the rows wait out the beat, and focus is on the closed row.
+  await wait(20);
+  expect(el.querySelector('section.ib-pane')).toBeNull();
+  expect(order(el)).toEqual(before);
+  expect(document.activeElement).toBe(rowOf(el, second!));
+  // Then they settle: both read rows leave for folded Quiet.
+  await wait(SETTLE_BEAT_MS + 60);
+  await until(() => rowOf(el, first!) === null && rowOf(el, second!) === null, 'the settle');
+  expect(el.querySelector('[data-section-id="quiet"] .ib-n')?.textContent).toBe('2');
+  // Focus is never dropped to the page: the row that now sits in the closed row's slot has it.
+  const slot = before.slice(before.indexOf(second!) + 1).find((id) => rowOf(el, id) !== null)!;
+  expect(document.activeElement).toBe(rowOf(el, slot));
+});
+
+test.skipIf(!hasDom)("an agent's message that arrives while reading stays behind Show after the close; Show brings it in", async () => {
+  const el = await renderApp(`#project=${world.project}`);
+  const first = newRows(el)[0]!;
+  await openRow(el, first);
+  const late = await agentSends('A late note from the agent.');
+  act(() => pokeStream!());
+  await until(() => el.querySelector('[data-inbox-notice]') !== null, 'the "1 new" notice');
+  expect(el.querySelector('[data-inbox-notice]')!.textContent).toContain('1 new in');
+  expect(rowOf(el, late)).toBeNull();
+
+  closeThread();
+  await wait(SETTLE_BEAT_MS + 60);
+  await until(() => rowOf(el, first) === null, 'the settle');
+  // Closing settled only the person's own read: the agent's message still waits.
+  expect(rowOf(el, late)).toBeNull();
+  expect(el.querySelector('[data-inbox-notice]')!.textContent).toContain('1 new in');
+
+  act(() => (el.querySelector('[data-inbox-notice]') as HTMLButtonElement).click());
+  await until(() => rowOf(el, late) !== null, 'Show');
+  expect(sectionOfRow(el, late)).toBe('new');
+  expect(el.querySelector('[data-inbox-notice]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('under reduced motion the close settles at once, with nothing animated', async () => {
+  media.reduce = true;
+  const animate = HTMLElement.prototype.animate;
+  let animations = 0;
+  HTMLElement.prototype.animate = function (...args: Parameters<typeof animate>) {
+    animations += 1;
+    return animate ? animate.apply(this, args) : ({ cancel() {} } as Animation);
+  };
+  try {
+    const el = await renderApp(`#project=${world.project}`);
+    const first = newRows(el)[0]!;
+    await openRow(el, first);
+    closeThread();
+    // No beat: the list is settled in the same commit as the close.
+    expect(rowOf(el, first)).toBeNull();
+    expect(document.activeElement && document.activeElement !== document.body).toBe(true);
+    expect(animations).toBe(0);
+  } finally {
+    HTMLElement.prototype.animate = animate;
+  }
+});
+
+test.skipIf(!hasDom)('a phone: Back shows the list as it was left, and it settles while the next thread covers it', async () => {
+  media.phone = true;
+  const el = await renderApp(`#project=${world.project}`);
+  const [first, second] = newRows(el);
+  const before = order(el);
+  await openRow(el, first!);
+  act(() => (el.querySelector('section.ib-pane [data-phone-back]') as HTMLButtonElement).click());
+  await until(() => el.querySelector('section.ib-pane') === null, 'Back');
+  await wait(SETTLE_BEAT_MS + 60);
+  // As left: the row read is in place, no longer bold, with focus on it.
+  expect(order(el)).toEqual(before);
+  expect(rowOf(el, first!)!.classList.contains('ib-u')).toBe(false);
+  expect(document.activeElement).toBe(rowOf(el, first!));
+
+  await openRow(el, second!);
+  // Behind the thread the list caught up: the first read row went to Quiet; the one opened kept its place.
+  expect(rowOf(el, first!)).toBeNull();
+  expect(sectionOfRow(el, second!)).toBe('new');
+});
+
+test.skipIf(!hasDom)('Mark read inside an open thread: the toast says the row will move, and it moves when the list settles', async () => {
+  const el = await renderApp(`#project=${world.project}`);
+  const first = newRows(el)[0]!;
+  await openRow(el, first);
+  // A New row once looked at waits on nobody (Mark read is off): a question from an agent does.
+  const asked = await agentSends('One question:\n\n:::question\nShip it?\n\n- [ ] Yes\n- [ ] No\n:::');
+  act(() => pokeStream!());
+  await until(() => el.querySelector('[data-inbox-notice]') !== null, 'the "1 new" notice');
+  act(() => (el.querySelector('[data-inbox-notice]') as HTMLButtonElement).click());
+  await until(() => rowOf(el, asked) !== null, 'Show');
+  await openRow(el, asked, null);
+  await until(() => el.querySelector('[data-mark-read]') !== null && !(el.querySelector('[data-mark-read]') as HTMLButtonElement).disabled, 'Mark read');
+  act(() => (el.querySelector('[data-mark-read]') as HTMLButtonElement).click());
+  await until(() => document.querySelector('[data-inbox-toast]') !== null, 'the toast');
+  expect(document.querySelector('[data-inbox-toast]')!.textContent).toContain('will move to Quiet');
+  expect(sectionOfRow(el, asked)).toBe('waiting');
+  closeThread();
+  await wait(SETTLE_BEAT_MS + 60);
+  await until(() => rowOf(el, asked) === null, 'the settle');
+});

@@ -194,7 +194,11 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-lhead { height: 60px; display: flex; align-items: center; gap: 12px; padding: 0 22px; flex: none; }
 .ib-lhead h1 { font-size: 20px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
 .ib-lhead .ib-path { font-family: var(--font-mono); font-size: 12px; color: var(--muted-foreground); }
-.ib-lbody { padding: 0 10px 10px; overflow-y: auto; flex: 1; min-height: 0; }
+.ib-lbody { padding: 0 10px 10px; overflow-y: auto; flex: 1; min-height: 0; position: relative; }
+/* A row that left the rows on screen when the list settled (settle.ts): a copy drawn where it was, fading
+   out under the rows sliding past it (they are opaque and sit above it while they move). */
+.ib-lbody > .ib-settle-ghost { position: absolute; margin: 0; z-index: 0; pointer-events: none; background: var(--card); }
+.ib-lbody > .ib-group > .ib-rw { background: var(--card); }
 .ib-band { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: 8px; background: var(--ib-band); font-size: 13px; font-weight: 600; width: 100%; text-align: left; }
 .ib-group + .ib-group { margin-top: 12px; }
 .ib-band .ib-n { font-weight: 500; color: var(--muted-foreground); }

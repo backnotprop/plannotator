@@ -27,7 +27,17 @@ import {
   type UpdateDetails,
   type WhatsNewModel,
 } from './api';
-import { filterSections, heldNotice, refreshHeldRows, waitingCount } from './held';
+import { filterSections, heldNotice, refreshHeldRows, settleOwn, waitingCount } from './held';
+import {
+  captureSettle,
+  COVERED_LIST_SETTLES,
+  listBody,
+  playSettle,
+  prefersReducedMotion,
+  rowInSlot,
+  SETTLE_BEAT_MS,
+  type SettleSnapshot,
+} from './settle';
 import { tildePath } from './format';
 import { inboxImageSrcResolver } from './images';
 import type { ConnectContext } from './harnesses';
@@ -190,6 +200,16 @@ function leavesCoveringPane(route: Route): boolean {
   return false;
 }
 
+/** The thread covers the list (a phone, a stacked window): the list is out of sight while a thread is open. */
+function listCovered(): boolean {
+  return isPhone() || covering.thread;
+}
+
+/** A row of the list on screen, by its thread (one element per row: the wide, two-line or phone row). */
+function rowElement(body: ParentNode, threadId: string): HTMLElement | null {
+  return body.querySelector<HTMLElement>(`[data-thread-id="${CSS.escape(threadId)}"]`);
+}
+
 /** Focus the first element on screen that matches one of `selectors`, in order (a list draws some rows twice, one hidden). */
 function focusFirst(selectors: readonly string[]): void {
   for (const selector of selectors) {
@@ -298,12 +318,49 @@ function Inbox() {
     };
   }, []);
 
-  /** Read the list; `adopt` puts it on screen (an action, Show, or nothing on screen yet). */
-  const refreshList = useCallback(async (adopt: boolean) => {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const latestRef = useRef(latest);
+  latestRef.current = latest;
+  /** The rows as they were just before the list on screen changes, when that change slides (settle.ts). */
+  const slideFrom = useRef<SettleSnapshot | null>(null);
+  /** Measure the rows now, so the next change of the list on screen slides from here. Nothing under reduced motion. */
+  const armSlide = useCallback(() => {
+    const body = prefersReducedMotion() ? null : listBody(rootRef.current);
+    slideFrom.current = body ? captureSettle(body) : null;
+  }, []);
+  /** The settle waiting out its beat after a thread closed (settle.ts). */
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelSettle = useCallback(() => {
+    if (settleTimer.current) clearTimeout(settleTimer.current);
+    settleTimer.current = null;
+  }, []);
+  /**
+   * The list on screen catches up: with the person's own reads and actions
+   * (`own`: closing a thread; agent activity still waits behind "N new"), or
+   * with everything (`all`: Show, another folder or page).
+   */
+  const settleList = useCallback(
+    (what: 'own' | 'all', slide: boolean) => {
+      cancelSettle();
+      const next = latestRef.current;
+      if (!next) return;
+      if (slide) armSlide();
+      setShown((current) => (what === 'all' || current === null || !hasRows(current) ? next.sections : settleOwn(current, next.sections)));
+    },
+    [armSlide, cancelSettle],
+  );
+  useEffect(() => cancelSettle, [cancelSettle]);
+
+  /**
+   * Read the list; `adopt` puts it on screen (an action, Show, or nothing on
+   * screen yet), sliding the rows to their places when `slide` says so.
+   */
+  const refreshList = useCallback(async (adopt: boolean, slide = false) => {
     try {
       const next = await inboxApi.list();
       setPageSession(next.serverSession);
       setLatest(next);
+      if (adopt && slide) armSlide();
       setUpdate(next.update);
       setUpdated(next.updated ?? null);
       // Held: the order waits for an action, but each row's own state (a delivery, an agent's read) follows at once.
@@ -314,7 +371,7 @@ function Inbox() {
       setLoadError(cause instanceof Error ? cause.message : String(cause));
       return null;
     }
-  }, []);
+  }, [armSlide]);
 
   const refreshThread = useCallback(async (threadId: string) => {
     try {
@@ -350,8 +407,6 @@ function Inbox() {
       setDecisionsError(cause instanceof Error ? cause.message : String(cause));
     }
   }, []);
-  const latestRef = useRef(latest);
-  latestRef.current = latest;
 
   const refreshSettings = useCallback(async () => {
     try {
@@ -403,13 +458,11 @@ function Inbox() {
     };
   }, [refreshList, refreshSettings, refreshThread, observeEvent, flushNotifications, refreshDecisions, decisionsProjectOf]);
 
-  // Leaving a thread (Esc, Close, the browser's Back) or opening another is an
-  // action: the rows held while the person was in the thread take their places.
-  useEffect(() => {
-    if (latestRef.current) setShown(latestRef.current.sections);
-  }, [route.thread]);
-
-  // Opening a thread: read it, record the look, and put the list as it now is on screen.
+  // Opening a thread: read it, record the look, and update its row in place.
+  // While any thread is open the list holds still (settle.ts): the look
+  // unbolds the row where it is and does not re-sort the list. Where the
+  // thread covers the list, the list catches up now, out of sight, before the
+  // look (so the row being opened keeps its place): Back shows it as left.
   useEffect(() => {
     const threadId = route.thread;
     if (!threadId) {
@@ -421,13 +474,45 @@ function Inbox() {
     void (async () => {
       const opened = await refreshThread(threadId);
       if (cancelled || !opened) return;
+      if (listCovered() && COVERED_LIST_SETTLES === 'while-covered') settleList('own', false);
       await inboxApi.seen(threadId).catch(() => {});
-      if (!cancelled) await refreshList(true);
+      if (!cancelled) await refreshList(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [route.thread, refreshThread, refreshList]);
+  }, [route.thread, refreshThread, refreshList, settleList]);
+
+  // When the list on screen catches up as the route changes (settle.ts).
+  // Another page or folder: the list there is drawn as it is now. A thread
+  // opening, or replacing another: nothing moves. The thread closing: the
+  // person's own reads and actions settle, a beat after the list has widened
+  // (at once under reduced motion, with no slide); where the thread covered
+  // the list, COVERED_LIST_SETTLES decides. Focus that the closed pane took
+  // with it goes to the thread's row.
+  const lastRoute = useRef({ page: route.page, project: route.project ?? null, thread: route.thread });
+  useLayoutEffect(() => {
+    const before = lastRoute.current;
+    const now = { page: route.page, project: route.project ?? null, thread: route.thread };
+    lastRoute.current = now;
+    if (before.page === now.page && before.project === now.project && before.thread === now.thread) return;
+    if (!(before.page === 'inbox' && now.page === 'inbox' && before.project === now.project)) {
+      settleList('all', false);
+      return;
+    }
+    if (now.thread) {
+      cancelSettle();
+      return;
+    }
+    const closed = before.thread;
+    if (!closed) return;
+    const body = listBody(rootRef.current);
+    const active = document.activeElement;
+    if (body && (!active || active === document.body)) rowElement(body, closed)?.focus({ preventScroll: true });
+    if (listCovered() && COVERED_LIST_SETTLES === 'while-covered') return;
+    if (prefersReducedMotion()) settleList('own', false);
+    else settleTimer.current = setTimeout(() => settleList('own', true), SETTLE_BEAT_MS);
+  }, [route.page, route.project, route.thread, settleList, cancelSettle]);
 
   useEffect(() => {
     if (route.page === 'settings') {
@@ -486,22 +571,15 @@ function Inbox() {
   }, [soundDialogDue, soundDialogBlocked]);
 
 
-  const go = (next: Route) => {
-    writeRoute(next);
-    // Changing the view is an action: the list on screen catches up.
-    if (latest) setShown(latest.sections);
-  };
+  // The list on screen catches up as the route changes (the layout effect above), not here.
+  const go = (next: Route) => writeRoute(next);
   /** Back to the screen under this one (closeTo): a thread's list, a file's thread. */
-  const close = (next: Route) => {
-    closeTo(next);
-    if (latest) setShown(latest.sections);
-  };
+  const close = (next: Route) => closeTo(next);
 
   // A phone shows one screen at a time (phone.ts, inbox.css), and its keyboard shrinks the window.
   const phone = usePhone();
   useEffect(() => (phone ? trackKeyboard() : undefined), [phone]);
   // A window too narrow for two panes (an iPad in portrait, a narrow desktop window): the pane on top covers the one under it (stack.ts).
-  const rootRef = useRef<HTMLDivElement>(null);
   // `‹ Inbox` from a file beside the thread in a window with room for the list and the thread but not for
   // the sidebar too (about 920 to 1050 px): the sidebar stays closed on screen so the list shows beside the
   // thread, as the open file kept it, without writing the person's choice. It comes back once there is room,
@@ -540,14 +618,14 @@ function Inbox() {
     );
     // While a thread is open the person's own writes never reorder the list
     // (owner ruling 2026-10-11): each row shows its new state in place, and
-    // the list catches up when they leave the thread or open another.
-    void refreshList(!routeRef.current.thread);
+    // the list catches up when the thread closes (settle.ts).
+    void refreshList(!routeRef.current.thread, true);
   };
 
   const afterWrite = async () => {
     const open = routeRef.current.thread;
     if (open) await refreshThread(open);
-    await refreshList(!open);
+    await refreshList(!open, true);
   };
 
   const rowOf = (threadId: string): InboxListRow | undefined =>
@@ -584,6 +662,8 @@ function Inbox() {
    */
   const markRead = async (threadId: string, read: boolean) => {
     const before = rowOf(threadId);
+    // With a thread open the list holds still: the row moves to Quiet when the list next settles.
+    const deferred = routeRef.current.thread !== null;
     try {
       await inboxApi.markRead(threadId, read);
     } catch (cause) {
@@ -598,7 +678,7 @@ function Inbox() {
     }
     if (!before) return;
     const closed = before.questions.open + before.questions.picked;
-    const copy = markReadToast(before, closed);
+    const copy = markReadToast(before, closed, deferred);
     showToast({
       ...copy,
       onUndo: () => void markRead(threadId, false),
@@ -614,7 +694,7 @@ function Inbox() {
           }
         : {}),
     });
-    say(`Read. ${before.subject ?? 'The thread'} moved to Quiet.`);
+    say(`Read. ${before.subject ?? 'The thread'} ${deferred ? 'will move' : 'moved'} to Quiet.`);
   };
 
   /** Archive (the MCP's resolve) or Unarchive, with Undo. */
@@ -979,14 +1059,35 @@ function Inbox() {
   useEffect(() => {
     const onFocusIn = (event: FocusEvent) => {
       const target = event.target as HTMLElement | null;
-      const row = target?.closest?.('.ib-listcol [data-thread-id]');
-      listFocus.current = row ? row.getAttribute('data-thread-id') : null;
+      // A row, or its hover action beside it (`.ib-rw[data-row]`).
+      const row = target?.closest?.('.ib-listcol [data-thread-id], .ib-listcol [data-row]');
+      listFocus.current = row ? (row.getAttribute('data-thread-id') ?? row.getAttribute('data-row')) : null;
       const decisionRow = target?.closest?.('.ib-dpage [data-decision-id]');
       decisionFocus.current = decisionRow ? decisionRow.getAttribute('data-decision-id') : null;
     };
     document.addEventListener('focusin', onFocusIn);
     return () => document.removeEventListener('focusin', onFocusIn);
   }, []);
+
+  // The list on screen changed: play the slide when one was armed (settle.ts),
+  // and never leave keyboard focus on the page. A row that had focus and left
+  // the rows on screen (for folded Quiet) hands it to the row now in its slot.
+  const listOrder = useRef<string[]>([]);
+  useLayoutEffect(() => {
+    const body = listBody(rootRef.current);
+    const from = slideFrom.current;
+    slideFrom.current = null;
+    const order = from?.order ?? listOrder.current;
+    if (body && from) playSettle(body, from);
+    const gone = listFocus.current;
+    const active = document.activeElement;
+    if (body && gone && (!active || active === document.body) && !rowElement(body, gone)) {
+      const next = rowInSlot(order, gone, (id) => rowElement(body, id) !== null);
+      const target = next ? rowElement(body, next) : body.querySelector<HTMLElement>('button.ib-band');
+      target?.focus({ preventScroll: true });
+    }
+    listOrder.current = body ? [...body.querySelectorAll('[data-thread-id]')].map((el) => el.getAttribute('data-thread-id')!) : [];
+  }, [shown]);
   const stackedBefore = useRef({ thread: stack.thread, decision: stack.decision });
   useEffect(() => {
     const was = stackedBefore.current;
@@ -1108,7 +1209,7 @@ function Inbox() {
               />
             )
           }
-          onShowNew={() => setShown(latest.sections)}
+          onShowNew={() => settleList('all', true)}
           onOpen={openRow}
           onMarkRead={(row) => void markRead(row.thread_id, true)}
           phone={phone}

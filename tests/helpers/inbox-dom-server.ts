@@ -3,7 +3,7 @@
  * under DOM_TESTS=1 happy-dom replaces the test process's Response, which
  * Bun.serve cannot answer with, so the server lives here instead.
  *
- *   bun tests/helpers/inbox-dom-server.ts <data dir> <projects dir> <count>
+ *   bun tests/helpers/inbox-dom-server.ts <data dir> <projects dir> <count> [news | header-files]
  *
  * Seeds `count` projects (one per test, since the window keeps the first
  * server session it saw), each with a thread an agent is stopped on (two
@@ -12,7 +12,11 @@
  * then posts a later update; in the second the person already picked), and
  * one with a file attached, prints one JSON line `{ port, worlds: [{ project,
  * stopped, waiting, mixed, update, same, sameUpdate, picked, pickedUpdate,
- * filed, attachment }] }`, and runs until killed.
+ * filed, attachment, news }] }`, and runs until killed. With a fourth argument `news`, each
+ * world also has three threads of plain agent news (no question: "New since
+ * you looked"), oldest first in `news`. A JSON line on stdin,
+ * `{ "send": { project, session, body, reply_to? } }`, is an agent writing
+ * while a test runs; the server answers `{ "sent": <message id> }` on stdout.
  * The set-aside note's delay is a minute, so no note is written while a test
  * runs.
  *
@@ -29,6 +33,7 @@ import { recordInboxAttachments } from "../../packages/shared/inbox/attachments"
 import { refuseRealDataDir } from "./real-data-dir";
 
 const [dataDir, projectsDir, countArg, extra] = process.argv.slice(2);
+const withNews = extra === "news";
 const count = Number(countArg ?? "1");
 if (!dataDir || !projectsDir || !Number.isInteger(count) || count < 1) {
   process.stderr.write("usage: inbox-dom-server.ts <data dir> <projects dir> <count>\n");
@@ -77,6 +82,7 @@ type World = {
   filed: string;
   attachment: string;
   files?: { thread: string; first: string; middle: string; last: string; ids: Record<string, string> };
+  news: string[];
 };
 const worlds: World[] = [];
 for (let i = 0; i < count; i++) {
@@ -135,9 +141,24 @@ for (let i = 0; i < count; i++) {
     pickedUpdate: pickedUpdate.id,
     filed: filed.id,
     attachment: attachments[0]!.id,
+    news: withNews
+      ? ["Search index built", "Install page links fixed", "Changelog drafted"].map(
+          (body, n) => store.sendMessage({ project_id: project.id, author: { ...author, session: `ses_news${i}_${n}` }, body }).message.id,
+        )
+      : [],
   });
 }
 process.stdout.write(`${JSON.stringify({ port: server.port, worlds })}\n`);
+// An agent writing while a test runs.
+void (async () => {
+  for await (const line of console) {
+    const command = JSON.parse(line) as { send?: { project: string; session: string; body: string; reply_to?: string } };
+    if (!command.send) continue;
+    const { project, session, body, reply_to } = command.send;
+    const sent = store.sendMessage({ project_id: project, author: { kind: "agent", host: "claude-code", session, name: "Claude Code" }, body, ...(reply_to ? { reply_to } : {}) });
+    process.stdout.write(`${JSON.stringify({ sent: sent.message.id })}\n`);
+  }
+})();
 process.on("SIGTERM", () => {
   server.stop();
   process.exit(0);

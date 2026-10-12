@@ -71,7 +71,7 @@ function useFootHeight(): number | null {
 
 /**
  * A phone's toast: its words and Undo, never Reply (the thread's foot has
- * it). A short note (`short`: "Read. Moved to Quiet.") is one line, and the
+ * it). A short note (`short`: "Read. Will move to Quiet.") is one line, and the
  * thread's banner says the rest; anything else, an error, wraps.
  */
 function PhoneToast({ toast, onDismiss }: { toast: InboxToastModel; onDismiss: () => void }) {
