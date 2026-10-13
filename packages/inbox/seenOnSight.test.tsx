@@ -168,16 +168,29 @@ beforeEach(() => {
 
 afterEach(() => {
   if (!hasDom) return;
-  act(() => root?.unmount());
-  host?.remove();
-  root = null;
-  host = null;
-  globalThis.fetch = savedFetch;
-  for (const undo of restore.splice(0).reverse()) undo();
-  jest.useRealTimers();
+  // Real timers come back even when the unmount or a restore throws, so fake
+  // timers never leak into the next file.
+  try {
+    act(() => root?.unmount());
+    host?.remove();
+  } finally {
+    root = null;
+    host = null;
+    globalThis.fetch = savedFetch;
+    try {
+      for (const undo of restore.splice(0).reverse()) undo();
+    } finally {
+      jest.useRealTimers();
+    }
+  }
 });
 
-/** Let `ms` of the test's time pass: every timer due in it fires, in order, then the page settles. */
+/**
+ * Let `ms` of the test's time pass: every timer due in it fires, in order, then the page settles.
+ * Never await a real timer here (or anywhere in these tests): the fake timers
+ * never fire it, and bun's per-test timeout cannot fire under fake timers
+ * either, so the test would hang until the job's timeout-minutes.
+ */
 async function wait(ms: number) {
   await act(async () => {
     await settle();

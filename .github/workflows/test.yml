@@ -15,6 +15,10 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # A backstop, not a budget: green runs take 16-19 minutes. Some DOM tests
+    # run on fake timers, where bun's per-test timeout cannot fire, so a stuck
+    # await would otherwise idle until GitHub's 6-hour default.
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
