@@ -96,7 +96,7 @@ export function sourceSaveCrossOriginResponse(): SourceSaveResponse {
 	return { ok: false, code: "not-writable", message: "Cross-origin source saves are not allowed." };
 }
 
-export type SourceSaveConflictResponse =Extract<SourceSaveResponse, { ok: false; code: "conflict" }>;
+export type SourceSaveConflictResponse = Extract<SourceSaveResponse, { ok: false; code: "conflict" }>;
 
 export function isSourceFileEol(value: unknown): value is SourceFileEol {
 	return value === "lf" || value === "crlf" || value === "mixed" || value === "none";

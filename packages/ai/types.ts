@@ -256,6 +256,8 @@ export interface AIProvider {
     host: string;
     status: "ready" | "busy" | "blocked" | "gone";
     modes: { turn: boolean; transient: boolean };
+    /** `false` only when the host never interrupts the session's work. */
+    interruptible?: false;
   };
 
   /**

@@ -1,4 +1,5 @@
 import { GUIDE_CLI_USAGE } from "@plannotator/server/guide-cli";
+import { T3_CLI_USAGE } from "@plannotator/t3-code/usage";
 
 const HELP_FLAGS = new Set(["--help", "-h"]);
 
@@ -183,9 +184,10 @@ export function formatTopLevelHelp(): string {
  * To launch one, delete it from this set, add its usage lines to
  * formatTopLevelHelp() and document it in apps/skills/core/plannotator/SKILL.md.
  *
- * Empty: `inbox` (the Plannotator Inbox) was the last one, and launched.
+ * `inbox` (the Plannotator Inbox) was the last one to launch. Today: the
+ * opt-in T3 Code connection (`t3`, and `t3-hook`, its Claude hook).
  */
-export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>();
+export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3", "t3-hook"]);
 
 /**
  * `plannotator inbox`'s commands and flags. `plannotator inbox --help` prints
@@ -408,6 +410,16 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "",
     "Purge data is local-only: it is not stored on a Plannotator server and",
     "cannot be recovered after purge. Unrecognized custom files are preserved.",
+  ].join("\n"),
+  // Unreleased (HIDDEN_SUBCOMMANDS): the opt-in T3 Code connection.
+  t3: T3_CLI_USAGE,
+  "t3-hook": [
+    "Usage:",
+    "  plannotator t3-hook install --settings <settings.json> --executable <plannotator>",
+    "  plannotator t3-hook remove --settings <settings.json>",
+    "",
+    "Internal: the Claude Bash hook of the opt-in T3 Code connection and its",
+    "settings helper (install.sh --with-t3 / --without-t3). Agents never run it.",
   ].join("\n"),
 };
 

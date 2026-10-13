@@ -89,12 +89,9 @@ interface OpenCodeHost {
 
 /** `opencode2 serve` in the world, with the packed plugin installed through a throwaway registry and the scripted model as its provider. */
 async function openOpenCode(w: InboxWorld, m: ScriptedModel): Promise<OpenCodeHost> {
-  const port = await freePort();
-  const registryPort = await freePort();
-  const registryUrl = `http://127.0.0.1:${registryPort}`;
   const npmRegistry = Bun.serve({
     hostname: "127.0.0.1",
-    port: registryPort,
+    port: 0,
     fetch(request) {
       const pathname = new URL(request.url).pathname;
       if (decodeURIComponent(pathname.slice(1)) === packageJson.name) {
@@ -109,6 +106,8 @@ async function openOpenCode(w: InboxWorld, m: ScriptedModel): Promise<OpenCodeHo
       return new Response("not found", { status: 404 });
     },
   });
+  const registryUrl = `http://127.0.0.1:${npmRegistry.port}`;
+  const port = await freePort();
   // One OpenCode home per world, so the second server reuses the installed plugin.
   const xdg = path.join(w.root, "opencode");
   for (const dir of ["config", "data", "cache"]) mkdirSync(path.join(xdg, dir), { recursive: true });

@@ -87,14 +87,13 @@ let taken = false;
 
 /**
  * The only place a result record may be written: a `result.json` inside the
- * mod's launch area of the data dir (`<data dir>/claude-code-mod/…`). Anything
+ * host's launch area of the data dir (`claude-code-mod/` or `t3-code/`). Anything
  * else is refused, so the variable can never be used to make the CLI create
  * or replace an arbitrary file.
  */
 export function isAllowedHostResultPath(path: string, dataDir: string = getPlannotatorDataDir()): boolean {
   if (!isAbsolute(path) || basename(path) !== "result.json") return false;
-  const root = resolve(dataDir, "claude-code-mod") + sep;
-  return resolve(path).startsWith(root);
+  return ["claude-code-mod", "t3-code"].some((host) => resolve(path).startsWith(resolve(dataDir, host) + sep));
 }
 
 /** Read the side-channel path once and scrub it from the environment. */
@@ -105,7 +104,7 @@ export function takeHostResultPath(env: NodeJS.ProcessEnv = process.env): string
     delete env[HOST_RESULT_FILE_ENV];
     const path = value && value.trim() ? value : undefined;
     if (path && !isAllowedHostResultPath(path)) {
-      console.error(`Plannotator: ignoring ${HOST_RESULT_FILE_ENV}: not a result.json under the data dir's claude-code-mod/ folder.`);
+      console.error(`Plannotator: ignoring ${HOST_RESULT_FILE_ENV}: not a result.json under the data dir's host launch folders.`);
       takenPath = undefined;
     } else {
       takenPath = path;

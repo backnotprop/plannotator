@@ -66,7 +66,7 @@ Each entry runs `<your plannotator binary> inbox mcp`. The agent uses it from it
 
 ### A note in each agent's instructions
 
-The first time you open the Inbox after it connected your agents, it asks once whether to add a short note about the Inbox to each agent's own instructions file, so agents send you decisions and finished work there while you are away. It shows each file before it writes anything:
+The first time you open the Inbox after it connected your agents, a dialog asks whether to add a short note about the Inbox to each agent's own instructions file, so agents send you decisions and finished work there while you are away. It lists each agent with the exact file, every agent ticked (Claude Code too), and writes nothing until you press **Add**: untick an agent to leave it out, or choose **Not now**. The top of the dialog says which agents `plannotator inbox` just connected. Each agent is asked once: an agent you connect later (say, Codex next week) gets the same dialog for itself alone. The dialog never opens on the same page load as another one-time dialog (the sound dialog comes first). The files:
 
 | Agent | File |
 |-------|------|
@@ -161,13 +161,13 @@ The setting is read when a session starts and never during one, because a change
 
 Once you have run the Inbox on this computer, a session that has the tool also gets one line, so the agent knows when the Inbox is the right place:
 
-> Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with plannotator_inbox send_message and keep going. Their reply comes back here.
+> Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with plannotator_inbox send_message and keep going. Their reply comes back here. Run `plannotator inbox --help` for how it works.
 
 Where it goes:
 
 - **Claude Code:** once, in the context of the conversation's first message. It names the tool by its full name (`mcp__…__plannotator_inbox`), so Claude can find it.
 - **Pi:** once, as a hidden message with the session's first prompt.
-- **OpenCode:** a line in the system prompt of every request. On OpenCode 1, and on an OpenCode 2 that cannot bring a reply back by itself, the last sentence says to call `wait_for_reply` instead.
+- **OpenCode:** a line in the system prompt of every request. On OpenCode 1, and on an OpenCode 2 that cannot bring a reply back by itself, the sentence about the reply says to call `wait_for_reply` instead.
 
 The text is fixed and never changes during a session, so it costs little and does not invalidate the prompt cache. It never appears without the tool. To turn it off, set `inboxReminder` in `~/.plannotator/config.json`: `false` for every host, or one per host, for example `{ "inboxReminder": { "claude-code": false } }`.
 

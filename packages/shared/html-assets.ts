@@ -1,6 +1,6 @@
 import { posix as pathPosix } from "path";
 import * as parse5 from "parse5";
-import { MAX_ANNOTATABLE_FILE_BYTES } from "@plannotator/core/annotatable";
+import { isDotenvFileName, MAX_ANNOTATABLE_FILE_BYTES } from "@plannotator/core/annotatable";
 
 export const HTML_ASSET_ROUTE_PREFIX = "/api/html-assets";
 
@@ -23,6 +23,23 @@ export const HTML_ASSET_DOCUMENT_CSP = "sandbox allow-scripts";
 export const HTML_ASSET_ERROR_CSP = "sandbox";
 /** Embedded documents honour the same 2MB ceiling single-file annotate reads do. */
 export const MAX_HTML_ASSET_DOCUMENT_BYTES = MAX_ANNOTATABLE_FILE_BYTES;
+
+/**
+ * Asset paths never served from a WIDE asset root: any segment starting with
+ * `.` (`.secrets/`, `.git/`, `.ssh/`) and the dotenv family (`prod.env`).
+ * A plain annotate session's root is the document's own folder; a folder
+ * session's root is the whole selected folder, and the Inbox's is the folder
+ * of a file attached from anywhere (a home folder, say). The page under
+ * review is untrusted and can request any path under its root, so these
+ * roots refuse what is hidden. Judge both the path as requested and where it
+ * really leads under the root (`htmlAssetPathRefused` in html-assets-node).
+ */
+export function refusesHiddenHtmlAssetPath(relativePath: string): boolean {
+  const segments = relativePath.split(/[\\/]+/).filter(Boolean);
+  if (segments.some((segment) => segment.startsWith("."))) return true;
+  const parts = relativePath.split(/[\\/]/);
+  return isDotenvFileName(parts[parts.length - 1] ?? relativePath);
+}
 
 /** Fetch destinations that mean "this response will become a nested document". */
 const FRAMED_FETCH_DESTS = new Set(["iframe", "frame", "embed", "object"]);
@@ -315,6 +332,8 @@ export function normalizeHtmlAssetRoutePath(routePath: string): string | null {
 }
 
 export interface RewriteHtmlAssetOptions {
+  /** Document directory relative to the permitted asset root. */
+  assetBasePath?: string;
   /**
    * Anchor the document's relative URLs here with a `<base href>` at the top of
    * `<head>`. This is what makes EMBEDDED local documents work: a srcdoc page
@@ -349,7 +368,7 @@ export function rewriteHtmlAssetReferences(
   const root = tree as unknown as HtmlNode;
   let hasFrame = false;
   visit(root, (node) => {
-    rewriteNodeAssetReferences(node, assetUrlFor);
+    rewriteNodeAssetReferences(node, assetUrlFor, options.assetBasePath ?? "");
     const tagName = node.tagName?.toLowerCase();
     if (tagName && tagName in FRAME_URL_ATTRS) hasFrame = true;
   });
@@ -435,42 +454,43 @@ export function rewriteCssAssetReferences(
 function rewriteNodeAssetReferences(
   node: HtmlNode,
   assetUrlFor: HtmlAssetUrlMapper,
+  basePath: string,
 ): void {
   const tagName = node.tagName?.toLowerCase();
   if (!tagName) return;
 
-  rewriteStyleAttr(node, assetUrlFor);
+  rewriteStyleAttr(node, assetUrlFor, basePath);
 
   if (tagName === "style") {
-    rewriteStyleContent(node, assetUrlFor);
+    rewriteStyleContent(node, assetUrlFor, basePath);
     return;
   }
 
   if (tagName === "img") {
-    rewriteAttr(node, "src", assetUrlFor);
-    rewriteSrcsetAttr(node, "srcset", assetUrlFor);
+    rewriteAttr(node, "src", assetUrlFor, basePath);
+    rewriteSrcsetAttr(node, "srcset", assetUrlFor, basePath);
     return;
   }
 
   if (tagName === "source") {
-    rewriteAttr(node, "src", assetUrlFor);
-    rewriteSrcsetAttr(node, "srcset", assetUrlFor);
+    rewriteAttr(node, "src", assetUrlFor, basePath);
+    rewriteSrcsetAttr(node, "srcset", assetUrlFor, basePath);
     return;
   }
 
   if (tagName === "video") {
-    rewriteAttr(node, "src", assetUrlFor);
-    rewriteAttr(node, "poster", assetUrlFor);
+    rewriteAttr(node, "src", assetUrlFor, basePath);
+    rewriteAttr(node, "poster", assetUrlFor, basePath);
     return;
   }
 
   if (tagName === "audio" || tagName === "script") {
-    rewriteAttr(node, "src", assetUrlFor);
+    rewriteAttr(node, "src", assetUrlFor, basePath);
     return;
   }
 
   if (tagName === "link" && isSupportLink(node)) {
-    rewriteAttr(node, "href", assetUrlFor);
+    rewriteAttr(node, "href", assetUrlFor, basePath);
   }
 }
 
@@ -483,10 +503,11 @@ function rewriteAttr(
   node: HtmlNode,
   name: string,
   assetUrlFor: HtmlAssetUrlMapper,
+  basePath: string,
 ): void {
   const attr = findAttr(node, name);
   if (!attr) return;
-  const rewritten = rewriteLocalAssetUrl(attr.value, assetUrlFor);
+  const rewritten = rewriteLocalAssetUrl(attr.value, assetUrlFor, basePath);
   if (rewritten !== null) attr.value = rewritten;
 }
 
@@ -494,10 +515,11 @@ function rewriteSrcsetAttr(
   node: HtmlNode,
   name: string,
   assetUrlFor: HtmlAssetUrlMapper,
+  basePath: string,
 ): void {
   const attr = findAttr(node, name);
   if (!attr) return;
-  const rewritten = rewriteSrcset(attr.value, assetUrlFor);
+  const rewritten = rewriteSrcset(attr.value, assetUrlFor, basePath);
   if (rewritten !== attr.value) attr.value = rewritten;
 }
 
@@ -510,16 +532,16 @@ function attrValue(node: HtmlNode, name: string): string | null {
   return findAttr(node, name)?.value.trim() ?? null;
 }
 
-function rewriteStyleAttr(node: HtmlNode, assetUrlFor: HtmlAssetUrlMapper): void {
+function rewriteStyleAttr(node: HtmlNode, assetUrlFor: HtmlAssetUrlMapper, basePath: string): void {
   const attr = findAttr(node, "style");
   if (!attr) return;
-  attr.value = rewriteCssAssetReferences(attr.value, assetUrlFor);
+  attr.value = rewriteCssAssetReferences(attr.value, assetUrlFor, basePath);
 }
 
-function rewriteStyleContent(node: HtmlNode, assetUrlFor: HtmlAssetUrlMapper): void {
+function rewriteStyleContent(node: HtmlNode, assetUrlFor: HtmlAssetUrlMapper, basePath: string): void {
   for (const child of node.childNodes ?? []) {
     if (typeof child.value === "string") {
-      child.value = rewriteCssAssetReferences(child.value, assetUrlFor);
+      child.value = rewriteCssAssetReferences(child.value, assetUrlFor, basePath);
     }
   }
 }
@@ -548,8 +570,10 @@ function rewriteLocalAssetUrl(
   if (shouldSkipUrl(trimmed)) return null;
 
   const { path, suffix } = splitPathSuffix(trimmed);
-  const normalized = normalizeLocalAssetPath(
-    basePath ? pathPosix.join(basePath, path) : path,
+  const decoded = decodeUrlPath(path);
+  if (decoded === null) return null;
+  const normalized = normalizeDecodedLocalAssetPath(
+    basePath ? pathPosix.join(basePath, decoded) : decoded,
   );
   if (normalized === null) return null;
   if (htmlAssetContentType(normalized) === null) return null;
@@ -562,6 +586,7 @@ function rewriteLocalAssetUrl(
 function rewriteSrcset(
   srcset: string,
   assetUrlFor: HtmlAssetUrlMapper,
+  basePath: string,
 ): string {
   const rewritten: string[] = [];
   let changed = false;
@@ -583,7 +608,7 @@ function rewriteSrcset(
     while (i < srcset.length && srcset[i] !== ",") i++;
     const descriptor = srcset.slice(descriptorStart, i).trim();
 
-    const nextUrl = rewriteLocalAssetUrl(originalUrl, assetUrlFor) ?? originalUrl;
+    const nextUrl = rewriteLocalAssetUrl(originalUrl, assetUrlFor, basePath) ?? originalUrl;
     if (nextUrl !== originalUrl) changed = true;
     rewritten.push(descriptor ? `${nextUrl} ${descriptor}` : nextUrl);
 

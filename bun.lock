@@ -54,6 +54,7 @@
         "@plannotator/inbox": "workspace:*",
         "@plannotator/server": "workspace:*",
         "@plannotator/shared": "workspace:*",
+        "@plannotator/t3-code": "workspace:*",
         "@plannotator/ui": "workspace:*",
         "@tailwindcss/vite": "^4.3.3",
         "react": "^19.2.8",
@@ -232,7 +233,7 @@
     },
     "packages/core": {
       "name": "@plannotator/core",
-      "version": "0.25.12",
+      "version": "0.25.13",
       "devDependencies": {
         "typescript": "~5.8.2",
       },
@@ -356,9 +357,24 @@
         "fast-check": "4.9.0",
       },
     },
+    "packages/t3-code": {
+      "name": "@plannotator/t3-code",
+      "version": "0.0.1",
+      "dependencies": {
+        "@modelcontextprotocol/client": "2.2.0",
+        "@plannotator/ai": "workspace:*",
+        "@plannotator/core": "workspace:*",
+        "@plannotator/server": "workspace:*",
+        "@plannotator/shared": "workspace:*",
+        "zod": "4.5.4",
+      },
+      "devDependencies": {
+        "typescript": "~5.8.2",
+      },
+    },
     "packages/ui": {
       "name": "@plannotator/ui",
-      "version": "0.52.1",
+      "version": "0.53.0",
       "dependencies": {
         "@base-ui/react": "^1.7.0",
         "@codemirror/autocomplete": "^6.20.3",
@@ -380,7 +396,7 @@
         "@lezer/highlight": "^1.2.3",
         "@pierre/diffs": "1.3.6",
         "@plannotator/atomic-editor": "^0.9.0",
-        "@plannotator/core": "0.25.12",
+        "@plannotator/core": "0.25.13",
         "@plannotator/markdown-editor": "^0.5.0",
         "@plannotator/web-highlighter": "^0.8.1",
         "@tanstack/react-table": "^8.21.3",
@@ -1096,6 +1112,8 @@
     "@plannotator/server": ["@plannotator/server@workspace:packages/server"],
 
     "@plannotator/shared": ["@plannotator/shared@workspace:packages/shared"],
+
+    "@plannotator/t3-code": ["@plannotator/t3-code@workspace:packages/t3-code"],
 
     "@plannotator/ui": ["@plannotator/ui@workspace:packages/ui"],
 

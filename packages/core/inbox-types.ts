@@ -932,8 +932,10 @@ export interface InboxAgentsModel {
   tool_env: boolean | null;
   /** PLANNOTATOR_INBOX_NOTES=0: no note offer, and note rows only for a note already written (it can be turned off, not added). */
   notes_env_off?: boolean;
-  /** The one-time note question was answered. */
+  /** The note question was answered at least once. */
   notes_offered: boolean;
+  /** The agents the note question was asked about: each is asked once (absent from an Inbox of 0.28.18 or older, which asked once in all). */
+  notes_asked?: InboxNoteAgentId[];
   /** The exact block a note writes, markers included. */
   note_text: string;
   /** A switch's refusal, after POST /api/inbox/agents. */

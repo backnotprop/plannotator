@@ -28,6 +28,8 @@ import {
   resolve,
 } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { parseT3HookCommand, T3_SETTINGS_BACKUP_SUFFIX } from "@plannotator/shared/t3-hook-command";
+import { runningT3Workers, stopT3Workers } from "@plannotator/shared/t3-workers";
 import { inboxStatus, readInboxRegistry, stopInbox } from "@plannotator/shared/inbox/registry";
 import { INBOX_TAILNET_HTTPS_PORT, takeDownInboxTailnet } from "./inbox-devices";
 import { takeDownInboxTailscale } from "./inbox-tailscale";
@@ -107,6 +109,7 @@ const PURGE_OWNED_TOP_LEVEL = [
   "history",
   "feedback",
   "inbox",
+  "t3-code",
   "drafts",
   "review-progress",
   "active",
@@ -294,7 +297,7 @@ type MutableUninstallResult = {
 type HookCleanupSpec = {
   readonly event: string;
   readonly matcher?: string;
-  readonly suffix: "" | "improve-context";
+  readonly suffix: "" | "improve-context" | "t3-hook";
 };
 
 type HookCleanupPolicy = {
@@ -427,6 +430,20 @@ export async function runPlannotatorUninstall(
         if (result === "removed") state.removed.push(`Took down the Plannotator Inbox's tailnet address (tailscale serve --https=${kept.https_port})`);
         if (result === "failed") state.warnings.push(`Could not check or remove the Inbox's tailnet address; run: tailscale serve --https=${kept.https_port} off`);
       }
+    }
+  }
+
+  // The opt-in T3 Code connection's workers run from the binary being removed
+  // and write into t3-code/: stop them (reviews stay open). Nothing to do for
+  // anyone who never connected T3.
+  if (request.dryRun) {
+    for (const worker of await runningT3Workers(state.dataDir)) {
+      state.planned.push(`Stop the T3 Code companion for thread ${worker.thread} (pid ${worker.pid})`);
+    }
+  } else {
+    for (const worker of await stopT3Workers(state.dataDir)) {
+      if (worker.state === "stopped") state.removed.push(`Stopped the T3 Code companion for thread ${worker.entry.thread} (pid ${worker.entry.pid})`);
+      if (worker.state === "still_running") state.warnings.push(`The T3 Code companion for thread ${worker.entry.thread} (pid ${worker.entry.pid}) did not stop; quit it before deleting ${join(state.dataDir, "t3-code")}.`);
     }
   }
 
@@ -748,6 +765,7 @@ function removeHostConfigEntries(
     [
       { event: "PermissionRequest", matcher: "ExitPlanMode", suffix: "" },
       { event: "PreToolUse", matcher: "EnterPlanMode", suffix: "improve-context" },
+      { event: "PreToolUse", matcher: "Bash", suffix: "t3-hook" },
     ],
     paths.binaryPaths,
     environment.platform,
@@ -756,10 +774,13 @@ function removeHostConfigEntries(
       removeFileWhenEmpty: false,
     },
     "managed Claude Code hooks",
-    `Make ${join(paths.claudeDir, "settings.json")} a readable, writable strict JSON object. Remove only Plannotator command hooks from hooks.PermissionRequest entries whose matcher is "ExitPlanMode" and hooks.PreToolUse entries whose matcher is "EnterPlanMode", then save the file.`,
+    `Make ${join(paths.claudeDir, "settings.json")} a readable, writable strict JSON object. Remove only Plannotator command hooks from hooks.PermissionRequest entries whose matcher is "ExitPlanMode", hooks.PreToolUse entries whose matcher is "EnterPlanMode", and Plannotator t3-hook commands in Bash entries, then save the file.`,
     request,
     state,
   );
+  // The backup `t3-hook install` (install.sh --with-t3) made before its first
+  // change to settings.json. The name is Plannotator's own; nothing else writes it.
+  removePath(join(paths.claudeDir, `settings.json${T3_SETTINGS_BACKUP_SUFFIX}`), request, state);
 
   cleanupHooksJson(
     join(paths.codexDir, "hooks.json"),
@@ -2037,7 +2058,7 @@ function removePath(
 function isManagedHook(
   value: unknown,
   binaryPaths: readonly string[],
-  suffix: "" | "improve-context",
+  suffix: "" | "improve-context" | "t3-hook",
   platform: NodeJS.Platform,
   allowRelocatedBinary = false,
 ): boolean {
@@ -2047,6 +2068,10 @@ function isManagedHook(
   }
 
   const command = hook.command.trim();
+  if (suffix === "t3-hook") {
+    const parsed = parseT3HookCommand(command);
+    return parsed !== undefined && (parsed.executable === "plannotator" || binaryPaths.some((path) => sameCommand(parsed.executable, path, platform)));
+  }
   const expectedBare = suffix ? `plannotator ${suffix}` : "plannotator";
   if (command === expectedBare) return true;
 

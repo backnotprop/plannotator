@@ -48,8 +48,9 @@ import { SidebarShell } from './shell/SidebarShell';
 import { InboxList } from './components/InboxList';
 import { ThreadPane } from './components/Thread';
 import { EmptyState } from './components/EmptyState';
-import { AgentsCard } from './components/AgentsCard';
-import type { InboxAgentsModel } from '@plannotator/core/inbox-types';
+import { AgentNoteDialog } from './components/AgentNoteDialog';
+import { cardReport, noteQuestionRows } from './agents';
+import type { InboxAgentRow, InboxAgentsModel, InboxConnectReport } from '@plannotator/core/inbox-types';
 import { SettingsPage } from './components/Settings';
 import { ArchivedBlock } from './components/Archived';
 import { NotificationAsk } from './components/NotificationAsk';
@@ -316,8 +317,22 @@ function Inbox() {
   const [decisions, setDecisions] = useState<DecisionsModel | null>(null);
   const [decisionsError, setDecisionsError] = useState<string | null>(null);
   const [settings, setSettings] = useState<SettingsModel | null>(null);
-  /** The agents on this computer (GET /api/inbox/agents): the first-open card and Settings → Agents. Null on an older Inbox. */
+  /** The agents on this computer (GET /api/inbox/agents): the agent-note dialog and Settings → Agents. Null on an older Inbox. */
   const [agents, setAgents] = useState<InboxAgentsModel | null>(null);
+  const agentsRef = useRef(agents);
+  agentsRef.current = agents;
+  /** The first read of the agents is done (a run that opened the window has finished connecting): the agent-note dialog may decide. */
+  const [agentsSettled, setAgentsSettled] = useState(false);
+  /**
+   * The one-time agent-note dialog: open on this load (with the agents it
+   * asks about and the band's news, fixed when it opens), or shown on it.
+   * Decided once per load, after the sound dialog and never on a load that
+   * showed it.
+   */
+  const [agentNote, setAgentNote] = useState<'none' | 'shown' | { rows: InboxAgentRow[]; report: InboxConnectReport | null }>('none');
+  const agentNoteDecided = useRef(false);
+  /** The sound dialog's claim has answered on this load (or it was never due). */
+  const [soundClaimed, setSoundClaimed] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [update, setUpdate] = useState<InboxHealth['update']>(null);
   const [restarting, setRestarting] = useState(false);
@@ -584,6 +599,7 @@ function Inbox() {
       const next = await refreshAgents();
       if (cancelled) return;
       if (next?.connecting || extra-- > 0) timer = setTimeout(() => void read(), next?.connecting ? 1500 : 2500);
+      else setAgentsSettled(true);
     };
     void read();
     return () => {
@@ -787,13 +803,47 @@ function Inbox() {
           setSettings((current) => (current ? { ...current, sound: answer.sound } : current));
           if (answer.show && !cancelled) setSoundDialog('open');
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => setSoundClaimed(true));
     }, 700);
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
   }, [soundDialogDue, soundDialogBlocked]);
+
+  // The one-time agent-note dialog (the approved "inbox-agent-note-dialog"
+  // design): asks about each agent that can take a note and was never asked.
+  // Decided once per load, once the agents are read (the run that opened the
+  // window has finished connecting) and the list has loaded; after the sound
+  // dialog, and never on a load that showed it. Never through the tailnet
+  // (the agents are local only, so `agents` stays null there), never while an
+  // update dialog is open or a reply is being typed, and it waits while
+  // Settings is open (Settings → Agents asks the same thing).
+  const soundSettled = settings !== null && (!(settings.sound?.dialog_due === true && (settings.via ?? 'local') === 'local') || soundClaimed);
+  const agentNoteReady =
+    agentsSettled && latest !== null && soundSettled && soundDialog === 'none' && updateDialog === null && !restarting && route.page !== 'settings';
+  useEffect(() => {
+    if (!agentNoteReady || agentNoteDecided.current) return;
+    let cancelled = false;
+    const decide = () => {
+      if (cancelled || agentNoteDecided.current || replyInProgress()) return false;
+      agentNoteDecided.current = true;
+      const model = agentsRef.current;
+      const rows = model ? noteQuestionRows(model) : [];
+      if (rows.length > 0 && model) setAgentNote({ rows, report: cardReport(model) });
+      return true;
+    };
+    if (decide()) return;
+    const timer = setInterval(() => {
+      if (decide()) clearInterval(timer);
+    }, 700);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [agentNoteReady]);
+  const agentNoteOpen = typeof agentNote === 'object';
 
 
   // The list on screen catches up as the route changes (the layout effect above), not here.
@@ -978,14 +1028,14 @@ function Inbox() {
   // An open file (its viewer, the stepping bar, the guard row) and a guided
   // review own the keyboard: E and Z stand down there, and while the sound
   // dialog is up.
-  const keysRef = useRef({ markRead, toast, thread, soundDialog });
-  keysRef.current = { markRead, toast, thread, soundDialog };
+  const keysRef = useRef({ markRead, toast, thread, soundDialog, agentNoteOpen: false });
+  keysRef.current = { markRead, toast, thread, soundDialog, agentNoteOpen: typeof agentNote === 'object' };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented || event.repeat) return;
       const key = event.key.toLowerCase();
       if (key !== 'e' && key !== 'z') return;
-      if (keysRef.current.soundDialog === 'open' || routeRef.current.guide) return;
+      if (keysRef.current.soundDialog === 'open' || keysRef.current.agentNoteOpen || routeRef.current.guide) return;
       const target = event.target instanceof HTMLElement ? event.target : null;
       if (target) {
         if (target.isContentEditable || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return;
@@ -1485,7 +1535,7 @@ function Inbox() {
     main = <div className="ib-listcol">{loadError && <div className="ib-error" style={{ padding: 22 }}>{loadError}</div>}</div>;
   } else if (firstRun) {
     main = (
-      <EmptyState context={context} agents={agents} onAgents={setAgents} onSettings={() => go({ page: 'settings', project: null, thread: null, section: 'agents' })} />
+      <EmptyState context={context} />
     );
   } else {
     main = (
@@ -1502,20 +1552,14 @@ function Inbox() {
           selectedThreadId={route.thread}
           notice={notice}
           ask={
-            <>
-              {/* The agents card sits above the notification ask; the two never merge. */}
-              {agents && !route.project && (
-                <AgentsCard model={agents} onModel={setAgents} onSettings={() => go({ page: 'settings', project: null, thread: null, section: 'agents' })} variant="list" />
-              )}
-              {notifications.ask && soundDialog === 'none' && (
-                <NotificationAsk
-                  kind={notifications.ask}
-                  soundOn={sound.settings.enabled}
-                  onTurnOn={() => void notifications.turnOn()}
-                  onNotNow={notifications.notNow}
-                />
-              )}
-            </>
+            notifications.ask && soundDialog === 'none' && agentNote === 'none' ? (
+              <NotificationAsk
+                kind={notifications.ask}
+                soundOn={sound.settings.enabled}
+                onTurnOn={() => void notifications.turnOn()}
+                onNotNow={notifications.notNow}
+              />
+            ) : null
           }
           onShowNew={() => {
             // Show's line goes away with the press: after a key, focus goes to the first row it brought in.
@@ -1548,7 +1592,7 @@ function Inbox() {
             lookSeq={look?.threadId === thread.thread_id ? look.seq : undefined}
             seenThrough={look?.threadId === thread.thread_id ? look.through : null}
             onSeen={(through) => seenOnSight(thread.thread_id, through)}
-            covered={!!route.guide || updateDialog !== null || soundDialog === 'open'}
+            covered={!!route.guide || updateDialog !== null || soundDialog === 'open' || agentNoteOpen}
             backLabel={filterProject?.name ?? 'Inbox'}
             phone={phone}
             stacked={stack.thread}
@@ -1660,7 +1704,17 @@ function Inbox() {
           }}
         />
       )}
-      {toast && soundDialog !== 'open' && <InboxToast toast={toast} onDismiss={dismissToast} phone={phone} />}
+      {typeof agentNote === 'object' && agents && (
+        <AgentNoteDialog
+          rows={agentNote.rows}
+          report={agentNote.report}
+          noteText={agents.note_text}
+          onModel={setAgents}
+          onSettings={() => go({ page: 'settings', project: null, thread: null, section: 'agents' })}
+          onClosed={() => setAgentNote('shown')}
+        />
+      )}
+      {toast && soundDialog !== 'open' && !agentNoteOpen && <InboxToast toast={toast} onDismiss={dismissToast} phone={phone} />}
       <div className="ib-sr" aria-live="polite" data-inbox-live="">
         {said}
       </div>

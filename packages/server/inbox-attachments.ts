@@ -28,8 +28,8 @@
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import type { FileHandle } from "node:fs/promises";
-import { HTML_ASSET_DOCUMENT_CSP } from "@plannotator/shared/html-assets";
-import { INBOX_ANNOTATION_CURRENT, inboxAttachmentNameRefusal, isInboxTextKind, readInboxAttachmentKind, type InboxAttachment } from "@plannotator/core/inbox-types";
+import { HTML_ASSET_DOCUMENT_CSP, refusesHiddenHtmlAssetPath } from "@plannotator/shared/html-assets";
+import { INBOX_ANNOTATION_CURRENT, isInboxTextKind, readInboxAttachmentKind, type InboxAttachment } from "@plannotator/core/inbox-types";
 import {
   inboxAttachmentState,
   isPdfHead,
@@ -101,12 +101,10 @@ function handleStream(handle: FileHandle): ReadableStream<Uint8Array> {
 /**
  * The asset paths the Inbox never serves from an attached HTML page's folder
  * (which may be a home folder): any segment starting with `.` (`.docker`,
- * `.ssh`, `.plannotator`) and the dotenv family.
+ * `.ssh`, `.plannotator`) and the dotenv family. The same rule an annotate
+ * folder session's widened asset root applies (`refusesHiddenHtmlAssetPath`).
  */
-export function inboxRefusesAssetPath(relativePath: string): boolean {
-  const segments = relativePath.split(/[\\/]+/).filter(Boolean);
-  return segments.some((segment) => segment.startsWith(".")) || inboxAttachmentNameRefusal(relativePath) !== null;
-}
+export const inboxRefusesAssetPath = refusesHiddenHtmlAssetPath;
 
 /** A nested document in an attached page runs scripts but reaches no network. */
 export const INBOX_HTML_DOCUMENT_CSP = `${HTML_ASSET_DOCUMENT_CSP}; connect-src 'none'`;

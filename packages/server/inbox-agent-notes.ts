@@ -36,17 +36,22 @@ import {
   type InboxAgentNoteStatus,
   type InboxNoteAgentId,
 } from "@plannotator/core/inbox-types";
+import { loadConfig, saveConfig } from "@plannotator/shared/config";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { describeFsError, readAgentFile, stripJsonComments, withBom, writeAgentFileAtomic } from "./agent-files";
 import {
   agentHomeAllowed,
+  agentSpec,
   claudeConfigDir,
   codexHome,
   displayPath,
   geminiDir,
   openCodeConfigDir,
+  inboxAgentReach,
   piAgentDir,
+  readInboxAgents,
   type AgentEnvironment,
+  type ConnectOptions,
 } from "./inbox-agents";
 
 export const INBOX_NOTE_VERSION = 1;
@@ -523,4 +528,79 @@ export function planInboxNoteRemoval(dataDir: string, e: AgentEnvironment, label
     }
   }
   return { items, skipped };
+}
+
+// ---------------------------------------------------------------------------
+// Asked once per agent (the approved "inbox-agent-note-dialog" design, which
+// amends decision 5: the window's question is asked once PER AGENT)
+
+/** A valid list of note agents, or null when `value` is not a list. Unknown ids are dropped. */
+function noteAgentIds(value: unknown): InboxNoteAgentId[] | null {
+  if (!Array.isArray(value)) return null;
+  return INBOX_NOTE_AGENT_IDS.filter((id) => value.includes(id));
+}
+
+/**
+ * The agents that can take a note now (the window's candidates): found,
+ * reaching the Inbox, no note yet, a file to put it in, and not failed by the
+ * last connecting run. The same rule as `noteCandidates` in packages/inbox/agents.ts.
+ */
+export async function noteCandidateIds(options: ConnectOptions): Promise<InboxNoteAgentId[]> {
+  const e = options.environment;
+  const failed = new Set(readInboxAgents(options.dataDir).last_report?.failed.map((f) => f.agent) ?? []);
+  const out: InboxNoteAgentId[] = [];
+  for (const id of INBOX_NOTE_AGENT_IDS) {
+    if (failed.has(id) || !agentSpec(id).detect(e)) continue;
+    if (noteStatus(id, options.dataDir, e).state !== "absent") continue;
+    if ((await inboxAgentReach(id, options)).on) out.push(id);
+  }
+  return out;
+}
+
+/**
+ * The agents that have the note, however it got there: a record in
+ * `inbox/agent-notes.json` (Plannotator wrote it), or a found agent whose
+ * file holds the section now. The person said yes to these (or wrote it
+ * themselves), so they count as asked: removing the note later in Settings
+ * never brings the question back.
+ */
+export function noteHolderIds(options: Pick<ConnectOptions, "dataDir" | "environment">): InboxNoteAgentId[] {
+  const records = readInboxAgentNotes(options.dataDir).notes;
+  return INBOX_NOTE_AGENT_IDS.filter((id) => {
+    if (records[id]) return true;
+    if (!agentSpec(id).detect(options.environment)) return false;
+    const state = noteStatus(id, options.dataDir, options.environment).state;
+    return state === "added" || state === "edited";
+  });
+}
+
+/**
+ * The agents the note question has been asked about (config.json
+ * `inboxAgentNotes.asked`), always including every agent that has the note
+ * (`noteHolderIds`; saved the first time one is missing). An Inbox of
+ * 0.28.18 or older recorded only `offered: true` (asked once, about every
+ * agent that could take a note then): the first read here turns that into
+ * the agents that can take a note NOW plus the agents that have it, and
+ * saves it, so those are never asked again while an agent that becomes a
+ * candidate later is asked once, for itself.
+ */
+export async function notesAsked(options: ConnectOptions): Promise<InboxNoteAgentId[]> {
+  const saved = loadConfig().inboxAgentNotes;
+  const recorded = noteAgentIds(saved?.asked);
+  const holders = noteHolderIds(options);
+  const base = recorded ?? (saved?.offered === true ? await noteCandidateIds(options) : []);
+  const asked = INBOX_NOTE_AGENT_IDS.filter((id) => base.includes(id) || holders.includes(id));
+  // Saved when it differs from the file: the 0.28.18 read, or a note that came another way (Settings, an older Inbox, by hand).
+  if (!recorded || asked.length !== recorded.length) {
+    if (recorded || asked.length > 0) saveConfig({ inboxAgentNotes: { ...(loadConfig().inboxAgentNotes ?? {}), asked } });
+  }
+  return asked;
+}
+
+/** Record that these agents were asked (they are never asked again). `offered` stays true for an older Inbox reading the same config. */
+export async function markNotesAsked(ids: readonly InboxNoteAgentId[], options: ConnectOptions): Promise<void> {
+  if (ids.length === 0) return;
+  const before = await notesAsked(options);
+  const asked = INBOX_NOTE_AGENT_IDS.filter((id) => before.includes(id) || ids.includes(id));
+  saveConfig({ inboxAgentNotes: { ...(loadConfig().inboxAgentNotes ?? {}), offered: true, asked } });
 }

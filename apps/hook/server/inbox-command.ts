@@ -33,8 +33,7 @@ import { handleInboxServerReady, startInboxServer } from "@plannotator/server/in
 import { exposureWarning, type InboxTailscaleState } from "@plannotator/server/inbox-tailscale";
 import { openBrowser } from "@plannotator/server/browser";
 import { agentSpec, createAgentEnvironment, formatConnectReport, inboxConnectDisabled } from "@plannotator/server/inbox-agents";
-import { addInboxNote, inboxNotesDisabled } from "@plannotator/server/inbox-agent-notes";
-import { loadConfig, saveConfig } from "@plannotator/shared/config";
+import { addInboxNote, inboxNotesDisabled, markNotesAsked } from "@plannotator/server/inbox-agent-notes";
 import { INBOX_AGENT_LABELS, INBOX_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { writeUrlQr } from "@plannotator/server/qr";
 import { getCliVersion } from "./cli";
@@ -279,8 +278,8 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
   process.once("SIGINT", () => shutdown(130));
   process.once("SIGTERM", () => shutdown(143));
   await handleInboxServerReady(inbox, { open });
-  // Off the request path: the window is already open, and the card shows what
-  // this did once it is done (GET /api/inbox/agents).
+  // Off the request path: the window is already open, and its note dialog shows
+  // what this did once it is done (GET /api/inbox/agents).
   if (connect) void inbox.connectAgents().then(reportConnect, () => {});
   const tailnet = inbox.tailscale.state();
   if (tailnet.on || tailscale) {
@@ -297,7 +296,7 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
  * once the person agreed in chat, and mark the window's one-time question as
  * answered. Starts nothing. Exit 0 when every note is there, 1 otherwise.
  */
-function writeNotes(dataDir: string, list: string): number {
+async function writeNotes(dataDir: string, list: string): Promise<number> {
   const ids = [...new Set(list.split(",").map((id) => id.trim()).filter(Boolean))];
   const unknown = ids.filter((id) => !(INBOX_NOTE_AGENT_IDS as readonly string[]).includes(id));
   if (ids.length === 0 || unknown.length > 0) {
@@ -310,7 +309,7 @@ function writeNotes(dataDir: string, list: string): number {
     return 1;
   }
   let ok = true;
-  let any = false;
+  const added: InboxNoteAgentId[] = [];
   for (const id of ids as InboxNoteAgentId[]) {
     const label = INBOX_AGENT_LABELS[id];
     // Never a file for an agent that is not on this computer.
@@ -325,7 +324,7 @@ function writeNotes(dataDir: string, list: string): number {
       process.stderr.write(`${label}: not added (${change.reason}).\n`);
       continue;
     }
-    any = true;
+    added.push(id);
     const said = {
       added: `Added a marked section to ${change.path}`,
       created: `Created ${change.path}`,
@@ -339,8 +338,8 @@ function writeNotes(dataDir: string, list: string): number {
     }[change.action];
     process.stderr.write(`${label}: ${said}.\n`);
   }
-  // The window's question is answered only when a note is there now.
-  if (any) saveConfig({ inboxAgentNotes: { ...(loadConfig().inboxAgentNotes ?? {}), offered: true } });
+  // The window never asks about an agent whose note is there now; the others are still asked, once each.
+  await markNotesAsked(added, { dataDir, selfCommand: selfCommand(), environment });
   if (ok) process.stderr.write("Each agent reads it from its next session. Remove it in the Inbox's Settings or with plannotator uninstall.\n");
   return ok ? 0 : 1;
 }
@@ -380,7 +379,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
 
   if (args[0] === "--notes") {
     if (args.length !== 2) usageError("--notes takes one list of agents, e.g. --notes codex,gemini, and no other option.");
-    process.exit(writeNotes(dataDir, args[1]!));
+    process.exit(await writeNotes(dataDir, args[1]!));
   }
 
   let background = false;

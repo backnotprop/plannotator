@@ -319,13 +319,20 @@ export interface PlannotatorConfig {
   };
   /**
    * The Plannotator Inbox's note in each agent's own instructions file
-   * (packages/server/inbox-agent-notes.ts). `offered`: the one-time question
-   * on the window's first open was answered (Add or Not now), or
-   * `plannotator inbox --notes` ran; the window never asks again. Which notes
-   * exist is kept in `inbox/agent-notes.json`, beside the files they are in.
+   * (packages/server/inbox-agent-notes.ts). `offered`: the window's question
+   * was answered at least once, or `plannotator inbox --notes` added a note;
+   * `asked` names each agent it covered (each agent is asked once). Which
+   * notes exist is kept in `inbox/agent-notes.json`, beside the files they are in.
    */
   inboxAgentNotes?: {
     offered?: boolean;
+    /**
+     * The agents the window's question was asked about, each once (Add, Not
+     * now, Don't add a note, or `plannotator inbox --notes`). Absent before
+     * 0.28.19: `offered` alone then counts for the agents that could take a
+     * note when it is first read (notesAsked in inbox-agent-notes.ts).
+     */
+    asked?: string[];
   };
   /**
    * The Plannotator Inbox's phone surface: pairing, the device door

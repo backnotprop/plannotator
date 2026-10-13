@@ -1190,8 +1190,8 @@ export function setInboxTool(host: InboxToolHost, on: boolean, e: AgentEnvironme
  * The person's switch in Settings: on adds the entry (or turns the tool on)
  * whatever the record says; off removes Plannotator's entry (never one that
  * runs something else) and records `off`, so no later run adds it back. On
- * success the agent's failure leaves the last report, so the card's amber
- * line goes. Returns an error reason, or null.
+ * success the agent's failure leaves the last report, so the note dialog's
+ * band stops naming it. Returns an error reason, or null.
  */
 export async function setInboxAgentReach(id: InboxAgentId, on: boolean, options: ConnectOptions): Promise<string | null> {
   const e = options.environment;

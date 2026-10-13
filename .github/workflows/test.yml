@@ -153,7 +153,7 @@ jobs:
           packages/inbox/toastPhone.test.tsx
           packages/inbox/attachmentsHeader.test.tsx
           packages/inbox/themeToggle.test.tsx
-          packages/inbox/agentsCard.test.tsx
+          packages/inbox/agentNoteDialog.test.tsx
           packages/inbox/agentsSettings.test.tsx
           packages/inbox/settingsSections.test.tsx
           packages/ui/components/MenuVersionSection.test.tsx
@@ -417,6 +417,11 @@ jobs:
         run: >-
           bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig
           --define '__CLI_VERSION__="0.0.0-dev"' --outfile .local/plannotator
+
+      - name: Run the T3 connected-session proofs on the compiled binary
+        env:
+          T3_TEST_EXECUTABLE: ${{ github.workspace }}/.local/plannotator
+        run: bun test packages/t3-code
 
       - name: Run the Inbox connection proofs on the installed package
         env:

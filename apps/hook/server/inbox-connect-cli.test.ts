@@ -102,10 +102,17 @@ test("a person's run that starts the Inbox connects once it listens; PLANNOTATOR
   let err = "";
   const reader = proc.stderr.getReader();
   const deadline = Date.now() + 30_000;
+  // One read at a time: a read that loses the race to the timer is kept, never dropped with its chunk.
+  let pending = reader.read();
   while (!err.includes("Connected Codex") && Date.now() < deadline) {
-    const chunk = await Promise.race([reader.read(), Bun.sleep(500).then(() => null)]);
-    if (chunk && !chunk.done) err += new TextDecoder().decode(chunk.value);
+    const chunk = await Promise.race([pending, Bun.sleep(500).then(() => null)]);
+    if (!chunk) continue;
+    if (chunk.done) break;
+    err += new TextDecoder().decode(chunk.value);
+    pending = reader.read();
   }
+  // The read still waiting is cancelled by releaseLock: expected, not a failure.
+  pending.catch(() => {});
   reader.releaseLock();
   expect(err).toContain("Plannotator Inbox: http://localhost:");
   expect(err).toContain("Connected Codex to the Inbox.");
@@ -161,7 +168,7 @@ test("plannotator inbox --notes adds only the notes named, starts nothing, and a
   expect(readFileSync(join(w.home, ".codex", "AGENTS.md"), "utf8")).toContain("<!-- plannotator-inbox:start v1");
   expect(existsSync(join(w.home, ".pi"))).toBe(false);
   expect(existsSync(join(w.home, ".plannotator", "inbox", "inbox.json"))).toBe(false);
-  expect(JSON.parse(readFileSync(join(w.home, ".plannotator", "config.json"), "utf8")).inboxAgentNotes).toEqual({ offered: true });
+  expect(JSON.parse(readFileSync(join(w.home, ".plannotator", "config.json"), "utf8")).inboxAgentNotes).toEqual({ offered: true, asked: ["codex", "gemini"] });
 
   const bad = await cli(w, ["inbox", "--notes", "vscode"]);
   expect(bad.code).toBe(1);

@@ -1718,7 +1718,7 @@ Everything host-facing that changed between ui 0.50.0 / core 0.25.10 and this pa
 - **"Ask this session" announcement (#1690):** new `components/AskSessionAnnouncementDialog`, `utils/askSessionAnnouncement` (cookie `plannotator-announce-ask-session-seen`) and `hooks/useFirstRunAnnouncementWindow`. Plannotator's apps mount it; nothing in the library mounts it for a host.
 - **gruvbox palette (#1721):** sets `--diffs-addition-color-override` (dark `#b8bb26`, light `#79740e`), so added diff lines draw in gruvbox green instead of the text colour. This changed the guides.show viewer stylesheet (see "Publishing & versioning").
 
-## Viewer `answerOnly` (unreleased)
+## Viewer `answerOnly` (ui 0.53.0)
 
 Additive, one optional `Viewer` prop; Plannotator passes none, so its render is unchanged. Added for the Plannotator Inbox window (`packages/inbox`), which shows an agent's message with answerable `:::question` cards and takes no comments on the message text.
 
@@ -1726,26 +1726,26 @@ Additive, one optional `Viewer` prop; Plannotator passes none, so its render is 
 - Inside, `Viewer` computes `authoringOff = readOnly || answerOnly` and uses it wherever it used `readOnly` for authoring; the question and checkbox handlers still read `readOnly`. Absent or false, every path is the one it was.
 - The article keeps its card padding; a host that wants the bare text (as the Inbox does) overrides it from its own CSS on `[data-print-region="article"]`.
 
-## Viewer `resolveLocalLink` (unreleased)
+## Viewer `resolveLocalLink` (ui 0.53.0)
 
 Additive, one optional `Viewer` prop; Plannotator's plan review and annotate pass none, so their render is unchanged. Added for the Plannotator Inbox, where a link in a message to a file the message attached opens that file beside the thread.
 
 - **`resolveLocalLink?: (href: string) => LocalLinkResolution | null`** (`components/LocalLinkContext.tsx`): asked about every markdown link and raw-HTML `<a href>` whose target is a local path (`isLocalLinkTarget`: not `#anchor`, not `//host`, no URL scheme). `{ kind: 'open', open, title?, href? }` draws a real link whose click (and Enter) calls `open` and never follows the href. With `href` (the host's own address for the same thing), that is the link's href and a new-tab click (Cmd/Ctrl/Shift, middle button), "Open in new tab", drag and copy use it; without it the href is the target as written and a middle click is suppressed. `{ kind: 'unavailable', title }` draws the link text as an inert span (raw HTML: the `<a>` loses its `href`), so nothing is fetched. `null` keeps the renderer's default for that link. External links are never passed to it.
 
-## Viewer `questionDecisionLocked` (unreleased)
+## Viewer `questionDecisionLocked` (ui 0.53.0)
 
 Additive, one optional `Viewer` prop; Plannotator passes none, so its render is unchanged. Added for the Plannotator Inbox (step 3, decisions), where one message can hold a sent question and an open one.
 
 - **`questionDecisionLocked?: (question: IndexedQuestion) => boolean`**: true for a question passes it neither `onToggleQuestionDecisionRecording` nor `onOpenQuestionDecision`, so its decision tag draws as a plain tag (on or dimmed off, as `questionDecisionRecording` says), exactly as under `readOnly`. Other questions in the same `Viewer` keep their switch and opener. Absent or false, every path is the one it was.
 
-## Viewer `renderQuestionCard` and `renderQuestionBelowPrompt` (unreleased)
+## Viewer `renderQuestionCard` and `renderQuestionBelowPrompt` (ui 0.53.0)
 
 Additive, two optional `Viewer` props; Plannotator passes none, so its render is unchanged. Added for the Plannotator Inbox's replaced questions, where an agent supersedes an earlier question and the host draws it as a card nobody can answer.
 
 - **`renderQuestionCard?: (question: IndexedQuestion, answer: QuestionAnswer | undefined) => ReactNode | undefined`**: a returned node is drawn in place of that question's answer card, inside a `<div data-block-id data-block-type="directive">`; `undefined` keeps the answer card. Adds no classes to the shared stylesheet.
 - **`renderQuestionBelowPrompt?: (question: IndexedQuestion) => ReactNode`** (`QuestionBlock`'s `renderBelowPrompt`, through `BlockRenderer`'s `renderQuestionBelowPrompt`): host content right under a card's prompt, e.g. "Replaces <an earlier question>"; null for none.
 
-## The composer handed to the host: `onHostDraft`, `stepPin`, `hideRedline` (unreleased)
+## The composer handed to the host: `onHostDraft`, `stepPin`, `hideRedline` (ui 0.53.0)
 
 Additive, all opt-in; Plannotator passes none of it, so its render is unchanged. Added for the Plannotator Inbox surface (PLAN step S1, `packages/inbox/surface`), the single-file build a phone's native shell hosts: the shell's own sheet writes every comment, so the viewers report what a comment would be on and draw no composer.
 
@@ -1757,7 +1757,7 @@ Additive, all opt-in; Plannotator passes none of it, so its render is unchanged.
 - **`AnnotationToolstrip` `hideRedline?: boolean`**: omits only the Redline action, as `hideQuickLabel` omits Label.
 - **Fix, `HtmlViewer` and `useHtmlAnnotation`:** both register their frame-message listeners in a layout effect instead of a passive one. A passive effect can run after a fast srcdoc frame has already posted the bridge's `ready`; the lost ready left the bridge with no input method or mode, so no pin could land (seen on a Linux WebKit CI runner in the surface's proof). Listening from the commit that inserts the iframe closes that race; nothing else changes.
 
-## `HtmlViewer` `hostNavigates`, `ViewerHandle.revealPin` and `ViewerHandle.takeSelection` (unreleased)
+## `HtmlViewer` `hostNavigates`, `ViewerHandle.revealPin` and `ViewerHandle.takeSelection` (ui 0.53.0)
 
 Additive, opt-in; Plannotator passes none of it, so its render is unchanged. Added for the iPhone app's attachment screen (PLAN step M2): the app's `WKWebView` decides every link itself, and a link in an agent's page must reach it as a new window opened by a person's tap, which the app checks against its own record of the touch, rather than as a frame message, which a page's script can forge.
 
@@ -1768,6 +1768,13 @@ Additive, opt-in; Plannotator passes none of it, so its render is unchanged. Add
 
 ## Publishing & versioning
 
+- **core 0.25.13 / ui 0.53.0: both change. Order: `core` 0.25.13, then `ui` 0.53.0. guides.show is already deployed.** ui pins core `0.25.13` exactly. It imports no core subpath or export that 0.25.12 lacks (checked name by name), but the exact pin cannot resolve until 0.25.13 is on npm, so core still goes first. core 0.25.13 moves the guides.show viewer pin from `viewer.BYGvfCcj.js` + `viewer.CBpqTZpM.css` (0.25.12) to `viewer.Cs7U8_7B.js` + `viewer.BbPFXtTg.css`. Both files, `chunks/index.DU_F3bOf.js` and every `langs` chunk answer 200 on `https://guides.show/v1/`, and the served files match the manifest's SRI hashes, so no manual deploy is needed. The previous pairs were ui 0.52.0 and ui 0.52.1 on core 0.25.12. **No export is removed from either package**, so a consumer upgrades without code changes, but these behave differently and Workspaces should check them:
+  1. **Block quotes and headings (ui `utils/parser`).** `parseMarkdownToBlocks` returns ONE `blockquote` block per run of `>` lines, its `content` the quote's inner markdown, rendered by the new `BlockquoteBlock` (fences, lists, nested quotes, tables inside one `<blockquote>`). Block ids after a quote that used to split shift down (restore re-anchors by text), and a host that reads a quote's `block.content` now sees fence and list markers. A heading now needs a space (or the line's end) after its `#`s, at top level too: `#123 fixed`, `#hashtag` and `#!/bin/sh` are paragraph text, no longer `<h1>`. See "Block quotes render their content (ui 0.53.0; …)".
+  2. **Long choice labels (core `question-block`).** `parseQuestionAnswer` caps `selected` labels at the new `MAX_QUESTION_SELECTED_CHARS` (20,000) instead of 200, `canonicalQuestionAnswer` maps an answer an older build cut at 200 back to its full label, and `questionExportItems` passes `choices` for labels over 200 (`questionChoicesNeedCanonicalLabels`). A host that checks picks against the choices itself must not cut picked labels shorter than the labels it compares them with. See "Long choice labels are picked whole (core 0.25.13; …)".
+  3. **Wider unions** (a compile error only in an exhaustive `switch`): `AgentToolHost` gains `'oh-my-pi'`; core `external-annotation`'s `session-closed` event has `by: "agent" | "session"` (ui's `useExternalAnnotations` passes it on, `utils/agentClosed` adds `closedReviewCopy`); core `inbox-types` gains the `"superseded"` question state and more `InboxRecordKind` / `InboxIdPrefix` members, and `inbox-questions` reads a bare negative word (`Stopped: no`) as no stop.
+  4. **Smaller visible changes.** Core `CODE_FILE_REGEX` also matches `.mjs`, `.cjs`, `.mts` and `.cts`, so those paths link as code files; the Pi provider icon is the three-colour pi.dev mark (no longer `currentColor`); the question card's eyebrow pills share one 18 px box and an off decision tag is fainter; `hooks/useUpdateCheck` (Plannotator-only, see "not for hosts") no longer asks GitHub from the browser and returns null unless the server's advert is passed.
+  5. **Questions (core `question-block`).** (a) `QUESTION_AUTHORING_GUIDE` was rewritten (2,213 to 2,654 characters) and now ends with an Inbox-only bullet naming `read_thread`, `supersedes` and `Replaces:`. A host that pastes the guide into its own agent prompts now passes on Plannotator Inbox wording; filter that bullet out or write your own. (b) `parseQuestionBlock` reads a `Replaces:` line whose every token is id-shaped (`msg_…/q-…`, or a bare `q-…`) into the new optional `ParsedQuestion.replaces` instead of context, wherever it sits in the block. Any other `Replaces:` line is prose as before, and `questionKey` is unchanged. (c) `QuestionAnswer` gains optional `by_reply` (kept by `parseQuestionAnswer` only beside `skipped: true`). `formatQuestionAnswersSection` prints such a skip as "Skipped (not answered in this reply)" and adds a count line telling the agent to treat those as skipped.
+  Everything else is additive and inert until a host passes it: on `Viewer` `answerOnly`, `resolveLocalLink`, `questionDecisionLocked`, `renderQuestionCard` / `renderQuestionBelowPrompt`, `refRepo` and `onHostDraft` (also on `HtmlViewer` and `DiagramViewer`, with `DiagramHostDraft`); `ViewerHandle.stepPin` / `revealPin` / `takeSelection`; `HtmlViewer` `hostNavigates`; `AnnotationToolstrip` `hideRedline`; `RenderedMarkdown` `resolveLocalLink` / `resolveImage` / `headingAnchors`; the `PlanCleanDiffView` seams and `foldUnchangedPlanDiff`; `CodeAnnotation.markdownPreview`; `AnnotationPanel` `emptyHint`; `CodeFileView` (the body of `CodeFilePopout`, exported); the Oh My Pi setup hint; Plannotator's own update modules (`Settings` `updateCheckSetting`, `hooks/useUpdateToast`, `hooks/useUpdateCheckSetting`, `utils/updateNotice`). Core adds `crypto`'s `encryptWithKey` / `decryptWithKey` / `deriveRelayKeys`, `diff-files`' `isLineRangeInPatch`, `source-save`'s decided and cross-origin responses, an optional error on `serverSessionMismatchBody`, Inbox wire types (`inbox-attachments.ts`, `inbox-surface-bridge.ts`, both re-exported by `inbox-types`), and `annotatable`'s `isDotenvFileName(name)` (#1568): the dotenv-family rule on a file NAME (`.env`, any name ending in `.env`, `.envrc`, and `.env.*` outside the annotatable docs, so `.env.example` stays). The Inbox attachment rule and Plannotator's HTML asset route both use it; the attachment rule is unchanged.
 - **core 0.25.11 / ui 0.51.0: both change. Order: guides.show deploy, then `core` 0.25.11, then `ui` 0.51.0.** ui imports `canonicalQuestionAnswer` and `PI_THINKING_LEVELS`, which no published core before 0.25.11 has, and pins core `0.25.11` exactly. core 0.25.11 pins a new guides.show viewer stylesheet (`viewer.DuqkfIUz.css`, from the gruvbox fix #1721; the viewer JS `viewer.BYGvfCcj.js` is unchanged), which guides.show serves only after a deploy, so run the deploy by hand first (next bullet). **ui 0.51.0 is BREAKING for 0.50.0 consumers of the "Ask this session" exports**: it removes `findUsableSessionBridge`, `resolveSessionBridgeFallback`, the `'fallback'` `SessionAskAction` member, `SessionAskActions`' `fallbackLabel` and `DocumentAIChatPanel`'s `sessionAskFallbackLabel`, and makes a listed bridge the only Ask AI selection. Release notes must say so. Everything else is additive or a fix (including #1725's agent tool switch and offer); see "Ask this session (shipped in 0.50.0; …)", "Comment composer trim (0.51.0; …)", "Ask AI from a diagram comment (0.51.0; …)" and "Questions, restore, drafts and the rest (ui 0.51.0, core 0.25.11)".
 - **guides.show before a core publish that moves the viewer pin.** guides.show deploys on Plannotator release tags only. When a core publish carries a new `guide-viewer-manifest` hash (any change to the shared CSS or the guide chain) and no release tag has shipped it yet, run the deploy by hand first (`gh workflow run guides-show-deploy.yml --ref main`), then check that `curl -I https://guides.show/v1/<css>` and `<js>` from the manifest answer 200. Otherwise every host's guide pages load without that asset (core 0.25.9 hit this; fixed by a manual deploy). The deploy is add-only.
 - **core 0.25.9 / ui 0.49.0 (question host seams): both change. Publish `core` first**: ui imports the new `@plannotator/core/markdown-structure` subpath and the new `findQuestionBlocks` / decision fields, so a ui on a published core 0.25.8 fails to compile in a consumer. See "Question host seams (ui 0.49.0, core 0.25.9)".
@@ -2159,7 +2166,7 @@ buttons with the anchor element, tab order, the opener without a toggle
 handler, 0.52.0 behavior without `onOpenDecision`, read-only cards, `Viewer`
 threading, and no-prop markup.
 
-## Question card eyebrow: the off decision tag reads as off; the pills align (unreleased; styling only)
+## Question card eyebrow: the off decision tag reads as off; the pills align (ui 0.53.0; styling only)
 
 No prop, attribute or markup change; a host that passes nothing renders the
 same elements with new classes on the eyebrow's pills.
@@ -2190,25 +2197,25 @@ same elements with new classes on the eyebrow's pills.
 
 ---
 
-## Ask AI setup hint for Oh My Pi (unreleased; additive, no core change)
+## Ask AI setup hint for Oh My Pi (ui 0.53.0; additive, no core change)
 
 New module `utils/askSessionSetupHint` (`askSessionSetupHint(origin, providers)`, `OMP_EXTENSION_INSTALL_COMMAND`) returns a one-line note when origin is `oh-my-pi` and no session-bridge provider is offered (#1814): the `plannotator` CLI run from OMP's shell has no "Ask this session", while the Plannotator extension loaded into OMP does. `AIProviderBar` gains an optional `setupHint` prop and `DocumentAIChatPanel` an optional `askSessionSetupHint` prop, rendered by the new `components/ai/AskSessionSetupHint` as a muted line under the provider bar (also under "No AI providers available"). Both are absent by default, so a host that passes neither renders exactly as before.
 
 ---
 
-## Agent tool host `oh-my-pi` (unreleased; additive)
+## Agent tool host `oh-my-pi` (ui 0.53.0; additive)
 
 `utils/agentToolSetting`'s `AgentToolHost` gains `'oh-my-pi'` (the Plannotator Pi extension running inside Oh My Pi, where the `plannotator` tool is on by default): `parseAgentToolSetting` accepts it, `agentToolHostName` answers "Oh My Pi", `agentToolAppliesWhen` "the next time Oh My Pi starts", and `agentToolCostNote` names OMP's one-line listing instead of Pi's per-request cost. `agentToolOfferApplies` / `agentToolOfferHostOf` never offer it (the offer is for hosts whose tool is off by default). A host that never sends `agentToolHost: 'oh-my-pi'` sees no change; code that switches exhaustively over `AgentToolHost` needs the new case.
 
 ---
 
-## `Viewer` `refRepo` (unreleased; additive; needs no new core subpath)
+## `Viewer` `refRepo` (ui 0.53.0; additive; needs no new core subpath)
 
 New optional `refRepo?: { display: string; host?: string } | null` on `Viewer`: the repository bare `#123` / `@user` refs link into (#1840), without the repo badge `repoInfo` also draws. It wins over `repoInfo` for links only; `null` and absent both fall back to `repoInfo`, so links follow `repoInfo?.display` / `repoInfo?.host` exactly as before, so Plannotator's plan and review apps are unchanged. The Inbox passes it per message (a badge on every message would be noise).
 
 ---
 
-## Block quotes render their content (unreleased; parser output change, no API change)
+## Block quotes render their content (ui 0.53.0; parser output change, no API change)
 
 `parseMarkdownToBlocks` now returns ONE `blockquote` block per run of consecutive `>` lines (blank `>` lines included), where it used to split the run whenever a line started with a list marker, a heading, a code fence or a nested `>`. The block's `content` is the quote's own markdown: each line with its `>` and one following space or tab removed, deeper indentation kept, trailing whitespace trimmed, one content line per source line; blank lines at the quote's edges are dropped and `startLine` moves past leading ones. So `exportAnnotations` labels a quote with its real span (`lines 3–7`).
 
@@ -2232,7 +2239,7 @@ Unchanged: GitHub alerts (`> [!NOTE]` … keep their old body text and `AlertBlo
 
 Plannotator's servers issue one random `serverSession` nonce per process (new `@plannotator/core/server-session`) and refuse a decision that echoes a different one with `409 { code: "session_mismatch" }`, so a tab left open on a reused port cannot decide a new session. The client half is `utils/serverSession` (`adoptServerSession`, `withServerSession`, `withServerSessionQuery`, `noteServerSessionMismatch`, `useServerSessionReplaced`) plus `components/ServerSessionReplacedBanner`. Hosts that post decisions to their own backend need none of it: nothing in the shared components sends the field on its own, and a request without it is always accepted.
 
-## `RenderedMarkdown` `resolveLocalLink`, `resolveImage` and `headingAnchors` (unreleased; additive, no core change)
+## `RenderedMarkdown` `resolveLocalLink`, `resolveImage` and `headingAnchors` (ui 0.53.0; additive, no core change)
 
 - **`resolveLocalLink?: LocalLinkResolver`** on `RenderedMarkdown`: the same contract as Viewer's `resolveLocalLink` (see above), provided through `LocalLinkContext` to every block it renders. Plannotator's code review passes it for the Markdown preview so a relative link opens the linked file in the review, or renders inert ("Not in this review"), and never navigates the tab.
 - **`resolveImage?: ImageResolver`** on `RenderedMarkdown` (`components/ImageResolverContext.tsx`): asked about every markdown image and raw-HTML `<img src>`, with the source as written. `{ kind: 'src', src }` loads that URL; `{ kind: 'unavailable', title }` draws an inert placeholder span (the alt text, `title` as its tooltip, `data-image-unavailable`) instead of an `<img>`, so nothing is fetched; `null` keeps the default resolution (`getImageSrc` / remote URLs as is).
@@ -2240,7 +2247,7 @@ Plannotator's servers issue one random `serverSession` nonce per process (new `@
 - **`headingAnchors?: boolean`**: headings get the plan Viewer's slug ids (`buildHeadingSlugMap`, GitHub's `-1` dedup), so a host can scroll `#section` links itself. Absent, headings carry no id.
 - Each provider wraps the output only when its prop is passed, so an enclosing provider (a `Viewer`'s) still applies when a prop is absent. A host that passes none of these renders exactly as before (`RenderedMarkdown.hostSeams.test.tsx` compares the DOM with the pre-seam body).
 
-## Plan diff line ranges, folding, and `PlanCleanDiffView` seams (unreleased; additive, no core change)
+## Plan diff line ranges, folding, and `PlanCleanDiffView` seams (ui 0.53.0; additive, no core change)
 
 - **`PlanDiffBlock.oldStart/oldEnd/newStart/newEnd`** (`utils/planDiffEngine`): `computePlanDiff` now fills the 1-based inclusive source lines of each block on each side, trimmed of blank lines; a side with no non-blank line has none (added blocks have no old range, removed blocks no new range). Every other field is unchanged.
 - **`foldUnchangedPlanDiff(blocks, { context = 1, minHidden = 2 })`** → `PlanDiffSegment[]`: pure. Changed blocks pass through; an unchanged block keeps `context` sections next to each neighbouring change and folds the rest into a `PlanDiffFold` (`pieces`, `sectionCount`, up to three plain `headings`, line span, stable `key`) when at least `minHidden` would be hidden.
@@ -2248,7 +2255,7 @@ Plannotator's servers issue one random `serverSession` nonce per process (new `@
 - **`CodeAnnotation.markdownPreview?: MarkdownPreviewAnchor`** (`types`): additive. Code review sets it on a file comment made by selecting text in a Markdown preview (`originalText`, `view`, optional `diffContext` and web-highlighter positions). Hosts that never set it see no change.
 - **`reviewMarkdownPreviewShortcuts`** (`shortcuts`, code-review scope `review-markdown-preview`, section "Markdown Files": `P`, the next Markdown view): additive.
 
-## Long choice labels are picked whole (core, unreleased; no API break)
+## Long choice labels are picked whole (core 0.25.13; no API break)
 
 `parseQuestionAnswer` used to cut every `selected` label to `MAX_QUESTION_CHOICE_LABEL_CHARS` (200). Task-list choices (`- [ ]`) are never cut by the parser, so a task-list label over 200 characters could never be picked: the card sent the whole label, the read-back answer held the first 200 characters, the card did not show it picked, and the Plannotator Inbox refused it (`422 "<first 200 chars>" is not one of the question's choices`). Now `selected` labels are capped at the new **`MAX_QUESTION_SELECTED_CHARS`** (= `MAX_QUESTION_BODY_CHARS`, 20,000: no label a block can hold is longer), so every label round-trips whole. `MAX_QUESTION_CHOICE_LABEL_CHARS` keeps its value and its one parse use (cutting a long plain-bullet label at a sentence end). **`canonicalQuestionAnswer`** also maps an answer an older build cut at 200 characters back to the one choice whose label (or alias) begins with it; two choices sharing their first 200 characters leave it as stored. That lookup is exact: a long label adds no case or punctuation matching (normalized matching still runs only for choices with `aliases`). `questionExportItems` now also passes `choices` when a label is over 200 characters (new **`questionChoicesNeedCanonicalLabels(choices)`** decides it), so the export prints the full label for such an answer; a host that builds its own `QuestionExportItem`s should use the same rule. The parser, labels and `questionKey` do not change. **A host that validates answers itself** (Workspaces' own check that a pick is one of the choices) must not cut picked labels shorter than the choice labels it compares them with.
 
