@@ -464,13 +464,26 @@ export function claudeCodePluginEnabled(e: AgentEnvironment): boolean {
 
 /**
  * Each CLI's own `--version` line, so a program that only shares the name
- * (cln's `pi` printing digits, amp.rs) is never handed an `mcp add`, and Pi
- * before 0.99 (no `pi mcp`: it would read the words as a chat prompt and run
- * a model turn) is left to the person. Read with no stdin, under the limit.
+ * (cln's `pi` printing digits, amp.rs) is never handed an `mcp add`, and a
+ * build older than its `mcp add` is left to the person: Pi before 0.99 (no
+ * `pi mcp`: it would read the words as a chat prompt and run a model turn),
+ * Codex CLI before 0.35.0 (`codex mcp add` landed in rust-v0.35.0, Sep 2025)
+ * and Gemini CLI before 0.1.19 (`gemini mcp add`, Aug 2025). Read with no
+ * stdin, under the limit.
  */
-const VERSION_SHAPES: Record<string, { line: RegExp; min?: [number, number, number]; manual: string }> = {
-  codex: { line: /^codex-cli (\d+)\.(\d+)\.(\d+)\b/, manual: "this codex did not answer like Codex CLI" },
-  gemini: { line: /^(\d+)\.(\d+)\.(\d+)(?:-[\w.]+)?$/, manual: "this gemini did not answer like Gemini CLI" },
+const VERSION_SHAPES: Record<string, { line: RegExp; min?: [number, number, number]; older?: string; manual: string }> = {
+  codex: {
+    line: /^codex-cli (\d+)\.(\d+)\.(\d+)\b/,
+    min: [0, 35, 0],
+    older: "Codex CLI before 0.35 has no `codex mcp add`; update Codex, or add plannotator-inbox to its config.toml by hand",
+    manual: "this codex did not answer like Codex CLI",
+  },
+  gemini: {
+    line: /^(\d+)\.(\d+)\.(\d+)(?:-[\w.]+)?$/,
+    min: [0, 1, 19],
+    older: "Gemini CLI before 0.1.19 has no `gemini mcp add`; update Gemini CLI, or add plannotator-inbox to its settings.json by hand",
+    manual: "this gemini did not answer like Gemini CLI",
+  },
   devin: { line: /^devin (\d+)\.(\d+)\.(\d+)\b/, manual: "this devin did not answer like Devin" },
   amp: { line: /^(\d+)\.(\d+)\.(\d+)-g[0-9a-f]+\b/, manual: "this amp did not answer like Sourcegraph Amp" },
   pi: {
@@ -500,7 +513,7 @@ async function cliWay(
       const version = [Number(match[1]), Number(match[2]), Number(match[3])];
       const [a, b, c] = shape.min;
       const older = version[0]! < a || (version[0] === a && (version[1]! < b || (version[1] === b && version[2]! < c)));
-      if (older) return { kind: "manual", why: shape.manual };
+      if (older) return { kind: "manual", why: shape.older ?? shape.manual };
     }
   }
   return { kind: "cli", bin, add, remove };
