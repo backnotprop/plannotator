@@ -732,6 +732,12 @@ function firstLine(text: string): string {
   return line.length > 200 ? `${line.slice(0, 199)}…` : line;
 }
 
+/** A time limit as people read it: "10 s", "1.5 s" (never rounded up to a limit it was not). */
+export function formatSeconds(ms: number): string {
+  const seconds = Math.floor(ms / 100) / 10;
+  return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)} s`;
+}
+
 type AgentOutcome =
   | { kind: "added"; record: InboxAgentRecord }
   | { kind: "already"; record: InboxAgentRecord | null }
@@ -797,7 +803,7 @@ async function connectOne(spec: AgentSpec, options: ConnectOptions, at: string):
   const bin = e.which(way.bin);
   if (!bin) return { kind: "manual", why: `${way.bin} is not on PATH` };
   const ran = await e.run([bin, ...way.add(command)], { timeoutMs });
-  if (ran.timedOut) return { kind: "failed", reason: `${way.bin} mcp add did not finish within ${Math.round(timeoutMs / 1000)} s`, path: file };
+  if (ran.timedOut) return { kind: "failed", reason: `${way.bin} mcp add did not finish within ${formatSeconds(timeoutMs)}`, path: file };
   if (ran.exitCode !== 0) {
     const why = firstLine(ran.stderr) || firstLine(ran.stdout);
     return { kind: "failed", reason: `${way.bin} mcp add exited with code ${ran.exitCode}${why ? ` (${why})` : ""}`, path: file };

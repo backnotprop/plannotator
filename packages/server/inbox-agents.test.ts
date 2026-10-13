@@ -16,6 +16,7 @@ import {
   connectInboxAgents,
   createAgentEnvironmentFor,
   formatConnectReport,
+  formatSeconds,
   isPlannotatorInboxCommand,
   planInboxAgentRemoval,
   readCodexEntry,
@@ -156,7 +157,7 @@ describe("agents with their own `mcp add`", () => {
     fake.install("amp", "codex");
     const report = await connect({ FAKE_AGENT_HANG: "amp" }, { agentTimeoutMs: 1500 });
     expect(report.added).toEqual(["codex"]);
-    expect(report.failed.map((f) => [f.agent, f.reason])).toEqual([["amp", "amp mcp add did not finish within 2 s"]]);
+    expect(report.failed.map((f) => [f.agent, f.reason])).toEqual([["amp", "amp mcp add did not finish within 1.5 s"]]);
   });
 
   test("the whole step's limit: agents still going are left for the next run", async () => {
@@ -342,6 +343,13 @@ describe("uninstall", () => {
     expect(readInboxAgents(dataDir).agents.cursor?.state).toBe("found");
     expect(planInboxAgentRemoval(dataDir, environment(), OURS).items).toEqual([]);
   });
+});
+
+test("formatSeconds says the limit it was: never rounded up", () => {
+  expect(formatSeconds(1500)).toBe("1.5 s");
+  expect(formatSeconds(10_000)).toBe("10 s");
+  expect(formatSeconds(1999)).toBe("1.9 s");
+  expect(formatSeconds(250)).toBe("0.2 s");
 });
 
 test("isPlannotatorInboxCommand: our stdio entry under any path, a source checkout, never something else", () => {
