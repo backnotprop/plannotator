@@ -89,8 +89,11 @@ export interface AgentEnvironment {
   readonly env: Readonly<Record<string, string | undefined>>;
   /** The absolute path of `command` on the environment's PATH, or null. */
   which(command: string): string | null;
-  /** Run argv with no stdin, the environment's env, killed after `timeoutMs`. */
-  run(argv: readonly string[], options: { timeoutMs: number }): Promise<AgentRunResult>;
+  /**
+   * Run argv with no stdin, the environment's env, killed (with its process
+   * group) after `timeoutMs`, when `signal` aborts, or when this process exits.
+   */
+  run(argv: readonly string[], options: { timeoutMs: number; signal?: AbortSignal }): Promise<AgentRunResult>;
 }
 
 /** The real boundary: this process's home, environment and PATH. */
@@ -110,17 +113,47 @@ export function createAgentEnvironmentFor(input: {
     homeDir: input.homeDir,
     env,
     which: (command) => Bun.which(command, { PATH: env.PATH ?? "" }),
-    run: (argv, options) => runWithTimeout(argv, env, options.timeoutMs),
+    run: (argv, options) => runWithTimeout(argv, env, options.timeoutMs, options.signal),
   };
+}
+
+/**
+ * The agent CLIs running now, each as the function that kills its process
+ * group. A run is in its own group (detached), so nothing else ends it: when
+ * this process exits (a quit, a restart, the end of a test run) before a
+ * run's own time limit, the exit handler kills what is left, or a hung CLI
+ * would run on with no parent, forever.
+ */
+const liveRuns = new Set<() => void>();
+let exitHandlerInstalled = false;
+function killLiveRuns(): void {
+  for (const kill of [...liveRuns]) kill();
+}
+
+/** How many agent CLIs this process is running now (tests). */
+export function liveAgentRunCount(): number {
+  return liveRuns.size;
 }
 
 /**
  * Run argv in its own process group (POSIX), no stdin. The answer comes when
  * the process exits, never when its output closes, so a grandchild that keeps
- * stdout open cannot hold it; on the time limit the whole group is killed.
+ * stdout open cannot hold it. On the time limit, when `signal` aborts, or when
+ * this process exits first, the whole group is killed (SIGKILL), so a CLI that
+ * hangs never outlives its run. A CLI that exited by itself is left alone (its
+ * group may hold a daemon it started on purpose).
  */
-function runWithTimeout(argv: readonly string[], env: Readonly<Record<string, string | undefined>>, timeoutMs: number): Promise<AgentRunResult> {
+function runWithTimeout(
+  argv: readonly string[],
+  env: Readonly<Record<string, string | undefined>>,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<AgentRunResult> {
   return new Promise((done) => {
+    if (signal?.aborted) {
+      done({ exitCode: 124, timedOut: true, stdout: "", stderr: "" });
+      return;
+    }
     let child: ReturnType<typeof spawnChild>;
     try {
       child = spawnChild(argv[0]!, argv.slice(1), {
@@ -136,29 +169,56 @@ function runWithTimeout(argv: readonly string[], env: Readonly<Record<string, st
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let exited = false;
     const cap = (text: string) => (text.length > 64 * 1024 ? text.slice(0, 64 * 1024) : text);
     child.stdout?.on("data", (chunk: Buffer) => (stdout = cap(stdout + chunk.toString("utf8"))));
     child.stderr?.on("data", (chunk: Buffer) => (stderr = cap(stderr + chunk.toString("utf8"))));
-    const finish = (result: AgentRunResult) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      child.stdout?.destroy();
-      child.stderr?.destroy();
-      done(result);
-    };
-    const timer = setTimeout(() => {
+    const kill = () => {
+      liveRuns.delete(kill);
+      // Once it exited, its pid (and group id) may name another process.
+      if (exited) return;
       try {
         if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
         else child.kill("SIGKILL");
       } catch {
-        child.kill("SIGKILL");
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // Already gone.
+        }
       }
+    };
+    const stopRun = () => {
+      kill();
       finish({ exitCode: 124, timedOut: true, stdout: "", stderr: "" });
-    }, timeoutMs);
-    child.on("error", (error) => finish({ exitCode: 127, timedOut: false, stdout, stderr: error.message }));
+    };
+    const finish = (result: AgentRunResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", stopRun);
+      liveRuns.delete(kill);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      done(result);
+    };
+    const timer = setTimeout(stopRun, timeoutMs);
+    liveRuns.add(kill);
+    if (!exitHandlerInstalled) {
+      exitHandlerInstalled = true;
+      process.on("exit", killLiveRuns);
+    }
+    signal?.addEventListener("abort", stopRun, { once: true });
+    child.on("error", (error) => {
+      exited = true;
+      finish({ exitCode: 127, timedOut: false, stdout, stderr: error.message });
+    });
     // A short grace after exit for the last of its own output, then answer whatever a grandchild holds.
-    child.on("exit", (code, signal) => setTimeout(() => finish({ exitCode: code ?? (signal ? 128 : 1), timedOut: false, stdout, stderr }), 50));
+    child.on("exit", (code, exitSignal) => {
+      exited = true;
+      liveRuns.delete(kill);
+      setTimeout(() => finish({ exitCode: code ?? (exitSignal ? 128 : 1), timedOut: false, stdout, stderr }), 50);
+    });
   });
 }
 
@@ -799,6 +859,12 @@ export interface ConnectOptions {
   now?: () => Date;
   agentTimeoutMs?: number;
   totalTimeoutMs?: number;
+  /**
+   * The caller is going away (the Inbox stops): agent CLIs still running are
+   * killed and left for the next run, as at the step's time limit, and
+   * nothing is written.
+   */
+  signal?: AbortSignal;
 }
 
 function firstLine(text: string): string {
@@ -926,25 +992,40 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
   }
   const toConnect = pending.filter((spec) => !file.agents[spec.id]);
   const deadline = options.totalTimeoutMs ?? INBOX_CONNECT_TOTAL_TIMEOUT_MS;
-  const settled = new Map<InboxAgentId, AgentOutcome>();
+  const results = new Map<InboxAgentId, AgentOutcome>();
+  // Every agent CLI this step runs ends with the step: past its time limit, or
+  // when the caller goes away, the ones still running are killed, never left
+  // behind (a hung CLI in its own process group would otherwise outlive us).
+  const runs = new AbortController();
+  const scoped: AgentEnvironment = { ...e, run: (argv, runOptions) => e.run(argv, { ...runOptions, signal: runs.signal }) };
+  const stepOptions: ConnectOptions = { ...options, environment: scoped };
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
   await Promise.race([
     Promise.all(
       toConnect.map(async (spec) => {
         let outcome: AgentOutcome;
         try {
-          outcome = await connectOne(spec, options, at);
+          outcome = await connectOne(spec, stepOptions, at);
         } catch (error) {
           outcome = { kind: "failed", reason: error instanceof Error ? error.message : String(error), path: spec.file(e) };
         }
-        settled.set(spec.id, outcome);
+        if (!runs.signal.aborted) results.set(spec.id, outcome);
       }),
     ),
     new Promise<void>((done) => {
       timer = setTimeout(done, deadline);
+      onAbort = () => done();
+      if (options.signal?.aborted) done();
+      else options.signal?.addEventListener("abort", onAbort, { once: true });
     }),
   ]);
   if (timer) clearTimeout(timer);
+  if (onAbort) options.signal?.removeEventListener("abort", onAbort);
+  // What finished in time; the rest is unfinished, and its CLIs are stopped now.
+  const settled = new Map(results);
+  runs.abort();
+  if (options.signal?.aborted) return { ...report, unfinished: toConnect.filter((spec) => !settled.has(spec.id)).map((spec) => spec.id) };
 
   const failures = { ...(file.failures ?? {}) };
   const manualSaid = { ...(file.manual_said ?? {}) };

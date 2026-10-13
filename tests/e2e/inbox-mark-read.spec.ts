@@ -7,12 +7,15 @@
  * compiled binary, with agents writing through `plannotator inbox mcp`
  * (scripts/inbox-sim.ts):
  *
- *  - a words-only reply in a Waiting thread skips its questions: the row does
- *    not move while the thread stays open, and sits in Sent, below New, once
- *    the person leaves it;
+ *  - a words-only reply defaults to Keep open (approval
+ *    "inbox-words-only-reply"); switched to skip, it skips the questions of a
+ *    Waiting thread: the row does not move while the thread stays open, and
+ *    sits in Sent, below New, once the person leaves it;
  *  - in a thread ONE session wrote (it asked, then posted a later update), a
- *    words-only Send is one reply: one new person message, carrying the skip
- *    and the words, to the message that asked;
+ *    words-only Send switched to skip is one reply: one new person message,
+ *    carrying the skip and the words, to the message that asked;
+ *  - a words-only reply left as it is keeps every question open, and the
+ *    agent's wait_for_reply gets the words plus the still-open line;
  *  - Mark read moves a thread to Quiet ("Read"), and an agent's new message
  *    brings it back to the top;
  *  - Mark read on a thread an agent is stopped on warns, and Z undoes it;
@@ -179,7 +182,7 @@ test('the list before: Stopped, Waiting, then New', async () => {
   await shot('01-list-before', ['light', 'dark']);
 });
 
-test('a words-only reply skips the questions; the row keeps its place while the thread is open, then sits in Sent below New', async () => {
+test('a words-only reply keeps the questions open by default; switched to skip, it skips them; the row keeps its place while the thread is open, then sits in Sent below New', async () => {
   const { page, threads } = world;
   await page.locator(`.ib-lbody [data-thread-id="${threads.invoices}"]`).click();
   const pane = page.locator('section.ib-pane');
@@ -187,6 +190,11 @@ test('a words-only reply skips the questions; the row keeps its place while the 
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Reply' }).click();
   await page.locator('.ib-rtext').fill('Redo the design. Use the dense table from the payouts page, not cards; we can talk sort order after.');
   const chip = page.locator('[data-skip-chip]');
+  // No pick in this Send: Keep open is the default (approval "inbox-words-only-reply").
+  await expect(chip).toHaveAttribute('data-skip-chip', 'keep');
+  await expect(chip).toContainText('3 unanswered questions stay open');
+  await shot('02a-reply-keeps-open');
+  await chip.getByRole('button', { name: 'Skip them' }).click();
   await expect(chip).toContainText('3 unanswered questions will be skipped');
   await shot('02-reply-skips');
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
@@ -221,6 +229,8 @@ test('one session asked, then posted an update: a words-only Send writes exactly
   const pane = page.locator('section.ib-pane');
   await expect(pane.getByRole('heading', { name: 'Status page: which index?' })).toBeVisible();
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Reply' }).click();
+  await expect(page.locator('[data-skip-chip]')).toContainText('1 unanswered question stays open');
+  await page.locator('[data-skip-chip]').getByRole('button', { name: 'Skip it' }).click();
   await expect(page.locator('[data-skip-chip]')).toContainText('1 unanswered question will be skipped');
   await page.locator('.ib-rtext').fill('Ship it as it is.');
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
@@ -234,6 +244,32 @@ test('one session asked, then posted an update: a words-only Send writes exactly
   expect(mine[0]!.body).toMatch(/^Skipped 1 question\./);
   expect(mine[0]!.body).toContain('Ship it as it is.');
   await shot('04b-one-session-one-reply');
+  await page.keyboard.press('Escape');
+  await expect(pane).toHaveCount(0);
+});
+
+test('a words-only reply left as it is: the questions stay open, and the agent gets the words and the still-open line', async () => {
+  const { page, agents, project } = world;
+  const asked = await agents.codex.send({ project_path: project, subject: 'Pricing page: a few calls', thread: 'pricing', body: INVOICES.replace('invoice list', 'pricing page') });
+  const threadId = asked.thread_id as string;
+  await page.goto(`${world.url}#thread=${threadId}`);
+  const pane = page.locator('section.ib-pane');
+  await expect(pane.getByRole('heading', { name: 'Pricing page: a few calls' })).toBeVisible();
+  await page.locator('.ib-pfoot').getByRole('button', { name: 'Reply' }).click();
+  await page.locator('.ib-rtext').fill("Received, I'll answer these after lunch.");
+  await expect(page.locator('[data-skip-chip]')).toHaveAttribute('data-skip-chip', 'keep');
+  await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
+  await expect(page.locator('.ib-rtext')).toHaveCount(0);
+  // The cards still take answers: nothing was skipped.
+  await expect(pane.getByText(/^Skipped with your reply/)).toHaveCount(0);
+  await shot('04c-words-only-keeps-open');
+  const waited = await agents.codex.waitForReply(threadId, 5);
+  expect((waited.reply as { body: string }).body).toBe(
+    "Received, I'll answer these after lunch.\n\nNo questions answered yet; all 3 are still open. Don't re-ask them; the person will answer in the Inbox.",
+  );
+  type Model = { thread: { messages: { questions?: { state: string }[] }[] } };
+  const model = (await (await fetch(new URL(`/api/inbox/threads/${threadId}`, world.url))).json()) as Model;
+  expect(model.thread.messages.flatMap((m) => m.questions ?? []).map((q) => q.state)).toEqual(['open', 'open', 'open']);
   await page.keyboard.press('Escape');
   await expect(pane).toHaveCount(0);
 });

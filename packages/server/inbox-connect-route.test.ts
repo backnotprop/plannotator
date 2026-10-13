@@ -69,6 +69,24 @@ test("two runs at once are one run", async () => {
   expect(fake.calls().filter((c) => c.args[1] === "add")).toHaveLength(1);
 });
 
+test("the Inbox stopping mid-run kills the agent CLIs still running", async () => {
+  fake.install("amp");
+  server = await startInboxServer({
+    dataDir: join(fake.root, "data"),
+    selfCommand: ["/opt/plannotator"],
+    agentEnvironment: createAgentEnvironmentFor({ platform: "linux", homeDir: fake.home, env: { ...fake.env, FAKE_AGENT_HANG: "amp" } }),
+  });
+  const running = server.connectAgents();
+  const started = Date.now();
+  while (fake.calls().length === 0 && Date.now() - started < 5000) await Bun.sleep(25);
+  expect(fake.live().map((p) => p.name)).toEqual(["amp"]);
+  server.stop();
+  server = null;
+  expect((await running).unfinished).toEqual(["amp"]);
+  for (let waited = 0; waited < 1000 && fake.live().length > 0; waited += 25) await Bun.sleep(25);
+  expect(fake.live()).toEqual([]);
+});
+
 test("a browser request (an Origin) never reaches the connect route", async () => {
   const s = await start();
   const answer = await fetch(`http://127.0.0.1:${s.port}/api/inbox/control/connect`, {

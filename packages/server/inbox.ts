@@ -643,8 +643,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       ? createAgentEnvironmentFor({ platform: process.platform, homeDir: join(dataDir, "agents-home"), env: { HOME: join(dataDir, "agents-home"), PATH: "" } })
       : createAgentEnvironment());
   let connecting: Promise<InboxConnectReport> | null = null;
+  // The Inbox's stop ends a run still going: its agent CLIs are killed, never left running.
+  const connectStop = new AbortController();
   const connectAgents = (): Promise<InboxConnectReport> => {
-    connecting ??= connectInboxAgents({ dataDir, selfCommand, environment: agentEnvironment }).finally(() => {
+    connecting ??= connectInboxAgents({ dataDir, selfCommand, environment: agentEnvironment, signal: connectStop.signal }).finally(() => {
       connecting = null;
     });
     return connecting;
@@ -1759,6 +1761,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     clearInterval(dataCheck);
     for (const timer of setAsideTimers) clearTimeout(timer);
     setAsideTimers.clear();
+    connectStop.abort();
     updates.stop();
     void mcp.close().catch(() => {});
     server.stop(true);

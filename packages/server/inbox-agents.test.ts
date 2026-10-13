@@ -42,6 +42,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
+  // Throws (failing the test) when a fake CLI was still running; it is killed first.
   fake.remove();
 });
 
@@ -60,6 +61,12 @@ function connect(extra: Record<string, string> = {}, options: { agentTimeoutMs?:
 }
 
 const adds = () => fake.calls().filter((call) => call.args[1] === "add");
+
+/** Every fake CLI the test started has ended (a SIGKILL in flight gets a moment). */
+async function expectNoFakeRunning(): Promise<void> {
+  for (let waited = 0; waited < 1000 && fake.live().length > 0; waited += 25) await Bun.sleep(25);
+  expect(fake.live()).toEqual([]);
+}
 
 describe("what is found", () => {
   test("nothing installed: nothing is run or written, and nothing is said", async () => {
@@ -158,13 +165,71 @@ describe("agents with their own `mcp add`", () => {
     const report = await connect({ FAKE_AGENT_HANG: "amp" }, { agentTimeoutMs: 1500 });
     expect(report.added).toEqual(["codex"]);
     expect(report.failed.map((f) => [f.agent, f.reason])).toEqual([["amp", "amp mcp add did not finish within 1.5 s"]]);
+    // Stopped means killed: the hung CLI is not running any more.
+    await expectNoFakeRunning();
   });
 
-  test("the whole step's limit: agents still going are left for the next run", async () => {
+  test("a hanging `--version` is stopped too, and the agent is left to connect by hand", async () => {
+    fake.install("amp");
+    // The probe's own limit is 5 s.
+    const report = await connect({ FAKE_AGENT_HANG_VERSION: "amp" });
+    expect(report.manual).toEqual(["amp"]);
+    await expectNoFakeRunning();
+  }, 15_000);
+
+  test("the whole step's limit: agents still going are left for the next run, and their CLIs are killed", async () => {
     fake.install("amp");
     const report = await connect({ FAKE_AGENT_HANG: "amp" }, { agentTimeoutMs: 5000, totalTimeoutMs: 300 });
     expect(report.unfinished).toEqual(["amp"]);
     expect(readInboxAgents(dataDir).agents.amp).toBeUndefined();
+    // Not left running until its own 5 s limit (or forever, once this process exits first).
+    await expectNoFakeRunning();
+  });
+
+  test("the caller going away (the Inbox stops) kills the CLIs still running and writes nothing", async () => {
+    fake.install("amp");
+    const stop = new AbortController();
+    const running = connectInboxAgents({
+      dataDir,
+      selfCommand: SELF,
+      environment: environment({ FAKE_AGENT_HANG: "amp" }),
+      agentTimeoutMs: 20_000,
+      totalTimeoutMs: 20_000,
+      signal: stop.signal,
+    });
+    const started = Date.now();
+    while (fake.live().length === 0 && Date.now() - started < 5000) await Bun.sleep(25);
+    expect(fake.live().map((p) => p.name)).toEqual(["amp"]);
+    stop.abort();
+    const report = await running;
+    expect(report.unfinished).toEqual(["amp"]);
+    expect(existsSync(join(dataDir, "inbox", "agents.json"))).toBe(false);
+    await expectNoFakeRunning();
+  });
+
+  test("a hung CLI does not outlive this process: the exit handler kills it", async () => {
+    // A child process runs a connect whose CLI hangs past the child's own exit.
+    fake.install("amp");
+    const script = join(fake.root, "exit-early.ts");
+    writeFileSync(
+      script,
+      `import { connectInboxAgents, createAgentEnvironmentFor } from ${JSON.stringify(join(import.meta.dir, "inbox-agents.ts"))};
+const env = JSON.parse(process.env.FAKE_ENV_JSON);
+void connectInboxAgents({ dataDir: process.env.DATA, selfCommand: ["/x"], environment: createAgentEnvironmentFor({ platform: process.platform, homeDir: env.HOME, env }), agentTimeoutMs: 60000, totalTimeoutMs: 60000 });
+const started = Date.now();
+// Exit once the hanging \`mcp add\` has started (it records its call first).
+const wait = () => { if (require("fs").readFileSync(env.FAKE_AGENT_LOG, "utf8").length > 0 || Date.now() - started > 5000) process.exit(0); else setTimeout(wait, 25); };
+wait();
+`,
+    );
+    const child = Bun.spawnSync([process.execPath, script], {
+      env: { ...process.env, DATA: dataDir, FAKE_ENV_JSON: JSON.stringify({ ...fake.env, FAKE_AGENT_HANG: "amp" }) },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(child.exitCode).toBe(0);
+    expect(fake.calls().map((call) => call.name)).toEqual(["amp"]);
+    await expectNoFakeRunning();
   });
 });
 
@@ -413,6 +478,8 @@ describe("a CLI is asked what it is before it is handed an mcp add", () => {
     const report = await connect({ FAKE_AGENT_GRANDCHILD: "codex" }, { agentTimeoutMs: 8000 });
     expect(report.added).toEqual(["codex"]);
     expect(Date.now() - started).toBeLessThan(6000);
+    // A CLI that exited by itself keeps the daemon it started (unchanged); this test ends it.
+    expect(fake.stopAll().map((p) => p.args)).toEqual([["--fake-grandchild"]]);
   });
 });
 

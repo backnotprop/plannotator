@@ -8,7 +8,7 @@
 
 import { isInboxNote, type InboxMessageWire, type InboxQuestion, type InboxThread } from '@plannotator/core/inbox-types';
 import { QUESTION_ANSWERS_HEADING, type QuestionAnswer } from '@plannotator/core/question-block';
-import { sliceText } from '@plannotator/core/inbox-questions';
+import { INBOX_STILL_OPEN_LINE, sliceText } from '@plannotator/core/inbox-questions';
 
 /**
  * Where "new since you looked" starts: the seq of the person's last look at
@@ -153,11 +153,12 @@ const ANSWERS_HEADING_LINE = new RegExp(`^#{1,6}\\s+${QUESTION_ANSWERS_HEADING}\
  * (core's `composeInboxReplyBody`): the leading "Answered N questions." / "Skipped N questions." /
  * "Answered N questions, skipped M." and
  * everything from the "Answers to your questions" heading on (the answers,
- * then the annotations' feedback).
+ * then the annotations' feedback), or, on a reply that answered nothing,
+ * from the "No questions answered yet; …" line on.
  */
 export function replyWords(body: string): string {
   const lines = body.split(/\r?\n/);
-  const at = lines.findIndex((line) => ANSWERS_HEADING_LINE.test(line.trim()));
+  const at = lines.findIndex((line) => ANSWERS_HEADING_LINE.test(line.trim()) || INBOX_STILL_OPEN_LINE.test(line.trim()));
   const kept = (at >= 0 ? lines.slice(0, at) : lines).join('\n');
   return kept.replace(/^\s*(?:Answered \d+ questions?(?:, skipped \d+)?|Skipped \d+ questions?)\.\s*/, '');
 }

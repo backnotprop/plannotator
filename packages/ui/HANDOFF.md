@@ -2283,6 +2283,10 @@ Three changes to `components/blocks/QuestionBlock`, from the Plannotator Inbox s
 
 **`CodeFileView`** (`components/CodeFilePopout`) gains **`overflow?: 'scroll' | 'wrap'`**, handed to Pierre's `File`: `'scroll'` (the default, today's view) scrolls long lines sideways, `'wrap'` wraps them. `CodeFilePopout` passes nothing and is unchanged. The Inbox wraps a code file with a line over 1,000 characters (a minified bundle), with no toggle.
 
+## A reply with no answers leaves the questions open (next core publish; additive exports, one output change)
+
+`@plannotator/core/inbox-questions` gains **`inboxStillOpenLine(questions)`** and **`INBOX_STILL_OPEN_LINE`** (a RegExp matching one line of it). **`composeInboxReplyBody`** changes output in one case only: when `sent` is empty (the reply carries no answer and no skip), it now puts the still-open line after the words: "No questions answered yet; all N are still open. Don't re-ask them; the person will answer in the Inbox." (N: the questions still open or picked and not sent, counted over the new optional `stillOpen` input, default `questions`; the Inbox passes every question the replied-to message's session asked in the thread; the singular and an "earlier answers" variant are in the source; nothing when none is open). A body with at least one answer or skip is byte-identical. A host that composes Inbox replies with it gets the new line; a host that strips the store's text from a reply (as the window's `replyWords` does) should cut at a line `INBOX_STILL_OPEN_LINE` matches. `question-block.ts` (plan review's `formatQuestionAnswersSection`) is unchanged. No ui change.
+
 ## The law (guardrails for anyone editing `@plannotator/ui`)
 
 These are enforced socially and, where possible, by CI. They exist because a prior from-scratch reimplementation of this UI broke the app and was reverted.

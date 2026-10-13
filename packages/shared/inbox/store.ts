@@ -1645,6 +1645,22 @@ export class InboxStore {
     const earlier = all
       .filter((r) => !sentKeys.has(r.key) && r.answer !== null && r.sent_revision > 0 && r.sent_revision === r.revision)
       .map((r) => r.answer as QuestionAnswer);
+    // A reply that answers nothing says which questions stay open: every one
+    // the replied-to message's session asked in this thread (it asked in one
+    // message and posted a plain update after it, and the words go to the
+    // update), never another session's.
+    const asker = message.author.kind === "agent" && message.author.session ? message.author : null;
+    const stillOpen = asker
+      ? this.threadMessages(message.thread_id)
+          .filter(
+            (m) =>
+              m.author.kind === "agent" &&
+              m.author.session === asker.session &&
+              (m.author.host ?? "") === (asker.host ?? "") &&
+              !this.closedByArchive(m),
+          )
+          .flatMap((m) => this.questionRecords(m.id))
+      : all;
     // The picks first, then the annotations as Plannotator's feedback text.
     const body = [
       composeInboxReplyBody({
@@ -1652,6 +1668,7 @@ export class InboxStore {
         sent: updated.map((r) => r.answer as QuestionAnswer),
         earlier,
         words,
+        stillOpen,
       }),
       feedback,
     ]

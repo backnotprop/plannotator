@@ -340,7 +340,8 @@ function exportItem(record: InboxQuestionRecord, number: number): QuestionExport
 /**
  * The body a Send writes: "Answered N questions.", "Skipped N questions." or
  * "Answered N questions, skipped M." when it carries answers or skips,
- * the person's words if any, then Plannotator's "Answers to your questions"
+ * the person's words if any (then, when it carries neither answers nor
+ * skips, the line saying the questions are still open), then Plannotator's "Answers to your questions"
  * section over every question of the message, with the answers this Send
  * carries and earlier sent answers that still stand. Empty when there is
  * nothing to send.
@@ -350,6 +351,13 @@ export function composeInboxReplyBody(input: {
   sent: readonly QuestionAnswer[];
   earlier: readonly QuestionAnswer[];
   words: string | undefined;
+  /**
+   * The questions the still-open line counts when the reply sends no answer
+   * and no skip. Default: `questions`. The Inbox passes every question the
+   * replied-to message's session asked in the thread, so words sent to its
+   * later plain update still tell it that its questions stay open.
+   */
+  stillOpen?: readonly InboxQuestionRecord[];
 }): string {
   // The same rule as the answers section's "x of y answered" line
   // (formatQuestionAnswersSection): a pick, Other or text answers; a note
@@ -372,8 +380,34 @@ export function composeInboxReplyBody(input: {
     .filter((item): item is QuestionExportItem => item !== null);
   const section = input.sent.length > 0 ? formatQuestionAnswersSection(items, [...input.sent, ...input.earlier]).trimEnd() : "";
   const words = input.words?.trim() ?? "";
-  return [sentence, words, section].filter((part) => part !== "").join("\n\n");
+  // A reply that answers and skips nothing (words, annotations, or both)
+  // leaves every question open, and says so: the agent must not ask again.
+  const stillOpen = input.sent.length === 0 ? inboxStillOpenLine(input.stillOpen ?? input.questions) : "";
+  return [sentence, words, stillOpen, section].filter((part) => part !== "").join("\n\n");
 }
+
+/**
+ * The line a reply that answers and skips nothing carries (approval
+ * "inbox-words-only-reply", 2026-10-13): the message's questions are still
+ * open and the person will answer them in the Inbox. Empty when none is left
+ * waiting on the person. `INBOX_STILL_OPEN_LINE` matches it, so the window
+ * can tell it from the person's own words.
+ */
+export function inboxStillOpenLine(questions: readonly InboxQuestionRecord[]): string {
+  const states = questions.map((q) => inboxQuestionState(q, false));
+  const open = states.filter((s) => s === "open" || s === "picked").length;
+  if (open === 0) return "";
+  // Some were answered in an earlier reply: "No questions answered yet" would not be true.
+  if (states.includes("sent")) {
+    return `No new answers in this reply; ${questionsWord(open)} ${open === 1 ? "is" : "are"} still open. Don't re-ask ${open === 1 ? "it" : "them"}; the person will answer in the Inbox.`;
+  }
+  if (open === 1) return "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.";
+  return `No questions answered yet; all ${open} are still open. Don't re-ask them; the person will answer in the Inbox.`;
+}
+
+/** Matches `inboxStillOpenLine`'s line (one line of a reply body). */
+export const INBOX_STILL_OPEN_LINE =
+  /^(?:No questions? answered yet|No new answers in this reply); .* still open\. Don't re-ask (?:it|them); the person will answer in the Inbox\.$/;
 
 const questionsWord = (n: number): string => `${n} question${n === 1 ? "" : "s"}`;
 
