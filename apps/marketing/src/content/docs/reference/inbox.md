@@ -66,7 +66,7 @@ Each entry runs `<your plannotator binary> inbox mcp`. The agent uses it from it
 
 ### A note in each agent's instructions
 
-The first time you open the Inbox after it connected your agents, it asks once whether to add a short note about the Inbox to each agent's own instructions file, so agents send you decisions and finished work there while you are away. It shows each file before it writes anything:
+The first time you open the Inbox after it connected your agents, a dialog asks whether to add a short note about the Inbox to each agent's own instructions file, so agents send you decisions and finished work there while you are away. It lists each agent with the exact file, every agent ticked (Claude Code too), and writes nothing until you press **Add**: untick an agent to leave it out, or choose **Not now**. The top of the dialog says which agents `plannotator inbox` just connected. Each agent is asked once: an agent you connect later (say, Codex next week) gets the same dialog for itself alone. The dialog never opens on the same page load as another one-time dialog (the sound dialog comes first). The files:
 
 | Agent | File |
 |-------|------|

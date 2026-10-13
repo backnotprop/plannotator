@@ -129,10 +129,12 @@ export interface ModalProps {
   ownKeys?: boolean;
   /** Where focus goes on close when nothing focusable opened the dialog (the page heading). */
   fallbackFocus?: () => HTMLElement | null;
+  /** A class beside `ib-dlg` (the agent-note dialog is wider, with a pinned footer). */
+  className?: string;
 }
 
 /** A native modal dialog: focus stays inside, Escape closes, focus returns to what opened it. */
-export function Modal({ label, labelledBy, describedBy, onClose, children, testId, ownKeys, fallbackFocus }: ModalProps) {
+export function Modal({ label, labelledBy, describedBy, onClose, children, testId, ownKeys, fallbackFocus, className }: ModalProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const opener = useRef<Element | null>(null);
   const fallback = useRef(fallbackFocus);
@@ -157,7 +159,7 @@ export function Modal({ label, labelledBy, describedBy, onClose, children, testI
   return (
     <dialog
       ref={ref}
-      className="ib-dlg"
+      className={className ? `ib-dlg ${className}` : 'ib-dlg'}
       aria-label={labelledBy ? undefined : label}
       aria-labelledby={labelledBy}
       aria-describedby={describedBy}

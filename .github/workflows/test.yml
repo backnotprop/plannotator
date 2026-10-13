@@ -153,7 +153,7 @@ jobs:
           packages/inbox/toastPhone.test.tsx
           packages/inbox/attachmentsHeader.test.tsx
           packages/inbox/themeToggle.test.tsx
-          packages/inbox/agentsCard.test.tsx
+          packages/inbox/agentNoteDialog.test.tsx
           packages/inbox/agentsSettings.test.tsx
           packages/inbox/settingsSections.test.tsx
           packages/ui/components/MenuVersionSection.test.tsx

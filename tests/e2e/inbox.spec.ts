@@ -169,8 +169,8 @@ test('first run: Try it, the harness picker folded behind Connect another agent 
   await page.goto(url);
   const empty = page.locator('[data-inbox-empty]');
   await expect(page.getByRole('heading', { name: 'No agent has written yet', exact: true })).toBeVisible();
-  // An Inbox an agent started (--background) connected nothing, and this scratch home has no agent: no card.
-  await expect(empty.locator('[data-agents-card]')).toHaveCount(0);
+  // An Inbox an agent started (--background) connected nothing, and this scratch home has no agent: no note dialog.
+  await expect(page.locator('dialog[data-dialog="agent-note"]')).toHaveCount(0);
   await expect(empty.getByRole('heading', { name: 'Try it', exact: true })).toBeVisible();
   await expect(empty.getByText('Send me a test message in my Plannotator Inbox.', { exact: true })).toBeVisible();
   await expect(page.getByText('Projects appear here when an agent writes from one.')).toBeVisible();

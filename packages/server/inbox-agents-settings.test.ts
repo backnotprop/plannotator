@@ -218,3 +218,75 @@ test("PLANNOTATOR_INBOX_NOTES=0: no offer, no row for an agent without a note, a
   // Plannotator created GEMINI.md for the note, so turning it off removes the file.
   expect(existsSync(join(fake.home, ".gemini", "GEMINI.md"))).toBe(false);
 });
+
+// The approved "inbox-agent-note-dialog" design: the question is asked once PER AGENT.
+type Asked = Model & { notes_asked: string[]; results?: { ok: boolean; agent: string }[] };
+
+test("asked once per agent: Not now answers only for the agents the dialog showed; an agent that connects later is asked alone", async () => {
+  fake.install("codex");
+  const s = await start();
+  await s.connectAgents();
+  const first = (await get(s)) as Asked;
+  expect(first.notes_asked).toEqual([]);
+  expect(row(first, "codex").note?.state).toBe("absent");
+  const notNow = (await (await post(s, "/api/inbox/agents/notes", { add: [], asked: ["codex"], seen: true })).json()) as Asked;
+  expect(notNow.notes_asked).toEqual(["codex"]);
+  expect(notNow.notes_offered).toBe(true);
+  expect(notNow.last_report?.seen).toBe(true);
+  // Nothing written without a yes.
+  expect(existsSync(join(fake.home, ".codex", "AGENTS.md"))).toBe(false);
+
+  fake.install("codex", "gemini");
+  await s.connectAgents();
+  const later = (await get(s)) as Asked;
+  expect(later.notes_asked).toEqual(["codex"]);
+  expect(row(later, "gemini")).toMatchObject({ detected: true, reach: { on: true }, note: { state: "absent" } });
+  const add = (await (await post(s, "/api/inbox/agents/notes", { add: ["gemini"], asked: ["gemini"], seen: true })).json()) as Asked;
+  expect(add.results?.map((r) => [r.agent, r.ok])).toEqual([["gemini", true]]);
+  expect(add.notes_asked).toEqual(["codex", "gemini"]);
+  expect(loadConfig().inboxAgentNotes).toEqual({ offered: true, asked: ["codex", "gemini"] });
+});
+
+test("an add that failed leaves that agent unasked (it is asked again); the others shown are answered", async () => {
+  mkdirSync(join(fake.home, ".codex"), { recursive: true });
+  writeFileSync(join(fake.home, ".codex", "AGENTS.md"), "Mine.\n");
+  const s = await start();
+  // Gemini is not on this computer: its add fails.
+  const answer = (await (await post(s, "/api/inbox/agents/notes", { add: ["codex", "gemini"], asked: ["codex", "gemini", "claude-code"] })).json()) as Asked;
+  expect(answer.results?.map((r) => [r.agent, r.ok])).toEqual([["codex", true], ["gemini", false]]);
+  expect(answer.notes_asked).toEqual(["claude-code", "codex"]);
+});
+
+test("a config from 0.28.18 (offered, no list): the agents that could take a note count as asked, an agent found later does not", async () => {
+  fake.install("codex");
+  mkdirSync(join(fake.home, ".claude"), { recursive: true });
+  writeFileSync(join(fake.home, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "plannotator@plannotator": true } }));
+  const s = await start();
+  await s.connectAgents();
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxAgentNotes: { offered: true } }));
+  const migrated = (await get(s)) as Asked;
+  expect(migrated.notes_asked).toEqual(["claude-code", "codex"]);
+  expect(loadConfig().inboxAgentNotes).toEqual({ offered: true, asked: ["claude-code", "codex"] });
+
+  fake.install("codex", "gemini");
+  await s.connectAgents();
+  const later = (await get(s)) as Asked;
+  expect(later.notes_asked).toEqual(["claude-code", "codex"]);
+  expect(row(later, "gemini").note?.state).toBe("absent");
+});
+
+test("a window older than the dialog (no asked list): the agents that can take a note now count as asked", async () => {
+  fake.install("codex");
+  const s = await start();
+  await s.connectAgents();
+  const answer = (await (await post(s, "/api/inbox/agents/notes", { add: [] })).json()) as Asked;
+  expect(answer.notes_asked).toEqual(["codex"]);
+});
+
+test("the answer's fields are checked", async () => {
+  const s = await start();
+  expect((await post(s, "/api/inbox/agents/notes", { add: [], asked: ["vscode"] })).status).toBe(422);
+  expect((await post(s, "/api/inbox/agents/notes", { add: [], asked: "codex" })).status).toBe(422);
+  expect((await post(s, "/api/inbox/agents/notes", { add: [], seen: "yes" })).status).toBe(422);
+  expect(loadConfig().inboxAgentNotes).toBeUndefined();
+});

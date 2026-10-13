@@ -135,7 +135,7 @@ import {
   writeInboxAgents,
   type AgentEnvironment,
 } from "./inbox-agents";
-import { addInboxNote, INBOX_NOTE_BLOCK, inboxNotesDisabled, noteStatus, removeInboxNote } from "./inbox-agent-notes";
+import { addInboxNote, INBOX_NOTE_BLOCK, inboxNotesDisabled, markNotesAsked, noteCandidateIds, notesAsked, noteStatus, removeInboxNote } from "./inbox-agent-notes";
 import {
   INBOX_AGENT_IDS,
   INBOX_AGENT_LABELS,
@@ -683,6 +683,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       notes_env_off: notesOff,
       tool_env: toolEnv ?? null,
       notes_offered: loadConfig().inboxAgentNotes?.offered === true,
+      notes_asked: await notesAsked(options),
       note_text: INBOX_NOTE_BLOCK,
     };
   };
@@ -728,7 +729,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (typeof body.note === "boolean") {
       if (!(INBOX_NOTE_AGENT_IDS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "note: this agent has no instructions file.", { field: "note" });
       if (inboxNotesDisabled(agentEnvironment.env) && body.note) throw new InboxError("notes_disabled", "PLANNOTATOR_INBOX_NOTES=0 is set: notes are off.");
-      // Adding one needs the agent here, as the card and --notes ask; switching one off never does.
+      // Adding one needs the agent here, as the note dialog and --notes ask; switching one off never does.
       if (body.note && !agentSpec(agent).detect(agentEnvironment)) {
         problems.push(`${INBOX_AGENT_LABELS[agent]} was not found on this computer`);
       } else {
@@ -739,22 +740,39 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return { ...(await agentsModel()), error: problems.length ? problems.join("; ") : null };
   };
 
-  /** The first-open card's answer: add the notes the person ticked (none for Not now); the question is never asked again. */
+  /**
+   * The note dialog's answer: add the notes the person ticked (none for Not
+   * now or Don't add a note). `asked` names the agents the dialog showed:
+   * each is asked once, except one whose add failed, which is asked again.
+   * Without `asked` (an older window) the agents that can take a note now
+   * count as asked. `seen`: the dialog's band showed the last run's news.
+   */
   const answerNotes = async (body: Record<string, unknown>) => {
+    const isNoteList = (value: unknown) => Array.isArray(value) && value.every((id) => typeof id === "string" && (INBOX_NOTE_AGENT_IDS as readonly string[]).includes(id));
     const add = body.add;
-    if (!Array.isArray(add) || add.some((id) => typeof id !== "string" || !(INBOX_NOTE_AGENT_IDS as readonly string[]).includes(id))) {
+    if (!isNoteList(add)) {
       throw new InboxError("validation_error", "add: a list of agents (claude-code, codex, gemini, pi, opencode).", { field: "add" });
     }
-    if (inboxNotesDisabled(agentEnvironment.env) && add.length > 0) throw new InboxError("notes_disabled", "PLANNOTATOR_INBOX_NOTES=0 is set: notes are off.");
-    const results = [...new Set(add as InboxNoteAgentId[])].map((agent) =>
+    if (body.asked !== undefined && !isNoteList(body.asked)) {
+      throw new InboxError("validation_error", "asked: a list of agents (claude-code, codex, gemini, pi, opencode).", { field: "asked" });
+    }
+    if (body.seen !== undefined && typeof body.seen !== "boolean") throw new InboxError("validation_error", "seen: a boolean.", { field: "seen" });
+    const adding = [...new Set(add as InboxNoteAgentId[])];
+    if (inboxNotesDisabled(agentEnvironment.env) && adding.length > 0) throw new InboxError("notes_disabled", "PLANNOTATOR_INBOX_NOTES=0 is set: notes are off.");
+    const options = { dataDir, selfCommand, environment: agentEnvironment };
+    // Read before adding: an agent whose note is added is no longer a candidate.
+    const shown = (body.asked as InboxNoteAgentId[] | undefined) ?? (await noteCandidateIds(options));
+    const results = adding.map((agent) =>
       // Never a file for an agent that is not on this computer.
       agentSpec(agent).detect(agentEnvironment)
         ? addInboxNote(agent, dataDir, agentEnvironment)
         : ({ ok: false, agent, reason: `${INBOX_AGENT_LABELS[agent]} was not found on this computer`, path: null } as const),
     );
-    // Not now (none), or at least one note added: the question is answered. Every add failed: ask again.
-    if (results.length === 0 || results.some((result) => result.ok)) {
-      saveConfig({ inboxAgentNotes: { ...(loadConfig().inboxAgentNotes ?? {}), offered: true } });
+    const failed = new Set(results.filter((result) => !result.ok).map((result) => result.agent));
+    await markNotesAsked([...new Set([...shown, ...adding])].filter((id) => !failed.has(id)), options);
+    if (body.seen === true) {
+      const file = readInboxAgents(dataDir);
+      if (file.last_report && !file.last_report.seen) writeInboxAgents(dataDir, { ...file, last_report: { ...file.last_report, seen: true } });
     }
     return { results, ...(await agentsModel()) };
   };
