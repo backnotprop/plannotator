@@ -7,7 +7,7 @@
  * installed since and says so once; PLANNOTATOR_INBOX_CONNECT=0 skips it.
  */
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { readInboxAgents } from "@plannotator/server/inbox-agents";
 import { createFakeAgents, type FakeAgents } from "../../../tests/helpers/fake-agents";
@@ -111,6 +111,42 @@ test("a person's run that starts the Inbox connects once it listens; PLANNOTATOR
   expect(err).toContain("Connected Codex to the Inbox.");
   expect(adds(w)).toEqual(["codex"]);
 }, 60_000);
+
+test("an older Inbox's detached start (its Restart into this binary: only the lock marker, no terminal) never connects", async () => {
+  // What 0.28.17's Restart, --background and connections spawn: `inbox
+  // --no-open` with PLANNOTATOR_INBOX_LOCK_HELD=1 and no PLANNOTATOR_INBOX_DETACHED,
+  // stdin closed, output to a file.
+  const w = world();
+  w.install("codex", "gemini");
+  mkdirSync(join(w.home, ".cursor"), { recursive: true });
+  const log = join(w.root, "inbox.log");
+  const fd = openSync(log, "a", 0o600);
+  Bun.spawn([process.execPath, "run", entry, "inbox", "--no-open"], {
+    cwd: w.root,
+    env: envOf(w, { PLANNOTATOR_INBOX_LOCK_HELD: "1" }),
+    stdout: fd,
+    stderr: fd,
+    stdin: "ignore",
+  });
+  closeSync(fd);
+  const output = () => (existsSync(log) ? readFileSync(log, "utf8") : "");
+  const deadline = Date.now() + 45_000;
+  while (!output().includes("Plannotator Inbox: http://localhost:") && Date.now() < deadline) await Bun.sleep(250);
+  expect(output()).toContain("Plannotator Inbox: http://localhost:");
+  // A person's start connects right after this line; give it ample time to.
+  await Bun.sleep(5_000);
+  const err = output();
+  expect(err).not.toContain("Connected");
+  expect(w.calls()).toEqual([]);
+  expect(existsSync(join(w.home, ".cursor", "mcp.json"))).toBe(false);
+  expect(Object.values(readInboxAgents(join(w.home, ".plannotator")).agents).filter((a) => a?.state === "added")).toEqual([]);
+
+  // The same computer and Inbox: a person's run does connect them.
+  const person = await cli(w, ["inbox", "--no-open"]);
+  expect(person.stderr).toContain("Connected");
+  expect(adds(w).sort()).toEqual(["codex", "gemini"]);
+  expect(existsSync(join(w.home, ".cursor", "mcp.json"))).toBe(true);
+}, 90_000);
 
 test("plannotator inbox --notes adds only the notes named, starts nothing, and answers the window's question", async () => {
   const w = world();
