@@ -50,7 +50,7 @@ import { shouldFallbackAfterEmbeddedError } from "./prompt-delivery-error";
 import { executeSubmitPlan } from "./submit-plan-executor";
 import { getPlanningPrompt } from "./planning-prompt";
 import { announceSessionUrl } from "./session-url";
-import { addInboxReminderOpenCode1, findInboxConnection, inboxToolArgs } from "./inbox";
+import { addInboxReminderOpenCode1, findInboxConnection, inboxToolArgs, openCode1AgentHasInbox } from "./inbox";
 import { inboxAgentTool } from "@plannotator/shared/inbox/connection";
 import {
   appendCommandFeedback,
@@ -734,15 +734,26 @@ Do NOT proceed with implementation until your plan is approved.`;
           },
         }),
       };
-      // The Inbox reminder, decided with the tool: one fixed system line on
-      // every request (OpenCode 1 rebuilds the system prompt per request, so a
-      // fixed line keeps the prefix stable), the no-wake wording since replies
-      // do not come back by themselves here. `inboxReminder` turns it off.
+      // The Inbox reminder, decided with the tool: one fixed system line, its
+      // own part, on every request of an agent that has the tool (OpenCode 1
+      // rebuilds the system prompt per request, so a fixed line keeps the
+      // prefix stable), the no-wake wording since replies do not come back by
+      // themselves here. A subagent, or an agent whose `tools` switch it off,
+      // gets none. `inboxReminder` turns it off.
       if (resolveInboxReminder(loadConfig(), process.env, "opencode")) {
         const planTransform = plugin["experimental.chat.system.transform"];
         plugin["experimental.chat.system.transform"] = async (input, output) => {
           await planTransform?.(input, output);
-          addInboxReminderOpenCode1(output.system);
+          if (!input.sessionID) return;
+          let agent: { mode?: unknown; tools?: unknown } | undefined;
+          try {
+            const messages = await ctx.client.session.messages({ path: { id: input.sessionID } });
+            const name = getLastUserAgentFromMessages(messages.data);
+            if (name) agent = (await getOpenCodeAgents())?.find((candidate: { name?: string }) => candidate.name === name);
+          } catch {
+            // Not attributable: the tool is registered for every agent.
+          }
+          if (openCode1AgentHasInbox(agent)) addInboxReminderOpenCode1(output.system);
         };
       }
     }

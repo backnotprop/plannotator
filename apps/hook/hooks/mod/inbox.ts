@@ -45,7 +45,7 @@ import type { Host, HttpResult } from './host'
 import {
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
-  INBOX_REMINDER_TEXT,
+  inboxReminderText,
   inboxToolCall,
   inboxToolCallParams,
   inboxToolResultText,
@@ -70,12 +70,13 @@ export const INBOX_REMINDER_BLOCK = 'plannotatorInbox'
 
 /**
  * The first message's context blocks with the Inbox reminder last
- * (INBOX_REMINDER_TEXT, fixed text). Never twice: a block of that name
- * already there (a hook above added it) is left as it is.
+ * (`inboxReminderText(toolName)`: fixed text naming the tool as the engine
+ * registered it, so tool search finds the deferred tool). Never twice: a
+ * block of that name already there (a hook above added it) is left as it is.
  */
-export function withInboxReminder<T extends { name: string; text: string }>(blocks: readonly T[]): Array<T | { name: string; text: string }> {
+export function withInboxReminder<T extends { name: string; text: string }>(blocks: readonly T[], toolName: string): Array<T | { name: string; text: string }> {
   if (blocks.some((block) => block?.name === INBOX_REMINDER_BLOCK)) return [...blocks]
-  return [...blocks, { name: INBOX_REMINDER_BLOCK, text: INBOX_REMINDER_TEXT }]
+  return [...blocks, { name: INBOX_REMINDER_BLOCK, text: inboxReminderText(toolName) }]
 }
 
 /** `$.store` key: the Inbox tool list last read live, used when the Inbox is stopped at session start. */

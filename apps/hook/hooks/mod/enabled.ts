@@ -88,15 +88,16 @@ export function resolveAgentToolEnabled(envValue: string | undefined, configText
 
 /**
  * Whether the mod registers the `plannotator_inbox` tool and runs the reply
- * wake when nothing is set (and an Inbox is found). Mirrors the claude-code
+ * wake when nothing is set. Mirrors the claude-code
  * entry of `INBOX_TOOL_DEFAULTS` in packages/shared/config.ts.
  */
 export const INBOX_TOOL_DEFAULT = true
 
 /**
  * Whether the mod connects this session to the Plannotator Inbox (the
- * `plannotator_inbox` tool and the reply wake), when `inbox/inbox.json`
- * exists. Off with:
+ * `plannotator_inbox` tool and the reply wake). The tool is registered even
+ * before the Inbox ever ran here (a bundled tool list; the first call starts
+ * it), and the wake starts polling once `inbox/inbox.json` exists. Off with:
  *
  *   PLANNOTATOR_INBOX_TOOL=0            (env; also false/off/disabled; wins over the config file)
  *   { "inboxTool": false }              (config.json in the data dir, every host)
@@ -128,11 +129,12 @@ export function resolveInboxToolEnabled(envValue: string | undefined, configText
 
 /**
  * Whether a session that has the `plannotator_inbox` tool starts with the
- * Inbox's one-line reminder (INBOX_REMINDER_TEXT, a `prompt.context` block).
- * Never without the tool; then on unless turned off with:
+ * Inbox's one-line reminder (a `prompt.context` block; register.ts also
+ * requires that the Inbox has run here). Never without the tool; then on
+ * unless turned off in config.json with:
  *
- *   { "inboxReminder": false }                       (config.json, every host)
- *   { "inboxReminder": { "claude-code": false } }    (this host only; the Inbox's Settings writes this)
+ *   { "inboxReminder": false }                       (every host)
+ *   { "inboxReminder": { "claude-code": false } }    (this host only)
  *
  * There is no env var of its own: PLANNOTATOR_INBOX_TOOL decides it through
  * the tool. Mirrors `resolveInboxReminder(config, env, 'claude-code')` in

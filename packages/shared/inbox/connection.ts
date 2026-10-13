@@ -174,6 +174,17 @@ export const INBOX_REMINDER_TEXT_NO_WAKE =
   "Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with plannotator_inbox send_message and keep going. Call wait_for_reply when you need their answer."
 
 /**
+ * The reminder naming the tool as the host registered it. Claude Code defers
+ * plugin tools behind tool search and names them `mcp__<server>__plannotator_inbox`,
+ * so the line carries that full name for the search to find; other hosts use
+ * the plain name. Fixed per process: the name never changes under a session.
+ */
+export function inboxReminderText(toolName: string = INBOX_TOOL_NAME, options: { wakes?: boolean } = {}): string {
+  const text = options.wakes === false ? INBOX_REMINDER_TEXT_NO_WAKE : INBOX_REMINDER_TEXT
+  return text.replace(INBOX_TOOL_NAME, toolName)
+}
+
+/**
  * The agent tool: name, description and input schema, built from the Inbox's
  * own tools. Null when it offers none. `wakes: false` for a host that cannot
  * deliver a reply as a turn (OpenCode 1): the description then says nothing

@@ -22,6 +22,8 @@ function world(
     cliStderr?: string
     fetch?: (e: any) => any
     sessionId?: () => string
+    /** Tool names `$.tool.register` refuses, as a session without a tool registrar would. */
+    refuseTools?: string[]
     /** Answers a process run itself (its result value), or undefined for the default. */
     run?: (argv: string[], files: Map<string, string>) => { exitCode: number; stdout: string; stderr: string } | undefined
   } = {},
@@ -42,6 +44,7 @@ function world(
   })
   const tools: { name: string; inputSchema: any }[] = []
   on('tool.register', ($: any, e: any) => {
+    if (options.refuseTools?.includes(e.name)) return { deny: `no tool registrar for ${e.name}` }
     tools.push({ name: e.name, inputSchema: e.inputSchema })
     return { value: { tool: `${TOOL_PREFIX}${e.name}` } }
   })
@@ -470,7 +473,8 @@ describe('register', () => {
     const first = await $.prompt.context({ blocks: base })
     const again = await $.prompt.context({ blocks: base })
     expect(first.blocks.map((b: any) => b.name)).toEqual(['currentDate', 'plannotatorInbox'])
-    expect(first.blocks[1].text).toBe("Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with plannotator_inbox send_message and keep going. Their reply comes back here.")
+    // The tool by the full name the engine registered: tool search finds the deferred tool by it.
+    expect(first.blocks[1].text).toBe(`Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with ${INBOX_TOOL} send_message and keep going. Their reply comes back here.`)
     expect(again).toEqual(first)
     expect(w.tools.some((t) => t.name === 'plannotator_inbox')).toBe(true)
   })
@@ -482,6 +486,31 @@ describe('register', () => {
     on('prompt.context', ($: any, e: any) => ({ blocks: e.blocks }))
     await $.session.start(SESSION)
     expect((await $.prompt.context({ blocks: [] })).blocks).toEqual([])
+  })
+
+  test('no inbox/inbox.json yet: the tool, but no reminder (it speaks only for an Inbox that has run here)', async ($: any, on: any) => {
+    const w = world(on, { fetch: inbox(TOOLS, []) })
+    on('prompt.context', ($: any, e: any) => ({ blocks: e.blocks }))
+    await $.session.start(SESSION)
+    expect(w.tools.some((t) => t.name === 'plannotator_inbox')).toBe(true)
+    expect((await $.prompt.context({ blocks: [] })).blocks).toEqual([])
+  })
+
+  test('a -p (non-interactive) session: no tool and no reminder', async ($: any, on: any) => {
+    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []) })
+    on('prompt.context', ($: any, e: any) => ({ blocks: e.blocks }))
+    await $.session.start({ ...SESSION, surface: null, isInteractive: false })
+    expect(w.tools).toEqual([])
+    expect((await $.prompt.context({ blocks: [] })).blocks).toEqual([])
+  })
+
+  test('$.tool.register refused plannotator_inbox: no reminder naming a tool the session lacks', async ($: any, on: any) => {
+    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []), refuseTools: ['plannotator_inbox'] })
+    on('prompt.context', ($: any, e: any) => ({ blocks: e.blocks }))
+    await $.session.start(SESSION)
+    expect(w.tools.some((t) => t.name === 'plannotator_inbox')).toBe(false)
+    expect((await $.prompt.context({ blocks: [] })).blocks).toEqual([])
+    expect(w.logs.some((line) => line.includes('plannotator_inbox tool is not available'))).toBe(true)
   })
 
   test('PLANNOTATOR_INBOX_TOOL=0: no tool and no reminder', async ($: any, on: any) => {
