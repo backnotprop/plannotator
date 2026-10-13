@@ -22,12 +22,13 @@ import {
   codeCommentBlocks,
   codeRangeOf,
 } from '../attachments';
-import { clockTime, formatBytes } from '../format';
+import { whenTime, formatBytes } from '../format';
 import { useRefRepo } from '../links';
 import { ImageAttachmentView } from './ImageAttachmentView';
 import { AttachmentStepper, type StepSource } from './AttachmentStepper';
 import { FIRST_NOTE, LAST_NOTE, stepAnnouncement, stepKeyIntent, type AttachmentStep } from '../stepping';
 import { Icon } from '../icons';
+import { FileName } from './FileName';
 
 export interface AttachmentPaneProps {
   attachment: InboxAttachmentState;
@@ -521,7 +522,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   };
   const close = () => leave(null, props.onClose);
 
-  const sentAt = clockTime(attachment.sent_at);
+  const sentAt = whenTime(attachment.sent_at);
   let line: React.ReactNode = null;
   if (currentUnavailable) {
     line = (
@@ -542,7 +543,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     const current = (view?.attachment ?? attachment).current;
     line = (
       <>
-        Changed since {props.agent} sent it at {sentAt}.{current ? ` Edited ${clockTime(current.mtime)}.` : ''}
+        Changed since {props.agent} sent it at {sentAt}.{current ? ` Edited ${whenTime(current.mtime)}.` : ''}
         <button type="button" className="ib-vlink" onClick={() => chooseVersion('sent')}>
           Open the version it sent
         </button>
@@ -582,7 +583,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         {/* With more than one file the bar under the file names it (a phone's bar has no room for the name). */}
         {(!multi || phone) && (
           <span className="ib-fn" data-header-name="">
-            {attachment.name}
+            <FileName name={attachment.name} />
           </span>
         )}
         <span className="ib-from">
@@ -707,7 +708,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   <Icon name={kind === 'pdf' ? 'doc' : 'cube'} size={18} />
                 </span>
                 <span className="ib-att-text">
-                  <span className="ib-nm">{attachment.name}</span>
+                  <FileName name={attachment.name} className="ib-nm" wrap />
                   <span className="ib-kd">
                     {inboxAttachmentKindLabel(attachment.kind, attachment.name, attachment.media_type)}, {formatBytes(attachment.current?.size ?? attachment.size)}. {tooLarge ? 'It is too large to show here; download it to open it.' : 'Plannotator does not show this kind of file; download it to open it.'}
                   </span>
@@ -839,7 +840,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             {guard.to === null ? 'Save it and close' : 'Save it and go on'}
           </button>
           <button type="button" className="ib-btn ib-sm" onClick={discardAndGo} disabled={guardSaving} data-guard-discard="">
-            {guard.to === null ? 'Discard and close the file' : `Discard and go to ${guard.to}`}
+            {guard.to === null ? 'Discard and close the file' : <>Discard and go to <FileName name={guard.to} /></>}
           </button>
           <button type="button" className="ib-btn ib-sm ib-ghost" onClick={keepWriting} data-guard-keep="">
             Keep writing

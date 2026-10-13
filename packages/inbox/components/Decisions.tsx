@@ -1,10 +1,19 @@
 import { useEffect, useId, useState } from 'react';
 import type { InboxDecision } from '@plannotator/core/inbox-types';
 import { InboxApiError, type DecisionProjectCounts, type DecisionsModel, type ProjectFolder, type WaitingDecision } from '../api';
-import { agentName, dateTime, dayWords, shortTime } from '../format';
+import { agentName, dateTime, dayWords, formatCount, shortTime } from '../format';
 import { DecisionDiamond, Icon } from '../icons';
 import { SidebarTrigger } from '../shell/sidebar';
 import { DecisionsProjectPicker } from './DecisionsProjectPicker';
+import { useNarrowerThan } from '../narrower';
+
+/**
+ * Below this page width the wide decision row (a 22 px mark, the text, then
+ * 300, 120 and 90 px columns) leaves the text too little room, so the page
+ * draws the two-line rows. At 1280 px and wider with the default sidebar the
+ * page is wider than this and keeps the five columns.
+ */
+export const DECISION_ROWS_MIN_WIDTH = 960;
 
 /**
  * The project's decisions (the window record's 3.2): a project switch, then
@@ -307,12 +316,15 @@ export function DecisionsPage(props: DecisionsPageProps) {
   // A decision opened from history unfolds it, so its row shows where it went.
   const showEnded = foldOpen || (open !== null && open.state !== 'current');
   const narrow = open !== null;
-  // A phone draws the two-line rows always: the five columns need a desktop's width.
-  const narrowRows = narrow || props.phone === true;
+  // The five columns need a desktop's width: a page narrower than that (an
+  // iPad, a laptop beside a wide sidebar) draws the two-line rows, as a phone
+  // always does. Measured on the page itself, not the window.
+  const [pageRef, narrowPage] = useNarrowerThan<HTMLElement>(DECISION_ROWS_MIN_WIDTH, false);
+  const narrowRows = narrow || props.phone === true || narrowPage;
 
   return (
     <>
-      <section className={`ib-dpage${narrow ? ' ib-narrow' : ''}`} aria-label="Decisions">
+      <section ref={pageRef} className={`ib-dpage${narrow ? ' ib-narrow' : ''}`} aria-label="Decisions">
         <div className="ib-dh">
           <SidebarTrigger />
           <h1>Decisions</h1>
@@ -332,7 +344,7 @@ export function DecisionsPage(props: DecisionsPageProps) {
             {model.waiting.length > 0 && (
               <div className="ib-group" role="group" aria-label="Waiting" data-decision-group="waiting">
                 <div className="ib-band">
-                  Waiting <span className="ib-n">{model.waiting.length}</span>
+                  Waiting <span className="ib-n">{formatCount(model.waiting.length)}</span>
                 </div>
                 {model.waiting.map((item) => (
                   <WaitingRow key={item.question_id} item={item} narrow={narrowRows} onOpenThread={() => props.onOpenThread(item.thread_id)} />
@@ -341,7 +353,7 @@ export function DecisionsPage(props: DecisionsPageProps) {
             )}
             <div className="ib-group" role="group" aria-label="Settled" data-decision-group="settled">
               <div className="ib-band">
-                Settled <span className="ib-n">{settled.length}</span>
+                Settled <span className="ib-n">{formatCount(settled.length)}</span>
               </div>
               {settled.length === 0 && <p className="ib-dnone">Nothing recorded in {project.name} yet.</p>}
               {settled.map((decision) => (
@@ -357,7 +369,7 @@ export function DecisionsPage(props: DecisionsPageProps) {
             {ended.length > 0 && (
               <div className="ib-group" role="group" aria-label="Replaced or retired" data-decision-group="ended">
                 <button type="button" className="ib-band" onClick={() => setFoldOpen(!showEnded)} aria-expanded={showEnded}>
-                  Replaced or retired <span className="ib-n">{ended.length}</span>
+                  Replaced or retired <span className="ib-n">{formatCount(ended.length)}</span>
                   <Icon name={showEnded ? 'chevD' : 'chevR'} size={14} />
                 </button>
                 {showEnded &&

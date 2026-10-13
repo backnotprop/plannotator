@@ -93,6 +93,10 @@
 .ib-nav:disabled { opacity: 0.55; }
 .ib-side-label { font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted-foreground); padding: 18px 9px 6px; }
 .ib-projs { overflow-y: auto; min-height: 0; }
+/* Only the project list gives up height when there are many projects: Inbox, Decisions and the foot keep theirs (they
+   shrank from 32 to 20 px past about 17 projects). The list fades at its foot while there is more to scroll. */
+.ib-side > :not(.ib-projs) { flex-shrink: 0; }
+.ib-projs[data-more] { mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); }
 .ib-proj { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 9px; border-radius: 7px; font-size: 13.5px; width: 100%; text-align: left; }
 .ib-proj .ib-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ib-proj .ib-n { margin-left: auto; font-size: 12.5px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
@@ -108,7 +112,8 @@
 .pn-inbox .ib-upd-btn:disabled { opacity: 0.55; cursor: default; }
 .pn-inbox .ib-upd-btn.ib-outline { background: transparent; color: var(--foreground); border-color: color-mix(in oklch, var(--foreground) 35%, transparent); }
 .pn-inbox .ib-upd-btn.ib-outline:hover { background: color-mix(in oklch, var(--muted) 55%, transparent); }
-.ib-upd-tip { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); white-space: nowrap; padding: 5px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--popover); color: var(--popover-foreground, var(--foreground)); font-size: 12.5px; opacity: 0; pointer-events: none; z-index: 5; }
+/* Anchored to the button's own width and wrapping inside it: a narrow sidebar never clips it. */
+.ib-upd-tip { position: absolute; bottom: calc(100% + 8px); left: 0; right: 0; white-space: normal; text-align: center; overflow-wrap: anywhere; padding: 5px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--popover); color: var(--popover-foreground, var(--foreground)); font-size: 12.5px; opacity: 0; pointer-events: none; z-index: 5; }
 .ib-upd:hover .ib-upd-tip, .ib-upd:focus-within .ib-upd-tip { opacity: 1; }
 .ib-spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: ib-spin 0.9s linear infinite; }
 @keyframes ib-spin { to { transform: rotate(360deg); } }
@@ -152,7 +157,8 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-dlg code, .ib-wn code { font-family: var(--font-mono); font-size: 12px; }
 .ib-dlg .ib-quietline code { white-space: nowrap; }
 .ib-cmd { display: flex; align-items: center; gap: 8px; margin-top: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); padding: 6px 6px 6px 10px; }
-.ib-cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; }
+/* The whole command, wrapped where it must: a phone showed a sliver of it in a sideways scroll. */
+.ib-cmd code { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ib-opt { display: flex; gap: 9px; align-items: flex-start; margin-top: 16px; font-size: 13px; cursor: pointer; }
 .ib-opt input { margin: 2px 0 0; accent-color: var(--primary); }
 .ib-opt small { display: block; color: var(--muted-foreground); font-size: 12px; }
@@ -192,8 +198,9 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 /* Its focus track stays centred on the line, but only draws: it never takes the pointer from the scrollbar. */
 .ib-listedge .ib-handle-track { pointer-events: none; }
 .ib-lhead { height: 60px; display: flex; align-items: center; gap: 12px; padding: 0 22px; flex: none; }
-.ib-lhead h1 { font-size: 20px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
-.ib-lhead .ib-path { font-family: var(--font-mono); font-size: 12px; color: var(--muted-foreground); }
+/* One line each: a long project name and its folder are cut with "…" (the full text is their hover text), the folder first; neither wraps out of the 60 px header. */
+.ib-lhead h1 { font-size: 20px; font-weight: 650; margin: 0; letter-spacing: -0.01em; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-lhead .ib-path { font-family: var(--font-mono); font-size: 12px; color: var(--muted-foreground); min-width: 0; flex: 0 1000 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ib-lbody { padding: 0 10px 10px; overflow-y: auto; flex: 1; min-height: 0; position: relative; }
 /* A row that left the rows on screen when the list settled (settle.ts): a copy drawn where it was, fading
    out under the rows sliding past it (they are opaque and sit above it while they move). */
@@ -291,7 +298,7 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-att-t .ib-fi { width: 30px; height: 30px; border-radius: 7px; background: var(--muted); display: flex; align-items: center; justify-content: center; color: var(--muted-foreground); }
 .ib-att-t .ib-nm { font-size: 13.5px; font-weight: 550; }
 .ib-att-t .ib-kd { font-size: 12px; color: var(--muted-foreground); }
-.ib-att-t .ib-open { margin-left: auto; font-size: 12.5px; color: var(--primary); font-weight: 550; padding-left: 14px; }
+.ib-att-t .ib-open { margin-left: auto; font-size: 12.5px; color: var(--primary); font-weight: 550; padding-left: 14px; flex: none; white-space: nowrap; }
 .ib-pfoot { flex: none; border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); padding: 12px 30px 14px; background: var(--card); position: relative; }
 .ib-acts { display: flex; align-items: center; gap: 8px; }
 .ib-acts .ib-st { font-size: 13px; color: var(--muted-foreground); margin-right: 4px; }
@@ -302,7 +309,7 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-pfoot > .ib-acts { flex-wrap: wrap; }
 .ib-reply-l { font-size: 12.5px; color: var(--muted-foreground); margin-bottom: 6px; }
 .ib-rbox { border: 1px solid color-mix(in oklch, var(--primary) 60%, transparent); box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 14%, transparent); border-radius: 8px; background: var(--card); margin-bottom: 10px; }
-.ib-rtext { display: block; width: 100%; padding: 10px 12px 6px; font: inherit; font-size: 14px; line-height: 1.55; min-height: 52px; max-height: 240px; border: 0; outline: none; resize: none; field-sizing: content; background: transparent; color: var(--foreground); }
+.ib-rtext { display: block; width: 100%; padding: 10px 12px 6px; font: inherit; font-size: 14px; line-height: 1.55; min-height: 52px; max-height: min(240px, 30vh); border: 0; outline: none; resize: none; field-sizing: content; background: transparent; color: var(--foreground); }
 .pn-inbox .ib-rtext:focus-visible { outline: none; }
 .ib-rtext::placeholder { color: var(--muted-foreground); }
 .ib-rfoot { display: flex; gap: 6px; padding: 6px 8px 8px; }
@@ -400,6 +407,8 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-arcinfo { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
 .ib-arcsub { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 13.5px; font-weight: 500; }
 .ib-arcsub .ib-st { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* The thread chip keeps a readable width beside a long subject (it was squeezed to "t…"); its name keeps its own cap. */
+.ib-arcsub .ib-key { flex: none; max-width: 40%; }
 .ib-arcinfo .ib-d { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-arcnone { margin: 0 0 4px; font-size: 13.5px; color: var(--muted-foreground); }
 .ib-arcgroup + .ib-arcgroup { margin-top: 10px; }
@@ -519,6 +528,8 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-way-sec h5, .ib-before h5 { margin: 0 0 5px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted-foreground); }
 .ib-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; line-height: 1.45; }
 .ib-checks li { display: flex; gap: 7px; align-items: flex-start; }
+/* A long fix (a URL, a command) wraps inside the line instead of being clipped. */
+.ib-checks li > span { min-width: 0; overflow-wrap: anywhere; }
 .pn-inbox .ib-checks svg.ib-ic, .ib-checks .ib-tsmark { width: 14px; height: 14px; margin-top: 1.5px; flex: none; color: var(--muted-foreground); }
 .pn-inbox .ib-checks .ib-ck-ok svg.ib-ic { color: var(--success, oklch(0.72 0.17 150)); }
 .pn-inbox .ib-checks .ib-ck-warn svg.ib-ic { color: var(--warning, oklch(0.75 0.15 85)); }
@@ -631,7 +642,8 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-dpage .ib-group + .ib-group { margin-top: 18px; }
 .ib-drow { display: grid; grid-template-columns: 22px minmax(0, 1fr) 300px 120px 90px; align-items: center; gap: 12px; min-height: 50px; padding: 0 12px; border-bottom: 1px solid var(--ib-hair); font-size: 14px; width: 100%; text-align: left; }
 button.ib-drow:hover { background: color-mix(in oklch, var(--muted) 35%, transparent); }
-.ib-drow .ib-st { font-weight: 550; }
+/* A long decision shows three lines; the open decision has all of it. */
+.ib-drow .ib-st { font-weight: 550; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
 .ib-drow .ib-src, .ib-drow .ib-when { color: var(--muted-foreground); font-size: 13px; }
 .ib-drow .ib-when { text-align: right; }
 .ib-drow .ib-act { text-align: right; }
@@ -649,9 +661,12 @@ button.ib-drow:hover { background: color-mix(in oklch, var(--muted) 35%, transpa
 .pn-inbox .ib-link { color: var(--primary); font-size: 13.5px; text-decoration: underline; text-underline-offset: 2px; margin-left: 8px; text-align: left; }
 .ib-dfacts dd > .ib-link:first-child { margin-left: 0; }
 .ib-dform .ib-ta { min-height: 52px; }
+/* A long text scrolls inside its box, so the form's buttons stay in reach. */
+.pn-inbox .ib-dform .ib-ta, .pn-inbox .ib-deccard .ib-ta { max-height: min(30vh, 200px); overflow-y: auto; }
 
 /* attachments (step 2, record 2.1 to 2.8) */
-.ib-att-t .ib-ch { font-size: 12px; color: var(--warning); }
+/* One line, "Changed 6:43 PM": the whole sentence is the hover text (tiles of a grid kept their heights uneven when it wrapped). */
+.ib-att-t .ib-ch { font-size: 12px; color: var(--warning); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ib-pane.ib-withfile { flex: none; width: 440px; border-right: 1px solid var(--ib-line); z-index: 2; }
 .ib-pane.ib-withfile .ib-annpop { width: 400px; }
 .ib-pane.ib-withfile .ib-pbody { padding: 16px 20px 0; }
@@ -665,7 +680,7 @@ button.ib-drow:hover { background: color-mix(in oklch, var(--muted) 35%, transpa
 /* The pane takes focus when a file opens (a region, not a control): no ring. */
 .ib-view:focus { outline: none; }
 .ib-vhead { display: flex; align-items: center; gap: 12px; padding: 0 14px 0 16px; background: var(--card); border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); min-width: 0; }
-.ib-vhead .ib-fn { font-weight: 600; font-size: 14px; white-space: nowrap; }
+.ib-vhead .ib-fn { font-weight: 600; font-size: 14px; white-space: nowrap; min-width: 0; overflow: hidden; }
 .ib-vhead .ib-from { font-size: 12.5px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ib-vhead .ib-sp { flex: 1; }
 .ib-changed { display: flex; align-items: center; gap: 8px; padding: 8px 18px; font-size: 13px; background: color-mix(in oklab, var(--warning) 10%, var(--card)); border-bottom: 1px solid color-mix(in oklab, var(--warning) 25%, transparent); }
@@ -726,7 +741,9 @@ button.ib-drow:hover { background: color-mix(in oklch, var(--muted) 35%, transpa
 /* A typed comment that would be lost: the question row directly above the bar, part of the layout. */
 .ib-stepguard { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 9px 14px; font-size: 13px; background: color-mix(in oklab, var(--primary) 10%, var(--card)); border-top: 1px solid color-mix(in oklab, var(--primary) 30%, transparent); }
 .ib-stepguard > .ib-ic { color: var(--primary); flex: none; }
-.ib-stepguard .ib-gt { flex: 1 1 260px; min-width: 0; }
+.ib-stepguard .ib-gt { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
+/* "Discard and go to <a long name>" cuts the name in its middle and never widens the page. */
+.pn-inbox .ib-stepguard .ib-btn { max-width: 100%; min-width: 0; }
 .ib-stepguard .ib-gt b { font-weight: 600; }
 /* The open file's tile beside the thread. */
 .ib-att-t.ib-open-beside { border-color: color-mix(in oklch, var(--primary) 55%, var(--border)); background: color-mix(in oklch, var(--primary) 6%, var(--card)); }
@@ -831,7 +848,7 @@ pre code.pn-code[data-keep-layout] {
 .pn-inbox .ib-btn.ib-on { border-color: color-mix(in oklch, var(--primary) 55%, transparent); background: color-mix(in oklch, var(--primary) 10%, var(--card)); color: var(--primary); }
 .pn-inbox .ib-btn.ib-dis { opacity: 0.5; }
 .ib-nmpop { position: absolute; left: 212px; bottom: calc(100% + 3px); background: var(--popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22); z-index: 6; }
-.ib-menu.ib-nmpop { width: 360px; padding: 6px; }
+.ib-menu.ib-nmpop { width: 360px; padding: 6px; max-height: min(440px, 60vh); overflow-y: auto; overscroll-behavior: contain; }
 .ib-menu .ib-mh { font-size: 12.5px; color: var(--muted-foreground); padding: 6px 8px 8px; }
 .pn-inbox .ib-menu .ib-mi { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 8px; border-radius: 7px; text-align: left; }
 .pn-inbox .ib-menu .ib-mi.ib-on, .pn-inbox .ib-menu .ib-mi:hover, .pn-inbox .ib-menu .ib-mi:focus-visible { background: color-mix(in oklch, var(--primary) 10%, transparent); }
@@ -1358,7 +1375,7 @@ pre code.pn-code[data-keep-layout] {
   .ib-pfoot > .ib-acts > .ib-btn.ib-pri { flex: 1; justify-content: center; }
   .pn-inbox .ib-pfoot [data-new-message] { width: 44px; padding: 0; justify-content: center; margin-left: auto; flex: none; }
   .pn-inbox .ib-pfoot [data-new-message] .ib-btn-l { display: none; }
-  .ib-rtext { font-size: 16px; max-height: 32vh; }
+  .ib-rtext { font-size: 16px; max-height: min(32vh, 30dvh); }
   .ib-rfoot { flex-wrap: wrap; }
   .pn-inbox .ib-rchip { height: 32px; }
   .ib-route { padding: 10px 6px 8px; }
@@ -1655,3 +1672,87 @@ pre code.pn-code[data-keep-layout] {
   .ib-aghead .ib-agvia { flex-basis: 100%; order: 3; margin-left: 40px; margin-top: -4px; }
 }
 .ib-conn-err { margin: -4px 14px 12px; }
+
+/* ───────────── Worst-case data (the stress test of 2026-10-12, batch 1) ─────────────
+   Real-world names and text that broke the window: right-to-left text, long file
+   names, things that grow, tables and tall images on a phone. With ordinary data
+   at 1280 px and wider none of these rules changes a pixel. */
+
+/* Right-to-left text. The names and subjects the window draws carry dir="auto", and a cell in a row starts at its
+   text's own start (a row is a button, which aligns left), so an Arabic subject is cut at its end, not its start. */
+.ib-row [dir="auto"], .ib-nrow [dir="auto"], .ib-mrow [dir="auto"], .ib-arcsub [dir="auto"], .ib-fline [dir="auto"], .ib-proj [dir="auto"] { text-align: start; }
+/* A message paragraph takes its direction from its own text: Arabic reads right to left, English as before. */
+.ib-body :is(p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th) { unicode-bidi: plaintext; }
+.ib-body :is(p, li, h1, h2, h3, h4, h5, h6, blockquote) { text-align: start; }
+
+/* A file name (components/FileName.tsx): its start gives way with "…", its end (the date, the version, the
+   extension) keeps its width. `.ib-fname-wrap` draws the whole name, broken where it must. */
+.ib-fname { display: flex; min-width: 0; max-width: 100%; white-space: nowrap; }
+.ib-fname-h { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-fname-t { flex: none; white-space: pre; }
+/* What a screen reader hears for a name cut in two: the whole name, visually hidden (FileName.tsx). */
+.ib-fname[data-name] { position: relative; }
+.ib-fname[data-name]::after { content: attr(data-name); position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.ib-fname.ib-fname-wrap { display: block; white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+.ib-fname-wrap > .ib-fname-h { white-space: normal; overflow: visible; }
+/* The open file's one column never grows past the pane for a row's content ("Discard and go to <a long name>"
+   was a 1,215 px button and scrolled the whole window sideways): its rows shrink their content instead. */
+.ib-view { grid-template-columns: minmax(0, 1fr); }
+
+/* A message's time keeps its line when the sender line is long (a real, long project name): the name wraps instead. */
+.ib-sender .ib-tm { flex: none; white-space: nowrap; }
+
+/* "Where should this reply go?" with many live sessions: the reply area stops at 70% of the thread, the list of
+   sessions scrolls inside it, and Send and Back stay in view. The foot itself never scrolls or clips (New
+   message's list and the step list open above it). */
+.ib-pfoot:has(> .ib-routeform) { display: flex; flex-direction: column; max-height: 70%; }
+.ib-pfoot:has(> .ib-routeform) > * { flex: none; }
+.ib-pfoot > .ib-routeform { display: flex; flex-direction: column; min-height: 0; flex: 0 1 auto; }
+.ib-routeform > * { flex: none; }
+.ib-routeform > .ib-route { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+
+/* Settings → Storage: a subject that is one long URL or path wraps in its cell; sizes and Delete stay whole. */
+.ib-stbl td:first-child { overflow-wrap: anywhere; }
+.ib-stbl .ib-fold { text-align: left; overflow-wrap: anywhere; }
+.ib-stbl td.ib-n, .ib-stbl td.ib-a { white-space: nowrap; }
+
+/* Pairing: a way's error (a Tailscale message with the link that fixes it) is read whole, never cut with "…". */
+.ib-way-addr.ib-way-err { overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+
+/* Several allowed tailnet logins, one per line. */
+.ib-logins { display: flex; flex-direction: column; gap: 3px; margin-top: 3px; }
+.ib-logins > span { overflow-wrap: anywhere; }
+
+/* The skipped releases on What's new, folded under their heading when there are many. */
+details.ib-wn-skipped { margin-top: 18px; }
+details.ib-wn-skipped > summary { cursor: pointer; list-style-position: inside; }
+details.ib-wn-skipped > summary h2 { display: inline; }
+details.ib-wn-skipped[open] > summary { margin-bottom: 6px; }
+.ib-wn-body + .ib-wn-skipped, .ib-sum + .ib-wn-skipped { margin-top: 18px; }
+
+/* A tall screenshot in a message shows its top at its own width (images.ts markTallImage), as the gallery does. */
+.ib-body img[data-ib-tall] { width: min(100%, var(--ib-nw, 100%)); max-height: min(480px, 60vh); object-fit: cover; object-position: top center; }
+
+/* The thread on a phone (PHONE_QUERY in phone.ts). */
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  /* A table in a message keeps whole words in its cells and scrolls sideways (TableBlock) rather than standing
+     one letter per line: the phone's "break anywhere" stops at the table. */
+  .ib-body :is(th, td), .ib-body :is(th, td) :not(pre) > code { overflow-wrap: break-word; word-break: normal; }
+  /* The notifications line: its words take the row, its buttons go under them. */
+  .ib-askline .ib-grow { flex: 1 1 calc(100% - 30px); }
+  /* "↓ N new" is the foot's first row (Thread.tsx), never over a sender's row. */
+  .ib-pfoot > .ib-npill-wrap { position: static; height: auto; margin: 0 0 8px; }
+  .ib-pfoot > .ib-npill-wrap:has(> [data-off]) { display: none; }
+  .pn-inbox .ib-pfoot .ib-npill { transform: none; height: 36px; }
+  /* Settings → Archived: Unarchive stays on its row; the subject takes up to two lines. */
+  .ib-srow.ib-arcrow { flex-wrap: nowrap; align-items: flex-start; }
+  .ib-arcrow > .ib-mk { margin-top: 3px; }
+  .ib-arcrow .ib-arcsub { align-items: flex-start; }
+  .ib-arcrow .ib-arcsub .ib-st { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+  .ib-arcrow .ib-arcinfo .ib-d { white-space: normal; }
+  .ib-arcrow > .ib-r { flex: none; margin-left: 0; align-self: center; }
+}
+/* A phone on its side: the comments sheet covers the file view (it shared it, and left room for one line). */
+@media (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-phone.ib-panel-open .ib-apanel { position: fixed; top: env(safe-area-inset-top); left: 0; right: 0; bottom: 0; height: auto; z-index: 8; border-radius: 0; }
+}

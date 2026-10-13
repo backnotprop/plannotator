@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { INBOX_HOST_NAMES, type InboxThread } from '@plannotator/core/inbox-types';
 import { InboxApiError, inboxApi, type LiveSession, type LiveSessionsModel } from '../api';
-import { clockTime, tildePath } from '../format';
+import { whenTime, tildePath } from '../format';
 import { HostMark, Icon } from '../icons';
 
 /**
@@ -34,8 +34,8 @@ export function sessionWords(session: LiveSession): string {
   const parts: string[] = [];
   if (session.wrote_thread) parts.push('Wrote this thread.');
   if (session.busy === true) parts.push('Working now; takes it when the turn ends.');
-  else if (session.busy === false && session.idle_since) parts.push(`Idle since ${clockTime(session.idle_since)}.`);
-  else if (!session.wrote_thread) parts.push(`Seen ${clockTime(session.last_seen_at)}.`);
+  else if (session.busy === false && session.idle_since) parts.push(`Idle since ${whenTime(session.idle_since)}.`);
+  else if (!session.wrote_thread) parts.push(`Seen ${whenTime(session.last_seen_at)}.`);
   return parts.join(' ');
 }
 
@@ -139,7 +139,7 @@ export function NewMessagePopover({
           >
             <HostMark host={session.host} />
             <span>
-              <span className="ib-t">Started {clockTime(session.started_at)}</span>
+              <span className="ib-t">Started {whenTime(session.started_at)}</span>
               <span className="ib-d">{sessionWords(session)}</span>
             </span>
           </button>

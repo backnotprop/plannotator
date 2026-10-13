@@ -273,7 +273,7 @@ test.skipIf(!hasDom)("a folded line's snippet is the person's answers when every
   expect(holdings(el, 'msg_P2')).toEqual(['annotations=2', 'delivered=Delivered']);
   expect(holdings(el, 'msg_P3')).toEqual(['delivered=Delivered']);
   // The line's label reads the sender, the time, what it holds and the snippet.
-  expect(article(el, 'msg_A1')!.querySelector('[data-fold-head]')!.getAttribute('aria-label')).toMatch(/^Claude Code, \d{1,2}:\d{2} [AP]M\. 2 questions answered\. Which search index should the docs site use: Pagefind; Which sections go in the index: Guides, API reference$/);
+  expect(article(el, 'msg_A1')!.querySelector('[data-fold-head]')!.getAttribute('aria-label')).toMatch(/^Claude Code, (?:[A-Z][a-z]{2} \d{1,2}, (?:\d{4}, )?)?\d{1,2}:\d{2} [AP]M\. 2 questions answered\. Which search index should the docs site use: Pagefind; Which sections go in the index: Guides, API reference$/);
 
   // One question answered, one still open: the first words, and "1 open question".
   const thread = seven();

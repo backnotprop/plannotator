@@ -8,6 +8,7 @@
 
 import { isInboxNote, type InboxMessageWire, type InboxQuestion, type InboxThread } from '@plannotator/core/inbox-types';
 import { QUESTION_ANSWERS_HEADING, type QuestionAnswer } from '@plannotator/core/question-block';
+import { sliceText } from '@plannotator/core/text-cut';
 
 /**
  * Where "new since you looked" starts: the seq of the person's last look at
@@ -135,7 +136,7 @@ export function cutAtWord(text: string, max: number): string {
   if (text.length <= max) return text;
   // One character more, so a word that ends exactly at `max` is kept whole.
   const space = text.slice(0, max + 1).lastIndexOf(' ');
-  return `${(space > max * 0.5 ? text.slice(0, space) : text.slice(0, max)).replace(/[\s,;:.]+$/, '')}…`;
+  return `${(space > max * 0.5 ? text.slice(0, space) : sliceText(text, max)).replace(/[\s,;:.]+$/, '')}…`;
 }
 
 function answeredParts(questions: readonly InboxQuestion[]): AnsweredPart[] {

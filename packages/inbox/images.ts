@@ -47,3 +47,23 @@ export const inboxImageSrcResolver: ImageSrcResolver = (path, base) => {
   if (base && !path.startsWith('/')) url += `&base=${encodeURIComponent(base)}`;
   return url;
 };
+
+/** Taller than this (in CSS pixels), an image in a message is cropped to its top (inbox.css `[data-ib-tall]`). */
+export const TALL_MESSAGE_IMAGE_PX = 480;
+
+/**
+ * Mark a loaded image in a message body that would draw taller than the crop
+ * (a phone screenshot of 390 by 4000): the window crops it from the top, as
+ * the attachment gallery does, keeping its own width (`--ib-nw`). A click
+ * still opens it whole. An image that fits is never marked.
+ */
+export function markTallImage(img: HTMLImageElement): void {
+  const { naturalWidth: width, naturalHeight: height } = img;
+  if (width <= 0 || height <= 0) return;
+  if (height <= TALL_MESSAGE_IMAGE_PX || height <= width * 1.5) {
+    img.removeAttribute('data-ib-tall');
+    return;
+  }
+  img.setAttribute('data-ib-tall', '');
+  img.style.setProperty('--ib-nw', `${width}px`);
+}

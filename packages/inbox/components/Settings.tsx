@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 're
 import { INBOX_SOUND_MAX_VOLUME, INBOX_SOUND_MIN_VOLUME } from '@plannotator/core/inbox-types';
 import type { InboxSound } from '../sound';
 import type { AgentToolHost, SettingsModel } from '../api';
-import { formatBytes, plural, tildePath } from '../format';
+import { formatBytes, formatCount, plural, tildePath } from '../format';
 import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon, type IconName } from '../icons';
 import { ConnectPicker } from './ConnectPicker';
@@ -485,7 +485,7 @@ export function SettingsPage(props: SettingsPageProps) {
   };
 
   const badge = (id: SettingsSection): ReactNode => {
-    if (id === 'archived' && archivedTotal) return <span className="ib-scount">{archivedTotal}</span>;
+    if (id === 'archived' && archivedTotal) return <span className="ib-scount">{formatCount(archivedTotal)}</span>;
     if (id === 'about' && aboutDot) return <span className="ib-dot" aria-label="A new version is available" role="img" />;
     if (id === 'devices' && devicesDot) return <span className="ib-dot ib-warn" aria-label="Something here is not working" role="img" />;
     return null;
@@ -509,7 +509,7 @@ export function SettingsPage(props: SettingsPageProps) {
         if (phonesOn && phones.devices && phones.devices.length > 0) return plural(phones.devices.length, 'phone');
         return settings.tailscale?.on ? 'Over your tailnet' : '';
       case 'archived':
-        return archivedTotal ? String(archivedTotal) : '';
+        return archivedTotal ? formatCount(archivedTotal) : '';
       case 'storage':
         return formatBytes(settings.store.bytes);
       case 'about':

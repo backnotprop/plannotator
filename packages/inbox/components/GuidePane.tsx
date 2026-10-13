@@ -22,7 +22,7 @@ import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { InboxApiError, inboxApi } from '../api';
 import { guideCommentOf } from '../attachments';
-import { agentName, clockTime, plural } from '../format';
+import { agentName, whenTime, plural } from '../format';
 import { Icon } from '../icons';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
@@ -163,7 +163,7 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
         <span className="ib-vsep" />
         <span className="ib-fn">Guided review</span>
         <span className="ib-from">
-          from {agentName(message.author)} in {thread.project.name}, sent {clockTime(message.created_at)}
+          from {agentName(message.author)} in {thread.project.name}, sent {whenTime(message.created_at)}
         </span>
         <span className="ib-sp" />
         <button type="button" className="ib-iconbtn" onClick={onClose} title="Close" aria-label="Close the guided review">

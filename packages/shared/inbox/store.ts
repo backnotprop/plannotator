@@ -66,6 +66,7 @@ import {
   isInboxNote,
 } from "@plannotator/core/inbox-types";
 import { inboxListSections, inboxRowUnread, inboxSectionOf } from "./list";
+import { inboxProjectLabels } from "./project-name";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
 import { sanitizeTag } from "@plannotator/core/project";
 import {
@@ -247,6 +248,8 @@ export class InboxStore {
   private readonly latest = new Map<string, InboxLine>();
   private readonly projectsById = new Map<string, InboxProject>();
   private readonly projectsByRoot = new Map<string, InboxProject>();
+  /** Each project's display name (`inboxProjectLabels`), worked out again when the projects change. */
+  private projectLabels: Map<string, string> | null = null;
   private readonly messages = new Map<string, InboxMessage>();
   /** The seq of a message's first line: its place in the event log. */
   private readonly messageSeq = new Map<string, number>();
@@ -364,6 +367,7 @@ export class InboxStore {
       case "project":
         this.projectsById.set(line.record.id, line.record);
         this.projectsByRoot.set(line.record.root, line.record);
+        this.projectLabels = null;
         break;
       case "message": {
         // The archive line: the root line whose resolved_at differs from the one before it.
@@ -445,16 +449,29 @@ export class InboxStore {
     return () => this.listeners.delete(listener);
   }
 
+  /**
+   * The project as every reader sees it: `name` is the real name of its
+   * folder (`inboxProjectLabels`), not the slug it was stored with, which
+   * stays its folder key. The record on disk is unchanged.
+   */
+  private labeled(project: InboxProject): InboxProject {
+    this.projectLabels ??= inboxProjectLabels([...this.projectsById.values()]);
+    const name = this.projectLabels.get(project.id);
+    return name && name !== project.name ? { ...project, name } : project;
+  }
+
   listProjects(): InboxProject[] {
-    return [...this.projectsById.values()].sort((a, b) => a.created_at.localeCompare(b.created_at));
+    return [...this.projectsById.values()].sort((a, b) => a.created_at.localeCompare(b.created_at)).map((project) => this.labeled(project));
   }
 
   project(id: string): InboxProject | null {
-    return this.projectsById.get(id) ?? null;
+    const project = this.projectsById.get(id);
+    return project ? this.labeled(project) : null;
   }
 
   projectByRoot(root: string): InboxProject | null {
-    return this.projectsByRoot.get(root) ?? null;
+    const project = this.projectsByRoot.get(root);
+    return project ? this.labeled(project) : null;
   }
 
   message(id: string): InboxMessage | null {
@@ -585,7 +602,7 @@ export class InboxStore {
   thread(threadId: string): InboxThread | null {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) return null;
-    const project = this.projectsById.get(root.project_id);
+    const project = this.project(root.project_id);
     if (!project) return null;
     return {
       thread_id: threadId,
@@ -717,7 +734,7 @@ export class InboxStore {
       agent_after_archive: agentAfterArchive,
       back_from_archive: backFromArchive,
       read_at: readAt,
-      project: { id: project.id, name: project.name },
+      project: { id: project.id, name: this.labeled(project).name },
       thread_name: root.thread_name ?? null,
       answered_not_sent: (root.resolved_at === null || backFromArchive) && summary.questions.open === 0 && summary.questions.picked > 0,
       waiting_since: waitingSince,
@@ -1179,7 +1196,7 @@ export class InboxStore {
   /** The project for `root` (an absolute realpath), created on first use. */
   ensureProject(input: { name: string; root: string }): InboxProject {
     const existing = this.projectsByRoot.get(input.root);
-    if (existing) return existing;
+    if (existing) return this.labeled(existing);
     const at = this.stamp();
     // Six hex of the root's hash keeps two same-named repositories apart; on
     // the rare collision take more of the hash, so one folder never holds two
@@ -1212,7 +1229,7 @@ export class InboxStore {
         // see write()
       }
     }
-    return project;
+    return this.labeled(project);
   }
 
   /**
@@ -2092,6 +2109,7 @@ export class InboxStore {
     this.latest.clear();
     this.projectsById.clear();
     this.projectsByRoot.clear();
+    this.projectLabels = null;
     this.messages.clear();
     this.messageSeq.clear();
     this.resolvedSeq.clear();

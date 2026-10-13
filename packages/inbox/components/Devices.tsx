@@ -176,6 +176,7 @@ function OverYourTailnet({
   const exposedPorts = (state.exposed ?? []).map((e) => e.https_port).filter((p): p is number => p !== null);
   const remote = via === 'tailnet';
   const who = state.allowed.length > 0 ? state.allowed.join(', ') : (state.owner ?? 'the Tailscale login that owns this computer');
+  const logins = state.allowed.length > 1 ? state.allowed : null;
   const locked = state.env !== null;
   const exposed = (state.exposed?.length ?? 0) > 0;
   return (
@@ -200,12 +201,20 @@ function OverYourTailnet({
                   <a href={state.url} target="_blank" rel="noreferrer">
                     {state.url}
                   </a>{' '}
-                  · only {who} can open it
+                  · only {logins ? 'these logins' : who} can open it{logins ? ':' : ''}
                 </>
               ) : state.on ? (
                 'On · not published'
               ) : (
-                `Off · only ${who} could open it`
+                `Off · only ${logins ? 'these logins' : who} could open it${logins ? ':' : ''}`
+              )}
+              {/* Several logins, one per line: never one long sentence of addresses. */}
+              {logins && (state.url || !state.on) && (
+                <span className="ib-logins" data-tailscale-logins="">
+                  {logins.map((login) => (
+                    <span key={login}>{login}</span>
+                  ))}
+                </span>
               )}
             </span>
           </span>

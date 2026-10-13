@@ -200,7 +200,8 @@ async function render(thread: InboxThread, onChanged?: () => Promise<void>) {
 }
 
 function button(el: HTMLElement, text: string): HTMLButtonElement {
-  const found = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === text);
+  // A jump link is an inline element with the button role (ReplacedQuestion's JumpLink).
+  const found = [...el.querySelectorAll('button, [role="button"]')].find((b) => b.textContent?.trim() === text);
   if (!found) throw new Error(`no button "${text}" in ${[...el.querySelectorAll('button')].map((b) => b.textContent?.trim()).join(' | ')}`);
   return found as HTMLButtonElement;
 }

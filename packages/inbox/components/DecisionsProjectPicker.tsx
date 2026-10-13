@@ -284,7 +284,7 @@ export function DecisionsProjectPicker(props: DecisionsProjectPickerProps) {
               {selected && <Icon name="check" size={15} />}
             </span>
             <span className="ib-ppick-ot">
-              <b>{project.name}</b>
+              <b dir="auto">{project.name}</b>
               <span className="ib-ppick-p">{path}</span>
             </span>
             <span className="ib-ppick-oc" aria-hidden="true">

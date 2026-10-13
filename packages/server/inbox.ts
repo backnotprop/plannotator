@@ -1033,7 +1033,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const eventPayload = (line: InboxLine) => {
     switch (line.kind) {
       case "project":
-        return { seq: line.seq, kind: line.kind, id: line.id, project: line.record };
+        // The display name (the folder's real name), as every other read gives it.
+        return { seq: line.seq, kind: line.kind, id: line.id, project: { ...line.record, name: store.project(line.id)?.name ?? line.record.name } };
       case "message":
         return { seq: line.seq, kind: line.kind, id: line.id, message: line.record };
       case "question":

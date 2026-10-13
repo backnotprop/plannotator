@@ -1,10 +1,11 @@
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { agentName, questionCount, shortTime } from '../format';
+import { agentName, formatCount, questionCount, shortTime } from '../format';
 import { AuthorMark, Icon } from '../icons';
 import { ListColumnEdge } from '../shell/ListColumnEdge';
 import { SidebarTrigger, useSidebar } from '../shell/sidebar';
 import { offersRowMarkRead } from '../markRead';
+import { useNarrowerThan } from '../narrower';
 
 export interface InboxListProps {
   title: string;
@@ -63,11 +64,15 @@ function SubjectLine({ row }: { row: InboxListRow }) {
     <>
       {row.thread_name && (
         <span className="ib-key">
-          <span className="ib-keyt">{row.thread_name}</span>
+          <span className="ib-keyt" dir="auto" title={row.thread_name}>
+            {row.thread_name}
+          </span>
         </span>
       )}
       <span className="ib-s">
-        <span className="ib-st">{subjectOf(row)}</span>
+        <span className="ib-st" dir="auto" title={subjectOf(row)}>
+          {subjectOf(row)}
+        </span>
       </span>
       {/* The record's 1.1: a thread that carries a guided review says so after its subject. */}
       {row.guide && row.section !== 'sent' && (
@@ -86,49 +91,6 @@ function SubjectLine({ row }: { row: InboxListRow }) {
  * 104px), so the list draws the two-line rows instead.
  */
 export const WIDE_ROWS_MIN_LIST_WIDTH = 900;
-
-/**
- * Whether the list is narrower than `min`, read before paint and on every
- * resize. Unmeasured (no layout, no ResizeObserver) reads as `unmeasured`:
- * wide for the full list, narrow for the column beside a thread.
- *
- * Crossing `min` swaps every row element for the other shape, which would
- * drop keyboard focus: the row that held it is noted just before the swap and
- * focused again (without scrolling) once the new rows are in the DOM.
- */
-function useNarrowerThan(min: number, unmeasured: boolean) {
-  const ref = useRef<HTMLElement>(null);
-  const [narrower, setNarrower] = useState(unmeasured);
-  const current = useRef(unmeasured);
-  const focusedThread = useRef<string | null>(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const read = (width: number) => {
-      const next = width > 0 ? width < min : unmeasured;
-      if (next === current.current) return;
-      const active = document.activeElement;
-      focusedThread.current = active instanceof HTMLElement && el.contains(active) ? (active.closest('[data-thread-id]')?.getAttribute('data-thread-id') ?? null) : null;
-      current.current = next;
-      setNarrower(next);
-    };
-    read(el.getBoundingClientRect().width);
-    if (typeof ResizeObserver === 'undefined') return;
-    // The border box, as getBoundingClientRect reads it: contentRect leaves out
-    // the column's 1px border, so a 900px column would read 899 here.
-    const observer = new ResizeObserver((entries) => read(entries[0]?.borderBoxSize?.[0]?.inlineSize ?? el.getBoundingClientRect().width));
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [min, unmeasured]);
-  useLayoutEffect(() => {
-    const id = focusedThread.current;
-    focusedThread.current = null;
-    if (!id || !ref.current) return;
-    const row = [...ref.current.querySelectorAll<HTMLElement>('[data-thread-id]')].find((r) => r.getAttribute('data-thread-id') === id);
-    row?.focus({ preventScroll: true });
-  }, [narrower]);
-  return [ref, narrower] as const;
-}
 
 /**
  * One row of the wide list. With every project shown it is five columns:
@@ -150,7 +112,7 @@ function WideRow({ row, selected, filtered, onOpen }: { row: InboxListRow; selec
       data-thread-id={row.thread_id}
       data-section={row.section}
     >
-      {!filtered && <span className="ib-p">{row.project.name}</span>}
+      {!filtered && <span className="ib-p" dir="auto" title={row.project.name}>{row.project.name}</span>}
       {!filtered && <span>{badgeEl}</span>}
       <span className="ib-subj">
         {filtered && badgeEl}
@@ -207,7 +169,7 @@ function NarrowRow({ row, selected, filtered, onOpen }: { row: InboxListRow; sel
       data-section={row.section}
     >
       <div className="ib-l1">
-        <span className="ib-p">{filtered ? agentName(row.author) : row.project.name}</span>
+        <span className="ib-p" dir="auto" title={filtered ? agentName(row.author) : row.project.name}>{filtered ? agentName(row.author) : row.project.name}</span>
         {count && <span className={`ib-c${row.section === 'quiet' ? ' ib-qlabel' : ''}`}>{count}</span>}
         <span className={`ib-t${count ? '' : ' ib-alone'}`}>{shortTime(row.last_at)}</span>
       </div>
@@ -241,16 +203,16 @@ function PhoneRow({ row, filtered, onOpen }: { row: InboxListRow; filtered: bool
     >
       <span className="ib-m1">
         <AuthorMark author={row.author} />
-        <span className="ib-p">{filtered ? agentName(row.author) : row.project.name}</span>
+        <span className="ib-p" dir="auto" title={filtered ? agentName(row.author) : row.project.name}>{filtered ? agentName(row.author) : row.project.name}</span>
         <span className="ib-t">{shortTime(row.last_at)}</span>
       </span>
-      <span className="ib-m2">{subjectOf(row)}</span>
+      <span className="ib-m2" dir="auto">{subjectOf(row)}</span>
       {(badge || row.thread_name || count || guide) && (
         <span className="ib-m3">
           {badge && <span className="ib-badge">{badge}</span>}
           {row.thread_name && (
             <span className="ib-key">
-              <span className="ib-keyt">{row.thread_name}</span>
+              <span className="ib-keyt" dir="auto">{row.thread_name}</span>
             </span>
           )}
           {count && <span className={`ib-c${row.section === 'quiet' ? ' ib-qlabel' : ''}`}>{count}</span>}
@@ -298,8 +260,14 @@ export function InboxList(props: InboxListProps) {
     >
       <div className="ib-lhead">
         <SidebarTrigger />
-        <h1>{props.title}</h1>
-        {props.path && <span className="ib-path">{props.path}</span>}
+        <h1 dir="auto" title={props.title}>
+          {props.title}
+        </h1>
+        {props.path && (
+          <span className="ib-path" title={props.path}>
+            {props.path}
+          </span>
+        )}
       </div>
       <div className="ib-lbody" ref={bodyRef}>
         {props.ask}
@@ -317,12 +285,12 @@ export function InboxList(props: InboxListProps) {
             <div key={section.id} className="ib-group" data-section-id={section.id} role="group" aria-label={section.label}>
               {quiet ? (
                 <button type="button" className="ib-band" onClick={() => setQuietOpen((v) => !v)} aria-expanded={quietOpen}>
-                  {section.label} <span className="ib-n">{section.threads.length}</span>
+                  {section.label} <span className="ib-n">{formatCount(section.threads.length)}</span>
                   <Icon name={quietOpen ? 'chevD' : 'chevR'} size={14} />
                 </button>
               ) : (
                 <div className="ib-band">
-                  {section.label} <span className="ib-n">{section.threads.length}</span>
+                  {section.label} <span className="ib-n">{formatCount(section.threads.length)}</span>
                 </div>
               )}
               {open &&

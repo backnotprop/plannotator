@@ -29,6 +29,16 @@ describe('heldNotice', () => {
     expect(heldNotice(shown, across)).toEqual({ count: 3, text: '3 new' });
   });
 
+  // The stress test of 2026-10-12, row 5: two projects named "api" (work and
+  // personal) changed, and the notice said "2 new in api".
+  test('two projects that share a name are two projects', () => {
+    const work = (id: string, at: string) => ({ ...row(id, 'api', at, 'agent'), project: { id: 'prj_work', name: 'api' } }) as InboxListRow;
+    const home = (id: string, at: string) => ({ ...row(id, 'api', at, 'agent'), project: { id: 'prj_home', name: 'api' } }) as InboxListRow;
+    const shown = sections(work('a', '2026-10-07T10:00:00Z'));
+    expect(heldNotice(shown, sections(work('a', '2026-10-07T10:00:00Z'), work('b', '2026-10-07T10:05:00Z'), home('c', '2026-10-07T10:06:00Z')))).toEqual({ count: 2, text: '2 new' });
+    expect(heldNotice(shown, sections(work('a', '2026-10-07T10:00:00Z'), work('b', '2026-10-07T10:05:00Z')))).toEqual({ count: 1, text: '1 new in api' });
+  });
+
   // The failure this guards: the Inbox's set-aside note is a person-authored
   // line, so an agent message followed by the note before the list read again
   // made the row's last message the person's, and the agent's message slipped

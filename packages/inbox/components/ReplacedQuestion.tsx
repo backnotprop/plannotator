@@ -18,7 +18,7 @@ import { InlineMarkdown } from '@plannotator/ui/components/InlineMarkdown';
 import { QuestionContext } from '@plannotator/ui/components/blocks/QuestionContext';
 import type { InboxAuthor, InboxMessageWire, InboxQuestion } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
-import { agentName, clockTime } from '../format';
+import { agentName, whenTime } from '../format';
 import { Icon } from '../icons';
 
 /** What replaced a question, read from its thread. */
@@ -64,13 +64,27 @@ export function replacedBy(messages: readonly InboxMessageWire[], question: Inbo
 
 /** A link to another card or message: the prompt (or words), with an arrow saying which way it is. */
 function JumpLink({ children, arrow, onJump, label }: { children: React.ReactNode; arrow: '↑' | '↓'; onJump: () => void; label?: string }) {
+  // An inline element with the button role, not a <button>: a button lays out
+  // as one box, so a long prompt broke the sentence around it and left its
+  // period alone on a line. This one wraps with the text like a link.
   return (
-    <button type="button" className="ib-q-link" onClick={onJump} aria-label={label}>
+    <span
+      role="button"
+      tabIndex={0}
+      className="ib-q-link"
+      onClick={onJump}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        onJump();
+      }}
+      aria-label={label}
+    >
       {children}
       <span className="ib-q-arrow" aria-hidden="true">
         {arrow}
       </span>
-    </button>
+    </span>
   );
 }
 
@@ -106,7 +120,7 @@ export function ReplacedQuestionCard({
   const promptId = `${id}-p`;
   const newsId = `${id}-news`;
   const panelId = `${id}-old`;
-  const at = clockTime(replacement.message.created_at);
+  const at = whenTime(replacement.message.created_at);
   const picked = answer && !answer.skipped ? new Set(answer.selected) : new Set<string>();
   return (
     <fieldset
@@ -234,7 +248,7 @@ export function ChangedNotice({
   const replacement = first ? replacementOf(thread.messages, first) : null;
   if (!first || !replacement) return null;
   const agent = agentName(replacement.message.author);
-  const at = clockTime(replacement.message.created_at);
+  const at = whenTime(replacement.message.created_at);
   const many = questions.length > 1;
   const which = many ? `${questions.length} questions you picked on` : questionName(first, false);
   return (
@@ -333,7 +347,7 @@ export function StaleGuard({
           const replacement = replacementOf(thread.messages, q);
           if (!replacement) return null;
           const agent = agentName(replacement.message.author);
-          const at = clockTime(replacement.message.created_at);
+          const at = whenTime(replacement.message.created_at);
           return (
             <p key={`${q.message_id}/${q.key}`}>
               {replacement.by ? (

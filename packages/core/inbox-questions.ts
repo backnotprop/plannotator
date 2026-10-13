@@ -24,6 +24,7 @@
  */
 
 import { resolveReferenceLinks } from "./markdown-structure";
+import { cutText } from "./text-cut";
 import {
   canonicalQuestionAnswer,
   findQuestionBlocks,
@@ -445,7 +446,8 @@ export function deriveInboxSubject(body: string, questions: readonly Pick<Parsed
   if (!pick) return null;
   const plain = pick.replace(/^#+\s*/, "").replace(/[*_`]/g, "").replace(/\s+/g, " ").trim();
   if (!plain) return null;
-  return plain.length > SUBJECT_MAX ? `${plain.slice(0, SUBJECT_MAX - 1)}…` : plain;
+  // Never inside a character: a cut mid-emoji drew "�…" (cutText keeps whole graphemes).
+  return cutText(plain, SUBJECT_MAX);
 }
 
 function firstLine(body: string): string | null {

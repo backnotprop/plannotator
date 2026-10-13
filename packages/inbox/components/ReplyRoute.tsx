@@ -1,7 +1,7 @@
 import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { InboxMessageWire } from '@plannotator/core/inbox-types';
 import type { LiveSession, LiveSessionsModel } from '../api';
-import { clockTime } from '../format';
+import { whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
 import { hostName, sessionWords } from './NewMessage';
 
@@ -234,7 +234,7 @@ export function RouteChoice({
             <HostMark host={row.live.host} />
             <span>
               <span className="ib-t">
-                {hostName(row.live.host)} · {row.asker ? 'the session that asked' : `started ${clockTime(row.live.started_at)}`}
+                {hostName(row.live.host)} · {row.asker ? 'the session that asked' : `started ${whenTime(row.live.started_at)}`}
               </span>
               <span className="ib-d">{row.ended ? 'Ended just now.' : sessionWords(row.live)}</span>
             </span>

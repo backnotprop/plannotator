@@ -13,13 +13,13 @@ import { AttachmentTiles, AttachmentsCount, changedCount } from './AttachmentTil
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import { attachmentSequence } from '../stepping';
 import { AnnotationsChip } from './AnnotationsChip';
-import { agentName, clockTime, dayWords, plural } from '../format';
+import { agentName, clockTime, dayWords, fullTime, plural, whenTime } from '../format';
 import { answerWords, foldSnippet, holdingsOf, isDelivered, isPersonReply, lastNonNote, lookBoundary, newSinceLook, planFolds, snippetText, type FoldSnippet, type Holding } from '../folding';
 import { AuthorMark, DecisionDiamond, Icon } from '../icons';
 import { PILL_BAND_PX, atEnd, followBy, lookThrough, measureFirstLines, unseenArrivals, useSeenOnSight } from '../seenOnSight';
 import { DecisionCard } from './DecisionCard';
 import { GuideCard } from './GuideCard';
-import { inboxMessageImageBase } from '../images';
+import { inboxMessageImageBase, markTallImage } from '../images';
 import { reportUnsentReply } from '../unsent';
 import { canToggleRead } from '../markRead';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
@@ -207,6 +207,20 @@ export function MessageBody({
 }) {
   const blocks = useMemo(() => parseMarkdownToBlocks(message.body, { frontmatter: false }), [message.body]);
   const refRepo = useRefRepo(repo);
+  // A tall screenshot in the body shows its top, cropped like the gallery's
+  // (inbox.css); a click still opens it whole.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const onLoad = (event: Event) => {
+      if (event.target instanceof HTMLImageElement) markTallImage(event.target);
+    };
+    for (const img of body.querySelectorAll('img')) if (img.complete) markTallImage(img);
+    // Load does not bubble: a capture listener on the body hears every image in it.
+    body.addEventListener('load', onLoad, true);
+    return () => body.removeEventListener('load', onLoad, true);
+  }, []);
   // A link to a file this message attached opens it beside the thread; any
   // other local link is inert text (links.ts). Kept stable across renders,
   // so raw-HTML blocks do not redraw their links on every pick.
@@ -267,7 +281,7 @@ export function MessageBody({
   );
 
   return (
-    <div className="ib-body" data-message-id={message.id}>
+    <div className="ib-body" data-message-id={message.id} ref={bodyRef}>
       <Viewer
         blocks={blocks}
         markdown={message.body}
@@ -1017,11 +1031,11 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     if (q.state === 'sent') {
       const at = sentAt(q.sent_reply_id);
       // A Send skipped it because the person left it unanswered.
-      if (q.answer?.skipped && q.answer.by_reply) return at ? `Skipped with your reply · ${clockTime(at)}` : 'Skipped with your reply';
-      return at ? `Sent ${clockTime(at)}` : 'Sent';
+      if (q.answer?.skipped && q.answer.by_reply) return at ? `Skipped with your reply · ${whenTime(at)}` : 'Skipped with your reply';
+      return at ? `Sent ${whenTime(at)}` : 'Sent';
     }
-    if (q.state === 'closed' && q.set_aside_at) return `Closed unanswered when you marked it read · ${clockTime(q.set_aside_at)}`;
-    if (q.state === 'picked' && q.picked_at) return `Picked ${clockTime(q.picked_at)}, not sent`;
+    if (q.state === 'closed' && q.set_aside_at) return `Closed unanswered when you marked it read · ${whenTime(q.set_aside_at)}`;
+    if (q.state === 'picked' && q.picked_at) return `Picked ${whenTime(q.picked_at)}, not sent`;
     return null;
   };
 
@@ -1260,10 +1274,10 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       ? null
       : last.to
         ? last.delivery
-          ? { state: 'delivered', text: `Delivered to ${toName(last, last.delivery)}, ${clockTime(last.delivery.at)}` }
+          ? { state: 'delivered', text: `Delivered to ${toName(last, last.delivery)}, ${whenTime(last.delivery.at)}` }
           : { state: 'queued', text: `${toName(last, last.to)} takes it as its next turn.` }
         : sent?.checked_at
-          ? { state: 'delivered', text: `Delivered to ${asker}, ${clockTime(sent.checked_at)}` }
+          ? { state: 'delivered', text: `Delivered to ${asker}, ${whenTime(sent.checked_at)}` }
           : askerEnded && asking
             ? { state: 'saved', ended: true, text: `Saved for ${asking.name}. The session that asked has ended, so it waits here until an agent reads this thread.` }
             : { state: 'saved', text: `Saved for ${asker}. It sees it when it checks.` };
@@ -1297,6 +1311,24 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       onShowAll={() => setRoute((current) => ({ ...current, showAll: true }))}
     />
   ) : null;
+
+  // While new messages are below the view: a pill that goes to them.
+  const newPill = (
+    <div className="ib-npill-wrap">
+      <button
+        type="button"
+        className="ib-npill"
+        data-new-pill=""
+        data-off={chrome.pill > 0 ? undefined : ''}
+        tabIndex={chrome.pill > 0 ? 0 : -1}
+        aria-hidden={chrome.pill === 0}
+        onClick={() => jumpNew(true)}
+      >
+        <Icon name="arrowDown" size={15} />
+        {Math.max(1, chrome.pill)} new
+      </button>
+    </div>
+  );
 
   // The warning toast's Reply: the reply box opens, once.
   useEffect(() => {
@@ -1420,7 +1452,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         ) : (
           <>
             {/* The subject, once it has scrolled away (the heading stays the one a screen reader reads). */}
-            <span className="ib-phsubj" data-header-subject="" data-on={chrome.subject ? '' : undefined} aria-hidden="true">
+            <span className="ib-phsubj" dir="auto" data-header-subject="" data-on={chrome.subject ? '' : undefined} aria-hidden="true">
               {thread.subject ?? '(no subject)'}
             </span>
             <button
@@ -1449,13 +1481,13 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       </div>
       <div className={`ib-pbody${one ? '' : ' ib-folding'}`} ref={bodyRef}>
         {/* A focus target (the way back's fallback, a stacked thread), never a tab stop. */}
-        <h2 className="ib-subject" tabIndex={-1}>{thread.subject ?? '(no subject)'}</h2>
+        <h2 className="ib-subject" dir="auto" tabIndex={-1}>{thread.subject ?? '(no subject)'}</h2>
         {readAt !== null && !resolved && (
           <div className="ib-readline" data-read-line="">
             <Icon name="checkCircle" size={16} />
             <div>
               <span>
-                Read {clockTime(readAt)}. It stays out of the top until {asker} writes again.
+                Read {whenTime(readAt)}. It stays out of the top until {asker} writes again.
               </span>
               {closedByRead.length > 0 && (
                 <>
@@ -1516,7 +1548,9 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
           }
           const isAgent = message.author.kind === 'agent';
           const name = isAgent ? agentName(message.author) : 'You';
-          const time = clockTime(message.created_at);
+          // The day too when it is not today, and the whole moment on hover.
+          const time = whenTime(message.created_at);
+          const fullWhen = fullTime(message.created_at);
           const open = one || !fold.folded.has(message.id);
           if (!open) {
             const holdings = holdingsOf(message, {
@@ -1549,12 +1583,12 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                       <Icon name="reply" />
                     </span>
                   )}
-                  <span className="ib-fl-nm">{name}</span>
-                  <span className="ib-fl-sn" data-snippet={snippet.kind} title={snippetText(snippet)}>
+                  <span className="ib-fl-nm" title={name}>{name}</span>
+                  <span className="ib-fl-sn" dir="auto" data-snippet={snippet.kind} title={snippetText(snippet)}>
                     <SnippetText snippet={snippet} />
                   </span>
                   <HoldingChips holdings={holdings} />
-                  <span className="ib-fl-tm">
+                  <span className="ib-fl-tm" title={fullWhen}>
                     {isNew && <span className="ib-newtag">New</span>}
                     {time}
                   </span>
@@ -1625,8 +1659,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
               )}
               {/* Spans, not divs: in a multi-message thread this sits inside the fold button. */}
               <span className="ib-whobox">
-                <span className="ib-who" aria-hidden={cover || undefined}>
-                  {name} <span>in {thread.project.name}</span>
+                <span className="ib-who" aria-hidden={cover || undefined} title={`${name} in ${thread.project.name}`}>
+                  <bdi>{name}</bdi> <span>in <bdi>{thread.project.name}</bdi></span>
                 </span>
                 {count ? (
                   <span className="ib-to ib-to-files">
@@ -1683,7 +1717,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                 )}
                 <div className="ib-tm">
                   {isNew && <span className="ib-newtag">New</span>}
-                  {time}
+                  <span title={fullWhen}>{time}</span>
                   {isAgent && liveMessage(message) && (
                     <button type="button" className="ib-mut" onClick={() => openBox(picksCount > 0)} title="Reply" aria-label="Reply">
                       <Icon name="reply" size={15} />
@@ -1781,28 +1815,14 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
           );
           return before;
         })}
-        {showNew && (
-          // While new messages are below the view: a pill that goes to them.
-          <div className="ib-npill-wrap">
-            <button
-              type="button"
-              className="ib-npill"
-              data-new-pill=""
-              data-off={chrome.pill > 0 ? undefined : ''}
-              tabIndex={chrome.pill > 0 ? 0 : -1}
-              aria-hidden={chrome.pill === 0}
-              onClick={() => jumpNew(true)}
-            >
-              <Icon name="arrowDown" size={15} />
-              {Math.max(1, chrome.pill)} new
-            </button>
-          </div>
-        )}
+        {showNew && !phone && newPill}
         <div className="ib-sr" aria-live="polite" data-fold-live="">
           {announced}
         </div>
       </div>
       <div className="ib-pfoot">
+        {/* A phone has no room to float the pill over the messages (it sat on a sender's row): it is the foot's first row there. */}
+        {showNew && phone && newPill}
         {/* One status region, always mounted, so a screen reader announces the note when it appears. */}
         <div role="status" id={noteId} data-asker-note="">
           {showAskerNote && asking && <AskerEndedNote asking={asking} project={thread.project.name} anyLive={anyOtherLive} />}

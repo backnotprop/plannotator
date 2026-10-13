@@ -6,7 +6,7 @@
  */
 
 import { inboxAttachmentKindLabel, type InboxAttachmentState, type InboxMessageWire } from '@plannotator/core/inbox-types';
-import { agentName, clockTime } from './format';
+import { agentName, whenTime } from './format';
 
 /** One file in the thread's sequence, with the message it came in. */
 export interface AttachmentStep {
@@ -30,12 +30,12 @@ export function attachmentSequence(messages: readonly InboxMessageWire[], attach
     for (const attachment of attachments) {
       if (attachment.message_id !== message.id || placed.has(attachment.id)) continue;
       placed.add(attachment.id);
-      steps.push({ attachment, messageId: message.id, sender: agentName(message.author), sentAt: clockTime(message.created_at) });
+      steps.push({ attachment, messageId: message.id, sender: agentName(message.author), sentAt: whenTime(message.created_at) });
     }
   }
   for (const attachment of attachments) {
     if (placed.has(attachment.id)) continue;
-    steps.push({ attachment, messageId: attachment.message_id, sender: 'the agent', sentAt: clockTime(attachment.sent_at) });
+    steps.push({ attachment, messageId: attachment.message_id, sender: 'the agent', sentAt: whenTime(attachment.sent_at) });
   }
   return steps;
 }

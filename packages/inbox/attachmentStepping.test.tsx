@@ -78,7 +78,7 @@ test('the sequence is every attachment in thread order: message by message, tile
 });
 
 test('a step announces position, name, kind, a change, and the message it came in', () => {
-  expect(stepAnnouncement(STEPS, 2)).toMatch(/^3 of 4, checkout-mobile\.png, PNG image, changed since it was sent, from Claude's \d{1,2}:\d{2} [AP]M message$/);
+  expect(stepAnnouncement(STEPS, 2)).toMatch(/^3 of 4, checkout-mobile\.png, PNG image, changed since it was sent, from Claude's (?:[A-Z][a-z]{2} \d{1,2}, (?:\d{4}, )?)?\d{1,2}:\d{2} [AP]M message$/);
   expect(stepAnnouncement(STEPS, 1)).toMatch(/^2 of 4, refund-policy\.pdf, PDF, from Claude's /);
 });
 

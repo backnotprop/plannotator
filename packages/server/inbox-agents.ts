@@ -35,6 +35,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync,
 import { homedir, tmpdir } from "node:os";
 import { spawn as spawnChild } from "node:child_process";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
+import { cutText } from "@plannotator/core/text-cut";
 import {
   INBOX_AGENT_IDS,
   INBOX_AGENT_LABELS,
@@ -802,7 +803,7 @@ export interface ConnectOptions {
 
 function firstLine(text: string): string {
   const line = text.split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? "";
-  return line.length > 200 ? `${line.slice(0, 199)}…` : line;
+  return cutText(line, 200);
 }
 
 /** A time limit as people read it: "10 s", "1.5 s" (never rounded up to a limit it was not). */

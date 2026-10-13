@@ -6,6 +6,7 @@ import { plural } from '../format';
 import { Icon } from '../icons';
 import type { AttachmentStep } from '../stepping';
 import { changedLine, iconOf } from './AttachmentTiles';
+import { FileName } from './FileName';
 
 /** Where a step came from: it decides where focus goes after it. */
 export type StepSource = 'button' | 'menu' | 'key';
@@ -157,7 +158,9 @@ export function AttachmentStepper(props: AttachmentStepperProps) {
                 {isImage ? <img src={attachmentImageUrl(attachment, readableVersion(attachment))} alt="" loading="lazy" decoding="async" draggable={false} /> : <Icon name={iconOf(attachment)} size={14} />}
               </span>
               <span className="ib-stept">
-                <b>{attachment.name}</b>
+                <b>
+                  <FileName name={attachment.name} />
+                </b>
                 {changed ? (
                   <span className="ib-ch">{changed}</span>
                 ) : (
@@ -248,7 +251,7 @@ export function AttachmentStepper(props: AttachmentStepperProps) {
             ·
           </span>
           <span className="ib-stepnm" data-step-name="">
-            {current.attachment.name}
+            <FileName name={current.attachment.name} title={false} />
           </span>
           <Icon name="chevD" size={13} />
         </button>

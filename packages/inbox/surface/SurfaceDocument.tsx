@@ -8,6 +8,7 @@
 
 import { forwardRef, lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { diagramTargetName, diagramTargetText, type DiagramAnchor } from '@plannotator/core/diagram-anchor';
+import { sliceText } from '@plannotator/core/text-cut';
 import { inboxAttachmentKindLabel, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type SurfaceOpenAttachment } from '@plannotator/core/inbox-types';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
 import { HtmlViewer } from '@plannotator/ui/components/html-viewer';
@@ -48,7 +49,7 @@ function shortLabel(text: string): string {
   const line = text.replace(/\s+/g, ' ').trim();
   if (line.length <= 60) return line;
   const cut = line.slice(0, 60);
-  return `${cut.slice(0, cut.lastIndexOf(' ') > 30 ? cut.lastIndexOf(' ') : 60)}…`;
+  return `${cut.lastIndexOf(' ') > 30 ? cut.slice(0, cut.lastIndexOf(' ')) : sliceText(line, 60)}…`;
 }
 
 export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function SurfaceDocument({ open, records, interact }, ref) {

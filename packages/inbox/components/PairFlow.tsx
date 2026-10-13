@@ -263,7 +263,7 @@ export function PairFlow({ lan, tailnet, busy, error, onSwitchLan, onSwitchTailn
                   'Not working'
                 )}
               </span>
-              <span className="ib-way-addr" title={working ? (address ?? undefined) : undefined}>
+              <span className={`ib-way-addr${working ? '' : ' ib-way-err'}`} title={working ? (address ?? undefined) : undefined}>
                 {working ? <code>{address}</code> : (state?.error ?? 'Not reachable yet')}
               </span>
               <span className="ib-way-btns">
@@ -426,7 +426,8 @@ export function PairFlow({ lan, tailnet, busy, error, onSwitchLan, onSwitchTailn
                     </span>
                   </div>
                 )}
-                {!expired && (
+                {/* Only with an address to reach: never the heading over an empty list. */}
+                {!expired && (lanAddress || tailnetAddress) && (
                   <div className="ib-before">
                     <h5>Before you scan, on your phone</h5>
                     <ul className="ib-checks">

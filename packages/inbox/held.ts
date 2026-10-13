@@ -94,7 +94,9 @@ export function heldNotice(
   open?: OpenThread | null,
 ): HeldNotice {
   const before = rowsById(shown);
-  const projects = new Set<string>();
+  // By id: two projects can share a name ("api" at work and at home), and two
+  // projects are never "new in api".
+  const projects = new Map<string, string>();
   let count = 0;
   for (const row of rowsById(latest).values()) {
     // The thread the person has open (or just closed, until the list settles)
@@ -102,10 +104,10 @@ export function heldNotice(
     if (isOpenRow(row, open)) continue;
     if (!hasNewAgentActivity(before.get(row.thread_id), row, openedHere)) continue;
     count += 1;
-    projects.add(row.project.name);
+    projects.set(row.project.id, row.project.name);
   }
   if (count === 0) return { count, text: null };
-  return { count, text: projects.size === 1 ? `${count} new in ${[...projects][0]}` : `${count} new` };
+  return { count, text: projects.size === 1 ? `${count} new in ${[...projects.values()][0]}` : `${count} new` };
 }
 
 /**

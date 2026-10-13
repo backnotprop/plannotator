@@ -11,7 +11,7 @@ import { Viewer } from '@plannotator/ui/components/Viewer';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import type { InboxHealth } from '@plannotator/core/inbox-types';
 import type { UpdateDetails, UpdateSwitches, WhatsNewModel } from '../api';
-import { clockTime, dayWords, tildePath } from '../format';
+import { clockTime, dayWords, formatCount, tildePath, whenTime } from '../format';
 import { Icon } from '../icons';
 import { CopyButton } from './ConnectPicker';
 import { SidebarTrigger } from '../shell/sidebar';
@@ -225,6 +225,9 @@ export interface UpdateDialogProps {
   onAutoUpdate: (next: boolean) => void;
 }
 
+/** The open sessions the dialog names; the rest are counted. */
+const SESSIONS_SHOWN = 5;
+
 /** Available → press. Update now in the first step (the owner's answer 4). */
 export function UpdateDialog({ details, update, error, busy, onUpdateNow, onRemindTomorrow, onCancel, onWhatsNew, onAutoUpdate }: UpdateDialogProps) {
   const released = releasedOn(details?.latest?.published_at ?? update.publishedAt);
@@ -264,12 +267,14 @@ export function UpdateDialog({ details, update, error, busy, onUpdateNow, onRemi
               <span>
                 Open reviews keep running on {update.current} until you finish them; new ones open on {update.version}.
                 {details && details.sessions.length > 0 && (
+                  // The first few, then how many more: thirty open reviews never push Update now off the dialog (decision 7).
                   <ul className="ib-sess">
-                    {details.sessions.map((s) => (
+                    {details.sessions.slice(0, SESSIONS_SHOWN).map((s) => (
                       <li key={`${s.label}-${s.started_at}`}>
-                        {s.project} · {s.mode === 'review' ? 'code review' : s.mode}, opened {clockTime(s.started_at)}
+                        {s.project} · {s.mode === 'review' ? 'code review' : s.mode}, opened {whenTime(s.started_at)}
                       </li>
                     ))}
+                    {details.sessions.length > SESSIONS_SHOWN && <li data-sessions-more="">and {formatCount(details.sessions.length - SESSIONS_SHOWN)} more</li>}
                   </ul>
                 )}
               </span>
@@ -459,18 +464,6 @@ export function WhatsNewPage({
           </div>
         </div>
         {error && <div className="ib-error">{error}</div>}
-        {model && model.skipped.length > 0 && (
-          <div className="ib-wn-skipped">
-            <h2>Also in the releases since {model.current}</h2>
-            <ul>
-              {model.skipped.map((h) => (
-                <li key={h.version}>
-                  <b>{h.version}</b> {h.text.replace(/`/g, '')}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
         {model && model.notes ? (
           <div className="ib-body ib-wn-body">
             <Viewer
@@ -492,8 +485,44 @@ export function WhatsNewPage({
         ) : (
           model && <p className="ib-sum">The release has no notes. They are on GitHub.</p>
         )}
+        {/* The skipped releases come after this release's notes, folded when there are more than a few (decision 7). */}
+        {model && model.skipped.length > 0 && <SkippedReleases current={model.current} skipped={model.skipped} />}
       </div>
     </div>
+  );
+}
+
+/** More skipped releases than this are folded under their heading. */
+const SKIPPED_SHOWN = 3;
+
+function SkippedReleases({ current, skipped }: { current: string; skipped: WhatsNewModel['skipped'] }) {
+  const items = (
+    <ul>
+      {skipped.map((h) => (
+        <li key={h.version}>
+          <b>{h.version}</b> {h.text.replace(/`/g, '')}
+        </li>
+      ))}
+    </ul>
+  );
+  const heading = `Also in the releases since ${current}`;
+  if (skipped.length <= SKIPPED_SHOWN) {
+    return (
+      <div className="ib-wn-skipped" data-skipped-releases="">
+        <h2>{heading}</h2>
+        {items}
+      </div>
+    );
+  }
+  return (
+    <details className="ib-wn-skipped" data-skipped-releases="">
+      <summary>
+        <h2>
+          {heading} <span className="ib-n">· {skipped.length}</span>
+        </h2>
+      </summary>
+      {items}
+    </details>
   );
 }
 

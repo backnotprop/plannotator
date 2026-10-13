@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { inboxAttachmentKindLabel, isInboxAnnotatableKind, readInboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { attachmentDownloadUrl, attachmentImageUrl, readableVersion } from '../attachments';
-import { clockTime, formatBytes, plural } from '../format';
+import { formatBytes, plural, shortTime, whenTime } from '../format';
 import { Icon, type IconName } from '../icons';
+import { FileName } from './FileName';
 
 /** The icon a tile (and the stepper's list) shows for a file of this kind. */
 export function iconOf(attachment: InboxAttachmentState): IconName {
@@ -36,7 +37,8 @@ export function changedLine(attachment: InboxAttachmentState, short = false): st
     return attachment.unavailable.code === 'attachment_missing' ? 'No longer on disk; the sent version opens' : 'Changed type; the sent version opens';
   }
   if (attachment.changed_since_sent && attachment.current) {
-    return short ? `Changed ${clockTime(attachment.current.mtime)}` : `Changed since it was sent, edited ${clockTime(attachment.current.mtime)}`;
+    // Short (a tile, a caption, the step list): the time today, else the day, so the count beside it keeps its room.
+    return short ? `Changed ${shortTime(attachment.current.mtime)}` : `Changed since it was sent, edited ${whenTime(attachment.current.mtime)}`;
   }
   return null;
 }
@@ -85,7 +87,8 @@ function GalleryImage({ image, count, onOpen }: { image: InboxAttachmentState; c
   const tall = ratio < TALL_RATIO;
   const src = attachmentImageUrl(image, readableVersion(image));
   const changed = changedLine(image, true);
-  const detail = changed ?? `${sizeLine(image)}${count > 0 ? `, ${plural(count, 'comment')}` : ''}`;
+  // A changed image keeps its comment count beside the changed line.
+  const detail = `${changed ?? sizeLine(image)}${count > 0 ? `, ${plural(count, 'comment')}` : ''}`;
   const label = `View ${image.name}, ${inboxAttachmentKindLabel(image.kind, image.name, image.media_type)}${changed ? `, ${changed.toLowerCase()}` : ''}${count > 0 ? `, ${plural(count, 'comment')}` : ''}`;
   return (
     <button
@@ -120,7 +123,7 @@ function GalleryImage({ image, count, onOpen }: { image: InboxAttachmentState; c
         {count > 0 && <span className="ib-gal-count">{count}</span>}
       </span>
       <span className="ib-gal-cap">
-        <span className="ib-nm" title={image.name}>{image.name}</span>
+        <FileName name={image.name} className="ib-nm" />
         <span className={changed ? 'ib-ch' : 'ib-kd'}>{detail}</span>
       </span>
     </button>
@@ -168,8 +171,14 @@ export function AttachmentTiles({
       <div className="ib-atts ib-tiles">
         {attachments.map((attachment) => {
           const count = annotationCounts.get(attachment.path) ?? 0;
-          const changed = changedLine(attachment);
-          const detail = changed ?? `${sizeLine(attachment)}${count > 0 ? `, ${plural(count, 'annotation')}` : ''}`;
+          // The tile says it short ("Changed 6:43 PM"), on one line, and keeps
+          // the annotation count beside it; the whole sentence is its hover
+          // text and what a screen reader hears.
+          const changed = changedLine(attachment, true);
+          const changedLong = changedLine(attachment);
+          const counted = count > 0 ? `, ${plural(count, 'annotation')}` : '';
+          const detail = `${changed ?? sizeLine(attachment)}${counted}`;
+          const detailLong = `${changedLong ?? sizeLine(attachment)}${counted}`;
           // The header's band shows the same tiles while the foot's are on the page: ids stay unique.
           const detailId = `ib-${header ? 'hatt' : 'att'}-detail-${attachment.id}`;
           const isImage = readInboxAttachmentKind(attachment.kind) === 'image';
@@ -184,10 +193,19 @@ export function AttachmentTiles({
           );
           const text = (
             <span className="ib-att-text">
-              <span className="ib-nm">{attachment.name}</span>
-              <span className={changed ? 'ib-ch' : 'ib-kd'} id={detailId}>
-                {detail}
-              </span>
+              <FileName name={attachment.name} className="ib-nm" />
+              {changed ? (
+                <span className="ib-ch" title={detailLong}>
+                  <span aria-hidden="true">{detail}</span>
+                  <span className="ib-sr" id={detailId}>
+                    {detailLong}
+                  </span>
+                </span>
+              ) : (
+                <span className="ib-kd" id={detailId}>
+                  {detail}
+                </span>
+              )}
             </span>
           );
           if (!opensInWindow(attachment)) {

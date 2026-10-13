@@ -5,6 +5,7 @@
  */
 
 import { shouldStripFrontmatter } from '@plannotator/core/annotatable';
+import { cutText } from '@plannotator/core/text-cut';
 import { readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { AnnotationType, type Annotation, type Block, type CodeAnnotation, type ImageAttachment } from '@plannotator/ui/types';
 import { diagramDocumentBlocks, exportLinkedDocAnnotations, parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
@@ -123,7 +124,7 @@ export function codeRangeOf(annotation: Annotation): InboxCodeRange | null {
 export function codeCommentAnnotation(input: { id: string; lineStart: number; lineEnd: number; text: string; code: string; author?: string; createdA?: number }): CodeCommentAnnotation {
   const lines = input.code.split('\n');
   const first = lines.find((line) => line.trim() !== '')?.trim() ?? '';
-  const quote = `${first.length > 120 ? `${first.slice(0, 119)}…` : first}${lines.length > 1 ? ' …' : ''}`;
+  const quote = `${cutText(first, 120)}${lines.length > 1 ? ' …' : ''}`;
   return {
     id: input.id,
     blockId: `code-L${input.lineStart}-${input.lineEnd}`,
@@ -213,7 +214,7 @@ export function recordQuote(record: InboxAnnotationRecord): string {
   if (!comment) return annotationQuote(annotationOf(record));
   const lines = (comment.selectedText ?? comment.originalCode ?? '').split('\n');
   const first = lines.find((line) => line.trim() !== '')?.trim() ?? '';
-  return `${first.length > 120 ? `${first.slice(0, 119)}…` : first}${lines.length > 1 && first ? ' …' : ''}`;
+  return `${cutText(first, 120)}${lines.length > 1 && first ? ' …' : ''}`;
 }
 
 export const GUIDE_FEEDBACK_TITLE = 'Feedback on the guided review';
