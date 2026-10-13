@@ -123,6 +123,31 @@ describe("the marked section", () => {
     }
   });
 
+  test("Codex: a note in AGENTS.md is still on after AGENTS.override.md appears, and Off removes it from both files", () => {
+    const agents = file(".codex", "AGENTS.md");
+    const override = file(".codex", "AGENTS.override.md");
+    write(agents, "Mine.\n");
+    expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "added" });
+    // The person adds an override later, and copies the section into it.
+    write(override, `Override.\n\n${INBOX_NOTE_BLOCK}\n`);
+    expect(noteStatus("codex", dataDir, e).state).toBe("added");
+    write(override, "Override.\n");
+    const status = noteStatus("codex", dataDir, e);
+    expect(status.state).toBe("added");
+    expect(status.reason).toContain("~/.codex/AGENTS.md");
+    expect(removeInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "removed" });
+    expect(read(agents)).toBe("Mine.\n");
+    expect(read(override)).toBe("Override.\n");
+    expect(noteStatus("codex", dataDir, e).state).toBe("absent");
+    // With the copy in both: both go.
+    write(agents, "Mine.\n");
+    addInboxNote("codex", dataDir, e);
+    write(agents, `Mine.\n\n${INBOX_NOTE_BLOCK}\n`);
+    expect(removeInboxNote("codex", dataDir, e)).toMatchObject({ ok: true });
+    expect(read(agents)).toBe("Mine.\n");
+    expect(read(override)).toBe("Override.\n");
+  });
+
   test("a symlinked file (dotfiles) is written at its target and stays a link", () => {
     const real = join(fake.root, "dotfiles", "GEMINI.md");
     write(real, "Mine.\n");

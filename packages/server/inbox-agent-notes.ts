@@ -31,6 +31,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import {
+  INBOX_AGENT_LABELS,
   INBOX_NOTE_AGENT_IDS,
   type InboxAgentNoteStatus,
   type InboxNoteAgentId,
@@ -256,12 +257,27 @@ export function noteStatus(agent: InboxNoteAgentId, dataDir: string, e: AgentEnv
   const base = { agent, path: displayPath(target.path, e), target: linked, create: target.create, created: record?.created === true, reason: null, shared_with: shared };
   if (!target.path) return { ...base, state: "unavailable", reason: target.reason };
   const read = readAgentFile(target.path);
+  // The note this agent's record names, in a file the agent no longer reads first (Codex's
+  // AGENTS.override.md appeared after the note went into AGENTS.md): still on, so Off can remove it.
+  const elsewhere = (): InboxAgentNoteStatus | null => {
+    if (!record || record.path === real) return null;
+    const there = readAgentFile(record.path);
+    if (there.kind !== "file") return null;
+    const block = findBlock(there.text);
+    if (block.kind !== "one") return null;
+    const shownThere = displayPath(record.path, e);
+    return {
+      ...base,
+      state: sha256(block.block) === record.block_sha256 ? "added" : "edited",
+      reason: `The note is in ${shownThere}, which ${INBOX_AGENT_LABELS[agent]} no longer reads first; turning it off removes it there.`,
+    };
+  };
   if (read.kind === "missing") {
-    return target.reason ? { ...base, state: "unavailable", reason: target.reason } : { ...base, state: "absent" };
+    return elsewhere() ?? (target.reason ? { ...base, state: "unavailable", reason: target.reason } : { ...base, state: "absent" });
   }
   if (read.kind === "refused") return { ...base, state: "refused", reason: read.reason };
   const found = findBlock(read.text);
-  if (found.kind === "none") return { ...base, state: "absent" };
+  if (found.kind === "none") return elsewhere() ?? { ...base, state: "absent" };
   if (found.kind === "damaged") return { ...base, state: "damaged", reason: "the Plannotator section's markers are broken; fix or delete it by hand" };
   const hash = sha256(found.block);
   const owner = record ?? shared.map((id) => readInboxAgentNotes(dataDir).notes[id]).find(Boolean);
@@ -343,6 +359,31 @@ export function addInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentE
  * block; only this agent's record goes.
  */
 export function removeInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentEnvironment, path?: string): NoteChange {
+  if (path) return removeNoteFrom(agent, dataDir, e, path);
+  // Switching off removes the note from the file the record names AND from the file the agent reads
+  // now, when they differ (Codex: the note went into AGENTS.md, then AGENTS.override.md appeared).
+  const record = readInboxAgentNotes(dataDir).notes[agent];
+  const files: string[] = [];
+  for (const file of [record?.path, noteTarget(agent, e).path, ...candidatePaths(agent, e)]) {
+    if (file && !files.some((known) => resolved(known) === resolved(file))) files.push(file);
+  }
+  if (files.length === 0) return removeNoteFrom(agent, dataDir, e, undefined);
+  const results = files.map((file) => removeNoteFrom(agent, dataDir, e, file));
+  const failed = results.find((result) => !result.ok);
+  if (failed) {
+    // Keep the record while a copy is left, so Off (or uninstall) can try again.
+    if (record) recordNote(dataDir, agent, record);
+    return failed;
+  }
+  const order = ["deleted", "removed", "kept-shared", "unchanged"] as const;
+  for (const action of order) {
+    const hit = results.find((result) => result.ok && result.action === action);
+    if (hit) return hit;
+  }
+  return results[0]!;
+}
+
+function removeNoteFrom(agent: InboxNoteAgentId, dataDir: string, e: AgentEnvironment, path: string | undefined): NoteChange {
   const notes = readInboxAgentNotes(dataDir).notes;
   const record = notes[agent];
   const file = path ?? record?.path ?? noteTarget(agent, e).path;

@@ -138,7 +138,9 @@ function AgentGroup({
           : ''
     : '';
   const noteSub =
-    note?.state === 'edited'
+    noteOn && note?.reason
+      ? note.reason
+      : note?.state === 'edited'
       ? "You edited this note, so Plannotator won't update it. Turning it off removes it as you left it."
       : note?.state === 'unavailable' || note?.state === 'damaged' || note?.state === 'refused'
         ? note.reason
