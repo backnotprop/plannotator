@@ -474,7 +474,7 @@ describe('register', () => {
     const again = await $.prompt.context({ blocks: base })
     expect(first.blocks.map((b: any) => b.name)).toEqual(['currentDate', 'plannotatorInbox'])
     // The tool by the full name the engine registered: tool search finds the deferred tool by it.
-    expect(first.blocks[1].text).toBe(`Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with ${INBOX_TOOL} send_message and keep going. Their reply comes back here.`)
+    expect(first.blocks[1].text).toBe(`Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with ${INBOX_TOOL} send_message and keep going. Their reply comes back here. Run \`plannotator inbox --help\` for how it works.`)
     expect(again).toEqual(first)
     expect(w.tools.some((t) => t.name === 'plannotator_inbox')).toBe(true)
   })

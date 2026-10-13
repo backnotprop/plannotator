@@ -142,14 +142,14 @@ export const INBOX_TOOL_WAKE_NOTE =
  * (the reply comes back as a turn).
  */
 export const INBOX_REMINDER_TEXT =
-  "Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with plannotator_inbox send_message and keep going. Their reply comes back here."
+  "Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with plannotator_inbox send_message and keep going. Their reply comes back here. Run `plannotator inbox --help` for how it works."
 
 /**
  * The same line for a host without the wake (OpenCode 1): the reply does not
  * come back by itself there, so it names wait_for_reply instead.
  */
 export const INBOX_REMINDER_TEXT_NO_WAKE =
-  "Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with plannotator_inbox send_message and keep going. Call wait_for_reply when you need their answer."
+  "Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with plannotator_inbox send_message and keep going. Call wait_for_reply when you need their answer. Run `plannotator inbox --help` for how it works."
 
 /**
  * The reminder naming the tool as the host registered it. Claude Code defers

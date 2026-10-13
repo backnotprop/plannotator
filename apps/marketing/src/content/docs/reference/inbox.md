@@ -161,13 +161,13 @@ The setting is read when a session starts and never during one, because a change
 
 Once you have run the Inbox on this computer, a session that has the tool also gets one line, so the agent knows when the Inbox is the right place:
 
-> Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with plannotator_inbox send_message and keep going. Their reply comes back here.
+> Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with plannotator_inbox send_message and keep going. Their reply comes back here. Run `plannotator inbox --help` for how it works.
 
 Where it goes:
 
 - **Claude Code:** once, in the context of the conversation's first message. It names the tool by its full name (`mcp__…__plannotator_inbox`), so Claude can find it.
 - **Pi:** once, as a hidden message with the session's first prompt.
-- **OpenCode:** a line in the system prompt of every request. On OpenCode 1, and on an OpenCode 2 that cannot bring a reply back by itself, the last sentence says to call `wait_for_reply` instead.
+- **OpenCode:** a line in the system prompt of every request. On OpenCode 1, and on an OpenCode 2 that cannot bring a reply back by itself, the sentence about the reply says to call `wait_for_reply` instead.
 
 The text is fixed and never changes during a session, so it costs little and does not invalidate the prompt cache. It never appears without the tool. To turn it off, set `inboxReminder` in `~/.plannotator/config.json`: `false` for every host, or one per host, for example `{ "inboxReminder": { "claude-code": false } }`.
 
