@@ -168,6 +168,29 @@ test('the toggle closes and opens the sidebar on the spring, and the list takes 
   expect(await cookie(page, 'plannotator-inbox-sidebar-open')).toBe('true');
 });
 
+test('Copy connect prompt copies the prompt naming this binary, says Copied, and keeps focus', async () => {
+  const { page, context, url } = world;
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(url).origin });
+  const foot = side(page).locator('.ib-side-foot');
+  // Just above Settings, an ordinary row of the same height.
+  await expect(foot.locator('.ib-nav')).toHaveText(['Copy connect prompt', 'Settings']);
+  const row = foot.getByRole('button', { name: 'Copy connect prompt' });
+  const settings = foot.getByRole('button', { name: 'Settings' });
+  expect((await row.boundingBox())!.height).toBe((await settings.boundingBox())!.height);
+  // The settings carry this run's absolute binary; the row copies it once they have loaded.
+  await expect.poll(() => page.evaluate(() => fetch('/api/inbox/settings').then((r) => r.json()).then((s) => s.mcp_command[0]))).toBe(builtBinary);
+  await row.click();
+  await expect(foot.locator('button[data-connect-prompt]')).toHaveText('Copied');
+  await expect(foot.locator('button[data-connect-prompt]')).toBeFocused();
+  await expect(side(page).locator('[data-connect-prompt-live]')).toHaveText('Connect prompt copied.');
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  expect(copied).toContain(`Run Plannotator as: ${builtBinary}`);
+  expect(copied).toContain(`${builtBinary} inbox --help`);
+  expect(copied).toContain('plannotator inbox --help');
+  await shot('connect-prompt-copied');
+  await expect(foot.locator('button[data-connect-prompt]')).toHaveText('Copy connect prompt', { timeout: 4_000 });
+});
+
 test('⌘B and Ctrl+B toggle it, and the choice survives a reload', async () => {
   const { page } = world;
   const closing = await sampleWidth(page, () => page.keyboard.press('Meta+b'));

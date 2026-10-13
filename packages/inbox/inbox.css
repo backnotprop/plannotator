@@ -122,6 +122,12 @@
 .pn-inbox .ib-theme-tg:hover { background: var(--muted); color: var(--foreground); }
 .pn-inbox .ib-theme-tg:focus-visible { outline-offset: 0; }
 .ib-theme-tg .ib-ic { width: 15px; height: 15px; }
+/* Copy connect prompt: a plain .ib-nav; only the copied state is new (a check in --success).
+   Dragged narrower than its words, the label ends in an ellipsis and never wraps. */
+.ib-cp .ib-cp-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-cp[data-connect-prompt="copied"] .ib-ic { color: var(--success); }
+/* The swap is instant, like the window's other copy buttons: no 150 ms colour fade on the check. */
+.ib-cp .ib-ic { transition: none; }
 /* Under reduced motion a theme switch lands in one frame (theme.ts holds this class for two frames). */
 html.ib-theme-instant, html.ib-theme-instant *, html.ib-theme-instant *::before, html.ib-theme-instant *::after { transition: none !important; }
 /* Settings → Appearance: Light, Dark, Match system, as one segmented control of native radios. */

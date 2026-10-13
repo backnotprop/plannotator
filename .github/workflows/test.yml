@@ -138,6 +138,7 @@ jobs:
           packages/inbox/seenOnSight.test.tsx
           packages/inbox/projectList.test.tsx
           packages/inbox/sidebarQuiet.test.tsx
+          packages/inbox/connectPromptRow.test.tsx
           packages/inbox/soundIntro.test.tsx
           packages/inbox/soundSettings.test.tsx
           packages/inbox/attachmentStepping.test.tsx

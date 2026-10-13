@@ -1,5 +1,8 @@
+import { useEffect, useRef, useState } from 'react';
 import type { InboxHealth } from '@plannotator/core/inbox-types';
+import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import type { ProjectFolder } from '../api';
+import { connectPrompt } from '../connectPrompt';
 import { Icon } from '../icons';
 import { useSidebar } from '../shell/sidebar';
 import { useInboxTheme } from '../theme';
@@ -33,6 +36,11 @@ export interface SidebarProps {
    * (this one too) turns the sound on, and the line goes.
    */
   soundNeedsClick?: boolean;
+  /**
+   * `GET /api/inbox/settings` `mcp_command`, for the absolute `plannotator`
+   * the connect prompt names; null until the settings load.
+   */
+  mcpCommand?: readonly string[] | null;
 }
 
 /**
@@ -114,6 +122,7 @@ export function Sidebar(props: SidebarProps) {
           onPress={pick(props.onUpdate)}
           onWhatsNew={(version) => pick(() => props.onWhatsNew(version))()}
         />
+        <CopyConnectPrompt mcpCommand={props.mcpCommand ?? null} />
         {/* Two controls side by side, never one inside the other: the row opens Settings, the icon flips light and dark. */}
         <div className="ib-setrow">
           <button
@@ -129,6 +138,59 @@ export function Sidebar(props: SidebarProps) {
         </div>
       </div>
     </aside>
+  );
+}
+
+/** How long the row reads "Copied" before it goes back to its name. */
+export const CONNECT_COPIED_MS = 2000;
+/** A failed copy stays on screen a little longer, so it is read. */
+export const CONNECT_COPY_FAILED_MS = 4000;
+export const CONNECT_COPIED_ANNOUNCEMENT = 'Connect prompt copied.';
+export const CONNECT_COPY_FAILED_ANNOUNCEMENT = "Couldn't copy the connect prompt.";
+
+/**
+ * "Copy connect prompt" (owner approval 2026-10-13, design record
+ * `inbox-sidebar-connect-prompt`): one plain row above Settings that copies
+ * the prompt an agent on this computer needs to connect itself
+ * (connectPrompt.ts). Only a copy button: no preview, no tooltip, no
+ * shortcut. The row says "Copied" for 2 s (or "Couldn't copy"), focus stays
+ * on it, and a polite live region says the same. Not navigation, so the
+ * phone sheet stays open to show it. Shown everywhere, the tailnet included.
+ */
+function CopyConnectPrompt({ mcpCommand }: { mcpCommand: readonly string[] | null }) {
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [announcement, setAnnouncement] = useState('');
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const attempt = useRef(0);
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+  const copy = async () => {
+    const mine = ++attempt.current;
+    const ok = await copyTextToClipboard(connectPrompt(mcpCommand));
+    if (mine !== attempt.current) return;
+    if (timer.current) clearTimeout(timer.current);
+    setState(ok ? 'copied' : 'failed');
+    // The same words twice in a row are not read again: a trailing no-break space makes each one new.
+    const words = ok ? CONNECT_COPIED_ANNOUNCEMENT : CONNECT_COPY_FAILED_ANNOUNCEMENT;
+    setAnnouncement((last) => (last === words ? `${words}\u00a0` : words));
+    timer.current = setTimeout(() => setState('idle'), ok ? CONNECT_COPIED_MS : CONNECT_COPY_FAILED_MS);
+  };
+  return (
+    <>
+      <button
+        type="button"
+        className="ib-nav ib-cp"
+        data-connect-prompt={state}
+        onClick={() => void copy()}
+      >
+        <Icon name={state === 'copied' ? 'check' : state === 'failed' ? 'warn' : 'copy'} />
+        <span className="ib-cp-l">{state === 'copied' ? 'Copied' : state === 'failed' ? "Couldn't copy" : 'Copy connect prompt'}</span>
+      </button>
+      <div className="ib-sr" role="status" aria-live="polite" data-connect-prompt-live="">
+        {announcement}
+      </div>
+    </>
   );
 }
 
