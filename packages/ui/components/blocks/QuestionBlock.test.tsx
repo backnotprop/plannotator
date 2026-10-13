@@ -19,6 +19,7 @@ import type { Annotation } from '../../types';
 import { exportAnnotations, parseMarkdownToBlocks } from '../../utils/parser';
 import { buildQuestionPanelRows, collectQuestionAnswers, upsertQuestionAnswerAnnotation } from '../../utils/questionAnswers';
 import { BlockRenderer } from '../BlockRenderer';
+import type { QuestionBlockProps } from './QuestionBlock';
 
 const hasDom = typeof document !== 'undefined';
 
@@ -66,7 +67,7 @@ Transport?
 
 let latest: Annotation[] = [];
 
-function Harness({ markdown, readOnly = false, initial = [] }: { markdown: string; readOnly?: boolean; initial?: Annotation[] }) {
+function Harness({ markdown, readOnly = false, initial = [], statusLabel }: { markdown: string; readOnly?: boolean; initial?: Annotation[]; statusLabel?: QuestionBlockProps['statusLabel'] }) {
   const blocks = parseMarkdownToBlocks(markdown);
   const index = indexQuestionBlocks(blocks);
   const [annotations, setAnnotations] = useState<Annotation[]>(initial);
@@ -86,6 +87,7 @@ function Harness({ markdown, readOnly = false, initial = [] }: { markdown: strin
             questionTotal={index.length}
             questionAnswer={question ? answers.get(question.question.key) : undefined}
             onAnswerQuestion={readOnly ? undefined : onAnswer}
+            questionStatusLabel={statusLabel}
           />
         );
       })}
@@ -395,5 +397,64 @@ describe('QuestionBlock', () => {
     expect(answerOf(0)?.selected).toEqual(['One per person']);
     await click(rowText(card, 'One per session'));
     expect(answerOf(0)?.selected).toEqual(['One per session']);
+  });
+
+  // Rows 37 and 38 of the Inbox stress test (the same cards in plan review and annotate).
+  const UNMATCHED = [
+    ':::question',
+    'Which store backs the cache?',
+    '',
+    '- [ ] Redis',
+    '- [ ] Memcached',
+    '',
+    'Recommended: SQLite on the box',
+    ':::',
+  ].join('\n');
+
+  test.skipIf(!hasDom)('a choice question whose recommendation names none of its choices shows it, and Use fills Other', async () => {
+    const el = await mount(<Harness markdown={UNMATCHED} />);
+    const card = cards(el)[0];
+    const line = card.querySelector<HTMLElement>('[data-question-suggested]');
+    expect(line?.textContent).toContain('SQLite on the box');
+    expect(card.getAttribute('aria-describedby')?.split(' ')).toContain(line!.id);
+    await click(button(card, 'Use')!);
+    expect(answerOf(0)).toMatchObject({ selected: [], other: 'SQLite on the box' });
+    // Answered, the line goes (as a text question's does).
+    expect(cards(el)[0].querySelector('[data-question-suggested]')).toBeNull();
+  });
+
+  test.skipIf(!hasDom)('a read-only card draws the Other row only when the answer used it', async () => {
+    const [q] = indexQuestionBlocks(parseMarkdownToBlocks(UNMATCHED));
+    const answer = (extra: Partial<QuestionAnswer>) =>
+      upsertQuestionAnswerAnnotation([], q.blockId, { v: 1, key: q.question.key, kind: 'single', prompt: q.question.prompt, selected: [], ...extra }, q.question.key);
+    const other = (el: HTMLElement) => cards(el)[0].querySelector<HTMLInputElement>('input[aria-label^="Other answer"]');
+
+    let el = await mount(<Harness markdown={UNMATCHED} readOnly initial={answer({ selected: ['Redis'] })} />);
+    expect(other(el)).toBeNull();
+    await act(async () => root!.unmount());
+    host!.remove();
+
+    el = await mount(<Harness markdown={UNMATCHED} readOnly initial={answer({ other: 'Postgres' })} />);
+    expect(other(el)?.value).toBe('Postgres');
+    await act(async () => root!.unmount());
+    host!.remove();
+
+    // An editable card keeps the row to type into.
+    el = await mount(<Harness markdown={UNMATCHED} />);
+    expect(other(el)).not.toBeNull();
+  });
+
+  test.skipIf(!hasDom)('a host status label replaces the card status tag; undefined keeps the card own', async () => {
+    const el = await mount(
+      <Harness
+        markdown={DOC}
+        statusLabel={(question, status) => (question.number === 1 && status === 'answered' ? { label: 'host-label-sentinel', tone: 'open' } : undefined)}
+      />,
+    );
+    await click(rowText(cards(el)[0], 'Nowhere'));
+    await click(rowText(cards(el)[1], 'Dot'));
+    expect(cards(el)[0].textContent).toContain('host-label-sentinel');
+    expect(cards(el)[0].textContent).not.toContain('Answered');
+    expect(cards(el)[1].textContent).toContain('Answered');
   });
 });

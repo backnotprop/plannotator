@@ -234,7 +234,12 @@ test("the tag's words open the card under the tag, drafted answer first", async 
   const { page } = world;
   await pane(page).getByText('Retry with the same idempotency key', { exact: true }).click();
   await expect(pane(page).getByText(/^Picked .*, not sent$/)).toHaveCount(1);
-  // Answered beside the on tag, Open beside the off tag.
+  // The unsent pick's card says Not sent, not Answered (row 36 of the stress test).
+  const picked = pane(page).locator('[data-question-status="answered"]');
+  await expect(picked).toHaveCount(1);
+  await expect(picked).toContainText('Not sent');
+  await expect(picked).not.toContainText('Answered');
+  // Not sent beside the on tag, Open beside the off tag.
   await expectEyebrowPillsAligned(page);
   await words(page).nth(0).click();
   const card = page.getByRole('dialog', { name: 'Record as a decision' });

@@ -19,6 +19,25 @@ export function attachmentBlocks(kindValue: InboxAttachmentKind | string, text: 
   return parseMarkdownToBlocks(text, shouldStripFrontmatter(name) ? undefined : { frontmatter: false });
 }
 
+/**
+ * Data and log files the window draws with the code view (exact lines,
+ * indentation kept, line comments) though their kind is `text`: the markdown
+ * pipeline ran their lines together and read `#` as a heading. Plain `.txt`
+ * keeps the text view. Decided on screen, so files already sent show this way
+ * too; a text comment left on one before shows as Unanchored.
+ */
+const CODE_VIEW_TEXT_EXTENSIONS = new Set(['log', 'yaml', 'yml', 'json', 'jsonc', 'json5', 'toml', 'ini', 'cfg', 'conf', 'properties', 'csv', 'tsv', 'xml']);
+
+/** The kind the window draws a file as: its stored kind, except data and log files, drawn as code. */
+export function inboxViewKind(kindValue: InboxAttachmentKind | string, name: string): InboxAttachmentKind {
+  const kind = readInboxAttachmentKind(kindValue);
+  if (kind !== 'text') return kind;
+  const lower = name.toLowerCase();
+  if (lower.endsWith('.env.example')) return 'code';
+  const ext = /\.([a-z0-9]+)$/.exec(lower)?.[1];
+  return ext !== undefined && CODE_VIEW_TEXT_EXTENSIONS.has(ext) ? 'code' : kind;
+}
+
 /** Names without an extension that a highlighter grammar knows by another name. */
 const CODE_NAME_LANGUAGES: Record<string, string> = {
   dockerfile: 'dockerfile',
@@ -46,6 +65,21 @@ export function codeLanguageOf(name: string): string | undefined {
  * text node, no language.
  */
 export const CODE_HIGHLIGHT_MAX_CHARS = 100_000;
+
+/** A code file with a line longer than this (a minified bundle) wraps its lines in the code view instead of scrolling sideways. */
+export const CODE_WRAP_LINE_CHARS = 1000;
+
+/** Whether any line of `text` is longer than `max` characters. */
+export function hasLineLongerThan(text: string, max: number): boolean {
+  let start = 0;
+  while (start <= text.length) {
+    let end = text.indexOf('\n', start);
+    if (end === -1) end = text.length;
+    if (end - start > max) return true;
+    start = end + 1;
+  }
+  return false;
+}
 
 /**
  * A code file as ONE read-only code block, never the markdown pipeline (a
@@ -98,6 +132,19 @@ export function attachmentDownloadUrl(attachment: Pick<InboxAttachmentState, 'id
   return `/api/inbox/attachments/${encodeURIComponent(attachment.id)}/download${version === 'sent' ? '?version=sent' : ''}`;
 }
 
+/** Wider than this width-to-height ratio, an image is a panorama: the gallery crops it from the left, the viewer scrolls it sideways. */
+export const WIDE_IMAGE_RATIO = 4;
+
+/**
+ * Whether an image fits in a `box`-pixel square at its own size, by the size
+ * its header gave: a thumbnail draws it as it is rather than blown up (a 1×1
+ * image is a dot, not a block of one colour).
+ */
+export function imageFitsWithin(attachment: Pick<InboxAttachmentState, 'width' | 'height'>, box: number): boolean {
+  const { width, height } = attachment;
+  return typeof width === 'number' && typeof height === 'number' && width > 0 && height > 0 && width <= box && height <= box;
+}
+
 /** The version a thumbnail or download should read: the sent one when the file on disk cannot be read. */
 export function readableVersion(attachment: Pick<InboxAttachmentState, 'unavailable'>): 'current' | 'sent' {
   return attachment.unavailable ? 'sent' : 'current';
@@ -107,8 +154,37 @@ export function readableVersion(attachment: Pick<InboxAttachmentState, 'unavaila
 export interface InboxCodeRange {
   lineStart: number;
   lineEnd: number;
-  /** The lines as they read when the comment was made. */
+  /**
+   * The lines as they read when the comment was made, cut to
+   * CODE_EXCERPT_MAX_CHARS when longer (a minified file's one line can be
+   * hundreds of KB): then `length` and `hash` name the whole.
+   */
   code: string;
+  /** The whole lines' length, when `code` is an excerpt. */
+  length?: number;
+  /** `codeHash` of the whole lines, when `code` is an excerpt. */
+  hash?: string;
+}
+
+/** The most of a comment's lines kept in its record and shown in the export; longer lines keep a hash of the whole. */
+export const CODE_EXCERPT_MAX_CHARS = 4096;
+
+/** A short hash of code lines (FNV-1a, 64 bits as two 32-bit halves with different seeds), to tell whether long lines still read the same. */
+export function codeHash(text: string): string {
+  let a = 0x811c9dc5;
+  let b = 0x01000193 ^ 0x9e3779b9;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    a = Math.imul(a ^ c, 0x01000193);
+    b = Math.imul(b ^ c, 0x01000193) ^ (b >>> 15);
+  }
+  return `${(a >>> 0).toString(16).padStart(8, '0')}${(b >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+/** Whether the file's lines still read as a comment's: by hash for an excerpt, by the text itself for a record that kept it whole (every record before excerpts). */
+export function codeRangeMatches(range: InboxCodeRange, lines: string): boolean {
+  if (range.hash !== undefined) return lines.length === range.length && codeHash(lines) === range.hash;
+  return lines === range.code;
 }
 
 type CodeCommentAnnotation = Annotation & { inboxCode?: InboxCodeRange };
@@ -135,7 +211,10 @@ export function codeCommentAnnotation(input: { id: string; lineStart: number; li
     originalText: quote,
     createdA: input.createdA ?? Date.now(),
     ...(input.author ? { author: input.author } : {}),
-    inboxCode: { lineStart: input.lineStart, lineEnd: input.lineEnd, code: input.code },
+    inboxCode:
+      input.code.length > CODE_EXCERPT_MAX_CHARS
+        ? { lineStart: input.lineStart, lineEnd: input.lineEnd, code: cutText(input.code, CODE_EXCERPT_MAX_CHARS), length: input.code.length, hash: codeHash(input.code) }
+        : { lineStart: input.lineStart, lineEnd: input.lineEnd, code: input.code },
   };
 }
 

@@ -24,6 +24,7 @@ import { InboxApiError, inboxApi } from '../api';
 import { guideCommentOf } from '../attachments';
 import { agentName, whenTime, plural } from '../format';
 import { Icon } from '../icons';
+import { useNarrowerThan } from '../narrower';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 const GuideReader = lazy(() => import('#guide-reader'));
@@ -36,6 +37,14 @@ export interface GuidePaneProps {
   /** Close the guide and the thread. */
   onClose: () => void;
 }
+
+/**
+ * The guide's width below which the 300 px comments panel folds into the
+ * header's Comments button and opens over the guide: beside it the guide's
+ * cards would squeeze their diffs to a narrow column (about 170 px in a
+ * 1024 px window). The guide at 1280 px and wider keeps the panel docked.
+ */
+export const GUIDE_FOLD_PANEL_BELOW = 1200;
 
 const NO_BLOCKS: never[] = [];
 const NO_ANNOTATIONS: never[] = [];
@@ -58,6 +67,12 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
    * back a comment just removed or drop one just saved.
    */
   const localWrites = useRef(0);
+  const [paneRef, folded] = useNarrowerThan<HTMLElement>(GUIDE_FOLD_PANEL_BELOW, false);
+  /** The folded panel, open over the guide. */
+  const [sheet, setSheet] = useState(false);
+  useEffect(() => {
+    if (!folded) setSheet(false);
+  }, [folded]);
 
   useEffect(() => {
     let cancelled = false;
@@ -154,7 +169,12 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
   );
 
   return (
-    <section className="ib-viewer" aria-label="Guided review" data-guide-message={message.id}>
+    <section
+      ref={paneRef}
+      className={`ib-viewer${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
+      aria-label="Guided review"
+      data-guide-message={message.id}
+    >
       <div className="ib-vhead">
         <button type="button" className="ib-back" onClick={onBack}>
           <Icon name="back" size={15} />
@@ -166,6 +186,20 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
           from {agentName(message.author)} in {thread.project.name}, sent {whenTime(message.created_at)}
         </span>
         <span className="ib-sp" />
+        {folded && (
+          <button
+            type="button"
+            className={`ib-btn ib-sm ib-vcomments${sheet ? ' ib-on' : ''}`}
+            onClick={() => setSheet((v) => !v)}
+            aria-expanded={sheet}
+            aria-label={`Comments, ${comments.length}`}
+            title="Comments"
+            data-guide-comments-sheet=""
+          >
+            <Icon name="comment" size={15} />
+            {comments.length}
+          </button>
+        )}
         <button type="button" className="ib-iconbtn" onClick={onClose} title="Close" aria-label="Close the guided review">
           <Icon name="x" />
         </button>
@@ -187,17 +221,42 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
             </Suspense>
           ) : null}
         </div>
-        <div className="ib-apanel ib-gpanel" data-guide-comments={comments.length}>
+        <div
+          className="ib-apanel ib-gpanel"
+          role={folded ? 'region' : undefined}
+          aria-label={folded ? 'Comments' : undefined}
+          data-guide-comments={comments.length}
+        >
+          {/* The folded panel's sheet: its own title and close. */}
+          {folded && (
+            <div className="ib-sheet-h">
+              <b>Comments</b>
+              <span className="ib-mut">{comments.length}</span>
+              <span className="ib-sp" />
+              <button type="button" className="ib-iconbtn" onClick={() => setSheet(false)} aria-label="Close the comments">
+                <Icon name="x" />
+              </button>
+            </div>
+          )}
           <AnnotationPanel
             emptyHint={readOnly ? undefined : 'Click a line number, drag across lines, or select code to comment'}
             isOpen
+            // A folded panel draws as a sheet of its own (the panel's window-wide overlay below 768 px has no close here).
+            presentation={folded ? 'embedded' : undefined}
             annotations={NO_ANNOTATIONS}
             blocks={NO_BLOCKS}
             codeAnnotations={comments}
-            onSelect={showComment}
+            onSelect={(id) => {
+              showComment(id);
+              // A folded panel steps aside to show the comment in the guide.
+              if (folded) setSheet(false);
+            }}
             onDelete={remove}
             selectedId={selectedId}
-            onSelectCodeAnnotation={showComment}
+            onSelectCodeAnnotation={(id) => {
+              showComment(id);
+              if (folded) setSheet(false);
+            }}
             onDeleteCodeAnnotation={remove}
             onEditCodeAnnotation={readOnly ? undefined : edit}
             width="100%"

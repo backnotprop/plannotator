@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { Viewer } from '@plannotator/ui/components/Viewer';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import type { InboxDecision, InboxDecisionDraft, InboxListRow, InboxMessageWire, InboxProjectRepo, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
-import type { IndexedQuestion, QuestionAnswer } from '@plannotator/core/question-block';
+import type { IndexedQuestion, QuestionAnswer, QuestionStatus } from '@plannotator/core/question-block';
 import { inboxDecisionWords } from '@plannotator/core/inbox-questions';
 import { isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
@@ -46,6 +46,8 @@ const noop = () => {};
 /** The agent superseded the question this call named (`422 question_superseded`). */
 const isSuperseded = (cause: unknown): boolean => cause instanceof InboxApiError && cause.code === 'question_superseded';
 const NO_ANNOTATIONS: never[] = [];
+/** An unsent pick's tag on its card (MessageBody's statusLabel). */
+const NOT_SENT_STATUS = { label: 'Not sent', tone: 'open' } as const;
 const NO_IDS: ReadonlySet<string> = new Set();
 
 /** The fold state of one open thread: in memory only, decided once when the thread opens. */
@@ -281,6 +283,17 @@ export function MessageBody({
     [message.questions],
   );
 
+  // A pick not sent yet tags its card "Not sent", not "Answered" (the footer says when it was picked);
+  // a sent answer, and a question a Mark read closed, keep the card's own tag.
+  const statusLabel = useCallback(
+    (question: IndexedQuestion, status: QuestionStatus) => {
+      if (status !== 'answered' && status !== 'skipped') return undefined;
+      const wire = message.questions?.find((q) => q.key === question.question.key);
+      return wire && (wire.state === 'open' || wire.state === 'picked') ? NOT_SENT_STATUS : undefined;
+    },
+    [message.questions],
+  );
+
   return (
     <div className="ib-body" data-message-id={message.id} ref={bodyRef}>
       <Viewer
@@ -308,6 +321,7 @@ export function MessageBody({
         onToggleQuestionDecisionRecording={onToggleDecision}
         onOpenQuestionDecision={onOpenDecision}
         questionDecisionLocked={locked}
+        questionStatusLabel={statusLabel}
         renderQuestionCard={renderReplacedCard ? questionCard : undefined}
         renderQuestionBelowPrompt={renderReplacesLine ? belowPrompt : undefined}
       />

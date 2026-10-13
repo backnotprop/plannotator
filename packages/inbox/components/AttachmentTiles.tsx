@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { inboxAttachmentKindLabel, isInboxAnnotatableKind, readInboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
-import { attachmentDownloadUrl, attachmentImageUrl, readableVersion } from '../attachments';
+import { attachmentDownloadUrl, attachmentImageUrl, imageFitsWithin, readableVersion, WIDE_IMAGE_RATIO } from '../attachments';
 import { formatBytes, plural, shortTime, whenTime } from '../format';
 import { Icon, type IconName } from '../icons';
 import { FileName } from './FileName';
@@ -83,8 +83,9 @@ function GalleryImage({ image, count, onOpen }: { image: InboxAttachmentState; c
   const width = natural?.width ?? image.width ?? 4;
   const height = natural?.height ?? image.height ?? 3;
   const ratio = width / height;
-  const shown = Math.max(ratio, TALL_RATIO);
+  const shown = Math.min(Math.max(ratio, TALL_RATIO), WIDE_IMAGE_RATIO);
   const tall = ratio < TALL_RATIO;
+  const wide = ratio > WIDE_IMAGE_RATIO;
   const src = attachmentImageUrl(image, readableVersion(image));
   const changed = changedLine(image, true);
   // A changed image keeps its comment count beside the changed line.
@@ -100,7 +101,7 @@ function GalleryImage({ image, count, onOpen }: { image: InboxAttachmentState; c
       data-gallery-image={image.id}
       data-attachment-name={image.name}
     >
-      <span className={`ib-gal-frame${tall ? ' ib-tall' : ''}`} style={{ aspectRatio: String(shown) }} data-src={src}>
+      <span className={`ib-gal-frame${tall ? ' ib-tall' : ''}${wide ? ' ib-wide' : ''}`} style={{ aspectRatio: String(shown) }} data-src={src}>
         {failed ? (
           <span className="ib-gal-fail">
             <Icon name="photo" size={20} />
@@ -184,7 +185,7 @@ export function AttachmentTiles({
           const isImage = readInboxAttachmentKind(attachment.kind) === 'image';
           const icon = isImage ? (
             <span className="ib-fi ib-thumb">
-              <img src={attachmentImageUrl(attachment, readableVersion(attachment))} alt="" loading="lazy" decoding="async" draggable={false} />
+              <img src={attachmentImageUrl(attachment, readableVersion(attachment))} alt="" loading="lazy" decoding="async" draggable={false} data-small={imageFitsWithin(attachment, 30) ? '' : undefined} />
             </span>
           ) : (
             <span className="ib-fi">

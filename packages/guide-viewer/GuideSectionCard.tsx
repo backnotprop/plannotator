@@ -66,6 +66,8 @@ interface GuideSectionCardProps {
   files: DiffFile[];
   index: number;
   total: number;
+  /** False for the "Everything else" card: it is not one of the guide's sections, so it carries no "NN / NN". */
+  numbered?: boolean;
   reviewed?: boolean;
   showReviewed?: boolean;
   onToggleReviewed?: () => void;
@@ -87,6 +89,7 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
   total,
   reviewed = false,
   showReviewed = true,
+  numbered = true,
   onToggleReviewed,
   focusedFile,
   revealTarget,
@@ -96,7 +99,7 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
   const [collapsedOverride, setCollapsedOverride] = useState<boolean | null>(null);
   const host = useGuideHost();
   const cardRef = useRef<HTMLDivElement>(null);
-  const position = `${String(index + 1).padStart(2, '0')} / ${String(total).padStart(2, '0')}`;
+  const position = numbered ? `${String(index + 1).padStart(2, '0')} / ${String(total).padStart(2, '0')}` : null;
   const isCollapsed = showReviewed ? collapsedOverride ?? reviewed : collapsedOverride === true;
 
   const filesByPath = useMemo(() => new Map(host.files.map((file) => [file.path, file])), [host.files]);
@@ -152,7 +155,7 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
             {section.diffs.length} diff{section.diffs.length !== 1 ? 's' : ''}
             {reviewed ? ' · reviewed' : ''}
           </span>
-          <span className="flex-shrink-0 font-mono text-[10px] text-muted-foreground/40">{position}</span>
+          {position && <span className="flex-shrink-0 font-mono text-[10px] text-muted-foreground/40">{position}</span>}
           <ChevronDown className="flex-shrink-0 -rotate-90 text-muted-foreground/40 transition-transform group-hover:text-muted-foreground" size={13} />
         </button>
       </div>
@@ -179,8 +182,9 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
                 <ChevronDown className="rotate-180" size={13} />
               </button>
             </div>
+            {(position || showReviewed) && (
             <div className="mt-2 flex items-center gap-3 md:flex-none">
-              <span className="font-mono text-[11px] text-muted-foreground/60">{position}</span>
+              {position && <span className="font-mono text-[11px] text-muted-foreground/60">{position}</span>}
               {showReviewed && (
                 <button
                   type="button"
@@ -193,6 +197,7 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
                 </button>
               )}
             </div>
+            )}
 
             {section.overview && (
               <div className="mt-3.5 space-y-2.5 md:flex-none">{renderMarkdownProse(section.overview, { tone: 'muted' })}</div>

@@ -175,6 +175,68 @@ test.skipIf(!hasDom)('a text file too large to show (413 attachment_too_large) o
   expect(host!.querySelector('[role="alert"]')).toBeNull();
 });
 
+function renderPane(attachment: InboxAttachmentState, options: { phone?: boolean; others?: InboxAttachmentState[]; records?: InboxAnnotationRecord[] } = {}) {
+  globalThis.fetch = (async () => new Response('{}', { status: 404 })) as unknown as typeof fetch;
+  const noop = () => {};
+  return render(
+    <AttachmentPane
+      attachment={attachment}
+      attachments={[attachment, ...(options.others ?? [])]}
+      records={options.records ?? []}
+      agent="Claude Code"
+      projectName="api"
+      projectRoot="/work/api"
+      version="current"
+      onVersion={noop}
+      full={options.phone === true}
+      fullLocked={options.phone === true}
+      phone={options.phone}
+      onToggleFull={noop}
+      focusId={null}
+      readOnly={false}
+      onSaved={noop}
+      onRemoved={noop}
+      onOpenAt={noop}
+      onClose={noop}
+      strip={{ picks: 0, annotations: 0, onBack: noop, onWriteReply: noop }}
+    />,
+  );
+}
+
+// Rows 47 and 61: a PDF takes no comments, so it has no panel beside it and no Comments button on a phone.
+test.skipIf(!hasDom)('a PDF has no comments panel or Comments button, unless other files have comments to list', async () => {
+  await renderPane(spec);
+  expect(host!.querySelector('[data-attachment-pane]')!.classList.contains('ib-nopanel')).toBe(true);
+  act(() => root!.unmount());
+  host!.remove();
+
+  await renderPane(spec, { phone: true });
+  expect(host!.querySelector('[data-download-card]')).not.toBeNull();
+  expect(host!.querySelector('[data-annotations-sheet]')).toBeNull();
+  act(() => root!.unmount());
+  host!.remove();
+
+  // Another file's comment: the panel lists it, so a phone keeps the button to open it.
+  const note = record(shot, imageCommentAnnotation({ id: 'ann-shot', name: 'checkout.png', text: 'Cut off.' }), 'ann-shot');
+  await renderPane(spec, { phone: true, others: [shot], records: [note] });
+  expect(host!.querySelector('[data-attachment-pane]')!.classList.contains('ib-nopanel')).toBe(false);
+  expect(host!.querySelector('[data-annotations-sheet]')).not.toBeNull();
+});
+
+// Row 52: a 1×1 image was blown up to a block of one colour; row 51: a panorama became a sliver.
+test.skipIf(!hasDom)('a tiny image draws at its own size in its thumbnail, and a panorama is cropped to 4:1 from the left', async () => {
+  const dot = file('att_01K7HHHHHHHHHHHHHHHHHHHHHH', 'dot.png', 'image', { media_type: 'image/png', width: 1, height: 1 });
+  const pano = file('att_01K7JJJJJJJJJJJJJJJJJJJJJJ', 'pano.png', 'image', { media_type: 'image/png', width: 8000, height: 300 });
+  await render(<AttachmentTiles attachments={[dot, pano, shot]} annotationCounts={new Map()} onOpen={() => {}} />);
+  const thumb = (a: InboxAttachmentState) => host!.querySelector(`button[data-attachment-id="${a.id}"] .ib-thumb img`)!;
+  expect(thumb(dot).hasAttribute('data-small')).toBe(true);
+  expect(thumb(shot).hasAttribute('data-small')).toBe(false);
+  const frame = (a: InboxAttachmentState) => host!.querySelector<HTMLElement>(`[data-gallery-image="${a.id}"] .ib-gal-frame`)!;
+  expect(frame(pano).classList.contains('ib-wide')).toBe(true);
+  expect(frame(pano).getAttribute('style')).toMatch(/aspect-ratio: 4( \/ 1)?;/);
+  expect(frame(shot).classList.contains('ib-wide')).toBe(false);
+});
+
 function record(attachment: InboxAttachmentState, annotation: object, id: string): InboxAnnotationRecord {
   return {
     id,

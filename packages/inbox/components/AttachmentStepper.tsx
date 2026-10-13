@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef } from 'react';
 import { inboxAttachmentKindLabel, readInboxAttachmentKind } from '@plannotator/core/inbox-types';
 import { Tooltip } from '@plannotator/ui/components/Tooltip';
-import { attachmentImageUrl, readableVersion } from '../attachments';
+import { attachmentImageUrl, imageFitsWithin, readableVersion } from '../attachments';
 import { plural } from '../format';
 import { Icon } from '../icons';
 import type { AttachmentStep } from '../stepping';
@@ -155,7 +155,7 @@ export function AttachmentStepper(props: AttachmentStepperProps) {
                 {i + 1}
               </span>
               <span className="ib-fi">
-                {isImage ? <img src={attachmentImageUrl(attachment, readableVersion(attachment))} alt="" loading="lazy" decoding="async" draggable={false} /> : <Icon name={iconOf(attachment)} size={14} />}
+                {isImage ? <img src={attachmentImageUrl(attachment, readableVersion(attachment))} alt="" loading="lazy" decoding="async" draggable={false} data-small={imageFitsWithin(attachment, 26) ? '' : undefined} /> : <Icon name={iconOf(attachment)} size={14} />}
               </span>
               <span className="ib-stept">
                 <b>

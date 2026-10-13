@@ -771,6 +771,22 @@ button.ib-drow:hover { background: color-mix(in oklch, var(--muted) 35%, transpa
 .ib-imgstage.ib-swipes { touch-action: pan-y pinch-zoom; }
 @media (prefers-reduced-motion: reduce) { .ib-endnote { transition: none; } }
 .ib-apanel { background: var(--card); border-left: 1px solid color-mix(in oklch, var(--border) 50%, transparent); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+/* A download (a PDF, any other file) takes no comments: no panel unless other files have some (AttachmentPane's hasPanel). */
+.ib-view.ib-nopanel .ib-vbody { grid-template-columns: minmax(0, 1fr); }
+.ib-view.ib-nopanel .ib-apanel { display: none; }
+/* A pane too narrow for the panel beside the file (under FOLD_PANEL_BELOW, AttachmentPane.tsx: a file beside the
+   thread at about 920 to 1220 px): the panel folds into the header's Comments button and opens over the file's
+   right edge, at its docked width, as a phone's opens over the foot. The phone's own rules are in its query below. */
+.ib-view.ib-fold .ib-vbody { grid-template-columns: minmax(0, 1fr); position: relative; }
+.ib-view.ib-fold .ib-apanel { display: none; }
+/* the file's own layers (the viewer draws at z-50) stay under the sheet */
+.ib-view.ib-fold .ib-docarea { isolation: isolate; z-index: 0; }
+.ib-view.ib-fold.ib-panel-open .ib-apanel { display: flex; position: absolute; top: 0; right: 0; bottom: 0; width: min(300px, 100%); z-index: 6; box-shadow: -16px 0 48px rgba(0, 0, 0, 0.18); }
+.ib-fold .ib-sheet-h { flex: none; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 4px 0 14px; border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); font-size: 13.5px; }
+.ib-fold .ib-sheet-h b { font-weight: 600; }
+.ib-fold .ib-sheet-h .ib-sp { flex: 1; }
+/* the viewer's Global comment and Copy float right by the window's width; in a narrow pane they sit on their own line, as on a phone */
+.ib-fold [data-sticky-actions] { float: none; justify-content: flex-end; margin: 0 -4px 6px 0; }
 
 /* the annotations chip in the reply box and its list */
 .ib-annchip { position: relative; display: inline-flex; }
@@ -847,7 +863,12 @@ pre code.pn-code[data-keep-layout] {
 .ib-gstrip .ib-l { font-size: 12.5px; color: var(--muted-foreground); }
 .ib-gstrip .ib-rchip { border: 1px solid var(--border); background: var(--card); }
 .ib-gstrip .ib-sp { flex: 1; }
-@media (max-width: 900px) { .ib-gsplit { grid-template-columns: minmax(0, 1fr); } .ib-gpanel { display: none; } }
+/* A guide narrower than GUIDE_FOLD_PANEL_BELOW (GuidePane.tsx): the panel folds into the header's Comments button and
+   opens over the guide's right edge, as the file pane's does (it was hidden at 900 px and below, with no way to it). */
+.ib-viewer.ib-fold .ib-gsplit { grid-template-columns: minmax(0, 1fr); position: relative; }
+.ib-viewer.ib-fold .ib-gpanel { display: none; }
+.ib-viewer.ib-fold .ib-gbody { isolation: isolate; z-index: 0; }
+.ib-viewer.ib-fold.ib-panel-open .ib-gpanel { display: flex; position: absolute; top: 0; right: 0; bottom: 0; width: min(300px, 100%); z-index: 6; box-shadow: -16px 0 48px rgba(0, 0, 0, 0.18); }
 
 /* New message (record 5.x): the button's states beside Reply, the list of live
    sessions (5.2) and the "not running" state (5.3), above the button. */
@@ -962,13 +983,18 @@ pre code.pn-code[data-keep-layout] {
 .ib-att-t .ib-fi { flex: none; }
 .ib-att-t .ib-fi.ib-thumb { overflow: hidden; background: color-mix(in oklch, var(--muted) 70%, transparent); border: 1px solid color-mix(in oklch, var(--border) 70%, transparent); }
 .ib-att-t .ib-fi.ib-thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
+/* an image no larger than its thumbnail is drawn at its own size, never blown up (data-small, imageFitsWithin) */
+.ib-att-t .ib-fi.ib-thumb img[data-small], .ib-stepitem .ib-fi img[data-small] { object-fit: none; object-position: center; }
 .ib-att-t .ib-nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ib-gallery { display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 12px; }
 .ib-gal-item { display: flex; flex-direction: column; gap: 6px; min-width: 0; text-align: left; color: inherit; }
 .ib-gal-frame { position: relative; display: block; width: 100%; max-height: 240px; overflow: hidden; border-radius: 9px; border: 1px solid var(--border); background-color: var(--muted); transition: border-color 120ms ease, box-shadow 120ms ease; }
-.ib-gal-frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+.ib-gal-frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: scale-down; display: block; }
 .ib-gal-frame.ib-tall img { object-fit: cover; object-position: top center; }
 .ib-gal-frame.ib-tall::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 40px; background: linear-gradient(to bottom, transparent, color-mix(in oklch, var(--muted) 92%, transparent)); pointer-events: none; }
+/* a panorama: cropped from the left at WIDE_IMAGE_RATIO (attachments.ts), fading out on the right, as a tall image fades at its foot */
+.ib-gal-frame.ib-wide img { object-fit: cover; object-position: left center; }
+.ib-gal-frame.ib-wide::after { content: ""; position: absolute; top: 0; bottom: 0; right: 0; width: 56px; background: linear-gradient(to right, transparent, color-mix(in oklch, var(--muted) 92%, transparent)); pointer-events: none; }
 .ib-gal-item:hover .ib-gal-frame { border-color: color-mix(in oklch, var(--primary) 55%, var(--border)); box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 12%, transparent); }
 .ib-gal-item:active .ib-gal-frame { transform: translateY(0.5px); }
 .pn-inbox .ib-gal-item:focus-visible { outline: none; }
@@ -988,6 +1014,9 @@ pre code.pn-code[data-keep-layout] {
 .ib-imgstage[data-fit="fit"] img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; }
 .ib-imgstage[data-fit="fit"][data-tall="true"] { align-items: flex-start; }
 .ib-imgstage[data-fit="fit"][data-tall="true"] img { max-height: none; }
+/* a panorama keeps its height (never more than the pane's) and scrolls sideways from its left edge, rather than fitting to a sliver */
+.ib-imgstage[data-fit="fit"][data-wide="true"] { justify-content: flex-start; }
+.ib-imgstage[data-fit="fit"][data-wide="true"] img { max-width: none; flex: none; }
 .ib-imgstage[data-fit="actual"] img { max-width: none; max-height: none; cursor: zoom-out; margin: auto; }
 .ib-imgstage[data-fit="fit"] img.ib-noup { cursor: default; }
 .ib-imgbar { position: absolute; top: 12px; right: 14px; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 9px; background: var(--card); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15); z-index: 3; }
@@ -1010,6 +1039,9 @@ pre code.pn-code[data-keep-layout] {
 .ib-att-t.ib-dlcard { max-width: 620px; width: 100%; padding: 14px 16px; gap: 14px; cursor: default; }
 .ib-att-t.ib-dlcard:hover, .ib-att-t.ib-dlcard:active { border-color: var(--border); background: var(--card); transform: none; }
 .ib-att-t.ib-dlcard .ib-kd { white-space: normal; }
+/* A narrow column wraps the Download button under the words instead of squeezing them to a word a line (a phone has its own rule). */
+.ib-view:not(.ib-phone) .ib-att-t.ib-dlcard { flex-wrap: wrap; }
+.ib-view:not(.ib-phone) .ib-att-t.ib-dlcard .ib-att-text { flex: 1 1 240px; }
 .ib-imgbar .ib-imgsize { font-size: 12px; color: var(--muted-foreground); padding: 0 8px; font-variant-numeric: tabular-nums; }
 
 /* ───────────── Replaced questions (design record, not in this repo; direction A "Quiet") ───────────── */
@@ -1266,9 +1298,10 @@ pre code.pn-code[data-keep-layout] {
 .pn-inbox .ib-pback { display: inline-flex; align-items: center; gap: 2px; flex: 0 1 auto; min-width: 0; max-width: 40%; height: 30px; padding: 0 9px 0 4px; border-radius: 7px; color: var(--primary); font-size: 13.5px; font-weight: 550; white-space: nowrap; }
 .pn-inbox .ib-pback:hover { background: color-mix(in oklch, var(--primary) 10%, transparent); }
 .ib-pback-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-/* The full-screen file's foot names the reply in a sentence that a narrow window wraps. */
-.pn-inbox[data-stack~="file"] .ib-vfoot { flex-wrap: wrap; row-gap: 8px; padding-top: 8px; padding-bottom: 8px; }
-.pn-inbox[data-stack~="file"] .ib-vreply { flex-wrap: wrap; row-gap: 6px; }
+/* The full-screen file's foot names the reply in a sentence that a narrow window or pane wraps (at any width: a
+   1024 px window that does not stack still clipped "Write the reply"). One row fits at 1280 px and wider. */
+.pn-inbox .ib-vfoot:not(.ib-vfoot-phone) { flex-wrap: wrap; row-gap: 8px; padding-top: 8px; padding-bottom: 8px; }
+.pn-inbox .ib-vreply { flex-wrap: wrap; row-gap: 6px; }
 
 /* ───────────── The Inbox on a phone ─────────────
    One screen at a time, like a mail app: the list, then a thread (Back to
@@ -1428,6 +1461,8 @@ pre code.pn-code[data-keep-layout] {
 
   /* a guided review */
   .ib-viewer { grid-template-rows: calc(48px + env(safe-area-inset-top)) minmax(0, 1fr); }
+  /* its folded comments open over the whole guide, under the safe area at the foot */
+  .ib-viewer.ib-fold.ib-panel-open .ib-gpanel { width: 100%; box-shadow: none; padding-bottom: env(safe-area-inset-bottom); }
   .ib-viewer .ib-vhead { padding: env(safe-area-inset-top) 4px 0 4px; }
   .ib-viewer .ib-vhead .ib-fn { flex: 1; }
   .pn-inbox .ib-back { height: 44px; }

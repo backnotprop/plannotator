@@ -11,6 +11,7 @@ import { buildHeadingSlugMap } from '../utils/slugify';
 import { copyTextToClipboard } from '../utils/clipboard';
 import { BlockRenderer } from './BlockRenderer';
 import { indexQuestionBlocks, type IndexedQuestion, type ParsedQuestion, type QuestionAnswer } from '@plannotator/core/question-block';
+import type { QuestionBlockProps } from './blocks/QuestionBlock';
 import { resolveQuestionAnswers } from '../utils/questionAnswers';
 import { CodeBlock } from './blocks/CodeBlock';
 import { TableBlock } from './blocks/TableBlock';
@@ -268,6 +269,10 @@ export interface ViewerProps {
    *  Settled / Skipped) so the host can draw its own; the decision tags stay.
    *  Default `'card'`. */
   questionStatusTag?: 'card' | 'none';
+  /** The host's own words for a question's status tag (ui seam, see
+   *  `QuestionBlock` `statusLabel`): the Plannotator Inbox says "Not sent" for
+   *  a saved, unsent pick. Absent: the card's own tags. */
+  questionStatusLabel?: QuestionBlockProps['statusLabel'];
   /** A host's own card in place of a question's (ui seam for a question the
    *  host no longer lets anyone answer, such as the Plannotator Inbox's
    *  replaced questions). Called per question; a returned node is drawn
@@ -692,6 +697,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   onOpenQuestionDecision,
   questionDecisionLocked,
   questionStatusTag,
+  questionStatusLabel,
   renderQuestionCard,
   renderQuestionBelowPrompt,
   onAskAI,
@@ -1686,6 +1692,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   onToggleQuestionDecisionRecording={readOnly || (question && questionDecisionLocked?.(question)) ? undefined : onToggleQuestionDecisionRecording}
                   onOpenQuestionDecision={readOnly || (question && questionDecisionLocked?.(question)) ? undefined : onOpenQuestionDecision}
                   questionStatusTag={questionStatusTag}
+                  questionStatusLabel={questionStatusLabel}
                   renderQuestionBelowPrompt={renderQuestionBelowPrompt}
                 />
               );

@@ -33,6 +33,7 @@ import {
   formatQuestionAnswersSection,
   isQuestionAnswerEmpty,
   isQuestionAnswered,
+  capQuestionPrompt,
   MAX_QUESTION_PROMPT_CHARS,
   parseQuestionAnswer,
   parseQuestionBlock,
@@ -295,7 +296,8 @@ export function checkInboxAnswer(
   if (parsed === null) return invalid("not a valid QuestionAnswer v1 record");
   if (parsed.key !== record.key) return invalid("key does not match the question");
   if (parsed.kind !== record.kind) return invalid("kind does not match the question");
-  if (parsed.prompt !== record.prompt.slice(0, MAX_QUESTION_PROMPT_CHARS)) {
+  // The cut every build makes now, or the plain 400-unit cut a client from before it made (the phone app's, until it updates).
+  if (parsed.prompt !== capQuestionPrompt(record.prompt) && parsed.prompt !== record.prompt.slice(0, MAX_QUESTION_PROMPT_CHARS)) {
     return invalid("prompt does not match the question");
   }
   const answer = canonicalQuestionAnswer({ choices: storedChoices(record) }, parsed);
@@ -398,7 +400,7 @@ export function inboxSkipAnswer(record: Pick<InboxQuestionRecord, "key" | "kind"
     v: 1,
     key: record.key,
     kind: record.kind,
-    prompt: record.prompt.slice(0, MAX_QUESTION_PROMPT_CHARS),
+    prompt: capQuestionPrompt(record.prompt),
     selected: [],
     skipped: true,
     ...(options.byReply ? { by_reply: true } : {}),

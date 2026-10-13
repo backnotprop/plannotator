@@ -186,6 +186,25 @@ describe('GuideView persistence affordances (#1112)', () => {
   });
 });
 
+describe('GuideView section count', () => {
+  test.skipIf(!hasDom)('numbers the cards against the sections the header counts; "Everything else" is unnumbered', async () => {
+    const guide = makeGuide({
+      sections: [
+        { title: 'First', overview: '', diffs: [{ file: 'a.ts' }] },
+        { title: 'Second', overview: '', diffs: [{ file: 'b.ts' }] },
+      ],
+      unplacedFiles: ['c.ts'],
+      reviewed: [false, false],
+    });
+    await renderView(guide, { state: makeState({ files: [makeFile('a.ts'), makeFile('b.ts'), makeFile('c.ts')] }) });
+    const text = host!.textContent ?? '';
+    expect(text).toContain('2 sections');
+    expect(text).toContain('01 / 02');
+    expect(text).toContain('02 / 02');
+    expect(text).not.toContain('/ 03');
+  });
+});
+
 describe('GuideView per-file windowing', () => {
   test.skipIf(!hasDom)('keeps 250 file shells while mounting only a bounded one-file CodeView window', async () => {
     const files = Array.from({ length: 250 }, (_, index) => makeFile(`src/file-${index}.ts`));

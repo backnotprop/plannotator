@@ -76,7 +76,8 @@ export const GuideView: React.FC<GuideViewProps> = ({
   // Only the guide's own files register shells; in-app the review may hold many more.
   const guideFileCount = resolved.sectionFiles.reduce((n, files) => n + files.length, 0) + resolved.unplacedFiles.length;
   const hasUnplaced = (guide.unplacedFiles?.length ?? 0) > 0;
-  const cardTotal = guide.sections.length + (hasUnplaced ? 1 : 0);
+  // The header counts sections, so the cards do too: "Everything else" is unnumbered.
+  const cardTotal = guide.sections.length;
   const reviewedCount = reviewed.filter(Boolean).length;
   const effectiveFocusedFile = focusedFile
     ?? resolved.sectionFiles.find((files) => files.length > 0)?.[0]?.path
@@ -202,6 +203,7 @@ export const GuideView: React.FC<GuideViewProps> = ({
             index={guide.sections.length}
             total={cardTotal}
             showReviewed={false}
+            numbered={false}
             focusedFile={effectiveFocusedFile}
             revealTarget={revealTarget}
             onActivate={onFocusFile}

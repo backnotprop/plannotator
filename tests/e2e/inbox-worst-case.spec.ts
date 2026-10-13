@@ -364,4 +364,149 @@ test('a file name cut in two copies whole, and reads whole to a screen reader (r
   }
 });
 
-test.fixme('PR 8: a file beside the thread at 920 to 1220 px keeps a readable column (rows 45 to 48, 50)', async () => {});
+/** Open a thread's file named `name` by its link (a PDF's tile downloads; the pane still shows it when stepped to or linked). */
+async function openFile(page: Page, thread: string, name: string): Promise<void> {
+  const model = (await (await fetch(`${world.url}/api/inbox/threads/${thread}/attachments`)).json()) as { attachments: { id: string; name: string }[] };
+  const id = model.attachments.find((a) => a.name === name)?.id;
+  expect(id, `${name} is attached in ${thread}`).toBeTruthy();
+  await page.goto(`${world.url}/#thread=${thread}&file=${id}`);
+  await page.waitForSelector(`section.ib-view[data-attachment-pane="${id}"]`, { timeout: 20_000 });
+  await page.waitForTimeout(500);
+}
+
+for (const width of [920, 1024, 1180, 1280]) {
+  test(`${width}: a file beside the thread keeps a readable column; the comments fold into a button below 1280 (rows 45 to 47, 50)`, async ({ browser }) => {
+    const { context, page } = await open(browser, { name: String(width), width, height: 800 });
+    try {
+      // A YAML file (drawn as code, row 44) beside the thread.
+      await openFile(page, world.seed.threads.kinds, world.seed.kinds.yaml);
+      await page.waitForSelector('section.ib-view [data-code-view]');
+      expect(await shapes(page)).toEqual([]);
+      const view = page.locator('section.ib-view');
+      const folded = width < 1280;
+      await expect(view).toHaveClass(folded ? /\bib-fold\b/ : /^(?!.*\bib-fold\b)/);
+      const pane = (await view.boundingBox())!;
+      const doc = (await view.locator('.ib-docarea').boundingBox())!;
+      if (folded) {
+        // The file takes the whole pane; the panel opens over it from the header's button, and closes.
+        expect(doc.width).toBeGreaterThan(pane.width - 4);
+        await expect(view.locator('.ib-apanel')).toBeHidden();
+        await view.locator('[data-annotations-sheet]').click();
+        await expect(view.locator('.ib-apanel')).toBeVisible();
+        expect((await view.locator('.ib-apanel').boundingBox())!.width).toBeLessThanOrEqual(301);
+        await shot(page, `fold-${width}-sheet`);
+        await view.getByRole('button', { name: 'Close the comments' }).click();
+        await expect(view.locator('.ib-apanel')).toBeHidden();
+      } else {
+        await expect(view.locator('[data-annotations-sheet]')).toHaveCount(0);
+        await expect(view.locator('.ib-apanel')).toBeVisible();
+      }
+      expect(doc.width, 'the file keeps a readable column').toBeGreaterThanOrEqual(480);
+      await shot(page, `fold-${width}-yaml`);
+
+      // A markdown file: the viewer's Global comment never sits on the toolstrip (row 46).
+      await openFile(page, world.seed.threads.files, world.seed.files.changed);
+      await page.waitForSelector('section.ib-view .ib-toolstrip');
+      const strip = (await page.locator('section.ib-view .ib-toolstrip').boundingBox())!;
+      const actions = (await page.locator('section.ib-view [data-sticky-actions]').first().boundingBox())!;
+      const overlaps = strip.x < actions.x + actions.width && actions.x < strip.x + strip.width && strip.y < actions.y + actions.height && actions.y < strip.y + strip.height;
+      expect(overlaps, 'Global comment clears the toolstrip').toBe(false);
+
+      // A PDF: no panel beside it, and the card's words keep a readable width (row 47).
+      await openFile(page, world.seed.threads.kinds, world.seed.kinds.pdf);
+      await page.waitForSelector('section.ib-view [data-download-card]');
+      await expect(page.locator('section.ib-view .ib-apanel')).toBeHidden();
+      expect((await page.locator('section.ib-view [data-download-card] .ib-att-text').boundingBox())!.width).toBeGreaterThan(200);
+      await shot(page, `fold-${width}-pdf`);
+
+      // Full screen: the foot wraps rather than cutting "Write the reply" (row 50).
+      await page.locator('section.ib-view').getByRole('button', { name: 'Full screen' }).click();
+      await page.waitForTimeout(300);
+      expect(await shapes(page)).toEqual([]);
+      const reply = (await page.locator('section.ib-view .ib-vfoot').getByRole('button', { name: 'Write the reply' }).boundingBox())!;
+      const foot = (await page.locator('section.ib-view .ib-vfoot').boundingBox())!;
+      expect(reply.x + reply.width).toBeLessThanOrEqual(foot.x + foot.width + 1);
+      await shot(page, `fold-${width}-full`);
+    } finally {
+      await context.close();
+    }
+  });
+}
+
+test('a guided review at 1024 and 900 keeps its diffs readable, with its comments a button away (row 48)', async ({ browser }) => {
+  for (const width of [900, 1024, 1440]) {
+    // The guide rides the thread's first message, whose id is the thread's.
+    const { context, page } = await open(browser, { name: String(width), width, height: 800 }, `thread=${world.seed.threads.guide}&guide=${world.seed.threads.guide}`);
+    try {
+      await expect(page.locator('section.ib-viewer .ib-gbody')).toContainText('Guard the refresh entry point', { timeout: 20_000 });
+      await page.waitForTimeout(500);
+      const viewer = page.locator('section.ib-viewer');
+      if (width < 1280) {
+        await expect(viewer).toHaveClass(/\bib-fold\b/);
+        expect((await viewer.locator('.ib-gbody').boundingBox())!.width).toBeGreaterThan(width - 260);
+        await viewer.locator('[data-guide-comments-sheet]').click();
+        await expect(viewer.locator('.ib-gpanel')).toBeVisible();
+        await shot(page, `guide-${width}-sheet`);
+        await viewer.getByRole('button', { name: 'Close the comments' }).click();
+        await expect(viewer.locator('.ib-gpanel')).toBeHidden();
+      } else {
+        await expect(viewer).not.toHaveClass(/\bib-fold\b/);
+        await expect(viewer.locator('[data-guide-comments-sheet]')).toHaveCount(0);
+        await expect(viewer.locator('.ib-gpanel')).toBeVisible();
+      }
+      await shot(page, `guide-${width}`);
+    } finally {
+      await context.close();
+    }
+  }
+});
+
+test('a panorama keeps a readable height, a 1×1 image stays one pixel, a minified file wraps (rows 51, 52, 59)', async ({ browser }) => {
+  const { context, page } = await open(browser, WIDTHS[0]!, `thread=${world.seed.threads.kinds}`);
+  try {
+    await page.waitForSelector('section.ib-pane [data-image-gallery]');
+    await page.waitForTimeout(800);
+    const frame = page.locator(`section.ib-pane [data-gallery-image] .ib-gal-frame.ib-wide`).first();
+    expect((await frame.boundingBox())!.height, 'a panorama is not a sliver').toBeGreaterThanOrEqual(120);
+    const dot = await page.locator(`section.ib-pane [data-gallery-image][data-attachment-name="${world.seed.kinds.dot}"] img`).first().evaluate((img: HTMLImageElement) => {
+      const r = img.getBoundingClientRect();
+      // object-fit: scale-down draws the image at its own size inside the box.
+      return { fit: getComputedStyle(img).objectFit, natural: img.naturalWidth, box: r.width };
+    });
+    expect(dot.fit).toBe('scale-down');
+    expect(dot.natural).toBe(1);
+    await shot(page, 'images-1440');
+    // The panorama in the viewer: its own height, scrolling sideways.
+    await page.locator(`section.ib-pane [data-gallery-image][data-attachment-name="${world.seed.kinds.pano}"]`).first().click();
+    await page.waitForSelector('section.ib-view .ib-imgstage[data-wide="true"] img');
+    await page.waitForTimeout(500);
+    const stage = await page.locator('section.ib-view .ib-imgstage').evaluate((el) => ({ scrolls: el.scrollWidth > el.clientWidth, height: el.querySelector('img')!.getBoundingClientRect().height }));
+    expect(stage.scrolls).toBe(true);
+    expect(stage.height).toBeGreaterThanOrEqual(120);
+    await shot(page, 'pano-viewer-1440');
+    // The minified bundle: its one line wraps instead of running sideways.
+    await openFile(page, world.seed.threads.kinds, world.seed.kinds.minified);
+    await page.waitForSelector('section.ib-view [data-code-view] diffs-container');
+    await page.waitForTimeout(1000);
+    const wraps = await page.locator('section.ib-view [data-code-view] diffs-container').evaluate((host) => {
+      const root = (host as HTMLElement).shadowRoot ?? host;
+      return root.querySelector('[data-overflow]')?.getAttribute('data-overflow') ?? 'none';
+    });
+    expect(wraps).toBe('wrap');
+    await shot(page, 'minified-1440');
+  } finally {
+    await context.close();
+  }
+});
+
+test('a phone opens a PDF with no Comments button (row 61)', async ({ browser }) => {
+  const { context, page } = await open(browser, WIDTHS[4]!, `thread=${world.seed.threads.kinds}`);
+  try {
+    await openFile(page, world.seed.threads.kinds, world.seed.kinds.pdf);
+    await page.waitForSelector('section.ib-view [data-download-card]');
+    await expect(page.locator('section.ib-view [data-annotations-sheet]')).toHaveCount(0);
+    await shot(page, 'phone-pdf');
+  } finally {
+    await context.close();
+  }
+});

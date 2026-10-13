@@ -299,6 +299,8 @@ export interface CodeFileViewProps {
   className?: string;
   /** The highlighting language, instead of Pierre's inference from the name (`'text'`: no highlighting, for a very large file). */
   lang?: string;
+  /** Long lines: `'scroll'` sideways (the default) or `'wrap'` onto the next row, for a minified file. */
+  overflow?: 'scroll' | 'wrap';
 }
 
 /**
@@ -320,6 +322,7 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
   allowImages = true,
   className = 'flex-1 min-h-0',
   lang,
+  overflow = 'scroll',
 }) => {
   const { resolvedMode } = useTheme();
   const mode = resolvedMode ?? 'dark';
@@ -507,7 +510,7 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
           options={{
             themeType: pierreTheme.type,
             unsafeCSS: pierreTheme.css,
-            overflow: 'scroll',
+            overflow,
             disableFileHeader: true,
             enableLineSelection: true,
             enableGutterUtility: !!onAddAnnotation,

@@ -4,7 +4,7 @@ import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import type { Annotation, ImageAttachment } from '@plannotator/ui/types';
 import { InboxApiError, inboxApi } from '../api';
-import { attachmentImageUrl, imageCommentAnnotation } from '../attachments';
+import { attachmentImageUrl, imageCommentAnnotation, WIDE_IMAGE_RATIO } from '../attachments';
 import { Icon } from '../icons';
 
 /** A fresh annotation id. */
@@ -84,25 +84,34 @@ export function ImageAttachmentView({
     setFailed(false);
   }, [version]);
 
-  // At its own size and larger than the stage, the image scrolls with the arrows (they do not step).
+  // A panorama fitted to the pane would be a sliver: it keeps a readable height and scrolls sideways.
+  const wide = natural !== null && natural.width > natural.height * WIDE_IMAGE_RATIO;
+  // At its own size (or a panorama) and larger than the stage, the image scrolls with the arrows (they do not step).
   const stageRef = useRef<HTMLDivElement>(null);
   const [overflows, setOverflows] = useState(false);
+  // An image no larger than the stage is shown at its own size either way: nothing to zoom (`.ib-noup`).
+  const [fitsStage, setFitsStage] = useState(false);
   useLayoutEffect(() => {
     const stage = stageRef.current;
-    if (!stage || fit !== 'actual') {
-      setOverflows(false);
-      return;
-    }
-    const measure = () => setOverflows(stage.scrollWidth > stage.clientWidth + 1 || stage.scrollHeight > stage.clientHeight + 1);
+    if (!stage) return;
+    const measure = () => {
+      const style = getComputedStyle(stage);
+      const room = {
+        width: stage.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+        height: stage.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom),
+      };
+      setFitsStage(natural !== null && room.width > 0 && natural.width <= room.width && natural.height <= room.height);
+      setOverflows((fit === 'actual' || wide) && (stage.scrollWidth > stage.clientWidth + 1 || stage.scrollHeight > stage.clientHeight + 1));
+    };
     measure();
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
     observer?.observe(stage);
     return () => observer?.disconnect();
-  }, [fit, natural]);
+  }, [fit, natural, wide]);
 
-  // A horizontal swipe on the fitted image: more than 60 px across, less than 40 px up or down.
+  // A horizontal swipe on the fitted image: more than 60 px across, less than 40 px up or down (a panorama scrolls instead).
   const swipeStart = useRef<{ x: number; y: number } | null>(null);
-  const swipes = onSwipe !== undefined && fit === 'fit';
+  const swipes = onSwipe !== undefined && fit === 'fit' && !wide;
 
   // A selected comment that carries a drawing shows the drawing on the stage.
   const selected = selectedId ? annotations.find((a) => a.id === selectedId) : undefined;
@@ -141,6 +150,7 @@ export function ImageAttachmentView({
         ref={stageRef}
         data-fit={fit}
         data-tall={tall ? 'true' : 'false'}
+        data-wide={wide ? 'true' : undefined}
         data-src={stageSrc}
         data-claims-arrows={overflows ? 'true' : undefined}
         onTouchStart={
@@ -195,6 +205,7 @@ export function ImageAttachmentView({
         ) : (
           <img
             key={stageSrc}
+            className={fit === 'fit' && fitsStage ? 'ib-noup' : undefined}
             src={stageSrc}
             alt={showingMarkup ? `${attachment.name}, marked up` : attachment.name}
             draggable={false}

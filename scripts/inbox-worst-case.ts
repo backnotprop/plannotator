@@ -7,7 +7,10 @@
  * and one from last year; long, near-identical and Arabic file names, a file
  * changed since it was sent with comments on it; a message table and a
  * 390 by 4000 screenshot; a replaced question with a long prompt; a long URL
- * as a subject; a long archived thread; a 2,000-character decision; 46
+ * as a subject; a long archived thread; a 2,000-character decision; a log,
+ * YAML, CSV, JSON, PDF, panorama, 1×1 image and minified bundle in one
+ * message; a guided review with an unplaced file; question cards with an
+ * unmatched recommendation, an unsent pick and a closed card; 46
  * projects; and, on request, enough waiting threads for a four-digit count.
  * Live agent sessions (for "Where should this reply go?" and New message)
  * are `LiveSessions`, against the running Inbox.
@@ -33,7 +36,9 @@ import { dirname, join, resolve } from 'node:path';
 import { deflateSync } from 'node:zlib';
 import { extractDirName, extractRepoName } from '../packages/core/project';
 import { INBOX_BRIDGE_POLL_PATH } from '../packages/shared/inbox/connection';
-import { recordInboxAttachments } from '../packages/shared/inbox/attachments';
+import { recordInboxAttachments, writeBlob } from '../packages/shared/inbox/attachments';
+import { FIXTURE_V1_LOCAL } from '../packages/core/guide-format-fixtures';
+import { checkInboxGuide, describeInboxGuide, inboxGuideInputHash } from '../packages/server/inbox-guides';
 import { InboxStore } from '../packages/shared/inbox/store';
 import { recordAgentDecision } from '../packages/server/inbox-decisions';
 import { refuseRealDataDir } from '../tests/helpers/real-data-dir';
@@ -75,7 +80,11 @@ export type WorstCaseThread =
   | 'archived'
   | 'longFile'
   | 'pill'
-  | 'centered';
+  | 'centered'
+  | 'kinds'
+  | 'guide'
+  | 'cards'
+  | 'closedCard';
 
 export interface WorstCaseWorld {
   dataDir: string;
@@ -85,6 +94,8 @@ export interface WorstCaseWorld {
   threads: Record<WorstCaseThread, string>;
   /** The attachment names in the `files` thread, by role. */
   files: { a: string; b: string; arabic: string; long: string; changed: string };
+  /** The attachment names in the `kinds` thread, by kind. */
+  kinds: { log: string; yaml: string; csv: string; json: string; pdf: string; pano: string; dot: string; minified: string };
 }
 
 /** A 2,000-character decision, one paragraph. */
@@ -350,6 +361,99 @@ export async function seedWorstCase(options: { dataDir: string; src?: string; no
   }
   send('billing', CLAUDE, question('Which ledger owns reversal entries?', ['The refunds ledger', 'The main ledger'], ['Decision: when answered']), { subject: 'Ledger ownership' });
 
+  // Batch 2 (the fix plan's PR 8): every kind of file the file view broke on, in one message.
+  at(new Date(today.getTime() - 30 * 60_000));
+  const artifacts = join(roots.billing, 'artifacts');
+  mkdirSync(artifacts, { recursive: true });
+  const kinds = {
+    log: 'refund-worker.log',
+    yaml: 'deploy.yaml',
+    csv: 'refunds-by-region.csv',
+    json: 'processor-settings.json',
+    pdf: 'payments-api-reference.pdf',
+    pano: 'checkout-funnel-panorama.png',
+    dot: 'tracking-pixel.png',
+    minified: 'checkout.bundle.min.js',
+  };
+  writeFileSync(
+    join(artifacts, kinds.log),
+    [
+      '# refund-worker, run 4412',
+      '2026-10-12T20:21:58Z INFO  worker started (queue=refunds, concurrency=8)',
+      '2026-10-12T20:22:03Z WARN  capture cap_9Hd2 pending for 26m, retrying with key idem_77a1',
+      '    at RefundWorker.retry (src/worker.ts:88)',
+      '    at processTicksAndRejections (node:internal/process/task_queues:95)',
+      '2026-10-12T20:22:04Z ERROR processor answered 409 for cap_9Hd2',
+      '2026-10-12T20:22:09Z INFO  dead-lettered cap_9Hd2 after 5 attempts',
+      '',
+    ].join('\n'),
+  );
+  writeFileSync(
+    join(artifacts, kinds.yaml),
+    ['# deploy settings for the refund worker', 'services:', '  refund-worker:', '    image: registry.internal/refund-worker:1.4.2', '    replicas: 3', '    env:', '      RETRY_LIMIT: "5"', '      DEAD_LETTER_QUEUE: refunds-dlq', ''].join('\n'),
+  );
+  writeFileSync(join(artifacts, kinds.csv), ['region,captures,refunds,refund_rate', 'North America,1284112,18402,1.43%', 'Europe,902551,14877,1.65%', 'Asia Pacific,455020,9912,2.18%', ''].join('\n'));
+  writeFileSync(join(artifacts, kinds.json), `${JSON.stringify({ processor: { retries: { limit: 5, backoff: 'exponential', keys: ['idempotency', 'capture_id'] } }, deadLetter: { queue: 'refunds-dlq' } }, null, 2)}\n`);
+  writeFileSync(join(artifacts, kinds.pdf), '%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n');
+  writeFileSync(join(artifacts, kinds.pano), stripedPng(8000, 300));
+  writeFileSync(join(artifacts, kinds.dot), stripedPng(1, 1));
+  // One line of about 200 KB (the stress test's was 323 KB): a comment on it stored the whole line.
+  writeFileSync(join(artifacts, kinds.minified), `!function(){${Array.from({ length: 6000 }, (_, n) => `var r${n}=t.refund(${n},"cap_${n}");`).join('')}}();\n`);
+  const kindsRecorded = await recordInboxAttachments(store.dir, Object.values(kinds).map((name) => join(artifacts, name)), { base: roots.billing, at: clock.toISOString() });
+  tick();
+  threads.kinds = store.sendMessage({
+    project_id: ids.billing,
+    author: { ...CLAUDE, session: 'ses_wc_kinds' },
+    body: 'The worker log, the deploy settings, the refund figures, the processor settings, the API reference, the funnel panorama, the tracking pixel and the minified checkout bundle.',
+    subject: 'Refund worker artifacts',
+    attachments: kindsRecorded,
+  }).message.thread_id;
+
+  // A guided review with one section, a file left in "Everything else", and an overview heading written with ##.
+  tick();
+  const guideSnapshot = {
+    ...FIXTURE_V1_LOCAL,
+    guide: {
+      ...FIXTURE_V1_LOCAL.guide,
+      sections: [{ ...FIXTURE_V1_LOCAL.guide.sections[0]!, overview: '## Why it matters\n\nThe refresh function now rejects a missing token instead of echoing it back.' }],
+      unplacedFiles: ['package.json'],
+      reviewed: [false],
+    },
+  };
+  const checkedGuide = checkInboxGuide({ snapshot: guideSnapshot }, roots.billing);
+  if (!checkedGuide.ok) throw new Error(`the seed's guided review is invalid: ${checkedGuide.error}`);
+  const described = describeInboxGuide(checkedGuide.snapshot, inboxGuideInputHash({ snapshot: guideSnapshot }));
+  const guideMessage = store.sendMessage({
+    project_id: ids.billing,
+    author: { ...CLAUDE, session: 'ses_wc_guide' },
+    body: 'A guided review of the token refresh change.',
+    subject: 'Guided review: token refresh',
+    guide: described.ref,
+  }).message;
+  writeBlob(store.dir, described.ref.sha256, Buffer.from(described.text, 'utf8'));
+  threads.guide = guideMessage.thread_id;
+
+  // Question cards: a choice question whose recommendation names none of its choices, and a pick saved but not sent.
+  const cardsMessage = send(
+    'billing',
+    PI,
+    [
+      [':::question', 'Which store backs the refund idempotency cache?', '', '- [ ] Redis', '- [ ] Memcached', '', 'Recommended: SQLite on the worker box', ':::'].join('\n'),
+      '',
+      question('Page the on-call for dead-lettered refunds?', ['Yes, every one', 'Only above 10 an hour']),
+    ].join('\n'),
+    { subject: 'Idempotency cache and paging' },
+  );
+  threads.cards = cardsMessage.thread_id;
+  const paging = store.questionsOf(cardsMessage.id)[1]!;
+  tick();
+  store.savePicks(cardsMessage.id, [{ key: paging.key, revision: paging.revision, answer: { v: 1, key: paging.key, kind: 'single', prompt: paging.prompt, selected: ['Only above 10 an hour'] } }]);
+  // A thread marked read: its question closed unanswered, a read-only card with no Other answer.
+  const closed = send('billing', CODEX, question('Keep the legacy refund endpoint for one more release?', ['Keep it', 'Remove it']), { subject: 'Legacy refund endpoint' });
+  threads.closedCard = closed.thread_id;
+  tick();
+  store.markRead(closed.thread_id, true);
+
   // 46 projects: the sidebar's list scrolls (the nav items shrank to 20 px past about 17).
   for (let n = 1; n <= 38; n++) {
     const root = repo(src, `client-portal-${String(n).padStart(2, '0')}`);
@@ -368,7 +472,7 @@ export async function seedWorstCase(options: { dataDir: string; src?: string; no
     }
   }
 
-  return { dataDir, src, projects: roots, threads, files };
+  return { dataDir, src, projects: roots, threads, files, kinds };
 }
 
 /**
@@ -414,10 +518,11 @@ async function main(): Promise<void> {
   };
   const dataDir = flag('--data-dir');
   if (!dataDir) {
-    process.stderr.write('Usage: bun scripts/inbox-worst-case.ts --data-dir <scratch data dir> [--src <folder>] [--bulk <n>]\n');
+    process.stderr.write('Usage: bun scripts/inbox-worst-case.ts --data-dir <scratch data dir> [--src <folder>] [--bulk <n>] [--now <ISO date>]\n');
     process.exit(2);
   }
-  const world = await seedWorstCase({ dataDir, src: flag('--src'), bulk: Number(flag('--bulk') ?? 0) });
+  const now = flag('--now');
+  const world = await seedWorstCase({ dataDir, src: flag('--src'), bulk: Number(flag('--bulk') ?? 0), ...(now ? { now: new Date(now) } : {}) });
   process.stdout.write(`${JSON.stringify(world, null, 2)}\n`);
 }
 

@@ -1,8 +1,10 @@
 import React from 'react';
 import { renderInlineMarkdown } from './renderInlineMarkdown';
 
+const HEADING = /^#{1,6} (.*)$/;
+
 /**
- * Renders a block of markdown-ish prose (paragraphs, `### ` headings, `- `/`* `
+ * Renders a block of markdown-ish prose (paragraphs, `#` to `######` headings, `- `/`* `
  * bullet lists, and `> [!NOTE|IMPORTANT|WARNING]` callouts) into React nodes,
  * with inline markdown (bold/italic/code/links) handled per-line via
  * {@link renderInlineMarkdown}.
@@ -87,12 +89,15 @@ export function renderMarkdownProse(
       continue;
     }
 
-    // Heading h3 — inline markdown applies here too (the guide prompt
+    // Heading — inline markdown applies here too (the guide prompt
     // encourages backticked symbols/file names, including in headings).
-    if (line.startsWith('### ')) {
+    // Any level from # to ###### reads as the card's one sub-heading style:
+    // agents write ## as often as ###, and the card has its own title.
+    const heading = HEADING.exec(line);
+    if (heading) {
       nodes.push(
         <h3 key={key++} className="text-[12px] font-semibold text-foreground mt-3 mb-1">
-          {renderInlineMarkdown(line.slice(4))}
+          {renderInlineMarkdown(heading[1])}
         </h3>
       );
       i++;
@@ -126,7 +131,7 @@ export function renderMarkdownProse(
     while (
       j < lines.length &&
       lines[j].trim() &&
-      !lines[j].startsWith('### ') &&
+      !HEADING.test(lines[j]) &&
       !lines[j].match(/^[-*] /) &&
       !lines[j].match(/^>\s*\[!/) &&
       !lines[j].trimStart().startsWith('```')

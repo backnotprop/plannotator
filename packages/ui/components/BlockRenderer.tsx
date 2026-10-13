@@ -62,9 +62,11 @@ export const BlockRenderer: React.FC<{
   onOpenQuestionDecision?: QuestionBlockProps['onOpenDecision'];
   /** `'none'` hides the card's own status tag (see `QuestionBlock`). */
   questionStatusTag?: QuestionBlockProps['statusTag'];
+  /** The host's words for a question's status tag (see `QuestionBlock`). */
+  questionStatusLabel?: QuestionBlockProps['statusLabel'];
   /** Host content under a question's prompt (see `QuestionBlock`). */
   renderQuestionBelowPrompt?: QuestionBlockProps['renderBelowPrompt'];
-}> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, repoHost, headingAnchorId, onNavigateAnchor, question, questionTotal, questionAnswer, onAnswerQuestion, onSaveQuestionAnswer, saveQuestionAnswerLabel, renderQuestionFooter, questionDecisionRecording, questionDecisionScope, onToggleQuestionDecisionRecording, onOpenQuestionDecision, questionStatusTag, renderQuestionBelowPrompt }) => {
+}> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, repoHost, headingAnchorId, onNavigateAnchor, question, questionTotal, questionAnswer, onAnswerQuestion, onSaveQuestionAnswer, saveQuestionAnswerLabel, renderQuestionFooter, questionDecisionRecording, questionDecisionScope, onToggleQuestionDecisionRecording, onOpenQuestionDecision, questionStatusTag, questionStatusLabel, renderQuestionBelowPrompt }) => {
   switch (block.type) {
     case 'heading': {
       const Tag = `h${block.level || 1}` as React.ElementType;
@@ -195,6 +197,7 @@ export const BlockRenderer: React.FC<{
               onToggleDecisionRecording={onToggleQuestionDecisionRecording}
               onOpenDecision={onOpenQuestionDecision}
               statusTag={questionStatusTag}
+              statusLabel={questionStatusLabel}
               renderBelowPrompt={renderQuestionBelowPrompt}
               onOpenLinkedDoc={onOpenLinkedDoc}
               onOpenCodeFile={onOpenCodeFile}

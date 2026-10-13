@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildQuestionAnswerAnnotation,
+  capQuestionPrompt,
+  MAX_QUESTION_PROMPT_CHARS,
   canonicalQuestionAnswer,
   formatQuestionAnswerText,
   formatQuestionAnswersSection,
@@ -503,6 +505,17 @@ describe("parseQuestionAnswer", () => {
     expect(parsed.prompt.length).toBe(400);
     expect(parsed.text!.length).toBe(4000);
     expect(parsed.selected.length).toBe(20);
+  });
+
+  test("never cuts a prompt inside an emoji, and the Inbox's check cuts it the same way", () => {
+    // The 400th code unit is the first half of a surrogate pair.
+    const prompt = `${"p".repeat(399)}😀 and more`;
+    const capped = capQuestionPrompt(prompt);
+    expect(capped).toBe("p".repeat(399));
+    expect(parseQuestionAnswer(answer({ prompt }))!.prompt).toBe(capped);
+    expect(capped.length).toBeLessThanOrEqual(MAX_QUESTION_PROMPT_CHARS);
+    // A prompt that fits is kept whole.
+    expect(capQuestionPrompt("Ship it? 😀")).toBe("Ship it? 😀");
   });
 });
 

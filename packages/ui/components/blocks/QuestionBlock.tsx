@@ -8,6 +8,7 @@ import {
   type IndexedQuestion,
   type ParsedQuestion,
   type QuestionAnswer,
+  type QuestionStatus,
 } from '@plannotator/core/question-block';
 import { InlineMarkdown } from '../InlineMarkdown';
 import { QuestionContext } from './QuestionContext';
@@ -178,6 +179,11 @@ export interface QuestionBlockProps {
    *  Skipped) so the host can draw its own; the decision tags stay. Default
    *  `'card'`. */
   statusTag?: 'card' | 'none';
+  /** The host's own words for the card's status tag, per question (ui seam;
+   *  the Plannotator Inbox says "Not sent" for a pick it has saved but not
+   *  sent, where the card would say "Answered"). Return undefined for the
+   *  card's own tag. Absent: today's tags. Ignored with `statusTag: 'none'`. */
+  statusLabel?: (question: IndexedQuestion, status: QuestionStatus) => QuestionStatusLabel | undefined;
   /** Host content drawn right under the prompt (a host note such as "Replaces
    *  <an earlier question>"), given the question. Return null for none.
    *  Absent: nothing is drawn there (today's card). */
@@ -189,6 +195,12 @@ export interface QuestionBlockProps {
   githubRepo?: string;
   repoHost?: string;
   onNavigateAnchor?: (hash: string) => void;
+}
+
+/** A host's status tag (`statusLabel`): its words, and the tone of one of the card's own tags (default `open`). */
+export interface QuestionStatusLabel {
+  label: string;
+  tone?: 'ok' | 'open' | 'skip';
 }
 
 export const QuestionBlock: React.FC<QuestionBlockProps> = ({
@@ -205,6 +217,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   onToggleDecisionRecording,
   onOpenDecision,
   statusTag = 'card',
+  statusLabel,
   renderBelowPrompt,
   onOpenLinkedDoc,
   onOpenCodeFile,
@@ -293,6 +306,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   // A note alone does not change a settled choice: the [x] stays drawn (and
   // the status stays Settled) until the reviewer picks, fills Other or skips.
   const status = questionStatus(question, answer);
+  const hostStatus = statusTag === 'none' ? undefined : statusLabel?.(indexed, status);
   const answered = status === 'answered';
   const skipped = status === 'skipped';
   const settled = status === 'settled';
@@ -413,9 +427,29 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     ? (recordingOn ? 'on' : 'off')
     : undefined;
 
-  const describedBy = [question.context ? contextId : null, question.kind === 'text' && question.suggestedText && !answered ? suggestId : null]
+  const describedBy = [question.context ? contextId : null, question.suggestedText && !answered ? suggestId : null]
     .filter(Boolean)
     .join(' ') || undefined;
+
+  // The suggestion the agent wrote that is not one of the choices (a choice
+  // question's `Recommended:` naming none of them; a text question's whole
+  // suggestion): "Accept recommended" fills it in, so the card shows it.
+  const suggestedLine = question.suggestedText && !answered && (
+    <div id={suggestId} className="mt-2 flex items-start gap-2 text-[12.5px] text-muted-foreground" data-question-suggested="">
+      <span className="min-w-0 flex-1">
+        <Tag tone="rec">Suggested</Tag> {inline(question.suggestedText)}
+      </span>
+      {!readOnly && (
+        <button
+          type="button"
+          onClick={acceptRecommended}
+          className="shrink-0 rounded-md bg-primary/15 px-2.5 py-[3px] text-xs font-medium text-primary hover:bg-primary/25 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          Use
+        </button>
+      )}
+    </div>
+  );
 
   return (
     <fieldset
@@ -494,7 +528,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           ) : (
             <><Tag tone="rec" style={DECISION_OFF_STYLE}><DiamondGlyph />Records a decision</Tag>{' '}</>
           ))}
-          {statusTag !== 'none' && (
+          {statusTag !== 'none' && hostStatus && <Tag tone={hostStatus.tone ?? 'open'}>{hostStatus.label}</Tag>}
+          {statusTag !== 'none' && !hostStatus && (
             <>
               {status === 'answered' && <Tag tone="ok"><CheckGlyph />Answered</Tag>}
               {status === 'settled' && <Tag tone="ok"><CheckGlyph />Settled</Tag>}
@@ -550,22 +585,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
 
       {question.kind === 'text' ? (
         <>
-          {question.suggestedText && !answered && (
-            <div id={suggestId} className="mt-2 flex items-start gap-2 text-[12.5px] text-muted-foreground">
-              <span className="min-w-0 flex-1">
-                <Tag tone="rec">Suggested</Tag> {inline(question.suggestedText)}
-              </span>
-              {!readOnly && (
-                <button
-                  type="button"
-                  onClick={acceptRecommended}
-                  className="shrink-0 rounded-md bg-primary/15 px-2.5 py-[3px] text-xs font-medium text-primary hover:bg-primary/25 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                >
-                  Use
-                </button>
-              )}
-            </div>
-          )}
+          {suggestedLine}
           <textarea
             className={cx(
               // annotation-exclude: typed text is not document text, so a
@@ -581,65 +601,71 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           />
         </>
       ) : (
-        <div
-          className={cx('mt-2.5 grid gap-0.5', skipped && 'opacity-55')}
-          role={inputType === 'radio' ? 'radiogroup' : 'group'}
-          aria-labelledby={promptId}
-        >
-          {question.choices.map((choice) => {
-            const checked = selected.includes(choice.label);
-            return (
-              <label
-                key={choice.label}
-                className={cx(
-                  'flex items-start gap-2.5 rounded-[7px] px-[9px] py-1.5 transition-colors',
-                  readOnly ? 'cursor-default' : 'cursor-pointer hover:bg-muted/45',
-                  checked && 'bg-primary/12 hover:bg-primary/12',
-                )}
-                data-question-option=""
-                onPointerDown={onRowPointerDown}
-                onClickCapture={(event) => onRowClick(event, choice.label)}
-              >
-                <input
-                  type={inputType}
-                  name={groupName}
-                  checked={checked}
-                  onChange={(e) => pick(choice.label, e.target.checked)}
-                  className="mt-[3px] h-[15px] w-[15px] shrink-0 cursor-pointer accent-primary disabled:cursor-default"
-                  disabled={readOnly}
-                />
-                <span className="min-w-0 flex-1 select-text text-[13.5px] leading-[1.45] text-foreground" data-question-part="choice">
-                  <span className="font-[550]">{inline(choice.label)}</span>
-                  {choice.description && (
-                    <span className="text-muted-foreground"> — {inline(choice.description)}</span>
+        <>
+          {suggestedLine}
+          <div
+            className={cx('mt-2.5 grid gap-0.5', skipped && 'opacity-55')}
+            role={inputType === 'radio' ? 'radiogroup' : 'group'}
+            aria-labelledby={promptId}
+          >
+            {question.choices.map((choice) => {
+              const checked = selected.includes(choice.label);
+              return (
+                <label
+                  key={choice.label}
+                  className={cx(
+                    'flex items-start gap-2.5 rounded-[7px] px-[9px] py-1.5 transition-colors',
+                    readOnly ? 'cursor-default' : 'cursor-pointer hover:bg-muted/45',
+                    checked && 'bg-primary/12 hover:bg-primary/12',
                   )}
-                  {choice.recommended && <> <Tag tone="rec">Recommended</Tag></>}
+                  data-question-option=""
+                  onPointerDown={onRowPointerDown}
+                  onClickCapture={(event) => onRowClick(event, choice.label)}
+                >
+                  <input
+                    type={inputType}
+                    name={groupName}
+                    checked={checked}
+                    onChange={(e) => pick(choice.label, e.target.checked)}
+                    className="mt-[3px] h-[15px] w-[15px] shrink-0 cursor-pointer accent-primary disabled:cursor-default"
+                    disabled={readOnly}
+                  />
+                  <span className="min-w-0 flex-1 select-text text-[13.5px] leading-[1.45] text-foreground" data-question-part="choice">
+                    <span className="font-[550]">{inline(choice.label)}</span>
+                    {choice.description && (
+                      <span className="text-muted-foreground"> — {inline(choice.description)}</span>
+                    )}
+                    {choice.recommended && <> <Tag tone="rec">Recommended</Tag></>}
+                  </span>
+                </label>
+              );
+            })}
+            {/* A read-only card with no Other answer has nothing to show there (it drew a bare "+"). */}
+            {(!readOnly || otherOn) && (
+              <div className="flex items-center gap-2.5 rounded-[7px] px-[9px] py-[5px]">
+                <span
+                  aria-hidden="true"
+                  className={cx(
+                    'annotation-exclude select-none grid h-[15px] w-[15px] shrink-0 place-items-center border-[1.5px] text-[11px] leading-none',
+                    question.kind === 'multi' ? 'rounded-[3px]' : 'rounded-full',
+                    otherOn ? 'border-solid border-primary bg-primary text-primary-foreground' : 'border-dashed border-border text-muted-foreground',
+                  )}
+                >
+                  {otherOn ? <CheckGlyph /> : '+'}
                 </span>
-              </label>
-            );
-          })}
-          <div className="flex items-center gap-2.5 rounded-[7px] px-[9px] py-[5px]">
-            <span
-              aria-hidden="true"
-              className={cx(
-                'annotation-exclude select-none grid h-[15px] w-[15px] shrink-0 place-items-center border-[1.5px] text-[11px] leading-none',
-                question.kind === 'multi' ? 'rounded-[3px]' : 'rounded-full',
-                otherOn ? 'border-solid border-primary bg-primary text-primary-foreground' : 'border-dashed border-border text-muted-foreground',
-              )}
-            >
-              {otherOn ? <CheckGlyph /> : '+'}
-            </span>
-            <input
-              type="text"
-              value={other}
-              onChange={(e) => setOther(e.target.value)}
-              disabled={readOnly}
-              placeholder={readOnly ? '' : 'Other…'}
-              aria-label={number > 0 ? `Other answer to question ${number}` : 'Other answer'}
-              className="annotation-exclude min-w-0 flex-1 border-0 border-b border-transparent bg-transparent py-[3px] text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring"
-            />
+                <input
+                  type="text"
+                  value={other}
+                  onChange={(e) => setOther(e.target.value)}
+                  disabled={readOnly}
+                  placeholder={readOnly ? '' : 'Other…'}
+                  aria-label={number > 0 ? `Other answer to question ${number}` : 'Other answer'}
+                  className="annotation-exclude min-w-0 flex-1 border-0 border-b border-transparent bg-transparent py-[3px] text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring"
+                />
+              </div>
+            )}
           </div>
-        </div>
+        </>
       )}
 
       {noteOpen && (!readOnly || !!answer?.note?.trim()) && (

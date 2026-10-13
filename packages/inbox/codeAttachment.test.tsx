@@ -9,7 +9,9 @@ import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
-import { CODE_HIGHLIGHT_MAX_CHARS, codeDocumentBlocks } from './attachments';
+import { CODE_EXCERPT_MAX_CHARS, CODE_HIGHLIGHT_MAX_CHARS, codeCommentAnnotation, codeDocumentBlocks, codeRangeMatches, codeRangeOf, hasLineLongerThan, inboxViewKind } from './attachments';
+import type { InboxAnnotationRecord } from '@plannotator/core/inbox-types';
+import { AnnotationType, type Annotation } from '@plannotator/ui/types';
 
 const hasDom = typeof document !== 'undefined';
 // The pane pulls in the Viewer, which reads `window` at module-eval time.
@@ -54,7 +56,7 @@ async function render(node: React.ReactNode) {
   });
 }
 
-async function openPane(text: string, file: InboxAttachmentState = attachment) {
+async function openPane(text: string, file: InboxAttachmentState = attachment, records: InboxAnnotationRecord[] = []) {
   globalThis.fetch = (async () =>
     new Response(JSON.stringify({ serverSession: 's', attachment: file, version: 'current', text, html: null }), {
       status: 200,
@@ -65,7 +67,7 @@ async function openPane(text: string, file: InboxAttachmentState = attachment) {
     <AttachmentPane
       attachment={file}
       attachments={[file]}
-      records={[]}
+      records={records}
       agent="Claude Code"
       projectName="api"
       projectRoot="/work/api"
@@ -109,4 +111,71 @@ test('a code file over the highlight bound is one block with no language (plain 
 test.skipIf(!hasDom)('the tile names the kind of a code attachment', async () => {
   await render(<AttachmentTiles attachments={[attachment]} annotationCounts={new Map()} onOpen={() => {}} />);
   expect(host!.querySelector(`[data-attachment-id="${attachment.id}"]`)?.textContent).toContain('Code (.sh)');
+});
+
+// Row 44: logs, YAML, CSV and JSON ran their lines together through the markdown pipeline (# read as a heading).
+test('data and log files are drawn as code; .txt and markdown keep their own view', () => {
+  for (const name of ['worker.log', 'config.yaml', 'ci.yml', 'data.csv', 'rows.tsv', 'package.json', 'Cargo.toml', 'app.ini', 'site.conf', 'feed.xml', '.env.example']) {
+    expect(inboxViewKind('text', name)).toBe('code');
+  }
+  expect(inboxViewKind('text', 'notes.txt')).toBe('text');
+  expect(inboxViewKind('text', 'README')).toBe('text');
+  expect(inboxViewKind('markdown', 'plan.md')).toBe('markdown');
+  expect(inboxViewKind('code', 'replay.sh')).toBe('code');
+});
+
+const yaml: InboxAttachmentState = { ...attachment, id: 'att_01K7YYYYYYYYYYYYYYYYYYYYYY', path: '/work/api/deploy.yaml', name: 'deploy.yaml', kind: 'text' };
+const YAML = '# deploy\nservices:\n  api:\n    image: api:1.4\n';
+
+function textComment(): InboxAnnotationRecord {
+  const annotation: Annotation = { id: 'ann-old', blockId: 'block-1', startOffset: 0, endOffset: 8, type: AnnotationType.COMMENT, text: 'Pin the tag.', originalText: 'services', createdA: 1 };
+  return {
+    id: 'ann-old',
+    project_id: 'prj_x',
+    thread_id: 'msg_x',
+    message_id: yaml.message_id,
+    attachment_id: yaml.id,
+    path: yaml.path,
+    version: 'current',
+    annotation: annotation as unknown as Record<string, unknown>,
+    created_at: yaml.sent_at,
+    updated_at: yaml.sent_at,
+    removed_at: null,
+    sent_reply_id: null,
+  };
+}
+
+test.skipIf(!hasDom)('a YAML file sent as text opens in the code view, and a text comment left on it before shows as Unanchored', async () => {
+  await openPane(YAML, yaml, [textComment()]);
+  expect(host!.querySelector('[data-code-view] diffs-container')).not.toBeNull();
+  expect(host!.querySelector('.ib-docscroll')).toBeNull();
+  const chip = [...host!.querySelectorAll('[data-annotation-panel] *')].find((el) => el.textContent === 'Unanchored');
+  expect(chip).toBeDefined();
+});
+
+// Row 60: a comment on a minified file's one line stored the whole 323 KB line.
+test('a comment on a very long line keeps an excerpt with the length and a hash; old whole-line records still match', () => {
+  const line = `var a=${'x'.repeat(330_000)};`;
+  const stored = codeRangeOf(codeCommentAnnotation({ id: 'a', lineStart: 1, lineEnd: 1, text: 'too long', code: line }))!;
+  expect(stored.code.length).toBeLessThanOrEqual(CODE_EXCERPT_MAX_CHARS);
+  expect(line.startsWith(stored.code.slice(0, -1))).toBe(true);
+  expect(stored.length).toBe(line.length);
+  expect(codeRangeMatches(stored, line)).toBe(true);
+  expect(codeRangeMatches(stored, line.replace('x;', 'y;'))).toBe(false);
+  expect(codeRangeMatches(stored, `${line} `)).toBe(false);
+
+  // A short comment is kept whole, with no hash: the same record as before.
+  const short = codeRangeOf(codeCommentAnnotation({ id: 'b', lineStart: 2, lineEnd: 2, text: 'ok', code: 'const a = 1;' }))!;
+  expect(short).toEqual({ lineStart: 2, lineEnd: 2, code: 'const a = 1;' });
+  // A record from before excerpts (the whole lines, no hash) matches by its text.
+  expect(codeRangeMatches({ lineStart: 1, lineEnd: 1, code: line }, line)).toBe(true);
+  expect(codeRangeMatches({ lineStart: 1, lineEnd: 1, code: line }, `${line} `)).toBe(false);
+});
+
+// Row 59: a minified file's one line could not wrap.
+test('a line over the wrap bound is found on any line, and short lines are not', () => {
+  expect(hasLineLongerThan('a\nb\n', 1000)).toBe(false);
+  expect(hasLineLongerThan(`a\n${'x'.repeat(1001)}\nb`, 1000)).toBe(true);
+  expect(hasLineLongerThan('x'.repeat(1001), 1000)).toBe(true);
+  expect(hasLineLongerThan('x'.repeat(1000), 1000)).toBe(false);
 });

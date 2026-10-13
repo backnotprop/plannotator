@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { inboxAttachmentKindLabel, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachmentState, type InboxProjectRepo } from '@plannotator/core/inbox-types';
+import { inboxAttachmentKindLabel, isInboxTextKind, type InboxAnnotationRecord, type InboxAttachmentState, type InboxProjectRepo } from '@plannotator/core/inbox-types';
 import { CodeFileView } from '@plannotator/ui/components/CodeFilePopout';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
@@ -16,11 +16,15 @@ import {
   attachmentBlocks,
   attachmentDownloadUrl,
   CODE_HIGHLIGHT_MAX_CHARS,
+  CODE_WRAP_LINE_CHARS,
+  hasLineLongerThan,
   attachmentLabel,
   codeAnnotationOf,
   codeCommentAnnotation,
   codeCommentBlocks,
+  codeRangeMatches,
   codeRangeOf,
+  inboxViewKind,
 } from '../attachments';
 import { whenTime, formatBytes } from '../format';
 import { titleIfClipped } from '../clipTitle';
@@ -30,6 +34,15 @@ import { AttachmentStepper, type StepSource } from './AttachmentStepper';
 import { FIRST_NOTE, LAST_NOTE, stepAnnouncement, stepKeyIntent, type AttachmentStep } from '../stepping';
 import { Icon } from '../icons';
 import { FileName } from './FileName';
+import { useNarrowerThan } from '../narrower';
+
+/**
+ * The pane width below which the 300 px comments panel folds into the
+ * header's Comments button and opens over the file (as a phone's sheet does):
+ * beside it the file would keep under 480 px. A file beside the thread at
+ * 1280 px and wider, and a full-screen file, keep the panel docked.
+ */
+export const FOLD_PANEL_BELOW = 780;
 
 export interface AttachmentPaneProps {
   attachment: InboxAttachmentState;
@@ -167,7 +180,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   // The current file cannot be read (gone, or no longer the file that was sent): the sent version opens.
   const currentUnavailable = attachment.unavailable !== null;
   const effectiveVersion = currentUnavailable ? 'sent' : version;
-  const kind = readInboxAttachmentKind(attachment.kind);
+  // Data and log files are drawn as code (inboxViewKind).
+  const kind = inboxViewKind(attachment.kind, attachment.name);
   // Text kinds read through the view route; an image draws from its own route, a PDF or a file downloads.
   const readsText = isInboxTextKind(kind);
 
@@ -196,7 +210,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
 
   useEffect(() => setSelectedId(props.focusId), [props.focusId, attachment.id]);
 
-  const sectionRef = useRef<HTMLElement>(null);
+  // Below FOLD_PANEL_BELOW the comments panel folds into the header's button (a file beside the thread at about 920 to 1220 px).
+  const [sectionRef, narrowPane] = useNarrowerThan<HTMLElement>(FOLD_PANEL_BELOW, false);
   useEffect(() => {
     if (props.focusRequest) sectionRef.current?.focus({ preventScroll: true });
   }, [props.focusRequest]);
@@ -207,8 +222,12 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const multi = steps.length > 1 && index >= 0;
   const phone = props.phone === true;
   const [menuOpen, setMenuOpen] = useState(false);
-  /** Phones: the annotations panel is a sheet the header's button opens (inbox.css, the panel's touch presentation inside it). */
+  /** The panel folded (a phone, or a narrow pane): the header's button opens it as a sheet (inbox.css; a phone draws the panel's touch presentation inside it). */
+  const folded = phone || narrowPane;
   const [sheet, setSheet] = useState(false);
+  useEffect(() => {
+    if (!folded) setSheet(false);
+  }, [folded]);
   const [endNote, setEndNote] = useState<string | null>(null);
   const endTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [announced, setAnnounced] = useState('');
@@ -428,7 +447,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const commentBlocks = useMemo(() => (isCode ? codeCommentBlocks(annotations) : []), [isCode, annotations]);
   const blocks = isCode ? commentBlocks : documentBlocks;
   const refRepo = useRefRepo(props.repo);
-  // Code comments drawn under their lines; one whose lines no longer read as they did is unanchored.
+  const wrapCode = useMemo(() => view !== null && isCode && hasLineLongerThan(view.text, CODE_WRAP_LINE_CHARS), [view, isCode]);
+  // Code comments drawn under their lines; one whose lines no longer read as they did is unanchored, and so is a text
+  // comment left on a data or log file before it was drawn as code (inboxViewKind).
   const codeAnnotations = useMemo(
     () => (isCode ? annotations.map((a) => codeAnnotationOf(a, attachment.name)).filter((a): a is NonNullable<typeof a> => a !== null) : []),
     [isCode, annotations, attachment.name],
@@ -439,7 +460,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     const moved = new Set<string>();
     for (const annotation of annotations) {
       const range = codeRangeOf(annotation);
-      if (range && lines.slice(range.lineStart - 1, range.lineEnd).join('\n') !== range.code) moved.add(annotation.id);
+      if (range ? !codeRangeMatches(range, lines.slice(range.lineStart - 1, range.lineEnd).join('\n')) : annotationOwnsHighlight(annotation)) moved.add(annotation.id);
     }
     setUnanchored(moved);
   }, [isCode, view, annotations]);
@@ -506,6 +527,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   }, [props.records, props.attachments, props.projectRoot, attachment]);
   const currentKey = recordKey(attachment.path, annotationVersion);
   const otherFiles = documents.some((d) => d.path !== currentKey);
+  // A PDF or any other download takes no comments: no panel (nor a Comments button) unless other files have comments to list.
+  const hasPanel = !isDownload || otherFiles;
   const groups = useMemo(() => groupAnnotationsByDocument(documents, currentKey), [documents, currentKey]);
   const openInDocument = (_path: string, id: string) => {
     const record = props.records.find((r) => r.id === id);
@@ -570,7 +593,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       ref={sectionRef}
       onPointerOver={titleIfClipped}
       tabIndex={-1}
-      className={`ib-view${full ? ' ib-full' : ''}${phone ? ' ib-phone' : ''}${phone && sheet ? ' ib-panel-open' : ''}`}
+      className={`ib-view${full ? ' ib-full' : ''}${phone ? ' ib-phone' : ''}${folded && !phone ? ' ib-fold' : ''}${hasPanel ? '' : ' ib-nopanel'}${folded && sheet ? ' ib-panel-open' : ''}`}
       aria-label={multi ? `${attachment.name}, attachment ${index + 1} of ${steps.length}` : attachment.name}
       data-attachment-pane={attachment.id}
       data-version={effectiveVersion}
@@ -604,7 +627,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           <Icon name="download" size={14} />
           {!phone && 'Download'}
         </a>
-        {phone ? (
+        {folded && hasPanel && (
           <button
             type="button"
             className={`ib-btn ib-sm ib-vcomments${sheet ? ' ib-on' : ''}`}
@@ -617,7 +640,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             <Icon name="comment" size={15} />
             {annotations.length}
           </button>
-        ) : (
+        )}
+        {!phone && (
           <>
             {!props.fullLocked && (
               <button type="button" className="ib-btn ib-sm" onClick={props.onToggleFull}>
@@ -750,6 +774,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 onDeleteAnnotation={props.readOnly ? undefined : (id) => void remove(id)}
                 allowImages={false}
                 lang={view.text.length > CODE_HIGHLIGHT_MAX_CHARS ? 'text' : undefined}
+                // A minified file's one line wraps (no toggle: a line this long is never read by scrolling sideways).
+                overflow={wrapCode ? 'wrap' : undefined}
                 className="ib-codebody"
               />
             </div>
@@ -781,9 +807,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             </div>
           )}
         </div>
-        <div className="ib-apanel" role={phone ? 'region' : undefined} aria-label={phone ? 'Comments' : undefined}>
-          {/* A phone's sheet: its own title and close (the panel's touch presentation has neither). */}
-          {phone && (
+        <div className="ib-apanel" role={folded ? 'region' : undefined} aria-label={folded ? 'Comments' : undefined}>
+          {/* The folded panel's sheet: its own title and close (a phone's touch presentation has neither). */}
+          {folded && (
             <div className="ib-sheet-h">
               <b>Comments</b>
               <span className="ib-mut">{annotations.length}</span>
@@ -794,16 +820,16 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             </div>
           )}
           <AnnotationPanel
-            // A phone draws the panel's touch presentation inside the sheet; the window-wide overlay it would otherwise draw below 768 px has no close here.
-            presentation={phone ? 'embedded' : undefined}
+            // A folded panel draws its timeline inside the sheet, under the sheet's own title and close (and a phone's window-wide overlay below 768 px would have no close here).
+            presentation={folded ? 'embedded' : undefined}
             emptyHint={isImage ? 'Comment below the image' : isCode ? 'Click a line to comment' : undefined}
             isOpen
             annotations={annotations}
             blocks={blocks}
             onSelect={(id) => {
               setSelectedId(id);
-              // On a phone the sheet steps aside to show the comment in the file.
-              if (phone) setSheet(false);
+              // A folded panel steps aside to show the comment in the file.
+              if (folded) setSheet(false);
             }}
             onDelete={(id) => void remove(id)}
             onEdit={edit}

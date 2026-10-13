@@ -63,4 +63,18 @@ describe("renderMarkdownProse", () => {
     expect(textOf(heading)).toBe("The useGuideData hook");
     expect(textOf(heading)).not.toContain("`");
   });
+
+  it("reads # to ###### as headings, and a heading ends the paragraph above it", () => {
+    for (const hashes of ["#", "##", "###", "####", "#####", "######"]) {
+      const nodes = renderMarkdownProse(`Some text\n${hashes} Why this matters`);
+      expect(nodes).toHaveLength(2);
+      expect(isElement(nodes[1]) && nodes[1].type).toBe("h3");
+      expect(textOf(nodes[1])).toBe("Why this matters");
+    }
+    // Seven hashes, or no space after them, is prose.
+    for (const prose of ["####### seven", "#hashtag"]) {
+      const [node] = renderMarkdownProse(prose);
+      expect(isElement(node) && node.type).toBe("p");
+    }
+  });
 });
