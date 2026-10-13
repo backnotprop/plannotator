@@ -1,7 +1,6 @@
 /**
- * The sidebar's brand mark: Workspaces' Tater sprite as Workspaces draws it
- * (apps/web/src/components/sprites/TaterSpriteSidebar.tsx and SpriteSheet.tsx
- * in the Workspaces repo): 24 frames of 77x88 at 2x, shown 44 px high,
+ * The sidebar's brand mark: Workspaces' Tater sprite as the Workspaces app
+ * draws it in its sidebar: 24 frames of 77x88 at 2x, shown 44 px high,
  * mirrored, looping over 3.5 s. It pauses while offscreen, and under
  * prefers-reduced-motion it shows its first frame (inbox.css, `ib-tater`).
  */

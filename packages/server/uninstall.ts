@@ -31,6 +31,10 @@ import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { parseT3HookCommand } from "@plannotator/shared/t3-hook-command";
 import { inboxStatus, readInboxRegistry, stopInbox } from "@plannotator/shared/inbox/registry";
 import { INBOX_TAILNET_HTTPS_PORT, takeDownInboxTailnet } from "./inbox-devices";
+import { takeDownInboxTailscale } from "./inbox-tailscale";
+import { forgetInboxAgents, planInboxAgentRemoval, type AgentEnvironment } from "./inbox-agents";
+import { planInboxNoteRemoval } from "./inbox-agent-notes";
+import { INBOX_AGENT_LABELS, type InboxAgentId } from "@plannotator/core/inbox-types";
 import {
   applyEdits,
   createScanner,
@@ -126,6 +130,7 @@ const PURGE_OWNED_TOP_LEVEL = [
   "update-result.json",
   "update.lock",
   "update.log",
+  "update-notes",
   "install-flags.json",
 ] as const;
 
@@ -413,12 +418,26 @@ export async function runPlannotatorUninstall(
         if (tailnet === "failed") state.warnings.push(`Could not check or remove the Inbox's tailnet address; run: tailscale serve --https=${INBOX_TAILNET_HTTPS_PORT} off`);
       }
     }
+    // "Over your tailnet": the window's mapping a crashed Inbox left behind (a clean stop, including the stop above, takes its own down).
+    const kept = inboxBlocksPurge ? undefined : readInboxRegistry(state.dataDir)?.tailscale;
+    if (kept?.https_port && kept.proxy_port) {
+      if (request.dryRun) {
+        state.planned.push(`Take down the Plannotator Inbox's tailnet address (tailscale serve --https=${kept.https_port})`);
+      } else {
+        const result = takeDownInboxTailscale(state.dataDir);
+        if (result === "removed") state.removed.push(`Took down the Plannotator Inbox's tailnet address (tailscale serve --https=${kept.https_port})`);
+        if (result === "failed") state.warnings.push(`Could not check or remove the Inbox's tailnet address; run: tailscale serve --https=${kept.https_port} off`);
+      }
+    }
   }
 
   const paths = resolveOwnedPaths(environment);
 
   await removeHostPlugins(request, environment, paths, state);
   removeHostConfigEntries(request, environment, paths, state);
+  // Plain uninstall too: with the binary gone, an agent's plannotator-inbox
+  // entry would fail to start at every launch.
+  await removeInboxAgentConnections(request, environment, state);
   removeInstalledFiles(request, environment, paths, state);
   if (dataDirSafetyIssue) {
     state.warnings.push(
@@ -493,6 +512,63 @@ export function formatUninstallResult(result: UninstallResult): string {
   }
 
   return lines.join("\n");
+}
+
+/** The agents' boundary (inbox-agents.ts) over uninstall's own. */
+function agentEnvironmentOf(environment: UninstallEnvironment): AgentEnvironment {
+  return {
+    platform: environment.platform,
+    homeDir: environment.homeDir,
+    env: environment.env,
+    which: (command) => environment.which(command),
+    run: async (argv) => {
+      const result = await environment.runCommand(argv[0]!, argv.slice(1));
+      return { exitCode: result.exitCode, timedOut: result.timedOut, stdout: result.stdout ?? "", stderr: "" };
+    },
+  };
+}
+
+/**
+ * The `plannotator-inbox` MCP entries `plannotator inbox` added to the
+ * agents on this computer (inbox-agents.ts): only the recorded ones that still
+ * run Plannotator. An entry the person changed to run something else is theirs
+ * and is named; so is one that runs this binary but has no record (agents.json
+ * lost), which the person may have added by hand. A failure is a warning,
+ * never a reason to keep the CLI.
+ */
+async function removeInboxAgentConnections(
+  request: UninstallRequest,
+  environment: UninstallEnvironment,
+  state: MutableUninstallResult,
+): Promise<void> {
+  const agents = agentEnvironmentOf(environment);
+  // With no record (agents.json lost), an entry that runs exactly this binary is named, never removed.
+  const plan = planInboxAgentRemoval(state.dataDir, agents, [environment.execPath, "inbox", "mcp"]);
+  // The notes (inbox-agent-notes.ts): only the marked section, as the person left it.
+  const notes = planInboxNoteRemoval(state.dataDir, agents, INBOX_AGENT_LABELS);
+  for (const skipped of [...plan.skipped, ...notes.skipped]) state.warnings.push(`Skipped: ${skipped}.`);
+  if (request.dryRun) {
+    for (const item of plan.items) state.planned.push(item.describe);
+    for (const note of notes.items) state.planned.push(note.describe);
+    return;
+  }
+  for (const note of notes.items) {
+    const result = note.apply();
+    if (result.ok) state.removed.push(note.describe);
+    else state.warnings.push(`Could not remove the note in ${note.path}: ${result.reason}.`);
+  }
+  const removed: InboxAgentId[] = [];
+  for (const item of plan.items) {
+    const problem = await item.apply();
+    if (problem) {
+      state.warnings.push(`Could not remove ${item.describe}: ${problem}.`);
+      continue;
+    }
+    state.removed.push(item.describe);
+    removed.push(item.agent);
+  }
+  // A plain uninstall keeps the data: forget these records so a reinstall connects them again.
+  if (!request.purge) forgetInboxAgents(state.dataDir, removed);
 }
 
 function formatUninstallRetryCommand(request: UninstallRequest): string {

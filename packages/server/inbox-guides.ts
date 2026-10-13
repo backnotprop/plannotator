@@ -72,7 +72,7 @@ export const GET_GUIDE_BRIEF_DESCRIPTION =
   "Get what you need to write a guided review of a code change for the person: Plannotator's method, the JSON shape of the guide, how to read the diff, the rules, and a worked submit_guide call. Read the diff in your checkout, write the guide on your own model, then call submit_guide with the guide and that exact patch.";
 
 export const SUBMIT_GUIDE_DESCRIPTION =
-  "Send the person a guided review of a code change. It lands in the Plannotator Inbox as a message with a \"Guided review\" card that opens in Plannotator's guide viewer. Pass `guide` (the shape get_guide_brief gives) and `patch` (the exact unified diff it describes), or `snapshot` (a complete Plannotator guide snapshot). Every file a section names must be in the patch, in one section only; a refusal names the file. Files you leave out show under \"Everything else\". `body` is your note above the card (default: the guide's intent). thread, reply_to and idempotency_key work as in send_message; the person's answer comes back through wait_for_reply.\n\nExample: get_guide_brief's `example` is a call that works as it is.";
+  "Send the person a guided review of a code change. It lands in the Plannotator Inbox as a message with a \"Guided review\" card that opens in Plannotator's guide viewer. Pass `guide` (the shape get_guide_brief gives) and `patch` (the exact unified diff it describes), or `snapshot` (a complete Plannotator guide snapshot). Every file a section names must be in the patch, in one section only; a refusal names the file. Files you leave out show under \"Everything else\". `body` is your note above the card (default: the guide's intent). thread, reply_to, supersedes and idempotency_key work as in send_message; the person's answer comes back through wait_for_reply.\n\nExample: get_guide_brief's `example` is a call that works as it is.";
 
 export type InboxGuideCheck = { ok: true; snapshot: GuideSnapshot } | { ok: false; error: string };
 
@@ -239,7 +239,7 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
         const described = describeInboxGuide(checked.snapshot, inboxGuideInputHash(input));
         const body = input.body?.trim() ? input.body : checked.snapshot.guide.intent;
         const subject = input.subject ?? (input.body?.trim() ? undefined : `Guided review: ${described.ref.title}`);
-        const sent = sendAgentMessage(context, project, { ...input, body, subject }, described.ref);
+        const sent = await sendAgentMessage(context, project, { ...input, body, subject }, described.ref, callerWakes(ctx));
         // The blob is written once the message has landed, in the same turn (nothing can ask for it
         // in between); a refused send writes none, and a retry answers the first message's guide.
         if (!sent.replayed) writeBlob(context.store.dir, described.ref.sha256, Buffer.from(described.text, "utf8"));

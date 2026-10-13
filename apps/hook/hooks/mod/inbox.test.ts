@@ -12,12 +12,13 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { inboxAgentTool, INBOX_MESSAGE_INSTRUCTION, INBOX_TOOL_ACTIONS, INBOX_WAKE_INSTRUCTION, inboxWakeText, mcpAnswerOf } from './inbox-contract'
+import { inboxAgentTool, INBOX_MESSAGE_INSTRUCTION, INBOX_TOOL_ACTIONS, INBOX_WAKE_INSTRUCTION, inboxRedirectedLine, inboxWakeText, mcpAnswerOf } from './inbox-contract'
 import { ClaudeSession } from './testing/claude-session'
+import { removeStubbedHtml, stubBuiltHtml } from '../../../../tests/helpers/inbox-world'
+import { inboxEntryOf, isAlive, mustSignalInbox, stopProvenInboxes } from '../../../../tests/helpers/inbox-process'
 import { INBOX_DISCOVER_TIMEOUT_MS, STORE_INBOX_TOOLS } from './inbox'
 
 const entry = resolve(import.meta.dir, '../../server/index.ts')
-const distDir = resolve(import.meta.dir, '../../dist')
 const binary = process.env.PLANNOTATOR_INBOX_TEST_BINARY
 const proofDir = process.env.INBOX_PROOF_DIR
 let stubs: string[] = []
@@ -25,29 +26,28 @@ const roots: string[] = []
 const sessions: ClaudeSession[] = []
 
 beforeAll(() => {
-  if (binary) return
   // The CLI from source imports the built HTML; the Inbox never serves it.
-  stubs = ['index.html', 'review.html', 'inbox.html'].map((name) => join(distDir, name)).filter((path) => !existsSync(path))
-  mkdirSync(distDir, { recursive: true })
-  for (const path of stubs) writeFileSync(path, '<!doctype html><title>test</title>')
+  stubs = stubBuiltHtml()
 })
 afterAll(() => {
-  for (const path of stubs) rmSync(path, { force: true })
+  removeStubbedHtml(stubs)
 })
-afterEach(() => {
+afterEach(async () => {
   for (const session of sessions.splice(0)) session.quit()
   for (const root of roots.splice(0)) {
-    const registry = join(root, 'home', '.plannotator', 'inbox', 'inbox.json')
-    if (existsSync(registry)) {
-      try {
-        process.kill(JSON.parse(readFileSync(registry, 'utf8')).pid, 'SIGKILL')
-      } catch {
-        // gone
-      }
-    }
+    // Only an Inbox proven to be the one this world started (tests/helpers/inbox-process.ts).
+    const entry = inboxEntryOf(join(root, 'home', '.plannotator'))
+    if (entry) await stopProvenInboxes([{ entry, root }], { signal: 'SIGKILL' })
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+/** SIGKILL the world's Inbox, once proven to be the one it started, and wait for it to die. */
+async function killInbox(w: World): Promise<number> {
+  const { pid } = await mustSignalInbox(inboxEntryOf(w.dataDir), w.root, 'SIGKILL')
+  await waitFor('the Inbox to die', () => !isAlive(pid))
+  return pid
+}
 
 interface World {
   root: string
@@ -174,16 +174,26 @@ const QUESTION = [
 ].join('\n')
 
 describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () => {
-  test('no registry: no tool and nothing polls; once the Inbox ran, the tool carries exactly what its /mcp offers', async () => {
+  test('no registry: the tool from the bundled list, nothing polls or writes, and the first call starts the Inbox; once the Inbox ran, the tool carries exactly what its /mcp offers', async () => {
     const w = world('01-registry-and-tool-list')
     const silent = await open(w, 'session-silent')
-    expect(silent.inboxTools).toBeNull()
-    expect(silent.mod.inbox).toBeNull()
+    // Before this computer ever ran the Inbox: the list bundled with the mod (pinned to a real Inbox by inbox-default-tools.test.ts).
+    expect(silent.inboxTools?.map((tool) => tool.name)).toEqual([...INBOX_TOOL_ACTIONS])
+    expect(silent.mod.inbox).not.toBeNull()
     await Bun.sleep(2_500)
     expect(silent.host.fetches).toEqual([])
-    w.proof('no inbox/inbox.json: inboxTools null, no InboxLink, 0 HTTP requests in 2.5 s')
+    expect(existsSync(join(w.dataDir, 'claude-code-mod', 'session-silent', 'inbox'))).toBe(false)
+    expect(existsSync(join(w.dataDir, 'inbox'))).toBe(false)
+    w.proof('no inbox/inbox.json: plannotator_inbox from the bundled list, 0 HTTP requests and no files in 2.5 s')
 
-    startInbox(w)
+    // The first call starts the Inbox (plannotator inbox --background, no tab) and the message lands.
+    const first = await send(silent, w, 'Is the staging deploy green?')
+    expect((await thread(w, first.thread_id)).messages[0]?.author).toMatchObject({ host: 'claude-code', session: 'session-silent' })
+    expect(existsSync(w.browserMarker)).toBe(false)
+    // And from then on the wake polls this session's replies.
+    await waitFor('the wake to poll the new Inbox', () => silent.host.fetches.some((url) => url.endsWith('/api/inbox/bridge/poll')))
+    w.proof(`the first call started the Inbox (pid ${registry(w).pid}) and landed thread ${first.thread_id}; the wake polls it now`)
+    silent.quit()
     const session = await open(w, 'session-1')
     const names = session.inboxTools?.map((tool) => tool.name)
     // What this Inbox's /mcp lists, asked directly: the tool carries exactly those it can (an older
@@ -199,9 +209,11 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     const spec = inboxAgentTool(session.inboxTools!)!
     const actions = (spec.inputSchema.properties as { action: { enum: string[] } }).action.enum
     expect(actions).toEqual(names!)
-    // The filled arguments never reach the agent's schema; the question guide rides `body`.
+    // The filled arguments never reach the agent's schema, except an optional project_path; the question guide rides `body`.
     const properties = Object.keys(spec.inputSchema.properties as object)
-    for (const filled of ['project_path', 'agent_session', 'agent_host', 'agent_name']) expect(properties).not.toContain(filled)
+    for (const filled of ['agent_session', 'agent_host', 'agent_name']) expect(properties).not.toContain(filled)
+    expect(properties).toContain('project_path')
+    expect(spec.inputSchema.required).toEqual(['action'])
     expect((spec.inputSchema.properties as { body: { description: string } }).body.description).toContain(':::question')
     expect(spec.description.length).toBeLessThan(2_048)
     w.proof(`registry present, Inbox running: plannotator_inbox actions = ${JSON.stringify(actions)}\n\n${spec.description}`)
@@ -387,15 +399,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     const first = startInbox(w)
     const session = await open(w, 'session-dead')
     expect(session.inboxTools).not.toBeNull()
-    process.kill(first.pid, 'SIGKILL')
-    await waitFor('the Inbox to die', () => {
-      try {
-        process.kill(first.pid, 0)
-        return false
-      } catch {
-        return true
-      }
-    })
+    expect(await killInbox(w)).toBe(first.pid)
     w.proof(`killed the Inbox (pid ${first.pid}); inbox.json stays`)
 
     const sent = await send(session, w, 'Is the staging deploy green?')
@@ -406,12 +410,38 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     w.proof(`the tool call started a new Inbox (pid ${now.pid}) through plannotator inbox --background; no browser opened`)
 
     // A new session whose Inbox is stopped still gets the tool, from the list the Inbox last offered.
-    process.kill(now.pid, 'SIGKILL')
-    await Bun.sleep(300)
+    expect(await killInbox(w)).toBe(now.pid)
     const later = await open(w, 'session-dead-2')
     expect(later.inboxTools?.map((tool) => tool.name)).toEqual(session.inboxTools?.map((tool) => tool.name))
     w.proof('a session starting while the Inbox is stopped registers the tool from the list the Inbox last offered')
   }, 90_000)
+
+  test("project_path names the project for a session working in another folder; a bad one is refused before the Inbox is reached", async () => {
+    const w = world('07b-project-path')
+    const first = startInbox(w)
+    const notes = join(w.root, 'meeting-notes')
+    mkdirSync(notes, { recursive: true })
+    writeFileSync(join(w.project, 'replay.sh'), '#!/bin/sh\necho replay\n')
+    const session = await open(w, 'session-notes')
+
+    const named = await session.callInbox({ action: 'send_message', body: 'The script I ran.', project_path: '../refund-service', attachments: ['replay.sh'] }, notes)
+    if ('deny' in named) throw new Error(named.deny)
+    const sent = JSON.parse(named.text.slice(named.text.indexOf('{'))) as { thread_id: string; attachments: { kind: string }[] }
+    expect((await thread(w, sent.thread_id)).project.root).toBe(w.project)
+    expect(sent.attachments[0]?.kind).toBe('code')
+    const plain = await session.callInbox({ action: 'send_message', body: 'From the notes folder.' }, notes)
+    if ('deny' in plain) throw new Error(plain.deny)
+    expect((await thread(w, JSON.parse(plain.text.slice(plain.text.indexOf('{'))).thread_id)).project.root).toBe(notes)
+    w.proof(`project_path "../refund-service" from ${notes} landed in ${w.project}; without it, in ${notes}`)
+
+    expect(await killInbox(w)).toBe(first.pid)
+    for (const bad of ['../missing', join(w.project, 'replay.sh'), 'two\nlines']) {
+      const refused = await session.callInbox({ action: 'send_message', body: 'x', project_path: bad }, notes)
+      expect('deny' in refused && refused.deny, bad).toContain('project_path')
+    }
+    // Nothing started the stopped Inbox: the registry still names the dead one.
+    expect(registry(w).pid).toBe(first.pid)
+  }, 60_000)
 
   // The failure this guards: the person's first prompt waits for session.start,
   // and `$.http.fetch` gives up only after 30 s, so an Inbox that accepts and
@@ -518,5 +548,44 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     expect(((await refused.json()) as { code: string }).code).toBe('session_not_live')
     expect((await thread(w, asked.thread_id)).messages).toHaveLength(before)
     w.proof('session-other quit: gone from the live list after 30 s; a New message to it answers 409 session_not_live and writes nothing')
+  }, 120_000)
+
+  test('the asking session ended and the person sent the reply to another live session: that session is woken once, with the line saying the asker ended; the asker is not', async () => {
+    const w = world('10-ended-session-reply')
+    startInbox(w)
+    const asker = await open(w, 'session-asker')
+    const asked = await send(asker, w, QUESTION)
+    asker.quit()
+    const taker = await open(w, 'session-taker')
+    const { port } = registry(w)
+    await waitFor('the other session live', async () => {
+      const model = (await (await fetch(`http://127.0.0.1:${port}/api/inbox/threads/${asked.thread_id}/sessions`)).json()) as { sessions: { session: string }[] }
+      return model.sessions.some((s) => s.session === 'session-taker') ? true : null
+    })
+    const health = (await (await fetch(`http://127.0.0.1:${port}/api/inbox/health`)).json()) as { serverSession: string }
+    const words = 'Retry with the same key.'
+    const response = await fetch(`http://127.0.0.1:${port}/api/inbox/messages/${asked.message_id}/reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: `http://127.0.0.1:${port}` },
+      body: JSON.stringify({ serverSession: health.serverSession, idempotency_key: 'ended-1', words, to: { host: 'claude-code', session: 'session-taker' } }),
+    })
+    expect(response.status).toBe(200)
+    const reply = ((await response.json()) as { reply: { id: string; body: string } }).reply
+    w.proof(`> the person picks session-taker at Send (session-asker has ended)\n${reply.body}\n`)
+
+    const turn = await waitFor('the redirected reply turn', () => taker.turns.find((t) => t.text.includes(reply.id)))
+    await Bun.sleep(3_000)
+    expect(taker.host.submits).toEqual([
+      inboxWakeText({ id: reply.id, subject: 'What should the worker do on a Stripe 409?', body: reply.body, redirected_from: 'Claude Code' }),
+    ])
+    const lines = taker.host.submits[0]!.split('\n')
+    expect(lines[1]).toBe(INBOX_WAKE_INSTRUCTION)
+    expect(lines[2]).toBe(inboxRedirectedLine('Claude Code', reply.id))
+    expect(asker.host.submits).toEqual([])
+    w.proof(`turn.start ${turn.id} in session-taker:\n${turn.text}`)
+
+    const delivered = await waitFor('the delivery record', async () => (await thread(w, asked.thread_id)).messages.find((m) => m.id === reply.id)?.delivery)
+    expect(delivered).toMatchObject({ state: 'delivered', host: 'claude-code', session: 'session-taker' })
+    w.proof(`thread shows: Delivered to Claude Code (another session), ${delivered.at}`)
   }, 120_000)
 })

@@ -15,6 +15,10 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # A backstop, not a budget: green runs take 16-19 minutes. Some DOM tests
+    # run on fake timers, where bun's per-test timeout cannot fire, so a stuck
+    # await would otherwise idle until GitHub's 6-hour default.
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -80,6 +84,7 @@ jobs:
           packages/review-editor/components/DiffViewer.binaryNotice.test.tsx
           packages/review-editor/components/DiffViewer.imagePreview.test.tsx
           packages/review-editor/components/DiffViewer.headerControls.test.tsx
+          packages/review-editor/components/DiffViewer.markdownPreview.test.tsx
 
       # Seam contracts + the remaining DOM-gated tests. Scoped to the DOM files
       # (not the whole ui suite) to keep this process light. Files get isolated
@@ -122,6 +127,36 @@ jobs:
           packages/ui/components/DiagramBlock.askAI.test.tsx
           packages/ui/components/Viewer.askAISelectionLine.test.tsx
           packages/ui/components/ImageLightbox.test.tsx
+          packages/inbox/images.test.tsx
+          packages/inbox/codeAttachment.test.tsx
+          packages/inbox/links.test.tsx
+          packages/inbox/issueRefs.test.tsx
+          packages/inbox/attachmentKinds.test.tsx
+          packages/inbox/updates.test.tsx
+          packages/inbox/replaced.test.tsx
+          packages/inbox/threadFolding.test.tsx
+          packages/inbox/seenOnSight.test.tsx
+          packages/inbox/projectList.test.tsx
+          packages/inbox/sidebarQuiet.test.tsx
+          packages/inbox/soundIntro.test.tsx
+          packages/inbox/soundSettings.test.tsx
+          packages/inbox/attachmentStepping.test.tsx
+          packages/inbox/attachmentSteppingSave.test.tsx
+          packages/inbox/listColumn.test.tsx
+          packages/inbox/endedSession.test.tsx
+          packages/inbox/markRead.test.tsx
+          packages/inbox/fileBack.test.tsx
+          packages/inbox/archived.test.tsx
+          packages/inbox/decisionsPicker.test.tsx
+          packages/inbox/openStaysPut.test.tsx
+          packages/inbox/phoneList.test.tsx
+          packages/inbox/toastPhone.test.tsx
+          packages/inbox/attachmentsHeader.test.tsx
+          packages/inbox/themeToggle.test.tsx
+          packages/inbox/agentsCard.test.tsx
+          packages/inbox/agentsSettings.test.tsx
+          packages/inbox/settingsSections.test.tsx
+          packages/ui/components/MenuVersionSection.test.tsx
           packages/ui/components/blocks/QuestionBlock.test.tsx
           packages/ui/components/blocks/QuestionBlock.host.test.tsx
           packages/ui/components/blocks/QuestionBlock.decisionToggle.test.tsx
@@ -129,6 +164,9 @@ jobs:
           packages/ui/hooks/useAnnotationHighlighter.questionSkip.test.tsx
           packages/ui/hooks/usePinpoint.question.test.tsx
           packages/ui/utils/blockTargeting.blocks.test.tsx
+          packages/ui/components/blocks/BlockquoteBlock.test.tsx
+          packages/ui/components/RenderedMarkdown.hostSeams.test.tsx
+          packages/ui/components/plan-diff/PlanCleanDiffView.seams.test.tsx
           packages/ui/components/AnnotationPanel.questions.test.tsx
           packages/ui/hooks/useActiveSection.test.tsx
           packages/editor/hooks/useQuestionAnswers.test.tsx
@@ -158,6 +196,10 @@ jobs:
           packages/review-editor/components/AllFilesCodeView.generated.test.tsx
           packages/review-editor/components/AllFilesCodeView.autoViewed.test.tsx
           packages/review-editor/components/AllFilesCodeView.imagePreview.test.tsx
+          packages/review-editor/components/AllFilesCodeView.markdownPreview.test.tsx
+          packages/review-editor/components/MarkdownFilePreview.test.tsx
+          packages/review-editor/hooks/useMarkdownPreview.test.tsx
+          packages/review-editor/components/MarkdownViewMenu.test.tsx
           packages/review-editor/components/DiffViewer.compactTouchSelection.test.tsx
           packages/guide-viewer/GuideSectionCard.test.tsx
           packages/guide-viewer/GuideView.test.tsx

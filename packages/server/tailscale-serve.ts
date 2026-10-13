@@ -103,8 +103,10 @@ export interface TailscaleServeOptions {
    */
   ownTargets?: readonly string[];
   /**
-   * Keep the mapping when this process exits (the Inbox: the person's switch
-   * stays on, and the next start re-points it). Default: torn down on exit.
+   * The caller owns the mapping's lifetime (the Inbox: it records the
+   * mapping, takes it down at its clean stop, and reconciles a leftover at
+   * its next start), so this module neither registers it for exit cleanup
+   * nor adds the served name to the Host allowlist. Default: torn down on exit.
    */
   persist?: boolean;
 }
@@ -156,8 +158,10 @@ export function enableTailscaleServe(
       `--tailscale: could not find an https:// URL for port ${httpsPort} in \`tailscale serve\` output.`,
     );
   }
-  // The Inbox (persist) publishes a door-only listener that reads no Host, so
-  // its window's allowlist never learns the tailnet name.
+  // The Inbox (persist) publishes its own tailnet-only listeners (Phones'
+  // door, the window's owner-only listener), which check the tailnet name
+  // themselves, so the window port's Host allowlist never learns it. The
+  // Inbox takes its mapping down itself and installs its own exit handling.
   if (options.persist) return { url };
   // tailscale serve forwards the browser's Host (the MagicDNS name) to the
   // loopback backend, so the server's Host allowlist must know the name.
@@ -184,6 +188,26 @@ export function enableTailscaleServe(
  */
 export function removeTailscaleServe(httpsPort: number, run: TailscaleRunner = runTailscale): boolean {
   return runServeOff(httpsPort, run);
+}
+
+/**
+ * Take down the mapping on `httpsPort` only when it points at one of
+ * `targets` (proxy targets this caller made): someone else's mapping on that
+ * port is never touched. "none" when there is no such mapping, "failed" when
+ * Tailscale could not say or could not remove it.
+ */
+export function takeDownOwnServeMapping(
+  run: TailscaleRunner,
+  httpsPort: number,
+  targets: readonly string[],
+): "removed" | "none" | "failed" {
+  if (targets.length === 0) return "none";
+  const status = run(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
+  if (status.error || status.status !== 0) return "failed";
+  const existing = serveStatusProxy(status.stdout, httpsPort);
+  if (existing.state === "malformed") return "failed";
+  if (existing.state !== "mapped" || !targets.includes(existing.proxy)) return "none";
+  return runServeOff(httpsPort, run) ? "removed" : "failed";
 }
 
 /**

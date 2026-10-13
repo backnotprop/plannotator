@@ -629,3 +629,116 @@ describe("questionStatus", () => {
     expect(questionStatus(openQ, base({ other: "gRPC" }))).toBe("answered");
   });
 });
+
+describe("Replaces: lines (the Plannotator Inbox)", () => {
+  const OLD = "msg_01M4H6G73M9H3Z32T859E72DPY/q-4f7db09f";
+
+  test("are read wherever they sit, never as the prompt or context, and leave the key alone", () => {
+    const plain = parseQuestionBlock("question", "Retry a 409?\n\n- [ ] Yes\n- [ ] No");
+    for (const body of [`Replaces: ${OLD}\nRetry a 409?\n\n- [ ] Yes\n- [ ] No`, `Retry a 409?\n\nreplaces:  ${OLD}\n\n- [ ] Yes\n- [ ] No`]) {
+      const parsed = parseQuestionBlock("question", body)!;
+      expect(parsed.prompt).toBe("Retry a 409?");
+      expect(parsed.context).toBe("");
+      expect(parsed.replaces).toEqual([OLD]);
+      expect(parsed.key).toBe(plain!.key);
+    }
+  });
+
+  test("take several ids, and a value that is not an id stays prose", () => {
+    const parsed = parseQuestionBlock("question-text", `Why?\nReplaces: ${OLD}, msg_01M4H6G73M9H3Z32T859E72DPZ; q-12345678`)!;
+    expect(parsed.replaces).toEqual([OLD, "msg_01M4H6G73M9H3Z32T859E72DPZ", "q-12345678"]);
+    const prose = parseQuestionBlock("question-text", "Why?\nReplaces: the legacy cache")!;
+    expect(prose.replaces).toBeUndefined();
+    expect(prose.context).toBe("Replaces: the legacy cache");
+  });
+
+  test("a value that only starts like an id stays prose; a trailing period on an id is dropped", () => {
+    for (const line of ["Replaces: q-learning with PPO for the agent.", "Replaces: msg_ queue drain approach", `Replaces: ${OLD} and the other one`]) {
+      const parsed = parseQuestionBlock("question-text", `Why?\n${line}`)!;
+      expect(parsed.replaces).toBeUndefined();
+      expect(parsed.context).toBe(line);
+    }
+    const prompt = parseQuestionBlock("question-text", "Replaces: q-learning with PPO\nWhy?")!;
+    expect(prompt.prompt).toBe("Replaces: q-learning with PPO");
+    expect(parseQuestionBlock("question-text", `Why?\nReplaces: ${OLD}.`)!.replaces).toEqual([OLD]);
+  });
+});
+
+// The owner's 0.28.17 report: a task-list choice longer than 200 characters
+// could never be picked in the Inbox ("… is not one of the question's
+// choices") and never showed as picked in plan review, because the answer's
+// `selected` was cut to 200 characters while the label was not.
+const LONG_SPIKE =
+  "Spike first. Find out what the sign-in grants (a Claude subscription paying for turns the platform runs?) and whether Anthropic allows it for a third-party product; the placeholder stays off the product until both answers are in";
+// The same text as a long label set off from a short "why" by ` - ` / ` — `:
+// the label before the separator is still over 200 characters.
+const LONG_DASH = `${LONG_SPIKE} - keeps it reversible`;
+const LONG_EM = `${LONG_SPIKE} — keeps it reversible`;
+// The short-lead form (` - ` right after the lead) splits as always.
+const SHORT_LEAD = "Spike first - find out what the sign-in grants (a Claude subscription paying for turns the platform runs?) and whether Anthropic allows it for a third-party product; the placeholder stays off the product until both answers are in";
+
+describe("long task-list choices (picked as written)", () => {
+  const block = (choice: string) => `Which way?\n\n- [ ] ${choice}\n- [ ] Ship it now`;
+
+  for (const [name, choice] of [
+    ["no separator", LONG_SPIKE],
+    ["a ' - ' separator", LONG_DASH],
+    ["a ' — ' separator", LONG_EM],
+  ] as const) {
+    test(`${name}: the label round-trips through parseQuestionAnswer whole`, () => {
+      const q = parseQuestionBlock("question", block(choice))!;
+      const label = q.choices[0].label;
+      expect(label.length).toBeGreaterThan(200);
+      const saved = parseQuestionAnswer({ v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: [label] })!;
+      expect(saved.selected).toEqual([label]);
+      expect(questionStatus(q, saved)).toBe("answered");
+      const index = indexQuestionBlocks([{ id: "b", type: "directive", directiveKind: "question", content: block(choice), startLine: 1 }]);
+      const out = formatQuestionAnswersSection(questionExportItems(index), [saved]);
+      expect(out).toContain(`Answer: ${label}`);
+    });
+  }
+
+  test("the separators keep their label/description split", () => {
+    for (const choice of [LONG_DASH, LONG_EM]) {
+      const q = parseQuestionBlock("question", block(choice))!;
+      expect(q.choices[0]).toMatchObject({ label: LONG_SPIKE, description: "keeps it reversible" });
+    }
+    const short = parseQuestionBlock("question", block(SHORT_LEAD))!;
+    expect(short.choices[0].label).toBe("Spike first");
+    expect(short.choices[0].description).toStartWith("find out what");
+  });
+
+  test("an answer an older build cut at 200 characters maps back to the one choice it names", () => {
+    const q = parseQuestionBlock("question", block(LONG_SPIKE))!;
+    const cut = LONG_SPIKE.slice(0, 200);
+    const stored: QuestionAnswer = { v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: [cut] };
+    expect(canonicalQuestionAnswer(q, stored).selected).toEqual([LONG_SPIKE]);
+    // Two choices sharing their first 200 characters: ambiguous, left as stored.
+    const twin = parseQuestionBlock("question", `Which way?\n\n- [ ] ${LONG_SPIKE}\n- [ ] ${LONG_SPIKE.slice(0, 200)} but later`)!;
+    expect(canonicalQuestionAnswer(twin, stored).selected).toEqual([cut]);
+  });
+
+  test("the export prints the full label for an answer an older build cut at 200 characters", () => {
+    const index = indexQuestionBlocks([{ id: "b", type: "directive", directiveKind: "question", content: block(LONG_SPIKE), startLine: 1 }]);
+    const q = index[0].question;
+    const cut: QuestionAnswer = { v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: [LONG_SPIKE.slice(0, 200)] };
+    const out = formatQuestionAnswersSection(questionExportItems(index), [cut]);
+    expect(out).toContain(`Answer: ${LONG_SPIKE}`);
+  });
+
+  test("a long label adds no looser matching: only its exact 200-character cut maps", () => {
+    const q = parseQuestionBlock("question", block(LONG_SPIKE))!;
+    expect(q.choices.some((c) => c.aliases)).toBe(false);
+    const stored = (label: string): QuestionAnswer => ({ v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: [label] });
+    // Case or punctuation never maps here, as in a question with no long label.
+    const loose = stored("ship it now.");
+    expect(canonicalQuestionAnswer(q, loose)).toBe(loose);
+    const cutLoose = stored(LONG_SPIKE.slice(0, 200).toUpperCase());
+    expect(canonicalQuestionAnswer(q, cutLoose)).toBe(cutLoose);
+  });
+
+  test("selected stays bounded: a label longer than any block body is cut", () => {
+    const parsed = parseQuestionAnswer(answer({ selected: ["x".repeat(30_000)] }))!;
+    expect(parsed.selected[0].length).toBe(20_000);
+  });
+});

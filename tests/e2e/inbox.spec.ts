@@ -19,10 +19,10 @@
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DEMO_MESSAGES, SimAgent, scratchProject } from '../../scripts/inbox-sim';
+import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -47,14 +47,6 @@ let world: World;
 
 function registry(): { pid: number; port: number; serverSession: string; url: string } {
   return JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8'));
-}
-
-function stopInbox(): void {
-  try {
-    process.kill(registry().pid, 'SIGTERM');
-  } catch {
-    // Already gone.
-  }
 }
 
 /**
@@ -94,7 +86,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   // Only this spec's own captures: decisions, attachments and guided reviews keep theirs in proof/decisions/, proof/attachments/ and proof/guides/.
   mkdirSync(proofDir, { recursive: true });
   for (const file of readdirSync(proofDir)) if (file.endsWith('.png') || file === 'index.html') rmSync(join(proofDir, file));
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-e2e-')));
+  const root = inboxScratch('plannotator-inbox-e2e-');
   // A copy the restart proof can replace on disk, as install.sh does.
   // A long directory name of our own, so the code boxes must wrap the command on any runner.
   const binDir = join(root, 'a-long-install-directory-name-so-every-connect-command-has-to-wrap', 'bin');
@@ -135,12 +127,15 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 });
 
 test.afterAll(async () => {
-  if (!world) return;
-  await Promise.all(world.agents.map((a) => a.close().catch(() => {})));
-  await world.context.close();
-  stopInbox();
-  rmSync(world.root, { recursive: true, force: true });
-  writeContactSheet();
+  try {
+    if (!world) return;
+    await Promise.all(world.agents.map((a) => a.close().catch(() => {})));
+    await world.context.close();
+    writeContactSheet();
+  } finally {
+    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
+    await removeInboxScratch();
+  }
 });
 
 function writeContactSheet(): void {
@@ -169,24 +164,15 @@ async function firstRunLabels(page: Page): Promise<string[]> {
     .evaluateAll((els) => els.map((el) => (el.textContent ?? '').trim()));
 }
 
-test('first run: the three connections, Use MCP instead below the row, the harness picker, Copy copies the command', async () => {
+test('first run: Try it, the harness picker folded behind Connect another agent by hand, Copy copies the command', async () => {
   const { page, url } = world;
   await page.goto(url);
   const empty = page.locator('[data-inbox-empty]');
   await expect(page.getByRole('heading', { name: 'No agent has written yet', exact: true })).toBeVisible();
-  const lines = {
-    'claude-code': ['Claude Code', "Plannotator's mod writes here. Nothing to install."],
-    pi: ['Pi', "Plannotator's extension writes here. Nothing to install."],
-    opencode: ['OpenCode', "Plannotator's plugin writes here. Nothing to install."],
-  } as const;
-  for (const [host, [name, line]] of Object.entries(lines)) {
-    const card = page.locator(`[data-host="${host}"]`);
-    await expect(card.getByRole('heading', { name, exact: true })).toBeVisible();
-    await expect(card.locator('p')).toHaveText(line);
-    await expect(card.getByRole('button', { name: 'Use MCP instead', exact: true })).toHaveAttribute('aria-expanded', 'false');
-  }
-  await expect(empty.getByRole('heading', { name: 'Other agents', exact: true })).toBeVisible();
-  await expect(empty.getByText('Add the Inbox as a local MCP server.', { exact: true })).toBeVisible();
+  // An Inbox an agent started (--background) connected nothing, and this scratch home has no agent: no card.
+  await expect(empty.locator('[data-agents-card]')).toHaveCount(0);
+  await expect(empty.getByRole('heading', { name: 'Try it', exact: true })).toBeVisible();
+  await expect(empty.getByText('Send me a test message in my Plannotator Inbox.', { exact: true })).toBeVisible();
   await expect(page.getByText('Projects appear here when an agent writes from one.')).toBeVisible();
 
   // The Tater mark is Workspaces' sprite: 24 frames over 3.5 s, its first frame under reduced motion.
@@ -199,6 +185,12 @@ test('first run: the three connections, Use MCP instead below the row, the harne
   await page.emulateMedia({ reducedMotion: 'reduce' });
   expect((await motion()).startsWith('none ')).toBe(true);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
+
+  const byHand = empty.getByRole('button', { name: 'Connect another agent by hand', exact: true });
+  await expect(byHand).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('tab', { name: 'Codex' })).toHaveCount(0);
+  await byHand.click();
+  await expect(byHand).toHaveAttribute('aria-expanded', 'true');
 
   // Codex is selected: the command with Copy, one note, the folded Another way, no eyebrow repeating the name.
   const binary = realpathSync(world.binary);
@@ -215,39 +207,20 @@ test('first run: the three connections, Use MCP instead below the row, the harne
   await expect(panel.getByRole('button', { name: 'Copied' })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(command);
 
-  // One rhythm: the same gap between the heading, the cards, Other agents and the tabs.
+  // One rhythm: the same gap between the heading, Try it, the fold and the picker.
   const boxes = await empty.evaluate((el) => [...el.children].map((child) => child.getBoundingClientRect()).map((r) => ({ top: r.top, bottom: r.bottom })));
   const gaps = boxes.slice(1).map((box, i) => Math.round(box.top - boxes[i]!.bottom));
   expect(gaps.length).toBe(3);
   expect(new Set(gaps).size).toBe(1);
 
-  // The cards are one height, and "Use MCP instead" opens the command below the row without making its card taller.
-  const cards = page.locator('.ib-hcard');
-  const heights = async () => (await cards.evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().height))));
-  const before = await heights();
-  expect(new Set(before).size).toBe(1);
-  const claudeLink = page.locator('[data-host="claude-code"]').getByRole('button', { name: 'Use MCP instead', exact: true });
-  await claudeLink.click();
-  await expect(claudeLink).toHaveAttribute('aria-expanded', 'true');
-  const reveal = page.locator('.ib-hreveal');
-  await expect(reveal.locator('pre')).toHaveText(`claude mcp add --scope user plannotator-inbox -- ${binary} inbox mcp`);
-  expect(await heights()).toEqual(before);
-  const rowBottom = Math.max(...(await cards.evaluateAll((els) => els.map((el) => el.getBoundingClientRect().bottom))));
-  expect((await reveal.boundingBox())!.y).toBeGreaterThanOrEqual(rowBottom);
-  // The reveal above names the binary this test started by its absolute path, under a directory name long enough to wrap on any runner.
+  // Claude Code is in the picker too, with its user-scope command, the binary named by its absolute path.
+  await page.getByRole('tab', { name: 'Claude Code' }).click();
+  await expect(page.getByRole('tabpanel', { name: 'Claude Code' }).locator('pre').first()).toHaveText(`claude mcp add --scope user plannotator-inbox -- ${binary} inbox mcp`);
   expect(binary.startsWith('/') && binary.endsWith('/a-long-install-directory-name-so-every-connect-command-has-to-wrap/bin/plannotator')).toBe(true);
   await expectCodeUnclipped(page);
-  await expect(panel.getByRole('button', { name: 'Copy', exact: true })).toBeVisible();
   await page.mouse.move(0, 0);
   await shot('1.3-first-run-claude-code');
-
-  // One reveal at a time; the same link closes it.
-  await page.locator('[data-host="pi"]').getByRole('button', { name: 'Use MCP instead', exact: true }).click();
-  await expect(reveal.locator('pre')).toHaveText(`pi mcp add plannotator-inbox -- ${binary} inbox mcp`);
-  await expect(claudeLink).toHaveAttribute('aria-expanded', 'false');
-  expect(await heights()).toEqual(before);
-  await page.locator('[data-host="pi"]').getByRole('button', { name: 'Use MCP instead', exact: true }).click();
-  await expect(reveal).toHaveCount(0);
+  await page.getByRole('tab', { name: 'Codex' }).click();
 
   // Headers carry no comma: every heading and label, on every tab.
   for (const tab of await page.getByRole('tab').all()) {
@@ -294,8 +267,8 @@ test('agents write three threads in two projects; the rows land in the six secti
     'Stopped on you',
     'Holding up work',
     'Waiting on you',
-    'Sent',
     'New since you looked',
+    'Sent',
     'Quiet',
   ]);
 
@@ -322,8 +295,22 @@ test('agents write three threads in two projects; the rows land in the six secti
   await shot('1.1-list');
 });
 
+/** A row cell's left edge, in px. */
+async function leftOf(page: Page, selector: string): Promise<number> {
+  const box = await page.locator(selector).first().boundingBox();
+  expect(box, `no box for ${selector}`).not.toBeNull();
+  return Math.round(box!.x);
+}
+
 test('a project folder filters the list and the sections still apply', async () => {
   const { page } = world;
+  // Every project: the row starts with the project label, the agent mark sits two columns in.
+  const named = `.ib-row[data-thread-id="${world.threads.named}"]`;
+  const stoppedRow = `.ib-row[data-thread-id="${world.threads.stopped}"]`;
+  const labelLeft = await leftOf(page, `${named} .ib-p`);
+  expect(await leftOf(page, '.ib-band')).toBe(labelLeft - 12);
+  expect(await leftOf(page, `${named} .ib-mk`)).toBeGreaterThan(labelLeft + 200);
+
   await side(page).getByRole('button', { name: /^docs-site/ }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'docs-site' })).toBeVisible();
   await expect(page.locator('.ib-path')).toHaveText(new RegExp(`docs-site$`));
@@ -333,7 +320,14 @@ test('a project folder filters the list and the sections still apply', async () 
   await side(page).getByRole('button', { name: /^billing-svc/ }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'billing-svc' })).toBeVisible();
   await expect(page.locator('.ib-band')).toHaveText([/^Stopped on you\s*1$/, /^Waiting on you\s*1$/]);
-  await expect(page.locator('.ib-row .ib-p').first()).toBeHidden();
+  // One project: no project column at all, and no empty block where it was. The
+  // agent mark starts where the project label did; a badge, when a row has one,
+  // starts there instead and the mark follows it.
+  await expect(page.locator('.ib-row .ib-p')).toHaveCount(0);
+  expect(await leftOf(page, `${named} .ib-mk`)).toBe(labelLeft);
+  expect(await leftOf(page, `${stoppedRow} .ib-badge`)).toBe(labelLeft);
+  const badgeBox = (await page.locator(`${stoppedRow} .ib-badge`).boundingBox())!;
+  expect(await leftOf(page, `${stoppedRow} .ib-mk`)).toBeLessThan(Math.round(badgeBox.x + badgeBox.width) + 16);
   await shot('1.2-project-filter');
   await side(page).getByRole('button', { name: /^Inbox/ }).click();
   await expect(page.locator('.ib-lbody [data-thread-id]')).toHaveCount(3);
@@ -403,6 +397,52 @@ test('a pick is saved at once and the agent reads it through read_thread', async
   await expect(row).toHaveAttribute('data-section', 'new');
   await expect(row).toContainText('Answered, not sent');
   await shot('3.1-answered-not-sent');
+
+  // "Answered, not sent" is wider than the wide row's 96px count column, and
+  // its text must end before the time's begins: in every project and in one,
+  // at full and narrower widths (every project below 900px of list draws the
+  // two-line row, which must hold the same). Measured on the text itself (a
+  // Range), since overflowing text spills past its cell's box.
+  const wide = page.locator(`.ib-lbody [data-thread-id="${world.threads.stopped}"]`);
+  const textGap = () =>
+    wide.evaluate((el) => {
+      const rect = (cell: Element) => {
+        const range = document.createRange();
+        range.selectNodeContents(cell);
+        return range.getBoundingClientRect();
+      };
+      const count = rect(el.querySelector('.ib-c')!);
+      const time = rect(el.querySelector('.ib-t')!);
+      return { shape: el.className.split(' ')[0], text: el.querySelector('.ib-c')!.textContent, gap: time.left - count.right, sameLine: Math.abs(count.top - time.top) < 4 };
+    });
+  for (const [folder, narrowShape] of [[/^Inbox/, 'ib-nrow'], [/^billing-svc/, 'ib-row']] as const) {
+    await side(page).getByRole('button', { name: folder }).click();
+    for (const width of [1440, 1000, 820]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(wide).toBeVisible();
+      const where = `at ${width}px (${folder})`;
+      if (width === 1440) await expect.poll(async () => (await textGap()).shape, where).toBe('ib-row');
+      if (width === 820) await expect.poll(async () => (await textGap()).shape, where).toBe(narrowShape);
+      // The folder click closes the thread and the list re-renders (and may
+      // switch between the wide and the two-line row): measure once the row's
+      // shape and gap hold still, at every width.
+      await expect
+        .poll(async () => {
+          const first = await textGap();
+          await page.waitForTimeout(150);
+          return JSON.stringify(first) === JSON.stringify(await textGap());
+        }, where)
+        .toBe(true);
+      const measured = await textGap();
+      expect(measured.text).toBe('Answered, not sent');
+      expect(measured.sameLine).toBe(true);
+      expect(measured.gap, `count runs into the time ${where}`).toBeGreaterThanOrEqual(8);
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await side(page).getByRole('button', { name: /^Inbox/ }).click();
+  await wide.click();
+  await expect(page.locator('.ib-pfoot').getByRole('button', { name: 'Edit the reply' })).toBeVisible();
 });
 
 test('Send carries the picks and the words, wait_for_reply returns them, and the thread says Delivered', async () => {
@@ -438,6 +478,14 @@ test('"N new" waits behind the notice, and the list moves only on an action', as
   const { page } = world;
   await page.keyboard.press('Escape');
   await expect(page.locator('section.ib-pane')).toHaveCount(0);
+  // Leaving the thread is an action: rows the person's own writes held in place take their places now. Let that land first.
+  await expect
+    .poll(async () => {
+      const first = await rowOrder(page);
+      await page.waitForTimeout(250);
+      return JSON.stringify(first) === JSON.stringify(await rowOrder(page));
+    })
+    .toBe(true);
   const before = await rowOrder(page);
   const codex = await agent('Codex', 'codex');
   const news = await codex.send({ project_path: world.docs, body: DEMO_MESSAGES.news });
@@ -478,32 +526,52 @@ test("a Sent row follows the agent's read in place, without an action: its state
   await expect(pane).toHaveCount(0);
 });
 
-test('Settings: the agent tool knob applies to the next session, the compact picker, the store on disk', async () => {
+test('Settings: in sections; Settings → Agents switches apply to the next session, the picker for the rest, the store on disk', async () => {
   const { page } = world;
+  // Plannotator's Claude Code plugin and Pi extension in this world's scratch home: both are found, each with its tool switch.
+  mkdirSync(join(world.env.HOME!, '.claude'), { recursive: true });
+  writeFileSync(join(world.env.HOME!, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'plannotator@plannotator': true } }));
+  mkdirSync(join(world.env.HOME!, '.pi', 'agent'), { recursive: true });
+  writeFileSync(join(world.env.HOME!, '.pi', 'agent', 'settings.json'), JSON.stringify({ packages: ['npm:@plannotator/pi-extension'] }));
   await side(page).getByRole('button', { name: 'Settings' }).click();
-  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
-  const claudeSwitch = page.getByRole('switch', { name: 'The Inbox tool in Claude Code' });
-  const piSwitch = page.getByRole('switch', { name: 'The Inbox tool in Pi' });
+  // A focused page (design of record inbox-settings-tabs): General first, the section nav beside it.
+  await expect(page.getByRole('heading', { name: 'General', level: 1 })).toBeVisible();
+  const nav = page.getByRole('navigation', { name: 'Settings sections' });
+  await expect(nav.getByRole('link')).toHaveText(['General', 'Agents', 'Devices', 'Archived', 'Storage', 'About']);
+  await nav.getByRole('link', { name: 'Agents' }).click();
+  await expect(page).toHaveURL(/#settings\/agents$/);
+  await expect(nav.getByRole('link', { name: 'Agents' })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeFocused();
+  const claudeSwitch = page.getByRole('switch', { name: 'Reaches the Inbox: Claude Code' });
+  const piSwitch = page.getByRole('switch', { name: 'Reaches the Inbox: Pi' });
   await expect(claudeSwitch).toHaveAttribute('aria-checked', 'true');
   await expect(piSwitch).toHaveAttribute('aria-checked', 'false');
-  await expect(page.getByRole('switch', { name: 'The Inbox tool in OpenCode' })).toHaveAttribute('aria-checked', 'false');
-  await expect(page.getByText('Applies to the next session. Sessions already running keep what they started with.')).toBeVisible();
+  await expect(page.getByRole('switch', { name: 'Reminder at session start: Pi' })).toBeDisabled();
+  await expect(page.getByText("A change applies to that agent's next session; sessions already running keep what they started with.")).toBeVisible();
+  // Phones stay hidden until the iPhone app ships (PLANNOTATOR_INBOX_PHONES is unset here): no block, no mention.
+  await expect(page.locator('[data-settings-phones]')).toHaveCount(0);
+  await expect(page.getByText('Phones reach it only on a path you turn on below.')).toHaveCount(0);
 
   const binary = realpathSync(world.binary);
+  await page.getByRole('button', { name: /^Not found on this computer/ }).click();
+  await page.getByRole('tab', { name: 'Other MCP client' }).click();
   const other = page.getByRole('tabpanel', { name: 'Other MCP client' });
   await expect(other.locator('pre').nth(0)).toHaveText(`${binary} inbox mcp`);
   await expect(other.locator('pre').nth(1)).toHaveText(`http://127.0.0.1:${registry().port}/mcp`);
   await expectCodeUnclipped(page);
 
+  await shot('7.1-settings');
+  await nav.getByRole('link', { name: 'Storage' }).click();
   const store = page.locator('.ib-stbl');
   await expect(store.locator('[data-store-project="billing-svc"]')).toContainText('2 threads');
   await expect(store.locator('[data-store-project="docs-site"]')).toContainText('2 threads');
   // Delete thread and delete project are live since step 2 (proved in inbox-attachments.spec.ts).
   await expect(store.getByRole('button', { name: /Delete project/ }).first()).toBeEnabled();
-  await shot('7.1-settings');
 
+  await nav.getByRole('link', { name: 'Agents' }).click();
   await piSwitch.click();
   await expect(piSwitch).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByText("Pi's next session").first()).toBeVisible();
   // The switch moves at the click; the save lands when the POST answers.
   await expect
     .poll(() => {
@@ -514,9 +582,11 @@ test('Settings: the agent tool knob applies to the next session, the compact pic
       }
     })
     .toEqual({ pi: true });
-  await page.locator('.ib-spage').evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  await nav.getByRole('link', { name: 'Storage' }).click();
   await shot('7.2-settings-storage');
-  await side(page).getByRole('button', { name: /^Inbox/ }).click();
+  // The sidebar slid away for Settings; "← Inbox" is the way back.
+  await page.locator('[data-settings-back]').click();
+  await expect(page).not.toHaveURL(/#settings/);
 });
 
 // Before the restart, whose gap (the old Inbox gone, the new one not yet up)
@@ -525,7 +595,7 @@ test('no page errors and no CSP refusals along the way', async () => {
   expect(world.errors).toEqual([]);
 });
 
-test('"A new version is ready, Restart" follows health, and Restart brings the new binary up', async () => {
+test('the Update button follows health ("ready"), and pressing it brings the new binary up', async () => {
   test.setTimeout(200_000);
   const { page } = world;
   const before = registry();
@@ -534,18 +604,19 @@ test('"A new version is ready, Restart" follows health, and Restart brings the n
   renameSync(world.binary, real);
   writeFileSync(world.binary, '#!/bin/sh\necho "plannotator 9.9.9"\n', { mode: 0o755 });
   // The health tick (60 s) stats the file, sees it changed, and asks it.
-  await expect(page.locator('.ib-restart')).toBeVisible({ timeout: 90_000 });
-  await expect(page.locator('.ib-restart')).toContainText('A new version is ready');
+  const button = page.locator('.ib-upd[data-update-state="ready"]');
+  await expect(button).toBeVisible({ timeout: 90_000 });
+  await expect(button.getByRole('button', { name: 'Update to Plannotator 9.9.9' })).toBeVisible();
   await shot('1.6-restart-to-update');
 
   // The real binary goes back on disk, then Restart starts it in this one's place.
   renameSync(real, world.binary);
-  await page.locator('.ib-restart').getByRole('button', { name: 'Restart' }).click();
+  await button.getByRole('button', { name: 'Update to Plannotator 9.9.9' }).click();
   await expect.poll(() => registry().serverSession, { timeout: 60_000 }).not.toBe(before.serverSession);
   const after = registry();
   expect(after.pid).not.toBe(before.pid);
   expect(after.port).toBe(before.port);
   // The page reloaded onto the new Inbox: the same store (the holding row, unfolded; named is Quiet now), the update line gone.
   await expect(page.locator(`[data-thread-id="${world.threads.holding}"]`)).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator('.ib-restart')).toHaveCount(0);
+  await expect(page.locator('.ib-upd')).toHaveCount(0);
 });

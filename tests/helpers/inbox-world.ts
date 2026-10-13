@@ -4,15 +4,24 @@
  * `plannotator` on PATH that runs the compiled binary when
  * PLANNOTATOR_INBOX_TEST_BINARY names one (the CI jobs build it with the
  * release flags) and the CLI from source otherwise. The person's Send goes
- * through the route the window posts to. Never touches the real ~/.plannotator.
+ * through the route the window posts to. Never touches the real ~/.plannotator:
+ * importing this sandboxes the test process's own PLANNOTATOR_DATA_DIR when no
+ * bunfig preload did (tests/setup/sandbox-data-dir.ts), every helper refuses
+ * the real data directory, and an Inbox is only ever signalled once it is
+ * proven to be the one the world started (tests/helpers/inbox-process.ts).
  */
-import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import "../setup/sandbox-data-dir";
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { stubHookDistHtml } from "./hook-dist-stub";
+import { type InboxEntry, inboxEntryOf, mustSignalInbox, stopProvenInboxes } from "./inbox-process";
+import { assertSandboxedDataDir, refuseRealDataDir } from "./real-data-dir";
+
+export { removeStubbedHtml } from "./hook-dist-stub";
 
 const repoRoot = resolve(import.meta.dir, "..", "..");
 const cliEntry = join(repoRoot, "apps", "hook", "server", "index.ts");
-const distDir = join(repoRoot, "apps", "hook", "dist");
 
 export interface InboxWorld {
   root: string;
@@ -25,22 +34,36 @@ export interface InboxWorld {
   path: string;
   /** Where the transcript goes, when INBOX_PROOF_DIR is set. */
   proof: (line: string) => void;
+  /** The Inbox serves phones (PLANNOTATOR_INBOX_PHONES=1); off otherwise, as released. */
+  phones: boolean;
 }
 
 export function inboxBinary(): string | undefined {
   return process.env.PLANNOTATOR_INBOX_TEST_BINARY || undefined;
 }
 
-/** The CLI from source imports the built HTML; the Inbox never serves it. Returns what to remove after. */
+/**
+ * The CLI from source imports the built HTML; the Inbox never serves it.
+ * Nothing to stub when the world runs the compiled binary. Returns what to
+ * remove after, with `removeStubbedHtml`.
+ */
 export function stubBuiltHtml(): string[] {
   if (inboxBinary()) return [];
-  mkdirSync(distDir, { recursive: true });
-  const made = ["index.html", "review.html", "inbox.html"].map((name) => join(distDir, name)).filter((path) => !existsSync(path));
-  for (const path of made) writeFileSync(path, "<!doctype html><title>test</title>");
-  return made;
+  return stubHookDistHtml();
 }
 
-export function createInboxWorld(prefix: string, name: string, proofSubdir: string): InboxWorld {
+/** Every Inbox entry each world's registry has named, so a teardown can stop an earlier start too. */
+const seen = new WeakMap<InboxWorld, Map<string, InboxEntry>>();
+
+function remember(w: InboxWorld): void {
+  const entry = inboxEntryOf(w.dataDir);
+  if (!entry) return;
+  if (!seen.has(w)) seen.set(w, new Map());
+  seen.get(w)!.set(`${entry.pid}:${entry.port}:${entry.serverSession}`, entry);
+}
+
+export function createInboxWorld(prefix: string, name: string, proofSubdir: string, options: { phones?: boolean } = {}): InboxWorld {
+  assertSandboxedDataDir("createInboxWorld");
   const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
   const home = join(root, "home");
   const dataDir = join(home, ".plannotator");
@@ -68,11 +91,13 @@ export function createInboxWorld(prefix: string, name: string, proofSubdir: stri
     proof: (line) => {
       if (proofFile) appendFileSync(proofFile, `${line}\n`);
     },
+    phones: options.phones === true,
   };
 }
 
 /** The environment every process of the world runs with (never a browser tab). */
 export function worldEnv(w: InboxWorld): Record<string, string> {
+  refuseRealDataDir(w.dataDir, "worldEnv");
   return {
     HOME: w.home,
     PATH: w.path,
@@ -81,12 +106,21 @@ export function worldEnv(w: InboxWorld): Record<string, string> {
     PLANNOTATOR_BIN: "",
     // Never the hosted relay (tests/setup/feedback-archive-off.ts says why).
     PLANNOTATOR_RELAY_URL: process.env.PLANNOTATOR_RELAY_URL || "http://127.0.0.1:9",
+    // Never GitHub: a release build's daily update check refuses at once.
+    PLANNOTATOR_UPDATE_API_URL: process.env.PLANNOTATOR_UPDATE_API_URL || "http://127.0.0.1:9/releases/latest",
+    // Never the real install script: Update now in a world fails fast unless a test serves one.
+    PLANNOTATOR_INSTALL_SCRIPT_URL: process.env.PLANNOTATOR_INSTALL_SCRIPT_URL || "http://127.0.0.1:9/install.sh",
+    // Phones are hidden until the iPhone app ships; only the phone proofs turn them on.
+    PLANNOTATOR_INBOX_PHONES: w.phones ? "1" : "0",
+    // Never run a real agent's CLI: a world's PATH holds the person's own (packages/server/inbox-agents.ts).
+    PLANNOTATOR_INBOX_CONNECT: "0",
     TMPDIR: tmpdir(),
   };
 }
 
 /** The person runs the Inbox once: `plannotator inbox --background`. */
 export function startInbox(w: InboxWorld): InboxRegistry {
+  assertSandboxedDataDir("startInbox");
   const run = Bun.spawnSync([join(w.bin, "plannotator"), "inbox", "--background"], { env: { ...process.env, ...worldEnv(w) }, cwd: w.root });
   if (run.exitCode !== 0) throw new Error(`inbox --background failed: ${run.stderr.toString()}`);
   return registry(w);
@@ -100,23 +134,44 @@ export interface InboxRegistry {
 }
 
 export function registry(w: InboxWorld): InboxRegistry {
-  return JSON.parse(readFileSync(join(w.dataDir, "inbox", "inbox.json"), "utf8"));
+  refuseRealDataDir(w.dataDir, "registry");
+  const value = JSON.parse(readFileSync(join(w.dataDir, "inbox", "inbox.json"), "utf8")) as InboxRegistry;
+  remember(w);
+  return value;
 }
 
-/** Stop the world's Inbox (SIGKILL) and remove the world. */
-export function destroyInboxWorld(w: InboxWorld): void {
-  stopInbox(w);
+/**
+ * Stop every Inbox the world provably started (SIGKILL; see
+ * tests/helpers/inbox-process.ts) and remove the world.
+ */
+export async function destroyInboxWorld(w: InboxWorld): Promise<void> {
+  assertSandboxedDataDir("destroyInboxWorld");
+  remember(w);
+  const targets = [...(seen.get(w)?.values() ?? [])].map((entry) => ({ entry, root: w.root }));
+  await stopProvenInboxes(targets, { signal: "SIGKILL" });
   rmSync(w.root, { recursive: true, force: true });
 }
 
-export function stopInbox(w: InboxWorld): void {
-  const file = join(w.dataDir, "inbox", "inbox.json");
-  if (!existsSync(file)) return;
-  try {
-    process.kill(JSON.parse(readFileSync(file, "utf8")).pid, "SIGKILL");
-  } catch {
-    // gone
-  }
+/**
+ * Kill the world's Inbox (SIGKILL) once it is proven to be the one the world
+ * started, and wait for it to exit. Nothing to do when none runs.
+ */
+export async function stopInbox(w: InboxWorld): Promise<void> {
+  assertSandboxedDataDir("stopInbox");
+  remember(w);
+  const entry = inboxEntryOf(w.dataDir);
+  if (entry) await stopProvenInboxes([{ entry, root: w.root }], { signal: "SIGKILL" });
+}
+
+/**
+ * Send `signal` to the world's Inbox, only once it is proven to be the one the
+ * world started; throws otherwise (a test that means to signal its own Inbox
+ * must never signal anything else). Does not wait. Returns the pid signalled.
+ */
+export async function signalInbox(w: InboxWorld, signal: NodeJS.Signals): Promise<number> {
+  assertSandboxedDataDir("signalInbox");
+  remember(w);
+  return (await mustSignalInbox(inboxEntryOf(w.dataDir), w.root, signal)).pid;
 }
 
 export interface ThreadMessage {

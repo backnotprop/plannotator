@@ -158,12 +158,15 @@ export function formatTopLevelHelp(): string {
     "  plannotator guide share --id <savedGuideId> | --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--public] [--ttl <7d>] [--json]",
     "  plannotator guide unshare <id> --token <deleteToken>",
     "  plannotator sessions",
-    "  plannotator inbox [--background | --no-open]",
+    "  plannotator inbox [--background | --no-open] [--tailscale]",
     "  plannotator inbox mcp",
+    "  plannotator update [--check]",
     "  plannotator uninstall [--purge] [--yes] [--dry-run]",
     "  plannotator improve-context",
     "",
     "Run 'plannotator <command> --help' for command-specific usage.",
+    "Agents: run 'plannotator inbox --help' for the full guide to the Plannotator Inbox",
+    "(what it is, when to use it, its MCP tools, threads, questions, connecting agents).",
     "",
     "Note:",
     "  running 'plannotator' without arguments is for hook integration and expects JSON on stdin",
@@ -183,6 +186,64 @@ export function formatTopLevelHelp(): string {
  * Empty: `inbox` (the Plannotator Inbox) was the last one, and launched.
  */
 export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>();
+
+/**
+ * `plannotator inbox`'s commands and flags. `plannotator inbox --help` prints
+ * the full agent guide (inbox-help.ts), which carries this block as its
+ * "Commands and flags" section; it is also the `inbox` entry of
+ * SUBCOMMAND_HELP, so the skill freshness test reads the same flags.
+ * The parser is `runInboxCommand` in inbox-command.ts.
+ */
+export const INBOX_COMMAND_USAGE = [
+  "Usage:",
+  "  plannotator inbox [--background | --no-open] [--tailscale]",
+  "  plannotator inbox mcp",
+  "  plannotator inbox --notes <ids>",
+  "",
+  "  plannotator inbox               Start the Inbox and open it in the browser,",
+  "                                  or open the one already running",
+  "  plannotator inbox --background  Start it detached without opening a browser,",
+  "                                  print its URL and exit",
+  "  plannotator inbox --no-open     Run it here without opening a browser",
+  "  plannotator inbox --tailscale   Also publish it over the person's tailnet for this",
+  "                                  run (tailscale serve, HTTPS, never funnel), for the",
+  "                                  Tailscale login that owns this machine only. With",
+  "                                  an Inbox already running, asks it to publish.",
+  "  plannotator inbox mcp           The stdio MCP server for agents. Starts a stopped",
+  "                                  Inbox in the background (no browser tab).",
+  "  plannotator inbox --notes <ids> Add the Inbox note to these agents' instructions",
+  "                                  files (claude-code, codex, gemini, pi, opencode,",
+  "                                  comma-separated). Only with the person's yes;",
+  "                                  starts nothing.",
+  "",
+  "Over the tailnet at every start: the Inbox's Settings, PLANNOTATOR_INBOX_TAILSCALE=1,",
+  "or { \"inboxTailscale\": true } in config.json. Agents and MCP stay on this computer;",
+  "another Tailscale login is let in only when config.json inboxTailscaleAllow names it.",
+  "",
+  "A person's plannotator inbox (not --background) also connects the agents found on",
+  "this computer that are not connected yet: a plannotator-inbox MCP server in each",
+  "terminal agent and the Claude app, the inbox tool for Pi and OpenCode with",
+  "Plannotator's extension or plugin. It never adds back one removed or turned off,",
+  "never replaces another plannotator-inbox, and says what it added on stderr.",
+  "PLANNOTATOR_INBOX_CONNECT=0 skips it. plannotator uninstall removes what it added.",
+].join("\n");
+
+/** `plannotator update`'s usage; the command is update-command.ts. */
+export const UPDATE_COMMAND_USAGE = [
+  "Usage:",
+  "  plannotator update [--check]",
+  "",
+  "Install the newest Plannotator release now, the way the install script does,",
+  "with the choices from your last install (install-flags.json). Open reviews keep",
+  "running on the old version; new ones start on the new one.",
+  "",
+  "Options:",
+  "  --check       Only ask GitHub whether a newer release exists; install nothing",
+  "",
+  "Asks GitHub even when automatic update checks are off (PLANNOTATOR_UPDATE_CHECK=0",
+  "or { \"updateCheck\": false }), because you asked. Exit codes: 0 up to date or",
+  "updated, 1 the update failed or could not run, 2 usage, 130 interrupted.",
+].join("\n");
 
 // Per-subcommand usage text. Keyed by the canonical subcommand token; aliases
 // (e.g. `last` → `annotate-last`) are resolved in formatSubcommandHelp().
@@ -330,29 +391,9 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "  --clean       Remove stale session entries",
     "  --json        Print the sessions as a JSON array on stdout (index, mode, reviewId, target, url, ...)",
   ].join("\n"),
-  inbox: [
-    "Usage:",
-    "  plannotator inbox [--background | --no-open]",
-    "  plannotator inbox mcp",
-    "",
-    "The Plannotator Inbox: one local window, per machine, where agents leave",
-    "messages and questions for you and you answer when you can. It binds",
-    "127.0.0.1 only and keeps its data under <data dir>/inbox/.",
-    "",
-    "  plannotator inbox               Start the Inbox and open it in the browser,",
-    "                                  or open the one already running",
-    "  plannotator inbox --background  Start it detached without opening a browser,",
-    "                                  print its URL and exit (what agents run)",
-    "  plannotator inbox --no-open     Run it here without opening a browser",
-    "  plannotator inbox mcp           Stdio MCP server for agents: messages, questions,",
-    "                                  files, decisions and guided reviews (send_message,",
-    "                                  read_thread, wait_for_reply, resolve_message,",
-    "                                  list_decisions, record_decision, get_guide_brief,",
-    "                                  submit_guide). Starts a stopped Inbox (no browser tab).",
-    "",
-    "Register the MCP entry with an agent, e.g.:",
-    "  claude mcp add plannotator-inbox -- plannotator inbox mcp",
-  ].join("\n"),
+  // `inbox --help` prints the full agent guide instead (index.ts, inbox-help.ts).
+  inbox: INBOX_COMMAND_USAGE,
+  update: UPDATE_COMMAND_USAGE,
   uninstall: [
     "Usage:",
     "  plannotator uninstall [--purge] [--yes | -y] [--dry-run]",
@@ -407,6 +448,7 @@ export function formatInteractiveNoArgClarification(): string {
     "  plannotator archive",
     "  plannotator sessions",
     "  plannotator inbox",
+    "  plannotator update",
     "  plannotator uninstall",
     "",
     "Run 'plannotator --help' for top-level usage.",

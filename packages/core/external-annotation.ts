@@ -42,9 +42,11 @@ export type ExternalAnnotationEvent<T = unknown> =
   /**
    * Not an annotation change: the agent session that opened this review
    * closed it (`POST /api/host/close`, packages/shared/host-control.ts). The
-   * tab shows it; the reviewer's unsent comments stay in the draft.
+   * tab shows it; the reviewer's unsent comments stay in the draft. `by`:
+   * "agent" when the agent asked to close it, "session" when plan mode or the
+   * agent session itself ended (Pi's plan review).
    */
-  | { type: "session-closed"; by: "agent"; unsentAnnotations: number };
+  | { type: "session-closed"; by: "agent" | "session"; unsentAnnotations: number };
 
 // ---------------------------------------------------------------------------
 // SSE helpers

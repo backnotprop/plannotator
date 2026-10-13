@@ -19,14 +19,16 @@ export function CodexIcon({ className }: { className?: string }) {
   return <img src={CODEX_DATA_URI} className={className} alt="" aria-hidden="true" draggable={false} />;
 }
 
-// Pi brand mark — path data from packages/ui/components/ProviderIcons.tsx's
-// PiIcon (itself extracted from apps/marketing/public/assets/icon-pi.svg).
-// currentColor so it adapts to theme, like OpenCodeIcon below.
+// Pi brand mark: the pi.dev logo (https://pi.dev/logo.svg), the same paths as
+// ProviderIcons.tsx's PiIcon and apps/marketing/public/assets/icon-pi.svg. Its
+// own three colours in every theme; the viewBox crops pi.dev's 800-unit canvas
+// to the mark plus an even margin so it sits level with the other marks.
 export function PiIcon({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 800 800" className={className} xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
-      <path fill="currentColor" fillRule="evenodd" d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z" />
-      <path fill="currentColor" d="M517.36 400H634.72V634.72H517.36Z" />
+    <svg viewBox="130 130 540 540" className={className} xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+      <path fill="#F09082" d="M165.29 165.29H517.36V400H400V282.65H165.29Z" />
+      <path fill="#4D9ABF" d="M165.29 282.65H282.65V400H400V517.36H282.65V634.72H165.29Z" />
+      <path fill="#F1BE58" d="M517.36 400H634.72V634.72H517.36Z" />
     </svg>
   );
 }
@@ -34,7 +36,7 @@ export function PiIcon({ className }: { className?: string }) {
 // GitHub Copilot brand mark — path from the official agent icon set
 // (welcome.developers.workers.dev/icons/agents/copilot); the dark/light
 // variants there differ only by fill, so one currentColor component covers
-// both themes, like PiIcon/OpenCodeIcon.
+// both themes, like OpenCodeIcon.
 export function CopilotIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 256 208" className={className} xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">

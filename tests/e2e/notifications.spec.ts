@@ -19,11 +19,11 @@
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
-import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DEMO_MESSAGES, SimAgent, scratchProject } from '../../scripts/inbox-sim';
+import { inboxScratch, rememberInboxOf, removeInboxScratch, stopScratchInbox } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -102,6 +102,8 @@ function config(): { inboxNotifications?: Record<string, unknown> } {
 
 function startInbox(): string {
   const started = spawnSync(binary, ['inbox', '--background'], { env: world.env, encoding: 'utf8', timeout: 60_000 });
+  // Each start's pid, for the teardown (inbox-scratch.ts): the registry names only the latest.
+  rememberInboxOf(world.dataDir);
   expect(started.status, started.stderr).toBe(0);
   return started.stdout.trim();
 }
@@ -109,7 +111,7 @@ function startInbox(): string {
 /** Stop the Inbox, hold its port with something else, start it again: it comes up on another port (another origin). */
 async function moveInbox(): Promise<string> {
   const before = registry();
-  process.kill(before.pid, 'SIGTERM');
+  await stopScratchInbox(world.dataDir);
   await expect
     .poll(async () => {
       try {
@@ -193,7 +195,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   rmSync(proofDir, { recursive: true, force: true });
   mkdirSync(proofDir, { recursive: true });
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-notify-')));
+  const root = inboxScratch('plannotator-inbox-notify-');
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
   mkdirSync(home);
@@ -219,16 +221,15 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 });
 
 test.afterAll(async () => {
-  if (!world) return;
-  await Promise.all(world.agents.map((a) => a.close().catch(() => {})));
-  await world.context.close();
   try {
-    process.kill(registry().pid, 'SIGTERM');
-  } catch {
-    // Already gone.
+    if (!world) return;
+    await Promise.all(world.agents.map((a) => a.close().catch(() => {})));
+    await world.context.close();
+    for (const blocker of world.blockers) blocker.close();
+  } finally {
+    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
+    await removeInboxScratch();
   }
-  for (const blocker of world.blockers) blocker.close();
-  rmSync(world.root, { recursive: true, force: true });
 });
 
 test('the ask appears when the first thread arrives, never on first paint', async () => {
@@ -291,9 +292,10 @@ test('Settings turns them on; after a port change the line returns once as "move
   const block = page.locator('[data-settings-notifications]');
   await expect(block).toContainText('Allowed in this browser');
   const main = block.getByRole('switch', { name: 'Desktop notifications' });
-  // On by default, and allowed by the browser: the one drawn switch reads on.
+  // On by default, and allowed by the browser: the one notifications switch reads on (the other is the question sound's).
   await expect(main).toHaveAttribute('aria-checked', 'true');
-  await expect(block.getByRole('switch')).toHaveCount(1);
+  await expect(block.getByRole('switch', { name: 'Desktop notifications' })).toHaveCount(1);
+  await expect(block.getByRole('switch')).toHaveCount(2);
   await main.click();
   await expect(main).toHaveAttribute('aria-checked', 'false');
   await expect.poll(() => config().inboxNotifications?.enabled).toBe(false);

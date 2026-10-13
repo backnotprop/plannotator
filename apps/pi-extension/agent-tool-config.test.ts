@@ -11,6 +11,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "./generated/config.ts";
+import { setPiHost } from "./pi-host.ts";
 import { startAnnotateServer, startPlanReviewServer, startReviewServer } from "./server.ts";
 
 const MINIMAL_HTML = "<html><body>Plannotator</body></html>";
@@ -29,6 +30,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	setPiHost("pi");
 	for (const key of KEYS) {
 		if (saved[key] === undefined) delete process.env[key];
 		else process.env[key] = saved[key];
@@ -83,6 +85,33 @@ describe("the agent tool advert on the Pi servers", () => {
 			expect(await serverConfig(server.url)).toMatchObject({ agentTool: true, agentToolEnv: false, agentToolEnabled: false });
 		} finally {
 			server.stop();
+		}
+	});
+
+	// In Oh My Pi the tool is on by default: Settings shows it on, and the
+	// one-time "turn it on" offer (which needs an off, unconfigured host) never applies.
+	test("the Oh My Pi view: on by default, still overridable both ways", async () => {
+		setPiHost("oh-my-pi");
+		const servers = [
+			await startPlanReviewServer({ plan: "# Plan", origin: "pi", htmlContent: MINIMAL_HTML }),
+			await startReviewServer({ rawPatch: PATCH, gitRef: "HEAD", htmlContent: MINIMAL_HTML }),
+			await startAnnotateServer({ markdown: "# Test", filePath: join(dataDir, "t.md"), htmlContent: MINIMAL_HTML }),
+		];
+		try {
+			for (const server of servers) {
+				const config =
+					server === servers[1]
+						? ((await (await fetch(`${server.url}/api/diff`)).json()) as { serverConfig: Record<string, unknown> }).serverConfig
+						: await serverConfig(server.url);
+				expect(config).toMatchObject({ agentTool: true, agentToolConfigured: false, agentToolHost: "oh-my-pi", agentToolEnabled: true });
+			}
+			const annotate = servers[2]!;
+			await post(annotate.url, { agentTool: false });
+			expect(await serverConfig(annotate.url)).toMatchObject({ agentTool: false, agentToolConfigured: true, agentToolEnabled: false });
+			process.env.PLANNOTATOR_AGENT_TOOL = "1";
+			expect(await serverConfig(annotate.url)).toMatchObject({ agentToolEnv: true, agentToolEnabled: true });
+		} finally {
+			for (const server of servers) server.stop();
 		}
 	});
 });

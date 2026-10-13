@@ -34,6 +34,7 @@ import {
 	renderCompletedChecklist,
 } from "./generated/checklist.ts";
 import { loadConfig, resolveAgentTool, resolveUseJina } from "./generated/config.ts";
+import { detectPiHost, setPiHost } from "./pi-host.ts";
 import { readImprovementHook } from "./generated/improvement-hooks.ts";
 import { composeImproveContext } from "./generated/pfm-reminder.ts";
 import {
@@ -406,10 +407,13 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 	const startCodeReview = deps.startCodeReview ?? startCodeReviewBrowserSession;
 	const startAnnotation = deps.startAnnotation ?? startMarkdownAnnotationSession;
 	const startLastMessageAnnotation = deps.startLastMessageAnnotation ?? startLastMessageAnnotationSession;
-	// The `plannotator` tool switch (off by default on Pi), read once per
-	// extension instance (one per session and per /reload): see the tool's
-	// registration below.
-	const agentToolEnabled = resolveAgentTool(loadConfig(), process.env, "pi");
+	// The `plannotator` tool switch (off by default on Pi, on in Oh My Pi,
+	// which lists an extension tool as one short line: see pi-host.ts), read
+	// once per extension instance (one per session and per /reload): see the
+	// tool's registration below.
+	const piHost = detectPiHost(pi);
+	setPiHost(piHost);
+	const agentToolEnabled = resolveAgentTool(loadConfig(), process.env, piHost);
 	const currentPiSession = registerCurrentPiSession(pi);
 	// "Ask this session": Ask AI answered by this Pi session (review, annotate,
 	// last, plan review). Listeners register once here; each command binds a bridge to its ctx.
@@ -796,6 +800,13 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 		pendingPlanReview = null;
 		review.settled = true;
 		if (review.tracked) openReviews.remove(review.tracked);
+		try {
+			// The open tab learns it was closed (draft kept) instead of offering
+			// a decision nothing could deliver.
+			review.session.closeKeepingDraft?.();
+		} catch (err) {
+			console.error(`Plannotator: failed to tell the plan review tab it closed: ${err instanceof Error ? err.message : String(err)}`);
+		}
 		try {
 			review.session.stop();
 		} catch (err) {
@@ -1925,6 +1936,12 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 			// approval settling during the await, or plan mode turned off): this
 			// review would be an orphan whose decision nobody delivers.
 			if (phase !== "planning") {
+				try {
+					// A tab that already loaded learns the review closed.
+					session.closeKeepingDraft?.();
+				} catch {
+					// Best effort, as below.
+				}
 				try {
 					session.stop();
 				} catch {

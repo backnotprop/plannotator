@@ -11,6 +11,15 @@
  *   Stopped: <why>                the asker cannot go on until this is answered
  *   Holds up: <name>; <name>      the asker goes on; these pieces of work wait
  *
+ * One guard on top of Workspaces' reading: a value that is only a negative
+ * word (`Stopped: no`, a `Holds up:` entry `none`) is no stop and holds
+ * nothing up; see `isNegativeWaitValue`. An empty `Stopped:` is still a stop
+ * (a claim with no why), as Workspaces reads it.
+ *
+ * A third, `Replaces: <message id>/<key>`, is read by core's parser itself
+ * (`ParsedQuestion.replaces`) when every token on it is id-shaped: it is then
+ * never the prompt and never context. Any other `Replaces:` line is prose.
+ *
  * Pure: no I/O, no clock unless passed in. Never throws on any input.
  */
 
@@ -20,9 +29,11 @@ import {
   findQuestionBlocks,
   formatQuestionAnswersSection,
   isQuestionAnswerEmpty,
+  isQuestionAnswered,
   MAX_QUESTION_PROMPT_CHARS,
   parseQuestionAnswer,
   parseQuestionBlock,
+  questionChoicesNeedCanonicalLabels,
   type QuestionAnswer,
   type QuestionChoice,
   type QuestionExportItem,
@@ -47,6 +58,8 @@ export interface ParsedInboxQuestion {
   stopped: string | null;
   holds_up: string[];
   decision_on_answer: boolean;
+  /** The block's `Replaces:` tokens, as written (checked by the store). */
+  replaces: string[];
 }
 
 const STOPPED_RE = /^stopped\s*:\s*(.*)$/i;
@@ -95,21 +108,48 @@ export function parseInboxQuestionBlocks(markdown: string): ParsedInboxQuestion[
       },
       ...waitsOf(context),
       decision_on_answer: parsed.decisionOnAnswer === true,
+      replaces: parsed.replaces ? [...parsed.replaces] : [],
     });
   }
   return out;
 }
 
-/** The `Stopped:` and `Holds up:` lines of a block's context; the first of each wins. */
+/**
+ * A `Stopped:` value or `Holds up:` entry that is only a negative word: no,
+ * none, n/a, na, nothing, false, nil, null, or a dash, in any case, with
+ * trailing punctuation and whitespace allowed. An agent filling in a template
+ * writes `Stopped: no`; that is not a stop.
+ *
+ * Only a bare negative word counts, and the guard errs toward a stop:
+ * `no API key yet`, `none of the fixtures load`, `No; I need the DB password
+ * first`, `no, the key is missing` are all real stops. An empty value is not
+ * a negative word (an empty `Stopped:` is a claim with no why, still a stop).
+ */
+const NEGATIVE_WAIT_RE = /^(?:no|none|n\/a|na|nothing|false|nil|null|[-\u2013\u2014]+)[\s.,;:!?\-\u2013\u2014]*$/i;
+
+/** Whether a `Stopped:` value or `Holds up:` entry is only a negative word. */
+export function isNegativeWaitValue(value: string): boolean {
+  return NEGATIVE_WAIT_RE.test(value.trim());
+}
+
+/**
+ * The `Stopped:` and `Holds up:` lines of a block's context; the first of each
+ * wins. A first `Stopped:` that is a bare negative (`Stopped: no`) decides
+ * there is no stop; bare-negative `Holds up:` entries are dropped. The lines
+ * stay in the context either way.
+ */
 function waitsOf(context: string): { stopped: string | null; holds_up: string[] } {
   let stopped: string | null = null;
+  let sawStopped = false;
   let holdsUp: string[] | null = null;
   for (const raw of context.split("\n")) {
     const line = raw.trim();
-    if (stopped === null) {
+    if (!sawStopped) {
       const match = STOPPED_RE.exec(line);
       if (match !== null) {
-        stopped = (match[1] ?? "").trim();
+        sawStopped = true;
+        const why = (match[1] ?? "").trim();
+        if (!isNegativeWaitValue(why)) stopped = why;
         continue;
       }
     }
@@ -119,19 +159,24 @@ function waitsOf(context: string): { stopped: string | null; holds_up: string[] 
         holdsUp = (match[1] ?? "")
           .split(";")
           .map((name) => name.trim())
-          .filter((name) => name !== "");
+          .filter((name) => name !== "" && !isNegativeWaitValue(name));
       }
     }
   }
   return { stopped, holds_up: holdsUp ?? [] };
 }
 
-/** Derived, never stored: closed when the thread is resolved, else open / picked / sent. */
+/**
+ * Derived, never stored: superseded when an agent replaced or withdrew it,
+ * else closed when the thread is resolved or the person's Mark read closed
+ * it (`set_aside`), else open / picked / sent.
+ */
 export function inboxQuestionState(
-  record: Pick<InboxQuestionRecord, "answer" | "revision" | "sent_revision">,
+  record: Pick<InboxQuestionRecord, "answer" | "revision" | "sent_revision" | "superseded_by" | "set_aside">,
   threadResolved: boolean,
 ): InboxQuestionState {
-  if (threadResolved) return "closed";
+  if (record.superseded_by) return "superseded";
+  if (threadResolved || record.set_aside) return "closed";
   if (record.answer === null) return "open";
   if (record.revision > 0 && record.sent_revision === record.revision) return "sent";
   return "picked";
@@ -178,7 +223,30 @@ export function toInboxQuestion(record: InboxQuestionRecord, threadResolved: boo
     message_id: record.message_id,
     decision_recording: inboxDecisionRecording(record),
     decision_draft: record.decision_draft ?? null,
+    superseded_by: record.superseded_by ? { message_id: record.superseded_by.message_id, key: record.superseded_by.key ?? null } : null,
+    set_aside_at: record.set_aside?.at ?? null,
   };
+}
+
+// ─────────────────────────────── Superseding ───────────────────────────────
+
+const SUPERSEDE_REF_RE = /^(msg_[0-9A-HJKMNP-TV-Z]{26})(?:\/(q-[0-9a-f]{8}(?:-\d{1,3})?))?$/;
+
+/**
+ * One id an agent supersedes with (send_message's `supersedes`, or a token of
+ * a `Replaces:` line): `<message id>` (every open question of that message)
+ * or `<message id>/<key>` (one). Null when it is neither.
+ */
+export function parseInboxSupersedeRef(value: unknown): { message_id: string; key: string | null } | null {
+  if (typeof value !== "string") return null;
+  const match = SUPERSEDE_REF_RE.exec(value.trim());
+  if (!match) return null;
+  return { message_id: match[1]!, key: match[2] ?? null };
+}
+
+/** A question that can still be superseded: one the person has not answered and sent. */
+export function isInboxQuestionSupersedable(state: InboxQuestionState): boolean {
+  return state === "open" || state === "picked";
 }
 
 /** Workspaces' row summary over a thread's questions (open ones only for the badges). */
@@ -206,7 +274,8 @@ export type InboxAnswerRefusal =
   | { code: "validation_error"; field: string; message: string }
   | { code: "question_not_found"; key: string }
   | { code: "question_revision_conflict"; key: string; current_revision: number }
-  | { code: "question_already_sent"; key: string };
+  | { code: "question_already_sent"; key: string }
+  | { code: "question_superseded"; key: string; superseded_by: { message_id: string; key: string | null } };
 
 /**
  * Plannotator's record checked against its question: the fail-closed parser
@@ -240,7 +309,9 @@ export function checkInboxAnswer(
 
 function exportItem(record: InboxQuestionRecord, number: number): QuestionExportItem {
   const settled = record.parsed.choices.filter((c) => c.settled).map((c) => c.label);
-  const hasAliases = record.parsed.aliases.some((a) => a !== null);
+  // The export prints current labels for answers stored under an older name
+  // or cut at 200 characters by a build through 0.28.17.
+  const needsChoices = questionChoicesNeedCanonicalLabels(storedChoices(record));
   return {
     key: record.key,
     number,
@@ -250,7 +321,7 @@ function exportItem(record: InboxQuestionRecord, number: number): QuestionExport
     ...(record.parsed.suggested_text === null ? {} : { suggestedText: record.parsed.suggested_text }),
     settled: settled.length > 0,
     settledLabels: settled,
-    ...(hasAliases
+    ...(needsChoices
       ? {
           choices: record.parsed.choices.map((c, i) => ({
             label: c.label,
@@ -262,7 +333,8 @@ function exportItem(record: InboxQuestionRecord, number: number): QuestionExport
 }
 
 /**
- * The body a Send writes: "Answered N questions." when it carries answers,
+ * The body a Send writes: "Answered N questions.", "Skipped N questions." or
+ * "Answered N questions, skipped M." when it carries answers or skips,
  * the person's words if any, then Plannotator's "Answers to your questions"
  * section over every question of the message, with the answers this Send
  * carries and earlier sent answers that still stand. Empty when there is
@@ -274,12 +346,90 @@ export function composeInboxReplyBody(input: {
   earlier: readonly QuestionAnswer[];
   words: string | undefined;
 }): string {
-  const count = input.sent.filter((a) => !isQuestionAnswerEmpty(a)).length;
-  const sentence = count > 0 ? `Answered ${count} question${count === 1 ? "" : "s"}.` : "";
-  const items = [...input.questions].sort((a, b) => a.position - b.position).map((q, i) => exportItem(q, i + 1));
+  // The same rule as the answers section's "x of y answered" line
+  // (formatQuestionAnswersSection): a pick, Other or text answers; a note
+  // alone answers only a settled question; a skip that answers nothing is a
+  // skip; a note alone on an open question is neither.
+  const settled = new Set(input.questions.filter((q) => q.parsed.choices.some((c) => c.settled)).map((q) => q.key));
+  let answered = 0;
+  let skipped = 0;
+  for (const a of input.sent) {
+    if (isQuestionAnswerEmpty(a)) continue;
+    if (isQuestionAnswered(a) || (settled.has(a.key) && !a.skipped)) answered += 1;
+    else if (a.skipped) skipped += 1;
+  }
+  const sentence = replySentence(answered, skipped);
+  // A superseded question is neither answered nor "Unanswered": the agent
+  // withdrew it. The others keep their numbers ("Q2" stays the card's 2).
+  const items = [...input.questions]
+    .sort((a, b) => a.position - b.position)
+    .map((q, i) => (q.superseded_by ? null : exportItem(q, i + 1)))
+    .filter((item): item is QuestionExportItem => item !== null);
   const section = input.sent.length > 0 ? formatQuestionAnswersSection(items, [...input.sent, ...input.earlier]).trimEnd() : "";
   const words = input.words?.trim() ?? "";
   return [sentence, words, section].filter((part) => part !== "").join("\n\n");
+}
+
+const questionsWord = (n: number): string => `${n} question${n === 1 ? "" : "s"}`;
+
+/**
+ * The reply's first line: "Answered 2 questions.", "Skipped 3 questions.", or
+ * "Answered 1 question, skipped 2." A skip is not an answer, so a Send of
+ * skips alone never opens with "Answered".
+ */
+function replySentence(answered: number, skipped: number): string {
+  if (answered > 0 && skipped > 0) return `Answered ${questionsWord(answered)}, skipped ${skipped}.`;
+  if (answered > 0) return `Answered ${questionsWord(answered)}.`;
+  if (skipped > 0) return `Skipped ${questionsWord(skipped)}.`;
+  return "";
+}
+
+/**
+ * A skip the Inbox writes for the person: a Send's for a question it left
+ * unanswered (`by_reply`, so the window says "Skipped with your reply" and
+ * the agent can tell it from a Skip the person pressed), or a Mark read's for
+ * a question it closed. Never records a decision (a skip decides nothing).
+ */
+export function inboxSkipAnswer(record: Pick<InboxQuestionRecord, "key" | "kind" | "prompt">, options: { byReply: boolean }): QuestionAnswer {
+  return {
+    v: 1,
+    key: record.key,
+    kind: record.kind,
+    prompt: record.prompt.slice(0, MAX_QUESTION_PROMPT_CHARS),
+    selected: [],
+    skipped: true,
+    ...(options.byReply ? { by_reply: true } : {}),
+  };
+}
+
+/** The first line of a Mark read's note to the asking agent. */
+export const INBOX_SET_ASIDE_HEADING = "Set aside for now; don't wait on these:";
+
+/**
+ * The note a Mark read sends the agent that asked the questions it closed
+ * (approval 2026-10-11: "tells the asking agent once"): the heading, then
+ * each question with its card number.
+ */
+export function composeInboxSetAsideBody(questions: readonly Pick<InboxQuestionRecord, "position" | "prompt">[]): string {
+  const lines = [...questions]
+    .sort((a, b) => a.position - b.position)
+    .map((q) => `- Q${q.position + 1}. ${q.prompt.replace(/\s+/g, " ").trim()}`);
+  return [INBOX_SET_ASIDE_HEADING, "", ...lines, "", "The person closed them unanswered in the Inbox. Ask again if you still need an answer to go on."].join("\n");
+}
+
+/** The first line of the note an Undo of Mark read sends once the agent was told. */
+export const INBOX_REOPENED_HEADING = "The person reopened these:";
+
+/**
+ * The note an Undo of Mark read sends when the asking agent was already told
+ * not to wait on those questions: they are open again, and wait on the
+ * person, so the agent must not go on as if they were set aside.
+ */
+export function composeInboxReopenedBody(questions: readonly Pick<InboxQuestionRecord, "position" | "prompt">[]): string {
+  const lines = [...questions]
+    .sort((a, b) => a.position - b.position)
+    .map((q) => `- Q${q.position + 1}. ${q.prompt.replace(/\s+/g, " ").trim()}`);
+  return [INBOX_REOPENED_HEADING, "", ...lines, "", "They are open again in the Inbox; wait for the person's answer before you rely on them."].join("\n");
 }
 
 // ─────────────────────────────── Subject ───────────────────────────────

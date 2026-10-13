@@ -7,7 +7,8 @@
  *
  * What it proves (the window record's 3.1 and 3.2, the approved
  * inbox-decision-toggle): the tag is on for a `Decision: when answered`
- * question and off for a plain one; switching it off hides the row and
+ * question and off for a plain one, and the tag and the status tag beside
+ * it (Open, Answered) draw at one height on one line; switching it off hides the row and
  * holds across a reload; the tag's words open the card under it, drafted
  * answer first; Done keeps edits; Send records a decision only where the
  * switch is on (decisions.jsonl on disk) and the thread says "Settled"; a
@@ -22,10 +23,10 @@
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DEMO_MESSAGES, SimAgent, scratchProject } from '../../scripts/inbox-sim';
+import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -102,6 +103,31 @@ function side(page: Page) {
   return page.getByRole('complementary', { name: 'Inbox navigation' });
 }
 
+/** Every question card's eyebrow pills (the decision tag beside Open,
+ *  Answered, Skipped, …) draw as one row: same top, bottom and height.
+ *  The owner saw the dashed "Open" tag sit 2 px taller and lower than the
+ *  decision tag beside it (only Open had a border). */
+async function expectEyebrowPillsAligned(page: Page): Promise<void> {
+  const rows = await pane(page).locator('[data-question-status]').evaluateAll((cards) =>
+    cards.map((card) => {
+      const group = card.firstElementChild?.querySelector(':scope > span.ml-auto');
+      return [...(group?.children ?? [])].map((pill) => {
+        const r = pill.getBoundingClientRect();
+        return { text: (pill.textContent ?? '').trim(), top: r.top, bottom: r.bottom, height: r.height };
+      });
+    }),
+  );
+  expect(rows.length).toBeGreaterThan(0);
+  for (const pills of rows) {
+    expect(pills.length, JSON.stringify(pills)).toBeGreaterThan(1);
+    for (const pill of pills.slice(1)) {
+      for (const edge of ['top', 'bottom', 'height'] as const) {
+        expect(Math.abs(pill[edge] - pills[0]![edge]), `${edge}: ${JSON.stringify(pills)}`).toBeLessThanOrEqual(0.5);
+      }
+    }
+  }
+}
+
 async function questionOf(agent: SimAgent, key: string): Promise<Record<string, any>> {
   const thread = await agent.readThread(world.threadId);
   return thread.messages[0].questions.find((q: { key: string }) => q.key === key);
@@ -113,7 +139,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   rmSync(proofDir, { recursive: true, force: true });
   mkdirSync(proofDir, { recursive: true });
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-decisions-e2e-')));
+  const root = inboxScratch('plannotator-inbox-decisions-e2e-');
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
   mkdirSync(home);
@@ -150,23 +176,21 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 });
 
 test.afterAll(async () => {
-  if (!world) return;
-  await Promise.all([world.claude.close().catch(() => {}), world.opencode.close().catch(() => {})]);
-  await world.context.close();
   try {
-    const entry = JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8'));
-    process.kill(entry.pid, 'SIGTERM');
-  } catch {
-    // Already gone.
+    if (!world) return;
+    await Promise.all([world.claude.close().catch(() => {}), world.opencode.close().catch(() => {})]);
+    await world.context.close();
+    const names = [...new Set(readdirSync(proofDir).filter((f) => f.endsWith('-light.png')).map((f) => f.replace(/-light\.png$/, '')))].sort();
+    writeFileSync(
+      join(proofDir, 'index.html'),
+      `<!doctype html><meta charset="utf-8"><title>Plannotator Inbox decisions: proof</title><style>body{font:14px system-ui;margin:24px;background:#e9eaee}h2{font-size:15px;margin:24px 0 8px}.pair{display:flex;gap:12px}.pair img{width:calc(50% - 6px);box-shadow:0 0 0 1px #0002;border-radius:6px}</style><h1>Plannotator Inbox decisions: every proved state, light and dark, 1440 by 900</h1>${names
+        .map((n) => `<section><h2>${n}</h2><div class="pair"><img src="${n}-light.png" alt="${n} light"><img src="${n}-dark.png" alt="${n} dark"></div></section>`)
+        .join('\n')}`,
+    );
+  } finally {
+    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
+    await removeInboxScratch();
   }
-  rmSync(world.root, { recursive: true, force: true });
-  const names = [...new Set(readdirSync(proofDir).filter((f) => f.endsWith('-light.png')).map((f) => f.replace(/-light\.png$/, '')))].sort();
-  writeFileSync(
-    join(proofDir, 'index.html'),
-    `<!doctype html><meta charset="utf-8"><title>Plannotator Inbox decisions: proof</title><style>body{font:14px system-ui;margin:24px;background:#e9eaee}h2{font-size:15px;margin:24px 0 8px}.pair{display:flex;gap:12px}.pair img{width:calc(50% - 6px);box-shadow:0 0 0 1px #0002;border-radius:6px}</style><h1>Plannotator Inbox decisions: every proved state, light and dark, 1440 by 900</h1>${names
-      .map((n) => `<section><h2>${n}</h2><div class="pair"><img src="${n}-light.png" alt="${n} light"><img src="${n}-dark.png" alt="${n} dark"></div></section>`)
-      .join('\n')}`,
-  );
 });
 
 test('the tag is on for a `Decision: when answered` question and off for a plain one', async () => {
@@ -182,6 +206,8 @@ test('the tag is on for a `Decision: when answered` question and off for a plain
   await expect(switches(page).nth(0)).toHaveAttribute('aria-pressed', 'true');
   await expect(switches(page).nth(1)).toHaveAttribute('aria-pressed', 'false');
   await expect(pane(page).getByText('Answering this records a decision')).toHaveCount(1);
+  // On beside Open and off beside Open: one row of equal pills.
+  await expectEyebrowPillsAligned(page);
   // The record says so too, and the sidebar counts the one that waits.
   expect((await questionOf(world.claude, world.q1)).decision_recording).toBe(true);
   expect((await questionOf(world.claude, world.q2)).decision_recording).toBe(false);
@@ -208,6 +234,8 @@ test("the tag's words open the card under the tag, drafted answer first", async 
   const { page } = world;
   await pane(page).getByText('Retry with the same idempotency key', { exact: true }).click();
   await expect(pane(page).getByText(/^Picked .*, not sent$/)).toHaveCount(1);
+  // Answered beside the on tag, Open beside the off tag.
+  await expectEyebrowPillsAligned(page);
   await words(page).nth(0).click();
   const card = page.getByRole('dialog', { name: 'Record as a decision' });
   await expect(card).toBeVisible();
@@ -310,7 +338,8 @@ test('the Decisions page: Waiting, then Settled; the Settled link opens the row 
 
   await detail.getByRole('button', { name: 'Close the decision' }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Decisions' })).toBeVisible();
-  await expect(page.getByRole('combobox', { name: 'Project' })).toHaveValue(/^prj_/);
+  // The project switch names the project and its counts (the question just asked waits, the decision is settled).
+  await expect(page.getByRole('button', { name: /^Project: billing-svc, / })).toHaveAccessibleName(/\d+ waiting · \d+ settled$/);
   await expect(page.getByText('What holds true in billing-svc, and what waits on a call.')).toBeVisible();
   const waitingRow = page.locator(`[data-decision-group="waiting"] [data-waiting-question="${waiting.message_id}/${waiting.questions[0].key}"]`);
   await expect(waitingRow).toContainText('Which queue holds the dead letters?');
@@ -422,6 +451,10 @@ test('read-only per question: in a half-sent message the sent card has a plain t
   const openCard = pane(page).locator(`[data-question-key="${second}"]`);
   await sentCard.getByText('Yes', { exact: true }).click();
   await expect(pane(page).getByText(/^Picked .*, not sent$/)).toHaveCount(1);
+  // A Send skips what it leaves unanswered unless the person keeps it open: keep the second one open.
+  await expect(page.locator('.ib-pfoot [data-skip-chip]')).toContainText('1 unanswered question will be skipped');
+  await page.locator('.ib-pfoot [data-skip-toggle]').click();
+  await expect(page.locator('.ib-pfoot [data-skip-chip]')).toContainText('1 unanswered question stays open');
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
   await expect(sentCard.getByText(/^Sent \d{1,2}:\d{2} [AP]M$/)).toBeVisible();
 

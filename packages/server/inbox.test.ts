@@ -247,7 +247,7 @@ describe("startup, registry and health", () => {
       update = (await health()).update;
       await Bun.sleep(50);
     }
-    expect(update).toEqual({ available: true, version: "1.1.0" });
+    expect(update).toMatchObject({ available: true, state: "ready", version: "1.1.0" });
   });
 });
 
@@ -331,6 +331,9 @@ describe("security refusals, by real requests", () => {
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain("connect-src 'self'");
     expect(csp).toContain("default-src 'self'");
+    // Graphviz attachments compile WebAssembly; eval stays off.
+    expect(csp).toContain("'wasm-unsafe-eval'");
+    expect(csp).not.toMatch(/'unsafe-eval'/);
     expect(page.headers.get("access-control-allow-origin")).toBeNull();
     // A sentinel string: the embedded window is what `/` serves.
     expect(await page.text()).toContain("data-window-sentinel");
@@ -360,12 +363,20 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
     expect(tools.tools.map((t) => t.name).sort()).toEqual([...INBOX_MCP_TOOLS].sort());
     // Claude Code hands a model an MCP description up to its first 2,048
     // characters ("… [truncated]" after). The question guide is longer than
-    // that by itself, so what must survive the cut is pinned: the syntax and
-    // the rules on what to ask, through "Ask only what you cannot decide alone".
+    // that by itself, so what must survive the cut is pinned: the syntax, the
+    // context rules (what to give a reader who switches in cold, images and
+    // linked files), the rules on what to ask, and the `- [x]` settled rule
+    // whole.
     const sendDescription = tools.tools.find((t) => t.name === "send_message")!.description!;
     const reachesModel = sendDescription.slice(0, 2048 - "… [truncated]".length);
     expect(reachesModel).toContain(":::question-text");
+    expect(reachesModel).toContain("does not know what you know");
+    expect(reachesModel).toContain("without opening anything else");
+    expect(reachesModel).toContain("no jargon");
+    expect(reachesModel).toContain("`![alt](path)`");
+    expect(reachesModel).toContain("`[the mock](mock.html)`");
     expect(reachesModel).toContain("Do not ask rhetorical questions or questions the codebase answers.");
+    expect(reachesModel).toContain("or drop the block and state the decision in prose.");
     // The guided-review tools reach the model whole, their worked example pointer included.
     for (const name of ["get_guide_brief", "submit_guide"]) {
       expect(tools.tools.find((t) => t.name === name)!.description!.length).toBeLessThan(2048);
@@ -660,6 +671,36 @@ describe("the window's routes: settings, restart, favicon", () => {
         enabled: false,
         allowedOrigin: origin,
       });
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
+  test("the theme saves into config.json `theme`, the value plan review reads, keeping the palettes", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      // A choice plan review already made: dark mode and a palette per half.
+      mkdirSync(dataDir, { recursive: true });
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ theme: { mode: "dark", light: "adwaita", dark: "tokyo-night" } }));
+      const server = await start(dataDir);
+      const read = async () => (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()).theme;
+      expect(await read()).toEqual({ mode: "dark", light: "adwaita", dark: "tokyo-night" });
+      for (const bad of [{ mode: "sepia" }, { light: "../x" }, { accent: "red" }, {}, "light"]) {
+        const refused = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, theme: bad });
+        expect(refused.status).toBe(422);
+      }
+      const cross = await post(server, "/api/inbox/settings", { theme: { mode: "light" } }, { Origin: "https://evil.example" });
+      expect(cross.status).toBe(403);
+      expect(await read()).toEqual({ mode: "dark", light: "adwaita", dark: "tokyo-night" });
+
+      const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, theme: { mode: "light" } });
+      expect(saved.status).toBe(200);
+      expect((await saved.json()).theme).toEqual({ mode: "light", light: "adwaita", dark: "tokyo-night" });
+      expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).theme).toEqual({ mode: "light", light: "adwaita", dark: "tokyo-night" });
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;

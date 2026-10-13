@@ -2,10 +2,10 @@
 // Slim announcement bar under the nav. One announcement at a time; swap the
 // copy and href together when the next announcement lands.
 ---
-<a href="https://github.com/plannotator/herdr-annotate" class="announce-bar" data-announce="herdr-annotate">
+<a href="/inbox/" class="announce-bar" data-announce="inbox">
   <span class="announce-tag">New</span>
-  <span class="announce-copy">Herdr Annotate: Plannotator-style review in the terminal</span>
-  <span class="announce-arrow" aria-hidden="true">&rarr;</span>
+  <span class="announce-copy">Plannotator Inbox: your agents' questions, plans and reviews in one local window</span>
+  <span class="announce-cta">See the Inbox <span class="announce-arrow" aria-hidden="true">&rarr;</span></span>
 </a>
 
 <style>
@@ -43,6 +43,12 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .announce-cta {
+    font-weight: 500;
+    color: var(--primary);
+    white-space: nowrap;
+    flex-shrink: 0;
   }
   .announce-arrow {
     color: var(--primary);

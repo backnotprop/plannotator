@@ -386,9 +386,10 @@ See HANDOFF.md § "Question host seams (ui 0.49.0, core 0.25.9)".
 
 **Decision recording toggle and status tag (ui 0.52.0, unreleased).** Also optional on `Viewer`, also unused by Plannotator:
 
-- `questionDecisionRecording(question) => boolean | undefined`: false draws a `Decision: when answered` question's "Records a decision" tag dimmed with a dotted outline and hides its "Answering this records a decision" row. A recorded decision is never affected.
+- `questionDecisionRecording(question) => boolean | undefined`: false draws a `Decision: when answered` question's "Records a decision" tag faded (muted-foreground at 55%; the focus ring stays at full strength) with a dotted outline and hides its "Answering this records a decision" row. A recorded decision is never affected.
 - `onToggleQuestionDecisionRecording(key, next)`: makes that tag an `aria-pressed` toggle button; store `next` and return it from `questionDecisionRecording`. Not offered under `readOnly` or in a card without an answer handler.
 - `questionStatusTag: 'none'`: hides the card's own Open / Answered / Settled / Skipped tag so you can draw your own; the decision tags stay.
+- `renderQuestionCard(question, savedAnswer)`: your own card in place of a question's answer card (return `undefined` to keep it), e.g. for a question the asker withdrew; `renderQuestionBelowPrompt(question)`: content under a card's prompt.
 
 See HANDOFF.md § "Question decision toggle and status tag (ui 0.52.0, unreleased; …)".
 
@@ -400,6 +401,8 @@ See HANDOFF.md § "Question decision toggle and status tag (ui 0.52.0, unrelease
 See HANDOFF.md § "Decision toggle on any question, and an opener for the host's decision card (ui 0.52.1, …)".
 
 **Answers without comments (unreleased).** `Viewer` `answerOnly`: annotation authoring and the document actions (Global comment, Copy) are off as under `readOnly`, while question cards and checkboxes keep their handlers, for a host that shows a message to answer, not a document to annotate. See HANDOFF.md § "Viewer `answerOnly` (unreleased)".
+
+**Local links decided by the host (unreleased).** `Viewer` `resolveLocalLink`: the host decides what a link to a local path does (open it itself, or draw it as inert text), markdown and raw HTML alike. See HANDOFF.md § "Viewer `resolveLocalLink` (unreleased)".
 
 ### Diff file tree (`components/DiffFileTree`; next ui release)
 

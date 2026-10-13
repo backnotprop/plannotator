@@ -1,7 +1,7 @@
 /**
  * Plannotator Inbox registry: `${dataDir}/inbox/inbox.json`.
  *
- * `{ v, pid, port, url, version, token, serverSession, startedAt, tailnet?, lan? }`, mode
+ * `{ v, pid, port, url, version, token, serverSession, startedAt, tailnet?, lan?, tailscale? }`, mode
  * 0600, written by the Inbox server when it starts and LEFT IN PLACE when it
  * exits, so a person who ran the Inbox once has it found by every agent
  * session, and a caller can start it again on the port it last had.
@@ -54,6 +54,16 @@ export interface InboxRegistryEntry {
    * switched off; absent means on, as P2 wrote it). Absent: never switched on.
    */
   lan?: { port: number; on?: boolean };
+  /**
+   * "Over your tailnet" (`plannotator inbox --tailscale`, PLANNOTATOR_INBOX_TAILSCALE,
+   * config.json `inboxTailscale`): present while publishing is on.
+   * `url` is the tailnet address while the publication works, `error` why
+   * not when it does not. `https_port` + `proxy_port` name the serve mapping
+   * this Inbox made (the HTTPS port is the Inbox's own port, the proxy port
+   * its tailnet-only loopback listener), kept after a stop whose take-down
+   * failed so the next start or `uninstall --purge` can take it down.
+   */
+  tailscale?: { url: string | null; error: string | null; https_port?: number; proxy_port?: number };
 }
 
 export function inboxRegistryPath(dataDir: string): string {
@@ -109,6 +119,90 @@ export function writeInboxRegistry(dataDir: string, entry: InboxRegistryEntry): 
     // Best effort where the filesystem has no modes.
   }
   renameSync(temp, path);
+}
+
+/**
+ * The running Inbox `serverSession` rewriting its own entry (a tailnet or
+ * Wi-Fi change), from the entry in the file: `change` gets a copy and the
+ * result is written, only while the file still names `serverSession`. False,
+ * and nothing written, when the file is gone (the data folder was removed:
+ * never make it again) or names another Inbox (one that started since owns
+ * the file: a stopping Inbox must not rewrite its successor's entry).
+ *
+ * Read, then write: not atomic across processes. An Inbox that writes its
+ * own entry between the read and the rename (a start overlapping this one's
+ * stop, within one file read) is overwritten with this Inbox's entry. The
+ * newer Inbox's data-gone check then finds another session in the file and
+ * exits, and the next agent call starts a fresh Inbox: a lost start, never
+ * two writers on the store and never a dead pid left for callers to wait on
+ * (this Inbox is stopping). Closing it would take a lock around every write.
+ */
+export function updateOwnInboxRegistry(
+  dataDir: string,
+  serverSession: string,
+  change: (entry: InboxRegistryEntry) => void,
+): boolean {
+  const current = readInboxRegistry(dataDir);
+  if (current?.serverSession !== serverSession) return false;
+  const entry = { ...current };
+  change(entry);
+  writeInboxRegistry(dataDir, entry);
+  return true;
+}
+
+/** What the running Inbox's data-gone check saw (`probeInboxData`). */
+export type InboxDataProbe =
+  | { state: "ok" }
+  /** Its data is gone: the reason, for stderr. */
+  | { state: "gone"; reason: string }
+  /** Could not tell (a permission, an I/O error, a file being replaced): neither a miss nor a pass. */
+  | { state: "unknown"; detail: string };
+
+function errnoOf(error: unknown): string | undefined {
+  return (error as NodeJS.ErrnoException | undefined)?.code;
+}
+
+const isMissing = (code: string | undefined) => code === "ENOENT" || code === "ENOTDIR";
+
+/**
+ * Whether the running Inbox `serverSession` still has its data: `inbox.json`
+ * exists and names it. Gone ONLY on evidence: the file (or a folder above
+ * it) does not exist (ENOENT, ENOTDIR), or it parses and names another
+ * Inbox. Any other failure (EACCES, EIO, ESTALE, EMFILE, EBUSY, a file that
+ * does not parse) is unknown: a network mount waking up or a permission
+ * change must never end an Inbox. Not the folder's device and inode: a
+ * remount after sleep or a data dir reached through a moved copy's symlink
+ * changes them while the Inbox and its file are fine.
+ *
+ * Unlike `readInboxRegistry` (null on anything, for callers that only ask
+ * "is there an entry"), this keeps the errno.
+ */
+export function probeInboxData(dataDir: string, serverSession: string): InboxDataProbe {
+  const dir = inboxDir(dataDir);
+  const path = inboxRegistryPath(dataDir);
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    const code = errnoOf(error);
+    if (!isMissing(code)) return { state: "unknown", detail: `${path}: ${code ?? String(error)}` };
+    let folderGone = false;
+    try {
+      statSync(dir);
+    } catch (folderError) {
+      folderGone = isMissing(errnoOf(folderError));
+    }
+    return { state: "gone", reason: folderGone ? `its data folder ${dir} is gone` : `${path} is gone` };
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return { state: "unknown", detail: `${path} does not parse` };
+  }
+  if (!isEntry(value)) return { state: "unknown", detail: `${path} is not an Inbox entry` };
+  if (value.serverSession !== serverSession) return { state: "gone", reason: `another Inbox (pid ${value.pid}) owns ${dir} now` };
+  return { state: "ok" };
 }
 
 export function isPidAlive(pid: number): boolean {

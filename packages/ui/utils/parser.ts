@@ -382,10 +382,13 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
     const prevLineWasBlank = lastLineWasBlank;
     lastLineWasBlank = false;
 
-    // Headings
-    if (trimmed.startsWith('#')) {
+    // Headings: one to six `#` followed by a space or the end of the line
+    // (CommonMark ATX). `#123 fixed`, `#hashtag` and `#!/bin/sh` are text,
+    // so an issue ref that starts a line keeps its link.
+    const headingMatch = trimmed.match(/^(#{1,6})(?:\s|$)/);
+    if (headingMatch) {
       flush();
-      const level = trimmed.match(/^#+/)?.[0].length || 1;
+      const level = headingMatch[1].length;
       blocks.push({
         id: `block-${currentId++}`,
         type: 'heading',
@@ -449,62 +452,63 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
       continue;
     }
 
-    // Blockquotes — consecutive `>` lines merge into one block so wrapped
-    // paragraph quotes render as a single continuous quote box. A blank line
-    // breaks the blockquote so the next `>` starts a fresh one.
+    // Blockquotes: a run of consecutive `>` lines (blank `>` lines included)
+    // is ONE quote block, the way GitHub renders it: one quote, one bar. A
+    // truly blank line ends the run, so the next `>` starts a fresh quote; a
+    // line without `>` is not a lazy continuation (it starts a paragraph).
     //
-    // Exception: if the stripped content starts with a block-level marker
-    // (list item, heading, code fence, nested blockquote) we do NOT merge.
-    // Our flat block model can't render a list-inside-a-quote as an actual
-    // nested list, so merging would flatten the markers into run-on inline
-    // text. Leaving them as separate blockquote blocks preserves each line's
-    // visual identity (a stacked-box layout) — imperfect but legible. A
-    // proper recursive blockquote parser is tracked as a follow-up.
+    // `content` is the quote's own markdown: each line with its `>` marker and
+    // one following space or tab removed (deeper indentation is kept, so a
+    // fenced code block or a nested list inside the quote keeps its shape) and
+    // trailing whitespace trimmed, one content line per source line. Blank
+    // lines at the quote's edges are dropped (`startLine` moves past leading
+    // ones), so the block's line span is the quote's text. The renderer
+    // (`BlockquoteBlock`) parses `content` again with this function and draws
+    // the inner blocks (paragraphs, code fences, lists, nested quotes) inside
+    // the one quote, while the quote stays a single annotatable block with a
+    // single `data-block-id`.
+    //
+    // GitHub alerts (`> [!KIND]` as the run's first line) are unchanged: the
+    // marker line tags the block, and the body is every later line fully
+    // `>`-stripped and trimmed, empty leading lines skipped, exactly as the
+    // line-by-line merge produced it. AlertBlock renders it.
     if (trimmed.startsWith('>')) {
       flush();
-      const stripped = trimmed.replace(/^>\s*/, '');
-      // List markers require trailing whitespace to avoid matching inline
-      // text like "-hyphen" or "1.5 seconds"; headings, code fences, and
-      // nested blockquote markers don't require it (``` can be followed
-      // directly by a language tag, # can start a dense heading).
-      const blockMarkerRe = /^(?:(?:\*|-|\d+\.)\s|#|```|>)/;
-      const hasBlockMarker = blockMarkerRe.test(stripped);
-      const prevBlock = blocks.length > 0 ? blocks[blocks.length - 1] : null;
-      // Don't merge into a previous blockquote whose content itself starts
-      // with a block marker — otherwise a `> some text` line following a
-      // `> 1. item` line would get glued onto the list-item block.
-      const prevIsMarkerQuote =
-        prevBlock?.type === 'blockquote' && blockMarkerRe.test(prevBlock.content);
-      // Alerts own their body: once a blockquote is tagged as an alert,
-      // subsequent `>` lines always merge into it (until a blank line).
-      // Without this, `> [!NOTE]\n> - item` splits the list item off into
-      // a separate plain quote, losing the callout.
-      const prevIsAlert = prevBlock?.type === 'blockquote' && !!prevBlock.alertKind;
-      const shouldMergeIntoAlert = prevIsAlert && !prevLineWasBlank;
-      const shouldMergeNormal =
-        !hasBlockMarker &&
-        !prevIsMarkerQuote &&
-        !prevLineWasBlank &&
-        prevBlock?.type === 'blockquote';
-      if (shouldMergeIntoAlert || shouldMergeNormal) {
-        prevBlock!.content = prevBlock!.content
-          ? prevBlock!.content + '\n' + stripped
-          : stripped;
-      } else {
-        // GitHub alert marker: a blockquote whose first line is [!KIND].
-        // We strip the marker from content and tag the block; rendering decides the style.
-        const alertMatch = stripped.match(/^\[!(NOTE|TIP|WARNING|CAUTION|IMPORTANT)\]\s*$/i);
+      let runEnd = i;
+      while (runEnd + 1 < lines.length && lines[runEnd + 1].trim().startsWith('>')) runEnd++;
+      const run = lines.slice(i, runEnd + 1);
+      const quoteStartLine = currentLineNum;
+      i = runEnd;
+      const alertMatch = trimmed
+        .replace(/^>\s*/, '')
+        .match(/^\[!(NOTE|TIP|WARNING|CAUTION|IMPORTANT)\]\s*$/i);
+      if (alertMatch) {
+        const body = run.slice(1).reduce((acc, raw) => {
+          const stripped = raw.trim().replace(/^>\s*/, '');
+          return acc ? acc + '\n' + stripped : stripped;
+        }, '');
         blocks.push({
           id: `block-${currentId++}`,
           type: 'blockquote',
-          content: alertMatch ? '' : stripped,
-          alertKind: alertMatch
-            ? (alertMatch[1].toLowerCase() as 'note' | 'tip' | 'warning' | 'caution' | 'important')
-            : undefined,
+          content: body,
+          alertKind: alertMatch[1].toLowerCase() as 'note' | 'tip' | 'warning' | 'caution' | 'important',
           order: currentId,
-          startLine: currentLineNum
+          startLine: quoteStartLine,
         });
+        continue;
       }
+      const inner = run.map((raw) => raw.replace(/^\s*>[ \t]?/, '').trimEnd());
+      let first = 0;
+      while (first < inner.length - 1 && inner[first] === '') first++;
+      let last = inner.length - 1;
+      while (last > first && inner[last] === '') last--;
+      blocks.push({
+        id: `block-${currentId++}`,
+        type: 'blockquote',
+        content: inner.slice(first, last + 1).join('\n'),
+        order: currentId,
+        startLine: quoteStartLine + first,
+      });
       continue;
     }
     

@@ -66,7 +66,10 @@ describe('Plannotator Inbox launch switch', () => {
   test('on: the page, the post and the images are built and linked', async () => {
     expect(files(join(dist.on, 'assets/inbox')).length).toBe(33);
     const home = inboxLinks(await read(dist.on, 'index.html')).map(text);
-    expect(home).toEqual(['Inbox', 'Inbox']);
+    // Nav, the announcement bar (src/components/landing/AnnounceBar.astro), Footer.
+    expect(home).toHaveLength(3);
+    expect([home[0], home[2]]).toEqual(['Inbox', 'Inbox']);
+    expect(home[1]).toContain('See the Inbox');
     const inbox = await read(dist.on, 'inbox/index.html');
     expect(inboxLinks(inbox)[0]).toContain('text-foreground font-medium');
     expect(inbox).toContain('<title>Plannotator Inbox</title>');
@@ -90,6 +93,18 @@ describe('Plannotator Inbox launch switch', () => {
         expect(`${text(element)} ${label}`, path).not.toContain(',');
       }
     }
+  });
+
+  // "Copy install prompt" copies the text inlined in the page; /inbox/prompt.md
+  // serves the file. Both come from src/lib/inbox-prompt.md and must not drift.
+  // ASCII only because S3 serves .md as text/markdown without a charset.
+  test('on: the install prompt is served and inlined from one source', async () => {
+    const source = await readFile(join(marketingRoot, 'src/lib/inbox-prompt.md'), 'utf8');
+    expect(source).toMatch(/^[\x09\x0a\x20-\x7e]*$/);
+    expect(await read(dist.on, 'inbox/prompt.md')).toBe(source);
+    const inbox = await read(dist.on, 'inbox/index.html');
+    const inlined = inbox.match(/<script type="application\/json" id="ib-install-prompt">([\s\S]*?)<\/script>/)?.[1];
+    expect(inlined && JSON.parse(inlined)).toBe(source);
   });
 
   test('on: every image on the page and the post resolves', async () => {

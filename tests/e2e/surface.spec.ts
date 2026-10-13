@@ -32,12 +32,12 @@
 
 import { expect, test, type Browser, type BrowserContext, type Frame, type FrameLocator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { FIXTURE_V1_LOCAL } from '../../packages/core/guide-format-fixtures';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
+import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 // WebKit, without the Chromium-only launch flags the config sets for the window's specs.
 test.use({ browserName: 'webkit', launchOptions: {} });
@@ -300,7 +300,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(surfaceFile), `build the surface first (build:hook): ${surfaceFile}`).toBe(true);
   rmSync(proofDir, { recursive: true, force: true });
   mkdirSync(proofDir, { recursive: true });
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-surface-')));
+  const root = inboxScratch('plannotator-surface-');
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
   mkdirSync(home);
@@ -366,24 +366,22 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 });
 
 test.afterAll(async () => {
-  if (!world) return;
-  await Promise.all(world.agents.map((a) => a.close().catch(() => {})));
-  await world.context.close();
   try {
-    const registry = JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8')) as { pid: number };
-    process.kill(registry.pid, 'SIGTERM');
-  } catch {
-    // Already gone.
+    if (!world) return;
+    await Promise.all(world.agents.map((a) => a.close().catch(() => {})));
+    await world.context.close();
+    if (!existsSync(proofDir)) return;
+    const names = [...new Set(readdirSync(proofDir).filter((f) => f.endsWith('-light.png')).map((f) => f.replace(/-light\.png$/, '')))].sort();
+    writeFileSync(
+      join(proofDir, 'index.html'),
+      `<!doctype html><meta charset="utf-8"><title>Plannotator surface: proof</title><style>body{font:14px system-ui;margin:24px;background:#e9eaee}h2{font-size:15px;margin:24px 0 8px}.pair{display:flex;gap:16px}.pair img{width:393px;box-shadow:0 0 0 1px #0002;border-radius:18px}</style><h1>The surface in WebKit: every proved state, light and dark, 393 by 852</h1>${names
+        .map((n) => `<section><h2>${n}</h2><div class="pair"><img src="${n}-light.png" alt="${n} light"><img src="${n}-dark.png" alt="${n} dark"></div></section>`)
+        .join('\n')}`,
+    );
+  } finally {
+    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
+    await removeInboxScratch();
   }
-  rmSync(world.root, { recursive: true, force: true });
-  if (!existsSync(proofDir)) return;
-  const names = [...new Set(readdirSync(proofDir).filter((f) => f.endsWith('-light.png')).map((f) => f.replace(/-light\.png$/, '')))].sort();
-  writeFileSync(
-    join(proofDir, 'index.html'),
-    `<!doctype html><meta charset="utf-8"><title>Plannotator surface: proof</title><style>body{font:14px system-ui;margin:24px;background:#e9eaee}h2{font-size:15px;margin:24px 0 8px}.pair{display:flex;gap:16px}.pair img{width:393px;box-shadow:0 0 0 1px #0002;border-radius:18px}</style><h1>The surface in WebKit: every proved state, light and dark, 393 by 852</h1>${names
-      .map((n) => `<section><h2>${n}</h2><div class="pair"><img src="${n}-light.png" alt="${n} light"><img src="${n}-dark.png" alt="${n} dark"></div></section>`)
-      .join('\n')}`,
-  );
 });
 
 test('the surface loads from a file URL and says ready on the bridge', async () => {

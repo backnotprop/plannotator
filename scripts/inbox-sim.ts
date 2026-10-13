@@ -20,6 +20,8 @@ import { mkdirSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { INBOX_WAKES_META_KEY } from '../packages/shared/inbox/connection';
+import { refuseRealDataDir } from '../tests/helpers/real-data-dir';
 
 export interface SimAgentOptions {
   /** The compiled `plannotator` binary. */
@@ -44,6 +46,8 @@ export class SimAgent {
   ) {}
 
   static async connect(options: SimAgentOptions): Promise<SimAgent> {
+    // The shim falls back to the default data dir without one: never let it reach the person's Inbox.
+    refuseRealDataDir(options.env.PLANNOTATOR_DATA_DIR, 'SimAgent.connect');
     const client = new Client({ name: `inbox-sim-${options.host}`, version: '1.0.0' });
     const transport = new StdioClientTransport({
       command: options.binary,
@@ -56,8 +60,8 @@ export class SimAgent {
     return new SimAgent(client, options.name, options.host);
   }
 
-  private async call(name: string, args: Record<string, unknown>): Promise<Structured> {
-    const result = (await this.client.callTool({ name, arguments: args })) as {
+  private async call(name: string, args: Record<string, unknown>, meta?: Record<string, unknown>): Promise<Structured> {
+    const result = (await this.client.callTool({ name, arguments: args, ...(meta ? { _meta: meta } : {}) })) as {
       isError?: boolean;
       content?: { type: string; text?: string }[];
       structuredContent?: Structured;
@@ -75,8 +79,12 @@ export class SimAgent {
     idempotency_key?: string;
     /** Files to attach: absolute, or relative to project_path. */
     attachments?: string[];
-  }): Promise<Structured> {
-    return this.call('send_message', { ...input, agent_name: this.name, agent_host: this.host });
+    /** Earlier questions of the thread this message supersedes: `<message id>` or `<message id>/<key>`. */
+    supersedes?: string[];
+  }, options: { wakes?: boolean } = {}): Promise<Structured> {
+    // `wakes`: send as a connection whose session the person's reply wakes
+    // would (the mod, Pi, OpenCode 2), so the Inbox may call it ended later.
+    return this.call('send_message', { ...input, agent_name: this.name, agent_host: this.host }, options.wakes ? { [INBOX_WAKES_META_KEY]: true } : undefined);
   }
 
   /** get_guide_brief: the method, the guide's shape, the diff steps, the rules and a worked example call. */
@@ -185,6 +193,14 @@ async function main(): Promise<void> {
   const dataDir = resolve(flag('--data-dir') ?? '');
   if (!flag('--data-dir')) {
     process.stderr.write('Usage: bun scripts/inbox-sim.ts --binary <plannotator> --data-dir <scratch data dir>\n');
+    process.exit(2);
+  }
+  // A scratch folder only (inside the OS temp dir or /tmp): the simulated agents
+  // write threads into this Inbox and start it, and a data dir anywhere else may be a real Inbox.
+  try {
+    refuseRealDataDir(flag('--data-dir')!, 'inbox-sim');
+  } catch (error) {
+    process.stderr.write(`${(error as Error).message}\n`);
     process.exit(2);
   }
   mkdirSync(dataDir, { recursive: true });

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -17,6 +18,8 @@ import {
   managedBinaryPath,
   readAutoUpdateState,
   runAutoUpdateCheck,
+  runInstallerForeground,
+  startManualUpdate,
   type AutoUpdateDeps,
   type InstallerLaunch,
 } from "./auto-update";
@@ -280,6 +283,17 @@ describe("remembered install flags", () => {
     expect(parseInstallFlags({ flags: ["with-t3", "without-t3", "skip-skills"] }).flags).toEqual(["skip-skills"]);
   });
 
+  test("skip-claude-plugin is replayed with each installer's spelling", () => {
+    // Recorded by install.sh / install.ps1 / install.cmd for --skip-claude-plugin
+    // (-SkipClaudePlugin), so an auto-update keeps a plugin opt-out. A binary
+    // that predates the id drops it as unrecognized (the test above).
+    const r = parseInstallFlags({ v: 1, flags: ["skip-claude-plugin", "skip-codex", "skip-future-thing"] });
+    expect(r.flags).toEqual(["skip-codex", "skip-claude-plugin"]);
+    expect(r.problem).toContain("dropped 1");
+    expect(installerFlagArgs(["skip-claude-plugin"], "linux")).toEqual(["--skip-claude-plugin"]);
+    expect(installerFlagArgs(["skip-claude-plugin"], "win32")).toEqual(["-SkipClaudePlugin"]);
+  });
+
   test("flags are spelled for each installer", () => {
     const flags = ["minimal", "with-call-flow", "skip-opencode"] as const;
     expect(installerFlagArgs(flags, "linux")).toEqual(["--minimal", "--with-call-flow", "--skip-opencode"]);
@@ -392,4 +406,161 @@ describe.skipIf(process.platform !== "win32" || !Bun.which("powershell.exe"))("W
       server.stop(true);
     }
   }, 60_000);
+});
+
+describe("update checks off", () => {
+  test("auto-update needs the check: off means no request and no install", async () => {
+    expect(await runAutoUpdateCheck(deps({ checksEnabled: () => false }))).toBe("checks-off");
+    expect(fetches).toBe(0);
+    expect(launches).toHaveLength(0);
+  });
+
+  test("auto-update answers from the release the shared check already cached", async () => {
+    writeFileSync(
+      autoUpdatePaths(dataDir).state,
+      JSON.stringify({ latestRelease: { tag: "0.28.0", fetchedAt: NOW - 1000 } }),
+    );
+    expect(await runAutoUpdateCheck(deps())).toBe("launched");
+    expect(fetches).toBe(0);
+  });
+});
+
+describe("Update now (the person asked)", () => {
+  const manual = (overrides: Partial<Parameters<typeof startManualUpdate>[0]> = {}) =>
+    startManualUpdate({
+      currentVersion: "0.27.22",
+      dataDir,
+      now: () => NOW,
+      platform: "linux",
+      isManaged: () => true,
+      launchInstaller: (launch) => {
+        launches.push(launch);
+      },
+      ...overrides,
+    });
+  const seed = () =>
+    writeFileSync(autoUpdatePaths(dataDir).state, JSON.stringify({ latestRelease: { tag: "0.28.0", fetchedAt: NOW - 1000 } }));
+
+  test("runs the installer once: a second press while it runs finds the lock", () => {
+    seed();
+    expect(manual()).toEqual({ outcome: "launched", version: "0.28.0" });
+    expect(manual()).toEqual({ outcome: "locked" });
+    expect(launches).toHaveLength(1);
+    expect(launches[0].version).toBe("v0.28.0");
+    expect(readAutoUpdateState(dataDir).pending).toEqual({ version: "0.28.0", fromVersion: "0.27.22", startedAt: NOW, by: "person" });
+  });
+
+  test("ignores the sessions gate and the 24h window that auto-update keeps", () => {
+    writeFileSync(
+      autoUpdatePaths(dataDir).state,
+      JSON.stringify({ lastCheckAt: NOW - 10, latestRelease: { tag: "0.28.0", fetchedAt: NOW - 1000 } }),
+    );
+    expect(manual().outcome).toBe("launched");
+  });
+
+  test("only the known newer release, never a dev build or an unmanaged binary", () => {
+    expect(manual().outcome).toBe("no-release");
+    seed();
+    expect(manual({ currentVersion: "0.28.0" }).outcome).toBe("up-to-date");
+    expect(manual({ currentVersion: undefined }).outcome).toBe("dev-build");
+    expect(manual({ isManaged: () => false }).outcome).toBe("unmanaged");
+    expect(launches).toHaveLength(0);
+  });
+
+  test("a launch that throws releases the lock and records the failure", () => {
+    seed();
+    expect(
+      manual({
+        launchInstaller: () => {
+          throw new Error("spawn EACCES");
+        },
+      }).outcome,
+    ).toBe("launch-failed");
+    expect(existsSync(autoUpdatePaths(dataDir).lock)).toBe(false);
+    expect(JSON.parse(readFileSync(autoUpdatePaths(dataDir).result, "utf-8")).exitCode).toBe(-1);
+    expect(manual().outcome).toBe("launched");
+  });
+});
+
+describe("a failed fetch gives the install window back", () => {
+  test("no release: lastCheckAt is restored, so the next start retries once the 6h backoff allows", async () => {
+    const d = deps({ fetchLatestTag: async () => (fetches++, null) });
+    expect(await runAutoUpdateCheck(d)).toBe("no-release");
+    expect(readAutoUpdateState(dataDir).lastCheckAt).toBeUndefined();
+    // Inside the release check's 6h backoff: no second request yet.
+    expect(await runAutoUpdateCheck(deps({ now: () => NOW + 60_000, fetchLatestTag: async () => (fetches++, "v0.28.0") }))).toBe("no-release");
+    expect(fetches).toBe(1);
+    // After it: the install window was not spent, so it asks and installs.
+    expect(await runAutoUpdateCheck(deps({ now: () => NOW + 6 * 60 * 60 * 1000 }))).toBe("launched");
+    expect(fetches).toBe(2);
+  });
+});
+
+describe.skipIf(process.platform === "win32" || !Bun.which("curl"))("interrupted installs release the lock", () => {
+  function fakeServer(body: string) {
+    return Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response(body) });
+  }
+
+  test("a group SIGINT (Ctrl-C) to the wrapper records 130 and removes update.lock", async () => {
+    const server = fakeServer('echo "fake installer started"\nsleep 30\n');
+    const paths = autoUpdatePaths(dataDir);
+    writeFileSync(paths.lock, "1");
+    try {
+      const { file, args } = installerCommand("linux", []);
+      const child = spawn(file, args, {
+        detached: true,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          PATH: process.env.PATH ?? "/usr/bin:/bin",
+          TMPDIR: dataDir,
+          PLANNOTATOR_UPDATE_VERSION: "v0.28.0",
+          PLANNOTATOR_UPDATE_RESULT: paths.result,
+          PLANNOTATOR_UPDATE_LOCK: paths.lock,
+          PLANNOTATOR_UPDATE_SCRIPT_URL: `http://127.0.0.1:${server.port}/install.sh`,
+        },
+      });
+      let out = "";
+      child.stdout!.on("data", (c) => (out += c));
+      const exited = new Promise<number | null>((r) => child.on("close", (code) => r(code)));
+      const deadline = Date.now() + 20_000;
+      while (!out.includes("fake installer started") && Date.now() < deadline) await Bun.sleep(20);
+      process.kill(-child.pid!, "SIGINT");
+      expect(await exited).toBe(130);
+      expect(existsSync(paths.lock)).toBe(false);
+      expect(JSON.parse(readFileSync(paths.result, "utf-8"))).toEqual({ version: "v0.28.0", exitCode: 130 });
+    } finally {
+      server.stop(true);
+    }
+  }, 30_000);
+
+  test("a wrapper killed outright (no trap runs) still ends with the lock released and a failed result", async () => {
+    const server = fakeServer('echo "fake installer started"\nsleep 3\n');
+    const saved = process.env.PLANNOTATOR_INSTALL_SCRIPT_URL;
+    process.env.PLANNOTATOR_INSTALL_SCRIPT_URL = `http://127.0.0.1:${server.port}/install.sh`;
+    const paths = autoUpdatePaths(dataDir);
+    writeFileSync(paths.lock, "1");
+    try {
+      let out = "";
+      const code = await runInstallerForeground(
+        { version: "v0.28.0", logPath: paths.log, resultPath: paths.result, lockPath: paths.lock, platform: "linux", flags: [] },
+        (chunk) => (out += chunk),
+        {
+          onSpawn: (child) => {
+            void (async () => {
+              const deadline = Date.now() + 20_000;
+              while (!out.includes("fake installer started") && Date.now() < deadline) await Bun.sleep(20);
+              child.kill("SIGKILL");
+            })();
+          },
+        },
+      );
+      expect(code).toBe(-1);
+      expect(existsSync(paths.lock)).toBe(false);
+      expect(JSON.parse(readFileSync(paths.result, "utf-8")).exitCode).toBe(-1);
+    } finally {
+      if (saved === undefined) delete process.env.PLANNOTATOR_INSTALL_SCRIPT_URL;
+      else process.env.PLANNOTATOR_INSTALL_SCRIPT_URL = saved;
+      server.stop(true);
+    }
+  }, 30_000);
 });

@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -250,34 +251,74 @@ function isPlannotatorAction(value: unknown): value is PlannotatorAction {
 	);
 }
 
-const REVIEW_STATUS_PATH = join(homedir(), ".pi", "plannotator-review-status.json");
+function defaultReviewStatusPath(): string {
+	return join(homedir(), ".pi", "plannotator-review-status.json");
+}
 
 type StoredReviewStatus = Record<string, PlannotatorReviewStatusResult>;
 
-function readStoredReviewStatuses(): StoredReviewStatus {
+type StoredReviewStatusRead =
+	| { ok: true; statuses: StoredReviewStatus }
+	/** The file exists but cannot be read or parsed (torn, hand-edited). */
+	| { ok: false; error: string };
+
+function readStoredReviewStatuses(path: string): StoredReviewStatusRead {
+	let raw: string;
 	try {
-		if (!existsSync(REVIEW_STATUS_PATH)) return {};
-		const raw = readFileSync(REVIEW_STATUS_PATH, "utf-8");
-		const parsed = JSON.parse(raw) as StoredReviewStatus;
-		return parsed && typeof parsed === "object" ? parsed : {};
-	} catch {
-		return {};
+		raw = readFileSync(path, "utf-8");
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code === "ENOENT") return { ok: true, statuses: {} };
+		return { ok: false, error: describeError(err) };
+	}
+	try {
+		const parsed = JSON.parse(raw) as unknown;
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+			return { ok: false, error: "not a JSON object" };
+		}
+		return { ok: true, statuses: parsed as StoredReviewStatus };
+	} catch (err) {
+		return { ok: false, error: describeError(err) };
 	}
 }
 
-function writeStoredReviewStatuses(statuses: StoredReviewStatus): void {
-	mkdirSync(dirname(REVIEW_STATUS_PATH), { recursive: true });
-	writeFileSync(REVIEW_STATUS_PATH, JSON.stringify(statuses, null, 2));
+/**
+ * Replace the status file atomically: a same-directory temp file, then a
+ * rename, so a reader (or a crash mid-write) never sees a torn file. The temp
+ * file is removed when either step fails. Exported for tests.
+ */
+export function writeReviewStatusesAtomically(path: string, statuses: StoredReviewStatus): void {
+	mkdirSync(dirname(path), { recursive: true });
+	const temp = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+	try {
+		writeFileSync(temp, JSON.stringify(statuses, null, 2));
+		renameSync(temp, path);
+	} catch (err) {
+		rmSync(temp, { force: true });
+		throw err;
+	}
 }
 
-function setStoredReviewStatus(reviewId: string, status: PlannotatorReviewStatusResult): void {
-	const statuses = readStoredReviewStatuses();
-	statuses[reviewId] = status;
-	writeStoredReviewStatuses(statuses);
+function setStoredReviewStatus(path: string, reviewId: string, status: PlannotatorReviewStatusResult): void {
+	const read = readStoredReviewStatuses(path);
+	if (!read.ok) {
+		// Never start over from {}: that would wipe every other review's
+		// recovery data. Leave the file for a person to look at.
+		console.error(
+			`Plannotator: ${path} could not be read (${read.error}); left it as it is and did not record review ${reviewId}.`,
+		);
+		return;
+	}
+	read.statuses[reviewId] = status;
+	writeReviewStatusesAtomically(path, read.statuses);
 }
 
-function getStoredReviewStatus(reviewId: string): PlannotatorReviewStatusResult {
-	return readStoredReviewStatuses()[reviewId] ?? { status: "missing" };
+function getStoredReviewStatus(path: string, reviewId: string): PlannotatorReviewStatusResult {
+	const read = readStoredReviewStatuses(path);
+	return (read.ok ? read.statuses[reviewId] : undefined) ?? { status: "missing" };
+}
+
+function describeError(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
 }
 
 function createActiveSessionContext() {
@@ -301,6 +342,10 @@ export interface PlannotatorEventListenerOptions {
 		mode: NonNullable<PlannotatorPlanModePayload["mode"]>,
 		ctx: ExtensionContext,
 	) => Promise<PlannotatorPlanModeResult> | PlannotatorPlanModeResult;
+	/** Test seam: where `review-status` is kept (default `~/.pi/plannotator-review-status.json`). */
+	reviewStatusPath?: string;
+	/** Test seam: starts the `plan-review` browser session (default: the real plan server). */
+	startPlanReviewSession?: typeof startPlanReviewBrowserSession;
 }
 
 export function registerPlannotatorEventListeners(
@@ -308,11 +353,52 @@ export function registerPlannotatorEventListeners(
 	options: PlannotatorEventListenerOptions = {},
 ): void {
 	const activeSessionContext = createActiveSessionContext();
+	const reviewStatusPath = options.reviewStatusPath ?? defaultReviewStatusPath();
+	const startPlanReview = options.startPlanReviewSession ?? startPlanReviewBrowserSession;
+	/**
+	 * Cleared when this extension instance's session ends. Pi builds a new
+	 * instance (with its own listeners) for the replacement session, and this
+	 * instance's `pi` and `ctx` go stale: every use throws. Event-API reviews
+	 * deliberately outlive it: a decision made in a tab left open across
+	 * /reload is still recorded, and the replacement asks `review-status`.
+	 */
+	let sessionLive = true;
+
+	// Results go to whoever asked, through Pi's event bus or the request's own
+	// callback. Both run code another extension instance owns, which throws
+	// once that instance was replaced (/reload, a session switch: Pi's
+	// stale-ctx guard). Nothing here may let that escape: these run from HTTP
+	// handlers and timers, where an uncaught throw ends the Pi process (#1864).
+	const emitReviewResult = (result: PlannotatorReviewResultEvent): void => {
+		try {
+			pi.events.emit(PLANNOTATOR_REVIEW_RESULT_CHANNEL, result);
+		} catch (err) {
+			console.error(`Plannotator: could not emit the review result for ${result.reviewId}: ${describeError(err)}`);
+		}
+	};
+	const respond = (request: { respond: (response: never) => void }, response: unknown): void => {
+		try {
+			request.respond(response as never);
+		} catch (err) {
+			console.error(`Plannotator: could not answer a ${PLANNOTATOR_REQUEST_CHANNEL} request: ${describeError(err)}`);
+		}
+	};
+	const storeReviewStatus = (reviewId: string, status: PlannotatorReviewStatusResult): void => {
+		try {
+			setStoredReviewStatus(reviewStatusPath, reviewId, status);
+		} catch (err) {
+			console.error(`Plannotator: could not record the status of review ${reviewId}: ${describeError(err)}`);
+		}
+	};
 
 	// Plannotator event requests are handled against the latest active session.
 	// The active context is intentionally session-scoped and replaced on each session_start.
 	pi.on("session_start", async (_event, ctx) => {
+		sessionLive = true;
 		activeSessionContext.set(ctx);
+	});
+	pi.on("session_shutdown", () => {
+		sessionLive = false;
 	});
 	pi.events.on(PLANNOTATOR_REQUEST_CHANNEL, async (data) => {
 		const request = data as Partial<PlannotatorRequest> | null;
@@ -321,46 +407,47 @@ export function registerPlannotatorEventListeners(
 		if (!request || typeof request.respond !== "function" || !isPlannotatorAction(request.action)) {
 			return;
 		}
+		const answer = (response: unknown) => respond(request as { respond: (response: never) => void }, response);
 
 		try {
 			if (request.action === "review-status") {
 				const reviewId = request.payload?.reviewId;
 				if (typeof reviewId !== "string" || !reviewId.trim()) {
-					request.respond({ status: "error", error: "Missing reviewId for review-status request." });
+					answer({ status: "error", error: "Missing reviewId for review-status request." });
 					return;
 				}
-				request.respond({ status: "handled", result: getStoredReviewStatus(reviewId) });
+				answer({ status: "handled", result: getStoredReviewStatus(reviewStatusPath, reviewId) });
 				return;
 			}
 
 			if (!ctx) {
-				request.respond({ status: "unavailable", error: "Plannotator context is not ready yet." });
+				answer({ status: "unavailable", error: "Plannotator context is not ready yet." });
 				return;
 			}
 
 			switch (request.action) {
 				case "plan-mode": {
 					if (!options.handlePlanMode) {
-						request.respond({ status: "unavailable", error: "Plan mode control is not available in this session." });
+						answer({ status: "unavailable", error: "Plan mode control is not available in this session." });
 						return;
 					}
 					const mode = request.payload?.mode ?? "toggle";
 					if (mode !== "enter" && mode !== "exit" && mode !== "toggle" && mode !== "status") {
-						request.respond({ status: "error", error: "Invalid plan-mode payload.mode." });
+						answer({ status: "error", error: "Invalid plan-mode payload.mode." });
 						return;
 					}
 					const result = await options.handlePlanMode(mode, ctx);
-					request.respond({ status: "handled", result });
+					answer({ status: "handled", result });
 					return;
 				}
 				case "plan-review": {
 					const planContent = request.payload?.planContent;
 					if (typeof planContent !== "string" || !planContent.trim()) {
-						request.respond({ status: "error", error: "Missing planContent for plan-review request." });
+						answer({ status: "error", error: "Missing planContent for plan-review request." });
 						return;
 					}
-					const session = await startPlanReviewBrowserSession(ctx, planContent);
-					setStoredReviewStatus(session.reviewId, { status: "pending" });
+					const session = await startPlanReview(ctx, planContent);
+					storeReviewStatus(session.reviewId, { status: "pending" });
 					session.onDecision((result) => {
 						const reviewResult = {
 							reviewId: session.reviewId,
@@ -371,10 +458,13 @@ export function registerPlannotatorEventListeners(
 							permissionMode: result.permissionMode,
 							...(result.answersOnly ? { answersOnly: true } : {}),
 						} satisfies PlannotatorReviewResultEvent;
-						setStoredReviewStatus(session.reviewId, { status: "completed", ...reviewResult });
-						pi.events.emit(PLANNOTATOR_REVIEW_RESULT_CHANNEL, reviewResult);
+						// Recorded first, so `review-status` reports it whatever happens next.
+						storeReviewStatus(session.reviewId, { status: "completed", ...reviewResult });
+						// A replaced session's bus is gone; its replacement asks `review-status`.
+						if (!sessionLive) return;
+						emitReviewResult(reviewResult);
 					});
-					request.respond({
+					answer({
 						status: "handled",
 						result: {
 							status: "pending",
@@ -393,13 +483,13 @@ export function registerPlannotatorEventListeners(
 						prUrl: request.payload?.prUrl,
 						patchFile: request.payload?.patchFile,
 					});
-					request.respond({ status: "handled", result });
+					answer({ status: "handled", result });
 					return;
 				}
 				case "annotate": {
 					const payload = request.payload;
 					if (!payload?.filePath) {
-						request.respond({ status: "error", error: "Missing filePath for annotate request." });
+						answer({ status: "error", error: "Missing filePath for annotate request." });
 						return;
 					}
 					const sourceConverted = /\.html?$/i.test(payload.filePath) || /^https?:\/\//i.test(payload.filePath);
@@ -413,7 +503,7 @@ export function registerPlannotatorEventListeners(
 						sourceConverted,
 						payload.gate,
 					);
-					request.respond({ status: "handled", result });
+					answer({ status: "handled", result });
 					return;
 				}
 				case "annotate-last": {
@@ -421,28 +511,28 @@ export function registerPlannotatorEventListeners(
 					const usePayloadText = !!payload?.markdown?.trim();
 					const lastText = usePayloadText ? payload!.markdown! : getLastAssistantMessageText(ctx);
 					if (!lastText) {
-						request.respond({ status: "unavailable", error: "No assistant message found in session." });
+						answer({ status: "unavailable", error: "No assistant message found in session." });
 						return;
 					}
 					const recent = usePayloadText ? [] : getRecentAssistantMessages(ctx, 25);
 					const pickerMessages = recent.length > 1 ? recent : undefined;
 					const result = await openLastMessageAnnotation(ctx, lastText, payload?.gate, pickerMessages);
-					request.respond({ status: "handled", result });
+					answer({ status: "handled", result });
 					return;
 				}
 				case "archive": {
 					const result = await openArchiveBrowserAction(ctx, request.payload?.customPlanPath);
-					request.respond({ status: "handled", result });
+					answer({ status: "handled", result });
 					return;
 				}
 			}
 		} catch (err) {
 			const message = getStartupErrorMessage(err);
 			if (/unavailable|not available/i.test(message)) {
-				request.respond({ status: "unavailable", error: message });
+				answer({ status: "unavailable", error: message });
 				return;
 			}
-			request.respond({ status: "error", error: message });
+			answer({ status: "error", error: message });
 		}
 	});
 }

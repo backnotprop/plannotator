@@ -16,7 +16,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { GuideSection } from '@plannotator/core/guide';
 import { GuideHostProvider, GuideSectionCard, GuideViewportProvider, renderInlineMarkdown, resolveGuideSectionFiles, type DiffFile } from '@plannotator/guide-viewer';
 import { parseDiffToFiles } from '@plannotator/guide-viewer/diffParser';
-import { ReadOnlyDiff } from './GuideReader';
+import { GuideDiff } from './GuideReader';
 import type { SurfaceGuideReaderProps } from './types';
 import type ReaderShape from './surface-reader-module';
 
@@ -73,7 +73,7 @@ export default function SurfaceGuideReader({ snapshot, reviewed, onReviewedChang
   const ticks = useMemo(() => guide.sections.map((_, i) => reviewed[i] ?? guide.reviewed[i] ?? false), [guide.sections, guide.reviewed, reviewed]);
   const toggle = useCallback((index: number) => onReviewedChange(ticks.map((v, i) => (i === index ? !v : v))), [ticks, onReviewedChange]);
   const go = useCallback((next: number | null) => onSection(next, pages.length), [onSection, pages.length]);
-  const host = useMemo(() => ({ files, DiffRenderer: ReadOnlyDiff, getDiffRendererProps: phoneRendererProps }), [files]);
+  const host = useMemo(() => ({ files, DiffRenderer: GuideDiff, getDiffRendererProps: phoneRendererProps }), [files]);
   const [focusedFile, setFocusedFile] = useState<string | null>(null);
 
   const page = section === null ? null : pages[section] ?? null;

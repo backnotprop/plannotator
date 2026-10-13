@@ -29,7 +29,7 @@ Recommended: Local only, purged after 30 days
 ```
 
 - `:::question` asks for one choice. `:::question-multi` accepts any number of choices. `:::question-text` asks for free text.
-- The first line is the question. Other lines before the choices are context.
+- The first line is the question. Other lines before the choices are context. Agents are told never to send a bare question: a sentence or three on what the choice affects, what they know, and why they recommend what they do.
 - `Recommended:` names the agent's recommendation. If it does not match a choice, Plannotator shows it as a suggested answer.
 - `- [x]` marks a choice as already settled. Agents use it when they resubmit a plan with a question you already answered.
 

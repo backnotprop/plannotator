@@ -20,9 +20,31 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InboxAuthor, InboxSectionId } from '@plannotator/core/inbox-types';
 import { inboxApi, type InboxEvent, type ListModel, type NotificationSettings } from './api';
 import { agentName, plural } from './format';
+import { pageInFront } from './sound';
 
 /** The one tag every Inbox notification carries: a new one replaces the last. */
 export const NOTIFICATION_TAG = 'plannotator-inbox';
+
+/**
+ * `renotify` is in the Notifications API but not in TypeScript's DOM lib
+ * (5.8), so the options type is widened here rather than cast.
+ */
+export interface InboxNotificationOptions extends NotificationOptions {
+  renotify?: boolean;
+}
+
+/**
+ * The options every Inbox notification is raised with. One tag keeps one
+ * notice at a time; `renotify` makes the replacement alert again. Without it
+ * Chrome swaps the content of a notice that still carries the tag (one macOS
+ * never displayed, say) with no banner and no sound, so a new question would
+ * arrive silently.
+ */
+export function inboxNotificationOptions(text: { body: string }, options: { silent?: boolean } = {}): InboxNotificationOptions {
+  const base: InboxNotificationOptions = { body: text.body, tag: NOTIFICATION_TAG, renotify: true };
+  // The Inbox's own sound is on (sound.ts): the system's chime (Windows, Linux) would make it two.
+  return options.silent ? { ...base, silent: true } : base;
+}
 
 /** One thread's banner (record 6.2): "billing-svc: Claude Code stopped on you", then the subject. */
 export function threadNotificationText(input: { project: string; agent: string; subject: string; section: InboxSectionId | null }): {
@@ -50,12 +72,23 @@ export type AskKind = 'ask' | 'moved';
  */
 export function askKind(settings: NotificationSettings, permission: NotificationPermission, origin: string): AskKind | null {
   if (permission !== 'default' || !settings.enabled || settings.dismissed) return null;
-  return settings.allowed_origin && settings.allowed_origin !== origin ? 'moved' : 'ask';
+  return settings.allowed_origin && settings.allowed_origin !== origin && sameHost(settings.allowed_origin, origin) ? 'moved' : 'ask';
 }
 
-/** The Inbox tab is in front (record 6.3). */
-function pageInFront(): boolean {
-  return document.visibilityState === 'visible' && document.hasFocus();
+/**
+ * "Moved" is the Inbox's port changing under the same name. Another name
+ * (the tailnet address on another device, or localhost after the tailnet)
+ * is another place the Inbox is open, with its own permission: the plain ask.
+ */
+function sameHost(a: string, b: string): boolean {
+  const loopback = (host: string) => host === 'localhost' || host === '[::1]' || /^127\./.test(host);
+  try {
+    const left = new URL(a).hostname;
+    const right = new URL(b).hostname;
+    return left === right || (loopback(left) && loopback(right));
+  } catch {
+    return false;
+  }
 }
 
 function supported(): boolean {
@@ -85,6 +118,10 @@ export function useInboxNotifications(options: {
   onSettings: (next: NotificationSettings) => void;
   openThread: (threadId: string) => void;
   openList: () => void;
+  /** New questions arrived (before any notification rule): the sound decides for itself (sound.ts). */
+  onQuestions?: () => void;
+  /** The Inbox's own sound is on: notifications are raised silent, so there is one sound on every OS. */
+  silent?: () => boolean;
 }): InboxNotifications {
   const [permission, setPermission] = useState(currentPermission);
   const [askRaised, setAskRaised] = useState(false);
@@ -94,6 +131,8 @@ export function useInboxNotifications(options: {
   openRef.current = { thread: options.openThread, list: options.openList };
   const onSettingsRef = useRef(options.onSettings);
   onSettingsRef.current = options.onSettings;
+  const soundRef = useRef({ questions: options.onQuestions, silent: options.silent });
+  soundRef.current = { questions: options.onQuestions, silent: options.silent };
   const messages = useRef(new Map<string, { threadId: string; author: InboxAuthor }>());
   const counted = useRef(new Set<string>());
   /** Message ids with a new question, waiting for the list read. */
@@ -156,8 +195,7 @@ export function useInboxNotifications(options: {
   const flush = useCallback((list: ListModel) => {
     const items = pending.current;
     pending.current = [];
-    const settings = settingsRef.current;
-    if (items.length === 0 || !settings || !settings.enabled || !supported()) return;
+    if (items.length === 0) return;
     // The threads these items landed in, newest last, with the agent that wrote.
     const threads = new Map<string, InboxAuthor>();
     for (const messageId of items) {
@@ -165,6 +203,10 @@ export function useInboxNotifications(options: {
       if (message) threads.set(message.threadId, message.author);
     }
     if (threads.size === 0) return;
+    // The sound does not depend on notifications: off, not allowed or blocked, it still rings.
+    soundRef.current.questions?.();
+    const settings = settingsRef.current;
+    if (!settings || !settings.enabled || !supported()) return;
     const now = Notification.permission;
     setPermission(now);
     if (now === 'default') {
@@ -191,7 +233,7 @@ export function useInboxNotifications(options: {
       open = () => openRef.current.list();
     }
     try {
-      const notification = new Notification(text.title, { body: text.body, tag: NOTIFICATION_TAG });
+      const notification = new Notification(text.title, inboxNotificationOptions(text, { silent: soundRef.current.silent?.() === true }));
       notification.onclick = () => {
         window.focus();
         notification.close();

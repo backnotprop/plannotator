@@ -72,9 +72,11 @@ Diagrams
 Code fences with \`mermaid\` or \`graphviz\` render as live diagrams. Useful for flow, state, sequence, or architecture sketches.
 
 Questions for the reviewer
-When a decision needs the reviewer, ask it as a question block. They answer in place, and the answers come back at the top of their feedback. Ask only what you cannot decide alone, about 8 at most per round. \`:::question-multi\` picks any number, \`:::question-text\` asks for free text. \`- [x]\` marks a choice as settled: use it when you resubmit with an answered question.
+When a decision needs the reviewer, ask it as a question block. They answer in place, and the answers come back at the top of their feedback. Never send a bare question: give one to three plain sentences on what it affects and why you recommend what you do, and a screenshot (\`![alt](path)\`) if it is visual. Ask only what you cannot decide alone, about 8 at most per round. \`:::question-multi\` picks any number, \`:::question-text\` asks for free text. \`- [x]\` marks a choice as settled: use it when you resubmit with an answered question.
   :::question
   Which cache backend?
+
+  Two app servers will run soon, and an in-memory cache would give each its own copy. Redis keeps one shared copy.
 
   - [ ] Redis — shared across instances
   - [ ] In-memory — simplest, lost on restart

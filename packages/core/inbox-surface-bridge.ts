@@ -10,8 +10,9 @@
  * never cross the bridge.
  *
  * - Shell to surface: `window.plannotatorSurface.receive(message)`.
- * - Surface to shell: `window.webkit.messageHandlers.plannotatorSurface.postMessage(message)`.
- *   The shell takes messages from the main frame only, so an agent's HTML,
+ * - Surface to shell: `window.webkit.messageHandlers.plannotatorSurface.postMessage(message)`
+ *   on iOS; on Android (no `window.webkit`), `window.plannotatorShell.postMessage(JSON.stringify(message))`
+ *   (section 10). The shell takes messages from the main frame only, so an agent's HTML,
  *   drawn in its sandboxed frame, cannot reach the bridge.
  *
  * Every message is `{ v: 1, type, ... }`. A surface given another `v`

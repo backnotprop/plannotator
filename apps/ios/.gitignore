@@ -1,6 +1,0 @@
-# Swift and Xcode leftovers
-.build/
-.swiftpm/
-xcuserdata/
-*.xcuserstate
-DerivedData/

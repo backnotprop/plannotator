@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./index.ts",
+    "./harnesses": "./harnesses.ts",
     "./inbox.css": "./inbox.css"
   },
   "imports": {
@@ -12,10 +13,12 @@
     "#surface-guide-reader": "./guide/SurfaceGuideReader.tsx"
   },
   "dependencies": {
+    "@base-ui/react": "^1.7.0",
     "@plannotator/core": "workspace:*",
     "@plannotator/guide-viewer": "workspace:*",
     "@plannotator/review-editor": "workspace:*",
     "@plannotator/ui": "workspace:*",
+    "motion": "^12.38.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "uqr": "^0.1.3"

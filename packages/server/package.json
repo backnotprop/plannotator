@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/server",
-  "version": "0.28.8",
+  "version": "0.28.17",
   "private": true,
   "description": "Shared server implementation for Plannotator plugins",
   "main": "index.ts",
@@ -32,7 +32,10 @@
     "./guide-cli": "./guide/guide-cli.ts",
     "./live-proxy": "./live-proxy.ts",
     "./inbox": "./inbox.ts",
-    "./inbox-mcp": "./inbox-mcp.ts"
+    "./inbox-tailscale": "./inbox-tailscale.ts",
+    "./inbox-mcp": "./inbox-mcp.ts",
+    "./inbox-agents": "./inbox-agents.ts",
+    "./inbox-agent-notes": "./inbox-agent-notes.ts"
   },
   "files": [
     "*.ts",

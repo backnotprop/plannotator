@@ -32,6 +32,8 @@ interface AITabProps {
   hasAISession?: boolean;
   /** "Ask this session": the reviewer's choice on a busy answer. */
   onSessionAskAction?: (questionId: string, action: SessionAskAction) => void;
+  /** Optional note on how to get "Ask this session" (askSessionSetupHint). */
+  askSessionSetupHint?: string | null;
 }
 
 interface FileGroup {
@@ -61,6 +63,7 @@ export const AITab: React.FC<AITabProps> = ({
   onAIConfigChange,
   hasAISession = false,
   onSessionAskAction,
+  askSessionSetupHint,
 }) => {
   const hasT3Session = aiProviders.some(provider => provider.sessionBridge?.host === 't3');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -183,6 +186,7 @@ export const AITab: React.FC<AITabProps> = ({
           selectedReasoningEffort={aiConfig?.reasoningEffort ?? null}
           onReasoningEffortChange={(effort) => onAIConfigChange?.({ reasoningEffort: effort })}
           hasSession={hasAISession}
+          setupHint={askSessionSetupHint}
         />
         {onAskGeneral && <GeneralInput value={generalInput} onChange={setGeneralInput} onSubmit={handleGeneralSubmit} disabled={isStreaming} isStreaming={isStreaming} onStop={onStop} observationOnly={hasT3Session} />}
       </div>
@@ -281,6 +285,7 @@ export const AITab: React.FC<AITabProps> = ({
         selectedReasoningEffort={aiConfig?.reasoningEffort ?? null}
         onReasoningEffortChange={(effort) => onAIConfigChange?.({ reasoningEffort: effort })}
         hasSession={hasAISession}
+        setupHint={askSessionSetupHint}
       />
 
       {/* General question input */}

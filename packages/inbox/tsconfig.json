@@ -27,5 +27,6 @@
     }
   },
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["node_modules", "dist", "guide/GuideReader.tsx", "guide/SurfaceGuideReader.tsx"]
+  // guideFeedback.test.ts compares the window's export with review-editor's, which does not compile under these settings.
+  "exclude": ["node_modules", "dist", "guide/GuideReader.tsx", "guide/SurfaceGuideReader.tsx", "guideFeedback.test.ts"]
 }

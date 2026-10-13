@@ -51,6 +51,7 @@
       "dependencies": {
         "@plannotator/core": "workspace:*",
         "@plannotator/editor": "workspace:*",
+        "@plannotator/inbox": "workspace:*",
         "@plannotator/server": "workspace:*",
         "@plannotator/shared": "workspace:*",
         "@plannotator/ui": "workspace:*",
@@ -113,7 +114,7 @@
     },
     "apps/opencode-plugin": {
       "name": "@plannotator/opencode",
-      "version": "0.28.8",
+      "version": "0.28.17",
       "devDependencies": {
         "@opencode-ai/plugin": "1.18.32",
         "@opencode/plugin": "2.0.14",
@@ -132,7 +133,7 @@
     },
     "apps/pi-extension": {
       "name": "@plannotator/pi-extension",
-      "version": "0.28.8",
+      "version": "0.28.17",
       "dependencies": {
         "@joplin/turndown-plugin-gfm": "^1.0.64",
         "@pierre/diffs": "1.3.6",
@@ -293,10 +294,12 @@
       "name": "@plannotator/inbox",
       "version": "0.0.1",
       "dependencies": {
+        "@base-ui/react": "^1.7.0",
         "@plannotator/core": "workspace:*",
         "@plannotator/guide-viewer": "workspace:*",
         "@plannotator/review-editor": "workspace:*",
         "@plannotator/ui": "workspace:*",
+        "motion": "^12.38.0",
         "react": "^19.2.8",
         "react-dom": "^19.2.8",
         "uqr": "^0.1.3",
@@ -333,7 +336,7 @@
     },
     "packages/server": {
       "name": "@plannotator/server",
-      "version": "0.28.8",
+      "version": "0.28.17",
       "dependencies": {
         "@modelcontextprotocol/server": "2.2.0",
         "@pierre/diffs": "1.3.6",

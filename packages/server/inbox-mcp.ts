@@ -2,7 +2,8 @@
  * Plannotator Inbox: the MCP tools, served statelessly on the Inbox's `/mcp`
  * (packages/server/inbox.ts) and reached by agents through the stdio shim
  * `plannotator inbox mcp`, which fills `project_path` from its working folder
- * and `agent_session` with its own `ses_` id.
+ * and `agent_session` with the agent host session it runs inside, else its own
+ * `ses_` id.
  *
  * The tool list is fixed. Success is `structuredContent` plus one line of
  * text (the reply's text in full for wait_for_reply); a refusal is `isError`
@@ -10,7 +11,8 @@
  * question, approves or sends on the person's behalf.
  */
 
-import { isAbsolute } from "node:path";
+import { realpathSync } from "node:fs";
+import { isAbsolute, sep } from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
@@ -30,17 +32,18 @@ export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "resolve_message"
 
 /** Under Claude Code's 2,048-character cap on server instructions. */
 export const INBOX_MCP_INSTRUCTIONS = [
-  "Plannotator Inbox: send the person a message and get their answer without holding your session on a review tab. The Inbox runs on this machine; the person reads your message there and answers when they can.",
+  "Plannotator Inbox: a local window on this machine where the person reads what you send and answers when they can, without holding your session open.",
   "",
-  "- send_message posts markdown to the person. Your messages land in one thread, your session's, until the person resolves it; pass `thread` (a short name) to keep separate work in its own thread, or to join another session's thread of that name; reply_to answers one message. Ask what you cannot decide alone as question blocks (:::question, :::question-multi, :::question-text); send_message's description has the syntax. Pass an idempotency_key so a retry never posts twice.",
-  "- After sending, either go on with other work or call wait_for_reply with the thread_id. It returns the person's reply as soon as it lands, or { status: \"waiting\", cursor } after about 50 seconds; call it again with that cursor to keep waiting.",
-  "- To show the person files (a plan, an HTML prototype, a diagram), pass them in send_message's attachments, e.g. [\"docs/plan.md\"]. They open and annotate them in the Inbox; their annotations come back in the reply after the answers.",
-  "- read_thread reads one thread (thread_id) or lists the threads you sent in, in this project.",
-  "- resolve_message closes a thread once you have what you needed.",
-  "- list_decisions reads what holds in this project: decisions the person recorded from answers, or agents recorded. record_decision records one you settled with the person. Add `Decision: when answered` to a question block to have its answer recorded.",
-  "- To walk the person through a code change, call get_guide_brief, write the guide, then submit_guide with the guide and the exact patch: it opens in Plannotator's guide viewer.",
+  "Use it when the person may not be watching this chat: a decision only they can make (ask it as a :::question block, then go on with other work), finished long work to hand over (a short summary, the files to look at in `attachments`), or when they ask you to. Ask in the chat instead when they are there; do not send routine progress.",
   "",
-  "The reply is the person's answer to you, framed as theirs: their words, then an \"Answers to your questions\" section. There is no tool to answer or approve on the person's behalf.",
+  "- send_message posts markdown. Your messages join your session's thread until the person resolves it; pass `thread` (a short name) to keep separate work apart, or reply_to to answer a message. Pass an idempotency_key so a retry never posts twice. The question syntax is in send_message's description.",
+  "- attachments: paths of files to show the person (a plan, a screenshot, an HTML mock, any file), absolute or relative to project_path. Link one from the body (`[the mock](mock.html)`) to open it beside the thread. The person's annotations come back in their reply.",
+  "- wait_for_reply (thread_id) returns the reply as soon as it lands, or { status: \"waiting\", cursor } after about 50 seconds: call it again with that cursor. Call it when you need the answer, after the work that does not depend on it.",
+  "- read_thread reads one thread (thread_id) or lists yours. When an open question of yours no longer fits, send with reply_to into its thread with `supersedes` instead of leaving it open. resolve_message archives the thread for the person; use it only when nothing in it is left for them to read or answer.",
+  "- list_decisions reads what holds in this project; record_decision records one you settled with the person. `Decision: when answered` in a question block records its answer.",
+  "- To walk the person through a code change: get_guide_brief, write the guide, then submit_guide with the exact patch.",
+  "",
+  "The reply is the person's answer, framed as theirs: their words, then \"Answers to your questions\". No tool answers or approves on the person's behalf.",
 ].join("\n");
 
 /**
@@ -50,10 +53,17 @@ export const INBOX_MCP_INSTRUCTIONS = [
  * own description, and the guide's rules on WHAT to ask still reach the model.
  */
 export const SEND_MESSAGE_DESCRIPTION = [
-  "Message the person in the Plannotator Inbox (markdown), in your session's open thread (see `thread`). The answer comes back via wait_for_reply.",
+  "Message the person in the Plannotator Inbox (markdown), in your session's open thread (see `thread`). One message per real need.",
   "",
   QUESTION_AUTHORING_GUIDE,
 ].join("\n");
+
+/**
+ * `supersedes`, as an agent reads it (a field description reaches the model
+ * whole; send_message's own description is cut at 2,048 characters).
+ */
+export const SUPERSEDES_DESCRIPTION =
+  "Earlier questions in this thread that no longer apply, so the person cannot answer them any more. Withdraw your own questions that are still open (read_thread state open or picked; a sent, skipped or closed one is refused) this way as the thread moves on: when this message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, so they stop keeping the thread at the top of the person's list. \"<message id>/<key>\" for one question (read_thread gives each question's key) or \"<message id>\" for every open question of that message. With exactly one question in this message, it replaces them; otherwise they read \"No longer applies\". To replace one with a particular new question, put `Replaces: <message id>/<key>` in that question's block instead. The person's pick on a superseded question is never sent. Every id must name an open question of the thread this message lands in (use reply_to); otherwise nothing is sent and the refusal, invalid_supersedes, lists the thread's open questions.";
 
 const PROJECT_PATH_DESCRIPTION =
   "Absolute path of the repository or folder you work in; the thread lands in that project's row. The `plannotator inbox mcp` shim fills it from its working folder.";
@@ -74,6 +84,10 @@ export const SEND_ROUTING_FIELDS = {
       `A short thread name (1-${INBOX_THREAD_NAME_MAX} characters, one line). Without it, your messages join your session's open thread in this project (a new one the first time, or once the person resolved it; a thread keeps its first subject). With it, the same name in this project is the same open thread, across sessions (compared without case, spacing or invisible characters). Use it to split separate work, or to join another session's thread. Ignored with reply_to.`,
     ),
   reply_to: z.string().optional().describe("A message id: post this as a reply in that message's thread."),
+  supersedes: z
+    .array(z.string())
+    .optional()
+    .describe(SUPERSEDES_DESCRIPTION),
   idempotency_key: z.string().optional().describe("Any unique string; sending again with the same key answers the first message instead of posting twice."),
   agent_session: z.string().optional().describe(AGENT_SESSION_DESCRIPTION),
   agent_name: z.string().optional().describe("How the person sees you, e.g. \"Claude Code\"."),
@@ -87,13 +101,20 @@ export interface InboxMcpContext {
   /** The project for a path an agent named (realpath, git toplevel), created on first use. */
   resolveProject: (path: string) => Promise<InboxProject>;
   /**
-   * Record the files a message attaches (realpath, inside the project, the
+   * Record the files a message attaches (realpath, from anywhere on disk, the
    * file rules, a blob of the bytes): `base` resolves relative paths. Absent:
    * attachments are refused.
    */
-  recordAttachments?: (paths: readonly string[], project: InboxProject, base: string) => InboxAttachment[];
+  recordAttachments?: (paths: readonly string[], project: InboxProject, base: string) => Promise<InboxAttachment[]>;
   /** wait_for_reply's default hold in ms (tests pass a shorter one only through timeout_seconds). */
   waitDefaultMs?: number;
+  /**
+   * Presence from MCP activity, for "the session that asked has ended": a
+   * tool call naming an `agent_session` counts as seen, and an open
+   * wait_for_reply holds the session present while it waits
+   * (packages/server/inbox-sessions.ts).
+   */
+  presence?: { seen: (session: string) => void; hold: (session: string) => () => void };
 }
 
 export type ToolResult = {
@@ -181,12 +202,12 @@ function replyResult(store: InboxStore, reply: InboxMessage, base: string): Tool
   // The agent now has this reply (not any later one): a Sent row moves to Quiet.
   store.markAgentChecked(reply.thread_id, cursor);
   const questions = reply.reply_to ? store.questionsOf(reply.reply_to) : [];
-  const root = store.message(reply.thread_id);
+  const subject = store.threadSubject(reply.thread_id);
   return {
     content: [
       {
         type: "text",
-        text: `The person replied in thread ${reply.thread_id}${root?.subject ? ` (${root.subject})` : ""}:\n\n${reply.body}`,
+        text: `The person replied in thread ${reply.thread_id}${subject ? ` (${subject})` : ""}:\n\n${reply.body}`,
       },
     ],
     structuredContent: {
@@ -209,6 +230,8 @@ export type AgentSendInput = {
   idempotency_key?: string;
   /** Files to attach (send_message only): absolute, or relative to project_path. */
   attachments?: string[];
+  /** Earlier questions of the thread this message supersedes (`<message id>` or `<message id>/<key>`). */
+  supersedes?: string[];
   agent_session?: string;
   agent_name?: string;
   agent_host?: string;
@@ -227,19 +250,36 @@ export async function sendProject(context: InboxMcpContext, input: { reply_to?: 
   return context.resolveProject(input.project_path);
 }
 
+/**
+ * The folder inside `project` an agent sent from, when it is not the root
+ * (`InboxMessage.base_path`): relative image paths in its body start there.
+ */
+function sendBasePath(projectPath: string | undefined, project: InboxProject): string | null {
+  if (!projectPath || !isAbsolute(projectPath)) return null;
+  let real: string;
+  try {
+    real = realpathSync(projectPath);
+  } catch {
+    return null;
+  }
+  const root = project.root.endsWith(sep) ? project.root : `${project.root}${sep}`;
+  return real !== project.root && real.startsWith(root) ? real : null;
+}
+
 /** An agent's message into `project`, routed by the store (send_message, submit_guide). */
-export function sendAgentMessage(
+export async function sendAgentMessage(
   context: InboxMcpContext,
   project: InboxProject,
   input: AgentSendInput,
   guide?: InboxGuideRef,
-): { structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number } {
+  wakes = false,
+): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; superseded: number }> {
   const { store } = context;
   let attachments: InboxAttachment[] | undefined;
   if (input.attachments && input.attachments.length > 0) {
     if (!context.recordAttachments) throw new InboxError("validation_error", "attachments: not taken by this Inbox.");
     const base = input.project_path && isAbsolute(input.project_path) ? input.project_path : project.root;
-    attachments = context.recordAttachments(input.attachments, project, base);
+    attachments = await context.recordAttachments(input.attachments, project, base);
   }
   const result = store.sendMessage({
     project_id: project.id,
@@ -256,11 +296,16 @@ export function sendAgentMessage(
     thread: input.thread ?? null,
     attachments,
     guide: guide ?? null,
+    base_path: sendBasePath(input.project_path, project),
+    supersedes: input.supersedes ?? null,
+    ...(wakes ? { wakes: true } : {}),
   });
   const message = result.message;
   const landed = store.project(message.project_id)!;
   const questions = (message.questions ?? []).map((q) => ({ key: q.key, kind: q.kind, prompt: q.prompt }));
+  const superseded = store.supersededBy(message.id);
   return {
+    superseded: superseded.length,
     replayed: result.replayed,
     questions: questions.length,
     attachments: message.attachments?.length ?? 0,
@@ -273,6 +318,8 @@ export function sendAgentMessage(
       project: { id: landed.id, name: landed.name, root: landed.root },
       questions,
       attachments: (message.attachments ?? []).map((a) => ({ id: a.id, name: a.name, kind: a.kind, path: a.path })),
+      /** The earlier questions this message superseded (`<message id>/<key>`). */
+      superseded,
       replayed: result.replayed,
       cursor: store.messageCursor(message.id) ?? store.cursor(),
       url: threadUrl(context.baseUrl(), message.thread_id),
@@ -294,13 +341,15 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
       description: SEND_MESSAGE_DESCRIPTION,
       inputSchema: z
         .object({
-          body: z.string().min(1).describe("The message, markdown. Question blocks render as answerable cards."),
+          body: z.string().min(1).describe(
+            "The message, markdown. Question blocks render as answerable cards. In a block, add `Stopped: <why>` only for a question that leaves you nothing else to work on (otherwise leave the line out, never `Stopped: no`); `Holds up: <work>; <work>` names the work that waits while you go on.",
+          ),
           ...SEND_ROUTING_FIELDS,
           attachments: z
             .array(z.string())
             .optional()
             .describe(
-              "Files for the person to open and annotate beside your message, e.g. [\"docs/plan.md\", \"proto/admin.html\", \"flow.mmd\"]: absolute, or relative to project_path, inside the project. Markdown, plain text, config and data files, Mermaid and Graphviz sources, and HTML (its relative images and frames load from its folder); .env is refused. The Inbox keeps the version you sent and shows the file as it is now, saying when it changed. The person's annotations come back in their reply.",
+              "Files to show the person beside your message, e.g. [\"docs/plan.md\", \"/tmp/checkout.png\", \"src/retry.mjs\"]: absolute (anywhere you can read) or relative to project_path. Any regular file, any size. Markdown, plain text, config and data files, Mermaid and Graphviz sources and HTML (its relative images and frames load from its folder) open in Plannotator's viewers; images (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP, ICO) show in the message; source code, scripts and other text open as code with line comments; PDFs and anything else are offered as a download. Folders and .env files are refused. The Inbox keeps the version you sent and shows the file as it is now, saying when it changed. The person's annotations, including comments on images and code lines, come back in their reply. Each attachment's kind in the result is markdown, text, html, mermaid, graphviz, code, image, pdf or file; treat any other as file. A markdown link to an attached file in the body, e.g. [the mock](proto/admin.html), opens it beside the thread.",
             ),
         })
         .strict(),
@@ -309,10 +358,11 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
     async (input, ctx) =>
       guarded(async () => {
         const project = await sendProject(context, input);
-        const sent = sendAgentMessage(context, project, input);
+        const sent = await sendAgentMessage(context, project, input, undefined, callerWakes(ctx));
         const asked =
           (sent.questions > 0 ? ` asking ${sent.questions} question${sent.questions === 1 ? "" : "s"}` : "") +
-          (sent.attachments > 0 ? ` with ${sent.attachments} attachment${sent.attachments === 1 ? "" : "s"}` : "");
+          (sent.attachments > 0 ? ` with ${sent.attachments} attachment${sent.attachments === 1 ? "" : "s"}` : "") +
+          (sent.superseded > 0 ? `, superseding ${sent.superseded} earlier question${sent.superseded === 1 ? "" : "s"}` : "");
         return ok(
           `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}). ${callerWakes(ctx) ? INBOX_REPLY_ARRIVES_TEXT : "Call wait_for_reply with this thread_id for the answer, or go on and read_thread later."}`,
           sent.structured,
@@ -357,7 +407,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         const askedBy = input.asked_by ?? (session ? "me" : "anyone");
         if (askedBy === "me" && !session) throw new InboxError("validation_error", "asked_by: \"me\" needs agent_session.");
         let threads = store.listRows({ projectId: project.id, session: askedBy === "me" ? session : null });
-        if (!input.include_resolved) threads = threads.filter((t) => t.resolved_at === null);
+        // A thread an agent wrote in after its archive line still takes a reply: listed like an open one.
+        if (!input.include_resolved) threads = threads.filter((t) => t.resolved_at === null || t.agent_after_archive === true);
         const limit = input.limit ?? 20;
         const total = threads.length;
         threads = threads.slice(0, limit);
@@ -373,7 +424,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
     "resolve_message",
     {
       title: "Resolve a thread",
-      description: "Close the thread a message belongs to once you have what you needed (resolved: false reopens it). Its questions read as closed.",
+      description:
+        "Archive the thread a message belongs to for the person; use it only when nothing in it is left for them to read or answer. resolved: false reopens it. Its questions read as closed; the person sees the thread as Archived.",
       inputSchema: z
         .object({
           message_id: z.string().describe("Any message id in the thread, or the thread id."),
@@ -409,82 +461,90 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
     },
     async (input, ctx) =>
       guarded(async () => {
-        const single = threadOf(store, input);
-        let threadIds: string[];
-        if (single) {
-          threadIds = [single];
-        } else {
-          const session = input.agent_session?.trim();
-          if (!session) throw new InboxError("validation_error", "thread_id: required (or agent_session, to wait on every thread you asked).");
-          const projectId = input.project_path ? (await context.resolveProject(input.project_path)).id : null;
-          threadIds = store
-            .listRows({ projectId, session })
-            .filter((t) => t.resolved_at === null)
-            .map((t) => t.thread_id);
-        }
-        const caller = input.agent_session?.trim() || null;
-        const thresholds = new Map(threadIds.map((id) => [id, input.cursor ?? lastAgentCursor(store, id, caller)]));
-        // A New message (step 8) belongs to the session the person picked: it
-        // never answers another session's wait.
-        const forCaller = (message: InboxMessage) => !message.to || message.to.session === caller;
-
-        const findExisting = (): InboxMessage | null => {
-          let best: { message: InboxMessage; seq: number } | null = null;
-          for (const [threadId, threshold] of thresholds) {
-            for (const message of store.thread(threadId)?.messages ?? []) {
-              if (message.author.kind !== "person" || !forCaller(message)) continue;
-              const seq = store.messageCursor(message.id) ?? 0;
-              if (seq > threshold && (!best || seq < best.seq)) best = { message, seq };
-            }
+        // An open wait is presence: the session that asked is not "ended" while it waits here.
+        const holder = input.agent_session?.trim();
+        const release = holder ? context.presence?.hold(holder) : undefined;
+        try {
+          const single = threadOf(store, input);
+          let threadIds: string[];
+          if (single) {
+            threadIds = [single];
+          } else {
+            const session = input.agent_session?.trim();
+            if (!session) throw new InboxError("validation_error", "thread_id: required (or agent_session, to wait on every thread you asked).");
+            const projectId = input.project_path ? (await context.resolveProject(input.project_path)).id : null;
+            threadIds = store
+              .listRows({ projectId, session })
+              .filter((t) => t.resolved_at === null || t.agent_after_archive === true)
+              .map((t) => t.thread_id);
           }
-          return best?.message ?? null;
-        };
+          const caller = input.agent_session?.trim() || null;
+          const thresholds = new Map(threadIds.map((id) => [id, input.cursor ?? lastAgentCursor(store, id, caller)]));
+          // A New message (step 8) belongs to the session the person picked: it
+          // never answers another session's wait.
+          const forCaller = (message: InboxMessage) => !message.to || message.to.session === caller;
 
-        const existing = findExisting();
-        if (existing) return replyResult(store, existing, context.baseUrl());
-        // A resolved thread takes no reply: say so now instead of holding the call.
-        if (single && store.message(single)?.resolved_at != null) {
-          return ok(`Thread ${single} is resolved; no reply will come.`, { status: "resolved", thread_id: single, cursor: store.cursor() });
-        }
-
-        const waitMs = input.timeout_seconds ? input.timeout_seconds * 1000 : (context.waitDefaultMs ?? INBOX_WAIT_DEFAULT_MS);
-        const signal: AbortSignal | undefined = ctx?.mcpReq?.signal;
-        const outcome = await new Promise<{ kind: "reply"; message: InboxMessage } | { kind: "resolved"; threadId: string } | { kind: "timeout" }>(
-          (resolve) => {
-            let done = false;
-            const finish = (value: Parameters<typeof resolve>[0]) => {
-              if (done) return;
-              done = true;
-              clearTimeout(timer);
-              unsubscribe();
-              signal?.removeEventListener("abort", onAbort);
-              resolve(value);
-            };
-            const onAbort = () => finish({ kind: "timeout" });
-            const timer = setTimeout(() => finish({ kind: "timeout" }), waitMs);
-            const unsubscribe = store.subscribe((line: InboxLine) => {
-              if (line.kind !== "message") return;
-              const message = line.record;
-              const threshold = thresholds.get(message.thread_id);
-              if (threshold === undefined) return;
-              if (message.author.kind === "person" && forCaller(message) && line.seq > threshold && store.messageCursor(message.id) === line.seq) {
-                finish({ kind: "reply", message });
-              } else if (message.id === message.thread_id && message.resolved_at !== null && threadIds.length === 1) {
-                finish({ kind: "resolved", threadId: message.id });
+          const findExisting = (): InboxMessage | null => {
+            let best: { message: InboxMessage; seq: number } | null = null;
+            for (const [threadId, threshold] of thresholds) {
+              for (const message of store.thread(threadId)?.messages ?? []) {
+                if (message.author.kind !== "person" || !forCaller(message)) continue;
+                const seq = store.messageCursor(message.id) ?? 0;
+                if (seq > threshold && (!best || seq < best.seq)) best = { message, seq };
               }
-            });
-            signal?.addEventListener("abort", onAbort);
-          },
-        );
-        if (outcome.kind === "reply") return replyResult(store, outcome.message, context.baseUrl());
-        const cursor = store.cursor();
-        if (outcome.kind === "resolved") {
-          return ok(`The person resolved thread ${outcome.threadId} without a reply.`, { status: "resolved", thread_id: outcome.threadId, cursor });
+            }
+            return best?.message ?? null;
+          };
+
+          const existing = findExisting();
+          if (existing) return replyResult(store, existing, context.baseUrl());
+          // A resolved thread takes no reply: say so now instead of holding the call.
+          // (An agent that wrote after the archive line can still get a reply there.)
+          if (single && store.message(single)?.resolved_at != null && !store.agentAfterArchive(single)) {
+            return ok(`Thread ${single} is resolved; no reply will come.`, { status: "resolved", thread_id: single, cursor: store.cursor() });
+          }
+
+          const waitMs = input.timeout_seconds ? input.timeout_seconds * 1000 : (context.waitDefaultMs ?? INBOX_WAIT_DEFAULT_MS);
+          const signal: AbortSignal | undefined = ctx?.mcpReq?.signal;
+          const outcome = await new Promise<{ kind: "reply"; message: InboxMessage } | { kind: "resolved"; threadId: string } | { kind: "timeout" }>(
+            (resolve) => {
+              let done = false;
+              const finish = (value: Parameters<typeof resolve>[0]) => {
+                if (done) return;
+                done = true;
+                clearTimeout(timer);
+                unsubscribe();
+                signal?.removeEventListener("abort", onAbort);
+                resolve(value);
+              };
+              const onAbort = () => finish({ kind: "timeout" });
+              const timer = setTimeout(() => finish({ kind: "timeout" }), waitMs);
+              const unsubscribe = store.subscribe((line: InboxLine) => {
+                if (line.kind !== "message") return;
+                const message = line.record;
+                const threshold = thresholds.get(message.thread_id);
+                if (threshold === undefined) return;
+                if (message.author.kind === "person" && forCaller(message) && line.seq > threshold && store.messageCursor(message.id) === line.seq) {
+                  finish({ kind: "reply", message });
+                } else if (message.id === message.thread_id && message.resolved_at !== null && threadIds.length === 1 && !store.agentAfterArchive(message.id)) {
+                  finish({ kind: "resolved", threadId: message.id });
+                }
+              });
+              signal?.addEventListener("abort", onAbort);
+            },
+          );
+          if (outcome.kind === "reply") return replyResult(store, outcome.message, context.baseUrl());
+          const cursor = store.cursor();
+          if (outcome.kind === "resolved") {
+            return ok(`The person resolved thread ${outcome.threadId} without a reply.`, { status: "resolved", thread_id: outcome.threadId, cursor });
+          }
+          return ok(
+            `No reply yet. Call wait_for_reply again with cursor ${cursor} to keep waiting, or go on and check later.`,
+            { status: "waiting", cursor, thread_ids: threadIds },
+          );
+        } finally {
+          release?.();
         }
-        return ok(
-          `No reply yet. Call wait_for_reply again with cursor ${cursor} to keep waiting, or go on and check later.`,
-          { status: "waiting", cursor, thread_ids: threadIds },
-        );
       }),
   );
 

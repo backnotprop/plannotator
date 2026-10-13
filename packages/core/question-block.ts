@@ -61,6 +61,15 @@
  *   when both are present the link wins. Each form is read once per block;
  *   any other `Decision:` value is context prose. A `Decision:` line BEFORE
  *   the prompt is the prompt. Neither form changes the question key.
+ * - Replaces (the Plannotator Inbox): a `Replaces: <message id>/<key>` line
+ *   (or a bare `<message id>`, several separated by commas, semicolons or
+ *   spaces) names the earlier question(s) this one replaces. Read only when
+ *   EVERY token of its value is id-shaped (`msg_` + a 26-character ULID,
+ *   optionally `/q-` + 8 hex, or a bare `q-` + 8 hex key; one trailing `.`
+ *   each is dropped), wherever it sits: it is then never the prompt and never
+ *   context, so the card never shows the raw ids (`replaces`). Any other
+ *   `Replaces:` line ("Replaces: q-learning with PPO") is ordinary prose. It
+ *   does not change the question key.
  */
 
 import {
@@ -120,6 +129,11 @@ export interface ParsedQuestion {
   decisionOnAnswer?: true;
   /** `Decision: [statement](url)`: the decision this question became. */
   decision?: QuestionDecisionLink;
+  /** `Replaces: <message id>/<key>` (the Plannotator Inbox): the earlier
+   *  questions this one replaces, each token as written. Absent when the
+   *  block has no such line. The host checks them (the Inbox refuses an id
+   *  that names no open question of the thread). */
+  replaces?: string[];
 }
 
 /** A recorded decision a question links to (`Decision: [statement](url)`). */
@@ -134,7 +148,15 @@ export interface QuestionDecisionLink {
 export const MAX_QUESTION_BODY_CHARS = 20_000;
 export const MAX_QUESTION_CHOICES = 20;
 export const MAX_QUESTION_PROMPT_CHARS = 400;
+/** The longest label a plain-bullet choice takes before the rest moves to
+ *  its description (see capChoiceLabel). Task-list labels are not cut. */
 export const MAX_QUESTION_CHOICE_LABEL_CHARS = 200;
+/** The cap on each `selected` label of an answer. A picked label is a choice
+ *  label, and a choice lives in a block body of at most
+ *  MAX_QUESTION_BODY_CHARS, so any label a block can hold round-trips whole.
+ *  (Through 0.28.17 this was MAX_QUESTION_CHOICE_LABEL_CHARS, which cut a
+ *  task-list label over 200 characters, so it could never be picked.) */
+export const MAX_QUESTION_SELECTED_CHARS = MAX_QUESTION_BODY_CHARS;
 export const MAX_QUESTION_OTHER_CHARS = 2000;
 export const MAX_QUESTION_TEXT_CHARS = 4000;
 export const MAX_QUESTION_NOTE_CHARS = 2000;
@@ -149,6 +171,13 @@ const LABEL_DESC_SEP_RE = /\s+(?:—|–|-)\s+/;
 const DECISION_RE = /^decision\s*:\s*(.*?)\s*$/i;
 const DECISION_FLAG_RE = /^when answered\.?$/i;
 const DECISION_LINK_RE = /^\[([^\]]+)\]\((\S+)\)\.?$/;
+// `Replaces: msg_…/q-…` anywhere in the block (leading whitespace aside):
+// read only when every token is an id (a message id, optionally with its
+// question key, or a bare key), so a prose line that happens to start with
+// "Replaces:" stays prose.
+const REPLACES_KEY = String.raw`q-[0-9a-f]{8}(?:-\d{1,3})?`;
+const REPLACES_TOKEN = String.raw`(?:msg_[0-9A-HJKMNP-TV-Z]{26}(?:/${REPLACES_KEY})?|${REPLACES_KEY})\.?`;
+const REPLACES_RE = new RegExp(String.raw`^\s*replaces\s*:\s*(${REPLACES_TOKEN}(?:[\s,;]+${REPLACES_TOKEN})*)[\s,;]*$`, 'i');
 // A line (leading whitespace aside) that opens a block of its own (list item, heading,
 // quote, fence, directive, table row, HTML, rule) ends a plain bullet instead
 // of continuing it lazily.
@@ -237,10 +266,11 @@ const splitBoldLead = (raw: string): { label: string; description: string } | nu
   return { label, description };
 };
 
-/** A label longer than an answer may quote (`MAX_QUESTION_CHOICE_LABEL_CHARS`)
- *  could never show as picked, so it is cut at its first sentence end (else
- *  its last space) within the cap; the rest leads the description. Nothing
- *  is dropped. */
+/** A plain-bullet label longer than `MAX_QUESTION_CHOICE_LABEL_CHARS` is cut
+ *  at its first sentence end (else its last space) within the cap; the rest
+ *  leads the description, so the card shows a short name. Nothing is
+ *  dropped. Task-list labels keep their full length (an answer quotes up to
+ *  `MAX_QUESTION_SELECTED_CHARS`). */
 const capChoiceLabel = (split: { label: string; description?: string }): { label: string; description?: string } => {
   const { label, description } = split;
   if (label.length <= MAX_QUESTION_CHOICE_LABEL_CHARS) return split;
@@ -426,6 +456,7 @@ export const parseQuestionBlock = (directiveKind: string | undefined, body: stri
   let openBullet: { index: number; contentColumn: number; afterBlank: boolean } | null = null;
   let decisionFlag = false;
   let decision: QuestionDecisionLink | undefined;
+  const replaces: string[] = [];
 
   const pushContext = (line: string) => {
     contextLines.push(line);
@@ -454,6 +485,17 @@ export const parseQuestionBlock = (directiveKind: string | undefined, body: stri
       });
       raws.push(raw);
       lastChoice = choices.length - 1;
+      openBullet = null;
+      recommendationOpen = false;
+      continue;
+    }
+    const replacesLine = line.match(REPLACES_RE);
+    if (replacesLine) {
+      for (const raw of replacesLine[1].split(/[\s,;]+/)) {
+        const token = raw.replace(/\.$/, '');
+        if (token && !replaces.includes(token)) replaces.push(token);
+      }
+      lastChoice = -1;
       openBullet = null;
       recommendationOpen = false;
       continue;
@@ -610,6 +652,7 @@ export const parseQuestionBlock = (directiveKind: string | undefined, body: stri
     ...(suggestedText ? { suggestedText } : {}),
     key: questionKey(kind, prompt),
     ...(decision ? { decision } : decisionFlag ? { decisionOnAnswer: true as const } : {}),
+    ...(replaces.length > 0 ? { replaces } : {}),
   };
 };
 
@@ -777,6 +820,12 @@ export interface QuestionAnswer {
   text?: string;
   note?: string;
   skipped?: boolean;
+  /**
+   * With `skipped`: the Plannotator Inbox skipped it because a Send left it
+   * unanswered, not because the person pressed Skip. Read only with
+   * `skipped: true`.
+   */
+  by_reply?: boolean;
   /** Document line of the prompt when answered. */
   sourceLine?: number;
 }
@@ -801,10 +850,11 @@ export const parseQuestionAnswer = (value: unknown): QuestionAnswer | null => {
     if (v[field] !== undefined && typeof v[field] !== 'string') return null;
   }
   if (v.skipped !== undefined && typeof v.skipped !== 'boolean') return null;
+  if (v.by_reply !== undefined && typeof v.by_reply !== 'boolean') return null;
   if (v.sourceLine !== undefined && !(Number.isInteger(v.sourceLine) && (v.sourceLine as number) > 0)) return null;
 
   const selected = [...new Set((v.selected as string[])
-    .map((s) => cap(s.trim(), MAX_QUESTION_CHOICE_LABEL_CHARS))
+    .map((s) => cap(s.trim(), MAX_QUESTION_SELECTED_CHARS))
     .filter(Boolean))]
     .slice(0, MAX_QUESTION_CHOICES);
   const other = typeof v.other === 'string' ? cap(v.other, MAX_QUESTION_OTHER_CHARS) : '';
@@ -820,6 +870,7 @@ export const parseQuestionAnswer = (value: unknown): QuestionAnswer | null => {
     ...(text.trim() ? { text } : {}),
     ...(note.trim() ? { note } : {}),
     ...(v.skipped === true ? { skipped: true } : {}),
+    ...(v.skipped === true && v.by_reply === true ? { by_reply: true } : {}),
     ...(typeof v.sourceLine === 'number' ? { sourceLine: v.sourceLine } : {}),
   };
 };
@@ -838,15 +889,26 @@ export const canonicalQuestionAnswer = <A extends QuestionAnswer>(
   answer: A,
 ): A => {
   if (answer.selected.length === 0) return answer;
-  if (!question.choices.some((c) => c.aliases?.length)) return answer;
-  // Answers are capped on validation, so a long alias is matched capped too.
-  const names = question.choices.map((c) =>
-    (c.aliases ?? []).flatMap((alias) => [alias, cap(alias.trim(), MAX_QUESTION_CHOICE_LABEL_CHARS)]));
   const labels = new Set(question.choices.map((c) => c.label));
+  if (answer.selected.every((stored) => labels.has(stored))) return answer;
   // The one choice a stored label names, or -1 when none or several do: an
   // ambiguous label (two bullets that shared a first line, or names that only
   // differ in case or emphasis) stays as stored rather than picking one.
   const only = (hits: number[]): number => (hits.length === 1 ? hits[0] : -1);
+  // Through 0.28.17 an answer's labels were cut at
+  // MAX_QUESTION_CHOICE_LABEL_CHARS: a stored label that is exactly a long
+  // label's first 200 characters names that choice. Exact only, never
+  // normalized, so a question with a long label matches nothing else looser.
+  const cutLabels = question.choices.map((c) => legacyCutName(c.label));
+  const cutHit = (stored: string): number =>
+    only(question.choices.flatMap((_, i) => (cutLabels[i] === stored ? [i] : [])));
+  const hasAliases = question.choices.some((c) => c.aliases?.length);
+  // Answers were capped on validation, so a long alias is matched cut too.
+  const names = question.choices.map((c) =>
+    (c.aliases ?? []).flatMap((alias) => {
+      const cut = legacyCutName(alias);
+      return cut === null ? [alias] : [alias, cut];
+    }));
   const exactHit = (stored: string): number =>
     only(question.choices.flatMap((_, i) => (names[i].includes(stored) ? [i] : [])));
   const normalizedHit = (stored: string): number => {
@@ -858,14 +920,29 @@ export const canonicalQuestionAnswer = <A extends QuestionAnswer>(
   let changed = false;
   const selected = answer.selected.map((stored) => {
     if (labels.has(stored)) return stored;
-    let hit = exactHit(stored);
-    if (hit === -1) hit = normalizedHit(stored);
+    let hit = hasAliases ? exactHit(stored) : -1;
+    if (hit === -1) hit = cutHit(stored);
+    if (hit === -1 && hasAliases) hit = normalizedHit(stored);
     if (hit === -1) return stored;
     changed = true;
     return question.choices[hit].label;
   });
   return changed ? { ...answer, selected: [...new Set(selected)] } : answer;
 };
+
+/** A name as a build through 0.28.17 stored it in an answer when it was
+ *  longer than MAX_QUESTION_CHOICE_LABEL_CHARS (cut to that length), else
+ *  null (such a name was stored whole). */
+const legacyCutName = (name: string): string | null => {
+  const trimmed = name.trim();
+  return trimmed.length > MAX_QUESTION_CHOICE_LABEL_CHARS ? cap(trimmed, MAX_QUESTION_CHOICE_LABEL_CHARS) : null;
+};
+
+/** Whether the export needs a question's choices to print an answer's
+ *  current label: a choice has older names, or a label long enough that an
+ *  older build stored it cut. */
+export const questionChoicesNeedCanonicalLabels = (choices: ReadonlyArray<Pick<QuestionChoice, 'label' | 'aliases'>>): boolean =>
+  choices.some((c) => (c.aliases?.length ?? 0) > 0 || legacyCutName(c.label) !== null);
 
 /** A choice was picked, "Other…" was filled, or free text was written. */
 export const isQuestionAnswered = (answer: QuestionAnswer): boolean =>
@@ -985,7 +1062,7 @@ export const formatQuestionAnswerLines = (
   } else if (picks.length === 1) {
     out += `Answer: ${picks[0]}${rec}\n`;
   } else if (answer.skipped) {
-    out += 'Skipped\n';
+    out += answer.by_reply ? 'Skipped (not answered in this reply)\n' : 'Skipped\n';
   }
   const note = answer.note?.trim();
   if (note) {
@@ -1026,7 +1103,7 @@ export const questionExportItems = (indexed: ReadonlyArray<IndexedQuestion>): Qu
     ...(question.suggestedText ? { suggestedText: question.suggestedText } : {}),
     settled: question.choices.some((c) => c.settled),
     settledLabels: question.choices.filter((c) => c.settled).map((c) => c.label),
-    ...(question.choices.some((c) => c.aliases) ? { choices: question.choices.map(({ label, aliases }) => ({ label, ...(aliases ? { aliases } : {}) })) } : {}),
+    ...(questionChoicesNeedCanonicalLabels(question.choices) ? { choices: question.choices.map(({ label, aliases }) => ({ label, ...(aliases ? { aliases } : {}) })) } : {}),
   }));
 
 export const QUESTION_ANSWERS_HEADING = 'Answers to your questions';
@@ -1075,6 +1152,14 @@ export const formatQuestionAnswersSection = (
   out += `${answered} of ${open.length} question${open.length === 1 ? '' : 's'} answered.`;
   if (settledUntouched > 0) {
     out += ` ${settledUntouched} already settled in the document ${settledUntouched === 1 ? 'was' : 'were'} left as is.`;
+  }
+  // The Inbox's Send skips what it left unanswered: say how the agent should read those skips.
+  const byReply = open.filter((q) => {
+    const a = byKey.get(q.key);
+    return a !== undefined && a.skipped === true && a.by_reply === true && !isQuestionAnswered(a);
+  }).length;
+  if (byReply > 0) {
+    out += ` ${byReply} ${byReply === 1 ? 'was' : 'were'} not answered in this reply; treat ${byReply === 1 ? 'it' : 'them'} as skipped, and ask again if you still need ${byReply === 1 ? 'it' : 'them'}.`;
   }
   out += '\n\n';
 
@@ -1156,13 +1241,13 @@ export const buildQuestionAnswerAnnotation = (
  */
 export const QUESTION_AUTHORING_GUIDE = `## Asking the reviewer questions
 
-When a decision needs the reviewer (a trade-off you cannot settle from the code or the conversation), write it as a question block. The reviewer answers in place, and the answers come back to you in an "Answers to your questions" section at the top of their feedback, with the questions they left open listed under "Unanswered".
+Ask what only the reviewer can decide as a question block. Answers come back at the top of their feedback ("Answers to your questions", then "Unanswered").
 
 \`\`\`markdown
 :::question
-Where should losing conflict versions be kept?
+Where should we keep the edit that loses a sync conflict?
 
-Last-write-wins silently drops the loser unless we keep it somewhere.
+When two devices edit one note offline, the later save wins and the other edit is lost. Local storage keeps it with no server work.
 
 - [ ] Local only, purged after 30 days — cheap, no server change
 - [ ] Server-side per user — survives reinstall, needs a retention policy
@@ -1172,12 +1257,17 @@ Recommended: Local only, purged after 30 days
 :::
 \`\`\`
 
-- \`:::question\` picks one choice, \`:::question-multi\` picks any number, \`:::question-text\` asks for free text (a block with no choices is free text too).
-- The first line is the question. Other prose lines are context. Most reviewers answer faster with a sentence or two of it: what the choice affects and what you already know. Context can include an image (\`![alt](path)\`), which helps when the question is about something visual, such as a screen.
-- Choices are task-list items: \`- [ ] label\`, optionally \`- [ ] label — why\`. The reviewer can always answer "Other", add a note, or skip.
-- \`Recommended: <label>\` marks your recommendation. Text that matches no choice is offered as a suggested answer.
-- \`- [x]\` means the choice is already settled. Use it when you resubmit: keep an answered question with the chosen choice checked, or remove the block and write the decision into the prose.
-- Leave blank lines between the parts so the block also reads well on GitHub.
-- Ask only what you cannot decide alone, and keep a round short (about 8 questions at most). Do not ask rhetorical questions or questions the codebase answers.
+- \`:::question\` picks one choice, \`:::question-multi\` any number, \`:::question-text\` free text (so does a block with no choices).
+- The first line is the question; the lines after it are context. Never send a bare question: the reviewer switches in cold, thinks at the level of the product, and does not know what you know.
+  - Say what the choice affects, what you know or tried, and why you recommend it, so they can decide without opening anything else.
+  - Be terse: one to three short sentences, plain words, no jargon or internal names they would not know.
+  - Add a screenshot (\`![alt](path)\`) for anything visual.
+  - Link a file that shows it better (a plan, an HTML mock): \`[the mock](mock.html)\`. In the Inbox, attach it too; the link opens it beside the thread.
+- Choices: \`- [ ] label\`, optionally \`- [ ] label — why\`. The reviewer can also answer "Other", add a note, or skip.
+- \`Recommended: <label>\` marks yours; text matching no choice shows as a suggested answer.
+- Ask only what you cannot decide alone, about 8 a round at most. Do not ask rhetorical questions or questions the codebase answers.
+- \`- [x]\` marks a settled choice. On resubmit, check the chosen answer, or drop the block and state the decision in prose.
+- Leave blank lines between the parts so the block reads well on GitHub.
 - Each answer comes back under its question (\`### Q2. <question> (line N)\`) as \`Answer: <choice>\`, marked \`(your recommendation)\` when the reviewer took yours, or as \`Other: …\`, free text in a quote, or \`Skipped\`, plus any \`Note:\`. A question you marked \`- [x]\` is settled and only comes back if the reviewer changed it or added a note.
+- In the Inbox, withdraw your own questions that are still open (read_thread state \`open\` or \`picked\`) as the thread moves on: when a newer message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, name them in \`supersedes\` (or a \`Replaces:\` line) so they stop keeping the thread at the top of the person's list.
 `;

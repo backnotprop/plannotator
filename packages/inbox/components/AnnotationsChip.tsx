@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
-import { annotationOf, annotationQuote, annotationTag } from '../attachments';
+import { annotationOf, recordQuote, recordTag } from '../attachments';
 import { plural } from '../format';
 import { Icon } from '../icons';
 
@@ -49,8 +49,40 @@ export function AnnotationsChip({ records, attachments, onEdit, onRemove, onOpen
     if (records.length === 0) setOpen(false);
   }, [records.length]);
 
+  // The list opens from the chip; where that would run past the window's right edge it lines up with the
+  // reply box's right edge instead (and never past the window's left edge). A phone draws it as a sheet.
+  const popRef = useRef<HTMLDivElement>(null);
+  const [shift, setShift] = useState(0);
+  useLayoutEffect(() => {
+    if (!open) {
+      setShift(0);
+      return;
+    }
+    const place = () => {
+      const pop = popRef.current;
+      const chip = rootRef.current;
+      if (!pop || !chip || getComputedStyle(pop).position !== 'absolute') {
+        setShift(0);
+        return;
+      }
+      const margin = 8;
+      const chipLeft = chip.getBoundingClientRect().left;
+      const width = pop.getBoundingClientRect().width;
+      const viewRight = document.documentElement.clientWidth - margin;
+      let left = chipLeft;
+      if (left + width > viewRight) {
+        const boxRight = chip.closest('.ib-rbox')?.getBoundingClientRect().right ?? viewRight;
+        left = Math.min(boxRight, viewRight) - width;
+      }
+      setShift(Math.round(Math.max(margin, left) - chipLeft));
+    };
+    place();
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [open]);
+
   const name = (record: InboxAnnotationRecord) =>
-    (attachments.find((a) => a.id === record.attachment_id) ?? attachments.find((a) => a.path === record.path))?.name ?? record.path;
+    record.guide ? record.path : (attachments.find((a) => a.id === record.attachment_id) ?? attachments.find((a) => a.path === record.path))?.name ?? record.path;
 
   const run = async (work: () => Promise<void>) => {
     setBusy(true);
@@ -76,7 +108,13 @@ export function AnnotationsChip({ records, attachments, onEdit, onRemove, onOpen
         {count > 0 ? plural(count, 'annotation') : 'No annotations'}
       </button>
       {open && (
-        <div className="ib-annpop" role="dialog" aria-label={`${plural(count, 'annotation')} ride this reply`}>
+        <div
+          ref={popRef}
+          className="ib-annpop"
+          role="dialog"
+          aria-label={`${plural(count, 'annotation')} ride this reply`}
+          style={shift ? ({ '--ib-annpop-shift': `${shift}px` } as CSSProperties) : undefined}
+        >
           <div className="ib-aph">
             <b>{plural(count, 'annotation')}</b>
             <span className="ib-mut">ride this reply</span>
@@ -87,8 +125,8 @@ export function AnnotationsChip({ records, attachments, onEdit, onRemove, onOpen
           </div>
           {records.map((record) => {
             const annotation = annotationOf(record);
-            const tag = annotationTag(annotation);
-            const quote = annotationQuote(annotation);
+            const tag = recordTag(record);
+            const quote = recordQuote(record);
             const isEditing = editing?.id === record.id;
             return (
               <div className={`ib-arow${isEditing ? ' ib-ed' : ''}`} key={record.id} data-annotation-row={record.id}>
@@ -102,7 +140,7 @@ export function AnnotationsChip({ records, attachments, onEdit, onRemove, onOpen
                     }}
                   >
                     {name(record)}
-                    {record.version !== 'current' ? ' (sent)' : ''}
+                    {record.guide ? ' (guided review)' : record.version !== 'current' ? ' (sent)' : ''}
                   </button>
                   {tag && <span className="ib-mini">{tag}</span>}
                   {!isEditing && (

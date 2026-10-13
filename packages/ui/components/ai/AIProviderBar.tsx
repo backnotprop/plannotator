@@ -2,6 +2,7 @@ import React from 'react';
 import { getProviderMeta } from '../ProviderIcons';
 import { findSessionBridge, type AIProviderOption } from '../../utils/aiProvider';
 import { ModelSourceHint, modelSourceToolForProvider } from '../ModelSourceHint';
+import { AskSessionSetupHint } from './AskSessionSetupHint';
 
 interface AIProviderBarProps {
   providers: AIProviderOption[];
@@ -11,6 +12,11 @@ interface AIProviderBarProps {
   onProviderChange: (providerId: string) => void;
   onModelChange: (model: string) => void;
   onReasoningEffortChange?: (effort: string | null) => void;
+  /**
+   * Optional muted line under the bar saying how to get "Ask this session"
+   * (see askSessionSetupHint). Absent: the bar renders exactly as before.
+   */
+  setupHint?: string | null;
 }
 
 export const AIProviderBar: React.FC<AIProviderBarProps> = ({
@@ -21,12 +27,16 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
   onProviderChange,
   onModelChange,
   onReasoningEffortChange,
+  setupHint,
 }) => {
   if (providers.length === 0) {
     return (
+      <>
       <div className="border-t border-border/50 px-2 py-1.5 text-[11px] text-muted-foreground/50">
         No AI providers available
       </div>
+      <AskSessionSetupHint text={setupHint} />
+      </>
     );
   }
 
@@ -115,6 +125,7 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
       info={currentProvider}
       className="-mt-1 px-2 pb-1.5 text-[10px] text-muted-foreground/50"
     />
+    <AskSessionSetupHint text={setupHint} />
     </>
   );
 };

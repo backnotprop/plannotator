@@ -4,7 +4,8 @@
  * against the compiled binary: three agents (Pi, then OpenCode, then Claude
  * Code) each ask a question through `plannotator inbox mcp` with the MCP
  * SDK's stdio client (scripts/inbox-sim.ts), and "Waiting on you" reads
- * Claude Code, OpenCode, Pi. A reply to Pi's question moves its row to Sent;
+ * Claude Code, OpenCode, Pi. A reply to Pi's question moves its row to Sent
+ * once the person leaves the thread;
  * a newer agent message waits behind "N new" and, once shown, sits at the top
  * of its section.
  *
@@ -14,10 +15,10 @@
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
+import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -63,7 +64,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   rmSync(proofDir, { recursive: true, force: true });
   mkdirSync(proofDir, { recursive: true });
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-order-e2e-')));
+  const root = inboxScratch('plannotator-inbox-order-e2e-');
   const dataDir = join(root, 'data');
   const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: 'none' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
@@ -101,15 +102,14 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 });
 
 test.afterAll(async () => {
-  if (!world) return;
-  await Promise.all(world.agents.map((a) => a.close().catch(() => {})));
-  await world.context.close();
   try {
-    process.kill(JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8')).pid, 'SIGTERM');
-  } catch {
-    // Already gone.
+    if (!world) return;
+    await Promise.all(world.agents.map((a) => a.close().catch(() => {})));
+    await world.context.close();
+  } finally {
+    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
+    await removeInboxScratch();
   }
-  rmSync(world.root, { recursive: true, force: true });
 });
 
 test('three agents ask in order A, B, C: "Waiting on you" reads C, B, A', async () => {
@@ -132,11 +132,13 @@ test("a reply to A moves A to Sent; Waiting keeps C, B", async () => {
   const row = page.locator(`.ib-lbody [data-thread-id="${threads.pi}"]`);
   await expect(row).toHaveAttribute('data-section', 'sent');
   await expect(row).toContainText('Saved for Pi');
-  expect(await sectionOrder(page, 'waiting')).toEqual([threads.claude, threads.opencode]);
-  expect(await sectionOrder(page, 'sent')).toEqual([threads.pi]);
-  await shot('2-reply-moves-a-to-sent');
+  // While the thread is open the person's own Send does not reorder the list (owner ruling 2026-10-11).
+  expect(await sectionOrder(page, 'waiting')).toEqual([threads.claude, threads.opencode, threads.pi]);
   await page.keyboard.press('Escape');
   await expect(pane).toHaveCount(0);
+  await expect.poll(() => sectionOrder(page, 'waiting')).toEqual([threads.claude, threads.opencode]);
+  expect(await sectionOrder(page, 'sent')).toEqual([threads.pi]);
+  await shot('2-reply-moves-a-to-sent');
 });
 
 test('a newer agent message waits behind "N new"; shown, its row is first in its section; no page errors', async () => {

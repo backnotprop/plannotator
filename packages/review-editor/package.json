@@ -7,7 +7,8 @@
     "./styles": "./index.css",
     "./shortcuts": "./shortcuts.ts",
     "./worker-pool": "./workerPool.tsx",
-    "./components/*": "./components/*.tsx"
+    "./components/*": "./components/*.tsx",
+    "./utils/*": "./utils/*.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

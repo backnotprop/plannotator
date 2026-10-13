@@ -1,4 +1,5 @@
-import { dirname, resolve as resolvePath } from "path";
+import { realpathSync } from "fs";
+import { dirname, relative as relativePath, resolve as resolvePath, sep } from "path";
 import {
   HTML_ASSET_ERROR_CSP,
   HTML_ASSET_DOCUMENT_CSP,
@@ -58,7 +59,24 @@ export function framedDocumentNotFound(req: Request, url: URL): Response | null 
   });
 }
 
-export function createHtmlAssetRegistry() {
+/**
+ * Options a host opts into; annotate passes none and keeps its behaviour.
+ * The Inbox serves the folder of an HTML file an agent attached from
+ * anywhere (a home folder, say), so it refuses hidden paths and secret
+ * names, and gives nested documents no network.
+ */
+export interface HtmlAssetRegistryOptions {
+  /**
+   * Refuse (404) an asset whose path, as requested or as its realpath under
+   * the root, names something this host never serves: the Inbox refuses any
+   * segment starting with `.` and the dotenv family.
+   */
+  refuseAssetPath?: (relativePath: string) => boolean;
+  /** The CSP of an embedded `.html` document. Default HTML_ASSET_DOCUMENT_CSP. */
+  documentCsp?: string;
+}
+
+export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) {
   const rootsByToken = new Map<string, string>();
   const tokensByRoot = new Map<string, string>();
 
@@ -109,6 +127,22 @@ export function createHtmlAssetRegistry() {
     if (!isWithinDirectory(resolved, root)) {
       return assetError(403, "Access denied", asDocument, assetPath);
     }
+    if (options.refuseAssetPath) {
+      // Judged as requested and by where it really leads under the root, so
+      // an innocent name linked to a hidden file is refused too.
+      let real = resolved;
+      let realRoot = root;
+      try {
+        real = realpathSync(resolved);
+        realRoot = realpathSync(root);
+      } catch {
+        // Not on disk: the read below answers 404.
+      }
+      const underRoot = relativePath(realRoot, real).split(sep).join("/");
+      if (options.refuseAssetPath(assetPath) || options.refuseAssetPath(underRoot)) {
+        return assetError(404, "Not found", asDocument, assetPath);
+      }
+    }
 
     try {
       const file = Bun.file(resolved);
@@ -122,7 +156,7 @@ export function createHtmlAssetRegistry() {
       if (document) {
         return new Response(file, {
           headers: {
-            ...htmlAssetDocumentHeaders(HTML_ASSET_DOCUMENT_CSP),
+            ...htmlAssetDocumentHeaders(options.documentCsp ?? HTML_ASSET_DOCUMENT_CSP),
             // Kept for parity with the other assets: a nested document load is
             // not a CORS request, but a `fetch('./page.html')` from the
             // opaque-origin frame is.

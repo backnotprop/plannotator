@@ -1,3 +1,4 @@
+import type { UpdateCheckSetting } from '@plannotator/ui/hooks/useUpdateCheckSetting';
 import React from 'react';
 import type { Origin } from '@plannotator/shared/agents';
 import type { Agent } from '@plannotator/ui/hooks/useAgents';
@@ -112,6 +113,7 @@ interface AppHeaderProps {
   gitUser: string | undefined;
   /** Present when the server advertises the auto-update setting; Settings shows its switch. */
   autoUpdateSetting?: { env?: boolean };
+  updateCheckSetting?: UpdateCheckSetting;
   /** The `plannotator` agent tool switch (parseAgentToolSetting of serverConfig); Settings shows its row. */
   agentToolSetting?: AgentToolSetting;
   onAgentToolChange?: (enabled: boolean) => Promise<void>;
@@ -211,6 +213,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   mobileSettingsOpen,
   gitUser,
   autoUpdateSetting,
+  updateCheckSetting,
   agentToolSetting,
   onAgentToolChange,
   agentTerminalAvailable,
@@ -506,6 +509,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
             onExternalClose={onCloseSettings}
             gitUser={gitUser}
             autoUpdateSetting={autoUpdateSetting}
+            updateCheckSetting={updateCheckSetting}
             agentToolSetting={agentToolSetting}
             onAgentToolChange={onAgentToolChange}
             agentTerminalAvailable={agentTerminalAvailable}

@@ -11,6 +11,7 @@
   "dependencies": {
     "@plannotator/core": "workspace:*",
     "@plannotator/editor": "workspace:*",
+    "@plannotator/inbox": "workspace:*",
     "@plannotator/server": "workspace:*",
     "@plannotator/shared": "workspace:*",
     "@plannotator/ui": "workspace:*",

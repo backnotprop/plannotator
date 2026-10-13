@@ -58,6 +58,38 @@ const APNS_BODY_LIMIT = 4096;
  * queued behind it (contract section 4).
  */
 const WEBSOCKET_MESSAGE_LIMIT = 32 * 1024 * 1024;
+/** The largest answer body the relay reads: base64 makes it 4/3 larger, so a larger one cannot fit one frame. */
+export const RELAY_BODY_LIMIT = Math.floor((WEBSOCKET_MESSAGE_LIMIT * 3) / 4);
+
+/**
+ * An answer's body, or null when it is larger than `cap`: refused from its
+ * Content-Length before anything is read, and otherwise read through a reader
+ * that cancels the stream as soon as the count passes the cap, so a body with
+ * no length (a streamed download) is never held whole.
+ */
+export async function readRelayBody(answer: Response, cap: number): Promise<Buffer | null> {
+  const length = Number(answer.headers.get("content-length"));
+  if (Number.isFinite(length) && length > cap) {
+    await answer.body?.cancel().catch(() => {});
+    return null;
+  }
+  if (!answer.body) return Buffer.alloc(0);
+  const reader = answer.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > cap) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks, total);
+}
+
 /** Reconnect delays for the socket, doubling from the first to the last. */
 const RECONNECT_FIRST_MS = 1_000;
 const RECONNECT_LAST_MS = 60_000;
@@ -352,10 +384,17 @@ export function createInboxRelay(context: InboxRelayContext) {
       const result = { v: 1, type: "result", id, status, content_type: contentType, body_b64: bytes.toString("base64") };
       return JSON.stringify({ type: "item", device_id: deviceId, cursor: null, ciphertext: await encryptWithKey(JSON.stringify(result), key) });
     };
-    const bytes = Buffer.from(await answer.arrayBuffer());
-    const frame = await seal(answer.status, answer.headers.get("content-type") ?? "application/octet-stream", bytes);
-    if (Buffer.byteLength(frame) <= WEBSOCKET_MESSAGE_LIMIT) return frame;
-    log(`command ${deviceId} result too large: ${bytes.length} bytes`);
+    // base64 grows a body by 4/3 before the JSON and the seal: anything over
+    // 3/4 of the frame limit can never fit, so it is refused without being
+    // read, and a body without a length is read only up to that bound.
+    const bytes = await readRelayBody(answer, RELAY_BODY_LIMIT);
+    if (bytes) {
+      const frame = await seal(answer.status, answer.headers.get("content-type") ?? "application/octet-stream", bytes);
+      if (Buffer.byteLength(frame) <= WEBSOCKET_MESSAGE_LIMIT) return frame;
+      log(`command ${deviceId} result too large: ${bytes.length} bytes`);
+    } else {
+      log(`command ${deviceId} result too large: over ${RELAY_BODY_LIMIT} bytes, not read`);
+    }
     const refusal = {
       error: "This answer is too large to carry through the relay. Open it over the Wi-Fi or the tailnet.",
       code: "result_too_large",
@@ -447,19 +486,28 @@ export function createInboxRelay(context: InboxRelayContext) {
     ws?.close(1000, "closed");
   };
 
-  /** One push per phone whose switch is on, for an agent's message with a question or a guided review. */
+  /**
+   * One push per phone whose switch is on, for an agent's message with a
+   * question or a guided review, or one that superseded earlier questions
+   * (replaced questions). Pushes collapse per thread, so a withdrawal that
+   * asks nothing new still pushes (with `question: null`, no answer actions)
+   * to replace the older notification and its lock-screen answers.
+   */
   const pushFor = async (messageId: string): Promise<void> => {
     const message = store.message(messageId);
     if (!mailbox || !message) return;
     const questions = store.questionsOf(messageId);
-    if (questions.length === 0 && !message.guide) return;
-    const only = questions.length === 1 ? questions[0]! : null;
+    const supersedes = store.supersededBy(messageId).length > 0;
+    if (questions.length === 0 && !message.guide && !supersedes) return;
+    // Only an open question is ever offered for a lock-screen answer.
+    const open = questions.filter((q) => q.state === "open");
+    const only = open.length === 1 ? open[0]! : null;
     const summary: PushPlaintext = {
       v: 1,
       type: "push",
       thread_id: message.thread_id,
       message_id: message.id,
-      subject: store.message(message.thread_id)?.subject ?? message.subject ?? "",
+      subject: store.threadSubject(message.thread_id) ?? message.subject ?? "",
       project: store.project(message.project_id)?.name ?? "",
       agent: inboxAgentName(message.author),
       // Apple shows at most four actions: one single-choice question with up to four choices is answered from the lock screen.

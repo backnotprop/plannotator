@@ -434,9 +434,9 @@ describe("resolveReviewProgress env handling", () => {
 describe("resolveAgentTool", () => {
   // The failure this guards: a user who turned the tool on (or off) gets the
   // other answer, so the agent's tool list does not match their setting.
-  test("unset: the host's default (owner's call: on for the Claude Code mod, off on Pi and OpenCode 2)", () => {
-    expect(AGENT_TOOL_DEFAULTS).toEqual({ "claude-code": true, pi: false, opencode: false });
-    for (const host of ["claude-code", "pi", "opencode"] as const) {
+  test("unset: the host's default (owner's call: on for the Claude Code mod and Oh My Pi, off on Pi and OpenCode 2)", () => {
+    expect(AGENT_TOOL_DEFAULTS).toEqual({ "claude-code": true, pi: false, "oh-my-pi": true, opencode: false });
+    for (const host of ["claude-code", "pi", "oh-my-pi", "opencode"] as const) {
       expect(resolveAgentTool({}, {}, host)).toBe(AGENT_TOOL_DEFAULTS[host]);
       // An empty or unrecognized env value counts as unset.
       expect(resolveAgentTool({}, { PLANNOTATOR_AGENT_TOOL: "" }, host)).toBe(AGENT_TOOL_DEFAULTS[host]);
@@ -452,6 +452,17 @@ describe("resolveAgentTool", () => {
     expect(resolveAgentTool({ agentTool: "nope" as never }, {}, "pi")).toBe(false);
   });
 
+  // Oh My Pi defaults on, but an explicit choice still decides there, both ways.
+  test("Oh My Pi: config.json and the env var override its default in both directions", () => {
+    expect(resolveAgentTool({}, {}, "oh-my-pi")).toBe(true);
+    expect(resolveAgentTool({ agentTool: false }, {}, "oh-my-pi")).toBe(false);
+    expect(resolveAgentTool({}, { PLANNOTATOR_AGENT_TOOL: "0" }, "oh-my-pi")).toBe(false);
+    expect(resolveAgentTool({ agentTool: true }, { PLANNOTATOR_AGENT_TOOL: "off" }, "oh-my-pi")).toBe(false);
+    expect(resolveAgentTool({ agentTool: false }, { PLANNOTATOR_AGENT_TOOL: "1" }, "oh-my-pi")).toBe(true);
+    // Plain Pi keeps its default: off.
+    expect(resolveAgentTool({}, {}, "pi")).toBe(false);
+  });
+
   test("the env var wins over agentTool in config.json, in both directions", () => {
     for (const v of ["0", "false", "OFF", "disabled", " off "]) {
       expect(resolveAgentTool({ agentTool: true }, { PLANNOTATOR_AGENT_TOOL: v }, "claude-code")).toBe(false);
@@ -461,11 +472,11 @@ describe("resolveAgentTool", () => {
     }
   });
 
-  test("only the three tool hosts name one", () => {
+  test("only the tool hosts name one", () => {
     expect(agentToolHostOf("claude-code")).toBe("claude-code");
     expect(agentToolHostOf("pi")).toBe("pi");
-    // The argument is a session-bridge host, never an agent origin.
-    expect(agentToolHostOf("oh-my-pi")).toBeNull();
+    // The Pi extension's in-process servers name their host, Pi or Oh My Pi.
+    expect(agentToolHostOf("oh-my-pi")).toBe("oh-my-pi");
     expect(agentToolHostOf("opencode")).toBe("opencode");
     expect(agentToolHostOf("codex")).toBeNull();
     expect(agentToolHostOf(undefined)).toBeNull();
@@ -495,6 +506,8 @@ describe("getServerConfig agent tool advert", () => {
   test("unset: the host default, marked not configured; no host, nothing", () => {
     expect(getServerConfig(null, "pi")).toMatchObject({ agentTool: false, agentToolConfigured: false, agentToolHost: "pi", agentToolEnabled: false });
     expect(getServerConfig(null, "claude-code")).toMatchObject({ agentTool: true, agentToolConfigured: false, agentToolHost: "claude-code", agentToolEnabled: true });
+    // Oh My Pi: on by default, so the Settings row shows it on and the one-time offer has nothing to offer.
+    expect(getServerConfig(null, "oh-my-pi")).toMatchObject({ agentTool: true, agentToolConfigured: false, agentToolHost: "oh-my-pi", agentToolEnabled: true });
     const codex = getServerConfig(null, "codex");
     expect([codex.agentTool, codex.agentToolHost, codex.agentToolEnabled]).toEqual([undefined, undefined, undefined]);
   });

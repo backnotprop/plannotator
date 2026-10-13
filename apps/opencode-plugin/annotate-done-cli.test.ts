@@ -9,20 +9,18 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { handleCliCommand } from "./cli-bridge";
+import { removeStubbedHtml, stubHookDistHtml } from "../../tests/helpers/hook-dist-stub";
 
 const ENTRY = path.resolve(import.meta.dir, "../hook/server/index.ts");
-const DIST = path.resolve(import.meta.dir, "../hook/dist");
 const roots: string[] = [];
 let stubs: string[] = [];
 
 beforeAll(() => {
   // The CLI imports the built HTML; API-only tests need just a stub.
-  stubs = ["index.html", "review.html", "inbox.html"].map((name) => path.join(DIST, name)).filter((p) => !existsSync(p));
-  mkdirSync(DIST, { recursive: true });
-  for (const p of stubs) writeFileSync(p, "<!doctype html><title>test</title>");
+  stubs = stubHookDistHtml();
 });
 afterAll(() => {
-  for (const p of stubs) rmSync(p, { force: true });
+  removeStubbedHtml(stubs);
   for (const root of roots) rmSync(root, { recursive: true, force: true });
 });
 

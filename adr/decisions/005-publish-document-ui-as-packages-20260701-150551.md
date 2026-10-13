@@ -8,11 +8,11 @@ Accepted
 
 ## Context
 
-The commercial Workspaces app (Cloudflare Workers + D1 + R2 + Durable Objects, WorkOS identity, Yjs realtime) needs Plannotator's document UI: the markdown rendering engine, the annotation/comment machinery, the markdown editor, and the theme. Plannotator's open-source experience must not change while making that possible.
+The commercial Workspaces app, a separate host app with its own backend (its own storage, identity, uploads and realtime), needs Plannotator's document UI: the markdown rendering engine, the annotation/comment machinery, the markdown editor, and the theme. Plannotator's open-source experience must not change while making that possible.
 
 Two approaches were on the table:
 
-1. **Copy/vendor** — fork the UI source into the Workspaces repo (an earlier from-scratch reimplementation of this UI was attempted, broke the app, and was reverted).
+1. **Copy/vendor** — fork the UI source into the host app's own repository (an earlier from-scratch reimplementation of this UI was attempted, broke the app, and was reverted).
 2. **Publish** — make the UI an installable package with host-override seams.
 
 Copy/vendor loses on two facts we've since measured:
@@ -45,7 +45,7 @@ Publish two packages, keep one private, and decouple via seams — never rewrite
 
 ## Consequences
 
-- Workspaces installs the packages and plugs in its Cloudflare backend (localStorage settings, WorkOS identity with `isEditable() => false`, R2 uploads, D1 doc previews, DO-backed annotation transport) without forking. Its repo writes the matching consumer-side ADR.
+- The host app installs the packages and plugs its own backend into the seams (settings storage, identity with `isEditable() => false`, uploads, doc previews, an annotation transport) through `configurePlannotatorUI()`, without forking. Consumer-side decisions are recorded in the host app's own repository, not here.
 - The published exports map is broad; **importable ≠ supported**. The supported-import allowlist and the unsupported "calls Plannotator's local server" list live in `packages/ui/HANDOFF.md`, alongside the annotation anchor schema and the editor/Yjs status. Restructuring exports was deliberately deferred.
 - Known rough edges accepted for v1 (documented in HANDOFF.md): `AITransport`/`FileTreeBackend` leak `Response` objects; the markdown editor doesn't yet accept CM6 extensions (live collab lands via a later atomic PR threading `extensions?` through both wrapper layers after `@plannotator/markdown-editor` is imported into the monorepo).
 - Every future "the host needs different behavior" request has one sanctioned shape: add an optional seam in a Plannotator PR whose default is today's behavior.

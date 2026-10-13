@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { startAnnotateServer } from "../../packages/server/annotate";
 import { startInboxServer } from "../../packages/server/inbox";
+import { getPlannotatorDataDir } from "../../packages/shared/data-dir";
+import { refuseRealDataDir } from "../../tests/helpers/real-data-dir";
 
 const SCAN_PORT = 19432;
 const SENTINEL_PORT = 19433;
@@ -14,6 +16,11 @@ if (process.env.PLANNOTATOR_DAST_ISOLATED !== "1") {
       "Run it only inside the workflow's internal Docker network.",
   );
 }
+
+// The data dir: required, and never the person's real one (resolved the way
+// Plannotator resolves its default: ~/.plannotator, $XDG_DATA_HOME/plannotator).
+refuseRealDataDir(process.env.PLANNOTATOR_DATA_DIR, "scripts/dast/target.ts");
+const inboxDataDir = getPlannotatorDataDir();
 
 // These are defense-in-depth defaults for the test target. The Docker network
 // is the primary outbound boundary; the application is also configured so an
@@ -116,8 +123,13 @@ const scanTarget = Bun.serve({
 // the same kind of read-only guard. It always binds loopback itself.
 // binaryPath null: no restart-to-update probe of the bun binary every minute.
 const inbox = await startInboxServer({
+  // Always the scratch data dir the workflow names, never the default: run on
+  // a workstation, a default would be the person's own ~/.plannotator Inbox.
+  dataDir: inboxDataDir,
   version: "dast",
   binaryPath: null,
+  // The door's refusals are scanned too: phones on, as the iPhone app's proofs run them.
+  phones: true,
   // The real window, built by build:hook like the plan page above.
   htmlContent: readFileSync(resolve("apps/hook/dist/inbox.html"), "utf8"),
 });

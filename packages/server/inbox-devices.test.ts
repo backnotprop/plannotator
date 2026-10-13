@@ -29,7 +29,7 @@ import {
   registry,
   startInbox,
   stopInbox,
-  stubBuiltHtml,
+  removeStubbedHtml, stubBuiltHtml,
   worldEnv,
   type InboxWorld,
 } from "../../tests/helpers/inbox-world";
@@ -105,7 +105,7 @@ describe("the device door, on the binary", () => {
 
   beforeAll(async () => {
     stubs = stubBuiltHtml();
-    w = createInboxWorld("plannotator-inbox-devices-", "device-door", "device-door");
+    w = createInboxWorld("plannotator-inbox-devices-", "device-door", "device-door", { phones: true });
     const entry = startInbox(w);
     base = `http://127.0.0.1:${entry.port}`;
     serverSession = ((await (await fetch(`${base}/api/inbox/health`)).json()) as Json).serverSession;
@@ -121,14 +121,16 @@ describe("the device door, on the binary", () => {
 
   afterAll(async () => {
     await agent?.close().catch(() => {});
-    if (w) destroyInboxWorld(w);
-    for (const path of stubs) rmSync(path, { force: true });
+    if (w) await destroyInboxWorld(w);
+    removeStubbedHtml(stubs);
   });
 
   test("7.1: the window makes an offer, with the QR link, the six digits, the computer and its addresses", async () => {
     const before = Date.now();
     const made = await offer();
-    expect(Object.keys(made).sort()).toEqual(["addresses", "computer", "link", "offer"]);
+    expect(Object.keys(made).sort()).toEqual(["addresses", "computer", "link", "offer", "reachable"]);
+    // No way switched on: the window shows no code for it (Pair a phone's step 1 is the gate).
+    expect(made.reachable).toBe(false);
     expect(made.offer.code).toMatch(/^\d{6}$/);
     const ttl = Date.parse(made.offer.expires_at) - before;
     expect(ttl).toBeGreaterThan(9.9 * 60_000);
@@ -237,6 +239,8 @@ describe("the device door, on the binary", () => {
       ["GET", "projects"],
       ["GET", `threads/${threadId}`],
       ["POST", `threads/${threadId}/seen`],
+      ["POST", `threads/${threadId}/read`],
+      ["POST", `threads/${threadId}/unread`],
       ["GET", "events"],
       ["POST", `messages/${threadId}/picks`],
       ["POST", `messages/${threadId}/reply`],
@@ -304,8 +308,8 @@ describe("the device door, on the binary", () => {
 
   test("7.5 to 7.9: the list, projects, a thread, seen (key required), the event stream", async () => {
     const list = (await (await door("threads")).json()) as Json;
-    expect(Object.keys(list).sort()).toEqual(["cursor", "decisions_waiting", "notice", "project", "projects", "sections", "serverSession", "update", "version"]);
-    expect(list.sections.map((s: Json) => s.id)).toEqual(["stopped", "holding", "waiting", "sent", "new", "quiet"]);
+    expect(Object.keys(list).sort()).toEqual(["cursor", "decisions_waiting", "notice", "project", "projects", "sections", "serverSession", "update", "updated", "version"]);
+    expect(list.sections.map((s: Json) => s.id)).toEqual(["stopped", "holding", "waiting", "new", "sent", "quiet"]);
     const row = list.sections.flatMap((s: Json) => s.threads).find((t: Json) => t.thread_id === threadId);
     expect(row).toMatchObject({ section: "waiting", unread: true, questions: { open: 2 } });
     const filtered = (await (await door(`threads?project=${row.project_id}`)).json()) as Json;
@@ -316,13 +320,21 @@ describe("the device door, on the binary", () => {
     expect(Object.keys(projects.projects[0]).sort()).toEqual(["created_at", "id", "key", "name", "root", "threads", "unread"]);
 
     const thread = (await (await door(`threads/${threadId}`)).json()) as Json;
-    expect(Object.keys(thread).sort()).toEqual(["cursor", "decisions", "serverSession", "thread"]);
+    expect(Object.keys(thread).sort()).toEqual(["cursor", "decisions", "row", "serverSession", "thread"]);
     expect(thread.thread.messages[0].questions).toHaveLength(2);
     expect(thread.thread.messages[0].questions[0]).toMatchObject({ kind: "single", state: "open", revision: 0, recommendation: "Yes" });
 
     const noKey = await door(`threads/${threadId}/seen`, { body: {} });
     expect(noKey.status).toBe(422);
     expect(await noKey.json()).toEqual({ error: "idempotency_key: required on a phone's command.", code: "validation_error", field: "idempotency_key" });
+    // through_seq (seen on sight) passes the door unchanged: a cap below every message covers nothing; a bad one is refused.
+    expect(row.unseen).toBeGreaterThan(0);
+    const capped = await door(`threads/${threadId}/seen`, { body: { idempotency_key: keys(), through_seq: 0 } });
+    expect(capped.status).toBe(200);
+    expect(((await capped.json()) as Json).thread).toMatchObject({ thread_id: threadId, unseen: row.unseen });
+    const badCap = await door(`threads/${threadId}/seen`, { body: { idempotency_key: keys(), through_seq: "all" } });
+    expect(badCap.status).toBe(422);
+    expect(((await badCap.json()) as Json)).toMatchObject({ code: "validation_error", field: "through_seq" });
     const seen = await door(`threads/${threadId}/seen`, { body: { idempotency_key: keys() } });
     expect(seen.status).toBe(200);
     expect(((await seen.json()) as Json).thread).toMatchObject({ thread_id: threadId, unseen: 0 });
@@ -433,7 +445,7 @@ describe("the device door, on the binary", () => {
     expect(decision.status).toBe(200);
     expect(((await decision.json()) as Json).question).toMatchObject({ key: open.key, decision_recording: true, decision_draft: { text: "Ship behind a flag.", reason: null } });
     const decisions = (await (await door(`decisions?project=${thread.thread.project.id}`)).json()) as Json;
-    expect(Object.keys(decisions).sort()).toEqual(["cursor", "decisions", "project_id", "serverSession", "waiting"]);
+    expect(Object.keys(decisions).sort()).toEqual(["cursor", "decisions", "project_counts", "project_id", "serverSession", "waiting"]);
     expect(decisions.waiting.map((d: Json) => d.prompt)).toContain("Ship it behind a flag?");
 
     // No live session yet: New message writes nothing.
@@ -460,6 +472,15 @@ describe("the device door, on the binary", () => {
   test("7.12 and 7.13: resolve, then delete the thread", async () => {
     const resolved = await door(`messages/${threadId}/resolve`, { body: { idempotency_key: keys(), resolved: true } });
     expect(((await resolved.json()) as Json).thread.resolved_at).toBeTruthy();
+    // The window moved archived threads out of its list (Settings lists them);
+    // the phone's list is unchanged unless it asks: the thread stays in Quiet.
+    const list = (await (await door("threads")).json()) as Json;
+    const quiet = list.sections.find((s: Json) => s.id === "quiet").threads.map((t: Json) => t.thread_id);
+    expect(quiet).toContain(threadId);
+    const apart = (await (await door("threads?archived=exclude")).json()) as Json;
+    expect(apart.sections.flatMap((s: Json) => s.threads).map((t: Json) => t.thread_id)).not.toContain(threadId);
+    const archived = (await (await door("threads/archived")).json()) as Json;
+    expect(archived.threads.map((t: Json) => t.thread_id)).toContain(threadId);
     const deleted = await door(`threads/${threadId}/delete`, { body: { idempotency_key: keys() } });
     expect(deleted.status).toBe(200);
     const body = (await deleted.json()) as Json;
@@ -472,7 +493,7 @@ describe("the device door, on the binary", () => {
     const key = keys();
     const first = await door(`messages/${guideMessage}/guide/reviewed`, { body: { idempotency_key: key, reviewed: [false] } });
     expect(first.status).toBe(200);
-    stopInbox(w);
+    await stopInbox(w);
     const entry = startInbox(w);
     base = `http://127.0.0.1:${entry.port}`;
     serverSession = ((await (await fetch(`${base}/api/inbox/health`)).json()) as Json).serverSession;
@@ -538,7 +559,7 @@ describe("the device door, in process", () => {
     const dataDir = mkdtempSync(join(tmpdir(), "plannotator-inbox-devices-clock-"));
     roots.push(dataDir);
     let clock = Date.parse("2026-10-08T10:00:00.000Z");
-    const inbox = await startInboxServer({ dataDir, binaryPath: null, now: () => new Date(clock) });
+    const inbox = await startInboxServer({ dataDir, binaryPath: null, phones: true, now: () => new Date(clock) });
     try {
       const base = `http://127.0.0.1:${inbox.port}`;
       const made = (await (await fetch(`${base}/api/inbox/pairing`, { method: "POST", body: "{}" })).json()) as Json;
@@ -582,7 +603,7 @@ describe("the device door, in process", () => {
     };
     const refused = async (response: Response) => [response.status, ((await response.json()) as Json).code];
     try {
-      const inbox = await startInboxServer({ dataDir, binaryPath: null, tailscale });
+      const inbox = await startInboxServer({ dataDir, binaryPath: null, phones: true, tailscale });
       const main = `http://127.0.0.1:${inbox.port}`;
       const on = await fetch(`${main}/api/inbox/tailnet`, { method: "POST", body: JSON.stringify({ on: true }) });
       expect(((await on.json()) as Json).tailnet).toMatchObject({ on: true, address: "macbook-pro.tail0000.ts.net:8443" });
@@ -649,7 +670,7 @@ describe("the device door, in process", () => {
       expect(serve.has(8443)).toBe(false);
       expect(JSON.parse(readFileSync(join(dataDir, "inbox", "inbox.json"), "utf8")).tailnet.https_port).toBe(8443);
       let atRestart: string | undefined = "not called";
-      const next = await startInboxServer({ dataDir, binaryPath: null, tailscale, onRestartRequested: () => (atRestart = serve.get(8443)) });
+      const next = await startInboxServer({ dataDir, binaryPath: null, phones: true, tailscale, onRestartRequested: () => (atRestart = serve.get(8443)) });
       expect(serve.get(8443)).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
       expect(serve.get(8443)).not.toBe(`http://127.0.0.1:${next.port}`);
       // Restart to update takes the mapping down before the new run starts (no race with its publish).
@@ -658,13 +679,13 @@ describe("the device door, in process", () => {
       expect(atRestart).toBeUndefined();
 
       // After a crash (kill -9): the mapping still points at the dead run's door listener.
-      const crashed = await startInboxServer({ dataDir, binaryPath: null, tailscale });
+      const crashed = await startInboxServer({ dataDir, binaryPath: null, phones: true, tailscale });
       const deadDoor = serve.get(8443)!;
       crashed.stop();
       serve.set(8443, deadDoor);
       // The next start that cannot publish takes that leftover down rather than leave it.
       down.serve = true;
-      const unpublished = await startInboxServer({ dataDir, binaryPath: null, tailscale });
+      const unpublished = await startInboxServer({ dataDir, binaryPath: null, phones: true, tailscale });
       expect(serve.has(8443)).toBe(false);
       unpublished.stop();
       down.serve = false;
@@ -676,7 +697,7 @@ describe("the device door, in process", () => {
       expect(takeDownInboxTailnet(dataDir, tailscale)).toBe("none");
 
       // A mapping someone else put on 8443 is never taken down.
-      const third = await startInboxServer({ dataDir, binaryPath: null, tailscale });
+      const third = await startInboxServer({ dataDir, binaryPath: null, phones: true, tailscale });
       serve.set(8443, "http://127.0.0.1:3000");
       third.stop();
       expect(serve.get(8443)).toBe("http://127.0.0.1:3000");

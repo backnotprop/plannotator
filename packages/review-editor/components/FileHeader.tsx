@@ -51,6 +51,12 @@ interface FileHeaderProps {
    * "generated" tag next to the +/- counts. Collapse seeding is the owner's
    * concern; this prop is display-only. */
   isGenerated?: boolean;
+  /**
+   * A Markdown file's view control (Source / Changes / Read), drawn by the
+   * caller so read-only hosts (the guides.show viewer) never carry it.
+   * `iconOnly` on a tight header; `touch` in the compact touch shell.
+   */
+  renderMarkdownView?: (fit: { iconOnly: boolean; touch: boolean }) => React.ReactNode;
 }
 
 function splitFilePath(filePath: string): { directory: string; name: string } {
@@ -135,6 +141,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   compactTouchLayout,
   readOnly = false,
   isGenerated = false,
+  renderMarkdownView,
 }) => {
   const [headerWidth, setHeaderWidth] = useState<number>(0);
   const state = useReviewStateOptional();
@@ -242,6 +249,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
         )}
       </div>
       {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 ${isCompact ? 'gap-1' : 'gap-2'}`}>
+        {renderMarkdownView?.({ iconOnly: isVeryTight, touch: false })}
         {showViewedControl && onToggleViewed && (
           <button
             onClick={onToggleViewed}
@@ -357,6 +365,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           }
         />}
       </div>}
+      {isCompactTouchLayout && renderMarkdownView?.({ iconOnly: false, touch: true })}
     </div>
   );
 };

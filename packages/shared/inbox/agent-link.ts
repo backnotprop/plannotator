@@ -34,9 +34,9 @@
 
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import {
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
@@ -178,6 +178,16 @@ export async function discoverInboxTools(
   return tools.length > 0 ? tools : null;
 }
 
+/** An agent's `project_path` as an existing folder's realpath (relative to `cwd` unless absolute), or null. */
+export function inboxProjectDir(cwd: string, given: string): string | null {
+  try {
+    const real = realpathSync(isAbsolute(given) ? given : resolve(cwd, given));
+    return statSync(real).isDirectory() ? real : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface InboxAgentConnectionOptions {
   dataDir: string;
   /** The host named on messages and deliveries (`pi`, `opencode`). */
@@ -215,6 +225,12 @@ export class InboxAgentConnection {
       agent_name: this.options.agentName,
     });
     if ("error" in call) return { text: call.error, isError: true };
+    if (call.projectPath !== undefined) {
+      // The agent named the project: an existing folder, relative to the working folder, or nothing reaches the Inbox.
+      const resolved = inboxProjectDir(at.cwd, call.projectPath);
+      if (!resolved) return { text: `Invalid plannotator_inbox call: project_path ${call.projectPath} is not an existing folder.`, isError: true };
+      call.arguments.project_path = resolved;
+    }
     const running = await this.ensureRunning();
     if ("error" in running) return { text: running.error, isError: true };
     let answer: Awaited<ReturnType<typeof mcpCall>>;

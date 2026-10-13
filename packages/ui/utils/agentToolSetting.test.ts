@@ -14,6 +14,9 @@ describe('parseAgentToolSetting', () => {
       .toEqual({ host: 'pi', enabled: false, configured: false });
     expect(parseAgentToolSetting({ agentToolHost: 'opencode', agentToolEnabled: true, agentToolConfigured: true, agentToolEnv: true }))
       .toEqual({ host: 'opencode', enabled: true, configured: true, env: true });
+    // The Pi extension inside Oh My Pi reports its own host (on by default there).
+    expect(parseAgentToolSetting({ agentToolHost: 'oh-my-pi', agentToolEnabled: true, agentToolConfigured: false, agentTool: true }))
+      .toEqual({ host: 'oh-my-pi', enabled: true, configured: false });
   });
 
   test('nothing without a known tool host', () => {
@@ -62,10 +65,13 @@ describe('agent tool offer eligibility', () => {
     expect(agentToolAnnouncementEligible({ ...base, setting: { host: 'opencode', enabled: false, configured: false } })).toBe(true);
   });
 
-  test('not for Claude Code, an on, chosen or env-decided value, or no host', () => {
+  test('not for Claude Code or Oh My Pi, an on, chosen or env-decided value, or no host', () => {
     for (const setting of [
       undefined,
       { host: 'claude-code', enabled: false, configured: false },
+      // Oh My Pi has the tool on by default: nothing to offer, even if it reads off.
+      { host: 'oh-my-pi', enabled: true, configured: false },
+      { host: 'oh-my-pi', enabled: false, configured: false },
       { host: 'pi', enabled: true, configured: true },
       { host: 'pi', enabled: false, configured: true },
       { host: 'pi', enabled: false, configured: false, env: false },

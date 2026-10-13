@@ -123,3 +123,32 @@ test("a deleted thread's seq is never handed out again, even after a restart", a
   const next = await send(client, { project_path: project, body: "After the restart.", agent_session: "ses_C" });
   expect(next.cursor).toBeGreaterThan(highest);
 });
+
+test("a script attaches as kind code: served as text/plain under the sandbox CSP, its view carries the text, and a line comment on it is kept", async () => {
+  const { project, dataDir } = world();
+  const script = "#!/bin/sh\n# replay the failed webhook\ncurl -X POST http://localhost:4242/hooks\n";
+  writeFileSync(join(project, "replay.sh"), script);
+  // A source name whose bytes are not text is offered as a download, not refused.
+  writeFileSync(join(project, "tool.ts"), new Uint8Array([0x00, 0x61, 0x73, 0x6d]));
+  const server = await start(dataDir);
+  const client = await agent(server);
+  const binary = await send(client, { project_path: project, body: "Binary.", attachments: ["tool.ts"] });
+  expect(binary.attachments[0].kind).toBe("file");
+  const sent = await send(client, { project_path: project, body: "The script I ran.", attachments: ["replay.sh"] });
+  const attachment = sent.attachments[0] as { id: string; kind: string };
+  expect(attachment.kind).toBe("code");
+  const raw = await fetch(`http://127.0.0.1:${server.port}/api/inbox/attachments/${attachment.id}`);
+  expect(raw.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+  expect(raw.headers.get("content-security-policy")).toBe("sandbox");
+  expect(raw.headers.get("x-content-type-options")).toBe("nosniff");
+  expect(await raw.text()).toBe(script);
+  const view = (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/attachments/${attachment.id}/view`)).json()) as { text: string; html: string | null };
+  expect(view.text).toBe(script);
+  expect(view.html).toBeNull();
+  const annotated = await post(server, "/api/inbox/annotations", {
+    attachment_id: attachment.id,
+    version: "current",
+    annotation: { id: "ann-code", type: "COMMENT", text: "Why localhost?", originalText: "curl -X POST http://localhost:4242/hooks", blockId: "code-L3-3", startOffset: 0, endOffset: 0, createdA: 1, inboxCode: { lineStart: 3, lineEnd: 3 } },
+  });
+  expect(annotated.status).toBe(200);
+});

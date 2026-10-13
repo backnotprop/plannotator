@@ -86,6 +86,8 @@ import {
   handleReviewServerReady,
 } from "@plannotator/server/review";
 import { runGuideCli } from "@plannotator/server/guide-cli";
+import { runUpdateCommand } from "./update-command";
+import { takeUpdateHint } from "@plannotator/shared/update-check";
 import {
   startAnnotateServer as startAnnotateServerUnguarded,
   handleAnnotateServerReady,
@@ -96,7 +98,7 @@ import {
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
-import { loadConfig, resolveDefaultDiffType, resolveSharingEnabled } from "@plannotator/shared/config";
+import { loadConfig, resolveDefaultDiffType, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
 import { formatIgnoredReviewWords, parseReviewArgs, resolveReviewTarget, withReviewDirectory, type ParsedReviewArgs } from "@plannotator/shared/review-args";
 import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
 import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
@@ -216,7 +218,9 @@ import {
 } from "./cli";
 import { exitOnUnknownSubcommand } from "./unknown-subcommand";
 import { completeAnnotateCommand } from "./annotate-command";
-import { runInboxCommand } from "./inbox-command";
+import { runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
+import { formatInboxHelp } from "./inbox-help";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import {
   annotateStartupFailureExitCode,
   isStrictAnnotateInvocation,
@@ -324,7 +328,9 @@ if (browserIdx !== -1 && args[browserIdx + 1]) {
 // --tailscale + PLANNOTATOR_REMOTE combination; it also restores the random
 // local port, so simultaneous sessions get distinct serve mappings.
 const TAILSCALE_COMMANDS = new Set(["review", "annotate", "annotate-last", "last"]);
-const tailscaleIdx = args.indexOf("--tailscale");
+// `plannotator inbox --tailscale` is the Inbox's own flag (inbox-command.ts):
+// a long-lived, owner-only publication, never this per-session transport.
+const tailscaleIdx = args[0] === "inbox" ? -1 : args.indexOf("--tailscale");
 const tailscaleFlag = tailscaleIdx !== -1;
 if (tailscaleFlag) {
   args.splice(tailscaleIdx, 1);
@@ -543,7 +549,12 @@ if (isTopLevelHelpInvocation(args)) {
 // spawning a stray tab whose close injects a bogus "no feedback" signal.
 const helpSubcommand = isSubcommandHelpInvocation(args);
 if (helpSubcommand) {
-  console.log(formatSubcommandHelp(helpSubcommand));
+  // `inbox --help` is the Plannotator Inbox guide for agents (inbox-help.ts).
+  console.log(
+    helpSubcommand === "inbox"
+      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir() })
+      : formatSubcommandHelp(helpSubcommand),
+  );
   process.exit(0);
 }
 
@@ -639,6 +650,13 @@ if (args[0] === "uninstall") {
   process.exit(result.ok ? 0 : 1);
 }
 
+// `plannotator update [--check]`: the install script for the newest release,
+// in the foreground (update-command.ts). Before the session registry and the
+// auto-update trigger: it is not a session.
+if (args[0] === "update") {
+  process.exit(await runUpdateCommand(rawArgs.slice(rawArgs.indexOf("update") + 1), { currentVersion: getCliVersion() }));
+}
+
 if (args[0] === "install-runtime") {
   const runtime = args[1];
   if (runtime !== "agent-terminal" && runtime !== "call-flow") {
@@ -671,7 +689,28 @@ process.on("exit", () => unregisterSession());
 // OpenCode and Pi servers never do. Both calls are no-ops for a dev/source run
 // (no __CLI_VERSION__), and the check itself is scheduled, never awaited.
 enableAutoUpdateNotice(getCliVersion());
+// One stderr line after an interactive session when the machine knows of a
+// newer release (update-check.ts, read from the cache: no network here), at
+// most once a day. Only for a person at a terminal: never under --json or
+// --hook, never when stderr is not a TTY (an agent's Bash call, a hook, the
+// Claude Code mod's detached launch), and never inside an agent session.
+let updateHintArmed = false;
+process.on("exit", () => {
+  if (!updateHintArmed || !process.stderr.isTTY) return;
+  if (rawArgs.includes("--json") || rawArgs.includes("--hook")) return;
+  if (process.env.CLAUDECODE || process.env.PLANNOTATOR_SESSION_TAG) return;
+  try {
+    const line = takeUpdateHint({
+      current: getCliVersion(),
+      enabled: resolveUpdateCheck(loadConfig()),
+      now: Date.now(),
+    });
+    if (line) process.stderr.write(`${line}\n`);
+  } catch {}
+});
+
 function registerCliSession(info: SessionInfo): void {
+  updateHintArmed = ["review", "annotate", "annotate-last", "last", "archive"].includes(args[0] ?? "");
   // The Claude Code mod tags its session (`claude-code:<session id>`) in the
   // environment every process it starts inherits, so a session it launched can
   // be matched back to it.

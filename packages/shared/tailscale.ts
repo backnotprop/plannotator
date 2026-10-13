@@ -220,6 +220,68 @@ export function serveStatusProxy(stdout: string, port: number): { state: "free" 
 }
 
 /**
+ * Every serve route in `tailscale serve status --json`, background and
+ * foreground: each web handler's proxy target (`Web["host:port"].Handlers`,
+ * every path) and each raw TCP forward (`TCP[port].TCPForward`). Undefined
+ * when the output is not recognizable.
+ */
+export function serveStatusRoutes(stdout: string): { port: number; target: string }[] | undefined {
+  const trimmed = stdout.trim();
+  if (trimmed === "") return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return undefined;
+  }
+  if (parsed === null) return [];
+  if (typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  const routes: { port: number; target: string }[] = [];
+  const foreground = (parsed as { Foreground?: unknown }).Foreground;
+  const configs = [parsed, ...(foreground && typeof foreground === "object" ? Object.values(foreground as Record<string, unknown>) : [])];
+  for (const config of configs) {
+    if (!config || typeof config !== "object") continue;
+    const tcp = (config as { TCP?: unknown }).TCP;
+    if (tcp && typeof tcp === "object") {
+      for (const [port, entry] of Object.entries(tcp as Record<string, unknown>)) {
+        const forward = (entry as { TCPForward?: unknown } | null)?.TCPForward;
+        if (typeof forward === "string" && /^\d+$/.test(port)) routes.push({ port: Number(port), target: `tcp://${forward}` });
+      }
+    }
+    const web = (config as { Web?: unknown }).Web;
+    if (web && typeof web === "object") {
+      for (const [hostPort, entry] of Object.entries(web as Record<string, unknown>)) {
+        const port = /:(\d+)$/.exec(hostPort)?.[1];
+        const handlers = (entry as { Handlers?: unknown } | null)?.Handlers;
+        if (!port || !handlers || typeof handlers !== "object") continue;
+        for (const handler of Object.values(handlers as Record<string, unknown>)) {
+          const proxy = (handler as { Proxy?: unknown } | null)?.Proxy;
+          if (typeof proxy === "string") routes.push({ port: Number(port), target: proxy });
+        }
+      }
+    }
+  }
+  return routes;
+}
+
+/**
+ * A serve target that lands on `port` on this machine's loopback:
+ * `http://127.0.0.1:<port>`, `http://localhost:<port>/x`, `https+insecure://…`,
+ * or a TCP forward `tcp://127.0.0.1:<port>`.
+ */
+export function serveTargetIsLoopbackPort(target: string, port: number): boolean {
+  let url: URL;
+  try {
+    url = new URL(target.replace(/^https\+insecure:/, "https:"));
+  } catch {
+    return false;
+  }
+  const host = url.hostname.toLowerCase();
+  const loopback = host === "localhost" || host === "[::1]" || host === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+  return loopback && url.port !== "" && Number(url.port) === port;
+}
+
+/**
  * First https URL in `tailscale serve --bg` output whose port matches the
  * port we asked to publish, sans trailing slash. Serve output is
  * version-dependent, so an https URL for a DIFFERENT port (some other
@@ -238,6 +300,86 @@ export function extractServeHttpsUrl(output: string, expectedPort: number): stri
     }
   }
   return undefined;
+}
+
+/** Who owns this machine on the tailnet, as `tailscale status --json` reports it. */
+export interface TailscaleSelfIdentity {
+  /** The owning user's login (`User[Self.UserID].LoginName`); null for a tagged machine or when Tailscale does not say. */
+  login: string | null;
+  /** The machine carries ACL tags: it has no owning user, and serve sends no identity for tagged peers. */
+  tagged: boolean;
+}
+
+/**
+ * The login that owns this machine: `Self.UserID` looked up in the `User`
+ * map (keyed by the id as a string). A tagged machine (`Self.Tags`
+ * non-empty) is owned by its tags, not a person, so its login is null even
+ * though Tailscale lists a "tagged-devices" pseudo-user for it. Undefined
+ * when the output is not a status document.
+ */
+export function parseTailscaleSelfIdentity(stdout: string): TailscaleSelfIdentity | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  const self = (parsed as { Self?: unknown }).Self;
+  if (!self || typeof self !== "object" || Array.isArray(self)) return undefined;
+  const tags = (self as { Tags?: unknown }).Tags;
+  if (Array.isArray(tags) && tags.length > 0) return { login: null, tagged: true };
+  const userId = (self as { UserID?: unknown }).UserID;
+  const users = (parsed as { User?: unknown }).User;
+  if ((typeof userId !== "number" && typeof userId !== "string") || !users || typeof users !== "object") {
+    return { login: null, tagged: false };
+  }
+  const profile = (users as Record<string, unknown>)[String(userId)];
+  const login = (profile as { LoginName?: unknown } | null | undefined)?.LoginName;
+  return { login: typeof login === "string" && login.trim() !== "" ? login.trim() : null, tagged: false };
+}
+
+/**
+ * A `Tailscale-User-*` header value as serve writes it: ASCII as is, anything
+ * else RFC 2047 Q-encoded (`=?utf-8?q?J=C3=BCrgen?=`, Go's
+ * `mime.QEncoding.Encode`, as one or more encoded words separated by
+ * whitespace, which RFC 2047 drops between adjacent words). Returns the
+ * decoded text, or null when an encoded word is malformed or not UTF-8:
+ * never a guess, since the caller compares it to a login.
+ */
+export function decodeTailscaleHeaderValue(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed.includes("=?")) return trimmed;
+  let out = "";
+  for (const word of trimmed.split(/\s+/)) {
+    const match = /^=\?utf-8\?q\?([^?]*)\?=$/i.exec(word);
+    if (!match) return null;
+    const text = match[1]!;
+    const bytes: number[] = [];
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i]!;
+      if (ch === "_") {
+        bytes.push(0x20);
+      } else if (ch === "=") {
+        const hex = text.slice(i + 1, i + 3);
+        if (!/^[0-9a-f]{2}$/i.test(hex)) return null;
+        bytes.push(parseInt(hex, 16));
+        i += 2;
+      } else {
+        const code = ch.charCodeAt(0);
+        if (code > 0x7e || code < 0x21) return null;
+        bytes.push(code);
+      }
+    }
+    try {
+      out += new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(bytes));
+    } catch {
+      return null;
+    }
+  }
+  // Serve encodes only non-ASCII values; an all-ASCII encoded word is not
+  // what serve writes, so it is compared as it came, never as a login.
+  return /^[\x00-\x7f]*$/.test(out) ? trimmed : out;
 }
 
 /**

@@ -20,7 +20,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { loadConfig, resolveSharingEnabled } from "@plannotator/shared/config";
+import { loadConfig, resolveInboxReminder, resolveSharingEnabled } from "@plannotator/shared/config";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import {
@@ -50,7 +50,7 @@ import { shouldFallbackAfterEmbeddedError } from "./prompt-delivery-error";
 import { executeSubmitPlan } from "./submit-plan-executor";
 import { getPlanningPrompt } from "./planning-prompt";
 import { announceSessionUrl } from "./session-url";
-import { findInboxConnection, inboxToolArgs } from "./inbox";
+import { addInboxReminderOpenCode1, findInboxConnection, inboxToolArgs, openCode1AgentHasInbox } from "./inbox";
 import { inboxAgentTool } from "@plannotator/shared/inbox/connection";
 import {
   appendCommandFeedback,
@@ -734,6 +734,39 @@ Do NOT proceed with implementation until your plan is approved.`;
           },
         }),
       };
+      // The Inbox reminder, decided with the tool: one fixed line at the end
+      // of the last system part, on every request of an agent that has the
+      // tool (OpenCode 1 rebuilds the system prompt per request, so a fixed
+      // line keeps the prefix stable), the no-wake wording since replies do
+      // not come back by themselves here. A subagent, or an agent whose
+      // `tools` switch it off, gets none. `inboxReminder` turns it off.
+      // A lookup that fails reuses the session's last answer (no answer yet:
+      // no line), so the system prompt cannot flip between requests.
+      if (resolveInboxReminder(loadConfig(), process.env, "opencode")) {
+        const planTransform = plugin["experimental.chat.system.transform"];
+        const lastAnswer = new Map<string, boolean>();
+        plugin["experimental.chat.system.transform"] = async (input, output) => {
+          await planTransform?.(input, output);
+          if (!input.sessionID) return;
+          let hasInbox: boolean;
+          try {
+            const messages = await ctx.client.session.messages({ path: { id: input.sessionID } });
+            const name = getLastUserAgentFromMessages(messages.data);
+            let agent: { mode?: unknown; tools?: unknown } | undefined;
+            if (name) {
+              const agents = await getOpenCodeAgents();
+              if (!agents) throw new Error("agents unavailable");
+              agent = agents.find((candidate: { name?: string }) => candidate.name === name);
+            }
+            hasInbox = openCode1AgentHasInbox(agent);
+          } catch {
+            hasInbox = lastAnswer.get(input.sessionID) ?? false;
+          }
+          if (lastAnswer.size > 500 && !lastAnswer.has(input.sessionID)) lastAnswer.clear();
+          lastAnswer.set(input.sessionID, hasInbox);
+          if (hasInbox) addInboxReminderOpenCode1(output.system);
+        };
+      }
     }
   } catch (error) {
     console.error(`[Plannotator] Could not register the plannotator_inbox tool: ${error instanceof Error ? error.message : String(error)}`);

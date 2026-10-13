@@ -8,6 +8,7 @@
  * more often than every 20 minutes, so it is kept for 50 minutes per isolate.
  */
 import { h2Request } from "./apns-h2";
+import { loopbackOverride } from "./origin";
 
 export interface ApnsKey {
   key: string;
@@ -68,7 +69,8 @@ export interface ApnsResult {
 /**
  * Send one push. `origin` replaces Apple's host for both environments: a
  * local HTTP/2 server in the relay's own proof (`APNS_ORIGIN` under
- * `wrangler dev`); `http:` there means cleartext HTTP/2.
+ * `wrangler dev`, loopback only; any other host is ignored); `http:` there
+ * means cleartext HTTP/2.
  */
 export async function sendPush(input: {
   apns: ApnsKey;
@@ -78,7 +80,7 @@ export async function sendPush(input: {
   envelope: string;
   origin?: string;
 }): Promise<ApnsResult> {
-  const target = new URL(input.origin || APNS_HOSTS[input.environment]);
+  const target = new URL(loopbackOverride("APNS_ORIGIN", input.origin) || APNS_HOSTS[input.environment]);
   const tls = target.protocol === "https:";
   const body = encoder.encode(apnsBody(input.envelope));
   const answer = await h2Request({

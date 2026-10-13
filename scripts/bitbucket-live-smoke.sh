@@ -5,8 +5,8 @@
 # inline + general comments with Approve and then Request changes, verifies
 # each through the Bitbucket API, and deletes the repository.
 #
-# Required env (the Plannotator names; the BITBUCKET_* names used by the
-# Workspaces test-credential files are mapped onto them when unset):
+# Required env (the Plannotator names; the plain BITBUCKET_* names are mapped
+# onto them when unset):
 #   PLANNOTATOR_BITBUCKET_EMAIL   (or BITBUCKET_EMAIL)      Atlassian account email
 #   PLANNOTATOR_BITBUCKET_TOKEN   (or BITBUCKET_API_TOKEN)  API token with scopes:
 #       read:user:bitbucket read:repository:bitbucket read:pullrequest:bitbucket

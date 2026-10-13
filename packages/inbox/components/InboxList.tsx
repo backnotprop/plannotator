@@ -1,7 +1,10 @@
-import { useState, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { agentName, questionCount, shortTime } from '../format';
 import { AuthorMark, Icon } from '../icons';
+import { ListColumnEdge } from '../shell/ListColumnEdge';
+import { SidebarTrigger, useSidebar } from '../shell/sidebar';
+import { offersRowMarkRead } from '../markRead';
 
 export interface InboxListProps {
   title: string;
@@ -10,7 +13,11 @@ export interface InboxListProps {
   sections: readonly InboxListSection[];
   /** One project is shown: its rows drop the project label. */
   filtered: boolean;
-  /** A thread is open beside the list: two-line rows in a narrow column. */
+  /**
+   * A thread is open beside the list: a column of its own width (380px, or
+   * wider where the person dragged its edge), two-line rows until it is
+   * wide enough for the wide ones.
+   */
   narrow: boolean;
   selectedThreadId: string | null;
   notice: string | null;
@@ -18,6 +25,12 @@ export interface InboxListProps {
   ask?: ReactNode;
   onShowNew: () => void;
   onOpen: (row: InboxListRow) => void;
+  /** The row's hover action (a row that waits on the person): Mark read, without opening it. Absent: no action. */
+  onMarkRead?: (row: InboxListRow) => void;
+  /** A phone (phone.ts): the list fills the window and its rows are a mail app's. */
+  phone?: boolean;
+  /** The project shown (null: every project). A phone opens another project's list at its top, as a mail app opens another mailbox. */
+  scope?: string | null;
 }
 
 function badgeOf(row: InboxListRow): string | null {
@@ -33,38 +46,151 @@ function subjectOf(row: InboxListRow): string {
 }
 
 function countOf(row: InboxListRow): string {
+  // A Quiet row says why it is there: archived (resolved), or marked read.
+  if (row.section === 'quiet' && row.resolved_at !== null && row.back_from_archive !== true) return 'Archived';
+  if (row.section === 'quiet' && (row.read_at ?? null) !== null) return 'Read';
   if (row.answered_not_sent) return 'Answered, not sent';
   return questionCount(row.questions.open);
 }
 
-function WideRow({ row, onOpen }: { row: InboxListRow; onOpen: () => void }) {
+/**
+ * The thread chip, the subject and the guided review mark, shared by both row
+ * shapes. When the line is short of room the subject gives way first, down to
+ * a floor (inbox.css), then the chip; the mark drops its label to its icon.
+ */
+function SubjectLine({ row }: { row: InboxListRow }) {
+  return (
+    <>
+      {row.thread_name && (
+        <span className="ib-key">
+          <span className="ib-keyt">{row.thread_name}</span>
+        </span>
+      )}
+      <span className="ib-s">
+        <span className="ib-st">{subjectOf(row)}</span>
+      </span>
+      {/* The record's 1.1: a thread that carries a guided review says so after its subject. */}
+      {row.guide && row.section !== 'sent' && (
+        <span className="ib-att" data-guide-mark="" role="img" aria-label="Guided review" title="Guided review">
+          <Icon name="book" size={13} />
+          <span className="ib-att-l">Guided review</span>
+        </span>
+      )}
+    </>
+  );
+}
+
+/**
+ * Below this list width the wide row of every project leaves its subject cell
+ * too little room (the project and badge columns are fixed at 130px and
+ * 104px), so the list draws the two-line rows instead.
+ */
+export const WIDE_ROWS_MIN_LIST_WIDTH = 900;
+
+/**
+ * Whether the list is narrower than `min`, read before paint and on every
+ * resize. Unmeasured (no layout, no ResizeObserver) reads as `unmeasured`:
+ * wide for the full list, narrow for the column beside a thread.
+ *
+ * Crossing `min` swaps every row element for the other shape, which would
+ * drop keyboard focus: the row that held it is noted just before the swap and
+ * focused again (without scrolling) once the new rows are in the DOM.
+ */
+function useNarrowerThan(min: number, unmeasured: boolean) {
+  const ref = useRef<HTMLElement>(null);
+  const [narrower, setNarrower] = useState(unmeasured);
+  const current = useRef(unmeasured);
+  const focusedThread = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const read = (width: number) => {
+      const next = width > 0 ? width < min : unmeasured;
+      if (next === current.current) return;
+      const active = document.activeElement;
+      focusedThread.current = active instanceof HTMLElement && el.contains(active) ? (active.closest('[data-thread-id]')?.getAttribute('data-thread-id') ?? null) : null;
+      current.current = next;
+      setNarrower(next);
+    };
+    read(el.getBoundingClientRect().width);
+    if (typeof ResizeObserver === 'undefined') return;
+    // The border box, as getBoundingClientRect reads it: contentRect leaves out
+    // the column's 1px border, so a 900px column would read 899 here.
+    const observer = new ResizeObserver((entries) => read(entries[0]?.borderBoxSize?.[0]?.inlineSize ?? el.getBoundingClientRect().width));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [min, unmeasured]);
+  useLayoutEffect(() => {
+    const id = focusedThread.current;
+    focusedThread.current = null;
+    if (!id || !ref.current) return;
+    const row = [...ref.current.querySelectorAll<HTMLElement>('[data-thread-id]')].find((r) => r.getAttribute('data-thread-id') === id);
+    row?.focus({ preventScroll: true });
+  }, [narrower]);
+  return [ref, narrower] as const;
+}
+
+/**
+ * One row of the wide list. With every project shown it is five columns:
+ * project, badge, subject, count, time. In one project's list (`filtered`)
+ * the project and badge columns are not rendered at all: the badge, when the
+ * row has one, leads the subject cell, so a row starts at the list's left edge
+ * instead of after an empty block.
+ */
+function WideRow({ row, selected, filtered, onOpen }: { row: InboxListRow; selected: boolean; filtered: boolean; onOpen: () => void }) {
   const badge = badgeOf(row);
   const sent = row.section === 'sent';
+  const badgeEl = badge && <span className="ib-badge">{badge}</span>;
   return (
     <button
       type="button"
-      className={`ib-row${row.unread ? ' ib-u' : ''}${sent ? ' ib-sent' : ''}`}
+      className={`ib-row${row.unread ? ' ib-u' : ''}${sent ? ' ib-sent' : ''}${selected ? ' ib-sel' : ''}`}
       onClick={onOpen}
+      aria-current={selected ? 'true' : undefined}
       data-thread-id={row.thread_id}
       data-section={row.section}
     >
-      <span className="ib-p">{row.project.name}</span>
-      <span>{badge && <span className="ib-badge">{badge}</span>}</span>
+      {!filtered && <span className="ib-p">{row.project.name}</span>}
+      {!filtered && <span>{badgeEl}</span>}
       <span className="ib-subj">
+        {filtered && badgeEl}
         <AuthorMark author={row.author} />
-        {row.thread_name && <span className="ib-key">{row.thread_name}</span>}
-        <span className="ib-s">{subjectOf(row)}</span>
-        {/* The record's 1.1: a thread that carries a guided review says so after its subject. */}
-        {row.guide && !sent && (
-          <span className="ib-att" data-guide-mark="">
-            <Icon name="book" size={13} />
-            Guided review
-          </span>
-        )}
+        <SubjectLine row={row} />
       </span>
-      <span className="ib-c">{countOf(row)}</span>
+      <span className={`ib-c${row.section === 'quiet' ? ' ib-qlabel' : ''}`}>{countOf(row)}</span>
       <span className="ib-t">{shortTime(row.last_at)}</span>
     </button>
+  );
+}
+
+/**
+ * A row and its quiet hover action: Mark read on a row that waits on the
+ * person, shown on hover or keyboard focus where the count and time are. It
+ * never opens the thread. The action is the row's sibling (a button cannot
+ * hold a button).
+ */
+function RowWithAction({ row, onMarkRead, children }: { row: InboxListRow; onMarkRead?: (row: InboxListRow) => void; children: ReactNode }) {
+  const offer = onMarkRead && offersRowMarkRead(row);
+  return (
+    <div className="ib-rw" data-row={row.thread_id}>
+      {children}
+      {offer && (
+        <button
+          type="button"
+          className="ib-ract"
+          data-row-mark-read=""
+          title={`Mark read (E): out of the top until ${agentName(row.author)} writes again`}
+          aria-label={`Mark read: ${row.subject ?? '(no subject)'}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onMarkRead(row);
+          }}
+        >
+          <Icon name="checkCircle" size={15} />
+          Mark read
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -82,32 +208,100 @@ function NarrowRow({ row, selected, filtered, onOpen }: { row: InboxListRow; sel
     >
       <div className="ib-l1">
         <span className="ib-p">{filtered ? agentName(row.author) : row.project.name}</span>
-        {count && <span className="ib-c">{count}</span>}
+        {count && <span className={`ib-c${row.section === 'quiet' ? ' ib-qlabel' : ''}`}>{count}</span>}
         <span className={`ib-t${count ? '' : ' ib-alone'}`}>{shortTime(row.last_at)}</span>
       </div>
       <div className="ib-l2">
         {badge && <span className="ib-badge">{badge}</span>}
         <AuthorMark author={row.author} />
-        {row.thread_name && <span className="ib-key">{row.thread_name}</span>}
-        <span className="ib-s">{subjectOf(row)}</span>
+        <SubjectLine row={row} />
       </div>
+    </button>
+  );
+}
+
+/**
+ * A row on a phone, read like a mail app's: who and when on the first line
+ * (the agent's mark, the project, or the agent in one project's list, and the
+ * time), the subject on up to two lines, then what the thread holds (the
+ * badge, the thread's name, the question count, the guided review mark),
+ * which wraps rather than pushing anything off the row.
+ */
+function PhoneRow({ row, filtered, onOpen }: { row: InboxListRow; filtered: boolean; onOpen: () => void }) {
+  const badge = badgeOf(row);
+  const count = countOf(row);
+  const guide = row.guide && row.section !== 'sent';
+  return (
+    <button
+      type="button"
+      className={`ib-mrow${row.unread ? ' ib-u' : ''}${row.section === 'sent' ? ' ib-sent' : ''}`}
+      onClick={onOpen}
+      data-thread-id={row.thread_id}
+      data-section={row.section}
+    >
+      <span className="ib-m1">
+        <AuthorMark author={row.author} />
+        <span className="ib-p">{filtered ? agentName(row.author) : row.project.name}</span>
+        <span className="ib-t">{shortTime(row.last_at)}</span>
+      </span>
+      <span className="ib-m2">{subjectOf(row)}</span>
+      {(badge || row.thread_name || count || guide) && (
+        <span className="ib-m3">
+          {badge && <span className="ib-badge">{badge}</span>}
+          {row.thread_name && (
+            <span className="ib-key">
+              <span className="ib-keyt">{row.thread_name}</span>
+            </span>
+          )}
+          {count && <span className={`ib-c${row.section === 'quiet' ? ' ib-qlabel' : ''}`}>{count}</span>}
+          {guide && (
+            <span className="ib-att" data-guide-mark="" role="img" aria-label="Guided review" title="Guided review">
+              <Icon name="book" size={13} />
+              <span className="ib-att-l">Guided review</span>
+            </span>
+          )}
+        </span>
+      )}
     </button>
   );
 }
 
 export function InboxList(props: InboxListProps) {
   const [quietOpen, setQuietOpen] = useState(false);
+  // Another project on a phone: the list starts at its top. The list itself stays mounted (its Quiet fold and,
+  // across a resize past the phone width, its scroll are kept).
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const shownScope = useRef(props.scope ?? null);
+  useLayoutEffect(() => {
+    const scope = props.scope ?? null;
+    if (scope === shownScope.current) return;
+    shownScope.current = scope;
+    if (props.phone && bodyRef.current) bodyRef.current.scrollTop = 0;
+  }, [props.scope, props.phone]);
+  const [listRef, narrowList] = useNarrowerThan(WIDE_ROWS_MIN_LIST_WIDTH, props.narrow);
+  // Two-line rows in a list too narrow for the wide row's columns: beside an
+  // open thread for every list (the column is 380px unless its edge was
+  // dragged past the wide rows' width), and in the full list for every
+  // project (one project's wide row fits any width).
+  const twoLine = narrowList && (props.narrow || !props.filtered);
+  // The column beside a thread gets the sidebar's resize edge, except on a phone.
+  const { isMobile } = useSidebar();
+  const columnId = useId();
+  const resizable = props.narrow && !isMobile;
   const visible = props.sections.filter((s) => s.threads.length > 0);
   return (
     <section
-      className={`ib-listcol${props.narrow ? ' ib-narrow' : ''}${props.filtered ? ' ib-noproj' : ''}`}
+      ref={listRef}
+      id={columnId}
+      className={`ib-listcol${props.narrow ? ' ib-narrow' : ''}${resizable ? ' ib-resizable' : ''}${props.filtered ? ' ib-noproj' : ''}`}
       aria-label={props.title}
     >
       <div className="ib-lhead">
+        <SidebarTrigger />
         <h1>{props.title}</h1>
         {props.path && <span className="ib-path">{props.path}</span>}
       </div>
-      <div className="ib-lbody">
+      <div className="ib-lbody" ref={bodyRef}>
         {props.ask}
         {props.notice && (
           <button type="button" className="ib-notice" onClick={props.onShowNew} data-inbox-notice="">
@@ -133,22 +327,24 @@ export function InboxList(props: InboxListProps) {
               )}
               {open &&
                 section.threads.map((row) =>
-                  props.narrow ? (
-                    <NarrowRow
-                      key={row.thread_id}
-                      row={row}
-                      filtered={props.filtered}
-                      selected={row.thread_id === props.selectedThreadId}
-                      onOpen={() => props.onOpen(row)}
-                    />
+                  // A phone's row has no hover action (a hover on a touch screen is a first tap): Mark read is in the thread's header there.
+                  props.phone ? (
+                    <PhoneRow key={row.thread_id} row={row} filtered={props.filtered} onOpen={() => props.onOpen(row)} />
                   ) : (
-                    <WideRow key={row.thread_id} row={row} onOpen={() => props.onOpen(row)} />
+                    <RowWithAction key={row.thread_id} row={row} onMarkRead={props.onMarkRead}>
+                      {twoLine ? (
+                        <NarrowRow row={row} filtered={props.filtered} selected={row.thread_id === props.selectedThreadId} onOpen={() => props.onOpen(row)} />
+                      ) : (
+                        <WideRow row={row} filtered={props.filtered} selected={row.thread_id === props.selectedThreadId} onOpen={() => props.onOpen(row)} />
+                      )}
+                    </RowWithAction>
                   ),
                 )}
             </div>
           );
         })}
       </div>
+      {resizable && <ListColumnEdge controls={columnId} />}
     </section>
   );
 }

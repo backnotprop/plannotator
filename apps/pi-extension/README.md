@@ -23,6 +23,8 @@ pi install ./plannotator/apps/pi-extension
 pi -e npm:@plannotator/pi-extension
 ```
 
+**In Oh My Pi (OMP):** OMP loads this extension as an OMP plugin. See [Oh My Pi](#oh-my-pi-omp) below.
+
 ## Update
 
 ```bash
@@ -57,6 +59,43 @@ pi remove npm:@plannotator/pi-extension
 
 If Pi was configured by the full Plannotator installer, `plannotator uninstall`
 also detects and removes the extension through Pi.
+
+## Oh My Pi (OMP)
+
+[Oh My Pi](https://omp.sh) loads Pi extensions as OMP plugins, so this
+extension runs in OMP too. Install it, then restart OMP:
+
+```bash
+omp plugin install @plannotator/pi-extension
+```
+
+Update with `omp plugin upgrade @plannotator/pi-extension`. Remove with
+`omp plugin uninstall @plannotator/pi-extension`.
+
+Open reviews with the extension's commands: `/plannotator-review`,
+`/plannotator-annotate`, `/plannotator-last`, and `/plannotator-plan-mode`.
+Reviews opened this way get [Ask this session](#ask-this-session): Ask AI sends
+the question to the OMP session and streams the answer back. The label reads
+"Ask this session · Pi".
+
+Reviews started by the `plannotator` CLI from OMP's shell do not get Ask this
+session. This includes the `/skill:plannotator-*` skills from the CLI installer
+and the agent running `plannotator` with its bash tool. The CLI has no
+connection back to OMP, so Ask AI offers only separate AI providers, and the
+header badge reads "Oh My Pi" instead of "Pi". For agent-opened reviews with Ask
+this session, the agent uses the [`plannotator` tool](#the-plannotator-tool),
+which is **on by default in OMP**. OMP lists extension tools as `xd://` devices,
+one short line each in its system prompt (about 50 tokens for this one), and
+loads the full description only when the agent reads it, so the agent finds it
+as `xd://plannotator`. To keep it out, set `PLANNOTATOR_AGENT_TOOL=0` or
+`{ "agentTool": false }` in `~/.plannotator/config.json`, then restart OMP.
+
+Start plan mode with `omp --plan` or `/plannotator-plan-mode`. With the
+extension loaded, `--plan` starts Plannotator's plan mode instead of choosing a
+plan model.
+
+Checked with OMP 18.8.9 and 18.10.2 (commands, plan mode, the `plannotator`
+tool, and Ask this session).
 
 ## Build from source
 
@@ -244,6 +283,7 @@ Plan review is asynchronous:
 - Plannotator opens the browser review and immediately responds with `{ status: "handled", result: { status: "pending", reviewId } }`
 - when the human approves or rejects in the browser, Plannotator emits `plannotator:review-result` with `{ reviewId, approved, feedback, savedPath?, agentSwitch?, permissionMode? }`
 - callers can query `review-status` with the same `reviewId` to recover from startup races or session restarts
+- the review tab outlives `/reload` and session switches: a decision made there after the session was replaced is recorded for `review-status` (the replaced runtime emits nothing, since its event bus is gone), so the new session can pick it up
 
 The other shared actions remain request/response flows. Payloads are intentionally minimal and only include fields the shared implementation actually uses.
 
@@ -298,7 +338,7 @@ Run `/plannotator-last` to annotate the agent's most recent response. The messag
 
 ### The `plannotator` tool
 
-The agent can have a `plannotator` tool (off by default on Pi; see below for turning it on). When you ask it to "open notes.md in Plannotator", it calls the tool instead of running the CLI:
+The agent can have a `plannotator` tool (off by default on Pi, on by default in [Oh My Pi](#oh-my-pi-omp); see below for turning it on). When you ask it to "open notes.md in Plannotator", it calls the tool instead of running the CLI:
 
 - **Open:** `annotate` a file, folder or URL (`gate: true` adds an Approve button), `review` changes or a PR (`options.base` sets the compare ref), or `last` (the agent's last answer; the message in which the agent calls the tool is skipped). The review opens exactly as the matching slash command opens it, with Ask this session. The tool returns at once with a session id (`pn-3f2a9c`) and the URL, and the agent's turn ends. Your decision arrives later as a new message that starts with `Plannotator: notes.md (pn-3f2a9c) — Feedback · 2 comments.` If the agent asked for a gated sign-off, a plain Approve is sent to it too.
 - **List:** the reviews this Pi session opened that are still open, including the ones you opened with `/plannotator-*` commands and plan reviews. Each line shows the id, what it shows, the URL, its age and how many comments you have not sent yet.
@@ -306,7 +346,7 @@ The agent can have a `plannotator` tool (off by default on Pi; see below for tur
 
 Another Pi session cannot list or close these reviews. After `/reload` or `/resume` of the same session, the agent still sees the reviews that are open. After `/new` it does not, because that is another session. In remote mode (or with a single `PLANNOTATOR_PORT`) every review uses the same port, so the tool opens only one review at a time and tells the agent which one to close first. The tool is active only in an interactive Pi session: in print or JSON mode the agent does not get it, because nothing could deliver your decision later. To review several files together, the agent passes a list as `target` (for example `["spec.md", "mock.html"]`); they open as one review in that order, with one decision. Decisions from the slash commands now also start with the same `Plannotator: … (pn-…) — …` line.
 
-The tool is off by default: turn it on with `PLANNOTATOR_AGENT_TOOL=1` or `{ "agentTool": true }` in `~/.plannotator/config.json` (the environment variable wins in both directions). Off, the agent has no `plannotator` tool and the slash commands and plan mode work as before. The setting is read when a session starts, so it applies to the next session (or after `/reload`); the tool list never changes during a session, which keeps the model's prompt cache intact.
+The tool is off by default on Pi, because Pi sends its full definition (about 780 tokens) with every request: turn it on with `PLANNOTATOR_AGENT_TOOL=1` or `{ "agentTool": true }` in `~/.plannotator/config.json` (the environment variable wins in both directions). In Oh My Pi it is on by default, because OMP lists it as one short line; `PLANNOTATOR_AGENT_TOOL=0` or `{ "agentTool": false }` keeps it out there. Off, the agent has no `plannotator` tool and the slash commands and plan mode work as before. The setting is read when a session starts, so it applies to the next session (or after `/reload`; in OMP, restart OMP); the tool list never changes during a session, which keeps the model's prompt cache intact.
 
 The extension also ships the `plannotator` knowledge skill (a CLI reference) for installs without the CLI installer's copy. It is user-invoked only: load it with `/skill:plannotator`; it is not listed in the model's system prompt.
 

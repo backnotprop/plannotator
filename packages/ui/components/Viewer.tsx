@@ -17,6 +17,7 @@ import { TableBlock } from './blocks/TableBlock';
 import { TableToolbar } from './blocks/TableToolbar';
 import { TablePopout } from './blocks/TablePopout';
 import { CodePathValidationContext } from './CodePathValidationContext';
+import { LocalLinkContext, type LocalLinkResolver } from './LocalLinkContext';
 import { useValidatedCodePaths } from '../hooks/useValidatedCodePaths';
 import { AnnotationToolbar } from './AnnotationToolbar';
 import { FloatingQuickLabelPicker } from './FloatingQuickLabelPicker';
@@ -132,6 +133,13 @@ export interface ViewerProps {
   onAddGlobalAttachment?: (image: ImageAttachment) => void;
   onRemoveGlobalAttachment?: (path: string) => void;
   repoInfo?: { display: string; branch?: string; host?: string } | null;
+  /**
+   * The repository bare `#123` / `@user` refs link into, WITHOUT the repo
+   * badge `repoInfo` also draws (a host that renders many small documents,
+   * such as the Inbox's messages). Wins over `repoInfo` for links only;
+   * `null` and absent both fall back to `repoInfo`, as before.
+   */
+  refRepo?: { display: string; host?: string } | null;
   stickyActions?: boolean;
   /**
    * Render compact annotation controls and the existing document actions in
@@ -145,6 +153,14 @@ export interface ViewerProps {
   gridEnabled?: boolean;
   onOpenLinkedDoc?: (path: string) => void;
   onOpenCodeFile?: (path: string) => void;
+  /**
+   * Opt-in host capability: decide what a link to a local path does
+   * (`[the mock](mock.html)`, markdown and raw-HTML `<a href>` alike; never
+   * `#anchors`, `//host` or a URL with a scheme). Return `{ kind: 'open' }`
+   * to open it yourself, `{ kind: 'unavailable', title }` to draw it as
+   * inert text, or null for the default. Absent → unchanged.
+   */
+  resolveLocalLink?: LocalLinkResolver;
   imageBaseDir?: string;
   /** Directory the active document lives in — used by the code-path validator
    *  so out-of-tree relative references (e.g. `../foo.ts` in a linked doc)
@@ -252,6 +268,16 @@ export interface ViewerProps {
    *  Settled / Skipped) so the host can draw its own; the decision tags stay.
    *  Default `'card'`. */
   questionStatusTag?: 'card' | 'none';
+  /** A host's own card in place of a question's (ui seam for a question the
+   *  host no longer lets anyone answer, such as the Plannotator Inbox's
+   *  replaced questions). Called per question; a returned node is drawn
+   *  instead of the answer card, inside a wrapper carrying the block's
+   *  `data-block-id`; `undefined` keeps the answer card. Absent: every
+   *  question draws its answer card (today's behaviour). */
+  renderQuestionCard?: (question: IndexedQuestion, answer: QuestionAnswer | undefined) => React.ReactNode | undefined;
+  /** Host content right under a question card's prompt, per question (e.g.
+   *  "Replaces <an earlier question>"); null for none. Absent: nothing there. */
+  renderQuestionBelowPrompt?: (question: IndexedQuestion) => React.ReactNode;
   onAskAI?: CommentAskAIHandler;
   /** Whether comment popovers offer image attachments. Hosts without an
    *  uploadTransport pass false so the attach affordance never dead-ends.
@@ -627,6 +653,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   onAddGlobalAttachment,
   onRemoveGlobalAttachment,
   repoInfo,
+  refRepo,
   stickyActions = true,
   annotationHeader,
   gridEnabled = false,
@@ -640,6 +667,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   maxWidth,
   onOpenLinkedDoc,
   onOpenCodeFile,
+  resolveLocalLink,
   linkedDocInfo,
   imageBaseDir,
   codePathBaseDir,
@@ -664,6 +692,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   onOpenQuestionDecision,
   questionDecisionLocked,
   questionStatusTag,
+  renderQuestionCard,
+  renderQuestionBelowPrompt,
   onAskAI,
   allowImages = true,
   readOnly = false,
@@ -680,6 +710,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   const hostComposes = onHostDraft !== undefined && !authoringOff;
   const viewerAnnotationHeader = authoringOff ? undefined : annotationHeader;
   const hasViewerAnnotationHeader = viewerAnnotationHeader !== undefined;
+  // Where `#123` / `@user` link: `refRepo` when the host gave one, else `repoInfo`.
+  const linkRepo = refRepo ?? repoInfo;
   const [copied, setCopied] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
   const [locationHash, setLocationHash] = useState(() => window.location.hash);
@@ -1401,6 +1433,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 
   return (
     <CodePathValidationContext.Provider value={codePathValidation}>
+    <LocalLinkContext.Provider value={resolveLocalLink ?? null}>
     <DiagramAnchorClaimsContext.Provider value={diagramClaims}>
     <div className="relative z-50 w-full" style={maxWidth === null ? undefined : { maxWidth: maxWidth ?? 832 }}>
       {taterMode && <TaterSpriteSitting />}
@@ -1502,8 +1535,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                       onOpenCodeFile={onOpenCodeFile}
                       onToggleCheckbox={readOnly ? undefined : onToggleCheckbox}
                       checkboxOverrides={checkboxOverrides}
-                      githubRepo={repoInfo?.display}
-                      repoHost={repoInfo?.host}
+                      githubRepo={linkRepo?.display}
+                      repoHost={linkRepo?.host}
                       headingAnchorId={headingSlugMap.get(block.id)}
                       onNavigateAnchor={scrollToAnchor}
                     />
@@ -1547,8 +1580,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               onImageClick={(src, alt) => setLightbox({ src, alt })}
               onOpenLinkedDoc={onOpenLinkedDoc}
               onOpenCodeFile={onOpenCodeFile}
-              githubRepo={repoInfo?.display}
-              repoHost={repoInfo?.host}
+              githubRepo={linkRepo?.display}
+              repoHost={linkRepo?.host}
               onNavigateAnchor={scrollToAnchor}
               onHover={(element) => {
                 if (tableHoverTimeoutRef.current) {
@@ -1617,6 +1650,16 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           ) : (
             (() => {
               const question = questionIndex.byBlock.get(group.block.id);
+              const hostCard = question && renderQuestionCard
+                ? renderQuestionCard(question, answersByKey.get(question.question.key))
+                : undefined;
+              if (hostCard !== undefined) {
+                return (
+                  <div key={group.block.id} data-block-id={group.block.id} data-block-type="directive">
+                    {hostCard}
+                  </div>
+                );
+              }
               return (
                 <BlockRenderer
                   imageBaseDir={imageBaseDir}
@@ -1628,8 +1671,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   onNavigateAnchor={scrollToAnchor}
                   onToggleCheckbox={readOnly ? undefined : onToggleCheckbox}
                   checkboxOverrides={checkboxOverrides}
-                  githubRepo={repoInfo?.display}
-                  repoHost={repoInfo?.host}
+                  githubRepo={linkRepo?.display}
+                  repoHost={linkRepo?.host}
                   headingAnchorId={headingSlugMap.get(group.block.id)}
                   question={question}
                   questionTotal={questionIndex.total}
@@ -1643,6 +1686,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   onToggleQuestionDecisionRecording={readOnly || (question && questionDecisionLocked?.(question)) ? undefined : onToggleQuestionDecisionRecording}
                   onOpenQuestionDecision={readOnly || (question && questionDecisionLocked?.(question)) ? undefined : onOpenQuestionDecision}
                   questionStatusTag={questionStatusTag}
+                  renderQuestionBelowPrompt={renderQuestionBelowPrompt}
                 />
               );
             })()
@@ -1754,8 +1798,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             onImageClick={(src, alt) => setLightbox({ src, alt })}
             onOpenLinkedDoc={onOpenLinkedDoc}
             onOpenCodeFile={onOpenCodeFile}
-            githubRepo={repoInfo?.display}
-            repoHost={repoInfo?.host}
+            githubRepo={linkRepo?.display}
+            repoHost={linkRepo?.host}
             onNavigateAnchor={scrollToAnchor}
           />
         )}
@@ -1878,6 +1922,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       )}
     </div>
     </DiagramAnchorClaimsContext.Provider>
+    </LocalLinkContext.Provider>
     </CodePathValidationContext.Provider>
   );
 });

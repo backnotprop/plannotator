@@ -52,6 +52,17 @@ export function getPlannotatorDataDir(): string {
     return resolve(envDir);
   }
 
+  return getDefaultPlannotatorDataDir(home);
+}
+
+/**
+ * The data directory Plannotator uses when PLANNOTATOR_DATA_DIR is unset:
+ * ~/.plannotator when it exists, else $XDG_DATA_HOME/plannotator when
+ * XDG_DATA_HOME holds an absolute path, else ~/.plannotator. `home` defaults
+ * to `homedir()`. Tests and dev scripts compare against it to refuse the
+ * person's real data directory (tests/helpers/real-data-dir.ts).
+ */
+export function getDefaultPlannotatorDataDir(home: string = homedir()): string {
   const legacyDir = join(home, ".plannotator");
   if (existsSync(legacyDir)) return legacyDir;
 

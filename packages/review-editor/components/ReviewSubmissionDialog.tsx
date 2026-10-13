@@ -5,6 +5,7 @@ import { CopyButton } from './CopyButton';
 import {
   exportReviewFeedback,
   formatCallFlowAnnotationTargets,
+  markdownPreviewQuote,
   formatConventionalPrefix,
   OUTDATED_ANNOTATION_LABEL,
 } from '../utils/exportFeedback';
@@ -136,7 +137,9 @@ function buildAnnotationFileComments(
 // body is the same text the review body fold uses, minus the path prefix.
 function buildFileLevelComments(annotations: CodeAnnotation[]): PRReviewFileLevelComment[] {
   return annotations
-    .filter(a => a.scope === 'file')
+    // A comment made in a Markdown preview quotes rendered text, not lines:
+    // it always rides the review body (see buildFileScopedBody).
+    .filter(a => a.scope === 'file' && !a.markdownPreview)
     .map(a => ({ path: a.filePath, body: `${a.text ?? ''}${formatCallFlowAnnotationTargets(a)}`.trim() }))
     .filter(c => c.path.length > 0 && c.body.length > 0);
 }
@@ -150,7 +153,11 @@ function buildFileScopedBody(annotations: CodeAnnotation[], withheld: ReadonlySe
   for (const a of annotations) {
     const scope = a.scope ?? 'line';
     const callFlowContext = formatCallFlowAnnotationTargets(a);
-    if (scope === 'file' && !fileLevel && (a.text || callFlowContext)) {
+    if (scope === 'file' && a.markdownPreview && a.text) {
+      // Never inline and never a file-level thread: the quote is rendered
+      // text, which maps to no line the platform could anchor to.
+      parts.push(`**${a.filePath} (rendered Markdown):**\n\n${markdownPreviewQuote(a.markdownPreview)}\n${a.text}`.trim());
+    } else if (scope === 'file' && !fileLevel && (a.text || callFlowContext)) {
       parts.push(`**${a.filePath}:** ${a.text ?? ''}${callFlowContext}`.trim());
     } else if (scope === 'general' && (a.text || callFlowContext)) {
       parts.push(`${a.text ?? ''}${callFlowContext}`.trim());

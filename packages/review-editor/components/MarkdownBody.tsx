@@ -5,6 +5,8 @@
  */
 import React, { useMemo, useRef, useEffect } from 'react';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
+import type { Block } from '@plannotator/ui/types';
+import { MAX_QUOTE_DEPTH, isProseQuote, parseQuoteBody } from '@plannotator/ui/components/blocks/BlockquoteBlock';
 import { parseTableContent } from '@plannotator/ui/components/blocks/TableBlock';
 import { sanitizeInlineHtml } from '@plannotator/ui/utils/sanitizeHtml';
 import { renderInlineMarkdown } from '../utils/renderInlineMarkdown';
@@ -57,104 +59,121 @@ export function MarkdownBody({ markdown, textClassName = 'text-xs' }: { markdown
 
   return (
     <div className={`space-y-2.5 ${textClassName} text-foreground/90 leading-relaxed`}>
-      {blocks.map((block) => {
-        switch (block.type) {
-          case 'heading': {
-            const Tag = `h${Math.min(block.level ?? 1, 6)}` as keyof JSX.IntrinsicElements;
-            const sizes: Record<number, string> = {
-              1: 'text-base font-bold',
-              2: 'text-sm font-semibold',
-              3: 'text-xs font-semibold',
-            };
-            return (
-              <Tag key={block.id} className={`${sizes[block.level ?? 1] ?? 'text-xs font-medium'} text-foreground`}>
-                {renderContent(block.content)}
-              </Tag>
-            );
-          }
-          case 'code':
-            return (
-              <pre key={block.id} className="bg-muted/50 rounded-md p-2 text-[11px] font-mono overflow-x-auto whitespace-pre-wrap">
-                <code>{block.content}</code>
-              </pre>
-            );
-          case 'list-item':
-            return (
-              <div key={block.id} className="flex gap-1.5" style={{ paddingLeft: (block.level ?? 0) * 12 }}>
-                <span className="text-muted-foreground shrink-0">{block.checked !== undefined ? (block.checked ? '☑' : '☐') : '•'}</span>
-                <span>{renderContent(block.content)}</span>
-              </div>
-            );
-          case 'blockquote':
-            return (
-              <blockquote key={block.id} className="border-l-2 border-border pl-2 text-muted-foreground italic">
-                {renderContent(block.content)}
-              </blockquote>
-            );
-          case 'hr':
-            return <hr key={block.id} className="border-border/50" />;
-          case 'table': {
-            const { headers, rows } = parseTableContent(block.content);
-            if (!headers.length) return null;
-            return (
-              <div key={block.id} className="overflow-x-auto">
-                <table className="min-w-full border-collapse">
-                  <thead>
-                    <tr className="border-b border-border">
-                      {headers.map((header, i) => (
-                        <th key={i} className="px-2 py-1 text-left font-semibold text-foreground/90 bg-muted/30">
-                          {renderContent(header)}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((row, ri) => (
-                      <tr key={ri} className="border-b border-border/50">
-                        {row.map((cell, ci) => (
-                          <td key={ci} className="px-2 py-1 align-top">
-                            {renderContent(cell)}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            );
-          }
-          default: {
-            if (!block.content) return null;
-            // A paragraph that is just a link to a video file → inline player
-            const video = parseLoneVideoLink(block.content);
-            if (video) {
-              return (
-                <div key={block.id} className="my-1">
-                  <video
-                    controls
-                    preload="metadata"
-                    src={video.url}
-                    className="max-w-full rounded-md border border-border bg-black"
-                  />
-                  <a
-                    href={video.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-1 block text-[11px] text-muted-foreground hover:text-foreground truncate"
-                  >
-                    {video.label}
-                  </a>
-                </div>
-              );
-            }
-            // If the entire paragraph is HTML, sanitize and render
-            if (containsHtml(block.content)) {
-              return <SafeHtml key={block.id} html={sanitizeInlineHtml(block.content)} />;
-            }
-            return <p key={block.id}>{renderInlineMarkdown(block.content)}</p>;
-          }
-        }
-      })}
+      {renderBlocks(blocks)}
     </div>
   );
+}
+
+/** A quote holding more than paragraphs (a code fence, a list, a nested
+ *  quote): its content is the quote's own markdown, rendered as blocks. Past
+ *  MAX_QUOTE_DEPTH nested quotes the rest is text (a PR comment can nest
+ *  `>` thousands deep, and each level recurses). */
+function quoteBlocks(content: string, depth: number): Block[] | null {
+  if (depth + 1 >= MAX_QUOTE_DEPTH) return null;
+  const inner = parseQuoteBody(content);
+  return isProseQuote(inner) ? null : inner;
+}
+
+/** `depth`: the number of quotes around these blocks. */
+function renderBlocks(blocks: Block[], depth = 0): React.ReactNode[] {
+  return blocks.map((block) => {
+    switch (block.type) {
+      case 'heading': {
+        const Tag = `h${Math.min(block.level ?? 1, 6)}` as keyof JSX.IntrinsicElements;
+        const sizes: Record<number, string> = {
+          1: 'text-base font-bold',
+          2: 'text-sm font-semibold',
+          3: 'text-xs font-semibold',
+        };
+        return (
+          <Tag key={block.id} className={`${sizes[block.level ?? 1] ?? 'text-xs font-medium'} text-foreground`}>
+            {renderContent(block.content)}
+          </Tag>
+        );
+      }
+      case 'code':
+        return (
+          <pre key={block.id} className="bg-muted/50 rounded-md p-2 text-[11px] font-mono overflow-x-auto whitespace-pre-wrap">
+            <code>{block.content}</code>
+          </pre>
+        );
+      case 'list-item':
+        return (
+          <div key={block.id} className="flex gap-1.5" style={{ paddingLeft: (block.level ?? 0) * 12 }}>
+            <span className="text-muted-foreground shrink-0">{block.checked !== undefined ? (block.checked ? '☑' : '☐') : '•'}</span>
+            <span>{renderContent(block.content)}</span>
+          </div>
+        );
+      case 'blockquote': {
+        const inner = block.alertKind ? null : quoteBlocks(block.content, depth);
+        return (
+          <blockquote key={block.id} className="border-l-2 border-border pl-2 text-muted-foreground italic">
+            {inner ? <div className="space-y-2.5">{renderBlocks(inner, depth + 1)}</div> : renderContent(block.content)}
+          </blockquote>
+        );
+      }
+      case 'hr':
+        return <hr key={block.id} className="border-border/50" />;
+      case 'table': {
+        const { headers, rows } = parseTableContent(block.content);
+        if (!headers.length) return null;
+        return (
+          <div key={block.id} className="overflow-x-auto">
+            <table className="min-w-full border-collapse">
+              <thead>
+                <tr className="border-b border-border">
+                  {headers.map((header, i) => (
+                    <th key={i} className="px-2 py-1 text-left font-semibold text-foreground/90 bg-muted/30">
+                      {renderContent(header)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, ri) => (
+                  <tr key={ri} className="border-b border-border/50">
+                    {row.map((cell, ci) => (
+                      <td key={ci} className="px-2 py-1 align-top">
+                        {renderContent(cell)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      }
+      default: {
+        if (!block.content) return null;
+        // A paragraph that is just a link to a video file → inline player
+        const video = parseLoneVideoLink(block.content);
+        if (video) {
+          return (
+            <div key={block.id} className="my-1">
+              <video
+                controls
+                preload="metadata"
+                src={video.url}
+                className="max-w-full rounded-md border border-border bg-black"
+              />
+              <a
+                href={video.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-1 block text-[11px] text-muted-foreground hover:text-foreground truncate"
+              >
+                {video.label}
+              </a>
+            </div>
+          );
+        }
+        // If the entire paragraph is HTML, sanitize and render
+        if (containsHtml(block.content)) {
+          return <SafeHtml key={block.id} html={sanitizeInlineHtml(block.content)} />;
+        }
+        return <p key={block.id}>{renderInlineMarkdown(block.content)}</p>;
+      }
+    }
+  });
 }

@@ -136,10 +136,24 @@ Same precedence: flag over environment variable over config file. The installer 
 
 To update, run the install command again. It installs the latest release over the old one, and a Plannotator session that is open while it runs keeps working. It also clears cached OpenCode plugin versions (OpenCode 1 and OpenCode 2), so OpenCode loads the latest `@plannotator/opencode` after a restart.
 
-The install script does not update the Claude Code plugin. It updates the Pi extension only when the `pi` command is on your PATH while it runs. Otherwise update them in the agent:
+The install script also updates the Claude Code plugin when it is already installed and the `claude` command is on your PATH: it runs `claude plugin marketplace update plannotator` and `claude plugin update plannotator@plannotator --scope user` for you, then tells you to restart Claude Code. It never installs the plugin, and a failure never fails the install (it prints the commands to run instead). A run pinned with `--version` leaves the plugin alone, because the plugin update always installs the newest plugin. Skip this with `--skip-claude-plugin` (PowerShell: `-SkipClaudePlugin`), `PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE=1`, or `{ "skipInstall": { "claudePlugin": true } }` in `~/.plannotator/config.json`. It updates the Pi extension only when the `pi` command is on your PATH while it runs. Otherwise update them in the agent:
 
 - **Claude Code:** refreshing the marketplace alone does not update an installed plugin. Run `claude plugin marketplace update plannotator`, then `claude plugin update plannotator@plannotator`, then restart Claude Code. Inside Claude Code you can run `/plugin marketplace update plannotator`, then open `/plugin`, go to **Installed**, select **plannotator** and choose **Update now**.
 - **Pi:** run `pi update --extensions`. A plain `pi update` updates only Pi itself.
+
+### `plannotator update`
+
+`plannotator update` does the same thing in one command: it asks GitHub for the newest stable release and, if it is newer, runs the install script for it with the choices from your last install (the flags recorded in `~/.plannotator/install-flags.json`), showing the installer's output as it goes. `plannotator update --check` only says whether a newer release exists. Open reviews keep running on the old version; new ones start on the new one.
+
+### Update check
+
+Once a day, the machine (never your browser) asks GitHub for the latest stable release and caches the answer. When a newer one exists:
+
+- the Inbox shows an **Update** button above Settings, which opens a dialog with what's new and **Update now** (see [the Inbox](/docs/reference/inbox/#update));
+- plan review, annotate and code review show a short toast at most once every three days, with **Update** (or the command to copy, on Pi: `pi update --extensions`), and the Options menu shows the right update command for your agent;
+- a review you started yourself in a terminal ends with one line: `Plannotator X is available (you have Y). Update: plannotator update`.
+
+Turn the check off with **Settings → General → Tell me when a new version is out** (the Inbox: **Settings → About**), with `{ "updateCheck": false }` in `~/.plannotator/config.json` or `PLANNOTATOR_UPDATE_CHECK=0`. Off makes no automatic request to GitHub at all (and stops auto-update, which needs the check); `plannotator update` still checks when you run it.
 
 ### Automatic updates (opt-in)
 
@@ -151,7 +165,7 @@ Plannotator can do this for you. Turn on **Settings → General → Keep Plannot
 
 in `~/.plannotator/config.json`, or `PLANNOTATOR_AUTO_UPDATE=1` in your environment (the environment variable wins). It is off by default.
 
-When it is on, the `plannotator` binary checks GitHub for a newer stable release at most once a day, after a review session has started. It never downgrades. If a newer release exists and no other Plannotator session is open, it runs the same install script shown above for that exact version, in the background, with your saved install choices: the `skipInstall` keys in `config.json`, the answers from your first install, and the install flags you last ran the script with. Each install records its flags (`--minimal`, `--no-minimal`, `--skip-codex`, `--skip-gemini`, `--skip-kiro`, `--skip-vibe`, `--skip-opencode`, `--skip-skills`, `--with-call-flow`, `--verify-attestation`, `--skip-attestation`, or the PowerShell equivalents such as `-SkipSkills`) in `~/.plannotator/install-flags.json`, and auto-update passes the same ones again. Running the install script by hand with none of those flags records an empty set, so later updates go back to the defaults. Nothing waits for it: the check adds no time to a review, and a failed check or install only writes a line to `~/.plannotator/update.log`. The next time Plannotator opens you see "Updated to vX", or "Auto-update failed" with the path to that log.
+When it is on, the `plannotator` binary checks GitHub for a newer stable release at most once a day, after a review session has started. It never downgrades. If a newer release exists and no other Plannotator session is open, it runs the same install script shown above for that exact version, in the background, with your saved install choices: the `skipInstall` keys in `config.json`, the answers from your first install, and the install flags you last ran the script with. Each install records its flags (`--minimal`, `--no-minimal`, `--skip-codex`, `--skip-gemini`, `--skip-kiro`, `--skip-vibe`, `--skip-opencode`, `--skip-skills`, `--skip-claude-plugin`, `--with-call-flow`, `--verify-attestation`, `--skip-attestation`, or the PowerShell equivalents such as `-SkipSkills`) in `~/.plannotator/install-flags.json`, and auto-update passes the same ones again. Running the install script by hand with none of those flags records an empty set, so later updates go back to the defaults. Nothing waits for it: the check adds no time to a review, and a failed check or install only writes a line to `~/.plannotator/update.log`. The next time Plannotator opens you see "Updated to vX", or "Auto-update failed" with the path to that log.
 
 Auto-update only applies to the binary the install script manages (`~/.local/bin/plannotator`, or `%LOCALAPPDATA%\plannotator\plannotator.exe` on Windows). A development build, a binary installed some other way, and the OpenCode and Pi plugins are never updated by it.
 
@@ -419,9 +433,29 @@ To update it later, run `pi update --extensions` (a plain `pi update` updates on
 
 Start plan mode with `pi --plan`, or toggle mid-session with `/plannotator-plan-mode` or `Ctrl+Alt+P`. Plan review does not make the agent wait: the agent ends its turn, and your decision arrives later as a message. The extension provides file-based plan review, code review (`/plannotator-review`), markdown annotation (`/plannotator-annotate`), bash safety gating during planning, and progress tracking during execution.
 
-The agent can also open Plannotator itself with a `plannotator` tool, for example when you ask it to "open notes.md in Plannotator". The tool returns at once, and your feedback arrives later as a message. The agent can list the reviews it opened and close one it no longer needs; closing keeps your unsent comments as a draft. The tool is off by default on Pi: turn it on with `PLANNOTATOR_AGENT_TOOL=1` or `{ "agentTool": true }` in `~/.plannotator/config.json` (applies to the next Pi session).
+The agent can also open Plannotator itself with a `plannotator` tool, for example when you ask it to "open notes.md in Plannotator". The tool returns at once, and your feedback arrives later as a message. The agent can list the reviews it opened and close one it no longer needs; closing keeps your unsent comments as a draft. The tool is off by default on Pi, because Pi sends its full definition (about 780 tokens) with every request: turn it on with `PLANNOTATOR_AGENT_TOOL=1` or `{ "agentTool": true }` in `~/.plannotator/config.json` (applies to the next Pi session). In Oh My Pi it is on by default (see below).
 
 See [Plannotator Meets Pi](/blog/plannotator-meets-pi) for the full walkthrough.
+
+### Oh My Pi (OMP)
+
+[Oh My Pi](https://omp.sh) loads the Pi extension as an OMP plugin. Install it, then restart OMP:
+
+```bash
+omp plugin install @plannotator/pi-extension
+```
+
+To update it later, run `omp plugin upgrade @plannotator/pi-extension`.
+
+Open reviews with the extension's commands: `/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`, and `/plannotator-plan-mode` for plan mode. Reviews opened this way can use **Ask this session**: Ask AI sends your question to the OMP session, and the answer streams back from it. Ask AI labels it "Ask this session · Pi".
+
+Reviews started by the `plannotator` CLI from OMP's shell do not get Ask this session. This includes the `/skill:plannotator-*` skills and the agent running `plannotator` with its bash tool. The CLI has no connection back to OMP. Ask AI then offers only the separate AI providers it can find, and the header badge reads "Oh My Pi" instead of "Pi".
+
+The extension's `plannotator` tool, which lets the agent open reviews with Ask this session, is **on by default in OMP**. OMP lists extension tools as `xd://` devices, one short line each in its system prompt (about 50 tokens for this one), and loads the full description only when the agent reads it, so the agent finds it as `xd://plannotator`. Plain Pi sends the full definition with every request instead, which is why the tool is off by default there. To keep it out in OMP, set `PLANNOTATOR_AGENT_TOOL=0` or `{ "agentTool": false }` in `~/.plannotator/config.json` (the environment variable wins in both directions), then restart OMP.
+
+Start plan mode with `omp --plan` or `/plannotator-plan-mode`. With the extension loaded, `--plan` starts Plannotator's plan mode instead of choosing a plan model.
+
+Checked with OMP 18.8.9 and 18.10.2.
 
 ## Amp
 

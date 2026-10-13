@@ -1,8 +1,10 @@
 import { useEffect, useId, useState } from 'react';
 import type { InboxDecision } from '@plannotator/core/inbox-types';
-import { InboxApiError, type DecisionsModel, type ProjectFolder, type WaitingDecision } from '../api';
+import { InboxApiError, type DecisionProjectCounts, type DecisionsModel, type ProjectFolder, type WaitingDecision } from '../api';
 import { agentName, dateTime, dayWords, shortTime } from '../format';
 import { DecisionDiamond, Icon } from '../icons';
+import { SidebarTrigger } from '../shell/sidebar';
+import { DecisionsProjectPicker } from './DecisionsProjectPicker';
 
 /**
  * The project's decisions (the window record's 3.2): a project switch, then
@@ -24,6 +26,14 @@ export interface DecisionsPageProps {
   onOpenThread: (threadId: string) => void;
   onRetire: (decision: InboxDecision) => Promise<void>;
   onReplace: (decision: InboxDecision, text: string, reason: string) => Promise<void>;
+  /** A phone (phone.ts): two-line rows, and an open decision takes the window with a Back button. */
+  phone?: boolean;
+  /** A window too narrow for the Decisions list beside an open decision (stack.ts): the decision covers the list and leads with the way back. */
+  stacked?: boolean;
+  /** Every project's waiting and settled counts, for the project switch (the Decisions route's `project_counts`). */
+  counts?: ReadonlyMap<string, DecisionProjectCounts> | null;
+  /** The home folder, for the switch's `~/…` paths. */
+  home?: string | null;
 }
 
 /** Who and how, in the row's two muted columns. */
@@ -114,6 +124,8 @@ function DecisionPane({
   onOpenThread,
   onRetire,
   onReplace,
+  phone,
+  stacked,
 }: {
   decision: InboxDecision;
   all: readonly InboxDecision[];
@@ -122,6 +134,8 @@ function DecisionPane({
   onOpenThread: (threadId: string) => void;
   onRetire: (decision: InboxDecision) => Promise<void>;
   onReplace: (decision: InboxDecision, text: string, reason: string) => Promise<void>;
+  phone: boolean;
+  stacked: boolean;
 }) {
   const id = useId();
   const [replacing, setReplacing] = useState(false);
@@ -154,14 +168,32 @@ function DecisionPane({
   return (
     <section className="ib-pane ib-dpane" aria-label={decision.text} data-decision-pane={decision.id}>
       <div className="ib-phead">
+        {phone && (
+          <button type="button" className="ib-pback" onClick={onClose} aria-label="Back to Decisions" data-phone-back="">
+            <Icon name="chevL" size={18} />
+            <span className="ib-pback-l">Decisions</span>
+          </button>
+        )}
+        {/* A stacked decision covers the list: the way back leads, where the list was. */}
+        {stacked && !phone && (
+          <>
+            <button type="button" className="ib-pback" onClick={onClose} aria-label="Back to Decisions" title="Back to Decisions" data-stack-back="">
+              <Icon name="chevL" size={16} />
+              <span className="ib-pback-l">Decisions</span>
+            </button>
+            <span className="ib-vsep" aria-hidden="true" />
+          </>
+        )}
         <span className="ib-dstate">
           <DecisionDiamond />
           {STATE_WORDS[decision.state]}
         </span>
         <span className="ib-sp" />
-        <button type="button" className="ib-iconbtn" onClick={onClose} title="Close" aria-label="Close the decision">
-          <Icon name="x" />
-        </button>
+        {!phone && !stacked && (
+          <button type="button" className="ib-iconbtn" onClick={onClose} title="Close" aria-label="Close the decision">
+            <Icon name="x" />
+          </button>
+        )}
       </div>
       <div className="ib-pbody">
         <h2 className="ib-subject">{decision.text}</h2>
@@ -275,19 +307,23 @@ export function DecisionsPage(props: DecisionsPageProps) {
   // A decision opened from history unfolds it, so its row shows where it went.
   const showEnded = foldOpen || (open !== null && open.state !== 'current');
   const narrow = open !== null;
+  // A phone draws the two-line rows always: the five columns need a desktop's width.
+  const narrowRows = narrow || props.phone === true;
 
   return (
     <>
       <section className={`ib-dpage${narrow ? ' ib-narrow' : ''}`} aria-label="Decisions">
         <div className="ib-dh">
+          <SidebarTrigger />
           <h1>Decisions</h1>
-          <select className="ib-select" aria-label="Project" value={project.id} onChange={(event) => props.onProject(event.target.value)}>
-            {props.projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+          <DecisionsProjectPicker
+            projects={props.projects}
+            current={project}
+            counts={props.counts ?? null}
+            home={props.home ?? null}
+            phone={props.phone === true}
+            onPick={props.onProject}
+          />
         </div>
         <p className="ib-dsub">What holds true in {project.name}, and what waits on a call.</p>
         {props.error && <div className="ib-error">{props.error}</div>}
@@ -299,7 +335,7 @@ export function DecisionsPage(props: DecisionsPageProps) {
                   Waiting <span className="ib-n">{model.waiting.length}</span>
                 </div>
                 {model.waiting.map((item) => (
-                  <WaitingRow key={item.question_id} item={item} narrow={narrow} onOpenThread={() => props.onOpenThread(item.thread_id)} />
+                  <WaitingRow key={item.question_id} item={item} narrow={narrowRows} onOpenThread={() => props.onOpenThread(item.thread_id)} />
                 ))}
               </div>
             )}
@@ -312,7 +348,7 @@ export function DecisionsPage(props: DecisionsPageProps) {
                 <DecisionRow
                   key={decision.id}
                   decision={decision}
-                  narrow={narrow}
+                  narrow={narrowRows}
                   selected={decision.id === props.openId}
                   onOpen={() => props.onOpen(decision.id)}
                 />
@@ -329,7 +365,7 @@ export function DecisionsPage(props: DecisionsPageProps) {
                     <DecisionRow
                       key={decision.id}
                       decision={decision}
-                      narrow={narrow}
+                      narrow={narrowRows}
                       selected={decision.id === props.openId}
                       onOpen={() => props.onOpen(decision.id)}
                     />
@@ -348,6 +384,8 @@ export function DecisionsPage(props: DecisionsPageProps) {
           onOpenThread={props.onOpenThread}
           onRetire={props.onRetire}
           onReplace={props.onReplace}
+          phone={props.phone === true}
+          stacked={props.stacked === true}
         />
       )}
     </>

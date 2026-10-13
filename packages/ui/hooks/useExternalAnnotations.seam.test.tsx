@@ -171,12 +171,12 @@ describe('session-closed event', () => {
       update: async () => {},
       clear: async () => {},
     });
-    const closed: number[] = [];
+    const closed: Array<{ unsent: number; by: string | undefined }> = [];
     const resultRef: { current: HookResult | null } = { current: null };
     function ClosingHarness() {
       resultRef.current = useExternalAnnotations<TestAnnotation>({
         enabled: true,
-        onSessionClosed: (event) => closed.push(event.unsentAnnotations),
+        onSessionClosed: (event) => closed.push({ unsent: event.unsentAnnotations, by: event.by }),
       });
       return null;
     }
@@ -190,8 +190,16 @@ describe('session-closed event', () => {
     await act(async () => {
       emit?.({ type: 'snapshot', annotations: [{ id: 'x' }] });
       emit?.({ type: 'session-closed', by: 'agent', unsentAnnotations: 4 });
+      // Plan mode / the agent session ended (Pi's plan review): not an agent close.
+      emit?.({ type: 'session-closed', by: 'session', unsentAnnotations: 1 });
+      // An unknown closer reads as the agent, as before the field had variants.
+      emit?.({ type: 'session-closed', by: 'later-kind', unsentAnnotations: 0 });
     });
-    expect(closed).toEqual([4]);
+    expect(closed).toEqual([
+      { unsent: 4, by: 'agent' },
+      { unsent: 1, by: 'session' },
+      { unsent: 0, by: 'agent' },
+    ]);
     expect(resultRef.current?.externalAnnotations.map((a) => a.id)).toEqual(['x']);
     await act(async () => { root.unmount(); });
   });

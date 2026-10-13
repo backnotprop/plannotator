@@ -42,6 +42,9 @@ describe("PFM_REMINDER", () => {
     expect(parsed?.kind).toBe("single");
     expect(parsed?.choices.length).toBe(2);
     expect(parsed?.choices.filter((c) => c.recommended).map((c) => c.label)).toEqual(["Redis"]);
+    // The example models the rule it states: no bare question.
+    expect(parsed?.context.trim()).not.toBe("");
+    expect(PFM_REMINDER).toContain("Never send a bare question");
     expect(PFM_REMINDER).toContain("- [x]");
   });
 

@@ -4,9 +4,8 @@
  * (owner decision 7), light and dark from the shell. The shell draws every
  * bar and sheet, so nothing here is chrome: the document, its marks, the
  * annotation toolstrip and the guide's own controls. Classes carry an `sf-`
- * prefix so they never meet ui's. The iPhone design of record is
- * .product/approved/plannotator-mobile-iphone-2026-10-07/ (3.6, 4.1 to 4.4,
- * 6.1, 6.2).
+ * prefix so they never meet ui's. Built to the iPhone design of record
+ * (renders 3.6, 4.1 to 4.4, 6.1, 6.2; design record, not in this repo).
  */
 
 :root {
@@ -290,6 +289,16 @@
      monospace instead. The variable crosses the renderer's shadow root. */
   --diffs-font-family: var(--font-mono);
 }
+/* Chromium 123 and 124 (Android WebView included) crash the page when they
+   compute a relative colour whose origin is light-dark(). The diff
+   renderer's word emphasis is one: rgb(from var(--diffs-addition-base) r g b
+   / .15), its base a light-dark() value. Its overrides give the same colour
+   through color-mix(), which those versions draw, so the crashing fallback is
+   never computed. Declared on the host, where --diffs-*-base are defined. */
+.sf-gcard diffs-container {
+  --diffs-bg-addition-emphasis-override: light-dark(color-mix(in srgb, var(--diffs-addition-base) 15%, transparent), color-mix(in srgb, var(--diffs-addition-base) 20%, transparent));
+  --diffs-bg-deletion-emphasis-override: light-dark(color-mix(in srgb, var(--diffs-deletion-base) 15%, transparent), color-mix(in srgb, var(--diffs-deletion-base) 20%, transparent));
+}
 /* The phone's diff header (the review app's compact touch layout) keeps the
    whole path, its ellipsis at the leading edge only when it does not fit;
    a path that fits starts at the left, under the chevron. */
@@ -373,3 +382,8 @@
   max-height: 70vh;
   contain: none;
 }
+
+/* A kind the surface does not draw (an image, a PDF, any other file): the shell shows it natively. */
+.sf-file { margin: 32px 20px; padding: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+.sf-file-name { font-weight: 600; font-size: calc(17px * var(--sf-text-scale, 1)); overflow-wrap: anywhere; }
+.sf-file-kind { margin-top: 4px; color: var(--muted-foreground); font-size: calc(15px * var(--sf-text-scale, 1)); }

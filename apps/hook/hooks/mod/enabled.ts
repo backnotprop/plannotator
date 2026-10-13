@@ -88,15 +88,16 @@ export function resolveAgentToolEnabled(envValue: string | undefined, configText
 
 /**
  * Whether the mod registers the `plannotator_inbox` tool and runs the reply
- * wake when nothing is set (and an Inbox is found). Mirrors the claude-code
+ * wake when nothing is set. Mirrors the claude-code
  * entry of `INBOX_TOOL_DEFAULTS` in packages/shared/config.ts.
  */
 export const INBOX_TOOL_DEFAULT = true
 
 /**
  * Whether the mod connects this session to the Plannotator Inbox (the
- * `plannotator_inbox` tool and the reply wake), when `inbox/inbox.json`
- * exists. Off with:
+ * `plannotator_inbox` tool and the reply wake). The tool is registered even
+ * before the Inbox ever ran here (a bundled tool list; the first call starts
+ * it), and the wake starts polling once `inbox/inbox.json` exists. Off with:
  *
  *   PLANNOTATOR_INBOX_TOOL=0            (env; also false/off/disabled; wins over the config file)
  *   { "inboxTool": false }              (config.json in the data dir, every host)
@@ -124,4 +125,36 @@ export function resolveInboxToolEnabled(envValue: string | undefined, configText
     if (v === 'false' || v === '0') return false
   }
   return INBOX_TOOL_DEFAULT
+}
+
+/**
+ * Whether a session that has the `plannotator_inbox` tool starts with the
+ * Inbox's one-line reminder (a `prompt.context` block; register.ts also
+ * requires that the Inbox has run here). Never without the tool; then on
+ * unless turned off in config.json with:
+ *
+ *   { "inboxReminder": false }                       (every host)
+ *   { "inboxReminder": { "claude-code": false } }    (this host only)
+ *
+ * There is no env var of its own: PLANNOTATOR_INBOX_TOOL decides it through
+ * the tool. Mirrors `resolveInboxReminder(config, env, 'claude-code')` in
+ * packages/shared/config.ts. Read once, at the first session.start, with the tool.
+ */
+export function resolveInboxReminderEnabled(inboxToolEnv: string | undefined, configText: string | null | undefined): boolean {
+  if (!resolveInboxToolEnabled(inboxToolEnv, configText)) return false
+  if (!configText) return true
+  let value: unknown
+  try {
+    value = (JSON.parse(configText) as Record<string, unknown> | null)?.inboxReminder
+  } catch {
+    return true
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) value = (value as Record<string, unknown>)['claude-code']
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase()
+    if (v === 'true' || v === '1') return true
+    if (v === 'false' || v === '0') return false
+  }
+  return true
 }

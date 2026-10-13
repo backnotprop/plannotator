@@ -4,9 +4,10 @@ name: Inbox relay
 # action: apps/relay/test/relay.test.ts runs the Worker under `wrangler dev`
 # (local workerd, no account, no deploy) with the COMPILED Inbox binary
 # pointed at it, agents writing through `plannotator inbox mcp`, and a local
-# HTTP/2 server playing Apple; then one push to Apple's real sandbox with a
-# throwaway key, which Apple answers 403 InvalidProviderToken (the transport
-# works). The relay is owner-deployed: nothing here deploys it. Runs only when
+# HTTP/2 server playing Apple and local servers playing Google's token
+# endpoint and FCM (R3, with a throwaway RSA service account); then one push
+# to Apple's real sandbox with a throwaway key, which Apple answers 403
+# InvalidProviderToken (the transport works). The relay is owner-deployed: nothing here deploys it. Runs only when
 # the relay or the Inbox code it talks to could have changed.
 
 on:
@@ -24,6 +25,11 @@ on:
       - 'apps/hook/server/inbox*'
       - 'scripts/inbox-sim.ts'
       - 'tests/helpers/inbox-world.ts'
+      - 'tests/helpers/inbox-process.ts'
+      - 'tests/helpers/real-data-dir.ts'
+      - 'tests/helpers/hook-dist-stub.ts'
+      - 'tests/setup/sandbox-data-dir.ts'
+      - 'packages/shared/data-dir.ts'
       - 'bun.lock'
       - '.github/workflows/relay.yml'
   push:
@@ -40,6 +46,11 @@ on:
       - 'apps/hook/server/inbox*'
       - 'scripts/inbox-sim.ts'
       - 'tests/helpers/inbox-world.ts'
+      - 'tests/helpers/inbox-process.ts'
+      - 'tests/helpers/real-data-dir.ts'
+      - 'tests/helpers/hook-dist-stub.ts'
+      - 'tests/setup/sandbox-data-dir.ts'
+      - 'packages/shared/data-dir.ts'
       - 'bun.lock'
       - '.github/workflows/relay.yml'
 

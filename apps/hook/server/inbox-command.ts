@@ -6,6 +6,10 @@
  *   plannotator inbox --background  start it detached (no browser), print the
  *                                   URL, exit 0; what agents and the shim run
  *   plannotator inbox --no-open     run here without opening a browser
+ *   plannotator inbox --tailscale   also publish it over the tailnet for this
+ *                                   run (with any of the above; a running
+ *                                   Inbox is asked to publish), for the
+ *                                   Tailscale login that owns this machine
  *   plannotator inbox mcp           the stdio MCP entry for any agent
  *
  * On demand never pops a tab mid-work: only a person running `plannotator
@@ -21,34 +25,51 @@ import { inboxDir } from "@plannotator/shared/inbox/schema";
 import {
   acquireInboxStartLock,
   inboxStatus,
+  readInboxRegistry,
   waitForInbox,
   type InboxRegistryEntry,
 } from "@plannotator/shared/inbox/registry";
 import { handleInboxServerReady, startInboxServer } from "@plannotator/server/inbox";
+import { exposureWarning, type InboxTailscaleState } from "@plannotator/server/inbox-tailscale";
 import { openBrowser } from "@plannotator/server/browser";
+import { agentSpec, createAgentEnvironment, formatConnectReport, inboxConnectDisabled } from "@plannotator/server/inbox-agents";
+import { addInboxNote, inboxNotesDisabled } from "@plannotator/server/inbox-agent-notes";
+import { loadConfig, saveConfig } from "@plannotator/shared/config";
+import { INBOX_AGENT_LABELS, INBOX_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
+import { writeUrlQr } from "@plannotator/server/qr";
 import { getCliVersion } from "./cli";
-import { runInboxMcpShim } from "./inbox-mcp-shim";
+import { inboxHostSessionFromEnv, runInboxMcpShim } from "./inbox-mcp-shim";
 
 export const INBOX_LOG_FILE = "inbox.log";
 /** Set by a starter that holds the start lock for the detached Inbox it spawns. */
 const LOCK_HELD_ENV = "PLANNOTATOR_INBOX_LOCK_HELD";
+/**
+ * Set on an Inbox started detached (`--background`, a connection or the shim
+ * starting a stopped one, the window's Restart): such a start never connects
+ * agents, which only a person's `plannotator inbox` does. Scrubbed at start.
+ */
+const DETACHED_ENV = "PLANNOTATOR_INBOX_DETACHED";
 /** How long a starter waits for a detached Inbox to answer its health check. */
 const START_TIMEOUT_MS = 20_000;
 
-/** The argv that runs this same CLI: the compiled binary alone, or bun plus the entry script. */
-function selfCommand(): string[] {
+/**
+ * The argv that runs this same CLI: the compiled binary alone, or bun plus the
+ * entry script. Exported for `plannotator inbox --help`, whose agent guide
+ * names it, as the window's connect snippets do (`mcp_command`).
+ */
+export function selfCommand(): string[] {
   const script = process.argv[1];
   if (script && /\.(?:[cm]?[jt]s)$/.test(script) && existsSync(script)) return [process.execPath, script];
   return [process.execPath];
 }
 
 /** Spawn `plannotator inbox --no-open` in its own session, output to inbox/inbox.log. */
-function spawnDetachedInbox(dataDir: string): void {
+function spawnDetachedInbox(dataDir: string, tailscale: boolean): void {
   const dir = inboxDir(dataDir);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const log = openSync(join(dir, INBOX_LOG_FILE), "a", 0o600);
   const [command, ...rest] = selfCommand();
-  const child = spawn(command!, [...rest, "inbox", "--no-open"], {
+  const child = spawn(command!, [...rest, "inbox", "--no-open", ...(tailscale ? ["--tailscale"] : [])], {
     detached: true,
     // Never the starter's folder: a long-lived process would hold the agent's
     // project as its working directory (on Windows that blocks deleting or
@@ -56,7 +77,7 @@ function spawnDetachedInbox(dataDir: string): void {
     cwd: dir,
     windowsHide: true,
     stdio: ["ignore", log, log],
-    env: { ...process.env, PLANNOTATOR_DATA_DIR: dataDir, [LOCK_HELD_ENV]: "1" },
+    env: { ...process.env, PLANNOTATOR_DATA_DIR: dataDir, [LOCK_HELD_ENV]: "1", [DETACHED_ENV]: "1" },
   });
   child.unref();
   closeSync(log);
@@ -86,14 +107,14 @@ async function waitForBusyInbox(dataDir: string, pid: number): Promise<InboxRegi
  * The running Inbox's registry entry, starting a stopped one detached when
  * needed. Never opens a browser. Throws when it cannot be started.
  */
-export async function ensureInboxRunning(dataDir: string): Promise<InboxRegistryEntry> {
+export async function ensureInboxRunning(dataDir: string, options: { tailscale?: boolean } = {}): Promise<InboxRegistryEntry> {
   const status = await inboxStatus(dataDir);
   if (status.state === "running") return status.entry;
   if (status.state === "busy") return waitForBusyInbox(dataDir, status.entry.pid);
   const release = acquireInboxStartLock(dataDir);
   if (release) {
     try {
-      spawnDetachedInbox(dataDir);
+      spawnDetachedInbox(dataDir, options.tailscale === true);
     } catch (error) {
       release();
       throw error;
@@ -110,8 +131,92 @@ export async function ensureInboxRunning(dataDir: string): Promise<InboxRegistry
   }
 }
 
+/** Where the Inbox is on the tailnet, or why it is not there; the Inbox runs locally either way. Stderr only. */
+function reportTailnet(state: Partial<InboxTailscaleState> & { url: string | null; error: string | null } | undefined, requested: boolean): void {
+  if (!state) {
+    if (requested) process.stderr.write("Over your tailnet: not published.\n");
+    return;
+  }
+  if (state.exposed?.length) process.stderr.write(`Warning: ${exposureWarning(state.exposed)} Open Settings > Over your tailnet to replace it.\n`);
+  if (requested && state.on === false && state.source === "env") {
+    process.stderr.write("Not published over your tailnet: PLANNOTATOR_INBOX_TAILSCALE turns it off in the Inbox's environment.\n");
+    return;
+  }
+  if (state.url) {
+    const who = state.allowed?.length ? ` (only ${state.allowed.join(", ")})` : "";
+    process.stderr.write(`Over your tailnet: ${state.url}${who}\n`);
+    writeUrlQr(state.url);
+    return;
+  }
+  if (state.error) process.stderr.write(`Not published over your tailnet: ${state.error} The Inbox runs on this computer as usual.\n`);
+}
+
+/** `--tailscale` is for this run; say how to keep it. */
+function reportFlagScope(): void {
+  process.stderr.write(
+    'Published for this run. To publish at every start, turn on "Over your tailnet" in the Inbox\'s Settings (or set PLANNOTATOR_INBOX_TAILSCALE=1).\n',
+  );
+}
+
+/**
+ * `--tailscale` with an Inbox already running: ask it to publish for this
+ * run, through its token-guarded connection route. An Inbox that predates
+ * the route answers 404.
+ */
+async function publishRunningInbox(entry: InboxRegistryEntry): Promise<void> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${entry.port}/api/inbox/control/tailscale`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${entry.token}`, "Content-Type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (response.status === 404) {
+      process.stderr.write("The running Inbox is an older version without --tailscale; quit it and run plannotator inbox --tailscale again.\n");
+      return;
+    }
+    if (!response.ok) {
+      process.stderr.write(`The running Inbox did not publish over your tailnet (HTTP ${response.status}).\n`);
+      return;
+    }
+    const body = (await response.json()) as { tailscale?: InboxTailscaleState };
+    reportTailnet(body.tailscale, true);
+    if (body.tailscale?.url && body.tailscale.source === "flag") reportFlagScope();
+  } catch (error) {
+    process.stderr.write(`Could not reach the running Inbox: ${error instanceof Error ? error.message : String(error)}\n`);
+  }
+}
+
+/** What connecting the agents did, on stderr (stdout is unchanged). Nothing when nothing changed. */
+function reportConnect(report: InboxConnectReport | undefined): void {
+  if (!report) return;
+  for (const line of formatConnectReport(report)) process.stderr.write(`${line}\n`);
+}
+
+/**
+ * `plannotator inbox` with an Inbox already running (an agent may have
+ * started it with --background): ask it to connect the agents on this
+ * computer, through its token-guarded connection route. An Inbox that
+ * predates the route answers 404, and connects nothing.
+ */
+async function connectRunningInbox(entry: InboxRegistryEntry): Promise<void> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${entry.port}/api/inbox/control/connect`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${entry.token}`, "Content-Type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(40_000),
+    });
+    if (!response.ok) return;
+    const body = (await response.json()) as { connect?: InboxConnectReport };
+    reportConnect(body.connect);
+  } catch {
+    // The agents are connected at the next run.
+  }
+}
+
 /** Run the Inbox server in this process until a signal or the stop route ends it. */
-async function serveInbox(dataDir: string, open: boolean, htmlContent: string | undefined): Promise<never> {
+async function serveInbox(dataDir: string, open: boolean, htmlContent: string | undefined, tailscale: boolean, connect: boolean): Promise<never> {
   // A detached Inbox runs under its starter's lock; anyone else takes it, so
   // two people (or a person and an agent) never start two writers on one store.
   const lockHeldByStarter = process.env[LOCK_HELD_ENV] === "1";
@@ -124,7 +229,9 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
       process.exit(1);
     }
     process.stderr.write(`Plannotator Inbox: ${running.url}\n`);
+    if (tailscale) await publishRunningInbox(running);
     if (open) await openBrowser(running.url);
+    if (connect) await connectRunningInbox(running);
     process.exit(0);
   }
   let inbox: Awaited<ReturnType<typeof startInboxServer>>;
@@ -133,7 +240,9 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
     if (status.state === "running" || status.state === "busy") {
       const entry = status.state === "running" ? status.entry : await waitForBusyInbox(dataDir, status.entry.pid);
       process.stderr.write(`Plannotator Inbox: ${entry.url}\n`);
+      if (tailscale) await publishRunningInbox(entry);
       if (open) await openBrowser(entry.url);
+      if (connect) await connectRunningInbox(entry);
       process.exit(0);
     }
     inbox = await startInboxServer({
@@ -141,13 +250,19 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
       version: getCliVersion() ?? "dev",
       htmlContent,
       selfCommand: selfCommand(),
+      publishTailnet: tailscale,
       // The stop route (uninstall --purge) ends the process.
       onStopRequested: () => process.exit(0),
+      // Its data folder (or inbox.json) is gone or another Inbox's: nothing
+      // can reach this one and it has no store, so it ends (the server has
+      // stopped and said why on stderr) instead of running on headless.
+      onDataGone: () => process.exit(0),
       // The window's Restart: this server has stopped listening, so the
       // registry reads stopped; start the binary on disk detached (its own
-      // start lock, the last port first) and end this process.
+      // start lock, the last port first) and end this process. A run
+      // published only by --tailscale passes it on.
       onRestartRequested: () => {
-        ensureInboxRunning(dataDir)
+        ensureInboxRunning(dataDir, { tailscale: inbox.tailscale.runOnly() })
           .catch((error) => process.stderr.write(`Restart failed: ${error instanceof Error ? error.message : String(error)}\n`))
           .finally(() => process.exit(0));
       },
@@ -162,7 +277,70 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
   process.once("SIGINT", () => shutdown(130));
   process.once("SIGTERM", () => shutdown(143));
   await handleInboxServerReady(inbox, { open });
+  // Off the request path: the window is already open, and the card shows what
+  // this did once it is done (GET /api/inbox/agents).
+  if (connect) void inbox.connectAgents().then(reportConnect, () => {});
+  const tailnet = inbox.tailscale.state();
+  if (tailnet.on || tailscale) {
+    // This process's stderr already carries the server's own exposure warning.
+    reportTailnet({ ...tailnet, exposed: [] }, tailscale);
+    if (tailnet.url && tailnet.source === "flag") reportFlagScope();
+  }
   return new Promise<never>(() => {});
+}
+
+/**
+ * `plannotator inbox --notes codex,gemini`: add the Inbox note to these
+ * agents' instructions files (inbox-agent-notes.ts), for the install prompt
+ * once the person agreed in chat, and mark the window's one-time question as
+ * answered. Starts nothing. Exit 0 when every note is there, 1 otherwise.
+ */
+function writeNotes(dataDir: string, list: string): number {
+  const ids = [...new Set(list.split(",").map((id) => id.trim()).filter(Boolean))];
+  const unknown = ids.filter((id) => !(INBOX_NOTE_AGENT_IDS as readonly string[]).includes(id));
+  if (ids.length === 0 || unknown.length > 0) {
+    process.stderr.write(`Unknown agent${unknown.length === 1 ? "" : "s"} for --notes: ${unknown.join(", ") || "(none)"}. Use any of: ${INBOX_NOTE_AGENT_IDS.join(", ")}.\n`);
+    return 1;
+  }
+  const environment = createAgentEnvironment();
+  if (inboxNotesDisabled(environment.env)) {
+    process.stderr.write("PLANNOTATOR_INBOX_NOTES=0 is set: notes are off, nothing was written.\n");
+    return 1;
+  }
+  let ok = true;
+  let any = false;
+  for (const id of ids as InboxNoteAgentId[]) {
+    const label = INBOX_AGENT_LABELS[id];
+    // Never a file for an agent that is not on this computer.
+    if (!agentSpec(id).detect(environment)) {
+      ok = false;
+      process.stderr.write(`${label}: not added (${label} was not found on this computer).\n`);
+      continue;
+    }
+    const change = addInboxNote(id, dataDir, environment);
+    if (!change.ok) {
+      ok = false;
+      process.stderr.write(`${label}: not added (${change.reason}).\n`);
+      continue;
+    }
+    any = true;
+    const said = {
+      added: `Added a marked section to ${change.path}`,
+      created: `Created ${change.path}`,
+      updated: `Updated the note in ${change.path}`,
+      unchanged: `${change.path} already has the note`,
+      "kept-edited": `${change.path} has the note as you edited it; left as it is`,
+      shared: `${change.path} already has the note (a file another agent reads too)`,
+      "kept-shared": "",
+      removed: "",
+      deleted: "",
+    }[change.action];
+    process.stderr.write(`${label}: ${said}.\n`);
+  }
+  // The window's question is answered only when a note is there now.
+  if (any) saveConfig({ inboxAgentNotes: { ...(loadConfig().inboxAgentNotes ?? {}), offered: true } });
+  if (ok) process.stderr.write("Each agent reads it from its next session. Remove it in the Inbox's Settings or with plannotator uninstall.\n");
+  return ok ? 0 : 1;
 }
 
 function usageError(message: string): never {
@@ -177,6 +355,11 @@ export interface InboxCommandAssets {
 
 export async function runInboxCommand(args: readonly string[], assets: InboxCommandAssets = {}): Promise<never> {
   const dataDir = getPlannotatorDataDir();
+  // Only a person's `plannotator inbox` connects agents, never a detached start.
+  const detached = process.env[DETACHED_ENV] === "1";
+  delete process.env[DETACHED_ENV];
+  // PLANNOTATOR_INBOX_CONNECT=0 in this shell skips it, also on an Inbox an agent started.
+  const connect = !detached && !inboxConnectDisabled(process.env);
 
   if (args[0] === "mcp") {
     if (args.length > 1) usageError(`Unknown inbox mcp option: ${args[1]}`);
@@ -184,21 +367,34 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
       dataDir,
       cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
       ensureRunning: () => ensureInboxRunning(dataDir),
+      hostSession: inboxHostSessionFromEnv(process.env),
     });
     process.exit(0);
   }
 
+  if (args[0] === "--notes") {
+    if (args.length !== 2) usageError("--notes takes one list of agents, e.g. --notes codex,gemini, and no other option.");
+    process.exit(writeNotes(dataDir, args[1]!));
+  }
+
   let background = false;
   let noOpen = false;
+  let tailscale = false;
   for (const arg of args) {
     if (arg === "--background") background = true;
     else if (arg === "--no-open") noOpen = true;
+    else if (arg === "--tailscale") tailscale = true;
+    else if (arg === "--notes") usageError("--notes goes first and alone: plannotator inbox --notes codex,gemini");
     else usageError(`Unknown inbox option: ${arg}`);
   }
 
   if (background) {
     try {
-      const entry = await ensureInboxRunning(dataDir);
+      const before = await inboxStatus(dataDir);
+      const entry = await ensureInboxRunning(dataDir, { tailscale });
+      // Stdout stays the local URL alone (agents read it); the tailnet goes to stderr.
+      if (tailscale && (before.state === "running" || before.state === "busy")) await publishRunningInbox(entry);
+      else reportTailnet(readInboxRegistry(dataDir)?.tailscale ?? entry.tailscale, tailscale);
       process.stdout.write(`${entry.url}\n`);
       process.exit(0);
     } catch (error) {
@@ -217,8 +413,10 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
       process.exit(1);
     }
     process.stderr.write(`Plannotator Inbox: ${entry.url}\n`);
+    if (tailscale) await publishRunningInbox(entry);
     if (!noOpen) await openBrowser(entry.url);
+    if (connect) await connectRunningInbox(entry);
     process.exit(0);
   }
-  return serveInbox(dataDir, !noOpen, assets.htmlContent);
+  return serveInbox(dataDir, !noOpen, assets.htmlContent, tailscale, connect);
 }

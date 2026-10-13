@@ -9,7 +9,10 @@
  *     install script manages. OpenCode and Pi never call into this module's
  *     trigger, so their npm servers are unaffected.
  *   - At most once per 24h (`update-state.json` in the data dir), after a
- *     session's server is up, it asks GitHub for the latest stable release.
+ *     session's server is up, it reads the latest stable release from the
+ *     shared update check (@plannotator/shared/update-check), which asks
+ *     GitHub only when its cache is stale and never while update checks are
+ *     off (PLANNOTATOR_UPDATE_CHECK=0).
  *   - When that release is newer and no OTHER Plannotator session is open, it
  *     spawns install.sh / install.ps1 for exactly that tag, fully detached,
  *     with output in `update.log`. A wrapper records the script's exit code in
@@ -18,58 +21,83 @@
  *     ("Updated to vX" once the running binary is that version, or "Auto-update
  *     failed" with the log path when the script exited non-zero).
  *
+ * Update now (the Inbox, a review window, `plannotator update`) runs the same
+ * wrapper with the same lock, log and result file, without the 24h window and
+ * without the open-sessions gate: `beginManualUpdate` / `startManualUpdate`.
+ *
  * Nothing here is ever awaited by a caller: `scheduleAutoUpdateCheck` returns
  * immediately and every failure ends in a log line, never a thrown error.
  */
 
 import { spawn } from "node:child_process";
 import {
-  appendFileSync,
   closeSync,
   existsSync,
-  mkdirSync,
   openSync,
   readFileSync,
   realpathSync,
-  renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
+  appendFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { join, posix, win32 } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
-import { loadConfig, resolveAutoUpdate } from "@plannotator/shared/config";
+import { loadConfig, resolveAutoUpdate, resolveUpdateCheck } from "@plannotator/shared/config";
+import {
+  buildUpdateAdvert,
+  cachedLatestTag,
+  compareStableVersions,
+  INSTALL_FLAG_SPELLINGS,
+  INSTALL_PS1_URL,
+  INSTALL_SH_URL,
+  installerFlagArgs,
+  isAllowedOverrideUrl,
+  isNewerStableVersion,
+  knownLatestRelease,
+  parseStableVersion,
+  patchUpdateState,
+  readInstallFlags,
+  readUpdateState,
+  releaseUrlFor,
+  runReleaseCheck,
+  updateLog,
+  type FetchReleaseResult,
+  type InstallFlagId,
+  type UpdateAction,
+  type UpdateAdvert,
+  type UpdateState,
+} from "@plannotator/shared/update-check";
+import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { isLoopbackHostHeader } from "@plannotator/shared/loopback-host";
+import { checkServerSession, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 import { listSessions, type SessionInfo } from "./sessions";
+
+// The version helpers and the install-flag allowlist moved to
+// @plannotator/shared/update-check (vendored to Pi); re-exported so existing
+// importers keep working.
+export {
+  cachedLatestTag,
+  compareStableVersions,
+  INSTALL_FLAG_SPELLINGS,
+  installerFlagArgs,
+  isNewerStableVersion,
+  normalizeStableVersion,
+  parseInstallFlags,
+  parseStableVersion,
+  readInstallFlags,
+  releaseUrlFor,
+  type InstallFlagId,
+  type InstallFlagsRead,
+} from "@plannotator/shared/update-check";
 
 export const AUTO_UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 /** A lock older than this is from a run that died without cleaning up. */
 export const AUTO_UPDATE_LOCK_STALE_MS = 60 * 60 * 1000;
 
-const REPO = "backnotprop/plannotator";
-const LATEST_RELEASE_API = `https://api.github.com/repos/${REPO}/releases/latest`;
-const INSTALL_SH_URL = "https://plannotator.ai/install.sh";
-const INSTALL_PS1_URL = "https://plannotator.ai/install.ps1";
-
-export interface AutoUpdateState {
-  /** Epoch ms of the last check that got past the gates (the 24h install window). */
-  lastCheckAt?: number;
-  /**
-   * The last answer GitHub gave for the latest stable release, cached for 24h
-   * independently of the install window, so a check that is skipped because
-   * other sessions are open does not re-query GitHub on every session start.
-   */
-  latestRelease?: {
-    tag: string;
-    fetchedAt: number;
-  };
-  /** The install this process (or an earlier one) started. */
-  pending?: {
-    version: string;
-    fromVersion: string;
-    startedAt: number;
-  };
-}
+/** auto-update's view of update-state.json (the shared state file). */
+export type AutoUpdateState = UpdateState;
 
 export interface AutoUpdateResult {
   version: string;
@@ -99,46 +127,6 @@ export function autoUpdatePaths(dataDir: string = getPlannotatorDataDir()) {
 // Pure helpers
 // ---------------------------------------------------------------------------
 
-/** Parse a stable `X.Y.Z` / `vX.Y.Z`; anything else (pre-release, junk) is null. */
-export function parseStableVersion(value: unknown): [number, number, number] | null {
-  if (typeof value !== "string") return null;
-  const m = /^v?(\d{1,9})\.(\d{1,9})\.(\d{1,9})$/.exec(value.trim());
-  if (!m) return null;
-  return [Number(m[1]), Number(m[2]), Number(m[3])];
-}
-
-/** -1 / 0 / 1; null when either side is not a stable version. */
-export function compareStableVersions(a: string, b: string): number | null {
-  const pa = parseStableVersion(a);
-  const pb = parseStableVersion(b);
-  if (!pa || !pb) return null;
-  for (let i = 0; i < 3; i++) {
-    if (pa[i] !== pb[i]) return pa[i] > pb[i] ? 1 : -1;
-  }
-  return 0;
-}
-
-/** True only for a strictly newer stable release: never a downgrade or re-install. */
-export function isNewerStableVersion(latest: string, current: string): boolean {
-  return compareStableVersions(latest, current) === 1;
-}
-
-/** The canonical `X.Y.Z` for a stable version string, or null. */
-export function normalizeStableVersion(value: unknown): string | null {
-  const parsed = parseStableVersion(value);
-  return parsed ? parsed.join(".") : null;
-}
-
-/** The cached latest-release tag when it is still fresh, else null. */
-export function cachedLatestTag(state: AutoUpdateState, now: number): string | null {
-  const cached = state.latestRelease;
-  if (!cached || typeof cached !== "object") return null;
-  const at = cached.fetchedAt;
-  if (typeof at !== "number" || !Number.isFinite(at) || at > now) return null;
-  if (now - at >= AUTO_UPDATE_INTERVAL_MS) return null;
-  return normalizeStableVersion(cached.tag);
-}
-
 export function isCheckDue(state: AutoUpdateState, now: number): boolean {
   const last = state.lastCheckAt;
   if (typeof last !== "number" || !Number.isFinite(last)) return true;
@@ -150,10 +138,6 @@ export function isCheckDue(state: AutoUpdateState, now: number): boolean {
 /** Live sessions that belong to some other Plannotator process. */
 export function otherOpenSessions(sessions: SessionInfo[], ownPid: number): SessionInfo[] {
   return sessions.filter((s) => s.pid !== ownPid);
-}
-
-export function releaseUrlFor(version: string): string {
-  return `https://github.com/${REPO}/releases/tag/v${version.replace(/^v/, "")}`;
 }
 
 export function deriveAutoUpdateNotice(
@@ -184,7 +168,8 @@ export function deriveAutoUpdateNotice(
 export function managedBinaryPath(
   platform: NodeJS.Platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,
-  home: string = homedir(),
+  // HOME as the environment says it now (os.homedir() may be fixed at startup).
+  home: string = (platform !== "win32" && env.HOME) || homedir(),
 ): string {
   // Join with the TARGET platform's separator, not the host's.
   if (platform === "win32") {
@@ -198,7 +183,8 @@ export function isManagedBinary(
   execPath: string,
   platform: NodeJS.Platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,
-  home: string = homedir(),
+  // HOME as the environment says it now (os.homedir() may be fixed at startup).
+  home: string = (platform !== "win32" && env.HOME) || homedir(),
 ): boolean {
   const target = managedBinaryPath(platform, env, home);
   const canon = (p: string) => {
@@ -226,36 +212,21 @@ function readJson<T>(path: string): T | null {
 }
 
 export function readAutoUpdateState(dataDir?: string): AutoUpdateState {
-  const raw = readJson<AutoUpdateState>(autoUpdatePaths(dataDir).state);
-  return raw && typeof raw === "object" ? raw : {};
+  return readUpdateState(dataDir);
 }
 
-function writeAutoUpdateState(state: AutoUpdateState, dataDir?: string): void {
-  const { state: path } = autoUpdatePaths(dataDir);
-  mkdirSync(join(path, ".."), { recursive: true });
-  const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n", "utf-8");
-  renameSync(tmp, path);
-}
-
-function readAutoUpdateResult(dataDir?: string): AutoUpdateResult | null {
+export function readAutoUpdateResult(dataDir?: string): AutoUpdateResult | null {
   const raw = readJson<AutoUpdateResult>(autoUpdatePaths(dataDir).result);
   if (!raw || typeof raw.version !== "string" || typeof raw.exitCode !== "number") return null;
   return raw;
 }
 
 function log(message: string, dataDir?: string): void {
-  try {
-    const { log: path } = autoUpdatePaths(dataDir);
-    mkdirSync(join(path, ".."), { recursive: true });
-    appendFileSync(path, `[${new Date().toISOString()}] auto-update: ${message}\n`);
-  } catch {
-    // Logging is best-effort; auto-update must never surface an error.
-  }
+  updateLog(message, dataDir, "auto-update");
 }
 
 /** Take update.lock, clearing a stale one. False when another run holds it. */
-function acquireLock(lockPath: string): boolean {
+export function acquireUpdateLock(lockPath: string): boolean {
   try {
     if (existsSync(lockPath)) {
       // Wall clock, not the injected clock: this compares against a file mtime.
@@ -272,102 +243,14 @@ function acquireLock(lockPath: string): boolean {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Remembered install flags
-// ---------------------------------------------------------------------------
-
-/**
- * The install-affecting command-line flags the installers remember in
- * `install-flags.json` (written by install.sh / install.ps1 / install.cmd after
- * a successful run), as neutral ids with their spelling per installer. This is
- * the strict allowlist: anything else in the file is dropped.
- */
-export const INSTALL_FLAG_SPELLINGS = {
-  minimal: { posix: "--minimal", powershell: "-Minimal" },
-  "no-minimal": { posix: "--no-minimal", powershell: "-NoMinimal" },
-  "verify-attestation": { posix: "--verify-attestation", powershell: "-VerifyAttestation" },
-  "skip-attestation": { posix: "--skip-attestation", powershell: "-SkipAttestation" },
-  "with-call-flow": { posix: "--with-call-flow", powershell: "-WithCallFlow" },
-  "with-t3": { posix: "--with-t3", powershell: null },
-  "without-t3": { posix: "--without-t3", powershell: null },
-  "skip-codex": { posix: "--skip-codex", powershell: "-SkipCodex" },
-  "skip-gemini": { posix: "--skip-gemini", powershell: "-SkipGemini" },
-  "skip-kiro": { posix: "--skip-kiro", powershell: "-SkipKiro" },
-  "skip-vibe": { posix: "--skip-vibe", powershell: "-SkipVibe" },
-  "skip-opencode": { posix: "--skip-opencode", powershell: "-SkipOpencode" },
-  "skip-skills": { posix: "--skip-skills", powershell: "-SkipSkills" },
-} as const;
-
-export type InstallFlagId = keyof typeof INSTALL_FLAG_SPELLINGS;
-
-const MUTUALLY_EXCLUSIVE: Array<[InstallFlagId, InstallFlagId]> = [
-  ["minimal", "no-minimal"],
-  ["verify-attestation", "skip-attestation"],
-  ["with-t3", "without-t3"],
-];
-
-function isInstallFlagId(value: unknown): value is InstallFlagId {
-  return typeof value === "string" && Object.prototype.hasOwnProperty.call(INSTALL_FLAG_SPELLINGS, value);
-}
-
-export interface InstallFlagsRead {
-  flags: InstallFlagId[];
-  /** Why the file could not be used as-is, for update.log. */
-  problem?: string;
-}
-
-/**
- * Validate the parsed contents of install-flags.json. Known ids are kept in
- * allowlist order without duplicates; unknown entries are dropped; a
- * mutually-exclusive pair (which no installer writes) drops both sides.
- */
-export function parseInstallFlags(raw: unknown): InstallFlagsRead {
-  if (!raw || typeof raw !== "object" || !Array.isArray((raw as { flags?: unknown }).flags)) {
-    return { flags: [], problem: "install-flags.json is malformed" };
-  }
-  const entries = (raw as { flags: unknown[] }).flags;
-  const present = new Set<InstallFlagId>();
-  let dropped = 0;
-  for (const entry of entries) {
-    if (isInstallFlagId(entry)) present.add(entry);
-    else dropped++;
-  }
-  for (const [a, b] of MUTUALLY_EXCLUSIVE) {
-    if (present.has(a) && present.has(b)) {
-      present.delete(a);
-      present.delete(b);
-      dropped += 2;
-    }
-  }
-  const flags = (Object.keys(INSTALL_FLAG_SPELLINGS) as InstallFlagId[]).filter((id) => present.has(id));
-  return dropped > 0
-    ? { flags, problem: `dropped ${dropped} unrecognized or conflicting install-flags.json entr${dropped === 1 ? "y" : "ies"}` }
-    : { flags };
-}
-
-/** Read install-flags.json; a missing or unreadable file means no flags. */
-export function readInstallFlags(dataDir?: string): InstallFlagsRead {
-  const path = autoUpdatePaths(dataDir).installFlags;
-  let text: string;
+/** True while an install holds update.lock (a lock older than an hour is a dead run's). */
+export function isUpdateLockHeld(dataDir?: string): boolean {
   try {
-    text = readFileSync(path, "utf-8");
+    const { lock } = autoUpdatePaths(dataDir);
+    return Date.now() - statSync(lock).mtimeMs < AUTO_UPDATE_LOCK_STALE_MS;
   } catch {
-    return { flags: [], problem: "no install-flags.json; running the installer with default flags" };
+    return false;
   }
-  try {
-    return parseInstallFlags(JSON.parse(text));
-  } catch {
-    return { flags: [], problem: "install-flags.json is malformed; running the installer with default flags" };
-  }
-}
-
-/** The flags spelled for the installer the platform runs. */
-export function installerFlagArgs(flags: readonly InstallFlagId[], platform: NodeJS.Platform): string[] {
-  const key = platform === "win32" ? "powershell" : "posix";
-  return flags.filter(isInstallFlagId).flatMap((id) => {
-    const spelling = INSTALL_FLAG_SPELLINGS[id][key];
-    return spelling === null ? [] : [spelling];
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -391,9 +274,15 @@ export interface AutoUpdateDeps {
   pid: number;
   dataDir: string;
   now: () => number;
+  /** The auto-update knob (resolveAutoUpdate). */
   enabled: () => boolean;
+  /** The update-check knob (resolveUpdateCheck): auto-update needs the check. Default: on. */
+  checksEnabled?: () => boolean;
   isManaged: () => boolean;
-  fetchLatestTag: () => Promise<string | null>;
+  /** Ask GitHub; the release (with its notes) or why not. Preferred over fetchLatestTag. */
+  fetchRelease?: () => Promise<FetchReleaseResult>;
+  /** Ask GitHub for the tag only (older seam, kept for tests). */
+  fetchLatestTag?: () => Promise<string | null>;
   listSessions: () => SessionInfo[];
   launchInstaller: (launch: InstallerLaunch) => void;
 }
@@ -401,6 +290,7 @@ export interface AutoUpdateDeps {
 export type AutoUpdateOutcome =
   | "dev-build"
   | "disabled"
+  | "checks-off"
   | "unmanaged"
   | "throttled"
   | "no-release"
@@ -410,10 +300,20 @@ export type AutoUpdateOutcome =
   | "launched"
   | "launch-failed";
 
+function releaseFetcher(deps: Pick<AutoUpdateDeps, "fetchRelease" | "fetchLatestTag">): () => Promise<FetchReleaseResult> {
+  if (deps.fetchRelease) return deps.fetchRelease;
+  const fetchTag = deps.fetchLatestTag;
+  return async () => {
+    const tag = fetchTag ? await fetchTag() : null;
+    return tag === null ? { ok: false, error: "no response" } : { ok: true, release: { tag } };
+  };
+}
+
 export async function runAutoUpdateCheck(deps: AutoUpdateDeps): Promise<AutoUpdateOutcome> {
   const current = deps.currentVersion;
   if (!current || !parseStableVersion(current)) return "dev-build";
   if (!deps.enabled()) return "disabled";
+  if (deps.checksEnabled && !deps.checksEnabled()) return "checks-off";
   if (!deps.isManaged()) return "unmanaged";
 
   const paths = autoUpdatePaths(deps.dataDir);
@@ -423,21 +323,34 @@ export async function runAutoUpdateCheck(deps: AutoUpdateDeps): Promise<AutoUpda
 
   // Claim the window before the network call so concurrent session starts do
   // not all query GitHub.
-  writeAutoUpdateState({ ...state, lastCheckAt: now }, deps.dataDir);
+  patchUpdateState((s) => ({ ...s, lastCheckAt: now }), deps.dataDir);
+  // Give the window back when nothing was installed for a reason that is not
+  // "checked and up to date": the next session start retries (the release
+  // check's own 6h backoff still bounds the requests).
+  const restoreWindow = () =>
+    patchUpdateState((s) => {
+      const next = { ...s };
+      if (state.lastCheckAt === undefined) delete next.lastCheckAt;
+      else next.lastCheckAt = state.lastCheckAt;
+      return next;
+    }, deps.dataDir);
 
-  // The tag is untrusted input (it ends up as an installer argument), so it is
-  // reduced to a canonical X.Y.Z before anything else sees it.
+  // The shared release check answers from the 24h cache, or asks GitHub once
+  // (it reduces the tag to a canonical X.Y.Z, since the tag ends up as an
+  // installer argument).
   let latest = cachedLatestTag(state, now);
-  let base: AutoUpdateState = state;
   if (!latest) {
-    const fetched = await deps.fetchLatestTag();
-    latest = normalizeStableVersion(fetched);
+    const checked = await runReleaseCheck({
+      dataDir: deps.dataDir,
+      now: () => now,
+      enabled: () => true,
+      fetchRelease: releaseFetcher(deps),
+    });
+    latest = checked.outcome === "checked" ? checked.version : null;
     if (!latest) {
-      log(`could not read the latest release (${fetched ?? "no response"})`, deps.dataDir);
+      restoreWindow();
       return "no-release";
     }
-    base = { ...state, latestRelease: { tag: latest, fetchedAt: now } };
-    writeAutoUpdateState({ ...base, lastCheckAt: now }, deps.dataDir);
   }
   if (!isNewerStableVersion(latest, current)) return "up-to-date";
 
@@ -445,7 +358,7 @@ export async function runAutoUpdateCheck(deps: AutoUpdateDeps): Promise<AutoUpda
   if (others.length > 0) {
     // Do not spend the 24h install window: the next session start retries,
     // answering from the cached release instead of querying GitHub again.
-    writeAutoUpdateState({ ...base }, deps.dataDir);
+    restoreWindow();
     log(
       `${latest} is available; skipped because ${others.length} other Plannotator session(s) are open`,
       deps.dataDir,
@@ -453,7 +366,7 @@ export async function runAutoUpdateCheck(deps: AutoUpdateDeps): Promise<AutoUpda
     return "sessions-open";
   }
 
-  if (!acquireLock(paths.lock)) {
+  if (!acquireUpdateLock(paths.lock)) {
     log("another update is already running", deps.dataDir);
     return "locked";
   }
@@ -463,8 +376,8 @@ export async function runAutoUpdateCheck(deps: AutoUpdateDeps): Promise<AutoUpda
     try {
       unlinkSync(paths.result);
     } catch {}
-    writeAutoUpdateState(
-      { ...base, lastCheckAt: now, pending: { version, fromVersion: current, startedAt: now } },
+    patchUpdateState(
+      (s) => ({ ...s, lastCheckAt: now, pending: { version, fromVersion: current, startedAt: now } }),
       deps.dataDir,
     );
     const remembered = readInstallFlags(deps.dataDir);
@@ -481,30 +394,116 @@ export async function runAutoUpdateCheck(deps: AutoUpdateDeps): Promise<AutoUpda
     });
     return "launched";
   } catch (err) {
-    log(`could not start the installer: ${err instanceof Error ? err.message : String(err)}`, deps.dataDir);
-    try {
-      writeFileSync(paths.result, JSON.stringify({ version, exitCode: -1 }) + "\n");
-    } catch {}
-    try {
-      unlinkSync(paths.lock);
-    } catch {}
+    abortLaunch(version, err, deps.dataDir);
     return "launch-failed";
   }
 }
 
-async function fetchLatestTag(): Promise<string | null> {
+/** A launch that never started: record a failed result and release the lock. */
+function abortLaunch(version: string, err: unknown, dataDir?: string): void {
+  const paths = autoUpdatePaths(dataDir);
+  log(`could not start the installer: ${err instanceof Error ? err.message : String(err)}`, dataDir);
   try {
-    const res = await fetch(LATEST_RELEASE_API, {
-      headers: { accept: "application/vnd.github+json", "user-agent": "plannotator-auto-update" },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) return null;
-    const body = (await res.json()) as { tag_name?: unknown; draft?: unknown; prerelease?: unknown };
-    if (body.draft === true || body.prerelease === true) return null;
-    return typeof body.tag_name === "string" ? body.tag_name : null;
-  } catch {
-    return null;
+    writeFileSync(paths.result, JSON.stringify({ version: version.replace(/^v/, ""), exitCode: -1 }) + "\n");
+  } catch {}
+  try {
+    unlinkSync(paths.lock);
+  } catch {}
+}
+
+// ---------------------------------------------------------------------------
+// Update now (the Inbox, a review window's toast, `plannotator update`)
+// ---------------------------------------------------------------------------
+
+export interface ManualUpdateDeps {
+  currentVersion: string | undefined;
+  dataDir: string;
+  now: () => number;
+  platform: NodeJS.Platform;
+  isManaged: () => boolean;
+}
+
+export type ManualUpdateBegin =
+  | { outcome: "ready"; launch: InstallerLaunch; fromVersion: string }
+  | { outcome: "dev-build" | "unmanaged" | "no-release" | "up-to-date" | "locked" };
+
+/**
+ * The person asked for the update: the same installer, lock, log, result file
+ * and pinned tag as auto-update, without its 24h throttle and without its
+ * "other sessions are open" gate (open sessions keep running their old
+ * binary; the person was told). The version is always the newest release the
+ * machine knows about, never one a caller names, so a request can never pick
+ * a downgrade.
+ */
+export function beginManualUpdate(deps: ManualUpdateDeps): ManualUpdateBegin {
+  const current = deps.currentVersion;
+  if (!current || !parseStableVersion(current)) return { outcome: "dev-build" };
+  if (!deps.isManaged()) return { outcome: "unmanaged" };
+  const latest = knownLatestRelease(readAutoUpdateState(deps.dataDir));
+  if (!latest) return { outcome: "no-release" };
+  if (!isNewerStableVersion(latest.version, current)) return { outcome: "up-to-date" };
+  const paths = autoUpdatePaths(deps.dataDir);
+  if (!acquireUpdateLock(paths.lock)) {
+    log("Update now: another update is already running", deps.dataDir);
+    return { outcome: "locked" };
   }
+  const now = deps.now();
+  try {
+    unlinkSync(paths.result);
+  } catch {}
+  patchUpdateState(
+    (s) => ({ ...s, pending: { version: latest.version, fromVersion: current, startedAt: now, by: "person" } }),
+    deps.dataDir,
+  );
+  const remembered = readInstallFlags(deps.dataDir);
+  if (remembered.problem) log(remembered.problem, deps.dataDir);
+  const flagNote = remembered.flags.length > 0 ? ` with ${remembered.flags.join(", ")}` : "";
+  log(`Update now: installing v${latest.version} (from v${current})${flagNote}`, deps.dataDir);
+  return {
+    outcome: "ready",
+    fromVersion: current,
+    launch: {
+      version: `v${latest.version}`,
+      logPath: paths.log,
+      resultPath: paths.result,
+      lockPath: paths.lock,
+      platform: deps.platform,
+      flags: remembered.flags,
+    },
+  };
+}
+
+export type ManualUpdateOutcome =
+  | { outcome: "launched"; version: string }
+  | { outcome: "launch-failed"; version: string }
+  | { outcome: "dev-build" | "unmanaged" | "no-release" | "up-to-date" | "locked" };
+
+/** Update now, detached: what the Inbox and a review window's Update button run. */
+export function startManualUpdate(
+  deps: ManualUpdateDeps & { launchInstaller: (launch: InstallerLaunch) => void },
+): ManualUpdateOutcome {
+  const begun = beginManualUpdate(deps);
+  if (begun.outcome !== "ready") return begun;
+  const version = begun.launch.version.replace(/^v/, "");
+  try {
+    deps.launchInstaller(begun.launch);
+    return { outcome: "launched", version };
+  } catch (err) {
+    abortLaunch(version, err, deps.dataDir);
+    return { outcome: "launch-failed", version };
+  }
+}
+
+/** startManualUpdate for this process: the compiled CLI's own binary and data dir. */
+export function startManualUpdateForThisBinary(currentVersion: string | undefined): ManualUpdateOutcome {
+  return startManualUpdate({
+    currentVersion,
+    dataDir: getPlannotatorDataDir(),
+    now: Date.now,
+    platform: process.platform,
+    isManaged: () => isManagedBinary(process.execPath),
+    launchInstaller,
+  });
 }
 
 /**
@@ -518,15 +517,26 @@ async function fetchLatestTag(): Promise<string | null> {
 const POSIX_WRAPPER = `
 tmp=$(mktemp "\${TMPDIR:-/tmp}/plannotator-install.XXXXXX") || exit 1
 code=1
+# Interrupted (Ctrl-C on plannotator update, a TERM): record 130 and release
+# the lock now, so the next update does not wait an hour for a stale lock.
+on_signal() {
+  trap '' INT TERM HUP
+  rm -f "$tmp"
+  printf '{"version":"%s","exitCode":130}\\n' "$PLANNOTATOR_UPDATE_VERSION" > "$PLANNOTATOR_UPDATE_RESULT.tmp" && mv -f "$PLANNOTATOR_UPDATE_RESULT.tmp" "$PLANNOTATOR_UPDATE_RESULT"
+  echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] update: interrupted"
+  rm -f "$PLANNOTATOR_UPDATE_LOCK"
+  exit 130
+}
+trap on_signal INT TERM HUP
 if curl -fsSL "$PLANNOTATOR_UPDATE_SCRIPT_URL" -o "$tmp"; then
   bash "$tmp" --version "$PLANNOTATOR_UPDATE_VERSION" --non-interactive "$@" </dev/null
   code=$?
 else
-  echo "auto-update: could not download $PLANNOTATOR_UPDATE_SCRIPT_URL"
+  echo "update: could not download $PLANNOTATOR_UPDATE_SCRIPT_URL"
 fi
 rm -f "$tmp"
 printf '{"version":"%s","exitCode":%d}\\n' "$PLANNOTATOR_UPDATE_VERSION" "$code" > "$PLANNOTATOR_UPDATE_RESULT.tmp" && mv -f "$PLANNOTATOR_UPDATE_RESULT.tmp" "$PLANNOTATOR_UPDATE_RESULT"
-echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] auto-update: install.sh exited $code"
+echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] update: install.sh exited $code"
 rm -f "$PLANNOTATOR_UPDATE_LOCK"
 `;
 
@@ -542,7 +552,9 @@ const POWERSHELL_ALLOWED_FLAGS = Object.values(INSTALL_FLAG_SPELLINGS)
  * splatted as an array, so they are never parsed as script text.
  */
 const POWERSHELL_WRAPPER = `
-$code = 1
+# 130 until the installer finished: a Ctrl-C stops the pipeline, and the
+# finally block below still records it and releases the lock.
+$code = 130
 $allowedFlags = @(${POWERSHELL_ALLOWED_FLAGS})
 $installFlags = @()
 if ($env:PLANNOTATOR_UPDATE_FLAGS) {
@@ -556,14 +568,14 @@ try {
   & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $tmp -Version $env:PLANNOTATOR_UPDATE_VERSION -NonInteractive @installFlags
   $code = $LASTEXITCODE
 } catch {
-  Write-Output "auto-update: $_"
+  Write-Output "update: $_"
   $code = 1
 } finally {
   Remove-Item -Force -ErrorAction SilentlyContinue $tmp
+  [System.IO.File]::WriteAllText($env:PLANNOTATOR_UPDATE_RESULT, ('{"version":"' + $env:PLANNOTATOR_UPDATE_VERSION + '","exitCode":' + [int]$code + '}'))
+  Write-Output ("[" + (Get-Date).ToUniversalTime().ToString('o') + "] update: install.ps1 exited " + $code)
+  Remove-Item -Force -ErrorAction SilentlyContinue $env:PLANNOTATOR_UPDATE_LOCK
 }
-[System.IO.File]::WriteAllText($env:PLANNOTATOR_UPDATE_RESULT, ('{"version":"' + $env:PLANNOTATOR_UPDATE_VERSION + '","exitCode":' + [int]$code + '}'))
-Write-Output ("[" + (Get-Date).ToUniversalTime().ToString('o') + "] auto-update: install.ps1 exited " + $code)
-Remove-Item -Force -ErrorAction SilentlyContinue $env:PLANNOTATOR_UPDATE_LOCK
 `;
 
 /**
@@ -594,19 +606,37 @@ export function installerCommand(
   return { file: "/bin/sh", args: ["-c", POSIX_WRAPPER, "plannotator-auto-update", ...flagArgs], env: {} };
 }
 
-export function launchInstaller(launch: InstallerLaunch): void {
-  const isWindows = launch.platform === "win32";
-  const logFd = openSync(launch.logPath, "a");
-  try {
-    const { file, args, env: commandEnv } = installerCommand(launch.platform, launch.flags);
-    const env = {
+/**
+ * The install script the wrapper downloads. PLANNOTATOR_INSTALL_SCRIPT_URL is
+ * a testing / mirror knob (`https:` or loopback `http:` only; anything else is
+ * ignored), like PLANNOTATOR_UPDATE_API_URL for the release check.
+ */
+export function installScriptUrl(platform: NodeJS.Platform, env: NodeJS.ProcessEnv = process.env): string {
+  const raw = env.PLANNOTATOR_INSTALL_SCRIPT_URL?.trim();
+  if (raw && isAllowedOverrideUrl(raw)) return raw;
+  return platform === "win32" ? INSTALL_PS1_URL : INSTALL_SH_URL;
+}
+
+function installerEnv(launch: InstallerLaunch): { file: string; args: string[]; env: NodeJS.ProcessEnv } {
+  const { file, args, env: commandEnv } = installerCommand(launch.platform, launch.flags);
+  return {
+    file,
+    args,
+    env: {
       ...process.env,
       PLANNOTATOR_UPDATE_VERSION: launch.version,
       PLANNOTATOR_UPDATE_RESULT: launch.resultPath,
       PLANNOTATOR_UPDATE_LOCK: launch.lockPath,
-      PLANNOTATOR_UPDATE_SCRIPT_URL: isWindows ? INSTALL_PS1_URL : INSTALL_SH_URL,
+      PLANNOTATOR_UPDATE_SCRIPT_URL: installScriptUrl(launch.platform),
       ...commandEnv,
-    };
+    },
+  };
+}
+
+export function launchInstaller(launch: InstallerLaunch): void {
+  const logFd = openSync(launch.logPath, "a");
+  try {
+    const { file, args, env } = installerEnv(launch);
     const child = spawn(file, args, {
       detached: true,
       stdio: ["ignore", logFd, logFd],
@@ -620,6 +650,78 @@ export function launchInstaller(launch: InstallerLaunch): void {
   }
 }
 
+/**
+ * `plannotator update`: the same wrapper, in the foreground, its output shown
+ * as it runs and appended to update.log. Resolves to the install script's exit
+ * code (from update-result.json, which the wrapper writes), or -1.
+ */
+export function runInstallerForeground(
+  launch: InstallerLaunch,
+  write: (chunk: string) => void,
+  options: { onSpawn?: (child: ReturnType<typeof spawn>) => void } = {},
+): Promise<number> {
+  return new Promise((resolve) => {
+    // While the installer runs, an INT or TERM to this process is passed to
+    // the wrapper (whose trap records 130 and releases the lock) instead of
+    // killing this process first; a Ctrl-C reaches both already.
+    const forward = (signal: NodeJS.Signals) => () => {
+      try {
+        child?.kill(signal);
+      } catch {}
+    };
+    const onInt = forward("SIGINT");
+    const onTerm = forward("SIGTERM");
+    const unhook = () => {
+      process.off("SIGINT", onInt);
+      process.off("SIGTERM", onTerm);
+    };
+    const { file, args, env } = installerEnv(launch);
+    const tee = (chunk: Buffer | string) => {
+      const text = chunk.toString();
+      write(text);
+      try {
+        appendFileSync(launch.logPath, text);
+      } catch {}
+    };
+    let child: ReturnType<typeof spawn> | undefined;
+    try {
+      child = spawn(file, args, { stdio: ["ignore", "pipe", "pipe"], env, windowsHide: true });
+    } catch (err) {
+      abortLaunch(launch.version, err, join(launch.logPath, ".."));
+      resolve(-1);
+      return;
+    }
+    process.on("SIGINT", onInt);
+    process.on("SIGTERM", onTerm);
+    options.onSpawn?.(child);
+    child.stdout?.on("data", tee);
+    child.stderr?.on("data", tee);
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      unhook();
+      const raw = readJson<AutoUpdateResult>(launch.resultPath);
+      if (raw && typeof raw.exitCode === "number") {
+        resolve(raw.exitCode);
+        return;
+      }
+      abortLaunch(launch.version, new Error("the installer ended without a result"), join(launch.logPath, ".."));
+      resolve(-1);
+    };
+    child.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      unhook();
+      abortLaunch(launch.version, err, join(launch.logPath, ".."));
+      resolve(-1);
+    });
+    // "exit", not "close": a wrapper killed outright can leave its own children
+    // holding the pipes open, and the lock must not wait for them.
+    child.on("exit", finish);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // CLI wiring
 // ---------------------------------------------------------------------------
@@ -628,28 +730,39 @@ let scheduled = false;
 let noticeVersion: string | undefined;
 
 /**
- * Fire-and-forget: returns immediately, runs the check on a later tick, and
- * swallows every failure into update.log. Called by the compiled CLI each time
- * a session registers; only the first call per process does anything.
+ * Fire-and-forget: returns immediately, runs on a later tick, and swallows
+ * every failure into update.log. Called by the compiled CLI each time a
+ * session registers; only the first call per process does anything.
+ *
+ * First the shared release check (the update notices: at most once per 24h
+ * per machine, 6h after a failure, never when PLANNOTATOR_UPDATE_CHECK is
+ * off), then opt-in auto-update, which answers from that same cache.
  */
 export function scheduleAutoUpdateCheck(currentVersion: string | undefined): void {
   if (scheduled) return;
   scheduled = true;
+  // No check at all in dev/source runs.
+  if (!currentVersion || !parseStableVersion(currentVersion)) return;
   const timer = setTimeout(() => {
     const dataDir = getPlannotatorDataDir();
-    runAutoUpdateCheck({
-      currentVersion,
-      execPath: process.execPath,
-      platform: process.platform,
-      pid: process.pid,
-      dataDir,
-      now: Date.now,
-      enabled: () => resolveAutoUpdate(loadConfig()),
-      isManaged: () => isManagedBinary(process.execPath),
-      fetchLatestTag,
-      listSessions,
-      launchInstaller,
-    }).catch((err) => log(`check failed: ${err instanceof Error ? err.message : String(err)}`, dataDir));
+    void (async () => {
+      const config = loadConfig();
+      const checksOn = resolveUpdateCheck(config);
+      await runReleaseCheck({ dataDir, enabled: () => checksOn });
+      await runAutoUpdateCheck({
+        currentVersion,
+        execPath: process.execPath,
+        platform: process.platform,
+        pid: process.pid,
+        dataDir,
+        now: Date.now,
+        enabled: () => resolveAutoUpdate(config),
+        checksEnabled: () => checksOn,
+        isManaged: () => isManagedBinary(process.execPath),
+        listSessions,
+        launchInstaller,
+      });
+    })().catch((err) => log(`check failed: ${err instanceof Error ? err.message : String(err)}`, dataDir));
   }, 0);
   // Never hold a finished CLI process open for the check.
   (timer as { unref?: () => void }).unref?.();
@@ -660,6 +773,16 @@ export function enableAutoUpdateNotice(currentVersion: string | undefined): void
   if (currentVersion && parseStableVersion(currentVersion)) noticeVersion = currentVersion;
 }
 
+/** Tests only: set or clear the version enableAutoUpdateNotice recorded (restore it in finally). */
+export function setCliNoticeVersionForTests(version: string | undefined): void {
+  noticeVersion = version;
+}
+
+/** The release version the compiled CLI runs, once enableAutoUpdateNotice saw it. */
+export function cliNoticeVersion(): string | undefined {
+  return noticeVersion;
+}
+
 /**
  * True when this compiled CLI will update itself: auto-update is on and the
  * running binary is the one the install script manages. The UI then drops the
@@ -668,7 +791,8 @@ export function enableAutoUpdateNotice(currentVersion: string | undefined): void
 export function isAutoUpdateActive(): boolean {
   if (!noticeVersion) return false;
   try {
-    return resolveAutoUpdate(loadConfig()) && isManagedBinary(process.execPath);
+    const config = loadConfig();
+    return resolveAutoUpdate(config) && resolveUpdateCheck(config) && isManagedBinary(process.execPath);
   } catch {
     return false;
   }
@@ -712,4 +836,91 @@ export function getAutoUpdateNotice(): AutoUpdateNotice | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** What updating means for a server the compiled CLI started for `origin`. */
+export function updateActionFor(origin: string | null | undefined, managed: boolean, exposed = false): UpdateAction {
+  if (origin === "opencode") return "opencode";
+  if (origin === "pi") return "pi";
+  // A session other devices can reach (remote mode, --tailscale) never offers
+  // to start the installer: it shows the command instead.
+  return managed && !exposed ? "script" : "copy";
+}
+
+/**
+ * The update notice the compiled CLI's servers add to their payload:
+ * `updateAvailable` when the machine knows of a newer stable release and
+ * update checks are on. Read from the cache only: never a network call.
+ */
+export function getUpdateAdvert(origin?: string | null, options: { exposed?: boolean } = {}): { updateAvailable?: UpdateAdvert } {
+  if (!noticeVersion) return {};
+  try {
+    if (!resolveUpdateCheck(loadConfig())) return {};
+    const dataDir = getPlannotatorDataDir();
+    const advert = buildUpdateAdvert({
+      state: readAutoUpdateState(dataDir),
+      current: noticeVersion,
+      action: updateActionFor(origin, isManagedBinary(process.execPath), options.exposed === true),
+      platform: process.platform,
+      flags: readInstallFlags(dataDir).flags,
+    });
+    return advert ? { updateAvailable: advert } : {};
+  } catch {
+    return {};
+  }
+}
+
+
+/**
+ * POST /api/update on the compiled CLI's plan, review and annotate servers:
+ * the review toast's (and the Options menu's) Update. The same Update now as
+ * the Inbox: the install script for the newest known release, detached, once
+ * (update.lock). Null for any other path.
+ *
+ * Starting an installer is this computer's decision, so it answers only a
+ * loopback Host naming this server's port (a LAN or tailnet device reaching a
+ * remote-mode or --tailscale session never can), never while the session is
+ * exposed beyond this computer (its advert says `copy` then), never a
+ * cross-origin page, and a tab left open on an older session gets 409.
+ */
+export function handleUpdateRoute(
+  req: Request,
+  url: URL,
+  ctx: { port: number | null | undefined; exposed: boolean; serverSession: string },
+): Promise<Response> | null {
+  if (url.pathname !== "/api/update") return null;
+  return (async () => {
+    if (req.method !== "POST") return Response.json({ error: "Use POST." }, { status: 405 });
+    if (!isLoopbackHostHeader(req.headers.get("host"), ctx.port)) {
+      return Response.json({ error: "Update answers only this computer.", code: "forbidden_host" }, { status: 403 });
+    }
+    if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) {
+      return Response.json({ error: "Cross-origin requests are not accepted." }, { status: 403 });
+    }
+    if (ctx.exposed) {
+      return Response.json(
+        { error: "This session is reachable from other devices, so it does not start the installer. Run the install command instead.", code: "update_exposed" },
+        { status: 403 },
+      );
+    }
+    let body: unknown = {};
+    try {
+      body = await req.json();
+    } catch {}
+    if (checkServerSession(body, ctx.serverSession) === "mismatch") return Response.json(serverSessionMismatchBody(), { status: 409 });
+    const result = startManualUpdateForThisBinary(noticeVersion);
+    if (result.outcome === "launched") return Response.json({ ok: true, version: result.version });
+    const refused: Record<string, string> = {
+      locked: "An update is already running.",
+      unmanaged: "This copy of Plannotator was not installed by the install script, so it can't update itself.",
+      "dev-build": "This is a development build; there is nothing to update.",
+      "no-release": "No newer release is known yet.",
+      "up-to-date": "Plannotator is up to date.",
+      "launch-failed": "The install script could not be started; see update.log.",
+    };
+    return Response.json(
+      { error: refused[result.outcome] ?? "The update could not start.", code: `update_${result.outcome.replace(/-/g, "_")}` },
+      { status: 409 },
+    );
+  })();
 }
