@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, openSync, closeSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, closeSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runPullSessionBridgeClient } from "@plannotator/ai/session-bridge-pull-client";
 import { classifyHostCloseAnswer, readHostStatusAnswer, type HostHttpAnswer } from "@plannotator/shared/host-control";
@@ -29,6 +29,13 @@ export function lastFinishedAssistantMessage(snapshot: T3ThreadRead, threadId: s
     && !(item.runId && unfinished.has(item.runId))).at(-1);
 }
 
+/** A launch with no ready line this long after it was made is abandoned (the opening window is 30 s). */
+export const T3_OPEN_ABANDONED_MS = 60_000;
+/** How long a delivered review's folder is kept (Claude may still Read its feedback.md). */
+export const T3_REVIEW_KEEP_MS = 24 * 60 * 60_000;
+/** How long a review that failed or was refused keeps its folder (decision and logs, for a person). */
+export const T3_FAILED_REVIEW_KEEP_MS = 7 * 24 * 60 * 60_000;
+
 function processAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch (error) { return (error as { code?: string }).code === "EPERM"; }
 }
@@ -42,6 +49,8 @@ interface Review {
   target?: string | string[];
   createdAt: number;
   token: string;
+  /** When it was delivered or failed for good. */
+  settledAt?: number;
   pid?: number;
   port?: number;
   url?: string;
@@ -63,12 +72,37 @@ export class T3Reviews {
     private readonly dataDir: string, private readonly bridge: T3SessionBridge, private readonly delivery: T3Delivery,
     private readonly notify: (message: string) => void = console.error) {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
+    this.prune();
     for (const id of readdirSync(directory)) {
       if (!/^pn-[0-9a-f]{6}$/.test(id)) continue;
       try {
         const review = JSON.parse(readFileSync(join(directory, id, "launch.json"), "utf8")) as Review;
         if (review.id === id && !review.delivered && !review.failure) this.reviews.set(id, review);
       } catch { /* An incomplete launch has no review to adopt. */ }
+    }
+  }
+
+  /**
+   * Forget settled reviews (on worker start and idle exit). A settled
+   * record's bridge token is dropped at once; its folder (feedback.md that
+   * Claude was told to Read, the decision, cli.log) goes after
+   * T3_REVIEW_KEEP_MS, or T3_FAILED_REVIEW_KEEP_MS when it never settled cleanly.
+   */
+  prune(now = Date.now()): void {
+    for (const id of readdirSync(this.directory)) {
+      if (!/^pn-[0-9a-f]{6}$/.test(id) || this.reviews.has(id)) continue;
+      const folder = join(this.directory, id);
+      try {
+        const path = join(folder, "launch.json");
+        const review = JSON.parse(readFileSync(path, "utf8")) as Review;
+        if (review.id !== id || !(review.delivered || review.failure)) continue;
+        const settledAt = review.settledAt ?? statSync(path).mtimeMs;
+        if (now - settledAt > (review.delivered ? T3_REVIEW_KEEP_MS : T3_FAILED_REVIEW_KEEP_MS)) {
+          rmSync(folder, { recursive: true, force: true });
+        } else if (review.token) {
+          privateWrite(path, { ...review, token: "", settledAt });
+        }
+      } catch { /* Unreadable: leave it for a person to look at. */ }
     }
   }
 
@@ -119,9 +153,8 @@ export class T3Reviews {
             void this.settle(review, resultPath).catch((error: unknown) => {
               if (error instanceof T3DeliveryRefused) {
                 // Retrying can never send it; keep the record and say why.
-                review.failure = review.deliveryError = error.message;
-                this.save(review);
-                this.reviews.delete(review.id);
+                review.deliveryError = error.message;
+                this.finish(review, { failure: error.message });
                 this.notify(`T3 delivery refused for ${review.id}: ${error.message} The decision stays in ${resultPath}.`);
                 return;
               }
@@ -133,14 +166,17 @@ export class T3Reviews {
             })
               .finally(() => this.sending.delete(review.id));
           }
-        } else if (review.port && review.pid && !processAlive(review.pid) && !existsSync(resultPath)) {
-          // The review server stopped without a decision (killed, crashed or
-          // a reboot): nothing will ever arrive, so the worker stops waiting.
+        } else if (!this.openingIds.has(review.id) && this.abandoned(review) && !existsSync(resultPath)) {
+          // Nothing will ever arrive: the review server stopped without a
+          // decision (killed, crashed or a reboot), or a launch never came up
+          // (a worker killed while opening it). The worker stops waiting, so
+          // it can go idle, and no later worker inherits the record.
           this.bridges.get(review.id)?.abort();
-          review.failure = "The review server stopped without a decision; its draft is kept.";
-          this.save(review);
-          this.reviews.delete(review.id);
-          this.notify(`T3 review ${review.id}: ${review.failure} See ${this.path(review, "cli.log")}`);
+          const failure = review.port
+            ? "The review server stopped without a decision; its draft is kept."
+            : "The review never finished opening.";
+          this.finish(review, { failure });
+          this.notify(`T3 review ${review.id}: ${failure} See ${this.path(review, "cli.log")}`);
         } else this.attach(review);
       } catch (error) { this.notify(`T3 review ${review.id}: ${String(error)}`); }
     }
@@ -155,9 +191,24 @@ export class T3Reviews {
       if (decision.overflow) writeFileSync(decision.overflow.path, decision.overflow.text, { mode: 0o600 });
       await this.delivery.send(decision.text, `plannotator-review:${review.id}`);
     } else this.notify(decision.text);
-    review.delivered = true;
+    this.finish(review, { delivered: true });
+  }
+
+  /**
+   * Settle a record for good: nothing waits on it any more, and its bridge
+   * token (useless once settled) is dropped from launch.json.
+   */
+  private finish(review: Review, outcome: { delivered: true } | { failure: string }): void {
+    Object.assign(review, outcome, { token: "", settledAt: Date.now() });
     this.save(review);
     this.reviews.delete(review.id);
+  }
+
+  /** A launch nobody will ever finish: its server is gone, or it never came up. */
+  private abandoned(review: Review): boolean {
+    if (review.port) return !!review.pid && !processAlive(review.pid);
+    // No ready line yet: give it the opening window (30 s) and some slack.
+    return !review.pid || !processAlive(review.pid) || Date.now() - review.createdAt > T3_OPEN_ABANDONED_MS;
   }
 
   async call(value: unknown): Promise<string> {
@@ -173,6 +224,9 @@ export class T3Reviews {
     this.opening++;
     try { return await this.openReview(input); } finally { this.opening--; }
   }
+
+  /** Reviews this worker is opening right now (not yet abandoned, whatever their age). */
+  private readonly openingIds = new Set<string>();
 
   private async openReview(input: PlannotatorToolInput & { action: Review["kind"] }): Promise<string> {
     let stdin: string | undefined;
@@ -190,6 +244,7 @@ export class T3Reviews {
     this.save(review);
     const args = input.action === "last" ? ["annotate-last", "--stdin", "--json"] : [input.action, ...plannotatorToolArgs(input), "--json"];
     const log = openSync(this.path(review, "cli.log"), "a", 0o600);
+    this.openingIds.add(id);
     try {
       const [executable, ...prefix] = this.command;
       const child = spawn(executable!, [...prefix, ...args], { cwd: this.cwd, detached: true, stdio: [stdin === undefined ? "ignore" : "pipe", log, log],
@@ -216,11 +271,9 @@ export class T3Reviews {
       this.attach(review);
       return plannotatorToolOpenedText(review.subject, review.url, review.gate === true, id, review.target);
     } catch (error) {
-      review.failure = String(error);
-      this.save(review);
-      this.reviews.delete(review.id);
+      this.finish(review, { failure: String(error) });
       throw error;
-    } finally { closeSync(log); }
+    } finally { this.openingIds.delete(id); closeSync(log); }
   }
 
   private async control(review: Review, path: string, method = "GET"): Promise<HostHttpAnswer> {

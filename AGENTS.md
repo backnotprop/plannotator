@@ -1207,7 +1207,20 @@ runs for anyone who did not opt in.
   the hook routes only when a saved grant exists and T3 shows the exact
   running tool call (`toolu_…`, Bedrock/Vertex ids included) owned by one
   conversation in the same folder; otherwise, and on any error, it answers
-  `{}` (the command runs as written) and logs to `t3-code/hook.log`.
+  `{}` (the command runs as written) and logs to `t3-code/hook.log`. The
+  whole lookup, connecting included, is bounded at 6.5 s, under Claude's
+  10 s hook timeout.
+  Limits: the gate opens for EVERY Agent SDK session, not only T3's:
+  `claude -p` (`sdk-cli`), other SDK apps, and Plannotator's own Claude
+  review-agent jobs (which load user settings). There an opted-in user pays
+  the binary's start (~320 ms) per Bash call, and the hook then finds no T3
+  owner and answers `{}`. A Claude whose cwd is below the thread's root (it
+  `cd`'d into a subfolder) is not routed: the command runs as the ordinary,
+  blocking CLI. Claude Code matches permission rules against the rewritten
+  command (`plannotator t3-hook open …`), not what Claude typed (from the
+  hooks contract; not checked live).
+  The launch file under `t3-code/hooks/` is removed after one use, whether
+  the open succeeds or fails.
 - **Worker:** one detached `plannotator t3 serve` per thread (registry
   `t3-code/<endpoint>/threads/<thread>/daemon.json`, token-guarded loopback
   routes `/health`, `/review`, `/stop`) launches the review CLI with a pull
@@ -1218,8 +1231,12 @@ runs for anyone who did not opt in.
   exited is retried once). The OAuth token is read per request and a refused
   MCP session is reopened, so a new login applies without a restart; only a
   delivery already attempted under the old grant is refused (T3's idempotency
-  namespace changed). A review whose server died without a decision, or a
-  refused delivery, stops being waited on.
+  namespace changed). A review whose server died without a decision, a
+  launch that never came up (no ready line within 60 s, or its CLI gone,
+  e.g. the worker was killed while opening it), or a refused delivery stops
+  being waited on, so no later worker inherits it. A settled review drops its
+  bridge token from `launch.json` at once; its folder is pruned on worker
+  start and idle exit after 24 h (7 days for failed or refused ones).
 - **Decisions** (`packages/t3-code/decision.ts`) are worded exactly as the
   Claude Code mod words them (`decision.test.ts` compares against the mod's
   `deliveryFor`): `Changes requested · N comments`, LGTM / Done / Close only
@@ -1235,8 +1252,9 @@ runs for anyone who did not opt in.
 - **Data:** `<data dir>/t3-code/` (grants, hook launches, review results,
   pending deliveries, `feedback.md`, logs; feedback and conversation text,
   nothing pruned). `isAllowedHostResultPath` accepts `result.json` under it.
-  Uninstall stops running workers (dry run lists them) and removes the hook
-  for the installed binary; `--purge` deletes `t3-code/`.
+  Uninstall stops running workers (dry run lists them), removes the hook for
+  the installed binary and the `settings.json.plannotator-t3.bak` backup the
+  hook install made; `--purge` deletes `t3-code/`.
 - **Tests:** `bun test packages/t3-code` (unit); with
   `T3_TEST_EXECUTABLE=<compiled binary>` also the end-to-end proof against a
   scripted T3 MCP server (`connected-session.test.ts`, run on the compiled

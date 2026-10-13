@@ -316,11 +316,19 @@ describe("default uninstall", () => {
         ...customHooks,
       ] }] },
     });
+    // The backup `t3-hook install` keeps of settings before its first change.
+    const backup = `${settings}.plannotator-t3.bak`;
+    writeText(backup);
+    const planned = await runPlannotatorUninstall({ purge: false, dryRun: true }, fixture.environment);
+    expect(planned.planned).toContain(backup);
+    expect(existsSync(backup)).toBe(true);
     const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
     expect(result.ok).toBe(true);
     expect(readJson(settings)).toEqual({
       theme: "dark", hooks: { PreToolUse: [{ matcher: "Bash", hooks: customHooks }] },
     });
+    expect(existsSync(backup)).toBe(false);
+    expect(result.removed).toContain(backup);
   });
 
   test("removes recognized installer components and preserves local data", async () => {

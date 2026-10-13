@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { parseT3HookCommand, t3HookCommand } from "@plannotator/shared/t3-hook-command";
+import { parseT3HookCommand, T3_SETTINGS_BACKUP_SUFFIX, t3HookCommand } from "@plannotator/shared/t3-hook-command";
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -50,7 +50,7 @@ export function configureT3Hook(file: string, executable: string, dataDir: strin
   if (next === original) return false;
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   if (original !== undefined) {
-    try { writeFileSync(file + ".plannotator-t3.bak", original, { flag: "wx", mode: 0o600 }); }
+    try { writeFileSync(file + T3_SETTINGS_BACKUP_SUFFIX, original, { flag: "wx", mode: 0o600 }); }
     catch (error) { if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error; }
   }
   const temporary = file + "." + randomUUID() + ".tmp";

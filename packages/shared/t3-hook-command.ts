@@ -1,6 +1,9 @@
 import { basename, isAbsolute } from "node:path";
 import { simpleShellCommandWords } from "./plannotator-tool";
 
+/** `<settings.json><suffix>`: the copy `t3-hook install` keeps of settings before its first change; uninstall removes it. */
+export const T3_SETTINGS_BACKUP_SUFFIX = ".plannotator-t3.bak";
+
 export function quoteHookWord(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }

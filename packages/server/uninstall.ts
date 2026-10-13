@@ -28,7 +28,7 @@ import {
   resolve,
 } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
-import { parseT3HookCommand } from "@plannotator/shared/t3-hook-command";
+import { parseT3HookCommand, T3_SETTINGS_BACKUP_SUFFIX } from "@plannotator/shared/t3-hook-command";
 import { runningT3Workers, stopT3Workers } from "@plannotator/shared/t3-workers";
 import { inboxStatus, readInboxRegistry, stopInbox } from "@plannotator/shared/inbox/registry";
 import { INBOX_TAILNET_HTTPS_PORT, takeDownInboxTailnet } from "./inbox-devices";
@@ -778,6 +778,9 @@ function removeHostConfigEntries(
     request,
     state,
   );
+  // The backup `t3-hook install` (install.sh --with-t3) made before its first
+  // change to settings.json. The name is Plannotator's own; nothing else writes it.
+  removePath(join(paths.claudeDir, `settings.json${T3_SETTINGS_BACKUP_SUFFIX}`), request, state);
 
   cleanupHooksJson(
     join(paths.codexDir, "hooks.json"),

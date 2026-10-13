@@ -12,7 +12,7 @@ T3 support is off by default and is not registered by the Claude plugin. In a re
 bash scripts/install.sh --with-t3
 ```
 
-The flag installs one `PreToolUse` Bash hook into `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json`. The hook command starts with a shell gate: only a Claude started through the Agent SDK (as T3 starts it; `CLAUDE_CODE_ENTRYPOINT=sdk-…`) runs Plannotator. An interactive `claude` that loads the same profile is answered by the shell in a few milliseconds and is never routed. If a step of the hook installation fails, the installer prints why and the command to retry, and the rest of the install continues. It preserves other hooks and settings, backs up existing settings before the first change, and pins the installed binary and selected Plannotator data directory in the hook command. Automatic updates replay the installation flag. An install without either T3 flag leaves any existing T3 hook alone. `--minimal` remains binary-only and skips both T3 flags.
+The flag installs one `PreToolUse` Bash hook into `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json`. The hook command starts with a shell gate: only a Claude started through the Agent SDK (as T3 starts it; `CLAUDE_CODE_ENTRYPOINT=sdk-…`) runs Plannotator. An interactive `claude` that loads the same profile is answered by the shell in a few milliseconds and is never routed. The gate opens for every Agent SDK session, not only T3's: `claude -p` (`sdk-cli`), other SDK apps, and Plannotator's own Claude review-agent jobs. There each Bash call pays the binary's start (about 320 ms) before the hook finds no T3 conversation and leaves the command alone. If a step of the hook installation fails, the installer prints why and the command to retry, and the rest of the install continues. It preserves other hooks and settings, backs up existing settings before the first change, and pins the installed binary and selected Plannotator data directory in the hook command. Automatic updates replay the installation flag. An install without either T3 flag leaves any existing T3 hook alone. `--minimal` remains binary-only and skips both T3 flags.
 
 The currently released installer does not include this experimental integration. To test this source checkout without downloading an older release, build the binary:
 
@@ -53,7 +53,7 @@ plannotator review --base origin/main
 plannotator last
 ```
 
-The agent needs no T3 URL, thread ID or awareness of T3. Claude's `PreToolUse` hook supplies the native tool-call ID. Plannotator finds the exact running activity item through the authorized T3 API, checks its source conversation and actual working directory, then supplies the connection internally. It never chooses a conversation by title or folder. The updated command still passes through Claude/T3's normal permission checks.
+The agent needs no T3 URL, thread ID or awareness of T3. Claude's `PreToolUse` hook supplies the native tool-call ID. Plannotator finds the exact running activity item through the authorized T3 API, checks its source conversation and actual working directory, then supplies the connection internally. It never chooses a conversation by title or folder. The updated command still passes through Claude/T3's normal permission checks, which match their rules against the rewritten `plannotator t3-hook open …` command rather than what Claude typed (per the hooks contract; not checked live). A Claude whose working directory is below the thread's root (it `cd`'d into a subfolder) is not routed: the command runs as the ordinary, blocking CLI.
 
 The command returns after the review opens. Its detached worker keeps the connection after the shell command finishes. The command output tells Claude to end its turn and wait for review feedback. **Ask this session** questions then become ordinary turns in the same conversation. Answers are correlated by message and run ID, including queued runs and long answers. A busy conversation can delay a question. Questions and answers remain in T3 history; transient answers are unavailable.
 
@@ -67,7 +67,7 @@ This does not add automatic T3 routing to `ExitPlanMode`, another provider, or a
 
 ## Recovery and diagnostics
 
-The worker adopts open reviews after restarting. A worker with no open review and no pending delivery exits after 10 minutes; the next command starts a new one. `plannotator uninstall` stops running workers, and `uninstall --purge` deletes `<data dir>/t3-code/`. Private result files retain decisions for delivery. Explicitly scoped commands remain available for diagnostics; agents do not need them in the ordinary flow:
+The worker adopts open reviews after restarting. A worker with no open review and no pending delivery exits after 10 minutes; the next command starts a new one. `plannotator uninstall` stops running workers, removes the `settings.json.plannotator-t3.bak` backup the hook install made, and `uninstall --purge` deletes `<data dir>/t3-code/`. A settled review drops its bridge token at once; its folder is pruned after a day (a week for failed ones), and a launch that never came up is given up after a minute. Private result files retain decisions for delivery. Explicitly scoped commands remain available for diagnostics; agents do not need them in the ordinary flow:
 
 ```sh
 plannotator t3 list --url <url> --thread <id>

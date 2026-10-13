@@ -197,6 +197,7 @@ export async function serveDaemon(options: AdapterOptions, threadId: string): Pr
       // first, so a command arriving now starts a fresh worker.
       if (busyRequests === 0 && reviews.idle() && Date.now() - lastActivity >= idleMs) {
         console.error(`No open reviews for ${Math.round(idleMs / 1000)}s; the T3 companion for thread ${threadId} exits.`);
+        try { reviews.prune(); } catch { /* Pruning never blocks the exit. */ }
         cleanup?.();
         process.exit(0);
       }

@@ -41,7 +41,7 @@ function configuredEndpoints(dataDir: string): URL[] {
  * other Claude session is answered before anything is read or contacted.
  */
 export async function prepareT3Hook(value: unknown, selfCommand: readonly string[], dataDir: string,
-  env: NodeJS.ProcessEnv = process.env): Promise<Record<string, unknown>> {
+  env: NodeJS.ProcessEnv = process.env, timeoutMs = 6500): Promise<Record<string, unknown>> {
   if (!isAgentSdkEntrypoint(env.CLAUDE_CODE_ENTRYPOINT)) return {};
   const parsed = hookEvent.safeParse(value);
   if (!parsed.success || parsed.data.agent_id) return {};
@@ -52,10 +52,12 @@ export async function prepareT3Hook(value: unknown, selfCommand: readonly string
   if (!endpoints.length) return {};
   const matches: Array<{ endpoint: URL; thread: string; cwd: string }> = [];
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error("T3 automatic connection timed out.")), 6500);
+  // Under Claude's 10 s hook timeout, connecting included: a hanging endpoint fails quietly.
+  const timer = setTimeout(() => controller.abort(new Error("T3 automatic connection timed out.")), timeoutMs);
   try {
     for (const endpoint of endpoints) {
-      const client = await T3Client.connect(endpoint, new T3Credentials(dataDir, endpoint).token);
+      const client = await untilAborted(T3Client.connect(endpoint, new T3Credentials(dataDir, endpoint).token), controller.signal,
+        (late) => { void late.close(); });
       const onAbort = () => { void client.close(); };
       controller.signal.addEventListener("abort", onAbort, { once: true });
       try {
@@ -75,6 +77,17 @@ export async function prepareT3Hook(value: unknown, selfCommand: readonly string
     // Permission evaluation still applies to the updated command.
     return { hookSpecificOutput: { hookEventName: "PreToolUse", updatedInput: { ...event.tool_input, command } } };
   } finally { clearTimeout(timer); }
+}
+
+/** `work`, or the signal's reason once it aborts; a result that arrives after that is handed to `discard`. */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal, discard: (late: T) => void): Promise<T> {
+  if (signal.aborted) { void work.then(discard, () => {}); return Promise.reject(signal.reason); }
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => { void work.then(discard, () => {}); reject(signal.reason); };
+    signal.addEventListener("abort", abort, { once: true });
+    work.then((value) => { signal.removeEventListener("abort", abort); resolve(value); },
+      (error: unknown) => { signal.removeEventListener("abort", abort); reject(error); });
+  });
 }
 
 function logHookFailure(dataDir: string, error: unknown): void {
@@ -123,11 +136,13 @@ export async function runT3Hook(args: readonly string[], selfCommand: readonly s
   const root = resolve(dataDir, "t3-code", "hooks");
   const path = resolve(file);
   if (!path.startsWith(root + sep) || !launchName.test(basename(path)) || lstatSync(path).isSymbolicLink()) throw new Error("Invalid T3 hook launch path.");
-  const launch = launchSchema.parse(JSON.parse(readFileSync(path, "utf8")) as unknown);
-  const parsed = parsePlannotatorToolInput(launch.input);
-  if (!parsed.ok) throw new Error(parsed.error);
-  const result = await callDaemon({ endpoint: t3Endpoint(launch.endpoint), dataDir, command: selfCommand, workerCommand: [...selfCommand, "t3"] }, launch.thread, parsed.input);
-  if (result.isError) throw new Error(result.text);
-  rmSync(path);
-  console.log(result.text);
+  // The launch file is used once, whatever the outcome.
+  try {
+    const launch = launchSchema.parse(JSON.parse(readFileSync(path, "utf8")) as unknown);
+    const parsed = parsePlannotatorToolInput(launch.input);
+    if (!parsed.ok) throw new Error(parsed.error);
+    const result = await callDaemon({ endpoint: t3Endpoint(launch.endpoint), dataDir, command: selfCommand, workerCommand: [...selfCommand, "t3"] }, launch.thread, parsed.input);
+    if (result.isError) throw new Error(result.text);
+    console.log(result.text);
+  } finally { rmSync(path, { force: true }); }
 }
