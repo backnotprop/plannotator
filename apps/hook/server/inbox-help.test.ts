@@ -24,11 +24,21 @@ import { formatTopLevelHelp } from "./cli";
 import { inboxAttachmentKind, inboxAttachmentNameRefusal } from "@plannotator/core/inbox-types";
 import { formatInboxHelp, INBOX_HELP_CODE_EXAMPLES, INBOX_HELP_MCP_URL, INBOX_QUESTION_EXAMPLE, INBOX_REPLACES_EXAMPLE, TOOL_GUIDE } from "./inbox-help";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
+import { createAgentEnvironmentFor } from "@plannotator/server/inbox-agents";
 
 const entry = resolve(import.meta.dir, "index.ts");
 const COMMAND = ["/opt/example bin/plannotator"];
 const DATA_DIR = "/home/someone/.plannotator";
-const help = formatInboxHelp({ command: COMMAND, dataDir: DATA_DIR, platform: "linux" });
+/** A scratch home for the note section's paths: the guide reads where each agent's file is, never the real home. */
+const NOTE_HOME = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-help-home-")));
+mkdirSync(join(NOTE_HOME, ".codex"), { recursive: true });
+writeFileSync(join(NOTE_HOME, ".codex", "AGENTS.md"), "Mine.\n");
+const help = formatInboxHelp({
+  command: COMMAND,
+  dataDir: DATA_DIR,
+  platform: "linux",
+  agentEnvironment: createAgentEnvironmentFor({ platform: "linux", homeDir: NOTE_HOME, env: { HOME: NOTE_HOME, PATH: "" } }),
+});
 
 let root = "";
 let trapBin = "";
@@ -46,6 +56,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  rmSync(NOTE_HOME, { recursive: true, force: true });
   removeStubbedHtml(stubs);
   rmSync(root, { recursive: true, force: true });
 });
@@ -112,6 +123,14 @@ describe("the guide against what it describes", () => {
     }
     // The stdio entry names this binary, quoted for a shell.
     expect(help).toContain(shellLine([...COMMAND, "inbox", "mcp"]));
+  });
+
+  test("lists where each agent's note would go on this computer, and how --notes adds it", () => {
+    expect(help).toContain("`plannotator inbox --notes <ids>`");
+    expect(help).toContain("- Codex (`codex`): `~/.codex/AGENTS.md`, adds a marked section.");
+    expect(help).toContain("- Gemini CLI (`gemini`): `~/.gemini/GEMINI.md`, creates the file.");
+    expect(help).toContain("- Claude Code (`claude-code`): `~/.claude/rules/plannotator-inbox.md`, creates the file.");
+    expect(help).toMatch(/- OpenCode \(`opencode`\): none\. Creating this file would stop OpenCode 1/);
   });
 
   test("names every flag and subcommand the inbox parser accepts", () => {

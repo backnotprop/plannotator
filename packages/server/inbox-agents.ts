@@ -31,7 +31,7 @@
  * CLIs; the real agent CLIs are never run by a test.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { spawn as spawnChild } from "node:child_process";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
@@ -390,8 +390,12 @@ interface AgentSpec {
   id: InboxAgentId;
   /** Found on this computer. */
   detect(e: AgentEnvironment): boolean;
-  /** How it is connected, once found (may ask the CLI its version). */
-  way(e: AgentEnvironment): Promise<ConnectWay>;
+  /**
+   * How it is connected, once found. `probe`: ask the CLI its `--version`
+   * first (before writing anything); without it (the Settings model, a read)
+   * nothing is run.
+   */
+  way(e: AgentEnvironment, probe?: boolean): Promise<ConnectWay>;
   /** Where its `plannotator-inbox` entry lives (null: unknown, or not a file). */
   file(e: AgentEnvironment): string | null;
   /** The raw entry, read only. Null: the agent's file is not known; the record decides. */
@@ -460,13 +464,26 @@ export function claudeCodePluginEnabled(e: AgentEnvironment): boolean {
 
 /**
  * Each CLI's own `--version` line, so a program that only shares the name
- * (cln's `pi` printing digits, amp.rs) is never handed an `mcp add`, and Pi
- * before 0.99 (no `pi mcp`: it would read the words as a chat prompt and run
- * a model turn) is left to the person. Read with no stdin, under the limit.
+ * (cln's `pi` printing digits, amp.rs) is never handed an `mcp add`, and a
+ * build older than its `mcp add` is left to the person: Pi before 0.99 (no
+ * `pi mcp`: it would read the words as a chat prompt and run a model turn),
+ * Codex CLI before 0.35.0 (`codex mcp add` landed in rust-v0.35.0, Sep 2025)
+ * and Gemini CLI before 0.1.19 (`gemini mcp add`, Aug 2025). Read with no
+ * stdin, under the limit.
  */
-const VERSION_SHAPES: Record<string, { line: RegExp; min?: [number, number, number]; manual: string }> = {
-  codex: { line: /^codex-cli (\d+)\.(\d+)\.(\d+)\b/, manual: "this codex did not answer like Codex CLI" },
-  gemini: { line: /^(\d+)\.(\d+)\.(\d+)(?:-[\w.]+)?$/, manual: "this gemini did not answer like Gemini CLI" },
+const VERSION_SHAPES: Record<string, { line: RegExp; min?: [number, number, number]; older?: string; manual: string }> = {
+  codex: {
+    line: /^codex-cli (\d+)\.(\d+)\.(\d+)\b/,
+    min: [0, 35, 0],
+    older: "Codex CLI before 0.35 has no `codex mcp add`; update Codex, or add plannotator-inbox to its config.toml by hand",
+    manual: "this codex did not answer like Codex CLI",
+  },
+  gemini: {
+    line: /^(\d+)\.(\d+)\.(\d+)(?:-[\w.]+)?$/,
+    min: [0, 1, 19],
+    older: "Gemini CLI before 0.1.19 has no `gemini mcp add`; update Gemini CLI, or add plannotator-inbox to its settings.json by hand",
+    manual: "this gemini did not answer like Gemini CLI",
+  },
   devin: { line: /^devin (\d+)\.(\d+)\.(\d+)\b/, manual: "this devin did not answer like Devin" },
   amp: { line: /^(\d+)\.(\d+)\.(\d+)-g[0-9a-f]+\b/, manual: "this amp did not answer like Sourcegraph Amp" },
   pi: {
@@ -476,11 +493,18 @@ const VERSION_SHAPES: Record<string, { line: RegExp; min?: [number, number, numb
   },
 };
 
-async function cliWay(e: AgentEnvironment, bin: string, add: (command: readonly string[]) => string[], remove: string[], timeoutMs: number): Promise<ConnectWay> {
+async function cliWay(
+  e: AgentEnvironment,
+  bin: string,
+  add: (command: readonly string[]) => string[],
+  remove: string[],
+  timeoutMs: number,
+  probe: boolean,
+): Promise<ConnectWay> {
   const path = e.which(bin);
   if (!path) return { kind: "manual", why: `${bin} is not on PATH` };
   const shape = VERSION_SHAPES[bin];
-  if (shape) {
+  if (shape && probe) {
     const ran = await e.run([path, "--version"], { timeoutMs: Math.min(timeoutMs, 5_000) });
     const line = ran.stdout.split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? "";
     const match = ran.exitCode === 0 && !ran.timedOut ? shape.line.exec(line) : null;
@@ -489,7 +513,7 @@ async function cliWay(e: AgentEnvironment, bin: string, add: (command: readonly 
       const version = [Number(match[1]), Number(match[2]), Number(match[3])];
       const [a, b, c] = shape.min;
       const older = version[0]! < a || (version[0] === a && (version[1]! < b || (version[1] === b && version[2]! < c)));
-      if (older) return { kind: "manual", why: shape.manual };
+      if (older) return { kind: "manual", why: shape.older ?? shape.manual };
     }
   }
   return { kind: "cli", bin, add, remove };
@@ -506,7 +530,7 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
   {
     id: "codex",
     detect: (e) => !!e.which("codex") || codexHomeHasUserConfig(e),
-    way: (e) => cliWay(e, "codex", (cmd) => ["mcp", "add", NAME, "--", ...cmd], ["mcp", "remove", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS),
+    way: (e, probe) => cliWay(e, "codex", (cmd) => ["mcp", "add", NAME, "--", ...cmd], ["mcp", "remove", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS, probe === true),
     file: (e) => join(codexHome(e), "config.toml"),
     raw: (e) => rawCodexEntry(join(codexHome(e), "config.toml")),
     remove: { bin: "codex", args: ["mcp", "remove", NAME] },
@@ -514,7 +538,7 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
   {
     id: "gemini",
     detect: (e) => !!e.which("gemini") || isDir(geminiDir(e)),
-    way: (e) => cliWay(e, "gemini", (cmd) => ["mcp", "add", "-s", "user", NAME, ...cmd], ["mcp", "remove", "-s", "user", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS),
+    way: (e, probe) => cliWay(e, "gemini", (cmd) => ["mcp", "add", "-s", "user", NAME, ...cmd], ["mcp", "remove", "-s", "user", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS, probe === true),
     file: (e) => join(geminiDir(e), "settings.json"),
     raw: (e) => rawJsonEntry(join(geminiDir(e), "settings.json"), ["mcpServers"], true),
     remove: { bin: "gemini", args: ["mcp", "remove", "-s", "user", NAME] },
@@ -529,7 +553,7 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
   {
     id: "windsurf",
     detect: (e) => !!e.which("devin"),
-    way: (e) => cliWay(e, "devin", (cmd) => ["mcp", "add", "-s", "user", NAME, "--", ...cmd], ["mcp", "remove", "-s", "user", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS),
+    way: (e, probe) => cliWay(e, "devin", (cmd) => ["mcp", "add", "-s", "user", NAME, "--", ...cmd], ["mcp", "remove", "-s", "user", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS, probe === true),
     file: (e) => join(xdgConfigHome(e), "devin", "config.json"),
     raw: (e) => rawJsonEntry(join(xdgConfigHome(e), "devin", "config.json"), ["mcpServers"], true),
     remove: { bin: "devin", args: ["mcp", "remove", "-s", "user", NAME] },
@@ -537,7 +561,7 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
   {
     id: "amp",
     detect: (e) => !!e.which("amp"),
-    way: (e) => cliWay(e, "amp", (cmd) => ["mcp", "add", NAME, "--", ...cmd], ["mcp", "remove", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS),
+    way: (e, probe) => cliWay(e, "amp", (cmd) => ["mcp", "add", NAME, "--", ...cmd], ["mcp", "remove", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS, probe === true),
     file: (e) => join(xdgConfigHome(e), "amp", "settings.json"),
     raw: (e) => rawJsonEntry(join(xdgConfigHome(e), "amp", "settings.json"), ["amp.mcpServers"], true),
     remove: { bin: "amp", args: ["mcp", "remove", NAME] },
@@ -560,10 +584,10 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
   {
     id: "pi",
     detect: (e) => piExtensionInstalled(e) || !!e.which("pi"),
-    way: (e) =>
+    way: (e, probe) =>
       piExtensionInstalled(e)
         ? Promise.resolve({ kind: "tool", host: "pi" } as ConnectWay)
-        : cliWay(e, "pi", (cmd) => ["mcp", "add", NAME, "--", ...cmd], ["mcp", "remove", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS),
+        : cliWay(e, "pi", (cmd) => ["mcp", "add", NAME, "--", ...cmd], ["mcp", "remove", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS, probe === true),
     file: (e) => join(piAgentDir(e), "mcp.json"),
     raw: (e) => rawJsonEntry(join(piAgentDir(e), "mcp.json"), ["mcpServers"], true),
     remove: { bin: "pi", args: ["mcp", "remove", NAME] },
@@ -598,7 +622,60 @@ export function readAgentEntry(id: InboxAgentId, e: AgentEnvironment, ours: read
 // ---------------------------------------------------------------------------
 // Writing one JSON key
 
-type WriteOutcome = { ok: true; changed: boolean } | { ok: false; reason: string };
+/**
+ * What an add changed, as text: the file was `prefix + before + suffix` and
+ * became `prefix + after + suffix`. Kept on the record so removal gives the
+ * file back byte for byte (an empty file stays empty, a final newline or its
+ * absence stays, a container Plannotator created goes) while `after` is
+ * still in the file untouched.
+ */
+export interface JsonEntryUndo {
+  before: string;
+  after: string;
+}
+
+type WriteOutcome = { ok: true; changed: boolean; undo?: JsonEntryUndo } | { ok: false; reason: string };
+
+/** Delete a file Plannotator created once it holds nothing but the empty containers along `keys`. */
+function deleteIfOnlyOurs(path: string, keys: readonly string[]): void {
+  const read = readAgentFile(path);
+  if (read.kind !== "file") return;
+  let skeleton: unknown = {};
+  for (const key of [...keys].reverse()) skeleton = { [key]: skeleton };
+  try {
+    if (read.text.trim() && JSON.stringify(JSON.parse(read.text)) !== JSON.stringify(skeleton)) return;
+    rmSync(read.target, { force: true });
+  } catch {
+    // Not plain JSON any more, or not removable: left as it is.
+  }
+}
+
+/** The smallest middle span that differs between two texts. */
+function textChange(original: string, next: string): JsonEntryUndo {
+  let start = 0;
+  while (start < original.length && start < next.length && original[start] === next[start]) start++;
+  let end = 0;
+  while (end < original.length - start && end < next.length - start && original[original.length - 1 - end] === next[next.length - 1 - end]) end++;
+  return { before: original.slice(start, original.length - end), after: next.slice(start, next.length - end) };
+}
+
+/**
+ * Undo an add exactly: `after` appears once in `text` (the entry as written,
+ * untouched) and putting `before` back leaves a file without the entry. Null
+ * when that cannot be done; the caller then cuts the entry alone.
+ */
+function undoJsonEntry(text: string, undo: JsonEntryUndo | undefined, keys: readonly string[]): string | null {
+  if (!undo || !undo.after || !undo.after.includes(JSON.stringify(NAME))) return null;
+  const first = text.indexOf(undo.after);
+  if (first < 0 || text.indexOf(undo.after, first + 1) >= 0) return null;
+  const restored = text.slice(0, first) + undo.before + text.slice(first + undo.after.length);
+  if (!restored.trim()) return restored;
+  try {
+    return at(JSON.parse(restored), [...keys, NAME]) === undefined ? restored : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Add (`value`) or remove (`undefined`) `plannotator-inbox` at `keys` in a
@@ -613,6 +690,7 @@ export function writeJsonEntry(
   keys: readonly string[],
   value: { command: string; args: string[] } | undefined,
   ours: readonly (readonly string[])[] = value ? [[value.command, ...value.args]] : [],
+  undo?: JsonEntryUndo,
 ): WriteOutcome {
   const read = readAgentFile(path);
   if (read.kind === "refused") return { ok: false, reason: `${path} can't be edited (${read.reason})` };
@@ -632,7 +710,8 @@ export function writeJsonEntry(
       if (!owned) return { ok: false, reason: `${path} has a ${NAME} entry Plannotator did not write` };
     } else if (value === undefined) return { ok: true, changed: false };
   }
-  const edit = value === undefined ? removeJsonMember(original, keys, NAME) : addJsonMember(original, keys, NAME, value);
+  const undone = value === undefined ? undoJsonEntry(original, undo, keys) : null;
+  const edit = undone !== null ? { ok: true as const, changed: true, text: undone } : value === undefined ? removeJsonMember(original, keys, NAME) : addJsonMember(original, keys, NAME, value);
   if (!edit.ok) return { ok: false, reason: `${path} can't be edited without reshaping it (${edit.reason}), so Plannotator left it as it was` };
   if (!edit.changed) return { ok: true, changed: false };
   try {
@@ -640,7 +719,8 @@ export function writeJsonEntry(
   } catch (error) {
     return { ok: false, reason: `${path} can't be written (${describeFsError(error)})` };
   }
-  return { ok: true, changed: true };
+  // A file Plannotator created holds nothing else once the entry goes: its undo is "no file".
+  return value === undefined || read.kind !== "file" ? { ok: true, changed: true } : { ok: true, changed: true, undo: textChange(original, edit.text) };
 }
 
 // ---------------------------------------------------------------------------
@@ -658,6 +738,10 @@ export interface InboxAgentRecord {
   path: string | null;
   /** The argv written, for an entry Plannotator added. */
   command?: string[];
+  /** A JSON add's exact change, so removal gives the file back byte for byte (writeJsonEntry). */
+  undo?: JsonEntryUndo;
+  /** Plannotator created the JSON file: removal deletes it when nothing but the empty containers is left. */
+  created?: boolean;
   at: string;
   /** An `added`/`found` entry that is no longer there: never added back by itself. */
   removed_outside_at?: string;
@@ -672,6 +756,8 @@ export interface InboxAgentsFile {
   last_report?: InboxConnectReport & { seen?: boolean };
   /** Each agent's last failure reason, so a lasting one is said once (the run still tries again). */
   failures?: Partial<Record<InboxAgentId, string>>;
+  /** Each agent's last "connect it by hand" reason, so it is said once (said again when it changes). */
+  manual_said?: Partial<Record<InboxAgentId, string>>;
 }
 
 export function inboxAgentsPath(dataDir: string): string {
@@ -719,6 +805,12 @@ function firstLine(text: string): string {
   return line.length > 200 ? `${line.slice(0, 199)}…` : line;
 }
 
+/** A time limit as people read it: "10 s", "1.5 s" (never rounded up to a limit it was not). */
+export function formatSeconds(ms: number): string {
+  const seconds = Math.floor(ms / 100) / 10;
+  return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)} s`;
+}
+
 type AgentOutcome =
   | { kind: "added"; record: InboxAgentRecord }
   | { kind: "already"; record: InboxAgentRecord | null }
@@ -743,7 +835,7 @@ function ourCommands(options: ConnectOptions, record?: InboxAgentRecord): string
 async function connectOne(spec: AgentSpec, options: ConnectOptions, at: string): Promise<AgentOutcome> {
   const e = options.environment;
   const timeoutMs = options.agentTimeoutMs ?? INBOX_CONNECT_AGENT_TIMEOUT_MS;
-  const way = await spec.way(e);
+  const way = await spec.way(e, true);
   const file = spec.file(e);
   const command = [...options.selfCommand, "inbox", "mcp"];
   if (way.kind === "none") return { kind: "none" };
@@ -777,14 +869,15 @@ async function connectOne(spec: AgentSpec, options: ConnectOptions, at: string):
   if (before.kind === "other") return { kind: "foreign", record: { state: "foreign", reach: "mcp", path: file, at }, path: file };
   if (way.kind === "json") {
     const [cmd, ...args] = command;
+    const created = readAgentFile(file!).kind === "missing";
     const result = writeJsonEntry(file!, way.keys, { command: cmd!, args });
     if (!result.ok) return { kind: "failed", reason: result.reason.split(e.homeDir).join("~"), path: file };
-    return { kind: "added", record: { state: "added", reach: "mcp", path: file, command, at } };
+    return { kind: "added", record: { state: "added", reach: "mcp", path: file, command, at, ...(result.undo ? { undo: result.undo } : {}), ...(created ? { created: true } : {}) } };
   }
   const bin = e.which(way.bin);
   if (!bin) return { kind: "manual", why: `${way.bin} is not on PATH` };
   const ran = await e.run([bin, ...way.add(command)], { timeoutMs });
-  if (ran.timedOut) return { kind: "failed", reason: `${way.bin} mcp add did not finish within ${Math.round(timeoutMs / 1000)} s`, path: file };
+  if (ran.timedOut) return { kind: "failed", reason: `${way.bin} mcp add did not finish within ${formatSeconds(timeoutMs)}`, path: file };
   if (ran.exitCode !== 0) {
     const why = firstLine(ran.stderr) || firstLine(ran.stdout);
     return { kind: "failed", reason: `${way.bin} mcp add exited with code ${ran.exitCode}${why ? ` (${why})` : ""}`, path: file };
@@ -853,6 +946,7 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
   if (timer) clearTimeout(timer);
 
   const failures = { ...(file.failures ?? {}) };
+  const manualSaid = { ...(file.manual_said ?? {}) };
   for (const spec of toConnect) {
     const outcome = settled.get(spec.id);
     if (!outcome) {
@@ -860,6 +954,7 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
       continue;
     }
     if (outcome.kind !== "failed") delete failures[spec.id];
+    if (outcome.kind !== "manual") delete manualSaid[spec.id];
     switch (outcome.kind) {
       case "added":
         report.added.push(spec.id);
@@ -883,12 +978,16 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
         break;
       case "manual":
         report.manual.push(spec.id);
+        // Why only a person can connect it (Pi before 0.99, no CLI on PATH): said once.
+        if (manualSaid[spec.id] !== outcome.why) (report.manual_why ??= []).push({ agent: spec.id, why: outcome.why });
+        manualSaid[spec.id] = outcome.why;
         break;
       case "none":
         break;
     }
   }
   file.failures = failures;
+  file.manual_said = manualSaid;
   for (const spec of pending) {
     if (toConnect.includes(spec)) continue;
     const record = file.agents[spec.id];
@@ -924,6 +1023,9 @@ export function formatConnectReport(report: InboxConnectReport): string[] {
   for (const failure of report.failed) {
     lines.push(`Couldn't connect ${INBOX_AGENT_LABELS[failure.agent]}: ${failure.reason}. Plannotator tries again at the next plannotator inbox.`);
   }
+  for (const manual of report.manual_why ?? []) {
+    lines.push(`${INBOX_AGENT_LABELS[manual.agent]} needs connecting by hand: ${manual.why}.`);
+  }
   for (const foreign of report.foreign) {
     lines.push(`${INBOX_AGENT_LABELS[foreign.agent]} has its own ${INBOX_MCP_SERVER_NAME} entry${foreign.path ? ` in ${foreign.path}` : ""}; left alone.`);
   }
@@ -946,17 +1048,19 @@ export interface RemovalPlanItem {
 
 export interface RemovalPlan {
   items: RemovalPlanItem[];
-  /** Entries Plannotator added that run something else now: the person's. */
+  /** Entries left with a reason: one Plannotator added that runs something else now, or one no record says it added. */
   skipped: string[];
 }
 
 /**
- * What uninstall removes: only entries Plannotator ADDED and that still run
- * the command it wrote (an entry it merely found, which the person added, is
- * left), then, for an agent with no record at all (agents.json lost), an
- * entry that runs exactly `ourCommand` (this binary's `inbox mcp`). Pi's and
- * OpenCode's `inboxTool` live in config.json, which a plain uninstall keeps
- * and --purge removes.
+ * What uninstall removes: only entries Plannotator ADDED (recorded in
+ * agents.json) and that still run the command it wrote. An entry it merely
+ * found (the person added it) is left. An entry with no record at all
+ * (agents.json lost, or never written) is left too, even when it runs exactly
+ * `ourCommand` (this binary's `inbox mcp`), because the person may have
+ * added that by hand; it is named in `skipped` with how to remove it. Pi's
+ * and OpenCode's `inboxTool` live in config.json, which a plain uninstall
+ * keeps and --purge removes.
  */
 export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourCommand: readonly string[]): RemovalPlan {
   const file = readInboxAgents(dataDir);
@@ -966,16 +1070,26 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
   for (const spec of AGENT_SPECS) {
     const record = file.agents[spec.id];
     if (record && (record.reach !== "mcp" || record.state !== "added")) continue;
-    const ours = record?.command ? [record.command] : record ? [] : [[...ourCommand]];
     const raw = spec.raw(e);
     const label = INBOX_AGENT_LABELS[spec.id];
+    if (!record) {
+      // No record says Plannotator added it: never removed, only named when it runs this binary.
+      const unrecorded = raw === null ? null : classify(raw, [[...ourCommand]], false);
+      if (unrecorded?.kind === "ours") {
+        const at = displayPath(spec.file(e), e);
+        const how = jsonKeysFor(spec.id) ? "delete that entry by hand" : spec.remove ? `run \`${spec.remove.bin} ${spec.remove.args.join(" ")}\`` : "remove it in the agent's settings";
+        skipped.push(`${label}'s "${NAME}"${at ? ` in ${at}` : ""} runs this Plannotator, but no record says Plannotator added it, so it may be yours (to remove it, ${how})`);
+      }
+      continue;
+    }
+    const ours = record.command ? [record.command] : [];
     const read = raw === null ? null : classify(raw, ours, false);
-    if (read?.kind === "other" && record) {
+    if (read?.kind === "other") {
       skipped.push(`${label}'s "${NAME}" now runs something else (changed by hand), so it is yours`);
       continue;
     }
-    if (read ? read.kind !== "ours" : !record) continue;
-    const path = spec.file(e) ?? record?.path ?? null;
+    if (read && read.kind !== "ours") continue;
+    const path = spec.file(e) ?? record.path ?? null;
     const shown = displayPath(path, e);
     const jsonKeys = jsonKeysFor(spec.id);
     if (jsonKeys && path) {
@@ -983,7 +1097,8 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
         agent: spec.id,
         describe: `MCP server ${NAME} from ${label} (${shown}, that entry only)`,
         apply: async () => {
-          const result = writeJsonEntry(path, jsonKeys, undefined, ours);
+          const result = writeJsonEntry(path, jsonKeys, undefined, ours, record.undo);
+          if (result.ok && record.created) deleteIfOnlyOurs(path, jsonKeys);
           return result.ok ? null : result.reason;
         },
       });
@@ -1012,6 +1127,106 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
 
 function jsonKeysFor(id: InboxAgentId): readonly string[] | null {
   return id === "cursor" || id === "kiro" || id === "claude-app" ? ["mcpServers"] : null;
+}
+
+// ---------------------------------------------------------------------------
+// Settings → Agents: one agent's reach, and the person's switch
+
+export interface InboxAgentReachState {
+  /** tool: Plannotator's plugin/extension (`inboxTool`); mcp: a plannotator-inbox entry; manual: only a person can add it; none: nothing to switch. */
+  kind: "tool" | "mcp" | "manual" | "none";
+  on: boolean;
+  state: "connected" | "off" | "removed" | "foreign" | "not_connected" | "manual" | "unreadable";
+  /** Where the entry is (`~` for home). */
+  path: string | null;
+  /** PLANNOTATOR_INBOX_TOOL decides the tool switch. */
+  locked: boolean;
+  /** Why it is unreadable or left to the person. */
+  reason: string | null;
+}
+
+/** How one agent reaches the Inbox now (read only; may ask a CLI its version). */
+export async function inboxAgentReach(id: InboxAgentId, options: ConnectOptions): Promise<InboxAgentReachState> {
+  const e = options.environment;
+  const spec = agentSpec(id);
+  const way: ConnectWay = id === "claude-code" ? { kind: "tool", host: "claude-code" } : await spec.way(e);
+  const path = displayPath(spec.file(e), e);
+  const record = readInboxAgents(options.dataDir).agents[id];
+  if (way.kind === "tool") {
+    const locked = parseInboxToolEnv(e.env as NodeJS.ProcessEnv) !== undefined;
+    const on = resolveInboxTool(loadConfig(), e.env as NodeJS.ProcessEnv, way.host);
+    return { kind: "tool", on, state: on ? "connected" : "off", path: null, locked, reason: null };
+  }
+  if (way.kind === "manual") return { kind: "manual", on: false, state: "manual", path, locked: false, reason: way.why };
+  if (way.kind === "none") return { kind: "none", on: false, state: "manual", path, locked: false, reason: null };
+  const read = readAgentEntry(id, e, ourCommands(options, record), true);
+  if (read?.kind === "ours") return { kind: "mcp", on: true, state: "connected", path, locked: false, reason: null };
+  if (read?.kind === "other") return { kind: "mcp", on: false, state: "foreign", path, locked: false, reason: null };
+  if (read?.kind === "unreadable") return { kind: "mcp", on: false, state: "unreadable", path, locked: false, reason: read.reason };
+  if (read === null && record && (record.state === "added" || record.state === "found")) {
+    return { kind: "mcp", on: true, state: "connected", path, locked: false, reason: null };
+  }
+  if (record?.state === "off") return { kind: "mcp", on: false, state: "off", path, locked: false, reason: null };
+  if (record && (record.state === "added" || record.state === "found")) return { kind: "mcp", on: false, state: "removed", path, locked: false, reason: null };
+  return { kind: "mcp", on: false, state: "not_connected", path, locked: false, reason: null };
+}
+
+/** Turn a host's `plannotator_inbox` tool on or off in config.json (the old Settings switch). Returns an error reason, or null. */
+export function setInboxTool(host: InboxToolHost, on: boolean, e: AgentEnvironment): string | null {
+  if (parseInboxToolEnv(e.env as NodeJS.ProcessEnv) !== undefined) return "PLANNOTATOR_INBOX_TOOL decides this";
+  const current = loadConfig().inboxTool;
+  const next: Partial<Record<InboxToolHost, boolean>> = {};
+  for (const name of ["claude-code", "pi", "opencode"] as const) {
+    const value = typeof current === "boolean" ? current : current?.[name];
+    if (typeof value === "boolean") next[name] = value;
+  }
+  next[host] = on;
+  saveConfig({ inboxTool: next });
+  return configuredInboxTool(loadConfig(), host) === on ? null : "Plannotator's config.json can't be written";
+}
+
+/**
+ * The person's switch in Settings: on adds the entry (or turns the tool on)
+ * whatever the record says; off removes Plannotator's entry (never one that
+ * runs something else) and records `off`, so no later run adds it back. On
+ * success the agent's failure leaves the last report, so the card's amber
+ * line goes. Returns an error reason, or null.
+ */
+export async function setInboxAgentReach(id: InboxAgentId, on: boolean, options: ConnectOptions): Promise<string | null> {
+  const e = options.environment;
+  if (!agentHomeAllowed(e)) return "not in a test's scratch home";
+  const at = (options.now ?? (() => new Date()))().toISOString();
+  const spec = agentSpec(id);
+  const way: ConnectWay = id === "claude-code" ? { kind: "tool", host: "claude-code" } : await spec.way(e, true);
+  const file = readInboxAgents(options.dataDir);
+  if (way.kind === "manual") return `${INBOX_AGENT_LABELS[id]} is connected by hand: ${way.why}`;
+  if (way.kind === "none") return `${INBOX_AGENT_LABELS[id]} is connected by hand`;
+  if (way.kind === "tool") {
+    const problem = setInboxTool(way.host, on, e);
+    if (problem) return problem;
+    file.agents[id] = { state: on ? "added" : "off", reach: "tool", path: null, at };
+  } else if (on) {
+    const previous = file.agents[id];
+    const outcome = await connectOne(spec, options, at);
+    if (outcome.kind === "failed") return outcome.reason;
+    if (outcome.kind === "foreign") return `${displayPath(outcome.path, e) ?? INBOX_AGENT_LABELS[id]} has its own ${NAME} entry`;
+    if (outcome.kind === "manual") return `${INBOX_AGENT_LABELS[id]} is connected by hand: ${outcome.why}`;
+    if ("record" in outcome && outcome.record) file.agents[id] = outcome.record;
+    else if (previous) delete file.agents[id];
+  } else {
+    const record = file.agents[id];
+    const ours = ourCommands(options, record);
+    const item = planInboxAgentRemoval(options.dataDir, e, ours[0]!).items.find((candidate) => candidate.agent === id);
+    if (item) {
+      const problem = await item.apply();
+      if (problem) return problem;
+    }
+    file.agents[id] = { state: "off", reach: "mcp", path: spec.file(e), at };
+  }
+  if (file.failures) delete file.failures[id];
+  if (file.last_report) file.last_report = { ...file.last_report, failed: file.last_report.failed.filter((failure) => failure.agent !== id) };
+  writeInboxAgents(options.dataDir, file);
+  return null;
 }
 
 /** After a plain uninstall removed entries: forget their records, so a reinstall connects them again. */

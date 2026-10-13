@@ -2094,6 +2094,32 @@ describe("the Inbox's agent connections (inbox-agents.ts)", () => {
     expect((readJson(join(fixture.dataDir, "inbox", "agents.json")).agents as Record<string, unknown>).cursor).toBeUndefined();
   });
 
+  test("the notes: only the marked section, from a file the record no longer names too", async () => {
+    const fixture = createFixture();
+    const note = [
+      "<!-- plannotator-inbox:start v1 · added by Plannotator. Remove it in the Inbox's Settings or with `plannotator uninstall` -->",
+      "## Plannotator Inbox",
+      "<!-- plannotator-inbox:end -->",
+    ].join("\n");
+    writeText(join(fixture.homeDir, ".codex", "AGENTS.md"), `Mine.\n\n${note}\n`);
+    const dry = await runPlannotatorUninstall({ purge: false, dryRun: true }, fixture.environment);
+    expect(dry.planned).toContain(`Note for Codex (${join("~", ".codex", "AGENTS.md")}, marked section only; you edited it)`);
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
+    expect(result.removed).toContain(`Note for Codex (${join("~", ".codex", "AGENTS.md")}, marked section only; you edited it)`);
+    expect(readFileSync(join(fixture.homeDir, ".codex", "AGENTS.md"), "utf8")).toBe("Mine.\n");
+  });
+
+  test("with no record (agents.json lost), an entry that runs this binary is named and left, never removed", async () => {
+    const fixture = createFixture();
+    const entry = { command: fixture.environment.execPath, args: ["inbox", "mcp"] };
+    writeJson(cursorFile(fixture), { mcpServers: { "plannotator-inbox": entry } });
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
+    expect(result.warnings).toContain(
+      `Skipped: Cursor's "plannotator-inbox" in ${join("~", ".cursor", "mcp.json")} runs this Plannotator, but no record says Plannotator added it, so it may be yours (to remove it, delete that entry by hand).`,
+    );
+    expect(readJson(cursorFile(fixture)).mcpServers).toEqual({ "plannotator-inbox": entry });
+  });
+
   test("an entry that runs something else now is named and left", async () => {
     const fixture = createFixture();
     seed(fixture);

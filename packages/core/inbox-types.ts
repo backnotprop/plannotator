@@ -862,8 +862,85 @@ export interface InboxConnectReport {
   foreign: { agent: InboxAgentId; path: string | null }[];
   /** Found, but only a person can connect them (no CLI on PATH, a config file Plannotator does not edit). */
   manual: InboxAgentId[];
+  /** Why each manual agent needs a person, said once per reason (the terminal prints these). */
+  manual_why?: { agent: InboxAgentId; why: string }[];
   /** Did not finish within the time limits; tried again at the next run. */
   unfinished: InboxAgentId[];
   /** Claude Code's plugin gives it the `plannotator_inbox` tool already. */
   claude_code: boolean;
+}
+
+/** The agents whose own instructions file can carry the Inbox note (packages/server/inbox-agent-notes.ts). */
+export type InboxNoteAgentId = "claude-code" | "codex" | "opencode" | "pi" | "gemini";
+export const INBOX_NOTE_AGENT_IDS: readonly InboxNoteAgentId[] = ["claude-code", "codex", "gemini", "pi", "opencode"];
+
+/**
+ * Where an agent's note would go and how it stands:
+ *  - absent: no note; `create` says whether adding it creates the file.
+ *  - added: the note Plannotator wrote is there, untouched.
+ *  - edited: the note is there but the person changed it; Plannotator never updates it.
+ *  - damaged: the markers are broken (one, several, or out of order); nothing is written.
+ *  - refused: the file cannot be edited (not a regular file, over 1 MiB, not UTF-8, unreadable).
+ *  - unavailable: no file to add to (OpenCode's AGENTS.md does not exist, and Plannotator never creates it).
+ */
+export interface InboxAgentNoteStatus {
+  agent: InboxNoteAgentId;
+  /** The file, `~` for the home folder. */
+  path: string | null;
+  /** The file is a link; `target` is where it leads (shown). */
+  target: string | null;
+  state: "absent" | "added" | "edited" | "damaged" | "refused" | "unavailable";
+  /** Adding it creates the file. */
+  create: boolean;
+  /** Plannotator created the file (removing the note deletes it when nothing else is left). */
+  created: boolean;
+  /** Why it is refused, damaged or unavailable. */
+  reason: string | null;
+  /** Other agents whose note lives in the same file (a link to one shared file): one section, kept while any of them has it on. */
+  shared_with?: InboxNoteAgentId[];
+}
+
+/** One agent in `GET /api/inbox/agents` (Settings → Agents and the first-open card). */
+export interface InboxAgentRow {
+  id: InboxAgentId;
+  label: string;
+  /** Found on this computer (its command on PATH, its folder, Plannotator's plugin). */
+  detected: boolean;
+  reach: {
+    kind: "tool" | "mcp" | "manual" | "none";
+    on: boolean;
+    state: "connected" | "off" | "removed" | "foreign" | "not_connected" | "manual" | "unreadable";
+    path: string | null;
+    /** PLANNOTATOR_INBOX_TOOL decides it. */
+    locked: boolean;
+    reason: string | null;
+  };
+  /** Claude Code, Pi and OpenCode only: their `plannotator_inbox` tool switch (`inboxTool`), shown whether or not the agent was found. */
+  tool?: { on: boolean; locked: boolean } | null;
+  /** Claude Code, Pi and OpenCode only. `needs_tool`: the tool is off, so there is no reminder. */
+  reminder: { on: boolean; locked: boolean; needs_tool: boolean } | null;
+  note: InboxAgentNoteStatus | null;
+}
+
+export interface InboxAgentsModel {
+  agents: InboxAgentRow[];
+  last_report: (InboxConnectReport & { seen?: boolean }) | null;
+  connecting: boolean;
+  /** PLANNOTATOR_INBOX_CONNECT turns the automatic step off. */
+  connect_env_off: boolean;
+  /** PLANNOTATOR_INBOX_TOOL's value when set. */
+  tool_env: boolean | null;
+  /** PLANNOTATOR_INBOX_NOTES=0: no note offer, and note rows only for a note already written (it can be turned off, not added). */
+  notes_env_off?: boolean;
+  /** The one-time note question was answered. */
+  notes_offered: boolean;
+  /** The exact block a note writes, markers included. */
+  note_text: string;
+  /** A switch's refusal, after POST /api/inbox/agents. */
+  error?: string | null;
+}
+
+/** "Codex, Gemini CLI and Pi" for note agents. */
+export function inboxNoteAgentList(ids: readonly InboxNoteAgentId[]): string {
+  return inboxAgentList(ids);
 }

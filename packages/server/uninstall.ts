@@ -32,7 +32,8 @@ import { inboxStatus, readInboxRegistry, stopInbox } from "@plannotator/shared/i
 import { INBOX_TAILNET_HTTPS_PORT, takeDownInboxTailnet } from "./inbox-devices";
 import { takeDownInboxTailscale } from "./inbox-tailscale";
 import { forgetInboxAgents, planInboxAgentRemoval, type AgentEnvironment } from "./inbox-agents";
-import type { InboxAgentId } from "@plannotator/core/inbox-types";
+import { planInboxNoteRemoval } from "./inbox-agent-notes";
+import { INBOX_AGENT_LABELS, type InboxAgentId } from "@plannotator/core/inbox-types";
 import {
   applyEdits,
   createScanner,
@@ -528,22 +529,32 @@ function agentEnvironmentOf(environment: UninstallEnvironment): AgentEnvironment
 
 /**
  * The `plannotator-inbox` MCP entries `plannotator inbox` added to the
- * agents on this computer (inbox-agents.ts): the recorded ones that still run
- * Plannotator, then any found in the known files whose record is gone. An
- * entry the person changed to run something else is theirs and is named. A
- * failure is a warning, never a reason to keep the CLI.
+ * agents on this computer (inbox-agents.ts): only the recorded ones that still
+ * run Plannotator. An entry the person changed to run something else is theirs
+ * and is named; so is one that runs this binary but has no record (agents.json
+ * lost), which the person may have added by hand. A failure is a warning,
+ * never a reason to keep the CLI.
  */
 async function removeInboxAgentConnections(
   request: UninstallRequest,
   environment: UninstallEnvironment,
   state: MutableUninstallResult,
 ): Promise<void> {
-  // With no record (agents.json lost), only an entry that runs exactly this binary is taken as ours.
-  const plan = planInboxAgentRemoval(state.dataDir, agentEnvironmentOf(environment), [environment.execPath, "inbox", "mcp"]);
-  for (const skipped of plan.skipped) state.warnings.push(`Skipped: ${skipped}.`);
+  const agents = agentEnvironmentOf(environment);
+  // With no record (agents.json lost), an entry that runs exactly this binary is named, never removed.
+  const plan = planInboxAgentRemoval(state.dataDir, agents, [environment.execPath, "inbox", "mcp"]);
+  // The notes (inbox-agent-notes.ts): only the marked section, as the person left it.
+  const notes = planInboxNoteRemoval(state.dataDir, agents, INBOX_AGENT_LABELS);
+  for (const skipped of [...plan.skipped, ...notes.skipped]) state.warnings.push(`Skipped: ${skipped}.`);
   if (request.dryRun) {
     for (const item of plan.items) state.planned.push(item.describe);
+    for (const note of notes.items) state.planned.push(note.describe);
     return;
+  }
+  for (const note of notes.items) {
+    const result = note.apply();
+    if (result.ok) state.removed.push(note.describe);
+    else state.warnings.push(`Could not remove the note in ${note.path}: ${result.reason}.`);
   }
   const removed: InboxAgentId[] = [];
   for (const item of plan.items) {

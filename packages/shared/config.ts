@@ -277,7 +277,7 @@ export interface PlannotatorConfig {
   /**
    * The Plannotator Inbox's one-line reminder at session start
    * (INBOX_REMINDER_TEXT), on the hosts that register `plannotator_inbox`
-   * (the Claude Code mod, Pi, OpenCode), set in this file: `true` / `false`
+   * (the Claude Code mod, Pi, OpenCode), set in this file or by the Inbox's Settings → Agents: `true` / `false`
    * for every host, or one boolean per host. It only ever applies where that
    * session has the Inbox tool and the Inbox has run on this computer
    * (`inbox/inbox.json` exists at session start), so the tool switch
@@ -316,6 +316,16 @@ export interface PlannotatorConfig {
     volume?: number;
     dialogDueFor?: string;
     dialogShownFor?: string;
+  };
+  /**
+   * The Plannotator Inbox's note in each agent's own instructions file
+   * (packages/server/inbox-agent-notes.ts). `offered`: the one-time question
+   * on the window's first open was answered (Add or Not now), or
+   * `plannotator inbox --notes` ran; the window never asks again. Which notes
+   * exist is kept in `inbox/agent-notes.json`, beside the files they are in.
+   */
+  inboxAgentNotes?: {
+    offered?: boolean;
   };
   /**
    * The Plannotator Inbox's phone surface: pairing, the device door
