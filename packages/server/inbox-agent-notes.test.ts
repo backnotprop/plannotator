@@ -150,7 +150,7 @@ describe("the marked section", () => {
   });
 
   test("no final newline and empty files (LF and CRLF) come back byte for byte, for every note file, with or without the record", () => {
-    const cases = ["abc", "a\r\nb", "a\nb\n\nc", "", "\n", "\r\n", "\r\n\r\n", "# Rules\r\nBe brief.\r\n", "x\n"];
+    const cases = ["abc", "a\r\nb", "a\nb\n\nc", "", "\n", "\r\n", "\r\n\r\n", "# Rules\r\nBe brief.\r\n", "x\n", " ", "\t", "  \n\t", "  \r\n\t", "\r\n ", " \n", "\t\r\n"];
     const targets: [InboxNoteAgentId, string][] = [
       ["codex", file(".codex", "AGENTS.md")],
       ["gemini", file(".gemini", "GEMINI.md")],
@@ -186,6 +186,21 @@ describe("the marked section", () => {
       rmSync(join(dataDir, "inbox", "agent-notes.json"), { force: true });
       for (const item of planInboxNoteRemoval(dataDir, e, INBOX_AGENT_LABELS).items) expect(item.apply()).toMatchObject({ ok: true });
       expect(JSON.stringify(read(agents))).toBe(JSON.stringify(before));
+    }
+  });
+
+  test("a whitespace-only file without a final line break: the start marker begins its own line, a re-add and Off both work, and the file comes back byte for byte", () => {
+    const path = file(".codex", "AGENTS.md");
+    for (const before of [" ", "\t", "  \n\t", "  \r\n\t", "\r\n\r\n "]) {
+      write(path, before);
+      expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "added" });
+      // Never glued to the person's last line: the section reads as one, not damaged.
+      expect(read(path).split(/\r?\n/)).toContain(INBOX_NOTE_START);
+      expect(noteStatus("codex", dataDir, e).state).toBe("added");
+      expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "unchanged" });
+      expect(removeInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "removed" });
+      expect(JSON.stringify(read(path))).toBe(JSON.stringify(before));
+      expect(noteStatus("codex", dataDir, e).state).toBe("absent");
     }
   });
 

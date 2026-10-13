@@ -226,11 +226,14 @@ function blockIn(nl: string): string {
  * file that ended with a line break gets the block plus a line break; one
  * that ended without (`abc`) gets the line breaks before the block and none
  * after it, so the block is the file's last bytes (stripBlock reads that).
- * Text that is only whitespace (an empty file included) is kept as it is,
- * with the block after it.
+ * Text that is only whitespace is kept as it is, with the block after it:
+ * an empty one, or one ending in a line break, gets the block plus a line
+ * break; one that does not end in a line break (" ", "\t") gets ONE line
+ * break before the block (the start marker must begin a line) and none after
+ * it, so the block is the file's last bytes there too.
  */
 function appendBlock(text: string, nl: string): string {
-  if (!text.trim()) return `${text}${blockIn(nl)}${nl}`;
+  if (!text.trim()) return text && !/\r?\n$/.test(text) ? `${text}${nl}${blockIn(nl)}` : `${text}${blockIn(nl)}${nl}`;
   if (/\r?\n$/.test(text)) return `${text}${nl}${blockIn(nl)}${nl}`;
   return `${text}${nl}${nl}${blockIn(nl)}`;
 }
@@ -247,10 +250,15 @@ function stripBlock(text: string, start: number, end: number): string {
   let to = end;
   if (end === text.length && start > 0) {
     // The block is the file's last bytes: appendBlock wrote it so for a file that
-    // ended without a line break, after two of them. Taking both gives that ending back.
+    // ended without a line break, after two of them (one when the text before is
+    // only whitespace). Taking those gives that ending back.
     const first = breakBefore(text, from);
-    const second = first ? breakBefore(text, from - first) : 0;
-    if (first && second && text.slice(0, from - first - second).trim()) return text.slice(0, from - first - second);
+    if (first) {
+      const head = text.slice(0, from - first);
+      if (!head.trim()) return head;
+      const second = breakBefore(text, from - first);
+      if (second && text.slice(0, from - first - second).trim()) return text.slice(0, from - first - second);
+    }
   }
   if (text.startsWith("\r\n", to)) to += 2;
   else if (text[to] === "\n") to += 1;
