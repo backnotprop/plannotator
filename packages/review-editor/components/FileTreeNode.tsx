@@ -34,6 +34,8 @@ interface FileTreeNodeProps {
   onStageFile?: (filePath: string) => void;
   stagingFile?: string | null;
   showStageControls?: boolean;
+  /** Markdown files shown as a rendered preview: an eye after the name. */
+  markdownPreviewedPaths?: ReadonlySet<string>;
 }
 
 function hasVisibleChildren(
@@ -72,6 +74,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
   onStageFile,
   stagingFile,
   showStageControls = true,
+  markdownPreviewedPaths,
 }) => {
   const paddingLeft = diffFileTreeIndent(node.depth);
 
@@ -106,6 +109,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
             onStageFile={onStageFile}
             stagingFile={stagingFile}
             showStageControls={showStageControls}
+            markdownPreviewedPaths={markdownPreviewedPaths}
           />
         ))}
       </>
@@ -152,7 +156,22 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
             file={node.file!}
             name={node.name}
             untracked={isUntracked}
-            afterName={<AnnotationBadge count={annotationCount} />}
+            afterName={<>
+              {markdownPreviewedPaths?.has(node.path) && (
+                <span
+                  data-file-tree-markdown-preview=""
+                  className="ml-1 inline-flex flex-shrink-0 text-primary/80"
+                  title="Shown rendered"
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                  <span className="sr-only">(rendered)</span>
+                </span>
+              )}
+              <AnnotationBadge count={annotationCount} />
+            </>}
             leading={<>
             {showViewedControls && (
               <ViewedControl isViewed={isViewed} onToggle={onToggleViewed ? () => onToggleViewed(node.path) : undefined} forceVisible={isActive} />

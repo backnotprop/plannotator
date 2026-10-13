@@ -11,6 +11,7 @@ import {
   mkdtempSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -1323,6 +1324,17 @@ describe("review-core", () => {
     const context = await getGitContext(makeRuntime(repoDir), repoDir);
 
     expect(context.diffOptions.map((option) => option.id)).not.toContain("local-vs-remote");
+  });
+
+  test("git context names the repository top level when started from a subfolder", async () => {
+    const repoDir = initRepo();
+    const subDir = join(repoDir, "docs");
+    mkdirSync(subDir, { recursive: true });
+    const context = await getGitContext(makeRuntime(subDir), subDir);
+
+    // Patch paths are relative to the top level, not to where the review began.
+    expect(context.cwd).toBe(subDir);
+    expect(realpathSync(context.root!)).toBe(realpathSync(repoDir));
   });
 
   test("since-base falls back to HEAD when the requested base cannot resolve", async () => {

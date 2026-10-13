@@ -27,7 +27,7 @@ import {
   type UpdateDetails,
   type WhatsNewModel,
 } from './api';
-import { filterSections, heldNotice, markHeldRowArchived, refreshHeldRows, settleOwn, waitingCount } from './held';
+import { filterSections, heldNotice, markHeldRowArchived, refreshHeldRows, settleOwn, settleThread, waitingCount, type OpenThread } from './held';
 import {
   captureSettle,
   COVERED_LIST_SETTLES,
@@ -63,6 +63,7 @@ import { unsentReply } from './unsent';
 import { InboxToast, type InboxToastModel } from './components/Toast';
 import { canToggleRead, MARK_READ_UNDO_MS, markReadToast } from './markRead';
 import { lookBoundary } from './folding';
+import { latestAgentSeq } from './seenOnSight';
 import { isPhone, trackKeyboard, usePhone } from './phone';
 import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH, useStack } from './stack';
 import { backTo, pushScreen } from './history';
@@ -91,6 +92,9 @@ configurePlannotatorUI({
 });
 
 const SIDEBAR_OPEN_COOKIE = 'plannotator-inbox-sidebar-open';
+/** A look seen on sight that the server did not take is sent again this many times, 1 s, 2 s, 4 s… apart. */
+const SEEN_RETRIES = 5;
+const SEEN_RETRY_MS = 1000;
 
 interface Route {
   page: 'inbox' | 'settings' | 'decisions' | 'whats-new';
@@ -301,8 +305,14 @@ function Inbox() {
   const [threadDecisions, setThreadDecisions] = useState<InboxDecision[]>([]);
   /** The open thread's own list row, from its read: an archived thread has none in the list. */
   const [threadRow, setThreadRow] = useState<InboxListRow | null>(null);
-  /** The open thread's "new since you looked" boundary (folding.ts), from before this look. */
-  const [look, setLook] = useState<{ threadId: string; seq: number | null } | null>(null);
+  /**
+   * The open thread's "new since you looked" boundary (folding.ts), from
+   * before this look, and `through`: what the window's looks this visit cover
+   * (the newest agent message of the first read, raised as messages that
+   * arrive while it is open are seen on sight, seenOnSight.ts). Null when the
+   * thread carries no seqs (an older Inbox).
+   */
+  const [look, setLook] = useState<{ threadId: string; seq: number | null; through: number | null } | null>(null);
   const [decisions, setDecisions] = useState<DecisionsModel | null>(null);
   const [decisionsError, setDecisionsError] = useState<string | null>(null);
   const [settings, setSettings] = useState<SettingsModel | null>(null);
@@ -390,6 +400,22 @@ function Inbox() {
   }, []);
   /** The settle waiting out its beat after a thread closed (settle.ts). */
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * The thread just closed, until the list settles: like the open thread, it
+   * is never held (held.ts): never in "N new", its row kept as it now is, and
+   * it settles where its state puts it (design record "inbox-new-in-open-thread").
+   */
+  const closing = useRef<OpenThread | null>(null);
+  /**
+   * The thread the held list treats as open: the route's, else the one
+   * closing (with its row as it stood at the close, so an agent message after
+   * the close waits behind "N new" like any other); the close's own render
+   * reads the route it leaves.
+   */
+  const heldOpen = (): OpenThread | null => {
+    const open = routeRef.current.thread ?? (closing.current ? null : lastRoute.current.thread);
+    return open ? { threadId: open } : closing.current;
+  };
   const cancelSettle = useCallback(() => {
     if (settleTimer.current) clearTimeout(settleTimer.current);
     settleTimer.current = null;
@@ -402,10 +428,13 @@ function Inbox() {
   const settleList = useCallback(
     (what: 'own' | 'all', slide: boolean) => {
       cancelSettle();
+      // The thread just closed settles as it now is, an arrival there included (held.ts settleOwn).
+      const closed = closing.current;
+      closing.current = null;
       const next = latestRef.current;
       if (!next) return;
       if (slide) armSlide();
-      setShown((current) => (what === 'all' || current === null || !hasRows(current) ? next.sections : settleOwn(current, next.sections, openedHere.current)));
+      setShown((current) => (what === 'all' || current === null || !hasRows(current) ? next.sections : settleOwn(current, next.sections, openedHere.current, closed)));
     },
     [armSlide, cancelSettle],
   );
@@ -424,7 +453,7 @@ function Inbox() {
       setUpdate(next.update);
       setUpdated(next.updated ?? null);
       // Held: the order waits for an action, but each row's own state (a delivery, an agent's read) follows at once.
-      setShown((current) => (adopt || current === null || !hasRows(current) ? next.sections : refreshHeldRows(current, next.sections)));
+      setShown((current) => (adopt || current === null || !hasRows(current) ? next.sections : refreshHeldRows(current, next.sections, heldOpen())));
       setLoadError(null);
       return next;
     } catch (cause) {
@@ -432,6 +461,63 @@ function Inbox() {
       return null;
     }
   }, [armSlide]);
+
+  /**
+   * Seen on sight (seenOnSight.ts): messages that arrived in the open thread
+   * have been on screen; record the look up to `through` (never past it) and
+   * let the row unbold in place. `look.through` rises only once the server
+   * took the look; a look that failed is sent again (a few times, waiting
+   * longer each time) unless a later one covers it.
+   */
+  const lookRef = useRef(look);
+  lookRef.current = look;
+  /** Per thread, the furthest look on its way to the server. */
+  const seenPosting = useRef(new Map<string, number>());
+  const seenRetries = useRef(new Set<ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const retries = seenRetries.current;
+    return () => {
+      for (const timer of retries) clearTimeout(timer);
+      retries.clear();
+    };
+  }, []);
+  const seenOnSight = useCallback(
+    (threadId: string, through: number) => {
+      const current = lookRef.current;
+      if (!current || current.threadId !== threadId || (current.through !== null && current.through >= through)) return;
+      if ((seenPosting.current.get(threadId) ?? -1) >= through) return;
+      seenPosting.current.set(threadId, through);
+      const attempt = (tries: number) => {
+        void inboxApi
+          .seen(threadId, through)
+          .then(() => {
+            if (seenPosting.current.get(threadId) === through) seenPosting.current.delete(threadId);
+            const now = lookRef.current;
+            if (now && now.threadId === threadId && (now.through === null || now.through < through)) {
+              const next = { ...now, through };
+              lookRef.current = next;
+              setLook(next);
+            }
+            return refreshList(false);
+          })
+          .catch(() => {
+            // A later look on its way covers this one.
+            if (seenPosting.current.get(threadId) !== through) return;
+            if (tries >= SEEN_RETRIES) {
+              seenPosting.current.delete(threadId);
+              return;
+            }
+            const timer = setTimeout(() => {
+              seenRetries.current.delete(timer);
+              attempt(tries + 1);
+            }, SEEN_RETRY_MS * 2 ** tries);
+            seenRetries.current.add(timer);
+          });
+      };
+      attempt(0);
+    },
+    [refreshList],
+  );
 
   const refreshThread = useCallback(async (threadId: string) => {
     try {
@@ -442,7 +528,7 @@ function Inbox() {
         setThreadRow(next.row ?? null);
         // What is new since the last look, from the first read of this thread:
         // it lands before the window records the look, and is kept until the person leaves the thread.
-        setLook((current) => (current?.threadId === threadId ? current : { threadId, seq: lookBoundary(next.thread) }));
+        setLook((current) => (current?.threadId === threadId ? current : { threadId, seq: lookBoundary(next.thread), through: latestAgentSeq(next.thread) }));
       }
       return next.thread;
     } catch (cause) {
@@ -568,8 +654,10 @@ function Inbox() {
     void (async () => {
       const opened = await refreshThread(threadId);
       if (cancelled || !opened) return;
+      closing.current = null;
       if (listCovered() && COVERED_LIST_SETTLES === 'while-covered') settleList('own', false);
-      await inboxApi.seen(threadId).catch(() => {});
+      // The look covers what this read showed, not a message that lands before the server takes it.
+      await inboxApi.seen(threadId, latestAgentSeq(opened)).catch(() => {});
       if (!cancelled) await refreshList(false);
     })();
     return () => {
@@ -607,9 +695,18 @@ function Inbox() {
     }
     const closed = before.thread;
     if (!closed) return;
+    closing.current = { threadId: closed, asOf: latestRef.current?.sections.flatMap((section) => section.threads).find((row) => row.thread_id === closed) ?? null };
     const active = document.activeElement;
     if (body && lastInput === 'keyboard' && (!active || active === document.body)) rowElement(body, closed)?.focus({ preventScroll: true });
-    if (listCovered() && COVERED_LIST_SETTLES === 'while-covered') return;
+    if (listCovered() && COVERED_LIST_SETTLES === 'while-covered') {
+      // The list as the person left it, except the thread they just closed
+      // when a message arrived there that they did not see: it comes back
+      // unread, in the section its state gives it (held.ts settleThread).
+      closing.current = null;
+      const next = latestRef.current?.sections.flatMap((section) => section.threads).find((row) => row.thread_id === closed);
+      if (next && next.unseen > 0) setShown((current) => (current ? settleThread(current, latestRef.current!.sections, closed) : current));
+      return;
+    }
     if (prefersReducedMotion()) settleList('own', false);
     else settleTimer.current = setTimeout(() => settleList('own', true), sidebarHeldNow.current ? SETTLE_AFTER_SIDEBAR_MS : SETTLE_BEAT_MS);
   }, [route.page, route.project, route.thread, settleList, cancelSettle]);
@@ -1140,7 +1237,7 @@ function Inbox() {
   };
 
   const filterProject = route.page === 'inbox' && route.project ? projects.find((p) => p.id === route.project) ?? null : null;
-  const notice = shown && latest ? heldNotice(filterSections(shown, route.project), filterSections(latest.sections, route.project), openedHere.current).text : null;
+  const notice = shown && latest ? heldNotice(filterSections(shown, route.project), filterSections(latest.sections, route.project), openedHere.current, heldOpen()).text : null;
   const firstRun = latest !== null && projects.length === 0;
   // A file beside the thread takes the list's and the sidebar's room (record 2.2).
   const fileOpen = route.page === 'inbox' && !!route.thread && !!route.file;
@@ -1449,6 +1546,9 @@ function Inbox() {
             onOpenFile={(file, options) => (file ? writeRoute({ ...routeRef.current, file }, options) : closeTo({ ...routeRef.current, file }))}
             onOpenGuide={(messageId) => go({ ...route, guide: messageId })}
             lookSeq={look?.threadId === thread.thread_id ? look.seq : undefined}
+            seenThrough={look?.threadId === thread.thread_id ? look.through : null}
+            onSeen={(through) => seenOnSight(thread.thread_id, through)}
+            covered={!!route.guide || updateDialog !== null || soundDialog === 'open'}
             backLabel={filterProject?.name ?? 'Inbox'}
             phone={phone}
             stacked={stack.thread}

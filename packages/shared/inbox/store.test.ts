@@ -102,8 +102,10 @@ type Op =
   | { op: "personSend"; target: number; key: string; words: string; skip?: boolean }
   | { op: "resolve"; target: number; resolved: boolean }
   | { op: "supersede"; target: number; whole: boolean; body: string }
-  // The person opened the thread (POST /api/inbox/threads/:id/seen).
-  | { op: "seen"; target: number }
+  // The person opened the thread (POST /api/inbox/threads/:id/seen). `through`
+  // (an index like `target`): the look stops at that agent message's seq
+  // (`through_seq`: the newest message the window showed).
+  | { op: "seen"; target: number; through?: number }
   // Mark read, or its Undo (POST /api/inbox/threads/:id/read and /unread).
   | { op: "read"; target: number; read: boolean }
   // An agent read the thread (read_thread, or wait_for_reply handed it the reply).
@@ -211,10 +213,12 @@ function run(store: InboxStore, op: Op, messageIds: string[]): Outcome {
         messageIds.push(result.message.id);
         return "ok";
       }
-      case "seen":
+      case "seen": {
         if (!target) return "noop";
-        store.markSeen(threadOf(target));
+        const through = op.through === undefined ? undefined : messageIds[op.through % messageIds.length];
+        store.markSeen(threadOf(target), through === undefined ? undefined : (store.messageCursor(through) ?? undefined));
         return "ok";
+      }
       case "read":
         if (!target) return "noop";
         store.markRead(threadOf(target), op.read);
@@ -647,6 +651,10 @@ function stateOpArbOf(body: fc.Arbitrary<string>, agentKeys: boolean): fc.Arbitr
       weight: 3,
     },
     { arbitrary: fc.record({ op: fc.constant("seen" as const), target: fc.nat() }), weight: 2 },
+    // The look capped at a message (`through_seq`), in the property runs only: the
+    // generated trace fixtures were drawn from this arbitrary without it, and a
+    // phone kit replays them as written.
+    ...(agentKeys ? [{ arbitrary: fc.record({ op: fc.constant("seen" as const), target: fc.nat(), through: fc.nat() }), weight: 2 }] : []),
     { arbitrary: fc.record({ op: fc.constant("read" as const), target: fc.nat(), read: fc.boolean() }), weight: 3 },
     { arbitrary: fc.record({ op: fc.constant("resolve" as const), target: fc.nat(), resolved: fc.boolean() }), weight: 3 },
     { arbitrary: fc.record({ op: fc.constant("agentRead" as const), target: fc.nat() }), weight: 2 },
@@ -878,6 +886,15 @@ class ThreadStateModel {
     };
     thread.messages.push(message);
     this.byMessage.set(id, { thread, message });
+    this.agentMessages.push(message);
+  }
+
+  /** Every agent message in the order written: what an op's index (`target`, `through`) names. */
+  private readonly agentMessages: ModelMessage[] = [];
+
+  /** The step that wrote the agent message an index names (wrapping, as `targetOf` does). */
+  private tickOfAgent(index: number): number {
+    return this.agentMessages[index % Math.max(1, this.agentMessages.length)]?.tick ?? 0;
   }
 
   private addPerson(thread: ModelThread, tick: number, note: ModelMessage["note"]): void {
@@ -990,9 +1007,12 @@ class ThreadStateModel {
         }
         return "ok";
       case "seen": {
-        // A look covers every agent message so far.
+        // A look covers every agent message so far, or, capped (`through_seq`),
+        // those written at or before the message it names (any thread's: a seq
+        // is one counter across the Inbox). It never goes back.
+        const cap = op.through === undefined ? Number.POSITIVE_INFINITY : this.tickOfAgent(op.through);
         let latestAgent = 0;
-        for (const m of thread.messages) if (m.author === "agent") latestAgent = Math.max(latestAgent, m.tick);
+        for (const m of thread.messages) if (m.author === "agent" && m.tick <= cap) latestAgent = Math.max(latestAgent, m.tick);
         if (latestAgent > this.lookTick(thread)) thread.seen = latestAgent;
         return "ok";
       }
@@ -1388,7 +1408,8 @@ describe("the thread-state model", () => {
 
 type TraceEvent =
   | { type: "agent_message"; project: string; session?: string | null; reply_to: string | null; supersedes?: string[]; body: string }
-  | { type: "seen" | "mark_read" | "unread" | "archive" | "unarchive" | "agent_read" | "set_aside_note"; thread: string }
+  // `through` (seen only, optional): the look stops at that agent message (`through_seq`).
+  | { type: "seen" | "mark_read" | "unread" | "archive" | "unarchive" | "agent_read" | "set_aside_note"; thread: string; through?: string }
   | { type: "pick"; message: string; key: string; choice?: string; text?: string }
   | { type: "send"; message: string; words: string; skip_unanswered: boolean };
 
@@ -1468,7 +1489,7 @@ function traceOp(event: TraceEvent, world: StateWorld, labels: TraceLabels, step
     case "send":
       return { op: "personSend", target: at(event.message), key: `send-${step}`, words: event.words, skip: event.skip_unanswered };
     case "seen":
-      return { op: "seen", target: at(event.thread) };
+      return event.through === undefined ? { op: "seen", target: at(event.thread) } : { op: "seen", target: at(event.thread), through: at(event.through) };
     case "mark_read":
       return { op: "read", target: at(event.thread), read: true };
     case "unread":
@@ -1511,7 +1532,7 @@ function traceEventOf(op: Op, world: StateWorld, labels: TraceLabels): TraceEven
     case "personSend":
       return { type: "send", message: labels.label(target), words: op.words, skip_unanswered: op.skip === true };
     case "seen":
-      return { type: "seen", thread };
+      return op.through === undefined ? { type: "seen", thread } : { type: "seen", thread, through: labels.label(world.ids[op.through % world.ids.length]!) };
     case "read":
       return { type: op.read ? "mark_read" : "unread", thread };
     case "resolve":
@@ -1601,6 +1622,7 @@ const REPLY = (reply_to: string, body: string, supersedes?: string[]): TraceEven
   body,
 });
 const ON = (type: Extract<TraceEvent, { thread: string }>["type"], thread: string): TraceEvent => ({ type, thread });
+const SEEN_THROUGH = (thread: string, through: string): TraceEvent => ({ type: "seen", thread, through });
 const PICK = (message: string, key: string, choice: string): TraceEvent => ({ type: "pick", message, key, choice });
 const SEND = (message: string, words: string, skip_unanswered: boolean): TraceEvent => ({ type: "send", message, words, skip_unanswered });
 
@@ -1750,6 +1772,23 @@ const HAND_TRACES: TraceDef[] = [
     name: "hand-17-came-back-mark-read-then-reply",
     description: "A came-back thread marked read goes back to Archived; the person's reply after that brings it back as Sent, and the agent's read returns it to the archive.",
     events: [ROOT(STATE_BODIES.news), ON("archive", "t1"), REPLY("m1", STATE_BODIES.ask), ON("mark_read", "t1"), SEND("m2", "one more thing", false), ON("agent_read", "t1")],
+  },
+  {
+    name: "hand-18-look-capped-by-through",
+    description:
+      "The look capped at what the window showed (`seen` with `through`): a message that landed after the window read the thread stays New; a cap behind the recorded look changes nothing; a cap past the thread's newest message (here another thread's later message) covers all of it.",
+    events: [
+      ROOT(STATE_BODIES.news, "ses_a"),
+      REPLY("m1", STATE_BODIES.news),
+      SEEN_THROUGH("t1", "m1"),
+      SEEN_THROUGH("t1", "m2"),
+      REPLY("m1", STATE_BODIES.ask),
+      SEEN_THROUGH("t1", "m1"),
+      SEEN_THROUGH("t1", "m3"),
+      REPLY("m1", STATE_BODIES.news),
+      ROOT(STATE_BODIES.news, null, "repo1"),
+      SEEN_THROUGH("t1", "m5"),
+    ],
   },
 ];
 

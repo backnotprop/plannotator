@@ -367,7 +367,16 @@ export const inboxApi = {
   },
   thread: (threadId: string) => get<ThreadModel>(`/api/inbox/threads/${encodeURIComponent(threadId)}`),
   settings: () => get<SettingsModel>('/api/inbox/settings'),
-  seen: (threadId: string) => post<unknown>(`/api/inbox/threads/${encodeURIComponent(threadId)}/seen`, {}),
+  /**
+   * The person looked at the thread. `throughSeq`: the seq of the newest
+   * message the window showed; the look stops there, so a message that landed
+   * after the window read the thread stays new (an older Inbox ignores it).
+   */
+  seen: (threadId: string, throughSeq?: number | null) =>
+    post<{ thread: InboxListRow }>(
+      `/api/inbox/threads/${encodeURIComponent(threadId)}/seen`,
+      typeof throughSeq === 'number' ? { through_seq: throughSeq } : {},
+    ),
   /** Mark read (the thread leaves the top for Quiet, its waiting questions closed) or its Undo. */
   markRead: (threadId: string, read: boolean) =>
     post<{ thread: InboxListRow }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/${read ? 'read' : 'unread'}`, {}),

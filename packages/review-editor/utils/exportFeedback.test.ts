@@ -620,3 +620,34 @@ describe("buildProseFeedback — artifact annotations", () => {
     expect(output).toContain("Crop this more tightly.");
   });
 });
+
+describe("comments made in a Markdown preview", () => {
+  it("export under their file with the quoted text and where it was in the rendered diff", () => {
+    const output = exportReviewFeedback([
+      ann({
+        id: "md-1",
+        scope: "file",
+        filePath: "docs/guide.md",
+        lineStart: 1,
+        lineEnd: 1,
+        text: "Link the installer page.",
+        markdownPreview: { originalText: "new installer\nfrom the website", view: "diff", diffContext: "removed" },
+      }),
+    ]);
+    expect(output).toContain("## docs/guide.md");
+    expect(output).toContain("> new installer\n> from the website");
+    expect(output).toContain("in removed text");
+    expect(output).toContain("Link the installer page.");
+    // Not presented as an ordinary file comment or a line comment.
+    expect(output).not.toContain("File Comment");
+    expect(output).not.toContain("Line 1");
+  });
+
+  it("say nothing about the section when it was unchanged or made in the whole file", () => {
+    const output = exportReviewFeedback([
+      ann({ id: "md-2", scope: "file", filePath: "docs/guide.md", text: "Fine.", markdownPreview: { originalText: "stays", view: "whole" } }),
+    ]);
+    expect(output).toContain("> stays");
+    expect(output).not.toContain("_(in ");
+  });
+});

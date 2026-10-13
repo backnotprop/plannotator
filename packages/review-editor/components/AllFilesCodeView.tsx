@@ -26,6 +26,7 @@ import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { usePierreTheme } from '../hooks/usePierreTheme';
 import { useIsWorkerPoolReadyOrDisabled, useWorkerPoolThemeSync } from '../workerPool';
 import type { DiffFile, AnnotationScrollTarget } from '../types';
+import type { MarkdownFileView } from '../utils/markdownPreview';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
 import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
 import { getDiffSelection, getLineNumberFromNode, getSideFromNode } from '../utils/diffSelection';
@@ -205,6 +206,30 @@ export interface AllFilesCodeViewProps {
     tooLargeFallback?: React.ReactNode;
     onHeightChange: () => void;
   }) => React.ReactNode;
+  /**
+   * Rendered Markdown previews. A previewed Markdown file shows its card in
+   * the header slot (measured like an image preview) and its item's diff is
+   * swapped for a hunkless one, so no rows draw under it; Source swaps the
+   * real diff back. Absent (the guide chain, guides.show): no preview at all.
+   */
+  markdownPreview?: {
+    previewedPaths: ReadonlySet<string>;
+    isPreviewable: (file: DiffFile) => boolean;
+    /** Navigation needs a view for a file (a search hit: Source; a comment
+     *  made in a rendered view: that view). */
+    show: (filePath: string, view: MarkdownFileView) => void;
+    /** The file's Source / Changes / Read control, drawn in its header. */
+    renderViewControl: (args: { file: DiffFile; iconOnly: boolean; touch: boolean }) => React.ReactNode;
+    /** The file the edit session holds (null when none): its view must not change mid-edit. */
+    onEditingFileChange?: (filePath: string | null) => void;
+    /**
+     * Registers how to find the Markdown file a view key should act on: the
+     * file holding focus or under the pointer, else the top-most Markdown
+     * file in view (never the last file just because the list fits).
+     */
+    registerViewTarget?: (resolve: (() => string | null) | null) => void;
+    render: (args: { file: DiffFile; onHeightChange: () => void }) => React.ReactNode;
+  };
   /** Compact coarse-pointer shell. Adjusts custom-header chrome and Pierre's
    * matching virtualization metric without changing desktop geometry. */
   compactTouchLayout?: boolean;
@@ -543,6 +568,24 @@ function buildItemIdentity(
 }
 
 /**
+ * The diff a previewed Markdown file's item carries: the same file with no
+ * hunks, so Pierre draws nothing under the header slot that holds the
+ * preview. A distinct cacheKey keeps highlight caches apart.
+ */
+function markdownPreviewFileDiff(full: FileDiffMetadata): FileDiffMetadata {
+  return {
+    ...full,
+    hunks: [],
+    splitLineCount: 0,
+    unifiedLineCount: 0,
+    isPartial: true,
+    deletionLines: [],
+    additionLines: [],
+    cacheKey: `${full.cacheKey ?? ''}#md-preview`,
+  };
+}
+
+/**
  * Slack allowed when deciding a file has scrolled out ABOVE the viewport for
  * auto-mark-viewed. The active-file rule uses a +50px threshold, so a file can
  * become "not active" while a sliver of it is still on screen; this epsilon
@@ -596,6 +639,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   reviewSnapshotId,
   contextExpansionAvailable = true,
   renderImagePreview,
+  markdownPreview,
   compactTouchLayout,
   onLineSelection,
   onAddAnnotationForFile,
@@ -834,9 +878,36 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     }
     return ids;
   }, [itemIdToFile, renderImagePreview]);
-  const imagePreviewItemIdsRef = useRef(imagePreviewItemIds);
-  imagePreviewItemIdsRef.current = imagePreviewItemIds;
 
+  // Markdown files shown as a rendered preview (see the `markdownPreview` prop).
+  const markdownPreviewRef = useRef(markdownPreview);
+  markdownPreviewRef.current = markdownPreview;
+  const previewedPaths = markdownPreview?.previewedPaths;
+  const isPreviewable = markdownPreview?.isPreviewable;
+  const previewItemIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!previewedPaths || !isPreviewable) return ids;
+    for (const [id, file] of itemIdToFile) {
+      if (previewedPaths.has(file.path) && isPreviewable(file)) ids.add(id);
+    }
+    return ids;
+  }, [itemIdToFile, previewedPaths, isPreviewable]);
+  const previewItemIdsRef = useRef(previewItemIds);
+  previewItemIdsRef.current = previewItemIds;
+
+  // Items whose header slot reports its real height: image previews and
+  // Markdown preview cards.
+  const measuredHeaderItemIds = useMemo(
+    () => (previewItemIds.size === 0 ? imagePreviewItemIds : new Set([...imagePreviewItemIds, ...previewItemIds])),
+    [imagePreviewItemIds, previewItemIds],
+  );
+  const imagePreviewItemIdsRef = useRef(measuredHeaderItemIds);
+  imagePreviewItemIdsRef.current = measuredHeaderItemIds;
+
+  // A previewed item carries a hunkless diff; its real one (raw patch, or the
+  // full-content augmentation once it lands) waits here until Source.
+  const fullDiffsRef = useRef(new Map<string, FileDiffMetadata>());
+  const previewAppliedRef = useRef(new Set<string>());
   // Stable identity of the current diff. Changes whenever the file set or any
   // file's patch CONTENT changes (diff type / base / whitespace / PR switch),
   // and is used as the CodeView `key` to force a remount + fresh seed.
@@ -858,6 +929,23 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     () => `${fileOrder ?? 'tree'}:${seedCollapsed ? 'c' : 'e'}:g${generatedKey ? hashString(generatedKey) : ''}:${prUrl ?? ''}:${prDiffScope ?? ''}:${reviewSnapshotId ?? ''}:${files.length}:${files.map((f, i) => `${f.path}#${patchHashes[i]}`).join('|')}`,
     [files, patchHashes, prUrl, prDiffScope, reviewSnapshotId, fileOrder, seedCollapsed, generatedKey],
   );
+
+  // CodeView seeds its items once per mount (keyed on fileSetKey): a new mount
+  // starts previewed files hunkless. An identity rebuilt without a remount
+  // (an equal file set re-parsed) is never seen by CodeView, so it re-seeds
+  // nothing. Idempotent per key (render may run twice).
+  const seededPreviewKeyRef = useRef<string | null>(null);
+  if (seededPreviewKeyRef.current !== fileSetKey) {
+    seededPreviewKeyRef.current = fileSetKey;
+    fullDiffsRef.current = new Map();
+    previewAppliedRef.current = new Set();
+    for (const item of identity.items) {
+      if (item.type !== 'diff' || !previewItemIds.has(item.id)) continue;
+      fullDiffsRef.current.set(item.id, item.fileDiff);
+      item.fileDiff = markdownPreviewFileDiff(item.fileDiff);
+      previewAppliedRef.current.add(item.id);
+    }
+  }
 
   // Visual-order list of file paths (for [/] stepping). Derived from items so it
   // matches CodeView's rendered order exactly.
@@ -1594,6 +1682,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           // scoped by generation so the same item id across diff switches never
           // collides in a (future) cross-mount worker cache.
           augmented.cacheKey = `${generation}::${itemId}#full`;
+          if (previewAppliedRef.current.has(itemId)) {
+            // Previewed: keep the hunkless diff on screen; Source swaps this in.
+            fullDiffsRef.current.set(itemId, augmented);
+            augmentState.set(itemId, { status: 'done', controller, generation });
+            return;
+          }
           item.fileDiff = augmented;
           item.version = (item.version ?? 0) + 1;
           // updateItem re-measures the (now taller) item and resolves the captured
@@ -1773,11 +1867,59 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // resolves layout against a display:none container and there is no retry —
   // bail instead, and the isActive flip re-runs this effect so a match
   // selected while the panel was hidden scrolls once the panel is shown.
+  // (Defined after the Markdown preview swap below, which must run first.)
+  //
+  // Source <-> Preview: swap each changed item's diff in place (hunkless
+  // while previewed) and republish only that item.
+  useEffect(() => {
+    const handle = viewerRef.current;
+    if (handle == null) return;
+    const applied = previewAppliedRef.current;
+    for (const { id } of identity.items) {
+      const want = previewItemIds.has(id);
+      if (want === applied.has(id)) continue;
+      const item = handle.getItem(id);
+      if (item == null || item.type !== 'diff') continue;
+      if (want) {
+        // Never swap the document out from under an edit session.
+        if (id === editSession.editingItemIdRef.current) continue;
+        fullDiffsRef.current.set(id, item.fileDiff);
+        item.fileDiff = markdownPreviewFileDiff(item.fileDiff);
+        applied.add(id);
+      } else {
+        const full = fullDiffsRef.current.get(id);
+        if (full) item.fileDiff = full;
+        fullDiffsRef.current.delete(id);
+        applied.delete(id);
+        // The header slot is back to the fixed FileHeader height.
+        measuredHeaderHeightsRef.current.delete(id);
+      }
+      item.version = (item.version ?? 0) + 1;
+      handle.updateItem(item);
+      if (!want) syncHeaderMetrics(id);
+    }
+    // editingItemId: a swap held back for the editing file runs once it ends.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewItemIds, identity, editSession.editingItemId]);
+
+  // A search hit in a previewed file shows that file as Source (v1: hits are
+  // in the diff text).
+  // The file in an edit session always shows its diff (the swap never takes
+  // it out from under the editor), so a hit there scrolls, whatever its view.
+  const activeMatchItemId = activeSearchMatch != null ? filePathToItemId.get(activeSearchMatch.filePath) ?? '' : '';
+  const activeMatchPreviewed = activeSearchMatch != null
+    && previewItemIds.has(activeMatchItemId)
+    && activeMatchItemId !== editSession.editingItemId;
+
   useEffect(() => {
     if (!isActive) return;
     if (activeSearchMatch == null) return;
     const itemId = filePathToItemId.get(activeSearchMatch.filePath);
     if (itemId == null) return;
+    if (activeMatchPreviewed) {
+      markdownPreviewRef.current?.show(activeSearchMatch.filePath, 'source');
+      return;
+    }
     const handle = viewerRef.current;
     if (handle == null) return;
 
@@ -1802,7 +1944,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       viewer.scrollTo({ type: 'line', id: itemId, lineNumber, side, align: 'center' });
     });
     return () => cancelAnimationFrame(raf);
-  }, [activeSearchMatch, filePathToItemId, isActive, syncAllCollapsedMirror, reportFileCollapsed]);
+  }, [activeSearchMatch, filePathToItemId, isActive, syncAllCollapsedMirror, reportFileCollapsed, activeMatchPreviewed]);
 
   // --- Annotations through CodeView item state (P4) ---------------------------
 
@@ -2362,13 +2504,29 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // to the comment. Keyed on the navigation token so it fires per sidebar click
   // (re-clicking the same comment re-centers it) and NEVER on a bare in-diff
   // selection. rAF defers the scroll a frame so the expand's layout has settled.
+  const handledScrollTargetRef = useRef<AnnotationScrollTarget | null>(null);
   useEffect(() => {
     if (!scrollTargetAnnotation) return;
+    if (handledScrollTargetRef.current === scrollTargetAnnotation) return;
     const ann = annotationsRef.current.find((a) => a.id === scrollTargetAnnotation.id);
     if (!ann) return;
     const itemId = filePathToItemId.get(ann.filePath);
     const handle = viewerRef.current;
     if (itemId == null || handle == null) return;
+    // A comment made in a Markdown preview lives in the preview; a line
+    // comment lives in the source diff. Switch first; this runs again once
+    // the item swapped.
+    const previewControl = markdownPreviewRef.current;
+    const previewed = previewItemIdsRef.current.has(itemId);
+    if (previewControl && ann.markdownPreview && !previewed) {
+      previewControl.show(ann.filePath, ann.markdownPreview.view === 'whole' ? 'read' : 'changes');
+      return;
+    }
+    if (previewControl && previewed && !isFileScopedAnnotation(ann)) {
+      previewControl.show(ann.filePath, 'source');
+      return;
+    }
+    handledScrollTargetRef.current = scrollTargetAnnotation;
 
     const item = handle.getItem(itemId);
     if (item != null && item.collapsed === true) {
@@ -2389,7 +2547,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     });
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scrollTargetAnnotation, filePathToItemId]);
+  }, [scrollTargetAnnotation, filePathToItemId, previewItemIds]);
 
   useEffect(() => {
     if (!isActive || readOnly || commentOnly) return;
@@ -2498,6 +2656,65 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     onStage,
   ]);
 
+  // --- Markdown view: the editing file, and the file a view key acts on ------
+
+  const editingFilePath = editSession.editingItemId != null
+    ? itemIdToFilePath.get(editSession.editingItemId) ?? null
+    : null;
+  const onEditingFileChange = markdownPreview?.onEditingFileChange;
+  useEffect(() => {
+    onEditingFileChange?.(editingFilePath);
+  }, [onEditingFileChange, editingFilePath]);
+  useEffect(() => () => onEditingFileChange?.(null), [onEditingFileChange]);
+
+  // Last pointer position over this view (null once it leaves).
+  const pointerRef = useRef<{ x: number; y: number } | null>(null);
+  const resolveViewTarget = useStableCallback((): string | null => {
+    const viewer = viewerRef.current?.getInstance();
+    const isPreviewable = markdownPreviewRef.current?.isPreviewable;
+    if (viewer == null || !isPreviewable) return null;
+    // Only files in the viewport count (rendered items include overscan), so
+    // P never switches a file the person cannot see.
+    const container = viewer.getContainerElement();
+    const view = container?.getBoundingClientRect();
+    const rendered = viewer.getRenderedItems().filter((item) => {
+      if (!view) return true;
+      const rect = item.element.getBoundingClientRect();
+      return rect.bottom > view.top + 1 && rect.top < view.bottom - 1;
+    });
+    const markdownPathOf = (itemId: string): string | null => {
+      const file = itemIdToFile.get(itemId);
+      return file && isPreviewable(file) ? file.path : null;
+    };
+    // 1. The file holding focus.
+    const active = document.activeElement;
+    if (active && active !== document.body) {
+      const holder = rendered.find((item) => item.element.contains(active));
+      if (holder) return markdownPathOf(holder.id);
+    }
+    // 2. The file under the pointer.
+    const pointer = pointerRef.current;
+    if (pointer) {
+      const under = rendered.find((item) => {
+        const rect = item.element.getBoundingClientRect();
+        return pointer.y >= rect.top && pointer.y < rect.bottom;
+      });
+      if (under) return markdownPathOf(under.id);
+    }
+    // 3. The top-most Markdown file in the viewport.
+    for (const item of rendered) {
+      const path = markdownPathOf(item.id);
+      if (path) return path;
+    }
+    return null;
+  });
+  const registerViewTarget = markdownPreview?.registerViewTarget;
+  useEffect(() => {
+    if (!registerViewTarget) return;
+    registerViewTarget(resolveViewTarget);
+    return () => registerViewTarget(null);
+  }, [registerViewTarget, resolveViewTarget]);
+
   // --- Custom header render slot (the full Plannotator FileHeader) -----------
 
   const renderCustomHeader = useStableCallback((item: CodeViewItem<DiffAnnotationMetadata>) => {
@@ -2511,7 +2728,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (file == null) return null;
 
     const collapsed = item.collapsed === true;
-    const fileComments = fileCommentsByPath.get(filePath) ?? [];
+    const previewControl = markdownPreview;
+    const previewable = !!previewControl && previewControl.isPreviewable(file);
+    const previewed = previewable && previewItemIdsRef.current.has(item.id);
+    const allFileComments = fileCommentsByPath.get(filePath) ?? [];
+    // Comments made in the preview are highlighted in it.
+    const fileComments = previewed ? allFileComments.filter((comment) => !comment.markdownPreview) : allFileComments;
     const isOversizedStub = isOversizedReviewStubPatch(file.patch);
     const isBinaryNotice = !isOversizedStub && isContentlessBinaryPatch(file.patch);
     const remeasure = () => refreshItem(item.id);
@@ -2529,7 +2751,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // updateItem BEFORE React commits state, so read the session's refs.
     const isEditingThis = editEnabled && editSession.editingItemIdRef.current === item.id;
     const editDisabledReason = editEnabled
-      ? editSession.editUnavailableRef.current.get(filePath) ?? null
+      ? (previewed ? 'Switch to Source to edit this file' : editSession.editUnavailableRef.current.get(filePath) ?? null)
       : null;
 
     return (
@@ -2551,6 +2773,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         editDisabledReason={editDisabledReason}
         isViewed={viewedFiles?.has(filePath)}
         isGenerated={generatedFiles?.has(filePath) === true}
+        renderMarkdownView={previewable ? (fit) => previewControl!.renderViewControl({ file, ...fit }) : undefined}
         onToggleViewed={onToggleViewed ? () => handleToggleViewedAndCollapse(filePath, item.id) : undefined}
         showViewedControl={showViewedControls}
         isStaged={stagedFiles?.has(filePath)}
@@ -2649,13 +2872,15 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
             onHeightChange={() => refreshItem(item.id)}
           />
         )}
+        {/* The rendered Markdown, in place of the (hunkless) diff rows. */}
+        {!collapsed && previewed && previewControl!.render({ file, onHeightChange: remeasure })}
         {/* This file's own horizontal scrollbar (#1048), riding the sticky
             header so it stays reachable anywhere in a long diff. Absolutely
             positioned on the header's bottom edge so it costs no layout
             height — itemMetrics.diffHeaderHeight must keep matching the
             header, and a bar that appears only on overflow would otherwise
             drift the virtualization estimate. */}
-        {!collapsed && diffOverflow !== 'wrap' && (
+        {!collapsed && !previewed && diffOverflow !== 'wrap' && (
           <DiffHScrollbar className="absolute inset-x-2 bottom-0 z-30" />
         )}
       </div>
@@ -2840,6 +3065,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     <div
       className="relative h-full"
       data-history-owner={editSession.editingItemId ? 'edit-session' : undefined}
+      onPointerMove={markdownPreview ? (event) => { pointerRef.current = { x: event.clientX, y: event.clientY }; } : undefined}
+      onPointerLeave={markdownPreview ? () => { pointerRef.current = null; } : undefined}
     >
       {/* EditProvider only mounts when the experimental flag is on; its
           factory declines attaches until the lazy editor chunk has loaded

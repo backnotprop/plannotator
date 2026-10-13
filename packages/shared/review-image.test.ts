@@ -391,9 +391,9 @@ describe("getJjFileBytesForDiff (jj-current through runJjBytes)", () => {
     };
     const old = await getJjFileBytesForDiff(runtime, "jj-current", "", "new.png", "old.png", "old", 100, "/repo");
     expect(old).toEqual({ kind: "ok", bytes: data });
-    expect(calls[0]).toEqual(["file", "show", "-r", "@-", "--", "old.png"]);
+    expect(calls[0]).toEqual(["file", "show", "-r", "@-", "--", 'root-file:"old.png"']);
     await getJjFileBytesForDiff(runtime, "jj-current", "", "new.png", "old.png", "new", 100, "/repo");
-    expect(calls[1]).toEqual(["file", "show", "-r", "@", "--", "new.png"]);
+    expect(calls[1]).toEqual(["file", "show", "-r", "@", "--", 'root-file:"new.png"']);
     const big = await getJjFileBytesForDiff(runtime, "jj-current", "", "new.png", undefined, "new", 3, "/repo");
     expect(big.kind).toBe("too-large");
   });

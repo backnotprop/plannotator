@@ -27,6 +27,8 @@ import { SidebarActionRow, SemanticDiffRow, CallFlowRow, AllFilesRow } from './P
 import { PanelControlsRow, PanelSearchField } from './PanelChrome';
 
 interface FileTreeProps {
+  /** Markdown files shown rendered, Changes or Read (an eye after the name). */
+  markdownPreviewedPaths?: ReadonlySet<string>;
   files: DiffFile[];
   activeFileIndex: number;
   onSelectFile: (index: number) => void;
@@ -128,6 +130,7 @@ interface FileTreeProps {
 }
 
 export const FileTree: React.FC<FileTreeProps> = ({
+  markdownPreviewedPaths,
   files,
   activeFileIndex,
   onSelectFile,
@@ -556,6 +559,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
                   onStageFile={onStageFile}
                   stagingFile={stagingFile}
                   showStageControls={showStageControls}
+                  markdownPreviewedPaths={markdownPreviewedPaths}
                 />
               ))}
             </>

@@ -537,6 +537,23 @@ export async function getJjFileContentsForDiff(
   };
 }
 
+/**
+ * A jj fileset naming exactly one repository-relative path. A bare path after
+ * `--` is a fileset EXPRESSION, so a file named `a|b.png` would show `a` and
+ * `b.png` (and `~`, `&`, `(`, globs and pattern prefixes likewise): a path
+ * that came out of a diff, or out of a Markdown file the review shows, must
+ * never be read as one. `root-file:"…"` is the literal path from the
+ * workspace root, with `\` and `"` escaped and control characters written as
+ * `\xHH` (jj's string-literal escapes).
+ */
+export function jjRootFileFileset(path: string): string {
+  const escaped = path.replace(/[\\"\u0000-\u001f\u007f]/g, (ch) => {
+    if (ch === "\\" || ch === '"') return `\\${ch}`;
+    return `\\x${ch.charCodeAt(0).toString(16).padStart(2, "0")}`;
+  });
+  return `root-file:"${escaped}"`;
+}
+
 /** One side of a jj diff as raw bytes for the image preview, capped at `maxBytes`. */
 export async function getJjFileBytesForDiff(
   runtime: ReviewJjRuntime,
@@ -556,7 +573,7 @@ export async function getJjFileBytesForDiff(
   // jj has no cheap size probe, so the byte cap is the gate: one byte over
   // the limit truncates the read and reports it as too large.
   const result = await runtime.runJjBytes(
-    ["file", "show", "-r", source.rev, "--", source.path],
+    ["file", "show", "-r", source.rev, "--", jjRootFileFileset(source.path)],
     { cwd: revs.cwd, maxOutputBytes: maxBytes },
   );
   if (result.truncated) return { kind: "too-large", size: maxBytes + 1 };
@@ -852,7 +869,7 @@ async function jjFileContent(
   filePath: string,
   cwd?: string,
 ): Promise<string | null> {
-  const result = await runtime.runJj(["file", "show", "-r", rev, "--", filePath], { cwd });
+  const result = await runtime.runJj(["file", "show", "-r", rev, "--", jjRootFileFileset(filePath)], { cwd });
   return result.exitCode === 0 ? result.stdout : null;
 }
 

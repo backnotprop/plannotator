@@ -80,6 +80,7 @@ jobs:
           packages/review-editor/components/DiffViewer.binaryNotice.test.tsx
           packages/review-editor/components/DiffViewer.imagePreview.test.tsx
           packages/review-editor/components/DiffViewer.headerControls.test.tsx
+          packages/review-editor/components/DiffViewer.markdownPreview.test.tsx
 
       # Seam contracts + the remaining DOM-gated tests. Scoped to the DOM files
       # (not the whole ui suite) to keep this process light. Files get isolated
@@ -130,6 +131,7 @@ jobs:
           packages/inbox/updates.test.tsx
           packages/inbox/replaced.test.tsx
           packages/inbox/threadFolding.test.tsx
+          packages/inbox/seenOnSight.test.tsx
           packages/inbox/projectList.test.tsx
           packages/inbox/sidebarQuiet.test.tsx
           packages/inbox/soundIntro.test.tsx
@@ -159,6 +161,8 @@ jobs:
           packages/ui/hooks/usePinpoint.question.test.tsx
           packages/ui/utils/blockTargeting.blocks.test.tsx
           packages/ui/components/blocks/BlockquoteBlock.test.tsx
+          packages/ui/components/RenderedMarkdown.hostSeams.test.tsx
+          packages/ui/components/plan-diff/PlanCleanDiffView.seams.test.tsx
           packages/ui/components/AnnotationPanel.questions.test.tsx
           packages/ui/hooks/useActiveSection.test.tsx
           packages/editor/hooks/useQuestionAnswers.test.tsx
@@ -188,6 +192,10 @@ jobs:
           packages/review-editor/components/AllFilesCodeView.generated.test.tsx
           packages/review-editor/components/AllFilesCodeView.autoViewed.test.tsx
           packages/review-editor/components/AllFilesCodeView.imagePreview.test.tsx
+          packages/review-editor/components/AllFilesCodeView.markdownPreview.test.tsx
+          packages/review-editor/components/MarkdownFilePreview.test.tsx
+          packages/review-editor/hooks/useMarkdownPreview.test.tsx
+          packages/review-editor/components/MarkdownViewMenu.test.tsx
           packages/review-editor/components/DiffViewer.compactTouchSelection.test.tsx
           packages/guide-viewer/GuideSectionCard.test.tsx
           packages/guide-viewer/GuideView.test.tsx

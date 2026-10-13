@@ -403,6 +403,15 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
             ) : isFileScope ? (
               <span className="inline-flex items-center gap-1.5">
                 <FileNameChip path={annotation.filePath} />
+                {annotation.markdownPreview && (
+                  <span
+                    data-annotation-markdown-preview=""
+                    className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary"
+                    title="Made in the rendered Markdown (Changes or Read)"
+                  >
+                    rendered
+                  </span>
+                )}
                 {annotation.callFlowTargets?.length ? (
                   <span className="text-[9px] text-primary/80">
                     flow · {annotation.callFlowTargets.length} {annotation.callFlowTargets.length === 1 ? 'step' : 'steps'}
@@ -441,6 +450,11 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
           author={annotation.author}
           createdAt={annotation.createdAt}
         />
+        {annotation.markdownPreview && (
+          <div className="mt-1 mb-1 border-l-2 border-border/40 pl-1.5 text-[11px] italic text-muted-foreground/80 line-clamp-2">
+            {annotation.markdownPreview.originalText}
+          </div>
+        )}
         {editingOutdated?.id === annotation.id ? (
           <div className="mt-1" onClick={(e) => e.stopPropagation()}>
             <textarea

@@ -7,6 +7,7 @@ import { useFenceTheme } from "../hooks/useFenceTheme";
 import { transformPlainText } from "../utils/inlineTransforms";
 import { hasLinkedDocExtension } from "../utils/markdownExtensions";
 import { getImageSrc } from "./ImageThumbnail";
+import { UNAVAILABLE_IMAGE_CLASS, useImageResolver } from "./ImageResolverContext";
 import { useCodePathValidation, type CodePathValidationContextValue } from "./CodePathValidationContext";
 import { isLocalLinkTarget, isNewTabClick, useLocalLinkResolver } from "./LocalLinkContext";
 import type { ValidationEntry } from "../hooks/useValidatedCodePaths";
@@ -472,6 +473,35 @@ function emitPlainTextWithBareUrls(
   }
 }
 
+/** An image a host resolver chose; a load failure shows the placeholder. */
+const HostResolvedImage: React.FC<{
+  src: string;
+  alt: string;
+  onImageClick?: (src: string, alt: string) => void;
+}> = ({ src, alt, onImageClick }) => {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  if (failedSrc === src) {
+    return (
+      <span className={UNAVAILABLE_IMAGE_CLASS} title="Image could not be loaded" data-image-unavailable="">
+        {alt || 'Image'}
+      </span>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className="max-w-full rounded my-2 cursor-zoom-in"
+      loading="lazy"
+      onError={() => setFailedSrc(src)}
+      onClick={(e) => {
+        e.stopPropagation();
+        onImageClick?.(src, alt);
+      }}
+    />
+  );
+};
+
 /**
  * Scanner that walks a text string and emits React nodes for inline markdown:
  * emphasis (**bold**, *italic*, _italic_, ***both***), `code`, ~~strikethrough~~,
@@ -510,6 +540,7 @@ export const InlineMarkdown: React.FC<{
 }> = ({ text, onOpenLinkedDoc, resolveLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo, repoHost }) => {
   const validation = useCodePathValidation();
   const resolveLocalLink = useLocalLinkResolver();
+  const resolveImage = useImageResolver();
   const refLinks = forgeRefLinks({ display: githubRepo, host: repoHost });
   const parts: React.ReactNode[] = [];
   let remaining = text;
@@ -968,21 +999,47 @@ export const InlineMarkdown: React.FC<{
     if (match) {
       const alt = match[1];
       const src = match[2];
-      const imgSrc = /^(https?:\/\/|data:|blob:)/i.test(src)
-        ? src
-        : getImageSrc(src, imageBaseDir);
+      // A host's resolver (RenderedMarkdown `resolveImage`) decides first;
+      // null from it, or no resolver, keeps the default resolution.
+      const resolvedImage = resolveImage ? resolveImage(src) : null;
+      if (resolvedImage?.kind === 'unavailable') {
+        parts.push(
+          <span
+            key={key++}
+            className={UNAVAILABLE_IMAGE_CLASS}
+            title={resolvedImage.title}
+            data-image-unavailable=""
+          >
+            {alt || 'Image'}
+          </span>,
+        );
+        remaining = remaining.slice(match[0].length);
+        previousChar = match[0][match[0].length - 1] || previousChar;
+        continue;
+      }
+      const imgSrc = resolvedImage?.kind === 'src'
+        ? resolvedImage.src
+        : /^(https?:\/\/|data:|blob:)/i.test(src)
+          ? src
+          : getImageSrc(src, imageBaseDir);
       parts.push(
-        <img
-          key={key++}
-          src={imgSrc}
-          alt={alt}
-          className="max-w-full rounded my-2 cursor-zoom-in"
-          loading="lazy"
-          onClick={(e) => {
-            e.stopPropagation();
-            onImageClick?.(imgSrc, alt);
-          }}
-        />,
+        resolveImage ? (
+          // With a host resolver, an image that fails to load becomes the
+          // same placeholder instead of a broken-image icon.
+          <HostResolvedImage key={key++} src={imgSrc} alt={alt} onImageClick={onImageClick} />
+        ) : (
+          <img
+            key={key++}
+            src={imgSrc}
+            alt={alt}
+            className="max-w-full rounded my-2 cursor-zoom-in"
+            loading="lazy"
+            onClick={(e) => {
+              e.stopPropagation();
+              onImageClick?.(imgSrc, alt);
+            }}
+          />
+        ),
       );
       remaining = remaining.slice(match[0].length);
       previousChar = match[0][match[0].length - 1] || previousChar;
