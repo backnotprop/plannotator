@@ -327,13 +327,17 @@ describe("uninstall", () => {
     expect(plan.skipped).toEqual([`Cursor's "plannotator-inbox" now runs something else (changed by hand), so it is yours`]);
   });
 
-  test("with the record gone, only an entry that runs exactly this binary is taken; one the person added is left", () => {
+  test("with no record (agents.json lost), nothing is removed: an entry that runs exactly this binary may be the person's, so it is named and left", () => {
+    const kiro = join(fake.home, ".kiro", "settings", "mcp.json");
     mkdirSync(join(fake.home, ".kiro", "settings"), { recursive: true });
-    writeFileSync(join(fake.home, ".kiro", "settings", "mcp.json"), JSON.stringify({ mcpServers: { "plannotator-inbox": { command: SELF[0], args: ["inbox", "mcp"] } } }));
+    writeFileSync(kiro, JSON.stringify({ mcpServers: { "plannotator-inbox": { command: SELF[0], args: ["inbox", "mcp"] } } }));
     mkdirSync(join(fake.home, ".cursor"), { recursive: true });
     writeFileSync(join(fake.home, ".cursor", "mcp.json"), JSON.stringify({ mcpServers: { "plannotator-inbox": { command: "plannotator", args: ["inbox", "mcp"] } } }));
     const plan = planInboxAgentRemoval(dataDir, environment(), OURS);
-    expect(plan.items.map((item) => item.agent)).toEqual(["kiro"]);
+    expect(plan.items).toEqual([]);
+    expect(plan.skipped).toEqual([
+      `Kiro's "plannotator-inbox" in ~/.kiro/settings/mcp.json runs this Plannotator, but no record says Plannotator added it, so it may be yours (to remove it, delete that entry by hand)`,
+    ]);
   });
 
   test("an entry Plannotator only found (the person added it) is never removed", async () => {

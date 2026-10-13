@@ -38,7 +38,8 @@ When you run `plannotator inbox` (not `--background`, which is how agents start 
 
 ```
 Connected Codex, Gemini CLI and Cursor to the Inbox (Claude Code was already on).
-Agents use it from their next session. Change this in the Inbox's Settings.
+Pi needs connecting by hand: Pi before 0.99 has no `pi mcp`; update Pi, or add plannotator-inbox to ~/.pi/agent/mcp.json by hand.
+Agents use it from their next session. PLANNOTATOR_INBOX_CONNECT=0 skips this step; plannotator uninstall removes what it added.
 ```
 
 | Agent | Found when | What is added |
@@ -55,12 +56,13 @@ Agents use it from their next session. Change this in the Inbox's Settings.
 Each entry runs `<your plannotator binary> inbox mcp`. The agent uses it from its next session. Before it runs an agent's own command, Plannotator checks the program's `--version`, so a different program with the same name is never handed it. Cline is not connected automatically yet: add it in Cline's MCP settings. When an agent started the Inbox in the background, a later `plannotator inbox` connects agents with the Inbox's environment (the `PATH` and home it was started with).
 
 - Every later `plannotator inbox` connects an agent installed since, and says so once ("Connected Amp to the Inbox (new on this computer)").
-- An agent you turned off in Settings, or whose entry you removed, is never added back by itself.
+- An agent you turned off (its switch in the Inbox's Settings → Agents, or `inboxTool: false` in config.json for Pi and OpenCode), or whose `plannotator-inbox` entry you removed after Plannotator added or found it, is never added back by itself. Turn it back on in Settings → Agents.
+- An agent only you can connect (no CLI on your `PATH`, Pi before 0.99, Cline) is named once on the terminal with the reason, and again only if the reason changes.
 - An existing `plannotator-inbox` entry that runs something else is never replaced.
 - In a JSON file only that one entry is added; every other byte of the file stays as it was. A file Plannotator cannot edit that way (comments, a duplicate key) is left as it was, and the terminal says why.
 - Editors (VS Code, Zed, JetBrains, Goose) are never changed. Settings has a one-click link or a snippet for each.
 - `PLANNOTATOR_INBOX_CONNECT=0` skips this step.
-- `plannotator uninstall` removes every entry it added (never one you added yourself). `--dry-run` lists them first.
+- `plannotator uninstall` removes every entry it recorded adding (never one you added yourself). `--dry-run` lists them first. If its record (`~/.plannotator/inbox/agents.json`) is gone, it removes none: an entry that runs this Plannotator is named with how to remove it, since you may have added it by hand.
 
 ### A note in each agent's instructions
 

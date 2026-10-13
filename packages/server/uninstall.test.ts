@@ -2109,6 +2109,17 @@ describe("the Inbox's agent connections (inbox-agents.ts)", () => {
     expect(readFileSync(join(fixture.homeDir, ".codex", "AGENTS.md"), "utf8")).toBe("Mine.\n");
   });
 
+  test("with no record (agents.json lost), an entry that runs this binary is named and left, never removed", async () => {
+    const fixture = createFixture();
+    const entry = { command: fixture.environment.execPath, args: ["inbox", "mcp"] };
+    writeJson(cursorFile(fixture), { mcpServers: { "plannotator-inbox": entry } });
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
+    expect(result.warnings).toContain(
+      `Skipped: Cursor's "plannotator-inbox" in ${join("~", ".cursor", "mcp.json")} runs this Plannotator, but no record says Plannotator added it, so it may be yours (to remove it, delete that entry by hand).`,
+    );
+    expect(readJson(cursorFile(fixture)).mcpServers).toEqual({ "plannotator-inbox": entry });
+  });
+
   test("an entry that runs something else now is named and left", async () => {
     const fixture = createFixture();
     seed(fixture);

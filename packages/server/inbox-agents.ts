@@ -974,17 +974,19 @@ export interface RemovalPlanItem {
 
 export interface RemovalPlan {
   items: RemovalPlanItem[];
-  /** Entries Plannotator added that run something else now: the person's. */
+  /** Entries left with a reason: one Plannotator added that runs something else now, or one no record says it added. */
   skipped: string[];
 }
 
 /**
- * What uninstall removes: only entries Plannotator ADDED and that still run
- * the command it wrote (an entry it merely found, which the person added, is
- * left), then, for an agent with no record at all (agents.json lost), an
- * entry that runs exactly `ourCommand` (this binary's `inbox mcp`). Pi's and
- * OpenCode's `inboxTool` live in config.json, which a plain uninstall keeps
- * and --purge removes.
+ * What uninstall removes: only entries Plannotator ADDED (recorded in
+ * agents.json) and that still run the command it wrote. An entry it merely
+ * found (the person added it) is left. An entry with no record at all
+ * (agents.json lost, or never written) is left too, even when it runs exactly
+ * `ourCommand` (this binary's `inbox mcp`), because the person may have
+ * added that by hand; it is named in `skipped` with how to remove it. Pi's
+ * and OpenCode's `inboxTool` live in config.json, which a plain uninstall
+ * keeps and --purge removes.
  */
 export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourCommand: readonly string[]): RemovalPlan {
   const file = readInboxAgents(dataDir);
@@ -994,16 +996,26 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
   for (const spec of AGENT_SPECS) {
     const record = file.agents[spec.id];
     if (record && (record.reach !== "mcp" || record.state !== "added")) continue;
-    const ours = record?.command ? [record.command] : record ? [] : [[...ourCommand]];
     const raw = spec.raw(e);
     const label = INBOX_AGENT_LABELS[spec.id];
+    if (!record) {
+      // No record says Plannotator added it: never removed, only named when it runs this binary.
+      const unrecorded = raw === null ? null : classify(raw, [[...ourCommand]], false);
+      if (unrecorded?.kind === "ours") {
+        const at = displayPath(spec.file(e), e);
+        const how = jsonKeysFor(spec.id) ? "delete that entry by hand" : spec.remove ? `run \`${spec.remove.bin} ${spec.remove.args.join(" ")}\`` : "remove it in the agent's settings";
+        skipped.push(`${label}'s "${NAME}"${at ? ` in ${at}` : ""} runs this Plannotator, but no record says Plannotator added it, so it may be yours (to remove it, ${how})`);
+      }
+      continue;
+    }
+    const ours = record.command ? [record.command] : [];
     const read = raw === null ? null : classify(raw, ours, false);
-    if (read?.kind === "other" && record) {
+    if (read?.kind === "other") {
       skipped.push(`${label}'s "${NAME}" now runs something else (changed by hand), so it is yours`);
       continue;
     }
-    if (read ? read.kind !== "ours" : !record) continue;
-    const path = spec.file(e) ?? record?.path ?? null;
+    if (read && read.kind !== "ours") continue;
+    const path = spec.file(e) ?? record.path ?? null;
     const shown = displayPath(path, e);
     const jsonKeys = jsonKeysFor(spec.id);
     if (jsonKeys && path) {
