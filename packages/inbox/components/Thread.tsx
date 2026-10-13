@@ -148,6 +148,38 @@ export function sendTargetsOf(
   return targets;
 }
 
+/** The skip chip's state: the default, or the person's choice for this Send. */
+export type SkipChoice = 'auto' | 'skip' | 'keep';
+
+/**
+ * Whether a Send skips the questions it leaves unanswered. By default only
+ * when it answers at least one question: a reply of words (or annotations)
+ * alone leaves them all open. The chip's choice wins either way.
+ */
+export function skipsUnanswered(choice: SkipChoice, answersAny: boolean): boolean {
+  return choice === 'skip' || (choice === 'auto' && answersAny);
+}
+
+/**
+ * Whether a Send now would carry at least one answer: a saved pick not yet
+ * sent, or one being saved (`pending`, keyed `<message id>/<key>`; null is a
+ * pick being cleared).
+ */
+export function sendAnswersAny(thread: InboxThread, pending: ReadonlyMap<string, QuestionAnswer | null> = new Map()): boolean {
+  for (const m of thread.messages) {
+    if (m.author.kind !== 'agent') continue;
+    for (const q of m.questions ?? []) {
+      const id = `${m.id}/${q.key}`;
+      if (pending.has(id)) {
+        if (pending.get(id) !== null && (q.state === 'open' || q.state === 'picked')) return true;
+      } else if (q.state === 'picked') {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 /** Two agent messages one session wrote (a message with no session matches none). */
 function sameSession(a: InboxMessageWire, b: InboxMessageWire): boolean {
   if (a.author.kind !== 'agent' || b.author.kind !== 'agent') return false;
@@ -449,8 +481,16 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   /** Decisions a Send could not record (the answers stay sent). */
   const [refused, setRefused] = useState<{ key: string; message: string }[]>([]);
   const [box, setBox] = useState<{ open: boolean; text: string }>({ open: false, text: '' });
+  /**
+   * What this Send does with the questions it leaves unanswered: `auto` skips
+   * them once the Send answers at least one question and keeps them open
+   * otherwise (a reply of words alone leaves every question open, approval
+   * "inbox-words-only-reply"); the chip's button picks `skip` or `keep`.
+   */
+  const [skipChoice, setSkipChoice] = useState<SkipChoice>('auto');
   /** Keep open: this Send leaves the unanswered questions open instead of skipping them. */
-  const [keepOpen, setKeepOpen] = useState(false);
+  const keepOpen = !skipsUnanswered(skipChoice, sendAnswersAny(thread, pending));
+  const toggleKeepOpen = () => setSkipChoice(keepOpen ? 'skip' : 'keep');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const sendKeys = useRef<Map<string, string> | null>(null);
@@ -766,7 +806,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     setStale([]);
     setGuard(false);
     setRoute(CLOSED_ROUTE);
-    setKeepOpen(false);
+    setSkipChoice('auto');
     sendKeys.current = null;
     revisions.current.clear();
   }, [thread.thread_id]);
@@ -1183,7 +1223,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       await pickChain.current;
       const current = threadRef.current;
       const words = box.open ? box.text.trim() : '';
-      const skip = !keepOpen;
+      // A pick saved just now, or still being saved when Send was pressed, counts as an answer.
+      const skip = skipsUnanswered(skipChoice, sendAnswersAny(current) || sendAnswersAny(thread, pending));
       const pendingAnnotations = records;
       const carries = words !== '' || pendingAnnotations.length > 0;
       // The latest agent message rides last only to carry the words and the
@@ -1216,7 +1257,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       setRefused(notRecorded);
       sendKeys.current = null;
       setRoute(CLOSED_ROUTE);
-      setKeepOpen(false);
+      setSkipChoice('auto');
       setBox({ open: false, text: '' });
       setFull(false);
       await onChanged();
@@ -1914,7 +1955,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                       {plural(picksCount, 'pick')}
                     </span>
                   )}
-                  <SkipChip count={unanswered.length} keepOpen={keepOpen} onToggle={() => setKeepOpen((v) => !v)} />
+                  <SkipChip count={unanswered.length} keepOpen={keepOpen} onToggle={toggleKeepOpen} />
                   {dropped.length > 0 && (
                     <span className="ib-rchip ib-dropped" data-dropped-picks-chip="" title="Replaced; this pick won't be sent">
                       {dropped.length} {dropped.length === 1 ? 'pick' : 'picks'} on a replaced question
@@ -1966,7 +2007,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
               <>
                 <span className="ib-sp" />
                 <span className={keepOpen ? 'ib-keep' : undefined}>
-                  <SkipChip count={unanswered.length} keepOpen={keepOpen} onToggle={() => setKeepOpen((v) => !v)} />
+                  <SkipChip count={unanswered.length} keepOpen={keepOpen} onToggle={toggleKeepOpen} />
                 </span>
               </>
             )}

@@ -192,3 +192,33 @@ describe("POST /api/inbox/messages/:id/reply with skip_unanswered", () => {
     expect((await post(server, `/api/inbox/messages/${messageId}/reply`, { idempotency_key: "k-3", questions: [] })).status).toBe(422);
   });
 });
+
+describe("POST /api/inbox/messages/:id/reply with words only (approval inbox-words-only-reply)", () => {
+  const STILL_OPEN = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.";
+
+  test("Keep open: the question stays open and wait_for_reply hands the agent the words and the still-open line", async () => {
+    const { server, client, threadId, messageId } = await setup();
+    const res = await post(server, `/api/inbox/messages/${messageId}/reply`, {
+      idempotency_key: "k-1",
+      words: "Received, I'll answer later.",
+      questions: [],
+      skip_unanswered: false,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { reply: { body: string }; questions: InboxQuestion[] };
+    expect(body.reply.body).toBe(`Received, I'll answer later.\n\n${STILL_OPEN}`);
+    expect(body.questions[0]).toMatchObject({ state: "open", answer: null });
+    expect((await rowOf(server, threadId)).section).toBe("stopped");
+    const waited = (await client.callTool({ name: "wait_for_reply", arguments: { thread_id: threadId, agent_session: "ses_mr", timeout_seconds: 1 } })) as {
+      structuredContent: { status: string; reply?: { body: string } };
+    };
+    expect(waited.structuredContent.reply?.body).toBe(`Received, I'll answer later.\n\n${STILL_OPEN}`);
+  });
+
+  test("no skip_unanswered at all (the phone door, an older window): the same reply", async () => {
+    const { server, messageId } = await setup();
+    const res = await post(server, `/api/inbox/messages/${messageId}/reply`, { idempotency_key: "k-1", words: "Still thinking." });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { reply: { body: string } }).reply.body).toBe(`Still thinking.\n\n${STILL_OPEN}`);
+  });
+});

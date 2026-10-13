@@ -244,7 +244,11 @@ describe("a Send skips what it leaves unanswered", () => {
   test("without skip_unanswered (Keep open, an older window, the MCP) the questions stay open", () => {
     const { store, asked } = setup();
     const result = store.sendReply(asked.id, { words: "Redo the design.", idempotency_key: "k-1" });
-    expect(result.reply.body).toBe("Redo the design.");
+    // The words, then the line that keeps the agent from asking again
+    // (approval "inbox-words-only-reply", store-words-only-reply.test.ts).
+    expect(result.reply.body).toBe(
+      "Redo the design.\n\nNo questions answered yet; all 3 are still open. Don't re-ask them; the person will answer in the Inbox.",
+    );
     expect(result.questions.map((q) => q.state)).toEqual(["open", "open", "open"]);
     expect(rowOf(store, asked.id).section).toBe("stopped");
   });
