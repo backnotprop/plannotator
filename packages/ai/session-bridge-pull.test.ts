@@ -139,6 +139,22 @@ function setup(options: Partial<PullSessionBridgeOptions> = {}, host = fakeHost(
 }
 
 describe("pull session bridge", () => {
+  test("a host that never interrupts says so on its polls; every other host's advert is unchanged", async () => {
+    // What regresses: the capability leaking onto other hosts' adverts (absent = interruptible).
+    const ordinary = setup();
+    void ordinary.startHost();
+    await waitFor(() => ordinary.pull.bridge.status() === "ready" && !!ordinary.provider.sessionBridge);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(ordinary.provider.sessionBridge).toEqual({ host: "opencode", status: "ready", modes: { turn: true, transient: false } });
+
+    const host = fakeHost();
+    const listenOnly = { ...host, bridge: { ...host.bridge, interruptible: false } };
+    const t3 = setup({}, listenOnly);
+    void t3.startHost();
+    await waitFor(() => t3.provider.sessionBridge.interruptible === false);
+    expect(t3.provider.sessionBridge).toMatchObject({ host: "opencode", interruptible: false });
+  });
+
   test("a question reaches the host through the poll and the answer streams back", async () => {
     const { provider, host, startHost } = setup();
     void startHost();

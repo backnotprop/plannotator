@@ -38,6 +38,13 @@ export interface SessionBridgeInfo {
   host: string;
   status: 'ready' | 'busy' | 'blocked' | 'gone';
   modes: { turn: boolean; transient: boolean };
+  /** `false` when the host never interrupts the session (Stop only stops listening). Absent = it can. */
+  interruptible?: boolean;
+}
+
+/** Whether any listed "Ask this session" provider says it cannot interrupt its session. */
+export function hasNonInterruptibleSession(providers: readonly { sessionBridge?: SessionBridgeInfo }[]): boolean {
+  return providers.some((provider) => provider.sessionBridge?.interruptible === false);
 }
 
 /** Error codes "Ask this session" answers with that the panel turns into actions. */

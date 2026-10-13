@@ -39,6 +39,9 @@ VERIFY_ATTESTATION_FLAG=-1
 # Precedence: --with-call-flow > PLANNOTATOR_INSTALL_CALLDIFF > config.json
 # installCallFlow > default (off).
 WITH_CALL_FLOW_FLAG=-1
+# T3 support is installed only by an explicit flag, never by the plugin,
+# environment auto-detection, config.json or the guided-install wizard.
+T3_HOOK_FLAG=-1
 # Guided-install answers. Precedence: CLI flags > wizard (terminal, first run
 # or --reconfigure) > saved prefs from a previous run > defaults (no extras,
 # nothing model-invocable). Empty string = not set by a flag.
@@ -83,6 +86,7 @@ Usage: install.sh [--version <tag>] [--verify-attestation | --skip-attestation]
                   [--extras | --no-extras] [--model-invocable <list>|none]
                   [--minimal | --no-minimal] [--skip-codex] [--skip-gemini]
                   [--skip-kiro] [--skip-vibe] [--skip-opencode] [--skip-skills]
+                  [--with-t3 | --without-t3]
                   [--skip-claude-plugin] [--non-interactive] [--reconfigure] [--help]
        install.sh <tag>
 
@@ -103,6 +107,13 @@ Options:
                          { "installCallFlow": true } in config.json.
   --extras               Install the extra skills (compound, setup-goal,
                          visual-explainer) via `npx skills add` without asking.
+  --with-t3              Install the optional T3 Code Claude Bash hook into
+                         ${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json.
+                         Off by default. Authorize T3 separately with
+                         plannotator t3 login --url <T3 MCP URL>.
+  --without-t3           Remove only the T3 Code hook from that Claude profile.
+                         Preserves other hooks, settings and T3 credentials.
+                         Both T3 flags are skipped by --minimal.
   --no-extras            Skip the extras without asking.
   --model-invocable <l>  Comma-separated skill names to make model-invocable
                          (e.g. plannotator-review,plannotator-compound), or
@@ -312,6 +323,16 @@ while [ $# -gt 0 ]; do
                 exit 1
             fi
             MINIMAL_FLAG=0
+            shift
+            ;;
+        --with-t3|--without-t3)
+            _t3_value=1
+            [ "$1" = "--without-t3" ] && _t3_value=0
+            if [ "$T3_HOOK_FLAG" -ne -1 ] && [ "$T3_HOOK_FLAG" -ne "$_t3_value" ]; then
+                echo "--with-t3 and --without-t3 are mutually exclusive" >&2
+                exit 1
+            fi
+            T3_HOOK_FLAG="$_t3_value"
             shift
             ;;
         --skip-codex)
@@ -1016,6 +1037,8 @@ write_install_flags() {
     [ "$VERIFY_ATTESTATION_FLAG" = "1" ] && _if_add verify-attestation
     [ "$VERIFY_ATTESTATION_FLAG" = "0" ] && _if_add skip-attestation
     [ "$WITH_CALL_FLOW_FLAG" = "1" ] && _if_add with-call-flow
+    [ "$T3_HOOK_FLAG" = "1" ] && _if_add with-t3
+    [ "$T3_HOOK_FLAG" = "0" ] && _if_add without-t3
     [ "$SKIP_CODEX_FLAG" = "1" ] && _if_add skip-codex
     [ "$SKIP_GEMINI_FLAG" = "1" ] && _if_add skip-gemini
     [ "$SKIP_KIRO_FLAG" = "1" ] && _if_add skip-kiro
@@ -1044,6 +1067,24 @@ if [ "$minimal" -eq 1 ]; then
     echo "Minimal install complete — only the plannotator binary was installed."
     echo "No skills, hooks, agent integrations, or config files were written."
     exit 0
+fi
+
+# Optional T3 Code hook (only with --with-t3 / --without-t3). A step that
+# fails never fails the install, like the Claude Code plugin update: the
+# reason is printed with the command to retry, and the install goes on.
+if [ "$T3_HOOK_FLAG" -ne -1 ]; then
+    _t3_settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+    if [ "$T3_HOOK_FLAG" -eq 1 ]; then
+        if PLANNOTATOR_DATA_DIR="$_config_dir" "$INSTALL_DIR/plannotator" t3-hook install --settings "$_t3_settings" --executable "$INSTALL_DIR/plannotator"; then
+            echo "T3 authorization is separate: plannotator t3 login --url <T3 MCP URL>"
+        else
+            echo "T3 Code hook: could not install it (see above); the rest of the install continues. Retry with: plannotator t3-hook install --settings \"$_t3_settings\" --executable \"$INSTALL_DIR/plannotator\"" >&2
+        fi
+    else
+        if ! PLANNOTATOR_DATA_DIR="$_config_dir" "$INSTALL_DIR/plannotator" t3-hook remove --settings "$_t3_settings"; then
+            echo "T3 Code hook: could not remove it (see above); the rest of the install continues. Retry with: plannotator t3-hook remove --settings \"$_t3_settings\"" >&2
+        fi
+    fi
 fi
 
 sem_asset_for_platform() {
@@ -2656,7 +2697,18 @@ fi
 # Warn if plannotator is configured in both settings.json hooks AND the plugin (causes double execution)
 # Only warn when the plugin is installed — manual-only users won't have overlap
 CLAUDE_SETTINGS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+duplicate_plan_hook=0
 if [ -f "$PLUGIN_HOOKS" ] && [ -f "$CLAUDE_SETTINGS" ] && grep -q '"command".*plannotator' "$CLAUDE_SETTINGS" 2>/dev/null; then
+    # The opt-in T3 Bash hook has no counterpart in the default plugin.
+    # Inspect event/matcher pairs so compact JSON with a real plan-hook
+    # overlap still warns even when it also contains the T3 hook.
+    if grep -q 't3-hook' "$CLAUDE_SETTINGS"; then
+        if "$INSTALL_DIR/plannotator" t3-hook plan-hook-present "$CLAUDE_SETTINGS"; then duplicate_plan_hook=1; fi
+    else
+        duplicate_plan_hook=1
+    fi
+fi
+if [ "$duplicate_plan_hook" -eq 1 ]; then
     echo ""
     echo "⚠️ ⚠️ ⚠️  WARNING: DUPLICATE HOOK DETECTED  ⚠️ ⚠️ ⚠️"
     echo ""

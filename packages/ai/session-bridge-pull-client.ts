@@ -250,7 +250,7 @@ export async function runPullSessionBridgeClient(options: PullSessionBridgeClien
 				res = await doFetch(`${base}${SESSION_BRIDGE_POLL_PATH}`, {
 					method: "POST",
 					headers,
-					body: JSON.stringify({ status: lastStatus, modes: bridge.modes, waitMs: pollWaitMs }),
+					body: JSON.stringify({ status: lastStatus, modes: bridge.modes, waitMs: pollWaitMs, ...(bridge.interruptible === false ? { interruptible: false } : {}) }),
 					signal,
 				});
 			} catch (error) {

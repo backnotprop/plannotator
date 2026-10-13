@@ -40,7 +40,7 @@ import type {
  */
 export type SessionBridgeStatus = "ready" | "busy" | "blocked" | "gone";
 
-export type SessionBridgeHost = "pi" | "opencode" | "claude-code";
+export type SessionBridgeHost = "pi" | "opencode" | "claude-code" | "t3";
 
 export type SessionBridgeAskMode = "turn" | "transient";
 
@@ -92,6 +92,12 @@ export interface SessionBridge {
 	 */
 	interrupt?(): void | Promise<void>;
 	/**
+	 * `false` when the host never stops the session's work (T3 Code): the
+	 * client then offers neither "Interrupt and ask now" nor a Stop that
+	 * claims to stop the turn. Absent means it can, as before.
+	 */
+	readonly interruptible?: boolean;
+	/**
 	 * The server is about to deliver the reviewer's decision (or shut down):
 	 * drop any question that has not reached the session yet, and leave a turn
 	 * that is already running alone. Optional; in-process hosts deliver at once.
@@ -135,6 +141,7 @@ const HOST_LABELS: Record<SessionBridgeHost, string> = {
 	pi: "Pi",
 	opencode: "OpenCode",
 	"claude-code": "Claude Code",
+	t3: "T3 Code",
 };
 
 export function sessionBridgeLabel(
@@ -249,6 +256,8 @@ export interface SessionBridgeInfo {
 	host: SessionBridgeHost;
 	status: SessionBridgeStatus;
 	modes: { turn: boolean; transient: boolean };
+	/** Present (`false`) only when the host said it never interrupts; absent = interruptible. */
+	interruptible?: false;
 }
 
 export class SessionBridgeProvider implements AIProvider {
@@ -281,7 +290,12 @@ export class SessionBridgeProvider implements AIProvider {
 		} catch {
 			status = "gone";
 		}
-		return { host: this.bridge.host, status, modes: { ...this.bridge.modes } };
+		return {
+			host: this.bridge.host,
+			status,
+			modes: { ...this.bridge.modes },
+			...(this.bridge.interruptible === false ? { interruptible: false as const } : {}),
+		};
 	}
 
 	/** @internal one question at a time across every session of this provider. */

@@ -42,6 +42,32 @@ function buttonsIn(container: Element, selector: string): HTMLButtonElement[] {
 }
 
 describe.if(hasDom)('Ask this session notices in the document chat panel', () => {
+  const listenOnlyProviders = [{ id: 'session-bridge', name: 'session-bridge', sessionBridge: { host: 't3', status: 'ready', modes: { turn: true, transient: false }, interruptible: false } }];
+
+  test('a session advertised as not interruptible offers waiting and stops listening without claiming to stop its turn', () => {
+    const onSessionAskAction = mock((_questionId: string, _action: string) => {});
+    const onStop = mock(() => {});
+    const el = render({ messages: [entry({ error: 'busy', errorCode: 'agent_busy' })], onSessionAskAction,
+      aiProviders: listenOnlyProviders, onAskGeneral: mock(() => {}), isStreaming: true, onStop });
+    const choices = buttonsIn(el, '[data-session-ask-actions="busy"]');
+    expect(choices.map(button => button.textContent)).toEqual(['Ask when it finishes']);
+    act(() => choices[0].click());
+    expect(onSessionAskAction.mock.calls).toEqual([['q1', 'wait']]);
+    const stop = el.querySelector<HTMLButtonElement>('button[aria-label="Stop listening"]')!;
+    expect(stop.title).toContain('keeps running');
+    act(() => stop.click());
+    expect(onStop).toHaveBeenCalledTimes(1);
+  });
+
+  test('the capability decides, not the host name: without interruptible:false the interrupt choice and Stop generating stay', () => {
+    // What regresses: an older server (no field) or any other host losing "Interrupt and ask now".
+    const { interruptible: _dropped, ...advert } = listenOnlyProviders[0].sessionBridge;
+    const el = render({ messages: [entry({ error: 'busy', errorCode: 'agent_busy' })], onSessionAskAction: mock(() => {}),
+      aiProviders: [{ ...listenOnlyProviders[0], sessionBridge: advert }], onAskGeneral: mock(() => {}), isStreaming: true, onStop: mock(() => {}) });
+    expect(buttonsIn(el, '[data-session-ask-actions="busy"]').map(button => button.textContent)).toEqual(['Ask when it finishes', 'Interrupt and ask now']);
+    expect(el.querySelector('button[aria-label="Stop generating"]')).not.toBeNull();
+  });
+
   test('busy: the two choices report wait and interrupt for that question', () => {
     const onSessionAskAction = mock((_questionId: string, _action: string) => {});
     const el = render({

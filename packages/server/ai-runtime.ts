@@ -108,6 +108,7 @@ export function agentToolHostForServer(
   opencodeToolCapable?: boolean,
 ): SessionBridgeHost | undefined {
   const host = sessionBridge?.host ?? launchingSessionHost();
+  if (host === "t3") return undefined;
   if (host === "opencode" && !(opencodeToolCapable ?? process.env[OPENCODE_TOOL_CAPABLE_ENV] === "1")) return undefined;
   return host;
 }

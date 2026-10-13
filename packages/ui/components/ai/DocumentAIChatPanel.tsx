@@ -1,6 +1,6 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AIChatEntry, PendingPermission } from '../../hooks/useAIChat';
-import type { AIProviderOption } from '../../utils/aiProvider';
+import { hasNonInterruptibleSession, type AIProviderOption } from '../../utils/aiProvider';
 import { formatRelativeTime, renderChatMarkdown } from '../../utils/aiChatFormat';
 import { OverlayScrollArea } from '../OverlayScrollArea';
 import { SparklesIcon } from '../SparklesIcon';
@@ -72,6 +72,8 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
   onSessionAskAction,
   askSessionSetupHint,
 }) => {
+  // A session that is never interrupted (T3 Code): Stop only stops listening.
+  const listenOnly = hasNonInterruptibleSession(aiProviders);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [generalInput, setGeneralInput] = useState('');
   const latestMessage = messages[messages.length - 1];
@@ -119,6 +121,7 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
             <DocumentQAPair
               key={entry.question.id}
               entry={entry}
+              canInterrupt={!listenOnly}
               onSessionAskAction={onSessionAskAction}
             />
           ))}
@@ -158,6 +161,7 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
           disabled={isStreaming}
           isStreaming={isStreaming}
           onStop={onStop}
+          observationOnly={listenOnly}
         />
       )}
     </div>
@@ -167,7 +171,8 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
 const DocumentQAPair = memo<{
   entry: AIChatEntry;
   onSessionAskAction?: (questionId: string, action: SessionAskAction) => void;
-}>(({ entry, onSessionAskAction }) => {
+  canInterrupt?: boolean;
+}>(({ entry, onSessionAskAction, canInterrupt }) => {
   const { question, response } = entry;
   const renderedResponse = useMemo(
     () => response.text ? renderChatMarkdown(response.text) : null,
@@ -209,6 +214,7 @@ const DocumentQAPair = memo<{
             <p className={`text-xs ${sessionAskErrorTone(response)}`}>{response.error}</p>
             <SessionAskActions
               response={response}
+              canInterrupt={canInterrupt}
               onAction={onSessionAskAction ? (action) => onSessionAskAction(question.id, action) : undefined}
             />
           </>
@@ -278,7 +284,8 @@ const GeneralInput: React.FC<{
   disabled?: boolean;
   isStreaming?: boolean;
   onStop?: () => void;
-}> = ({ value, onChange, onSubmit, disabled, isStreaming, onStop }) => {
+  observationOnly?: boolean;
+}> = ({ value, onChange, onSubmit, disabled, isStreaming, onStop, observationOnly = false }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -312,9 +319,10 @@ const GeneralInput: React.FC<{
           <button
             onClick={onStop}
             className="p-1.5 mb-px rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex-shrink-0"
-            title="Stop generating"
-            aria-label="Stop generating"
+            title={observationOnly ? 'Stop listening; the question keeps running in the session' : 'Stop generating'}
+            aria-label={observationOnly ? 'Stop listening' : 'Stop generating'}
           >
+            {observationOnly && <span className="text-[10px] mr-1">Stop listening</span>}
             <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
               <rect x="6" y="6" width="12" height="12" rx="2" />
             </svg>

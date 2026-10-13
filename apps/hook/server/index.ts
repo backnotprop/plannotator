@@ -221,6 +221,7 @@ import { completeAnnotateCommand } from "./annotate-command";
 import { runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
 import { formatInboxHelp } from "./inbox-help";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { isAgentSdkEntrypoint } from "@plannotator/shared/t3-hook-command";
 import {
   annotateStartupFailureExitCode,
   isStrictAnnotateInvocation,
@@ -251,6 +252,16 @@ const reviewHtmlContent = reviewHtml as unknown as string;
 import inboxHtml from "../dist/inbox.html" with { type: "text" };
 const inboxHtmlContent = inboxHtml as unknown as string;
 
+// The optional T3 Code hook (`t3-hook` with no arguments) runs on EVERY Bash
+// call of a Claude session that loads it. Only an Agent SDK session can be a
+// T3 conversation; answer every other one first, before any startup work.
+// (The installed command's shell gate usually answers before this binary
+// starts at all; this covers a hook registered without it.)
+if (process.argv[2] === "t3-hook" && process.argv.length === 3 && !isAgentSdkEntrypoint(process.env.CLAUDE_CODE_ENTRYPOINT)) {
+  process.stdout.write("{}\n");
+  process.exit(0);
+}
+
 // Check for subcommand
 // "Ask this session" pull-bridge secret: take it out of process.env before
 // ANYTHING spawns (git/gh/sem before the server starts, the auto-update
@@ -266,6 +277,28 @@ takeHostMessagesPath();
 const hostReviewId = takeHostReviewId();
 
 const rawArgs = process.argv.slice(2);
+// T3 Code (opt-in, unreleased; HIDDEN_SUBCOMMANDS): `t3` is the connection's
+// CLI and worker, `t3-hook` the Claude Bash hook and its settings helper.
+// Loaded only when asked for, so no other subcommand evaluates any of it.
+{
+  // Before the strict-annotate parse: these take their own flags.
+  const args = rawArgs;
+  if (args[0] === "t3" || args[0] === "t3-hook") {
+    const script = process.argv[1];
+    const selfCommand = script && /\.(?:[cm]?[jt]s)$/.test(script) && existsSync(script) ? [process.execPath, script] : [process.execPath];
+    try {
+      if (args[0] === "t3-hook") {
+        const { runT3Hook } = await import("@plannotator/t3-code/hook");
+        await runT3Hook(args.slice(1), selfCommand);
+      } else {
+        const { runT3Command } = await import("@plannotator/t3-code/cli");
+        await runT3Command(args.slice(1), selfCommand);
+      }
+    }
+    catch (error) { console.error(error instanceof Error ? error.message : String(error)); process.exit(1); }
+    process.exit(0);
+  }
+}
 let parsedStrictAnnotateOptions;
 try {
   parsedStrictAnnotateOptions = parseStrictAnnotateOptions(

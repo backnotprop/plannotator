@@ -42,7 +42,8 @@ const buttonClass =
 export const SessionAskActions: React.FC<{
   response: AIResponse;
   onAction?: (action: SessionAskAction) => void;
-}> = ({ response, onAction }) => {
+  canInterrupt?: boolean;
+}> = ({ response, onAction, canInterrupt = true }) => {
   if (!response.errorCode) return null;
 
   if (response.errorCode === SESSION_ASK_ERROR_CODES.agentBusy) {
@@ -56,14 +57,14 @@ export const SessionAskActions: React.FC<{
         >
           Ask when it finishes
         </button>
-        <button
+        {canInterrupt && <button
           type="button"
           onClick={() => onAction('interrupt')}
           className={`${buttonClass} bg-muted text-foreground hover:bg-muted/80`}
           title="Stops the session's current work, then asks your question"
         >
           Interrupt and ask now
-        </button>
+        </button>}
       </div>
     );
   }
