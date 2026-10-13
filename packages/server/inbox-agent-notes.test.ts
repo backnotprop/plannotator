@@ -5,9 +5,9 @@
  * person's edit), removal, and the uninstall scan.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { INBOX_AGENT_LABELS } from "@plannotator/core/inbox-types";
+import { INBOX_AGENT_LABELS, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
 import {
   addInboxNote,
@@ -93,7 +93,8 @@ describe("the marked section", () => {
     const path = file(".codex", "AGENTS.md");
     write(path, "# My rules\nBe brief.");
     expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "added", path: "~/.codex/AGENTS.md" });
-    expect(read(path)).toBe(`# My rules\nBe brief.\n\n${INBOX_NOTE_BLOCK}\n`);
+    // The file ended without a line break, so the block ends it the same way (removal reads that).
+    expect(read(path)).toBe(`# My rules\nBe brief.\n\n${INBOX_NOTE_BLOCK}`);
     const mtime = statSync(path).mtimeMs;
     Bun.sleepSync(20);
     expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "unchanged" });
@@ -146,6 +147,46 @@ describe("the marked section", () => {
     expect(removeInboxNote("codex", dataDir, e)).toMatchObject({ ok: true });
     expect(read(agents)).toBe("Mine.\n");
     expect(read(override)).toBe("Override.\n");
+  });
+
+  test("no final newline and empty files (LF and CRLF) come back byte for byte, for every note file, with or without the record", () => {
+    const cases = ["abc", "a\r\nb", "a\nb\n\nc", "", "\n", "\r\n", "\r\n\r\n", "# Rules\r\nBe brief.\r\n", "x\n"];
+    const targets: [InboxNoteAgentId, string][] = [
+      ["codex", file(".codex", "AGENTS.md")],
+      ["gemini", file(".gemini", "GEMINI.md")],
+      ["pi", file(".pi", "agent", "AGENTS.md")],
+      ["opencode", file(".config", "opencode", "AGENTS.md")],
+    ];
+    for (const [agent, path] of targets) {
+      for (const before of cases) {
+        write(path, before);
+        expect(addInboxNote(agent, dataDir, e)).toMatchObject({ ok: true });
+        expect(read(path)).toContain(INBOX_NOTE_START);
+        // A second add changes nothing.
+        expect(addInboxNote(agent, dataDir, e)).toMatchObject({ ok: true, action: "unchanged" });
+        expect(removeInboxNote(agent, dataDir, e)).toMatchObject({ ok: true });
+        expect([agent, JSON.stringify(read(path))]).toEqual([agent, JSON.stringify(before)]);
+      }
+    }
+    // Codex's override file too.
+    const override = file(".codex", "AGENTS.override.md");
+    for (const before of ["abc", "a\r\nb", ""]) {
+      write(override, before);
+      addInboxNote("codex", dataDir, e);
+      expect(read(override)).toContain(INBOX_NOTE_START);
+      removeInboxNote("codex", dataDir, e);
+      expect(JSON.stringify(read(override))).toBe(JSON.stringify(before));
+    }
+    rmSync(override);
+    // Uninstall with the record gone reads the same from the file alone.
+    const agents = file(".codex", "AGENTS.md");
+    for (const before of ["abc", "a\r\nb", "", "x\n"]) {
+      write(agents, before);
+      addInboxNote("codex", dataDir, e);
+      rmSync(join(dataDir, "inbox", "agent-notes.json"), { force: true });
+      for (const item of planInboxNoteRemoval(dataDir, e, INBOX_AGENT_LABELS).items) expect(item.apply()).toMatchObject({ ok: true });
+      expect(JSON.stringify(read(agents))).toBe(JSON.stringify(before));
+    }
   });
 
   test("a symlinked file (dotfiles) is written at its target and stays a link", () => {

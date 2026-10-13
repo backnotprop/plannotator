@@ -219,21 +219,45 @@ function blockIn(nl: string): string {
   return INBOX_NOTE_BLOCK.replace(/\n/g, nl);
 }
 
-/** `text` with the block appended at the end, after one blank line, in the file's dominant ending. */
+/**
+ * `text` with the block appended at the end, after one blank line, in the
+ * file's dominant ending. The file's own last byte decides how the block
+ * ends, so removal can give the file back byte for byte without a record: a
+ * file that ended with a line break gets the block plus a line break; one
+ * that ended without (`abc`) gets the line breaks before the block and none
+ * after it, so the block is the file's last bytes (stripBlock reads that).
+ * Text that is only whitespace (an empty file included) is kept as it is,
+ * with the block after it.
+ */
 function appendBlock(text: string, nl: string): string {
-  if (!text.trim()) return `${blockIn(nl)}${nl}`;
-  const ending = /\r?\n$/.test(text) ? "" : nl;
-  return `${text}${ending}${nl}${blockIn(nl)}${nl}`;
+  if (!text.trim()) return `${text}${blockIn(nl)}${nl}`;
+  if (/\r?\n$/.test(text)) return `${text}${nl}${blockIn(nl)}${nl}`;
+  return `${text}${nl}${nl}${blockIn(nl)}`;
+}
+
+/** The length of the line break that ends just before `i` (2 for CRLF, 1 for LF), or 0. */
+function breakBefore(text: string, i: number): number {
+  if (i >= 2 && text[i - 2] === "\r" && text[i - 1] === "\n") return 2;
+  return i >= 1 && text[i - 1] === "\n" ? 1 : 0;
 }
 
 /** `text` without the block at [start, end), its line break, and the one blank line the writer put before it. */
 function stripBlock(text: string, start: number, end: number): string {
   let from = start;
   let to = end;
+  if (end === text.length && start > 0) {
+    // The block is the file's last bytes: appendBlock wrote it so for a file that
+    // ended without a line break, after two of them. Taking both gives that ending back.
+    const first = breakBefore(text, from);
+    const second = first ? breakBefore(text, from - first) : 0;
+    if (first && second && text.slice(0, from - first - second).trim()) return text.slice(0, from - first - second);
+  }
   if (text.startsWith("\r\n", to)) to += 2;
   else if (text[to] === "\n") to += 1;
   // The blank line is the one line break right before the block, after the previous line's own
   // ending, whichever ending that line had ("c\n\r\n" in a mostly-CRLF file ending in a lone LF).
+  // Only whitespace before the block: appendBlock wrote no blank line there, so none is taken.
+  if (!text.slice(0, from).trim()) return text.slice(0, from) + text.slice(to);
   if (from >= 3 && text.slice(from - 2, from) === "\r\n" && text[from - 3] === "\n") from -= 2;
   else if (from >= 2 && text[from - 1] === "\n" && text[from - 2] === "\n") from -= 1;
   return text.slice(0, from) + text.slice(to);

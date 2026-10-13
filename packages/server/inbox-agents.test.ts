@@ -5,8 +5,8 @@
  * touched, what a later run does, and what uninstall removes.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { loadConfig } from "@plannotator/shared/config";
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
 import {
@@ -485,6 +485,52 @@ describe("a JSON edit changes only the one entry", () => {
     expect(planInboxAgentRemoval(dataDir, environment(), OURS).items).toHaveLength(1);
     await planInboxAgentRemoval(dataDir, environment(), OURS).items[0]!.apply();
     expect(readFileSync(cursor(), "utf8")).toBe(before);
+  });
+
+  test("add then remove gives the file back byte for byte: empty files, no final newline, LF and CRLF, a container Plannotator made", async () => {
+    const files: [string, string][] = [
+      ["cursor", join(fake.home, ".cursor", "mcp.json")],
+      ["kiro", join(fake.home, ".kiro", "settings", "mcp.json")],
+    ];
+    const cases = ["", "\n", "\r\n", "{}", "{}\n", "{}\r\n", '{"a":1}', '{\r\n  "a": 1\r\n}', '{\r\n  "a": 1\r\n}\r\n', '{\n  "mcpServers": {}\n}', '{\n  "mcpServers": {\n    "o": { "command": "x" }\n  }\n}\n'];
+    for (const [agent, path] of files) {
+      for (const before of cases) {
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, before);
+        rmSync(join(dataDir, "inbox", "agents.json"), { force: true });
+        const report = await connect();
+        expect([agent, before, report.added.includes(agent as never)]).toEqual([agent, before, true]);
+        const item = planInboxAgentRemoval(dataDir, environment(), OURS).items.find((candidate) => candidate.agent === agent)!;
+        expect(await item.apply()).toBeNull();
+        expect([agent, JSON.stringify(readFileSync(path, "utf8"))]).toEqual([agent, JSON.stringify(before)]);
+      }
+    }
+  });
+
+  test("a JSON file Plannotator created is gone after removal; one the person wrote into meanwhile stays, without the entry", async () => {
+    const cursor = join(fake.home, ".cursor", "mcp.json");
+    mkdirSync(join(fake.home, ".cursor"), { recursive: true });
+    await connect();
+    expect(existsSync(cursor)).toBe(true);
+    for (const item of planInboxAgentRemoval(dataDir, environment(), OURS).items) expect(await item.apply()).toBeNull();
+    expect(existsSync(cursor)).toBe(false);
+
+    rmSync(join(dataDir, "inbox", "agents.json"), { force: true });
+    await connect();
+    const added = JSON.parse(readFileSync(cursor, "utf8"));
+    added.mcpServers.mine = { command: "mine" };
+    writeFileSync(cursor, JSON.stringify(added, null, 2));
+    for (const item of planInboxAgentRemoval(dataDir, environment(), OURS).items) expect(await item.apply()).toBeNull();
+    expect(JSON.parse(readFileSync(cursor, "utf8"))).toEqual({ mcpServers: { mine: { command: "mine" } } });
+  });
+
+  test("an entry the person edited is cut alone (the exact undo no longer applies)", async () => {
+    put('{\n  "a": 1\n}');
+    await connect();
+    const edited = readFileSync(cursor(), "utf8").replace('"inbox",', '"inbox" ,');
+    writeFileSync(cursor(), edited);
+    await planInboxAgentRemoval(dataDir, environment(), OURS).items[0]!.apply();
+    expect(JSON.parse(readFileSync(cursor(), "utf8"))).toEqual({ a: 1, mcpServers: {} });
   });
 
   test("numeric keys keep their order; a duplicate key on the path is refused", async () => {

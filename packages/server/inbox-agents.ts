@@ -31,7 +31,7 @@
  * CLIs; the real agent CLIs are never run by a test.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { spawn as spawnChild } from "node:child_process";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
@@ -622,7 +622,60 @@ export function readAgentEntry(id: InboxAgentId, e: AgentEnvironment, ours: read
 // ---------------------------------------------------------------------------
 // Writing one JSON key
 
-type WriteOutcome = { ok: true; changed: boolean } | { ok: false; reason: string };
+/**
+ * What an add changed, as text: the file was `prefix + before + suffix` and
+ * became `prefix + after + suffix`. Kept on the record so removal gives the
+ * file back byte for byte (an empty file stays empty, a final newline or its
+ * absence stays, a container Plannotator created goes) while `after` is
+ * still in the file untouched.
+ */
+export interface JsonEntryUndo {
+  before: string;
+  after: string;
+}
+
+type WriteOutcome = { ok: true; changed: boolean; undo?: JsonEntryUndo } | { ok: false; reason: string };
+
+/** Delete a file Plannotator created once it holds nothing but the empty containers along `keys`. */
+function deleteIfOnlyOurs(path: string, keys: readonly string[]): void {
+  const read = readAgentFile(path);
+  if (read.kind !== "file") return;
+  let skeleton: unknown = {};
+  for (const key of [...keys].reverse()) skeleton = { [key]: skeleton };
+  try {
+    if (read.text.trim() && JSON.stringify(JSON.parse(read.text)) !== JSON.stringify(skeleton)) return;
+    rmSync(read.target, { force: true });
+  } catch {
+    // Not plain JSON any more, or not removable: left as it is.
+  }
+}
+
+/** The smallest middle span that differs between two texts. */
+function textChange(original: string, next: string): JsonEntryUndo {
+  let start = 0;
+  while (start < original.length && start < next.length && original[start] === next[start]) start++;
+  let end = 0;
+  while (end < original.length - start && end < next.length - start && original[original.length - 1 - end] === next[next.length - 1 - end]) end++;
+  return { before: original.slice(start, original.length - end), after: next.slice(start, next.length - end) };
+}
+
+/**
+ * Undo an add exactly: `after` appears once in `text` (the entry as written,
+ * untouched) and putting `before` back leaves a file without the entry. Null
+ * when that cannot be done; the caller then cuts the entry alone.
+ */
+function undoJsonEntry(text: string, undo: JsonEntryUndo | undefined, keys: readonly string[]): string | null {
+  if (!undo || !undo.after || !undo.after.includes(JSON.stringify(NAME))) return null;
+  const first = text.indexOf(undo.after);
+  if (first < 0 || text.indexOf(undo.after, first + 1) >= 0) return null;
+  const restored = text.slice(0, first) + undo.before + text.slice(first + undo.after.length);
+  if (!restored.trim()) return restored;
+  try {
+    return at(JSON.parse(restored), [...keys, NAME]) === undefined ? restored : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Add (`value`) or remove (`undefined`) `plannotator-inbox` at `keys` in a
@@ -637,6 +690,7 @@ export function writeJsonEntry(
   keys: readonly string[],
   value: { command: string; args: string[] } | undefined,
   ours: readonly (readonly string[])[] = value ? [[value.command, ...value.args]] : [],
+  undo?: JsonEntryUndo,
 ): WriteOutcome {
   const read = readAgentFile(path);
   if (read.kind === "refused") return { ok: false, reason: `${path} can't be edited (${read.reason})` };
@@ -656,7 +710,8 @@ export function writeJsonEntry(
       if (!owned) return { ok: false, reason: `${path} has a ${NAME} entry Plannotator did not write` };
     } else if (value === undefined) return { ok: true, changed: false };
   }
-  const edit = value === undefined ? removeJsonMember(original, keys, NAME) : addJsonMember(original, keys, NAME, value);
+  const undone = value === undefined ? undoJsonEntry(original, undo, keys) : null;
+  const edit = undone !== null ? { ok: true as const, changed: true, text: undone } : value === undefined ? removeJsonMember(original, keys, NAME) : addJsonMember(original, keys, NAME, value);
   if (!edit.ok) return { ok: false, reason: `${path} can't be edited without reshaping it (${edit.reason}), so Plannotator left it as it was` };
   if (!edit.changed) return { ok: true, changed: false };
   try {
@@ -664,7 +719,8 @@ export function writeJsonEntry(
   } catch (error) {
     return { ok: false, reason: `${path} can't be written (${describeFsError(error)})` };
   }
-  return { ok: true, changed: true };
+  // A file Plannotator created holds nothing else once the entry goes: its undo is "no file".
+  return value === undefined || read.kind !== "file" ? { ok: true, changed: true } : { ok: true, changed: true, undo: textChange(original, edit.text) };
 }
 
 // ---------------------------------------------------------------------------
@@ -682,6 +738,10 @@ export interface InboxAgentRecord {
   path: string | null;
   /** The argv written, for an entry Plannotator added. */
   command?: string[];
+  /** A JSON add's exact change, so removal gives the file back byte for byte (writeJsonEntry). */
+  undo?: JsonEntryUndo;
+  /** Plannotator created the JSON file: removal deletes it when nothing but the empty containers is left. */
+  created?: boolean;
   at: string;
   /** An `added`/`found` entry that is no longer there: never added back by itself. */
   removed_outside_at?: string;
@@ -809,9 +869,10 @@ async function connectOne(spec: AgentSpec, options: ConnectOptions, at: string):
   if (before.kind === "other") return { kind: "foreign", record: { state: "foreign", reach: "mcp", path: file, at }, path: file };
   if (way.kind === "json") {
     const [cmd, ...args] = command;
+    const created = readAgentFile(file!).kind === "missing";
     const result = writeJsonEntry(file!, way.keys, { command: cmd!, args });
     if (!result.ok) return { kind: "failed", reason: result.reason.split(e.homeDir).join("~"), path: file };
-    return { kind: "added", record: { state: "added", reach: "mcp", path: file, command, at } };
+    return { kind: "added", record: { state: "added", reach: "mcp", path: file, command, at, ...(result.undo ? { undo: result.undo } : {}), ...(created ? { created: true } : {}) } };
   }
   const bin = e.which(way.bin);
   if (!bin) return { kind: "manual", why: `${way.bin} is not on PATH` };
@@ -1036,7 +1097,8 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
         agent: spec.id,
         describe: `MCP server ${NAME} from ${label} (${shown}, that entry only)`,
         apply: async () => {
-          const result = writeJsonEntry(path, jsonKeys, undefined, ours);
+          const result = writeJsonEntry(path, jsonKeys, undefined, ours, record.undo);
+          if (result.ok && record.created) deleteIfOnlyOurs(path, jsonKeys);
           return result.ok ? null : result.reason;
         },
       });

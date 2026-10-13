@@ -59,7 +59,7 @@ Each entry runs `<your plannotator binary> inbox mcp`. The agent uses it from it
 - An agent you turned off (its switch in the Inbox's Settings → Agents, or `inboxTool: false` in config.json for Pi and OpenCode), or whose `plannotator-inbox` entry you removed after Plannotator added or found it, is never added back by itself. Turn it back on in Settings → Agents.
 - An agent only you can connect (no CLI on your `PATH`, Pi before 0.99, Cline) is named once on the terminal with the reason, and again only if the reason changes.
 - An existing `plannotator-inbox` entry that runs something else is never replaced.
-- In a JSON file only that one entry is added; every other byte of the file stays as it was. A file Plannotator cannot edit that way (comments, a duplicate key) is left as it was, and the terminal says why.
+- In a JSON file only that one entry is added; every other byte of the file stays as it was, and removing it gives the file back exactly as it was (an empty file stays empty; a file Plannotator created is deleted). A file Plannotator cannot edit that way (comments, a duplicate key) is left as it was, and the terminal says why.
 - Editors (VS Code, Zed, JetBrains, Goose) are never changed. Settings has a one-click link or a snippet for each.
 - `PLANNOTATOR_INBOX_CONNECT=0` skips this step.
 - `plannotator uninstall` removes every entry it recorded adding (never one you added yourself). `--dry-run` lists them first. If its record (`~/.plannotator/inbox/agents.json`) is gone, it removes none: an entry that runs this Plannotator is named with how to remove it, since you may have added it by hand.
