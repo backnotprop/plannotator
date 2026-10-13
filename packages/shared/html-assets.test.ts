@@ -6,6 +6,7 @@ import {
   isFramedEmbeddedDocumentRequest,
   isFramedFetchDest,
   pathNamesEmbeddedDocument,
+  refusesHiddenHtmlAssetPath,
   rewriteCssAssetReferences,
   normalizeHtmlAssetRoutePath,
   resolveHtmlAssetRoute,
@@ -268,5 +269,19 @@ describe("isFramedEmbeddedDocumentRequest", () => {
     expect(isFramedEmbeddedDocumentRequest("iframe", "/")).toBe(false);
     expect(isFramedEmbeddedDocumentRequest("document", "/gone.html")).toBe(false);
     expect(isFramedEmbeddedDocumentRequest(null, "/gone.html")).toBe(false);
+  });
+});
+
+describe("refusesHiddenHtmlAssetPath", () => {
+  test("refuses hidden files, hidden folders and the dotenv family", () => {
+    for (const path of [".hidden.css", ".secrets/creds.json", "assets/.git/config.json", "nested\\.ssh\\id.txt", "config/prod.env", ".envrc", ".env.local"]) {
+      expect(refusesHiddenHtmlAssetPath(path), path).toBe(true);
+    }
+  });
+
+  test("serves ordinary asset paths", () => {
+    for (const path of ["assets/lesson.css", "lessons/quiz.js", "img/a.b.png", "env/settings.json"]) {
+      expect(refusesHiddenHtmlAssetPath(path), path).toBe(false);
+    }
   });
 });

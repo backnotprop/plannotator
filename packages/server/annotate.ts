@@ -577,7 +577,7 @@ export async function startAnnotateServer(
   // Set once bound: "Ask this session" answers only a loopback Host with this port.
   let boundPort: number | undefined;
   const aiRuntime = resolveAIEnabled() ? await createAIRuntime({ sessionBridge: options.sessionBridge, getServerPort: () => boundPort }) : null;
-  const htmlAssets = createHtmlAssetRegistry();
+  const htmlAssets = createHtmlAssetRegistry({ folderPath: mode === "annotate-folder" ? folderPath : undefined });
   const agentTerminal = await createBunAgentTerminalBridge({
     enabled: supportsAnnotateAgentTerminalMode(mode),
     cwd: agentCwd ?? process.cwd(),

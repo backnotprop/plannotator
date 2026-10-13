@@ -214,6 +214,17 @@ export function isAnnotatableDocPath(input: string, extra: readonly string[] = [
 	return buildAnnotatableDocRegex(extra).test(input.trim());
 }
 
+/**
+ * The dotenv family as a file NAME (not a path): `.env` and any name ending in
+ * `.env` (`prod.env`, `.prod.env`), `.envrc`, and `.env.*` outside the
+ * annotatable docs (`.env.example` is a doc and stays). Shared by the Inbox's
+ * attachment rule and the HTML asset route's hidden-path refusal.
+ */
+export function isDotenvFileName(name: string): boolean {
+	if (/(^|\.)env$/i.test(name) || /^\.envrc$/i.test(name)) return true;
+	return /^\.env\./i.test(name) && !isAnnotatableDocPath(name);
+}
+
 /** True when `input` is annotatable only because of a configured extra extension. */
 export function isExtraMarkdownPath(input: string, extra: readonly string[] = []): boolean {
 	if (extra.length === 0) return false;
