@@ -45,8 +45,24 @@ async function healthy(registry: Registry | undefined): Promise<boolean> {
   } catch { return false; }
 }
 
+/** The worker was not listening (it exited between the health check and the request): nothing reached it. */
+function notListening(error: unknown): boolean {
+  const code = (error as { code?: string } | null)?.code;
+  return code === "ConnectionRefused" || code === "ECONNREFUSED" || code === "ECONNRESET";
+}
+
 export async function callDaemon(options: AdapterOptions, thread: string, input: unknown): Promise<ToolAnswer> {
   new T3Thread({ call: async () => undefined }, thread);
+  try {
+    return await request(await ensureDaemon(options, thread), "/review", input) as ToolAnswer;
+  } catch (error) {
+    // An idle worker exits on its own; one that did so a moment ago is started again.
+    if (!notListening(error)) throw error;
+    return await request(await ensureDaemon(options, thread), "/review", input) as ToolAnswer;
+  }
+}
+
+async function ensureDaemon(options: AdapterOptions, thread: string): Promise<Registry> {
   const directory = daemonDirectory(options, thread);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   let registry = readRegistry(options, thread);
@@ -90,13 +106,31 @@ export async function callDaemon(options: AdapterOptions, thread: string, input:
     }
     if (!await healthy(registry)) throw new Error(`T3 companion did not start. See ${join(directory, "daemon.log")}`);
   }
-  return await request(registry!, "/review", input) as ToolAnswer;
+  return registry!;
+}
+
+/**
+ * How long a worker with no open review and no pending delivery stays before
+ * it exits (a later command starts a new one). `PLANNOTATOR_T3_WORKER_IDLE_MS`
+ * is a testing knob.
+ */
+export const T3_WORKER_IDLE_MS = 10 * 60_000;
+
+function workerIdleMs(): number {
+  const value = Number(process.env.PLANNOTATOR_T3_WORKER_IDLE_MS);
+  return Number.isFinite(value) && value > 0 ? value : T3_WORKER_IDLE_MS;
 }
 
 export async function daemonStatus(options: AdapterOptions, thread: string, stop = false): Promise<unknown> {
   const registry = readRegistry(options, thread);
   if (!await healthy(registry)) return { running: false };
-  return request(registry!, stop ? "/stop" : "/health", stop ? {} : undefined);
+  try {
+    return await request(registry!, stop ? "/stop" : "/health", stop ? {} : undefined);
+  } catch (error) {
+    // It exited (idle, or a stop) between the two requests.
+    if (notListening(error)) return { running: false };
+    throw error;
+  }
 }
 
 export async function serveDaemon(options: AdapterOptions, threadId: string): Promise<void> {
@@ -127,6 +161,8 @@ export async function serveDaemon(options: AdapterOptions, threadId: string): Pr
     const delivery = new T3Delivery(thread, credentials);
     const reviews = new T3Reviews(join(directory, "reviews"), options.command, cwd, options.dataDir, bridge, delivery);
     const token = randomBytes(32).toString("base64url");
+    let lastActivity = Date.now();
+    let busyRequests = 0;
     const server = Bun.serve({ hostname: "127.0.0.1", port: 0, maxRequestBodySize: 2_000_000,
       async fetch(request) {
         const url = new URL(request.url);
@@ -134,20 +170,37 @@ export async function serveDaemon(options: AdapterOptions, threadId: string): Pr
         const expected = `Bearer ${token}`;
         const authenticated = supplied.length === expected.length && timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));
         if (!authenticated || request.headers.has("origin") || url.host !== `127.0.0.1:${server.port}`) return new Response("Forbidden", { status: 403 });
-        if (url.pathname === "/health" && request.method === "GET") return Response.json({ running: true, endpoint: options.endpoint.href, thread: threadId, pid: process.pid, status: bridge.status() });
-        if (url.pathname === "/stop" && request.method === "POST") { setTimeout(() => { cleanup?.(); process.exit(0); }, 100); return Response.json({ stopped: true, reviews: "Reviews remain open and can be recovered when a CLI command reconnects." }); }
-        if (url.pathname !== "/review" || request.method !== "POST") return new Response("Not found", { status: 404 });
-        try {
-          const input: unknown = await request.json();
-          const current = await thread.read({ limit: 1 });
-          if (current.thread.archived || current.thread.projectId !== snapshot.thread.projectId || (current.thread.worktreePath ?? project.workspaceRoot) !== cwd) throw new Error("This T3 thread was archived or changed worktrees. Restart its companion.");
-          const answer = { text: await reviews.call(input), isError: false };
-          return Response.json(answer);
-        } catch (error) { return Response.json({ text: error instanceof Error ? error.message : String(error), isError: true }); }
+        // A status check is not use: only a review request keeps the worker.
+        if (url.pathname !== "/review") return handle(request, url);
+        lastActivity = Date.now();
+        busyRequests++;
+        try { return await handle(request, url); } finally { busyRequests--; lastActivity = Date.now(); }
       },
     });
+    const handle = async (request: Request, url: URL): Promise<Response> => {
+      if (url.pathname === "/health" && request.method === "GET") return Response.json({ running: true, endpoint: options.endpoint.href, thread: threadId, pid: process.pid, status: bridge.status() });
+      if (url.pathname === "/stop" && request.method === "POST") { setTimeout(() => { cleanup?.(); process.exit(0); }, 100); return Response.json({ stopped: true, reviews: "Reviews remain open and can be recovered when a CLI command reconnects." }); }
+      if (url.pathname !== "/review" || request.method !== "POST") return new Response("Not found", { status: 404 });
+      try {
+        const input: unknown = await request.json();
+        const current = await thread.read({ limit: 1 });
+        if (current.thread.archived || current.thread.projectId !== snapshot.thread.projectId || (current.thread.worktreePath ?? project.workspaceRoot) !== cwd) throw new Error("This T3 thread was archived or changed worktrees. Restart its companion.");
+        const answer = { text: await reviews.call(input), isError: false };
+        return Response.json(answer);
+      } catch (error) { return Response.json({ text: error instanceof Error ? error.message : String(error), isError: true }); }
+    };
     privateWrite(join(directory, "daemon.json"), { endpoint: options.endpoint.href, thread: threadId, port: server.port, token, pid: process.pid });
-    const timer = setInterval(() => { void bridge.refresh(); }, 5000);
+    const idleMs = workerIdleMs();
+    const timer = setInterval(() => {
+      void bridge.refresh();
+      // Nothing open, nothing to deliver and nobody asking: exit. Unregister
+      // first, so a command arriving now starts a fresh worker.
+      if (busyRequests === 0 && reviews.idle() && Date.now() - lastActivity >= idleMs) {
+        console.error(`No open reviews for ${Math.round(idleMs / 1000)}s; the T3 companion for thread ${threadId} exits.`);
+        cleanup?.();
+        process.exit(0);
+      }
+    }, Math.min(5000, Math.max(250, Math.floor(idleMs / 4))));
     cleanup = () => { clearInterval(timer); reviews.dispose(); bridge.dispose(); server.stop(true); void client.close(); rmSync(join(directory, "daemon.json"), { force: true }); rmSync(lock, { recursive: true, force: true }); };
     process.once("SIGTERM", () => { cleanup?.(); process.exit(0); });
     process.once("SIGINT", () => { cleanup?.(); process.exit(0); });

@@ -72,6 +72,17 @@ test.skipIf(!process.env.T3_TEST_EXECUTABLE)("unchanged agent command through th
   const options: AdapterOptions = { endpoint: new URL(`http://127.0.0.1:${t3.port}/mcp`), dataDir, command: cliCommand, workerCommand: [...cliCommand, "t3"] };
   const store = new T3Credentials(dataDir, options.endpoint);
   store.save({ endpoint: options.endpoint.href, epoch: "test-grant", tokens: { access_token: "test-access", token_type: "Bearer" } });
+  // Workers started here exit 4 s after their last review settles (production: 10 min).
+  const childEnv = { ...process.env, PLANNOTATOR_BROWSER: "/usr/bin/true", PLANNOTATOR_GLIMPSE: "0", PLANNOTATOR_T3_WORKER_IDLE_MS: "4000" };
+  const runHook = async (entrypoint: string) => {
+    const hook = Bun.spawn([...cliCommand, "t3-hook"], { cwd: project, env: { ...childEnv, PLANNOTATOR_DATA_DIR: dataDir, CLAUDE_CODE_ENTRYPOINT: entrypoint },
+      stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+    hook.stdin.write(JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: "toolu_OpeningReview", session_id: "native-session", cwd: project,
+      tool_input: { command: "plannotator annotate notes.md --gate", description: "Open the review", timeout: 120_000 } }));
+    hook.stdin.end();
+    const [stdout, stderr, code] = await Promise.all([new Response(hook.stdout).text(), new Response(hook.stderr).text(), hook.exited]);
+    return { stdout, stderr, code };
+  };
   const cli = async (input: Record<string, unknown>) => {
     const args = [String(input.action)];
     if (typeof input.target === "string") args.push(input.target);
@@ -79,8 +90,7 @@ test.skipIf(!process.env.T3_TEST_EXECUTABLE)("unchanged agent command through th
     args.push("--url", options.endpoint.href, "--data-dir", dataDir);
     if (input.t3_thread_id) args.push("--thread", String(input.t3_thread_id));
     if (input.gate) args.push("--gate");
-    const child = Bun.spawn([...options.command, "t3", ...args], { cwd: project,
-      env: { ...process.env, PLANNOTATOR_BROWSER: "/usr/bin/true", PLANNOTATOR_GLIMPSE: "0" }, stdout: "pipe", stderr: "pipe" });
+    const child = Bun.spawn([...options.command, "t3", ...args], { cwd: project, env: childEnv, stdout: "pipe", stderr: "pipe" });
     const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
     if (code !== 0) throw new Error(stderr);
     return stdout;
@@ -88,22 +98,19 @@ test.skipIf(!process.env.T3_TEST_EXECUTABLE)("unchanged agent command through th
   try {
     await expect(cli({ action: "list" })).rejects.toThrow("--thread is required");
     expect(existsSync(join(dataDir, "inbox"))).toBe(false);
-    const hook = Bun.spawn([...cliCommand, "t3-hook"], { cwd: project, env: { ...process.env, PLANNOTATOR_DATA_DIR: dataDir },
-      stdin: "pipe", stdout: "pipe", stderr: "pipe" });
-    hook.stdin.write(JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: "toolu_OpeningReview", session_id: "native-session", cwd: project,
-      tool_input: { command: "plannotator annotate notes.md --gate", description: "Open the review", timeout: 120_000 } }));
-    hook.stdin.end();
-    const hookText = await new Response(hook.stdout).text();
-    const hookErrors = await new Response(hook.stderr).text();
-    expect(await hook.exited).toBe(0);
-    expect(hookErrors).toBe("");
-    const updated = JSON.parse(hookText).hookSpecificOutput;
+    // An interactive Claude session (not T3's Agent SDK) is answered before T3 is contacted.
+    const interactive = await runHook("cli");
+    expect(interactive).toEqual({ stdout: "{}\n", stderr: "", code: 0 });
+    expect(calls).toHaveLength(0);
+    const hook = await runHook("sdk-ts");
+    expect(hook.code).toBe(0);
+    expect(hook.stderr).toBe("");
+    const updated = JSON.parse(hook.stdout).hookSpecificOutput;
     expect(updated.permissionDecision).toBeUndefined();
     expect(updated.updatedInput.description).toBe("Open the review");
     expect(updated.updatedInput.command).not.toContain("--url");
     expect(updated.updatedInput.command).not.toContain("--thread");
-    const launch = Bun.spawn(simpleShellCommandWords(updated.updatedInput.command)!, { cwd: project,
-      env: { ...process.env, PLANNOTATOR_BROWSER: "/usr/bin/true", PLANNOTATOR_GLIMPSE: "0" }, stdout: "pipe", stderr: "pipe" });
+    const launch = Bun.spawn(simpleShellCommandWords(updated.updatedInput.command)!, { cwd: project, env: childEnv, stdout: "pipe", stderr: "pipe" });
     const opened = await new Response(launch.stdout).text();
     expect(await new Response(launch.stderr).text()).toBe("");
     expect(await launch.exited).toBe(0);
@@ -112,6 +119,8 @@ test.skipIf(!process.env.T3_TEST_EXECUTABLE)("unchanged agent command through th
     expect(opened).toContain(join(project, "notes.md"));
     expect(await cli({ t3_thread_id: "thread-b", action: "list" })).not.toContain(id);
     expect(await cli({ t3_thread_id: "thread-a", action: "list" })).toContain(id);
+    const registry = JSON.parse(readFileSync(join(daemonDirectory(options, "thread-a"), "daemon.json"), "utf8")) as { port: number; token: string };
+    expect((await fetch(`http://127.0.0.1:${registry.port}/review`, { method: "POST", headers: { authorization: `Bearer ${registry.token}`, origin: "https://evil.example", "content-type": "application/json" }, body: "{}" })).status).toBe(403);
     await eventually(async () => {
       const capability = await (await fetch(`${url}/api/ai/capabilities`)).json();
       return capability.providers?.some((provider: { sessionBridge?: { host: string; status: string } }) => provider.sessionBridge?.host === "t3" && provider.sessionBridge.status === "ready");
@@ -138,8 +147,17 @@ test.skipIf(!process.env.T3_TEST_EXECUTABLE)("unchanged agent command through th
     const reviewOpened = await cli({ t3_thread_id: "thread-a", action: "review" });
     const reviewId = reviewOpened.match(/Session: (pn-[0-9a-f]{6})/)![1]!;
     const reviewUrl = reviewOpened.match(/in Plannotator: (http:\/\/\S+)/)![1]!;
-    expect((await fetch(`${reviewUrl}/api/feedback`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ approved: false, feedback: "T3 code feedback", annotations: [] }) })).status).toBe(200);
-    await eventually(() => (messages.get("thread-a") ?? []).some((item) => item.text?.includes(`(${reviewId})`) && item.text.includes("T3 code feedback")));
+    // Feedback far over T3's 120,000-character message cap: written to the
+    // review's feedback.md and named in a short message (it used to retry forever).
+    const longFeedback = `T3 code feedback\n${"Consider this line. ".repeat(8000)}`;
+    expect(longFeedback.length).toBeGreaterThan(120_000);
+    expect((await fetch(`${reviewUrl}/api/feedback`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ approved: false, feedback: longFeedback, annotations: [] }) })).status).toBe(200);
+    await eventually(() => (messages.get("thread-a") ?? []).some((item) => item.text?.includes(`(${reviewId}) — Changes requested.`)));
+    const reviewDecision = (messages.get("thread-a") ?? []).find((item) => item.text?.includes(`(${reviewId})`))!.text!;
+    expect(reviewDecision.length).toBeLessThan(120_000);
+    const feedbackFile = reviewDecision.match(/Read all of it with the Read tool before you continue: (\S+feedback\.md)/)![1]!;
+    expect(readFileSync(feedbackFile, "utf8")).toContain("T3 code feedback");
+    expect(readFileSync(feedbackFile, "utf8").length).toBeGreaterThan(120_000);
     const lastOpened = await cli({ t3_thread_id: "thread-a", action: "last" });
     const lastId = lastOpened.match(/Session: (pn-[0-9a-f]{6})/)![1]!;
     const lastUrl = lastOpened.match(/in Plannotator: (http:\/\/\S+)/)![1]!;
@@ -149,8 +167,18 @@ test.skipIf(!process.env.T3_TEST_EXECUTABLE)("unchanged agent command through th
     expect(existsSync(join(dataDir, "inbox"))).toBe(false);
     expect(messages.get("thread-b") ?? []).toHaveLength(0);
     expect(calls.filter((call) => call.name === "t3_thread_send" && String(call.args.message).includes("Explain this note."))).toHaveLength(1);
-    const registry = JSON.parse(readFileSync(join(daemonDirectory(options, "thread-a"), "daemon.json"), "utf8")) as { port: number; token: string };
-    expect((await fetch(`http://127.0.0.1:${registry.port}/review`, { method: "POST", headers: { authorization: `Bearer ${registry.token}`, origin: "https://evil.example", "content-type": "application/json" }, body: "{}" })).status).toBe(403);
+    // Nothing open and nothing to deliver: the worker exits by itself, and the next command starts a new one.
+    await eventually(async () => !(await daemonStatus(options, "thread-a") as { running: boolean }).running, 20_000);
+    expect(existsSync(join(daemonDirectory(options, "thread-a"), "daemon.json"))).toBe(false);
+    expect(await cli({ t3_thread_id: "thread-a", action: "list" })).toContain("No open Plannotator reviews");
+    expect((await daemonStatus(options, "thread-a") as { running: boolean }).running).toBe(true);
+    // Logout stops the endpoint's workers and forgets the grant.
+    const logout = Bun.spawn([...cliCommand, "t3", "logout", "--url", options.endpoint.href, "--data-dir", dataDir], { cwd: project, env: childEnv, stdout: "pipe", stderr: "pipe" });
+    const [loggedOut, , logoutCode] = await Promise.all([new Response(logout.stdout).text(), new Response(logout.stderr).text(), logout.exited]);
+    expect(logoutCode).toBe(0);
+    expect(loggedOut).toContain("forgot its T3 authorization");
+    expect(existsSync(store.path)).toBe(false);
+    expect((await daemonStatus(options, "thread-a") as { running: boolean }).running).toBe(false);
   } finally {
     for (const thread of ["thread-a", "thread-b"]) {
       await daemonStatus(options, thread, true).catch(() => {});

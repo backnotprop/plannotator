@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { SessionBridgeSink } from "@plannotator/ai/session-bridge";
+import { lastFinishedAssistantMessage } from "./reviews";
 import { T3SessionBridge } from "./session-bridge";
 import { T3Thread, t3Endpoint, type T3Rpc, type T3ThreadRead, type T3TimelineItem } from "./t3-client";
 
@@ -113,6 +114,24 @@ describe("T3 question correlation", () => {
   test("a recovered question finds the original receipt's answer before the new cursor", async () => {
     const rpc = new Scripted((args) => args.afterPosition === 19 ? snapshot() : snapshot([item(4, "user_message", "Why?"), item(5, "assistant_message", "Recovered answer")]));
     expect((await ask(rpc)).answer).toBe("Recovered answer");
+  });
+  test("last skips the run that called it (its 'opening it now' text) and any run still writing", () => {
+    // What regresses: `plannotator last` opened the agent's own current message.
+    const items = [
+      item(1, "user_message", "Write the plan", { runId: "run-1", messageId: "m1" }),
+      item(2, "assistant_message", "Here is the plan.", { runId: "run-1" }),
+      item(3, "user_message", "Open your last message in Plannotator", { runId: "run-2", messageId: "m2" }),
+      item(4, "assistant_message", "Opening it in Plannotator now.", { runId: "run-2" }),
+    ];
+    const running = { ...snapshot(items, { activeRunId: "run-2", status: "running" }),
+      recentRuns: [{ runId: "run-1", status: "completed", startedAt: null }, { runId: "run-2", status: "running", startedAt: null }] };
+    expect(lastFinishedAssistantMessage(running, "thread-a")?.text).toBe("Here is the plan.");
+    // A run reported only through activeRunId still counts as unfinished.
+    expect(lastFinishedAssistantMessage({ ...running, recentRuns: [] }, "thread-a")?.text).toBe("Here is the plan.");
+    // From a terminal with nothing running, the newest message is the last one.
+    const idle = { ...snapshot(items), recentRuns: [{ runId: "run-1", status: "completed", startedAt: null }, { runId: "run-2", status: "completed", startedAt: null }] };
+    expect(lastFinishedAssistantMessage(idle, "thread-a")?.text).toBe("Opening it in Plannotator now.");
+    expect(lastFinishedAssistantMessage({ ...running, items: items.slice(2) }, "thread-a")).toBeUndefined();
   });
   test("endpoint validation preserves the advertised local or HTTPS address", () => {
     expect(t3Endpoint("http://127.0.0.1:3773/mcp").href).toBe("http://127.0.0.1:3773/mcp");

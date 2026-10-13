@@ -14,6 +14,7 @@
     "@plannotator/inbox": "workspace:*",
     "@plannotator/server": "workspace:*",
     "@plannotator/shared": "workspace:*",
+    "@plannotator/t3-code": "workspace:*",
     "@plannotator/ui": "workspace:*",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

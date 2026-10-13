@@ -1,6 +1,7 @@
 export const T3_CLI_USAGE = [
   "One-time connection setup:",
   "  plannotator t3 login --url <T3 MCP URL>",
+  "  plannotator t3 logout --url <T3 MCP URL>   (forget the grant, stop its workers)",
   "",
   "Opt in to the Claude hook with install.sh --with-t3, then restart the Claude provider session.",
   "Agents use ordinary plannotator review, annotate and last commands. The default plugin is unchanged.",

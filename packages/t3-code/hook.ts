@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import * as z from "zod";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { parsePlannotatorToolInput, plannotatorCommandToToolInput } from "@plannotator/shared/plannotator-tool";
+import { isAgentSdkEntrypoint } from "@plannotator/shared/t3-hook-command";
 import { privateWrite, T3Credentials } from "./auth";
 import { callDaemon } from "./daemon";
 import { findHookThread } from "./hook-routing";
@@ -33,7 +34,15 @@ function configuredEndpoints(dataDir: string): URL[] {
   return endpoints;
 }
 
-export async function prepareT3Hook(value: unknown, selfCommand: readonly string[], dataDir: string): Promise<Record<string, unknown>> {
+/**
+ * The hook's answer for one Bash call: `{}` (run the command as written)
+ * unless the call is an ordinary Plannotator command in a T3 conversation this
+ * machine is authorized for. Only Agent SDK sessions can be T3's, so every
+ * other Claude session is answered before anything is read or contacted.
+ */
+export async function prepareT3Hook(value: unknown, selfCommand: readonly string[], dataDir: string,
+  env: NodeJS.ProcessEnv = process.env): Promise<Record<string, unknown>> {
+  if (!isAgentSdkEntrypoint(env.CLAUDE_CODE_ENTRYPOINT)) return {};
   const parsed = hookEvent.safeParse(value);
   if (!parsed.success || parsed.data.agent_id) return {};
   const event = parsed.data;
@@ -68,6 +77,15 @@ export async function prepareT3Hook(value: unknown, selfCommand: readonly string
   } finally { clearTimeout(timer); }
 }
 
+function logHookFailure(dataDir: string, error: unknown): void {
+  try {
+    const directory = join(dataDir, "t3-code");
+    if (!existsSync(directory)) return;
+    const reason = error instanceof Error ? error.message : String(error);
+    appendFileSync(join(directory, "hook.log"), `${new Date().toISOString()} automatic T3 connection unavailable: ${reason.replace(/\s+/g, " ")}\n`, { mode: 0o600 });
+  } catch { /* Logging must never change the hook's answer. */ }
+}
+
 export async function runT3Hook(args: readonly string[], selfCommand: readonly string[]): Promise<void> {
   if (args[0] === "install" || args[0] === "remove") {
     const [operation, flag, file, executableFlag, installedExecutable, ...extra] = args;
@@ -83,12 +101,20 @@ export async function runT3Hook(args: readonly string[], selfCommand: readonly s
     process.exit(hasPlanHookOverlap(resolve(args[1]!)) ? 0 : 1);
   }
   if (!args.length) {
+    // Fail silent: an unreachable T3, a revoked grant or an ambiguous owner
+    // leaves the command as written, with no message in the conversation.
+    // The reason goes to <data dir>/t3-code/hook.log.
+    const dataDir = getPlannotatorDataDir();
+    let answer: Record<string, unknown> = {};
     try {
-      const value: unknown = JSON.parse(await Bun.stdin.text());
-      console.log(JSON.stringify(await prepareT3Hook(value, selfCommand, getPlannotatorDataDir())));
+      if (isAgentSdkEntrypoint(process.env.CLAUDE_CODE_ENTRYPOINT)) {
+        const value: unknown = JSON.parse(await Bun.stdin.text());
+        answer = await prepareT3Hook(value, selfCommand, dataDir);
+      }
     } catch (error) {
-      console.log(JSON.stringify({ systemMessage: `Plannotator automatic T3 connection unavailable: ${String(error)}` }));
+      logHookFailure(dataDir, error);
     }
+    console.log(JSON.stringify(answer));
     return;
   }
   const [operation, file, flag, directory, ...extra] = args;

@@ -1069,13 +1069,21 @@ if [ "$minimal" -eq 1 ]; then
     exit 0
 fi
 
+# Optional T3 Code hook (only with --with-t3 / --without-t3). A step that
+# fails never fails the install, like the Claude Code plugin update: the
+# reason is printed with the command to retry, and the install goes on.
 if [ "$T3_HOOK_FLAG" -ne -1 ]; then
     _t3_settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
     if [ "$T3_HOOK_FLAG" -eq 1 ]; then
-        PLANNOTATOR_DATA_DIR="$_config_dir" "$INSTALL_DIR/plannotator" t3-hook install --settings "$_t3_settings" --executable "$INSTALL_DIR/plannotator"
-        echo "T3 authorization is separate: plannotator t3 login --url <T3 MCP URL>"
+        if PLANNOTATOR_DATA_DIR="$_config_dir" "$INSTALL_DIR/plannotator" t3-hook install --settings "$_t3_settings" --executable "$INSTALL_DIR/plannotator"; then
+            echo "T3 authorization is separate: plannotator t3 login --url <T3 MCP URL>"
+        else
+            echo "T3 Code hook: could not install it (see above); the rest of the install continues. Retry with: plannotator t3-hook install --settings \"$_t3_settings\" --executable \"$INSTALL_DIR/plannotator\"" >&2
+        fi
     else
-        PLANNOTATOR_DATA_DIR="$_config_dir" "$INSTALL_DIR/plannotator" t3-hook remove --settings "$_t3_settings"
+        if ! PLANNOTATOR_DATA_DIR="$_config_dir" "$INSTALL_DIR/plannotator" t3-hook remove --settings "$_t3_settings"; then
+            echo "T3 Code hook: could not remove it (see above); the rest of the install continues. Retry with: plannotator t3-hook remove --settings \"$_t3_settings\"" >&2
+        fi
     fi
 fi
 

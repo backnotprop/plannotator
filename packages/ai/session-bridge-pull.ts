@@ -14,7 +14,7 @@
  *
  * Protocol (both endpoints are POST + JSON):
  *
- *   POST /api/ai/bridge/poll   body { status?, modes?, waitMs? }
+ *   POST /api/ai/bridge/poll   body { status?, modes?, waitMs?, interruptible? }
  *     Long-poll for commands. Answers as soon as there is something to do, or
  *     with an empty list after `waitMs` (clamped to 0..25s, default 25s).
  *     -> 200 { commands: BridgeCommand[], features: string[], closing?: true, superseded?: true }
@@ -304,10 +304,16 @@ export function createPullSessionBridge(options: PullSessionBridgeOptions): Pull
 		poll.resolve(pollReply({ commands }));
 	};
 
+	// A host that never interrupts says so on its polls (`interruptible: false`).
+	let interruptible: false | undefined;
+
 	const bridge: SessionBridge = {
 		host: options.host,
 		modes,
 		status,
+		get interruptible() {
+			return interruptible;
+		},
 		ask(req, sink, signal) {
 			if (disposed || isGone()) {
 				sink.error("gone");
@@ -424,6 +430,7 @@ export function createPullSessionBridge(options: PullSessionBridgeOptions): Pull
 				if (typeof body.modes.turn === "boolean") modes.turn = body.modes.turn;
 				if (typeof body.modes.transient === "boolean") modes.transient = body.modes.transient;
 			}
+			if (typeof body.interruptible === "boolean") interruptible = body.interruptible ? undefined : false;
 		}
 		if (disposed) return pollReply({ commands: [], closing: true });
 		if (hostStatus === "gone") failForGone();

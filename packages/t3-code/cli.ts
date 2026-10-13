@@ -6,8 +6,9 @@ import { T3Credentials, loginT3 } from "./auth";
 import { callDaemon, daemonStatus, serveDaemon, type AdapterOptions } from "./daemon";
 import { t3Endpoint, T3Client, T3Thread } from "./t3-client";
 import { T3_CLI_USAGE } from "./usage";
+import { stopT3Workers } from "@plannotator/shared/t3-workers";
 
-const COMMANDS = ["login", "annotate", "review", "last", "list", "close", "status", "stop", "serve"] as const;
+const COMMANDS = ["login", "logout", "annotate", "review", "last", "list", "close", "status", "stop", "serve"] as const;
 type Command = typeof COMMANDS[number];
 interface Invocation { command: Command; endpoint: URL; thread?: string; dataDir?: string; executable?: string; review?: PlannotatorToolInput }
 
@@ -38,8 +39,8 @@ export function parseT3Args(args: readonly string[]): Invocation {
   const url = flags.get("--url");
   if (!url) throw new Error("--url is required; copy the MCP URL from T3 Settings → Connections.");
   const thread = flags.get("--thread");
-  if (command === "login" && thread) throw new Error("Login authorizes an environment; it takes no --thread.");
-  if (command !== "login") {
+  if ((command === "login" || command === "logout") && thread) throw new Error(`${command === "login" ? "Login authorizes" : "Logout forgets"} an environment; it takes no --thread.`);
+  if (command !== "login" && command !== "logout") {
     if (!thread) throw new Error("--thread is required; use the current T3 conversation's explicit ID.");
     new T3Thread({ call: async () => undefined }, thread);
   }
@@ -72,6 +73,17 @@ export async function runT3Command(args: readonly string[], selfCommand: readonl
     const client = await T3Client.connect(options.endpoint, credentials.token);
     await client.close();
     console.log("Plannotator is authorized with T3. Enable the optional Claude hook with install.sh --with-t3 and restart the provider session to connect ordinary Plannotator commands.");
+  } else if (input.command === "logout") {
+    const stopped = await stopT3Workers(options.dataDir, options.endpoint.href);
+    const stuck = stopped.filter((worker) => worker.state === "still_running");
+    if (stuck.length) throw new Error(`A T3 companion (pid ${stuck[0]!.entry.pid}) did not stop; the saved grant was kept. Run logout again.`);
+    const removed = new T3Credentials(options.dataDir, options.endpoint).forget();
+    const workers = stopped.filter((worker) => worker.state === "stopped").length;
+    console.log([
+      removed ? `Plannotator forgot its T3 authorization for ${options.endpoint.href}.` : `Plannotator had no saved T3 authorization for ${options.endpoint.href}.`,
+      ...(workers ? [`Stopped ${workers} T3 companion${workers === 1 ? "" : "s"}; open reviews stay open, and their decisions are kept until you log in again.`] : []),
+      "The grant itself stays listed in T3 until you revoke it there. The Claude hook stays installed (install.sh --without-t3 removes it).",
+    ].join("\n"));
   } else if (input.command === "serve") await serveDaemon(options, input.thread!);
   else if (input.command === "status" || input.command === "stop") console.log(JSON.stringify(await daemonStatus(options, input.thread!, input.command === "stop")));
   else {

@@ -1,31 +1,44 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, openSync, closeSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, closeSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import * as z from "zod";
 import { runPullSessionBridgeClient } from "@plannotator/ai/session-bridge-pull-client";
 import { classifyHostCloseAnswer, readHostStatusAnswer, type HostHttpAnswer } from "@plannotator/shared/host-control";
 import {
   parsePlannotatorToolInput, plannotatorToolArgs, plannotatorToolOpenedText,
   plannotatorToolListText, plannotatorToolCloseText, plannotatorUnknownSessionText,
-  plannotatorDecisionHeading, plannotatorDecisionSubject, plannotatorTargetSubject,
+  plannotatorTargetSubject,
   type PlannotatorToolInput, type PlannotatorSessionSummary, type PlannotatorCloseOutcome,
 } from "@plannotator/shared/plannotator-tool";
 import { privateWrite } from "./auth";
-import { T3Delivery } from "./delivery";
+import { hostResultSchema, t3Decision } from "./decision";
+import { T3Delivery, T3DeliveryRefused } from "./delivery";
 import { T3SessionBridge } from "./session-bridge";
-import { pause } from "./t3-client";
+import { T3_TERMINAL, pause, type T3ThreadRead } from "./t3-client";
 
-const resultSchema = z.object({
-  v: z.literal(1), decision: z.enum(["approved", "annotated", "dismissed", "denied", "answered"]),
-  message: z.string(), noop: z.boolean(), platform: z.boolean().optional(),
-  annotationCount: z.number().optional(), target: z.union([z.string(), z.array(z.string())]).optional(),
-});
+/**
+ * The assistant message `last` opens: the newest one from a run that has
+ * finished. A run still going is the one that called `last` (its "opening it
+ * now" text) or one not done writing, so its messages are skipped.
+ */
+export function lastFinishedAssistantMessage(snapshot: T3ThreadRead, threadId: string): T3ThreadRead["items"][number] | undefined {
+  const unfinished = new Set(snapshot.recentRuns.filter((run) => !T3_TERMINAL.has(run.status)).map((run) => run.runId));
+  if (snapshot.thread.activeRunId) unfinished.add(snapshot.thread.activeRunId);
+  return snapshot.items.filter((item) => item.type === "assistant_message" && item.sourceThreadId === threadId
+    && item.visibility !== "inherited" && item.visibility !== "synthetic" && item.text
+    && !(item.runId && unfinished.has(item.runId))).at(-1);
+}
+
+function processAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch (error) { return (error as { code?: string }).code === "EPERM"; }
+}
 
 interface Review {
   id: string;
   kind: "annotate" | "review" | "last";
   subject: string;
+  /** A gated annotate session: its bare approval is sent, since Claude was told to wait for it. */
+  gate?: boolean;
   target?: string | string[];
   createdAt: number;
   token: string;
@@ -43,6 +56,7 @@ export class T3Reviews {
   private readonly reviews = new Map<string, Review>();
   private readonly bridges = new Map<string, AbortController>();
   private readonly sending = new Set<string>();
+  private opening = 0;
   private timer: ReturnType<typeof setInterval> | undefined;
 
   constructor(readonly directory: string, private readonly command: readonly string[], private readonly cwd: string,
@@ -53,7 +67,7 @@ export class T3Reviews {
       if (!/^pn-[0-9a-f]{6}$/.test(id)) continue;
       try {
         const review = JSON.parse(readFileSync(join(directory, id, "launch.json"), "utf8")) as Review;
-        if (review.id === id && !review.delivered) this.reviews.set(id, review);
+        if (review.id === id && !review.delivered && !review.failure) this.reviews.set(id, review);
       } catch { /* An incomplete launch has no review to adopt. */ }
     }
   }
@@ -103,6 +117,14 @@ export class T3Reviews {
           if (!this.sending.has(review.id) && (review.retryAt ?? 0) <= Date.now()) {
             this.sending.add(review.id);
             void this.settle(review, resultPath).catch((error: unknown) => {
+              if (error instanceof T3DeliveryRefused) {
+                // Retrying can never send it; keep the record and say why.
+                review.failure = review.deliveryError = error.message;
+                this.save(review);
+                this.reviews.delete(review.id);
+                this.notify(`T3 delivery refused for ${review.id}: ${error.message} The decision stays in ${resultPath}.`);
+                return;
+              }
               review.deliveryError = String(error);
               review.retryCount = (review.retryCount ?? 0) + 1;
               review.retryAt = Date.now() + Math.min(60_000, 1000 * 2 ** Math.min(review.retryCount, 6));
@@ -111,22 +133,28 @@ export class T3Reviews {
             })
               .finally(() => this.sending.delete(review.id));
           }
+        } else if (review.port && review.pid && !processAlive(review.pid) && !existsSync(resultPath)) {
+          // The review server stopped without a decision (killed, crashed or
+          // a reboot): nothing will ever arrive, so the worker stops waiting.
+          this.bridges.get(review.id)?.abort();
+          review.failure = "The review server stopped without a decision; its draft is kept.";
+          this.save(review);
+          this.reviews.delete(review.id);
+          this.notify(`T3 review ${review.id}: ${review.failure} See ${this.path(review, "cli.log")}`);
         } else this.attach(review);
       } catch (error) { this.notify(`T3 review ${review.id}: ${String(error)}`); }
     }
   }
 
   private async settle(review: Review, path: string): Promise<void> {
-    const result = resultSchema.parse(JSON.parse(readFileSync(path, "utf8")) as unknown);
-    const sendsDecision = result.decision !== "dismissed" && (!result.noop || result.decision === "approved" || result.platform);
-    if (sendsDecision) {
-      const target = result.target ?? review.target;
-      const subject = plannotatorDecisionSubject(review.subject, review.target, target);
-      const comments = result.annotationCount ? ` · ${result.annotationCount} comments` : "";
-      const outcome = result.platform ? "Review posted" : result.decision === "approved" ? (result.noop ? "Approved" : `Approved with notes${comments}`) : `Feedback${comments}`;
-      const heading = plannotatorDecisionHeading(subject, review.id, outcome, target);
-      await this.delivery.send(result.noop ? heading : `${heading}\n\n${result.message}`, `plannotator-review:${review.id}`);
-    }
+    const result = hostResultSchema.parse(JSON.parse(readFileSync(path, "utf8")) as unknown);
+    const decision = t3Decision(result, { kind: review.kind, subject: review.subject, sessionId: review.id,
+      target: review.target, gate: review.gate, directory: join(this.directory, review.id) });
+    if (decision.action === "send") {
+      // Written before the send, so the file Claude is told to Read exists.
+      if (decision.overflow) writeFileSync(decision.overflow.path, decision.overflow.text, { mode: 0o600 });
+      await this.delivery.send(decision.text, `plannotator-review:${review.id}`);
+    } else this.notify(decision.text);
     review.delivered = true;
     this.save(review);
     this.reviews.delete(review.id);
@@ -142,16 +170,22 @@ export class T3Reviews {
   }
 
   private async open(input: PlannotatorToolInput & { action: Review["kind"] }): Promise<string> {
+    this.opening++;
+    try { return await this.openReview(input); } finally { this.opening--; }
+  }
+
+  private async openReview(input: PlannotatorToolInput & { action: Review["kind"] }): Promise<string> {
     let stdin: string | undefined;
     if (input.action === "last") {
       const snapshot = await this.bridge.thread.itemsAfter(undefined);
-      const last = snapshot.items.filter((item) => item.type === "assistant_message" && item.sourceThreadId === this.bridge.thread.id && item.visibility !== "inherited" && item.visibility !== "synthetic" && item.text).at(-1);
-      if (!last) throw new Error("This T3 thread has no assistant message to annotate.");
+      const last = lastFinishedAssistantMessage(snapshot, this.bridge.thread.id);
+      if (!last) throw new Error("This T3 thread has no finished assistant message to annotate.");
       stdin = await this.bridge.thread.fullText(last);
     }
     let id: string;
     do { id = `pn-${randomBytes(3).toString("hex")}`; } while (existsSync(join(this.directory, id)));
-    const review: Review = { id, kind: input.action, subject: input.action === "last" ? "your last message" : plannotatorTargetSubject(input.action, input.target) ?? "local changes", createdAt: Date.now(), token: randomBytes(32).toString("base64url") };
+    const review: Review = { id, kind: input.action, subject: input.action === "last" ? "your last message" : plannotatorTargetSubject(input.action, input.target) ?? "local changes",
+      ...(input.gate === true ? { gate: true } : {}), createdAt: Date.now(), token: randomBytes(32).toString("base64url") };
     mkdirSync(join(this.directory, id), { mode: 0o700 });
     this.save(review);
     const args = input.action === "last" ? ["annotate-last", "--stdin", "--json"] : [input.action, ...plannotatorToolArgs(input), "--json"];
@@ -180,7 +214,7 @@ export class T3Reviews {
       }
       if (!review.port) { child.kill(); throw new Error(`Plannotator did not open within 30 seconds. See ${this.path(review, "cli.log")}`); }
       this.attach(review);
-      return plannotatorToolOpenedText(review.subject, review.url, input.gate === true || input.action === "review", id, review.target);
+      return plannotatorToolOpenedText(review.subject, review.url, review.gate === true, id, review.target);
     } catch (error) {
       review.failure = String(error);
       this.save(review);
@@ -219,6 +253,11 @@ export class T3Reviews {
       } catch (error) { outcomes.push({ id: review.id, subject: review.subject, closed: false, reason: "failed", detail: String(error) }); }
     }
     return plannotatorToolCloseText(outcomes);
+  }
+
+  /** Nothing open and nothing waiting to be delivered: the worker may exit. */
+  idle(): boolean {
+    return this.reviews.size === 0 && this.sending.size === 0 && this.opening === 0;
   }
 
   dispose(): void {

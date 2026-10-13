@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   Client, StreamableHTTPClientTransport, UnauthorizedError,
@@ -46,6 +46,13 @@ export class T3Credentials {
   token = (): string | undefined => this.read()?.tokens?.access_token;
 
   save(value: Credentials): void { privateWrite(this.path, value); }
+
+  /** Delete the saved grant (`plannotator t3 logout`). True when there was one. */
+  forget(): boolean {
+    if (!existsSync(this.path)) return false;
+    rmSync(this.path, { force: true });
+    return true;
+  }
 }
 
 export class T3OAuthProvider implements OAuthClientProvider {

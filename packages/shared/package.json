@@ -60,6 +60,7 @@
     "./pfm-reminder": "./pfm-reminder.ts",
     "./plannotator-tool": "./plannotator-tool.ts",
     "./t3-hook-command": "./t3-hook-command.ts",
+    "./t3-workers": "./t3-workers.ts",
     "./worktree": "./worktree.ts",
     "./worktree-pool": "./worktree-pool.ts",
     "./html-to-markdown": "./html-to-markdown.ts",

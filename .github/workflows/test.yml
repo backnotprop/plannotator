@@ -421,7 +421,7 @@ jobs:
       - name: Run the T3 connected-session proofs on the compiled binary
         env:
           T3_TEST_EXECUTABLE: ${{ github.workspace }}/.local/plannotator
-        run: bun test apps/t3-code
+        run: bun test packages/t3-code
 
       - name: Run the Inbox connection proofs on the installed package
         env:

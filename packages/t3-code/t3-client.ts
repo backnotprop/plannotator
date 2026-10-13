@@ -1,4 +1,4 @@
-import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { Client, StreamableHTTPClientTransport, UnauthorizedError } from "@modelcontextprotocol/client";
 import * as z from "zod";
 
 export function t3Endpoint(value: string): URL {
@@ -58,23 +58,52 @@ export interface T3Rpc {
   call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>;
 }
 
+/**
+ * A refusal that means the request never reached a tool: the grant was
+ * refused (401: revoked, expired, or replaced by a new login) or the server no
+ * longer knows the MCP session (404). Safe to retry once on a fresh session.
+ */
+function isSessionRefusal(error: unknown): boolean {
+  if (error instanceof UnauthorizedError) return true;
+  const status = (error as { status?: unknown; data?: { status?: unknown } } | null)?.status
+    ?? (error as { data?: { status?: unknown } } | null)?.data?.status;
+  if (status === 401 || status === 404) return true;
+  const message = error instanceof Error ? error.message : "";
+  return /\b401\b|unauthorized|session not found/i.test(message);
+}
+
+async function openClient(url: URL, token: () => string | undefined): Promise<Client> {
+  const client = new Client({ name: "plannotator-t3", version: "0.0.1" });
+  try {
+    // The token is read for every request, so a new `plannotator t3 login`
+    // applies to a running worker without restarting it.
+    await client.connect(new StreamableHTTPClientTransport(url, { authProvider: { token: async () => token() } }));
+    return client;
+  } catch (error) {
+    await client.close().catch(() => {});
+    throw error;
+  }
+}
+
 export class T3Client implements T3Rpc {
-  constructor(readonly client: Client) {}
+  private constructor(private client: Client, private readonly url: URL, private readonly token: () => string | undefined) {}
 
   static async connect(url: URL, token: () => string | undefined): Promise<T3Client> {
-    const client = new Client({ name: "plannotator-t3", version: "0.0.1" });
-    const accessToken = token();
-    try {
-      await client.connect(new StreamableHTTPClientTransport(url, { authProvider: { token: async () => accessToken } }));
-      return new T3Client(client);
-    } catch (error) {
-      await client.close().catch(() => {});
-      throw error;
-    }
+    return new T3Client(await openClient(url, token), url, token);
   }
 
   async call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
-    const result = await this.client.callTool({ name, arguments: args }, { signal, timeout: 60_000 });
+    let result: Awaited<ReturnType<Client["callTool"]>>;
+    try {
+      result = await this.client.callTool({ name, arguments: args }, { signal, timeout: 60_000 });
+    } catch (error) {
+      if (signal?.aborted || !isSessionRefusal(error)) throw error;
+      // After a new login the old MCP session may be refused; open a new one.
+      const previous = this.client;
+      this.client = await openClient(this.url, this.token);
+      void previous.close().catch(() => {});
+      result = await this.client.callTool({ name, arguments: args }, { signal, timeout: 60_000 });
+    }
     const text = result.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
     if (result.isError) throw new Error(`T3 ${name}: ${text || "request refused"}`);
     if (result.structuredContent) return result.structuredContent;

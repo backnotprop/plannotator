@@ -12,7 +12,7 @@ export interface HookThread { thread: string; cwd: string }
 
 /** T3 preserves Claude's native tool-use ID in the public activity item ID. */
 export function claudeToolItemId(toolId: string): string {
-  if (!/^toolu_[A-Za-z0-9]+$/.test(toolId) || toolId.length > 256) throw new Error("Invalid Claude tool-call identity.");
+  if (!/^toolu_[A-Za-z0-9_-]+$/.test(toolId) || toolId.length > 256) throw new Error("Invalid Claude tool-call identity.");
   return `turn-item:provider:claudeAgent:native-item:${encodeURIComponent(toolId)}`;
 }
 

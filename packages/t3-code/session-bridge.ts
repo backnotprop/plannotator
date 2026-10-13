@@ -11,6 +11,8 @@ function snapshotStatus(snapshot: T3ThreadRead): SessionBridgeStatus {
 export class T3SessionBridge implements SessionBridge {
   readonly host = "t3" as const;
   readonly modes = { turn: true, transient: false };
+  /** T3 is never interrupted: Stop only stops listening, and there is no "Interrupt and ask now". */
+  readonly interruptible = false;
   private currentStatus: SessionBridgeStatus = "gone";
   private active: AbortController | undefined;
   private generation = 0;

@@ -1,9 +1,14 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { T3Credentials } from "./auth";
 import { claudeToolItemId, findHookThread } from "./hook-routing";
 import { prepareT3Hook } from "./hook";
 import type { T3Rpc } from "./t3-client";
 
 const tool = "toolu_CurrentCall";
+const sdk = { CLAUDE_CODE_ENTRYPOINT: "sdk-ts" };
 const itemId = claudeToolItemId(tool);
 
 function scripted(owners: Record<string, { visibility?: string; source?: string; status?: string }>): T3Rpc {
@@ -36,8 +41,35 @@ describe("T3 routing from Claude's actual tool-call identity", () => {
   });
   test("preserves ordinary commands without a configured connection or for scripted gates", async () => {
     const event = { hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: tool, session_id: "session", cwd: "/same-folder", tool_input: { command: "plannotator review" } };
-    expect(await prepareT3Hook(event, ["plannotator"], "/a-data-directory-that-does-not-exist")).toEqual({});
-    expect(await prepareT3Hook({ ...event, tool_input: { command: "plannotator annotate notes.md --require-approval" } }, ["plannotator"], "/missing")).toEqual({});
-    expect(await prepareT3Hook({ ...event, agent_id: "subagent" }, ["plannotator"], "/missing")).toEqual({});
+    expect(await prepareT3Hook(event, ["plannotator"], "/a-data-directory-that-does-not-exist", sdk)).toEqual({});
+    expect(await prepareT3Hook({ ...event, tool_input: { command: "plannotator annotate notes.md --require-approval" } }, ["plannotator"], "/missing", sdk)).toEqual({});
+    expect(await prepareT3Hook({ ...event, agent_id: "subagent" }, ["plannotator"], "/missing", sdk)).toEqual({});
+  });
+  test("Bedrock and Vertex tool-call ids are routed like first-party ones", async () => {
+    for (const id of ["toolu_bdrk_01AbC-dEf_9", "toolu_vrtx_01XyZ"]) {
+      expect(claudeToolItemId(id)).toBe(`turn-item:provider:claudeAgent:native-item:${id}`);
+    }
+    for (const id of ["toolu_", "tool_abc", "toolu_a b", "toolu_a/b", "toolu_a:b"]) expect(() => claudeToolItemId(id)).toThrow();
+  });
+  test("only an Agent SDK session reaches T3; every other Claude session is answered without a request", async () => {
+    // What regresses: the hook contacting T3 (or reading the data dir) on
+    // every Bash call of an interactive Claude session that loads the settings file.
+    let requests = 0;
+    const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch() { requests++; return new Response("Unauthorized", { status: 401 }); } });
+    const root = mkdtempSync(join(tmpdir(), "plannotator-t3-gate-"));
+    try {
+      const endpoint = new URL(`http://127.0.0.1:${server.port}/mcp`);
+      new T3Credentials(root, endpoint).save({ endpoint: endpoint.href, epoch: "grant", tokens: { access_token: "token", token_type: "Bearer" } });
+      const event = { hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: tool, session_id: "session", cwd: root, tool_input: { command: "plannotator review" } };
+      for (const entrypoint of ["cli", "claude-desktop", "", undefined]) {
+        expect(await prepareT3Hook(event, ["plannotator"], root, { CLAUDE_CODE_ENTRYPOINT: entrypoint })).toEqual({});
+      }
+      expect(requests).toBe(0);
+      await expect(prepareT3Hook(event, ["plannotator"], root, sdk)).rejects.toThrow();
+      expect(requests).toBeGreaterThan(0);
+    } finally {
+      server.stop(true);
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

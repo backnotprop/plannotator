@@ -55,7 +55,7 @@ plannotator/
 │   │   └── package.json           # Extension manifest (publisher: backnotprop)
 │   └── skills/                    # Agent skills (agentskills.io format)
 │       ├── core/                  # CORE skills (single-sourced) — installed to ~/.claude/skills and ~/.agents/skills (Codex)
-│       │   ├── plannotator/           # Knowledge layer: model-invocable CLI reference (subcommands, flags, exit codes) an agent loads on generic "use Plannotator" intent; freshness-guarded against apps/hook/server/cli.ts by plannotator-skill-reference.test.ts. Unreleased subcommands (`HIDDEN_SUBCOMMANDS` in cli.ts, empty today; `inbox` was the last, until the Inbox launched) still run and keep `<sub> --help`, but stay out of `plannotator --help`, "Did you mean" suggestions and this skill (the test requires their absence); un-hide by deleting from that set, adding the top-level usage lines and documenting it here
+│       │   ├── plannotator/           # Knowledge layer: model-invocable CLI reference (subcommands, flags, exit codes) an agent loads on generic "use Plannotator" intent; freshness-guarded against apps/hook/server/cli.ts by plannotator-skill-reference.test.ts. Unreleased subcommands (`HIDDEN_SUBCOMMANDS` in cli.ts: today `t3` and `t3-hook`, the opt-in T3 Code connection; `inbox` was the last to launch) still run and keep `<sub> --help`, but stay out of `plannotator --help`, "Did you mean" suggestions and this skill (the test requires their absence); un-hide by deleting from that set, adding the top-level usage lines and documenting it here
 │       │   ├── plannotator-review/    # Lightweight: opens review UI
 │       │   ├── plannotator-annotate/  # Lightweight: opens annotate UI
 │       │   └── plannotator-last/      # Lightweight: annotates last message
@@ -105,6 +105,7 @@ plannotator/
 │   │   ├── project.ts            # Pure string helpers (sanitizeTag, extractRepoName, extractDirName)
 │   │   └── inbox/                # The Inbox store (store.ts, append-only JSONL; thread routing), the per-thread list sections (list.ts), layout + line reader (schema.ts), registry (registry.ts: inbox/inbox.json)
 │   ├── inbox/                    # The Plannotator Inbox window (App, sidebar, list, thread, empty state, Settings), composed from ui, and surface/ (what a phone hosts); built by apps/inbox
+│   ├── t3-code/                  # @plannotator/t3-code — the opt-in T3 Code connection (Ask this session through a Claude Bash hook); loaded by the CLI only for `t3` / `t3-hook` (see "T3 Code")
 │   ├── guide-viewer/             # @plannotator/guide-viewer — the Guided Review chain (GuideView → GuideSectionCard → GuideFileCard → GuideViewportManager) behind a narrow GuideHost context; used by review-editor (ReviewGuideHost + AllFilesCodeView) and by the guides.show viewer (readOnly). Also home of diffParser, DiffFile, and the two markdown renderers.
 │   ├── editor/                   # Plan review app
 │   │   ├── App.tsx               # Main plan review app
@@ -172,6 +173,7 @@ claude --plugin-dir ./apps/hook
 | `PLANNOTATOR_SESSION_TAG` | Set by the Claude Code mod in its session's environment (`claude-code:<session id>`), so processes the session starts can be matched to it; recorded as `hostSession` in the `sessions/` registry, and read by `plannotator inbox mcp`, which sends as that session when the agent leaves `agent_session` out (see "Plannotator Inbox"). Only `<host>:<id>` with host `claude-code`, `pi` or `opencode` counts; anything else is ignored. Not meant to be set by hand. |
 | `PLANNOTATOR_HOST_REVIEW_ID` | Set per launch by the Claude Code mod and the OpenCode plugin to the review's `pn-` id; the CLI takes it at startup (validated `pn-` + 6 hex, scrubbed from the environment) and records it as `reviewId` in the `sessions/` registry, which `plannotator sessions` (and `--json`) prints beside each session's full `target`. Not meant to be set by hand. |
 | `PLANNOTATOR_MOD_DEBUG` | Set to `1` before starting Claude Code to have the Claude Code mod write `claude-code-mod/debug.log` in the data dir (launches, results, turns, bridge commands). Default: off. |
+| `PLANNOTATOR_T3_WORKER_IDLE_MS` | Testing knob for the opt-in T3 Code connection (see "T3 Code"): how long a per-thread worker with no open review and no pending delivery waits before it exits. Default 600000 (10 min). |
 | `PLANNOTATOR_ORIGIN` | Explicit agent-origin override at the top of the detection chain. Valid values: `claude-code`, `amp`, `droid`, `opencode`, `codex`, `copilot-cli`, `gemini-cli`, `kiro-cli`, `mistral-vibe`, `pi`, `oh-my-pi`. Invalid values silently fall through to env-based detection. Unset by default. |
 | `PLANNOTATOR_JINA` | Set to `0` / `false` to disable Jina Reader for URL annotation, or `1` / `true` to enable. Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "jina": false }`) or per-invocation via `--no-jina`. |
 | `PLANNOTATOR_ANNOTATE_HISTORY` | Set to `0` / `false` to disable ALL annotate-session writes to the data dir: per-file version history (no copies of annotated files are written; the annotate version diff is unavailable) AND the durable submitted-feedback records (#678) that single-local-file annotate sessions otherwise write to `history/{project}/{slug}/submissions/` before deleting the draft on submit. Disabling it keeps annotate sessions fully stateless but also gives up that submit crash-recovery record. URL and annotate-last sessions never write either kind of data regardless of this flag. Folder sessions write no submitted-feedback records, but they do participate in per-file version history: the first time a session serves a file through /api/doc it snapshots that file (lazily, memoized per resolved path for the life of the server), which is what powers the per-file version diff when a folder file is reopened later; setting this flag to 0 disables those folder snapshots too. A review of several files (bundle) snapshots each of its text files when it opens, through the same pipeline, governed the same way. Setting it to 0 additionally suppresses **feedback archive** records for every annotate surface (single file, folder, URL, live app, annotate-last), so "fully stateless annotate session" stays literally true regardless of `PLANNOTATOR_FEEDBACK_HISTORY`, with one exception: annotation drafts (`drafts/`, including the path-keyed copies described under "Annotate drafts follow the file") are crash recovery and are still written; they are deleted when the review is decided. Raw-HTML and live-app pinpoints write their element context (selector, ancestor path, allowlisted attributes, visible text, a collapsed HTML skeleton, and the live route) into the submission records and drafts too; form values and inline handlers are never captured. Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "annotateHistory": false }`); the env var takes precedence. |
@@ -1172,6 +1174,74 @@ with no turn delivered, and Ask AI showed "Ask this session". A list target
 order, `list` named it `2 files: notes.md, mock.html`, its feedback arrived
 headed `— Feedback · 2 comments.` under `Files: notes.md, mock.html`, and
 `close all` closed a second bundle.
+
+### T3 Code: Ask this session through an optional Claude hook (opt-in, unreleased)
+
+`packages/t3-code` (user notes in its README). T3 Code runs Claude through the
+Agent SDK, which loads `~/.claude/settings.json` hooks, so a Claude Bash hook
+connects ordinary `plannotator review` / `annotate` / `last` commands in a T3
+conversation to that conversation: Ask this session becomes a T3 turn, and the
+decision arrives as a T3 message. It uses T3's existing MCP API as a client
+(no T3 change, no provider-side MCP server, no skill change). Nothing of it
+runs for anyone who did not opt in.
+
+- **Opt in / out:** `install.sh --with-t3` writes one `PreToolUse` `Bash` hook
+  into `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json` (`t3-hook install`,
+  `packages/t3-code/install-hook.ts`: other hooks and settings kept, a
+  `.plannotator-t3.bak` backup before the first change); `--without-t3`
+  removes only it. Both are remembered in `install-flags.json` (`with-t3`,
+  `without-t3`; POSIX only, no PowerShell spelling) and skipped by
+  `--minimal`; a failing step warns and never aborts the install. Without a
+  flag the installer touches nothing T3. `plannotator t3 login --url <T3 MCP
+  URL>` authorizes once (OAuth, PKCE); `plannotator t3 logout --url …` stops
+  that endpoint's workers and deletes the saved grant. `t3` and `t3-hook` are
+  in `HIDDEN_SUBCOMMANDS`.
+- **The gate (per Bash call cost):** the hook runs on every Bash call of every
+  Claude session that loads the settings file. The command is
+  `case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) PLANNOTATOR_DATA_DIR=… '<binary>' t3-hook;; esac`
+  (`t3HookCommand`, `packages/shared/t3-hook-command.ts`): only an Agent SDK
+  session (`sdk-ts`, …) starts the binary; an interactive `claude` (`cli`)
+  is answered by the shell with no output (~3 ms instead of ~290 ms of CLI
+  startup). The binary repeats the check as the first statement of
+  `apps/hook/server/index.ts` and in `prepareT3Hook`. Inside an SDK session
+  the hook routes only when a saved grant exists and T3 shows the exact
+  running tool call (`toolu_…`, Bedrock/Vertex ids included) owned by one
+  conversation in the same folder; otherwise, and on any error, it answers
+  `{}` (the command runs as written) and logs to `t3-code/hook.log`.
+- **Worker:** one detached `plannotator t3 serve` per thread (registry
+  `t3-code/<endpoint>/threads/<thread>/daemon.json`, token-guarded loopback
+  routes `/health`, `/review`, `/stop`) launches the review CLI with a pull
+  bridge (`PLANNOTATOR_SESSION_BRIDGE_HOST=t3`), long-polls it, and delivers
+  the host result record. It exits after 10 min with no open review, no
+  pending delivery and no review request (`PLANNOTATOR_T3_WORKER_IDLE_MS`);
+  the next command starts a new one (a request that meets one that just
+  exited is retried once). The OAuth token is read per request and a refused
+  MCP session is reopened, so a new login applies without a restart; only a
+  delivery already attempted under the old grant is refused (T3's idempotency
+  namespace changed). A review whose server died without a decision, or a
+  refused delivery, stops being waited on.
+- **Decisions** (`packages/t3-code/decision.ts`) are worded exactly as the
+  Claude Code mod words them (`decision.test.ts` compares against the mod's
+  `deliveryFor`): `Changes requested · N comments`, LGTM / Done / Close only
+  logged (a gated annotate approval is sent), over 12 KB written to the
+  review's `feedback.md` and named in the message (T3 caps a message at
+  120,000 characters). One deliberate difference: a review posted to the PR
+  platform is sent as `Review posted` with its status line. `last` skips
+  messages from runs still going (the run that called it).
+- **UI:** the bridge advertises `interruptible: false` (pull poll body →
+  `sessionBridge.interruptible` on `/api/ai/capabilities`; absent for every
+  other host and older servers), and the Ask AI panels then offer no
+  "Interrupt and ask now" and label Stop as "Stop listening".
+- **Data:** `<data dir>/t3-code/` (grants, hook launches, review results,
+  pending deliveries, `feedback.md`, logs; feedback and conversation text,
+  nothing pruned). `isAllowedHostResultPath` accepts `result.json` under it.
+  Uninstall stops running workers (dry run lists them) and removes the hook
+  for the installed binary; `--purge` deletes `t3-code/`.
+- **Tests:** `bun test packages/t3-code` (unit); with
+  `T3_TEST_EXECUTABLE=<compiled binary>` also the end-to-end proof against a
+  scripted T3 MCP server (`connected-session.test.ts`, run on the compiled
+  binary in `test.yml`); `scripts/install.test.ts` ("optional T3 hook"),
+  `packages/server/uninstall.test.ts`, `packages/ai/session-bridge-pull.test.ts`.
 
 ### Codex Stop hook: which turn the plan belongs to
 

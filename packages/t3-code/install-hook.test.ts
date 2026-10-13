@@ -65,11 +65,24 @@ test("hook command quoting executes safely with spaces and apostrophes and pins 
   const { executable, dataDir } = fixture();
   mkdirSync(join(executable, ".."), { recursive: true });
   writeFileSync(executable, '#!/bin/sh\nprintf "%s\\n%s\\n" "$PLANNOTATOR_DATA_DIR" "$1"\n', { mode: 0o755 });
-  const result = Bun.spawnSync(["/bin/sh", "-c", t3HookCommand(executable, dataDir)], { stdout: "pipe", stderr: "pipe" });
-  expect(result.exitCode).toBe(0);
-  expect(result.stdout.toString()).toBe(dataDir + "\nt3-hook\n");
+  const run = (entrypoint?: string) => Bun.spawnSync(["/bin/sh", "-c", t3HookCommand(executable, dataDir)],
+    { env: { PATH: "/usr/bin:/bin", ...(entrypoint === undefined ? {} : { CLAUDE_CODE_ENTRYPOINT: entrypoint }) }, stdout: "pipe", stderr: "pipe" });
+  for (const entrypoint of ["sdk-ts", "sdk-py"]) {
+    const result = run(entrypoint);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe(dataDir + "\nt3-hook\n");
+  }
+  // Every other Claude session: the shell answers, the binary never starts.
+  for (const entrypoint of ["cli", "claude-desktop", "", undefined]) {
+    const result = run(entrypoint);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe("");
+  }
   expect(parseT3HookCommand(t3HookCommand(executable, dataDir) + " && echo unrelated")).toBeUndefined();
   expect(parseT3HookCommand("/other/custom-command t3-hook")).toBeUndefined();
+  expect(parseT3HookCommand('case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) /other/custom-command t3-hook;; esac')).toBeUndefined();
+  // The ungated form earlier builds wrote is still recognized, so reinstall and uninstall replace it.
+  expect(parseT3HookCommand(`PLANNOTATOR_DATA_DIR='/data' '${executable}' t3-hook`)).toEqual({ executable });
 });
 
 test.skipIf(!process.env.T3_TEST_EXECUTABLE)("the compiled installer helper registers an executable hook and removes only its registration", () => {
@@ -80,13 +93,22 @@ test.skipIf(!process.env.T3_TEST_EXECUTABLE)("the compiled installer helper regi
   const installed = Bun.spawnSync([executable, "t3-hook", "install", "--settings", file, "--executable", executable], { env, stdout: "pipe", stderr: "pipe" });
   expect(installed.exitCode).toBe(0);
   const command = JSON.parse(readFileSync(file, "utf8")).hooks.PreToolUse[0].hooks[0].command;
-  const hooked = Bun.spawnSync(["/bin/sh", "-c", command], {
-    env,
+  const hook = (entrypoint: string) => Bun.spawnSync(["/bin/sh", "-c", command], {
+    env: { ...env, CLAUDE_CODE_ENTRYPOINT: entrypoint },
     stdin: Buffer.from(JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: "toolu_fixture", session_id: "fixture", cwd: join(file, ".."), tool_input: { command: "plannotator annotate notes.md --gate" } })),
     stdout: "pipe", stderr: "pipe",
   });
+  const hooked = hook("sdk-ts");
   expect(hooked.exitCode).toBe(0);
   expect(JSON.parse(hooked.stdout.toString())).toEqual({});
+  const interactive = hook("cli");
+  expect(interactive.exitCode).toBe(0);
+  expect(interactive.stdout.toString()).toBe("");
+  // The binary's own gate, for a hook registered without the shell's: `{}` before any startup work.
+  const direct = Bun.spawnSync([executable, "t3-hook"], { env: { ...env, CLAUDE_CODE_ENTRYPOINT: "cli" }, stdin: Buffer.from("not json"), stdout: "pipe", stderr: "pipe" });
+  expect(direct.exitCode).toBe(0);
+  expect(JSON.parse(direct.stdout.toString())).toEqual({});
+  expect(direct.stderr.toString()).toBe("");
   const removed = Bun.spawnSync([executable, "t3-hook", "remove", "--settings", file], { env, stdout: "pipe", stderr: "pipe" });
   expect(removed.exitCode).toBe(0);
   expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({});

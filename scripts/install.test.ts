@@ -2384,7 +2384,7 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
   "install.sh optional T3 hook",
   () => {
     const args = ["--version", "v99.9.9", "--non-interactive", "--skip-skills"];
-    const sourceHook = join(scriptsDir, "..", "apps", "t3-code", "hook.ts");
+    const sourceHook = join(scriptsDir, "..", "packages", "t3-code", "hook.ts");
     const helper = `import { runT3Hook } from ${JSON.stringify(sourceHook)}; await runT3Hook(Bun.argv.slice(2), [process.execPath]);`;
     const binary = `#!/bin/sh\nexec ${quoteHookWord(process.execPath)} --eval ${quoteHookWord(helper)} "$@"\n`;
     const fixture = () => setupInstallSandbox({ gh: "pass-all", binary });
@@ -2415,16 +2415,25 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
       expect(settings.hooks.PreToolUse[0]).toEqual(customHook);
       expect(existsSync(settingsFile(sandbox.home))).toBe(false);
       const command = settings.hooks.PreToolUse[1].hooks[0].command;
-      const invoked = Bun.spawnSync(["/bin/sh", "-c", command], {
-        env: { HOME: sandbox.home, PATH: "/usr/bin:/bin" },
+      const invoke = (entrypoint?: string) => Bun.spawnSync(["/bin/sh", "-c", command], {
+        env: { HOME: sandbox.home, PATH: "/usr/bin:/bin", ...(entrypoint ? { CLAUDE_CODE_ENTRYPOINT: entrypoint } : {}) },
         stdin: Buffer.from(JSON.stringify({
           hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: "toolu_fixture", session_id: "fixture",
           cwd: sandbox.home, tool_input: { command: "plannotator annotate notes.md --gate" },
         })),
         stdout: "pipe", stderr: "pipe",
       });
+      // An Agent SDK session (T3 runs Claude through it) reaches the binary.
+      const invoked = invoke("sdk-ts");
       expect(invoked.exitCode).toBe(0);
       expect(JSON.parse(invoked.stdout.toString())).toEqual({});
+      // Any other Claude session is answered by the shell: no output, no decision.
+      for (const entrypoint of ["cli", undefined]) {
+        const skipped = invoke(entrypoint);
+        expect(skipped.exitCode).toBe(0);
+        expect(skipped.stdout.toString()).toBe("");
+        expect(skipped.stderr.toString()).toBe("");
+      }
       expect(JSON.parse(readFileSync(join(dataDir, "install-flags.json"), "utf8"))).toEqual({ v: 1, flags: ["with-t3", "skip-skills"] });
       const before = readFileSync(file, "utf8");
       expect(runInstallSh(sandbox, [...args, "--with-t3"], env).code).toBe(0);
@@ -2452,14 +2461,22 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
       expect(JSON.parse(readFileSync(join(sandbox.home, ".plannotator", "install-flags.json"), "utf8"))).toEqual({ v: 1, flags: ["without-t3", "skip-skills"] });
     });
 
-    test("malformed settings are preserved and the requested installation fails visibly", () => {
+    test("a T3 hook step that fails is reported but never aborts the install, and malformed settings are preserved", () => {
+      // What regresses: under `set -e` a failed opt-in step ended the whole
+      // install before the rest of it (and install-flags.json) ran.
       const sandbox = fixture();
       const file = settingsFile(sandbox.home);
       mkdirSync(join(file, ".."), { recursive: true });
       writeFileSync(file, "{invalid settings");
       const result = runInstallSh(sandbox, [...args, "--with-t3"]);
-      expect(result.code).not.toBe(0);
+      expect(result.code).toBe(0);
       expect(result.out).not.toContain("T3 hook installed");
+      expect(result.out).toContain("T3 Code hook: could not install it");
+      expect(readFileSync(file, "utf8")).toBe("{invalid settings");
+      expect(JSON.parse(readFileSync(join(sandbox.home, ".plannotator", "install-flags.json"), "utf8"))).toEqual({ v: 1, flags: ["with-t3", "skip-skills"] });
+      const removal = runInstallSh(sandbox, [...args, "--without-t3"]);
+      expect(removal.code).toBe(0);
+      expect(removal.out).toContain("T3 Code hook: could not remove it");
       expect(readFileSync(file, "utf8")).toBe("{invalid settings");
     });
 
