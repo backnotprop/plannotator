@@ -92,11 +92,10 @@ import {
 	htmlAssetBaseHref,
 	htmlAssetDocumentHeaders,
 	isFramedEmbeddedDocumentRequest,
-	refusesHiddenHtmlAssetPath,
 	resolveHtmlAssetRoute,
 	rewriteHtmlAssetReferences,
 } from "../generated/html-assets.ts";
-import { htmlAssetContext, htmlAssetPathRefused, inlineHtmlLocalAssets, isWithinDirectory, MAX_HTML_ASSET_BYTES, resolveOpenInTarget } from "../generated/html-assets-node.ts";
+import { folderSessionAssetAllowed, htmlAssetContext, inlineHtmlLocalAssets, isWithinDirectory, MAX_HTML_ASSET_BYTES, resolveOpenInTarget } from "../generated/html-assets-node.ts";
 import {
 	supportsAnnotateAgentTerminalMode,
 	type AgentTerminalCapability,
@@ -153,26 +152,27 @@ function firstHeader(value: string | string[] | undefined): string | null {
 
 function createHtmlAssetRegistry(folderPath?: string) {
 	const rootsByToken = new Map<string, string>();
-	const tokensByRoot = new Map<string, string>();
-	/** Roots that are a whole selected folder: hidden paths are refused there. */
-	const widenedRoots = new Set<string>();
+	const tokensByScope = new Map<string, string>();
+	/** Folder-session tokens: one per (selected folder, document directory), as in the Bun registry. */
+	const docDirByToken = new Map<string, string>();
 
-	function register(baseDir: string, widened = false): string {
+	function register(baseDir: string, docDir: string | null = null): string {
 		const root = resolvePath(baseDir);
-		if (widened) widenedRoots.add(root);
-		const existing = tokensByRoot.get(root);
+		const scope = docDir ? `${root}\0${docDir}` : root;
+		const existing = tokensByScope.get(scope);
 		if (existing) return existing;
 		const token = randomUUID().replace(/-/g, "").slice(0, 16);
-		tokensByRoot.set(root, token);
+		tokensByScope.set(scope, token);
 		rootsByToken.set(token, root);
+		if (docDir) docDirByToken.set(token, docDir);
 		return token;
 	}
 
 	function rewriteHtml(htmlContent: string, htmlFilePath: string): string {
 		if (/^https?:\/\//i.test(htmlFilePath)) return htmlContent;
 		try {
-			const { root, basePath, widened } = htmlAssetContext(htmlFilePath, folderPath);
-			const token = register(root, widened);
+			const { root, basePath, docDir } = htmlAssetContext(htmlFilePath, folderPath);
+			const token = register(root, docDir);
 			return rewriteHtmlAssetReferences(
 				htmlContent,
 				(assetPath) => `${HTML_ASSET_ROUTE_PREFIX}/${token}/${encodeHtmlAssetPath(assetPath)}`,
@@ -219,16 +219,16 @@ function createHtmlAssetRegistry(folderPath?: string) {
 			return true;
 		}
 
-		const { root, assetPath, contentType, document, asDocument, maxBytes } = decision;
+		const { token, root, assetPath, contentType, document, asDocument, maxBytes } = decision;
 		const resolved = resolvePath(root, assetPath);
 		if (!isWithinDirectory(resolved, root)) {
 			assetError(res, 403, "Access denied", asDocument, assetPath);
 			return true;
 		}
-		// A widened folder root: the page under review can reach the whole
-		// folder, so hidden paths and the dotenv family are refused, judged as
-		// requested and by where the path really leads (mirrors the Bun route).
-		if (widenedRoots.has(root) && htmlAssetPathRefused(root, assetPath, refusesHiddenHtmlAssetPath)) {
+		// A folder session: the page's own directory as before, the rest of the
+		// folder minus hidden paths and the dotenv family (mirrors the Bun route).
+		const docDir = docDirByToken.get(token);
+		if (docDir && !folderSessionAssetAllowed(root, docDir, assetPath)) {
 			assetError(res, 404, "Not found", asDocument, assetPath);
 			return true;
 		}

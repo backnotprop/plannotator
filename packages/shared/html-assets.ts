@@ -217,6 +217,8 @@ export type HtmlAssetRouteDecision =
     }
   | {
       kind: "serve";
+      /** The token the request named (a folder session keys its rules on it). */
+      token: string;
       root: string;
       assetPath: string;
       contentType: string;
@@ -249,7 +251,8 @@ export function resolveHtmlAssetRoute(
     return { kind: "error", status: 404, message: "Missing asset token or path", asDocument: framed };
   }
 
-  const root = lookupRoot(rest.slice(0, slash));
+  const token = rest.slice(0, slash);
+  const root = lookupRoot(token);
   const rawPath = rest.slice(slash + 1);
   const htmlRequest = framed || isHtmlDocumentAssetPath(stripUrlSuffix(rawPath));
   const name = assetDisplayName(rawPath);
@@ -279,6 +282,7 @@ export function resolveHtmlAssetRoute(
 
   return {
     kind: "serve",
+    token,
     root,
     assetPath,
     contentType,
