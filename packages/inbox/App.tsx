@@ -1653,6 +1653,7 @@ function Inbox() {
             onUpdate={pressUpdate}
             onWhatsNew={openWhatsNew}
             soundNeedsClick={!!settings?.sound && sound.settings.enabled && !sound.armed}
+            mcpCommand={settings?.mcp_command ?? null}
           />
         }
       >

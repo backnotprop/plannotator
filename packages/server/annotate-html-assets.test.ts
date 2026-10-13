@@ -91,6 +91,24 @@ describe("annotate raw HTML assets", () => {
     }
   });
 
+  test("the share inliner keeps a page's own hidden asset folders in a folder session", () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inline-own-hidden-")));
+    try {
+      mkdirSync(join(root, "site", ".vendor"), { recursive: true });
+      mkdirSync(join(root, ".secrets"));
+      const pagePath = join(root, "site", "page.html");
+      const html = '<link rel="stylesheet" href=".vendor/x.css"><script src="../.secrets/x.js"></script>';
+      writeFileSync(pagePath, html);
+      writeFileSync(join(root, "site", ".vendor", "x.css"), "VENDOR_STYLE");
+      writeFileSync(join(root, ".secrets", "x.js"), "SECRET_SCRIPT");
+      const shared = inlineHtmlLocalAssets(html, pagePath, root);
+      expect(shared).toContain(Buffer.from("VENDOR_STYLE").toString("base64"));
+      expect(shared).not.toContain(Buffer.from("SECRET_SCRIPT").toString("base64"));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test("the share inliner keeps a hidden-folder page's own assets in a folder session", () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inline-hidden-doc-")));
     try {
@@ -512,6 +530,62 @@ for (const [runtime, startServer] of [["Bun", startAnnotateServer], ["Pi", start
       expect(await hidden.text()).not.toContain("DRAFT_STYLE");
       const sharedLesson = await (await fetch(`${server.url}/api/share-html?path=${encodeURIComponent(lessonPath)}`)).json() as { shareHtml: string };
       expect(sharedLesson.shareHtml).not.toContain(Buffer.from("DRAFT_STYLE").toString("base64"));
+    } finally {
+      server.stop();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test(`${runtime} folder session: a page keeps the hidden folders in its own directory`, async () => {
+    // v0.28.18 served `site/.vendor/x.css` to `site/page.html` (its folder was
+    // its root). The page's own directory keeps that rule, hidden segments and
+    // all; the rest of the selected folder is reachable minus hidden paths.
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-folder-own-hidden-")));
+    for (const dir of ["site/.vendor", "lessons", "assets", ".secrets"]) mkdirSync(join(root, dir), { recursive: true });
+    const pagePath = join(root, "site", "page.html");
+    writeFileSync(pagePath, '<html><head><link rel="stylesheet" href=".vendor/x.css"><link rel="stylesheet" href="linked.css"></head><body></body></html>');
+    writeFileSync(join(root, "site", ".vendor", "x.css"), "VENDOR_STYLE");
+    writeFileSync(join(root, ".secrets", "linked.css"), "LINKED_SECRET");
+    // In the page's directory, but it leads into a hidden folder elsewhere in
+    // the selected folder: judged by the folder rule on its real path.
+    symlinkSync(join(root, ".secrets", "linked.css"), join(root, "site", "linked.css"));
+    const lessonPath = join(root, "lessons", "lesson.html");
+    writeFileSync(lessonPath, '<html><head><link rel="stylesheet" href="../assets/lesson.css"></head><body><script src="../.secrets/x.json"></script></body></html>');
+    writeFileSync(join(root, "assets", "lesson.css"), "LESSON_STYLE");
+    writeFileSync(join(root, ".secrets", "x.json"), "SECRET_JSON");
+    const server = await startServer({ markdown: "", filePath: root, folderPath: root, mode: "annotate-folder", htmlContent: "<html></html>" });
+    const docOf = async (path: string) =>
+      (await (await fetch(`${server.url}/api/doc?path=${encodeURIComponent(path)}`)).json() as { rawHtml: string }).rawHtml;
+    const sharedOf = async (path: string) =>
+      (await (await fetch(`${server.url}/api/share-html?path=${encodeURIComponent(path)}`)).json() as { shareHtml: string }).shareHtml;
+    const assetUrl = (html: string, name: string) => {
+      const path = html.match(new RegExp(`(?:href|src)="([^"]+${name.replace(/\./g, "\\.")})"`))?.[1];
+      expect(path, name).toStartWith("/api/html-assets/");
+      return new URL(path!, server.url);
+    };
+    const b64 = (text: string) => Buffer.from(text).toString("base64");
+    try {
+      const page = await docOf(pagePath);
+      const vendor = await fetch(assetUrl(page, ".vendor/x.css"));
+      expect(vendor.status).toBe(200);
+      expect(await vendor.text()).toBe("VENDOR_STYLE");
+      const linked = await fetch(assetUrl(page, "site/linked.css"));
+      expect(linked.status).toBe(404);
+      expect(await linked.text()).not.toContain("LINKED_SECRET");
+      const sharedPage = await sharedOf(pagePath);
+      expect(sharedPage).toContain(b64("VENDOR_STYLE"));
+      expect(sharedPage).not.toContain(b64("LINKED_SECRET"));
+
+      const lesson = await docOf(lessonPath);
+      const css = await fetch(assetUrl(lesson, "assets/lesson.css"));
+      expect(css.status).toBe(200);
+      expect(await css.text()).toBe("LESSON_STYLE");
+      const secret = await fetch(assetUrl(lesson, ".secrets/x.json"));
+      expect(secret.status).toBe(404);
+      expect(await secret.text()).not.toContain("SECRET_JSON");
+      const sharedLesson = await sharedOf(lessonPath);
+      expect(sharedLesson).toContain(b64("LESSON_STYLE"));
+      expect(sharedLesson).not.toContain(b64("SECRET_JSON"));
     } finally {
       server.stop();
       rmSync(root, { recursive: true, force: true });
