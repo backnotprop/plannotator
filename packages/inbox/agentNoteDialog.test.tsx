@@ -127,6 +127,10 @@ test.skipIf(!hasDom)('several agents: the band, every agent ticked (Claude Code 
   ]);
   expect(primary(el).textContent).toBe('Add to Codex, Gemini CLI and Claude Code');
   expect(document.activeElement).toBe(primary(el));
+  // Each checkbox is named by its whole row (name, path, pill), so the path is read once: no second description.
+  const box = el.querySelector('.ib-anote-table input') as HTMLInputElement;
+  expect(box.hasAttribute('aria-describedby')).toBe(false);
+  expect(box.closest('label')?.textContent?.split('~/.codex/AGENTS.md')).toHaveLength(2);
   expect(el.querySelector('[data-anote-notnow]')).not.toBeNull();
   expect(el.querySelector('.ib-anote-later')?.textContent).toBe('Change it later in Settings → Agents.');
 });
@@ -187,7 +191,10 @@ test.skipIf(!hasDom)('Add: only the ticked notes are sent; results in the same r
     { name: 'Codex', path: '~/.codex/AGENTS.md', state: 'Added', ticked: null },
     { name: 'Gemini CLI', path: '~/.gemini/GEMINI.md', state: 'Not added', ticked: null },
   ]);
-  expect(el.querySelector('.ib-anote-err')?.textContent).toBe("~/.gemini/GEMINI.md can't be written: permission deniedTry again");
+  expect(el.querySelector('.ib-anote-err')?.textContent).toBe("~/.gemini/GEMINI.md can't be written: permission denied. Try again");
+  // The results view: focus on Done, the live region says what was written, the band is gone.
+  expect(document.activeElement).toBe(button(el, 'Done'));
+  expect(el.querySelector('[data-anote-band]')).toBeNull();
   expect(el.querySelector('.ib-anote-doneline')?.textContent).toBe('Each agent reads it from its next session. Fix the file, then try again here or in Settings → Agents.');
   expect(el.querySelector('[aria-live="polite"]')?.textContent).toBe("Added the note to Codex. Couldn't add the note to Gemini CLI.");
 
@@ -197,6 +204,7 @@ test.skipIf(!hasDom)('Add: only the ticked notes are sent; results in the same r
   expect(rowsOf(el).map((r) => r.state)).toEqual(['Added', 'Created']);
   expect(title(el)).toBe('Added the note to Codex and Gemini CLI');
   expect(el.querySelector('.ib-anote-err')).toBeNull();
+  expect(document.activeElement).toBe(button(el, 'Done'));
 
   act(() => button(el, 'Done').click());
   expect(seen.closed).toBe(1);
@@ -267,12 +275,16 @@ test.skipIf(!hasDom)('a failure and a foreign entry in the band; "new on this co
     first: false,
     added: ['codex'],
     manual_why: [],
-    failed: [{ agent: 'amp', reason: 'amp mcp add exited with code 3', path: null }],
+    failed: [
+      { agent: 'amp', reason: 'amp mcp add exited with code 3', path: null },
+      { agent: 'gemini', reason: 'gemini mcp add exited with code 3 (boom: gemini could not write its config (permission denied))', path: null },
+    ],
     foreign: [{ agent: 'cursor', path: '~/.cursor/mcp.json' }],
   });
   expect([...el.querySelectorAll('.ib-anote-band p')].map((p) => p.textContent)).toEqual([
     'Connected Codex to the Inbox (new on this computer).',
     "Couldn't connect Amp: amp mcp add exited with code 3. Settings → Agents",
+    "Couldn't connect Gemini CLI: gemini mcp add exited with code 3: boom: gemini could not write its config (permission denied). Settings → Agents",
     'Cursor has its own plannotator-inbox entry in ~/.cursor/mcp.json; Plannotator left it alone.',
   ]);
 });

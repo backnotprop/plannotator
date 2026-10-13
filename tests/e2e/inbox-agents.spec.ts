@@ -26,7 +26,7 @@
  */
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createFakeAgents, type FakeAgents } from '../helpers/fake-agents';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
@@ -154,9 +154,25 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
     await rowsOf(page).nth(0).locator('input').check();
     await rowsOf(page).nth(1).locator('input').check();
 
+    // Gemini's folder cannot be written (a permission a root runner would ignore): its row says why, with Try again.
+    const failGemini = process.getuid?.() !== 0;
+    if (failGemini) chmodSync(join(fake.home, '.gemini'), 0o555);
     await primary.click();
+    if (failGemini) {
+      await expect(dialog.getByRole('heading', { name: 'Added the note to Codex' })).toBeVisible();
+      await expect(rowsOf(page).locator('.ib-anote-st')).toHaveText(['Added', 'Not added']);
+      await expect(rowsOf(page).nth(1).locator('.ib-anote-err')).toContainText('Try again');
+      await expect(dialog.locator('[data-anote-band]')).toHaveCount(0);
+      await expect(dialog.getByRole('button', { name: 'Done' })).toBeFocused();
+      await shot(page, 'checklist-08-error', ['desktop', 'narrow']);
+      chmodSync(join(fake.home, '.gemini'), 0o755);
+      await rowsOf(page).nth(1).getByRole('button', { name: 'Try again' }).click();
+    }
     await expect(dialog.getByRole('heading', { name: 'Added the note to Codex and Gemini CLI' })).toBeVisible();
     await expect(rowsOf(page).locator('.ib-anote-st')).toHaveText(['Added', 'Created']);
+    // The results view: the band is gone and Done has the focus.
+    await expect(dialog.locator('[data-anote-band]')).toHaveCount(0);
+    await expect(dialog.getByRole('button', { name: 'Done' })).toBeFocused();
     await shot(page, 'checklist-07-added', ['desktop', 'narrow']);
     await dialog.getByRole('button', { name: 'Done' }).click();
     await expect(dialog).toHaveCount(0);
@@ -171,6 +187,18 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
     await page.reload();
     await expectNoDialog(page);
 
+    // Removing Codex's note in Settings → Agents never brings the question back: the person said yes once.
+    const removed = await page.evaluate(async () => {
+      const settings = await (await fetch('/api/inbox/settings')).json();
+      const answer = await fetch('/api/inbox/agents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession: settings.serverSession, agent: 'codex', note: false }) });
+      return answer.status;
+    });
+    expect(removed).toBe(200);
+    expect(readFileSync(join(fake.home, '.codex', 'AGENTS.md'), 'utf8')).toBe('# My rules\n\nBe brief.\n');
+    await page.reload();
+    await expectNoDialog(page);
+    expect(config(root).inboxAgentNotes.asked).toEqual(['claude-code', 'codex', 'gemini']);
+
     // The person turns Gemini off (the same route Settings → Agents uses): its entry goes, and stays gone.
     const off = await page.evaluate(async () => {
       const settings = await (await fetch('/api/inbox/settings')).json();
@@ -180,11 +208,11 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
     expect(off).toBe(200);
     expect(JSON.parse(readFileSync(join(fake.home, '.gemini', 'settings.json'), 'utf8')).mcpServers).toEqual({});
 
-    // Settings → Agents: Codex connected with its note, Gemini off (never re-added).
+    // Settings → Agents: Codex connected, its note off (removed above), Gemini off (never re-added).
     await page.goto(`${url}#settings/agents`);
     const codex = page.locator('[data-agent="codex"]');
     await expect(codex.getByRole('switch', { name: 'Reaches the Inbox: Codex' })).toHaveAttribute('aria-checked', 'true');
-    await expect(codex.getByRole('switch', { name: 'Note in its instructions: Codex' })).toHaveAttribute('aria-checked', 'true');
+    await expect(codex.getByRole('switch', { name: 'Note in its instructions: Codex' })).toHaveAttribute('aria-checked', 'false');
     await expect(page.locator('[data-agent="gemini"]').getByRole('switch', { name: 'Reaches the Inbox: Gemini CLI' })).toHaveAttribute('aria-checked', 'false');
     await page.goto(url);
 
@@ -220,6 +248,10 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
   } finally {
     await context.close().catch(() => {});
     await removeInboxScratch(root);
+    // A failure halfway must not leave a folder the cleanup cannot empty.
+    try {
+      chmodSync(join(fake.home, '.gemini'), 0o755);
+    } catch {}
     fake.remove();
   }
 });

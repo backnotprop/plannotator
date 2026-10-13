@@ -275,6 +275,48 @@ test("a config from 0.28.18 (offered, no list): the agents that could take a not
   expect(row(later, "gemini").note?.state).toBe("absent");
 });
 
+test("a config from 0.28.18 whose person said yes: an agent with the note counts as asked, so removing the note never asks again", async () => {
+  fake.install("codex", "gemini");
+  mkdirSync(join(fake.home, ".codex"), { recursive: true });
+  writeFileSync(join(fake.home, ".codex", "AGENTS.md"), "Mine.\n");
+  const s = await start();
+  await s.connectAgents();
+  // 0.28.18: the card's Add wrote Codex's note and saved only `offered`.
+  await post(s, "/api/inbox/agents/notes", { add: ["codex"], asked: ["codex"] });
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxAgentNotes: { offered: true } }));
+  const migrated = (await get(s)) as Asked;
+  expect(migrated.notes_asked).toEqual(["codex", "gemini"]);
+  const removed = (await (await post(s, "/api/inbox/agents", { agent: "codex", note: false })).json()) as Asked;
+  expect(row(removed, "codex").note?.state).toBe("absent");
+  expect(removed.notes_asked).toEqual(["codex", "gemini"]);
+  expect(loadConfig().inboxAgentNotes?.asked).toEqual(["codex", "gemini"]);
+});
+
+test("a yes in Settings → Agents answers the dialog for that agent: removing the note later never asks again", async () => {
+  fake.install("codex");
+  const s = await start();
+  await s.connectAgents();
+  expect(((await get(s)) as Asked).notes_asked).toEqual([]);
+  const on = (await (await post(s, "/api/inbox/agents", { agent: "codex", note: true })).json()) as Asked;
+  expect(on.error).toBeNull();
+  expect(on.notes_asked).toEqual(["codex"]);
+  const off = (await (await post(s, "/api/inbox/agents", { agent: "codex", note: false })).json()) as Asked;
+  expect(row(off, "codex").note?.state).toBe("absent");
+  expect(off.notes_asked).toEqual(["codex"]);
+});
+
+test("a note already in an agent's file (written by hand or an older Inbox, no record) counts as asked", async () => {
+  fake.install("codex");
+  mkdirSync(join(fake.home, ".codex"), { recursive: true });
+  const s = await start();
+  await s.connectAgents();
+  writeFileSync(join(fake.home, ".codex", "AGENTS.md"), `Mine.\n\n${(await get(s) as unknown as { note_text: string }).note_text}\n`);
+  const model = (await get(s)) as Asked;
+  expect(row(model, "codex").note?.state).toBe("added");
+  expect(model.notes_asked).toEqual(["codex"]);
+  expect(loadConfig().inboxAgentNotes?.asked).toEqual(["codex"]);
+});
+
 test("a window older than the dialog (no asked list): the agents that can take a note now count as asked", async () => {
   fake.install("codex");
   const s = await start();

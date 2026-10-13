@@ -7,7 +7,7 @@
  */
 import { expect, test } from 'bun:test';
 import type { InboxAgentRow, InboxAgentsModel } from '@plannotator/core/inbox-types';
-import { cardReport, noteQuestionRows, primaryAction, splitPath } from './agents';
+import { cardReport, noteQuestionRows, primaryAction, sentence, splitPath, tidyReason } from './agents';
 
 function row(id: InboxAgentRow['id'], over: Partial<InboxAgentRow> = {}): InboxAgentRow {
   return {
@@ -77,4 +77,14 @@ test('a path is cut in the middle: a short file name whole, a long one by its la
   const { head, tail } = splitPath(long);
   expect(head + tail).toBe(long);
   expect(tail).toHaveLength(22);
+});
+
+test('a reason never ends "))": an agent CLI\'s own message in parentheses is unwrapped to a colon when it ends in a parenthesis', () => {
+  expect(tidyReason('codex mcp add exited with code 3 (boom: codex could not write its config (permission denied))')).toBe(
+    'codex mcp add exited with code 3: boom: codex could not write its config (permission denied)',
+  );
+  expect(tidyReason('codex mcp add exited with code 3 (permission denied)')).toBe('codex mcp add exited with code 3 (permission denied)');
+  expect(tidyReason('timed out after 10 s')).toBe('timed out after 10 s');
+  expect(sentence('it failed (permission denied)')).toBe('it failed (permission denied).');
+  expect(sentence('Nothing was changed.')).toBe('Nothing was changed.');
 });

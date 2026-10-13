@@ -1598,7 +1598,7 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
 .ib-anote-sub code { overflow-wrap: anywhere; }
 .ib-anote-err { display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: 6px; font-size: 12.5px; line-height: 1.45; color: var(--foreground); margin-top: 3px; }
 .pn-inbox .ib-anote-err svg.ib-ic { width: 14px; height: 14px; margin-top: 2px; color: var(--warning); }
-.pn-inbox .ib-anote-err .ib-lnk { margin-left: 6px; }
+.pn-inbox .ib-anote-err .ib-lnk { margin-left: 0; white-space: nowrap; }
 /* The state: a quiet pill that never wraps; results carry an icon, so colour is never the only signal. */
 .ib-anote-pill { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; border: 1px solid var(--ib-line); font-size: 12px; color: var(--muted-foreground); white-space: nowrap; }
 .ib-anote-res { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 550; white-space: nowrap; }

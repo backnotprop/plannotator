@@ -1,8 +1,8 @@
-import { Fragment, useId, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import type { InboxAgentRow, InboxAgentsModel, InboxConnectReport, InboxNoteAgentId } from '@plannotator/core/inbox-types';
 import { INBOX_AGENT_LABELS } from '@plannotator/core/inbox-types';
 import { inboxApi, type InboxNoteResult } from '../api';
-import { bandLines, defaultPicks, joinNames, noteResultLabel, primaryAction, splitPath, whoLabel } from '../agents';
+import { bandLines, defaultPicks, joinNames, noteResultLabel, primaryAction, sentence, splitPath, tidyReason, whoLabel } from '../agents';
 import { HostMark, Icon } from '../icons';
 import { Modal } from './Updates';
 
@@ -33,13 +33,19 @@ type RowStatus = { kind: 'busy' } | { kind: 'done'; result: InboxNoteResult };
  */
 export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, onClosed }: AgentNoteDialogProps) {
   const id = useId();
-  const titleRef = useRef<HTMLHeadingElement>(null);
+  const doneRef = useRef<HTMLButtonElement>(null);
   const [picks, setPicks] = useState<Record<string, boolean>>(() => defaultPicks(rows));
   const [preview, setPreview] = useState(false);
   const [phase, setPhase] = useState<'ask' | 'busy' | 'done'>('ask');
   const [status, setStatus] = useState<Record<string, RowStatus>>({});
   const [live, setLive] = useState('');
   const closed = useRef(false);
+  // The results view takes focus on Done (the live region says what was written), and so does a
+  // Try again that worked (its link is gone).
+  const [focusDone, setFocusDone] = useState(0);
+  useEffect(() => {
+    if (phase === 'done') doneRef.current?.focus();
+  }, [phase, focusDone]);
 
   const single = rows.length === 1;
   const asked = rows.map((row) => row.id as InboxNoteAgentId);
@@ -89,7 +95,6 @@ export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, o
     }
     settle(results);
     setPhase('done');
-    requestAnimationFrame(() => titleRef.current?.focus());
   };
   const retry = async (agent: InboxNoteAgentId) => {
     setStatus((current) => ({ ...current, [agent]: { kind: 'busy' } }));
@@ -102,6 +107,7 @@ export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, o
       results = failedAll([agent], err);
     }
     settle(results);
+    if (results.every((result) => result.ok)) setFocusDone((n) => n + 1);
   };
 
   const doneRows = rows.filter((row) => status[row.id]);
@@ -132,7 +138,8 @@ export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, o
       fallbackFocus={pageHeading}
       className="ib-anote"
     >
-      {band && (band.connected || band.byHand || band.failed.length > 0 || band.foreign.length > 0) && (
+      {/* The band is this run's news before the answer; the results view drops it, as in the approved mock. */}
+      {!done && band && (band.connected || band.byHand || band.failed.length > 0 || band.foreign.length > 0) && (
         <div className="ib-anote-band" role="status" data-anote-band="">
           {band.connected && (
             <p className="ib-anote-ok">
@@ -171,7 +178,7 @@ export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, o
         </div>
       )}
       <div className="ib-anote-head">
-        <h2 id={`${id}-title`} ref={titleRef} tabIndex={-1} dir="auto">
+        <h2 id={`${id}-title`} tabIndex={-1} dir="auto">
           {title}
         </h2>
         {desc && (
@@ -231,11 +238,10 @@ export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, o
                         type="checkbox"
                         checked={picks[row.id] === true}
                         disabled={busy}
-                        aria-describedby={`${id}-path-${row.id}`}
                         onChange={(event) => setPicks((current) => ({ ...current, [row.id]: event.target.checked }))}
                       />
                       <HostMark host={row.id} />
-                      <RowMain row={row} pathId={`${id}-path-${row.id}`} />
+                      <RowMain row={row} />
                       <span className="ib-anote-st">
                         <Pill row={row} />
                       </span>
@@ -262,7 +268,7 @@ export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, o
         {done ? (
           <>
             <span className="ib-anote-later">Remove it any time in Settings → Agents.</span>
-            <button type="button" className="ib-btn ib-pri" data-anote-done="" onClick={close}>
+            <button type="button" className="ib-btn ib-pri" data-anote-done="" ref={doneRef} onClick={close}>
               Done
             </button>
           </>
@@ -298,14 +304,14 @@ function Pill({ row }: { row: InboxAgentRow }) {
   return <span className="ib-anote-pill">{row.note?.create ? 'New file' : 'Adds to end'}</span>;
 }
 
-function RowMain({ row, pathId, failure, onRetry }: { row: InboxAgentRow; pathId?: string; failure?: string | null; onRetry?: () => void }) {
+function RowMain({ row, failure, onRetry }: { row: InboxAgentRow; failure?: string | null; onRetry?: () => void }) {
   const note = row.note;
   return (
     <span className="ib-anote-main">
       <span className="ib-anote-name" dir="auto" title={row.label}>
         {row.label}
       </span>
-      {note?.path && <NotePath path={note.path} id={pathId} />}
+      {note?.path && <NotePath path={note.path} />}
       {!failure && row.id === 'pi' && <span className="ib-anote-sub">Pi reads only one of its instruction files; this is the one.</span>}
       {!failure && note?.shared_with && note.shared_with.length > 0 && (
         <span className="ib-anote-sub">This file is shared with {joinNames(note.shared_with.map((other) => INBOX_AGENT_LABELS[other]))}: one section serves both.</span>
@@ -319,11 +325,14 @@ function RowMain({ row, pathId, failure, onRetry }: { row: InboxAgentRow; pathId
         <span className="ib-anote-err">
           <Icon name="warn" />
           <span>
-            {failure}
+            {sentence(tidyReason(failure))}
             {onRetry && (
-              <button type="button" className="ib-lnk" onClick={onRetry}>
-                Try again
-              </button>
+              <>
+                {' '}
+                <button type="button" className="ib-lnk" onClick={onRetry}>
+                  Try again
+                </button>
+              </>
             )}
           </span>
         </span>
@@ -333,7 +342,7 @@ function RowMain({ row, pathId, failure, onRetry }: { row: InboxAgentRow; pathId
 }
 
 /** A path on one line, cut in the middle; each folder name its own bidi isolate; the whole path in the DOM and in `title`. */
-function NotePath({ path, id }: { path: string; id?: string }) {
+function NotePath({ path }: { path: string }) {
   const { head, tail } = splitPath(path);
   const segments = (part: string) =>
     part.split('/').map((name, index, all) => (
@@ -347,7 +356,7 @@ function NotePath({ path, id }: { path: string; id?: string }) {
       </Fragment>
     ));
   return (
-    <span className="ib-anote-path" dir="ltr" title={path} id={id}>
+    <span className="ib-anote-path" dir="ltr" title={path}>
       <span className="ib-anote-ph">{segments(head)}</span>
       <span className="ib-anote-pt">{segments(tail)}</span>
     </span>

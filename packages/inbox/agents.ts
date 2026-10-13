@@ -66,9 +66,34 @@ export function bandLines(report: InboxConnectReport): BandLines {
   return {
     connected: report.added.length > 0 ? `Connected ${joinNames(report.added.map(label))} to the Inbox${report.first ? '' : ' (new on this computer)'}.` : null,
     byHand: manual.length > 0 ? `${joinNames(manual.map(label))} ${manual.length === 1 ? 'needs' : 'need'} connecting by hand:` : null,
-    failed: report.failed.map((f) => ({ agent: f.agent, text: `Couldn't connect ${label(f.agent)}: ${f.reason}.` })),
+    failed: report.failed.map((f) => ({ agent: f.agent, text: `Couldn't connect ${label(f.agent)}: ${sentence(tidyReason(f.reason))}` })),
     foreign: report.foreign.map((f) => ({ agent: f.agent, text: `${label(f.agent)} has its own plannotator-inbox entry${f.path ? ` in ${f.path}` : ''}; Plannotator left it alone.` })),
   };
+}
+
+/**
+ * A reason as one tidy clause. An agent CLI's own message rides in
+ * parentheses ("codex mcp add exited with code 3 (boom: … (permission
+ * denied))"); when that message ends in a parenthesis of its own, the outer
+ * pair is unwrapped to a colon, so the line never ends "))".
+ */
+export function tidyReason(reason: string): string {
+  const text = reason.trim();
+  if (!text.endsWith('))')) return text;
+  let depth = 0;
+  for (let i = text.length - 1; i >= 0; i--) {
+    if (text[i] === ')') depth++;
+    else if (text[i] === '(' && --depth === 0) {
+      if (i === 0 || text[i - 1] !== ' ') return text;
+      return `${text.slice(0, i - 1)}: ${text.slice(i + 1, -1)}`;
+    }
+  }
+  return text;
+}
+
+/** A clause ended with one full stop (none added after ".", "!" or "?"). */
+export function sentence(text: string): string {
+  return /[.!?]$/.test(text) ? text : `${text}.`;
 }
 
 /** "Codex", "Codex and Gemini CLI", "Codex, Gemini CLI and Claude Code". */
