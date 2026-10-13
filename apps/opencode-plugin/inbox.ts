@@ -125,11 +125,17 @@ export async function registerInboxOpenCode2(
   v2: V2ContextLike,
   connection: InboxAgentConnection,
   resolveRoot: (sessionID: string) => Promise<{ root: string }>,
+  options: { signal?: AbortSignal } = {},
 ): Promise<boolean> {
   const transform = toolDomain?.transform;
   const spec = inboxAgentTool(connection.tools, { wakes: typeof v2.session?.prompt === "function" });
   if (typeof transform !== "function" || !spec) return false;
   const wakes = typeof v2.session?.prompt === "function" ? new OpenCode2Wakes(v2, connection, resolveRoot) : null;
+  // `signal` ends the wakes (their event subscription and lease timers): the plugin's lifetime otherwise.
+  if (wakes && options.signal) {
+    if (options.signal.aborted) wakes.dispose();
+    else options.signal.addEventListener("abort", () => wakes.dispose(), { once: true });
+  }
   let added = false;
   await transform((tools) => {
     if (typeof tools?.add !== "function") {
