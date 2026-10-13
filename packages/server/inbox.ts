@@ -726,8 +726,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (typeof body.note === "boolean") {
       if (!(INBOX_NOTE_AGENT_IDS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "note: this agent has no instructions file.", { field: "note" });
       if (inboxNotesDisabled(agentEnvironment.env) && body.note) throw new InboxError("notes_disabled", "PLANNOTATOR_INBOX_NOTES=0 is set: notes are off.");
-      const change = body.note ? addInboxNote(agent as InboxNoteAgentId, dataDir, agentEnvironment) : removeInboxNote(agent as InboxNoteAgentId, dataDir, agentEnvironment);
-      if (!change.ok) problems.push(change.reason);
+      // Adding one needs the agent here, as the card and --notes ask; switching one off never does.
+      if (body.note && !agentSpec(agent).detect(agentEnvironment)) {
+        problems.push(`${INBOX_AGENT_LABELS[agent]} was not found on this computer`);
+      } else {
+        const change = body.note ? addInboxNote(agent as InboxNoteAgentId, dataDir, agentEnvironment) : removeInboxNote(agent as InboxNoteAgentId, dataDir, agentEnvironment);
+        if (!change.ok) problems.push(change.reason);
+      }
     }
     return { ...(await agentsModel()), error: problems.length ? problems.join("; ") : null };
   };

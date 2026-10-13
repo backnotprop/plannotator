@@ -189,6 +189,14 @@ test("the card never writes a note for an agent not found here, and a question w
   expect(existsSync(join(fake.home, ".gemini"))).toBe(false);
 });
 
+test("Settings' note switch refuses an agent not found here too, and writes nothing", async () => {
+  const s = await start();
+  const refused = (await (await post(s, "/api/inbox/agents", { agent: "gemini", note: true })).json()) as Model & { error: string | null };
+  expect(refused.error).toBe("Gemini CLI was not found on this computer");
+  expect(existsSync(join(fake.home, ".gemini"))).toBe(false);
+  expect(existsSync(join(dataDir, "inbox", "agent-notes.json"))).toBe(false);
+});
+
 test("PLANNOTATOR_INBOX_NOTES=0: no note rows, no offer, and a note cannot be added", async () => {
   mkdirSync(join(fake.home, ".codex"), { recursive: true });
   writeFileSync(join(fake.home, ".codex", "AGENTS.md"), "Mine.\n");
