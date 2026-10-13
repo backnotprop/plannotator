@@ -33,7 +33,8 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, isAbsolute, join, sep } from "node:path";
+import { spawn as spawnChild } from "node:child_process";
+import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import {
   INBOX_AGENT_IDS,
   INBOX_AGENT_LABELS,
@@ -50,12 +51,12 @@ import {
   type InboxToolHost,
 } from "@plannotator/shared/config";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
+import { addJsonMember, removeJsonMember } from "./json-edit";
 import {
   describeFsError,
-  jsonIndentOf,
   readAgentFile,
   stripJsonComments,
-  withLineEndings,
+  withBom,
   writeAgentFileAtomic,
 } from "./agent-files";
 
@@ -112,27 +113,52 @@ export function createAgentEnvironmentFor(input: {
   };
 }
 
-async function runWithTimeout(argv: readonly string[], env: Readonly<Record<string, string | undefined>>, timeoutMs: number): Promise<AgentRunResult> {
-  let proc: Bun.Subprocess<"ignore", "pipe", "pipe">;
-  try {
-    proc = Bun.spawn([...argv], { stdin: "ignore", stdout: "pipe", stderr: "pipe", env: { ...env } as Record<string, string> });
-  } catch (error) {
-    return { exitCode: 127, timedOut: false, stdout: "", stderr: error instanceof Error ? error.message : String(error) };
-  }
-  const stdout = new Response(proc.stdout).text().catch(() => "");
-  const stderr = new Response(proc.stderr).text().catch(() => "");
-  let timedOut = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const limit = new Promise<number>((done) => {
-    timer = setTimeout(() => {
-      timedOut = true;
-      proc.kill();
-      done(124);
+/**
+ * Run argv in its own process group (POSIX), no stdin. The answer comes when
+ * the process exits, never when its output closes, so a grandchild that keeps
+ * stdout open cannot hold it; on the time limit the whole group is killed.
+ */
+function runWithTimeout(argv: readonly string[], env: Readonly<Record<string, string | undefined>>, timeoutMs: number): Promise<AgentRunResult> {
+  return new Promise((done) => {
+    let child: ReturnType<typeof spawnChild>;
+    try {
+      child = spawnChild(argv[0]!, argv.slice(1), {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...env } as NodeJS.ProcessEnv,
+        detached: process.platform !== "win32",
+        windowsHide: true,
+      });
+    } catch (error) {
+      done({ exitCode: 127, timedOut: false, stdout: "", stderr: error instanceof Error ? error.message : String(error) });
+      return;
+    }
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const cap = (text: string) => (text.length > 64 * 1024 ? text.slice(0, 64 * 1024) : text);
+    child.stdout?.on("data", (chunk: Buffer) => (stdout = cap(stdout + chunk.toString("utf8"))));
+    child.stderr?.on("data", (chunk: Buffer) => (stderr = cap(stderr + chunk.toString("utf8"))));
+    const finish = (result: AgentRunResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      done(result);
+    };
+    const timer = setTimeout(() => {
+      try {
+        if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
+        else child.kill("SIGKILL");
+      } catch {
+        child.kill("SIGKILL");
+      }
+      finish({ exitCode: 124, timedOut: true, stdout: "", stderr: "" });
     }, timeoutMs);
+    child.on("error", (error) => finish({ exitCode: 127, timedOut: false, stdout, stderr: error.message }));
+    // A short grace after exit for the last of its own output, then answer whatever a grandchild holds.
+    child.on("exit", (code, signal) => setTimeout(() => finish({ exitCode: code ?? (signal ? 128 : 1), timedOut: false, stdout, stderr }), 50));
   });
-  const exitCode = await Promise.race([proc.exited, limit]);
-  if (timer) clearTimeout(timer);
-  return { exitCode, timedOut, stdout: timedOut ? "" : await stdout, stderr: timedOut ? "" : await stderr };
 }
 
 /**
@@ -178,8 +204,11 @@ function envDir(e: AgentEnvironment, name: string): string | null {
   return isAbsolute(path) ? path : null;
 }
 
+/** `$CODEX_HOME` (a relative one resolved against the working folder, as Codex does), else `~/.codex`. */
 export function codexHome(e: AgentEnvironment): string {
-  return envDir(e, "CODEX_HOME") ?? join(e.homeDir, ".codex");
+  const value = e.env.CODEX_HOME?.trim();
+  if (value) return resolve(expandHome(value, e.homeDir));
+  return join(e.homeDir, ".codex");
 }
 export function claudeConfigDir(e: AgentEnvironment): string {
   return envDir(e, "CLAUDE_CONFIG_DIR") ?? join(e.homeDir, ".claude");
@@ -193,8 +222,9 @@ export function xdgConfigHome(e: AgentEnvironment): string {
 export function openCodeConfigDir(e: AgentEnvironment): string {
   return envDir(e, "OPENCODE_CONFIG_DIR") ?? join(xdgConfigHome(e), "opencode");
 }
+/** Gemini CLI's folder: `.gemini` under `$GEMINI_CLI_HOME` when set, else under the home folder. */
 export function geminiDir(e: AgentEnvironment): string {
-  return join(e.homeDir, ".gemini");
+  return join(envDir(e, "GEMINI_CLI_HOME") ?? e.homeDir, ".gemini");
 }
 /** The Claude desktop app's settings folder on this platform. */
 export function claudeAppDir(e: AgentEnvironment): string {
@@ -237,24 +267,32 @@ function codexHomeHasUserConfig(e: AgentEnvironment): boolean {
 /** What a config holds under `plannotator-inbox`. */
 export type InboxEntryRead =
   | { kind: "absent" }
+  /** It runs this Inbox's stdio entry (or a recorded / Plannotator one; see `ownsEntry`). */
   | { kind: "ours"; argv: string[] }
   | { kind: "other"; argv: string[] | null }
   /** The file could not be read or parsed; nothing is written to it. */
   | { kind: "unreadable"; reason: string };
 
 /**
- * Whether argv runs this Inbox's stdio entry: ends in `inbox mcp`, run by a
- * `plannotator` binary (any path: an older install, a moved binary) or by a
- * source checkout of it. People rename servers, so callers also match on this.
+ * Whether argv runs a Plannotator Inbox stdio entry, for uninstall's scan of
+ * files whose record is gone and for "already connected": ends in `inbox
+ * mcp`, and the program is a binary named exactly `plannotator` (any
+ * folder), or a source checkout's entry script (`…/apps/hook/server/index.ts`
+ * run by bun or node). `my-plannotator-proxy` is not.
  */
 export function isPlannotatorInboxCommand(argv: readonly string[]): boolean {
   if (argv.length < 3) return false;
   if (argv[argv.length - 2] !== "inbox" || argv[argv.length - 1] !== "mcp") return false;
-  return argv.slice(0, -2).some((word) => /^plannotator(?:\.exe)?$/i.test(basename(word)) || /plannotator/i.test(word));
+  const program = argv.slice(0, -2);
+  if (program.length === 1) return /^plannotator(?:\.exe)?$/i.test(basename(program[0]!.replace(/\\/g, "/")));
+  if (program.length === 2) {
+    return /^(?:bun|node)(?:\.exe)?$/i.test(basename(program[0]!.replace(/\\/g, "/"))) && /[\\/]apps[\\/]hook[\\/]server[\\/]index\.ts$/.test(program[1]!);
+  }
+  return false;
 }
 
-/** A server entry's argv: `{ command, args }`, OpenCode's `command: [...]`, or an HTTP entry on this machine's `/mcp`. */
-function entryArgv(value: unknown): string[] | null {
+/** A server entry's argv: `{ command, args }`, OpenCode's `command: [...]`, or an HTTP entry. */
+export function entryArgv(value: unknown): string[] | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   if (Array.isArray(record.command) && record.command.every((w) => typeof w === "string")) return record.command as string[];
@@ -262,18 +300,23 @@ function entryArgv(value: unknown): string[] | null {
     const args = Array.isArray(record.args) ? record.args.filter((w): w is string => typeof w === "string") : [];
     return [record.command, ...args];
   }
-  const url = typeof record.url === "string" ? record.url : typeof record.httpUrl === "string" ? record.httpUrl : null;
-  if (url && /^http:\/\/(?:127\.0\.0\.1|localhost):\d+\/mcp\/?$/.test(url)) return [url];
   return null;
 }
 
-function classify(value: unknown): InboxEntryRead {
-  const argv = entryArgv(value);
-  if (argv && (isPlannotatorInboxCommand(argv) || (argv.length === 1 && argv[0]!.startsWith("http")))) return { kind: "ours", argv };
-  return { kind: "other", argv };
+const sameArgv = (a: readonly string[] | null, b: readonly string[] | null) => !!a && !!b && a.length === b.length && a.every((w, i) => w === b[i]);
+
+/**
+ * Whether an entry is ours: exactly the command this CLI writes (or the one a
+ * record says it wrote), else, with `heuristic`, any Plannotator Inbox entry
+ * (`isPlannotatorInboxCommand`).
+ */
+export function ownsEntry(argv: readonly string[] | null, ours: readonly (readonly string[])[], heuristic: boolean): boolean {
+  if (!argv) return false;
+  if (ours.some((command) => sameArgv(argv, command))) return true;
+  return heuristic && isPlannotatorInboxCommand(argv);
 }
 
-/** The value at a key path (`["mcpServers", name]`; a key may hold dots, as Amp's `amp.mcpServers`). */
+/** The value at a key path (a key may hold dots, as Amp's `amp.mcpServers`). */
 function at(root: unknown, keys: readonly string[]): unknown {
   let value = root;
   for (const key of keys) {
@@ -283,11 +326,13 @@ function at(root: unknown, keys: readonly string[]): unknown {
   return value;
 }
 
-/** Read `plannotator-inbox` at `keys` in a JSON (or, when `jsonc`, JSON with comments) file. */
-function readJsonEntry(path: string, keys: readonly string[], jsonc: boolean): InboxEntryRead {
+/** The raw `plannotator-inbox` value in a file: absent, a value, or why it cannot be read. */
+type RawEntry = { kind: "absent" } | { kind: "value"; value: unknown } | { kind: "unreadable"; reason: string };
+
+function rawJsonEntry(path: string, keys: readonly string[], jsonc: boolean): RawEntry {
   const read = readAgentFile(path);
   if (read.kind === "missing") return { kind: "absent" };
-  if (read.kind === "refused") return { kind: "unreadable", reason: `${read.reason}` };
+  if (read.kind === "refused") return { kind: "unreadable", reason: read.reason };
   if (!read.text.trim()) return { kind: "absent" };
   let parsed: unknown;
   try {
@@ -296,58 +341,33 @@ function readJsonEntry(path: string, keys: readonly string[], jsonc: boolean): I
     return { kind: "unreadable", reason: "it is not plain JSON" };
   }
   const value = at(parsed, [...keys, INBOX_MCP_SERVER_NAME]);
-  return value === undefined ? { kind: "absent" } : classify(value);
+  return value === undefined ? { kind: "absent" } : { kind: "value", value };
 }
 
-/** TOML strings in `text`: basic ("…", escapes) and literal ('…'). */
-function tomlStrings(text: string): string[] {
-  const out: string[] = [];
-  for (const match of text.matchAll(/"((?:[^"\\\n]|\\.)*)"|'([^'\n]*)'/g)) {
-    if (match[2] !== undefined) out.push(match[2]);
-    else {
-      try {
-        out.push(JSON.parse(`"${match[1]}"`) as string);
-      } catch {
-        out.push(match[1]!);
-      }
-    }
-  }
-  return out;
-}
-
-/** Codex's `[mcp_servers.plannotator-inbox]` table in config.toml: its command and args. Read only; `codex mcp` writes it. */
-export function readCodexEntry(path: string): InboxEntryRead {
+/** Codex's config.toml, parsed as TOML (every form: tables, inline tables, dotted keys, quoted parts). */
+function rawCodexEntry(path: string): RawEntry {
   const read = readAgentFile(path);
   if (read.kind === "missing") return { kind: "absent" };
   if (read.kind === "refused") return { kind: "unreadable", reason: read.reason };
-  const lines = read.text.split(/\r?\n/);
-  const header = /^\s*\[\s*mcp_servers\s*\.\s*(?:"plannotator-inbox"|'plannotator-inbox'|plannotator-inbox)\s*\]\s*(?:#.*)?$/;
-  const start = lines.findIndex((line) => header.test(line));
-  if (start === -1) return { kind: "absent" };
-  let end = lines.length;
-  for (let i = start + 1; i < lines.length; i += 1) {
-    if (/^\s*\[/.test(lines[i]!)) {
-      end = i;
-      break;
-    }
+  let parsed: unknown;
+  try {
+    parsed = Bun.TOML.parse(read.text);
+  } catch {
+    return { kind: "unreadable", reason: "it is not valid TOML" };
   }
-  const body = lines.slice(start + 1, end).join("\n");
-  const command = /^\s*command\s*=\s*(.+)$/m.exec(body);
-  const commandWords = command ? tomlStrings(command[1]!) : [];
-  const argsStart = body.search(/^\s*args\s*=\s*\[/m);
-  let args: string[] = [];
-  if (argsStart !== -1) {
-    const open = body.indexOf("[", argsStart);
-    const close = body.indexOf("]", open);
-    if (close === -1) return { kind: "unreadable", reason: "its plannotator-inbox table could not be read" };
-    args = tomlStrings(body.slice(open + 1, close));
-  }
-  if (commandWords.length === 0) {
-    const url = /^\s*url\s*=\s*(.+)$/m.exec(body);
-    const urlWords = url ? tomlStrings(url[1]!) : [];
-    return urlWords.length ? classify({ url: urlWords[0] }) : { kind: "other", argv: null };
-  }
-  return classify({ command: commandWords[0], args });
+  const value = at(parsed, ["mcp_servers", INBOX_MCP_SERVER_NAME]);
+  return value === undefined ? { kind: "absent" } : { kind: "value", value };
+}
+
+function classify(raw: RawEntry, ours: readonly (readonly string[])[], heuristic: boolean): InboxEntryRead {
+  if (raw.kind !== "value") return raw;
+  const argv = entryArgv(raw.value);
+  return ownsEntry(argv, ours, heuristic) ? { kind: "ours", argv: argv! } : { kind: "other", argv };
+}
+
+/** Codex's `plannotator-inbox` in config.toml (read only; `codex mcp` writes it). `ours`: the commands that count as ours. */
+export function readCodexEntry(path: string, ours: readonly (readonly string[])[] = [], heuristic = true): InboxEntryRead {
+  return classify(rawCodexEntry(path), ours, heuristic);
 }
 
 // ---------------------------------------------------------------------------
@@ -361,8 +381,8 @@ type ConnectWay =
   | { kind: "json"; keys: readonly string[] }
   /** `inboxTool` on for Plannotator's own extension/plugin. */
   | { kind: "tool"; host: InboxToolHost }
-  /** Only a person can connect it. */
-  | { kind: "manual" }
+  /** Only a person can connect it; `why` says how. */
+  | { kind: "manual"; why: string }
   /** Nothing to do (Claude Code). */
   | { kind: "none" };
 
@@ -370,12 +390,18 @@ interface AgentSpec {
   id: InboxAgentId;
   /** Found on this computer. */
   detect(e: AgentEnvironment): boolean;
-  /** How it is connected, once found. */
-  way(e: AgentEnvironment): ConnectWay;
+  /**
+   * How it is connected, once found. `probe`: ask the CLI its `--version`
+   * first (before writing anything); without it (the Settings model, a read)
+   * nothing is run.
+   */
+  way(e: AgentEnvironment, probe?: boolean): Promise<ConnectWay>;
   /** Where its `plannotator-inbox` entry lives (null: unknown, or not a file). */
   file(e: AgentEnvironment): string | null;
-  /** The entry, read only. Null: the agent's file is not known; the record decides. */
-  read(e: AgentEnvironment): InboxEntryRead | null;
+  /** The raw entry, read only. Null: the agent's file is not known; the record decides. */
+  raw(e: AgentEnvironment): RawEntry | null;
+  /** How uninstall removes it, when not a JSON key. */
+  remove?: { bin: string; args: string[] };
 }
 
 const NAME = INBOX_MCP_SERVER_NAME;
@@ -396,19 +422,27 @@ export function piExtensionInstalled(e: AgentEnvironment): boolean {
   }
 }
 
-/** Whether Plannotator's OpenCode plugin is listed in the global opencode config (`plugin` / `plugins`). */
+/** Whether Plannotator's OpenCode plugin is listed in the global opencode config: `plugin` (OpenCode 1) or `plugins` (OpenCode 2, strings or `{ package }`). */
 export function openCodePluginInstalled(e: AgentEnvironment): boolean {
   const dir = openCodeConfigDir(e);
+  const isOurs = (item: unknown) => {
+    const spec =
+      typeof item === "string"
+        ? item
+        : Array.isArray(item) && typeof item[0] === "string"
+          ? item[0]
+          : item && typeof item === "object" && typeof (item as { package?: unknown }).package === "string"
+            ? (item as { package: string }).package
+            : null;
+    return spec !== null && /^@plannotator\/opencode(?:@|$)/.test(spec);
+  };
   for (const name of ["opencode.json", "opencode.jsonc", "config.json"]) {
     const read = readAgentFile(join(dir, name));
     if (read.kind !== "file") continue;
     try {
       const parsed = JSON.parse(stripJsonComments(read.text)) as { plugin?: unknown; plugins?: unknown };
       const lists = [parsed.plugin, parsed.plugins].filter(Array.isArray) as unknown[][];
-      if (lists.some((list) => list.some((item) => {
-        const spec = typeof item === "string" ? item : Array.isArray(item) && typeof item[0] === "string" ? item[0] : null;
-        return spec !== null && /^@plannotator\/opencode(?:@|$)/.test(spec);
-      }))) return true;
+      if (lists.some((list) => list.some(isOurs))) return true;
     } catch {
       // Unreadable: not found here.
     }
@@ -428,97 +462,148 @@ export function claudeCodePluginEnabled(e: AgentEnvironment): boolean {
   }
 }
 
-function cliWay(e: AgentEnvironment, bin: string, add: (command: readonly string[]) => string[], remove: string[]): ConnectWay {
-  return e.which(bin) ? { kind: "cli", bin, add, remove } : { kind: "manual" };
+/**
+ * Each CLI's own `--version` line, so a program that only shares the name
+ * (cln's `pi` printing digits, amp.rs) is never handed an `mcp add`, and Pi
+ * before 0.99 (no `pi mcp`: it would read the words as a chat prompt and run
+ * a model turn) is left to the person. Read with no stdin, under the limit.
+ */
+const VERSION_SHAPES: Record<string, { line: RegExp; min?: [number, number, number]; manual: string }> = {
+  codex: { line: /^codex-cli (\d+)\.(\d+)\.(\d+)\b/, manual: "this codex did not answer like Codex CLI" },
+  gemini: { line: /^(\d+)\.(\d+)\.(\d+)(?:-[\w.]+)?$/, manual: "this gemini did not answer like Gemini CLI" },
+  devin: { line: /^devin (\d+)\.(\d+)\.(\d+)\b/, manual: "this devin did not answer like Devin" },
+  amp: { line: /^(\d+)\.(\d+)\.(\d+)-g[0-9a-f]+\b/, manual: "this amp did not answer like Sourcegraph Amp" },
+  pi: {
+    line: /^(\d+)\.(\d+)\.(\d+)(?:-[\w.]+)?$/,
+    min: [0, 99, 0],
+    manual: "Pi before 0.99 has no `pi mcp`; update Pi, or add plannotator-inbox to ~/.pi/agent/mcp.json by hand",
+  },
+};
+
+async function cliWay(
+  e: AgentEnvironment,
+  bin: string,
+  add: (command: readonly string[]) => string[],
+  remove: string[],
+  timeoutMs: number,
+  probe: boolean,
+): Promise<ConnectWay> {
+  const path = e.which(bin);
+  if (!path) return { kind: "manual", why: `${bin} is not on PATH` };
+  const shape = VERSION_SHAPES[bin];
+  if (shape && probe) {
+    const ran = await e.run([path, "--version"], { timeoutMs: Math.min(timeoutMs, 5_000) });
+    const line = ran.stdout.split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? "";
+    const match = ran.exitCode === 0 && !ran.timedOut ? shape.line.exec(line) : null;
+    if (!match) return { kind: "manual", why: shape.manual };
+    if (shape.min) {
+      const version = [Number(match[1]), Number(match[2]), Number(match[3])];
+      const [a, b, c] = shape.min;
+      const older = version[0]! < a || (version[0] === a && (version[1]! < b || (version[1] === b && version[2]! < c)));
+      if (older) return { kind: "manual", why: shape.manual };
+    }
+  }
+  return { kind: "cli", bin, add, remove };
 }
 
 export const AGENT_SPECS: readonly AgentSpec[] = [
   {
     id: "claude-code",
     detect: (e) => claudeCodePluginEnabled(e),
-    way: () => ({ kind: "none" }),
+    way: async () => ({ kind: "none" }),
     file: () => null,
-    read: () => null,
+    raw: () => null,
   },
   {
     id: "codex",
     detect: (e) => !!e.which("codex") || codexHomeHasUserConfig(e),
-    way: (e) => cliWay(e, "codex", (cmd) => ["mcp", "add", NAME, "--", ...cmd], ["mcp", "remove", NAME]),
+    way: (e, probe) => cliWay(e, "codex", (cmd) => ["mcp", "add", NAME, "--", ...cmd], ["mcp", "remove", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS, probe === true),
     file: (e) => join(codexHome(e), "config.toml"),
-    read: (e) => readCodexEntry(join(codexHome(e), "config.toml")),
+    raw: (e) => rawCodexEntry(join(codexHome(e), "config.toml")),
+    remove: { bin: "codex", args: ["mcp", "remove", NAME] },
   },
   {
     id: "gemini",
     detect: (e) => !!e.which("gemini") || isDir(geminiDir(e)),
-    way: (e) => cliWay(e, "gemini", (cmd) => ["mcp", "add", "-s", "user", NAME, ...cmd], ["mcp", "remove", "-s", "user", NAME]),
+    way: (e, probe) => cliWay(e, "gemini", (cmd) => ["mcp", "add", "-s", "user", NAME, ...cmd], ["mcp", "remove", "-s", "user", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS, probe === true),
     file: (e) => join(geminiDir(e), "settings.json"),
-    read: (e) => readJsonEntry(join(geminiDir(e), "settings.json"), ["mcpServers"], true),
+    raw: (e) => rawJsonEntry(join(geminiDir(e), "settings.json"), ["mcpServers"], true),
+    remove: { bin: "gemini", args: ["mcp", "remove", "-s", "user", NAME] },
   },
   {
     id: "cursor",
     detect: (e) => isDir(join(e.homeDir, ".cursor")) || !!e.which("cursor") || !!e.which("cursor-agent"),
-    way: () => ({ kind: "json", keys: ["mcpServers"] }),
+    way: async () => ({ kind: "json", keys: ["mcpServers"] }),
     file: (e) => join(e.homeDir, ".cursor", "mcp.json"),
-    read: (e) => readJsonEntry(join(e.homeDir, ".cursor", "mcp.json"), ["mcpServers"], false),
+    raw: (e) => rawJsonEntry(join(e.homeDir, ".cursor", "mcp.json"), ["mcpServers"], false),
   },
   {
     id: "windsurf",
     detect: (e) => !!e.which("devin"),
-    way: (e) => cliWay(e, "devin", (cmd) => ["mcp", "add", "-s", "user", NAME, "--", ...cmd], ["mcp", "remove", "-s", "user", NAME]),
+    way: (e, probe) => cliWay(e, "devin", (cmd) => ["mcp", "add", "-s", "user", NAME, "--", ...cmd], ["mcp", "remove", "-s", "user", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS, probe === true),
     file: (e) => join(xdgConfigHome(e), "devin", "config.json"),
-    read: (e) => readJsonEntry(join(xdgConfigHome(e), "devin", "config.json"), ["mcpServers"], true),
+    raw: (e) => rawJsonEntry(join(xdgConfigHome(e), "devin", "config.json"), ["mcpServers"], true),
+    remove: { bin: "devin", args: ["mcp", "remove", "-s", "user", NAME] },
   },
   {
     id: "amp",
     detect: (e) => !!e.which("amp"),
-    way: (e) => cliWay(e, "amp", (cmd) => ["mcp", "add", NAME, "--", ...cmd], ["mcp", "remove", NAME]),
+    way: (e, probe) => cliWay(e, "amp", (cmd) => ["mcp", "add", NAME, "--", ...cmd], ["mcp", "remove", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS, probe === true),
     file: (e) => join(xdgConfigHome(e), "amp", "settings.json"),
-    read: (e) => readJsonEntry(join(xdgConfigHome(e), "amp", "settings.json"), ["amp.mcpServers"], true),
+    raw: (e) => rawJsonEntry(join(xdgConfigHome(e), "amp", "settings.json"), ["amp.mcpServers"], true),
+    remove: { bin: "amp", args: ["mcp", "remove", NAME] },
   },
   {
     id: "cline",
     detect: (e) => !!e.which("cline"),
-    way: (e) => cliWay(e, "cline", (cmd) => ["mcp", "add", NAME, "--yes", "--", ...cmd], ["mcp", "remove", NAME]),
-    // Cline CLI's config file is not verified: its record decides.
+    // Cline CLI's `mcp add` and its config file are not verified (and a positional word can start a task), so a person adds it.
+    way: async () => ({ kind: "manual", why: "Cline's MCP command is not verified; add it in Cline's MCP settings" }),
     file: () => null,
-    read: () => null,
+    raw: () => null,
   },
   {
     id: "kiro",
     detect: (e) => !!e.which("kiro-cli") || isDir(join(e.homeDir, ".kiro")),
-    way: () => ({ kind: "json", keys: ["mcpServers"] }),
+    way: async () => ({ kind: "json", keys: ["mcpServers"] }),
     file: (e) => join(e.homeDir, ".kiro", "settings", "mcp.json"),
-    read: (e) => readJsonEntry(join(e.homeDir, ".kiro", "settings", "mcp.json"), ["mcpServers"], false),
+    raw: (e) => rawJsonEntry(join(e.homeDir, ".kiro", "settings", "mcp.json"), ["mcpServers"], false),
   },
   {
     id: "pi",
     detect: (e) => piExtensionInstalled(e) || !!e.which("pi"),
-    way: (e) =>
+    way: (e, probe) =>
       piExtensionInstalled(e)
-        ? { kind: "tool", host: "pi" }
-        : cliWay(e, "pi", (cmd) => ["mcp", "add", NAME, "--", ...cmd], ["mcp", "remove", NAME]),
-    file: (e) => (piExtensionInstalled(e) ? null : join(piAgentDir(e), "mcp.json")),
-    read: (e) => readJsonEntry(join(piAgentDir(e), "mcp.json"), ["mcpServers"], true),
+        ? Promise.resolve({ kind: "tool", host: "pi" } as ConnectWay)
+        : cliWay(e, "pi", (cmd) => ["mcp", "add", NAME, "--", ...cmd], ["mcp", "remove", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS, probe === true),
+    file: (e) => join(piAgentDir(e), "mcp.json"),
+    raw: (e) => rawJsonEntry(join(piAgentDir(e), "mcp.json"), ["mcpServers"], true),
+    remove: { bin: "pi", args: ["mcp", "remove", NAME] },
   },
   {
     id: "opencode",
-    detect: (e) => openCodePluginInstalled(e) || !!e.which("opencode"),
-    // Without the plugin: opencode.json may be JSONC and project-scoped, so a person adds it.
-    way: (e) => (openCodePluginInstalled(e) ? { kind: "tool", host: "opencode" } : { kind: "manual" }),
+    detect: (e) => openCodePluginInstalled(e) || !!e.which("opencode") || !!e.which("opencode2"),
+    // Without the plugin: opencode.json may be JSONC and per project, so a person adds it.
+    way: async (e) => (openCodePluginInstalled(e) ? { kind: "tool", host: "opencode" } : { kind: "manual", why: "add Plannotator's OpenCode plugin, or the server to opencode.json" }),
     file: () => null,
-    read: () => null,
+    raw: () => null,
   },
   {
     id: "claude-app",
     detect: (e) => isDir(claudeAppDir(e)),
-    way: () => ({ kind: "json", keys: ["mcpServers"] }),
+    way: async () => ({ kind: "json", keys: ["mcpServers"] }),
     file: (e) => join(claudeAppDir(e), "claude_desktop_config.json"),
-    read: (e) => readJsonEntry(join(claudeAppDir(e), "claude_desktop_config.json"), ["mcpServers"], false),
+    raw: (e) => rawJsonEntry(join(claudeAppDir(e), "claude_desktop_config.json"), ["mcpServers"], false),
   },
 ];
 
 export function agentSpec(id: InboxAgentId): AgentSpec {
   return AGENT_SPECS.find((spec) => spec.id === id)!;
+}
+
+/** One agent's entry, read only, judged against the commands that count as ours. */
+export function readAgentEntry(id: InboxAgentId, e: AgentEnvironment, ours: readonly (readonly string[])[], heuristic = false): InboxEntryRead | null {
+  const raw = agentSpec(id).raw(e);
+  return raw === null ? null : classify(raw, ours, heuristic);
 }
 
 // ---------------------------------------------------------------------------
@@ -527,54 +612,42 @@ export function agentSpec(id: InboxAgentId): AgentSpec {
 type WriteOutcome = { ok: true; changed: boolean } | { ok: false; reason: string };
 
 /**
- * Set (or with `value === undefined`, delete) `plannotator-inbox` at `keys`
- * in a plain-JSON file: a strict parse, the file's own indentation and line
- * endings, atomic, a no-op when nothing changes. Never replaces an entry that
- * is not ours.
+ * Add (`value`) or remove (`undefined`) `plannotator-inbox` at `keys` in a
+ * plain-JSON file, losslessly (json-edit.ts: only that member's text
+ * changes; anything else is refused, with the reason), atomically, written at
+ * a symlink's target, a no-op when nothing changes. `ours`: the commands a
+ * removal may take away; an entry running anything else is never replaced or
+ * removed.
  */
-export function writeJsonEntry(path: string, keys: readonly string[], value: { command: string; args: string[] } | undefined): WriteOutcome {
+export function writeJsonEntry(
+  path: string,
+  keys: readonly string[],
+  value: { command: string; args: string[] } | undefined,
+  ours: readonly (readonly string[])[] = value ? [[value.command, ...value.args]] : [],
+): WriteOutcome {
   const read = readAgentFile(path);
-  if (read.kind === "refused") return { ok: false, reason: `${path} ${read.reason === "permission denied" ? "can't be read (permission denied)" : `can't be edited: ${read.reason}`}` };
+  if (read.kind === "refused") return { ok: false, reason: `${path} can't be edited (${read.reason})` };
   if (read.kind === "missing" && value === undefined) return { ok: true, changed: false };
   const original = read.kind === "file" ? read.text : "";
-  let root: Record<string, unknown> = {};
   if (original.trim()) {
+    let parsed: unknown;
     try {
-      const parsed: unknown = JSON.parse(original);
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { ok: false, reason: `${path} is not a JSON object, so Plannotator left it as it was` };
-      root = parsed as Record<string, unknown>;
+      parsed = JSON.parse(original);
     } catch {
       return { ok: false, reason: `${path} is not plain JSON, so Plannotator left it as it was` };
     }
+    const current = at(parsed, [...keys, NAME]);
+    if (current !== undefined) {
+      const owned = ownsEntry(entryArgv(current), ours, false);
+      if (value !== undefined) return owned ? { ok: true, changed: false } : { ok: false, reason: `${path} has its own ${NAME} entry` };
+      if (!owned) return { ok: false, reason: `${path} has a ${NAME} entry Plannotator did not write` };
+    } else if (value === undefined) return { ok: true, changed: false };
   }
-  let parent: Record<string, unknown> = root;
-  for (const key of keys) {
-    const next = parent[key];
-    if (next === undefined) {
-      if (value === undefined) return { ok: true, changed: false };
-      parent[key] = {};
-    } else if (!next || typeof next !== "object" || Array.isArray(next)) {
-      return { ok: false, reason: `${path} has a "${key}" that is not an object, so Plannotator left it as it was` };
-    }
-    parent = parent[key] as Record<string, unknown>;
-  }
-  const current = parent[NAME];
-  if (current !== undefined && classify(current).kind !== "ours") {
-    return { ok: false, reason: `${path} has its own ${NAME} entry` };
-  }
-  if (value === undefined) {
-    if (current === undefined) return { ok: true, changed: false };
-    delete parent[NAME];
-  } else {
-    if (current !== undefined) return { ok: true, changed: false };
-    parent[NAME] = value;
-  }
-  const crlf = read.kind === "file" ? read.crlf : false;
-  const trailing = original === "" || /\n$/.test(original) ? "\n" : "";
-  const text = withLineEndings(`${JSON.stringify(root, null, jsonIndentOf(original))}${trailing}`, crlf);
-  if (read.kind === "file" && text === read.text) return { ok: true, changed: false };
+  const edit = value === undefined ? removeJsonMember(original, keys, NAME) : addJsonMember(original, keys, NAME, value);
+  if (!edit.ok) return { ok: false, reason: `${path} can't be edited without reshaping it (${edit.reason}), so Plannotator left it as it was` };
+  if (!edit.changed) return { ok: true, changed: false };
   try {
-    writeAgentFileAtomic(read.target, text, read.kind === "file" ? read.mode : 0o600);
+    writeAgentFileAtomic(read.target, withBom(edit.text, read.kind === "file" && read.bom), read.kind === "file" ? read.mode : 0o600);
   } catch (error) {
     return { ok: false, reason: `${path} can't be written (${describeFsError(error)})` };
   }
@@ -608,6 +681,8 @@ export interface InboxAgentsFile {
   agents: Partial<Record<InboxAgentId, InboxAgentRecord>>;
   /** The last run's report, for the window's one-line card. `seen` once the person closed it. */
   last_report?: InboxConnectReport & { seen?: boolean };
+  /** Each agent's last failure reason, so a lasting one is said once (the run still tries again). */
+  failures?: Partial<Record<InboxAgentId, string>>;
 }
 
 export function inboxAgentsPath(dataDir: string): string {
@@ -660,18 +735,30 @@ type AgentOutcome =
   | { kind: "already"; record: InboxAgentRecord | null }
   | { kind: "foreign"; record: InboxAgentRecord; path: string | null }
   | { kind: "failed"; reason: string; path: string | null }
-  | { kind: "manual" }
+  | { kind: "manual"; why: string }
   | { kind: "off"; record: InboxAgentRecord }
   | { kind: "none" };
 
+/** The commands that count as this CLI's entry: what it writes now, and what a record says it wrote. */
+function ourCommands(options: ConnectOptions, record?: InboxAgentRecord): string[][] {
+  const commands = [[...options.selfCommand, "inbox", "mcp"]];
+  if (record?.command) commands.push(record.command);
+  return commands;
+}
+
+/**
+ * Connect one agent. `force`: the person's own switch (Settings), which adds
+ * the entry whatever the record says; the run itself only reaches agents with
+ * no record. Never replaces an entry it did not write.
+ */
 async function connectOne(spec: AgentSpec, options: ConnectOptions, at: string): Promise<AgentOutcome> {
   const e = options.environment;
-  const way = spec.way(e);
+  const timeoutMs = options.agentTimeoutMs ?? INBOX_CONNECT_AGENT_TIMEOUT_MS;
+  const way = await spec.way(e, true);
   const file = spec.file(e);
   const command = [...options.selfCommand, "inbox", "mcp"];
-  const timeoutMs = options.agentTimeoutMs ?? INBOX_CONNECT_AGENT_TIMEOUT_MS;
   if (way.kind === "none") return { kind: "none" };
-  if (way.kind === "manual") return { kind: "manual" };
+  if (way.kind === "manual") return { kind: "manual", why: way.why };
   if (way.kind === "tool") {
     // The env var decides (and locks the switch): nothing to write.
     if (parseInboxToolEnv(e.env as NodeJS.ProcessEnv) !== undefined) {
@@ -680,10 +767,12 @@ async function connectOne(spec: AgentSpec, options: ConnectOptions, at: string):
     const configured = configuredInboxTool(loadConfig(), way.host);
     if (configured === true) return { kind: "already", record: { state: "found", reach: "tool", path: null, at } };
     if (configured === false) return { kind: "off", record: { state: "off", reach: "tool", path: null, at } };
-    const config = loadConfig();
-    const current = config.inboxTool;
-    const next: Partial<Record<InboxToolHost, boolean>> =
-      current && typeof current === "object" && !Array.isArray(current) ? { ...current } : {};
+    const current = loadConfig().inboxTool;
+    const next: Partial<Record<InboxToolHost, boolean>> = {};
+    for (const host of ["claude-code", "pi", "opencode"] as const) {
+      const value = typeof current === "boolean" ? current : current?.[host];
+      if (typeof value === "boolean") next[host] = value;
+    }
     next[way.host] = true;
     saveConfig({ inboxTool: next });
     if (configuredInboxTool(loadConfig(), way.host) !== true) {
@@ -691,46 +780,47 @@ async function connectOne(spec: AgentSpec, options: ConnectOptions, at: string):
     }
     return { kind: "added", record: { state: "added", reach: "tool", path: null, at } };
   }
-  const before = spec.read(e);
-  if (before?.kind === "unreadable") {
+  const before = classify(spec.raw(e) ?? { kind: "absent" }, ourCommands(options), true);
+  if (before.kind === "unreadable") {
     return { kind: "failed", reason: `${displayPath(file, e)} can't be read (${before.reason}), so Plannotator left it as it was`, path: file };
   }
-  if (before?.kind === "ours") return { kind: "already", record: { state: "found", reach: "mcp", path: file, at } };
-  if (before?.kind === "other") return { kind: "foreign", record: { state: "foreign", reach: "mcp", path: file, at }, path: file };
+  if (before.kind === "ours") return { kind: "already", record: { state: "found", reach: "mcp", path: file, at } };
+  if (before.kind === "other") return { kind: "foreign", record: { state: "foreign", reach: "mcp", path: file, at }, path: file };
   if (way.kind === "json") {
     const [cmd, ...args] = command;
     const result = writeJsonEntry(file!, way.keys, { command: cmd!, args });
-    if (!result.ok) return { kind: "failed", reason: result.reason.replace(e.homeDir, "~"), path: file };
+    if (!result.ok) return { kind: "failed", reason: result.reason.split(e.homeDir).join("~"), path: file };
     return { kind: "added", record: { state: "added", reach: "mcp", path: file, command, at } };
   }
   const bin = e.which(way.bin);
-  if (!bin) return { kind: "manual" };
+  if (!bin) return { kind: "manual", why: `${way.bin} is not on PATH` };
   const ran = await e.run([bin, ...way.add(command)], { timeoutMs });
   if (ran.timedOut) return { kind: "failed", reason: `${way.bin} mcp add did not finish within ${Math.round(timeoutMs / 1000)} s`, path: file };
   if (ran.exitCode !== 0) {
     const why = firstLine(ran.stderr) || firstLine(ran.stdout);
     return { kind: "failed", reason: `${way.bin} mcp add exited with code ${ran.exitCode}${why ? ` (${why})` : ""}`, path: file };
   }
-  const after = spec.read(e);
-  if (after && after.kind !== "ours") {
+  const after = classify(spec.raw(e) ?? { kind: "absent" }, [command], false);
+  if (after.kind !== "ours") {
     return { kind: "failed", reason: `${way.bin} mcp add ran, but ${displayPath(file, e)} does not have the entry`, path: file };
   }
   return { kind: "added", record: { state: "added", reach: "mcp", path: file, command, at } };
 }
 
 /**
- * Whether an `added`/`found` MCP entry is still there (read only). Null: the
- * agent's file is not known or not readable, so nothing can be said.
+ * Whether a recorded MCP entry is still there (read only). Null: the agent's
+ * file is not known or not readable, so nothing can be said.
  */
-export function entryStillThere(id: InboxAgentId, e: AgentEnvironment): boolean | null {
-  const read = agentSpec(id).read(e);
+export function entryStillThere(id: InboxAgentId, e: AgentEnvironment, ours: readonly (readonly string[])[]): boolean | null {
+  const read = readAgentEntry(id, e, ours, true);
   if (!read || read.kind === "unreadable") return null;
   return read.kind === "ours";
 }
 
 /**
  * Connect every agent found that has no record yet. Never throws: a failure
- * is reported per agent and tried again at the next run.
+ * is reported per agent and tried again at the next run (said again only
+ * when its reason changes).
  */
 export async function connectInboxAgents(options: ConnectOptions): Promise<InboxConnectReport> {
   const now = options.now ?? (() => new Date());
@@ -749,7 +839,7 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
   for (const spec of pending) {
     const record = file.agents[spec.id];
     if (!record || record.reach !== "mcp" || (record.state !== "added" && record.state !== "found") || record.removed_outside_at) continue;
-    if (entryStillThere(spec.id, e) === false) record.removed_outside_at = at;
+    if (entryStillThere(spec.id, e, ourCommands(options, record)) === false) record.removed_outside_at = at;
   }
   const toConnect = pending.filter((spec) => !file.agents[spec.id]);
   const deadline = options.totalTimeoutMs ?? INBOX_CONNECT_TOTAL_TIMEOUT_MS;
@@ -773,12 +863,14 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
   ]);
   if (timer) clearTimeout(timer);
 
+  const failures = { ...(file.failures ?? {}) };
   for (const spec of toConnect) {
     const outcome = settled.get(spec.id);
     if (!outcome) {
       report.unfinished.push(spec.id);
       continue;
     }
+    if (outcome.kind !== "failed") delete failures[spec.id];
     switch (outcome.kind) {
       case "added":
         report.added.push(spec.id);
@@ -796,7 +888,9 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
         file.agents[spec.id] = outcome.record;
         break;
       case "failed":
-        report.failed.push({ agent: spec.id, reason: outcome.reason, path: displayPath(outcome.path, e) });
+        // A lasting failure is said once; tried again every run.
+        if (failures[spec.id] !== outcome.reason) report.failed.push({ agent: spec.id, reason: outcome.reason, path: displayPath(outcome.path, e) });
+        failures[spec.id] = outcome.reason;
         break;
       case "manual":
         report.manual.push(spec.id);
@@ -805,6 +899,7 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
         break;
     }
   }
+  file.failures = failures;
   for (const spec of pending) {
     if (toConnect.includes(spec)) continue;
     const record = file.agents[spec.id];
@@ -833,17 +928,19 @@ export function formatConnectReport(report: InboxConnectReport): string[] {
       const claude = report.claude_code ? " (Claude Code was already on)" : "";
       lines.push(`Connected ${inboxAgentList(report.added)} to the Inbox${claude}.`);
     } else {
-      lines.push(`Connected ${inboxAgentList(report.added)} to the Inbox (new on this computer). Change it in Settings.`);
+      lines.push(`Connected ${inboxAgentList(report.added)} to the Inbox (new on this computer).`);
     }
     if (report.added.includes("claude-app")) lines.push("Restart the Claude app to use it there.");
   }
   for (const failure of report.failed) {
-    lines.push(`Couldn't connect ${INBOX_AGENT_LABELS[failure.agent]}: ${failure.reason}. Turn it on in Settings once that's fixed.`);
+    lines.push(`Couldn't connect ${INBOX_AGENT_LABELS[failure.agent]}: ${failure.reason}. Plannotator tries again at the next plannotator inbox.`);
   }
   for (const foreign of report.foreign) {
     lines.push(`${INBOX_AGENT_LABELS[foreign.agent]} has its own ${INBOX_MCP_SERVER_NAME} entry${foreign.path ? ` in ${foreign.path}` : ""}; left alone.`);
   }
-  if (report.added.length > 0 && report.first) lines.push("Agents use it from their next session. Change this in the Inbox's Settings.");
+  if (report.added.length > 0 && report.first) {
+    lines.push(`Agents use it from their next session. ${INBOX_CONNECT_ENV}=0 skips this step; plannotator uninstall removes what it added.`);
+  }
   return lines;
 }
 
@@ -860,33 +957,35 @@ export interface RemovalPlanItem {
 
 export interface RemovalPlan {
   items: RemovalPlanItem[];
-  /** Entries named `plannotator-inbox` that run something else now: the person's. */
+  /** Entries Plannotator added that run something else now: the person's. */
   skipped: string[];
 }
 
 /**
- * What uninstall removes: every recorded entry that still runs Plannotator,
- * then every known file's `plannotator-inbox` entry that runs Plannotator
- * (the record may be gone). Pi's and OpenCode's `inboxTool` live in
- * config.json, which a plain uninstall keeps and --purge removes.
+ * What uninstall removes: only entries Plannotator ADDED and that still run
+ * the command it wrote (an entry it merely found, which the person added, is
+ * left), then, for an agent with no record at all (agents.json lost), an
+ * entry that runs exactly `ourCommand` (this binary's `inbox mcp`). Pi's and
+ * OpenCode's `inboxTool` live in config.json, which a plain uninstall keeps
+ * and --purge removes.
  */
-export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment): RemovalPlan {
+export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourCommand: readonly string[]): RemovalPlan {
   const file = readInboxAgents(dataDir);
   const items: RemovalPlanItem[] = [];
   const skipped: string[] = [];
   if (!agentHomeAllowed(e)) return { items, skipped };
   for (const spec of AGENT_SPECS) {
     const record = file.agents[spec.id];
-    if (record?.reach === "tool") continue;
-    const recorded = record?.reach === "mcp" && (record.state === "added" || record.state === "found");
-    const read = spec.read(e);
+    if (record && (record.reach !== "mcp" || record.state !== "added")) continue;
+    const ours = record?.command ? [record.command] : record ? [] : [[...ourCommand]];
+    const raw = spec.raw(e);
     const label = INBOX_AGENT_LABELS[spec.id];
-    if (read?.kind === "other" && recorded) {
+    const read = raw === null ? null : classify(raw, ours, false);
+    if (read?.kind === "other" && record) {
       skipped.push(`${label}'s "${NAME}" now runs something else (changed by hand), so it is yours`);
       continue;
     }
-    const ours = read ? read.kind === "ours" : recorded;
-    if (!ours) continue;
+    if (read ? read.kind !== "ours" : !record) continue;
     const path = spec.file(e) ?? record?.path ?? null;
     const shown = displayPath(path, e);
     const jsonKeys = jsonKeysFor(spec.id);
@@ -895,13 +994,13 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment): Rem
         agent: spec.id,
         describe: `MCP server ${NAME} from ${label} (${shown}, that entry only)`,
         apply: async () => {
-          const result = writeJsonEntry(path, jsonKeys, undefined);
+          const result = writeJsonEntry(path, jsonKeys, undefined, ours);
           return result.ok ? null : result.reason;
         },
       });
       continue;
     }
-    const remove = cliRemoveArgs(spec.id);
+    const remove = spec.remove;
     if (!remove) continue;
     const bin = e.which(remove.bin);
     if (!bin) {
@@ -926,25 +1025,6 @@ function jsonKeysFor(id: InboxAgentId): readonly string[] | null {
   return id === "cursor" || id === "kiro" || id === "claude-app" ? ["mcpServers"] : null;
 }
 
-function cliRemoveArgs(id: InboxAgentId): { bin: string; args: string[] } | null {
-  switch (id) {
-    case "codex":
-      return { bin: "codex", args: ["mcp", "remove", NAME] };
-    case "gemini":
-      return { bin: "gemini", args: ["mcp", "remove", "-s", "user", NAME] };
-    case "windsurf":
-      return { bin: "devin", args: ["mcp", "remove", "-s", "user", NAME] };
-    case "amp":
-      return { bin: "amp", args: ["mcp", "remove", NAME] };
-    case "cline":
-      return { bin: "cline", args: ["mcp", "remove", NAME] };
-    case "pi":
-      return { bin: "pi", args: ["mcp", "remove", NAME] };
-    default:
-      return null;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Settings → Agents: one agent's reach, and the person's switch
 
@@ -957,23 +1037,25 @@ export interface InboxAgentReachState {
   path: string | null;
   /** PLANNOTATOR_INBOX_TOOL decides the tool switch. */
   locked: boolean;
+  /** Why it is unreadable or left to the person. */
   reason: string | null;
 }
 
-/** How one agent reaches the Inbox now (read only). */
-export function inboxAgentReach(id: InboxAgentId, dataDir: string, e: AgentEnvironment): InboxAgentReachState {
+/** How one agent reaches the Inbox now (read only; may ask a CLI its version). */
+export async function inboxAgentReach(id: InboxAgentId, options: ConnectOptions): Promise<InboxAgentReachState> {
+  const e = options.environment;
   const spec = agentSpec(id);
-  const way = id === "claude-code" ? ({ kind: "tool", host: "claude-code" } as const) : spec.way(e);
-  const file = spec.file(e);
-  const path = displayPath(file, e);
-  const record = readInboxAgents(dataDir).agents[id];
+  const way: ConnectWay = id === "claude-code" ? { kind: "tool", host: "claude-code" } : await spec.way(e);
+  const path = displayPath(spec.file(e), e);
+  const record = readInboxAgents(options.dataDir).agents[id];
   if (way.kind === "tool") {
     const locked = parseInboxToolEnv(e.env as NodeJS.ProcessEnv) !== undefined;
     const on = resolveInboxTool(loadConfig(), e.env as NodeJS.ProcessEnv, way.host);
     return { kind: "tool", on, state: on ? "connected" : "off", path: null, locked, reason: null };
   }
-  if (way.kind === "manual" || way.kind === "none") return { kind: way.kind, on: false, state: "manual", path, locked: false, reason: null };
-  const read = spec.read(e);
+  if (way.kind === "manual") return { kind: "manual", on: false, state: "manual", path, locked: false, reason: way.why };
+  if (way.kind === "none") return { kind: "none", on: false, state: "manual", path, locked: false, reason: null };
+  const read = readAgentEntry(id, e, ourCommands(options, record), true);
   if (read?.kind === "ours") return { kind: "mcp", on: true, state: "connected", path, locked: false, reason: null };
   if (read?.kind === "other") return { kind: "mcp", on: false, state: "foreign", path, locked: false, reason: null };
   if (read?.kind === "unreadable") return { kind: "mcp", on: false, state: "unreadable", path, locked: false, reason: read.reason };
@@ -985,48 +1067,60 @@ export function inboxAgentReach(id: InboxAgentId, dataDir: string, e: AgentEnvir
   return { kind: "mcp", on: false, state: "not_connected", path, locked: false, reason: null };
 }
 
+/** Turn a host's `plannotator_inbox` tool on or off in config.json (the old Settings switch). Returns an error reason, or null. */
+export function setInboxTool(host: InboxToolHost, on: boolean, e: AgentEnvironment): string | null {
+  if (parseInboxToolEnv(e.env as NodeJS.ProcessEnv) !== undefined) return "PLANNOTATOR_INBOX_TOOL decides this";
+  const current = loadConfig().inboxTool;
+  const next: Partial<Record<InboxToolHost, boolean>> = {};
+  for (const name of ["claude-code", "pi", "opencode"] as const) {
+    const value = typeof current === "boolean" ? current : current?.[name];
+    if (typeof value === "boolean") next[name] = value;
+  }
+  next[host] = on;
+  saveConfig({ inboxTool: next });
+  return configuredInboxTool(loadConfig(), host) === on ? null : "Plannotator's config.json can't be written";
+}
+
 /**
  * The person's switch in Settings: on adds the entry (or turns the tool on)
  * whatever the record says; off removes Plannotator's entry (never one that
- * runs something else) and records `off`, so no later run adds it back.
- * Returns an error reason, or null.
+ * runs something else) and records `off`, so no later run adds it back. On
+ * success the agent's failure leaves the last report, so the card's amber
+ * line goes. Returns an error reason, or null.
  */
 export async function setInboxAgentReach(id: InboxAgentId, on: boolean, options: ConnectOptions): Promise<string | null> {
   const e = options.environment;
   if (!agentHomeAllowed(e)) return "not in a test's scratch home";
   const at = (options.now ?? (() => new Date()))().toISOString();
   const spec = agentSpec(id);
-  const way = id === "claude-code" ? ({ kind: "tool", host: "claude-code" } as const) : spec.way(e);
+  const way: ConnectWay = id === "claude-code" ? { kind: "tool", host: "claude-code" } : await spec.way(e, true);
   const file = readInboxAgents(options.dataDir);
-  if (way.kind === "manual" || way.kind === "none") return `${INBOX_AGENT_LABELS[id]} is connected by hand`;
+  if (way.kind === "manual") return `${INBOX_AGENT_LABELS[id]} is connected by hand: ${way.why}`;
+  if (way.kind === "none") return `${INBOX_AGENT_LABELS[id]} is connected by hand`;
   if (way.kind === "tool") {
-    if (parseInboxToolEnv(e.env as NodeJS.ProcessEnv) !== undefined) return "PLANNOTATOR_INBOX_TOOL decides this";
-    const config = loadConfig();
-    const current = config.inboxTool;
-    const next: Partial<Record<InboxToolHost, boolean>> = {};
-    for (const host of ["claude-code", "pi", "opencode"] as const) {
-      const value = typeof current === "boolean" ? current : current?.[host];
-      if (typeof value === "boolean") next[host] = value;
-    }
-    next[way.host] = on;
-    saveConfig({ inboxTool: next });
-    if (configuredInboxTool(loadConfig(), way.host) !== on) return "Plannotator's config.json can't be written";
+    const problem = setInboxTool(way.host, on, e);
+    if (problem) return problem;
     file.agents[id] = { state: on ? "added" : "off", reach: "tool", path: null, at };
   } else if (on) {
-    delete file.agents[id];
+    const previous = file.agents[id];
     const outcome = await connectOne(spec, options, at);
     if (outcome.kind === "failed") return outcome.reason;
     if (outcome.kind === "foreign") return `${displayPath(outcome.path, e) ?? INBOX_AGENT_LABELS[id]} has its own ${NAME} entry`;
-    if (outcome.kind === "manual") return `${INBOX_AGENT_LABELS[id]} is connected by hand`;
+    if (outcome.kind === "manual") return `${INBOX_AGENT_LABELS[id]} is connected by hand: ${outcome.why}`;
     if ("record" in outcome && outcome.record) file.agents[id] = outcome.record;
+    else if (previous) delete file.agents[id];
   } else {
-    const item = planInboxAgentRemoval(options.dataDir, e).items.find((candidate) => candidate.agent === id);
+    const record = file.agents[id];
+    const ours = ourCommands(options, record);
+    const item = planInboxAgentRemoval(options.dataDir, e, ours[0]!).items.find((candidate) => candidate.agent === id);
     if (item) {
       const problem = await item.apply();
       if (problem) return problem;
     }
     file.agents[id] = { state: "off", reach: "mcp", path: spec.file(e), at };
   }
+  if (file.failures) delete file.failures[id];
+  if (file.last_report) file.last_report = { ...file.last_report, failed: file.last_report.failed.filter((failure) => failure.agent !== id) };
   writeInboxAgents(options.dataDir, file);
   return null;
 }

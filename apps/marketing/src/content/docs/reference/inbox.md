@@ -45,22 +45,22 @@ Agents use it from their next session. Change this in the Inbox's Settings.
 |-------|------------|---------------|
 | Claude Code | the Plannotator plugin is enabled | nothing: the plugin already gives it the `plannotator_inbox` tool |
 | Pi, OpenCode | Plannotator's extension or plugin is installed | the inbox tool turned on (`inboxTool` in `~/.plannotator/config.json`) |
-| Pi without the extension | `pi` on your `PATH` | `pi mcp add plannotator-inbox` |
-| Codex | `codex` on your `PATH` | `codex mcp add plannotator-inbox` (the Codex app and IDE extension share it) |
-| Gemini CLI | `gemini` on your `PATH` | `gemini mcp add -s user plannotator-inbox` |
-| Windsurf / Devin, Amp, Cline | `devin`, `amp` or `cline` on your `PATH` | the agent's own `mcp add plannotator-inbox` |
-| Cursor, Kiro | `~/.cursor` or `~/.kiro` exists | one `plannotator-inbox` key in `~/.cursor/mcp.json` or `~/.kiro/settings/mcp.json` |
+| Pi without the extension | Pi 0.99 or later on your `PATH` (older Pi has no `pi mcp`: connect it by hand) | `pi mcp add plannotator-inbox` |
+| Codex | `codex` on your `PATH` (a `~/.codex` or `$CODEX_HOME` folder without the CLI: connect it by hand) | `codex mcp add plannotator-inbox` (the Codex app and IDE extension share it) |
+| Gemini CLI | `gemini` on your `PATH` (`$GEMINI_CLI_HOME` honored) | `gemini mcp add -s user plannotator-inbox` |
+| Windsurf / Devin, Amp | `devin` or `amp` on your `PATH` | the agent's own `mcp add plannotator-inbox` |
+| Cursor, Kiro | `~/.cursor` exists or `cursor` / `cursor-agent` is on your `PATH`; `~/.kiro` exists or `kiro-cli` is on your `PATH` | one `plannotator-inbox` key in `~/.cursor/mcp.json` or `~/.kiro/settings/mcp.json` |
 | The Claude app | its settings folder exists | one key in `claude_desktop_config.json` (restart the Claude app) |
 
-Each entry runs `<your plannotator binary> inbox mcp`. The agent uses it from its next session.
+Each entry runs `<your plannotator binary> inbox mcp`. The agent uses it from its next session. Before it runs an agent's own command, Plannotator checks the program's `--version`, so a different program with the same name is never handed it. Cline is not connected automatically yet: add it in Cline's MCP settings. When an agent started the Inbox in the background, a later `plannotator inbox` connects agents with the Inbox's environment (the `PATH` and home it was started with).
 
 - Every later `plannotator inbox` connects an agent installed since, and says so once ("Connected Amp to the Inbox (new on this computer)").
 - An agent you turned off in Settings, or whose entry you removed, is never added back by itself.
 - An existing `plannotator-inbox` entry that runs something else is never replaced.
-- A JSON file that is not plain JSON is left as it was, and the terminal says why.
+- In a JSON file only that one entry is added; every other byte of the file stays as it was. A file Plannotator cannot edit that way (comments, a duplicate key) is left as it was, and the terminal says why.
 - Editors (VS Code, Zed, JetBrains, Goose) are never changed. Settings has a one-click link or a snippet for each.
 - `PLANNOTATOR_INBOX_CONNECT=0` skips this step.
-- `plannotator uninstall` removes every entry it added. `--dry-run` lists them first.
+- `plannotator uninstall` removes every entry it added (never one you added yourself). `--dry-run` lists them first.
 
 ### A note in each agent's instructions
 

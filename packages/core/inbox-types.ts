@@ -894,6 +894,8 @@ export interface InboxAgentNoteStatus {
   created: boolean;
   /** Why it is refused, damaged or unavailable. */
   reason: string | null;
+  /** Other agents whose note lives in the same file (a link to one shared file): one section, kept while any of them has it on. */
+  shared_with?: InboxNoteAgentId[];
 }
 
 /** One agent in `GET /api/inbox/agents` (Settings → Agents and the first-open card). */
@@ -911,6 +913,8 @@ export interface InboxAgentRow {
     locked: boolean;
     reason: string | null;
   };
+  /** Claude Code, Pi and OpenCode only: their `plannotator_inbox` tool switch (`inboxTool`), shown whether or not the agent was found. */
+  tool?: { on: boolean; locked: boolean } | null;
   /** Claude Code, Pi and OpenCode only. `needs_tool`: the tool is off, so there is no reminder. */
   reminder: { on: boolean; locked: boolean; needs_tool: boolean } | null;
   note: InboxAgentNoteStatus | null;
@@ -924,6 +928,8 @@ export interface InboxAgentsModel {
   connect_env_off: boolean;
   /** PLANNOTATOR_INBOX_TOOL's value when set. */
   tool_env: boolean | null;
+  /** PLANNOTATOR_INBOX_NOTES=0: no note offer, no note rows. */
+  notes_env_off?: boolean;
   /** The one-time note question was answered. */
   notes_offered: boolean;
   /** The exact block a note writes, markers included. */

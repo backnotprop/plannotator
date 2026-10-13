@@ -32,8 +32,8 @@ import {
 import { handleInboxServerReady, startInboxServer } from "@plannotator/server/inbox";
 import { exposureWarning, type InboxTailscaleState } from "@plannotator/server/inbox-tailscale";
 import { openBrowser } from "@plannotator/server/browser";
-import { createAgentEnvironment, formatConnectReport, inboxConnectDisabled } from "@plannotator/server/inbox-agents";
-import { addInboxNote } from "@plannotator/server/inbox-agent-notes";
+import { agentSpec, createAgentEnvironment, formatConnectReport, inboxConnectDisabled } from "@plannotator/server/inbox-agents";
+import { addInboxNote, inboxNotesDisabled } from "@plannotator/server/inbox-agent-notes";
 import { loadConfig, saveConfig } from "@plannotator/shared/config";
 import { INBOX_AGENT_LABELS, INBOX_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { writeUrlQr } from "@plannotator/server/qr";
@@ -303,27 +303,42 @@ function writeNotes(dataDir: string, list: string): number {
     return 1;
   }
   const environment = createAgentEnvironment();
+  if (inboxNotesDisabled(environment.env)) {
+    process.stderr.write("PLANNOTATOR_INBOX_NOTES=0 is set: notes are off, nothing was written.\n");
+    return 1;
+  }
   let ok = true;
+  let any = false;
   for (const id of ids as InboxNoteAgentId[]) {
-    const change = addInboxNote(id, dataDir, environment);
     const label = INBOX_AGENT_LABELS[id];
+    // Never a file for an agent that is not on this computer.
+    if (!agentSpec(id).detect(environment)) {
+      ok = false;
+      process.stderr.write(`${label}: not added (${label} was not found on this computer).\n`);
+      continue;
+    }
+    const change = addInboxNote(id, dataDir, environment);
     if (!change.ok) {
       ok = false;
       process.stderr.write(`${label}: not added (${change.reason}).\n`);
       continue;
     }
+    any = true;
     const said = {
       added: `Added a marked section to ${change.path}`,
       created: `Created ${change.path}`,
       updated: `Updated the note in ${change.path}`,
       unchanged: `${change.path} already has the note`,
       "kept-edited": `${change.path} has the note as you edited it; left as it is`,
+      shared: `${change.path} already has the note (a file another agent reads too)`,
+      "kept-shared": "",
       removed: "",
       deleted: "",
     }[change.action];
     process.stderr.write(`${label}: ${said}.\n`);
   }
-  saveConfig({ inboxAgentNotes: { ...(loadConfig().inboxAgentNotes ?? {}), offered: true } });
+  // The window's question is answered only when a note is there now.
+  if (any) saveConfig({ inboxAgentNotes: { ...(loadConfig().inboxAgentNotes ?? {}), offered: true } });
   if (ok) process.stderr.write("Each agent reads it from its next session. Remove it in the Inbox's Settings or with plannotator uninstall.\n");
   return ok ? 0 : 1;
 }

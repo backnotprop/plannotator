@@ -84,7 +84,7 @@ test("--background never connects; a person's run on that Inbox does; a later ru
 
   w.install("amp");
   const later = await cli(w, ["inbox", "--no-open"]);
-  expect(later.stderr).toContain("Connected Amp to the Inbox (new on this computer). Change it in Settings.");
+  expect(later.stderr).toContain("Connected Amp to the Inbox (new on this computer).");
   expect(readInboxAgents(join(w.home, ".plannotator")).agents.amp?.state).toBe("added");
 }, 60_000);
 
@@ -116,6 +116,7 @@ test("plannotator inbox --notes adds only the notes named, starts nothing, and a
   const w = world();
   mkdirSync(join(w.home, ".codex"), { recursive: true });
   writeFileSync(join(w.home, ".codex", "AGENTS.md"), "Mine.\n");
+  mkdirSync(join(w.home, ".gemini"), { recursive: true });
   const result = await cli(w, ["inbox", "--notes", "codex,gemini"]);
   expect(result.code).toBe(0);
   expect(result.stdout).toBe("");

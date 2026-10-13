@@ -26,7 +26,12 @@ export const AGENT_FILE_MAX_BYTES = 1024 * 1024;
 
 export type AgentFileRead =
   | { kind: "missing"; path: string; target: string }
-  | { kind: "file"; path: string; target: string; text: string; mode: number; crlf: boolean; linked: boolean }
+  /**
+   * `text` without its UTF-8 BOM (`bom` says it had one; put it back when
+   * writing); `crlf`: CRLF is the file's dominant line ending (more CRLF than
+   * lone LF), which new text takes.
+   */
+  | { kind: "file"; path: string; target: string; text: string; mode: number; crlf: boolean; bom: boolean; linked: boolean }
   | { kind: "refused"; path: string; target: string; reason: string };
 
 /** Where `path` leads: its target when it is a symlink (followed as far as it exists), else itself. */
@@ -77,8 +82,22 @@ export function readAgentFile(path: string): AgentFileRead {
   } catch {
     return { kind: "refused", path, target, reason: "it is not UTF-8 text" };
   }
+  // TextDecoder drops a leading BOM; the bytes say whether there was one.
+  const bom = bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
-  return { kind: "file", path, target, text, mode: stat.mode & 0o777, crlf: /\r\n/.test(text), linked };
+  return { kind: "file", path, target, text, mode: stat.mode & 0o777, crlf: dominantCrlf(text), bom, linked };
+}
+
+/** More CRLF than lone LF line endings. */
+export function dominantCrlf(text: string): boolean {
+  const crlf = (text.match(/\r\n/g) ?? []).length;
+  const lf = (text.match(/\n/g) ?? []).length - crlf;
+  return crlf > lf;
+}
+
+/** `text` in a file that read as `read`: its BOM back. */
+export function withBom(text: string, bom: boolean): string {
+  return bom ? `﻿${text}` : text;
 }
 
 /** `text` with LF line endings turned into the file's own (CRLF stays CRLF). */

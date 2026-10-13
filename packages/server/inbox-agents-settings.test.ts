@@ -117,6 +117,7 @@ test("PLANNOTATOR_INBOX_TOOL locks the tool and reminder switches", async () => 
 test("the card's question: the ticked notes are added, Not now adds none, and it is never asked again", async () => {
   mkdirSync(join(fake.home, ".codex"), { recursive: true });
   writeFileSync(join(fake.home, ".codex", "AGENTS.md"), "Mine.\n");
+  mkdirSync(join(fake.home, ".gemini"), { recursive: true });
   const s = await start();
   const answer = (await (await post(s, "/api/inbox/agents/notes", { add: ["codex", "gemini"] })).json()) as Model & { results: { ok: boolean; action: string }[] };
   expect(answer.results.map((r) => r.action)).toEqual(["added", "created"]);

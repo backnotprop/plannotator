@@ -188,7 +188,7 @@ test("uninstall: every recorded note, plus a file with our markers whose record 
   addInboxNote("codex", dataDir, e);
   addInboxNote("gemini", dataDir, e);
   write(file(".pi", "agent", "CLAUDE.md"), `Pi rules\n\n${INBOX_NOTE_BLOCK}\n`);
-  const items = planInboxNoteRemoval(dataDir, e, INBOX_AGENT_LABELS);
+  const { items } = planInboxNoteRemoval(dataDir, e, INBOX_AGENT_LABELS);
   expect(items.map((item) => item.describe)).toEqual([
     "Note for Codex (~/.codex/AGENTS.md, marked section only)",
     "Note for Gemini CLI (~/.gemini/GEMINI.md, created by Plannotator: file removed if empty)",

@@ -540,16 +540,17 @@ async function removeInboxAgentConnections(
   state: MutableUninstallResult,
 ): Promise<void> {
   const agents = agentEnvironmentOf(environment);
-  const plan = planInboxAgentRemoval(state.dataDir, agents);
+  // With no record (agents.json lost), only an entry that runs exactly this binary is taken as ours.
+  const plan = planInboxAgentRemoval(state.dataDir, agents, [environment.execPath, "inbox", "mcp"]);
   // The notes (inbox-agent-notes.ts): only the marked section, as the person left it.
   const notes = planInboxNoteRemoval(state.dataDir, agents, INBOX_AGENT_LABELS);
-  for (const skipped of plan.skipped) state.warnings.push(`Skipped: ${skipped}.`);
+  for (const skipped of [...plan.skipped, ...notes.skipped]) state.warnings.push(`Skipped: ${skipped}.`);
   if (request.dryRun) {
     for (const item of plan.items) state.planned.push(item.describe);
-    for (const note of notes) state.planned.push(note.describe);
+    for (const note of notes.items) state.planned.push(note.describe);
     return;
   }
-  for (const note of notes) {
+  for (const note of notes.items) {
     const result = note.apply();
     if (result.ok) state.removed.push(note.describe);
     else state.warnings.push(`Could not remove the note in ${note.path}: ${result.reason}.`);
