@@ -1,6 +1,6 @@
 import { posix as pathPosix } from "path";
 import * as parse5 from "parse5";
-import { MAX_ANNOTATABLE_FILE_BYTES } from "@plannotator/core/annotatable";
+import { isDotenvFileName, MAX_ANNOTATABLE_FILE_BYTES } from "@plannotator/core/annotatable";
 
 export const HTML_ASSET_ROUTE_PREFIX = "/api/html-assets";
 
@@ -23,6 +23,23 @@ export const HTML_ASSET_DOCUMENT_CSP = "sandbox allow-scripts";
 export const HTML_ASSET_ERROR_CSP = "sandbox";
 /** Embedded documents honour the same 2MB ceiling single-file annotate reads do. */
 export const MAX_HTML_ASSET_DOCUMENT_BYTES = MAX_ANNOTATABLE_FILE_BYTES;
+
+/**
+ * Asset paths never served from a WIDE asset root: any segment starting with
+ * `.` (`.secrets/`, `.git/`, `.ssh/`) and the dotenv family (`prod.env`).
+ * A plain annotate session's root is the document's own folder; a folder
+ * session's root is the whole selected folder, and the Inbox's is the folder
+ * of a file attached from anywhere (a home folder, say). The page under
+ * review is untrusted and can request any path under its root, so these
+ * roots refuse what is hidden. Judge both the path as requested and where it
+ * really leads under the root (`htmlAssetPathRefused` in html-assets-node).
+ */
+export function refusesHiddenHtmlAssetPath(relativePath: string): boolean {
+  const segments = relativePath.split(/[\\/]+/).filter(Boolean);
+  if (segments.some((segment) => segment.startsWith("."))) return true;
+  const parts = relativePath.split(/[\\/]/);
+  return isDotenvFileName(parts[parts.length - 1] ?? relativePath);
+}
 
 /** Fetch destinations that mean "this response will become a nested document". */
 const FRAMED_FETCH_DESTS = new Set(["iframe", "frame", "embed", "object"]);

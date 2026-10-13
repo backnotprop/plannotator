@@ -30,7 +30,7 @@
  * blob's sha256.
  */
 
-import { diagramRenderKindForPath, isAnnotatableDocPath } from "./annotatable";
+import { diagramRenderKindForPath, isAnnotatableDocPath, isDotenvFileName } from "./annotatable";
 import { CODE_FILE_REGEX } from "./code-file";
 import { ulid } from "./inbox-types";
 
@@ -195,16 +195,6 @@ function isCodeName(name: string): boolean {
 }
 
 /**
- * The dotenv family, as annotate denies it: `.env` and any name ending in
- * `.env` (`prod.env`, `.prod.env`), `.envrc`, and `.env.*` outside the
- * annotatable docs (`.env.example` is a doc and stays).
- */
-function isDotenvName(name: string): boolean {
-  if (/(^|\.)env$/i.test(name) || /^\.envrc$/i.test(name)) return true;
-  return /^\.env\./i.test(name) && !isAnnotatableDocPath(name);
-}
-
-/**
  * The one name rule: the dotenv family is never attached (it holds secrets,
  * and the Inbox keeps a copy of what it was sent). Checked on the named path,
  * on its realpath, and again whenever the current file is served, by the
@@ -212,7 +202,7 @@ function isDotenvName(name: string): boolean {
  */
 export function inboxAttachmentNameRefusal(path: string): string | null {
   const name = baseName(path);
-  if (isDotenvName(name)) return ".env files are never attached (they hold secrets).";
+  if (isDotenvFileName(name)) return ".env files are never attached (they hold secrets).";
   return null;
 }
 

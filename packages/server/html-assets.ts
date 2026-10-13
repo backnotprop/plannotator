@@ -1,5 +1,4 @@
-import { realpathSync } from "fs";
-import { relative as relativePath, resolve as resolvePath, sep } from "path";
+import { resolve as resolvePath } from "path";
 import {
   HTML_ASSET_ERROR_CSP,
   HTML_ASSET_DOCUMENT_CSP,
@@ -9,12 +8,14 @@ import {
   htmlAssetBaseHref,
   htmlAssetDocumentHeaders,
   isFramedEmbeddedDocumentRequest,
+  refusesHiddenHtmlAssetPath,
   resolveHtmlAssetRoute,
   rewriteHtmlAssetReferences,
 } from "@plannotator/shared/html-assets";
 import {
   inlineHtmlLocalAssets,
   htmlAssetContext,
+  htmlAssetPathRefused,
   isWithinDirectory,
   MAX_HTML_ASSET_BYTES,
 } from "@plannotator/shared/html-assets-node";
@@ -75,7 +76,11 @@ export interface HtmlAssetRegistryOptions {
   refuseAssetPath?: (relativePath: string) => boolean;
   /** The CSP of an embedded `.html` document. Default HTML_ASSET_DOCUMENT_CSP. */
   documentCsp?: string;
-  /** Annotate folder sessions: the selected folder is the asset root. */
+  /**
+   * Annotate folder sessions: the selected folder is the asset root for every
+   * document inside it, so `../assets/x.css` resolves. Such a widened root
+   * also refuses hidden paths and the dotenv family (`refusesHiddenHtmlAssetPath`).
+   */
   folderPath?: string;
 }
 
@@ -83,9 +88,12 @@ export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) 
   const folderPath = options.folderPath;
   const rootsByToken = new Map<string, string>();
   const tokensByRoot = new Map<string, string>();
+  /** Roots that are a whole selected folder: hidden paths are refused there. */
+  const widenedRoots = new Set<string>();
 
-  function register(baseDir: string): string {
+  function register(baseDir: string, widened = false): string {
     const root = resolvePath(baseDir);
+    if (widened) widenedRoots.add(root);
     const existing = tokensByRoot.get(root);
     if (existing) return existing;
     const token = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
@@ -97,8 +105,8 @@ export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) 
   function rewriteHtml(html: string, htmlFilePath: string): string {
     if (/^https?:\/\//i.test(htmlFilePath)) return html;
     try {
-      const { root, basePath } = htmlAssetContext(htmlFilePath, folderPath);
-      const token = register(root);
+      const { root, basePath, widened } = htmlAssetContext(htmlFilePath, folderPath);
+      const token = register(root, widened);
       return rewriteHtmlAssetReferences(
         html,
         (assetPath) => `${HTML_ASSET_ROUTE_PREFIX}/${token}/${encodeHtmlAssetPath(assetPath)}`,
@@ -132,21 +140,15 @@ export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) 
     if (!isWithinDirectory(resolved, root)) {
       return assetError(403, "Access denied", asDocument, assetPath);
     }
-    if (options.refuseAssetPath) {
-      // Judged as requested and by where it really leads under the root, so
-      // an innocent name linked to a hidden file is refused too.
-      let real = resolved;
-      let realRoot = root;
-      try {
-        real = realpathSync(resolved);
-        realRoot = realpathSync(root);
-      } catch {
-        // Not on disk: the read below answers 404.
-      }
-      const underRoot = relativePath(realRoot, real).split(sep).join("/");
-      if (options.refuseAssetPath(assetPath) || options.refuseAssetPath(underRoot)) {
-        return assetError(404, "Not found", asDocument, assetPath);
-      }
+    // The host's own rule (the Inbox) and, for a widened folder root, the
+    // hidden-path rule; each judged as requested and by where the path really
+    // leads under the root, so an innocent name linked to a hidden file is
+    // refused too.
+    if (
+      (options.refuseAssetPath && htmlAssetPathRefused(root, assetPath, options.refuseAssetPath)) ||
+      (widenedRoots.has(root) && htmlAssetPathRefused(root, assetPath, refusesHiddenHtmlAssetPath))
+    ) {
+      return assetError(404, "Not found", asDocument, assetPath);
     }
 
     try {

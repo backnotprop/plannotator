@@ -92,10 +92,11 @@ import {
 	htmlAssetBaseHref,
 	htmlAssetDocumentHeaders,
 	isFramedEmbeddedDocumentRequest,
+	refusesHiddenHtmlAssetPath,
 	resolveHtmlAssetRoute,
 	rewriteHtmlAssetReferences,
 } from "../generated/html-assets.ts";
-import { htmlAssetContext, inlineHtmlLocalAssets, isWithinDirectory, MAX_HTML_ASSET_BYTES, resolveOpenInTarget } from "../generated/html-assets-node.ts";
+import { htmlAssetContext, htmlAssetPathRefused, inlineHtmlLocalAssets, isWithinDirectory, MAX_HTML_ASSET_BYTES, resolveOpenInTarget } from "../generated/html-assets-node.ts";
 import {
 	supportsAnnotateAgentTerminalMode,
 	type AgentTerminalCapability,
@@ -153,9 +154,12 @@ function firstHeader(value: string | string[] | undefined): string | null {
 function createHtmlAssetRegistry(folderPath?: string) {
 	const rootsByToken = new Map<string, string>();
 	const tokensByRoot = new Map<string, string>();
+	/** Roots that are a whole selected folder: hidden paths are refused there. */
+	const widenedRoots = new Set<string>();
 
-	function register(baseDir: string): string {
+	function register(baseDir: string, widened = false): string {
 		const root = resolvePath(baseDir);
+		if (widened) widenedRoots.add(root);
 		const existing = tokensByRoot.get(root);
 		if (existing) return existing;
 		const token = randomUUID().replace(/-/g, "").slice(0, 16);
@@ -167,8 +171,8 @@ function createHtmlAssetRegistry(folderPath?: string) {
 	function rewriteHtml(htmlContent: string, htmlFilePath: string): string {
 		if (/^https?:\/\//i.test(htmlFilePath)) return htmlContent;
 		try {
-			const { root, basePath } = htmlAssetContext(htmlFilePath, folderPath);
-			const token = register(root);
+			const { root, basePath, widened } = htmlAssetContext(htmlFilePath, folderPath);
+			const token = register(root, widened);
 			return rewriteHtmlAssetReferences(
 				htmlContent,
 				(assetPath) => `${HTML_ASSET_ROUTE_PREFIX}/${token}/${encodeHtmlAssetPath(assetPath)}`,
@@ -219,6 +223,13 @@ function createHtmlAssetRegistry(folderPath?: string) {
 		const resolved = resolvePath(root, assetPath);
 		if (!isWithinDirectory(resolved, root)) {
 			assetError(res, 403, "Access denied", asDocument, assetPath);
+			return true;
+		}
+		// A widened folder root: the page under review can reach the whole
+		// folder, so hidden paths and the dotenv family are refused, judged as
+		// requested and by where the path really leads (mirrors the Bun route).
+		if (widenedRoots.has(root) && htmlAssetPathRefused(root, assetPath, refusesHiddenHtmlAssetPath)) {
+			assetError(res, 404, "Not found", asDocument, assetPath);
 			return true;
 		}
 

@@ -424,4 +424,73 @@ for (const [runtime, startServer] of [["Bun", startAnnotateServer], ["Pi", start
       rmSync(parent, { recursive: true, force: true });
     }
   });
+
+  test(`${runtime} folder session refuses hidden files and folders, served and shared`, async () => {
+    // The widened root hands the untrusted page the whole folder, so anything
+    // hidden in it (a .secrets/ folder, a dotfile, an innocent name linked to
+    // one) must stay out of reach, on the route and in a share link.
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-folder-hidden-")));
+    mkdirSync(join(root, "lessons"));
+    mkdirSync(join(root, "assets"));
+    mkdirSync(join(root, ".secrets"));
+    const filePath = join(root, "lessons", "lesson.html");
+    writeFileSync(
+      filePath,
+      '<html><head><link rel="stylesheet" href="../assets/lesson.css"><link rel="stylesheet" href="../.hidden.css"><link rel="stylesheet" href="../assets/innocent.css"></head><body><script src="../.secrets/creds.js"></script></body></html>',
+    );
+    writeFileSync(join(root, "assets", "lesson.css"), "body { color: red; }");
+    writeFileSync(join(root, ".hidden.css"), "HIDDEN_FILE_SECRET");
+    writeFileSync(join(root, ".secrets", "creds.json"), "HIDDEN_FOLDER_SECRET");
+    writeFileSync(join(root, ".secrets", "creds.js"), "HIDDEN_FOLDER_SCRIPT");
+    writeFileSync(join(root, ".secrets", "linked.css"), "LINKED_SECRET");
+    symlinkSync(join(root, ".secrets", "linked.css"), join(root, "assets", "innocent.css"));
+    const server = await startServer({ markdown: "", filePath: root, folderPath: root, mode: "annotate-folder", htmlContent: "<html></html>" });
+    try {
+      const doc = await (await fetch(`${server.url}/api/doc?path=${encodeURIComponent(filePath)}`)).json() as { rawHtml: string };
+      const cssPath = doc.rawHtml.match(/href="([^"]+assets\/lesson\.css)"/)?.[1];
+      expect(cssPath).toStartWith("/api/html-assets/");
+      const tokenRoot = cssPath!.slice(0, -"assets/lesson.css".length);
+      expect((await fetch(new URL(cssPath!, server.url))).status).toBe(200);
+      for (const hidden of [".hidden.css", ".secrets/creds.json", ".secrets/creds.js", "assets/innocent.css"]) {
+        const response = await fetch(new URL(`${tokenRoot}${hidden}`, server.url));
+        expect(response.status, hidden).toBe(404);
+        expect(await response.text()).not.toContain("SECRET");
+      }
+      const shared = await (await fetch(`${server.url}/api/share-html?path=${encodeURIComponent(filePath)}`)).json() as { shareHtml: string };
+      expect(shared.shareHtml).toContain(Buffer.from("body { color: red; }").toString("base64"));
+      for (const secret of ["HIDDEN_FILE_SECRET", "HIDDEN_FOLDER_SCRIPT", "LINKED_SECRET"]) {
+        expect(shared.shareHtml).not.toContain(Buffer.from(secret).toString("base64"));
+      }
+    } finally {
+      server.stop();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test(`${runtime} single-file session still does not serve ../ assets`, async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-single-parent-")));
+    mkdirSync(join(root, "lessons"));
+    mkdirSync(join(root, "assets"));
+    const filePath = join(root, "lessons", "lesson.html");
+    const html = '<html><head><link rel="stylesheet" href="../assets/lesson.css"></head><body></body></html>';
+    writeFileSync(filePath, html);
+    writeFileSync(join(root, "assets", "lesson.css"), "PARENT_CSS");
+    const server = await startServer({ markdown: "", filePath, htmlContent: "<html></html>", rawHtml: html, renderHtml: true });
+    try {
+      const plan = await (await fetch(`${server.url}/api/plan`)).json() as { rawHtml: string };
+      const base = plan.rawHtml.match(/<base href="([^"]+)"/)?.[1];
+      expect(base).toMatch(/^\/api\/html-assets\/[0-9a-f]{16}\/$/);
+      expect(plan.rawHtml).not.toMatch(/\/api\/html-assets\/[^"]*assets\/lesson\.css/);
+      for (const spelling of ["../assets/lesson.css", "%2e%2e/assets/lesson.css"]) {
+        const response = await fetch(new URL(`${base}${spelling}`, server.url));
+        expect(response.status).toBeGreaterThanOrEqual(400);
+        expect(await response.text()).not.toContain("PARENT_CSS");
+      }
+      const shared = await (await fetch(`${server.url}/api/share-html`)).json() as { shareHtml: string };
+      expect(shared.shareHtml).not.toContain(Buffer.from("PARENT_CSS").toString("base64"));
+    } finally {
+      server.stop();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 }

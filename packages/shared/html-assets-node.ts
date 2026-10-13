@@ -1,28 +1,64 @@
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve as resolvePath, posix as pathPosix } from "node:path";
+import { dirname, isAbsolute, relative, resolve as resolvePath, posix as pathPosix, sep } from "node:path";
 import {
   htmlAssetContentType,
+  refusesHiddenHtmlAssetPath,
   rewriteCssAssetReferences,
   rewriteHtmlAssetReferences,
 } from "./html-assets";
 
 export const MAX_HTML_ASSET_BYTES = 50 * 1024 * 1024;
 
-export function htmlAssetContext(htmlFilePath: string, folderPath?: string): { root: string; basePath: string } {
+/**
+ * Where an HTML document's relative assets are served from. Normally the
+ * document's own folder. In an annotate folder session (`folderPath`) a
+ * document inside the selected folder gets the whole folder as its root, so
+ * `../assets/x.css` from `lessons/page.html` resolves, with `basePath` naming
+ * the document's folder under that root. `widened` marks that wider root:
+ * the page under review can then reach every file in the folder, so hidden
+ * paths are refused there (`refusesHiddenHtmlAssetPath`).
+ */
+export function htmlAssetContext(
+  htmlFilePath: string,
+  folderPath?: string,
+): { root: string; basePath: string; widened: boolean } {
   const directory = dirname(resolvePath(htmlFilePath));
   if (!folderPath || !isWithinDirectory(htmlFilePath, folderPath)) {
-    return { root: directory, basePath: "" };
+    return { root: directory, basePath: "", widened: false };
   }
   const root = realpathSync(folderPath);
   const documentDirectory = dirname(realpathSync(htmlFilePath));
-  return { root, basePath: relative(root, documentDirectory).split("\\").join("/") };
+  return { root, basePath: relative(root, documentDirectory).split("\\").join("/"), widened: true };
+}
+
+/**
+ * Whether `refuse` rejects an asset, judged on the path as requested AND on
+ * where it really leads under the root, so an innocent name symlinked to a
+ * hidden file is refused too. Shared by the Bun route, the Pi route and the
+ * share-link inliner.
+ */
+export function htmlAssetPathRefused(
+  root: string,
+  assetPath: string,
+  refuse: (relativePath: string) => boolean,
+): boolean {
+  if (refuse(assetPath)) return true;
+  let real = resolvePath(root, assetPath);
+  let realRoot = resolvePath(root);
+  try {
+    real = realpathSync(real);
+    realRoot = realpathSync(realRoot);
+  } catch {
+    // Not on disk: the read answers 404 (the inliner skips it).
+  }
+  return refuse(relative(realRoot, real).split(sep).join("/"));
 }
 
 export function inlineHtmlLocalAssets(html: string, htmlFilePath: string, folderPath?: string): string {
   if (/^https?:\/\//i.test(htmlFilePath)) return html;
 
   try {
-    const { root, basePath } = htmlAssetContext(htmlFilePath, folderPath);
+    const { root, basePath, widened } = htmlAssetContext(htmlFilePath, folderPath);
     const activeCss = new Set<string>();
 
     const dataUrlFor = (assetPath: string): string | null => {
@@ -32,6 +68,7 @@ export function inlineHtmlLocalAssets(html: string, htmlFilePath: string, folder
 
         const resolved = resolvePath(root, assetPath);
         if (!isWithinDirectory(resolved, root)) return null;
+        if (widened && htmlAssetPathRefused(root, assetPath, refusesHiddenHtmlAssetPath)) return null;
         if (!existsSync(resolved)) return null;
 
         const stat = statSync(resolved);
