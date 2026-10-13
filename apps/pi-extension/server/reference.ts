@@ -36,6 +36,7 @@ import {
 	MAX_ANNOTATABLE_FILE_BYTES,
 	isAnnotatableTextPath,
 } from "../generated/resolve-file.ts";
+import { diagramRenderKindForPath, isDiagramRenderKind } from "../generated/annotatable.ts";
 import {
 	DOC_ACCESS_DENIED,
 	DOC_TOO_LARGE,
@@ -54,6 +55,7 @@ import { parseCodePath, type ParsedCodePath } from "../generated/code-file.ts";
 import { htmlToMarkdown } from "../generated/html-to-markdown.ts";
 import { disabledSourceSave, type SourceFileSnapshot, type SourceSaveCapability } from "../generated/source-save.ts";
 import {
+	createBundleSourceSaveCapability,
 	createSourceSaveCapability,
 	createSourceSaveCapabilityFromSnapshot,
 	readSourceFileSnapshot,
@@ -85,6 +87,9 @@ export interface HandleDocOptions {
 	rewriteHtml?: (html: string, filepath: string) => string;
 	sourceSaveFilePath?: string;
 	sourceSaveFolderPath?: string;
+	/** A review of several files: the real paths of its own files that source save may write
+	 *  (`resolveBundleSourceSavePaths`). Every other document stays read-only. */
+	sourceSaveBundlePaths?: ReadonlySet<string>;
 	onSourceDocumentServed?: (path: string) => void;
 	rootPaths?: string[];
 	/**
@@ -170,7 +175,9 @@ function applyDocOptions<T extends Record<string, unknown>>(
 	if (
 		options.annotateHistory &&
 		typeof data.filepath === "string" &&
-		data.renderAs === "markdown" &&
+		// Diagram sources (.mmd/.dot) take the markdown branch's raw text, so
+		// they keep per-file version history exactly like a .txt.
+		(data.renderAs === "markdown" || isDiagramRenderKind(data.renderAs)) &&
 		data.isConverted !== true &&
 		typeof data.markdown === "string" &&
 		isAnnotatableTextPath(data.filepath)
@@ -182,7 +189,7 @@ function applyDocOptions<T extends Record<string, unknown>>(
 		}
 	}
 	if (typeof data.filepath !== "string") {
-		return (options.sourceSaveFolderPath || options.sourceSaveFilePath
+		return (options.sourceSaveFolderPath || options.sourceSaveFilePath || options.sourceSaveBundlePaths
 			? { ...next, sourceSave: disabledSourceSave("not-local-file") }
 			: next) as DocOptionsResult<T>;
 	}
@@ -198,6 +205,13 @@ function applyDocOptions<T extends Record<string, unknown>>(
 			? createSourceSaveCapabilityFromSnapshot("single-file", data.filepath, sourceSnapshot)
 			: createSourceSaveCapability("single-file", data.filepath);
 		if (sourcePath && doc.enabled && sourcePath === doc.path) {
+			options.onSourceDocumentServed?.(doc.path);
+			return { ...next, sourceSave: doc } as DocOptionsResult<T>;
+		}
+	}
+	if (options.sourceSaveBundlePaths) {
+		const doc = createBundleSourceSaveCapability(data.filepath, options.sourceSaveBundlePaths, sourceSnapshot);
+		if (doc?.enabled) {
 			options.onSourceDocumentServed?.(doc.path);
 			return { ...next, sourceSave: doc } as DocOptionsResult<T>;
 		}
@@ -269,7 +283,11 @@ function readDocument(res: Res, path: string, convert: boolean, options: HandleD
 			}
 			return;
 		}
-		jsonDoc(res, { markdown: snapshot.text, filepath: path, renderAs: "markdown" }, options, undefined, snapshot);
+		// A diagram source is served as its raw text with the engine named in
+		// `renderAs`; the editor renders it through the same DiagramBlock a
+		// ```mermaid fence uses instead of the markdown pipeline.
+		const diagramKind = diagramRenderKindForPath(path);
+		jsonDoc(res, { markdown: snapshot.text, filepath: path, renderAs: diagramKind ?? "markdown" }, options, undefined, snapshot);
 	} catch {
 		json(res, { error: "Failed to read file" }, 500);
 	}

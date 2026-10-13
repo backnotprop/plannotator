@@ -1,0 +1,6 @@
+{
+  "type": "error",
+  "error": {
+    "message": "No such file or directory: nope.txt"
+  }
+}

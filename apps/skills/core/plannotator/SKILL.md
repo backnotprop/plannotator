@@ -1,22 +1,30 @@
 ---
 name: plannotator
-description: "Reference for using the Plannotator CLI: plan review, code review, annotating files, URLs, folders, and running local apps, annotating the last assistant message, browsing archived plan decisions, and exporting or sharing Guided Reviews. Invoke when asked to use Plannotator for anything not covered by a more specific plannotator-* skill."
+description: "Reference for using Plannotator (its `plannotator` tool when you have one, otherwise the CLI): plan review, code review, annotating files, URLs, folders, and running local apps, annotating the last assistant message, browsing archived plan decisions, exporting or sharing Guided Reviews, and the Plannotator Inbox (messages and questions the person answers later, without blocking you). Invoke when asked to use Plannotator for anything not covered by a more specific plannotator-* skill, and before you leave the person a decision, a question or finished work while they are away from the chat (if another agent started you, report to it instead)."
 ---
 
 # Plannotator CLI Reference
 
-Plannotator is a local, browser-based review layer for agent workflows: it opens plans, diffs, and documents in an annotation UI, the human marks them up, and the structured feedback comes back to you on stdout. It installs as a single `plannotator` binary plus per-host hooks, so plan review fires automatically when you exit plan mode; every other surface is launched explicitly from the CLI. A session runs on a random localhost port (fixed port 19432 in remote mode) and blocks until the reviewer submits feedback, approves, or closes the tab.
+Plannotator is a local, browser-based review layer for agent workflows: it opens plans, diffs, and documents in an annotation UI, the human marks them up, and the structured feedback comes back to you on stdout. It installs as a single `plannotator` binary plus per-host hooks, so plan review fires automatically when you exit plan mode; every other surface is launched explicitly, with the `plannotator` tool when you have one and with the CLI otherwise. A session runs on a random localhost port (fixed port 19432 in remote mode) and blocks until the reviewer submits feedback, approves, or closes the tab.
 
 This skill is the knowledge layer. The `plannotator-review`, `plannotator-annotate`, and `plannotator-last` skills are thin launchers for the three most common actions; use this reference when you need to pick the right command or flags yourself.
 
+## If you have a `plannotator` tool, always use it
+
+Check your tools before you run any command below. If you have a tool named `plannotator` (it can be listed with a prefix, for example `mcp__plannotator__plannotator` in Claude Code, and can need to be loaded through tool search before you call it), always call it instead of running `plannotator annotate`, `plannotator review`, or `plannotator last`. This includes approvals: call it with `{ "action": "annotate", "target": "<file>", "gate": true }`, not `--gate --json`.
+
+The tool returns at once. End your turn after you call it and wait: the reviewer's decision arrives later as a message. Do not also run the CLI, poll, or reopen the session.
+
+Use the CLI only when you have no such tool, or for what the tool does not do: `archive`, `guide`, `sessions`, review flags other than `--base`, annotate flags other than `--gate` and `--markdown`, and strict gates that a script checks by exit code (`--require-approval`, `--result-file`).
+
 ## Choose the command
 
-| The user wants | Run |
+| The user wants | Run (CLI, when you have no `plannotator` tool) |
 | --- | --- |
 | Review a plan you produced | Nothing. Plan review opens automatically on plan exit via hooks. Never run bare `plannotator` yourself. |
 | Review and explicitly approve a plan/spec saved as a file | `plannotator annotate <file> --gate --json` |
 | Review current code changes | `plannotator review` |
-| Review a GitHub PR or GitLab MR | `plannotator review <PR_URL>` |
+| Review a GitHub PR, GitLab MR or Bitbucket Cloud PR | `plannotator review <PR_URL>` |
 | Annotate a markdown, text, config, or HTML file | `plannotator annotate <file>` |
 | Annotate a web page | `plannotator annotate <https-url>` |
 | Annotate a running local app (dev server) | `plannotator annotate <http://localhost:PORT/>` |
@@ -25,14 +33,15 @@ This skill is the knowledge layer. The `plannotator-review`, `plannotator-annota
 | Browse past plan decisions | `plannotator archive` |
 | Export or share a Guided Review | `plannotator guide export` / `plannotator guide share` |
 | Reopen or list live sessions | `plannotator sessions` |
+| Ask the person something they can answer later, without blocking | The `plannotator_inbox` tool when you have it, else the Inbox's MCP server (`plannotator inbox mcp`) |
 
 ## Session model
 
-Every review or annotate command starts a local web server, opens the browser, and blocks until the human decides. That can take minutes. Launch it with a long (or no) command timeout, or in the background, then read stdout when the process exits. Do not kill the process to "finish" a review; a session that ends without a decision reads as no feedback.
+Every review or annotate command starts a local web server, opens the browser, and blocks until the human decides. That can take minutes, or more than an hour for a large pull request. Launch it with a long (or no) command timeout, or in the background, then read stdout when the process exits. In Claude Code, a background command is stopped after 30 minutes unless you pass `run_in_background` with a longer `timeout` (up to `7200000` ms). Do not kill the process to "finish" a review; a session that ends without a decision reads as no feedback. If a session was stopped by a time limit, run the same command again: annotation drafts are restored.
 
 Stdout is the interface, but its contract is command-specific. For `annotate` and its last-message variants:
 
-- Plaintext (default): empty output on close, `The user approved.` on approve, otherwise the feedback text. Address returned feedback in the same conversation.
+- Plaintext (default): empty output on close, `The user approved.` on approve (an approval with a note prints an "Approved with Notes" message instead; treat the notes as guidance, not a change request), otherwise the feedback text. Address returned feedback in the same conversation.
 - `--json`: one JSON record with `decision` (`approved`, `dismissed`, or `annotated`) and optional raw `feedback`. An approval may still carry notes in `feedback`; treat those as guidance, not a change request.
 - `--hook`: hook-native output for real PostToolUse/Stop hook contexts only. Approve/close emits nothing (hook passes); annotations emit `{"decision":"block","reason":"..."}`. `--hook` implies the gate UI. Never use it for a normal interactive invocation.
 
@@ -41,7 +50,7 @@ Stdout is the interface, but its contract is command-specific. For `annotate` an
 ## plannotator review
 
 ```bash
-plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--patch-file <path | ->] [--tailscale] [--json] [PR_URL]
+plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--patch-file <path | ->] [--no-git-remote-check] [--tailscale] [--json] [DIRECTORY | PR_URL]
 ```
 
 Reviews local VCS changes, or a pull request when a URL is given. Default stdout stays plaintext: the existing close message, approval prompt, or feedback.
@@ -55,7 +64,9 @@ Classify the outcome only by `decision`, never by `message` text. Notes on an `a
 - **Reviewing one layer of a stacked branch? Pass `--base <the branch below yours>`** — `plannotator review --base feature/part-1` shows only what this layer adds, instead of everything since `main`.
 - Both flags are git-only: they error on jj, GitButler, Perforce, multi-repo workspace reviews, and PR URLs (a PR's base comes from the pull request). A `--base` ref that does not resolve is a startup error naming near-match branches, never a silently wrong diff.
 - `--patch-file <path>` reviews a static caller-supplied unified diff with no repository at all (use `-` to read it from stdin): the session serves the patch as-is with no file-system affordances that need a worktree. It cannot be combined with a PR/MR URL, `--base`, `--diff-type`, `--git`/`--gitbutler`, or `--local`/`--no-local`. Every working-tree affordance is off in that session (staging, hunk-context expansion, open-in-editor, code navigation, diff-type/base switching), and the endpoints behind them answer 400.
-- PR review (`plannotator review https://github.com/owner/repo/pull/123`, GitLab MR URLs too) needs an authenticated `gh` or `glab` CLI. `--local` (the default) builds a local checkout of the PR head in the background for full file access; `--no-local` skips it and reviews the platform diff only.
+- Pass a directory to review another repo or worktree: `plannotator review ../feature-worktree` or `plannotator review ./backend --diff-type last-commit`. Paths resolve relative to the invoking directory; quote paths containing spaces. A directory selects the review workspace, not a file filter. Accepts one directory or PR URL; a directory cannot be combined with `--patch-file`. Invalid targets fail instead of falling back to the current repo.
+- PR review (`plannotator review https://github.com/owner/repo/pull/123`, GitLab MR and Bitbucket Cloud PR URLs too) needs an authenticated `gh` or `glab` CLI; Bitbucket Cloud (`https://bitbucket.org/<workspace>/<repo>/pull-requests/<id>`) instead needs an Atlassian API token in `PLANNOTATOR_BITBUCKET_TOKEN` (plus `PLANNOTATOR_BITBUCKET_EMAIL`). `--local` (the default) builds a local checkout of the PR head in the background for full file access; `--no-local` skips it and reviews the platform diff only.
+- `--no-git-remote-check` stops the session contacting the git remote at all: no `git ls-remote` for the default branch or the "behind GitHub" baseline check. The compare target then comes from local refs only and the staleness banner never shows, which also takes away its one-click Fetch button (the `/api/fetch-base` endpoint stays available); fetching from a terminal is unaffected. Use it when a remote probe is expensive or intrusive — most sharply when SSH authentication is backed by a hardware token, where each probe is a physical touch prompt. The same opt-out is available session-wide as `PLANNOTATOR_GIT_REMOTE_CHECK=0` or `{ "gitRemoteCheck": false }` in `~/.plannotator/config.json` (the flag beats the env var, which beats the config key). Without it the remote is queried when the review opens, on diff load, on a diff-type/base switch, and on Fetch — never on a timer.
 - `--tailscale` publishes the loopback session over the user's tailnet via `tailscale serve` (HTTPS, never public) and prints the URL with a QR code. A publish failure exits nonzero instead of leaving the server hanging.
 
 ## plannotator annotate
@@ -66,20 +77,22 @@ plannotator annotate <target> [--markdown] [--no-jina] [--app | --static] [--ren
 
 Opens one document, page, or app in the annotation UI and returns the human's annotations on stdout.
 
-Plain `annotate` is feedback-only: it shows **Close** but no **Approve** button. When the user asks to review, approve, accept, or gate a generated plan/spec/document saved as a file, always add `--gate --json`. Do not tell the user they can approve a plain `annotate` session. If the plan is being handed off through the host agent's native plan flow, do not launch `annotate`; let the plan-exit hook open the approval UI automatically.
+Plain `annotate` is feedback-only: it shows **Close** but no **Approve** button. When the user asks to review, approve, accept, or gate a generated plan/spec/document saved as a file, call the `plannotator` tool with `"gate": true` if you have it; otherwise always add `--gate --json`. Do not tell the user they can approve a plain `annotate` session. If the plan is being handed off through the host agent's native plan flow, do not launch `annotate`; let the plan-exit hook open the approval UI automatically.
 
 Targets:
 
 - Markdown and text files: `.md`, `.mdx`, `.txt`.
 - Plain-text config and data files, rendered as text: `.yaml`, `.yml`, `.json`, `.jsonc`, `.json5`, `.toml`, `.ini`, `.cfg`, `.conf`, `.properties`, `.csv`, `.tsv`, `.log`, `.xml`, `.env.example`. `.env` itself is deliberately refused (it commonly holds secrets, and annotate history copies file contents). Source-code files belong to `plannotator review`, not annotate.
+- Diagram sources, opened in the full diagram viewer (zoom, pan, popout, click a node/edge/cluster to comment): `.mmd`, `.mermaid` (Mermaid) and `.dot`, `.gv` (Graphviz). The file is the whole diagram — no fence needed — and comments carry the part's id plus its real file line.
 - HTML files (`.html`, `.htm`): rendered as the raw page by default; `--markdown` converts to markdown instead. `--render-html` is accepted for compatibility; raw rendering is already the default.
 - URLs (`https://...`): fetched and converted via Jina Reader by default; `--no-jina` uses plain fetch plus Turndown instead.
 - Running local apps: a loopback `http://localhost:PORT/` URL whose probe returns HTML opens in live-app mode (annotate the real running page). `--app` forces live mode and fails loudly when it cannot apply; `--static` forces the classic conversion pipeline. Non-loopback URLs always use the conversion pipeline.
 - Folders: `plannotator annotate docs/` opens a file browser over the folder's supported files.
+- Several files: `plannotator annotate spec.md mock.html notes.md` opens them as one review, in the order given, with one decision. Every argument must be an existing file named by its path (no prose, URLs or folders among them). With the `plannotator` tool, pass the list as `target`.
 
 Single files are capped at 2MB. Files are read from disk at stable project paths; keep the reviewed source where it lives.
 
-Argument tolerance: extra words are fine (`plannotator annotate look at notes.md please` opens `notes.md`), but two resolvable targets is an error naming both, and an unrecognized dashed token disables the tolerance so flag typos fail loudly. When nothing resolves in a plain multi-word invocation, the CLI prints an agent-addressed handoff on stdout and exits 0: read it, work out the concrete target, and re-run with that exact path or URL.
+Argument tolerance: extra words are fine (`plannotator annotate look at notes.md please` opens `notes.md`), but two resolvable targets mixed with prose, a URL or a folder is an error naming them, and an unrecognized dashed token disables the tolerance so flag typos fail loudly. When nothing resolves in a plain multi-word invocation, the CLI prints an agent-addressed handoff on stdout and exits 0: read it, work out the concrete target, and re-run with that exact path or URL.
 
 ### Strict gates and exit codes
 
@@ -151,20 +164,36 @@ Guided Reviews are AI-generated walkthroughs of a diff, produced inside the code
 ## plannotator sessions
 
 ```bash
-plannotator sessions [--open [N]] [--clean]
+plannotator sessions [--open [N]] [--clean] [--json]
 ```
 
-Lists active Plannotator server sessions. `--open` reopens session N (default 1) in the browser, useful when a tab was closed mid-review. `--clean` drops stale entries.
+Lists active Plannotator server sessions, each with its full target (absolute path, URL, PR URL or reviewed directory) and, for a review a host opened, its `pn-` id. `--open` reopens session N (default 1) in the browser, useful when a tab was closed mid-review. `--clean` drops stale entries. `--json` prints the list as a JSON array on stdout.
+
+## plannotator inbox
+
+```bash
+plannotator inbox [--background | --no-open] [--tailscale]
+plannotator inbox mcp
+```
+
+The Plannotator Inbox is one local window per machine where you leave the person messages, `:::question` blocks they answer with a click, files to annotate, decisions and guided reviews. Nothing blocks: you send, then keep working or end your turn.
+
+- Use it when the person may not be watching this chat: a decision only they can make (a `:::question` block, then go on with work that does not depend on it), long work you finished (one short summary, with the files to look at in `attachments`), or when they ask. Ask in the chat when they are there, and do not send routine progress. Use a review (plan review, `annotate`, `review`) when you need a decision on this document or diff before you go on.
+- If you have a `plannotator_inbox` tool, use it; otherwise use the stdio MCP server `plannotator inbox mcp`. With the tool, the person's reply arrives in your session by itself, so end your turn instead of waiting.
+- Run `plannotator inbox --help` once and read it before your first use: it is the full guide (tools and arguments, threads, where replies go, question syntax, replacing questions, connecting other agents).
+- Never run `plannotator inbox` just to send: calls start a stopped Inbox in the background, and bare `plannotator inbox` opens the window for the person. `--tailscale` is the person's choice; never add it.
 
 ## Other subcommands
 
 ```bash
 plannotator setup-goal <interview|facts> <bundle.json | -> [--json]
+plannotator update [--check]
 plannotator uninstall [--purge] [--yes] [--dry-run]
 plannotator improve-context
 ```
 
 - `setup-goal` opens the interview or facts-acceptance UI for /goal workflows; it is driven by the `plannotator-setup-goal` skill and takes a bundle JSON (`-` reads stdin). Do not hand-build bundles.
+- `update` installs the newest release now (the install script, with the choices from the last install); `--check` only reports whether one exists. Run it only when the person asks you to update Plannotator: it replaces the binary. Exit 0 up to date or updated, 1 failed, 2 usage, 130 interrupted.
 - `uninstall` removes Plannotator-installed components (`--purge` also deletes local data; `--yes` is required without a TTY; `--dry-run` previews).
 - `improve-context` and `install-runtime` are internal integration commands (hook plumbing and managed runtime install). Never run `improve-context` directly; `plannotator install-runtime agent-terminal` exists for reinstalling the optional annotate-terminal runtime and is normally run by the installer.
 - Additional host-internal subcommands (the `opencode-*` and `copilot-plan` family) are invoked by their plugins, not by you.
@@ -175,18 +204,52 @@ plannotator improve-context
 | --- | --- |
 | `PLANNOTATOR_REMOTE=1` | Force remote mode (fixed port 19432, wide bind) for SSH/devcontainer sessions; `0` forces local. Unset means SSH auto-detection. |
 | `PLANNOTATOR_PORT` | Fix the port instead of a random one. |
-| `PLANNOTATOR_ORIGIN` | Override agent-origin detection (`claude-code`, `codex`, `opencode`, `pi`, `oh-my-pi`, `amp`, `droid`, `copilot-cli`, `gemini-cli`, `kiro-cli`). Set it when launching Plannotator from a wrapper the detection cannot see through. |
+| `PLANNOTATOR_ORIGIN` | Override agent-origin detection (`claude-code`, `codex`, `opencode`, `pi`, `oh-my-pi`, `amp`, `droid`, `copilot-cli`, `gemini-cli`, `kiro-cli`, `mistral-vibe`). Set it when launching Plannotator from a wrapper the detection cannot see through. |
 | `PLANNOTATOR_AI=disabled` | Disable Ask AI and agent-launched review surfaces in the UI. |
 | `PLANNOTATOR_SHARE=disabled` | Disable URL sharing, including guide share links. |
 | `PLANNOTATOR_DATA_DIR` | Move the data directory (default `~/.plannotator`): plans, history, drafts, config. |
 | `PLANNOTATOR_BROWSER` | Open sessions in a specific browser. |
+| `PLANNOTATOR_UPDATE_CHECK=0` | No automatic check for a newer release (and no update notices or auto-update). `plannotator update` still checks when run. |
 
 ## Posting annotations into a live session
 
 A running plan-review session exposes a small HTTP API on its base URL for external annotations: `POST /api/external-annotations` adds inline annotations the reviewer sees immediately, with PATCH/DELETE for updates and an SSE stream at `/api/external-annotations/stream`. The UI's "copy agent instructions" action puts the full API contract for the current session, with the correct base URL, on the clipboard for handing to an agent or script. If the user pastes such instructions, follow them; do not invent endpoints beyond that contract.
 
+## Asking the reviewer questions
+
+Ask what only the reviewer can decide as a question block. Answers come back at the top of their feedback ("Answers to your questions", then "Unanswered").
+
+```markdown
+:::question
+Where should we keep the edit that loses a sync conflict?
+
+When two devices edit one note offline, the later save wins and the other edit is lost. Local storage keeps it with no server work.
+
+- [ ] Local only, purged after 30 days — cheap, no server change
+- [ ] Server-side per user — survives reinstall, needs a retention policy
+- [ ] Nowhere — accept silent loss for v1
+
+Recommended: Local only, purged after 30 days
+:::
+```
+
+- `:::question` picks one choice, `:::question-multi` any number, `:::question-text` free text (so does a block with no choices).
+- The first line is the question; the lines after it are context. Never send a bare question: the reviewer switches in cold, thinks at the level of the product, and does not know what you know.
+  - Say what the choice affects, what you know or tried, and why you recommend it, so they can decide without opening anything else.
+  - Be terse: one to three short sentences, plain words, no jargon or internal names they would not know.
+  - Add a screenshot (`![alt](path)`) for anything visual.
+  - Link a file that shows it better (a plan, an HTML mock): `[the mock](mock.html)`. In the Inbox, attach it too; the link opens it beside the thread.
+- Choices: `- [ ] label`, optionally `- [ ] label — why`. The reviewer can also answer "Other", add a note, or skip.
+- `Recommended: <label>` marks yours; text matching no choice shows as a suggested answer.
+- Ask only what you cannot decide alone, about 8 a round at most. Do not ask rhetorical questions or questions the codebase answers.
+- `- [x]` marks a settled choice. On resubmit, check the chosen answer, or drop the block and state the decision in prose.
+- Leave blank lines between the parts so the block reads well on GitHub.
+- Each answer comes back under its question (`### Q2. <question> (line N)`) as `Answer: <choice>`, marked `(your recommendation)` when the reviewer took yours, or as `Other: …`, free text in a quote, or `Skipped`, plus any `Note:`. A question you marked `- [x]` is settled and only comes back if the reviewer changed it or added a note.
+- In the Inbox, withdraw your own questions that are still open (read_thread state `open` or `picked`) as the thread moves on: when a newer message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, name them in `supersedes` (or a `Replaces:` line) so they stop keeping the thread at the top of the person's list.
+
 ## Do not
 
+- Do not run `plannotator annotate`, `review`, or `last` through a shell when you have a `plannotator` tool; call the tool.
 - Do not parse or scrape the browser UI's HTML; the CLI's stdout (and the documented HTTP API above) is the whole contract.
 - Do not use `--hook` outside a real hook context; use `--json` when you need structured output.
 - Do not run bare `plannotator` interactively; it is the hook entry point.

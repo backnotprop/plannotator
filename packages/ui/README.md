@@ -31,6 +31,7 @@ configurePlannotatorUI({
   mathRendererLoader,          // how KaTeX loads when no renderer is registered before first math render
   identityGenerator,           // sync generator behind the default "tater" name (no identityProvider)
   alertIconRenderer,           // (name) => ReactNode | null for a GitHub alert title line's <!-- icon: name --> (default: null, the type's icon)
+  fenceTheme,                  // (colorTheme, mode) => Shiki theme name | undefined for code fences (default: SHIKI_THEME_MAP, else pierre-dark/light)
 });
 ```
 
@@ -74,10 +75,17 @@ Plannotator's own entries import the eager math and identity modules (`math-eage
   const editorExtensions = [wikiLinks({ suggest, resolve, onOpen })]; // stable reference!
   <MarkdownEditor markdown={md} documentId={docId} editorHandleRef={ref} extensions={editorExtensions} />
   ```
-- **`embedPicker(config)` and `embedSlashItem()` are re-exported from the same surface.** Compose the static item into `slashCommands({ items: [...] })` and pass the picker beside it in the stable `extensions` array. `getTargets`, `buildInsertLine`, optional `uploadTarget`, and optional `getNotice` stay live through callbacks. The host owns embed grammar and upload error UI; the package owns filtering, async anchor mapping, single-flight upload state, and paragraph-safe insertion through the re-exported `planEmbedInsert()`.
+- **`embedPicker(config)` and `embedSlashItem()` are re-exported from the same surface.** Compose the static item into `slashCommands({ items: [...] })` and pass the picker beside it in the stable `extensions` array. `getTargets`, `buildInsertLine`, optional `uploadTarget`, and optional `getNotice` stay live through callbacks. Optional `labels` (`upload`, `empty`, `noMatch(query)`) reword the three rows that say "HTML"; absent keys keep the built-in text. The host owns embed grammar and upload error UI; the package owns filtering, async anchor mapping, single-flight upload state, and paragraph-safe insertion through the re-exported `planEmbedInsert()`.
+- **`linkWidgets(...specs)` and `refreshLinkWidgets` are re-exported from the same surface** (since 0.47.0, engine `@plannotator/atomic-editor` ^0.9.0), with the types `LinkWidgetSpec` and `LinkWidgetLink`. A spec's `match(link)` gets `{ url, text, title?, from, to }` for a single-line `[text](url)` link whose syntax the engine would hide, and returns a CM6 `WidgetType` to draw in the link's place (first non-null spec wins) or `null` for the engine's normal link. The reveal rule (caret, focus, pointer-press freeze, diff ranges) stays the engine's, so the widget comes and goes exactly when the hidden syntax would; `match` is never asked about table-cell links or links wrapping an image. `match` runs on every rebuild: keep it synchronous and side-effect free and implement `eq` on the widget. When the answer changes without a document edit (data arrived after mount), dispatch `view.dispatch({ effects: refreshLinkWidgets.of(null) })`; it changes no text and adds no history entry.
+  ```tsx
+  import { linkWidgets, refreshLinkWidgets, type LinkWidgetSpec } from "@plannotator/ui/components/MarkdownEditor";
+
+  const spec: LinkWidgetSpec = { match: (link) => (isMine(link.url) ? new MyChip(link) : null) };
+  const editorExtensions = [linkWidgets(spec)]; // stable reference!
+  ```
 - **The viewer resolves wiki-links synchronously.** `InlineMarkdown` takes `resolveLinkedDoc?: (target) => { label?; status?: 'active' | 'deleted' } | null` — called with the raw stored target (opaque ids like `doc_01XYZ`, no `.md` normalization). Return a `label` to display live titles (stored label is the fallback, target the last resort); return `status: 'deleted'` for a muted non-link ("Document deleted") instead of a live link. Absent or `null` → rendering is unchanged. Sync-only by design: back it with an in-memory cache.
 
-Requires `@plannotator/markdown-editor ^0.3.2` and `@plannotator/atomic-editor ^0.7.0`. See HANDOFF.md § "Wiki-link seams (0.27.0)".
+Wiki links require `@plannotator/markdown-editor ^0.3.2` and `@plannotator/atomic-editor ^0.7.0` (see HANDOFF.md § "Wiki-link seams (0.27.0)"); link widgets require `@plannotator/markdown-editor ^0.5.0` and `@plannotator/atomic-editor ^0.9.0`, which is what 0.47.0 declares (see HANDOFF.md § "Host link widgets (0.47.0)").
 
 ### Frozen markdown diff (`MarkdownDiff`)
 
@@ -206,6 +214,14 @@ common case) applies inside the header too and pulls the action cluster out of
 its row. Scope such rules away from the header, e.g.
 `[data-viewer-document-header] [data-sticky-actions] { margin-top: 0; margin-right: 0; }`.
 
+With `stickyActions` on, the legacy bar's `[data-sticky-actions]` cluster is no
+longer the sticky element or a float: it pins inside a zero-height
+`[data-sticky-actions-lane]`, beside a static float that reserves the title's
+wrap space. Both copy the cluster's measured size and margins, so margin
+overrides on `[data-sticky-actions]` still apply. Do not give the cluster
+`position: sticky` and a float together: Firefox narrows float-avoiding blocks
+such as table and code wrappers around a sticky float's stuck position.
+
 The config is intentionally typed rather than a React-node slot. Viewer reuses
 its existing `mode`, `inputMethod`, and `taterMode`; the config supplies only
 the state-change callbacks and optional `hideQuickLabel`. Compact toolstrips
@@ -220,6 +236,118 @@ the in-flow host integration.
 
 One renderer slot and one canvas render every Mermaid and Graphviz diagram — the fences in `Viewer` (`MermaidBlock`, `GraphvizBlock`), their popout, and whatever a host renders itself. `DiagramViewer` from `@plannotator/ui/components/diagram` takes `kind`, `source`, `theme` (`{ colorTheme, mode, shadowAmount? }`), `comments: DiagramComment[]` and `onCreateComment(anchor, text, additionalTargets)`; pass `onSave(source) => Promise<{ status: 'ok' } | { status: 'stale', currentSource }>` to get the Source pane (left of the canvas on desktop, under it on the phone; `readOnlySource` shows it without Save), and `sourceOpen` to toggle it. Zoom, pan and fit are the canvas's (wheel, drag, `+` `-` `0`, arrow keys); a click opens the composer at the part beneath while a drag pans (4 px threshold, 10 px for a finger), nothing highlights on a plain mouse-over (the ring under the pointer needs the platform modifier held), every edge carries an invisible 14 px hit path in one top layer and a click is resolved by priority over everything under the pointer (node, then edge, then cluster; an edge label is its edge), a click on no part comments on the whole diagram (kind `diagram`), sequence diagrams are addressable (actors, messages, notes, frames), a saved comment paints a ring and a numbered badge from the array order, and every comment re-resolves against each render through the engine's finder (id, then label, then unanchored — reported through `onUnanchoredChange`). The anchor is `DiagramAnchor` from `@plannotator/core/diagram-anchor` (`{ v: 1, family, kind, id | from + to, label, sourceLine }`, document lines), and Plannotator stores it as `Annotation.diagramAnchor`. Runtime slots: `utils/mermaid` (as before) and `utils/graphviz` (new, same shape, `@viz-js/viz` pinned `3.30.0`), each lazy on first use or filled by the host. `DiagramPopout` is the full-size viewer in the `PopoutDialog` chrome. See HANDOFF.md § "Diagram engine (0.41.0)" for every export, the adapter, the sanitizer and the migration notes.
 
+### Host toolbar seams (0.43.0)
+
+Two opt-in props for hosts that want their own commands and their own people
+inside the annotation UI. Both default to today's behavior — pass neither and
+the toolbar and the comment composer render byte-for-byte what they rendered
+in 0.42.0 (proven by diffing the mounted `outerHTML` against the base commit).
+
+- **`AnnotationToolbar` `selectionActions`** (forwarded by `Viewer` to both its
+  toolbars, and by `HtmlViewer` to the HTML selection toolbar): an array of
+  `{ id, label, detail?, icon?, onSelect(ctx) }`. They render as ONE wand
+  button (`data-selection-actions`) in the slot the quick-labels Zap occupied,
+  opening the package's dropdown below it (arrows + Enter + Escape, nothing
+  preselected until the first arrow). `onSelect` receives
+  `{ text, blockId, startOffset, endOffset, element }` — the same coordinates
+  an annotation created from that selection would carry (`blockId: ''` and
+  `startOffset: 0` on a surface with no blocks, such as raw HTML) — and the
+  toolbar closes. **The package creates no annotation:** what an action does is yours.
+  An empty array renders no button.
+- **`AnnotationToolbar` `selectionActionsIcon`** (forwarded by `Viewer` and
+  `HtmlViewer`): the glyph on the `selectionActions` button, so a host can match
+  the wand it draws elsewhere. Absent means the package's own wand; nothing else
+  about the button changes.
+- **`AnnotationToolbar` `quickLabels`** (default `true`): `false` hides the Zap
+  picker and makes the Alt+digit label shortcuts inert on that toolbar. The
+  one-click 👍 is unaffected, and mode state is still yours to clamp.
+- **`CommentPopover` `mentionSource`** (0.43.2 adds `heading?` above the list
+  and an optional `avatar?: { url?, initials?, tint? }` per person, drawn before
+  the label; both absent → the 0.43.1 rows): `{ people, emptyNotice?,
+  onMentionsChange?, onPickBlocked? }` over `MentionPerson`
+  (`{ id, kind, label, detail, canOpen }`). Typing `@` at a word boundary opens
+  a portaled picker measured from the textarea; picking inserts the readable
+  `@Label ` token, and the ids ride `onMentionsChange(ids)` plus an optional
+  third `onSubmit(text, images?, mentions?)` argument that is passed **only**
+  when a source is supplied. Deleting a token untags that person. A
+  `canOpen: false` person inserts nothing when you supply `onPickBlocked` (your
+  no-access dialog) and inserts normally when you do not. Not wired to any
+  Plannotator data and not a `configurePlannotatorUI` seam — pass it where you
+  render the composer.
+- **`CommentPopover` mention chips** (0.44.0): with a `mentionSource`, the
+  `@Label` tokens the picker inserted render as chips in the composer's text —
+  the same mirrored overlay skill references use, never a second layer. Each
+  chip span carries `data-mention-token="<person id>"` and
+  `data-mention-kind`, which is `MentionPerson.kind` verbatim — today that is
+  always `user`, because the picker offers users only; `agent` is reserved
+  and matches nothing yet. `MentionSource.tokenClassName?` is appended to the
+  span for your own look. **Metric rule, yours to keep too:** a chip
+  may change color, background, border-radius, box-shadow and text-decoration
+  ONLY — padding, margin, border width, weight, tracking or size move a glyph
+  and drift the caret off the painted text (want a pill? add
+  `box-shadow: 0 0 0 Npx <background>`, which paints without taking space).
+  Only a person you supplied and the author picked is a chip, and editing a
+  byte of the token un-chips it in the same render that drops the id. Two
+  inherited limits: two labels that sanitize to the same token are one token
+  in a plain-text body, so the first person you list owns every occurrence of
+  it; and a restored draft has no chips (and reports no ids) until the author
+  picks again. No source → no overlay element at all.
+- **`Viewer` / `HtmlViewer` `mentionSource`** (0.43.1): the same prop on the two
+  viewers, forwarded to every comment composer each of them mounts, so a host
+  wires mentions once per surface instead of per composer. The ids the author
+  kept ride onto the created annotation as `Annotation.mentions`
+  (`readonly string[]`, present only when a source was supplied and at least
+  one token survived). It is host data: the package never renders, exports,
+  shares or archives it.
+
+See HANDOFF.md § "Host toolbar seams (0.43.0)" for the grammar, the keyboard
+rules and the threading points, and § "mentionSource on the viewers (0.43.1)"
+for the two viewer props and the annotation field. § "Mention token chips in
+the composer (0.44.0)" covers the chips, the metric rule, the merged-range
+refactor behind them, and the three inherited limits (duplicate labels,
+restored drafts, and a label that is a prefix of another label).
+
+### Annotation card seams (`AnnotationPanel`; 0.45.0)
+
+Two more opt-in props, both on the panel and both defaulting to today's
+behavior — pass neither and the panel renders byte-for-byte what it rendered
+in 0.44.0 (proven by diffing mounted `outerHTML` against the base commit for
+an empty panel, every card kind, a card in edit mode, `readOnly` and the
+All-files view).
+
+- **`renderCardHeader?: (annotation) => ReactNode`** — the twin of
+  `renderCardFooter`, rendered inside each plan-annotation card's header row
+  after `author · time` and before the built-in edit/delete actions: the place
+  for a status stamp (resolved, needs reply, a reviewer badge). Its wrapper is
+  `[data-annotation-card-header]` and swallows clicks and keydowns, so
+  interacting with your stamp never selects the card. It renders under
+  `readOnly` for the same reason the footer does — a stamp is a read
+  affordance — and, like the footer, only on the OPEN document's cards in the
+  All-files grouped view. Return `null` for a card and no wrapper exists for
+  it; omit the prop and no wrapper exists at all. The header row is one
+  non-wrapping flex line, so keep the stamp compact: the wrapper shrinks but
+  a node that cannot will overflow toward the built-in actions.
+- **`mentionSource?: MentionSource`** — the same source `Viewer` and
+  `HtmlViewer` take (0.43.1), applied to the card's EDIT box, so a comment can
+  be re-tagged after it was written. The grammar, the picker, the keyboard
+  rules and `onPickBlocked` are the ones documented above. Saving an edit
+  calls `onEdit(id, { text, mentions })` **only** when a source is supplied
+  AND at least one person was picked in that edit session whose token
+  survives; otherwise it is the `onEdit(id, { text })` it always was, so an
+  untouched or pick-less edit can never wipe tags the annotation already
+  carries. Reopening the editor starts a fresh session with nobody picked, and
+  `onMentionsChange` follows that session — it reports `[]` once when the
+  editor opens, so treat it as the live picker state, never as the
+  annotation's stored tags.
+  **One difference from `CommentPopover`: no chips** — the token stays plain
+  text, because the chip layer lives in the composer's mirrored overlay and is
+  not worth duplicating; the follow-up is to move the card's edit box onto
+  `ComposerTextarea`.
+
+Neither prop reaches `CodeAnnotation` cards (the review-editor shape), which
+take no `renderCardFooter` either. See HANDOFF.md § "Annotation card header
+slot and mentions on the edit box (0.45.0)".
+
 ### WebMCP provider (`@plannotator/ui/webmcp`; 0.32.0)
 
 The engine that lets a browser-integrated agent (Chrome/Edge WebMCP, `document.modelContext`) call in-page tools on a document surface. Feature-detected once; a browser without the API sees no registration, no DOM, no network, no timers. Seam: `configurePlannotatorUI({ webmcp: { enabled, namePrefix } })`, default enabled with the `plannotator.` prefix; pass `enabled: false` to keep a host page tool-free, or your own prefix to namespace the tools beside your own. There is deliberately no confirmation seam: the catalog is read-and-comment only (no approve / submit / close tools), and the agent may only edit or remove comments stamped `source: "browser-agent"`.
@@ -231,6 +359,72 @@ The engine that lets a browser-integrated agent (Chrome/Edge WebMCP, `document.m
 - Never register tools inside an untrusted iframe: the raw-HTML viewer's `sandbox="allow-scripts"` frame and the live-app frame carry no `allow="tools"`, and that is what keeps a framed page from impersonating the host's tools.
 
 The one additive data-model change that rides with it: `Annotation.inReplyTo` (threaded replies; the panel indents them under the parent, the export nests them, share links drop them).
+
+### Questions in documents (`:::question`; 0.48.0, core 0.25.8)
+
+An agent writes `:::question` (pick one), `:::question-multi` (pick any) or `:::question-text` (free text) blocks in a markdown document; `Viewer` renders each as an answer card (`components/blocks/QuestionBlock`) with native radios / checkboxes, an always-present "Other…", Add note · Skip · Accept recommended. Question and choice text stay selectable and annotatable; a drag across option text never picks it.
+
+- **Grammar, key, answer shape, export section, authoring guide:** `@plannotator/core/question-block` (`parseQuestionBlock`, `indexQuestionBlocks`, `questionKey`, `QuestionAnswer`, `parseQuestionAnswer`, `formatQuestionAnswersSection`, `QUESTION_AUTHORING_GUIDE` — the syntax reference to put in your own agent prompts).
+- **Storage is an annotation.** An answer is one row with `Annotation.questionAnswer` (id `ann-question-<key>`). The Viewer draws answers from its existing `annotations` prop, so your annotation persistence and `draftTransport` carry them unchanged.
+- **One new optional prop:** `Viewer` `onAnswerQuestion?(blockId, answer | null, key)`. Apply it with `upsertQuestionAnswerAnnotation(annotations, blockId, answer, key)` from `utils/questionAnswers` and store the result. Without the prop (or under `readOnly`) the cards render read-only, still showing stored answers.
+- **Export:** `exportAnnotations` / `exportLinkedDocAnnotations` / `exportAnnotationEntry` print answers in an "Answers to your questions" section before the numbered feedback, with no host action.
+- An unparseable block (no prompt) renders as the ordinary directive callout; a ui older than 0.48.0 renders every `:::question` that way.
+- **Progress and panel (optional):** pass `questionRows={buildQuestionPanelRows(blocks, annotations)}` to `AnnotationPanel` for the Questions section (answers then leave the comment timeline), and mount `QuestionProgressChip` with `questionProgress(rows)` / `nextOpenQuestionKey(rows)` / `focusQuestionCard(key)` for the "N/M answered" chip.
+
+See HANDOFF.md § "Questions in documents (0.48.0, core 0.25.8)".
+
+**A host that keeps answers itself (ui 0.49.0, core 0.25.9).** All optional on `Viewer`; Plannotator passes none of them:
+
+- `questionAnswers` (Map or object keyed by the de-duplicated question key): the cards read answers from here instead of from `annotations`.
+- `onSaveQuestionAnswer(key, answer | null)`: explicit save mode. Edits stay a draft in the card, which shows Save answer and Cancel (no Skip); return a promise to hold the draft until the save settles.
+- `saveQuestionAnswerLabel` (string, or `(question) => string`): the Save button's label in explicit save mode. Default "Save answer"; never derived from `Decision: when answered`, since only the host knows whether its save records a decision.
+- `renderQuestionFooter(question, savedAnswer)`: host actions at the right of the card's footer (e.g. "Mark as decision"), live in read-only cards too.
+- Core reads a `Decision: when answered` line after the prompt as `ParsedQuestion.decisionOnAnswer` and a `Decision: [statement](https://…)` line as `ParsedQuestion.decision`; the card shows either. Neither changes the key.
+- `findQuestionBlocks(markdown)` (core) locates each question block by key, line range and exact text, without the UI parser; it shares the block splitter's rules through the new `@plannotator/core/markdown-structure` subpath, so it agrees with what renders.
+
+See HANDOFF.md § "Question host seams (ui 0.49.0, core 0.25.9)".
+
+**Decision recording toggle and status tag (ui 0.52.0, unreleased).** Also optional on `Viewer`, also unused by Plannotator:
+
+- `questionDecisionRecording(question) => boolean | undefined`: false draws a `Decision: when answered` question's "Records a decision" tag faded (muted-foreground at 55%; the focus ring stays at full strength) with a dotted outline and hides its "Answering this records a decision" row. A recorded decision is never affected.
+- `onToggleQuestionDecisionRecording(key, next)`: makes that tag an `aria-pressed` toggle button; store `next` and return it from `questionDecisionRecording`. Not offered under `readOnly` or in a card without an answer handler.
+- `questionStatusTag: 'none'`: hides the card's own Open / Answered / Settled / Skipped tag so you can draw your own; the decision tags stay.
+- `renderQuestionCard(question, savedAnswer)`: your own card in place of a question's answer card (return `undefined` to keep it), e.g. for a question the asker withdrew; `renderQuestionBelowPrompt(question)`: content under a card's prompt.
+
+See HANDOFF.md § "Question decision toggle and status tag (ui 0.52.0, unreleased; …)".
+
+**Decision toggle on any question, and a decision-card opener (ui 0.52.1, unreleased).** Also optional on `Viewer`, also unused by Plannotator:
+
+- `questionDecisionScope?: 'when-answered' | 'any'` (default `'when-answered'`, the 0.52.0 behaviour). With `'any'`, `questionDecisionRecording(question)` also applies to a question with no decision line: a boolean adds the "Records a decision" tag in that state (true also shows the "Answering this records a decision" row); `undefined` leaves it tag-less. Return `false` for "off by default".
+- `onOpenQuestionDecision(key, anchor)`: splits the tag into a diamond switch (`aria-pressed`, "Record as a decision", driven by `onToggleQuestionDecisionRecording`) and the words as a button (`aria-haspopup="dialog"`) that calls this with its own element to anchor your decision card. Offered on and off; not offered under `readOnly`. Without it the whole tag is the toggle, as in 0.52.0.
+
+See HANDOFF.md § "Decision toggle on any question, and an opener for the host's decision card (ui 0.52.1, …)".
+
+**Answers without comments (unreleased).** `Viewer` `answerOnly`: annotation authoring and the document actions (Global comment, Copy) are off as under `readOnly`, while question cards and checkboxes keep their handlers, for a host that shows a message to answer, not a document to annotate. See HANDOFF.md § "Viewer `answerOnly` (unreleased)".
+
+**Local links decided by the host (unreleased).** `Viewer` `resolveLocalLink`: the host decides what a link to a local path does (open it itself, or draw it as inert text), markdown and raw HTML alike. See HANDOFF.md § "Viewer `resolveLocalLink` (unreleased)".
+
+### Diff file tree (`components/DiffFileTree`; next ui release)
+
+A read-only file tree for a list of changed files, to sit beside a host's own per-file diff list. It is Plannotator's code-review tree, not a lookalike: the builder (`utils/diffFileTree`), the folder open/closed hook (`hooks/useDiffFileTreeExpansion`) and the row atoms moved here from `packages/review-editor`, and the review now renders from them.
+
+```tsx
+import { DiffFileTree } from "@plannotator/ui/components/DiffFileTree";
+
+<DiffFileTree
+  files={files}            // { path, oldPath?, status, additions, deletions }[]
+  selectedPath={selected}  // string | null (controlled)
+  onSelect={setSelected}   // (path) => void
+/>
+```
+
+- `status`: `'added' | 'modified' | 'deleted' | 'renamed' | 'binary'` (letters A, M, D, R, B; R's tooltip names `oldPath`).
+- Optional: `defaultExpanded` (`'all'` default, `'none'`, or folder paths; re-applied when the set of files changes, not when an equal array is passed again), `label` (accessible name, default "Changed files"), `className`.
+- Same shape rules as the review: folders first, single-child folder chains merged (`packages/app/src`), a lone root folder holding only files unwrapped, folder +/- summed.
+- `role="tree"` with `treeitem` rows (`aria-level`, `aria-expanded`, `aria-selected`) and one tab stop. While focus is in the tree: ArrowDown/`j`, ArrowUp/`k`, Home, End select files in tree order (the review's keys, opening folders as needed); ArrowRight/ArrowLeft open/close a focused folder, ArrowLeft from a file focuses its folder. Unlike the review, nothing listens on `window`.
+- Styling is the `file-tree-item` rules in `styles.css` plus ThemeProvider tokens; no fetches, no seams.
+
+For a custom row, use the atoms (`DiffFileTreeFolderRow`, `DiffFileTreeFileRowContent`, `ChangeTypeLetter`, `DiffCounts`, `diffFileTreeIndent`) with `buildDiffFileTree` and `useDiffFileTreeExpansion`, as the review does. See HANDOFF.md § "Diff file tree".
 
 ## Consuming it (e.g. from Workspaces)
 
@@ -255,7 +449,7 @@ npm install @plannotator/ui @plannotator/core
 - `@plannotator/core` — pure utils + types, zero deps, browser-safe (CI enforces no `node:` imports). Published.
 - `@plannotator/ui` — React components/hooks + theme + `configure()`. Depends on an exact published `@plannotator/core` version. Published.
 - `@plannotator/shared`, `@plannotator/ai` — stay private to the monorepo; `shared` re-exports `core`'s modules via shims so Plannotator's internals are untouched.
-- Currently `@plannotator/ui` 0.41.0 depends exactly on `@plannotator/core` 0.25.4. `core` is bumped only when something under `packages/core` changes, so `ui` can advance alone. Keep the published core version exact in `packages/ui/package.json`; do not use a `workspace:` protocol there, because a directly published manifest must remain installable outside this monorepo. Bun still links the matching local workspace during development. When both packages change, publish `core` first, then build and publish the UI tarball. See HANDOFF.md "Publishing & versioning" for the verification command.
+- Currently `@plannotator/ui` 0.48.0 depends exactly on `@plannotator/core` 0.25.8. `core` is bumped only when something under `packages/core` changes, so `ui` can advance alone. Keep the published core version exact in `packages/ui/package.json`; do not use a `workspace:` protocol there, because a directly published manifest must remain installable outside this monorepo. Bun still links the matching local workspace during development. When both packages change, publish `core` first, then build and publish the UI tarball. See HANDOFF.md "Publishing & versioning" for the verification command.
 
 ## The one rule
 

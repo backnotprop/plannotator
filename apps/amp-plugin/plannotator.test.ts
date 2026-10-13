@@ -312,6 +312,16 @@ describe("Amp Plannotator registered commands", () => {
         const empty = await run(command, JSON.stringify({ decision: "annotated", feedback: "" }));
         expect(empty.appended).toEqual([]);
         expect(empty.notifications).toEqual([expect.stringMatching(/closed/i)]);
+
+        // #1701: a bare Done keeps the zero-state sentence as feedback and
+        // marks it; it must not become a "please address the feedback" turn.
+        const done = await run(command, JSON.stringify({
+          decision: "annotated",
+          feedback: "User reviewed the document and has no feedback.",
+          nothingToSend: true,
+        }));
+        expect(done.appended).toEqual([]);
+        expect(done.notifications).toEqual([expect.stringMatching(/closed/i)]);
       });
     },
   );

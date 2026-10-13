@@ -23,7 +23,9 @@ import { OpenInAppButton } from './OpenInAppButton';
 
 export interface LinkedDocBadgeInfo {
   filepath: string;
-  onBack: () => void;
+  /** Leave the document. Optional for `folder-file`: absent shows no Close
+   *  (a file of a review of several files, which the switcher moves between). */
+  onBack?: () => void;
   label?: string;
   backLabel?: string;
   variant?: 'breadcrumb' | 'folder-file';
@@ -198,13 +200,15 @@ export const DocBadges: React.FC<DocBadgesProps> = ({
       {!isRow && linkedDocInfo && (
         linkedDocInfo.variant === 'folder-file' ? (
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={linkedDocInfo.onBack}
-              className="rounded-sm text-[9px] font-medium text-primary transition-colors hover:text-primary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-            >
-              Close
-            </button>
+            {linkedDocInfo.onBack && (
+              <button
+                type="button"
+                onClick={linkedDocInfo.onBack}
+                className="rounded-sm text-[9px] font-medium text-primary transition-colors hover:text-primary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                Close
+              </button>
+            )}
             <span
               className="truncate rounded bg-muted/50 px-1.5 py-0.5 text-[9px] text-muted-foreground max-w-[220px]"
               title={linkedDocInfo.filepath}

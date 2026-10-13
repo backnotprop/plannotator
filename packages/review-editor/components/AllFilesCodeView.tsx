@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { getSingularPatch, processFile } from '@pierre/diffs';
+import { DEFAULT_CODE_VIEW_FILE_METRICS, getSingularPatch, processFile } from '@pierre/diffs';
 import type {
   CodeViewItem,
   CodeViewLineSelection,
@@ -10,6 +10,7 @@ import type {
   LineAnnotation,
   PostRenderPhase,
   SelectedLineRange,
+  VirtualFileMetrics,
 } from '@pierre/diffs';
 import { CodeView, EditProvider, type CodeViewHandle, useStableCallback } from '@pierre/diffs/react';
 import type { DiffTokenEventBaseProps } from '@pierre/diffs';
@@ -25,6 +26,7 @@ import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { usePierreTheme } from '../hooks/usePierreTheme';
 import { useIsWorkerPoolReadyOrDisabled, useWorkerPoolThemeSync } from '../workerPool';
 import type { DiffFile, AnnotationScrollTarget } from '../types';
+import type { MarkdownFileView } from '../utils/markdownPreview';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
 import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
 import { getDiffSelection, getLineNumberFromNode, getSideFromNode } from '../utils/diffSelection';
@@ -34,10 +36,11 @@ import {
   resolveLineSelectionBehavior,
   type LineSelectionSource,
 } from '../utils/lineSelectionBehavior';
-import { isContentlessBinaryPatch, isOversizedReviewStubPatch } from '@plannotator/shared/diff-paths';
+import { isContentlessBinaryPatch, isImagePreviewCandidate, isOversizedReviewStubPatch } from '@plannotator/shared/diff-paths';
 import { OversizedFileNotice } from './OversizedFileNotice';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import { FileHeader } from './FileHeader';
+import { DiffHScrollbar } from './DiffHScrollbar';
 import { BinaryFileNotice } from './BinaryFileNotice';
 import { GeneratedFileNotice } from './GeneratedFileNotice';
 import { EditSessionHud } from './EditSessionHud';
@@ -189,6 +192,44 @@ export interface AllFilesCodeViewProps {
    *  patch review): the augmentation stage completes as a no-op instead of
    *  firing a /api/file-content request the server answers 400. */
   contextExpansionAvailable?: boolean;
+  /**
+   * Before/After image preview for a hunkless image chunk (#1598), rendered in
+   * place of the binary notice. A render prop rather than a flag so the
+   * preview (and its fetches) never enter hosts that leave it unset: the
+   * guide chain and the read-only guides.show viewer keep the plain notice.
+   */
+  renderImagePreview?: (args: {
+    file: DiffFile;
+    /** The notice to show when the server cannot display the file. */
+    fallback: React.ReactNode;
+    /** The notice to show when every side is over the byte cap. */
+    tooLargeFallback?: React.ReactNode;
+    onHeightChange: () => void;
+  }) => React.ReactNode;
+  /**
+   * Rendered Markdown previews. A previewed Markdown file shows its card in
+   * the header slot (measured like an image preview) and its item's diff is
+   * swapped for a hunkless one, so no rows draw under it; Source swaps the
+   * real diff back. Absent (the guide chain, guides.show): no preview at all.
+   */
+  markdownPreview?: {
+    previewedPaths: ReadonlySet<string>;
+    isPreviewable: (file: DiffFile) => boolean;
+    /** Navigation needs a view for a file (a search hit: Source; a comment
+     *  made in a rendered view: that view). */
+    show: (filePath: string, view: MarkdownFileView) => void;
+    /** The file's Source / Changes / Read control, drawn in its header. */
+    renderViewControl: (args: { file: DiffFile; iconOnly: boolean; touch: boolean }) => React.ReactNode;
+    /** The file the edit session holds (null when none): its view must not change mid-edit. */
+    onEditingFileChange?: (filePath: string | null) => void;
+    /**
+     * Registers how to find the Markdown file a view key should act on: the
+     * file holding focus or under the pointer, else the top-most Markdown
+     * file in view (never the last file just because the list fits).
+     */
+    registerViewTarget?: (resolve: (() => string | null) | null) => void;
+    render: (args: { file: DiffFile; onHeightChange: () => void }) => React.ReactNode;
+  };
   /** Compact coarse-pointer shell. Adjusts custom-header chrome and Pierre's
    * matching virtualization metric without changing desktop geometry. */
   compactTouchLayout?: boolean;
@@ -337,6 +378,14 @@ export interface AllFilesCodeViewProps {
    * See adr/decisions/007-portable-guided-reviews-20260815.md (D2, D4).
    */
   readOnly?: boolean;
+  /**
+   * A host with no review server that still takes line comments (the Inbox's
+   * guide reader): line and range selection, the comment toolbar and the
+   * inline comments work as in the app, while the keyboard shortcuts and the
+   * header's open-in affordance stay off as for `readOnly`. Ignored when
+   * `readOnly` is set.
+   */
+  commentOnly?: boolean;
   /** EXPERIMENTAL flag-gated edit-to-suggestion mode. Only the plain all-files
    * dock panel passes this — Guided Review surfaces deliberately do NOT (the
    * GuideViewportManager evicts CodeViews beyond ~8 mounted, which would
@@ -519,6 +568,24 @@ function buildItemIdentity(
 }
 
 /**
+ * The diff a previewed Markdown file's item carries: the same file with no
+ * hunks, so Pierre draws nothing under the header slot that holds the
+ * preview. A distinct cacheKey keeps highlight caches apart.
+ */
+function markdownPreviewFileDiff(full: FileDiffMetadata): FileDiffMetadata {
+  return {
+    ...full,
+    hunks: [],
+    splitLineCount: 0,
+    unifiedLineCount: 0,
+    isPartial: true,
+    deletionLines: [],
+    additionLines: [],
+    cacheKey: `${full.cacheKey ?? ''}#md-preview`,
+  };
+}
+
+/**
  * Slack allowed when deciding a file has scrolled out ABOVE the viewport for
  * auto-mark-viewed. The active-file rule uses a +50px threshold, so a file can
  * become "not active" while a sliver of it is still on screen; this epsilon
@@ -526,6 +593,11 @@ function buildItemIdentity(
  * momentum-scrolled frame.
  */
 const SCROLLED_PAST_EPSILON_PX = 8;
+
+/** The one VirtualizedFileDiff method the image-header sizing needs. */
+type HeaderMetricsTarget = { setMetrics(metrics?: Partial<VirtualFileMetrics>, force?: boolean): void };
+const isHeaderMetricsTarget = (value: unknown): value is HeaderMetricsTarget =>
+  typeof value === 'object' && value !== null && typeof (value as HeaderMetricsTarget).setMetrics === 'function';
 
 // Resolved pixel height of the custom header. Must equal FileHeader's fixed
 // container height (`style={{ height: 'var(--panel-header-h)' }}`) so CodeView's
@@ -566,6 +638,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   reviewBase,
   reviewSnapshotId,
   contextExpansionAvailable = true,
+  renderImagePreview,
+  markdownPreview,
   compactTouchLayout,
   onLineSelection,
   onAddAnnotationForFile,
@@ -609,6 +683,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   leadingContent,
   isActive = true,
   readOnly = false,
+  commentOnly = false,
   aiAvailable = false,
   onAskAIForFile,
   isAILoading = false,
@@ -792,6 +867,47 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   );
   const { filePathToItemId, filePathToItemIds, itemIdToFilePath, itemIdToFile } = identity;
 
+  // Items whose header slot carries an image preview (#1598). Only these get a
+  // measured header height; without `renderImagePreview` (the guide chain,
+  // guides.show) the set is empty and nothing below runs.
+  const imagePreviewItemIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!renderImagePreview) return ids;
+    for (const [id, file] of itemIdToFile) {
+      if (isImagePreviewCandidate(file.patch, file.path, file.oldPath)) ids.add(id);
+    }
+    return ids;
+  }, [itemIdToFile, renderImagePreview]);
+
+  // Markdown files shown as a rendered preview (see the `markdownPreview` prop).
+  const markdownPreviewRef = useRef(markdownPreview);
+  markdownPreviewRef.current = markdownPreview;
+  const previewedPaths = markdownPreview?.previewedPaths;
+  const isPreviewable = markdownPreview?.isPreviewable;
+  const previewItemIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!previewedPaths || !isPreviewable) return ids;
+    for (const [id, file] of itemIdToFile) {
+      if (previewedPaths.has(file.path) && isPreviewable(file)) ids.add(id);
+    }
+    return ids;
+  }, [itemIdToFile, previewedPaths, isPreviewable]);
+  const previewItemIdsRef = useRef(previewItemIds);
+  previewItemIdsRef.current = previewItemIds;
+
+  // Items whose header slot reports its real height: image previews and
+  // Markdown preview cards.
+  const measuredHeaderItemIds = useMemo(
+    () => (previewItemIds.size === 0 ? imagePreviewItemIds : new Set([...imagePreviewItemIds, ...previewItemIds])),
+    [imagePreviewItemIds, previewItemIds],
+  );
+  const imagePreviewItemIdsRef = useRef(measuredHeaderItemIds);
+  imagePreviewItemIdsRef.current = measuredHeaderItemIds;
+
+  // A previewed item carries a hunkless diff; its real one (raw patch, or the
+  // full-content augmentation once it lands) waits here until Source.
+  const fullDiffsRef = useRef(new Map<string, FileDiffMetadata>());
+  const previewAppliedRef = useRef(new Set<string>());
   // Stable identity of the current diff. Changes whenever the file set or any
   // file's patch CONTENT changes (diff type / base / whitespace / PR switch),
   // and is used as the CodeView `key` to force a remount + fresh seed.
@@ -813,6 +929,23 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     () => `${fileOrder ?? 'tree'}:${seedCollapsed ? 'c' : 'e'}:g${generatedKey ? hashString(generatedKey) : ''}:${prUrl ?? ''}:${prDiffScope ?? ''}:${reviewSnapshotId ?? ''}:${files.length}:${files.map((f, i) => `${f.path}#${patchHashes[i]}`).join('|')}`,
     [files, patchHashes, prUrl, prDiffScope, reviewSnapshotId, fileOrder, seedCollapsed, generatedKey],
   );
+
+  // CodeView seeds its items once per mount (keyed on fileSetKey): a new mount
+  // starts previewed files hunkless. An identity rebuilt without a remount
+  // (an equal file set re-parsed) is never seen by CodeView, so it re-seeds
+  // nothing. Idempotent per key (render may run twice).
+  const seededPreviewKeyRef = useRef<string | null>(null);
+  if (seededPreviewKeyRef.current !== fileSetKey) {
+    seededPreviewKeyRef.current = fileSetKey;
+    fullDiffsRef.current = new Map();
+    previewAppliedRef.current = new Set();
+    for (const item of identity.items) {
+      if (item.type !== 'diff' || !previewItemIds.has(item.id)) continue;
+      fullDiffsRef.current.set(item.id, item.fileDiff);
+      item.fileDiff = markdownPreviewFileDiff(item.fileDiff);
+      previewAppliedRef.current.add(item.id);
+    }
+  }
 
   // Visual-order list of file paths (for [/] stepping). Derived from items so it
   // matches CodeView's rendered order exactly.
@@ -1213,6 +1346,95 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     handle.updateItem(item);
   }, []);
 
+  // --- Measured header height for image-preview items (#1598) ---------------
+  //
+  // Pierre sizes every item from `itemMetrics` and line estimates; it never
+  // measures the custom header slot. That is fine for the fixed-height
+  // FileHeader, but an image preview lives in the same slot and is a few
+  // hundred pixels tall. Left alone, Pierre models the card as a bare 33px
+  // header: once the scroll passes that 33px the card leaves the virtual
+  // window, unmounts, and the code below jumps up into its place.
+  //
+  // So for image-preview items we measure the whole header slot and hand the
+  // height to that item's own VirtualizedFileDiff through the public
+  // `setMetrics` (per instance; every other item keeps the shared metrics).
+  // Pierre then lays the card out at its real height, keeps it mounted while
+  // any of it is on screen, and puts the next file below it. Instances persist
+  // per CodeView record, so an override survives the card scrolling out of the
+  // window and back. Code files never take this path.
+  const itemMetricsRef = useRef<Partial<VirtualFileMetrics>>({});
+  /** Measured header-slot height per image-preview item id. */
+  const measuredHeaderHeightsRef = useRef(new Map<string, number>());
+  /** The item's VirtualizedFileDiff, captured from onPostRender. */
+  const headerMetricsInstancesRef = useRef(new Map<string, HeaderMetricsTarget>());
+  /** What was last applied to each instance (header height + shared metrics). */
+  const appliedHeaderMetricsRef = useRef(
+    new WeakMap<HeaderMetricsTarget, { height: number; base: Partial<VirtualFileMetrics> }>(),
+  );
+
+  const syncHeaderMetrics = useCallback(
+    (itemId: string) => {
+      const instance = headerMetricsInstancesRef.current.get(itemId);
+      if (instance == null) return;
+      const base = itemMetricsRef.current;
+      const baseHeight = base.diffHeaderHeight ?? DEFAULT_CODE_VIEW_FILE_METRICS?.diffHeaderHeight ?? 0;
+      const height = measuredHeaderHeightsRef.current.get(itemId) ?? baseHeight;
+      const applied = appliedHeaderMetricsRef.current.get(instance);
+      // Nothing to do when this exact height is already applied over the
+      // current shared metrics, or when the item never had an override and
+      // still matches the shared header height.
+      if (applied ? applied.height === height && applied.base === base : height === baseHeight) return;
+      // Same shape as CodeView's own per-item metrics (its defaults first),
+      // with only the header height replaced.
+      instance.setMetrics({ ...DEFAULT_CODE_VIEW_FILE_METRICS, ...base, diffHeaderHeight: height });
+      appliedHeaderMetricsRef.current.set(instance, { height, base });
+      // setMetrics only marks the instance dirty; the version bump makes
+      // CodeView re-lay out from this item down.
+      refreshItem(itemId);
+    },
+    [refreshItem],
+  );
+
+  // A ref callback per item id, so a header re-render does not re-observe.
+  const headerMeasureRefs = useRef(new Map<string, (el: HTMLElement | null) => void>());
+  const headerObserversRef = useRef(new Map<string, ResizeObserver>());
+  const getHeaderMeasureRef = useCallback(
+    (itemId: string) => {
+      let callback = headerMeasureRefs.current.get(itemId);
+      if (callback) return callback;
+      callback = (el: HTMLElement | null) => {
+        headerObserversRef.current.get(itemId)?.disconnect();
+        headerObserversRef.current.delete(itemId);
+        if (el == null || typeof ResizeObserver === 'undefined') return;
+        const report = () => {
+          const height = Math.ceil(el.getBoundingClientRect().height);
+          // 0 means hidden (an inactive dock panel), not a real size: keep
+          // the last measurement instead of collapsing the card.
+          if (height <= 0) return;
+          const baseHeight = itemMetricsRef.current.diffHeaderHeight ?? 0;
+          if (height === baseHeight) measuredHeaderHeightsRef.current.delete(itemId);
+          else measuredHeaderHeightsRef.current.set(itemId, height);
+          syncHeaderMetrics(itemId);
+        };
+        const observer = new ResizeObserver(report);
+        observer.observe(el);
+        headerObserversRef.current.set(itemId, observer);
+        report();
+      };
+      headerMeasureRefs.current.set(itemId, callback);
+      return callback;
+    },
+    [syncHeaderMetrics],
+  );
+
+  useEffect(() => {
+    const observers = headerObserversRef.current;
+    return () => {
+      for (const observer of observers.values()) observer.disconnect();
+      observers.clear();
+    };
+  }, []);
+
   // --- Lazy full-content hunk expansion via CodeView item updates (P5) --------
 
   // Per-item augmentation bookkeeping. `status` guards against double-fetch /
@@ -1460,6 +1682,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           // scoped by generation so the same item id across diff switches never
           // collides in a (future) cross-mount worker cache.
           augmented.cacheKey = `${generation}::${itemId}#full`;
+          if (previewAppliedRef.current.has(itemId)) {
+            // Previewed: keep the hunkless diff on screen; Source swaps this in.
+            fullDiffsRef.current.set(itemId, augmented);
+            augmentState.set(itemId, { status: 'done', controller, generation });
+            return;
+          }
           item.fileDiff = augmented;
           item.version = (item.version ?? 0) + 1;
           // updateItem re-measures the (now taller) item and resolves the captured
@@ -1523,6 +1751,14 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         clearItemSearchHighlights(node);
         nodeToItemIdRef.current.delete(node);
         return;
+      }
+      // Image-preview items take a per-item header height (see
+      // syncHeaderMetrics). Capture the instance and (re)apply: a change to
+      // the shared itemMetrics resets every instance, and this is the first
+      // point after that reset where the item renders again.
+      if (imagePreviewItemIdsRef.current.has(context.id) && isHeaderMetricsTarget(_instance)) {
+        headerMetricsInstancesRef.current.set(context.id, _instance);
+        syncHeaderMetrics(context.id);
       }
       // Track which item currently owns this <diffs-container> element so the
       // text-drag selection handler can resolve file identity from the
@@ -1631,11 +1867,59 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // resolves layout against a display:none container and there is no retry —
   // bail instead, and the isActive flip re-runs this effect so a match
   // selected while the panel was hidden scrolls once the panel is shown.
+  // (Defined after the Markdown preview swap below, which must run first.)
+  //
+  // Source <-> Preview: swap each changed item's diff in place (hunkless
+  // while previewed) and republish only that item.
+  useEffect(() => {
+    const handle = viewerRef.current;
+    if (handle == null) return;
+    const applied = previewAppliedRef.current;
+    for (const { id } of identity.items) {
+      const want = previewItemIds.has(id);
+      if (want === applied.has(id)) continue;
+      const item = handle.getItem(id);
+      if (item == null || item.type !== 'diff') continue;
+      if (want) {
+        // Never swap the document out from under an edit session.
+        if (id === editSession.editingItemIdRef.current) continue;
+        fullDiffsRef.current.set(id, item.fileDiff);
+        item.fileDiff = markdownPreviewFileDiff(item.fileDiff);
+        applied.add(id);
+      } else {
+        const full = fullDiffsRef.current.get(id);
+        if (full) item.fileDiff = full;
+        fullDiffsRef.current.delete(id);
+        applied.delete(id);
+        // The header slot is back to the fixed FileHeader height.
+        measuredHeaderHeightsRef.current.delete(id);
+      }
+      item.version = (item.version ?? 0) + 1;
+      handle.updateItem(item);
+      if (!want) syncHeaderMetrics(id);
+    }
+    // editingItemId: a swap held back for the editing file runs once it ends.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewItemIds, identity, editSession.editingItemId]);
+
+  // A search hit in a previewed file shows that file as Source (v1: hits are
+  // in the diff text).
+  // The file in an edit session always shows its diff (the swap never takes
+  // it out from under the editor), so a hit there scrolls, whatever its view.
+  const activeMatchItemId = activeSearchMatch != null ? filePathToItemId.get(activeSearchMatch.filePath) ?? '' : '';
+  const activeMatchPreviewed = activeSearchMatch != null
+    && previewItemIds.has(activeMatchItemId)
+    && activeMatchItemId !== editSession.editingItemId;
+
   useEffect(() => {
     if (!isActive) return;
     if (activeSearchMatch == null) return;
     const itemId = filePathToItemId.get(activeSearchMatch.filePath);
     if (itemId == null) return;
+    if (activeMatchPreviewed) {
+      markdownPreviewRef.current?.show(activeSearchMatch.filePath, 'source');
+      return;
+    }
     const handle = viewerRef.current;
     if (handle == null) return;
 
@@ -1660,7 +1944,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       viewer.scrollTo({ type: 'line', id: itemId, lineNumber, side, align: 'center' });
     });
     return () => cancelAnimationFrame(raf);
-  }, [activeSearchMatch, filePathToItemId, isActive, syncAllCollapsedMirror, reportFileCollapsed]);
+  }, [activeSearchMatch, filePathToItemId, isActive, syncAllCollapsedMirror, reportFileCollapsed, activeMatchPreviewed]);
 
   // --- Annotations through CodeView item state (P4) ---------------------------
 
@@ -2220,13 +2504,29 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // to the comment. Keyed on the navigation token so it fires per sidebar click
   // (re-clicking the same comment re-centers it) and NEVER on a bare in-diff
   // selection. rAF defers the scroll a frame so the expand's layout has settled.
+  const handledScrollTargetRef = useRef<AnnotationScrollTarget | null>(null);
   useEffect(() => {
     if (!scrollTargetAnnotation) return;
+    if (handledScrollTargetRef.current === scrollTargetAnnotation) return;
     const ann = annotationsRef.current.find((a) => a.id === scrollTargetAnnotation.id);
     if (!ann) return;
     const itemId = filePathToItemId.get(ann.filePath);
     const handle = viewerRef.current;
     if (itemId == null || handle == null) return;
+    // A comment made in a Markdown preview lives in the preview; a line
+    // comment lives in the source diff. Switch first; this runs again once
+    // the item swapped.
+    const previewControl = markdownPreviewRef.current;
+    const previewed = previewItemIdsRef.current.has(itemId);
+    if (previewControl && ann.markdownPreview && !previewed) {
+      previewControl.show(ann.filePath, ann.markdownPreview.view === 'whole' ? 'read' : 'changes');
+      return;
+    }
+    if (previewControl && previewed && !isFileScopedAnnotation(ann)) {
+      previewControl.show(ann.filePath, 'source');
+      return;
+    }
+    handledScrollTargetRef.current = scrollTargetAnnotation;
 
     const item = handle.getItem(itemId);
     if (item != null && item.collapsed === true) {
@@ -2247,10 +2547,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     });
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scrollTargetAnnotation, filePathToItemId]);
+  }, [scrollTargetAnnotation, filePathToItemId, previewItemIds]);
 
   useEffect(() => {
-    if (!isActive || readOnly) return;
+    if (!isActive || readOnly || commentOnly) return;
     const handler = (e: KeyboardEvent) => {
       // composedPath()[0] pierces shadow DOM: window-level e.target retargets
       // to the shadow HOST (e.g. <diffs-container>), which would hide a
@@ -2342,6 +2642,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   }, [
     isActive,
     readOnly,
+    commentOnly,
     orderedItemIds,
     filePathToItemId,
     itemIdToFilePath,
@@ -2354,6 +2655,65 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     canStagePath,
     onStage,
   ]);
+
+  // --- Markdown view: the editing file, and the file a view key acts on ------
+
+  const editingFilePath = editSession.editingItemId != null
+    ? itemIdToFilePath.get(editSession.editingItemId) ?? null
+    : null;
+  const onEditingFileChange = markdownPreview?.onEditingFileChange;
+  useEffect(() => {
+    onEditingFileChange?.(editingFilePath);
+  }, [onEditingFileChange, editingFilePath]);
+  useEffect(() => () => onEditingFileChange?.(null), [onEditingFileChange]);
+
+  // Last pointer position over this view (null once it leaves).
+  const pointerRef = useRef<{ x: number; y: number } | null>(null);
+  const resolveViewTarget = useStableCallback((): string | null => {
+    const viewer = viewerRef.current?.getInstance();
+    const isPreviewable = markdownPreviewRef.current?.isPreviewable;
+    if (viewer == null || !isPreviewable) return null;
+    // Only files in the viewport count (rendered items include overscan), so
+    // P never switches a file the person cannot see.
+    const container = viewer.getContainerElement();
+    const view = container?.getBoundingClientRect();
+    const rendered = viewer.getRenderedItems().filter((item) => {
+      if (!view) return true;
+      const rect = item.element.getBoundingClientRect();
+      return rect.bottom > view.top + 1 && rect.top < view.bottom - 1;
+    });
+    const markdownPathOf = (itemId: string): string | null => {
+      const file = itemIdToFile.get(itemId);
+      return file && isPreviewable(file) ? file.path : null;
+    };
+    // 1. The file holding focus.
+    const active = document.activeElement;
+    if (active && active !== document.body) {
+      const holder = rendered.find((item) => item.element.contains(active));
+      if (holder) return markdownPathOf(holder.id);
+    }
+    // 2. The file under the pointer.
+    const pointer = pointerRef.current;
+    if (pointer) {
+      const under = rendered.find((item) => {
+        const rect = item.element.getBoundingClientRect();
+        return pointer.y >= rect.top && pointer.y < rect.bottom;
+      });
+      if (under) return markdownPathOf(under.id);
+    }
+    // 3. The top-most Markdown file in the viewport.
+    for (const item of rendered) {
+      const path = markdownPathOf(item.id);
+      if (path) return path;
+    }
+    return null;
+  });
+  const registerViewTarget = markdownPreview?.registerViewTarget;
+  useEffect(() => {
+    if (!registerViewTarget) return;
+    registerViewTarget(resolveViewTarget);
+    return () => registerViewTarget(null);
+  }, [registerViewTarget, resolveViewTarget]);
 
   // --- Custom header render slot (the full Plannotator FileHeader) -----------
 
@@ -2368,19 +2728,42 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (file == null) return null;
 
     const collapsed = item.collapsed === true;
-    const fileComments = fileCommentsByPath.get(filePath) ?? [];
+    const previewControl = markdownPreview;
+    const previewable = !!previewControl && previewControl.isPreviewable(file);
+    const previewed = previewable && previewItemIdsRef.current.has(item.id);
+    const allFileComments = fileCommentsByPath.get(filePath) ?? [];
+    // Comments made in the preview are highlighted in it.
+    const fileComments = previewed ? allFileComments.filter((comment) => !comment.markdownPreview) : allFileComments;
+    const isOversizedStub = isOversizedReviewStubPatch(file.patch);
+    const isBinaryNotice = !isOversizedStub && isContentlessBinaryPatch(file.patch);
+    const remeasure = () => refreshItem(item.id);
+    const imagePreview = !collapsed && renderImagePreview && isImagePreviewCandidate(file.patch, file.path, file.oldPath)
+      ? renderImagePreview({
+          file,
+          fallback: isOversizedStub
+            ? <OversizedFileNotice onHeightChange={remeasure} />
+            : isBinaryNotice ? <BinaryFileNotice onHeightChange={remeasure} /> : null,
+          tooLargeFallback: isOversizedStub ? <OversizedFileNotice onHeightChange={remeasure} /> : undefined,
+          onHeightChange: remeasure,
+        })
+      : null;
     // Edit-to-suggestion affordance (flag-gated). Slot portals republish on
     // updateItem BEFORE React commits state, so read the session's refs.
     const isEditingThis = editEnabled && editSession.editingItemIdRef.current === item.id;
     const editDisabledReason = editEnabled
-      ? editSession.editUnavailableRef.current.get(filePath) ?? null
+      ? (previewed ? 'Switch to Source to edit this file' : editSession.editUnavailableRef.current.get(filePath) ?? null)
       : null;
 
     return (
-      <div className="flex flex-col">
+      <div
+        className="relative flex flex-col"
+        // Image-preview items report their real header height to the
+        // virtualizer (see syncHeaderMetrics); other headers are fixed height.
+        ref={imagePreviewItemIdsRef.current.has(item.id) ? getHeaderMeasureRef(item.id) : undefined}
+      >
         <FileHeader
         compactTouchLayout={compactTouchLayout}
-        readOnly={readOnly}
+        readOnly={readOnly || commentOnly}
         filePath={filePath}
         patch={file.patch}
         status={file.status}
@@ -2390,6 +2773,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         editDisabledReason={editDisabledReason}
         isViewed={viewedFiles?.has(filePath)}
         isGenerated={generatedFiles?.has(filePath) === true}
+        renderMarkdownView={previewable ? (fit) => previewControl!.renderViewControl({ file, ...fit }) : undefined}
         onToggleViewed={onToggleViewed ? () => handleToggleViewedAndCollapse(filePath, item.id) : undefined}
         showViewedControl={showViewedControls}
         isStaged={stagedFiles?.has(filePath)}
@@ -2446,18 +2830,19 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
             onHeightChange={() => refreshItem(item.id)}
           />
         )}
+        {/* A hunkless image chunk previews its Before/After images (#1598)
+            when the host opts in; the notices below are its fallback. */}
+        {imagePreview}
         {/* Files over the review size cap arrive as a contents-free stub, so
             Pierre renders nothing below the header. Explain why rather than
             leaving a bare header that reads as a broken diff. */}
-        {!collapsed && isOversizedReviewStubPatch(file.patch) && (
+        {!collapsed && !imagePreview && isOversizedStub && (
           <OversizedFileNotice onHeightChange={() => refreshItem(item.id)} />
         )}
         {/* The general fallback under that specific case: any OTHER hunkless
             binary chunk draws nothing either. Gated on the marker so a
             marker-carrying stub is explained exactly once, by the line above. */}
-        {!collapsed
-          && !isOversizedReviewStubPatch(file.patch)
-          && isContentlessBinaryPatch(file.patch) && (
+        {!collapsed && !imagePreview && isBinaryNotice && (
           <BinaryFileNotice onHeightChange={() => refreshItem(item.id)} />
         )}
         {/* EXPERIMENTAL edit-session HUD: session controls + state in a slim
@@ -2487,6 +2872,17 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
             onHeightChange={() => refreshItem(item.id)}
           />
         )}
+        {/* The rendered Markdown, in place of the (hunkless) diff rows. */}
+        {!collapsed && previewed && previewControl!.render({ file, onHeightChange: remeasure })}
+        {/* This file's own horizontal scrollbar (#1048), riding the sticky
+            header so it stays reachable anywhere in a long diff. Absolutely
+            positioned on the header's bottom edge so it costs no layout
+            height — itemMetrics.diffHeaderHeight must keep matching the
+            header, and a bar that appears only on overflow would otherwise
+            drift the virtualization estimate. */}
+        {!collapsed && !previewed && diffOverflow !== 'wrap' && (
+          <DiffHScrollbar className="absolute inset-x-2 bottom-0 z-30" />
+        )}
       </div>
     );
   });
@@ -2507,6 +2903,16 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const px = parseFloat(fontSize);
     return Number.isFinite(px) && px > 0 ? Math.round(px * 1.5) : undefined;
   }, [fontSize]);
+
+  const itemMetrics = useMemo<Partial<VirtualFileMetrics>>(
+    () => ({
+      diffHeaderHeight: compactTouchLayout ? COMPACT_PANEL_HEADER_HEIGHT : PANEL_HEADER_HEIGHT,
+      hunkSeparatorHeight: HUNK_SEPARATOR_HEIGHT,
+      ...(customLineHeight != null && { lineHeight: customLineHeight }),
+    }),
+    [compactTouchLayout, customLineHeight],
+  );
+  itemMetricsRef.current = itemMetrics;
 
   const options = useMemo<CodeViewOptions<DiffAnnotationMetadata>>(
     () => ({
@@ -2529,11 +2935,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // leadingHeight reserves space for the leading-content portal (commit
       // description card) so items start below it and it scrolls with them.
       layout: { gap: 0, paddingTop: 8 + leadingHeight, paddingBottom: 8 },
-      itemMetrics: {
-        diffHeaderHeight: compactTouchLayout ? COMPACT_PANEL_HEADER_HEIGHT : PANEL_HEADER_HEIGHT,
-        hunkSeparatorHeight: HUNK_SEPARATOR_HEIGHT,
-        ...(customLineHeight != null && { lineHeight: customLineHeight }),
-      },
+      itemMetrics,
       // Opt-in safety net for the hand-maintained itemMetrics above: Pierre
       // compares its virtualization estimates against measured DOM heights and
       // warns on drift. Explicit env opt-in (VITE_PIERRE_VALIDATE_HEIGHTS=1)
@@ -2590,8 +2992,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       disableBackground,
       expandUnchanged,
       readOnly,
-      customLineHeight,
-      compactTouchLayout,
+      itemMetrics,
       leadingHeight,
       handleLineSelectionEnd,
       handleGutterUtilityClick,
@@ -2603,6 +3004,23 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       handlePostRender,
     ],
   );
+
+  // A change to the shared itemMetrics (font size, compact layout) makes
+  // CodeView reset every instance to them, dropping the image-header
+  // overrides. Mounted items re-apply from onPostRender; this re-applies to
+  // items outside the window too, once CodeView has run its reset.
+  const lastItemMetricsRef = useRef(itemMetrics);
+  useEffect(() => {
+    if (lastItemMetricsRef.current === itemMetrics) return;
+    lastItemMetricsRef.current = itemMetrics;
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        appliedHeaderMetricsRef.current = new WeakMap();
+        for (const itemId of headerMetricsInstancesRef.current.keys()) syncHeaderMetrics(itemId);
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [itemMetrics, syncHeaderMetrics]);
 
   // After all hooks: hold the surface until the worker pool can take the
   // first tokenization wave (≈100-300ms once per session; instant after).
@@ -2647,6 +3065,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     <div
       className="relative h-full"
       data-history-owner={editSession.editingItemId ? 'edit-session' : undefined}
+      onPointerMove={markdownPreview ? (event) => { pointerRef.current = { x: event.clientX, y: event.clientY }; } : undefined}
+      onPointerLeave={markdownPreview ? () => { pointerRef.current = null; } : undefined}
     >
       {/* EditProvider only mounts when the experimental flag is on; its
           factory declines attaches until the lazy editor chunk has loaded

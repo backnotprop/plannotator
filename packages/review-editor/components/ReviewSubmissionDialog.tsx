@@ -1,13 +1,16 @@
 import React, { useRef } from 'react';
 import type { CodeAnnotation } from '@plannotator/ui/types';
-import type { PRReviewSubmissionPartial } from '@plannotator/shared/pr-types';
+import { getPRPlatformCapabilities, type Platform, type PRReviewAction, type PRReviewFileLevelComment, type PRReviewSubmissionPartial } from '@plannotator/shared/pr-types';
 import { CopyButton } from './CopyButton';
 import {
   exportReviewFeedback,
   formatCallFlowAnnotationTargets,
+  markdownPreviewQuote,
   formatConventionalPrefix,
+  OUTDATED_ANNOTATION_LABEL,
 } from '../utils/exportFeedback';
 import { useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
+import { canPostInline } from '../utils/codeAnnotationAnchor';
 import {
   Dialog,
   DialogContent,
@@ -32,6 +35,9 @@ export interface SubmissionTarget {
     start_line?: number;
     start_side?: 'LEFT' | 'RIGHT';
   }>;
+  /** GitHub only (#1599): file-scoped comments posted as file-level threads.
+   *  On any other platform they stay in `fileScopedBody`. */
+  fileLevelComments: PRReviewFileLevelComment[];
   fileScopedBody: string;
   fileCount: number;
   annotationCount: number;
@@ -53,17 +59,30 @@ export interface ReviewSubmission {
 
 /** Request body accepted by the review server's platform submission endpoint. */
 export interface PRActionRequest {
-  action: 'approve' | 'comment';
+  action: PRReviewAction;
   body: string;
   fileComments: SubmissionTarget['fileComments'];
+  fileLevelComments?: PRReviewFileLevelComment[];
   targetPrUrl?: string;
 }
 
-type ReviewPlatform = 'github' | 'gitlab';
+type ReviewPlatform = Platform;
 
 interface ReviewSubmissionDialogProps {
   isOpen: boolean;
-  action: 'approve' | 'comment';
+  action: PRReviewAction;
+  /**
+   * #1611: when given (and the dialog is not approving), the dialog offers a
+   * Comment / Request changes choice and reports the pick here. The primary
+   * "Post Comments" opens without it, so that flow is unchanged.
+   */
+  onActionChange?: (action: 'comment' | 'request_changes') => void;
+  /**
+   * Why Request changes cannot be chosen (GitLab has no such review; GitHub
+   * refuses it on your own PR). Set ⇒ the option renders disabled with this
+   * reason under it.
+   */
+  requestChangesUnavailableReason?: string;
   submission: ReviewSubmission;
   generalComment: string;
   onGeneralCommentChange: (value: string) => void;
@@ -81,11 +100,19 @@ interface ReviewSubmissionDialogProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
+// A line comment posted in the review body instead of inline: outdated (#1590),
+// or stamped on a snapshot the session knows its PR has moved past.
+const inBody = (a: CodeAnnotation, withheld: ReadonlySet<string>) => a.outdated || withheld.has(a.id);
+
 function buildAnnotationFileComments(
   annotations: CodeAnnotation[],
+  withheld: ReadonlySet<string>,
 ): SubmissionTarget['fileComments'] {
   return annotations
-    .filter(a => (a.scope ?? 'line') === 'line')
+    // Outdated comments (#1590) carry line numbers from an earlier version of
+    // the PR; posting them inline would pin them to whatever code sits there
+    // now. They ride the review body instead (buildFileScopedBody).
+    .filter(a => (a.scope ?? 'line') === 'line' && !inBody(a, withheld))
     .map(ann => {
       const ccPrefix = formatConventionalPrefix(ann.conventionalLabel, ann.decorations);
       let body = ccPrefix + (ann.text ?? '');
@@ -106,18 +133,45 @@ function buildAnnotationFileComments(
     .filter(c => c.body.length > 0);
 }
 
+// File-scoped comments posted as GitHub file-level review threads (#1599). The
+// body is the same text the review body fold uses, minus the path prefix.
+function buildFileLevelComments(annotations: CodeAnnotation[]): PRReviewFileLevelComment[] {
+  return annotations
+    // A comment made in a Markdown preview quotes rendered text, not lines:
+    // it always rides the review body (see buildFileScopedBody).
+    .filter(a => a.scope === 'file' && !a.markdownPreview)
+    .map(a => ({ path: a.filePath, body: `${a.text ?? ''}${formatCallFlowAnnotationTargets(a)}`.trim() }))
+    .filter(c => c.path.length > 0 && c.body.length > 0);
+}
+
 // The review-level body: file-scoped comments (prefixed with their path) plus
 // general (review-wide) comments, which belong to no file. Both ride here so
-// neither is dropped from a PR submission.
-function buildFileScopedBody(annotations: CodeAnnotation[]): string {
+// neither is dropped from a PR submission. With `fileLevel` (GitHub), file-scoped
+// comments post as file-level threads instead and are left out of the body.
+function buildFileScopedBody(annotations: CodeAnnotation[], withheld: ReadonlySet<string>, fileLevel: boolean): string {
   const parts: string[] = [];
   for (const a of annotations) {
     const scope = a.scope ?? 'line';
     const callFlowContext = formatCallFlowAnnotationTargets(a);
-    if (scope === 'file' && (a.text || callFlowContext)) {
+    if (scope === 'file' && a.markdownPreview && a.text) {
+      // Never inline and never a file-level thread: the quote is rendered
+      // text, which maps to no line the platform could anchor to.
+      parts.push(`**${a.filePath} (rendered Markdown):**\n\n${markdownPreviewQuote(a.markdownPreview)}\n${a.text}`.trim());
+    } else if (scope === 'file' && !fileLevel && (a.text || callFlowContext)) {
       parts.push(`**${a.filePath}:** ${a.text ?? ''}${callFlowContext}`.trim());
     } else if (scope === 'general' && (a.text || callFlowContext)) {
       parts.push(`${a.text ?? ''}${callFlowContext}`.trim());
+    } else if (scope === 'line' && inBody(a, withheld) && (a.text || a.suggestedCode || callFlowContext)) {
+      const lines = a.lineStart === a.lineEnd ? `L${a.lineStart}` : `L${a.lineStart}-L${a.lineEnd}`;
+      const suggestion = a.suggestedCode ? `\n\nSuggested code:\n\`\`\`\n${a.suggestedCode}\n\`\`\`` : '';
+      // The code the comment was written on, so the PR reader can find it
+      // even though the line numbers no longer point there.
+      const commentedOn = a.anchorText !== undefined ? `\n\nCommented on:\n\`\`\`\n${a.anchorText}\n\`\`\`` : '';
+      // The Outdated label only for a comment an anchor check marked outdated.
+      const label = a.outdated ? `${OUTDATED_ANNOTATION_LABEL} ` : '';
+      parts.push(
+        `**${a.filePath} (${lines}, ${a.side}):** ${label}${a.text ?? ''}${callFlowContext}${commentedOn}${suggestion}`.trim(),
+      );
     }
   }
   return parts.join('\n\n');
@@ -138,21 +192,41 @@ function buildFailedCommentsMarkdown(
 
 /**
  * Build the top-level review body without adding product attribution.
- * GitHub requires a body for COMMENT reviews, so an inline-only review gets a
+ * GitHub requires a body for COMMENT and REQUEST_CHANGES reviews, so an inline-only review gets a
  * neutral pointer. Approvals and GitLab discussions can remain bodyless.
  */
+/** What a narrowed retry will send, for the partial-submission notice. */
+export function describePartialRetry(partial: PRReviewSubmissionPartial, mrLabel: string): string {
+  const { retry } = partial;
+  const parts: string[] = [];
+  if (retry.fileComments.length > 0) {
+    parts.push(`the ${retry.fileComments.length} unposted inline comment${retry.fileComments.length === 1 ? '' : 's'}`);
+  }
+  if (retry.body !== undefined) parts.push('the unposted general comment');
+  if (partial.approval === 'failed') parts.push(`the ${mrLabel} decision`);
+  const what = parts.length > 1
+    ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+    : parts[0] ?? 'nothing';
+  const notAgain = retry.body !== undefined
+    ? 'posted comments are not sent again.'
+    : 'posted comments and the general note are not sent again.';
+  return `Retry sends only ${what}; ${notAgain}`;
+}
+
 export function buildPlatformReviewBody(
-  action: 'approve' | 'comment',
+  action: PRReviewAction,
   platform: ReviewPlatform,
   generalComment: string | undefined,
-  target: Pick<SubmissionTarget, 'fileComments' | 'fileScopedBody'>,
+  target: Pick<SubmissionTarget, 'fileComments' | 'fileScopedBody'> & Partial<Pick<SubmissionTarget, 'fileLevelComments'>>,
 ): string {
   const parts: string[] = [];
   if (generalComment?.trim()) parts.push(generalComment);
   if (target.fileScopedBody.trim()) parts.push(target.fileScopedBody);
 
   if (parts.length > 0) return parts.join('\n\n');
-  if (action === 'comment' && platform === 'github' && target.fileComments.length > 0) {
+  const threadCount = target.fileComments.length + (target.fileLevelComments?.length ?? 0);
+  // GitHub requires a body on COMMENT and REQUEST_CHANGES reviews alike.
+  if (action !== 'approve' && getPRPlatformCapabilities({ platform }).reviewBodyRequired && threadCount > 0) {
     return 'See inline comments.';
   }
   return '';
@@ -163,7 +237,7 @@ export function buildPlatformReviewBody(
  * returned by the server after a partial GitLab submission.
  */
 export function buildPRActionRequest(
-  action: 'approve' | 'comment',
+  action: PRReviewAction,
   body: string,
   target: SubmissionTarget,
 ): PRActionRequest {
@@ -171,10 +245,14 @@ export function buildPRActionRequest(
     throw new Error('Partial review target is missing its server-authorized retry');
   }
   const retry = target.partial?.retry;
+  // A narrowed retry (GitLab/Bitbucket partial) resends only its own inline
+  // comments, plus the general comment when the server reports it unposted.
+  const fileLevelComments = retry ? [] : target.fileLevelComments;
   return {
     action: retry?.action ?? action,
-    body: retry ? '' : body,
+    body: retry ? (retry.body ?? '') : body,
     fileComments: retry?.fileComments ?? target.fileComments,
+    ...(fileLevelComments.length > 0 ? { fileLevelComments } : {}),
     ...(target.prUrl ? { targetPrUrl: target.prUrl } : {}),
   };
 }
@@ -185,7 +263,17 @@ export function buildReviewSubmission(
   currentPrUrl: string | undefined,
   currentDiffPaths: Set<string>,
   currentPrMeta?: { number: number; title: string; repo: string },
+  /** PR url → snapshot id of the diff last seen for that PR's layer view
+   *  (#1590). When given, a line comment is posted inline only if its
+   *  `anchorSnapshot` equals that snapshot; anything else (outdated, or
+   *  coordinates from a diff we cannot vouch for) goes in the review body. */
+  knownSnapshots?: ReadonlyMap<string, string>,
+  /** Target platform. Only platforms with the `fileLevelComments` capability
+   *  (GitHub) post file-scoped comments as file-level
+   *  threads (#1599); anything else folds them into the review body. */
+  platform?: ReviewPlatform,
 ): ReviewSubmission {
+  const fileLevel = platform !== undefined && getPRPlatformCapabilities({ platform }).fileLevelComments;
   const targets: SubmissionTarget[] = [];
   const orphanAnnotations: { reason: 'full-stack' | 'unmapped'; ann: CodeAnnotation }[] = [];
 
@@ -241,9 +329,15 @@ export function buildReviewSubmission(
   let editorCommentsAttached = false;
 
   for (const [prUrl, annotations] of byPR) {
+    const withheld = new Set(
+      annotations
+        .filter((ann) => (ann.scope ?? 'line') === 'line' && !ann.outdated && !canPostInline(ann, knownSnapshots, currentPrUrl))
+        .map((ann) => ann.id),
+    );
     const sample = annotations[0];
-    const fileComments = buildAnnotationFileComments(annotations);
-    const fileScopedBody = buildFileScopedBody(annotations);
+    const fileComments = buildAnnotationFileComments(annotations, withheld);
+    const fileLevelComments = fileLevel ? buildFileLevelComments(annotations) : [];
+    const fileScopedBody = buildFileScopedBody(annotations, withheld, fileLevel);
     // Exclude the "" sentinel path of general (review-level) comments so they
     // don't inflate the file count.
     const uniqueFiles = new Set(annotations.map(a => a.filePath).filter(p => p.length > 0));
@@ -260,6 +354,7 @@ export function buildReviewSubmission(
       prTitle: sample.prTitle ?? '',
       prRepo: sample.prRepo ?? '',
       fileComments,
+      fileLevelComments,
       fileScopedBody,
       fileCount: uniqueFiles.size,
       annotationCount: annotations.length,
@@ -275,6 +370,7 @@ export function buildReviewSubmission(
       prTitle: currentPrMeta?.title ?? '',
       prRepo: currentPrMeta?.repo ?? '',
       fileComments: editorFileComments,
+      fileLevelComments: [],
       fileScopedBody: '',
       fileCount: editorFiles.size,
       annotationCount: 0,
@@ -312,6 +408,8 @@ export function buildReviewSubmission(
 export function ReviewSubmissionDialog({
   isOpen,
   action,
+  onActionChange,
+  requestChangesUnavailableReason,
   submission,
   generalComment,
   onGeneralCommentChange,
@@ -336,6 +434,23 @@ export function ReviewSubmissionDialog({
   const hasPartial = submission.targets.some(t => t.status === 'partial');
   const hasBlocked = submission.targets.some(t => t.status === 'blocked');
   const bodyLocked = hasPartial || hasBlocked;
+  const isRequestChanges = action === 'request_changes';
+  // #1611: the Comment / Request changes choice. It locks once any target may
+  // have been posted, so a retry (or the rest of a stacked submission) always
+  // carries the event the first attempt used; after a plain failure nothing
+  // was posted, so the reviewer can still switch (e.g. to Comment after
+  // GitHub refused Request changes).
+  const showEventChoice = !isApprove && onActionChange !== undefined;
+  const eventChoiceLocked = isSubmitting ||
+    submission.targets.some(t => t.status === 'success' || t.status === 'partial' || t.status === 'blocked');
+  const eventOptions: Array<{ value: 'comment' | 'request_changes'; label: string; disabled: boolean }> = [
+    { value: 'comment', label: 'Comment', disabled: eventChoiceLocked },
+    {
+      value: 'request_changes',
+      label: 'Request changes',
+      disabled: eventChoiceLocked || requestChangesUnavailableReason !== undefined,
+    },
+  ];
 
   return (
     <Dialog
@@ -353,13 +468,53 @@ export function ReviewSubmissionDialog({
       >
         <div className="min-h-0 overflow-y-auto p-4 sm:p-6">
         <DialogTitle className="font-semibold mb-1">
-          {isApprove ? `Approve ${mrLabel}` : 'Post Review Comments'}
+          {isApprove ? `Approve ${mrLabel}` : isRequestChanges ? 'Request Changes' : 'Post Review Comments'}
         </DialogTitle>
         <DialogDescription className="text-sm text-muted-foreground mb-3">
           {isApprove
             ? 'Add a general comment to the approval (optional).'
             : 'Review what will be posted.'}
         </DialogDescription>
+
+        {/* The native radios stay visible, so keyboard focus keeps the
+            browser's own focus ring. No new utility classes here: the
+            guides.show viewer scans this file and pins its CSS. */}
+        {showEventChoice && (
+          <fieldset data-review-event-choice className="mb-3">
+            <legend className="sr-only">Review type</legend>
+            <div className="grid grid-cols-2 gap-1 rounded-md bg-muted p-1">
+              {eventOptions.map(option => {
+                const checked = action === option.value;
+                return (
+                  <label
+                    key={option.value}
+                    data-pn-touch-target
+                    className={`flex items-center justify-center gap-1.5 rounded px-2 py-1.5 text-sm font-medium select-none ${
+                      checked ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'
+                    } ${option.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:text-foreground'}`}
+                  >
+                    <input
+                      type="radio"
+                      name="review-event"
+                      value={option.value}
+                      checked={checked}
+                      disabled={option.disabled}
+                      aria-describedby={option.value === 'request_changes' && requestChangesUnavailableReason ? 'review-request-changes-reason' : undefined}
+                      onChange={() => onActionChange?.(option.value)}
+                      className="shrink-0"
+                    />
+                    {option.label}
+                  </label>
+                );
+              })}
+            </div>
+            {requestChangesUnavailableReason && (
+              <p id="review-request-changes-reason" className="mt-1 text-xs text-muted-foreground">
+                {requestChangesUnavailableReason}
+              </p>
+            )}
+          </fieldset>
+        )}
 
         {/* General comment */}
         <textarea
@@ -457,15 +612,18 @@ export function ReviewSubmissionDialog({
                             />
                           </>
                         )}
+                        {target.partial.reviewBodyError && (
+                          <div className="mt-1 break-words text-destructive">
+                            {target.partial.reviewBodyError}
+                          </div>
+                        )}
                         {target.partial.approval === 'failed' && (
                           <div className="mt-1 text-destructive">
                             {target.partial.approvalError ?? `Failed to approve ${mrLabel}.`}
                           </div>
                         )}
                         <div className="mt-1 text-muted-foreground">
-                          {target.partial.retry.fileComments.length > 0
-                            ? `Retry sends only the ${target.partial.retry.fileComments.length} unposted inline comment${target.partial.retry.fileComments.length === 1 ? '' : 's'}; posted comments and the general note are not sent again.`
-                            : `Retry only repeats the ${mrLabel} approval; posted comments and the general note are not sent again.`}
+                          {describePartialRetry(target.partial, mrLabel)}
                         </div>
                         <div className="mt-1 text-muted-foreground">
                           {recoveryPersistsRefresh
@@ -551,8 +709,10 @@ export function ReviewSubmissionDialog({
           View on {platformLabel} after submitting
         </label>
 
+        </div>
+
         {/* Actions */}
-        <div className="sticky bottom-0 -mx-4 -mb-4 flex justify-end gap-2 border-t border-border/50 bg-card px-4 pb-4 pt-3 sm:-mx-6 sm:-mb-6 sm:px-6 sm:pb-6">
+        <div className="shrink-0 flex justify-end gap-2 border-t border-border/50 bg-card px-4 pb-4 pt-3 sm:px-6 sm:pb-6">
           <button
             data-pn-touch-target
             onClick={onCancel}
@@ -583,9 +743,10 @@ export function ReviewSubmissionDialog({
                   ? 'Retry Failed'
                   : isApprove
                     ? 'Approve'
-                    : 'Post Comments'}
+                    : isRequestChanges
+                      ? 'Request Changes'
+                      : 'Post Comments'}
           </button>
-        </div>
         </div>
       </DialogContent>
     </Dialog>

@@ -56,6 +56,33 @@ describe('parsePRActionSuccess', () => {
     });
   });
 
+  test('parses a Bitbucket partial whose only remaining work is the general comment', () => {
+    const submission = {
+      status: 'partial',
+      postedFileCommentCount: 2,
+      failedFileComments: [],
+      reviewBodyPosted: false,
+      approval: 'succeeded',
+      reviewBodyError: 'Failed to post the PR comment: Bitbucket HTTP 500',
+      retry: { action: 'comment', fileComments: [], body: 'Overall: add tests.' },
+    };
+    expect(parsePRActionSuccess({ ok: true, submission })).toEqual({ submission });
+  });
+
+  test('rejects a retry body for a general comment the server says was posted', () => {
+    expect(parsePRActionSuccess({
+      ok: true,
+      submission: {
+        status: 'partial',
+        postedFileCommentCount: 2,
+        failedFileComments: [],
+        reviewBodyPosted: true,
+        approval: 'succeeded',
+        retry: { action: 'comment', fileComments: [], body: 'Would duplicate the summary.' },
+      },
+    })).toBeNull();
+  });
+
   test('rejects a partial response that could cause an unsafe broad retry', () => {
     expect(parsePRActionSuccess({
       ok: true,
@@ -89,6 +116,24 @@ describe('parsePRActionSuccess', () => {
           ],
         },
       },
+    })).toBeNull();
+  });
+
+  test('accepts a failed Bitbucket request-changes decision as its own retry, not as approve', () => {
+    const submission = {
+      status: 'partial',
+      postedFileCommentCount: 0,
+      failedFileComments: [],
+      reviewBodyPosted: true,
+      approval: 'failed',
+      approvalError: 'Failed to request changes on the PR: Bitbucket HTTP 400',
+      retry: { action: 'request_changes', fileComments: [] },
+    };
+    expect(parsePRActionSuccess({ ok: true, submission })).toEqual({ submission });
+    // A failed decision can never be "retried" as a plain comment.
+    expect(parsePRActionSuccess({
+      ok: true,
+      submission: { ...submission, retry: { action: 'comment', fileComments: [] } },
     })).toBeNull();
   });
 });

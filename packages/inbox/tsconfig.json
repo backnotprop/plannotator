@@ -1,0 +1,32 @@
+{
+  // The Inbox window (apps/inbox builds it). Strict, like a consumer of
+  // @plannotator/ui's supported surface (packages/ui/tsconfig.strict-consumer.json).
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "types": ["bun-types"],
+    "paths": {
+      "@plannotator/core": ["../core/index.ts"],
+      "@plannotator/core/*": ["../core/*"],
+      "@plannotator/ui/*": ["../ui/*"],
+      // The guide reader's shape; the reader itself is checked by tsconfig.guide.json.
+      "#guide-reader": ["./guide/reader-module.d.ts"],
+      "#surface-guide-reader": ["./guide/surface-reader-module.d.ts"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
+  // guideFeedback.test.ts compares the window's export with review-editor's, which does not compile under these settings.
+  "exclude": ["node_modules", "dist", "guide/GuideReader.tsx", "guide/SurfaceGuideReader.tsx", "guideFeedback.test.ts"]
+}

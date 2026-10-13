@@ -1,0 +1,18 @@
+{
+  // The Worker and its Durable Object: strict, no DOM, Workers types only.
+  // `tsc --noEmit -p apps/relay` (the root typecheck). The proof under test/
+  // runs under bun and is checked by its own run.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": ["ES2022"],
+    "strict": true,
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "types": ["@cloudflare/workers-types"]
+  },
+  "include": ["src/**/*.ts"]
+}

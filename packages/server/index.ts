@@ -8,13 +8,16 @@
  *   PLANNOTATOR_PORT   - Fixed port or inclusive range (default: random locally, 19432 for remote)
  *   PLANNOTATOR_ORIGIN - Explicit origin override; validated against AGENT_CONFIG
  *                        in packages/shared/agents.ts. Supported values:
- *                        "claude-code", "amp", "droid", "kiro-cli", "opencode",
- *                        "codex", "copilot-cli", "gemini-cli", "pi", "oh-my-pi".
+ *                        "claude-code", "amp", "droid", "kiro-cli", "mistral-vibe",
+ *                        "opencode", "codex", "copilot-cli", "gemini-cli", "pi", "oh-my-pi".
  */
 
+import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { appHtmlResponse, likelyAppHtmlEncoding, prewarmAppHtml } from "@plannotator/shared/app-html";
 import type { Origin } from "@plannotator/shared/agents";
 import { resolve } from "path";
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
+import { createRequestHostGuard } from "./request-host-guard";
 import { openEditorDiff } from "./ide";
 import {
   saveToObsidian,
@@ -41,38 +44,58 @@ import {
 } from "./storage";
 import { getRepoInfo } from "./repo";
 import { detectProjectName } from "./project";
-import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveFeedbackHistory } from "./config";
+import { agentToolSaveFailed, loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveFeedbackHistory } from "./config";
+import { getAutoUpdateAdvert, getUpdateAdvert, handleUpdateRoute } from "./auto-update";
 import { appendFeedbackRecord, type FeedbackDecision } from "@plannotator/shared/feedback-archive";
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { readImprovementHook, getImprovementHookExpectedPath } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, type OpencodeClient } from "./shared-handlers";
-import { contentHash, deleteDraft } from "./draft";
+import { contentHash, deleteDraft, loadDraft } from "./draft";
 import { handleDoc, handleDocExists, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, handleFileBrowserFiles } from "./reference-handlers";
 import { closeAllFileBrowserWatchers, handleFileBrowserFilesStream } from "./reference-watch";
 import { warmFileListCache } from "@plannotator/shared/resolve-file";
 import { createEditorAnnotationHandler } from "./editor-annotations";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { isWSL } from "./browser";
-import { AI_QUERY_ENDPOINT, createAIRuntime } from "./ai-runtime";
-import { isAIEndpointPath, type AIEndpoints } from "@plannotator/ai";
+import { agentToolHostForServer, createAIRuntime } from "./ai-runtime";
+import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control";
+import { countUnsentDraftComments } from "@plannotator/shared/host-control";
+import { isAIEndpointPath, isLongLivedAIEndpointPath, type AIEndpoints, type SessionBridge } from "@plannotator/ai";
 import { isArchiveDocumentMutation } from "@plannotator/shared/archive-mode";
+import { readPlanFile } from "@plannotator/shared/doc-resolve";
+import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
 export { openBrowser } from "./browser";
 export * from "./integrations";
 export * from "./storage";
-export { handleServerReady } from "./shared-handlers";
+export { handleServerReady, setServerReadyTarget } from "./shared-handlers";
 export { type VaultNode, buildFileTree } from "@plannotator/shared/reference-common";
 
 // --- Types ---
 
 export interface ServerOptions {
+  /** "Ask this session": the host bridge to the agent session (see packages/ai/session-bridge.ts). A host whose plan flow blocks the session must report `blocked`. */
+  sessionBridge?: SessionBridge;
+  /**
+   * The token `/api/host/status` accepts (packages/shared/host-control.ts).
+   * Default: the pull-bridge token the host launched the CLI with; off in
+   * remote mode. A plan review has no host close: it ends with a decision.
+   */
+  hostControlToken?: string;
   /** The plan markdown content */
   plan: string;
   /** Origin identifier (e.g., "claude-code", "opencode") */
   origin: Origin;
+  /**
+   * The OpenCode host can register the `plannotator` agent tool, so the
+   * serverConfig advert names it. Set by the OpenCode 2 plugin's in-process
+   * plan review; a CLI it launches carries OPENCODE_TOOL_CAPABLE_ENV instead
+   * (packages/server/ai-runtime.ts).
+   */
+  opencodeToolCapable?: boolean;
   /** HTML content to serve for the UI */
   htmlContent: string;
   /** Current permission mode to preserve (Claude Code only) */
@@ -91,6 +114,25 @@ export interface ServerOptions {
   mode?: "archive";
   /** Custom plan save path — used by archive mode to find saved plans */
   customPlanPath?: string | null;
+  /** The plan's file on disk as the harness reported it, trusted only when it holds `plan` */
+  planFilePath?: string;
+  /**
+   * The host may push revised plans into this open review (`updatePlan`), as
+   * Pi's non-blocking plan review does. Advertised to the tab as `planRevision`
+   * on /api/plan, which makes it poll /api/plan/revision. Off by default: a
+   * host that never revises keeps a tab that never polls.
+   */
+  planRevisions?: boolean;
+}
+
+/** What `updatePlan` did with a revised plan pushed into the open review. */
+export interface PlanRevisionResult {
+  /** Revision counter the tab compares against (0 = the plan the server started with). */
+  revision: number;
+  /** History version number of the plan now under review. */
+  version: number;
+  /** The pushed plan matched the one already under review: nothing changed. */
+  unchanged: boolean;
 }
 
 export interface ServerResult {
@@ -107,11 +149,24 @@ export interface ServerResult {
     savedPath?: string;
     agentSwitch?: string;
     permissionMode?: string;
+    /** The reviewer's only feedback was answers to the plan's questions
+     *  (`answersOnly: true` on /api/deny). Consumers pick the
+     *  `plan.answered` prompt through `composePlanDeniedMessage`. */
+    answersOnly?: boolean;
   }>;
   /** Wait for user to close (archive mode only) */
   waitForDone?: () => Promise<void>;
+  /**
+   * Push a revised plan into this still-open review. Saved to version history
+   * like a resubmission; the tab picks it up through /api/plan/revision when
+   * `planRevisions` is on. Null once a decision settled (or in archive mode):
+   * the caller opens a new review instead.
+   */
+  updatePlan: (plan: string) => PlanRevisionResult | null;
   /** Stop the server and close active browser connections. */
   stop: () => Promise<void>;
+  /** Host-only status (no close: a plan review ends with the reviewer's decision). */
+  hostControl: HostControl;
 }
 
 // --- Server Implementation ---
@@ -128,7 +183,35 @@ export interface ServerResult {
 export async function startPlannotatorServer(
   options: ServerOptions
 ): Promise<ServerResult> {
-  const { plan, origin, htmlContent, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, onReady, mode, customPlanPath } = options;
+  const { origin, htmlContent, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, onReady, mode, customPlanPath, planFilePath } = options;
+  // `plan`, its slug, file trust and version diff are `let`: a host with
+  // `planRevisions` pushes revised plans into the open review (updatePlan).
+  let plan = options.plan;
+  let planFile = mode === "archive" ? null : readPlanFile(planFilePath, plan);
+  // Bumped by every accepted updatePlan; decisions echo the revision the tab
+  // shows and a stale one is refused (409), so nobody approves unseen text.
+  let planRevision = 0;
+  let decisionSettled = false;
+  // Set the moment a decision passes the revision check, before its awaits
+  // (note integrations): updatePlan then refuses, so the plan a decision
+  // names cannot be swapped while that decision is still being recorded.
+  let decisionClaimed = false;
+  // Stale-tab guard (packages/core/server-session.ts): advertised on
+  // /api/plan, echoed by every decision; a different nonce is a tab left open
+  // on a port a NEW server now owns, refused with 409 session_mismatch. A
+  // body without it (an older client) is accepted.
+  const serverSession = createServerSessionNonce();
+
+  // Host-only status (packages/shared/host-control.ts). Never in archive mode.
+  const hostControlToken = mode === "archive" ? undefined : resolveHostControlToken(options.hostControlToken);
+  const hostControl: HostControl = {
+    status: () => ({
+      kind: "plan",
+      documents: [],
+      unsentAnnotations: draftKey ? countUnsentDraftComments(loadDraft(draftKey)) : 0,
+      decided: decisionSettled || decisionClaimed,
+    }),
+  };
 
   const isRemote = isRemoteSession();
   const wslFlag = await isWSL();
@@ -152,8 +235,10 @@ export async function startPlannotatorServer(
   const draftKey = mode !== "archive" ? contentHash(plan) : "";
   const editorAnnotations = mode !== "archive" ? createEditorAnnotationHandler() : null;
   const externalAnnotations = mode !== "archive" ? createExternalAnnotationHandler("plan") : null;
-  const aiRuntime = mode !== "archive" && resolveAIEnabled() ? await createAIRuntime() : null;
-  const slug = mode !== "archive" ? generateSlug(plan) : "";
+  // Set once bound: "Ask this session" answers only a loopback Host with this port.
+  let boundPort: number | undefined;
+  const aiRuntime = mode !== "archive" && resolveAIEnabled() ? await createAIRuntime({ sessionBridge: options.sessionBridge, getServerPort: () => boundPort }) : null;
+  let slug = mode !== "archive" ? generateSlug(plan) : "";
 
   // Lazy cache for in-session archive browsing (plan review sidebar tab)
   let cachedArchivePlans: ReturnType<typeof listArchivedPlans> | null = null;
@@ -171,6 +256,7 @@ export async function startPlannotatorServer(
     savedPath?: string;
     agentSwitch?: string;
     permissionMode?: string;
+    answersOnly?: boolean;
   }) => void;
   let decisionPromise: Promise<{
     approved: boolean;
@@ -178,6 +264,7 @@ export async function startPlannotatorServer(
     savedPath?: string;
     agentSwitch?: string;
     permissionMode?: string;
+    answersOnly?: boolean;
   }>;
 
   if (mode !== "archive") {
@@ -248,6 +335,23 @@ export async function startPlannotatorServer(
     });
   };
 
+  /**
+   * A decision body names the revision the tab was showing; a number that
+   * differs from the live one means the plan was revised after the tab loaded
+   * it. A body without the field (an older client) passes.
+   */
+  const isStaleRevision = (body: unknown): boolean =>
+    !!body && typeof body === "object" &&
+    typeof (body as { planRevision?: unknown }).planRevision === "number" &&
+    (body as { planRevision: number }).planRevision !== planRevision;
+  const staleRevisionResponse = () =>
+    Response.json({
+      error: "The plan was revised while you were reviewing it. Review the new version, then decide again.",
+      code: "plan_revised",
+      planRevision,
+    }, { status: 409 });
+
+  const requestHostGuard = createRequestHostGuard();
   const server = await startBunServerOnAvailablePort((port) =>
     Bun.serve({
         hostname: getServerHostname(),
@@ -257,7 +361,18 @@ export async function startPlannotatorServer(
         idleTimeout: 0,
 
         async fetch(req, server) {
+          // Host allowlist first, before any route (request-host-guard.ts).
+          const hostRefusal = requestHostGuard.check(req);
+          if (hostRefusal) return hostRefusal;
+
           const url = new URL(req.url);
+
+          const hostControlResponse = handleHostControl(req, url, {
+            token: hostControlToken,
+            getServerPort: () => boundPort,
+            control: hostControl,
+          });
+          if (hostControlResponse) return hostControlResponse;
 
           // API: Get a specific plan version from history
           if (url.pathname === "/api/plan/version") {
@@ -328,15 +443,22 @@ export async function startPlannotatorServer(
                 sharingEnabled,
                 shareBaseUrl,
                 isWSL: wslFlag,
-                serverConfig: getServerConfig(gitUser),
+                serverConfig: getServerConfig(gitUser, agentToolHostForServer(options.sessionBridge, options.opencodeToolCapable)),
+                ...getAutoUpdateAdvert(),
+                ...getUpdateAdvert(origin, { exposed: isRemote }),
               });
             }
-            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, projectRoot: process.cwd(), isWSL: wslFlag, serverConfig: getServerConfig(gitUser) });
+            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, serverSession, ...(options.planRevisions ? { planRevision } : {}), projectRoot: process.cwd(), planDir: planFile?.dir, isWSL: wslFlag, serverConfig: getServerConfig(gitUser, agentToolHostForServer(options.sessionBridge, options.opencodeToolCapable)), ...getAutoUpdateAdvert(), ...getUpdateAdvert(origin, { exposed: isRemote }) });
+          }
+
+          // API: The live plan revision (open reviews that receive revised plans)
+          if (url.pathname === "/api/plan/revision" && req.method === "GET" && mode !== "archive") {
+            return Response.json({ revision: planRevision, decided: decisionSettled });
           }
 
           // API: Serve a linked markdown document
           if (url.pathname === "/api/doc" && req.method === "GET") {
-            return handleDoc(req);
+            return handleDoc(req, { planFile });
           }
 
           // API: Batch existence check for code-file paths the renderer detected
@@ -365,19 +487,34 @@ export async function startPlannotatorServer(
             });
           }
 
+          // API: Update now (the update toast and the Options menu): the install script, once.
+
+          const updateRoute = handleUpdateRoute(req, url, { port: boundPort, exposed: isRemote, serverSession });
+
+          if (updateRoute) return updateRoute;
+
+
           // API: Update user config (write-back to ~/.plannotator/config.json)
           if (url.pathname === "/api/config" && req.method === "POST") {
+            if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) {
+              return Response.json({ error: "Cross-origin config writes are not allowed" }, { status: 403 });
+            }
             try {
-              const body = (await req.json()) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; conventionalComments?: boolean; conventionalLabels?: unknown[] | null; pfmReminder?: boolean };
+              const body = (await req.json()) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; updateCheck?: unknown; agentTool?: unknown; conventionalComments?: boolean; conventionalLabels?: unknown[] | null; pfmReminder?: boolean };
               const toSave: Record<string, unknown> = {};
               if (body.displayName !== undefined) toSave.displayName = body.displayName;
               if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
               if (body.theme !== undefined) toSave.theme = body.theme;
               if (isFaviconStyle(body.favicon)) toSave.favicon = body.favicon;
+              if (typeof body.autoUpdate === "boolean") toSave.autoUpdate = body.autoUpdate;
+              if (typeof body.updateCheck === "boolean") toSave.updateCheck = body.updateCheck;
+              // The agent tool switch: boolean only; it applies to the next session.
+              if (typeof body.agentTool === "boolean") toSave.agentTool = body.agentTool;
               if (body.conventionalComments !== undefined) toSave.conventionalComments = body.conventionalComments;
               if (body.conventionalLabels !== undefined) toSave.conventionalLabels = body.conventionalLabels;
               if (body.pfmReminder !== undefined) toSave.pfmReminder = body.pfmReminder;
               if (Object.keys(toSave).length > 0) saveConfig(toSave as Parameters<typeof saveConfig>[0]);
+              if (agentToolSaveFailed(toSave)) return Response.json({ error: "Could not save the setting to config.json." }, { status: 500 });
               return Response.json({ ok: true });
             } catch {
               return Response.json({ error: "Invalid request" }, { status: 400 });
@@ -490,7 +627,7 @@ export async function startPlannotatorServer(
             }
             const handler = aiRuntime.endpoints[url.pathname as keyof AIEndpoints];
             if (handler) {
-              if (url.pathname === AI_QUERY_ENDPOINT) {
+              if (isLongLivedAIEndpointPath(url.pathname)) {
                 server.timeout(req, 0);
               }
               return handler(req);
@@ -512,8 +649,12 @@ export async function startPlannotatorServer(
             let planSaveEnabled = true; // default to enabled for backwards compat
             let planSaveCustomPath: string | undefined;
             let draftGeneration: number | undefined;
+            const rawApproveBody = (await req.json().catch(() => ({}))) as Record<string, unknown> | null;
+            if (checkServerSession(rawApproveBody, serverSession) === "mismatch") return Response.json(serverSessionMismatchBody(), { status: 409 });
+            if (isStaleRevision(rawApproveBody)) return staleRevisionResponse();
+            decisionClaimed = true;
             try {
-              const body = (await req.json().catch(() => ({}))) as {
+              const body = (rawApproveBody ?? {}) as {
                 obsidian?: ObsidianConfig;
                 bear?: BearConfig;
                 octarine?: OctarineConfig;
@@ -592,6 +733,7 @@ export async function startPlannotatorServer(
 
             // Use permission mode from client request if provided, otherwise fall back to hook input
             const effectivePermissionMode = requestedPermissionMode || permissionMode;
+            decisionSettled = true;
             resolveDecision({ approved: true, feedback, savedPath, agentSwitch, permissionMode: effectivePermissionMode });
             return Response.json({ ok: true, savedPath });
           }
@@ -602,14 +744,22 @@ export async function startPlannotatorServer(
             let planSaveEnabled = true; // default to enabled for backwards compat
             let planSaveCustomPath: string | undefined;
             let draftGeneration: number | undefined;
+            let answersOnly = false;
+            const rawDenyBody = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+            if (checkServerSession(rawDenyBody, serverSession) === "mismatch") return Response.json(serverSessionMismatchBody(), { status: 409 });
+            if (isStaleRevision(rawDenyBody)) return staleRevisionResponse();
+            decisionClaimed = true;
             try {
-              const body = (await req.json()) as {
+              if (!rawDenyBody || typeof rawDenyBody !== "object") throw new Error("no body");
+              const body = rawDenyBody as {
                 feedback?: string;
                 planSave?: { enabled: boolean; customPath?: string };
                 draftGeneration?: number;
+                answersOnly?: unknown;
               };
               draftGeneration = readDraftGenerationFromBody(body);
               feedback = body.feedback || feedback;
+              answersOnly = body.answersOnly === true;
 
               // Capture plan save settings
               if (body.planSave !== undefined) {
@@ -630,7 +780,8 @@ export async function startPlannotatorServer(
             archivePlanDecision("denied", feedback);
 
             deleteDraft(draftKey, draftGeneration);
-            resolveDecision({ approved: false, feedback, savedPath });
+            decisionSettled = true;
+            resolveDecision({ approved: false, feedback, savedPath, ...(answersOnly ? { answersOnly: true } : {}) });
             return Response.json({ ok: true, savedPath });
           }
 
@@ -643,9 +794,7 @@ export async function startPlannotatorServer(
           }
 
           // Serve embedded HTML for all other routes (SPA)
-          return new Response(htmlContent, {
-            headers: { "Content-Type": "text/html" },
-          });
+          return appHtmlResponse(req, htmlContent, isRemote);
         },
 
         error(err) {
@@ -659,6 +808,7 @@ export async function startPlannotatorServer(
   );
 
   const port = server.port!;
+  boundPort = port;
   const serverUrl = buildAdvertisedUrl(port);
   let stopPromise: Promise<void> | undefined;
   const stop = () => {
@@ -672,6 +822,10 @@ export async function startPlannotatorServer(
     })();
     return stopPromise;
   };
+
+  // Remote sessions serve the app page compressed (#1617); start the likely
+  // encoding (gzip over plain http) now so the first load does not wait.
+  if (isRemote) prewarmAppHtml(htmlContent, likelyAppHtmlEncoding(false));
 
   // The cache warm must never gate the listening socket. Its async filesystem
   // walk yields between directories while requests remain serviceable.
@@ -693,6 +847,21 @@ export async function startPlannotatorServer(
     isRemote,
     waitForDecision: () => decisionPromise,
     ...(donePromise && { waitForDone: () => donePromise }),
+    updatePlan: (next) => {
+      if (mode === "archive" || decisionSettled || decisionClaimed) return null;
+      if (next === plan) return { revision: planRevision, version: versionInfo.version, unchanged: true };
+      // Same bookkeeping a resubmission gets from a fresh server.
+      slug = generateSlug(next);
+      const historyResult = saveToHistory(project, slug, next);
+      currentPlanPath = historyResult.path;
+      previousPlan = historyResult.version > 1 ? getPlanVersion(project, slug, historyResult.version - 1) : null;
+      versionInfo = { version: historyResult.version, totalVersions: getVersionCount(project, slug), project };
+      plan = next;
+      planFile = readPlanFile(planFilePath, plan);
+      planRevision += 1;
+      return { revision: planRevision, version: historyResult.version, unchanged: false };
+    },
     stop,
+    hostControl,
   };
 }

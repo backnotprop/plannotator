@@ -3,6 +3,7 @@ import type { PRContext, PRComment, PRReview, PRReviewThread } from '@plannotato
 import { MarkdownBody } from './MarkdownBody';
 import { CopyButton } from './CopyButton';
 import { DiffHunkPreview } from './DiffHunkPreview';
+import { focusCommentHunk } from '../utils/commentHunkFocus';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { getItem, setItem } from '@plannotator/ui/utils/storage';
 import { Popover } from '@base-ui/react/popover';
@@ -652,7 +653,15 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
           {/* Diff hunk */}
           {first.diffHunk && (
             <div className="mt-2">
-              <DiffHunkPreview hunk={first.diffHunk} maxHeight={96} />
+              <DiffHunkPreview
+                hunk={first.diffHunk}
+                collapsedHunk={focusCommentHunk(first.diffHunk, {
+                  side: thread.diffSide,
+                  line: thread.line,
+                  startLine: thread.startLine,
+                })}
+                maxHeight={96}
+              />
             </div>
           )}
 
@@ -747,7 +756,7 @@ function PRCommentLinkActions({ url, body, commentId, author, onAnnotate }: {
           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
           </svg>
-          {url.includes('gitlab') ? 'View on GitLab' : 'View on GitHub'}
+          {url.includes('gitlab') ? 'View on GitLab' : url.includes('bitbucket.org') ? 'View on Bitbucket' : 'View on GitHub'}
         </a>
       )}
       <CopyButton text={body} variant="inline" label="Copy" />

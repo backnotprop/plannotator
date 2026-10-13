@@ -14,8 +14,8 @@ export function FolderAnnotationEmptyState({
         <p className="text-lg font-medium mb-2">Select a file to annotate</p>
         <p className="text-sm">
           {compactTouchLayout
-            ? 'Choose a markdown, text, or HTML file to begin.'
-            : 'Pick a markdown or HTML file from the sidebar to begin.'}
+            ? 'Choose a markdown, text, HTML, or diagram file to begin.'
+            : 'Pick a markdown, HTML, or diagram file from the sidebar to begin.'}
         </p>
         {compactTouchLayout && (
           <Button

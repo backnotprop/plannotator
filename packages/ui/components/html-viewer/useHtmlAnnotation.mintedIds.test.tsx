@@ -70,7 +70,7 @@ describe.if(hasDom)('useHtmlAnnotation minted ids', () => {
     const first = await mount((a) => added.push(a));
     fireSelection(first.iframe, 'first selection');
     act(() => {
-      first.result.handleCommentLooksGood();
+      first.result.handleCommentSubmit('minted');
     });
     expect(added.length).toBe(1);
     expect(first.result.createdAnnotationIds.has(added[0].id)).toBe(true);

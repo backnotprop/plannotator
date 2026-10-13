@@ -8,9 +8,34 @@ section: "Guides"
 
 Plannotator embeds an AI chat sidebar directly in live review sessions. In plan review and annotate, you can ask a general question about the current plan or document, or select text, open the comment popover, and choose **Ask AI**. In code review, you can select lines in a diff and ask questions about the code.
 
-The AI sees the relevant review context automatically: the current plan and previous plan version for plan review, the active document and source metadata for annotate, or the full diff for code review. AI chat history stays separate from approve, deny, and send-annotations output unless you manually copy text into normal feedback.
+The AI sees the relevant review context automatically: the current plan and previous plan version for plan review, the active document and source metadata for annotate, or the full diff for code review. AI chat history stays separate from approve, deny, and send-annotations output unless you manually copy text into normal feedback. With [Ask this session](#ask-this-session), your questions and the answers are also part of the agent's conversation.
 
-Ask AI is an optional network feature. When you send the first question, Plannotator passes that question and the relevant review context to the provider you selected, using the provider's locally installed and authenticated client. The Plannotator project does not proxy or collect those conversations; the selected provider's privacy and retention terms apply.
+Ask AI is an optional network feature. When you send the first question, Plannotator passes that question and the relevant review context to the agent session that opened Plannotator ([Ask this session](#ask-this-session)) or to the provider you selected, using the provider's locally installed and authenticated client. The Plannotator project does not proxy or collect those conversations; the selected provider's privacy and retention terms apply.
+
+## Ask this session
+
+When Plannotator is opened from an agent session that can answer questions itself, Ask AI is answered by that session instead of a separate AI. This works when Plannotator is opened from:
+
+- **Claude Code** with the [Plannotator mod](/docs/guides/claude-code/#the-plannotator-mod) (plan review, code review, annotate and annotate-last)
+- **Pi** (plan review, code review, annotate and annotate-last)
+- **OpenCode 2** (code review, annotate and annotate-last; in plan review the session gives a quick answer only, see below)
+
+In these sessions "Ask this session" is the only Ask AI option. There is no provider or model picker, and a provider you saved before is not used.
+
+- Your question shows in the agent's chat, and the answer streams back into Plannotator. The agent already knows the conversation, so you don't have to explain the context.
+- If the agent is busy with a turn, Plannotator asks what to do: **Ask when it finishes** or **Interrupt and ask now**.
+- Stopping a question stops only that question.
+- If the session closes or can't be reached, Plannotator says so. It does not switch to a different AI.
+- **OpenCode 2 plan review:** the agent is waiting for your plan decision, so it cannot run a full turn. You get a quick answer from the session's context ("Quick answer from this session"), and nothing is added to the conversation.
+
+You pick a provider as before (see below) when:
+
+- the session is in remote mode or published with `--tailscale`
+- Plannotator was opened from OpenCode 1
+- the Claude Code mod is off, or Claude Code runs without it (older versions, `claude -p`, Windows)
+- you run the `plannotator` CLI yourself, outside an agent session
+
+Review Agents, Code Tour and Guided Review are separate from Ask AI. They always run their own Claude or Codex models (or another installed agent CLI), also in a session where Ask AI uses the session.
 
 ## Supported providers
 
@@ -18,33 +43,13 @@ Ask AI is an optional network feature. When you send the first question, Plannot
 
 Requires the `claude` CLI installed and authenticated. Uses Claude Code's full system prompt, so the AI has the same capabilities as a Claude Code session — file reading, search, web access — plus the diff context.
 
-**Models:**
-
-- Sonnet 5 (default)
-- Fable 5
-- Opus 5
-- Opus 4.8
-- Sonnet 4.6
-- Opus 4.7
-- Opus 4.6
-- Haiku 4.5
-
-Opus 4.8, Opus 4.7, Opus 4.6, and Sonnet 4.6 are also offered in `(1M)` context
-variants. The 5-series models use their 1M context window by default, so they
-have no separate variant.
+**Models:** whatever your installed `claude` offers (the same list its `/model` picker shows), plus a latest-resolving alias (`opus`, `sonnet`, `fable`, `haiku`) for each family it offers. Sonnet is the default. The effort control lists only the levels the selected model supports. The review agent, Code Tour, and Guided Review pickers show the same list.
 
 ### Codex (via Codex SDK)
 
 Requires the `codex` CLI installed and authenticated. The AI operates in a sandboxed read-only mode with the diff context injected as a system prompt prefix.
 
-**Models:**
-
-- GPT-5.4 (default)
-- GPT-5.4 Mini
-- GPT-5.3 Codex
-- GPT-5.3 Codex Spark
-- GPT-5.2 Codex
-- GPT-5.2
+**Models:** whatever your installed `codex` offers (its `model/list`), with Codex's own default preselected. The reasoning control lists only the efforts the selected model supports. The review agent, Code Tour, and Guided Review pickers show the same list.
 
 ### Pi (via RPC subprocess)
 
@@ -60,7 +65,7 @@ OpenCode supports session forking, resuming, and runtime permission approvals �
 
 ## Configuration
 
-Provider and model selection is available in **Settings > AI**. These persist via cookies across sessions.
+Provider and model selection is available in **Settings > AI**. In a session where Ask AI is answered by the session itself, Settings > AI shows only that session. These persist via cookies across sessions.
 
 By default, Plannotator prefers the provider that matches the detected agent origin: Claude Code uses Claude, Codex uses Codex, OpenCode uses OpenCode, and Pi uses Pi when those providers are available. GitHub Copilot CLI and Gemini CLI do not have dedicated Ask AI providers yet, so they fall back to your saved provider or the server default.
 

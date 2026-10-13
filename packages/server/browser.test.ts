@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   chmodSync,
   mkdtempSync,
@@ -14,7 +14,10 @@ import {
   openBrowser,
   resolvePosixBrowserTarget,
   shouldTryRemoteBrowserFallback,
+  tryVscodeIpc,
 } from "./browser";
+
+import { createTestEnvironment } from "../../tests/helpers/environment";
 
 const savedEnv: Record<string, string | undefined> = {};
 const envKeys = ["PLANNOTATOR_BROWSER", "BROWSER"];
@@ -222,5 +225,65 @@ describe("WSL configured browser launch", () => {
       (process.stderr as { write: unknown }).write = originalWrite;
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("tryVscodeIpc, module imported before PLANNOTATOR_DATA_DIR is set (#1502)", () => {
+  const dataDirEnv = createTestEnvironment(["PLANNOTATOR_DATA_DIR"], "plannotator-browser-ipc-");
+
+  type IpcServer = { port: number; openedUrls: string[] };
+
+  /** Runs `run` against a stand-in for the VS Code extension's IPC listener. */
+  async function withIpcServer<T>(run: (ipc: IpcServer) => Promise<T>): Promise<T> {
+    const openedUrls: string[] = [];
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(req) {
+        const requestUrl = new globalThis.URL(req.url);
+        if (requestUrl.pathname !== "/open") return new Response("not found", { status: 404 });
+        openedUrls.push(requestUrl.searchParams.get("url") ?? "");
+        return new Response("ok");
+      },
+    });
+    try {
+      return await run({ port: server.port, openedUrls });
+    } finally {
+      await server.stop(true);
+    }
+  }
+
+  /** A data dir whose registry routes the current workspace to `port`. */
+  function makeDataDirWithRegistry(port: number): string {
+    const dir = dataDirEnv.makeTempDir();
+    writeFileSync(join(dir, "vscode-ipc.json"), JSON.stringify({ [process.cwd()]: port }));
+    return dir;
+  }
+
+  beforeEach(() => dataDirEnv.reset());
+
+  afterEach(() => dataDirEnv.restore());
+
+  test("reads the registry from a PLANNOTATOR_DATA_DIR set after import", async () => {
+    await withIpcServer(async (ipc) => {
+      process.env.PLANNOTATOR_DATA_DIR = makeDataDirWithRegistry(ipc.port);
+
+      expect(await tryVscodeIpc(URL)).toBe(true);
+      expect(ipc.openedUrls).toEqual([URL]);
+    });
+  });
+
+  test("follows a later change to PLANNOTATOR_DATA_DIR", async () => {
+    await withIpcServer(async (first) => {
+      await withIpcServer(async (second) => {
+        process.env.PLANNOTATOR_DATA_DIR = makeDataDirWithRegistry(first.port);
+        await tryVscodeIpc("http://127.0.0.1:19432/first");
+
+        process.env.PLANNOTATOR_DATA_DIR = makeDataDirWithRegistry(second.port);
+
+        expect(await tryVscodeIpc("http://127.0.0.1:19432/second")).toBe(true);
+        expect(second.openedUrls).toEqual(["http://127.0.0.1:19432/second"]);
+      });
+    });
   });
 });

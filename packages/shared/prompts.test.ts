@@ -3,6 +3,7 @@ import { mergePromptConfig, type PromptRuntime } from "./config";
 import {
   DEFAULT_REVIEW_APPROVED_PROMPT,
   DEFAULT_PLAN_DENIED_PROMPT,
+  DEFAULT_PLAN_ANSWERED_PROMPT,
   DEFAULT_PLAN_APPROVED_PROMPT,
   DEFAULT_PLAN_APPROVED_WITH_NOTES_PROMPT,
   DEFAULT_PLAN_AUTO_APPROVED_PROMPT,
@@ -17,6 +18,8 @@ import {
   getConfiguredPrompt,
   getReviewApprovedPrompt,
   getPlanDeniedPrompt,
+  getPlanAnsweredPrompt,
+  composePlanDeniedMessage,
   getPlanApprovedPrompt,
   getPlanApprovedWithNotesPrompt,
   getPlanAutoApprovedPrompt,
@@ -68,6 +71,58 @@ describe("resolveTemplate", () => {
 });
 
 // ─── A2. Plan denied ─────────────────────────────────────────────────────────
+
+// What regresses: an answers-only deny reads "YOUR PLAN WAS NOT APPROVED",
+// or an ordinary deny stops being byte-identical to the denied prompt.
+describe("composePlanDeniedMessage (plan.answered)", () => {
+  const vars = { toolName: "ExitPlanMode", planFileRule: "", feedback: "## Answers to your questions" };
+
+  test("answersOnly selects the answered prompt, filled in", () => {
+    const result = composePlanDeniedMessage("claude-code", {}, vars, { answersOnly: true });
+    expect(result).toBe(getPlanAnsweredPrompt("claude-code", {}, vars));
+    expect(result).not.toContain("NOT APPROVED");
+    expect(result).toContain("ExitPlanMode");
+    expect(result).toContain("## Answers to your questions");
+    expect(result).not.toContain("{{");
+  });
+
+  test("without answersOnly it is exactly the denied prompt", () => {
+    const denied = getPlanDeniedPrompt("claude-code", {}, vars);
+    expect(composePlanDeniedMessage("claude-code", {}, vars)).toBe(denied);
+    expect(composePlanDeniedMessage("claude-code", {}, vars, {})).toBe(denied);
+    expect(composePlanDeniedMessage("claude-code", {}, vars, { answersOnly: false })).toBe(denied);
+  });
+
+  test("the default teaches the resubmit convention and keeps the plan file rule", () => {
+    // The [x] = settled convention is what makes an answer survive the resubmit.
+    expect(DEFAULT_PLAN_ANSWERED_PROMPT).toContain("- [x]");
+    expect(DEFAULT_PLAN_ANSWERED_PROMPT).toContain("{{planFileRule}}");
+    const result = getPlanAnsweredPrompt("pi", {}, { ...vars, planFileRule: buildPlanFileRule("plannotator_submit_plan", "/p/plan.md") });
+    expect(result).toContain("/p/plan.md");
+  });
+
+  test("prompts.plan.answered and its runtime override are honored", () => {
+    const config = {
+      prompts: {
+        plan: {
+          answered: "ANSWERED via {{toolName}}: {{feedback}}",
+          runtimes: { opencode: { answered: "OC {{feedback}}" } },
+        },
+      },
+    };
+    expect(composePlanDeniedMessage("claude-code", config, vars, { answersOnly: true }))
+      .toBe("ANSWERED via ExitPlanMode: ## Answers to your questions");
+    expect(composePlanDeniedMessage("opencode", config, vars, { answersOnly: true }))
+      .toBe("OC ## Answers to your questions");
+  });
+
+  test("a custom plan.denied does not replace the answered prompt", () => {
+    const config = { prompts: { plan: { denied: "REJECTED {{feedback}}" } } };
+    expect(composePlanDeniedMessage("claude-code", config, vars, { answersOnly: true }))
+      .toBe(getPlanAnsweredPrompt("claude-code", {}, vars));
+    expect(composePlanDeniedMessage("claude-code", config, vars)).toBe("REJECTED ## Answers to your questions");
+  });
+});
 
 describe("getPlanDeniedPrompt", () => {
   test("falls back to built-in default when no config", () => {

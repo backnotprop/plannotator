@@ -37,6 +37,8 @@ export interface ExternalAnnotationHandler {
   ) => Promise<Response | null>;
   /** Push annotations directly into the store (bypasses HTTP, reuses same validation). */
   addAnnotations: (body: unknown) => { ids: string[] } | { error: string };
+  /** Send an event that is not a store mutation (session-closed) to every open stream. */
+  broadcast: (event: ExternalAnnotationEvent<StorableAnnotation>) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -58,8 +60,7 @@ export function createExternalAnnotationHandler(
   const encoder = new TextEncoder();
   const transform = mode === "plan" ? transformPlanInput : transformReviewInput;
 
-  // Wire store mutations → SSE broadcast
-  store.onMutation((event: ExternalAnnotationEvent<StorableAnnotation>) => {
+  const broadcast = (event: ExternalAnnotationEvent<StorableAnnotation>) => {
     const data = encoder.encode(serializeSSEEvent(event));
     for (const controller of subscribers) {
       try {
@@ -69,9 +70,14 @@ export function createExternalAnnotationHandler(
         subscribers.delete(controller);
       }
     }
-  });
+  };
+
+  // Wire store mutations → SSE broadcast
+  store.onMutation(broadcast);
 
   return {
+    broadcast,
+
     addAnnotations(body: unknown): { ids: string[] } | { error: string } {
       const parsed = transform(body);
       if ("error" in parsed) return { error: parsed.error };

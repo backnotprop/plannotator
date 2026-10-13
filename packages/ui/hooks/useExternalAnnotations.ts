@@ -120,10 +120,30 @@ interface UseExternalAnnotationsReturn<T> {
   clearExternalAnnotations: (source?: string) => void;
 }
 
+/** The agent session that opened this review closed it (`session-closed` on the stream). */
+export interface ExternalSessionClosed {
+  unsentAnnotations: number;
+  /**
+   * Who closed it: the agent (`POST /api/host/close`), or `"session"` when plan
+   * mode or the agent session itself ended. Anything else reads as `"agent"`.
+   */
+  by?: 'agent' | 'session';
+}
+
 export function useExternalAnnotations<T extends { id: string; source?: string }>(
-  options?: { enabled?: boolean },
+  options?: {
+    enabled?: boolean;
+    /**
+     * The stream reported that the agent closed this review
+     * (`POST /api/host/close`). Only the SSE stream carries it; the polling
+     * fallback does not.
+     */
+    onSessionClosed?: (event: ExternalSessionClosed) => void;
+  },
 ): UseExternalAnnotationsReturn<T> {
   const enabled = options?.enabled ?? true;
+  const onSessionClosedRef = useRef(options?.onSessionClosed);
+  onSessionClosedRef.current = options?.onSessionClosed;
   const [annotations, setAnnotations] = useState<T[]>([]);
   const versionRef = useRef(0);
   const fallbackRef = useRef(false);
@@ -174,6 +194,12 @@ export function useExternalAnnotations<T extends { id: string; source?: string }
           setAnnotations((prev) =>
             prev.map((a) => a.id === parsed.id ? (parsed.annotation as T) : a),
           );
+          break;
+        case 'session-closed':
+          onSessionClosedRef.current?.({
+            unsentAnnotations: typeof parsed.unsentAnnotations === 'number' ? parsed.unsentAnnotations : 0,
+            by: parsed.by === 'session' ? 'session' : 'agent',
+          });
           break;
       }
     }

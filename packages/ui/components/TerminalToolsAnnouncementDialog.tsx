@@ -107,7 +107,7 @@ function GitHubMark({ className }: { readonly className?: string }) {
   );
 }
 
-function XMark({ className }: { readonly className?: string }) {
+export function XMark({ className }: { readonly className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={className} aria-hidden="true" focusable="false">
       <path

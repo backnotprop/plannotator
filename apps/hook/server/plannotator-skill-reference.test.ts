@@ -9,6 +9,10 @@
  *   - Subcommands: BIDIRECTIONAL. Every subcommand the skill documents must
  *     exist in the CLI, and every user-facing CLI subcommand must appear in
  *     the skill. A renamed, removed, or newly added subcommand fails here.
+ *     Unreleased subcommands (HIDDEN_SUBCOMMANDS in cli.ts, empty today)
+ *     are the one exception, and the rule flips for them: they must NOT be
+ *     in the skill or the top-level help until they are taken out of that
+ *     set.
  *   - Flags: ONE-DIRECTIONAL. Every flag the skill mentions must be accepted
  *     somewhere in the CLI, so a renamed or deleted flag fails. The reverse
  *     is NOT asserted: a new CLI flag that the skill never mentions passes.
@@ -28,8 +32,10 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_CONFIG } from "@plannotator/shared/agents";
+import { QUESTION_AUTHORING_GUIDE } from "@plannotator/shared/question-block";
 import {
   formatTopLevelHelp,
+  HIDDEN_SUBCOMMANDS,
   SUBCOMMAND_HELP,
   SUBCOMMAND_HELP_ALIASES,
 } from "./cli";
@@ -210,7 +216,8 @@ describe("plannotator knowledge skill freshness", () => {
   test("no user-facing CLI subcommand is missing from the skill", () => {
     // The user-facing surface is what cli.ts publishes help for (plus its
     // aliases and the top-level usage lines). Internal dispatch-only
-    // subcommands (opencode-*, copilot-plan, install-runtime) are exempt.
+    // subcommands (opencode-*, copilot-plan, install-runtime) are exempt, and
+    // so are unreleased ones (HIDDEN_SUBCOMMANDS; see the next test).
     const userFacing = new Set<string>([
       ...Object.keys(SUBCOMMAND_HELP),
       ...Object.keys(SUBCOMMAND_HELP_ALIASES),
@@ -220,11 +227,95 @@ describe("plannotator knowledge skill freshness", () => {
     )) {
       userFacing.add(m[1]);
     }
+    for (const sub of HIDDEN_SUBCOMMANDS) userFacing.delete(sub);
+    expect(userFacing.size).toBeGreaterThanOrEqual(8);
     for (const sub of userFacing) {
       expect(
         documentedSubcommands.has(sub),
         `CLI subcommand \`plannotator ${sub}\` is not documented in apps/skills/core/plannotator/SKILL.md — add it (a fenced \`plannotator ${sub}\` usage line)`,
       ).toBe(true);
+    }
+  });
+
+  // Every way a hidden subcommand can leak, for one name. Separate from the
+  // test so the check can be driven with a set other than HIDDEN_SUBCOMMANDS,
+  // which is empty while nothing is unreleased.
+  function hiddenSubcommandLeaks(sub: string): string[] {
+    const leaks: string[] = [];
+    if (!(sub in SUBCOMMAND_HELP)) {
+      leaks.push(`HIDDEN_SUBCOMMANDS names \`${sub}\`, which has no SUBCOMMAND_HELP entry — remove it from the set`);
+    }
+    if (documentedSubcommands.has(sub) || skillDoc.toLowerCase().includes(`plannotator ${sub}`)) {
+      leaks.push(`\`plannotator ${sub}\` is unreleased (HIDDEN_SUBCOMMANDS in cli.ts) but apps/skills/core/plannotator/SKILL.md documents it`);
+    }
+    if (formatTopLevelHelp().includes(`plannotator ${sub}`)) {
+      leaks.push(`\`plannotator ${sub}\` is unreleased (HIDDEN_SUBCOMMANDS in cli.ts) but \`plannotator --help\` lists it`);
+    }
+    return leaks;
+  }
+
+  test("unreleased subcommands stay out of the skill and the top-level help", () => {
+    // What regresses: someone documents a hidden subcommand and agents start
+    // running it, or it leaks into `plannotator --help`. A hidden entry must
+    // also still be a real subcommand, so a stale name in the set cannot make
+    // this pass vacuously.
+    for (const sub of HIDDEN_SUBCOMMANDS) {
+      expect(hiddenSubcommandLeaks(sub)).toEqual([]);
+    }
+    // The check itself must still bite: a released, documented subcommand
+    // reads as leaked in both places, and a name with no help entry as stale.
+    expect(hiddenSubcommandLeaks("review")).toHaveLength(2);
+    expect(hiddenSubcommandLeaks("no-such-subcommand")).toHaveLength(1);
+  });
+
+  test("the Inbox is released: in the top-level help and the skill", () => {
+    // It was the hidden subcommand until launch; nothing hides it now.
+    expect(HIDDEN_SUBCOMMANDS.has("inbox")).toBe(false);
+    expect(formatTopLevelHelp()).toContain("plannotator inbox mcp");
+    expect(documentedSubcommands.has("inbox")).toBe(true);
+  });
+});
+
+/**
+ * The "Asking the reviewer questions" section is a copy of
+ * QUESTION_AUTHORING_GUIDE (packages/core/question-block.ts), the one source
+ * hosts put in their own agent prompts. What regresses: the grammar, the
+ * `[x]` = settled rule, or the soft cap changes in core (or someone edits
+ * the skill by hand) and agents reading the skill write question blocks the
+ * renderer no longer parses the way the skill says. Exact, not fuzzy: the
+ * section must equal the guide byte for byte, so the fix is always "paste
+ * the guide again".
+ */
+describe("plannotator skill: question authoring section", () => {
+  const heading = QUESTION_AUTHORING_GUIDE.split("\n", 1)[0]!;
+
+  function skillSection(doc: string): string | null {
+    const start = doc.indexOf(`\n${heading}\n`);
+    if (start < 0) return null;
+    const lines = doc.slice(start + 1).split("\n");
+    // The next level-2 heading outside a code fence ends the section.
+    let inFence = false;
+    for (let i = 1; i < lines.length; i++) {
+      if (/^(```|~~~)/.test(lines[i]!)) inFence = !inFence;
+      if (!inFence && /^## /.test(lines[i]!)) return lines.slice(0, i).join("\n");
+    }
+    return lines.join("\n");
+  }
+
+  test("the section exists and equals QUESTION_AUTHORING_GUIDE", () => {
+    const section = skillSection(skillDoc);
+    expect(
+      section,
+      `apps/skills/core/plannotator/SKILL.md has no "${heading}" section — paste QUESTION_AUTHORING_GUIDE from packages/core/question-block.ts`,
+    ).not.toBeNull();
+    expect(section!.trim()).toBe(QUESTION_AUTHORING_GUIDE.trim());
+  });
+
+  test("the guide covers the rules agents need", () => {
+    // Facts, not prose: the three kinds, the settled and recommendation
+    // markers, the soft cap, and where answers come back.
+    for (const fact of [":::question", ":::question-multi", ":::question-text", "- [x]", "Recommended:", "about 8", "Answers to your questions", "Unanswered"]) {
+      expect(QUESTION_AUTHORING_GUIDE).toContain(fact);
     }
   });
 });

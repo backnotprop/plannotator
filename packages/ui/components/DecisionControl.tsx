@@ -7,7 +7,6 @@ import { ActionMenuDivider, ActionMenuItem } from './ActionMenu';
 import { ConfirmDialog, type ConfirmDialogProps } from './ConfirmDialog';
 import { useDismissablePopover } from '../hooks/useDismissablePopover';
 import { useCompactTouchLayout } from '../hooks/useIsMobile';
-import { submitHint } from '../utils/platform';
 import { cn } from '../lib/utils';
 import type {
   DecisionActionId,
@@ -228,8 +227,7 @@ export const DecisionNoteDialog: React.FC<{
           disabled={disabled}
           autoFocus={!isCompactTouchLayout}
         />
-        <div className="mt-3 flex items-center justify-between gap-2">
-          <span className="text-[11px] leading-snug text-muted-foreground">{submitHint}</span>
+        <div className="mt-3 flex items-center justify-end gap-2">
           <Button
             variant={toneButtonVariant(composer.tone)}
             size="xs"
@@ -571,10 +569,7 @@ export const DecisionControl: React.FC<DecisionControlProps> = ({
                 onCancel={backToMenu}
                 placeholder={activeItem.composer.placeholder}
               />
-              <div className="mt-2 flex items-center justify-between gap-2 px-0.5">
-                <span className="text-[11px] leading-snug text-muted-foreground">
-                  {submitHint} send · Esc back, note kept
-                </span>
+              <div className="mt-2 flex items-center justify-end gap-2 px-0.5">
                 <Button
                   variant={toneButtonVariant(activeItem.composer.tone)}
                   size="xs"

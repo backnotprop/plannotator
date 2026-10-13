@@ -11,6 +11,8 @@ describe('isCommitDiffType', () => {
     expect(isCommitDiffType('worktree:/tmp/wt:commit:abcdef12')).toBe(true);
     // Worktree paths may contain colons; only the anchored tail decides.
     expect(isCommitDiffType('worktree:C:/work/tree:commit:abcdef12')).toBe(true);
+    // A jj session's family (Commits rail in jj).
+    expect(isCommitDiffType(`jj-commit:${'a'.repeat(40)}`)).toBe(true);
   });
 
   test('rejects every non-commit diff type', () => {
@@ -25,6 +27,8 @@ describe('isCommitDiffType', () => {
       'commit:xyz!', // non-hex
       'commit:abc', // below the 4-char minimum the parse enforces
       'my-commit-mode', // contains the word, not the family
+      'jj-current',
+      'jj-commit:main', // not an id
     ]) {
       expect(isCommitDiffType(t)).toBe(false);
     }

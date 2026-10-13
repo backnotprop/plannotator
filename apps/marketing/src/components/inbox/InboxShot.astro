@@ -1,0 +1,116 @@
+---
+// One Inbox screen in the code-review page's screenshot frame (cr-shot), with
+// its dark and light renders at 1x and 2x. The mode toggle shows one of the two;
+// a click opens the 2x render of the shown mode in the page's lightbox.
+interface Props {
+  name: string;
+  alt: string;
+  large?: boolean;
+  eager?: boolean;
+  class?: string;
+}
+
+const { name, alt, large = false, eager = false, class: className } = Astro.props;
+const base = `/assets/inbox/${name}`;
+const sizes = '(min-width: 1152px) 1088px, (min-width: 768px) calc(100vw - 4rem), calc(100vw - 3rem)';
+const modes = ['dark', 'light'] as const;
+---
+<figure class:list={['ib-shot', large && 'ib-shot-lg', className]}>
+  <button
+    type="button"
+    class="ib-shot-btn"
+    data-lightbox-dark={`${base}-dark@2x.webp`}
+    data-lightbox-light={`${base}-light@2x.webp`}
+    data-lightbox-alt={alt}
+    aria-label={`View ${alt} full size`}
+  >
+    {modes.map((mode) => (
+      <img
+        class={`ib-${mode}`}
+        src={`${base}-${mode}.webp`}
+        srcset={`${base}-${mode}.webp 1440w, ${base}-${mode}@2x.webp 2880w`}
+        sizes={sizes}
+        width="1440"
+        height="900"
+        loading={eager ? 'eager' : 'lazy'}
+        decoding="async"
+        alt={alt}
+      />
+    ))}
+    <span class="ib-shot-zoom" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+      </svg>
+    </span>
+  </button>
+</figure>
+
+<style>
+  .ib-shot {
+    margin: 0;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--card);
+    box-shadow: 0 1px 2px color-mix(in oklab, var(--foreground) 6%, transparent);
+  }
+
+  .ib-shot-lg {
+    box-shadow:
+      0 30px 80px -20px color-mix(in oklab, #000 45%, transparent),
+      0 1px 2px color-mix(in oklab, var(--foreground) 6%, transparent);
+  }
+
+  :global(.light) .ib-shot-lg {
+    box-shadow: 0 30px 70px -24px color-mix(in oklab, var(--foreground) 22%, transparent);
+  }
+
+  /* Each screen ships its dark and light render; the mode shows one. */
+  :global(.light) .ib-dark,
+  :global(html:not(.light)) .ib-light {
+    display: none;
+  }
+
+  .ib-shot-btn {
+    display: block;
+    width: 100%;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: none;
+    cursor: zoom-in;
+    position: relative;
+  }
+
+  /* Display comes from the reset (block) and the mode rule above (none). */
+  .ib-shot-btn img {
+    width: 100%;
+    height: auto;
+  }
+
+  .ib-shot-btn:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+  }
+
+  .ib-shot-zoom {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.6rem;
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    color: #fff;
+    background: color-mix(in oklab, #000 55%, transparent);
+    backdrop-filter: blur(3px);
+    opacity: 0;
+  }
+
+  .ib-shot-zoom svg { width: 17px; height: 17px; }
+
+  .ib-shot-btn:hover .ib-shot-zoom,
+  .ib-shot-btn:focus-visible .ib-shot-zoom { opacity: 1; }
+</style>

@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
 import { useLinkedDoc, type UseLinkedDocReturn } from './useLinkedDoc';
 import type { ViewerHandle } from '../components/Viewer';
-import type { Annotation, ImageAttachment } from '../types';
+import type { Annotation, DocumentRenderAs, ImageAttachment } from '../types';
 
 // Integration coverage for the diff-baseline seam useLinkedDoc gained for
 // annotate folder sessions: a document's own previousPlan/versionInfo
@@ -29,7 +29,7 @@ function LinkedDocHarness(props: { onLatest: (v: UseLinkedDocReturn) => void }) 
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [globalAttachments, setGlobalAttachments] = useState<ImageAttachment[]>([]);
-  const [renderAs, setRenderAs] = useState<'markdown' | 'html'>('markdown');
+  const [renderAs, setRenderAs] = useState<DocumentRenderAs>('markdown');
   const [rawHtml, setRawHtml] = useState('');
   const [shareHtml, setShareHtml] = useState('');
   const viewerRef = useRef<ViewerHandle | null>(noopViewerHandle);

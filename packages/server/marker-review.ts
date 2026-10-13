@@ -486,11 +486,18 @@ function opencodeFormatLogEvent(event: MarkerStreamEvent): string | null {
  *
  * `--format json` emits NDJSON events we capture on stdout. `--agent plan` is
  * OpenCode's read-oriented agent — a sensible default for review (it does not
- * edit). `--dir <cwd>` matches the spawn cwd. The message (prompt) is the
- * trailing positional arg. `--model` is `provider/model` and is omitted when
- * empty so OpenCode uses the configured default.
+ * edit). The message (prompt) is the trailing positional arg. `--model` is
+ * `provider/model` and is omitted when empty so OpenCode uses the configured
+ * default.
+ *
+ * NO `--dir` (#1609): OpenCode 1.x's `run --dir` means "directory to run in,
+ * path on remote server if attaching", and OpenCode v2's `run` rejects the flag
+ * outright ("Unrecognized flag: --dir"). We never attach to a remote server, so
+ * the working directory is expressed the same way as Pi's: the job's spawn cwd
+ * (spawnJob already spawns with the build result's `cwd`). `cwd` is accepted
+ * only to match the shared `MarkerEngine["buildArgv"]` signature.
  */
-function opencodeBuildArgv(prompt: string, model?: string, cwd?: string): string[] {
+function opencodeBuildArgv(prompt: string, model?: string, _cwd?: string): string[] {
   const useModel = !!model && model.trim().length > 0;
   return [
     "opencode",
@@ -500,7 +507,6 @@ function opencodeBuildArgv(prompt: string, model?: string, cwd?: string): string
     "--agent",
     "plan",
     ...(useModel ? ["--model", model] : []),
-    ...(cwd ? ["--dir", cwd] : []),
     // Message (prompt) is the trailing positional arg.
     prompt,
   ];
@@ -704,7 +710,7 @@ function piFormatLogEvent(event: MarkerStreamEvent): string | null {
  * NEVER be allowed to load for an arbitrary review job. `--no-session` keeps
  * the run ephemeral so background jobs don't accumulate in the user's
  * `~/.pi/agent/sessions`. Pi has NO `--cwd`/`--workspace`/`--dir` flag (unlike
- * Cursor's `--workspace` or OpenCode's `--dir`) — it always operates on the
+ * Cursor's `--workspace`; OpenCode's run also relies on the spawn cwd) — it always operates on the
  * process's actual working directory, which is exactly the job's spawn cwd
  * (spawnJob already spawns with the build result's `cwd`), so `cwd` is
  * accepted only to match the shared `MarkerEngine["buildArgv"]` signature and

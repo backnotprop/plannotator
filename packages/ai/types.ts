@@ -11,7 +11,8 @@
 // ---------------------------------------------------------------------------
 
 import type { AIContext, AIContextMode, PlanContext, CodeReviewContext, AnnotateContext, ParentSession } from '@plannotator/core/ai-context';
-export type { AIContext, AIContextMode, PlanContext, CodeReviewContext, AnnotateContext, ParentSession };
+import type { CatalogModel } from '@plannotator/core/model-catalog';
+export type { AIContext, AIContextMode, PlanContext, CodeReviewContext, AnnotateContext, ParentSession, CatalogModel };
 
 // ---------------------------------------------------------------------------
 // Messages — what streams back from the AI
@@ -69,6 +70,17 @@ export interface AIPermissionRequestMessage {
   toolUseId: string;
 }
 
+/**
+ * Progress of a question that has not started answering yet. Only the
+ * "Ask this session" provider emits it: `waiting` while a busy session
+ * finishes its turn, `interrupting` while it is being stopped, `running`
+ * once the question was delivered.
+ */
+export interface AIStatusMessage {
+  type: "status";
+  status: "waiting" | "interrupting" | "running";
+}
+
 export interface AIUnknownMessage {
   type: "unknown";
   /** The raw message from the provider, for debugging/transparency. */
@@ -83,7 +95,27 @@ export type AIMessage =
   | AIErrorMessage
   | AIResultMessage
   | AIPermissionRequestMessage
+  | AIStatusMessage
   | AIUnknownMessage;
+
+/** Per-question options. Providers that do not understand a field ignore it. */
+export interface AIQueryOptions {
+  /**
+   * What to do when the host session is busy ("Ask this session" only):
+   * `wait` holds the question until the session is idle, `interrupt` stops
+   * the session's current work first. Absent: report `agent_busy` and let the
+   * reviewer choose.
+   */
+  busyPolicy?: "wait" | "interrupt";
+  /**
+   * "Ask this session" only: the reviewer's unsubmitted (draft) annotations,
+   * as the plain list `formatDraftAnnotationsForAsk` builds. The bridge wraps
+   * it in a read-only frame (`formatSessionAskText`), never as feedback. An
+   * empty string means the drafts sent earlier were all removed; absent means
+   * nothing changed since the session last saw them.
+   */
+  draftAnnotations?: string;
+}
 
 // ---------------------------------------------------------------------------
 // Session — a live conversation with the AI
@@ -103,7 +135,7 @@ export interface AISession {
    * Send a prompt and stream back messages.
    * The returned async iterable yields messages as they arrive.
    */
-  query(prompt: string): AsyncIterable<AIMessage>;
+  query(prompt: string, options?: AIQueryOptions): AsyncIterable<AIMessage>;
 
   /**
    * Abort the current in-flight query.
@@ -172,10 +204,10 @@ export interface CreateSessionOptions {
    */
   maxBudgetUsd?: number;
   /**
-   * Reasoning effort level (Codex only).
+   * Reasoning effort level — one of the selected model's `reasoningEfforts`.
    * Controls how much thinking the model does before responding.
    */
-  reasoningEffort?: "minimal" | "low" | "medium" | "high" | "xhigh";
+  reasoningEffort?: string;
 }
 
 /**
@@ -197,15 +229,34 @@ export interface AIProvider {
   readonly capabilities: AIProviderCapabilities;
 
   /** Available models for this provider. */
-  readonly models?: ReadonlyArray<{
-    id: string;
-    label: string;
-    default?: boolean;
-    /** Reasoning-effort options this model supports (provider-reported). */
-    reasoningEfforts?: ReadonlyArray<{ id: string; label: string }>;
-    /** The model's default reasoning effort. */
-    defaultReasoningEffort?: string;
-  }>;
+  readonly models?: ReadonlyArray<CatalogModel>;
+
+  /**
+   * Where `models` came from, for providers that start on a static fallback:
+   * `fallback` until discovery succeeds, then `discovered`. Clients use it to
+   * retry a fallback answer on a later load instead of caching it.
+   */
+  readonly modelsSource?: 'fallback' | 'discovered';
+
+  /**
+   * The installed CLI's version, captured once during model discovery (never
+   * spawned on its own). Absent until discovery has run, or when the tool
+   * did not report one.
+   */
+  readonly toolVersion?: string;
+
+  /** Display label overriding the provider-name lookup (e.g. "Ask this session · Pi"). */
+  readonly label?: string;
+
+  /**
+   * Present only on the "Ask this session" provider: the live host status,
+   * reported by `/api/ai/capabilities` so the client can default to it.
+   */
+  readonly sessionBridge?: {
+    host: string;
+    status: "ready" | "busy" | "blocked" | "gone";
+    modes: { turn: boolean; transient: boolean };
+  };
 
   /**
    * Create a fresh session (no parent history).

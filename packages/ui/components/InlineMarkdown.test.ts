@@ -199,3 +199,24 @@ describe('InlineMarkdown math', () => {
     expect(html).toContain('data-math-tex="2x + 1"');
   });
 });
+
+describe('issue and mention refs (#1596)', () => {
+  const render = (repoHost?: string) =>
+    renderToStaticMarkup(
+      createElement(InlineMarkdown, { text: 'Fixes #123, thanks @alice', githubRepo: 'group/sub/project', repoHost }),
+    );
+
+  test('GitLab host links to its own issues and users', () => {
+    const html = render('gitlab.com');
+    expect(html).toContain('href="https://gitlab.com/group/sub/project/-/issues/123"');
+    expect(html).toContain('href="https://gitlab.com/alice"');
+    expect(html).not.toContain('github.com');
+  });
+
+  test('unrecognized host renders the refs as unlinked spans', () => {
+    const html = render('git.internal.example');
+    expect(html).not.toContain('<a');
+    expect(html).toContain('#123</span>');
+    expect(html).toContain('@alice</span>');
+  });
+});

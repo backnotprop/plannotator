@@ -2,13 +2,46 @@ import type { Block, Annotation, CodeAnnotation, EditorAnnotation, ImageAttachme
 import { planDenyFeedback } from '@plannotator/core/feedback-templates';
 import { resolveReplyParents } from '@plannotator/core/annotation-threads';
 import { diagramAnchorLocationLine, parseDiagramAnchor } from '@plannotator/core/diagram-anchor';
+import {
+  formatQuestionAnswerLines,
+  formatQuestionAnswerText,
+  formatQuestionAnswersSection,
+  indexQuestionBlocks,
+  parseQuestionAnswer,
+  questionExportItems,
+  type QuestionAnswer,
+  type QuestionExportItem,
+} from '@plannotator/core/question-block';
+import {
+  DIRECTIVE_OPEN_RE,
+  HTML_BLOCK_TAGS,
+  codeFenceCloseIndex,
+  directiveCloseIndex,
+  htmlBlockEndAt,
+  resolveReferenceLinks,
+  scanDisplayMath,
+  splitFrontmatter,
+  type TagCloseIndex,
+} from '@plannotator/core/markdown-structure';
 import { skillReferenceExportBlock } from './skillReferences';
+
+// The structural helpers moved to `@plannotator/core/markdown-structure` so
+// `findQuestionBlocks` (core) splits a document exactly as this parser does.
+export { HTML_BLOCK_TAGS, resolveReferenceLinks };
+
+/**
+ * Parsed YAML frontmatter value: scalar string, array, or nested map.
+ */
+export type FrontmatterValue =
+  | string
+  | FrontmatterValue[]
+  | { [key: string]: FrontmatterValue };
 
 /**
  * Parsed YAML frontmatter as key-value pairs.
  */
 export interface Frontmatter {
-  [key: string]: string | string[];
+  [key: string]: FrontmatterValue;
 }
 
 /** Number of leading whitespace characters on a line. */
@@ -82,87 +115,170 @@ function parseBlockScalar(
 }
 
 /**
+ * Parse a simple `key: value` pair from a line. Returns null if the line
+ * is not a valid YAML mapping entry (e.g. scalar URLs or quoted strings).
+ */
+function parseKeyValue(str: string): { key: string; value: string } | null {
+  // A QUOTED KEY is still a mapping entry: `"title": "Doc"` must yield
+  // { title: "Doc" }, not nothing. Only a line that is nothing but a quoted
+  // scalar (`"just a string"`) is not an entry — which is the case the char
+  // after the closing quote distinguishes.
+  const quote = str[0];
+  if (quote === '"' || quote === "'") {
+    const closing = str.indexOf(quote, 1);
+    if (closing === -1) return null;
+    if (str[closing + 1] !== ':') return null;
+    // Same rule the unquoted branch applies: `key:value` is a scalar, not a
+    // mapping entry. A colon at end of line (empty value) is fine.
+    const afterColon = str[closing + 2];
+    if (afterColon !== undefined && afterColon !== ' ' && afterColon !== '\t') {
+      return null;
+    }
+    return { key: str.slice(1, closing), value: str.slice(closing + 2).trim() };
+  }
+  const colonIndex = str.indexOf(':');
+  if (colonIndex <= 0) return null;
+  if (colonIndex < str.length - 1 && str[colonIndex + 1] !== ' ' && str[colonIndex + 1] !== '\t') {
+    return null;
+  }
+  const key = str.slice(0, colonIndex).trim();
+  const value = str.slice(colonIndex + 1).trim();
+  return { key, value };
+}
+
+/**
  * Extract YAML frontmatter from markdown if present.
  * Returns the parsed frontmatter, the remaining markdown, and the 1-based
  * line number where content begins in the original file (so downstream
  * line references stay accurate).
  */
 export function extractFrontmatter(markdown: string): { frontmatter: Frontmatter | null; content: string; contentStartLine: number } {
-  const trimmed = markdown.trimStart();
-  if (!trimmed.startsWith('---')) {
+  const { raw: frontmatterRaw, content: afterFrontmatter, contentStartLine } = splitFrontmatter(markdown);
+  if (frontmatterRaw === null) {
     return { frontmatter: null, content: markdown, contentStartLine: 1 };
   }
 
-  // Find the closing ---
-  const endIndex = trimmed.indexOf('\n---', 3);
-  if (endIndex === -1) {
-    return { frontmatter: null, content: markdown, contentStartLine: 1 };
-  }
-
-  // Extract frontmatter content (between the --- delimiters)
-  const frontmatterRaw = trimmed.slice(4, endIndex).trim();
-  const rawAfterFrontmatter = trimmed.slice(endIndex + 4);
-  const afterFrontmatter = rawAfterFrontmatter.trimStart();
-
-  // Compute the 1-based line where content begins in the original file.
-  // Account for: leading whitespace trimmed from original, the frontmatter
-  // block itself, and any blank lines between closing --- and first content.
-  const leadingChars = markdown.length - trimmed.length;
-  const consumedInTrimmed = endIndex + 4 + (rawAfterFrontmatter.length - afterFrontmatter.length);
-  const consumedTotal = leadingChars + consumedInTrimmed;
-  const contentStartLine = (markdown.slice(0, consumedTotal).match(/\n/g) || []).length + 1;
-
-  // Parse simple YAML (key: value pairs)
+  // Parse simple YAML (key: value pairs, indentation-aware)
   const frontmatter: Frontmatter = {};
-  let currentKey: string | null = null;
-  let currentArray: string[] | null = null;
+  const mapStack: { indent: number; map: { [key: string]: FrontmatterValue } }[] = [
+    { indent: -1, map: frontmatter },
+  ];
+  const arrayStack: { indent: number; array: FrontmatterValue[] }[] = [];
+  let pendingKey: {
+    key: string;
+    indent: number;
+    parentMap: { [key: string]: FrontmatterValue };
+  } | null = null;
 
   const lines = frontmatterRaw.split('\n');
   for (let i = 0; i < lines.length; i++) {
-    const rawLine = lines[i];
+    const rawLine = lines[i].replace(/\r$/, '');
     const trimmedLine = rawLine.trim();
 
-    // Array item (- value)
-    if (trimmedLine.startsWith('- ') && currentKey) {
-      const value = trimmedLine.slice(2).trim();
-      if (!currentArray) {
-        currentArray = [];
-        frontmatter[currentKey] = currentArray;
+    if (!trimmedLine) continue;
+
+    const lineIndent = indentWidth(rawLine);
+
+    // Array item (- value or - key: value)
+    if (trimmedLine.startsWith('- ')) {
+      const afterDash = trimmedLine.slice(2).trim();
+      const kv = parseKeyValue(afterDash);
+
+      if (pendingKey && lineIndent >= pendingKey.indent) {
+        const newArray: FrontmatterValue[] = [];
+        pendingKey.parentMap[pendingKey.key] = newArray;
+        arrayStack.push({ indent: lineIndent, array: newArray });
+        pendingKey = null;
+      } else {
+        pendingKey = null;
+        while (arrayStack.length > 0 && arrayStack[arrayStack.length - 1].indent > lineIndent) {
+          arrayStack.pop();
+        }
       }
-      currentArray.push(value);
+
+      while (mapStack.length > 1 && mapStack[mapStack.length - 1].indent >= lineIndent) {
+        mapStack.pop();
+      }
+
+      const targetArray = arrayStack.length > 0 ? arrayStack[arrayStack.length - 1].array : null;
+
+      if (kv) {
+        const blockScalar = kv.value.match(/^([|>])[+-]?$/);
+        let scalarVal = kv.value;
+        if (blockScalar) {
+          const { value: parsedScalar, endIndex } = parseBlockScalar(
+            lines,
+            i + 1,
+            lineIndent,
+            blockScalar[1] === '>',
+          );
+          scalarVal = parsedScalar;
+          i = endIndex;
+        }
+
+        const mapElem: { [key: string]: FrontmatterValue } = {};
+        if (scalarVal) {
+          mapElem[kv.key] = scalarVal;
+        } else {
+          // The key sits two columns right of the dash (`- meta:`), so that —
+          // not the dash's own indent — is the indent its nested block must be
+          // measured against. Recording `lineIndent` here made the nested map
+          // swallow the item's later sibling keys, because a sibling indented
+          // to the key's column never dedented past the dash.
+          pendingKey = { key: kv.key, indent: lineIndent + 2, parentMap: mapElem };
+        }
+
+        if (targetArray) {
+          targetArray.push(mapElem);
+        }
+        mapStack.push({ indent: lineIndent, map: mapElem });
+      } else {
+        if (targetArray) {
+          targetArray.push(afterDash);
+        }
+      }
       continue;
     }
 
     // Key: value pair
-    const colonIndex = trimmedLine.indexOf(':');
-    if (colonIndex > 0) {
-      currentKey = trimmedLine.slice(0, colonIndex).trim();
-      const value = trimmedLine.slice(colonIndex + 1).trim();
-      currentArray = null;
+    const kv = parseKeyValue(trimmedLine);
+    if (kv) {
+      if (pendingKey) {
+        if (lineIndent > pendingKey.indent) {
+          const newMap: { [key: string]: FrontmatterValue } = {};
+          pendingKey.parentMap[pendingKey.key] = newMap;
+          mapStack.push({ indent: pendingKey.indent, map: newMap });
+        }
+        pendingKey = null;
+      }
 
-      // Block scalar: `|` (literal, keep newlines) or `>` (folded, join with
-      // spaces), each with optional chomping indicator (`-`/`+`). The value
-      // spans the following lines indented deeper than the key, e.g.
-      //   description: >-
-      //     line one
-      //     line two
-      // Without this, the indicator (">-") was stored verbatim and the body
-      // silently dropped.
-      const blockScalar = value.match(/^([|>])[+-]?$/);
+      while (arrayStack.length > 0 && arrayStack[arrayStack.length - 1].indent >= lineIndent) {
+        arrayStack.pop();
+      }
+      while (mapStack.length > 1 && mapStack[mapStack.length - 1].indent >= lineIndent) {
+        mapStack.pop();
+      }
+
+      const parentMap = mapStack[mapStack.length - 1].map;
+
+      // Block scalar: `|` or `>`
+      const blockScalar = kv.value.match(/^([|>])[+-]?$/);
       if (blockScalar) {
         const { value: scalarValue, endIndex } = parseBlockScalar(
           lines,
           i + 1,
-          indentWidth(rawLine),
+          lineIndent,
           blockScalar[1] === '>',
         );
-        frontmatter[currentKey] = scalarValue;
+        parentMap[kv.key] = scalarValue;
         i = endIndex;
         continue;
       }
 
-      if (value) {
-        frontmatter[currentKey] = value;
+      if (kv.value) {
+        parentMap[kv.key] = kv.value;
+      } else {
+        pendingKey = { key: kv.key, indent: lineIndent, parentMap };
       }
     }
   }
@@ -170,32 +286,6 @@ export function extractFrontmatter(markdown: string): { frontmatter: Frontmatter
   return { frontmatter, content: afterFrontmatter, contentStartLine };
 }
 
-/**
- * Tag names that trigger a raw HTML block per CommonMark §4.6, Type 6.
- * A line starting with `<tag` or `</tag` (where `tag` is in this set) opens
- * an HTML block that continues verbatim until a blank line or EOF.
- *
- * Inline-only tags (`kbd`, `sub`, `sup`, `mark`, etc.) are NOT here — a line
- * that happens to start with one of those still goes through the paragraph
- * path and renders as escaped text, matching prior behavior.
- */
-export const HTML_BLOCK_TAGS: ReadonlySet<string> = new Set([
-  'details', 'summary',
-  'div', 'section', 'article', 'aside', 'header', 'footer',
-  'blockquote', 'pre',
-  'table', 'thead', 'tbody', 'tr', 'td', 'th',
-  'ul', 'ol', 'li', 'p',
-  // Media: GitHub embeds screenshots/videos as raw HTML on their own line.
-  'img', 'video', 'picture',
-]);
-
-/** Void elements — no closing tag, so the block is a single line (don't scan
- *  ahead for a `</tag>` that will never come). */
-const VOID_HTML_TAGS: ReadonlySet<string> = new Set([
-  'img', 'br', 'hr', 'source', 'input', 'wbr', 'area', 'col', 'embed',
-]);
-
-const HTML_BLOCK_OPEN_RE = /^<\/?([a-zA-Z][a-zA-Z0-9]*)(?:\s|>|\/|$)/;
 
 export interface ParseMarkdownOptions {
   /**
@@ -207,339 +297,39 @@ export interface ParseMarkdownOptions {
   frontmatter?: boolean;
 }
 
-// CommonMark bounds a link label to 999 characters. Reusing that bound here
-// also caps the worst-case backtracking cost of the bracket-matching groups
-// below to a constant per starting position, turning a document with a very
-// long run of unmatched `[` characters (a real hazard within the 2MB annotate
-// cap) into a linear scan instead of a quadratic one. A label longer than
-// this is a deliberate, documented degradation: it is neither collected as a
-// definition nor resolved as a reference, so it is simply left untouched
-// rather than partially or incorrectly rewritten.
-const MAX_REF_LABEL_CHARS = 999;
-// Same reasoning applied to the inline-code-span alternative: bounding how far
-// a lazy scan for a closing backtick run can travel keeps a line with many
-// stray, unterminated backticks linear too. 5000 is far beyond any realistic
-// inline code span, so legitimate spans are unaffected.
-const MAX_CODE_SPAN_CHARS = 5000;
-// Defense-in-depth cap on the number of definitions collected from a single
-// document. A pathological document could otherwise grow the map without
-// bound; this keeps that growth bounded even though ordinary documents never
-// approach it.
-const MAX_TRACKED_DEFINITIONS = 20_000;
-
-// A link reference definition: `[label]: destination "optional title"`, with up
-// to three leading spaces. The destination is a bare token or an <...> form; any
-// trailing text must be a quoted or parenthesized title, otherwise the line is
-// ordinary prose (so `[Reminder]: call the bank` is NOT a definition). Matches
-// the CommonMark shape closely enough for the simplified parser. `\r?` before
-// the end anchor tolerates a CRLF source (lines are split on `\n` only, so a
-// CRLF line keeps its trailing `\r`).
-const REFERENCE_DEFINITION_RE = new RegExp(
-  `^ {0,3}\\[([^\\]]{1,${MAX_REF_LABEL_CHARS}})\\]:[ \\t]*(?:<([^>]*)>|(\\S+))[ \\t]*(?:"[^"]*"|'[^']*'|\\([^)]*\\))?[ \\t]*\\r?$`,
-);
-
-// One left-to-right pass over a line. The first alternative matches a whole
-// inline code span (balanced backtick run) so its contents are skipped; the
-// second matches a reference link/image: optional `!`, the bracketed text, then
-// an optional second bracket for the full (`[label]`) or collapsed (`[]`) forms.
-// A bare `[text]` is the shortcut form, resolved only when it names a definition
-// and is not actually an inline link. Groups: 1 code ticks, 2 `!`, 3 text,
-// 4 second bracket, 5 label.
-const REFERENCE_LINK_RE = new RegExp(
-  `(\`+)[^\\n]{0,${MAX_CODE_SPAN_CHARS}}?\\1|(!?)\\[([^\\]]{1,${MAX_REF_LABEL_CHARS}})\\](\\[([^\\]]{0,${MAX_REF_LABEL_CHARS}})\\])?`,
-  'g',
-);
-
-// CommonMark label matching is case-insensitive and collapses internal runs of
-// whitespace.
-const normalizeRefLabel = (label: string): string =>
-  label.trim().replace(/\s+/g, ' ').toLowerCase();
 
 /**
- * One pass over the lines that marks every line the block parser (below) will
- * render as code or raw HTML — fenced code blocks and HTML blocks — so link
- * reference definitions and references inside them are left completely
- * untouched. This reuses the exact same conditions the block parser itself
- * uses (not a looser approximation), so the two can never disagree about
- * where code/HTML starts and ends:
+ * The block list for a whole-file diagram source (`plannotator annotate
+ * flow.mmd`): ONE code block carrying the file's raw text, which `Viewer`
+ * hands to the same `DiagramBlock` a ```mermaid fence in a plan produces.
+ * Everything downstream — diagram comments, the annotations rail, the export's
+ * `Diagram node <label> (<id>), line <n>` location line, drafts, restore — is
+ * the fence path unchanged.
  *
- * - Fences: `trimmed.startsWith('```')` after a full `.trim()` — the block
- *   parser has no minimum-indent exemption, so ANY indentation (a fence
- *   nested inside a list item, or simply indented 4+ spaces) still opens a
- *   code block, and this must too. Only backtick fences are recognized —
- *   the block parser has no `~~~` support, so this doesn't either (a `~~~`
- *   line is ordinary text to both).
- * - Raw HTML blocks: the same `HTML_BLOCK_OPEN_RE`/`HTML_BLOCK_TAGS`/
- *   `VOID_HTML_TAGS` the block parser uses, with the same three extents
- *   (blank-line termination for a leading close tag, single-line for void
- *   tags, balanced-depth scanning otherwise) — so a definition sitting
- *   inside `<details>…</details>` or `<pre>…</pre>` is protected exactly as
- *   far as the block parser's own HTML block extends.
+ * `diagramSourceLineOffset: 0` is the load-bearing part. `DiagramBlock` passes
+ * it as the viewer's `sourceLineOffset` and the codec adds it to the 1-based
+ * line WITHIN the diagram source; for a fence that offset is the fence's own
+ * opening line, which sits one line above the diagram's first line. A diagram
+ * FILE has no fence, so its first line is document line 1 and the offset is 0
+ * — the 1 a synthesized ```mermaid wrapper would produce puts every exported
+ * diagram line one too high. `startLine`/`sourceLineCount` still describe the
+ * block itself, so the export's `(lines a–b)` label names the file's real
+ * span.
  */
-/**
- * Per-tag-name index backing `findHtmlBlockEnd`. `augmented` is the running
- * open-tag-count-minus-close-tag-count prefix sum for this tag name, with a
- * virtual baseline of 0 prepended at index 0 — so `augmented[k]` is the sum
- * through line `k-1` (the depth baseline a block opening at line `k` must
- * return to) and `augmented[k+1]` is the sum through line `k`.
- * `nextAtOrBelow[m]` is the classic "next element at or below this one"
- * index over `augmented`: the smallest `m' > m` with `augmented[m'] <=
- * augmented[m]`, or -1 if none exists.
- */
-interface TagCloseIndex {
-  augmented: number[];
-  nextAtOrBelow: number[];
-}
-
-/**
- * Builds a `TagCloseIndex` for one tag name in a single O(N) pass (plus a
- * classic O(N) monotonic-stack pass for `nextAtOrBelow` — each index is
- * pushed and popped at most once, so the two passes together are linear in
- * the document's line count, independent of how many opening/closing tags
- * it contains).
- */
-function buildTagCloseIndex(lines: string[], tagName: string): TagCloseIndex {
-  const openRe = new RegExp(`<${tagName}(?:\\s|>|/|$)`, 'gi');
-  const closeRe = new RegExp(`</${tagName}\\s*>`, 'gi');
-  const n = lines.length;
-  const augmented = new Array<number>(n + 1);
-  augmented[0] = 0;
-  let running = 0;
-  for (let k = 0; k < n; k++) {
-    running += (lines[k].match(openRe) || []).length;
-    running -= (lines[k].match(closeRe) || []).length;
-    augmented[k + 1] = running;
-  }
-  const nextAtOrBelow = new Array<number>(n + 1).fill(-1);
-  const stack: number[] = [];
-  for (let m = n; m >= 0; m--) {
-    while (stack.length && augmented[stack[stack.length - 1]] > augmented[m]) stack.pop();
-    nextAtOrBelow[m] = stack.length ? stack[stack.length - 1] : -1;
-    stack.push(m);
-  }
-  return { augmented, nextAtOrBelow };
-}
-
-/**
- * Shared helper computing the last line index of a balanced open/close-tag
- * HTML block that opens at `startIndex` with the given already-computed
- * `depth` (the opening line's own open-tag count minus close-tag count).
- * Used by both `markProtectedLines` (the resolver's protection pass) and
- * `parseMarkdownToBlocks` (the block parser) so the two can never disagree
- * about a multi-line HTML block's extent, and so a fix here lives in exactly
- * one place instead of two copies drifting apart.
- *
- * History: naively scanning line-by-line from `startIndex` until depth
- * returns to zero (or giving up at end-of-document) is O(N^2) for a
- * document with many consecutive unclosed openers (e.g. thousands of bare
- * `<div>` lines), since every one of them re-scans to EOF. A first fix
- * added an O(1) "does a close exist anywhere" pre-check plus a fixed
- * line-count cap on the residual scan — but that cap silently truncated
- * VALID blocks longer than it, and removing the cap alone reopened a
- * closely related O(N^2) case: N unclosed openers followed by a SINGLE
- * trailing close still all pass the "a close exists somewhere" pre-check,
- * so every one of them still scans forward (mostly to EOF) before giving up.
- *
- * Fixed properly here with a per-tag-name prefix-sum index
- * (`buildTagCloseIndex`, O(N), built once per tag name and cached per
- * document — see `closeCache`): finding "the exact line where a block
- * starting at `startIndex` closes, if ever" is exactly the classic "next
- * smaller-or-equal element" query against that prefix sum, which the index
- * answers in O(1). No scanning happens per opener at all — not for a block
- * that never closes, not for one that closes after any number of
- * intervening lines, however many. This is provably linear overall (a
- * document with T distinct protected tag names costs O(T * N) to index,
- * and T is bounded by the small, fixed `HTML_BLOCK_TAGS` set) and can never
- * truncate a valid block, because it always finds the block's real end
- * (however far away) rather than giving up at a fixed distance.
- *
- * Returns `startIndex` unchanged when the block never closes: depth <= 0,
- * or the running depth never returns to exactly zero anywhere in the rest
- * of the document (whether because no close exists at all, or one exists
- * but is insufficient to bring the count back to exactly the opener's own
- * baseline — e.g. an unbalanced/self-closing tag).
- */
-function findHtmlBlockEnd(
-  lines: string[],
-  startIndex: number,
-  tagName: string,
-  depth: number,
-  closeCache: Map<string, TagCloseIndex>,
-): number {
-  if (depth <= 0) return startIndex;
-  let index = closeCache.get(tagName);
-  if (!index) {
-    index = buildTagCloseIndex(lines, tagName);
-    closeCache.set(tagName, index);
-  }
-  const { augmented, nextAtOrBelow } = index;
-  const m = nextAtOrBelow[startIndex];
-  if (m === -1) return startIndex;
-  return augmented[m] === augmented[startIndex] ? m - 1 : startIndex;
-}
-
-const markProtectedLines = (lines: string[]): boolean[] => {
-  const isProtected = new Array<boolean>(lines.length).fill(false);
-  let fenceLen = 0; // 0 = not currently inside a fence
-  const closeCache = new Map<string, TagCloseIndex>();
-  for (let i = 0; i < lines.length; i++) {
-    if (fenceLen > 0) {
-      isProtected[i] = true;
-      if (new RegExp('^\\s*`{' + fenceLen + ',}').test(lines[i])) fenceLen = 0;
-      continue;
-    }
-    const trimmed = lines[i].trim();
-    if (trimmed.startsWith('```')) {
-      fenceLen = trimmed.match(/^`+/)![0].length;
-      isProtected[i] = true;
-      continue;
-    }
-    const htmlTagMatch = trimmed.match(HTML_BLOCK_OPEN_RE);
-    if (htmlTagMatch && HTML_BLOCK_TAGS.has(htmlTagMatch[1].toLowerCase())) {
-      const tagName = htmlTagMatch[1].toLowerCase();
-      const isCloseTag = trimmed.startsWith('</');
-      isProtected[i] = true;
-      if (isCloseTag) {
-        while (i + 1 < lines.length && lines[i + 1].trim() !== '') {
-          i++;
-          isProtected[i] = true;
-        }
-      } else if (VOID_HTML_TAGS.has(tagName)) {
-        while (!lines[i].includes('>') && i + 1 < lines.length && lines[i + 1].trim() !== '') {
-          i++;
-          isProtected[i] = true;
-        }
-      } else {
-        const openRe = new RegExp(`<${tagName}(?:\\s|>|/|$)`, 'gi');
-        const closeRe = new RegExp(`</${tagName}\\s*>`, 'gi');
-        const depth = (lines[i].match(openRe) || []).length - (lines[i].match(closeRe) || []).length;
-        const end = findHtmlBlockEnd(lines, i, tagName, depth, closeCache);
-        if (end > i) {
-          for (let idx = i + 1; idx <= end; idx++) isProtected[idx] = true;
-          i = end;
-        }
-      }
-    }
-  }
-  return isProtected;
-};
-
-/** Resolve reference links/images in one non-code, non-HTML line. A single
- * left-to-right pass: an inline code span is matched as a whole and returned
- * verbatim, so a reference-looking pattern inside backticks is never
- * rewritten; only bracketed references outside code are resolved. Every label
- * that actually resolves against a definition is recorded into `usedLabels`,
- * so the caller can tell a genuinely consumed definition from an unused one. */
-const resolveRefsInLine = (
-  line: string,
-  defs: Map<string, string>,
-  usedLabels: Set<string>,
-): string => {
-  if (!line.includes('[')) return line;
-  return line.replace(
-    REFERENCE_LINK_RE,
-    (match, codeTicks, bang, text, secondBracket, label, offset: number, whole: string) => {
-      if (codeTicks !== undefined) return match; // inline code span: keep verbatim
-      let refLabel: string;
-      if (secondBracket === undefined) {
-        // Shortcut `[text]`: not a link when an inline `(...)` destination
-        // follows (that is an inline link the existing renderer already draws).
-        if (whole[offset + match.length] === '(') return match;
-        // Nor when it is a task-list checkbox marker at the start of a list
-        // item (`- [x]`); the checkbox parser owns that `[x]`, and resolving it
-        // against a stray `x`/`X` definition would clobber the item.
-        if (/^[ xX]$/.test(text) && /^\s*(?:[-*+]|\d+[.)])\s+$/.test(whole.slice(0, offset))) {
-          return match;
-        }
-        refLabel = text;
-      } else {
-        refLabel = label === '' ? text : label;
-      }
-      const normalized = normalizeRefLabel(refLabel);
-      const dest = defs.get(normalized);
-      // An unknown reference stays literal, matching CommonMark and avoiding
-      // false links for bracketed prose like `[TODO]` or array indices.
-      if (!dest) return match;
-      usedLabels.add(normalized);
-      return `${bang}[${text}](${dest})`;
-    },
-  );
-};
-
-/**
- * Resolve CommonMark link reference definitions and reference links into inline
- * `[text](url)` links, so the shared inline renderer draws them instead of
- * showing raw `[text][id]` and `[id]: url` text (issue #923). Definitions and
- * references inside fenced code blocks, raw HTML blocks, and inline code spans
- * are left untouched. A definition-shaped line is only ever blanked when its
- * label was actually consumed by a resolved reference outside a protected
- * region — an unused definition, or one referenced only from inside code/HTML,
- * stays visible exactly as written. Blanked lines keep block start-line
- * numbers accurate (and their own CRLF ending, so line endings round-trip).
- * GFM footnote definitions (`[^label]: ...`) are never treated as link
- * definitions. No-op (returns the input) when the document defines no
- * (non-footnote) references.
- */
-export const resolveReferenceLinks = (markdown: string): string => {
-  if (!markdown.includes('[')) return markdown;
-  const lines = markdown.split('\n');
-  const isProtected = markProtectedLines(lines);
-  const defs = new Map<string, string>();
-  // The normalized label a definition-shaped line defines, or null if the
-  // line isn't a definition (or is a footnote definition, which is never
-  // collected/blanked).
-  const defLabelByLine = new Array<string | null>(lines.length).fill(null);
-  // A definition cannot interrupt a paragraph (CommonMark 4.7): a line matching
-  // the definition shape is only a definition when it can start a block, i.e.
-  // the previous line is the document start, blank, a protected code/HTML
-  // line (each is its own block), or itself a definition. Otherwise the line
-  // is paragraph continuation text and must be left untouched, or a bare
-  // `[word]: token` under a sentence would be silently deleted.
-  let canStartDefinition = true;
-  for (let i = 0; i < lines.length; i++) {
-    if (isProtected[i]) {
-      canStartDefinition = true;
-      continue;
-    }
-    const blank = lines[i].trim() === '';
-    const match = canStartDefinition && !blank ? lines[i].match(REFERENCE_DEFINITION_RE) : null;
-    if (match) {
-      const rawLabel = match[1];
-      // GFM footnote definition ([^label]: ...) — not a link reference
-      // definition. Leave it out of `defs` entirely so it can never be
-      // collected, blanked, or accidentally satisfy a footnote reference's
-      // lookup; it stays block-starting like any other definition line.
-      if (!rawLabel.startsWith('^') && defs.size < MAX_TRACKED_DEFINITIONS) {
-        const label = normalizeRefLabel(rawLabel);
-        const dest = match[2] !== undefined ? match[2] : match[3];
-        // First definition wins, per CommonMark.
-        if (label && dest && !defs.has(label)) defs.set(label, dest);
-        defLabelByLine[i] = label;
-      }
-      // A run of definitions stays eligible; canStartDefinition remains true.
-    } else {
-      // Blank keeps a new block startable; any other non-definition line starts
-      // (or continues) a paragraph, so a following definition-shaped line is text.
-      canStartDefinition = blank;
-    }
-  }
-  if (defs.size === 0) return markdown;
-  const usedLabels = new Set<string>();
-  // Resolve references first; definition-shaped lines are passed through
-  // unresolved (never fed to resolveRefsInLine) so a definition's own
-  // `[label]` can never be mistaken for a reference to itself.
-  const resolved = lines.map((line, i) =>
-    isProtected[i] || defLabelByLine[i] !== null ? line : resolveRefsInLine(line, defs, usedLabels),
-  );
-  return resolved
-    .map((line, i) => {
-      const label = defLabelByLine[i];
-      if (label === null || !usedLabels.has(label)) return line;
-      // Blank in place, preserving this line's own CRLF ending if it had one.
-      return line.endsWith('\r') ? '\r' : '';
-    })
-    .join('\n');
-};
+export const diagramDocumentBlocks = (text: string, kind: 'mermaid' | 'graphviz'): Block[] => [
+  {
+    id: 'block-0',
+    type: 'code',
+    content: text,
+    // `dot` is what isGraphvizLanguage reads for the Graphviz engine.
+    language: kind === 'graphviz' ? 'dot' : 'mermaid',
+    order: 1,
+    startLine: 1,
+    // A trailing newline ends the last line, it does not start another.
+    sourceLineCount: text === '' ? 0 : text.replace(/\n$/, '').split('\n').length,
+    diagramSourceLineOffset: 0,
+  },
+];
 
 /**
  * A simplified markdown parser that splits content into linear blocks.
@@ -592,10 +382,13 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
     const prevLineWasBlank = lastLineWasBlank;
     lastLineWasBlank = false;
 
-    // Headings
-    if (trimmed.startsWith('#')) {
+    // Headings: one to six `#` followed by a space or the end of the line
+    // (CommonMark ATX). `#123 fixed`, `#hashtag` and `#!/bin/sh` are text,
+    // so an issue ref that starts a line keeps its link.
+    const headingMatch = trimmed.match(/^(#{1,6})(?:\s|$)/);
+    if (headingMatch) {
       flush();
-      const level = trimmed.match(/^#+/)?.[0].length || 1;
+      const level = headingMatch[1].length;
       blocks.push({
         id: `block-${currentId++}`,
         type: 'heading',
@@ -659,81 +452,77 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
       continue;
     }
 
-    // Blockquotes — consecutive `>` lines merge into one block so wrapped
-    // paragraph quotes render as a single continuous quote box. A blank line
-    // breaks the blockquote so the next `>` starts a fresh one.
+    // Blockquotes: a run of consecutive `>` lines (blank `>` lines included)
+    // is ONE quote block, the way GitHub renders it: one quote, one bar. A
+    // truly blank line ends the run, so the next `>` starts a fresh quote; a
+    // line without `>` is not a lazy continuation (it starts a paragraph).
     //
-    // Exception: if the stripped content starts with a block-level marker
-    // (list item, heading, code fence, nested blockquote) we do NOT merge.
-    // Our flat block model can't render a list-inside-a-quote as an actual
-    // nested list, so merging would flatten the markers into run-on inline
-    // text. Leaving them as separate blockquote blocks preserves each line's
-    // visual identity (a stacked-box layout) — imperfect but legible. A
-    // proper recursive blockquote parser is tracked as a follow-up.
+    // `content` is the quote's own markdown: each line with its `>` marker and
+    // one following space or tab removed (deeper indentation is kept, so a
+    // fenced code block or a nested list inside the quote keeps its shape) and
+    // trailing whitespace trimmed, one content line per source line. Blank
+    // lines at the quote's edges are dropped (`startLine` moves past leading
+    // ones), so the block's line span is the quote's text. The renderer
+    // (`BlockquoteBlock`) parses `content` again with this function and draws
+    // the inner blocks (paragraphs, code fences, lists, nested quotes) inside
+    // the one quote, while the quote stays a single annotatable block with a
+    // single `data-block-id`.
+    //
+    // GitHub alerts (`> [!KIND]` as the run's first line) are unchanged: the
+    // marker line tags the block, and the body is every later line fully
+    // `>`-stripped and trimmed, empty leading lines skipped, exactly as the
+    // line-by-line merge produced it. AlertBlock renders it.
     if (trimmed.startsWith('>')) {
       flush();
-      const stripped = trimmed.replace(/^>\s*/, '');
-      // List markers require trailing whitespace to avoid matching inline
-      // text like "-hyphen" or "1.5 seconds"; headings, code fences, and
-      // nested blockquote markers don't require it (``` can be followed
-      // directly by a language tag, # can start a dense heading).
-      const blockMarkerRe = /^(?:(?:\*|-|\d+\.)\s|#|```|>)/;
-      const hasBlockMarker = blockMarkerRe.test(stripped);
-      const prevBlock = blocks.length > 0 ? blocks[blocks.length - 1] : null;
-      // Don't merge into a previous blockquote whose content itself starts
-      // with a block marker — otherwise a `> some text` line following a
-      // `> 1. item` line would get glued onto the list-item block.
-      const prevIsMarkerQuote =
-        prevBlock?.type === 'blockquote' && blockMarkerRe.test(prevBlock.content);
-      // Alerts own their body: once a blockquote is tagged as an alert,
-      // subsequent `>` lines always merge into it (until a blank line).
-      // Without this, `> [!NOTE]\n> - item` splits the list item off into
-      // a separate plain quote, losing the callout.
-      const prevIsAlert = prevBlock?.type === 'blockquote' && !!prevBlock.alertKind;
-      const shouldMergeIntoAlert = prevIsAlert && !prevLineWasBlank;
-      const shouldMergeNormal =
-        !hasBlockMarker &&
-        !prevIsMarkerQuote &&
-        !prevLineWasBlank &&
-        prevBlock?.type === 'blockquote';
-      if (shouldMergeIntoAlert || shouldMergeNormal) {
-        prevBlock!.content = prevBlock!.content
-          ? prevBlock!.content + '\n' + stripped
-          : stripped;
-      } else {
-        // GitHub alert marker: a blockquote whose first line is [!KIND].
-        // We strip the marker from content and tag the block; rendering decides the style.
-        const alertMatch = stripped.match(/^\[!(NOTE|TIP|WARNING|CAUTION|IMPORTANT)\]\s*$/i);
+      let runEnd = i;
+      while (runEnd + 1 < lines.length && lines[runEnd + 1].trim().startsWith('>')) runEnd++;
+      const run = lines.slice(i, runEnd + 1);
+      const quoteStartLine = currentLineNum;
+      i = runEnd;
+      const alertMatch = trimmed
+        .replace(/^>\s*/, '')
+        .match(/^\[!(NOTE|TIP|WARNING|CAUTION|IMPORTANT)\]\s*$/i);
+      if (alertMatch) {
+        const body = run.slice(1).reduce((acc, raw) => {
+          const stripped = raw.trim().replace(/^>\s*/, '');
+          return acc ? acc + '\n' + stripped : stripped;
+        }, '');
         blocks.push({
           id: `block-${currentId++}`,
           type: 'blockquote',
-          content: alertMatch ? '' : stripped,
-          alertKind: alertMatch
-            ? (alertMatch[1].toLowerCase() as 'note' | 'tip' | 'warning' | 'caution' | 'important')
-            : undefined,
+          content: body,
+          alertKind: alertMatch[1].toLowerCase() as 'note' | 'tip' | 'warning' | 'caution' | 'important',
           order: currentId,
-          startLine: currentLineNum
+          startLine: quoteStartLine,
         });
+        continue;
       }
+      const inner = run.map((raw) => raw.replace(/^\s*>[ \t]?/, '').trimEnd());
+      let first = 0;
+      while (first < inner.length - 1 && inner[first] === '') first++;
+      let last = inner.length - 1;
+      while (last > first && inner[last] === '') last--;
+      blocks.push({
+        id: `block-${currentId++}`,
+        type: 'blockquote',
+        content: inner.slice(first, last + 1).join('\n'),
+        order: currentId,
+        startLine: quoteStartLine + first,
+      });
       continue;
     }
     
-    // Code blocks (naive)
+    // Code blocks (naive). Count backticks in the opening fence to support
+    // nested fences (e.g. ```` wrapping ```); the extent is shared with core.
     if (trimmed.startsWith('```')) {
       flush();
       const codeStartLine = currentLineNum;
-      // Count backticks in opening fence to support nested fences (e.g. ```` wrapping ```)
       const fenceLen = trimmed.match(/^`+/)?.[0].length ?? 3;
-      const closingFence = new RegExp('^\\s*`{' + fenceLen + ',}');
       // Extract language from fence (e.g., ```rust → "rust")
       const language = trimmed.slice(fenceLen).trim() || undefined;
-      // Fast forward until end of code block
-      let codeContent = [];
-      i++; // Skip start fence
-      while(i < lines.length && !closingFence.test(lines[i])) {
-        codeContent.push(lines[i]);
-        i++;
-      }
+      const close = codeFenceCloseIndex(lines, i);
+      const codeContent = lines.slice(i + 1, close);
+      i = close;
       blocks.push({
         id: `block-${currentId++}`,
         type: 'code',
@@ -745,127 +534,32 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
       continue;
     }
 
-    // Display math: $$ ... $$ — only when a closing $$ actually exists. An
-    // unclosed $$ (a stray delimiter or informal money like "$$100k for infra")
-    // must NOT swallow the rest of the document: scan ahead without committing,
-    // and if there's no close, fall through and treat the line as ordinary text.
-    if (trimmed.startsWith('$$')) {
+    // Display math: $$ ... $$ or \[ ... \] — only when the close actually
+    // exists. An unclosed opener (a stray delimiter, informal money like
+    // "$$100k for infra", a `\[deprecated\]`-style line) must NOT swallow the
+    // rest of the document: scanDisplayMath scans ahead without committing
+    // and answers null, and the line falls through as ordinary text.
+    const mathDelimiter = trimmed.startsWith('$$') ? '$$' : trimmed.startsWith('\\[') ? '\\[' : null;
+    const math = mathDelimiter ? scanDisplayMath(lines, i, mathDelimiter) : null;
+    if (math) {
+      flush();
       const mathStartLine = currentLineNum;
-      const afterOpen = trimmed.slice(2);
-      const mathLines: string[] = [];
-      let remainder = '';
-      let closed = false;
-      let closeLine = i;
-      // Find the closing $$ anywhere on the opening line (not just at its end),
-      // so `$$x$$.` or `$$x$$ trailing` close correctly instead of running on.
-      const inlineClose = afterOpen.indexOf('$$');
-      if (inlineClose !== -1) {
-        const body = afterOpen.slice(0, inlineClose).trim();
-        if (body) mathLines.push(body);
-        remainder = afterOpen.slice(inlineClose + 2).trim();
-        closed = true;
-      } else {
-        const scanned: string[] = afterOpen.trim() ? [afterOpen.trim()] : [];
-        let j = i;
-        while (j + 1 < lines.length) {
-          j++;
-          // A blank line ends the search: real $$…$$ has no blank line before its
-          // close, so a blank means this opener was never closed. Stopping here
-          // also prevents matching a stray $$ far below (e.g. inside a later code
-          // fence) and swallowing everything in between.
-          if (lines[j].trim() === '') break;
-          const closeAt = lines[j].indexOf('$$');
-          if (closeAt !== -1) {
-            const before = lines[j].slice(0, closeAt);
-            if (before.trim()) scanned.push(before);
-            remainder = lines[j].slice(closeAt + 2).trim();
-            closed = true;
-            closeLine = j;
-            break;
-          }
-          scanned.push(lines[j]);
-        }
-        if (closed) for (const s of scanned) mathLines.push(s);
+      i = math.closeLine;
+      blocks.push({
+        id: `block-${currentId++}`,
+        type: 'math',
+        content: math.body.join('\n'),
+        order: currentId,
+        startLine: mathStartLine,
+        sourceLineCount: i + contentStartLine - mathStartLine + 1,
+      });
+      // Trailing text after the close isn't math — reprocess it as its own
+      // line so it renders normally instead of being swallowed into the block.
+      if (math.remainder) {
+        lines[i] = math.remainder;
+        i--;
       }
-
-      if (closed) {
-        flush();
-        i = closeLine;
-        blocks.push({
-          id: `block-${currentId++}`,
-          type: 'math',
-          content: mathLines.join('\n'),
-          order: currentId,
-          startLine: mathStartLine,
-          sourceLineCount: i + contentStartLine - mathStartLine + 1,
-        });
-        // Trailing text after the closing $$ isn't math — reprocess it as its own
-        // line so it renders normally instead of being swallowed into the block.
-        if (remainder) {
-          lines[i] = remainder;
-          i--;
-        }
-        continue;
-      }
-      // No closing $$ found — not display math; fall through to normal handling.
-    }
-
-    // Display math: \[ ... \] — same unclosed-guard as $$ above: only treat as
-    // math when the closing \] exists, so a stray `\[deprecated\]`-style line or
-    // an unclosed `\[` doesn't swallow the rest of the document.
-    if (trimmed.startsWith('\\[')) {
-      const mathStartLine = currentLineNum;
-      const afterOpen = trimmed.slice(2);
-      const mathLines: string[] = [];
-      let remainder = '';
-      let closed = false;
-      let closeLine = i;
-      const inlineClose = afterOpen.indexOf('\\]');
-      if (inlineClose !== -1) {
-        const body = afterOpen.slice(0, inlineClose).trim();
-        if (body) mathLines.push(body);
-        remainder = afterOpen.slice(inlineClose + 2).trim();
-        closed = true;
-      } else {
-        const scanned: string[] = afterOpen.trim() ? [afterOpen.trim()] : [];
-        let j = i;
-        while (j + 1 < lines.length) {
-          j++;
-          // Blank line ends the search (see the $$ branch): unclosed \[ must not
-          // swallow later blocks or match a stray \] inside a later code fence.
-          if (lines[j].trim() === '') break;
-          const closeAt = lines[j].indexOf('\\]');
-          if (closeAt !== -1) {
-            const before = lines[j].slice(0, closeAt);
-            if (before.trim()) scanned.push(before);
-            remainder = lines[j].slice(closeAt + 2).trim();
-            closed = true;
-            closeLine = j;
-            break;
-          }
-          scanned.push(lines[j]);
-        }
-        if (closed) for (const s of scanned) mathLines.push(s);
-      }
-
-      if (closed) {
-        flush();
-        i = closeLine;
-        blocks.push({
-          id: `block-${currentId++}`,
-          type: 'math',
-          content: mathLines.join('\n'),
-          order: currentId,
-          startLine: mathStartLine,
-          sourceLineCount: i + contentStartLine - mathStartLine + 1,
-        });
-        if (remainder) {
-          lines[i] = remainder;
-          i--;
-        }
-        continue;
-      }
-      // No closing \] found — not display math; fall through to normal handling.
+      continue;
     }
 
     // Tables (lines starting with |)
@@ -896,27 +590,17 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
       continue;
     }
 
-    // Raw HTML blocks. A line starting with a known block-level HTML tag
-    // opens an HTML block. For opening tags we accumulate until the matching
-    // close tag is balanced (so `<details>…blank line…</details>` renders as
-    // one unit, matching GitHub's flavored behavior rather than strict
-    // CommonMark §4.6 Type 6 blank-line termination). For a line that starts
-    // with a close tag, we fall back to blank-line termination. Content is
-    // sanitized at render time, not here.
     // Directive container: `:::kind` opens, `:::` closes. Inline kind is
     // restricted to simple identifiers (letters, digits, hyphens). Body is
     // accumulated verbatim and rendered with inline markdown.
-    const directiveOpen = trimmed.match(/^:::\s*([a-zA-Z][a-zA-Z0-9-]*)\s*$/);
+    const directiveOpen = trimmed.match(DIRECTIVE_OPEN_RE);
     if (directiveOpen) {
       flush();
       const directiveStartLine = currentLineNum;
       const kind = directiveOpen[1].toLowerCase();
-      const bodyLines: string[] = [];
-      while (i + 1 < lines.length) {
-        i++;
-        if (lines[i].trim() === ':::') break;
-        bodyLines.push(lines[i]);
-      }
+      const close = directiveCloseIndex(lines, i);
+      const bodyLines = lines.slice(i + 1, close);
+      i = close;
       blocks.push({
         id: `block-${currentId++}`,
         type: 'directive',
@@ -928,43 +612,19 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
       continue;
     }
 
-    const htmlTagMatch = trimmed.match(HTML_BLOCK_OPEN_RE);
-    if (htmlTagMatch && HTML_BLOCK_TAGS.has(htmlTagMatch[1].toLowerCase())) {
+    // Raw HTML blocks. A line starting with a known block-level HTML tag
+    // opens an HTML block. For opening tags we accumulate until the matching
+    // close tag is balanced (so `<details>…blank line…</details>` renders as
+    // one unit, matching GitHub's flavored behavior rather than strict
+    // CommonMark §4.6 Type 6 blank-line termination). For a line that starts
+    // with a close tag, we fall back to blank-line termination. Content is
+    // sanitized at render time, not here.
+    const htmlEnd = htmlBlockEndAt(lines, i, htmlCloseCache);
+    if (htmlEnd !== -1) {
       flush();
       const htmlStartLine = currentLineNum;
-      const tagName = htmlTagMatch[1].toLowerCase();
-      const isCloseTag = trimmed.startsWith('</');
-      const htmlLines: string[] = [line];
-
-      if (isCloseTag) {
-        while (i + 1 < lines.length && lines[i + 1].trim() !== '') {
-          i++;
-          htmlLines.push(lines[i]);
-        }
-      } else if (VOID_HTML_TAGS.has(tagName)) {
-        // Void element (e.g. <img>): no closing tag, but attributes can wrap across
-        // lines. Consume until the line that actually closes the tag with `>` so a
-        // multi-line <img> isn't truncated to a bare `<img` fragment.
-        while (!lines[i].includes('>') && i + 1 < lines.length && lines[i + 1].trim() !== '') {
-          i++;
-          htmlLines.push(lines[i]);
-        }
-      } else {
-        const openRe = new RegExp(`<${tagName}(?:\\s|>|/|$)`, 'gi');
-        const closeRe = new RegExp(`</${tagName}\\s*>`, 'gi');
-        const depth = (line.match(openRe) || []).length - (line.match(closeRe) || []).length;
-        // Scan ahead for the matching close tag via the shared, bounded/
-        // linear helper (see its doc comment for why a naive per-opener scan
-        // is quadratic). If none is ever found — a self-closing <video/>, or
-        // an unclosed <picture>/<div> — do NOT swallow the rest of the
-        // document into this block; keep it to the opening line.
-        const end = findHtmlBlockEnd(lines, i, tagName, depth, htmlCloseCache);
-        if (end > i) {
-          for (let k = i + 1; k <= end; k++) htmlLines.push(lines[k]);
-          i = end;
-        }
-      }
-
+      const htmlLines = lines.slice(i, htmlEnd + 1);
+      i = htmlEnd;
       blocks.push({
         id: `block-${currentId++}`,
         type: 'html',
@@ -1119,13 +779,41 @@ const isElementPlaceholderQuote = (text: unknown): boolean =>
  *  element instead (`Feedback on the <nav> element — "Primary"`); every other
  *  annotation keeps the quote line exactly as before. */
 const commentHeadingLine = (ann: any): string => {
+  const element = elementSubject(ann);
+  return element ? `Feedback on ${element}` : `Feedback on: "${ann.originalText}"`;
+};
+
+/** `the <nav> element — "Primary"` for a text-less pinpoint whose quote is
+ *  the bridge's placeholder; null for every other annotation. */
+const elementSubject = (ann: any): string | null => {
   const context = ann?.elementContext;
-  if (context && typeof context.tag === 'string' && isElementPlaceholderQuote(ann.originalText)) {
-    const tag = safeInline(context.tag, 32);
-    const name = context.name ? safeInline(context.name, 120) : '';
-    return `Feedback on the <${tag}> element${name ? ` — "${name}"` : ''}`;
+  if (!context || typeof context.tag !== 'string' || !isElementPlaceholderQuote(ann.originalText)) return null;
+  const tag = safeInline(context.tag, 32);
+  const name = context.name ? safeInline(context.name, 120) : '';
+  const file = elementSourceFileName(context);
+  return `the <${tag}> element${name ? ` — "${name}"` : ''}${file && file !== name ? ` (${file})` : ''}`;
+};
+
+/** The file a media element shows, so two nameless images read differently in a heading:
+ *  `team.jpg` for `https://cdn.test/img/team.jpg?…`, `data:image/png` for an
+ *  inline image. Empty when the context carries no source.
+ *
+ *  `sourceName` is the bridge's own resolution (the one the composer quote
+ *  uses: src, a lazy data-src, srcset, <picture>/<source>, poster), so the
+ *  heading and the quote can never name different files. Contexts captured
+ *  before that field existed fall back to the scrubbed `src` attribute. */
+const elementSourceFileName = (context: any): string => {
+  if (typeof context?.sourceName === 'string' && context.sourceName.trim()) {
+    return safeInline(context.sourceName, 60);
   }
-  return `Feedback on: "${ann.originalText}"`;
+  const attrs = Array.isArray(context?.attrs) ? context.attrs : [];
+  const pair = attrs.find((p: unknown) => Array.isArray(p) && p[0] === 'src' && typeof p[1] === 'string');
+  if (!pair) return '';
+  const value: string = pair[1].trim();
+  if (/^data:/i.test(value)) return safeInline(`data:${value.slice(5).split(/[;,]/)[0] || 'unknown'}`, 60);
+  const path = value.replace(/\?…$/, '').replace(/\/+$/, '');
+  const name = path.slice(path.lastIndexOf('/') + 1);
+  return safeInline(name || path, 60);
 };
 
 export interface ElementContextExportOptions {
@@ -1227,6 +915,66 @@ const additionalTargetsExportBlock = (ann: any): string => {
   return block;
 };
 
+/** A URL with its query and fragment replaced by `?…`, the way the bridge
+ *  scrubs captured `href`/`src` values (tokens live in both). */
+const scrubUrlQuery = (url: string): string => {
+  const mark = url.search(/[?#]/);
+  return mark < 0 ? url : `${url.slice(0, mark)}?…`;
+};
+
+/** Ask AI sends no query strings: the live-app route line drops its query
+ *  (the persisted context keeps it, since that is the page that was reviewed). */
+const withoutRouteQuery = (context: unknown): unknown => {
+  const page = (context as any)?.page;
+  if (!page || typeof page.url !== 'string') return context;
+  return { ...(context as object), page: { ...page, url: scrubUrlQuery(page.url) } };
+};
+
+/** The anchor's `href`/`src` selector rung carries the raw attribute value,
+ *  query included (it must, to stay a working selector); Ask AI gets the
+ *  value with the query scrubbed instead. */
+const withoutSelectorQuery = (anchor: AskAIElementTarget['anchor']): AskAIElementTarget['anchor'] => {
+  if (!anchor || typeof anchor.selector !== 'string') return anchor;
+  const selector = anchor.selector.replace(
+    /(\[(?:href|src)=")((?:[^"\\]|\\.)*)(")/g,
+    (_m, open: string, value: string, close: string) => `${open}${scrubUrlQuery(value)}${close}`,
+  );
+  return { ...anchor, selector };
+};
+
+/** One pinpointed element as the Ask AI composer holds it (a draft target). */
+export interface AskAIElementTarget {
+  text?: string;
+  anchor?: { selector?: string } | null;
+  context?: unknown;
+}
+
+/**
+ * The element identity behind an Ask AI question asked from a raw-HTML or
+ * live-app pinpoint: the same identity lines the feedback export prints
+ * (`elementContextExportBlock`), without the fenced outline (the costly part
+ * of a model turn). One entry per pinpointed element, numbered when the
+ * question covers several. Empty when no target carries element context, so
+ * a plain text selection asks exactly what it asked before.
+ */
+export const elementIdentityForAskAI = (targets: readonly AskAIElementTarget[] | null | undefined): string => {
+  if (!Array.isArray(targets)) return '';
+  const blocks = targets
+    .map((target) => ({
+      text: typeof target?.text === 'string' ? safeInline(target.text, 200) : '',
+      lines: elementContextExportBlock(
+        { elementContext: withoutRouteQuery(target?.context), htmlAnchor: withoutSelectorQuery(target?.anchor) },
+        { includeOutline: false, includeRoute: true },
+      ).trim(),
+    }))
+    .filter((block) => block.lines);
+  if (blocks.length === 0) return '';
+  if (blocks.length === 1) return blocks[0].lines;
+  return blocks
+    .map((block, i) => `Element ${i + 1}${block.text ? `: "${block.text}"` : ''}\n${block.lines}`)
+    .join('\n\n');
+};
+
 /**
  * One annotation rendered as a standalone feedback entry (no number, no
  * document heading), for hosts that surface a single annotation to an agent.
@@ -1237,6 +985,11 @@ const additionalTargetsExportBlock = (ann: any): string => {
  * panel chrome does not use it.
  */
 export const exportAnnotationEntry = (ann: any, opts: ElementContextExportOptions = { includeRoute: true }): string => {
+  // An answer to a `:::question` block: the question and the answer lines.
+  const answer = ann?.questionAnswer == null ? null : parseQuestionAnswer(ann.questionAnswer);
+  if (answer) {
+    return `Answer to the question "${safeInline(answer.prompt, 400)}"\n${formatQuestionAnswerLines(answer)}`;
+  }
   let output = '';
   switch (ann?.type) {
     case 'DELETION':
@@ -1288,49 +1041,130 @@ const lineLabelForAnnotation = (blocks: Block[], ann: any): string | null => {
   return `lines ${block.startLine}–${end}`;
 };
 
-export const exportAnnotations = (
-  blocks: Block[],
-  annotations: any[],
-  globalAttachments: ImageAttachment[] = [],
-  title: string = 'Plan Feedback',
-  subject: string = 'plan',
-  opts: ExportAnnotationsOptions = {},
-): string => {
-  if (annotations.length === 0 && globalAttachments.length === 0) {
-    return 'No changes detected.';
+/** The source lines a text selection covers, for an Ask AI question
+ *  (`AIQuestion.scope.lineStart` / `lineEnd`). `blockIds` are the blocks the
+ *  selection touches; the range runs from the first block's start line to
+ *  the last block's end line, so a selection inside one block names exactly
+ *  the span its annotation would export (`(line 41)` / `(lines 41–44)`).
+ *  Blocks without a line (diff blocks, unknown ids) are skipped; `null` when
+ *  none is left. */
+export const selectionSourceLines = (
+  blocks: readonly Block[],
+  blockIds: readonly string[],
+): { lineStart: number; lineEnd: number } | null => {
+  let lineStart = Infinity;
+  let lineEnd = -Infinity;
+  for (const id of blockIds) {
+    if (id.startsWith('diff-block-')) continue;
+    const block = blocks.find(b => b.id === id);
+    if (!block || typeof block.startLine !== 'number' || block.startLine < 1) continue;
+    lineStart = Math.min(lineStart, block.startLine);
+    lineEnd = Math.max(lineEnd, blockEndLine(block), block.startLine);
   }
+  return Number.isFinite(lineStart) ? { lineStart, lineEnd } : null;
+};
 
-  // Sort annotations by block and offset
-  const sortedAnns = [...annotations].sort((a, b) => {
-    const blockA = blocks.findIndex(blk => blk.id === a.blockId);
-    const blockB = blocks.findIndex(blk => blk.id === b.blockId);
-    if (blockA !== blockB) return blockA - blockB;
+/** Separate valid question answers from ordinary feedback. A row whose
+ *  `questionAnswer` fails validation stays ordinary feedback (its one-line
+ *  text still reads), so nothing is ever dropped. */
+const splitQuestionAnswers = (list: any[]): { answers: QuestionAnswer[]; annotations: any[] } => {
+  const answers: QuestionAnswer[] = [];
+  const annotations: any[] = [];
+  for (const ann of list) {
+    const answer = ann?.questionAnswer == null ? null : parseQuestionAnswer(ann.questionAnswer);
+    if (answer) answers.push(answer);
+    else annotations.push(ann);
+  }
+  return { answers, annotations };
+};
+
+/** Export items when a document's blocks are unknown: the answers' own
+ *  prompts and lines, numbered in answer order. */
+const questionItemsFromAnswers = (answers: QuestionAnswer[]): QuestionExportItem[] =>
+  answers.map((a, i) => ({
+    key: a.key,
+    number: i + 1,
+    prompt: a.prompt,
+    ...(a.sourceLine ? { line: a.sourceLine } : {}),
+    recommendedLabels: [],
+    settled: false,
+  }));
+
+/** The diff-block index of a comment made in the plan/version diff view
+ *  (`blockId` `diff-block-N`), or null for every other annotation. */
+const diffBlockIndex = (ann: any): number | null => {
+  const match = typeof ann?.blockId === 'string' ? /^diff-block-(\d+)$/.exec(ann.blockId) : null;
+  return match ? Number(match[1]) : null;
+};
+
+/**
+ * Sort annotations in DOCUMENT order: by the block's position in `blocks`,
+ * then by offset. Without blocks (a linked document whose text is unknown)
+ * block ids compare numerically, so block-10 never precedes block-2.
+ *
+ * Comments made in the version diff view (`diff-block-N`) cannot be placed in
+ * the document: N indexes the diff against whichever base was selected, and
+ * nothing in the annotation maps it back to a block. They go together AFTER
+ * every other comment, in diff order (which is itself document order, since
+ * the diff walks the document). A list with no diff comments sorts exactly as
+ * before.
+ */
+const sortAnnotationsInDocumentOrder = (annotations: any[], blocks: Block[] | undefined): any[] => {
+  const order = new Map<string, number>();
+  blocks?.forEach((blk, index) => order.set(blk.id, index));
+  return [...annotations].sort((a, b) => {
+    const diffA = diffBlockIndex(a);
+    const diffB = diffBlockIndex(b);
+    if (diffA !== null || diffB !== null) {
+      if (diffA === null) return -1;
+      if (diffB === null) return 1;
+      if (diffA !== diffB) return diffA - diffB;
+      return a.startOffset - b.startOffset;
+    }
+    if (a.blockId !== b.blockId) {
+      // Two ids missing from `blocks` share position -1; fall through to the
+      // offset so the main document keeps its pre-#1696 order.
+      const byBlock = blocks
+        ? (order.get(a.blockId) ?? -1) - (order.get(b.blockId) ?? -1)
+        : String(a.blockId ?? '').localeCompare(String(b.blockId ?? ''), undefined, { numeric: true });
+      if (byBlock) return byBlock;
+    }
     return a.startOffset - b.startOffset;
   });
+};
 
-  // One injection per export: a human-only skill referenced by several
-  // comments has its instructions injected once (see skillReferenceExportBlock).
-  const injectedSkills = new Set<string>();
-
-  let output = `# ${title}\n\n`;
-
-  if (opts.sourceConverted) {
-    output += `> Note: Line numbers below refer to the converted markdown, not the original HTML/URL source.\n\n`;
+/** `Label Summary` heading (at `level`) tallying quick labels, or '' when none. */
+const labelSummaryBlock = (sortedAnns: any[], level: number): string => {
+  const labeledAnns = sortedAnns.filter((a: any) => a.isQuickLabel && a.text);
+  if (labeledAnns.length === 0) return '';
+  const grouped = new Map<string, number>();
+  labeledAnns.forEach((a: any) => {
+    grouped.set(a.text, (grouped.get(a.text) || 0) + 1);
+  });
+  let output = `${'#'.repeat(level)} Label Summary\n\n`;
+  for (const [text, count] of grouped) {
+    output += `- **${text}**: ${count}\n`;
   }
+  output += '\n';
+  return output;
+};
 
-  // Add global reference images section if any
-  if (globalAttachments.length > 0) {
-    output += `## Reference Images\n`;
-    output += `Please review these reference images (use the Read tool to view):\n`;
-    globalAttachments.forEach((img, idx) => {
-      output += `${idx + 1}. [${img.name}] \`${img.path}\`\n`;
-    });
-    output += `\n`;
-  }
-
-  if (annotations.length > 0) {
-    output += `I've reviewed this ${subject} and have ${annotations.length} piece${annotations.length > 1 ? 's' : ''} of feedback:\n\n`;
-  }
+/**
+ * The numbered feedback entries of ONE document, shared by the root export
+ * (`exportAnnotations`, entries at `##`) and every linked/folder document
+ * (`exportLinkedDocAnnotations`, entries at `###` under the file heading), so
+ * a document's comments read the same whichever section carries them: line
+ * labels, `[In diff content]`, quick labels with their tip, element context,
+ * skill references, images, and threaded replies.
+ */
+const renderAnnotationEntries = (
+  sortedAnns: any[],
+  blocks: Block[] | undefined,
+  opts: { subject: string; level: number; injectedSkills: Set<string> },
+): string => {
+  const { subject, injectedSkills } = opts;
+  const hashes = (n: number) => '#'.repeat(n);
+  let output = '';
 
   // Live app sessions stamp annotations with the page they were made on.
   // When any exported annotation carries a pageUrl, entries are grouped under
@@ -1342,7 +1176,7 @@ export const exportAnnotations = (
   // number of its position in the ungrouped order, matching the on-page
   // marker numbering, so grouped sections may show non-contiguous numbers.
   // With no pageUrl anywhere the output is byte-identical to the ungrouped
-  // export (`## N.` entries, no page headers).
+  // export (entries at `level`, no page headers).
   const hasPageGroups = sortedAnns.some(
     (a: any) => typeof a.pageUrl === 'string' && a.pageUrl.length > 0,
   );
@@ -1423,16 +1257,16 @@ export const exportAnnotations = (
   let lastEmittedPage: string | null = null;
   emitOrder.forEach((ann) => {
     if (hasPageGroups && ann.pageUrl && ann.pageUrl !== lastEmittedPage) {
-      output += `## Page: ${ann.pageUrl}\n\n`;
+      output += `${hashes(opts.level)} Page: ${ann.pageUrl}\n\n`;
       lastEmittedPage = ann.pageUrl;
     }
-    output += `${hasPageGroups ? '###' : '##'} ${annotationNumbers.get(ann)}. `;
+    output += `${hashes(hasPageGroups ? opts.level + 1 : opts.level)} ${annotationNumbers.get(ann)}. `;
 
     // Add diff context label if annotation was created in diff view
     if (ann.diffContext) {
       output += `[In diff content] `;
     } else {
-      const lineLabel = lineLabelForAnnotation(blocks, ann);
+      const lineLabel = blocks ? lineLabelForAnnotation(blocks, ann) : null;
       if (lineLabel) output += `(${lineLabel}) `;
     }
 
@@ -1494,22 +1328,61 @@ export const exportAnnotations = (
     output += '\n';
   });
 
+  return output;
+};
+
+export const exportAnnotations = (
+  blocks: Block[],
+  allAnnotations: any[],
+  globalAttachments: ImageAttachment[] = [],
+  title: string = 'Plan Feedback',
+  subject: string = 'plan',
+  opts: ExportAnnotationsOptions = {},
+): string => {
+  // Answers to `:::question` blocks are printed first, in their own section,
+  // and never counted as numbered feedback.
+  const { answers, annotations } = splitQuestionAnswers(allAnnotations);
+  const answersSection = answers.length > 0
+    ? formatQuestionAnswersSection(questionExportItems(indexQuestionBlocks(blocks)), answers, { headingLevel: 2 })
+    : '';
+  if (annotations.length === 0 && globalAttachments.length === 0 && !answersSection) {
+    return 'No changes detected.';
+  }
+
+  const sortedAnns = sortAnnotationsInDocumentOrder(annotations, blocks);
+
+  // One injection per export: a human-only skill referenced by several
+  // comments has its instructions injected once (see skillReferenceExportBlock).
+  const injectedSkills = new Set<string>();
+
+  let output = `# ${title}\n\n`;
+
+  if (opts.sourceConverted) {
+    output += `> Note: Line numbers below refer to the converted markdown, not the original HTML/URL source.\n\n`;
+  }
+
+  output += answersSection;
+
+  // Add global reference images section if any
+  if (globalAttachments.length > 0) {
+    output += `## Reference Images\n`;
+    output += `Please review these reference images (use the Read tool to view):\n`;
+    globalAttachments.forEach((img, idx) => {
+      output += `${idx + 1}. [${img.name}] \`${img.path}\`\n`;
+    });
+    output += `\n`;
+  }
+
+  if (annotations.length > 0) {
+    output += `I've reviewed this ${subject} and have ${annotations.length} piece${annotations.length > 1 ? 's' : ''} of feedback:\n\n`;
+  }
+
+  output += renderAnnotationEntries(sortedAnns, blocks, { subject, level: 2, injectedSkills });
+
   output += `---\n`;
 
-  // Quick Label Summary
-  const labeledAnns = sortedAnns.filter((a: any) => a.isQuickLabel && a.text);
-  if (labeledAnns.length > 0) {
-    const grouped = new Map<string, number>();
-    labeledAnns.forEach((a: any) => {
-      grouped.set(a.text, (grouped.get(a.text) || 0) + 1);
-    });
-
-    output += `\n## Label Summary\n\n`;
-    for (const [text, count] of grouped) {
-      output += `- **${text}**: ${count}\n`;
-    }
-    output += '\n';
-  }
+  const summary = labelSummaryBlock(sortedAnns, 2);
+  if (summary) output += `\n${summary}`;
 
   return output;
 };
@@ -1522,18 +1395,50 @@ export interface LinkedDocAnnotationEntry {
   isConverted?: boolean;
 }
 
+/** Section heading for exportLinkedDocAnnotations. The default describes
+ *  documents a plan links to; a folder session's documents are not that. */
+export interface LinkedDocExportHeading {
+  title: string;
+  intro: string;
+}
+
+export const LINKED_DOC_EXPORT_HEADING: LinkedDocExportHeading = {
+  title: 'Linked Document Feedback',
+  intro: 'The following feedback is on documents referenced in the plan.',
+};
+
+export const FOLDER_DOC_EXPORT_HEADING: LinkedDocExportHeading = {
+  title: 'Folder Document Feedback',
+  intro: 'The following feedback is on files in the reviewed folder, grouped by file.',
+};
+
+export const BUNDLE_DOC_EXPORT_HEADING: LinkedDocExportHeading = {
+  title: 'File Feedback',
+  intro: 'The following feedback is on the files under review, one section per file, in the order they were given for review.',
+};
+
 export const exportLinkedDocAnnotations = (
-  docAnnotations: Map<string, LinkedDocAnnotationEntry>
+  docAnnotations: Map<string, LinkedDocAnnotationEntry>,
+  heading: LinkedDocExportHeading = LINKED_DOC_EXPORT_HEADING,
 ): string => {
-  let output = `\n# Linked Document Feedback\n\nThe following feedback is on documents referenced in the plan.\n\n`;
+  let output = `\n# ${heading.title}\n\n${heading.intro}\n\n`;
 
   // One injection per export, across all linked documents.
   const injectedSkills = new Set<string>();
 
-  for (const [filepath, { annotations, globalAttachments, blocks: docBlocks, isConverted }] of docAnnotations) {
-    if (annotations.length === 0 && globalAttachments.length === 0) continue;
+  for (const [filepath, { annotations: docAnnotationList, globalAttachments, blocks: docBlocks, markdown: docMarkdown, isConverted }] of docAnnotations) {
+    if (docAnnotationList.length === 0 && globalAttachments.length === 0) continue;
+    const { answers, annotations } = splitQuestionAnswers(docAnnotationList);
 
     output += `## ${filepath}${isConverted ? ' (converted from HTML — line numbers refer to converted markdown)' : ''}\n\n`;
+
+    if (answers.length > 0) {
+      const questionBlocks = docBlocks ?? (docMarkdown !== undefined ? parseMarkdownToBlocks(docMarkdown) : null);
+      const items = questionBlocks
+        ? questionExportItems(indexQuestionBlocks(questionBlocks))
+        : questionItemsFromAnswers(answers);
+      output += formatQuestionAnswersSection(items, answers, { headingLevel: 3 });
+    }
 
     if (globalAttachments.length > 0) {
       output += `### Reference Images\n`;
@@ -1544,55 +1449,14 @@ export const exportLinkedDocAnnotations = (
       output += `\n`;
     }
 
-    // Sort annotations by block and offset
-    const sortedAnns = [...annotations].sort((a, b) => {
-      if (a.blockId !== b.blockId) return a.blockId.localeCompare(b.blockId);
-      return a.startOffset - b.startOffset;
-    });
+    const sortedAnns = sortAnnotationsInDocumentOrder(annotations, docBlocks);
 
-    output += `I've reviewed this document and have ${annotations.length} piece${annotations.length !== 1 ? 's' : ''} of feedback:\n\n`;
+    if (annotations.length > 0 || answers.length === 0) {
+      output += `I've reviewed this document and have ${annotations.length} piece${annotations.length !== 1 ? 's' : ''} of feedback:\n\n`;
+    }
 
-    sortedAnns.forEach((ann, index) => {
-      output += `### ${index + 1}. `;
-
-      const lineLabel = docBlocks ? lineLabelForAnnotation(docBlocks, ann) : null;
-      if (lineLabel) output += `(${lineLabel}) `;
-
-      switch (ann.type) {
-        case 'DELETION':
-          output += `Remove this\n`;
-          output += `\`\`\`\n${ann.originalText}\n\`\`\`\n`;
-          output += `> I don't want this in the document.\n`;
-          break;
-
-        case 'COMMENT':
-          output += `${commentHeadingLine(ann)}\n`;
-          output += diagramLocationExportLine(ann);
-          output += `> ${ann.text}\n`;
-          break;
-
-        case 'GLOBAL_COMMENT':
-          output += `General feedback about the document\n`;
-          output += `> ${ann.text}\n`;
-          break;
-      }
-
-      output += elementContextExportBlock(ann, { includeRoute: false });
-      // Multi-target raw-HTML comments list every additional covered element.
-      output += additionalTargetsExportBlock(ann);
-
-      // External (tool-sourced) comments list skills but never inject.
-      output += skillReferenceExportBlock(ann.text, injectedSkills, { external: !!ann.source });
-
-      if (ann.images && ann.images.length > 0) {
-        output += `**Attached images:**\n`;
-        ann.images.forEach((img: ImageAttachment) => {
-          output += `- [${img.name}] \`${img.path}\`\n`;
-        });
-      }
-
-      output += '\n';
-    });
+    output += renderAnnotationEntries(sortedAnns, docBlocks, { subject: 'document', level: 3, injectedSkills });
+    output += labelSummaryBlock(sortedAnns, 3);
   }
 
   output += `---\n`;
@@ -1660,6 +1524,119 @@ export const exportCodeFileAnnotations = (annotations: CodeAnnotation[]): string
 
   output += `---\n`;
   return output;
+};
+
+/** What `formatDraftAnnotationsForAsk` lists: the same collections the
+ *  feedback export reads, before the reviewer submits them. */
+export interface DraftAnnotationsForAsk {
+  /** The session's own document (plan, file, message). */
+  annotations: readonly Annotation[];
+  blocks?: Block[];
+  globalAttachments?: readonly ImageAttachment[];
+  /** Every other document holding drafts, by path. */
+  documents?: ReadonlyMap<string, LinkedDocAnnotationEntry>;
+  codeAnnotations?: readonly CodeAnnotation[];
+  editorAnnotations?: readonly EditorAnnotation[];
+}
+
+const MAX_ASK_DRAFT_ENTRIES = 60;
+const ASK_DRAFT_QUOTE_CHARS = 160;
+const ASK_DRAFT_TEXT_CHARS = 1000;
+
+/**
+ * The reviewer's UNSUBMITTED annotations as a plain list, for an "Ask this
+ * session" question (#1748). It is deliberately not the feedback export: no
+ * title, no "I've reviewed this … and have N pieces of feedback", no numbered
+ * "Feedback on" headings, no injected skill instructions. The session that
+ * reads it is the agent the review is for, so a draft must read as something
+ * the reviewer is still writing, not as a request. The server wraps the list
+ * in a read-only frame (`SESSION_ASK_DRAFTS_LABEL`); this function only lists.
+ *
+ * One line per draft (`Draft 2 (line 14): comment on "…" — …`), numbered in
+ * document order so a question can say "draft 2"; every page-, file- or
+ * reviewer-supplied string is collapsed to one line and capped. Empty string
+ * when there are no drafts.
+ */
+export const formatDraftAnnotationsForAsk = (input: DraftAnnotationsForAsk): string => {
+  type Row = { ann: any; where: string | null };
+  const rows: Row[] = [];
+  const placeOf = (blocks: Block[] | undefined, ann: any): string | null => {
+    if (ann.diffContext) return 'in the version diff';
+    return blocks ? lineLabelForAnnotation(blocks, ann) : null;
+  };
+  for (const ann of sortAnnotationsInDocumentOrder([...input.annotations], input.blocks)) {
+    rows.push({ ann, where: placeOf(input.blocks, ann) });
+  }
+  for (const [path, doc] of input.documents ?? []) {
+    for (const ann of sortAnnotationsInDocumentOrder([...doc.annotations], doc.blocks)) {
+      const line = placeOf(doc.blocks, ann);
+      rows.push({ ann, where: line ? `${safeInline(path, 300)}, ${line}` : safeInline(path, 300) });
+    }
+  }
+
+  const numbers = new Map<string, number>();
+  rows.forEach((row, index) => {
+    if (typeof row.ann?.id === 'string') numbers.set(row.ann.id, index + 1);
+  });
+  const replyParents = resolveReplyParents(rows.map((row) => row.ann));
+  const quote = (value: unknown) => `"${safeInline(value, ASK_DRAFT_QUOTE_CHARS)}"`;
+  const text = (value: unknown) => safeInline(value, ASK_DRAFT_TEXT_CHARS);
+  const imageList = (list: readonly ImageAttachment[]): string =>
+    list.map((img) => `[${safeInline(img?.name, 80)}] ${safeInline(img?.path, 300)}`).join(', ');
+  const images = (list: unknown): string =>
+    Array.isArray(list) && list.length > 0 ? ` (attached: ${imageList(list)})` : '';
+
+  const lines: string[] = [];
+  rows.forEach(({ ann, where }, index) => {
+    const parent = replyParents.get(ann.id);
+    const parentNumber = parent ? numbers.get(parent) : undefined;
+    const head = `Draft ${index + 1}${where ? ` (${where})` : ''}:`;
+    const from = ann.source ? ` (from ${safeInline(ann.source, 60)})` : '';
+    const answer = ann.questionAnswer == null ? null : parseQuestionAnswer(ann.questionAnswer);
+    let body: string;
+    if (answer) {
+      body = `answer to the question ${quote(answer.prompt)} — ${text(formatQuestionAnswerText(answer))}`;
+    } else if (parentNumber !== undefined) {
+      body = `reply to draft ${parentNumber} — ${text(ann.text)}`;
+    } else if (ann.type === 'DELETION') {
+      body = `suggests removing ${quote(ann.originalText)}`;
+    } else if (ann.type === 'GLOBAL_COMMENT') {
+      body = `general note — ${text(ann.text)}`;
+    } else {
+      const subject = elementSubject(ann) ?? quote(ann.originalText);
+      const anchor = ann.diagramAnchor === undefined ? null : parseDiagramAnchor(ann.diagramAnchor);
+      const target = anchor ? `${subject} [${safeInline(diagramAnchorLocationLine(anchor), 300)}]` : subject;
+      body = ann.isQuickLabel
+        ? `label ${quote(ann.text)} on ${target}`
+        : `comment on ${target} — ${text(ann.text)}`;
+    }
+    lines.push(`${head} ${body}${from}${images(ann.images)}`);
+  });
+
+  let next = rows.length;
+  for (const ann of input.codeAnnotations ?? []) {
+    next += 1;
+    const range = ann.lineStart === ann.lineEnd ? `line ${ann.lineStart}` : `lines ${ann.lineStart}–${ann.lineEnd}`;
+    const on = ann.originalCode ? ` on ${quote(ann.originalCode)}` : '';
+    lines.push(`Draft ${next} (${safeInline(ann.filePath, 300)}, ${range}): comment${on} — ${text(ann.text)}${ann.source ? ` (from ${safeInline(ann.source, 60)})` : ''}${images(ann.images)}`);
+  }
+  for (const ann of input.editorAnnotations ?? []) {
+    next += 1;
+    const range = ann.lineStart === ann.lineEnd ? `line ${ann.lineStart}` : `lines ${ann.lineStart}–${ann.lineEnd}`;
+    lines.push(`Draft ${next} (${safeInline(ann.filePath, 300)}, ${range}): comment on ${quote(ann.selectedText)} — ${text(ann.comment)}`);
+  }
+
+  const shown = lines.slice(0, MAX_ASK_DRAFT_ENTRIES);
+  if (lines.length > shown.length) shown.push(`… and ${lines.length - shown.length} more draft annotations`);
+
+  const attachments = input.globalAttachments ?? [];
+  if (attachments.length > 0) shown.push(`Reference images: ${imageList(attachments)}`);
+  for (const [path, doc] of input.documents ?? []) {
+    if (doc.globalAttachments.length > 0) {
+      shown.push(`Reference images (${safeInline(path, 300)}): ${imageList(doc.globalAttachments)}`);
+    }
+  }
+  return shown.join('\n');
 };
 
 export interface MessageAnnotationEntry {

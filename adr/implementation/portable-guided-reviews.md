@@ -2,7 +2,7 @@
 
 Status: implemented on branch `portable-guides` (see §11); first Cloudflare deploy pending
 Decision record: `adr/decisions/007-portable-guided-reviews-20260815.md` (D1–D12 referenced throughout)
-Salvage source: branch `guided-review-html-export` (`2cf18cc3`), worktree `/Users/ramos/plannotator/guided-review-html-export`
+Salvage source: branch `guided-review-html-export` (`2cf18cc3`), in a local worktree
 
 ## 1. Goal
 

@@ -49,4 +49,27 @@ describe("embedded annotate prompt delivery", () => {
       message: expect.stringContaining("Could not deliver approved annotation notes"),
     });
   });
+
+  // #1612: the embedded /plannotator-last delivery carries the agent that
+  // wrote the annotated message, and stays unnamed when that is unknown.
+  test("names the resolved agent, and omits the key when there is none", async () => {
+    const named = { app: { log: mock(() => {}) }, session: { prompt: mock(async (_input: any) => {}) } };
+    await deliverEmbeddedAnnotateMessagePrompt({
+      client: named,
+      sessionId: "session-1",
+      approved: false,
+      feedback: "Tighten this.",
+      agent: "agent-engineer",
+    });
+    expect(named.session.prompt.mock.calls[0]?.[0].body.agent).toBe("agent-engineer");
+
+    const unnamed = { app: { log: mock(() => {}) }, session: { prompt: mock(async (_input: any) => {}) } };
+    await deliverEmbeddedAnnotateMessagePrompt({
+      client: unnamed,
+      sessionId: "session-1",
+      approved: false,
+      feedback: "Tighten this.",
+    });
+    expect("agent" in unnamed.session.prompt.mock.calls[0]?.[0].body).toBe(false);
+  });
 });

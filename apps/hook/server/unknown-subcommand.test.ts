@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import {
   findClosestSubcommand,
   findUnknownSubcommand,
@@ -41,6 +42,22 @@ describe("unknown subcommand", () => {
     expect(findClosestSubcommand("x".repeat(10_000))).toBeNull();
   });
 
+  test("an unreleased subcommand is never suggested", () => {
+    // HIDDEN_SUBCOMMANDS is empty now that the Inbox launched, so the filter
+    // is driven with its own set: a hidden name must not be advertised by a
+    // typo, while the same typo finds it once it is released.
+    const hidden = new Set(["inbox"]);
+    expect(findClosestSubcommand("inbo", hidden)).toBeNull();
+    expect(findClosestSubcommand("inbx", hidden)).toBeNull();
+    expect(findClosestSubcommand("inbo")).toBe("inbox");
+    expect(findClosestSubcommand("inbx")).toBe("inbox");
+  });
+
+  test("the launched Inbox dispatches and is suggested", () => {
+    expect(findUnknownSubcommand(["inbox", "--background"])).toBeNull();
+    expect(formatUnknownSubcommandError("inbo")).toContain("plannotator inbox");
+  });
+
   test("error text names the typo and points at --help", () => {
     const message = formatUnknownSubcommandError("annotatte");
     expect(message).toContain("Unknown command: annotatte");
@@ -54,20 +71,7 @@ describe("unknown subcommand", () => {
     // the apps, so drop empty placeholders for any missing artifact and
     // remove exactly what this test created afterwards. The guard under test
     // exits before either page is ever served, so content is irrelevant.
-    const distDir = resolve(import.meta.dir, "../dist");
-    const created: string[] = [];
-    let createdDir = false;
-    if (!existsSync(distDir)) {
-      mkdirSync(distDir, { recursive: true });
-      createdDir = true;
-    }
-    for (const name of ["index.html", "review.html"]) {
-      const file = resolve(distDir, name);
-      if (!existsSync(file)) {
-        writeFileSync(file, "<!doctype html>");
-        created.push(file);
-      }
-    }
+    const created = stubHookDistHtml();
     try {
     const proc = Bun.spawn(
       [
@@ -94,8 +98,8 @@ describe("unknown subcommand", () => {
     expect(stderr).toContain("Unknown command: annotatte");
     expect(stderr).toContain("plannotator annotate");
     } finally {
-      for (const file of created) rmSync(file, { force: true });
-      if (createdDir) rmSync(distDir, { recursive: true, force: true });
+      // Only the stubs this test wrote; never the dist folder (a build may be writing into it).
+      removeStubbedHtml(created);
     }
   }, 30_000);
 });

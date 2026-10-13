@@ -104,16 +104,25 @@ describe("createBestEffortOnce", () => {
     expect(calls).toBe(1);
   });
 
-  test("swallows initialization failure and does not retry", async () => {
+  test("swallows a failure and retries only once the cooldown has passed", async () => {
     let calls = 0;
-    const initialize = createBestEffortOnce(async () => {
+    const failing = async () => {
       calls++;
       throw new Error("discovery failed");
-    });
+    };
 
-    await expect(initialize()).resolves.toBeUndefined();
-    await expect(initialize()).resolves.toBeUndefined();
+    // Within the cooldown a broken tool is not re-spawned on every call…
+    const cooled = createBestEffortOnce(failing, 60_000);
+    await expect(cooled()).resolves.toBeUndefined();
+    await expect(cooled()).resolves.toBeUndefined();
     expect(calls).toBe(1);
+
+    // …but a failure never pins the fallback for the life of the process.
+    calls = 0;
+    const retrying = createBestEffortOnce(failing, 0);
+    await retrying();
+    await retrying();
+    expect(calls).toBe(2);
   });
 });
 
@@ -981,6 +990,44 @@ describe("AI endpoints", () => {
     expect(createdModel).toBe("anything-goes");
   });
 
+  test("session creation forwards only an effort the resolved model accepts", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    const efforts: Array<string | undefined> = [];
+    reg.register({
+      ...mockProvider("claude-agent-sdk"),
+      models: [
+        { id: "sonnet", label: "Sonnet", default: true, reasoningEfforts: [{ id: "high", label: "High" }] },
+        { id: "haiku", label: "Haiku" },
+      ],
+      async createSession(options: CreateSessionOptions) {
+        efforts.push(options.reasoningEffort);
+        return mockSession(`session-${++sessionCounter}`, null);
+      },
+    }, "claude");
+    const endpoints = createAIEndpoints({ registry: reg, sessionManager: sm });
+
+    for (const [model, reasoningEffort] of [["sonnet", "high"], ["sonnet", "ultra"], ["haiku", "high"]]) {
+      const res = await endpoints["/api/ai/session"](
+        new Request("http://localhost/api/ai/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            context: { mode: "plan-review", plan: { plan: "# Test" } },
+            providerId: "claude",
+            model,
+            reasoningEffort,
+          }),
+        }),
+      );
+      expect(res.status).toBe(200);
+    }
+
+    // A level the model lists passes; one it does not list, or any level on a
+    // model that takes none, is dropped rather than sent to the CLI.
+    expect(efforts).toEqual(["high", undefined, undefined]);
+  });
+
   test("session creation clamps client-supplied cost controls", async () => {
     const { reg, endpoints } = setup();
     let seenOptions: { maxTurns?: number; maxBudgetUsd?: number } | null = null;
@@ -1051,12 +1098,15 @@ describe("AI endpoints", () => {
           sessionId,
           prompt: "What changed?",
           contextUpdate: "New annotation: section 3 flagged",
+          // "Ask this session" only; a separate AI never sees it (#1748).
+          draftAnnotations: "Draft 1: DRAFT-SENTINEL",
         }),
       })
     );
     const text = await queryRes.text();
     expect(text).toContain("Context update");
     expect(text).toContain("section 3 flagged");
+    expect(text).not.toContain("DRAFT-SENTINEL");
     expect(text).toContain("What changed?");
   });
 

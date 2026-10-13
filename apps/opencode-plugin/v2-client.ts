@@ -1,11 +1,10 @@
 /**
  * Duck-typed adapters over the OpenCode 2 plugin context.
  *
- * The V2 plugin API is still pre-release: the published `next` and `latest`
- * dist-tags of `@opencode-ai/plugin` carry an older context shape than the
- * `beta` / `dev` nightlies. Nothing here may import the plugin package at
- * runtime or assume a domain exists: every capability is probed before use so
- * the adapter degrades to today's behavior on an older host.
+ * The build uses the stable @opencode/plugin types, but installed V2 hosts may
+ * predate native commands, agent switching or transcript notices. Nothing here
+ * imports the plugin package at runtime: optional capabilities are probed so
+ * older hosts retain their fallback behavior.
  */
 
 import type { OpenCodeBridgeAgent } from "./cli-bridge";
@@ -13,8 +12,25 @@ import type { OpenCodeBridgeAgent } from "./cli-bridge";
 /** The subset of the V2 session domain this plugin touches. */
 export interface V2SessionDomain {
   get?: (input: { sessionID: string }) => Promise<{ location?: { directory?: string } }>;
-  prompt?: (input: { sessionID: string; text: string; delivery?: unknown }) => Promise<unknown>;
+  prompt?: (input: {
+    sessionID: string;
+    text: string;
+    delivery?: unknown;
+    /** Our own inbox/message id (`msg_…`), so its delivery event can be matched. */
+    id?: string;
+    metadata?: Record<string, unknown>;
+  }) => Promise<unknown>;
+  /** "Ask this session" only: answer from the session's context without a turn. */
+  generate?: (input: { sessionID: string; prompt: string }) => Promise<unknown>;
+  /** Stops the session's whole current execution. */
+  interrupt?: (input: { sessionID: string; resume?: boolean }) => Promise<unknown>;
+  /** Resolves once the session is idle (at once when it already is). */
+  wait?: (input: { sessionID: string }) => Promise<unknown>;
   switchAgent?: (input: { sessionID: string; agent: string }) => Promise<unknown>;
+  switchModel?: (input: {
+    sessionID: string;
+    model: { providerID: string; id: string; variant?: string };
+  }) => Promise<unknown>;
   context?: (input: { sessionID: string }) => Promise<unknown>;
   /**
    * Put a message in the session without starting a model turn NOW.
@@ -110,6 +126,12 @@ export interface V2BridgeClient {
    * `createSessionUrlNotifier` and `toastPlannotatorUrl` in `cli-bridge.ts`.
    */
   notifyUrl?: (input: { url: string; message: string }) => Promise<unknown>;
+  /**
+   * Present only for a slash command's client on a host with
+   * `session.synthetic`: shows the person that the command failed, as a
+   * transcript notice that starts no model turn (`createCommandFailureNotifier`).
+   */
+  notifyFailure?: (input: { command: string; message: string }) => Promise<unknown>;
   app: {
     log: (entry: { level: "info" | "error"; message: string }) => void;
     agents: () => Promise<{ data: OpenCodeBridgeAgent[] }>;
@@ -175,14 +197,32 @@ export function normalizeAgentList(response: unknown): OpenCodeBridgeAgent[] {
       description: typeof entry.description === "string" ? entry.description : undefined,
       mode: typeof entry.mode === "string" ? entry.mode : undefined,
       hidden: entry.hidden === true,
+      model: normalizeAgentModel(entry.model),
     });
   }
   return agents;
 }
 
+function normalizeAgentModel(value: unknown): OpenCodeBridgeAgent["model"] {
+  if (!isRecord(value)) return undefined;
+  if (typeof value.providerID !== "string" || !value.providerID) return undefined;
+  if (typeof value.id !== "string" || !value.id) return undefined;
+  if (value.variant !== undefined && typeof value.variant !== "string") return undefined;
+  return {
+    providerID: value.providerID,
+    id: value.id,
+    ...(value.variant ? { variant: value.variant } : {}),
+  };
+}
+
 /** True when this host's session domain can switch the active agent. */
 export function supportsSwitchAgent(ctx: V2ContextLike): boolean {
   return typeof ctx.session?.switchAgent === "function";
+}
+
+/** True when this host can persist the model configured for a selected agent. */
+export function supportsSwitchModel(ctx: V2ContextLike): boolean {
+  return typeof ctx.session?.switchModel === "function";
 }
 
 // There is deliberately no `supportsNativeCommands(ctx)`. `ctx.command.transform`
@@ -202,6 +242,9 @@ export function toBridgeMessages(context: unknown): unknown[] {
       id: typeof message.id === "string" ? message.id : undefined,
       role: typeof message.type === "string" ? message.type : undefined,
       time: isRecord(message.time) ? { created: message.time.created } : undefined,
+      // V2 assistant messages record their writer (`Session.Message.Assistant`
+      // carries `agent: Agent.ID`); /plannotator-last routes feedback to it.
+      ...(typeof message.agent === "string" && message.agent ? { agent: message.agent } : {}),
     },
     parts: Array.isArray(message.content) ? message.content : [],
   }));
@@ -213,6 +256,16 @@ function joinTextParts(parts: unknown[]): string {
       isRecord(part) && part.type === "text" && typeof part.text === "string")
     .map((part) => part.text)
     .join("\n");
+}
+
+/** The session's current agent, or undefined when the host cannot say. */
+async function readSessionAgent(ctx: V2ContextLike, sessionID: string): Promise<string | undefined> {
+  try {
+    const session: unknown = await ctx.session?.get?.({ sessionID });
+    return isRecord(session) && typeof session.agent === "string" ? session.agent : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Read the session id out of the V1-shaped `{ path: { id } }` request. */
@@ -271,7 +324,7 @@ const CO_PROMOTED_DELIVERY = "steer";
  *
  * Two vocabularies are live at once, and this adapter has to speak both:
  *
- *  - `0.0.0-next-*` (the version this package pins, and what CI installs)
+ *  - `0.0.0-next-*` (older V2 hosts, before the inbox-event rename)
  *    publishes `session.input.promoted` with `data.inputID`
  *    (`SessionInputPromoted` in `@opencode-ai/client`'s generated types).
  *  - v2.0.x and `dev` renamed the inbox events: `session.inbox.delivered` and
@@ -459,6 +512,8 @@ export function createNoticePendingTracker(
   };
 }
 
+const SESSION_URL_NOTICE_PREFIX = "Plannotator session ready: ";
+
 /**
  * The one line a user is shown when a Plannotator session opens on OpenCode 2.
  *
@@ -466,7 +521,99 @@ export function createNoticePendingTracker(
  * name the product and carry the URL on its own.
  */
 export function formatSessionUrlNotice(url: string): string {
-  return `Plannotator session ready: ${url}`;
+  return `${SESSION_URL_NOTICE_PREFIX}${url}`;
+}
+
+
+/**
+ * The notice a slash command posts when it fails (a refused argument, the
+ * CLI's startup error): the command and the reason, which is all the person
+ * needs to run it again.
+ */
+export function formatCommandFailureNotice(command: string, message: string): string {
+  return `Plannotator /${command} failed: ${message.trim()}`;
+}
+
+/**
+ * The marker that ends a failure notice's `text` (never its `description`,
+ * which is what the person sees and can copy). The context filter matches
+ * only text that ends with it, so a message the person TYPES or pastes, such
+ * as the failure line followed by "why?", is never dropped from what the
+ * model reads. In the one request where the notice is kept (see
+ * `dropSessionUrlNotices`), it also tells the model there is nothing to do.
+ */
+const COMMAND_FAILURE_NOTICE_MARKER = "\n\n(Plannotator notice for the person; not a request.)";
+
+/** The `text` of a failure notice: the visible line plus the marker. */
+export function commandFailureNoticeText(command: string, message: string): string {
+  return `${formatCommandFailureNotice(command, message)}${COMMAND_FAILURE_NOTICE_MARKER}`;
+}
+
+const COMMAND_FAILURE_NOTICE_RE = /^Plannotator \/plannotator-(?:review|annotate|last) failed: \S[\s\S]*\n\n\(Plannotator notice for the person; not a request\.\)$/;
+
+/** Is this model-context message one of our transcript notices (session URL or command failure)? */
+function isSessionUrlNoticeMessage(message: unknown): boolean {
+  if (!isRecord(message) || message.role !== "user") return false;
+  const content = message.content;
+  const text = typeof content === "string"
+    ? content
+    : Array.isArray(content) && content.length === 1 && isRecord(content[0]) && content[0].type === "text"
+      ? content[0].text
+      : undefined;
+  if (typeof text !== "string") return false;
+  if (COMMAND_FAILURE_NOTICE_RE.test(text)) return true;
+  return text.startsWith(SESSION_URL_NOTICE_PREFIX)
+    && /^https?:\/\/\S+$/.test(text.slice(SESSION_URL_NOTICE_PREFIX.length));
+}
+
+/**
+ * Keep our session-URL notices out of what the MODEL reads. Mutates
+ * `messages` in place (the `context` hook's array) and returns how many it
+ * removed. A slash command's failure notice (`formatCommandFailureNotice`) is
+ * the same kind of row, for the person only, and is dropped the same way.
+ *
+ * The notice is for the person, who sees it as the transcript row's
+ * description; the model has no use for it. But it is a pending steer
+ * (`CO_PROMOTED_DELIVERY`), and steers are promoted at the next step
+ * boundary. During plan review that boundary is the one right after the
+ * `submit_plan` tool result, so the next model request read
+ * `[…, tool result (the decision), user: "Plannotator session ready: <url>"]`
+ * and a model could answer the notice instead of the decision. Seen live on
+ * 2.0.22: after a denial the model replied to the URL line. The plugin's
+ * session domain cannot withdraw a pending row (no inbox member, see
+ * `createV2BridgeClient`), but every model request passes through the
+ * `context` hook, so the notice is dropped there, from every request, which
+ * also keeps the cached prompt prefix stable.
+ *
+ * One exception: when the notice is the only thing after the model's own last
+ * reply (a notice promoted on its own at an idle boundary), dropping it would
+ * send a request that ends on an assistant message. That request exists only
+ * because of the notice, so the last notice is kept rather than sending a
+ * malformed turn; no decision is involved in that case.
+ */
+export function dropSessionUrlNotices(messages: unknown[]): number {
+  const notices: number[] = [];
+  messages.forEach((message, index) => {
+    if (isSessionUrlNoticeMessage(message)) notices.push(index);
+  });
+  if (notices.length === 0) return 0;
+
+  let keep: number | undefined;
+  const lastNotice = notices[notices.length - 1];
+  if (lastNotice === messages.length - 1) {
+    let previous = lastNotice - 1;
+    while (previous >= 0 && notices.includes(previous)) previous--;
+    const before = messages[previous];
+    if (previous < 0 || (isRecord(before) && before.role === "assistant")) keep = lastNotice;
+  }
+
+  let removed = 0;
+  for (let i = notices.length - 1; i >= 0; i--) {
+    if (notices[i] === keep) continue;
+    messages.splice(notices[i], 1);
+    removed++;
+  }
+  return removed;
 }
 
 /**
@@ -495,8 +642,11 @@ export function formatSessionUrlNotice(url: string): string {
  *    "hides synthetic messages without descriptions"), and the live append
  *    subscriptions gate on `description?.trim()` too. What the TUI prints is
  *    the DESCRIPTION, not the text (`SessionNoticeMessageV2` in
- *    `packages/tui/src/routes/session/index.tsx`), so the URL must be in both:
- *    `description` to be seen, `text` so the next turn's history carries it.
+ *    `packages/tui/src/routes/session/index.tsx`), so `description` carries
+ *    the URL. `text` is the same line, but the model never reads it: the
+ *    plugin's `context` hook drops these notices from every model request
+ *    (`dropSessionUrlNotices`), because a promoted notice landing after a
+ *    plan decision read as the thing to answer.
  *  - Setting no `metadata.source` keeps it on the plain "Notice" row rather
  *    than the subagent/shell completion row.
  *
@@ -582,6 +732,39 @@ function readAdmittedInboxID(response: unknown): string | undefined {
 }
 
 /**
+ * Show the person that a slash command failed, as a transcript notice.
+ *
+ * Without it a failed command showed nothing at all: the reason went to
+ * `app.log`, which OpenCode 2 discards (see `createSessionUrlNotifier`), so
+ * `/plannotator-annotate` with a typo read as a command that did nothing.
+ *
+ * Same mechanism as the session-URL notice, and the same reasons: OpenCode 2's
+ * plugin context has no toast surface, and `session.synthetic` with a
+ * `description` is a rendered row, while `resume: false` starts no model turn
+ * (a slash command never reaches the model unless it says so; the tool's
+ * `plannotatorLateFailureText` is a `session.prompt` because there the agent
+ * was told to wait). The row is a pending steer, promoted with whatever next
+ * wakes the session, and `dropSessionUrlNotices` keeps it out of the model's
+ * requests like the URL notice. The one gap is the same as the URL notice's:
+ * a row promoted alone at an idle boundary stays in that one request.
+ *
+ * Undefined on an older host with no `synthetic`, or with no session: the
+ * failure then stays in the log, as before.
+ */
+export function createCommandFailureNotifier(
+  ctx: V2ContextLike,
+  sessionID: string | undefined,
+): ((input: { command: string; message: string }) => Promise<unknown>) | undefined {
+  const synthetic = ctx.session?.synthetic;
+  if (typeof synthetic !== "function" || !sessionID) return undefined;
+  return async ({ command, message }) => {
+    const description = formatCommandFailureNotice(command, message);
+    const text = commandFailureNoticeText(command, message);
+    return await synthetic({ sessionID, text, description, resume: false, delivery: CO_PROMOTED_DELIVERY });
+  };
+}
+
+/**
  * Build the V1-shaped client `handleCliCommand` and `resolveValidatedTargetAgent`
  * expect, backed by the V2 context. Delivering feedback goes through
  * `ctx.session.prompt`, the direct path, rather than a synthetic-event
@@ -601,6 +784,27 @@ export function createV2BridgeClient(input: {
   sessionID?: string;
   /** Best-effort warning sink; defaults to stderr. */
   warn?: (message: string) => void;
+  /**
+   * Deliver feedback with `FEEDBACK_DELIVERY` ("queue") even while a notice of
+   * ours is still pending. For the `plannotator` tool, whose calling session is
+   * mid-turn when the notice is posted, so the notice is promoted inside that
+   * turn and a steer would push a late decision into a running turn instead.
+   */
+  alwaysQueue?: boolean;
+  /**
+   * Post the session-URL notice into `notice.sessionID` instead of
+   * `sessionID`, and only while `notice.open()` answers true; once it answers
+   * false the URL goes to the log alone. The `plannotator` tool's launches:
+   * the notice goes to the calling session while its tool call is open (see
+   * `runNativeCommand`), the decision to `sessionID`. Without it every notice
+   * goes to `sessionID`, which is what the slash commands need (#1515).
+   */
+  notice?: { sessionID: string; open: () => boolean };
+  /**
+   * Show a failed command in `sessionID`'s transcript (`notifyFailure`). For
+   * the slash commands; a tool launch reports its failure as the tool result.
+   */
+  failureNotices?: boolean;
 }): V2BridgeClient {
   const warn = input.warn ?? ((message: string) => console.error(message));
   const loggedUrls = new Set<string>();
@@ -613,14 +817,22 @@ export function createV2BridgeClient(input: {
   // 27aaa9ce0e — even though the server itself routes `session.inbox.cancel`),
   // so the feedback joins its promotion instead. The tracker is what keeps that
   // "still waiting" honest once something else promotes the row.
-  const notice = createNoticePendingTracker(input.ctx, input.sessionID);
-  const notifyUrl = createSessionUrlNotifier(input.ctx, input.sessionID, {
+  const noticeSessionID = input.notice?.sessionID ?? input.sessionID;
+  const notice = createNoticePendingTracker(input.ctx, noticeSessionID);
+  const postNotice = createSessionUrlNotifier(input.ctx, noticeSessionID, {
     posting: notice.posting,
     admitted: notice.admitted,
     rejected: notice.rejected,
   });
+  const noticeOpen = input.notice?.open;
+  const notifyUrl = postNotice && noticeOpen
+    // Checked synchronously at the call, before anything is posted.
+    ? async (url: { url: string; message: string }) => (noticeOpen() ? postNotice(url) : undefined)
+    : postNotice;
+  const notifyFailure = input.failureNotices ? createCommandFailureNotifier(input.ctx, input.sessionID) : undefined;
   return {
     ...(notifyUrl && { notifyUrl }),
+    ...(notifyFailure && { notifyFailure }),
     dispose: notice.dispose,
     app: {
       agents: async () => ({ data: await input.getAgents() }),
@@ -647,7 +859,13 @@ export function createV2BridgeClient(input: {
           // A failed switch must never cost the reviewer their feedback: the
           // same guarantee `switchV2SessionAgent` gives the approval path.
           try {
-            await input.ctx.session.switchAgent({ sessionID, agent });
+            // `Session.switchAgent` publishes an `agent-switched` transcript
+            // row unconditionally, so skip it when the session is already on
+            // that agent — upstream's own command plugin guards the same way
+            // (`packages/core/src/config/plugin/command.ts`).
+            if (await readSessionAgent(input.ctx, sessionID) !== agent) {
+              await input.ctx.session.switchAgent({ sessionID, agent });
+            }
           } catch (error) {
             warn(`[Plannotator] Could not switch the OpenCode session to "${agent}": ${error instanceof Error ? error.message : String(error)}`);
           }
@@ -659,7 +877,10 @@ export function createV2BridgeClient(input: {
         const delivered = await prompt({
           sessionID,
           text: joinTextParts(Array.isArray(body.parts) ? body.parts : []),
-          delivery: notice.pending() ? CO_PROMOTED_DELIVERY : FEEDBACK_DELIVERY,
+          // Co-promotion only helps a notice in THIS session's inbox.
+          delivery: notice.pending() && !input.alwaysQueue && sessionID === noticeSessionID
+            ? CO_PROMOTED_DELIVERY
+            : FEEDBACK_DELIVERY,
         });
         // Admitted: the notice is no longer the row ahead of us, so any later
         // delivery on this client is a plain late arrival again.

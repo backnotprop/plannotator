@@ -9,7 +9,9 @@ import { getIdentity } from '../utils/identity';
 import { createRuntimeRetryEpoch } from '../utils/runtimeRetry';
 import { DiagramAnchorClaims, DiagramAnchorClaimsContext } from './diagram/anchorClaims';
 import { DiagramPending, DiagramInlineSource } from './diagram/DiagramPending';
-import { DiagramViewer } from './diagram/DiagramViewer';
+import { DiagramViewer, type DiagramAskAI } from './diagram/DiagramViewer';
+import type { CommentAskAIHandler } from './CommentPopover';
+import { diagramAskAIContext } from '../utils/diagramAskAI';
 import { svgContentSize } from './diagram/svgContentSize';
 import type { DiagramComment, DiagramCreateComment } from './diagram/useDiagramComments';
 import type { DiagramRenderState } from './diagram/useDiagramRender';
@@ -77,6 +79,13 @@ export interface DiagramBlockProps {
    * `attempted`, the ones whose part is gone as `unanchored`, so the host's
    * panel shows the same "Unanchored" chip a text comment gets. */
   onRestoreReport?: (report: AnnotationRestoreReport) => void;
+  /** The document's Ask AI handler (the one the markdown composer takes).
+   * With it the diagram composer offers "Ask AI", and the question carries
+   * the part's identity and the bounded diagram source as `detail`. Absent:
+   * no Ask AI, exactly as before. */
+  onAskAI?: CommentAskAIHandler;
+  /** The document's path, sent with an Ask AI question (`sourcePath`). */
+  askAISourcePath?: string;
 }
 
 const NO_ANNOTATIONS: readonly Annotation[] = [];
@@ -90,6 +99,8 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
   onAddAnnotation,
   readOnly = false,
   onRestoreReport,
+  onAskAI,
+  askAISourcePath,
 }) => {
   const label = LABELS[kind];
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -208,6 +219,37 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
     };
   }, [block.id, onAddAnnotation, readOnly]);
 
+  // A fence's offset is its own opening line; a whole-file diagram source
+  // overrides it with 0 (see Block.diagramSourceLineOffset).
+  const sourceLineOffset = block.diagramSourceLineOffset ?? block.startLine;
+
+  const handleAskAI = useMemo<DiagramAskAI | undefined>(() => {
+    if (readOnly || onAskAI === undefined) return undefined;
+    return (question, anchor, additionalTargets) =>
+      onAskAI(
+        question,
+        diagramAskAIContext({
+          kind,
+          anchor,
+          additionalTargets,
+          source: block.content,
+          sourceLineOffset,
+          sourcePath: askAISourcePath,
+        }),
+      );
+  }, [askAISourcePath, block.content, kind, onAskAI, readOnly, sourceLineOffset]);
+
+  // The popout covers the panel the answer streams into, so a question
+  // asked there closes it once the host takes the question.
+  const handlePopoutAskAI = useMemo<DiagramAskAI | undefined>(() => {
+    if (handleAskAI === undefined) return undefined;
+    return async (question, anchor, additionalTargets) => {
+      const accepted = await handleAskAI(question, anchor, additionalTargets);
+      if (accepted !== false) setIsExpanded(false);
+      return accepted;
+    };
+  }, [handleAskAI]);
+
   const [resolution, setResolution] = useState<ReadonlyMap<string, boolean> | null>(null);
   const svgReady = renderState?.svgNode != null;
   const renderFailed = renderState !== null && renderState.error !== null && !svgReady;
@@ -292,7 +334,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
     onCreateComment: handleCreate,
     selectedCommentId,
     onSelectComment: onSelectAnnotation,
-    sourceLineOffset: block.startLine,
+    sourceLineOffset,
     retryToken,
   };
 
@@ -353,6 +395,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
             <DiagramViewer
               {...viewerProps}
               renderId={`${kind}-${block.id}`}
+              onAskAI={handleAskAI}
               onResolutionChange={setResolution}
               onRenderState={setRenderState}
               renderFallback={renderFallback}
@@ -368,6 +411,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
             onClose={() => setIsExpanded(false)}
             title={`${label} diagram`}
             renderId={`${kind}-${block.id}-popout`}
+            onAskAI={handlePopoutAskAI}
             dataAttributes={{ 'data-block-id': block.id }}
           />
         </Suspense>

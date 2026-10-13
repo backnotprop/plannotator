@@ -493,6 +493,22 @@ describe("exportReviewFeedback", () => {
     expect(result).not.toContain("anchored");
   });
 
+  it("labels a jj revision by its short change id; git keeps the 7-char sha", () => {
+    const id = "0123456789abcdef0123456789abcdef01234567";
+    const jj = exportReviewFeedback([ann({ commitSha: id })], undefined, {
+      mode: `jj-commit:${id}`,
+      commitSubject: "trim fields",
+      commitShortId: "kmqzsnwp",
+    });
+    expect(jj).toContain("**Diff:** Commit `kmqzsnwp` — trim fields");
+    // The same short id on a git commit is ignored: git labels stay unchanged.
+    const git = exportReviewFeedback([ann({ commitSha: id })], undefined, {
+      mode: `commit:${id}`,
+      commitShortId: "kmqzsnwp",
+    });
+    expect(git).toContain("**Diff:** Commit `0123456`");
+  });
+
   it("labels commit-anchored annotations exported under a different diff", () => {
     const sha = "0123456789abcdef0123456789abcdef01234567";
     const result = exportReviewFeedback(
@@ -602,5 +618,36 @@ describe("buildProseFeedback — artifact annotations", () => {
     expect(output).toContain("Hero image — Pin at 25%, 40%");
     expect(output).toContain("Regarding an artifact in the PR description.");
     expect(output).toContain("Crop this more tightly.");
+  });
+});
+
+describe("comments made in a Markdown preview", () => {
+  it("export under their file with the quoted text and where it was in the rendered diff", () => {
+    const output = exportReviewFeedback([
+      ann({
+        id: "md-1",
+        scope: "file",
+        filePath: "docs/guide.md",
+        lineStart: 1,
+        lineEnd: 1,
+        text: "Link the installer page.",
+        markdownPreview: { originalText: "new installer\nfrom the website", view: "diff", diffContext: "removed" },
+      }),
+    ]);
+    expect(output).toContain("## docs/guide.md");
+    expect(output).toContain("> new installer\n> from the website");
+    expect(output).toContain("in removed text");
+    expect(output).toContain("Link the installer page.");
+    // Not presented as an ordinary file comment or a line comment.
+    expect(output).not.toContain("File Comment");
+    expect(output).not.toContain("Line 1");
+  });
+
+  it("say nothing about the section when it was unchanged or made in the whole file", () => {
+    const output = exportReviewFeedback([
+      ann({ id: "md-2", scope: "file", filePath: "docs/guide.md", text: "Fine.", markdownPreview: { originalText: "stays", view: "whole" } }),
+    ]);
+    expect(output).toContain("> stays");
+    expect(output).not.toContain("_(in ");
   });
 });

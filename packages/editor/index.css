@@ -54,6 +54,18 @@ pre code.pn-code {
   background: var(--code-bg) !important;
   font-size: 0.8125rem;
   line-height: 1.6;
+  /* Soft-wrap long lines instead of scrolling; break unbroken tokens (URLs,
+     hashes) that are wider than the block on their own. Wrapping is visual
+     only: the text node, copy button and annotation offsets are unchanged. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Grid-shaped fences (ASCII diagrams, aligned columns) keep their layout and
+   scroll horizontally instead; see `codeBlockKeepsLayout`. */
+pre code.pn-code[data-keep-layout] {
+  white-space: pre;
+  overflow-wrap: normal;
 }
 
 /* The code-file hover preview is not a <pre><code>, so the rule above misses

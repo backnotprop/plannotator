@@ -15,12 +15,12 @@
  * @packageDocumentation
  */
 
-import { type Plugin, tool } from "@opencode-ai/plugin/v1";
+import { type Plugin, tool } from "@opencode-ai/plugin";
 import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { loadConfig, resolveSharingEnabled } from "@plannotator/shared/config";
+import { loadConfig, resolveInboxReminder, resolveSharingEnabled } from "@plannotator/shared/config";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import {
@@ -49,6 +49,19 @@ import { resolveValidatedTargetAgent } from "./agent-switch";
 import { shouldFallbackAfterEmbeddedError } from "./prompt-delivery-error";
 import { executeSubmitPlan } from "./submit-plan-executor";
 import { getPlanningPrompt } from "./planning-prompt";
+import { announceSessionUrl } from "./session-url";
+import { addInboxReminderOpenCode1, findInboxConnection, inboxToolArgs, openCode1AgentHasInbox } from "./inbox";
+import { inboxAgentTool } from "@plannotator/shared/inbox/connection";
+import {
+  appendCommandFeedback,
+  CommandMessageAgents,
+  createCommandTurnClient,
+  resolveFeedbackTarget,
+  retargetCommandMessage,
+  type CommandModelRef,
+  type FeedbackTarget,
+  type PendingCommandFeedback,
+} from "./command-turn";
 
 // Lazy-load HTML at first use instead of embedding in the bundle.
 // The two SPA files are ~20 MB combined — inlining them as string literals
@@ -129,27 +142,6 @@ function getEmbeddedRuntimeError(): string {
   return "runtime \"embedded\" requires a Bun-hosted OpenCode plugin runtime. Use runtime \"auto\" or \"cli\" with this OpenCode host.";
 }
 
-function logPlannotatorReady(client: any, label: string, url: string): void {
-  try {
-    void client.app.log({ level: "info", message: `[Plannotator] Open ${label}: ${url}` });
-  } catch {
-    // OpenCode logging is best-effort.
-  }
-  // app.log only reaches OpenCode's server log file — never the TUI. Toast the
-  // URL too so remote users (no auto-opened browser) actually see it.
-  // Best-effort: older hosts without /tui/show-toast just no-op.
-  try {
-    const result = client.tui?.showToast?.({
-      body: { title: "Plannotator", message: `Open ${label}: ${url}`, variant: "info" },
-    });
-    // A fetch-level failure (host restarting) rejects the SDK promise; swallow
-    // it so a cosmetic toast can never surface an unhandled rejection.
-    if (result && typeof result.catch === "function") result.catch(() => {});
-  } catch {
-    // Toast delivery is best-effort.
-  }
-}
-
 type EmbeddedRuntimeModule = {
   runEmbeddedPlanReview: (input: {
     client: any;
@@ -217,7 +209,7 @@ async function runPlanReview(input: {
         htmlContent: input.htmlContent,
         timeoutSeconds: input.timeoutSeconds,
         abortSignal: input.abortSignal,
-        logReady: (url) => logPlannotatorReady(input.client, "plan review", url),
+        logReady: (url) => announceSessionUrl(input.client, "plan review", url),
       });
     } catch (error) {
       input.abortSignal.throwIfAborted();
@@ -255,6 +247,83 @@ const PlannotatorPlugin: Plugin = async (ctx, rawOptions?: PlannotatorOpenCodeOp
   preloadBundledHtml("review-editor.html", (html) => { _reviewHtml = html; });
 
   let cachedAgents: any[] | null = null;
+  // Feedback a slash command put in its own message, waiting for `chat.message`
+  // to give that message the agent/model/variant the feedback prompt would
+  // have had. Keyed by session.
+  const commandFeedback = new Map<string, PendingCommandFeedback>();
+  // The agent each retargeted command message was built with, so later
+  // commands still read the user's agent from it. See `CommandMessageAgents`.
+  const commandMessageAgents = new CommandMessageAgents();
+
+  /**
+   * What OpenCode would have used for the old separate feedback prompt (agent
+   * named or not, no model, no variant), read when the feedback is delivered:
+   * before the command's own message exists, so the session's model is still
+   * the one that prompt would have seen. Every read is best-effort; see
+   * `resolveFeedbackTarget` for what a missing answer falls back to.
+   */
+  async function resolveCommandFeedbackTarget(
+    sessionID: string,
+    namedAgent: string | undefined,
+  ): Promise<FeedbackTarget | undefined> {
+    const query = { query: { directory: ctx.directory } };
+    const client = ctx.client as any;
+    const [agents, config, session, providers] = await Promise.allSettled([
+      client.app.agents(query),
+      namedAgent ? Promise.resolve(undefined) : client.config.get(query),
+      client.session.get({ path: { id: sessionID }, ...query }),
+      client.config.providers(query),
+    ]);
+    const agentList = agents.status === "fulfilled" && Array.isArray(agents.value?.data) ? agents.value.data : [];
+    const defaultAgent = config.status === "fulfilled" && typeof config.value?.data?.default_agent === "string"
+      ? config.value.data.default_agent
+      : undefined;
+
+    const readModel = (value: any): CommandModelRef | undefined => {
+      const modelID = typeof value?.modelID === "string" ? value.modelID : value?.id;
+      return typeof value?.providerID === "string" && typeof modelID === "string" && value.providerID && modelID
+        ? { providerID: value.providerID, modelID }
+        : undefined;
+    };
+    // `currentModel`: the session's stored model, else the last user message's.
+    let sessionModel = session.status === "fulfilled" ? readModel(session.value?.data?.model) : undefined;
+    if (!sessionModel) {
+      try {
+        const messages = (await client.session.messages({ path: { id: sessionID }, ...query }))?.data;
+        for (let i = (messages?.length ?? 0) - 1; i >= 0 && !sessionModel; i--) {
+          if (messages[i]?.info?.role === "user") sessionModel = readModel(messages[i].info.model);
+        }
+      } catch {
+        // Leave it to the message's own model.
+      }
+    }
+
+    const providerList = providers.status === "fulfilled" && Array.isArray(providers.value?.data?.providers)
+      ? providers.value.data.providers
+      : undefined;
+    // How the old prompt picked its variant changed across 1.x (see
+    // `agentVariantRule`), so the version matters. OpenCode 1 plugins get the
+    // v1 SDK, whose `global` domain has only `event()`, so the running host's
+    // version (`/global/health`) is out of reach; the session's own `version`
+    // is used instead. It names the OpenCode that CREATED the session, which
+    // differs only for a session resumed under another release.
+    const sessionVersion = session.status === "fulfilled" ? session.value?.data?.version : undefined;
+    const hostVersion = typeof sessionVersion === "string" ? sessionVersion : undefined;
+    return resolveFeedbackTarget({
+      namedAgent,
+      agents: agentList,
+      defaultAgent,
+      sessionModel,
+      hostVersion,
+      // `provider.getModel` in createUserMessage: an unknown model offers no
+      // variants. Undefined only when the listing itself failed.
+      modelVariants: (model) => {
+        if (!providerList) return undefined;
+        const entry = providerList.find((provider: any) => provider?.id === model.providerID)?.models?.[model.modelID];
+        return entry?.variants && typeof entry.variants === "object" ? Object.keys(entry.variants) : [];
+      },
+    });
+  }
 
   async function getSharingEnabled(): Promise<boolean> {
     try {
@@ -470,68 +539,117 @@ Do NOT proceed with implementation until your plan is approved.`;
       ) return;
 
       output.parts.length = 0;
+      commandFeedback.delete(input.sessionID);
 
-      // input.arguments is the raw tail string from OpenCode's command dispatcher —
-      // needed so --gate / --json reach the handlers' parseAnnotateArgs.
-      const event = {
-        properties: { sessionID: input.sessionID, arguments: input.arguments },
-      };
-
-      if (shouldUseEmbeddedRuntime(workflowOptions.runtime)) {
-        try {
-          const embedded = await importEmbeddedRuntime();
-          const deps = {
-            client: ctx.client,
-            htmlContent: getPlanHtml(),
-            reviewHtmlContent: getReviewHtml(),
-            getSharingEnabled,
-            getShareBaseUrl,
-            getPasteApiUrl,
-            directory: ctx.directory,
-          };
-          const result = await embedded.handleEmbeddedCommand(cmd, event, deps);
-          if (cmd === "plannotator-last" && result.feedback) {
-            await embedded.deliverEmbeddedAnnotateMessagePrompt({
-              client: ctx.client,
-              sessionId: input.sessionID,
-              approved: Boolean(result.approved),
-              feedback: result.feedback,
-            });
-          }
-          return;
-        } catch (error) {
-          if (!shouldFallbackAfterEmbeddedError(workflowOptions.runtime, error)) {
-            throw error;
-          }
-          try {
-            void ctx.client.app.log({
-              level: "error",
-              message: `[Plannotator] Embedded runtime unavailable; falling back to CLI: ${error instanceof Error ? error.message : String(error)}`,
-            });
-          } catch {}
+      // Feedback rides the command's OWN message instead of a second prompt:
+      // OpenCode runs a model turn for that message no matter what, so a
+      // separate prompt meant two turns for one review. See command-turn.ts.
+      const turn = createCommandTurnClient(ctx.client, input.sessionID, {
+        messageAgents: commandMessageAgents,
+      });
+      try {
+        await runPlannotatorCommand(cmd, input, turn.client);
+      } finally {
+        const feedback = turn.take();
+        if (feedback) {
+          appendCommandFeedback(output.parts as unknown[], feedback);
+          const target = await resolveCommandFeedbackTarget(input.sessionID, feedback.agent)
+            .catch(() => undefined);
+          if (target) commandFeedback.set(input.sessionID, { text: feedback.text, target });
         }
       }
+    },
 
-      if (workflowOptions.runtime === "embedded" && !hasEmbeddedRuntime()) {
+    // The command's message is built right after `command.execute.before`
+    // returns; this is where it still gets the agent, model and variant the
+    // separate feedback prompt used to have (the review UI's agent switch,
+    // the writer of an annotated message #1612, or OpenCode's default agent).
+    // One-shot, and only for the message carrying our text.
+    "chat.message": async (input, output) => {
+      const pending = commandFeedback.get(input.sessionID);
+      if (!pending) return;
+      commandFeedback.delete(input.sessionID);
+      const message = output.message as { id?: unknown; agent?: unknown };
+      const builtWith = message.agent;
+      if (retargetCommandMessage({
+        sessionID: input.sessionID,
+        pending,
+        hook: input,
+        message,
+        parts: output.parts,
+      })) {
+        // The next command reads "the user's agent" from this message.
+        commandMessageAgents.record(message.id, builtWith, message.agent);
+      }
+    },
+  };
+
+  async function runPlannotatorCommand(
+    cmd: "plannotator-last" | "plannotator-annotate" | "plannotator-review",
+    input: { sessionID: string; arguments?: string },
+    client: any,
+  ): Promise<void> {
+    // input.arguments is the raw tail string from OpenCode's command dispatcher —
+    // needed so --gate / --json reach the handlers' parseAnnotateArgs.
+    const event = {
+      properties: { sessionID: input.sessionID, arguments: input.arguments },
+    };
+
+    if (shouldUseEmbeddedRuntime(workflowOptions.runtime)) {
+      try {
+        const embedded = await importEmbeddedRuntime();
+        const deps = {
+          client,
+          htmlContent: getPlanHtml(),
+          reviewHtmlContent: getReviewHtml(),
+          getSharingEnabled,
+          getShareBaseUrl,
+          getPasteApiUrl,
+          directory: ctx.directory,
+        };
+        const result = await embedded.handleEmbeddedCommand(cmd, event, deps);
+        if (cmd === "plannotator-last" && result.feedback) {
+          await embedded.deliverEmbeddedAnnotateMessagePrompt({
+            client,
+            sessionId: input.sessionID,
+            approved: Boolean(result.approved),
+            feedback: result.feedback,
+            agent: result.agent,
+          });
+        }
+        return;
+      } catch (error) {
+        if (!shouldFallbackAfterEmbeddedError(workflowOptions.runtime, error)) {
+          throw error;
+        }
         try {
           void ctx.client.app.log({
             level: "error",
-            message: `[Plannotator] ${getEmbeddedRuntimeError()}`,
+            message: `[Plannotator] Embedded runtime unavailable; falling back to CLI: ${error instanceof Error ? error.message : String(error)}`,
           });
         } catch {}
-        return;
       }
+    }
 
-      await handleCliCommand({
-        command: cmd,
-        client: ctx.client,
-        sessionId: input.sessionID,
-        rawArgs: input.arguments ?? "",
-        cwd: ctx.directory,
-        bridge: await getBridgeContext(),
-      });
-    },
-  };
+    if (workflowOptions.runtime === "embedded" && !hasEmbeddedRuntime()) {
+      try {
+        void ctx.client.app.log({
+          level: "error",
+          message: `[Plannotator] ${getEmbeddedRuntimeError()}`,
+        });
+      } catch {}
+      return;
+    }
+
+    await handleCliCommand({
+      command: cmd,
+      client,
+      sessionId: input.sessionID,
+      rawArgs: input.arguments ?? "",
+      cwd: ctx.directory,
+      bridge: await getBridgeContext(),
+    });
+  }
 
   if (shouldRegisterSubmitPlan(workflowOptions)) {
     plugin.tool = {
@@ -593,6 +711,65 @@ Do NOT proceed with implementation until your plan is approved.`;
         },
       }),
     };
+  }
+
+  // The Plannotator Inbox tool (inbox.ts), decided once at plugin setup: only
+  // where the inbox tool switch allows it for OpenCode and an Inbox was found.
+  // OpenCode 1 gets the tool only: it has no way to wake an idle session, so
+  // replies are read with wait_for_reply or read_thread, and the description
+  // says nothing about them arriving by themselves.
+  try {
+    const inbox = await findInboxConnection();
+    const spec = inbox ? inboxAgentTool(inbox.tools, { wakes: false }) : null;
+    if (inbox && spec) {
+      plugin.tool = {
+        ...(plugin.tool ?? {}),
+        [spec.name]: tool({
+          description: spec.description,
+          args: inboxToolArgs(spec.inputSchema, tool.schema),
+          async execute(args, context) {
+            const result = await inbox.callTool(args, { sessionId: context.sessionID, cwd: context.directory });
+            if (result.isError) throw new Error(result.text);
+            return result.text;
+          },
+        }),
+      };
+      // The Inbox reminder, decided with the tool: one fixed line at the end
+      // of the last system part, on every request of an agent that has the
+      // tool (OpenCode 1 rebuilds the system prompt per request, so a fixed
+      // line keeps the prefix stable), the no-wake wording since replies do
+      // not come back by themselves here. A subagent, or an agent whose
+      // `tools` switch it off, gets none. `inboxReminder` turns it off.
+      // A lookup that fails reuses the session's last answer (no answer yet:
+      // no line), so the system prompt cannot flip between requests.
+      if (resolveInboxReminder(loadConfig(), process.env, "opencode")) {
+        const planTransform = plugin["experimental.chat.system.transform"];
+        const lastAnswer = new Map<string, boolean>();
+        plugin["experimental.chat.system.transform"] = async (input, output) => {
+          await planTransform?.(input, output);
+          if (!input.sessionID) return;
+          let hasInbox: boolean;
+          try {
+            const messages = await ctx.client.session.messages({ path: { id: input.sessionID } });
+            const name = getLastUserAgentFromMessages(messages.data);
+            let agent: { mode?: unknown; tools?: unknown } | undefined;
+            if (name) {
+              const agents = await getOpenCodeAgents();
+              if (!agents) throw new Error("agents unavailable");
+              agent = agents.find((candidate: { name?: string }) => candidate.name === name);
+            }
+            hasInbox = openCode1AgentHasInbox(agent);
+          } catch {
+            hasInbox = lastAnswer.get(input.sessionID) ?? false;
+          }
+          if (lastAnswer.size > 500 && !lastAnswer.has(input.sessionID)) lastAnswer.clear();
+          lastAnswer.set(input.sessionID, hasInbox);
+          if (hasInbox) addInboxReminderOpenCode1(output.system);
+        };
+      }
+    }
+  } catch (error) {
+    console.error(`[Plannotator] Could not register the plannotator_inbox tool: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   return plugin;

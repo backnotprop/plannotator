@@ -11,6 +11,7 @@ import {
   mkdtempSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -19,6 +20,9 @@ import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import {
   detectRemoteDefaultInfo,
+  nextRemoteBaseCheckInterval,
+  REMOTE_BASE_CHECK_INTERVAL_MS,
+  REMOTE_BASE_CHECK_MAX_INTERVAL_MS,
   getDefaultBranch,
   getFileContentsForDiff,
   getGitSnapshotMaterializationPatch,
@@ -28,12 +32,15 @@ import {
   gitAddFile,
   gitResetFile,
   isBinaryPatchFile,
+  commitFamilyId,
   isSameCwdCommitSwitch,
   listPatchFiles,
   listRecentCommits,
   MAX_REVIEW_FILE_CONTENT_BYTES,
   parseCommitDiffType,
+  parseJjCommitDiffType,
   parseWorktreeDiffType,
+  GIT_COLOR_FREE_ARGS,
   prepareGitCommand,
   runGitDiff,
   splitPorcelainRename,
@@ -212,6 +219,7 @@ describe("review-core", () => {
       GIT_SSH_COMMAND: "custom-ssh --proxy jump-host",
     });
     expect(command.args).toEqual([
+      ...GIT_COLOR_FREE_ARGS,
       "-c",
       "core.quotePath=false",
       "-c",
@@ -258,7 +266,7 @@ describe("review-core", () => {
     );
 
     expect(command).toEqual({
-      args: ["-c", "core.quotePath=false", "fetch", "origin", "main"],
+      args: [...GIT_COLOR_FREE_ARGS, "-c", "core.quotePath=false", "fetch", "origin", "main"],
       isolateProcessGroup: false,
     });
   });
@@ -272,7 +280,7 @@ describe("review-core", () => {
 
     // argv must stay byte-identical to the configless invocation: callers and
     // test mocks match on the exact argument vector.
-    expect(command.args).toEqual(["-c", "core.quotePath=false", "diff", "--no-ext-diff", "--cached"]);
+    expect(command.args).toEqual([...GIT_COLOR_FREE_ARGS, "-c", "core.quotePath=false", "diff", "--no-ext-diff", "--cached"]);
     expect(command.env).toEqual({
       PATH: "/usr/bin",
       GIT_CONFIG_COUNT: "1",
@@ -1318,6 +1326,17 @@ describe("review-core", () => {
     expect(context.diffOptions.map((option) => option.id)).not.toContain("local-vs-remote");
   });
 
+  test("git context names the repository top level when started from a subfolder", async () => {
+    const repoDir = initRepo();
+    const subDir = join(repoDir, "docs");
+    mkdirSync(subDir, { recursive: true });
+    const context = await getGitContext(makeRuntime(subDir), subDir);
+
+    // Patch paths are relative to the top level, not to where the review began.
+    expect(context.cwd).toBe(subDir);
+    expect(realpathSync(context.root!)).toBe(realpathSync(repoDir));
+  });
+
   test("since-base falls back to HEAD when the requested base cannot resolve", async () => {
     const repoDir = initRepo("trunk");
     const runtime = makeRuntime(repoDir);
@@ -1740,6 +1759,20 @@ describe("isSameCwdCommitSwitch", () => {
   });
 });
 
+describe("jj-commit family", () => {
+  test("parses bare hex commit ids only, and reads as a commit detour", () => {
+    expect(parseJjCommitDiffType(`jj-commit:${"a".repeat(40)}`)).toEqual({ commitId: "a".repeat(40) });
+    expect(parseJjCommitDiffType("jj-commit:main")).toBeNull();
+    expect(parseJjCommitDiffType("jj-commit:@-")).toBeNull();
+    expect(parseJjCommitDiffType("commit:abc1234")).toBeNull();
+    expect(commitFamilyId("jj-commit:abc1234")).toBe("abc1234");
+    expect(commitFamilyId("worktree:/tmp/wt:commit:abc1234")).toBe("abc1234");
+    expect(commitFamilyId("jj-current")).toBeNull();
+    // The rail's hot path skips the jj context recompute too.
+    expect(isSameCwdCommitSwitch("jj-current", "jj-commit:abc1234")).toBe(true);
+  });
+});
+
 describe("parseCommitDiffType", () => {
   test("accepts full and abbreviated hex shas", () => {
     expect(parseCommitDiffType("commit:abc1234")).toEqual({ sha: "abc1234" });
@@ -1840,5 +1873,47 @@ describe("commit diff mode", () => {
 
     const after = await getGitDiffFingerprint(runtime, `commit:${rootSha}` as DiffType, "main");
     expect(after).toBe(before);
+  });
+});
+
+/**
+ * Failure backoff for the remote-default probe (#1553). The regression this
+ * guards is the one the issue reported: a remote that never answers being
+ * retried on the same 60s cadence for the life of the session, which on a
+ * smartcard-backed SSH setup is one physical touch prompt per minute. The
+ * reset leg matters just as much — a network that comes back must return to
+ * the normal cadence rather than stay parked at the cap.
+ */
+describe("nextRemoteBaseCheckInterval", () => {
+  test("doubles on failure, from the base interval up to the cap", () => {
+    const seen: number[] = [];
+    let interval = REMOTE_BASE_CHECK_INTERVAL_MS;
+    for (let i = 0; i < 8; i++) {
+      interval = nextRemoteBaseCheckInterval(interval, false);
+      seen.push(interval);
+    }
+    expect(seen).toEqual([
+      120_000,
+      240_000,
+      480_000,
+      REMOTE_BASE_CHECK_MAX_INTERVAL_MS,
+      REMOTE_BASE_CHECK_MAX_INTERVAL_MS,
+      REMOTE_BASE_CHECK_MAX_INTERVAL_MS,
+      REMOTE_BASE_CHECK_MAX_INTERVAL_MS,
+      REMOTE_BASE_CHECK_MAX_INTERVAL_MS,
+    ]);
+  });
+
+  test("a success resets to the base interval from any backoff level", () => {
+    expect(nextRemoteBaseCheckInterval(REMOTE_BASE_CHECK_MAX_INTERVAL_MS, true))
+      .toBe(REMOTE_BASE_CHECK_INTERVAL_MS);
+    expect(nextRemoteBaseCheckInterval(240_000, true)).toBe(REMOTE_BASE_CHECK_INTERVAL_MS);
+    expect(nextRemoteBaseCheckInterval(REMOTE_BASE_CHECK_INTERVAL_MS, true))
+      .toBe(REMOTE_BASE_CHECK_INTERVAL_MS);
+  });
+
+  test("the cap is never exceeded even from an already-capped interval", () => {
+    expect(nextRemoteBaseCheckInterval(REMOTE_BASE_CHECK_MAX_INTERVAL_MS, false))
+      .toBe(REMOTE_BASE_CHECK_MAX_INTERVAL_MS);
   });
 });

@@ -109,7 +109,7 @@ async function readRepoFile(path: string): Promise<Buffer> {
 
 describe("favicon surfaces", () => {
   test("every product HTML entry point references the expected favicon", async () => {
-    for (const path of ["apps/hook/index.html", "apps/review/index.html"]) {
+    for (const path of ["apps/hook/index.html", "apps/review/index.html", "apps/inbox/index.html"]) {
       const html = (await readRepoFile(path)).toString();
       expect(html).toContain(SERVED_FAVICON_LINK);
       expect(html).not.toContain('rel="icon" type=');

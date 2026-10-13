@@ -309,6 +309,38 @@ describe("default uninstall", () => {
     writeText(
       join(homeDir, ".kiro", "skills", "plannotator-setup-goal", "SKILL.md"),
     );
+
+    // Vibe: a hooks.toml holding both a user hook and the installer's
+    // managed block, plus installed skills. The managed block must be
+    // stripped and the user hook preserved.
+    const vibeHooks = join(homeDir, ".vibe", "hooks.toml");
+    writeText(
+      vibeHooks,
+      [
+        '[[hooks]]',
+        'name = "my-own-hook"',
+        'type = "pre_tool"',
+        'match = "write_file"',
+        'command = "/usr/local/bin/notify"',
+        "",
+        "# >>> plannotator-managed-vibe-hooks (managed; do not edit) >>>",
+        "[[hooks]]",
+        'name = "plannotator-exit-plan-mode"',
+        'type = "pre_tool"',
+        'match = "exit_plan_mode"',
+        `command = "${join(homeDir, ".local", "bin", "plannotator")}"`,
+        "timeout = 345600",
+        'description = "Plannotator plan review (managed)"',
+        "# <<< plannotator-managed-vibe-hooks <<<",
+      ].join("\n"),
+    );
+    writeText(
+      join(homeDir, ".vibe", "skills", "plannotator-review", "SKILL.md"),
+    );
+    writeText(
+      join(homeDir, ".vibe", "skills", "my-custom-skill", "SKILL.md"),
+      "user's own",
+    );
     const openCodePackageCache = join(
       homeDir,
       ".cache",
@@ -354,7 +386,30 @@ describe("default uninstall", () => {
       "opencode",
       "0.25.1@@@1",
     );
+    // OpenCode 2 caches npm plugins at <cache>/opencode/npm/<name>@<spec>/<generation>/.
+    const openCode2PluginCache = join(
+      homeDir,
+      ".cache",
+      "opencode",
+      "npm",
+      "@plannotator",
+      "opencode@latest",
+      "1790000000000",
+      "package.json",
+    );
+    const openCode2UnrelatedCache = join(
+      homeDir,
+      ".cache",
+      "opencode",
+      "npm",
+      "@plannotator",
+      "pi-extension@latest",
+      "1790000000000",
+      "package.json",
+    );
     writeText(openCodePackageCache);
+    writeText(openCode2PluginCache);
+    writeText(openCode2UnrelatedCache);
     writeText(unrelatedScopedCache);
     writeText(unrelatedBunCache);
     writeText(bunOpenCodeVersionCache);
@@ -477,8 +532,16 @@ describe("default uninstall", () => {
     expect(existsSync(join(homeDir, ".agents", "skills", "plannotator-compound"))).toBe(true);
     expect(existsSync(join(homeDir, ".agents", "skills", "plannotator-archive"))).toBe(false);
     expect(existsSync(join(homeDir, ".kiro", "skills", "plannotator-setup-goal"))).toBe(false);
+    expect(existsSync(join(homeDir, ".vibe", "skills", "plannotator-review"))).toBe(false);
+    expect(existsSync(join(homeDir, ".vibe", "skills", "my-custom-skill"))).toBe(true);
+    const vibeHooksAfter = readFileSync(vibeHooks, "utf8");
+    expect(vibeHooksAfter).toContain("my-own-hook");
+    expect(vibeHooksAfter).not.toContain("plannotator-managed-vibe-hooks");
+    expect(vibeHooksAfter).not.toContain("exit_plan_mode");
     expect(existsSync(customStaleLayoutEntry)).toBe(true);
     expect(existsSync(openCodePackageCache)).toBe(false);
+    expect(existsSync(join(homeDir, ".cache", "opencode", "npm", "@plannotator", "opencode@latest"))).toBe(false);
+    expect(existsSync(openCode2UnrelatedCache)).toBe(true);
     expect(existsSync(unrelatedScopedCache)).toBe(true);
     expect(existsSync(unrelatedBunCache)).toBe(true);
     expect(existsSync(bunOpenCodeVersionCache)).toBe(false);
@@ -621,6 +684,26 @@ describe("default uninstall", () => {
     writeJson(join(fixture.homeDir, ".claude", "settings.json"), {
       enabledPlugins: { "plannotator@plannotator": true },
     });
+    // Vibe: a user hook beside the managed block, so the real run would
+    // REWRITE the file rather than delete it (the dry-run must not).
+    const vibeHooks = join(fixture.homeDir, ".vibe", "hooks.toml");
+    writeText(
+      vibeHooks,
+      [
+        "[[hooks]]",
+        'name = "my-own-hook"',
+        'type = "pre_tool"',
+        'match = "write_file"',
+        'command = "/usr/local/bin/notify"',
+        "",
+        "# >>> plannotator-managed-vibe-hooks (managed; do not edit) >>>",
+        "[[hooks]]",
+        'name = "plannotator-exit-plan-mode"',
+        `command = "${binary}"`,
+        "# <<< plannotator-managed-vibe-hooks <<<",
+        "",
+      ].join("\n"),
+    );
     const before = snapshotTree(fixture.root);
 
     const result = await runPlannotatorUninstall(
@@ -636,9 +719,44 @@ describe("default uninstall", () => {
     expect(result.planned).toContain(
       "Claude Code plugin plannotator@plannotator",
     );
+    expect(result.planned).toContain(
+      `Plannotator Vibe plan-review hook in ${vibeHooks}`,
+    );
     expect(existsSync(binary)).toBe(true);
     expect(fixture.commandCalls).toEqual([]);
     expect(snapshotTree(fixture.root)).toEqual(before);
+  });
+
+  test("strips the managed Vibe block, reports it, and keeps CRLF line endings", async () => {
+    const fixture = createFixture();
+    const vibeHooks = join(fixture.homeDir, ".vibe", "hooks.toml");
+    writeText(
+      vibeHooks,
+      [
+        "[[hooks]]",
+        'name = "my-own-hook"',
+        'command = "/usr/local/bin/notify"',
+        "",
+        "# >>> plannotator-managed-vibe-hooks (managed; do not edit) >>>",
+        "[[hooks]]",
+        'name = "plannotator-exit-plan-mode"',
+        "# <<< plannotator-managed-vibe-hooks <<<",
+        "",
+      ].join("\r\n"),
+    );
+
+    const result = await runPlannotatorUninstall(
+      { purge: false, dryRun: false },
+      fixture.environment,
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(result.removed).toContain(
+      `Plannotator Vibe plan-review hook in ${vibeHooks}`,
+    );
+    expect(readFileSync(vibeHooks, "utf8")).toBe(
+      '[[hooks]]\r\nname = "my-own-hook"\r\ncommand = "/usr/local/bin/notify"\r\n',
+    );
   });
 
   test("removes OpenCode from JSONC while preserving comments and unrelated plugins", async () => {
@@ -1944,5 +2062,70 @@ describe("host and platform integrations", () => {
       PLANNOTATOR_UNINSTALL_ORIGINAL_PATH:
         `C:\\Before;${dirname(currentExe)};C:\\After;;`,
     });
+  });
+});
+
+describe("the Inbox's agent connections (inbox-agents.ts)", () => {
+  const cursorFile = (fixture: Fixture) => join(fixture.homeDir, ".cursor", "mcp.json");
+  const ours = { command: "/old/bin/plannotator", args: ["inbox", "mcp"] };
+
+  function seed(fixture: Fixture): void {
+    writeJson(cursorFile(fixture), { mcpServers: { mine: { command: "x" }, "plannotator-inbox": ours } });
+    writeJson(join(fixture.dataDir, "inbox", "agents.json"), {
+      v: 1,
+      agents: { cursor: { state: "added", reach: "mcp", path: cursorFile(fixture), command: ["/old/bin/plannotator", "inbox", "mcp"], at: "2026-10-12T00:00:00.000Z" } },
+    });
+  }
+
+  test("--dry-run lists the entry and changes nothing", async () => {
+    const fixture = createFixture();
+    seed(fixture);
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: true }, fixture.environment);
+    expect(result.planned).toContain(`MCP server plannotator-inbox from Cursor (${join("~", ".cursor", "mcp.json")}, that entry only)`);
+    expect((readJson(cursorFile(fixture)).mcpServers as Record<string, unknown>)["plannotator-inbox"]).toEqual(ours);
+  });
+
+  test("a plain uninstall removes the entry, keeps the person's others, and forgets the record", async () => {
+    const fixture = createFixture();
+    seed(fixture);
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
+    expect(result.removed).toContain(`MCP server plannotator-inbox from Cursor (${join("~", ".cursor", "mcp.json")}, that entry only)`);
+    expect(readJson(cursorFile(fixture)).mcpServers).toEqual({ mine: { command: "x" } });
+    expect((readJson(join(fixture.dataDir, "inbox", "agents.json")).agents as Record<string, unknown>).cursor).toBeUndefined();
+  });
+
+  test("the notes: only the marked section, from a file the record no longer names too", async () => {
+    const fixture = createFixture();
+    const note = [
+      "<!-- plannotator-inbox:start v1 · added by Plannotator. Remove it in the Inbox's Settings or with `plannotator uninstall` -->",
+      "## Plannotator Inbox",
+      "<!-- plannotator-inbox:end -->",
+    ].join("\n");
+    writeText(join(fixture.homeDir, ".codex", "AGENTS.md"), `Mine.\n\n${note}\n`);
+    const dry = await runPlannotatorUninstall({ purge: false, dryRun: true }, fixture.environment);
+    expect(dry.planned).toContain(`Note for Codex (${join("~", ".codex", "AGENTS.md")}, marked section only; you edited it)`);
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
+    expect(result.removed).toContain(`Note for Codex (${join("~", ".codex", "AGENTS.md")}, marked section only; you edited it)`);
+    expect(readFileSync(join(fixture.homeDir, ".codex", "AGENTS.md"), "utf8")).toBe("Mine.\n");
+  });
+
+  test("with no record (agents.json lost), an entry that runs this binary is named and left, never removed", async () => {
+    const fixture = createFixture();
+    const entry = { command: fixture.environment.execPath, args: ["inbox", "mcp"] };
+    writeJson(cursorFile(fixture), { mcpServers: { "plannotator-inbox": entry } });
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
+    expect(result.warnings).toContain(
+      `Skipped: Cursor's "plannotator-inbox" in ${join("~", ".cursor", "mcp.json")} runs this Plannotator, but no record says Plannotator added it, so it may be yours (to remove it, delete that entry by hand).`,
+    );
+    expect(readJson(cursorFile(fixture)).mcpServers).toEqual({ "plannotator-inbox": entry });
+  });
+
+  test("an entry that runs something else now is named and left", async () => {
+    const fixture = createFixture();
+    seed(fixture);
+    writeJson(cursorFile(fixture), { mcpServers: { "plannotator-inbox": { command: "theirs" } } });
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
+    expect(result.warnings).toContain(`Skipped: Cursor's "plannotator-inbox" now runs something else (changed by hand), so it is yours.`);
+    expect(readJson(cursorFile(fixture)).mcpServers).toEqual({ "plannotator-inbox": { command: "theirs" } });
   });
 });

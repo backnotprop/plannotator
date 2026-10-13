@@ -11,7 +11,7 @@ type ArtifactDocumentCacheEntry =
   | { readonly status: 'ready'; readonly content: string; readonly expiresAt: number };
 
 export interface ArtifactProviderLocation {
-  readonly platform: 'github' | 'gitlab';
+  readonly platform: 'github' | 'gitlab' | 'bitbucket';
   readonly host: string;
 }
 

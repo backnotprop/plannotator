@@ -41,15 +41,28 @@ const DEBOUNCE_MS = 500;
  *  - `load` returns the raw stored body (or null) plus the generation the
  *    store reports when there is NO draft (the default reads `draftGeneration`
  *    from the 404 body) so the client can resume past a tombstone.
+ *  - `save` MAY resolve `{ staleGeneration }` when the store refused the body
+ *    as stale (the default reads it from a `409 { draftGeneration }` that is
+ *    not marked `decided: true`, which
+ *    annotate servers answer when the file's path copy was deleted or moved
+ *    ahead by another session). The hook then raises its counter above that
+ *    generation and saves again, once. Resolving nothing keeps the old
+ *    behavior, so a host transport that never refuses needs no change.
  */
 export interface DraftTransport {
   /** GET the draft. `data` is the raw stored body (null if none). `generation`
       is the store's reported generation when there is no draft (null otherwise). */
   load(): Promise<{ data: unknown | null; generation: number | null }>;
-  /** Persist the draft body. `keepalive` requests best-effort delivery on close. */
-  save(body: object, opts: { keepalive: boolean }): Promise<void>;
+  /** Persist the draft body. `keepalive` requests best-effort delivery on close.
+      Resolves `{ staleGeneration }` when the store refused the body as stale. */
+  save(body: object, opts: { keepalive: boolean }): Promise<void | DraftSaveRefused>;
   /** Generation-gated tombstone delete. */
   remove(generation: number, opts: { keepalive: boolean }): Promise<void>;
+}
+
+/** A save the store refused as stale: the highest generation it knows. */
+export interface DraftSaveRefused {
+  staleGeneration: number;
 }
 
 /**
@@ -73,7 +86,15 @@ const defaultDraftTransport: DraftTransport = {
     const payload = JSON.stringify(body);
     const headers = { 'Content-Type': 'application/json' };
     return fetch('/api/draft', { method: 'POST', headers, body: payload, keepalive }).then(
-      () => {},
+      async (res): Promise<void | DraftSaveRefused> => {
+        if (res.status !== 409) return;
+        const data = (await res.json().catch(() => null)) as (MissingDraftData & { decided?: boolean }) | null;
+        // The review was decided: saving again would put back comments that
+        // were just sent, so a decided refusal is never retried.
+        if (data?.decided === true) return;
+        const staleGeneration = readDraftGeneration(data?.draftGeneration);
+        return staleGeneration !== null ? { staleGeneration } : undefined;
+      },
     );
   },
   remove(generation, { keepalive }) {
@@ -281,6 +302,10 @@ interface UseAnnotationDraftResult {
   scheduleDraftSaveAfterSubmitFailure: () => void;
   getDraftGeneration: () => number;
   dismissDraft: () => void;
+  /** Send a pending (debounced) save now, if there is one. For a session
+      that ends WITHOUT a decision body (the agent closed it): the comment
+      typed just before must still reach the kept draft. */
+  flushPendingSave: () => void;
 }
 
 export function useAnnotationDraft({
@@ -393,7 +418,7 @@ export function useAnnotationDraft({
       });
   }, [isApiMode, isSharedSession]);
 
-  const persistNow = useCallback((keepalive: boolean) => {
+  const persistNow = useCallback((keepalive: boolean, retried = false) => {
     // Re-check: the session may have been submitted while the debounce was
     // pending — a save landing after submit would resurrect a draft the
     // server just deleted, ghosting it into the next session for this plan.
@@ -429,15 +454,29 @@ export function useAnnotationDraft({
     // The transport moves the POST behind the seam; the keepalive retry-on-failure
     // gate stays in the hook verbatim so a host transport that resolves/rejects on
     // failure still won't resurrect a superseded save.
-    getDraftTransport().save(payload, { keepalive }).catch(() => {
+    // A refused (stale) save means the store moved past this tab's counter:
+    // another session on the same file decided or saved ahead of it. Adopt
+    // the store's generation and save again, so the reviewer's comments are
+    // not silently left unsaved. Only while this is still the latest save,
+    // and only once per save.
+    const retryIfRefused = (result: void | DraftSaveRefused) => {
+      if (!result || retried) return;
+      if (!canPersistRef.current || draftGenerationRef.current !== draftGeneration) return;
+      draftGenerationRef.current = Math.max(draftGenerationRef.current, result.staleGeneration);
+      persistNowRef.current(false, true);
+    };
+
+    getDraftTransport().save(payload, { keepalive }).then(retryIfRefused, () => {
       // Chromium caps keepalive bodies (~64KB); retry without it. Completes
       // fine when the page was only backgrounded, best-effort on close.
       if (keepalive && canPersistRef.current && draftGenerationRef.current === draftGeneration) {
-        getDraftTransport().save(payload, { keepalive: false }).catch(() => {});
+        getDraftTransport().save(payload, { keepalive: false }).then(retryIfRefused, () => {});
       }
       // Otherwise silent failure — draft is best-effort.
     });
   }, []);
+  const persistNowRef = useRef(persistNow);
+  persistNowRef.current = persistNow;
 
   const scheduleDraftSave = useCallback(() => {
     if (!canPersistRef.current || !hasMountedRef.current) return;
@@ -456,6 +495,13 @@ export function useAnnotationDraft({
   }, [scheduleDraftSave]);
 
   const getDraftGeneration = useCallback(() => draftGenerationRef.current + 1, []);
+
+  const flushPendingSave = useCallback(() => {
+    if (timerRef.current === null) return;
+    clearTimeout(timerRef.current);
+    timerRef.current = null;
+    persistNow(false);
+  }, [persistNow]);
 
   // Flush a pending save when the page is backgrounded or closed — otherwise
   // the last debounce window of typing is lost on tab close, and reopening
@@ -519,5 +565,5 @@ export function useAnnotationDraft({
     getDraftTransport().remove(deletedGeneration, { keepalive: false }).catch(() => {});
   }, []);
 
-  return { draftBanner, restoreDraft, scheduleDraftSave, scheduleDraftSaveAfterSubmitFailure, getDraftGeneration, dismissDraft };
+  return { draftBanner, restoreDraft, scheduleDraftSave, scheduleDraftSaveAfterSubmitFailure, getDraftGeneration, dismissDraft, flushPendingSave };
 }

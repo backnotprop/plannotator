@@ -3,6 +3,11 @@ import { extname, isAbsolute, relative, resolve } from "node:path";
 export type Phase = "idle" | "planning" | "executing";
 
 export const PLAN_SUBMIT_TOOL = "plannotator_submit_plan";
+export const PLAN_SUBMIT_DEVICE_URI = `xd://${PLAN_SUBMIT_TOOL}` as const;
+
+export function isPlannotatorSubmitDevicePath(input: unknown): boolean {
+	return typeof input === "string" && input === PLAN_SUBMIT_DEVICE_URI;
+}
 export const PLAN_MARK_DONE_TOOL = "plannotator_mark_done";
 
 const ALLOWED_PLAN_EXTENSIONS = new Set<string>([".md", ".mdx"]);

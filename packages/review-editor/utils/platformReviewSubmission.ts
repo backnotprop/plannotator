@@ -1,3 +1,6 @@
+import { SERVER_SESSION_MISMATCH_CODE } from '@plannotator/shared/server-session';
+import { markServerSessionReplaced, withServerSession } from '@plannotator/ui/utils/serverSession';
+import type { PRReviewAction } from '@plannotator/shared/pr-types';
 import type { SubmissionTarget } from '../components/ReviewSubmissionDialog';
 import { buildPRActionRequest } from '../components/ReviewSubmissionDialog';
 import { parsePRActionSuccess, readPRActionError } from './prActionResponse';
@@ -57,7 +60,7 @@ export function markPlatformReviewAmbiguous(
  */
 export async function submitPlatformReviewTarget(options: {
   target: SubmissionTarget;
-  action: 'approve' | 'comment';
+  action: PRReviewAction;
   body: string;
   fetchReview?: PlatformReviewFetch;
 }): Promise<PlatformReviewTargetResult> {
@@ -71,7 +74,8 @@ export async function submitPlatformReviewTarget(options: {
     response = await fetchReview('/api/pr-action', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildPRActionRequest(action, body, target)),
+      // The stale-tab guard: a server that took over this port refuses it.
+      body: JSON.stringify(withServerSession(buildPRActionRequest(action, body, target))),
     });
   } catch {
     return { target: markPlatformReviewAmbiguous(target) };
@@ -89,6 +93,10 @@ export async function submitPlatformReviewTarget(options: {
   }
 
   if (!response.ok) {
+    // Nothing was posted: this tab's server was replaced. Show the reload prompt.
+    if (response.status === 409 && (rawResponse as { code?: unknown } | null)?.code === SERVER_SESSION_MISMATCH_CODE) {
+      markServerSessionReplaced();
+    }
     return {
       target: markPlatformReviewSafeFailure(
         target,
@@ -129,7 +137,7 @@ export async function submitPlatformReviewTarget(options: {
  */
 export async function submitPlatformReviewTargets(options: {
   targets: SubmissionTarget[];
-  action: 'approve' | 'comment';
+  action: PRReviewAction;
   generalComment: string;
   bodyForTarget: (target: SubmissionTarget) => string;
   fetchReview?: PlatformReviewFetch;

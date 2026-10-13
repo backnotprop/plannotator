@@ -1,7 +1,7 @@
 # Synthesis: Pi as a Plannotator agent-job provider
 
 Date: 2026-07-02
-Subject: /Users/ramos/oss-agents/pi (`@earendil-works/pi-coding-agent` 0.80.3, MIT)
+Subject: a local checkout of Pi (`@earendil-works/pi-coding-agent` 0.80.3, MIT)
 Method: shallow breadth dive + three deep-dive subagent reports (CLI headless modes;
 extensibility/SDK/auth; Plannotator-side integration seams).
 Companion: `synthesis-flue-provider-fit-20260702.md` (Flue verdict: pass).

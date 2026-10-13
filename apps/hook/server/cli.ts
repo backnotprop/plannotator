@@ -124,6 +124,11 @@ export function isVersionInvocation(args: string[]): boolean {
 
 declare const __CLI_VERSION__: string;
 
+/** The release version baked in at compile time; undefined for dev/source runs. */
+export function getCliVersion(): string | undefined {
+  return typeof __CLI_VERSION__ !== "undefined" ? __CLI_VERSION__ : undefined;
+}
+
 export function formatVersion(): string {
   return `plannotator ${typeof __CLI_VERSION__ !== "undefined" ? __CLI_VERSION__ : "dev"}`;
 }
@@ -141,7 +146,7 @@ export function formatTopLevelHelp(): string {
     "  plannotator --help",
     "  plannotator --version, -v",
     "  plannotator [--browser <name>]",
-    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--patch-file <path | ->] [--tailscale] [PR_URL]",
+    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--patch-file <path | ->] [--tailscale] [DIRECTORY | PR_URL]",
     "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--tailscale] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
     "  plannotator annotate-last [--stdin] [--tailscale] [--gate] [--json] [--hook]",
     "  plannotator copilot-last [--gate] [--json] [--hook]",
@@ -153,15 +158,92 @@ export function formatTopLevelHelp(): string {
     "  plannotator guide share --id <savedGuideId> | --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--public] [--ttl <7d>] [--json]",
     "  plannotator guide unshare <id> --token <deleteToken>",
     "  plannotator sessions",
+    "  plannotator inbox [--background | --no-open] [--tailscale]",
+    "  plannotator inbox mcp",
+    "  plannotator update [--check]",
     "  plannotator uninstall [--purge] [--yes] [--dry-run]",
     "  plannotator improve-context",
     "",
     "Run 'plannotator <command> --help' for command-specific usage.",
+    "Agents: run 'plannotator inbox --help' for the full guide to the Plannotator Inbox",
+    "(what it is, when to use it, its MCP tools, threads, questions, connecting agents).",
     "",
     "Note:",
     "  running 'plannotator' without arguments is for hook integration and expects JSON on stdin",
   ].join("\n");
 }
+
+/**
+ * Subcommands that work but are not released yet. They keep their
+ * `<sub> --help` text and stay known to the dispatcher (so they never read as
+ * "Unknown command"), but they are left out of everything that advertises the
+ * CLI: the top-level help, the "Did you mean" suggestions, and the plannotator
+ * knowledge skill (plannotator-skill-reference.test.ts requires a hidden
+ * subcommand to be ABSENT from the skill and every other one to be present).
+ * To launch one, delete it from this set, add its usage lines to
+ * formatTopLevelHelp() and document it in apps/skills/core/plannotator/SKILL.md.
+ *
+ * Empty: `inbox` (the Plannotator Inbox) was the last one, and launched.
+ */
+export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>();
+
+/**
+ * `plannotator inbox`'s commands and flags. `plannotator inbox --help` prints
+ * the full agent guide (inbox-help.ts), which carries this block as its
+ * "Commands and flags" section; it is also the `inbox` entry of
+ * SUBCOMMAND_HELP, so the skill freshness test reads the same flags.
+ * The parser is `runInboxCommand` in inbox-command.ts.
+ */
+export const INBOX_COMMAND_USAGE = [
+  "Usage:",
+  "  plannotator inbox [--background | --no-open] [--tailscale]",
+  "  plannotator inbox mcp",
+  "  plannotator inbox --notes <ids>",
+  "",
+  "  plannotator inbox               Start the Inbox and open it in the browser,",
+  "                                  or open the one already running",
+  "  plannotator inbox --background  Start it detached without opening a browser,",
+  "                                  print its URL and exit",
+  "  plannotator inbox --no-open     Run it here without opening a browser",
+  "  plannotator inbox --tailscale   Also publish it over the person's tailnet for this",
+  "                                  run (tailscale serve, HTTPS, never funnel), for the",
+  "                                  Tailscale login that owns this machine only. With",
+  "                                  an Inbox already running, asks it to publish.",
+  "  plannotator inbox mcp           The stdio MCP server for agents. Starts a stopped",
+  "                                  Inbox in the background (no browser tab).",
+  "  plannotator inbox --notes <ids> Add the Inbox note to these agents' instructions",
+  "                                  files (claude-code, codex, gemini, pi, opencode,",
+  "                                  comma-separated). Only with the person's yes;",
+  "                                  starts nothing.",
+  "",
+  "Over the tailnet at every start: the Inbox's Settings, PLANNOTATOR_INBOX_TAILSCALE=1,",
+  "or { \"inboxTailscale\": true } in config.json. Agents and MCP stay on this computer;",
+  "another Tailscale login is let in only when config.json inboxTailscaleAllow names it.",
+  "",
+  "A person's plannotator inbox (not --background) also connects the agents found on",
+  "this computer that are not connected yet: a plannotator-inbox MCP server in each",
+  "terminal agent and the Claude app, the inbox tool for Pi and OpenCode with",
+  "Plannotator's extension or plugin. It never adds back one removed or turned off,",
+  "never replaces another plannotator-inbox, and says what it added on stderr.",
+  "PLANNOTATOR_INBOX_CONNECT=0 skips it. plannotator uninstall removes what it added.",
+].join("\n");
+
+/** `plannotator update`'s usage; the command is update-command.ts. */
+export const UPDATE_COMMAND_USAGE = [
+  "Usage:",
+  "  plannotator update [--check]",
+  "",
+  "Install the newest Plannotator release now, the way the install script does,",
+  "with the choices from your last install (install-flags.json). Open reviews keep",
+  "running on the old version; new ones start on the new one.",
+  "",
+  "Options:",
+  "  --check       Only ask GitHub whether a newer release exists; install nothing",
+  "",
+  "Asks GitHub even when automatic update checks are off (PLANNOTATOR_UPDATE_CHECK=0",
+  "or { \"updateCheck\": false }), because you asked. Exit codes: 0 up to date or",
+  "updated, 1 the update failed or could not run, 2 usage, 130 interrupted.",
+].join("\n");
 
 // Per-subcommand usage text. Keyed by the canonical subcommand token; aliases
 // (e.g. `last` → `annotate-last`) are resolved in formatSubcommandHelp().
@@ -175,9 +257,9 @@ export function formatTopLevelHelp(): string {
 export const SUBCOMMAND_HELP: Record<string, string> = {
   review: [
     "Usage:",
-    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--patch-file <path | ->] [--tailscale] [--json] [PR_URL]",
+    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--patch-file <path | ->] [--no-git-remote-check] [--tailscale] [--json] [DIRECTORY | PR_URL]",
     "",
-    "Review local VCS changes or a GitHub/GitLab pull request in the browser.",
+    "Review local VCS changes or a GitHub, GitLab or Bitbucket Cloud pull request in the browser.",
     "",
     "Options:",
     "  --git         Force git as the VCS (skip auto-detection)",
@@ -191,11 +273,21 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "  --local       For PR review, prepare a local checkout for full file access (default)",
     "  --no-local    For PR review, skip the local checkout (diff only)",
     "  --patch-file  Display a static unified diff from a file, or use - for stdin",
+    "  --no-git-remote-check",
+    "                Never contact the git remote this session: no ls-remote for the",
+    "                default branch or the \"behind GitHub\" check. The compare target",
+    "                stays what local refs resolve to; Fetch still works. Useful when",
+    "                SSH auth costs a hardware-key touch. Also PLANNOTATOR_GIT_REMOTE_CHECK=0",
+    "                or { \"gitRemoteCheck\": false } in ~/.plannotator/config.json.",
     "  --tailscale   Publish the loopback session over your tailnet via tailscale serve (HTTPS)",
     "  --json        Emit one decision/message JSON record instead of plaintext",
-    "  PR_URL        GitHub PR or GitLab MR URL to review",
+    "  PR_URL        GitHub PR, GitLab MR or Bitbucket Cloud PR URL to review",
+    "  DIRECTORY     Review a repo, worktree, or multi-repo workspace at this path",
+    "                Relative to the invoking directory; quote paths containing spaces.",
     "",
-    "  --patch-file cannot be combined with PR_URL.",
+    "  Accepts one DIRECTORY or PR_URL. Neither can be combined with --patch-file.",
+    "  A sole word or a path-like word (./x, ../x, a/b, ~/x) is a directory target;",
+    "  other words are ignored with a notice.",
     "",
     "JSON output:",
     '  { "decision": "approved" | "annotated" | "dismissed", "message": string }',
@@ -207,6 +299,8 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Examples:",
     "  plannotator review",
     "  plannotator review --git",
+    "  plannotator review ../feature-worktree",
+    "  plannotator review ./backend --diff-type last-commit",
     "  plannotator review --gitbutler",
     "  plannotator review --base feature/part-1   # review one layer of a stacked branch",
     "  plannotator review --patch-file reading.diff",
@@ -217,6 +311,8 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--tailscale] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
     "",
     "Open a markdown/text/HTML file, a URL, or a folder of documents in the annotation UI.",
+    "Several existing file paths (plannotator annotate spec.md mock.html notes.md) open",
+    "as one review, in that order, with one decision for all of them.",
     "",
     "Options:",
     "  --markdown    Convert HTML input to markdown instead of rendering it raw",
@@ -286,14 +382,18 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   ].join("\n"),
   sessions: [
     "Usage:",
-    "  plannotator sessions [--open [N]] [--clean]",
+    "  plannotator sessions [--open [N]] [--clean] [--json]",
     "",
     "List active Plannotator server sessions.",
     "",
     "Options:",
     "  --open [N]    Reopen session #N (default 1) in the browser",
     "  --clean       Remove stale session entries",
+    "  --json        Print the sessions as a JSON array on stdout (index, mode, reviewId, target, url, ...)",
   ].join("\n"),
+  // `inbox --help` prints the full agent guide instead (index.ts, inbox-help.ts).
+  inbox: INBOX_COMMAND_USAGE,
+  update: UPDATE_COMMAND_USAGE,
   uninstall: [
     "Usage:",
     "  plannotator uninstall [--purge] [--yes | -y] [--dry-run]",
@@ -347,6 +447,8 @@ export function formatInteractiveNoArgClarification(): string {
     "  plannotator last",
     "  plannotator archive",
     "  plannotator sessions",
+    "  plannotator inbox",
+    "  plannotator update",
     "  plannotator uninstall",
     "",
     "Run 'plannotator --help' for top-level usage.",

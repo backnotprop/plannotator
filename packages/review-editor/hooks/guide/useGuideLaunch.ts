@@ -1,6 +1,8 @@
 import type { AgentCapabilities } from '@plannotator/ui/types';
 import type { AgentLaunchParams } from '@plannotator/ui/hooks/useAgentJobs';
+import { useEffect } from 'react';
 import { useAgentSettings } from '@plannotator/ui/hooks/useAgentSettings';
+import { useModelCatalogs, type ModelCatalogs } from '@plannotator/ui/hooks/useModelCatalogs';
 import type { ReviewEngine } from '@plannotator/ui/hooks/useAgentSettings';
 import { REVIEW_ENGINE_LABEL } from '@plannotator/ui/components/AgentsTab';
 
@@ -18,6 +20,8 @@ export type GuideModelOption = { value: string; label: string };
 export interface GuideLaunchState {
   /** The persisted agent settings bundle (pickers read/write through this). */
   settings: ReturnType<typeof useAgentSettings>;
+  /** Claude / Codex model catalogs (discovered from the installed CLIs). */
+  catalogs: ModelCatalogs;
   guideAvailable: boolean;
   availableEngines: ReviewEngine[];
   /** Effective engine: the persisted choice, snapped to an available one. */
@@ -48,8 +52,15 @@ export interface GuideLaunchState {
  * GuideView's "Regenerate" hint on an outdated saved guide, so both launch
  * surfaces stay in lockstep.
  */
-export function useGuideLaunch(capabilities: AgentCapabilities | null): GuideLaunchState {
-  const settings = useAgentSettings();
+export function useGuideLaunch(
+  capabilities: AgentCapabilities | null,
+  /** Fetch the guide engine's model catalog. Off where no launch is offered
+   *  (viewing a guide that is not outdated), so merely reading a saved guide
+   *  never spawns a CLI. */
+  { loadModels = true }: { loadModels?: boolean } = {},
+): GuideLaunchState {
+  const catalogs = useModelCatalogs(capabilities);
+  const settings = useAgentSettings(catalogs);
   const {
     guideEngine,
     guideClaudeModel,
@@ -70,6 +81,10 @@ export function useGuideLaunch(capabilities: AgentCapabilities | null): GuideLau
   // A persisted engine can be unavailable on this machine — fall back to the
   // first available one rather than a dead selection.
   const engine: ReviewEngine = providerAvailable(guideEngine) ? guideEngine : (availableEngines[0] ?? guideEngine);
+  const loadCatalog = catalogs.load;
+  useEffect(() => {
+    if (loadModels) loadCatalog(engine);
+  }, [loadModels, loadCatalog, engine]);
 
   // Marker model catalogs are discovered server-side and delivered on the
   // capability entry; fall back to the engine-default option until then.
@@ -155,8 +170,13 @@ export function useGuideLaunch(capabilities: AgentCapabilities | null): GuideLau
                   : { reasoningEffort: guideCodexReasoning }),
               };
 
+  // Claude/Codex launches wait for their catalog to settle so a launch never
+  // uses an unresolved pick (the catalog always settles; fallback on failure).
+  const modelsReady = engine === 'claude' || engine === 'codex' ? catalogs[engine].settled : true;
+
   return {
     settings,
+    catalogs,
     guideAvailable,
     availableEngines,
     engine,
@@ -168,7 +188,7 @@ export function useGuideLaunch(capabilities: AgentCapabilities | null): GuideLau
     effectiveOpencodeModel,
     effectivePiModel,
     effectiveCopilotModel,
-    canLaunch: guideAvailable && availableEngines.length > 0,
+    canLaunch: guideAvailable && availableEngines.length > 0 && modelsReady,
     buildParams,
   };
 }

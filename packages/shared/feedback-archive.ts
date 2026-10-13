@@ -48,6 +48,7 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { parseDiagramAnchor, type DiagramAnchor } from "@plannotator/core/diagram-anchor";
+import { parseQuestionAnswer, type QuestionAnswer } from "@plannotator/core/question-block";
 import { getPlannotatorDataDir } from "./data-dir";
 import { extractDirName, extractRepoName, sanitizeTag } from "./project";
 
@@ -71,7 +72,9 @@ export type FeedbackSurface =
   | "annotate-url"
   | "annotate-app"
   | "annotate-last"
-  | "annotate-folder";
+  | "annotate-folder"
+  /** Several files reviewed as one (0.29 bundles); `target.documents` lists them. */
+  | "annotate-bundle";
 
 export type FeedbackDecision =
   | "approved"
@@ -115,8 +118,8 @@ export interface FeedbackTarget {
    * The annotate session's own target: the resolved file for a single-file
    * session, and the session's FOLDER for a folder session (not the document
    * that happened to be open when the reviewer submitted — a folder session
-   * submits one body of feedback for the whole session, and the per-document
-   * path is not part of it).
+   * submits one body of feedback for the whole session; each annotation names
+   * its own document in `documentPath`).
    */
   filePath?: string;
   /**
@@ -126,6 +129,13 @@ export interface FeedbackTarget {
    * to disk; the archive opt-out is the control for that.
    */
   url?: string;
+  /**
+   * The files of a review of several files (`annotate-bundle`), in the order
+   * they were opened for review, each with how many submitted comments were
+   * made on it. A bundle has no single `filePath`. Additive per the field
+   * contract above.
+   */
+  documents?: { path: string; annotationCount: number }[];
   /**
    * Provenance for surfaces whose subject is an AGENT SESSION rather than a
    * file or a diff: annotate-last and the other message-shaped surfaces, where
@@ -182,11 +192,25 @@ export interface FeedbackAnnotationRecord {
   elementName?: string;
   /** Live-app sessions: the route the annotation was made on. */
   pageUrl?: string;
+  /** Multi-document annotate sessions (a folder, or linked documents opened
+   *  from the annotated file): the path of the document this comment was made
+   *  on. Absent means the session's own target (`target.filePath`/`url`), or
+   *  the message on annotate-last. Distinct from `file`, which is a code
+   *  annotation's file. Additive per the field contract above. */
+  documentPath?: string;
   /** A comment on a rendered diagram part (a Mermaid or Graphviz fence):
    *  the part's own id, label and document source line, validated by the
    *  same parser the ui codec runs. Additive per the field contract above;
    *  absent for every other annotation kind. */
   diagramAnchor?: DiagramAnchor;
+  /** The reviewer's answer to a `:::question` block (the annotation's
+   *  `questionAnswer`): picked choice labels, "Other" or free text, note,
+   *  skipped, plus the question's key and prompt. Validated and capped by
+   *  the same `parseQuestionAnswer` the ui runs; a malformed value is left
+   *  out. Additive per the field contract above; absent for every other
+   *  annotation kind. This is the "how I answer things" record: the text
+   *  also rides `feedback`, this is the structured copy. */
+  questionAnswer?: QuestionAnswer;
   images?: number;
 }
 
@@ -293,7 +317,12 @@ function normalizeAnnotation(raw: unknown): FeedbackAnnotationRecord {
   if (type) record.type = type;
   const text = asString(a.text);
   if (text) record.text = text;
-  const originalText = asString(a.originalText) ?? asString(a.selectedText) ?? asString(a.tokenText);
+  // A code-review comment made in a Markdown preview quotes rendered text.
+  const markdownPreview = typeof a.markdownPreview === "object" && a.markdownPreview !== null
+    ? (a.markdownPreview as Record<string, unknown>)
+    : undefined;
+  const originalText = asString(a.originalText) ?? asString(a.selectedText) ?? asString(a.tokenText)
+    ?? asString(markdownPreview?.originalText);
   if (originalText) record.originalText = originalText;
   const file = asString(a.filePath) ?? asString(a.file);
   if (file) record.file = file;
@@ -332,8 +361,12 @@ function normalizeAnnotation(raw: unknown): FeedbackAnnotationRecord {
   if (elementName) record.elementName = elementName;
   const pageUrl = asString(a.pageUrl);
   if (pageUrl) record.pageUrl = pageUrl;
+  const documentPath = asString(a.documentPath);
+  if (documentPath) record.documentPath = documentPath;
   const diagramAnchor = a.diagramAnchor === undefined ? null : parseDiagramAnchor(a.diagramAnchor);
   if (diagramAnchor !== null) record.diagramAnchor = diagramAnchor;
+  const questionAnswer = a.questionAnswer === undefined ? null : parseQuestionAnswer(a.questionAnswer);
+  if (questionAnswer !== null) record.questionAnswer = questionAnswer;
   return record;
 }
 
@@ -345,6 +378,7 @@ const SURFACE_TITLES: Record<FeedbackSurface, string> = {
   "annotate-app": "Annotate feedback (live app)",
   "annotate-last": "Annotate feedback (agent message)",
   "annotate-folder": "Annotate feedback (folder)",
+  "annotate-bundle": "Annotate feedback (several files)",
 };
 
 /**
@@ -361,6 +395,9 @@ export function renderFeedbackRecordMarkdown(record: FeedbackRecord): string {
   const target = record.target;
   if (target?.filePath) lines.push(`- File: ${target.filePath}`);
   if (target?.url) lines.push(`- URL: ${target.url}`);
+  for (const document of target?.documents ?? []) {
+    lines.push(`- File: ${document.path} (${document.annotationCount} ${document.annotationCount === 1 ? "comment" : "comments"})`);
+  }
   if (target?.slug) {
     lines.push(
       `- Plan: ${target.slug}${target.planVersion ? ` (version ${target.planVersion})` : ""}`,

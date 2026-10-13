@@ -55,6 +55,16 @@ function readTombstoneGeneration(key: string): number | null {
   }
 }
 
+/**
+ * Generation recorded by the key's delete tombstone, or null when the key has
+ * never been deleted with a generation. Exposed for callers that store one
+ * logical draft under several keys (PR review drafts, see review-draft.ts) and
+ * must let one key's tombstone guard the others.
+ */
+export function getDraftTombstoneGeneration(key: string): number | null {
+  return readTombstoneGeneration(key);
+}
+
 function readStoredDraftGeneration(key: string): number | null {
   const filePath = draftPath(key);
   try {

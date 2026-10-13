@@ -20,16 +20,14 @@ import {
 } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 
 const serverDir = import.meta.dir;
 const cliEntry = join(serverDir, "index.ts");
-const distDir = join(serverDir, "..", "dist");
-const distFiles = ["index.html", "review.html"];
 
 let fixtureDir: string;
 let dataDir: string;
-const createdDistFiles: string[] = [];
-let createdDistDir = false;
+let stubs: string[] = [];
 
 function runAnnotate(args: string[], envOverrides: Record<string, string> = {}): {
   exitCode: number;
@@ -59,17 +57,7 @@ function runAnnotate(args: string[], envOverrides: Record<string, string> = {}):
 }
 
 beforeAll(() => {
-  if (!existsSync(distDir)) {
-    mkdirSync(distDir, { recursive: true });
-    createdDistDir = true;
-  }
-  for (const file of distFiles) {
-    const path = join(distDir, file);
-    if (!existsSync(path)) {
-      writeFileSync(path, "<!-- test placeholder -->");
-      createdDistFiles.push(path);
-    }
-  }
+  stubs = stubHookDistHtml();
 
   fixtureDir = mkdtempSync(join(tmpdir(), "plannotator-annotate-cli-"));
   dataDir = join(fixtureDir, ".plannotator-data");
@@ -89,12 +77,8 @@ beforeAll(() => {
 
 afterAll(() => {
   rmSync(fixtureDir, { recursive: true, force: true });
-  for (const path of createdDistFiles) {
-    rmSync(path, { force: true });
-  }
-  if (createdDistDir) {
-    rmSync(distDir, { recursive: true, force: true });
-  }
+  // Only the stubs this file wrote; never the dist folder (a build may be writing into it).
+  removeStubbedHtml(stubs);
 });
 
 describe("annotate CLI single-token failures stay legacy", () => {
@@ -250,4 +234,53 @@ describe("plannotator annotate: live app remote hard-off (CLI layer)", () => {
       app.stop(true);
     }
   });
+});
+
+describe("annotate CLI on an occupied fixed port", () => {
+  // Remote mode binds one fixed port, so a second concurrent session finds it
+  // taken. That is a startup failure with one clean line, never a stack trace.
+  async function runOnOccupiedPort(extraArgs: string[]) {
+    const blocker = Bun.serve({ hostname: "0.0.0.0", port: 0, fetch: () => new Response("busy") });
+    try {
+      const child = Bun.spawn([process.execPath, cliEntry, "annotate", "notes.md", ...extraArgs], {
+        cwd: fixtureDir,
+        env: {
+          ...process.env,
+          PLANNOTATOR_CWD: fixtureDir,
+          PLANNOTATOR_DATA_DIR: dataDir,
+          PLANNOTATOR_REMOTE: "1",
+          PLANNOTATOR_PORT: String(blocker.port),
+          PLANNOTATOR_BROWSER: "none",
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const exitCode = await child.exited;
+      return {
+        port: blocker.port,
+        exitCode,
+        stdout: await new Response(child.stdout).text(),
+        stderr: await new Response(child.stderr).text(),
+      };
+    } finally {
+      blocker.stop(true);
+    }
+  }
+
+  test("exits 1 with one line naming the port and PLANNOTATOR_PORT, no stack", async () => {
+    const result = await runOnOccupiedPort([]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(`port ${result.port} (PLANNOTATOR_PORT) is already in use`);
+    // Only the usual "Resolved:" note precedes it; the failure itself is one line.
+    expect(result.stderr.trim().split("\n").filter((line) => !line.startsWith("Resolved:"))).toHaveLength(1);
+    expect(result.stderr).not.toMatch(/\n\s+at /);
+    expect(result.stdout).toBe("");
+  }, 20_000);
+
+  test("is a gate startup failure (exit 2) under a strict annotate gate", async () => {
+    const result = await runOnOccupiedPort(["--gate", "--json", "--require-approval"]);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("is already in use");
+    expect(result.stdout).toBe("");
+  }, 20_000);
 });

@@ -29,7 +29,7 @@ apps/opencode-plugin/skills/
 # Pi extension build artifacts (generated from hook/review dist + shared packages)
 apps/pi-extension/plannotator.html
 apps/pi-extension/review-editor.html
-# Same knowledge skill, vendored by vendor.sh for the Pi manifest's pi.skills.
+# Same knowledge skill, vendored by vendor.sh; offered to Pi by bundled-skill.ts.
 apps/pi-extension/skills/
 apps/pi-extension/storage.ts
 apps/pi-extension/draft.ts

@@ -1,5 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useId } from 'react';
 import { AnnotationType, type Annotation, type Block, type CodeAnnotation, type EditorAnnotation } from '../types';
+import type { MentionSource } from '../utils/mentions';
+import { useMentionAutocomplete } from '../hooks/useMentionAutocomplete';
+import { MentionAutocompleteMenu, mentionActiveOptionId } from './MentionAutocomplete';
 import { isCurrentUser } from '../utils/identity';
 import { ImageThumbnail } from './ImageThumbnail';
 import { EditorAnnotationCard } from './EditorAnnotationCard';
@@ -10,6 +13,8 @@ import { cn } from '../lib/utils';
 import { resolveReplyParents, resolveThreadRootTimestamps } from '@plannotator/core/annotation-threads';
 import { ROOT_DOCUMENT_GROUP_KEY } from '../utils/annotationScope';
 import type { AnnotationScope, AnnotationDocumentGroup } from '../utils/annotationScope';
+import type { QuestionPanelRow } from '../utils/questionAnswers';
+import { QuestionsPanelSection } from './QuestionsPanelSection';
 
 // Card type-word colors. Deletion uses `destructive` (reliably red on every
 // theme, matching the in-document .deletion highlight). Comment uses the
@@ -96,6 +101,8 @@ interface DirectEditsPanelItem {
 }
 
 interface PanelProps {
+  /** The second line of the empty state. Default "Select text to annotate"; a host whose document is an image or code says how to comment there. */
+  emptyHint?: string;
   isOpen: boolean;
   annotations: Annotation[];
   blocks: Block[];
@@ -126,6 +133,21 @@ interface PanelProps {
     *  resolve UI). The panel stays presentation-only; clicks inside the slot
     *  do not select the card. Default: nothing rendered. */
   renderCardFooter?: (annotation: Annotation) => React.ReactNode;
+  /** Host slot rendered inside the header row of each plan-annotation card,
+    *  after `author · time` and before the built-in edit/delete actions — the
+    *  place for a status stamp (resolved, needs reply, a reviewer badge). Twin
+    *  of `renderCardFooter`: the panel stays presentation-only, clicks inside
+    *  the slot do not select the card, and it renders under `readOnly` too
+    *  (a stamp is a read affordance). Default: nothing rendered, and no
+    *  wrapper element exists at all. */
+  renderCardHeader?: (annotation: Annotation) => React.ReactNode;
+  /** Opt-in host capability: an `@` mention source for the EDIT box of each
+    *  plan-annotation card, the same `MentionSource` `Viewer` and `HtmlViewer`
+    *  take for their creation composers. Supplied → the edit textarea grows
+    *  the `@` picker and a save that follows a pick carries the surviving ids
+    *  as `Annotation.mentions`. Absent → the edit box is exactly what it was:
+    *  no listener, no picker, no `mentions` key. */
+  mentionSource?: MentionSource;
   /** Hide every built-in mutation affordance (delete/edit, direct-edit
     *  discard). The host footer slot still renders: its contents are
     *  host-owned and may be read affordances (replies, links), so the host
@@ -159,9 +181,20 @@ interface PanelProps {
   onDeleteInDocument?: (path: string, id: string) => void;
   /** Edit an annotation in its owning document's store. */
   onEditInDocument?: (path: string, id: string, updates: Partial<Annotation>) => void;
+  /**
+   * `:::question` rows for the open document (`buildQuestionPanelRows`).
+   * Supplied, a Questions section renders above a Comments section and the
+   * answer annotations (rows carrying `questionAnswer`) leave the comment
+   * timeline; a row whose question is gone offers Remove through `onDelete`.
+   * Absent, the panel is unchanged and answers list as comment cards.
+   */
+  questionRows?: readonly QuestionPanelRow[];
+  /** A Questions row was clicked (the host scrolls to the card). */
+  onSelectQuestion?: (row: QuestionPanelRow) => void;
 }
 
 export const AnnotationPanel: React.FC<PanelProps> = ({
+  emptyHint = 'Select text to annotate',
   isOpen,
   annotations,
   onSelect,
@@ -183,6 +216,8 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   onOtherFileAnnotationsClick,
   directEdits = null,
   renderCardFooter,
+  renderCardHeader,
+  mentionSource,
   readOnly = false,
   presentation = 'panel',
   unanchoredIds,
@@ -192,13 +227,20 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   onSelectInDocument,
   onDeleteInDocument,
   onEditInDocument,
+  questionRows,
+  onSelectQuestion,
 }) => {
   const isMobile = useIsMobile();
   const embedded = presentation === 'embedded';
   const mobilePanel = isMobile && !embedded;
   const [copiedText, setCopiedText] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
-  const sortedAnnotations = [...annotations].sort((a, b) => a.createdA - b.createdA);
+  // With a Questions section, answers are listed there, not as comments.
+  const showQuestions = questionRows !== undefined && questionRows.length > 0;
+  const timelineAnnotations = questionRows !== undefined
+    ? annotations.filter((a) => a.questionAnswer == null)
+    : annotations;
+  const sortedAnnotations = [...timelineAnnotations].sort((a, b) => a.createdA - b.createdA);
   const sortedCodeAnnotations = [...codeAnnotations].sort((a, b) => a.createdAt - b.createdAt);
   // Replies (`inReplyTo`) thread under their parent: each reply is lifted to
   // sit right after its parent (and the parent's earlier replies) at the
@@ -217,6 +259,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
     return a.ts - b.ts;
   });
   const totalCount = annotations.length + codeAnnotations.length + (editorAnnotations?.length ?? 0);
+  const timelineCount = timelineAnnotations.length + codeAnnotations.length + (editorAnnotations?.length ?? 0);
 
   // --- Cross-file scope (opt-in: a host that passes neither prop is unchanged) ---
   const scopeEnabled = annotationScope !== undefined && onAnnotationScopeChange !== undefined;
@@ -363,11 +406,28 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
         {directEdits?.map((item) => (
           <DirectEditsCard key={item.id} {...item} onDiscard={readOnly ? undefined : item.onDiscard} />
         ))}
+        {showQuestions && (
+          <>
+            <QuestionsPanelSection
+              rows={questionRows!}
+              onSelect={onSelectQuestion}
+              onRemoveOrphan={readOnly ? undefined : (row) => { if (row.annotationId) onDelete(row.annotationId); }}
+            />
+            <div className="mx-0.5 mt-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+              <span className="flex-1">Comments</span>
+              <span className="tabular-nums">{showGroups ? groupedTotal : timelineCount}</span>
+            </div>
+          </>
+        )}
         {showGroups ? (
           <>
             {groups.map((group) => {
               const collapsed = collapsedGroups.has(group.path);
-              const sorted = [...group.annotations].sort((a, b) => a.createdA - b.createdA);
+              // The open document's answers are in the Questions section.
+              const groupAnnotations = group.isCurrent && questionRows !== undefined
+                ? group.annotations.filter((a) => a.questionAnswer == null)
+                : group.annotations;
+              const sorted = [...groupAnnotations].sort((a, b) => a.createdA - b.createdA);
               const threaded = threadReplies(sorted);
               return (
                 <section key={group.path} data-annotation-group={group.path}>
@@ -421,6 +481,8 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                               : (onEditInDocument ? (updates: Partial<Annotation>) => onEditInDocument(group.path, annotation.id, updates) : undefined)}
                             readOnly={readOnly}
                             footer={group.isCurrent ? renderCardFooter?.(annotation) : undefined}
+                            header={group.isCurrent ? renderCardHeader?.(annotation) : undefined}
+                            mentionSource={mentionSource}
                             unanchored={group.isCurrent ? (unanchoredIds?.has(annotation.id) ?? false) : false}
                           />
                         );
@@ -487,14 +549,18 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
               </button>
             )}
           </>
-        ) : totalCount === 0 ? (
+        ) : timelineCount === 0 && showQuestions ? (
+          <p className="px-1 py-2.5 text-[12.5px] text-muted-foreground">
+            Select text in the document to comment. Question and option text is selectable too.
+          </p>
+        ) : timelineCount === 0 ? (
           (!directEdits || directEdits.length === 0) && (
             <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
               <p className="text-xs text-muted-foreground/60">
                 No annotations yet
               </p>
               <p className="mt-1 text-[11px] text-muted-foreground/40">
-                Select text to annotate
+                {emptyHint}
               </p>
               {scopeEnabled && otherGroupCount > 0 && (
                 <button
@@ -528,6 +594,8 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                       onEdit={onEdit ? (updates: Partial<Annotation>) => onEdit(entry.annotation.id, updates) : undefined}
                       readOnly={readOnly}
                       footer={renderCardFooter?.(entry.annotation)}
+                      header={renderCardHeader?.(entry.annotation)}
+                      mentionSource={mentionSource}
                       unanchored={unanchoredIds?.has(entry.annotation.id) ?? false}
                     />
                   </div>
@@ -542,6 +610,8 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                   onEdit={onEdit ? (updates: Partial<Annotation>) => onEdit(entry.annotation.id, updates) : undefined}
                   readOnly={readOnly}
                   footer={renderCardFooter?.(entry.annotation)}
+                  header={renderCardHeader?.(entry.annotation)}
+                  mentionSource={mentionSource}
                   unanchored={unanchoredIds?.has(entry.annotation.id) ?? false}
                 />
                 )
@@ -762,6 +832,87 @@ const DirectEditsCard: React.FC<{
   );
 };
 
+/**
+ * The plan-annotation card's edit box.
+ *
+ * Mounted only while a card is in edit mode, which is also what scopes an
+ * `@` pick to ONE edit session: `useMentionAutocomplete`'s tagged-people
+ * state lives and dies with this component, so reopening the editor starts
+ * with nobody picked and a pick-less save is `{ text }` again.
+ *
+ * Without a `mentionSource` every mention path here is inert — no listener,
+ * no menu state, no picker DOM, and the textarea's attributes are exactly
+ * the ones it rendered before the prop existed (all five mention-related
+ * ARIA attributes resolve to `undefined`).
+ *
+ * KNOWN DIFFERENCE from `CommentPopover`: no chip overlay. The token stays
+ * plain text here. Chips live in `ComposerTextarea` (mirrored overlay behind
+ * a transparent-text textarea) and duplicating that layer is not the way to
+ * get them — the follow-up is to make this box use `ComposerTextarea`.
+ */
+const AnnotationEditComposer: React.FC<{
+  value: string;
+  onChange: (text: string) => void;
+  /** Save with the mention ids the body still tags (empty without a source). */
+  onSave: (mentions: readonly string[]) => void;
+  onCancel: () => void;
+  mentionSource?: MentionSource;
+}> = ({ value, onChange, onSave, onCancel, mentionSource }) => {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mention = useMentionAutocomplete({ text: value, setText: onChange, textareaRef, source: mentionSource });
+  const listboxId = `annotation-card-mentions-${useId().replace(/:/g, '')}`;
+  const menuOpen = mention.menu !== null;
+
+  // Focus-on-open, unchanged: this component mounts exactly when editing starts.
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+      textareaRef.current.select();
+    }
+  }, []);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // The menu is offered the key FIRST: while it is open Escape closes it
+    // (and only a second Escape cancels the edit), and an arrowed-to row
+    // takes Enter. Mod+Enter is never consumed by the menu.
+    if (mention.onKeyDown(e)) return;
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      onSave(mention.mentionIds);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      onCancel();
+    }
+  };
+
+  return (
+    <div onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+      <textarea
+        data-pn-mobile-editable="true"
+        ref={textareaRef}
+        value={value}
+        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => { onChange(e.target.value); mention.onSelect(); }}
+        onSelect={mention.onSelect}
+        onKeyDown={handleKeyDown}
+        placeholder="Add your comment..."
+        aria-label="Annotation comment"
+        aria-autocomplete={mentionSource ? 'list' : undefined}
+        aria-haspopup={mentionSource ? 'listbox' : undefined}
+        aria-controls={menuOpen ? listboxId : undefined}
+        aria-owns={menuOpen ? listboxId : undefined}
+        aria-activedescendant={mentionActiveOptionId(listboxId, mention.menu)}
+        className="w-full resize-none rounded-lg border border-border/50 bg-card px-2.5 py-2 text-base leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 focus:border-primary/40 focus:ring-1 focus:ring-primary/20"
+        style={{ fieldSizing: 'content', minHeight: 44 } as React.CSSProperties}
+      />
+      <div className="mt-1.5 flex justify-end gap-1.5">
+        <Button variant="ghost" size="xxs" onClick={onCancel}>Cancel</Button>
+        <Button size="xxs" disabled={!value.trim()} onClick={() => onSave(mention.mentionIds)}>Save</Button>
+      </div>
+      <MentionAutocompleteMenu id={listboxId} menu={mention.menu} onSelect={mention.select} />
+    </div>
+  );
+};
+
 const AnnotationCard: React.FC<{
   annotation: Annotation;
   isSelected: boolean;
@@ -771,19 +922,15 @@ const AnnotationCard: React.FC<{
   onEdit?: (updates: Partial<Annotation>) => void;
   readOnly?: boolean;
   footer?: React.ReactNode;
+  /** Host slot in the card's header row (see `renderCardHeader`). */
+  header?: React.ReactNode;
+  /** An `@` mention source for the edit box (see `mentionSource`). */
+  mentionSource?: MentionSource;
   /** The annotation has no live location in the document (host-reported). */
   unanchored?: boolean;
-}> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit, readOnly = false, footer, unanchored = false }) => {
+}> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit, readOnly = false, footer, header, mentionSource, unanchored = false }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(annotation.text || '');
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    if (isEditing && textareaRef.current) {
-      textareaRef.current.focus();
-      textareaRef.current.select();
-    }
-  }, [isEditing]);
 
   // Update editText when annotation.text changes
   useEffect(() => {
@@ -798,9 +945,14 @@ const AnnotationCard: React.FC<{
     setIsEditing(true);
   };
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = (mentions: readonly string[]) => {
     if (onEdit) {
-      onEdit({ text: editText });
+      // The presence rule, same as the creation composers': the key exists
+      // only when a source was supplied AND at least one id survived to save,
+      // so an untouched or pick-less edit can never wipe tags the annotation
+      // already carries.
+      if (mentionSource && mentions.length > 0) onEdit({ text: editText, mentions });
+      else onEdit({ text: editText });
     }
     setIsEditing(false);
   };
@@ -810,39 +962,19 @@ const AnnotationCard: React.FC<{
     setIsEditing(false);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
-      e.preventDefault();
-      handleSaveEdit();
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      handleCancelEdit();
-    }
-  };
-
   const typeColor = TYPE_COLOR[annotation.type] ?? 'text-muted-foreground';
   const typeLabel = TYPE_LABEL[annotation.type] ?? 'Note';
   const isGlobal = annotation.type === AnnotationType.GLOBAL_COMMENT;
 
-  // Shared edit textarea — matches the prototype composer primitive
+  // The edit box, mounted only while editing (see AnnotationEditComposer).
   const editComposer = (
-    <div onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-      <textarea
-        data-pn-mobile-editable="true"
-        ref={textareaRef}
-        value={editText}
-        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setEditText(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder="Add your comment..."
-        aria-label="Annotation comment"
-        className="w-full resize-none rounded-lg border border-border/50 bg-card px-2.5 py-2 text-base leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 focus:border-primary/40 focus:ring-1 focus:ring-primary/20"
-        style={{ fieldSizing: 'content', minHeight: 44 } as React.CSSProperties}
-      />
-      <div className="mt-1.5 flex justify-end gap-1.5">
-        <Button variant="ghost" size="xxs" onClick={handleCancelEdit}>Cancel</Button>
-        <Button size="xxs" disabled={!editText.trim()} onClick={handleSaveEdit}>Save</Button>
-      </div>
-    </div>
+    <AnnotationEditComposer
+      value={editText}
+      onChange={setEditText}
+      onSave={handleSaveEdit}
+      onCancel={handleCancelEdit}
+      mentionSource={mentionSource}
+    />
   );
 
   return (
@@ -890,6 +1022,19 @@ const AnnotationCard: React.FC<{
         <span className="text-[10px] text-muted-foreground/50 truncate">
           {annotation.author ? `${annotation.author}${isMe ? ' (me)' : ''} · ` : ''}{formatTimestamp(annotation.createdA)}
         </span>
+        {/* Host header slot (a status stamp etc.) — interactions inside it
+            must not toggle card selection, exactly like the footer slot.
+            Rendered under readOnly too: its contents are host-owned. */}
+        {header != null && header !== false && (
+          <div
+            data-annotation-card-header="true"
+            className="flex min-w-0 items-center"
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+            onKeyDown={(e: React.KeyboardEvent) => e.stopPropagation()}
+          >
+            {header}
+          </div>
+        )}
         {!readOnly && (
           <div className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 [@media(hover:none)]:opacity-100">
             {onEdit && annotation.type !== AnnotationType.DELETION && !isEditing && (

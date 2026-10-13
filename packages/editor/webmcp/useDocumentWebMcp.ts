@@ -46,7 +46,7 @@ export interface DocumentWebMcpInputs {
   livePageUrl: string;
   archiveMode: boolean;
   gate: boolean;
-  submitted: 'approved' | 'denied' | 'exited' | null;
+  submitted: 'approved' | 'denied' | 'done' | 'exited' | null;
   renderAs: 'markdown' | 'html';
   rawHtml: string;
   displayedMarkdown: string;
@@ -232,7 +232,7 @@ export function useDocumentWebMcp(inputs: DocumentWebMcpInputs): { available: bo
             : i.annotateMode
               ? i.liveApp ? 'annotate-app' : i.annotateSource === 'folder' ? 'annotate-folder' : i.annotateSource === 'message' ? 'annotate-last' : 'annotate'
               : 'plan';
-        const decision: SessionDecision = i.submitted === 'approved' ? 'approved' : i.submitted === 'denied' ? 'feedback-sent' : i.submitted === 'exited' ? 'exited' : 'pending';
+        const decision: SessionDecision = i.submitted === 'approved' ? 'approved' : i.submitted === 'denied' ? 'feedback-sent' : i.submitted === 'done' ? 'done' : i.submitted === 'exited' ? 'exited' : 'pending';
         const currentSurface: DocumentSurface = i.liveApp ? 'live-app' : i.renderAs === 'html' ? 'html' : 'markdown';
         return {
           mode,

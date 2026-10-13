@@ -1,6 +1,8 @@
 import React from 'react';
 import { getProviderMeta } from '../ProviderIcons';
-import { type AIProviderOption } from '../../utils/aiProvider';
+import { findSessionBridge, type AIProviderOption } from '../../utils/aiProvider';
+import { ModelSourceHint, modelSourceToolForProvider } from '../ModelSourceHint';
+import { AskSessionSetupHint } from './AskSessionSetupHint';
 
 interface AIProviderBarProps {
   providers: AIProviderOption[];
@@ -10,6 +12,11 @@ interface AIProviderBarProps {
   onProviderChange: (providerId: string) => void;
   onModelChange: (model: string) => void;
   onReasoningEffortChange?: (effort: string | null) => void;
+  /**
+   * Optional muted line under the bar saying how to get "Ask this session"
+   * (see askSessionSetupHint). Absent: the bar renders exactly as before.
+   */
+  setupHint?: string | null;
 }
 
 export const AIProviderBar: React.FC<AIProviderBarProps> = ({
@@ -20,11 +27,32 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
   onProviderChange,
   onModelChange,
   onReasoningEffortChange,
+  setupHint,
 }) => {
   if (providers.length === 0) {
     return (
+      <>
       <div className="border-t border-border/50 px-2 py-1.5 text-[11px] text-muted-foreground/50">
         No AI providers available
+      </div>
+      <AskSessionSetupHint text={setupHint} />
+      </>
+    );
+  }
+
+  // "Ask this session": the session that opened Plannotator is the only thing
+  // Ask AI talks to, so there is no provider or model to choose. Show its label.
+  const sessionBridge = findSessionBridge(providers);
+  if (sessionBridge) {
+    const bridgeMeta = getProviderMeta(sessionBridge.name, sessionBridge.label);
+    const BridgeIcon = bridgeMeta.icon;
+    return (
+      <div
+        className="border-t border-border/50 px-2 py-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground"
+        data-ai-provider-session-bridge
+      >
+        <BridgeIcon className="w-3.5 h-3.5 flex-shrink-0" />
+        <span className="min-w-0 truncate text-foreground">{bridgeMeta.label}</span>
       </div>
     );
   }
@@ -36,22 +64,23 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
   const effectiveModel = selectedModel ?? defaultModel?.id ?? '';
   const currentModel = models.find(m => m.id === effectiveModel) ?? defaultModel;
   const reasoningEfforts = currentModel?.reasoningEfforts ?? [];
-  const meta = getProviderMeta(currentProvider?.name ?? 'AI');
+  const meta = getProviderMeta(currentProvider?.name ?? 'AI', currentProvider?.label);
   const Icon = meta.icon;
   // Show only when the selected model actually reports reasoning efforts.
   const showReasoningEffort = !!onReasoningEffortChange && reasoningEfforts.length > 0;
 
   return (
+    <>
     <div className="border-t border-border/50 px-2 py-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
       <Icon className="w-3.5 h-3.5 flex-shrink-0" />
       <select
         value={effectiveProviderId ?? ''}
         onChange={(event) => onProviderChange(event.target.value)}
-        className="min-w-0 max-w-[8rem] bg-transparent text-[11px] text-foreground focus:outline-none"
+        className="min-w-0 max-w-[8rem] bg-transparent text-[11px] text-foreground focus:outline-none [&>option]:bg-card [&>option]:text-foreground"
         aria-label="AI provider"
       >
         {providers.map(provider => {
-          const providerMeta = getProviderMeta(provider.name);
+          const providerMeta = getProviderMeta(provider.name, provider.label);
           return (
             <option key={provider.id} value={provider.id}>
               {providerMeta.label}
@@ -64,7 +93,7 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
         <select
           value={effectiveModel}
           onChange={(event) => onModelChange(event.target.value)}
-          className="min-w-0 flex-1 bg-transparent text-[11px] text-foreground focus:outline-none"
+          className="min-w-0 flex-1 bg-transparent text-[11px] text-foreground focus:outline-none [&>option]:bg-card [&>option]:text-foreground"
           aria-label="AI model"
         >
           {models.map(model => (
@@ -79,7 +108,7 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
         <select
           value={selectedReasoningEffort ?? ''}
           onChange={(event) => onReasoningEffortChange?.(event.target.value || null)}
-          className="w-16 bg-transparent text-[11px] text-foreground focus:outline-none"
+          className="w-16 bg-transparent text-[11px] text-foreground focus:outline-none [&>option]:bg-card [&>option]:text-foreground"
           aria-label="Reasoning effort"
         >
           <option value="">Auto</option>
@@ -91,5 +120,12 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
         </select>
       )}
     </div>
+    <ModelSourceHint
+      tool={modelSourceToolForProvider(currentProvider?.name)}
+      info={currentProvider}
+      className="-mt-1 px-2 pb-1.5 text-[10px] text-muted-foreground/50"
+    />
+    <AskSessionSetupHint text={setupHint} />
+    </>
   );
 };

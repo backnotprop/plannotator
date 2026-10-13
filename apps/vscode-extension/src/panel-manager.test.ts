@@ -70,6 +70,47 @@ describe("PanelManager", () => {
     expect(captured.html).toContain('"plannotator-clipboard-data"');
   });
 
+  // #1583: the webview sandbox has no allow-popups, so "View on Bitbucket
+  // after submitting" (and every target=_blank link) only works through
+  // vscode.env.openExternal.
+  it("opens http(s) links the app frame forwards in the external browser", async () => {
+    let onMessage: ((msg: unknown) => Promise<void> | void) | null = null;
+    const spy = spyOn(vscode.window, "createWebviewPanel");
+    spy.mockImplementation((() => ({
+      webview: {
+        html: "",
+        onDidReceiveMessage(listener: (msg: unknown) => void) {
+          onMessage = listener;
+          return { dispose() {} };
+        },
+        postMessage() { return Promise.resolve(true); },
+      },
+      onDidDispose() { return { dispose() {} }; },
+      dispose() {},
+    })) as unknown as typeof vscode.window.createWebviewPanel);
+    spies.push(spy);
+    const opened: string[] = [];
+    const openSpy = spyOn(vscode.env, "openExternal");
+    openSpy.mockImplementation(async (uri: vscode.Uri) => {
+      opened.push(uri.toString());
+      return true;
+    });
+    spies.push(openSpy);
+
+    await manager.open("http://127.0.0.1:9999/review?id=42");
+    await onMessage!({ type: "plannotator-open-external", url: "https://bitbucket.org/ws/repo/pull-requests/1" });
+    await onMessage!({ type: "plannotator-open-external", url: "javascript:alert(1)" });
+    await onMessage!({ type: "plannotator-open-external", url: "file:///etc/passwd" });
+
+    expect(opened).toEqual(["https://bitbucket.org/ws/repo/pull-requests/1"]);
+  });
+
+  it("accepts open-external requests only from the app frame itself", async () => {
+    const captured = stubWebviewPanel();
+    await manager.open("http://127.0.0.1:9999/review?id=42");
+    expect(captured.html).toContain('e.source === app.contentWindow');
+  });
+
   it("uses asExternalUri resolved URL in iframe and CSP", async () => {
     const envSpy = spyOn(vscode.env, "asExternalUri");
     envSpy.mockImplementation(async (_uri: vscode.Uri) => {

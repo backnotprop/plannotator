@@ -49,7 +49,7 @@ const AUTHORED_ENGINE_LABEL: Record<string, string> = {
  * producer knew it (self-reported by the agent from its harness, or the model
  * a Plannotator job was launched with).
  */
-function engineLabel(engine: string | undefined, model: string | undefined): string | undefined {
+export function engineLabel(engine: string | undefined, model: string | undefined): string | undefined {
   if (!engine) return model || undefined;
   const label = (GUIDE_ENGINE_LABEL as Record<string, string>)[engine] ?? AUTHORED_ENGINE_LABEL[engine] ?? engine;
   return model ? `${label} · ${model}` : label;

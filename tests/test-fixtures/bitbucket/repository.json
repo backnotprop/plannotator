@@ -1,0 +1,125 @@
+{
+  "type": "repository",
+  "full_name": "ws/repo",
+  "links": {
+    "self": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo"
+    },
+    "html": {
+      "href": "https://bitbucket.org/ws/repo"
+    },
+    "avatar": {
+      "href": "https://bytebucket.org/ravatar/%7B00000000-0000-4000-8000-0000000000bb%7D?ts=default"
+    },
+    "pullrequests": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/pullrequests"
+    },
+    "commits": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/commits"
+    },
+    "forks": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/forks"
+    },
+    "watchers": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/watchers"
+    },
+    "branches": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/refs/branches"
+    },
+    "tags": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/refs/tags"
+    },
+    "downloads": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/downloads"
+    },
+    "source": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/src"
+    },
+    "clone": [
+      {
+        "name": "https",
+        "href": "https://ada-reviewer@bitbucket.org/ws/repo.git"
+      },
+      {
+        "name": "ssh",
+        "href": "git@bitbucket.org:ws/repo.git"
+      }
+    ],
+    "hooks": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/hooks"
+    }
+  },
+  "name": "repo",
+  "slug": "repo",
+  "description": "",
+  "scm": "git",
+  "website": null,
+  "owner": {
+    "display_name": "ws",
+    "links": {
+      "self": {
+        "href": "https://api.bitbucket.org/2.0/workspaces/%7B00000000-0000-4000-8000-0000000000cc%7D"
+      },
+      "avatar": {
+        "href": "https://bitbucket.org/account/ws/avatar/"
+      },
+      "html": {
+        "href": "https://bitbucket.org/%7B00000000-0000-4000-8000-0000000000cc%7D/"
+      }
+    },
+    "type": "team",
+    "uuid": "{00000000-0000-4000-8000-0000000000cc}",
+    "username": "ws"
+  },
+  "workspace": {
+    "type": "workspace",
+    "uuid": "{00000000-0000-4000-8000-0000000000cc}",
+    "name": "ws",
+    "slug": "ws",
+    "links": {
+      "avatar": {
+        "href": "https://bitbucket.org/workspaces/ws/avatar/?ts=1790750939"
+      },
+      "html": {
+        "href": "https://bitbucket.org/ws/"
+      },
+      "self": {
+        "href": "https://api.bitbucket.org/2.0/workspaces/ws"
+      }
+    }
+  },
+  "is_private": true,
+  "project": {
+    "type": "project",
+    "key": "PROJ",
+    "uuid": "{33139c70-4d15-4230-ae53-3853b36e455f}",
+    "name": "Untitled project",
+    "links": {
+      "self": {
+        "href": "https://api.bitbucket.org/2.0/workspaces/ws/projects/PROJ"
+      },
+      "html": {
+        "href": "https://bitbucket.org/ws/workspace/projects/PROJ"
+      },
+      "avatar": {
+        "href": "https://bitbucket.org/ws/workspace/projects/PROJ/avatar/32?ts=1790751455"
+      }
+    }
+  },
+  "fork_policy": "allow_forks",
+  "created_on": "2026-09-30T06:57:47.776083+00:00",
+  "updated_on": "2026-09-30T06:58:46.729417+00:00",
+  "size": 217,
+  "language": "",
+  "uuid": "{00000000-0000-4000-8000-0000000000bb}",
+  "mainbranch": {
+    "name": "main",
+    "type": "branch"
+  },
+  "override_settings": {
+    "default_merge_strategy": true,
+    "branching_model": true
+  },
+  "parent": null,
+  "enforced_signed_commits": null
+}

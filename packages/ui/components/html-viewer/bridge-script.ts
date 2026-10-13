@@ -332,17 +332,89 @@ export const BRIDGE_SCRIPT = `(function() {
   });
 
   // --- Resize ---
-  var lastHeight = 0;
+  // The last child of el whose bottom margin could collapse through el's
+  // bottom edge: out-of-flow children (display:none, absolute/fixed, floats)
+  // never do, which also skips the bridge's own fixed overlay elements and a
+  // trailing script element.
+  function lastInFlowChild(el) {
+    for (var child = el.lastElementChild; child; child = child.previousElementSibling) {
+      var cs = window.getComputedStyle(child);
+      if (cs.display === 'none' || cs.display === 'contents') continue;
+      if (cs.position === 'absolute' || cs.position === 'fixed') continue;
+      if (cs.float && cs.float !== 'none') continue;
+      return child;
+    }
+    return null;
+  }
+
+  // Height the auto-sized frame needs to show the whole document.
+  // Not body.scrollHeight alone: when body has no top padding or border, a
+  // first child's top margin collapses THROUGH body and moves body's box down
+  // without making it taller (the same holds at the bottom), so the page was
+  // cut short by those margins. Not documentElement.scrollHeight either: it
+  // never reports less than the frame's own viewport, so the frame could grow
+  // but never shrink back, and an html{height:100%} page would pin it at
+  // whatever height it had. Instead body's box is placed in document
+  // coordinates (its top already includes a collapsed top margin), and the
+  // bottom margins that can collapse through body's bottom edge are added by
+  // walking the last in-flow child chain. Nothing here reads the frame's own
+  // height, so the measure cannot feed back on itself.
+  function measureContentHeight() {
+    var body = document.body;
+    var scrollY = window.pageYOffset || 0;
+    var bodyRect = body.getBoundingClientRect();
+    var bottom = Math.max(bodyRect.bottom, bodyRect.top + (body.clientTop || 0) + body.scrollHeight) + scrollY;
+    var el = body;
+    for (var depth = 0; el && depth < 64; depth++) {
+      var cs = window.getComputedStyle(el);
+      var marginBottom = parseFloat(cs.marginBottom) || 0;
+      if (marginBottom > 0) bottom = Math.max(bottom, el.getBoundingClientRect().bottom + scrollY + marginBottom);
+      // A child's bottom margin only collapses through a plain block parent
+      // with no bottom padding or border that does not clip (flex/grid
+      // containers, flow-root and scroll containers keep it inside).
+      if (cs.display !== 'block' && cs.display !== 'list-item') break;
+      if (cs.overflowY && cs.overflowY !== 'visible') break;
+      if ((parseFloat(cs.paddingBottom) || 0) > 0 || (parseFloat(cs.borderBottomWidth) || 0) > 0) break;
+      el = lastInFlowChild(el);
+    }
+    var rootStyle = window.getComputedStyle(document.documentElement);
+    bottom += (parseFloat(rootStyle.paddingBottom) || 0) + (parseFloat(rootStyle.borderBottomWidth) || 0);
+    return Math.max(0, Math.ceil(bottom));
+  }
+
+  // Feedback guard. Content sized by the frame itself (html,body{height:100%},
+  // min-height:100vh, a 100vh section) plus anything around it (a collapsed
+  // margin, body's own margin) always measures taller than the frame, so every
+  // grow would ask for another: the frame would grow forever. The first
+  // measure after the parent applied a GROW we asked for decides: if the page
+  // still overflows by at least as much as it did before the grow, it grew
+  // with the frame, and the frame stays where it is. Later content changes
+  // post as usual (and re-run the check on their own grow). Pure, so the
+  // test can drive it: returns the height to post, or null for none.
+  function nextResizeHeight(state, h, viewport) {
+    var applied = state.awaiting && Math.abs(viewport - state.last) <= 1;
+    if (applied) state.awaiting = false;
+    if (h === state.last) return null;
+    if (applied && state.excess > 0 && h > viewport && h - viewport >= state.excess - 1) {
+      state.last = h; // held: report nothing until the content measures differently
+      return null;
+    }
+    state.excess = h - viewport;
+    state.awaiting = true;
+    state.last = h;
+    return h;
+  }
+
+  var resizeState = { last: 0, excess: 0, awaiting: false };
   function postResize() {
     if (LIVE) return; // live surfaces render full-viewport; the parent ignores height
     if (!document.body) return;
-    var h = document.body.scrollHeight;
-    if (h !== lastHeight) {
-      lastHeight = h;
-      postToParent({ type: PREFIX + 'resize', height: h });
-    }
+    var h = nextResizeHeight(resizeState, measureContentHeight(), window.innerHeight);
+    if (h !== null) postToParent({ type: PREFIX + 'resize', height: h });
   }
   window.addEventListener('load', postResize);
+  // The frame resizing is what tells the guard its last grow was applied.
+  window.addEventListener('resize', postResize, { passive: true });
 
   // --- Selection ---
   var pendingSelection = null;
@@ -389,6 +461,8 @@ export const BRIDGE_SCRIPT = `(function() {
   // marker buttons keep their own clicks. BOTH surface kinds start ARMED —
   // Esc (or the header pen) drops to Interact.
   var annotateModeActive = true;
+  // A native host decides link navigations itself (HtmlViewer hostNavigates).
+  var hostNavigates = false;
   function updatePinpointCursor() {
     if (!document.body) return;
     if (annotateModeActive && currentInputMethod === 'pinpoint') {
@@ -694,6 +768,21 @@ export const BRIDGE_SCRIPT = `(function() {
       flashMultiTarget(typeof e.data.key === 'string' ? e.data.key : '');
     }
 
+    else if (type === PREFIX + 'step-pin') {
+      // A host's Parent or Child (a phone's comment sheet): move the pinned
+      // draft to the element around it, or back in. Re-pins through
+      // annotateElement, so the parent sees an ordinary pinpoint selection.
+      stepPin(e.data.direction === 'child' ? 'child' : 'parent');
+    }
+
+    else if (type === PREFIX + 'reveal-pin') {
+      // A host whose own panel covers the page's lower part (a phone's comment
+      // sheet) shrank the frame: bring the pinned draft back into view.
+      if (pendingPinEl && pendingPinEl.isConnected) {
+        try { pendingPinEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (ex) {}
+      }
+    }
+
     else if (type === PREFIX + 'scroll-to') {
       // Selecting an annotation scrolls its first resolved target into view
       // and flashes the overlay focus highlight over EVERY rect of EVERY
@@ -735,6 +824,10 @@ export const BRIDGE_SCRIPT = `(function() {
       }
       updatePinpointCursor(); // cursor affordance is mode-gated: never in Interact
       if (vimEnabled) updateVimUi();
+    }
+
+    else if (type === PREFIX + 'set-host-navigates') {
+      hostNavigates = e.data.active === true;
     }
 
     else if (type === PREFIX + 'set-annotate-mode') {
@@ -1144,6 +1237,10 @@ export const BRIDGE_SCRIPT = `(function() {
 
   // Floating label naming the element under the cursor (like the markdown overlay).
   var PINPOINT_LABELS = { H1:'Heading', H2:'Heading', H3:'Heading', H4:'Heading', H5:'Heading', H6:'Heading', P:'Paragraph', UL:'List', OL:'List', LI:'List item', A:'Link', BUTTON:'Button', IMG:'Image', TABLE:'Table', THEAD:'Table', TBODY:'Table', TR:'Row', TD:'Cell', TH:'Header cell', SECTION:'Section', NAV:'Navigation', HEADER:'Header', FOOTER:'Footer', ARTICLE:'Article', ASIDE:'Sidebar', BLOCKQUOTE:'Quote', PRE:'Code', CODE:'Code', FIGURE:'Figure', FIGCAPTION:'Caption', MAIN:'Main', FORM:'Form', INPUT:'Input', LABEL:'Label' };
+  // Media kinds name themselves only when the page gives no accessible name:
+  // unlike the semantic tags above, an aria-label on a <video> is a better
+  // label than "Video", and it keeps winning exactly as it did before.
+  var MEDIA_PINPOINT_LABELS = { VIDEO:'Video', AUDIO:'Audio', IFRAME:'Frame', CANVAS:'Canvas' };
 
   var MAX_HOVER_LABEL = 40;
   function truncateLabel(text) {
@@ -1179,6 +1276,8 @@ export const BRIDGE_SCRIPT = `(function() {
     if (known) return known;
     var aria = el.getAttribute && el.getAttribute('aria-label');
     if (aria && aria.trim()) return truncateLabel(aria.trim());
+    var media = MEDIA_PINPOINT_LABELS[el.tagName];
+    if (media) return media;
     var role = el.getAttribute && el.getAttribute('role');
     if (role && role.trim()) return truncateLabel(role.trim());
     var tokens = meaningfulClassTokens(el);
@@ -2615,7 +2714,86 @@ export const BRIDGE_SCRIPT = `(function() {
 
   function anchorTextSnapshot(el) {
     var text = (el.textContent || '').replace(/\\s+/g, ' ').trim();
+    if (!text) return anchorSourceSnapshot(el);
     return text.length > 180 ? text.slice(0, 180) : text;
+  }
+
+  // Media snapshots. An image, video or frame has no text to verify a weak
+  // selector against, but its source says what it shows the way text says
+  // what a paragraph says, and unlike the structure-derived signatures D1
+  // ruled out, two siblings showing different files never share it. The key
+  // is the author's reference to the resource: relative to the document's
+  // base when it lies under it (a host may re-root assets per session, through
+  // a <base> on its own asset route or by rewriting attributes to a session
+  // host), else its root-relative path on the document's own origin (a live
+  // app's proxy port changes per session), else origin and path. The query
+  // and the fragment are part of what a source shows (/_next/image?url=a.jpg,
+  // proto.html?step=2, icons.svg#close), so they count, but only as a digest:
+  // they can carry per-visit state (signed URLs, tokens) that must never be
+  // stored in plain text in an annotation. A source whose query changes per
+  // load therefore does not restore, which fails closed. Inline sources
+  // (data:, blob:) name no resource and get no key.
+  var ANCHOR_SOURCE_PREFIX = 'src:';
+  var ANCHOR_SOURCE_MAX = 176;
+
+  // FNV-1a, 32 bits, as 8 hex digits: an identity check, not a secret.
+  function anchorDigest(value) {
+    var hash = 0x811c9dc5;
+    for (var i = 0; i < value.length; i++) {
+      hash ^= value.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return ('0000000' + hash.toString(16)).slice(-8);
+  }
+
+  function anchorSourceKey(el) {
+    var raw = descRawSource(el);
+    if (!raw || /^(data|blob):/i.test(raw)) return '';
+    var path = raw;
+    var variant = '';
+    var url = null;
+    try { url = new URL(raw, document.baseURI); } catch (ex) {}
+    if (!url || !/^https?:$/i.test(url.protocol)) {
+      var mark = raw.search(/[?#]/);
+      if (mark >= 0) {
+        path = raw.slice(0, mark);
+        variant = raw.slice(mark);
+      }
+    } else {
+      variant = url.search + url.hash;
+      var base = null;
+      try { base = new URL('.', document.baseURI); } catch (ex2) {}
+      if (base && url.origin === base.origin && url.pathname.indexOf(base.pathname) === 0) {
+        path = url.pathname.slice(base.pathname.length);
+      } else if (base && url.origin === base.origin) {
+        path = url.pathname;
+      } else {
+        path = url.origin + url.pathname;
+      }
+    }
+    if (!path) return '';
+    return variant ? path + '?' + anchorDigest(variant) : path;
+  }
+
+  function sourceSnapshotOf(el) {
+    var key = anchorSourceKey(el);
+    if (!key) return '';
+    // A long key keeps its head for readability and a digest of the whole,
+    // so two sources that differ only past the cut never compare equal.
+    if (key.length > ANCHOR_SOURCE_MAX) key = key.slice(0, ANCHOR_SOURCE_MAX - 9) + '~' + anchorDigest(key);
+    return ANCHOR_SOURCE_PREFIX + key;
+  }
+
+  // A source that another element of the same kind shares cannot tell the two
+  // apart, which is the D1 failure again: no snapshot, so no anchor.
+  function anchorSourceSnapshot(el) {
+    var snapshot = sourceSnapshotOf(el);
+    if (!snapshot) return '';
+    var sameKind = document.getElementsByTagName(el.tagName);
+    for (var i = 0; i < sameKind.length; i++) {
+      if (sameKind[i] !== el && sourceSnapshotOf(sameKind[i]) === snapshot) return '';
+    }
+    return snapshot;
   }
 
   function uniquelySelects(selector, el) {
@@ -2716,12 +2894,13 @@ export const BRIDGE_SCRIPT = `(function() {
     if (!selector) return null;
     var snapshot = anchorTextSnapshot(el);
     // Text-less elements anchor ONLY through a stable-identity rung (#id or
-    // an author-controlled data-* identity attribute). A weak (positional /
-    // class) selector has nothing to verify against — identical siblings
-    // share every structural trait, so any derived signature would validate
-    // the WRONG element after a sibling is inserted or removed. A
-    // wrong-binding anchor is worse than no anchor: ship none and fail
-    // closed (the pin simply doesn't restore).
+    // an author-controlled data-* identity attribute), or, for media, through
+    // a source no other element of its kind shows (anchorSourceSnapshot).
+    // Otherwise a weak (positional / class) selector has nothing to verify
+    // against — identical siblings share every structural trait, so any
+    // derived signature would validate the WRONG element after a sibling is
+    // inserted or removed. A wrong-binding anchor is worse than no anchor:
+    // ship none and fail closed (the pin simply doesn't restore).
     if (!snapshot && !anchorHasStableIdentity(selector, el)) return null;
     return {
       selector: selector,
@@ -2754,6 +2933,26 @@ export const BRIDGE_SCRIPT = `(function() {
 
   function resolveAnchorElement(anchor) {
     if (!anchor || typeof anchor.selector !== 'string' || !anchor.selector || typeof anchor.tagName !== 'string') return null;
+    return resolveAnchorSelector(anchor) || relocateBySource(anchor);
+  }
+
+  // A media anchor whose selector no longer lands on its element (a sibling
+  // was inserted or removed, a refresh reordered the page) finds it again by
+  // its source, the way a text annotation falls back to searching for its
+  // text. Exactly one element may match: two resolve nothing.
+  function relocateBySource(anchor) {
+    if (typeof anchor.text !== 'string' || anchor.text.indexOf(ANCHOR_SOURCE_PREFIX) !== 0) return null;
+    var found = null;
+    var candidates = document.getElementsByTagName(anchor.tagName);
+    for (var i = 0; i < candidates.length; i++) {
+      if (sourceSnapshotOf(candidates[i]) !== anchor.text) continue;
+      if (found) return null;
+      found = candidates[i];
+    }
+    return found;
+  }
+
+  function resolveAnchorSelector(anchor) {
     var matches;
     try {
       matches = document.querySelectorAll(anchor.selector);
@@ -2844,6 +3043,25 @@ export const BRIDGE_SCRIPT = `(function() {
   function ctxScrubUrl(value) {
     var v = String(value).trim();
     if (/^javascript:/i.test(v)) return null;
+    // Srcdoc sessions serve a document's relative assets through the
+    // session's own asset route (/api/html-assets/<token>/<path>). The token
+    // means nothing outside this session; the path after it is the author's
+    // own, relative to the document, which is what an agent can find.
+    if (!LIVE) {
+      var asset = v.match(/^\\/api\\/html-assets\\/[^\\/?#]+\\/([^?#]*)/);
+      if (asset && asset[1]) {
+        // The route percent-encodes each segment; show the name the author
+        // wrote (jane doe.png, not jane%20doe.png). A malformed escape, or one
+        // that decodes to ? or # (which the query scrub below would cut), keeps
+        // the raw text.
+        var authored = asset[1];
+        try {
+          var decoded = decodeURIComponent(authored);
+          if (!/[?#]/.test(decoded)) authored = decoded;
+        } catch (ex) {}
+        v = authored + v.slice(asset[0].length);
+      }
+    }
     if (/^data:/i.test(v)) {
       var comma = v.indexOf(',');
       return (comma > 0 ? v.slice(0, Math.min(comma, 40)) : v.slice(0, 40)) + ',…';
@@ -3153,7 +3371,8 @@ export const BRIDGE_SCRIPT = `(function() {
   }
 
   // Shed order when over budget: the fields an agent can live without first.
-  var CTX_SHED_ORDER = ['outline', 'text', 'attrs', 'classes', 'path', 'heading', 'landmark', 'component'];
+  // Mirrors ELEMENT_CONTEXT_SHED_ORDER in @plannotator/core/html-anchor.
+  var CTX_SHED_ORDER = ['outline', 'text', 'attrs', 'classes', 'path', 'heading', 'landmark', 'component', 'sourceName'];
 
   function buildElementContext(el, maxBytes) {
     if (!el || el.nodeType !== 1) return null;
@@ -3180,6 +3399,12 @@ export const BRIDGE_SCRIPT = `(function() {
       if (heading) context.heading = heading;
       var component = ctxComponent(el);
       if (component) context.component = component;
+      // The media file this element shows, resolved exactly as the composer
+      // quote resolves it (src, a lazy data-src, srcset, <picture>/<source>,
+      // poster; see descRawSource), so the exported heading can name the file
+      // even when the element has no usable src attribute.
+      var sourceName = descSourceName(el);
+      if (sourceName) context.sourceName = sourceName;
       if (LIVE) {
         context.page = { url: currentPageUrl() };
         var title = ctxCollapse(document.title, 200);
@@ -3292,11 +3517,95 @@ export const BRIDGE_SCRIPT = `(function() {
     }
   }
 
-  // Element text for an additional target: same capping and text-less
-  // description used by the primary element path in annotateElement.
+  // --- Text-less element descriptions ---
+  // A pinpoint on an element with no text quotes a description instead
+  // ("[element: …]"). The hover label alone ("Image") cannot tell one image
+  // from the next, so the description adds what identifies THIS element: its
+  // accessible name (aria-label, alt, title, ...) and, for media, the source
+  // file name. The source goes through the same scrub the element context
+  // uses (no query, no fragment, data: reduced to its media type). Square
+  // brackets become parentheses and double quotes single ones, so the whole
+  // description stays one "[element: …]" token the export recognizes.
+  var DESC_MAX_NAME = 80;
+  var DESC_MAX_FILE = 60;
+  var DESC_SRC_ATTR = { IMG: 'src', VIDEO: 'src', AUDIO: 'src', IFRAME: 'src', EMBED: 'src', SOURCE: 'src', TRACK: 'src', INPUT: 'src', OBJECT: 'data' };
+
+  function descClean(value, max) {
+    return ctxCollapse(String(value).replace(/\\[/g, '(').replace(/\\]/g, ')').replace(/"/g, "'"), max);
+  }
+
+  // Candidates are comma-separated ("a.png, b.png 2x"); the URL is the
+  // first candidate's first word. A data: URL carries its own comma, so it is
+  // taken up to whitespace instead.
+  function descFirstSrcsetUrl(value) {
+    var srcset = String(value || '').trim();
+    if (!srcset) return '';
+    return (/^data:/i.test(srcset) ? srcset : srcset.split(',')[0]).trim().split(/\\s+/)[0] || '';
+  }
+
+  function descRawSource(el) {
+    var tag = el.tagName;
+    if (tag === 'INPUT' && String(el.getAttribute('type') || '').toLowerCase() !== 'image') return '';
+    var attr = DESC_SRC_ATTR[tag];
+    var src = '';
+    if (attr) src = (el.getAttribute(attr) || '').trim();
+    else if (el.ownerSVGElement && tag.toLowerCase() === 'image') src = (el.getAttribute('href') || el.getAttribute('xlink:href') || '').trim();
+    else return '';
+    // Lazy loaders put a data: placeholder in src and the real file in data-src.
+    var lazy = (el.getAttribute('data-src') || '').trim();
+    if (lazy && (!src || /^data:/i.test(src))) src = lazy;
+    if (!src && tag === 'IMG') {
+      src = descFirstSrcsetUrl(el.getAttribute('srcset'));
+      // <picture><source srcset="…"><img></picture>: the img itself may carry
+      // no source at all; the first <source> candidate names the file.
+      var picture = el.parentElement;
+      if (!src && picture && picture.tagName === 'PICTURE' && picture.querySelector) {
+        var pictureSource = picture.querySelector('source[srcset]');
+        if (pictureSource) src = descFirstSrcsetUrl(pictureSource.getAttribute('srcset'));
+      }
+    }
+    if (!src && (tag === 'VIDEO' || tag === 'AUDIO')) {
+      var child = el.querySelector && el.querySelector('source[src]');
+      if (child) src = (child.getAttribute('src') || '').trim();
+      if (!src && tag === 'VIDEO') src = (el.getAttribute('poster') || '').trim();
+    }
+    return src;
+  }
+
+  // The file name a source points at: "team.jpg" for
+  // https://cdn.test/img/team.jpg?sig=…, "data:image/png" for an inline image.
+  function descSourceName(el) {
+    var src = descRawSource(el);
+    if (!src) return '';
+    var scrubbed = ctxScrubUrl(src);
+    if (!scrubbed) return '';
+    if (/^data:/i.test(scrubbed)) {
+      var media = scrubbed.slice(5).split(/[;,]/)[0];
+      return descClean('data:' + (media || 'unknown'), DESC_MAX_FILE);
+    }
+    if (/^blob:/i.test(scrubbed)) return 'blob';
+    var path = scrubbed.replace(/\\?…$/, '').replace(/\\/+$/, '');
+    var name = path.slice(path.lastIndexOf('/') + 1);
+    try { name = decodeURIComponent(name); } catch (ex) {}
+    if (!name || /^[a-z][a-z0-9+.-]*:$/i.test(name)) name = path;
+    return descClean(name, DESC_MAX_FILE);
+  }
+
+  function describeTextlessElement(el, label) {
+    var out = descClean(label, DESC_MAX_NAME) || 'element';
+    var name = ctxName(el);
+    name = name ? descClean(name, DESC_MAX_NAME) : '';
+    if (name && name !== out) out += ' "' + name + '"';
+    var file = descSourceName(el);
+    if (file && file !== name) out += ' (' + file + ')';
+    return out;
+  }
+
+  // Element text for a pinpoint target (primary or additional): the
+  // element's own text, or for a text-less element its description.
   function elementTargetText(el, label) {
     var text = capSelectionText((el.textContent || '').trim());
-    if (!text) text = capSelectionText('[element: ' + label + ']');
+    if (!text) text = capSelectionText('[element: ' + describeTextlessElement(el, label) + ']');
     return text;
   }
 
@@ -3472,6 +3781,41 @@ export const BRIDGE_SCRIPT = `(function() {
     });
   }
 
+  // Parent and Child for a pinned draft. The trail holds the elements stepped
+  // out of, so Child goes back the way Parent came; past it, Child takes the
+  // first element child. A new pin by click starts a new trail.
+  var pinStepTrail = [];
+  var steppingPin = false;
+  function stepPin(direction) {
+    if (!pendingPinEl || !pendingPinEl.isConnected) return;
+    var from = pendingPinEl;
+    var next = null;
+    if (direction === 'parent') {
+      var up = from.parentElement;
+      if (up && up !== document.body && up !== document.documentElement) next = up;
+    } else {
+      var back = pinStepTrail[pinStepTrail.length - 1];
+      if (back && back.isConnected && from.contains(back)) next = back;
+      else {
+        for (var child = from.firstElementChild; child; child = child.nextElementSibling) {
+          if (isViewerOverlayNode(child)) continue;
+          if (/^(SCRIPT|STYLE|TEMPLATE|NOSCRIPT)$/.test(child.tagName)) continue;
+          next = child;
+          break;
+        }
+      }
+    }
+    if (!next) return;
+    var trail = pinStepTrail.slice();
+    if (direction === 'parent') trail.push(from);
+    else if (trail[trail.length - 1] === next) trail.pop();
+    else trail = [];
+    steppingPin = true;
+    try { annotateElement(next, undefined, pendingPinViaPinpoint, null); }
+    finally { steppingPin = false; }
+    pinStepTrail = trail;
+  }
+
   // Pin an element: select its text if possible (so a <mark> can wrap it), else
   // post its text + box directly so the toolbar still anchors (e.g. an SVG node,
   // whose <text> doesn't select like HTML text). Either way the element stays
@@ -3479,6 +3823,7 @@ export const BRIDGE_SCRIPT = `(function() {
   // rides along so the annotation can restore to this exact element later.
   function annotateElement(el, modeOverride, viaPinpoint, clickPoint) {
     if (!el) return false;
+    if (!steppingPin) pinStepTrail = [];
     pinpointHover = null;
     hidePinpointLabel();
     clearMultiTargets(); // a new primary starts a fresh draft
@@ -3535,10 +3880,10 @@ export const BRIDGE_SCRIPT = `(function() {
       if (!posted) clearPendingPin();
       return posted;
     }
-    var elText = capSelectionText((el.textContent || '').trim());
-    // Text-less elements (icon buttons, decorative chips, empty containers)
-    // are still annotatable: describe the element instead of quoting it.
-    if (!elText) elText = capSelectionText('[element: ' + pinpointHoverLabel(el) + ']');
+    // Text-less elements (images, icon buttons, decorative chips, empty
+    // containers) are still annotatable: describe the element instead of
+    // quoting it, naming WHICH one it is where the page says so.
+    var elText = elementTargetText(el, pinpointHoverLabel(el));
     var r = el.getBoundingClientRect();
     pendingSelection = { element: true };
     pendingRange = null;
@@ -3614,6 +3959,16 @@ export const BRIDGE_SCRIPT = `(function() {
         return;
       }
       e.preventDefault();
+      // A native host decides links itself: a person's tap opens the link as a
+      // new window, which the host's web view hands to its own delegate (the
+      // frame never navigates; the host page's CSP would refuse it anyway).
+      if (hostNavigates) {
+        if (e.isTrusted && !(annotateModeActive && currentInputMethod === 'pinpoint')) {
+          var target = (e.target && e.target.closest) ? e.target.closest('a,area') : null;
+          try { window.open(target && target.href ? target.href : raw, '_blank', 'noopener'); } catch (ex) {}
+        }
+        return;
+      }
       // Armed pinpoint: the click belongs to annotation, and the capture-phase
       // pinpoint handler below is about to pin this element. Navigation is
       // already suppressed above, which is all this surface owes the click.
@@ -3712,6 +4067,25 @@ export const BRIDGE_SCRIPT = `(function() {
     if (!message) return;
     e.preventDefault();
     postToParent({ type: PREFIX + message });
+  }, true);
+
+  // A plain ] or [ while armed (Annotate): the host may step to its next or
+  // previous file (the Inbox steps through a thread's attachments). Never in
+  // Interact (the page owns its keys), never while the page's focus is in a
+  // text field, with a modifier, on auto-repeat or mid-composition. The page
+  // still receives the key; a host without a step handler ignores the
+  // message. Capture phase, like the chords above.
+  document.addEventListener('keydown', function(e) {
+    if (e.key !== ']' && e.key !== '[') return;
+    if (!annotateModeActive || vimEnabled) return;
+    if (e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.isComposing) return;
+    var t = e.target;
+    if (t && t.nodeType === 1) {
+      var tag = t.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable) return;
+      if (t.closest && t.closest('[contenteditable]:not([contenteditable="false"])')) return;
+    }
+    postToParent({ type: PREFIX + 'step', dir: e.key === ']' ? 1 : -1 });
   }, true);
 
   // Author opt-in: a plain click on any element tagged [data-annotate] pops the
@@ -5134,11 +5508,16 @@ export const BRIDGE_SCRIPT = `(function() {
 
   function onReady() {
     if (typeof ResizeObserver !== 'undefined' && document.body) {
-      new ResizeObserver(function() {
+      var resizeObserver = new ResizeObserver(function() {
         postResize();
         scheduleVimUiUpdate();
         schedulePinpointReconcile();
-      }).observe(document.body);
+      });
+      resizeObserver.observe(document.body);
+      // A collapsed margin changing moves body without resizing it; the root
+      // box does resize then. (An html{height:100%} root resizes with the
+      // frame instead, which re-measures the same height and posts nothing.)
+      resizeObserver.observe(document.documentElement);
     }
     watchPageMutations();
     // Armed is the default on both surfaces, and live sessions default to

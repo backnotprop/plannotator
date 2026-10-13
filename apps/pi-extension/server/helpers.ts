@@ -5,6 +5,7 @@
 
 import type { IncomingMessage } from "node:http";
 import { Readable } from "node:stream";
+import { prepareAppHtml } from "../generated/app-html.ts";
 
 /** The raw request body as text (for endpoints where an empty body is meaningful, e.g. all-optional JSON). */
 export function readBody(req: IncomingMessage): Promise<string> {
@@ -54,12 +55,20 @@ export function handleApiNotFound(
 	json(res, { error: "Not found", path }, 404);
 }
 
-export function html(
+/**
+ * Serve the single-file app HTML, compressed when the session is remote and the
+ * client accepts br/gzip (#1617); local sessions get the page unchanged. Negotiation and the per-process compression cache are shared with
+ * the Bun servers via generated/app-html.ts; identity sends the string as-is.
+ */
+export async function html(
+	req: IncomingMessage,
 	res: import("node:http").ServerResponse,
 	content: string,
-): void {
-	res.writeHead(200, { "Content-Type": "text/html" });
-	res.end(content);
+	compress: boolean,
+): Promise<void> {
+	const prepared = await prepareAppHtml(content, req.headers["accept-encoding"], compress);
+	res.writeHead(200, prepared.headers);
+	res.end(prepared.body);
 }
 
 export function send(

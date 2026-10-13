@@ -34,6 +34,7 @@ import {
 } from "@plannotator/shared/resolve-file";
 import { isConvertedSource, urlToMarkdown } from "@plannotator/shared/url-to-markdown";
 import { isLoopbackHostname } from "@plannotator/server/live-proxy";
+import type { AnnotateBundleFile } from "@plannotator/shared/annotate-bundle";
 import {
   LIVE_APP_REQUIRES_HTTP_MESSAGE,
   LIVE_APP_REQUIRES_LOOPBACK_MESSAGE,
@@ -50,7 +51,10 @@ export interface AnnotateResolutionSuccess {
   rawHtml?: string;
   absolutePath: string;
   folderPath?: string;
-  annotateMode: "annotate" | "annotate-folder";
+  /** `annotate-bundle` is built by the CLI's bundle rule, never by this pipeline. */
+  annotateMode: "annotate" | "annotate-folder" | "annotate-bundle";
+  /** Several files reviewed as one, in review order (annotate-bundle only). */
+  bundleFiles?: AnnotateBundleFile[];
   sourceInfo?: string;
   sourceConverted: boolean;
   isUrl: boolean;
@@ -303,7 +307,7 @@ export async function resolveAnnotateTarget(options: {
         message:
           `File type not supported: ${ext}\n` +
           `Supported types: ${buildAnnotatableExtensionsHint(extraMarkdownExtensions)}\n` +
-          `For code review, use: plannotator review [file]`,
+          `For code review, use: plannotator review [DIRECTORY]`,
       };
     }
     return {

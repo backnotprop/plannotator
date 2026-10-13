@@ -72,6 +72,8 @@ export interface AnnotateContext {
   renderAs?: "markdown" | "html";
   /** Summary of annotations the user has made. */
   annotations?: string;
+  /** A review of several files: where the open file sits (1-based `index` of `total`). */
+  bundlePosition?: { index: number; total: number };
 }
 
 /**

@@ -185,12 +185,16 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-background/90 backdrop-blur-sm"
+      className="pn-visible-viewport-overlay z-[200] flex items-center justify-center bg-background/90 backdrop-blur-sm"
       data-popover-layer
       onClick={handleBackdropClick}
     >
       {/* Canvas with image and toolbar */}
-      <div className="relative flex flex-col items-center gap-3" onClick={(e) => e.stopPropagation()}>
+      <div
+        data-pn-image-annotator-stage
+        className="relative flex max-w-full flex-col items-center gap-3"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Toolbar - above image */}
         <Toolbar
           tool={state.tool}

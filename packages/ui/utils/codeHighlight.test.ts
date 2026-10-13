@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   codeBlockClassName,
+  codeBlockKeepsLayout,
   CODE_BLOCK_CLASS,
   applyHighlight,
   highlightToHtml,
@@ -19,6 +20,25 @@ describe('code block class', () => {
   test('omits the language hook for language-less fences', () => {
     expect(codeBlockClassName()).toBe(`${CODE_BLOCK_CLASS} font-mono`);
     expect(codeBlockClassName(undefined)).not.toContain('language-');
+  });
+});
+
+// Plan fences wrap long lines; these pin which fences must NOT wrap because a
+// wrapped row would tear a diagram or a column layout apart.
+describe('codeBlockKeepsLayout', () => {
+  test('keeps diagrams and column-aligned fences unwrapped', () => {
+    expect(codeBlockKeepsLayout('┌────┐\n│ UI │\n└────┘')).toBe(true);
+    expect(codeBlockKeepsLayout('+------+        +------+\n| hook | -----> | srv  |')).toBe(true);
+    expect(codeBlockKeepsLayout('Name      Type     Default\nport      number   random')).toBe(true);
+    expect(codeBlockKeepsLayout('key\tvalue')).toBe(true);
+  });
+
+  test('lets ordinary code, commands, URLs and prose wrap', () => {
+    expect(codeBlockKeepsLayout('function f() {\n    return someCall(a, b, c);\n}')).toBe(false);
+    expect(codeBlockKeepsLayout('bun build apps/hook/server/index.ts --compile --outfile ~/.local/bin/plannotator')).toBe(false);
+    expect(codeBlockKeepsLayout('https://example.com/a/very/long/path?x=1&y=2')).toBe(false);
+    expect(codeBlockKeepsLayout('First sentence.  Second sentence!  Third?  Done.')).toBe(false);
+    expect(codeBlockKeepsLayout('trailing hard break  \nnext line')).toBe(false);
   });
 });
 

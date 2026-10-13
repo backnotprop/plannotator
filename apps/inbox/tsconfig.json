@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true,
+    "types": ["node"],
+    "moduleResolution": "bundler",
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "allowJs": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@plannotator/ui/*": ["../../packages/ui/*"],
+      "@plannotator/inbox": ["../../packages/inbox/index.ts"],
+      "@plannotator/inbox/*": ["../../packages/inbox/*"],
+      "#guide-reader": ["../../packages/inbox/guide/reader-module.d.ts"],
+      "#surface-guide-reader": ["../../packages/inbox/guide/surface-reader-module.d.ts"]
+    },
+    "allowImportingTsExtensions": true,
+    "noEmit": true
+  },
+  "include": ["index.tsx", "surface.tsx"]
+}

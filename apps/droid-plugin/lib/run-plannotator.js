@@ -112,7 +112,9 @@ function emitAnnotateDecision(rawOutput, heading) {
 
       if (parsed.decision === "annotated") {
         const feedback = typeof parsed.feedback === "string" ? parsed.feedback.trim() : "";
-        if (!feedback) {
+        // A Done with nothing to send (#1701): the zero-state sentence rides
+        // `feedback`, and nothing should reach the agent.
+        if (!feedback || parsed.nothingToSend === true) {
           process.stdout.write("Annotation session closed.\n");
           return;
         }

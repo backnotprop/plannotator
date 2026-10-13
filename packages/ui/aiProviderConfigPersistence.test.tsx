@@ -179,4 +179,29 @@ describe('useAIProviderConfig persistence', () => {
 
     expect(getAIProviderSettings().preferredModels['codex-local']).toBe('gpt-5.6-sol');
   });
+
+  // A server with a session bridge offers only the bridge. The saved pick is
+  // for sessions without one, so selecting the bridge must not overwrite it.
+  test.skipIf(!hasDom)('a bridge-only capability answer selects the bridge and leaves the saved pick alone', async () => {
+    saveAIProviderSettings({
+      providerId: 'codex-local',
+      preferredModels: { 'codex-local': 'gpt-5.3-codex' },
+      providerByOrigin: {},
+    });
+    const before = new Map(memory);
+
+    const getResult = await mountHarness([
+      {
+        id: 'session-bridge',
+        name: 'session-bridge',
+        label: 'Ask this session · Claude Code',
+        models: [],
+        sessionBridge: { host: 'claude-code', status: 'ready', modes: { turn: true, transient: false } },
+      },
+    ]);
+
+    expect(getResult().aiConfig.providerId).toBe('session-bridge');
+    expect(getResult().aiConfig.model).toBeNull();
+    expect(memory).toEqual(before);
+  });
 });

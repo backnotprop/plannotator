@@ -38,7 +38,8 @@ function pageFocusIsNeutral(): boolean {
   return document.activeElement === document.body || document.activeElement === null;
 }
 
-function hasBlockingOverlay(): boolean {
+/** True while a dialog, modal overlay, or dismissable popover owns the page. */
+export function hasBlockingOverlay(): boolean {
   return document.querySelector(BLOCKING_OVERLAY_SELECTOR) !== null;
 }
 

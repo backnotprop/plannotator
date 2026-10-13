@@ -9,7 +9,6 @@ import { useTheme } from './ThemeProvider';
 import { THEME_MODES } from './themeModes';
 import { ReviewAgentsIcon } from './ReviewAgentsIcon';
 import { MenuVersionSection } from './MenuVersionSection';
-import { TextShimmer } from './TextShimmer';
 import type { UpdateInfo } from '../hooks/useUpdateCheck';
 import type { Origin } from '@plannotator/core/agents';
 
@@ -40,7 +39,7 @@ interface PlanHeaderMenuProps {
 }
 
 export interface CompactPlanAction {
-  id: 'exit' | 'feedback' | 'approve' | 'copy' | 'done' | 'edit' | 'tools' | 'annotate' | 'refresh' | 'annotations' | 'ai' | 'review' | 'note' | 'discard-finish';
+  id: 'exit' | 'feedback' | 'approve' | 'copy' | 'done' | 'edit' | 'tools' | 'annotate' | 'refresh' | 'annotations' | 'ai' | 'review' | 'note' | 'discard-finish' | 'bundle-previous' | 'bundle-next';
   label: string;
   subtitle?: string;
   onSelect: () => void;
@@ -105,13 +104,8 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
           aria-expanded={isOpen}
         >
           {isOpen ? <CloseIcon /> : <MenuIcon />}
-          {showUpdateDot ? (
-            <TextShimmer className="hidden md:inline text-xs font-medium" duration={2.5} spread={1.5}>
-              Options
-            </TextShimmer>
-          ) : (
-            <span className="hidden md:inline">Options</span>
-          )}
+          {/* The dot says an update is out; the label never moves (no shimmer). */}
+          <span className="hidden md:inline">Options</span>
           {showUpdateDot && (
             <span className="absolute top-0.5 right-0.5 md:-top-0.5 md:-right-0.5 w-2 h-2 rounded-full bg-primary ring-2 ring-background" />
           )}

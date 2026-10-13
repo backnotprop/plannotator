@@ -88,7 +88,7 @@ This was intentionally endpoint selection rather than tap-to-toggle arbitrary it
 
 ### Code Review — DiffsHub reference and approved behavior
 
-Physical feedback confirms multiline selection works well in the standalone DiffsHub app at `/Users/ramos/oss/pierre`. Source comparison shows that DiffsHub and Plannotator already enable the same Pierre contracts: `enableLineSelection`, `enableGutterUtility`, `onLineSelectionEnd`, and `onGutterUtilityClick`.
+Physical feedback confirms multiline selection works well in the standalone DiffsHub app (a local checkout of the Pierre repository). Source comparison shows that DiffsHub and Plannotator already enable the same Pierre contracts: `enableLineSelection`, `enableGutterUtility`, `onLineSelectionEnd`, and `onGutterUtilityClick`.
 
 The important difference is what happens after selection:
 

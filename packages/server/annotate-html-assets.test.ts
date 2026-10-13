@@ -50,7 +50,7 @@ describe("annotate raw HTML assets", () => {
     writeFileSync(htmlPath, html);
     writeFileSync(join(dir, "assets", "lesson.css"), "body { color: red; }");
     writeFileSync(join(dir, "assets", "quiz.js"), "window.quiz = true;");
-    const assets = createHtmlAssetRegistry(dir);
+    const assets = createHtmlAssetRegistry({ folderPath: dir });
     const rewritten = assets.rewriteHtml(html, htmlPath);
     for (const [name, expected] of [["lesson.css", "body { color: red; }"], ["quiz.js", "window.quiz = true;"]]) {
       const urlPath = rewritten.match(new RegExp('(?:href|src)="([^" ]+' + name.replace(".", "\\.") + ')"'))?.[1];
@@ -76,7 +76,7 @@ describe("annotate raw HTML assets", () => {
         const html = '<link rel="stylesheet" href="./lesson.css">';
         writeFileSync(path, html);
         writeFileSync(join(directory, "lesson.css"), "body { color: red; }");
-        const assets = createHtmlAssetRegistry(root);
+        const assets = createHtmlAssetRegistry({ folderPath: root });
         const rewritten = assets.rewriteHtml(html, path);
         const cssPath = rewritten.match(/href="([^"]+lesson.css)"/)?.[1];
         const url = new URL(cssPath!, "http://localhost");

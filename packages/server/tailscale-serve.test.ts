@@ -16,6 +16,7 @@ import {
   enableTailscaleServe,
   resetTailscaleServeForTests,
 } from "./tailscale-serve";
+import { createRequestHostGuard } from "./request-host-guard";
 
 const SERVE_OUTPUT = [
   "Available within your tailnet:",
@@ -208,5 +209,29 @@ describe("disableTailscaleServe", () => {
     const { runner, calls } = makeRunner({});
     disableTailscaleServe(59999, runner);
     expect(calls).toEqual([]);
+  });
+});
+
+describe("enableTailscaleServe for the Inbox (8443, persisted, re-pointed)", () => {
+  const INBOX_OUTPUT = "Available within your tailnet:\n\nhttps://vps-1.tail1234.ts.net:8443/\n|-- proxy http://127.0.0.1:52900\n";
+  const mapped = (proxy: string) =>
+    JSON.stringify({ TCP: { "8443": { HTTPS: true } }, Web: { "vps-1.tail1234.ts.net:8443": { Handlers: { "/": { Proxy: proxy } } } } });
+
+  test("re-points its own mapping from the last run's port and keeps it past exit", () => {
+    const { runner, calls } = makeRunner({ status: { status: 0, stdout: mapped("http://127.0.0.1:52817"), stderr: "" }, serve: { status: 0, stdout: INBOX_OUTPUT, stderr: "" } });
+    const before = process.listenerCount("exit");
+    const { url } = enableTailscaleServe(52900, runner, { httpsPort: 8443, ownTargets: ["http://127.0.0.1:52900", "http://127.0.0.1:52817"], persist: true });
+    expect(url).toBe("https://vps-1.tail1234.ts.net:8443");
+    expect(calls[1]).toEqual(["serve", "--bg", "--https=8443", "http://127.0.0.1:52900"]);
+    // Persisted: no exit teardown, so a restart-to-update never takes the new run's mapping down.
+    expect(process.listenerCount("exit")).toBe(before);
+    // And the served name never joins a window's Host allowlist: the Inbox publishes a door-only listener.
+    expect(createRequestHostGuard({ localOnly: true }).check(new Request("http://127.0.0.1/", { headers: { Host: "vps-1.tail1234.ts.net:8443" } }))?.status).toBe(403);
+  });
+
+  test("never overwrites a mapping on 8443 that points anywhere else", () => {
+    const { runner, calls } = makeRunner({ status: { status: 0, stdout: mapped("http://127.0.0.1:3000"), stderr: "" } });
+    expect(() => enableTailscaleServe(52900, runner, { httpsPort: 8443, ownTargets: ["http://127.0.0.1:52900"], persist: true })).toThrow(/already routes port 8443/);
+    expect(calls).toHaveLength(1);
   });
 });

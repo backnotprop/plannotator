@@ -13,6 +13,7 @@ import {
   exportMessageAnnotations,
   parseMarkdownToBlocks,
   type LinkedDocAnnotationEntry,
+  type LinkedDocExportHeading,
   type MessageAnnotationEntry,
 } from "@plannotator/ui/utils/parser";
 import { shouldStripFrontmatter } from "@plannotator/shared/annotatable";
@@ -67,7 +68,11 @@ export interface CompleteAnnotateFeedbackInput {
   blocks: Block[];
   annotations: Annotation[];
   globalAttachments: ImageAttachment[];
+  /** Documents OTHER than the one `annotations` describes — never the same
+   *  document again (see resolveFeedbackSections). */
   linkedDocuments: Map<string, LinkedDocAnnotationEntry>;
+  /** Heading for the linked-documents section; defaults to the plan wording. */
+  linkedDocumentsHeading?: LinkedDocExportHeading;
   editorAnnotations: EditorAnnotation[];
   codeAnnotations: CodeAnnotation[];
   title: string;
@@ -133,7 +138,9 @@ export function buildCompleteAnnotateFeedback(
           // sources (.yaml/.json/.toml/…) keep a leading `---` as real content,
           // so stripping it here would shift every block id and mis-label the
           // exported line numbers.
-          enriched.set(filepath, entry.markdown
+          // Blocks the caller already derived (resolveFeedbackSections, which
+          // is also diagram-aware) are kept as they are.
+          enriched.set(filepath, entry.markdown && !entry.blocks
             ? {
                 ...entry,
                 blocks: parseMarkdownToBlocks(entry.markdown, {
@@ -142,7 +149,7 @@ export function buildCompleteAnnotateFeedback(
               }
             : entry);
         }
-        annotationsText += exportLinkedDocAnnotations(enriched);
+        annotationsText += exportLinkedDocAnnotations(enriched, input.linkedDocumentsHeading);
       }
       if (hasEditorAnnotations) {
         annotationsText += exportEditorAnnotations(input.editorAnnotations);
@@ -150,6 +157,9 @@ export function buildCompleteAnnotateFeedback(
       if (hasCodeAnnotations) {
         annotationsText += exportCodeFileAnnotations(input.codeAnnotations);
       }
+      // The secondary sections open with a blank line to separate them from
+      // the section before; with no primary section that line led the payload.
+      annotationsText = annotationsText.replace(/^\n+/, "");
     }
   }
 

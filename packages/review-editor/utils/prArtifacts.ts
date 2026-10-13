@@ -1,6 +1,6 @@
 import { marked, type Token } from 'marked';
 import { isPRArtifactDocumentUrlAllowed } from '@plannotator/shared/pr-artifact-document';
-import type { PRContext, PRMetadata } from '@plannotator/shared/pr-types';
+import { getPRPlatformCapabilities, type PRContext, type PRMetadata } from '@plannotator/shared/pr-types';
 
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp', 'avif']);
 const VIDEO_EXTENSIONS = new Set(['mp4', 'webm', 'mov']);
@@ -233,7 +233,7 @@ function artifactDedupeKey(url: URL, metadata: PRMetadata): string {
   const pathKey = `${url.origin.toLowerCase()}${url.pathname}`;
   const isPlatformUpload = metadata.platform === 'github'
     ? isKnownGitHubAssetUrl(url, metadata.host)
-    : isKnownGitLabAssetUrl(url, metadata);
+    : metadata.platform === 'gitlab' && isKnownGitLabAssetUrl(url, metadata);
   if (isPlatformUpload) return pathKey;
 
   const semanticQuery = new URLSearchParams();
@@ -328,6 +328,9 @@ export function buildPRArtifacts(
   context: PRContext | null,
 ): readonly PRArtifact[] {
   if (metadata === null || context === null) return [];
+  // Platforms without the artifacts capability (Bitbucket) collect nothing,
+  // so no artifact annotations exist and the panel stays hidden.
+  if (!getPRPlatformCapabilities(metadata).artifacts) return [];
 
   const seen = new Set<string>();
   const artifacts: PRArtifact[] = [];

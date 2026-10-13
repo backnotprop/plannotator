@@ -44,7 +44,7 @@ When you use plan mode in Copilot CLI:
 
 | Command | Description |
 |---------|-------------|
-| `/plannotator-review` | Open interactive code review for current changes or a PR URL |
+| `/plannotator-review [DIRECTORY \| PR_URL]` | Open interactive code review for current changes, another repository/worktree, or a PR URL |
 | `/plannotator-annotate <file>` | Open interactive annotation UI for a markdown file |
 | `/plannotator-last` | Annotate the last rendered assistant message |
 

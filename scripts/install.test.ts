@@ -38,23 +38,13 @@ const CORE_SKILLS = [
 describe("install.sh", () => {
   const script = readScript("install.sh");
 
-  test("hooks.json heredoc is valid JSON", () => {
-    // Extract the JSON between the HOOKS_EOF heredoc markers
-    const match = script.match(/cat > "\$PLUGIN_HOOKS" << 'HOOKS_EOF'\n([\s\S]*?)\nHOOKS_EOF/);
-    expect(match).toBeTruthy();
-    const json = JSON.parse(match![1]);
-    expect(json.hooks.PermissionRequest).toBeArray();
-    expect(json.hooks.PermissionRequest[0].matcher).toBe("ExitPlanMode");
-    expect(json.hooks.PermissionRequest[0].hooks[0].type).toBe("command");
-    expect(json.hooks.PermissionRequest[0].hooks[0].command).toBe("plannotator");
-    expect(json.hooks.PermissionRequest[0].hooks[0].timeout).toBe(345600);
-    // EnterPlanMode hook drives the compound-skill improvement-hook injection.
-    // It must be re-emitted on every install — see apps/hook/hooks/hooks.json.
-    expect(json.hooks.PreToolUse).toBeArray();
-    expect(json.hooks.PreToolUse[0].matcher).toBe("EnterPlanMode");
-    expect(json.hooks.PreToolUse[0].hooks[0].type).toBe("command");
-    expect(json.hooks.PreToolUse[0].hooks[0].command).toBe("plannotator improve-context");
-    expect(json.hooks.PreToolUse[0].hooks[0].timeout).toBe(5);
+  test("never writes the Claude Code marketplace clone's hooks.json", () => {
+    // The clone is Claude Code's own checkout of this repo, and its hooks.json
+    // is the source of truth. A hard-coded rewrite dropped keys twice (#689
+    // the EnterPlanMode hook, then "modules", the Claude Code mod).
+    expect(script).not.toMatch(/>\s*"\$PLUGIN_HOOKS"/);
+    expect(script).not.toContain("<< 'HOOKS_EOF'");
+    expect(script).toContain('repair_legacy_plugin_hooks "$PLUGIN_MARKETPLACE_DIR" || true');
   });
 
   test("installs to ~/.local/bin", () => {
@@ -85,7 +75,7 @@ describe("install.sh", () => {
     expect(script).toContain("git clone --depth 1 --filter=blob:none --sparse");
     // Sparse set extended to also fetch the command stubs from the checkout.
     expect(script).toContain(
-      "git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands",
+      "git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands",
     );
     expect(script).toContain("CLAUDE_SKILLS_DIR");
     expect(script).toContain("AGENTS_SKILLS_DIR");
@@ -197,12 +187,47 @@ describe("install.sh", () => {
     expect(script).toContain('copy_skill_if_present apps/skills/extra/plannotator-setup-goal "$KIRO_SKILLS_DIR"');
     expect(script).toContain('copy_skill_if_present apps/skills/extra/plannotator-visual-explainer "$KIRO_SKILLS_DIR"');
     // sparse-checkout fetches apps/kiro-cli (skills + agent example).
-    expect(script).toContain("git sparse-checkout set apps/skills apps/kiro-cli");
+    expect(script).toContain("git sparse-checkout set apps/skills apps/kiro-cli apps/vibe");
     // The installer also writes the example custom agent to ~/.kiro/agents.
     expect(script).toContain('cp apps/kiro-cli/agents/plannotator.json "$HOME/.kiro/agents/plannotator.json"');
     // Parity: no bespoke flag, like every other agent.
     expect(script).not.toContain("--kiro");
     expect(script).not.toContain("INSTALL_KIRO");
+  });
+
+  test("auto-installs Vibe skills + managed hook when ~/.vibe is detected (no flag)", () => {
+    // Vibe (Mistral's TUI coding agent) is auto-detected like Kiro/Codex:
+    // PATH executable or an existing ~/.vibe, never gated behind a bespoke flag.
+    expect(script).toContain("vibe_available=0");
+    expect(script).toContain('[ -d "$VIBE_HOME" ]');
+    expect(script).toContain('VIBE_HOME="${VIBE_HOME:-$HOME/.vibe}"');
+    expect(script).toContain("VIBE_SKILLS_DIR");
+    expect(script).toContain('$VIBE_HOME/skills');
+    expect(script).toContain('if [ "$vibe_available" -eq 1 ]');
+    // Vibe-specific skills (origin baked in) come from apps/vibe/skills.
+    for (const skill of ["plannotator-review", "plannotator-annotate", "plannotator-last"]) {
+      expect(script).toContain(`copy_skill_if_present apps/vibe/skills/${skill} "$VIBE_SKILLS_DIR"`);
+    }
+    // The knowledge skill is agent-agnostic and single-sourced in apps/skills/core.
+    expect(script).toContain('copy_skill_if_present apps/skills/core/plannotator "$VIBE_SKILLS_DIR"');
+    // sparse-checkout fetches apps/vibe (skills + hook templates).
+    expect(script).toContain("git sparse-checkout set apps/skills apps/kiro-cli apps/vibe");
+    // Managed marker block so the hook coexists with the user's own hooks.toml.
+    expect(script).toContain('VIBE_MANAGED_START="# >>> plannotator-managed-vibe-hooks (managed; do not edit) >>>"');
+    expect(script).toContain('VIBE_MANAGED_END="# <<< plannotator-managed-vibe-hooks <<<"');
+    // The hook command is argv-only with the absolute binary path (no env
+    // prefix) so it survives both shell and shell-free hook executors, and
+    // origin detection happens in the binary from the hook payload.
+    expect(script).toContain('command = "${PLANNOTATOR_BIN}"');
+    expect(script).toContain("PLANNOTATOR_BIN=\"${INSTALL_DIR}/plannotator\"");
+    expect(script).toContain('match = "exit_plan_mode"');
+    // Hooks are stable in Vibe 2.25+; no config.toml flag is written, and the
+    // installer must not touch $VIBE_HOME/config.toml at all.
+    expect(script).not.toContain("enable_experimental_hooks");
+    expect(script).not.toContain('VIBE_CONFIG="$VIBE_HOME/config.toml"');
+    // Parity: no bespoke flag, like every other agent.
+    expect(script).not.toContain("--vibe-only");
+    expect(script).not.toContain("INSTALL_VIBE");
   });
 
   test("aggressively cleans up deprecated commands and stale skills on upgrade", () => {
@@ -225,7 +250,7 @@ describe("install.sh", () => {
     // plannotator-archive no longer ships as a skill — a stale installed copy
     // is removed unconditionally from every skill scope.
     expect(script).toContain(
-      'for scope in "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR" "$KIRO_SKILLS_DIR"; do',
+      'for scope in "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR" "$KIRO_SKILLS_DIR" "$VIBE_SKILLS_DIR"; do',
     );
     expect(script).toContain('rm -rf "$scope/plannotator-archive"');
     // The removed /plannotator-archive OpenCode command stub is swept too.
@@ -273,7 +298,9 @@ describe("install.sh", () => {
   });
 
   test("Pi extension update keeps no settings.json package-skills filter", () => {
-    // Pi no longer bundles skills, so the settings.json filter machinery is gone.
+    // The extension resolves its skill overlap with ~/.agents/skills itself
+    // (apps/pi-extension/bundled-skill.ts, #1642), so the installer never
+    // edits Pi's settings.json.
     expect(script).toContain("update_pi_extension_if_present");
     expect(script).toContain("npm:@plannotator/pi-extension");
     expect(script).not.toContain("configure_pi_plannotator_package_filter");
@@ -301,7 +328,7 @@ describe("install.sh", () => {
       'if [ "$skip_skills" -eq 0 ] && ! command -v git &>/dev/null; then',
     );
     expect(gitGateIndex).toBeGreaterThan(0);
-    const pluginHooksIndex = script.indexOf('cat > "$PLUGIN_HOOKS"');
+    const pluginHooksIndex = script.indexOf('repair_legacy_plugin_hooks "$PLUGIN_MARKETPLACE_DIR" || true');
     const codexHooksIndex = script.indexOf('enable_codex_hooks_config || true');
     expect(pluginHooksIndex).toBeGreaterThan(0);
     expect(pluginHooksIndex).toBeLessThan(gitGateIndex);
@@ -337,7 +364,7 @@ describe("install.sh", () => {
     // the sidecar downloads, agent integrations, skill checkout, and config
     // writes — that ordering is the whole point of #977.
     const binaryInstalled = script.indexOf(
-      'mv "$tmp_file" "$INSTALL_DIR/plannotator"',
+      'mv -f "$staged_file" "$INSTALL_DIR/plannotator"',
     );
     const minimalExit = script.indexOf('if [ "$minimal" -eq 1 ]; then');
     const semInstall = script.indexOf("install_sem_sidecar\n");
@@ -375,13 +402,14 @@ describe("install.sh", () => {
     // Flags exist for Codex plus the two integrations where the mechanism
     // generalizes identically (detect -> write): Gemini and Kiro. OpenCode
     // gets a plain do-not-write switch (no detection leg).
-    for (const flag of ["--skip-codex)", "--skip-gemini)", "--skip-kiro)", "--skip-opencode)"]) {
+    for (const flag of ["--skip-codex)", "--skip-gemini)", "--skip-kiro)", "--skip-vibe)", "--skip-opencode)"]) {
       expect(script).toContain(flag);
     }
     // Env vars follow the existing PLANNOTATOR_SKIP_*_INSTALL naming.
     expect(script).toContain("PLANNOTATOR_SKIP_CODEX_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_GEMINI_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_KIRO_INSTALL");
+    expect(script).toContain("PLANNOTATOR_SKIP_VIBE_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_OPENCODE_INSTALL");
     // Config layer (M2): the skipInstall OBJECT is extracted first (awk,
     // character-indexed so single-line JSON works too) and per-agent keys
@@ -399,7 +427,7 @@ describe("install.sh", () => {
     expect(script).toContain("continue # explicit false is a veto, never a skip");
     // skills rides the same loop: not an agent, but the same three layers
     // and the same skipInstall key region.
-    expect(script).toContain("for _agent in codex gemini kiro opencode skills; do");
+    expect(script).toContain("for _agent in codex gemini kiro vibe opencode skills claudePlugin; do");
     // The old whole-file grep form is gone.
     expect(script).not.toContain('grep -q \'"codex"[[:space:]]*:[[:space:]]*true\' "$_config_dir/config.json"');
     // Precedence by textual layering (later assignment wins): config grep,
@@ -416,9 +444,11 @@ describe("install.sh", () => {
 
   test("skip states are reported honestly and never remove existing integrations (#1178)", () => {
     // Three distinct Codex states, never conflated: detected-skipped vs not
-    // detected vs installed.
+    // detected vs installed. "Not detected" is now conveyed by omitting the
+    // CODEX USERS closing section entirely (see the functional closing-summary
+    // tests below), never by a skip message.
     expect(script).toContain('Codex: detected, skipped (${skip_codex_source}).');
-    expect(script).toContain("Codex was not detected.");
+    expect(script).not.toContain("Codex was not detected.");
     expect(script).toContain("Codex was detected, but the integration was skipped");
     // When a previous install wired Codex, the skip run says it left the
     // existing integration alone.
@@ -463,7 +493,7 @@ describe("install.sh", () => {
     expect(envIdx).toBeGreaterThan(configIdx);
     expect(flagIdx).toBeGreaterThan(envIdx);
     // Advertised in the usage text alongside the per-agent opt-outs.
-    expect(script).toContain("[--skip-kiro] [--skip-opencode] [--skip-skills]");
+    expect(script).toContain("[--skip-kiro] [--skip-vibe] [--skip-opencode] [--skip-skills]");
     expect(script).toContain("PLANNOTATOR_SKIP_SKILLS_INSTALL; config key:");
   });
 
@@ -525,28 +555,10 @@ describe("install.sh", () => {
 describe("install.ps1", () => {
   const script = readScript("install.ps1");
 
-  test("hooks.json has valid structure", () => {
-    // PS1 uses @"..."@ (interpolated) with $exePathJson for full exe path.
-    // Verify structural keys since the command value is a dynamic variable.
-    expect(script).toContain('"PermissionRequest"');
-    expect(script).toContain('"matcher": "ExitPlanMode"');
-    expect(script).toContain('"type": "command"');
-    expect(script).toContain('"timeout": 345600');
-    expect(script).toContain('"command":');
-    // EnterPlanMode hook drives the compound-skill improvement-hook injection.
-    expect(script).toContain('"PreToolUse"');
-    expect(script).toContain('"matcher": "EnterPlanMode"');
-    // The exe path is JSON-escaped-quoted so hooks survive a space in the
-    // install path (e.g. C:\Users\John Smith\...). Unquoted paths word-split
-    // when the hook shell runs them and the hook silently never fires.
-    expect(script).toContain('"command": "\\"$exePathJson\\" improve-context"');
-    expect(script).toContain('"command": "\\"$exePathJson\\""');
-    expect(script).toContain('"timeout": 5');
-  });
-
-  test("uses full exe path in hooks.json", () => {
-    expect(script).toContain("$exePathJson");
-    expect(script).toContain(".Replace('\\', '/')");
+  test("never writes the Claude Code marketplace clone's hooks.json", () => {
+    expect(script).not.toMatch(/Set-Content -Path \$pluginHooks/);
+    expect(script).not.toContain("$exePathJson");
+    expect(script).toContain("try { Repair-LegacyPluginHooks -Clone $pluginMarketplaceDir } catch { }");
   });
 
   test("handles both PS 5.1 and PS 7+ checksum response types", () => {
@@ -591,7 +603,7 @@ describe("install.ps1", () => {
   test("installs core skills via git sparse-checkout to claude + agents", () => {
     expect(script).toContain("git clone --depth 1 --filter=blob:none --sparse");
     expect(script).toContain(
-      "git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands",
+      "git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands",
     );
     expect(script).toContain("claudeSkillsDir");
     expect(script).toContain("agentsSkillsDir");
@@ -646,6 +658,18 @@ describe("install.ps1", () => {
     expect(script).toContain('Join-Path $scope "plannotator-archive"');
     // The removed /plannotator-archive OpenCode command stub is swept too.
     expect(script).toContain('Removing stale plannotator-archive command');
+  });
+
+  test("detects Vibe only by its home and writes nothing under it", () => {
+    // A `vibe` binary on PATH alone must not count as Vibe detected
+    // (install.sh parity).
+    expect(script).toContain("$vibeAvailable = [bool](Test-Path $vibeHome)");
+    expect(script).not.toContain("Get-Command vibe");
+    // The apps/vibe skills use a POSIX env-prefix that Vibe's PowerShell
+    // fallback cannot run, so Windows never copies them (or anything else)
+    // into the Vibe home.
+    expect(script).not.toContain("apps\\vibe\\skills\\");
+    expect(script).not.toContain('Join-Path $vibeHome "skills"');
   });
 
   test("does not treat a skills-only Codex home as configured", () => {
@@ -708,16 +732,19 @@ describe("install.ps1", () => {
     expect(script).toContain("[switch]$SkipCodex");
     expect(script).toContain("[switch]$SkipGemini");
     expect(script).toContain("[switch]$SkipKiro");
+    expect(script).toContain("[switch]$SkipVibe");
     expect(script).toContain("[switch]$SkipOpencode");
     expect(script).toContain("PLANNOTATOR_SKIP_CODEX_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_GEMINI_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_KIRO_INSTALL");
+    expect(script).toContain("PLANNOTATOR_SKIP_VIBE_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_OPENCODE_INSTALL");
     // Config layer parses the real nested JSON (strict boolean check, like
     // verifyAttestation).
     expect(script).toContain("$cfg.skipInstall.codex -is [bool]");
     expect(script).toContain("$cfg.skipInstall.gemini -is [bool]");
     expect(script).toContain("$cfg.skipInstall.kiro -is [bool]");
+    expect(script).toContain("$cfg.skipInstall.vibe -is [bool]");
     expect(script).toContain("$cfg.skipInstall.opencode -is [bool]");
     // Precedence by textual layering (later assignment wins): config, then
     // env var, then switch.
@@ -805,26 +832,10 @@ describe("install.ps1", () => {
 describe("install.cmd", () => {
   const script = readScript("install.cmd");
 
-  test("hooks.json echo block produces valid JSON structure", () => {
-    // The .cmd file uses echo statements to produce JSON.
-    expect(script).toContain('echo   "hooks": {');
-    expect(script).toContain('echo     "PermissionRequest": [');
-    expect(script).toContain('echo         "matcher": "ExitPlanMode",');
-    expect(script).toContain('echo             "type": "command",');
-    expect(script).toContain('echo             "command":');
-    expect(script).toContain('echo             "timeout": 345600');
-    // EnterPlanMode hook drives the compound-skill improvement-hook injection.
-    expect(script).toContain('echo     "PreToolUse": [');
-    expect(script).toContain('echo         "matcher": "EnterPlanMode",');
-    // Quoted for space-in-path installs — same invariant as install.ps1.
-    expect(script).toContain('echo             "command": "\\"!EXE_PATH!\\" improve-context",');
-    expect(script).toContain('echo             "command": "\\"!EXE_PATH!\\"",');
-    expect(script).toContain('echo             "timeout": 5');
-  });
-
-  test("uses full exe path in hooks.json", () => {
-    expect(script).toContain("EXE_PATH");
-    expect(script).toContain('!INSTALL_PATH:\\=/!');
+  test("never writes the Claude Code marketplace clone's hooks.json", () => {
+    expect(script).not.toContain('> "!PLUGIN_HOOKS!"');
+    expect(script).not.toContain("EXE_PATH");
+    expect(script).toContain('if exist "!PLUGIN_HOOKS!" call :RepairLegacyPluginHooks');
   });
 
   test("uses only ASCII text so cmd.exe consoles render output on any codepage", () => {
@@ -865,7 +876,7 @@ describe("install.cmd", () => {
   test("installs core skills via git sparse-checkout to claude + agents", () => {
     expect(script).toContain("git clone --depth 1 --filter=blob:none --sparse");
     expect(script).toContain(
-      "git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands",
+      "git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands",
     );
     expect(script).toContain("CLAUDE_SKILLS_DIR");
     expect(script).toContain("AGENTS_SKILLS_DIR");
@@ -913,6 +924,16 @@ describe("install.cmd", () => {
     expect(script).toContain('rmdir /s /q "%%~D\\plannotator-archive"');
     // The removed /plannotator-archive OpenCode command stub is swept too.
     expect(script).toContain('del /q "!OPENCODE_COMMANDS_DIR!\\plannotator-archive.md"');
+  });
+
+  test("detects Vibe only by its home and writes nothing under it", () => {
+    // A vibe executable on PATH alone must not count as Vibe detected
+    // (install.sh parity).
+    expect(script).toContain('if exist "!VIBE_HOME!" set "VIBE_AVAILABLE=1"');
+    expect(script).not.toContain("where vibe");
+    // Windows never copies the POSIX-only apps/vibe skills into the Vibe home.
+    expect(script).not.toContain("apps\\vibe\\skills\\");
+    expect(script).not.toContain("VIBE_SKILLS_DIR");
   });
 
   test("does not treat a skills-only Codex home as configured", () => {
@@ -1001,26 +1022,105 @@ describe("install.cmd", () => {
     expect(printPathAdvice).toBeGreaterThan(0);
   });
 
+  // The Claude Code plugin hooks run bare `plannotator` (#1689), so the
+  // binary's directory has to be on the user PATH, which install.ps1 already
+  // writes. install.cmd used to only print advice.
+  describe(":PrintPathAdvice adds INSTALL_DIR to the user PATH", () => {
+    const start = script.indexOf("\n:PrintPathAdvice\n");
+    const end = script.indexOf("goto :eof", start);
+    const body = script.slice(start, end);
+    const psLine = body.split("\n").find((line) => line.startsWith("powershell ")) ?? "";
+    const command = psLine.slice(psLine.indexOf('-Command "') + '-Command "'.length, psLine.lastIndexOf('"'));
+
+    test("runs one top-level PowerShell call, outside any parenthesized block", () => {
+      expect(start).toBeGreaterThan(0);
+      expect(psLine).toStartWith("powershell -NoProfile -ExecutionPolicy Bypass -Command \"");
+      expect(psLine.endsWith('"')).toBe(true);
+      // No enclosing `(` block: every line before it at column 0 or a label.
+      const before = body.slice(0, body.indexOf(psLine));
+      expect(before.split("(").length).toBe(before.split(")").length);
+    });
+
+    test("the command carries nothing cmd.exe would reinterpret", () => {
+      expect(command.length).toBeGreaterThan(100);
+      // Delayed expansion is on: `!` would be eaten; `%` expands; the quote
+      // would end the argument; `^`, `&`, `<`, `>` are cmd operators.
+      for (const ch of ['"', "%", "!", "^", "&", "<", ">"]) {
+        expect(command.includes(ch), `install.cmd PATH command contains ${ch}`).toBe(false);
+      }
+    });
+
+    test("passes the directory through the environment, never interpolated", () => {
+      expect(body).toContain('set "PLN_PATH_DIR=!INSTALL_DIR!"');
+      expect(command).toContain("$env:PLN_PATH_DIR");
+      expect(command).not.toContain("INSTALL_DIR");
+      expect(body).toContain('set "PLN_PATH_DIR="');
+    });
+
+    test("edits the user PATH through the registry, unexpanded, keeping its kind, without duplicates", () => {
+      expect(command).toContain("[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')");
+      expect(command).toContain("DoNotExpandEnvironmentNames");
+      expect(command).toContain("$k.GetValueKind('Path')");
+      expect(command).toContain("$k.SetValue('Path',$n,$kind)");
+      // Idempotent: an existing entry (raw or expanded, case-insensitive,
+      // trailing backslash ignored) exits before any write.
+      expect(command).toContain("-ieq $d");
+      expect(command).toContain("ExpandEnvironmentVariables");
+      expect(command.indexOf("if($has.Count -gt 0)")).toBeLessThan(command.indexOf("$k.SetValue("));
+      // Not the 1024-char-truncating setx, and not the machine PATH.
+      expect(command).not.toContain("setx");
+      expect(command).not.toContain("LocalMachine");
+    });
+
+    test("keeps the printed note and falls back to manual advice when PowerShell fails", () => {
+      expect(body).toContain("is not in your PATH. Adding it to your user PATH...");
+      expect(body).toContain("if errorlevel 1 (");
+      expect(body).toContain('echo   setx PATH "%%PATH%%;!INSTALL_DIR!"');
+      expect(body).toContain("echo   set PATH=%%PATH%%;!INSTALL_DIR!");
+      expect(script.slice(end)).toStartWith("goto :eof");
+    });
+
+    const powershell = Bun.which("pwsh") ?? Bun.which("powershell") ?? Bun.which("powershell.exe");
+    test.skipIf(!powershell)("the command parses cleanly in a real PowerShell (parse only, no registry access)", async () => {
+      const proc = Bun.spawn(
+        [
+          powershell!,
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "$errors=$null; [void][System.Management.Automation.Language.Parser]::ParseInput($env:PLANNOTATOR_TEST_SCRIPT,[ref]$null,[ref]$errors); if($errors.Count -gt 0){$errors | ForEach-Object { Write-Output $_.Message }; exit 1}; exit 0",
+        ],
+        { stdin: "ignore", stdout: "pipe", stderr: "pipe", env: { ...process.env, PLANNOTATOR_TEST_SCRIPT: command } },
+      );
+      const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+      expect(stdout.trim()).toBe("");
+      expect(exitCode).toBe(0);
+    }, 60_000);
+  });
+
   test("per-agent skip opt-outs: flags, env vars, config keys, precedence (#1178)", () => {
     expect(script).toContain('if /i "%~1"=="--skip-codex"');
     expect(script).toContain('if /i "%~1"=="--skip-gemini"');
     expect(script).toContain('if /i "%~1"=="--skip-kiro"');
+    expect(script).toContain('if /i "%~1"=="--skip-vibe"');
     expect(script).toContain('if /i "%~1"=="--skip-opencode"');
     expect(script).toContain("PLANNOTATOR_SKIP_CODEX_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_GEMINI_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_KIRO_INSTALL");
+    expect(script).toContain("PLANNOTATOR_SKIP_VIBE_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_OPENCODE_INSTALL");
     // Config layer (M2): the REAL JSON is parsed by PowerShell (strict
     // boolean check, matching install.ps1) instead of a line-oblivious
     // findstr - so a "codex": true under some OTHER key can never opt
     // anyone out and an explicit false inside skipInstall is honored.
     expect(script).toContain("$c.skipInstall.$k");
-    expect(script).toContain("@('codex','gemini','kiro','opencode','skills')");
+    expect(script).toContain("@('codex','gemini','kiro','vibe','opencode','skills','claudePlugin')");
     expect(script).toContain("$v -is [bool] -and $v");
     expect(script).toContain("PLN_CONFIG_JSON");
     expect(script).toContain("skipInstall.codex");
     expect(script).toContain("skipInstall.gemini");
     expect(script).toContain("skipInstall.kiro");
+    expect(script).toContain("skipInstall.vibe");
     expect(script).toContain("skipInstall.opencode");
     // The old whole-file findstr form is gone.
     expect(script).not.toContain('findstr /r /c:"\\"codex\\"');
@@ -2084,6 +2184,7 @@ describe("PlannotatorConfig schema", () => {
     expect(match![1]).toContain("gemini?: boolean");
     expect(match![1]).toContain("kiro?: boolean");
     expect(match![1]).toContain("opencode?: boolean");
+    expect(match![1]).toContain("claudePlugin?: boolean");
   });
 });
 
@@ -2101,7 +2202,7 @@ const FAKE_BINARY_SHA256 = createHash("sha256").update(FAKE_BINARY).digest("hex"
 const ATTESTATION_FIXTURE = join(scriptsDir, "fixtures", "attestations-response.json");
 
 type GhBehavior = "reject-bundle" | "fail-all" | "pass-all";
-type GitBehavior = "fail" | "sparse-unsupported" | "network-error";
+type GitBehavior = "fail" | "sparse-unsupported" | "network-error" | "real-no-clone";
 
 // git shim that behaves like git 2.23 (macOS with stale Xcode CLT, #1238):
 // `clone --sparse` dies instantly on "unknown option" (exit 129, before any
@@ -2161,6 +2262,10 @@ function gitShimBody(git: GitBehavior): string {
       return GIT_NETWORK_ERROR_SHIM;
     case "fail":
       return "#!/bin/bash\nexit 1\n";
+    case "real-no-clone":
+      // The host git for everything but a clone (which would reach the
+      // network), so the installer can inspect a real fixture repository.
+      return `#!/bin/bash\nif [ "$1" = "clone" ]; then exit 1; fi\nexec "${Bun.which("git")}" "$@"\n`;
   }
 }
 
@@ -2194,6 +2299,7 @@ for a in "$@"; do
   prev="$a"
 done
 case "$url" in
+  */releases/latest) printf '{"tag_name":"v99.9.9"}\\n200' ;;
   *".sha256") printf '%s  plannotator\\n' "$STUB_CHECKSUM" ;;
   */releases/download/*) printf 'fake plannotator binary\\n' > "$out" ;;
   */attestations/sha256:*) cat "$STUB_ATT_JSON" ;;
@@ -2238,7 +2344,11 @@ exit 1`
   return { home, stub };
 }
 
-function runInstallSh(sandbox: { home: string; stub: string }, args: string[]) {
+function runInstallSh(
+  sandbox: { home: string; stub: string },
+  args: string[],
+  extraEnv: Record<string, string> = {},
+) {
   const r = Bun.spawnSync(
     ["bash", join(scriptsDir, "install.sh"), ...args],
     {
@@ -2250,6 +2360,7 @@ function runInstallSh(sandbox: { home: string; stub: string }, args: string[]) {
         STUB_ATT_JSON: ATTESTATION_FIXTURE,
         PLANNOTATOR_SKIP_SEM_INSTALL: "1",
         PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL: "1",
+        ...extraEnv,
       },
       stdout: "pipe",
       stderr: "pipe",
@@ -2377,6 +2488,184 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
     });
   },
 );
+
+// ---------------------------------------------------------------------------
+// Closing summary: agent-specific sections print only for agents the run
+// detected (existing detection legs: `pi` on PATH, ~/.gemini, Codex home or
+// CLI, ~/.kiro or kiro-cli). OpenCode (no detection leg) and Claude Code stay
+// universal. Every run is a full install into a temp HOME with a stubbed PATH;
+// the git shim supplies a local checkout, so nothing reaches the network.
+// ---------------------------------------------------------------------------
+type SummaryAgent = "pi" | "omp" | "gemini" | "codex" | "kiro";
+
+const SUMMARY_HEADERS: Record<SummaryAgent, string> = {
+  pi: "  PI USERS",
+  omp: "  OH MY PI (OMP) USERS",
+  gemini: "  GEMINI CLI USERS",
+  codex: "  CODEX USERS",
+  kiro: "  KIRO CLI USERS",
+};
+
+function runSummaryInstall(detected: SummaryAgent[], extraArgs: string[] = []) {
+  const sandbox = setupInstallSandbox({
+    gh: "pass-all",
+    git: "sparse-unsupported",
+    codexHome: detected.includes("codex"),
+  });
+  if (detected.includes("gemini")) mkdirSync(join(sandbox.home, ".gemini"), { recursive: true });
+  if (detected.includes("kiro")) mkdirSync(join(sandbox.home, ".kiro"), { recursive: true });
+  // A no-op `pi` on PATH is exactly what the Pi detection leg checks; the
+  // installer's `pi install` call against it succeeds without doing anything.
+  if (detected.includes("pi")) writeFileSync(join(sandbox.stub, "pi"), "#!/bin/bash\nexit 0\n", { mode: 0o755 });
+  // OMP is detected by `omp` on PATH. The installer never runs it (the stub
+  // exits 1 so a call would show up as a failure), it only prints how to install.
+  if (detected.includes("omp")) writeFileSync(join(sandbox.stub, "omp"), "#!/bin/bash\nexit 1\n", { mode: 0o755 });
+  const r = runInstallSh(sandbox, ["--version", "v99.9.9", "--non-interactive", "--no-extras", ...extraArgs]);
+  return { ...r, home: sandbox.home };
+}
+
+function expectOnlySections(out: string, detected: SummaryAgent[]) {
+  for (const agent of Object.keys(SUMMARY_HEADERS) as SummaryAgent[]) {
+    const lines = out.split("\n");
+    const present = lines.includes(SUMMARY_HEADERS[agent]);
+    expect({ agent, present }).toEqual({ agent, present: detected.includes(agent) });
+  }
+  // Universal sections are unaffected by detection.
+  expect(out).toContain("  OPENCODE USERS");
+  expect(out).toContain("CLAUDE CODE USERS:");
+  expect(out).toContain("/plugin marketplace add backnotprop/plannotator");
+  // An undetected agent is represented by absence, never by a nag.
+  expect(out).not.toContain("was not detected");
+}
+
+describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
+  "install.sh closing summary shows only detected agents",
+  () => {
+    test("nothing detected: only the universal OpenCode and Claude Code sections", () => {
+      const { code, out } = runSummaryInstall([]);
+      expect(code).toBe(0);
+      expectOnlySections(out, []);
+      expect(out).toContain("The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready to use after you restart Claude Code!");
+    });
+
+    for (const agent of Object.keys(SUMMARY_HEADERS) as SummaryAgent[]) {
+      test(`only ${agent} detected: only its section is added`, () => {
+        const { code, out } = runSummaryInstall([agent]);
+        expect(code).toBe(0);
+        expectOnlySections(out, [agent]);
+      });
+    }
+
+    test("all detected: every agent section prints, in the original order", () => {
+      const all: SummaryAgent[] = ["pi", "omp", "gemini", "codex", "kiro"];
+      const { code, out } = runSummaryInstall(all);
+      expect(code).toBe(0);
+      expectOnlySections(out, all);
+      const order = ["  OPENCODE USERS", ...all.map((a) => SUMMARY_HEADERS[a]), "CLAUDE CODE USERS:"].map((h) =>
+        out.indexOf(h),
+      );
+      expect([...order].sort((a, b) => a - b)).toEqual(order);
+      expect(out).toContain("Launch it: kiro-cli chat --agent plannotator");
+      expect(out).toContain("Plan review is configured through the Codex Stop hook.");
+      // The OMP section names the plugin install command (#1814).
+      expect(out).toContain("  omp plugin install @plannotator/pi-extension");
+    });
+
+    test("a detected-but-skipped agent keeps its honest skipped section", () => {
+      const { code, out } = runSummaryInstall(["codex", "gemini"], ["--skip-codex", "--skip-gemini"]);
+      expect(code).toBe(0);
+      expectOnlySections(out, ["codex", "gemini"]);
+      expect(out).toContain("Codex was detected, but the integration was skipped (--skip-codex).");
+      expect(out).toContain("Gemini was detected, but the integration was skipped (--skip-gemini).");
+    });
+
+    test("--skip-skills: detected sections report the skip, undetected ones stay hidden", () => {
+      const { code, out } = runSummaryInstall(["kiro"], ["--skip-skills"]);
+      expect(code).toBe(0);
+      expectOnlySections(out, ["kiro"]);
+      expect(out).toContain("Kiro was detected, but skills were skipped (--skip-skills)");
+      expect(out).toContain("  CLAUDE CODE USERS: BINARY INSTALLED");
+    });
+
+    test("--minimal prints no agent sections at all, detected or not", () => {
+      const { code, out } = runSummaryInstall(["pi", "omp", "gemini", "codex", "kiro"], ["--minimal"]);
+      expect(code).toBe(0);
+      expect(out).toContain("Minimal install complete");
+      expect(out).not.toContain(" USERS");
+    });
+  },
+);
+
+// ---------------------------------------------------------------------------
+// install-flags.json (#1634): each successful run records the install-affecting
+// flags it was given, so a background auto-update re-runs with the same ones.
+// ---------------------------------------------------------------------------
+describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
+  "install.sh remembers its command-line flags",
+  () => {
+    const readFlags = (home: string) =>
+      JSON.parse(readFileSync(join(home, ".plannotator", "install-flags.json"), "utf-8"));
+
+    test("a full install records its opt-out flags as neutral ids", () => {
+      const { code, home } = runSummaryInstall(["codex"], ["--skip-codex", "--skip-skills"]);
+      expect(code).toBe(0);
+      expect(readFlags(home)).toEqual({ v: 1, flags: ["skip-codex", "skip-skills"] });
+    });
+
+    test("a minimal install records --minimal (the binary-only early exit writes it too)", () => {
+      const { code, home } = runSummaryInstall([], ["--minimal", "--skip-gemini"]);
+      expect(code).toBe(0);
+      expect(readFlags(home)).toEqual({ v: 1, flags: ["minimal", "skip-gemini"] });
+    });
+
+    test("a run with no flags records an empty set; non-install flags are never recorded", () => {
+      const { code, home } = runSummaryInstall([]);
+      expect(code).toBe(0);
+      // runSummaryInstall passes --version, --non-interactive and --no-extras.
+      expect(readFlags(home)).toEqual({ v: 1, flags: [] });
+    });
+
+    test("the file lands in PLANNOTATOR_DATA_DIR when it is set", () => {
+      const sandbox = setupInstallSandbox({ gh: "pass-all" });
+      const dataDir = join(sandbox.home, "custom-data");
+      const r = Bun.spawnSync(
+        ["bash", join(scriptsDir, "install.sh"), "--version", "v99.9.9", "--minimal", "--skip-attestation", "--non-interactive"],
+        {
+          env: {
+            HOME: sandbox.home,
+            TMPDIR: join(sandbox.home, "tmp"),
+            PATH: `${sandbox.stub}:/usr/bin:/bin`,
+            STUB_CHECKSUM: FAKE_BINARY_SHA256,
+            STUB_ATT_JSON: ATTESTATION_FIXTURE,
+            PLANNOTATOR_DATA_DIR: dataDir,
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      expect(r.exitCode).toBe(0);
+      expect(JSON.parse(readFileSync(join(dataDir, "install-flags.json"), "utf-8"))).toEqual({
+        v: 1,
+        flags: ["minimal", "skip-attestation"],
+      });
+      expect(existsSync(join(sandbox.home, ".plannotator", "install-flags.json"))).toBe(false);
+    });
+  },
+);
+
+describe("install-flags.json is written by every installer", () => {
+  test("install.ps1 and install.cmd record the same neutral ids after both exits", () => {
+    const ps = readScript("install.ps1");
+    const cmd = readScript("install.cmd");
+    for (const id of ["minimal", "no-minimal", "verify-attestation", "skip-attestation", "with-call-flow", "skip-codex", "skip-gemini", "skip-kiro", "skip-vibe", "skip-opencode", "skip-skills", "skip-claude-plugin"]) {
+      expect(ps).toContain(`$ids += "${id}"`);
+      expect(cmd).toContain(`call :AddInstallFlag ${id}`);
+    }
+    // Called in the minimal gate and once at the end of the full install.
+    expect(ps.split("\n").filter((l) => l.trim() === "Write-InstallFlags")).toHaveLength(2);
+    expect(cmd.split("\n").filter((l) => l.trim() === "call :WriteInstallFlags")).toHaveLength(2);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // M7: the Windows installers' bundle extraction, exercised under PowerShell
@@ -2620,5 +2909,1147 @@ describe.skipIf(!pwshBin || process.platform === "win32")(
       expect(out).not.toContain("falling back to a plain shallow clone");
       expect(code).toBe(1);
     }, PWSH_SCANNER_TIMEOUT_MS);
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Closing summary on Windows: install.ps1 prints PI USERS / KIRO CLI USERS
+// only for a detected agent (install.ps1 has no Gemini or Codex closing
+// section), and install.cmd prints KIRO CLI USERS only when KIRO_AVAILABLE.
+// The ps1 region is driven under pwsh when available; both are source-scanned.
+// ---------------------------------------------------------------------------
+
+function extractPs1ClosingSummaryRegion(): string {
+  const ps = readScript("install.ps1");
+  const start = ps.indexOf('Write-Host "  OPENCODE USERS"');
+  const end = ps.indexOf("# Warn if plannotator is configured in both settings.json hooks");
+  if (start < 0 || end < 0 || end <= start) {
+    throw new Error("could not locate the closing summary region in install.ps1");
+  }
+  return ps.slice(start, end);
+}
+
+describe("closing summary sections are gated on detection (Windows installers)", () => {
+  test("install.ps1 gates PI USERS on the Pi detection leg and KIRO CLI USERS on $kiroAvailable", () => {
+    const region = extractPs1ClosingSummaryRegion();
+    const piGate = region.indexOf("if ($piDetected) {");
+    const kiroGate = region.indexOf("if ($kiroAvailable) {");
+    expect(region).toContain("$piDetected = [bool](Get-Command pi -ErrorAction SilentlyContinue)");
+    expect(piGate).toBeGreaterThan(0);
+    expect(kiroGate).toBeGreaterThan(piGate);
+    // Each header sits inside its gate, not before it.
+    expect(region.indexOf('Write-Host "  PI USERS"')).toBeGreaterThan(piGate);
+    const ompGate = region.indexOf("if ($ompDetected) {");
+    expect(region).toContain("$ompDetected = [bool](Get-Command omp -ErrorAction SilentlyContinue)");
+    expect(ompGate).toBeGreaterThan(piGate);
+    expect(region.indexOf('Write-Host "  OH MY PI (OMP) USERS"')).toBeGreaterThan(ompGate);
+    expect(region.indexOf('Write-Host "  KIRO CLI USERS"')).toBeGreaterThan(kiroGate);
+    expect(region).not.toContain("Kiro was not detected");
+    // The Claude Code block stays universal.
+    expect(region).toContain('Write-Host "  CLAUDE CODE USERS: YOU ARE ALL SET!"');
+  });
+
+  test("install.cmd prints the KIRO CLI USERS header only inside the KIRO_AVAILABLE gate", () => {
+    const script = readScript("install.cmd");
+    const header = script.indexOf("echo   KIRO CLI USERS");
+    const gate = script.lastIndexOf('if "!KIRO_AVAILABLE!"=="1" (', header);
+    expect(header).toBeGreaterThan(0);
+    expect(gate).toBeGreaterThan(0);
+    // Nothing but the separator lines between the gate and the header.
+    expect(script.slice(gate, header)).toBe(
+      'if "!KIRO_AVAILABLE!"=="1" (\n    echo.\n    echo ==========================================\n    ',
+    );
+    expect(script).not.toContain("Kiro was not detected");
+  });
+});
+
+function runPs1ClosingSummary(opts: { pi: boolean; kiro: boolean; omp?: boolean; skipKiro?: boolean; skipSkills?: boolean }) {
+  const root = mkdtempSync(join(tmpdir(), "plannotator-ps1-summary-test-"));
+  const home = join(root, "home");
+  const stub = join(root, "stub-bin");
+  mkdirSync(home, { recursive: true });
+  mkdirSync(stub, { recursive: true });
+  if (opts.pi) writeFileSync(join(stub, "pi"), "#!/bin/bash\nexit 0\n", { mode: 0o755 });
+  if (opts.omp) writeFileSync(join(stub, "omp"), "#!/bin/bash\nexit 1\n", { mode: 0o755 });
+  const driver = [
+    `$ErrorActionPreference = "Stop"`,
+    `$skipOpencodeResolved = $false`,
+    `$skipSkillsResolved = $${opts.skipSkills ? "true" : "false"}`,
+    `$skipSkillsSource = "-SkipSkills"`,
+    `$kiroAvailable = $${opts.kiro ? "true" : "false"}`,
+    `$skipKiroResolved = $${opts.skipKiro ? "true" : "false"}`,
+    `$skipKiroSource = "-SkipKiro"`,
+    `$extrasChoice = "no"`,
+    // The Claude Code block reads the plugin-update state and prints the
+    // manual commands through the installer's own helper.
+    `$claudePluginState = "none"`,
+    `$claudePluginVersion = ""`,
+    `$claudePluginId = "plannotator@plannotator"`,
+    extractPs1Function("Write-ClaudePluginManualUpdate"),
+    `Write-Host ""`,
+    `Write-Host "=========================================="`,
+    extractPs1ClosingSummaryRegion(),
+    `exit 0`,
+  ].join("\n");
+  const driverPath = join(root, "driver.ps1");
+  writeFileSync(driverPath, driver);
+  const r = Bun.spawnSync([pwshBin!, "-NoProfile", "-File", driverPath], {
+    env: { PATH: `${stub}:/usr/bin:/bin`, HOME: home, USERPROFILE: home, TMPDIR: root },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return { code: r.exitCode, out: r.stdout.toString() + r.stderr.toString() };
+}
+
+describe.skipIf(!pwshBin || process.platform === "win32")(
+  "install.ps1 closing summary under PowerShell",
+  () => {
+    test("nothing detected: no PI or KIRO section, universal sections intact", () => {
+      const { code, out } = runPs1ClosingSummary({ pi: false, kiro: false });
+      expect(code).toBe(0);
+      expect(out).not.toContain("PI USERS");
+      expect(out).not.toContain("OH MY PI (OMP) USERS");
+      expect(out).not.toContain("KIRO CLI USERS");
+      expect(out).not.toContain("was not detected");
+      expect(out).toContain("OPENCODE USERS");
+      expect(out).toContain("CLAUDE CODE USERS: YOU ARE ALL SET!");
+    }, PWSH_SCANNER_TIMEOUT_MS);
+
+    test("pi and kiro detected: both sections print", () => {
+      const { code, out } = runPs1ClosingSummary({ pi: true, kiro: true });
+      expect(code).toBe(0);
+      expect(out).toContain("  PI USERS");
+      expect(out).toContain("  KIRO CLI USERS");
+      expect(out).toContain("Launch it: kiro-cli chat --agent plannotator");
+    }, PWSH_SCANNER_TIMEOUT_MS);
+
+    test("omp detected: the OMP section names the plugin install command", () => {
+      const { code, out } = runPs1ClosingSummary({ pi: false, kiro: false, omp: true });
+      expect(code).toBe(0);
+      expect(out).toContain("  OH MY PI (OMP) USERS");
+      expect(out).toContain("  omp plugin install @plannotator/pi-extension");
+      expect(out.split("\n")).not.toContain("  PI USERS");
+    }, PWSH_SCANNER_TIMEOUT_MS);
+
+    test("detected-but-skipped Kiro keeps its honest skipped section", () => {
+      const { code, out } = runPs1ClosingSummary({ pi: false, kiro: true, skipKiro: true });
+      expect(code).toBe(0);
+      expect(out).toContain("Kiro was detected, but the integration was skipped (-SkipKiro).");
+      expect(out).not.toContain("PI USERS");
+    }, PWSH_SCANNER_TIMEOUT_MS);
+
+    test("-SkipSkills with Kiro detected reports the skills skip", () => {
+      const { code, out } = runPs1ClosingSummary({ pi: false, kiro: true, skipSkills: true });
+      expect(code).toBe(0);
+      expect(out).toContain("Kiro was detected, but skills were skipped (-SkipSkills)");
+      expect(out).toContain("CLAUDE CODE USERS: BINARY INSTALLED");
+    }, PWSH_SCANNER_TIMEOUT_MS);
+  },
+);
+
+// Auto-update (#1634) runs these scripts in the background while other
+// plannotator processes may be running, so the binary swap must never leave
+// the path missing (sh) and must never try to overwrite a running .exe
+// (ps1/cmd, where Windows refuses; renaming a running exe is allowed).
+describe("binary replacement is safe while plannotator is running", () => {
+  test("install.sh stages next to the target and renames over it, with no rm first", () => {
+    const script = readScript("install.sh");
+    const stage = script.indexOf('staged_file="$INSTALL_DIR/.plannotator.new.$$"');
+    const swap = script.indexOf('mv -f "$staged_file" "$INSTALL_DIR/plannotator"');
+    expect(stage).toBeGreaterThan(0);
+    expect(swap).toBeGreaterThan(stage);
+    expect(script).not.toContain('rm -f "$INSTALL_DIR/plannotator" "$INSTALL_DIR/plannotator.exe"');
+  });
+
+  test("install.ps1 renames the running exe aside before moving the new one in", () => {
+    const script = readScript("install.ps1");
+    const aside = script.indexOf("Move-Item -Force $targetExe $asideExe -ErrorAction Stop");
+    const place = script.indexOf('Move-Item -Force $tmpFile "$installDir\\plannotator.exe"');
+    expect(aside).toBeGreaterThan(0);
+    expect(place).toBeGreaterThan(aside);
+  });
+
+  test("install.cmd renames the running exe aside before moving the new one in", () => {
+    const script = readScript("install.cmd");
+    const aside = script.indexOf('move /y "!INSTALL_PATH!" "!INSTALL_PATH!.old"');
+    const place = script.indexOf('move /y "!TEMP_FILE!" "!INSTALL_PATH!"');
+    expect(aside).toBeGreaterThan(0);
+    expect(place).toBeGreaterThan(aside);
+  });
+});
+
+describe("latest tag is parsed by key, not by line (#1655)", () => {
+  // GitHub can serve releases/latest compact on a single line. The old
+  // `grep '"tag_name"' | cut -d'"' -f4` then returned the first quoted value
+  // on that line ("url"), so installs tried to download from the API URL.
+  const script = readScript("install.sh");
+  const parseLine = script
+    .split("\n")
+    .find((line) => line.includes('latest_tag=$(printf') && line.includes("tag_name"));
+
+  const release = {
+    url: "https://api.github.com/repos/backnotprop/plannotator/releases/400625228",
+    html_url: "https://github.com/backnotprop/plannotator/releases/tag/v0.27.24",
+    id: 400625228,
+    tag_name: "v0.27.24",
+    body: 'Notes mention \\"tag_name\\": \\"v9.9.9\\" in text',
+  };
+
+  function runParse(apiBody: string): string {
+    const cmd = `_api_body="$1"\n${parseLine!.trim()}\ncase "$latest_tag" in v[0-9]*.[0-9]*.[0-9]*) ;; *) latest_tag="" ;; esac\nprintf '%s' "$latest_tag"`;
+    const proc = Bun.spawnSync(["bash", "-c", cmd, "bash", apiBody]);
+    return proc.stdout.toString();
+  }
+
+  test("the parse line exists in install.sh", () => {
+    expect(parseLine).toBeDefined();
+    expect(script).not.toContain(`grep '"tag_name"' | cut -d'"' -f4`);
+  });
+
+  test("pretty-printed response", () => {
+    expect(runParse(JSON.stringify(release, null, 2) + "\n200")).toBe("v0.27.24");
+  });
+
+  test("compact single-line response", () => {
+    expect(runParse(JSON.stringify(release) + "\n200")).toBe("v0.27.24");
+  });
+
+  test("a response without a valid tag yields nothing", () => {
+    expect(runParse(JSON.stringify({ url: release.url }) + "\n200")).toBe("");
+    expect(runParse(JSON.stringify({ tag_name: "latest" }) + "\n200")).toBe("");
+  });
+
+  test("install.cmd parses the JSON with PowerShell, not findstr", () => {
+    const cmdScript = readScript("install.cmd");
+    expect(cmdScript).toContain("ConvertFrom-Json).tag_name");
+    expect(cmdScript).not.toContain('findstr /c:"\\"tag_name\\""');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Claude Code marketplace clone: the installers never write it, and repair a
+// hooks.json an earlier installer rewrote.
+//
+// <claude config>/plugins/marketplaces/plannotator is Claude Code's own git
+// clone of this repo; installing or updating the plugin copies apps/hook from
+// it. Installers used to overwrite its apps/hook/hooks/hooks.json with a
+// hard-coded copy that had no "modules" key, so a plugin installed from that
+// clone lost the Claude Code mod. These tests pin both halves: the clone is
+// left byte-for-byte alone, and a clone still carrying an old rewrite is
+// restored to its HEAD, while a user's own edit is never discarded.
+// ---------------------------------------------------------------------------
+
+const REPO_HOOKS_JSON = readFileSync(
+  join(scriptsDir, "..", "apps", "hook", "hooks", "hooks.json"),
+  "utf-8",
+);
+
+// Every hooks.json shape an earlier installer wrote, rebuilt from the old
+// writers: install.sh (#230 PermissionRequest only, #689 + EnterPlanMode),
+// install.ps1 / install.cmd (#230 bare command, #267 unquoted exe path,
+// 47bdd210 quoted exe path; CRLF line endings).
+function legacyPluginHooks(opts: {
+  command: string;
+  improveContext: boolean;
+  eol?: string;
+}): string {
+  const hook = (command: string, timeout: number) => [
+    "        \"hooks\": [",
+    "          {",
+    "            \"type\": \"command\",",
+    `            "command": "${command}",`,
+    `            "timeout": ${timeout}`,
+    "          }",
+    "        ]",
+  ];
+  const lines = ["{", "  \"hooks\": {"];
+  if (opts.improveContext) {
+    lines.push(
+      "    \"PreToolUse\": [",
+      "      {",
+      "        \"matcher\": \"EnterPlanMode\",",
+      ...hook(`${opts.command} improve-context`, 5),
+      "      }",
+      "    ],",
+    );
+  }
+  lines.push(
+    "    \"PermissionRequest\": [",
+    "      {",
+    "        \"matcher\": \"ExitPlanMode\",",
+    ...hook(opts.command, 345600),
+    "      }",
+    "    ]",
+    "  }",
+    "}",
+  );
+  const eol = opts.eol ?? "\n";
+  return lines.join(eol) + eol;
+}
+
+const WIN_EXE = "C:/Users/John Smith/AppData/Local/plannotator/plannotator.exe";
+const LEGACY_REWRITES: Record<string, string> = {
+  "install.sh #230": legacyPluginHooks({ command: "plannotator", improveContext: false }),
+  "install.sh #689": legacyPluginHooks({ command: "plannotator", improveContext: true }),
+  "install.cmd #230": legacyPluginHooks({ command: "plannotator", improveContext: false, eol: "\r\n" }),
+  "install.ps1 #267": legacyPluginHooks({ command: WIN_EXE, improveContext: false, eol: "\r\n" }),
+  "install.ps1 #689": legacyPluginHooks({ command: WIN_EXE, improveContext: true, eol: "\r\n" }),
+  "install.ps1 quoted": legacyPluginHooks({ command: `\\"${WIN_EXE}\\"`, improveContext: true, eol: "\r\n" }),
+};
+
+// Shapes that are NOT an installer's rewrite and must never be discarded.
+const NOT_LEGACY: Record<string, string> = {
+  "the repo's hooks.json": REPO_HOOKS_JSON,
+  "a user's changed timeout": legacyPluginHooks({ command: "plannotator", improveContext: true }).replace("345600", "60"),
+  "a user's extra key": legacyPluginHooks({ command: "plannotator", improveContext: true }).replace(
+    "{\n  \"hooks\"",
+    "{\n  \"modules\": [\"./mine.ts\"],\n  \"hooks\"",
+  ),
+  "a user's other command": legacyPluginHooks({ command: "my-review-tool", improveContext: false }),
+};
+
+function compactHooks(text: string): string {
+  return text.replace(/[\s\uFEFF]/g, "");
+}
+
+describe("legacy plugin hooks.json pattern (all three installers)", () => {
+  const shRe = /^LEGACY_PLUGIN_HOOKS_RE='(.*)'$/m.exec(readScript("install.sh"))?.[1];
+  const ps1Re = /^\$legacyPluginHooksRe = '(.*)'$/m.exec(readScript("install.ps1"))?.[1];
+  const cmdRe = /^set "PLN_HOOKS_RE=(.*)"$/m.exec(readScript("install.cmd"))?.[1];
+
+  test("install.ps1 and install.cmd carry the identical .NET pattern", () => {
+    expect(ps1Re).toBeTruthy();
+    expect(cmdRe).toBe(ps1Re!);
+    // cmd.exe would parse these: keep them out of the pattern. (A caret is
+    // literal inside the quoted set as long as the line has no "!".)
+    expect(cmdRe!).not.toMatch(/["|!%&<>]/);
+  });
+
+  // ERE (install.sh) is JS-compatible as written; the .NET form only needs
+  // its \A / \z anchors spelled for JS.
+  const patterns = () => ({
+    "install.sh": new RegExp(shRe!),
+    "install.ps1/cmd": new RegExp(ps1Re!.replace(/^\\A/, "^").replace(/\\z$/, "$")),
+  });
+
+  for (const [name, text] of Object.entries(LEGACY_REWRITES)) {
+    test(`recognizes the ${name} rewrite`, () => {
+      for (const [script, re] of Object.entries(patterns())) {
+        expect({ script, match: re.test(compactHooks(text)) }).toEqual({ script, match: true });
+      }
+    });
+  }
+
+  for (const [name, text] of Object.entries(NOT_LEGACY)) {
+    test(`does not recognize ${name}`, () => {
+      for (const [script, re] of Object.entries(patterns())) {
+        expect({ script, match: re.test(compactHooks(text)) }).toEqual({ script, match: false });
+      }
+    });
+  }
+});
+
+function makeMarketplaceClone(home: string, configDir = join(home, ".claude")): string {
+  const clone = join(configDir, "plugins", "marketplaces", "plannotator");
+  mkdirSync(join(clone, "apps", "hook", "hooks"), { recursive: true });
+  writeFileSync(join(clone, "apps", "hook", "hooks", "hooks.json"), REPO_HOOKS_JSON);
+  writeFileSync(join(clone, "README.md"), "plannotator\n");
+  const gitEnv = { HOME: home, PATH: process.env.PATH ?? "/usr/bin:/bin" };
+  const run = (args: string[]) => {
+    const r = Bun.spawnSync([Bun.which("git")!, "-C", clone, ...args], { env: gitEnv });
+    if (r.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr.toString()}`);
+    return r.stdout.toString();
+  };
+  run(["init", "-q", "-b", "main"]);
+  run(["add", "-A"]);
+  run(["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "fixture"]);
+  return clone;
+}
+
+function cloneStatus(home: string, clone: string): string {
+  const r = Bun.spawnSync([Bun.which("git")!, "-C", clone, "status", "--porcelain"], {
+    env: { HOME: home, PATH: process.env.PATH ?? "/usr/bin:/bin" },
+  });
+  return r.stdout.toString();
+}
+
+const SANDBOX_INSTALL_ARGS = [
+  "--version", "v99.9.9", "--non-interactive", "--no-extras", "--skip-skills",
+];
+
+describe.skipIf(process.platform === "win32" || !Bun.which("node") || !Bun.which("git"))(
+  "install.sh leaves the Claude Code marketplace clone alone (stubbed PATH, sandbox HOME)",
+  () => {
+    test("a clean clone is untouched, so the plugin keeps its mod", () => {
+      const sandbox = setupInstallSandbox({ gh: "pass-all", git: "real-no-clone" });
+      const clone = makeMarketplaceClone(sandbox.home);
+      const hooks = join(clone, "apps", "hook", "hooks", "hooks.json");
+      const { code, out } = runInstallSh(sandbox, SANDBOX_INSTALL_ARGS);
+      expect(code).toBe(0);
+      expect(readFileSync(hooks, "utf-8")).toBe(REPO_HOOKS_JSON);
+      expect(JSON.parse(readFileSync(hooks, "utf-8")).modules).toEqual(["./mod/register.ts"]);
+      expect(cloneStatus(sandbox.home, clone)).toBe("");
+      expect(out).not.toContain("Restored ");
+    });
+
+    test("a clone carrying an earlier installer's rewrite is restored to HEAD (CLAUDE_CONFIG_DIR)", () => {
+      const sandbox = setupInstallSandbox({ gh: "pass-all", git: "real-no-clone" });
+      const configDir = join(sandbox.home, "claude-config");
+      const clone = makeMarketplaceClone(sandbox.home, configDir);
+      const hooks = join(clone, "apps", "hook", "hooks", "hooks.json");
+      writeFileSync(hooks, LEGACY_REWRITES["install.sh #689"]!);
+      expect(cloneStatus(sandbox.home, clone)).not.toBe("");
+      const { code, out } = runInstallSh(sandbox, SANDBOX_INSTALL_ARGS, {
+        CLAUDE_CONFIG_DIR: configDir,
+      });
+      expect(code).toBe(0);
+      expect(out).toContain(`Restored ${hooks} from its git checkout`);
+      expect(readFileSync(hooks, "utf-8")).toBe(REPO_HOOKS_JSON);
+      expect(cloneStatus(sandbox.home, clone)).toBe("");
+    });
+
+    test("a user's own edit to the clone is never discarded", () => {
+      const sandbox = setupInstallSandbox({ gh: "pass-all", git: "real-no-clone" });
+      const clone = makeMarketplaceClone(sandbox.home);
+      const hooks = join(clone, "apps", "hook", "hooks", "hooks.json");
+      const edited = NOT_LEGACY["a user's changed timeout"]!;
+      writeFileSync(hooks, edited);
+      const { code, out } = runInstallSh(sandbox, SANDBOX_INSTALL_ARGS);
+      expect(code).toBe(0);
+      expect(readFileSync(hooks, "utf-8")).toBe(edited);
+      expect(out).not.toContain("Restored ");
+    });
+
+    test("without a usable git the rewrite is left as is and the install still succeeds", () => {
+      const sandbox = setupInstallSandbox({ gh: "pass-all", git: "real-no-clone" });
+      const clone = makeMarketplaceClone(sandbox.home);
+      const hooks = join(clone, "apps", "hook", "hooks", "hooks.json");
+      writeFileSync(hooks, LEGACY_REWRITES["install.sh #689"]!);
+      writeFileSync(join(sandbox.stub, "git"), gitShimBody("fail"), { mode: 0o755 });
+      const { code } = runInstallSh(sandbox, SANDBOX_INSTALL_ARGS);
+      expect(code).toBe(0);
+      expect(readFileSync(hooks, "utf-8")).toBe(LEGACY_REWRITES["install.sh #689"]!);
+    });
+  },
+);
+
+// ---------------------------------------------------------------------------
+// OpenCode plugin cache. OpenCode 2 caches npm plugins at
+// <cache>/opencode/npm/<name>@<spec>/<generation>/ (packages/util/src/npm.ts
+// in OpenCode 2.0.22), so @plannotator/opencode@latest is the nested
+// npm/@plannotator/opencode@latest. OpenCode 1 used node_modules/ and
+// packages/. Both root <cache> at ${XDG_CACHE_HOME:-~/.cache}.
+// ---------------------------------------------------------------------------
+
+function seedOpenCodeCache(cacheRoot: string) {
+  const oc = join(cacheRoot, "opencode");
+  const paths = {
+    oc1Plugin: join(oc, "node_modules", "@plannotator", "opencode", "package.json"),
+    oc2Latest: join(oc, "npm", "@plannotator", "opencode@latest", "1790000000000", "node_modules", "@plannotator", "opencode", "package.json"),
+    oc2Pinned: join(oc, "npm", "@plannotator", "opencode@0.27.25", "1790000000000", "package.json"),
+    oc2Sibling: join(oc, "npm", "@plannotator", "pi-extension@latest", "1790000000000", "package.json"),
+    oc2Unrelated: join(oc, "npm", "some-plugin@latest", "1790000000000", "package.json"),
+  };
+  for (const p of Object.values(paths)) {
+    mkdirSync(join(p, ".."), { recursive: true });
+    writeFileSync(p, "{}\n");
+  }
+  return paths;
+}
+
+describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
+  "install.sh clears the OpenCode plugin cache (stubbed PATH, sandbox HOME)",
+  () => {
+    test("removes OpenCode 1 and OpenCode 2 entries for our plugin and nothing else", () => {
+      const sandbox = setupInstallSandbox({ gh: "pass-all" });
+      const cache = seedOpenCodeCache(join(sandbox.home, ".cache"));
+      const { code } = runInstallSh(sandbox, SANDBOX_INSTALL_ARGS);
+      expect(code).toBe(0);
+      const npmScope = join(sandbox.home, ".cache", "opencode", "npm", "@plannotator");
+      expect(existsSync(cache.oc1Plugin)).toBe(false);
+      expect(existsSync(join(npmScope, "opencode@latest"))).toBe(false);
+      expect(existsSync(join(npmScope, "opencode@0.27.25"))).toBe(false);
+      expect(existsSync(cache.oc2Sibling)).toBe(true);
+      expect(existsSync(cache.oc2Unrelated)).toBe(true);
+    });
+
+    test("honors XDG_CACHE_HOME and drops the scope directory once it is empty", () => {
+      const sandbox = setupInstallSandbox({ gh: "pass-all" });
+      const xdg = join(sandbox.home, "xdg-cache");
+      const scope = join(xdg, "opencode", "npm", "@plannotator");
+      const latest = join(scope, "opencode@latest", "1790000000000", "package.json");
+      mkdirSync(join(latest, ".."), { recursive: true });
+      writeFileSync(latest, "{}\n");
+      const unrelated = join(xdg, "opencode", "npm", "some-plugin@latest", "package.json");
+      mkdirSync(join(unrelated, ".."), { recursive: true });
+      writeFileSync(unrelated, "{}\n");
+      const { code } = runInstallSh(sandbox, SANDBOX_INSTALL_ARGS, { XDG_CACHE_HOME: xdg });
+      expect(code).toBe(0);
+      expect(existsSync(scope)).toBe(false);
+      expect(existsSync(unrelated)).toBe(true);
+    });
+
+    test("--skip-opencode leaves OpenCode's cache alone", () => {
+      const sandbox = setupInstallSandbox({ gh: "pass-all" });
+      const cache = seedOpenCodeCache(join(sandbox.home, ".cache"));
+      const { code } = runInstallSh(sandbox, [...SANDBOX_INSTALL_ARGS, "--skip-opencode"]);
+      expect(code).toBe(0);
+      for (const p of Object.values(cache)) expect(existsSync(p)).toBe(true);
+    });
+  },
+);
+
+describe("Windows installers clear the OpenCode 2 plugin cache (source scan)", () => {
+  test("install.ps1 roots the cache at XDG_CACHE_HOME and removes only opencode@* under npm\\@plannotator", () => {
+    const script = readScript("install.ps1");
+    expect(script).toContain(
+      '$opencodeCacheDir = if ($env:XDG_CACHE_HOME) { "$env:XDG_CACHE_HOME\\opencode" } else { "$env:USERPROFILE\\.cache\\opencode" }',
+    );
+    // Join-Path throws under ErrorActionPreference=Stop when the drive is not mapped;
+    // a string cannot, so an unusual XDG_CACHE_HOME never aborts the install.
+    expect(script).not.toContain(
+      'Join-Path $env:XDG_CACHE_HOME',
+    );
+    expect(script).toContain('$opencodeNpmScope = "$opencodeCacheDir\\npm\\@plannotator"');
+    expect(script).toContain("Where-Object { $_.Name -like 'opencode@*' }");
+    expect(script).not.toContain('"$env:USERPROFILE\\.cache\\opencode\\node_modules\\@plannotator"');
+  });
+
+  test("install.cmd roots the cache at XDG_CACHE_HOME and removes only opencode@* under npm\\@plannotator", () => {
+    const script = readScript("install.cmd");
+    expect(script).toContain('set "OPENCODE_CACHE_DIR=%XDG_CACHE_HOME%\\opencode"');
+    expect(script).toContain(
+      'for /d %%D in ("!OPENCODE_CACHE_DIR!\\npm\\@plannotator\\opencode@*") do rmdir /s /q "%%~fD" >nul 2>&1',
+    );
+    expect(script).not.toContain('"%USERPROFILE%\\.cache\\opencode\\node_modules\\@plannotator"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Claude Code plugin update. The plugin comes from a GitHub marketplace, which
+// Claude Code does not auto-update, so every installer runs
+// `claude plugin marketplace update plannotator` and
+// `claude plugin update plannotator@plannotator --scope user` when (and only when) the
+// claude CLI is on PATH and the plugin is already installed at user scope.
+// Every run uses a FAKE `claude` that logs its argv; nothing reaches the real
+// CLI, ~/.claude or the network.
+// ---------------------------------------------------------------------------
+
+const CLAUDE_PLUGIN_COMMANDS = [
+  "plugin marketplace update plannotator",
+  "plugin update plannotator@plannotator --scope user",
+];
+
+/** A v2 installed_plugins.json, as Claude Code writes it. */
+function claudePluginRegistry(
+  records: Array<{ scope?: string; version: string; sha?: string }>,
+  id = "plannotator@plannotator",
+): string {
+  return JSON.stringify(
+    {
+      version: 2,
+      plugins: {
+        "other@elsewhere": [{ scope: "user", installPath: "/x/other", version: "9.9.9" }],
+        [id]: records.map((r) => ({
+          ...(r.scope ? { scope: r.scope } : {}),
+          installPath: `/x/cache/plannotator/plannotator/${r.version}`,
+          version: r.version,
+          installedAt: "2026-09-01T00:00:00.000Z",
+          lastUpdated: "2026-09-01T00:00:00.000Z",
+          gitCommitSha: r.sha ?? "aaaaaaa",
+        })),
+      },
+    },
+    null,
+    2,
+  );
+}
+
+// The fake logs one line per call; on `plugin marketplace update` it also notes
+// whether the marketplace clone's hooks.json already carries the mod (proves
+// the update runs after the repair). `plugin update` rewrites the registry to
+// FAKE_CLAUDE_NEW_VERSION when that is set, as the real command records the
+// new install. FAKE_CLAUDE_FAIL=<marketplace|plugin> fails that step;
+// FAKE_CLAUDE_HANG=1 never returns.
+const FAKE_CLAUDE = `#!/bin/bash
+printf '%s\\n' "$*" >> "$FAKE_CLAUDE_LOG"
+if [ -n "$CLAUDECODE" ]; then echo "CLAUDECODE was set" >> "$FAKE_CLAUDE_LOG"; fi
+if [ "$FAKE_CLAUDE_HANG" = "1" ]; then exec sleep 30; fi
+step=""
+[ "$1 $2 $3" = "plugin marketplace update" ] && step="marketplace"
+[ "$1 $2" = "plugin update" ] && step="plugin"
+if [ -n "$FAKE_CLAUDE_FAIL" ] && [ "$FAKE_CLAUDE_FAIL" = "$step" ]; then
+  echo "Updating marketplace..."
+  echo "\${FAKE_CLAUDE_FAIL_MESSAGE:-Error: failed to reach github.com}" >&2
+  exit 3
+fi
+if [ "$step" = "marketplace" ] && [ -n "$FAKE_CLAUDE_HOOKS" ]; then
+  if grep -q '"modules"' "$FAKE_CLAUDE_HOOKS" 2>/dev/null; then
+    echo "hooks-at-marketplace-update: repaired" >> "$FAKE_CLAUDE_LOG"
+  else
+    echo "hooks-at-marketplace-update: legacy" >> "$FAKE_CLAUDE_LOG"
+  fi
+fi
+if [ "$step" = "plugin" ] && [ -n "$FAKE_CLAUDE_NEW_VERSION" ]; then
+  sed "s/0\\.28\\.7/$FAKE_CLAUDE_NEW_VERSION/g; s/aaaaaaa/bbbbbbb/g" "$FAKE_CLAUDE_REGISTRY" > "$FAKE_CLAUDE_REGISTRY.new"
+  mv "$FAKE_CLAUDE_REGISTRY.new" "$FAKE_CLAUDE_REGISTRY"
+fi
+exit 0
+`;
+
+function setupClaudePluginSandbox(opts: {
+  registry?: string | null;
+  claude?: boolean;
+  configDir?: boolean;
+  git?: GitBehavior;
+  plannotatorConfig?: string;
+}) {
+  const sandbox = setupInstallSandbox({
+    gh: "pass-all",
+    git: opts.git,
+    plannotatorConfig: opts.plannotatorConfig,
+  });
+  const configDir = opts.configDir ? join(sandbox.home, "claude-config") : join(sandbox.home, ".claude");
+  const registryPath = join(configDir, "plugins", "installed_plugins.json");
+  if (opts.registry !== null) {
+    mkdirSync(join(configDir, "plugins"), { recursive: true });
+    writeFileSync(registryPath, opts.registry ?? claudePluginRegistry([{ scope: "user", version: "0.28.7" }]));
+  }
+  if (opts.claude !== false) writeFileSync(join(sandbox.stub, "claude"), FAKE_CLAUDE, { mode: 0o755 });
+  const log = join(sandbox.home, "claude-calls.log");
+  const env: Record<string, string> = {
+    // As in an auto-update started from a Claude Code session; the installers
+    // clear it for the claude commands (the fake logs it if it leaks through).
+    CLAUDECODE: "1",
+    FAKE_CLAUDE_LOG: log,
+    FAKE_CLAUDE_REGISTRY: registryPath,
+    ...(opts.configDir ? { CLAUDE_CONFIG_DIR: configDir } : {}),
+  };
+  const calls = () => (existsSync(log) ? readFileSync(log, "utf-8").split("\n").filter(Boolean) : []);
+  return { sandbox, configDir, registryPath, env, calls };
+}
+
+// No --version: the latest-release path, which the stub curl serves. A
+// --version pin skips the plugin update (see the pinned tests).
+const PLUGIN_INSTALL_ARGS = ["--non-interactive", "--no-extras", "--skip-skills"];
+const MISSING_MARKETPLACE =
+  "Error: Marketplace 'plannotator' not found. Available marketplaces: claude-plugins-official";
+const MANUAL_PLUGIN_COMMANDS =
+  "  claude plugin marketplace update plannotator\n  claude plugin update plannotator@plannotator --scope user\n";
+const READD_PLUGIN_COMMANDS =
+  "  claude plugin marketplace add backnotprop/plannotator\n  claude plugin update plannotator@plannotator --scope user\n";
+
+describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
+  "install.sh updates an installed Claude Code plugin (fake claude, sandbox HOME)",
+  () => {
+    test("installed: both update commands run, in order, and the new version is reported", () => {
+      const s = setupClaudePluginSandbox({});
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+        ...s.env,
+        FAKE_CLAUDE_NEW_VERSION: "0.28.11",
+      });
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+      expect(out).toContain(
+        "Updating the Claude Code plugin...\nClaude Code plugin: updated to 0.28.11 (restart Claude Code to load it).\n",
+      );
+      expect(out).toContain("The Claude Code plugin was updated to 0.28.11. Restart Claude Code to load it.");
+      // An installed plugin needs neither install instructions nor manual commands.
+      expect(out).not.toContain("/plugin marketplace add backnotprop/plannotator");
+      expect(out).not.toContain(MANUAL_PLUGIN_COMMANDS);
+    });
+
+    test("installed and already current: says so, with the version", () => {
+      const s = setupClaudePluginSandbox({});
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+      expect(out).toContain("Claude Code plugin: already up to date (0.28.7).");
+      expect(out).toContain("The Claude Code plugin is up to date (0.28.7).");
+    });
+
+    test("runs after the legacy hooks.json repair, against CLAUDE_CONFIG_DIR", () => {
+      const s = setupClaudePluginSandbox({ configDir: true, git: "real-no-clone" });
+      const clone = makeMarketplaceClone(s.sandbox.home, s.configDir);
+      const hooks = join(clone, "apps", "hook", "hooks", "hooks.json");
+      writeFileSync(hooks, LEGACY_REWRITES["install.sh #689"]!);
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+        ...s.env,
+        FAKE_CLAUDE_HOOKS: hooks,
+        FAKE_CLAUDE_NEW_VERSION: "0.28.11",
+      });
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual([
+        CLAUDE_PLUGIN_COMMANDS[0],
+        "hooks-at-marketplace-update: repaired",
+        CLAUDE_PLUGIN_COMMANDS[1],
+      ]);
+      expect(out.indexOf("Restored ")).toBeGreaterThan(-1);
+      expect(out.indexOf("Restored ")).toBeLessThan(out.indexOf("Updating the Claude Code plugin..."));
+    });
+
+    test("a v1 registry record (no scope) counts as the user install", () => {
+      const s = setupClaudePluginSandbox({
+        registry: JSON.stringify({
+          version: 1,
+          plugins: { "plannotator@plannotator": { version: "0.28.7", installPath: "/x/p", gitCommitSha: "aaaaaaa" } },
+        }),
+      });
+      const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+    });
+
+    const notInstalled: Array<[string, string | null]> = [
+      ["no registry", null],
+      ["a registry without the plugin", claudePluginRegistry([{ scope: "user", version: "1.0.0" }], "something@else")],
+      ["only a project-scope install", claudePluginRegistry([{ scope: "project", version: "0.28.7" }])],
+      ["an empty install list", JSON.stringify({ version: 2, plugins: { "plannotator@plannotator": [] } })],
+    ];
+    for (const [name, registry] of notInstalled) {
+      test(`not installed (${name}): no claude command runs, install instructions stay`, () => {
+        const s = setupClaudePluginSandbox({ registry });
+        const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, s.env);
+        expect(code).toBe(0);
+        expect(s.calls()).toEqual([]);
+        expect(out).not.toMatch(/^Claude Code plugin:/m);
+        expect(out).toContain("/plugin marketplace add backnotprop/plannotator");
+        expect(out).toContain(
+          `Updating the plugin? Run these in a terminal, then restart Claude Code:\n${MANUAL_PLUGIN_COMMANDS}`,
+        );
+      });
+    }
+
+    const optOuts: Array<[string, string[], Record<string, string>, string | undefined, string]> = [
+      ["the flag", ["--skip-claude-plugin"], {}, undefined, "--skip-claude-plugin"],
+      ["the env var", [], { PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE: "1" }, undefined, "PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE"],
+      ["the config key", [], {}, '{"skipInstall":{"claudePlugin":true}}\n', "config skipInstall.claudePlugin"],
+      ["the flag over env 0", ["--skip-claude-plugin"], { PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE: "0" }, undefined, "--skip-claude-plugin"],
+    ];
+    for (const [name, args, env, config, source] of optOuts) {
+      test(`opted out by ${name}: nothing runs, the manual commands are printed`, () => {
+        const s = setupClaudePluginSandbox({ plannotatorConfig: config });
+        const { code, out } = runInstallSh(s.sandbox, [...PLUGIN_INSTALL_ARGS, ...args], { ...s.env, ...env });
+        expect(code).toBe(0);
+        expect(s.calls()).toEqual([]);
+        expect(out).toContain(`Claude Code plugin: not updated (${source}).`);
+        expect(out).toContain(
+          `Update the Claude Code plugin: run these in a terminal, then restart Claude Code:\n${MANUAL_PLUGIN_COMMANDS}`,
+        );
+      });
+    }
+
+    test("env var 0 overrides a config opt-out", () => {
+      const s = setupClaudePluginSandbox({ plannotatorConfig: '{"skipInstall":{"claudePlugin":true}}\n' });
+      const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+        ...s.env,
+        PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE: "0",
+      });
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+    });
+
+    test("--minimal runs no claude command and says nothing about the plugin", () => {
+      const s = setupClaudePluginSandbox({});
+      const { code, out } = runInstallSh(s.sandbox, [...PLUGIN_INSTALL_ARGS, "--minimal"], s.env);
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual([]);
+      expect(out).not.toContain("Claude Code plugin");
+    });
+
+    test("a failing marketplace update stops there, keeps the install green and prints the manual commands", () => {
+      const s = setupClaudePluginSandbox({});
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+        ...s.env,
+        FAKE_CLAUDE_FAIL: "marketplace",
+      });
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual([CLAUDE_PLUGIN_COMMANDS[0]]);
+      expect(out).toContain(
+        `Claude Code plugin: could not update it (claude exited 3: Error: failed to reach github.com). Run these, then restart Claude Code:\n${MANUAL_PLUGIN_COMMANDS}`,
+      );
+      expect(out).toContain("Update the Claude Code plugin: run these in a terminal, then restart Claude Code:");
+    });
+
+    test("a failing plugin update is reported the same way", () => {
+      const s = setupClaudePluginSandbox({});
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, { ...s.env, FAKE_CLAUDE_FAIL: "plugin" });
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+      expect(out).toContain(
+        "Claude Code plugin: could not update it (claude exited 3: Error: failed to reach github.com).",
+      );
+    });
+
+    test("a hanging claude is stopped at the time limit and the install still succeeds", () => {
+      const s = setupClaudePluginSandbox({});
+      const started = Date.now();
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+        ...s.env,
+        FAKE_CLAUDE_HANG: "1",
+        PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT: "1",
+      });
+      expect(code).toBe(0);
+      expect(Date.now() - started).toBeLessThan(15_000);
+      expect(s.calls()).toEqual([CLAUDE_PLUGIN_COMMANDS[0]]);
+      expect(out).toContain(
+        "Claude Code plugin: could not update it (timed out after 1s). Run these, then restart Claude Code:",
+      );
+    }, 30_000);
+
+    test("no claude on PATH: nothing runs, the banner keeps the manual commands", () => {
+      const s = setupClaudePluginSandbox({ claude: false });
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual([]);
+      expect(out).not.toContain("Updating the Claude Code plugin");
+      expect(out).not.toMatch(/^Claude Code plugin:/m);
+      expect(out).toContain(
+        `Update the Claude Code plugin: run these in a terminal, then restart Claude Code:\n${MANUAL_PLUGIN_COMMANDS}`,
+      );
+    });
+
+    test("--skip-claude-plugin is remembered in install-flags.json", () => {
+      const s = setupClaudePluginSandbox({});
+      const { code } = runInstallSh(s.sandbox, [...PLUGIN_INSTALL_ARGS, "--skip-claude-plugin"], s.env);
+      expect(code).toBe(0);
+      expect(
+        JSON.parse(readFileSync(join(s.sandbox.home, ".plannotator", "install-flags.json"), "utf-8")),
+      ).toEqual({ v: 1, flags: ["skip-skills", "skip-claude-plugin"] });
+    });
+
+    test("a --version pin skips the update: a pinned binary keeps the plugin it has", () => {
+      const s = setupClaudePluginSandbox({});
+      const { code, out } = runInstallSh(s.sandbox, [...PLUGIN_INSTALL_ARGS, "--version", "v0.27.0"], s.env);
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual([]);
+      expect(out).toContain(
+        "Claude Code plugin: not updated: pinned to v0.27.0; updating would install the newest plugin.\n",
+      );
+      expect(out).toContain(
+        `Update the Claude Code plugin: run these in a terminal, then restart Claude Code:\n${MANUAL_PLUGIN_COMMANDS}`,
+      );
+    });
+
+    test("auto-update's --version (the newest release, exported as PLANNOTATOR_UPDATE_VERSION) is not a pin", () => {
+      const s = setupClaudePluginSandbox({});
+      const { code } = runInstallSh(s.sandbox, [...PLUGIN_INSTALL_ARGS, "--version", "v99.9.9"], {
+        ...s.env,
+        PLANNOTATOR_UPDATE_VERSION: "v99.9.9",
+      });
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+    });
+
+    test("a missing plannotator marketplace prints the re-add command instead", () => {
+      const s = setupClaudePluginSandbox({});
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+        ...s.env,
+        FAKE_CLAUDE_FAIL: "marketplace",
+        FAKE_CLAUDE_FAIL_MESSAGE: MISSING_MARKETPLACE,
+      });
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual([CLAUDE_PLUGIN_COMMANDS[0]]);
+      expect(out).toContain(
+        `Claude Code plugin: could not update it (the plannotator marketplace is not registered). Re-add it, then restart Claude Code:\n${READD_PLUGIN_COMMANDS}`,
+      );
+      expect(out).toContain(
+        `Re-add the Claude Code plugin's marketplace: run these in a terminal, then restart Claude Code:\n${READD_PLUGIN_COMMANDS}`,
+      );
+      expect(out).not.toContain(MANUAL_PLUGIN_COMMANDS);
+    });
+
+    test("its temporary files live in a private mktemp directory that is removed afterwards", () => {
+      const s = setupClaudePluginSandbox({});
+      const tmp = join(s.sandbox.home, "tmp");
+      const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+        ...s.env,
+        FAKE_CLAUDE_HANG: "1",
+        PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT: "1",
+      });
+      expect(code).toBe(0);
+      expect(readdirSync(tmp).filter((n) => n.includes("claude-plugin") || n.includes("time-limit"))).toEqual([]);
+    }, 30_000);
+
+    test("no temporary directory: nothing runs, the manual commands are printed", () => {
+      const s = setupClaudePluginSandbox({});
+      // mktemp fails only for the plugin update's directory.
+      writeFileSync(
+        join(s.sandbox.stub, "mktemp"),
+        `#!/bin/bash\ncase "$*" in *claude-plugin*) exit 1 ;; esac\nexec /usr/bin/mktemp "$@"\n`,
+        { mode: 0o755 },
+      );
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual([]);
+      expect(out).toContain(
+        `Claude Code plugin: could not update it (no temporary directory). Run these, then restart Claude Code:\n${MANUAL_PLUGIN_COMMANDS}`,
+      );
+    });
+  },
+);
+
+describe("Claude Code plugin update: every installer (source scan)", () => {
+  test("each installer takes the opt-out flag, env var and config key", () => {
+    const sh = readScript("install.sh");
+    const ps = readScript("install.ps1");
+    const cmd = readScript("install.cmd");
+    expect(sh).toContain("        --skip-claude-plugin)");
+    expect(sh).toContain('case "${PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE:-}" in');
+    expect(sh).toContain("for _agent in codex gemini kiro vibe opencode skills claudePlugin; do");
+    expect(ps).toContain("[switch]$SkipClaudePlugin");
+    expect(ps).toContain("$env:PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE -match");
+    expect(ps).toContain("$cfg.skipInstall.claudePlugin -is [bool]");
+    expect(cmd).toContain('if /i "%~1"=="--skip-claude-plugin" (');
+    expect(cmd).toContain('if /i "!PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE!"=="%%V"');
+    expect(cmd).toContain("'skills','claudePlugin'");
+  });
+
+  test("each installer runs the update after the legacy hooks.json repair", () => {
+    const pairs: Array<[string, string, string]> = [
+      ["install.sh", 'repair_legacy_plugin_hooks "$PLUGIN_MARKETPLACE_DIR" || true', "update_claude_plugin_if_installed || true"],
+      ["install.ps1", "try { Repair-LegacyPluginHooks -Clone $pluginMarketplaceDir } catch { }", "try { Update-ClaudePluginIfInstalled } catch { }"],
+      ["install.cmd", 'if exist "!PLUGIN_HOOKS!" call :RepairLegacyPluginHooks', "\ncall :UpdateClaudePlugin\n"],
+    ];
+    for (const [name, repair, update] of pairs) {
+      const script = readScript(name);
+      const r = script.indexOf(repair);
+      const u = script.indexOf(update);
+      expect({ name, repair: r > 0, update: u > r }).toEqual({ name, repair: true, update: true });
+    }
+  });
+
+  test("every installer updates, and tells people to update, the user scope", () => {
+    // `claude plugin update` auto-detects the scope on current Claude Code: from
+    // inside a project with a project-scope install it would update that one.
+    for (const name of ["install.sh", "install.ps1", "install.cmd"]) {
+      const script = readScript(name);
+      const bare = script.split("\n").filter((l) => /plugin update (plannotator@plannotator|\$\{CLAUDE_PLUGIN_ID\}|\$claudePluginId|' \+ \$id)/.test(l) && !l.includes("--scope user") && !/'--scope', 'user'|"--scope", "user"/.test(l) && !/^\s*(#|REM )/.test(l));
+      expect({ name, bare }).toEqual({ name, bare: [] });
+    }
+    expect(readScript("install.cmd")).toContain(
+      'if /i not "!VERSION!"=="latest" if not "!TAG!"=="!PLANNOTATOR_UPDATE_VERSION!" set "PLN_CP_PINNED=!TAG!"',
+    );
+  });
+
+  test("install.cmd's PowerShell carries nothing cmd.exe would reinterpret", () => {
+    expect(extractCmdClaudePluginCommand()).not.toMatch(/["%!]/);
+  });
+});
+
+/** The PowerShell install.cmd runs inside :UpdateClaudePlugin. */
+function extractCmdClaudePluginCommand(): string {
+  const cmd = readScript("install.cmd");
+  const sub = cmd.slice(cmd.indexOf("\n:UpdateClaudePlugin\n"));
+  const m = /^powershell -NoProfile -ExecutionPolicy Bypass -Command "(.*)"$/m.exec(sub);
+  if (!m) throw new Error("could not locate the :UpdateClaudePlugin PowerShell in install.cmd");
+  return m[1];
+}
+
+/** One top-level function of install.ps1, by name, through its closing brace. */
+function extractPs1Function(name: string): string {
+  const ps = readScript("install.ps1");
+  const start = ps.indexOf(`function ${name} {`);
+  const end = ps.indexOf("\n}\n", start);
+  if (start < 0 || end < 0) throw new Error(`could not locate function ${name} in install.ps1`);
+  return ps.slice(start, end + 2);
+}
+
+function extractPs1ClaudePluginRegion(): string {
+  const ps = readScript("install.ps1");
+  const start = ps.indexOf('$claudePluginId = "plannotator@plannotator"');
+  const marker = "try { Update-ClaudePluginIfInstalled } catch { }";
+  const end = ps.indexOf(marker);
+  if (start < 0 || end < 0 || end <= start) {
+    throw new Error("could not locate the Claude Code plugin region in install.ps1");
+  }
+  return ps.slice(start, end + marker.length);
+}
+
+type PluginRunner = "install.ps1" | "install.cmd";
+
+/**
+ * Drive the Windows installers' plugin update under PowerShell: install.ps1's
+ * region (extracted like the other ps1 regions), or the exact PowerShell
+ * command install.cmd hands to `powershell -Command`. On Unix PowerShell a
+ * backslash is an ordinary separator character, so the registry path is
+ * handed in directly: CLAUDE_CONFIG_DIR is overridden after extraction for
+ * ps1, and PLN_CP_REGISTRY is what install.cmd passes.
+ */
+function runWindowsClaudePluginUpdate(
+  runner: PluginRunner,
+  s: ReturnType<typeof setupClaudePluginSandbox>,
+  opts: { skipSource?: string; pinned?: string; env?: Record<string, string> } = {},
+) {
+  const root = mkdtempSync(join(tmpdir(), "plannotator-ps-plugin-test-"));
+  const driverPath = join(root, "driver.ps1");
+  const body =
+    runner === "install.ps1"
+      ? [
+          `$ErrorActionPreference = "Stop"`,
+          `$skipClaudePluginResolved = $${opts.skipSource ? "true" : "false"}`,
+          `$skipClaudePluginSource = "${opts.skipSource ?? ""}"`,
+          // As install.ps1 resolves them: -Version stays "latest" unless pinned.
+          `$Version = "${opts.pinned ?? "latest"}"`,
+          `$latestTag = "${opts.pinned ?? "v99.9.9"}"`,
+          extractPs1ClaudePluginRegion().replace(
+            /^\$claudePluginRegistry = .*$/m,
+            "$claudePluginRegistry = $env:PLN_CP_REGISTRY",
+          ),
+          `Write-Host ("STATE=" + $claudePluginState + " VERSION=" + $claudePluginVersion)`,
+          `exit 0`,
+        ]
+      : [extractCmdClaudePluginCommand()];
+  writeFileSync(driverPath, body.join("\n"));
+  const r = Bun.spawnSync([pwshBin!, "-NoProfile", "-File", driverPath], {
+    env: {
+      PATH: `${s.sandbox.stub}:/usr/bin:/bin`,
+      HOME: s.sandbox.home,
+      USERPROFILE: s.sandbox.home,
+      TMPDIR: join(s.sandbox.home, "tmp"),
+      PLN_CP_REGISTRY: s.registryPath,
+      ...(runner === "install.cmd" && opts.skipSource ? { PLN_CP_SKIP: opts.skipSource } : {}),
+      ...(runner === "install.cmd" && opts.pinned ? { PLN_CP_PINNED: opts.pinned } : {}),
+      ...s.env,
+      ...opts.env,
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return { code: r.exitCode, out: r.stdout.toString() + r.stderr.toString() };
+}
+
+describe.skipIf(!pwshBin || process.platform === "win32")(
+  "Windows installers update an installed Claude Code plugin (PowerShell, fake claude)",
+  () => {
+    // install.cmd's PowerShell reports its state as its exit code.
+    const CMD_STATE = {
+      none: 0,
+      manual: 20,
+      skipped: 21,
+      updated: 22,
+      current: 23,
+      failed: 24,
+      "no-marketplace": 25,
+    };
+    const expectState = (
+      runner: PluginRunner,
+      r: { code: number; out: string },
+      expected: keyof typeof CMD_STATE,
+    ) => {
+      if (runner === "install.cmd") {
+        expect({ code: r.code, out: r.out }).toMatchObject({ code: CMD_STATE[expected] });
+      } else {
+        expect(r.code).toBe(0);
+        expect(r.out).toContain(`STATE=${expected} `);
+      }
+    };
+
+    for (const runner of ["install.ps1", "install.cmd"] as const) {
+      test(`${runner}: installed - both commands run in order and the new version is reported`, () => {
+        const s = setupClaudePluginSandbox({});
+        const r = runWindowsClaudePluginUpdate(runner, s, { env: { FAKE_CLAUDE_NEW_VERSION: "0.28.11" } });
+        expectState(runner, r, "updated");
+        expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+        expect(r.out).toContain(
+          "Updating the Claude Code plugin...\nClaude Code plugin: updated to 0.28.11 (restart Claude Code to load it).\n",
+        );
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      test(`${runner}: already current`, () => {
+        const s = setupClaudePluginSandbox({});
+        const r = runWindowsClaudePluginUpdate(runner, s);
+        expectState(runner, r, "current");
+        expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+        expect(r.out).toContain("Claude Code plugin: already up to date (0.28.7).");
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      test(`${runner}: a project-scope-only install is left alone`, () => {
+        const s = setupClaudePluginSandbox({
+          registry: claudePluginRegistry([{ scope: "project", version: "0.28.7" }]),
+        });
+        const r = runWindowsClaudePluginUpdate(runner, s);
+        expectState(runner, r, "none");
+        expect(s.calls()).toEqual([]);
+        expect(r.out).not.toContain("Claude Code plugin");
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      test(`${runner}: opted out - nothing runs`, () => {
+        const s = setupClaudePluginSandbox({});
+        const r = runWindowsClaudePluginUpdate(runner, s, { skipSource: "-SkipClaudePlugin" });
+        expectState(runner, r, "skipped");
+        expect(s.calls()).toEqual([]);
+        expect(r.out).toContain("Claude Code plugin: not updated (-SkipClaudePlugin).");
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      test(`${runner}: a failing claude never fails the run and prints the manual commands`, () => {
+        const s = setupClaudePluginSandbox({});
+        const r = runWindowsClaudePluginUpdate(runner, s, { env: { FAKE_CLAUDE_FAIL: "marketplace" } });
+        expectState(runner, r, "failed");
+        expect(s.calls()).toEqual([CLAUDE_PLUGIN_COMMANDS[0]]);
+        expect(r.out).toContain(
+          `Claude Code plugin: could not update it (claude exited 3: Error: failed to reach github.com). Run these, then restart Claude Code:\n${MANUAL_PLUGIN_COMMANDS}`,
+        );
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      test(`${runner}: a hanging claude is stopped at the time limit`, () => {
+        const s = setupClaudePluginSandbox({});
+        const started = Date.now();
+        const r = runWindowsClaudePluginUpdate(runner, s, {
+          env: { FAKE_CLAUDE_HANG: "1", PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT: "1" },
+        });
+        expectState(runner, r, "failed");
+        expect(Date.now() - started).toBeLessThan(20_000);
+        expect(r.out).toContain("Claude Code plugin: could not update it (timed out after 1s).");
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      test(`${runner}: a claude that exits at once without reading stdin is a normal run, every time`, () => {
+        // Start-Process -RedirectStandardInput wrote into the pipe after the
+        // start and threw "Broken pipe" when claude had already exited (CI on
+        // Linux, run 38076200627). Repeat to make that race show if it is back.
+        for (let i = 0; i < 5; i++) {
+          const s = setupClaudePluginSandbox({});
+          writeFileSync(
+            join(s.sandbox.stub, "claude"),
+            `#!/bin/sh\nprintf '%s\\n' "$*" >> "$FAKE_CLAUDE_LOG"\nexit 0\n`,
+            { mode: 0o755 },
+          );
+          const r = runWindowsClaudePluginUpdate(runner, s);
+          expect(r.out).not.toContain("could not run claude");
+          expectState(runner, r, "current");
+          expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+        }
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      test(`${runner}: a --version pin skips the update`, () => {
+        const s = setupClaudePluginSandbox({});
+        const r = runWindowsClaudePluginUpdate(runner, s, { pinned: "v0.27.0" });
+        expectState(runner, r, "skipped");
+        expect(s.calls()).toEqual([]);
+        expect(r.out).toContain(
+          "Claude Code plugin: not updated: pinned to v0.27.0; updating would install the newest plugin.\n",
+        );
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      test(`${runner}: a missing plannotator marketplace prints the re-add command`, () => {
+        const s = setupClaudePluginSandbox({});
+        const r = runWindowsClaudePluginUpdate(runner, s, {
+          env: { FAKE_CLAUDE_FAIL: "marketplace", FAKE_CLAUDE_FAIL_MESSAGE: MISSING_MARKETPLACE },
+        });
+        expectState(runner, r, "no-marketplace");
+        expect(s.calls()).toEqual([CLAUDE_PLUGIN_COMMANDS[0]]);
+        expect(r.out).toContain(
+          `Claude Code plugin: could not update it (the plannotator marketplace is not registered). Re-add it, then restart Claude Code:\n${READD_PLUGIN_COMMANDS}`,
+        );
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      test(`${runner}: no claude on PATH - nothing runs`, () => {
+        const s = setupClaudePluginSandbox({ claude: false });
+        const r = runWindowsClaudePluginUpdate(runner, s);
+        expectState(runner, r, "manual");
+        expect(s.calls()).toEqual([]);
+        expect(r.out).not.toContain("Updating the Claude Code plugin");
+      }, PWSH_SCANNER_TIMEOUT_MS);
+    }
   },
 );

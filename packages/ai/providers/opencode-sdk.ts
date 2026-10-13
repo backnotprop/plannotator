@@ -90,11 +90,28 @@ export class OpenCodeProvider implements AIProvider {
 		// real URL back from the child's "listening" line), so every Plannotator
 		// process gets its own server instead of piling onto a shared default
 		// port. An explicitly configured port is still honored verbatim.
-		const server: { url: string; close: () => void } = await createOpencodeServer({
-			hostname: this.config.hostname ?? "127.0.0.1",
-			port: this.config.port ?? 0,
-			timeout: 15_000,
-		});
+		let server: { url: string; close: () => void };
+		try {
+			server = await createOpencodeServer({
+				hostname: this.config.hostname ?? "127.0.0.1",
+				port: this.config.port ?? 0,
+				timeout: 15_000,
+			});
+		} catch (err: unknown) {
+			// A missing CLI is a spawn error with code ENOENT in every runtime
+			// (Node: "spawn opencode ENOENT"; Bun: "Executable not found in
+			// $PATH"; cross-spawn re-emits the Windows cmd.exe miss the same
+			// way). Match the code only: the SDK's other failures embed the
+			// child's stderr in the message, which can say "not found" for
+			// reasons that have nothing to do with the binary.
+			if ((err as NodeJS.ErrnoException | null)?.code === "ENOENT") {
+				throw new Error(
+					"OpenCode CLI (`opencode`) was not found on PATH. Install it (https://opencode.ai) or choose a different AI provider.",
+					{ cause: err },
+				);
+			}
+			throw err;
+		}
 		// A SIGINT/SIGTERM death is routed through process.exit() by the CLI, so
 		// an "exit" handler is what keeps Ctrl-C from orphaning the spawned
 		// `opencode serve` child (server.close() kills it synchronously). The

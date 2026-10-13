@@ -12,6 +12,7 @@ import { AIConfigBar } from './AIConfigBar';
 import { submitHint } from '@plannotator/ui/utils/platform';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import type { AIProviderOption } from '@plannotator/ui/utils/aiProvider';
+import { SessionAskActions, SessionAskNote, SessionAskStatus, sessionAskErrorTone, type SessionAskAction } from '@plannotator/ui/components/ai/SessionAskNotice';
 
 interface AITabProps {
   messages: AIChatEntry[];
@@ -29,6 +30,10 @@ interface AITabProps {
   aiConfig?: { providerId: string | null; model: string | null; reasoningEffort?: string | null };
   onAIConfigChange?: (config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => void;
   hasAISession?: boolean;
+  /** "Ask this session": the reviewer's choice on a busy answer. */
+  onSessionAskAction?: (questionId: string, action: SessionAskAction) => void;
+  /** Optional note on how to get "Ask this session" (askSessionSetupHint). */
+  askSessionSetupHint?: string | null;
 }
 
 interface FileGroup {
@@ -57,6 +62,8 @@ export const AITab: React.FC<AITabProps> = ({
   aiConfig,
   onAIConfigChange,
   hasAISession = false,
+  onSessionAskAction,
+  askSessionSetupHint,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   // File chat groups default to expanded; this tracks the ones the user has
@@ -178,6 +185,7 @@ export const AITab: React.FC<AITabProps> = ({
           selectedReasoningEffort={aiConfig?.reasoningEffort ?? null}
           onReasoningEffortChange={(effort) => onAIConfigChange?.({ reasoningEffort: effort })}
           hasSession={hasAISession}
+          setupHint={askSessionSetupHint}
         />
         {onAskGeneral && <GeneralInput value={generalInput} onChange={setGeneralInput} onSubmit={handleGeneralSubmit} disabled={isStreaming} isStreaming={isStreaming} onStop={onStop} />}
       </div>
@@ -219,7 +227,7 @@ export const AITab: React.FC<AITabProps> = ({
               {isExpanded && (
                 <div className="ml-3 border-l border-border/30 pl-2 space-y-2 mt-1">
                   {fileMessages.map(({ question, response }) => (
-                    <QAPair key={question.id} question={question} response={response} onScrollToLines={onScrollToLines} />
+                    <QAPair key={question.id} question={question} response={response} onScrollToLines={onScrollToLines} onSessionAskAction={onSessionAskAction} />
                   ))}
                 </div>
               )}
@@ -239,7 +247,7 @@ export const AITab: React.FC<AITabProps> = ({
             )}
             <div className="space-y-2">
               {generalMessages.map(({ question, response }) => (
-                <QAPair key={question.id} question={question} response={response} onScrollToLines={onScrollToLines} />
+                <QAPair key={question.id} question={question} response={response} onScrollToLines={onScrollToLines} onSessionAskAction={onSessionAskAction} />
               ))}
             </div>
           </div>
@@ -276,6 +284,7 @@ export const AITab: React.FC<AITabProps> = ({
         selectedReasoningEffort={aiConfig?.reasoningEffort ?? null}
         onReasoningEffortChange={(effort) => onAIConfigChange?.({ reasoningEffort: effort })}
         hasSession={hasAISession}
+        setupHint={askSessionSetupHint}
       />
 
       {/* General question input */}
@@ -357,7 +366,8 @@ const QAPair = memo<{
   question: AIChatEntry['question'];
   response: AIChatEntry['response'];
   onScrollToLines: AITabProps['onScrollToLines'];
-}>(({ question, response, onScrollToLines }) => {
+  onSessionAskAction?: AITabProps['onSessionAskAction'];
+}>(({ question, response, onScrollToLines, onSessionAskAction }) => {
   const scope = getQuestionScope(question);
   const renderedResponse = useMemo(
     () => response.text ? renderChatMarkdown(response.text) : null,
@@ -392,7 +402,13 @@ const QAPair = memo<{
       {/* Response */}
       <div className="group relative p-2.5 rounded-lg border border-border/50 bg-popover/50 hover:bg-muted/30 transition-colors">
         {response.error ? (
-          <p className="text-xs text-destructive">{response.error}</p>
+          <>
+            <p className={`text-xs ${sessionAskErrorTone(response)}`}>{response.error}</p>
+            <SessionAskActions
+              response={response}
+              onAction={onSessionAskAction ? (action) => onSessionAskAction(question.id, action) : undefined}
+            />
+          </>
         ) : response.text ? (
           <>
             <div className="text-xs review-comment-body">
@@ -401,11 +417,14 @@ const QAPair = memo<{
             </div>
             {!response.isStreaming && <CopyButton text={response.text} />}
           </>
+        ) : response.status ? (
+          <SessionAskStatus response={response} />
         ) : response.isStreaming ? (
           <span className="text-xs text-muted-foreground">
             <span className="ai-streaming-cursor" /> Thinking...
           </span>
         ) : null}
+        {!response.error && <SessionAskNote response={response} />}
       </div>
     </div>
   );

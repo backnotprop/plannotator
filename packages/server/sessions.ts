@@ -24,6 +24,12 @@ export interface SessionInfo {
   project: string;
   startedAt: string;
   label: string;
+  /** The agent session that started this one, when the host tagged it (`claude-code:<session id>`). */
+  hostSession?: string;
+  /** The `pn-` id the host gave this review (`PLANNOTATOR_HOST_REVIEW_ID`), when a host started it. */
+  reviewId?: string;
+  /** What the session is of, in full: an absolute path, URL, PR URL or reviewed directory (a bundle's files joined with ", "). */
+  target?: string;
 }
 
 function getSessionsDir(): string {

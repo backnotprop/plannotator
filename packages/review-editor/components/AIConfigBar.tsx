@@ -1,7 +1,9 @@
 import type React from 'react';
 import { useState, useEffect, useRef } from 'react';
 import { getProviderMeta } from '@plannotator/ui/components/ProviderIcons';
-import { type AIProviderOption } from '@plannotator/ui/utils/aiProvider';
+import { findSessionBridge, type AIProviderOption } from '@plannotator/ui/utils/aiProvider';
+import { ModelSourceHint, modelSourceToolForProvider } from '@plannotator/ui/components/ModelSourceHint';
+import { AskSessionSetupHint } from '@plannotator/ui/components/ai/AskSessionSetupHint';
 
 interface AIConfigBarProps {
   providers: AIProviderOption[];
@@ -12,10 +14,12 @@ interface AIConfigBarProps {
   onModelChange: (model: string) => void;
   onReasoningEffortChange: (effort: string | null) => void;
   hasSession: boolean;
+  /** Optional muted line on how to get "Ask this session" (askSessionSetupHint). */
+  setupHint?: string | null;
 }
 
 export const AIConfigBar: React.FC<AIConfigBarProps> = ({
-  providers,
+  providers: offeredProviders,
   selectedProviderId,
   selectedModel,
   selectedReasoningEffort,
@@ -23,7 +27,12 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
   onModelChange,
   onReasoningEffortChange,
   hasSession,
+  setupHint,
 }) => {
+  // "Ask this session": the session that opened Plannotator is the only thing
+  // Ask AI talks to, so the bar shows just its label (one provider, no models).
+  const sessionBridge = findSessionBridge(offeredProviders);
+  const providers = sessionBridge ? [sessionBridge] : offeredProviders;
   const [showSessionNote, setShowSessionNote] = useState(false);
   const [openMenu, setOpenMenu] = useState<'provider' | 'model' | 'effort' | null>(null);
   const [modelSearch, setModelSearch] = useState('');
@@ -53,17 +62,20 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
 
   if (providers.length === 0) {
     return (
+      <>
       <div className="border-t border-border/50 px-2 py-1.5 text-[11px] text-muted-foreground/50">
         No AI providers available
       </div>
+      <AskSessionSetupHint text={setupHint} />
+      </>
     );
   }
 
-  const currentProvider = providers.find(p => p.id === selectedProviderId) ?? providers[0];
+  const currentProvider = sessionBridge ?? providers.find(p => p.id === selectedProviderId) ?? providers[0];
   if (!currentProvider) return null;
   const effectiveProviderId = currentProvider.id;
 
-  const meta = getProviderMeta(currentProvider.name);
+  const meta = getProviderMeta(currentProvider.name, currentProvider.label);
   const Icon = meta.icon;
   const models = currentProvider.models ?? [];
   const defaultModel = models.find(m => m.default) ?? models[0];
@@ -71,8 +83,11 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
   const currentModel = models.find(m => m.id === effectiveModel) ?? defaultModel;
   const currentModelLabel = currentModel?.label;
   const reasoningEfforts = currentModel?.reasoningEfforts ?? [];
-  const effortFallback = currentModel?.defaultReasoningEffort ?? reasoningEfforts[0]?.id ?? '';
-  const activeEffort = selectedReasoningEffort ?? effortFallback;
+  // With nothing picked the bar shows the model's own default effort, or
+  // "Auto" when the provider reports none (Pi: its default level is the user's
+  // own setting) — never the first listed level, which nothing would send.
+  const defaultEffort = currentModel?.defaultReasoningEffort;
+  const activeEffort = selectedReasoningEffort ?? defaultEffort ?? '';
 
   const handleProviderSelect = (id: string) => {
     if (hasSession) setShowSessionNote(true);
@@ -87,7 +102,7 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
     setModelSearch('');
   };
 
-  const handleEffortSelect = (id: string) => {
+  const handleEffortSelect = (id: string | null) => {
     if (hasSession) setShowSessionNote(true);
     onReasoningEffortChange(id);
     setOpenMenu(null);
@@ -100,6 +115,7 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
   );
 
   return (
+    <>
     <div ref={barRef} className="relative border-t border-border/50 px-2 py-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
       {/* Provider selector */}
       {providers.length > 1 ? (
@@ -117,7 +133,7 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
           {openMenu === 'provider' && (
             <div className="ai-config-menu">
               {providers.map(p => {
-                const m = getProviderMeta(p.name);
+                const m = getProviderMeta(p.name, p.label);
                 const ProvIcon = m.icon;
                 const isActive = p.id === effectiveProviderId;
                 return (
@@ -225,6 +241,20 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
 
             {openMenu === 'effort' && (
               <div className="ai-config-menu">
+                {!defaultEffort && (
+                  <button
+                    type="button"
+                    onClick={() => handleEffortSelect(null)}
+                    className={`ai-config-menu-item ${activeEffort === '' ? 'ai-config-menu-item-active' : ''}`}
+                  >
+                    <span>Auto</span>
+                    {activeEffort === '' && (
+                      <svg className="w-3 h-3 ml-auto text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    )}
+                  </button>
+                )}
                 {reasoningEfforts.map(e => {
                   const isActive = e.id === activeEffort;
                   return (
@@ -257,5 +287,12 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
         <span className="text-[10px] text-amber-500 animate-pulse">New chat session</span>
       )}
     </div>
+    <ModelSourceHint
+      tool={modelSourceToolForProvider(currentProvider.name)}
+      info={currentProvider}
+      className="-mt-1 px-2 pb-1.5 text-[10px] text-muted-foreground/50"
+    />
+    <AskSessionSetupHint text={setupHint} />
+    </>
   );
 };

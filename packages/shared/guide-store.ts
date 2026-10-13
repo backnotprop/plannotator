@@ -25,7 +25,7 @@ import { mkdirSync, writeFileSync, readFileSync, readdirSync, renameSync, unlink
 import { createHash } from "crypto";
 import { getPlannotatorDataDir } from "./data-dir";
 import { parseRemoteUrl, parseRemoteHost } from "./repo";
-import { parsePRUrl } from "./pr-types";
+import { getDisplayRepo, parsePRUrl } from "./pr-types";
 import type { CodeGuideOutput, SavedGuideListEntry } from "./guide";
 import {
   buildGuideSnapshot,
@@ -141,7 +141,7 @@ export function deriveGuideRepoKeyFromRemote(remoteUrl: string): string | null {
 export function deriveGuideRepoKeyFromPRUrl(prUrl: string): string | null {
   const ref = parsePRUrl(prUrl);
   if (!ref) return null;
-  const path = ref.platform === "github" ? `${ref.owner}/${ref.repo}` : ref.projectPath;
+  const path = getDisplayRepo(ref);
   return [ref.host, ...path.split("/").filter(Boolean)].map(sanitizeKeySegment).join("__");
 }
 

@@ -35,3 +35,24 @@ export function createAnnotateDecisionSettler<TDecision>(
     },
   };
 }
+
+/**
+ * Whether an annotate `/api/feedback` body is a Done with nothing to send.
+ *
+ * Non-gated annotate has no approve channel, so a Done with no annotations
+ * still posts the legacy zero-state sentence as `feedback`: plain CLI stdout,
+ * `--json` ("annotated") and the OpenCode/Pi consumers depend on those bytes.
+ * The editor additionally marks the body `nothingToSend: true` when the
+ * payload it built carries nothing (no annotations, no edits, no attachments),
+ * so a host that must not start a turn for it (the Claude Code mod's result
+ * record) can tell it apart without reading the English sentence. The flag is
+ * honored only together with empty annotation arrays: a body that carries
+ * annotations is never "nothing", whatever it claims.
+ */
+export function isNothingToSendFeedbackBody(body: unknown): boolean {
+  if (!body || typeof body !== "object") return false;
+  const b = body as Record<string, unknown>;
+  if (b.nothingToSend !== true) return false;
+  const empty = (value: unknown) => value === undefined || (Array.isArray(value) && value.length === 0);
+  return empty(b.annotations) && empty(b.codeAnnotations);
+}

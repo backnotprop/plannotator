@@ -15,7 +15,13 @@
  * sees rendered in chat.
  */
 
-import { readdirSync, statSync, readFileSync } from "node:fs";
+import {
+  accessSync,
+  constants as fsConstants,
+  readdirSync,
+  statSync,
+  readFileSync,
+} from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join, dirname, basename } from "node:path";
 import { homedir } from "node:os";
@@ -27,6 +33,16 @@ const DEFAULT_PROJECTS_DIR = join(claudeConfigDir, "projects");
 const factoryConfigDir =
   process.env.FACTORY_CONFIG_DIR || join(homedir(), ".factory");
 const DEFAULT_FACTORY_SESSIONS_DIR = join(factoryConfigDir, "sessions");
+
+/**
+ * Resolve the Vibe home directory. Vibe (Mistral's TUI agent) respects the
+ * VIBE_HOME env var and defaults to ~/.vibe (mirrors vibe/utils/paths.py).
+ */
+function resolveVibeHome(): string {
+  const raw = process.env.VIBE_HOME;
+  if (raw) return raw.startsWith("~") ? join(homedir(), raw.slice(1)) : raw;
+  return join(homedir(), ".vibe");
+}
 
 /**
  * Normalize a cwd for comparison. On Windows, filesystems are case-insensitive
@@ -152,6 +168,72 @@ export function findSessionLogsForCwd(cwd: string, projectsDirOverride?: string)
   return [];
 }
 
+type ClaudeSessionLogLookup =
+  | { status: "found"; logPath: string }
+  | { status: "missing" }
+  // Invalid id, unreadable file, or the id exists under more than one slug.
+  | { status: "unknown" };
+
+function lookupClaudeSessionLogById(
+  sessionId: string,
+  projectsDirOverride?: string,
+): ClaudeSessionLogLookup {
+  if (
+    typeof sessionId !== "string" ||
+    !sessionId ||
+    sessionId.includes("/") ||
+    sessionId.includes("\\") ||
+    sessionId.includes("\0") ||
+    basename(sessionId) !== sessionId
+  ) {
+    return { status: "unknown" };
+  }
+
+  const projectsDir = projectsDirOverride ?? DEFAULT_PROJECTS_DIR;
+  let projectDirs: string[];
+  try {
+    projectDirs = readdirSync(projectsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT"
+      ? { status: "missing" }
+      : { status: "unknown" };
+  }
+
+  const matches: string[] = [];
+  for (const projectDir of projectDirs) {
+    const candidate = join(projectsDir, projectDir, `${sessionId}.jsonl`);
+    try {
+      if (statSync(candidate).isFile()) {
+        accessSync(candidate, fsConstants.R_OK);
+        matches.push(candidate);
+      }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT" && code !== "ENOTDIR") return { status: "unknown" };
+    }
+    if (matches.length > 1) return { status: "unknown" };
+  }
+
+  return matches[0]
+    ? { status: "found", logPath: matches[0] }
+    : { status: "missing" };
+}
+
+/**
+ * Find a Claude session log by its exact session id across project slugs.
+ * Returns null unless exactly one first-level project directory contains the
+ * corresponding regular file.
+ */
+export function findClaudeSessionLogById(
+  sessionId: string,
+  projectsDirOverride?: string,
+): string | null {
+  const lookup = lookupClaudeSessionLogById(sessionId, projectsDirOverride);
+  return lookup.status === "found" ? lookup.logPath : null;
+}
+
 /**
  * Find Droid/Factory session log candidates for a given working directory.
  * Returns all .jsonl paths sorted by mtime (most recent first).
@@ -220,19 +302,94 @@ export interface SessionMetadata {
   startedAt: number;
 }
 
-/**
- * Read a Claude Code session metadata file for a given PID.
- * Returns null if the file doesn't exist or can't be parsed.
- */
-function readSessionMetadata(
-  pid: number,
-  sessionsDir: string
-): SessionMetadata | null {
-  const metaPath = join(sessionsDir, `${pid}.json`);
-  try {
-    return JSON.parse(readFileSync(metaPath, "utf-8"));
-  } catch {
+export type ClaudeSessionLogResolution =
+  | { status: "unavailable" }
+  | { status: "blocked"; source: "cwd-metadata" }
+  | {
+      status: "identified";
+      sessionId: string;
+      logPath: string | null;
+      source: "ancestor-pid" | "cwd-metadata";
+    };
+
+export interface ClaudeSessionLogResolutionOptions {
+  startPid?: number;
+  cwd?: string;
+  sessionsDir?: string;
+  projectsDir?: string;
+  getParentPid?: (pid: number) => number | null;
+  maxHops?: number;
+  /** Called before a metadata read is retried (test seam). */
+  beforeMetadataRetry?: (path: string) => void;
+}
+
+function parseSessionMetadata(value: unknown): SessionMetadata | null {
+  if (!value || typeof value !== "object") return null;
+  const meta = value as Record<string, unknown>;
+  if (
+    typeof meta.pid !== "number" ||
+    !Number.isFinite(meta.pid) ||
+    typeof meta.sessionId !== "string" ||
+    !meta.sessionId ||
+    typeof meta.cwd !== "string" ||
+    !meta.cwd ||
+    typeof meta.startedAt !== "number" ||
+    !Number.isFinite(meta.startedAt)
+  ) {
     return null;
+  }
+  return {
+    pid: meta.pid,
+    sessionId: meta.sessionId,
+    cwd: meta.cwd,
+    startedAt: meta.startedAt,
+  };
+}
+
+type SessionMetadataReadResult =
+  | { status: "absent" }
+  | { status: "invalid" }
+  | { status: "valid"; metadata: SessionMetadata };
+
+// Claude rewrites its metadata file in place, so a read can land mid-write.
+const SESSION_METADATA_RETRY_MS = 50;
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function readSessionMetadataDetailed(
+  pid: number,
+  sessionsDir: string,
+  beforeRetry?: (path: string) => void,
+): SessionMetadataReadResult {
+  const first = readSessionMetadataOnce(pid, sessionsDir);
+  if (first.status !== "invalid") return first;
+  beforeRetry?.(join(sessionsDir, `${pid}.json`));
+  sleepSync(SESSION_METADATA_RETRY_MS);
+  return readSessionMetadataOnce(pid, sessionsDir);
+}
+
+function readSessionMetadataOnce(
+  pid: number,
+  sessionsDir: string,
+): SessionMetadataReadResult {
+  const metaPath = join(sessionsDir, `${pid}.json`);
+  let content: string;
+  try {
+    content = readFileSync(metaPath, "utf-8");
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT"
+      ? { status: "absent" }
+      : { status: "invalid" };
+  }
+  try {
+    const metadata = parseSessionMetadata(JSON.parse(content));
+    return metadata
+      ? { status: "valid", metadata }
+      : { status: "invalid" };
+  } catch {
+    return { status: "invalid" };
   }
 }
 
@@ -360,49 +517,78 @@ export function getAncestorPids(
  * in metadata) from legitimate concurrent sessions (which have their own PID's
  * metadata file).
  */
-export function isSessionRegistered(
+type SessionRegistrationStatus = "registered" | "unregistered" | "unknown";
+
+function resolveSessionRegistration(
   sessionId: string,
-  sessionsDir: string
-): boolean {
+  sessionsDir: string,
+  beforeRetry?: (path: string) => void,
+): SessionRegistrationStatus {
+  let files: string[];
   try {
-    const files = readdirSync(sessionsDir).filter((f) => f.endsWith(".json"));
-    for (const f of files) {
+    files = readdirSync(sessionsDir).filter((f) => f.endsWith(".json"));
+  } catch {
+    return "unknown";
+  }
+
+  for (const f of files) {
+    const path = join(sessionsDir, f);
+    let content: string;
+    try {
+      content = readFileSync(path, "utf-8");
+    } catch {
+      // Unreadable metadata cannot be attributed to a session.
+      continue;
+    }
+    let value: unknown;
+    try {
+      value = JSON.parse(content);
+    } catch {
+      // Likely caught mid-rewrite. If it stays unparsable it could belong to
+      // the sibling, so keep the session's own transcript rather than risk
+      // returning another live session's conversation.
+      beforeRetry?.(path);
+      sleepSync(SESSION_METADATA_RETRY_MS);
       try {
-        const meta: SessionMetadata = JSON.parse(
-          readFileSync(join(sessionsDir, f), "utf-8")
-        );
-        if (meta?.sessionId === sessionId) return true;
+        value = JSON.parse(readFileSync(path, "utf-8"));
       } catch {
-        // Malformed file — skip
+        return "unknown";
       }
     }
-  } catch {
-    // sessionsDir unreadable
+    // Match on the id alone so a record with other invalid fields still
+    // counts as registering its session.
+    if (
+      value &&
+      typeof value === "object" &&
+      (value as Record<string, unknown>).sessionId === sessionId
+    ) {
+      return "registered";
+    }
   }
-  return false;
+
+  return "unregistered";
+}
+
+export function isSessionRegistered(
+  sessionId: string,
+  sessionsDir: string,
+): boolean {
+  return resolveSessionRegistration(sessionId, sessionsDir) === "registered";
 }
 
 /**
- * Resolve a session log path by walking up the PID chain, checking
- * `~/.claude/sessions/<pid>.json` at each hop for a session metadata match.
+ * Resolve a session by walking up the PID chain, checking
+ * `~/.claude/sessions/<pid>.json` at each hop for session metadata.
  *
- * When the matched log is not the most recently modified file in the project
- * directory, checks whether the newer file is a "ghost" session — one created
- * by /clear that was never registered in any metadata file. If so, prefers the
- * ghost (it's the current session). If the newer file belongs to a registered
- * concurrent session, keeps the PID-based result.
+ * The session id is resolved across project slugs because a worktree can move
+ * after Claude records its launch cwd. When the exact log has a newer sibling,
+ * an unregistered sibling is a "ghost" session created by /clear and wins.
  */
-export function resolveSessionLogByAncestorPids(
-  opts: {
-    startPid?: number;
-    sessionsDir?: string;
-    projectsDir?: string;
-    getParentPid?: (pid: number) => number | null;
-    maxHops?: number;
-  } = {}
-): string | null {
+function resolveSessionLogByAncestorPidsDetailed(
+  opts: ClaudeSessionLogResolutionOptions = {},
+): ClaudeSessionLogResolution {
   const startPid = opts.startPid ?? process.ppid;
-  if (!startPid) return null;
+  if (!startPid) return { status: "unavailable" };
   const sessionsDir = opts.sessionsDir ?? DEFAULT_SESSIONS_DIR;
   // Fresh closure per call: each resolver invocation gets its own snapshot,
   // so the process table can't go stale between unrelated lookups.
@@ -411,24 +597,80 @@ export function resolveSessionLogByAncestorPids(
 
   const pids = getAncestorPids(startPid, maxHops, getParent);
   for (const pid of pids) {
-    const meta = readSessionMetadata(pid, sessionsDir);
-    if (!meta?.sessionId || !meta?.cwd) continue;
-
-    const candidates = findSessionLogsForCwd(meta.cwd, opts.projectsDir);
-    const match = candidates.find((p) => p.includes(meta.sessionId));
-    if (match) {
-      // Check for stale metadata: if a newer log exists that has no
-      // registered metadata, it's a ghost session from /clear — prefer it.
-      if (candidates[0] !== match) {
-        const newestSessionId = basename(candidates[0], ".jsonl");
-        if (!isSessionRegistered(newestSessionId, sessionsDir)) {
-          return candidates[0];
-        }
-      }
-      return match;
+    const metadata = readSessionMetadataDetailed(
+      pid,
+      sessionsDir,
+      opts.beforeMetadataRetry,
+    );
+    if (metadata.status === "absent") continue;
+    if (metadata.status === "invalid") {
+      // Still unreadable after a retry: let the cwd scan decide rather than
+      // continuing up the tree into an unrelated outer session.
+      return { status: "unavailable" };
     }
+    const meta = metadata.metadata;
+
+    const match = findClaudeSessionLogById(meta.sessionId, opts.projectsDir);
+    if (!match) {
+      return {
+        status: "identified",
+        sessionId: meta.sessionId,
+        logPath: null,
+        source: "ancestor-pid",
+      };
+    }
+    const preciseMatch: ClaudeSessionLogResolution = {
+      status: "identified",
+      sessionId: meta.sessionId,
+      logPath: match,
+      source: "ancestor-pid",
+    };
+
+    // Check for stale metadata: if a newer sibling log has no registered
+    // metadata, it's a ghost session from /clear — prefer it.
+    const candidates = findSessionLogs(dirname(match));
+    let matchMtime: number;
+    try {
+      matchMtime = statSync(match).mtimeMs;
+    } catch {
+      return preciseMatch;
+    }
+    for (const candidate of candidates) {
+      if (candidate === match) break;
+      try {
+        if (statSync(candidate).mtimeMs <= matchMtime) break;
+        const candidateSessionId = basename(candidate, ".jsonl");
+        const registration = resolveSessionRegistration(
+          candidateSessionId,
+          sessionsDir,
+          opts.beforeMetadataRetry,
+        );
+        if (registration === "unknown") {
+          return preciseMatch;
+        }
+        if (registration === "unregistered") {
+          return {
+            status: "identified",
+            sessionId: candidateSessionId,
+            logPath: candidate,
+            source: "ancestor-pid",
+          };
+        }
+      } catch {
+        return preciseMatch;
+      }
+    }
+
+    return preciseMatch;
   }
-  return null;
+  return { status: "unavailable" };
+}
+
+export function resolveSessionLogByAncestorPids(
+  opts: ClaudeSessionLogResolutionOptions = {},
+): string | null {
+  const resolution = resolveSessionLogByAncestorPidsDetailed(opts);
+  return resolution.status === "identified" ? resolution.logPath : null;
 }
 
 /**
@@ -440,13 +682,9 @@ export function resolveSessionLogByAncestorPids(
  * session-level metadata rather than file modification time, which can be
  * touched by unrelated processes or resumed sessions.
  */
-export function resolveSessionLogByCwdScan(
-  opts: {
-    cwd?: string;
-    sessionsDir?: string;
-    projectsDir?: string;
-  } = {}
-): string | null {
+function resolveSessionLogByCwdScanDetailed(
+  opts: ClaudeSessionLogResolutionOptions = {},
+): ClaudeSessionLogResolution {
   const cwd = opts.cwd ?? process.cwd();
   const sessionsDir = opts.sessionsDir ?? DEFAULT_SESSIONS_DIR;
 
@@ -454,37 +692,79 @@ export function resolveSessionLogByCwdScan(
   try {
     files = readdirSync(sessionsDir).filter((f) => f.endsWith(".json"));
   } catch {
-    return null;
+    return { status: "unavailable" };
   }
 
   const normalizedTarget = normalizeCwdForCompare(cwd);
   const candidates: SessionMetadata[] = [];
   for (const f of files) {
+    let value: unknown;
     try {
-      const meta: SessionMetadata = JSON.parse(
-        readFileSync(join(sessionsDir, f), "utf-8")
-      );
-      if (
-        meta?.sessionId &&
-        meta?.cwd &&
-        normalizeCwdForCompare(meta.cwd) === normalizedTarget
-      ) {
-        candidates.push(meta);
-      }
+      value = JSON.parse(readFileSync(join(sessionsDir, f), "utf-8"));
     } catch {
-      // Malformed metadata file — skip
+      // Cannot associate unreadable or malformed metadata with this cwd.
+      continue;
     }
+    if (!value || typeof value !== "object") continue;
+    const rawCwd = (value as Record<string, unknown>).cwd;
+    if (
+      typeof rawCwd !== "string" ||
+      normalizeCwdForCompare(rawCwd) !== normalizedTarget
+    ) {
+      continue;
+    }
+    const meta = parseSessionMetadata(value);
+    if (!meta) return { status: "blocked", source: "cwd-metadata" };
+    candidates.push(meta);
   }
 
-  // Newest sessions first — pick the most recently started session that has a matching jsonl
+  // Newest first. A session with no transcript yet (opened, no messages) is
+  // skipped so it cannot shadow the active session in the same directory;
+  // a transcript that cannot be resolved unambiguously stops the scan.
   candidates.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
 
-  const logs = findSessionLogsForCwd(cwd, opts.projectsDir);
   for (const meta of candidates) {
-    const match = logs.find((p) => p.includes(meta.sessionId));
-    if (match) return match;
+    const lookup = lookupClaudeSessionLogById(meta.sessionId, opts.projectsDir);
+    if (lookup.status === "missing") continue;
+    return {
+      status: "identified",
+      sessionId: meta.sessionId,
+      logPath: lookup.status === "found" ? lookup.logPath : null,
+      source: "cwd-metadata",
+    };
+  }
+  return { status: "unavailable" };
+}
+
+export function resolveSessionLogByCwdScan(
+  opts: ClaudeSessionLogResolutionOptions = {},
+): string | null {
+  const resolution = resolveSessionLogByCwdScanDetailed(opts);
+  return resolution.status === "identified" ? resolution.logPath : null;
+}
+
+/**
+ * Explain why a Claude session resolution produced no transcript, or null
+ * when there is nothing more specific to say than "no message found".
+ */
+export function describeClaudeSessionResolutionFailure(
+  resolution: ClaudeSessionLogResolution,
+): string | null {
+  if (resolution.status === "blocked") {
+    return "Claude session metadata for this directory could not be used, so the current session is ambiguous. Try again in a moment.";
+  }
+  if (resolution.status === "identified" && !resolution.logPath) {
+    return `No unique readable transcript found for Claude session ${resolution.sessionId} (a new session has none until its first message).`;
   }
   return null;
+}
+
+export function resolveClaudeSessionLog(
+  opts: ClaudeSessionLogResolutionOptions = {},
+): ClaudeSessionLogResolution {
+  const ancestor = resolveSessionLogByAncestorPidsDetailed(opts);
+  if (ancestor.status !== "unavailable") return ancestor;
+  return resolveSessionLogByCwdScanDetailed(opts);
 }
 
 /**
@@ -882,4 +1162,182 @@ export function getRecentRenderedMessages(
   } catch {
     return [];
   }
+}
+
+// --- Mistral Vibe session discovery ---
+
+/**
+ * Vibe session index entry shape. Vibe writes a session index at
+ * $VIBE_HOME/logs/session/.session_index.json mapping session directory names
+ * to metadata. Only the fields we use are declared; others are tolerated.
+ */
+interface VibeSessionIndexEntry {
+  session_id: string;
+  cwd: string;
+  mtime_ns: number;
+  parent_session_id?: string | null;
+}
+type VibeSessionIndex = Record<string, VibeSessionIndexEntry>;
+
+function readVibeSessionIndex(
+  sessionLogDir: string,
+): VibeSessionIndex | null {
+  const indexPath = join(sessionLogDir, ".session_index.json");
+  try {
+    return JSON.parse(readFileSync(indexPath, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the Vibe session log file (messages.jsonl) for a given cwd.
+ *
+ * Vibe stores sessions as directories under $VIBE_HOME/logs/session/, each
+ * containing a messages.jsonl transcript. A .session_index.json maps each
+ * directory name to { session_id, cwd, mtime_ns }. We filter by cwd and pick
+ * the newest by mtime_ns. If no index exists, fall back to scanning the
+ * directory for the newest session_<ts>_<id>/ whose messages.jsonl exists.
+ *
+ * Returns the absolute path to messages.jsonl, or null if none match.
+ */
+export function resolveVibeSessionLogForCwd(
+  cwd: string,
+  opts: { vibeHome?: string } = {},
+): string | null {
+  const vibeHome = opts.vibeHome
+    ? (opts.vibeHome.startsWith("~") ? join(homedir(), opts.vibeHome.slice(1)) : opts.vibeHome)
+    : resolveVibeHome();
+  const sessionLogDir = join(vibeHome, "logs", "session");
+  const normalizedTarget = normalizeCwdForCompare(cwd);
+
+  const index = readVibeSessionIndex(sessionLogDir);
+  if (index) {
+    let bestDir: string | null = null;
+    let bestMtime = -1;
+    for (const [dirName, entry] of Object.entries(index)) {
+      if (!entry?.cwd || !entry?.mtime_ns) continue;
+      if (normalizeCwdForCompare(entry.cwd) !== normalizedTarget) continue;
+      if (entry.mtime_ns > bestMtime) {
+        const messagesPath = join(sessionLogDir, dirName, "messages.jsonl");
+        try {
+          statSync(messagesPath);
+          bestMtime = entry.mtime_ns;
+          bestDir = messagesPath;
+        } catch {
+          continue;
+        }
+      }
+    }
+    // The index is authoritative: a present-but-no-match means no session
+    // for this cwd, so do not fall through to the cwd-blind mtime scan.
+    return bestDir;
+  }
+
+  // Fallback: scan session_<ts>_<id>/ directories when the index is absent.
+  // Each session dir carries a meta.json with its working_directory under
+  // environment (see Vibe's session_logger), so filter on cwd the same way
+  // the index path does — never pick the newest session across all projects.
+  let dirs: string[];
+  try {
+    dirs = readdirSync(sessionLogDir).filter((d) => d.startsWith("session_"));
+  } catch {
+    return null;
+  }
+  let newest: string | null = null;
+  let newestMtime = -1;
+  for (const d of dirs) {
+    const messagesPath = join(sessionLogDir, d, "messages.jsonl");
+    try {
+      const metaPath = join(sessionLogDir, d, "meta.json");
+      const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
+      const metaCwd =
+        typeof meta?.environment?.working_directory === "string"
+          ? meta.environment.working_directory
+          : undefined;
+      if (!metaCwd || normalizeCwdForCompare(metaCwd) !== normalizedTarget) continue;
+      const mtime = statSync(messagesPath).mtimeMs;
+      if (mtime > newestMtime) {
+        newestMtime = mtime;
+        newest = messagesPath;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return newest;
+}
+
+interface VibeMessageEntry {
+  role?: string;
+  content?: string;
+  message_id?: string;
+  reasoning_content?: string;
+  tool_calls?: unknown[];
+}
+
+/**
+ * Extract up to `limit` recent rendered assistant messages from a Vibe
+ * messages.jsonl transcript, newest-first.
+ *
+ * Vibe's transcript line shape: { role, content, message_id, reasoning_content?,
+ * tool_calls? }. A rendered assistant message has role === "assistant" and a
+ * non-empty string `content`; reasoning-only or tool-call-only turns are skipped.
+ * Chunks sharing a message_id are concatenated.
+ */
+export function getRecentVibeMessages(
+  logPath: string,
+  limit: number,
+): RenderedMessage[] {
+  if (limit <= 0) return [];
+  let lines: string[];
+  try {
+    lines = readFileSync(logPath, "utf-8").split("\n");
+  } catch {
+    return [];
+  }
+
+  const buckets = new Map<
+    string,
+    { texts: string[]; lineNums: number[]; timestamp?: string }
+  >();
+
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    let entry: VibeMessageEntry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (entry.role !== "assistant") continue;
+    const text = typeof entry.content === "string" ? entry.content.trim() : "";
+    if (!text) continue;
+    const msgId = entry.message_id;
+    if (!msgId) continue;
+
+    let bucket = buckets.get(msgId);
+    if (!bucket) {
+      if (buckets.size >= limit) continue;
+      bucket = { texts: [], lineNums: [] };
+      buckets.set(msgId, bucket);
+    }
+    bucket.texts.push(text);
+    bucket.lineNums.push(i + 1);
+  }
+
+  return Array.from(buckets, ([messageId, b]) => {
+    const chrono = b.texts.slice().reverse();
+    return {
+      messageId,
+      text: chrono.join("\n"),
+      lineNumbers: b.lineNums.slice().reverse(),
+    };
+  });
+}
+
+/** Convenience: the single most recent rendered assistant message in a Vibe log. */
+export function getLastVibeRenderedMessage(logPath: string): RenderedMessage | null {
+  return getRecentVibeMessages(logPath, 1)[0] ?? null;
 }

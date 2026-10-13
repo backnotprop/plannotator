@@ -11,11 +11,16 @@
  *   POST /api/ai/abort         — Abort the current query
  *   GET  /api/ai/sessions      — List active sessions
  *   GET  /api/ai/capabilities  — Check if AI features are available
+ *   POST /api/ai/bridge/poll   — "Ask this session" pull bridge: host long-poll (session-bridge-pull.ts)
+ *   POST /api/ai/bridge/event  — "Ask this session" pull bridge: host progress events
  */
 
-import type { AIContext, AIMessage, CreateSessionOptions } from "./types.ts";
+import { resolveModelChoice } from "@plannotator/core/model-catalog";
+import type { AIContext, AIMessage, AIProvider, CreateSessionOptions } from "./types.ts";
 import type { ProviderRegistry } from "./provider.ts";
 import type { SessionManager } from "./session-manager.ts";
+import { SessionBridgeProvider, SessionBridgeSession } from "./session-bridge.ts";
+import { SESSION_BRIDGE_EVENT_PATH, SESSION_BRIDGE_POLL_PATH } from "./session-bridge-pull.ts";
 
 /** Canonical paths handled by the shared AI endpoint runtime. */
 export const AI_ENDPOINT_PATHS = [
@@ -25,7 +30,17 @@ export const AI_ENDPOINT_PATHS = [
   "/api/ai/abort",
   "/api/ai/permission",
   "/api/ai/sessions",
+  "/api/ai/bridge/poll",
+  "/api/ai/bridge/event",
 ] as const;
+
+/**
+ * Endpoints whose requests legitimately stay open (SSE answers, the bridge
+ * long-poll): servers with a per-request idle timeout lift it for these.
+ */
+export function isLongLivedAIEndpointPath(path: string): boolean {
+  return path === "/api/ai/query" || path === SESSION_BRIDGE_POLL_PATH;
+}
 
 /** A path handled by the shared AI endpoint runtime. */
 export type AIEndpointPath = (typeof AI_ENDPOINT_PATHS)[number];
@@ -52,8 +67,8 @@ export interface CreateSessionRequest {
   maxTurns?: number;
   /** Max budget in USD. */
   maxBudgetUsd?: number;
-  /** Reasoning effort (Codex only). */
-  reasoningEffort?: "minimal" | "low" | "medium" | "high" | "xhigh";
+  /** Reasoning effort — one of the selected model's `reasoningEfforts`. */
+  reasoningEffort?: string;
 }
 
 export interface QueryRequest {
@@ -61,8 +76,21 @@ export interface QueryRequest {
   sessionId: string;
   /** The user's prompt/question. */
   prompt: string;
-  /** Optional context update (e.g., new annotations since session was created). */
+  /**
+   * Optional context update (e.g., new annotations since session was created).
+   * Separate-AI providers only: an "Ask this session" question ignores it,
+   * because the session that receives it is the agent the feedback is for and
+   * would read it as instructions (#1748). Drafts go there as `draftAnnotations`.
+   */
   contextUpdate?: string;
+  /** "Ask this session" only: what to do when the host session is busy. */
+  busyPolicy?: "wait" | "interrupt";
+  /**
+   * "Ask this session" only: the reviewer's unsubmitted annotations as a plain
+   * list, framed by the bridge as read-only context (see `AIQueryOptions`).
+   * Ignored by every other provider.
+   */
+  draftAnnotations?: string;
 }
 
 export interface AbortRequest {
@@ -77,26 +105,127 @@ export interface AbortRequest {
 export interface AIEndpointDeps {
   /** Provider registry (one per server or shared). */
   registry: ProviderRegistry;
+  /**
+   * Providers registered ONLY so their model catalogs can be served to the
+   * agent-job launchers (Review Agents, Code Tour, Guided Review), used when a
+   * session bridge makes the bridge the sole Ask AI provider. They never take
+   * an Ask AI session and are never listed under `providers`: a
+   * `?activate=<id>` probe naming one runs its discovery and reports it under
+   * `catalogProviders`, which only the launchers' catalog loader reads.
+   */
+  catalogRegistry?: ProviderRegistry;
   /** Session manager instance (one per server). */
   sessionManager: SessionManager;
   /** Resolve the current working directory for new AI sessions. */
   getCwd?: () => string;
   /** Optional hook to finish lazy provider capability loading before reporting capabilities. */
   beforeCapabilities?: () => Promise<void> | void;
-  /** Optional hook to finish provider-specific lazy initialization before creating a session. */
-  beforeProviderSession?: (providerId: string) => Promise<void> | void;
+  /**
+   * Optional hook to run provider-specific lazy initialization, either before
+   * creating a session (`session`) or for an explicit `?activate=` probe
+   * (`activate`, which reports the refreshed model list and so must wait).
+   */
+  beforeProviderSession?: (
+    providerId: string,
+    reason: "session" | "activate",
+    requestedModel?: string,
+  ) => Promise<void> | void;
+  /**
+   * "Ask this session" only: whether a request may create a session on, or
+   * query, the session-bridge provider (the runtime checks the Host header is
+   * a loopback name with the server's own port, so a DNS-rebinding page cannot
+   * type into the user's agent session). Absent means refuse: the bridge never
+   * answers without a guard. Other providers never consult it.
+   */
+  authorizeSessionBridgeRequest?: (req: Request) => boolean;
+  /**
+   * "Ask this session" pull bridge (session-bridge-pull.ts), present when a
+   * host that runs this server as a separate process handed it a bridge
+   * token. Its two endpoints answer 404 without it, and are also gated by
+   * `authorizeSessionBridgeRequest` (loopback Host) before the token check.
+   */
+  pullBridge?: { handle(req: Request): Promise<Response> | null };
+}
+
+/** Error code for a bridge request refused by `authorizeSessionBridgeRequest`. */
+export const SESSION_BRIDGE_FORBIDDEN_HOST = "session_bridge_forbidden_host";
+
+function sessionBridgeForbidden(): Response {
+  return Response.json(
+    {
+      error:
+        "Ask this session only answers pages opened on this machine (localhost, 127.0.0.1 or [::1] with this server's port).",
+      code: SESSION_BRIDGE_FORBIDDEN_HOST,
+    },
+    { status: 403 },
+  );
 }
 
 const MAX_CLIENT_MAX_TURNS = 99;
 const MAX_CLIENT_BUDGET_USD = 5;
 
+/**
+ * Run a lazy initializer (model discovery) at most once on success. Callers
+ * share one in-flight run and never see its error; a failed run may be retried
+ * by a later call once `retryAfterMs` has passed, so a transient failure does
+ * not pin the fallback for the life of the process while a persistently
+ * broken tool is not re-spawned on every session.
+ */
 export function createBestEffortOnce(
   initialize: () => Promise<void>,
+  retryAfterMs = 60_000,
 ): () => Promise<void> {
   let result: Promise<void> | null = null;
+  let failedAt = 0;
   return () => {
-    result ??= initialize().catch(() => {});
+    if (result === null || (failedAt && Date.now() - failedAt >= retryAfterMs)) {
+      failedAt = 0;
+      result = initialize().catch(() => {
+        failedAt = Date.now();
+      });
+    }
     return result;
+  };
+}
+
+/**
+ * Deferred model discovery shared by both runtimes. Discovery spawns the
+ * provider's CLI, so it runs on first explicit activation (?activate= from a
+ * model picker) or the first session, never at startup. An `?activate=` probe
+ * always waits for it (it reports the refreshed list). A session waits only
+ * for providers registered with `blockSession` (the default); the others
+ * resolve the model against their current list and let discovery finish in
+ * the background — unless that list is still the static fallback and does not
+ * offer the requested model (e.g. `opus[1m]`, which the fallback lacks), where
+ * resolving now would silently change the pick for the first session only, so
+ * the session waits for discovery (bounded by the provider's own timeout).
+ */
+export function createDeferredModelDiscovery() {
+  const initializers = new Map<string, () => Promise<void>>();
+  const background = new Map<string, Pick<AIProvider, "models" | "modelsSource">>();
+  return {
+    defer(providerId: string, provider: object | null | undefined, { blockSession = true }: { blockSession?: boolean } = {}) {
+      if (!provider || !("fetchModels" in provider)) return;
+      const fetchModels = provider.fetchModels as () => Promise<void>;
+      initializers.set(providerId, createBestEffortOnce(() => fetchModels.call(provider)));
+      if (!blockSession) background.set(providerId, provider as Pick<AIProvider, "models" | "modelsSource">);
+    },
+    async beforeProviderSession(providerId: string, reason: "session" | "activate", requestedModel?: string): Promise<void> {
+      const initialize = initializers.get(providerId);
+      if (!initialize) return;
+      const provider = background.get(providerId);
+      if (reason === "session" && provider) {
+        const pickOnFallbackOnly =
+          !!requestedModel &&
+          provider.modelsSource === "fallback" &&
+          !(provider.models ?? []).some((m) => m.id === requestedModel);
+        if (!pickOnFallbackOnly) {
+          void initialize();
+          return;
+        }
+      }
+      await initialize();
+    },
   };
 }
 
@@ -127,11 +256,22 @@ function clampPositiveNumber(value: unknown, max: number): number | undefined {
 export function createAIEndpoints(deps: AIEndpointDeps) {
   const {
     registry,
+    catalogRegistry,
     sessionManager,
     getCwd,
     beforeCapabilities,
     beforeProviderSession,
+    authorizeSessionBridgeRequest,
+    pullBridge,
   } = deps;
+
+  const handlePullBridge = async (req: Request): Promise<Response> => {
+    if (!pullBridge) {
+      return Response.json({ error: "No session bridge on this server.", code: "session_bridge_unavailable" }, { status: 404 });
+    }
+    if (!authorizeSessionBridgeRequest?.(req)) return sessionBridgeForbidden();
+    return (await pullBridge.handle(req)) ?? Response.json({ error: "Not found" }, { status: 404 });
+  };
 
   return {
     "/api/ai/capabilities": async (req: Request) => {
@@ -144,23 +284,27 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
       // on load, and activating there would reintroduce the eager launch this
       // deferral exists to prevent.
       const activateId = new URL(req.url).searchParams.get("activate");
-      if (activateId && registry.get(activateId)) {
-        await beforeProviderSession?.(activateId);
+      const catalogOnly = activateId && !registry.get(activateId) ? catalogRegistry?.get(activateId) : undefined;
+      if (activateId && (registry.get(activateId) || catalogOnly)) {
+        await beforeProviderSession?.(activateId, "activate");
       }
       const defaultEntry = registry.getDefault();
-      const providerDetails = registry.list().map(id => {
-        const p = registry.get(id)!;
-        return {
-          id,
-          name: p.name,
-          capabilities: p.capabilities,
-          models: p.models ?? [],
-        };
+      const describe = (id: string, p: AIProvider) => ({
+        id,
+        name: p.name,
+        capabilities: p.capabilities,
+        models: p.models ?? [],
+        ...(p.modelsSource ? { modelsSource: p.modelsSource } : {}),
+        ...(p.toolVersion ? { toolVersion: p.toolVersion } : {}),
+        ...(p.label ? { label: p.label } : {}),
+        ...(p.sessionBridge ? { sessionBridge: p.sessionBridge } : {}),
       });
+      const providerDetails = registry.list().map(id => describe(id, registry.get(id)!));
       return Response.json({
         available: !!defaultEntry,
         providers: providerDetails,
         defaultProvider: defaultEntry?.id ?? null,
+        ...(activateId && catalogOnly ? { catalogProviders: [describe(activateId, catalogOnly)] } : {}),
       });
     },
 
@@ -192,18 +336,26 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
         );
       }
 
+      if (provider instanceof SessionBridgeProvider && !authorizeSessionBridgeRequest?.(req)) {
+        return sessionBridgeForbidden();
+      }
+
       try {
-        await beforeProviderSession?.(providerEntry.id);
-        // Resolve the model against the post-activation list: a requested
-        // model the (possibly refreshed) provider still offers is honored,
-        // anything else — including a stale pre-discovery fallback id — snaps
-        // to the provider's current default. Providers that report no models
-        // pass the request through verbatim.
+        await beforeProviderSession?.(providerEntry.id, "session", model);
+        // Resolve the model against the post-activation list with the shared
+        // resolver (exact id → the model an alias covers → same-family alias →
+        // the provider's default), so a stale pre-discovery pick lands on the
+        // closest current model. Providers that report no models pass the
+        // request through verbatim.
         const models = provider.models ?? [];
-        const effectiveModel =
-          model && models.some((candidate) => candidate.id === model)
-            ? model
-            : models.find((candidate) => candidate.default)?.id ?? models[0]?.id ?? model;
+        const effectiveModel = models.length > 0 ? resolveModelChoice(model ?? "", models) : model;
+        // Only forward an effort the resolved model accepts (a model that
+        // reports no efforts takes none); unlisted models pass it through.
+        const modelInfo = models.find((candidate) => candidate.id === effectiveModel);
+        const effectiveEffort =
+          reasoningEffort && (!modelInfo || modelInfo.reasoningEfforts?.some((e) => e.id === reasoningEffort))
+            ? reasoningEffort
+            : undefined;
         const boundedMaxTurns = clampPositiveInteger(maxTurns, MAX_CLIENT_MAX_TURNS);
         const boundedMaxBudgetUsd = clampPositiveNumber(maxBudgetUsd, MAX_CLIENT_BUDGET_USD);
         const options: CreateSessionOptions = {
@@ -212,7 +364,7 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
           model: effectiveModel,
           ...(boundedMaxTurns !== undefined && { maxTurns: boundedMaxTurns }),
           ...(boundedMaxBudgetUsd !== undefined && { maxBudgetUsd: boundedMaxBudgetUsd }),
-          reasoningEffort,
+          reasoningEffort: effectiveEffort,
         };
 
         // Fork if parent session is provided AND provider supports it.
@@ -249,6 +401,9 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
 
       const body = (await req.json()) as QueryRequest;
       const { sessionId, prompt, contextUpdate } = body;
+      const busyPolicy =
+        body.busyPolicy === "wait" || body.busyPolicy === "interrupt" ? body.busyPolicy : undefined;
+      const draftAnnotations = typeof body.draftAnnotations === "string" ? body.draftAnnotations : undefined;
 
       if (!sessionId || !prompt) {
         return Response.json(
@@ -265,12 +420,26 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
         );
       }
 
+      if (entry.session instanceof SessionBridgeSession && !authorizeSessionBridgeRequest?.(req)) {
+        return sessionBridgeForbidden();
+      }
+
       sessionManager.touch(sessionId);
 
-      // If context update provided, prepend it to the prompt
-      const effectivePrompt = contextUpdate
+      const isSessionBridge = entry.session instanceof SessionBridgeSession;
+
+      // A separate AI gets the context update in front of the prompt. "Ask
+      // this session" never does: that session is the agent the review is
+      // for, and the update is the feedback export of drafts the reviewer has
+      // not submitted, which it would carry out (#1748). Drafts reach it only
+      // as `draftAnnotations`, inside the bridge's read-only frame.
+      const effectivePrompt = contextUpdate && !isSessionBridge
         ? `[Context update: the user has made changes since this conversation started]\n${contextUpdate}\n\n${prompt}`
         : prompt;
+      const queryOptions = {
+        ...(busyPolicy && { busyPolicy }),
+        ...(isSessionBridge && draftAnnotations !== undefined && { draftAnnotations }),
+      };
 
       // Set label from first query if not already set
       if (!entry.label) {
@@ -282,7 +451,10 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
       const stream = new ReadableStream({
         async start(controller) {
           try {
-            for await (const message of entry.session.query(effectivePrompt)) {
+            const messages = Object.keys(queryOptions).length > 0
+              ? entry.session.query(effectivePrompt, queryOptions)
+              : entry.session.query(effectivePrompt);
+            for await (const message of messages) {
               const data = JSON.stringify(message);
               controller.enqueue(
                 encoder.encode(`data: ${data}\n\n`)
@@ -387,6 +559,9 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
         }))
       );
     },
+
+    [SESSION_BRIDGE_POLL_PATH]: handlePullBridge,
+    [SESSION_BRIDGE_EVENT_PATH]: handlePullBridge,
   } as const;
 }
 

@@ -17,6 +17,10 @@ const SKIP_SELECTORS = [
 ].join(',');
 
 const INLINE_TARGET_SELECTOR = 'strong,em,a,code:not(.pn-code)';
+/** A `:::question` card (`QuestionBlock`): one block whose text is in parts. */
+const QUESTION_CARD_SELECTOR = 'fieldset.question-block';
+/** The card's text parts: the prompt, the context, and each choice's text. */
+const QUESTION_PART_SELECTOR = '[data-question-part]';
 const TABLE_EDGE_ZONE = 22;
 
 /** The semantic kind of a document target. */
@@ -133,8 +137,20 @@ function groupLabel(group: HTMLElement): string {
 }
 
 function listContentElement(block: HTMLElement): HTMLElement | null {
+  // A question card also starts with a `select-none` child (its eyebrow), so
+  // without this its second child, the prompt, stood in for the whole card:
+  // every pinpoint hover or click inside it resolved to the prompt.
+  if (block.matches(QUESTION_CARD_SELECTOR)) return null;
   if (!block.querySelector('.select-none')) return null;
   return block.children[1] instanceof HTMLElement ? block.children[1] : null;
+}
+
+function questionPartLabel(part: HTMLElement): string {
+  const text = truncate(part.textContent?.trim() ?? '', 30);
+  const kind = part.dataset.questionPart;
+  if (kind === 'choice') return `choice: "${text}"`;
+  if (kind === 'context') return `context: "${text}"`;
+  return `question: "${text}"`;
 }
 
 function addInlineTargets(
@@ -199,11 +215,54 @@ export function buildSemanticTargetGraph(container: HTMLElement): SemanticTarget
 
     const group = block.closest<HTMLElement>('[data-pinpoint-group]');
     const parentKey = group ? groupTargets.get(group)?.key ?? null : null;
-    const codeElement = block.querySelector<HTMLElement>('pre > code.pn-code');
+
+    // First: a card's context can hold a table, a code fence or a formula,
+    // and the card is still one question block made of its parts.
+    if (block.matches(QUESTION_CARD_SELECTOR)) {
+      const prompt = block.querySelector<HTMLElement>('[data-question-part="prompt"]');
+      const cardTarget: SemanticTarget = {
+        key: `${blockId}:block`,
+        blockId,
+        element: block,
+        label: prompt ? questionPartLabel(prompt) : 'question',
+        kind: 'block',
+        parentKey,
+      };
+      targets.push(cardTarget);
+      byElement.set(block, cardTarget);
+      blockKeys.push(cardTarget.key);
+      block.querySelectorAll<HTMLElement>(QUESTION_PART_SELECTOR).forEach((part, index) => {
+        const partTarget: SemanticTarget = {
+          key: `${blockId}:part:${index}`,
+          blockId,
+          element: part,
+          label: questionPartLabel(part),
+          kind: 'inline',
+          parentKey: cardTarget.key,
+        };
+        targets.push(partTarget);
+        byElement.set(part, partTarget);
+        addInlineTargets(targets, byElement, blockId, partTarget, part, partTarget.key);
+      });
+      continue;
+    }
+
+    // A quote is one text block even when it holds a code fence or a table:
+    // its fence is not a code-block target (whose click would annotate only
+    // the fence), and its table rows are not cells of the quote.
+    const isQuote = block.tagName === 'BLOCKQUOTE';
+    const codeElement = isQuote ? null : block.querySelector<HTMLElement>('pre > code.pn-code');
+    // Inline math in a quote keeps the paragraph rule (the quote targets the
+    // formula, as a paragraph with inline math does); a display-math block
+    // inside a quote is not the quote.
     const mathElement = block.matches('.math-annotatable,[data-math-tex]')
       ? block
-      : block.querySelector<HTMLElement>('.math-annotatable,[data-math-tex]');
-    const table = block.querySelector<HTMLTableElement>('table');
+      : block.querySelector<HTMLElement>(
+          isQuote
+            ? '.math-annotatable:not([data-math-display="true"]),[data-math-tex]:not([data-math-display="true"])'
+            : '.math-annotatable,[data-math-tex]',
+        );
+    const table = isQuote ? null : block.querySelector<HTMLTableElement>('table');
 
     if (codeElement) {
       const target: SemanticTarget = {
@@ -455,8 +514,11 @@ export function resolveSemanticTargetAtPoint(
   if (!block || !graph.container.contains(block) || block.tagName === 'HR') return null;
   const blockTarget = targetForBlock(graph, block);
   if (!blockTarget) return null;
+  // A question card's code fences and tables live in its context part; the
+  // part lookup below resolves them.
+  const card = block.matches(QUESTION_CARD_SELECTOR);
 
-  const code = block.querySelector<HTMLElement>('pre > code.pn-code');
+  const code = card ? null : block.querySelector<HTMLElement>('pre > code.pn-code');
   if (
     code
     && (pointerTarget === code || code.contains(pointerTarget) || pointerTarget.closest('pre'))
@@ -464,7 +526,7 @@ export function resolveSemanticTargetAtPoint(
     return blockTarget;
   }
 
-  const table = block.querySelector<HTMLTableElement>('table');
+  const table = card ? null : block.querySelector<HTMLTableElement>('table');
   if (table && pointer) {
     const rect = table.getBoundingClientRect();
     const nearHorizontalEdge = pointer.clientX - rect.left < TABLE_EDGE_ZONE
@@ -482,6 +544,14 @@ export function resolveSemanticTargetAtPoint(
   if (inline && block.contains(inline)) {
     const inlineTarget = graph.byElement.get(inline);
     if (inlineTarget) return inlineTarget;
+  }
+
+  // Inside a question card: the part under the pointer. A choice row's
+  // padding and marker belong to that choice's text.
+  const part = pointerTarget.closest<HTMLElement>(QUESTION_PART_SELECTOR)
+    ?? pointerTarget.closest<HTMLElement>('[data-question-option]')?.querySelector<HTMLElement>(QUESTION_PART_SELECTOR);
+  if (part && block.contains(part)) {
+    return graph.byElement.get(part) ?? blockTarget;
   }
 
   const cell = pointerTarget.closest<HTMLTableCellElement>('td,th');

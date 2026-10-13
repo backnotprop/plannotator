@@ -5,17 +5,12 @@ import { GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS } from '@plannotator/shared/guide';
 import type { SavedGuideListEntry } from '@plannotator/shared/guide';
 import type { AgentLaunchParams } from '@plannotator/ui/hooks/useAgentJobs';
 import type { ReviewEngine } from '@plannotator/ui/hooks/useAgentSettings';
-// Same catalogs AgentsTab's launch panel uses — one source of truth for both
-// guide launch surfaces (this page and the sidebar's Guided Review mode).
-import {
-  TOUR_CLAUDE_MODELS,
-  CLAUDE_EFFORT,
-  CODEX_MODELS,
-  codexReasoningOptions,
-  PI_THINKING,
-  REVIEW_ENGINE_LABEL,
-} from '@plannotator/ui/components/AgentsTab';
+import { PI_THINKING, REVIEW_ENGINE_LABEL } from '@plannotator/ui/components/AgentsTab';
+// Claude/Codex options come from the same discovered catalogs AgentsTab and
+// Ask AI use (useGuideLaunch → useModelCatalogs).
+import { effortSelectOptions, modelSelectOptions } from '@plannotator/ui/hooks/useModelCatalogs';
 import { groupModelOptions, labelWithinGroup, SEARCHABLE_THRESHOLD } from '@plannotator/ui/components/AgentControls';
+import { ModelSourceHint } from '@plannotator/ui/components/ModelSourceHint';
 import { useGuideLaunch } from '../../hooks/guide/useGuideLaunch';
 
 type Option = { value: string; label: string };
@@ -369,11 +364,19 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
     effectiveCopilotModel,
   } = launch;
 
+  const { catalogs } = launch;
+  // While the engine's catalog settles, show a loading entry instead of an
+  // empty picker (Generate is held until it does).
+  const loadingPicker = { value: '', options: [{ value: '', label: 'Loading models…' }], onChange: () => {} };
   const modelPicker: { value: string; options: Option[]; onChange: (v: string) => void } =
     engine === 'claude'
-      ? { value: guideClaudeModel, options: TOUR_CLAUDE_MODELS, onChange: setGuideClaudeModel }
+      ? catalogs.claude.settled
+        ? { value: guideClaudeModel, options: modelSelectOptions(catalogs.claude.models, guideClaudeModel), onChange: setGuideClaudeModel }
+        : loadingPicker
       : engine === 'codex'
-        ? { value: guideCodexModel, options: CODEX_MODELS, onChange: setGuideCodexModel }
+        ? catalogs.codex.settled
+          ? { value: guideCodexModel, options: modelSelectOptions(catalogs.codex.models, guideCodexModel), onChange: setGuideCodexModel }
+          : loadingPicker
         : engine === 'cursor'
           ? { value: effectiveCursorModel, options: cursorOptions, onChange: setGuideCursorModel }
           : engine === 'opencode'
@@ -482,16 +485,23 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
                 onChange={(v) => setGuideEngine(v as ReviewEngine)}
               />
               <InlinePicker label="Model" {...modelPicker} />
-              {engine === 'claude' && (
-                <InlinePicker label="Effort" value={guideClaudeEffort} options={CLAUDE_EFFORT} onChange={setGuideClaudeEffort} />
+              {engine === 'claude' && effortSelectOptions(catalogs.claude.models, guideClaudeModel).length > 0 && (
+                <InlinePicker label="Effort" value={guideClaudeEffort} options={effortSelectOptions(catalogs.claude.models, guideClaudeModel)} onChange={setGuideClaudeEffort} />
               )}
-              {engine === 'codex' && (
-                <InlinePicker label="Reasoning" value={guideCodexReasoning} options={codexReasoningOptions(guideCodexModel)} onChange={setGuideCodexReasoning} />
+              {engine === 'codex' && effortSelectOptions(catalogs.codex.models, guideCodexModel).length > 0 && (
+                <InlinePicker label="Reasoning" value={guideCodexReasoning} options={effortSelectOptions(catalogs.codex.models, guideCodexModel)} onChange={setGuideCodexReasoning} />
               )}
               {engine === 'pi' && (
                 <InlinePicker label="Thinking" value={guidePiThinking} options={PI_THINKING} onChange={setGuidePiThinking} />
               )}
             </div>
+            {(engine === 'claude' || engine === 'codex') && catalogs[engine].settled && (
+              <ModelSourceHint
+                tool={engine}
+                info={catalogs[engine]}
+                className="mt-2.5 text-[11px] leading-snug text-muted-foreground/60"
+              />
+            )}
             <p className="mt-2.5 text-[11px] leading-snug text-muted-foreground/60">
               Newer models with lower effort are recommended — guides generate quicker.
             </p>

@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dir, '..');
 const read = (path: string) => readFileSync(resolve(root, path), 'utf8');
 
 describe('review entry assets', () => {
-  test.each(['apps/portal/index.html', 'apps/hook/index.html', 'apps/review/index.html'])(
+  test.each(['apps/portal/index.html', 'apps/hook/index.html', 'apps/review/index.html', 'apps/inbox/index.html', 'apps/inbox/surface.html'])(
     '%s has no externally hosted startup scripts or styles',
     (path) => {
       expect(read(path)).not.toMatch(
@@ -18,7 +18,7 @@ describe('review entry assets', () => {
   // The portal mounts the same @plannotator/editor App as the hook, so it needs
   // the identical shell: without it the mobile layout's safe-area tokens are
   // inert and the document scrolls behind the app's own scroll ownership.
-  test.each(['apps/hook/index.html', 'apps/review/index.html', 'apps/portal/index.html'])(
+  test.each(['apps/hook/index.html', 'apps/review/index.html', 'apps/portal/index.html', 'apps/inbox/index.html'])(
     '%s leaves scrolling to the visible-viewport application shell',
     (path) => {
       const html = read(path);
@@ -92,6 +92,26 @@ describe('review entry assets', () => {
     expect(read('packages/review-editor/App.tsx')).not.toContain('mermaid-eager');
   });
 
+  // The review app renders Mermaid and Graphviz fences as code, never as
+  // diagrams (Markdown preview; approval record, 2026-10-12 amendment:
+  // performance wins). A lazy import does not help here: the single-file
+  // build inlines every dynamic import, so naming a diagram engine anywhere in
+  // the review app's graph puts ~6.7 MB of runtimes into every review page.
+  // The built-bundle markers below are the proof; this names the culprit.
+  test('the review app imports no diagram engine, not even lazily', () => {
+    const diagramModule = /(?:from\s+|import\s*\(?\s*)['"](?:[^'"]*(?:components\/(?:MermaidBlock|GraphvizBlock|DiagramBlock|Viewer)|components\/diagram\/[^'"]*|utils\/(?:mermaid|graphviz|diagram-render)[^'"\/]*)|mermaid|@viz-js\/viz)['"]/;
+    const walk = (dir: string): string[] =>
+      readdirSync(resolve(root, dir), { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory()
+          ? entry.name === 'node_modules' || entry.name === 'dist' ? [] : walk(`${dir}/${entry.name}`)
+          : /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [`${dir}/${entry.name}`] : [],
+      );
+    const offenders = ['packages/review-editor', 'packages/guide-viewer', 'apps/review']
+      .flatMap(walk)
+      .filter((path) => diagramModule.test(read(path)));
+    expect(offenders).toEqual([]);
+  });
+
   // The other half of the optimization: the renderers must stay OFF the
   // static import graph of the components, otherwise a host's bundler puts
   // them back into every document read and the slots become decoration.
@@ -125,6 +145,46 @@ describe('review entry assets', () => {
     expect(read('packages/ui/utils/generateIdentity.ts')).not.toMatch(staticImport('unique-username-generator'));
   });
 
+  // The Inbox window's guided review (PLAN step 5) reaches the guide chain and
+  // review-editor's diff renderer through GuidePane's one dynamic import of
+  // `#guide-reader` (packages/inbox/guide/GuideReader.tsx). The single-file
+  // build inlines that chunk, so what this keeps waiting for Open is the
+  // mount (the diff render, the highlighter), not the bytes. A static import
+  // elsewhere would make the window depend on the reader directly, and that
+  // boundary would be gone.
+  // The surface a phone hosts (PLAN step S1) has no network at all: every
+  // byte arrives over the bridge. Its policy is the boundary, so it is pinned.
+  // The one https origin it names is the Android shell's asset origin, the
+  // virtual host the shell intercepts and never fetches (contract section 10).
+  test('the surface forbids every connection and loads nothing from outside', () => {
+    const html = read('apps/inbox/surface.html');
+    const csp = html.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/)?.[1] ?? '';
+    expect(csp).toContain("default-src 'none'");
+    expect(csp).toContain("connect-src 'none'");
+    expect(csp.replaceAll(' https://appassets.androidplatform.net;', ';').replaceAll(' https://appassets.androidplatform.net ', ' ')).not.toMatch(/https?:|wss?:|\*/);
+    // Wherever iOS's asset scheme is allowed, Android's asset origin is too, and nowhere else.
+    for (const directive of csp.split(';').map((d) => d.trim())) {
+      expect(directive.includes('https://appassets.androidplatform.net')).toBe(directive.includes('plannotator-asset:'));
+    }
+  });
+
+  test('the Inbox window mounts the guide viewer only through its dynamic import', () => {
+    const heavy = /^import\s+(?!type\b)[^;]*from\s+['"](?:@plannotator\/guide-viewer|@plannotator\/review-editor|#guide-reader)[^'"]*['"]/m;
+    const walk = (dir: string): string[] =>
+      readdirSync(resolve(root, dir), { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory()
+          ? entry.name === 'node_modules' ? [] : walk(`${dir}/${entry.name}`)
+          : /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [`${dir}/${entry.name}`] : [],
+      );
+    const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx'];
+    const eager = walk('packages/inbox').filter((path) => !readers.includes(path) && heavy.test(read(path)));
+    expect(eager).toEqual([]);
+    expect(read('packages/inbox/components/GuidePane.tsx')).toContain("lazy(() => import('#guide-reader'))");
+    // The surface's reader (one section per screen) and its diagram engine wait the same way.
+    expect(read('packages/inbox/surface/SurfaceGuide.tsx')).toContain("lazy(() => import('#surface-guide-reader'))");
+    expect(read('packages/inbox/surface/SurfaceDocument.tsx')).toContain("lazy(() => import('./SurfaceDiagram'))");
+  });
+
   // Built-artifact check: a lost eager import would still type-check and pass
   // every unit test, so the built single-file bundles are read directly.
   // Two different kinds of marker, deliberately:
@@ -141,7 +201,9 @@ describe('review entry assets', () => {
   //   registration marker is asserted ABSENT from both bundles: since Mermaid
   //   12 the plan editor loads the runtime lazily by policy, and an eager
   //   import creeping back in would only show up as a bigger portal entry
-  //   chunk. The review bundle carries no Mermaid at all.
+  //   chunk. The review bundle carries no Mermaid and no Graphviz at all: its
+  //   Markdown preview shows diagram fences as code (see the import guard
+  //   above), so both presence markers are asserted absent there.
   // - Presence markers (a KaTeX class name, a Mermaid diagram id, an
   //   Emscripten symbol from Graphviz, the bridge global), which only say the
   //   runtime is still inlined by inlineDynamicImports. KaTeX is inlined
@@ -154,7 +216,7 @@ describe('review entry assets', () => {
   const REGISTRATION_MARKERS = ['plannotator-math-eager', 'uniqueUsernameGenerator'];
   const markerExpectations: Array<[bundle: string, present: string[], absent: string[]]> = [
     ['apps/hook/dist/index.html', [...REGISTRATION_MARKERS, 'katex-display', 'flowchart-v2', 'viz_set_y_invert', '__plannotatorLiveConfig'], ['plannotator-mermaid-eager']],
-    ['apps/review/dist/index.html', [...REGISTRATION_MARKERS, 'katex-display', '__plannotatorLiveConfig'], ['plannotator-mermaid-eager', 'flowchart-v2']],
+    ['apps/review/dist/index.html', [...REGISTRATION_MARKERS, 'katex-display', '__plannotatorLiveConfig'], ['plannotator-mermaid-eager', 'flowchart-v2', 'viz_set_y_invert']],
   ];
   for (const [path, present, absent] of markerExpectations) {
     test.skipIf(!existsSync(resolve(root, path)))(`${path} carries the eager registration and renderer markers`, () => {
@@ -192,6 +254,7 @@ describe('review entry assets', () => {
       'apps/review/vite.config.ts',
       'apps/hook/vite.config.ts',
       'apps/portal/vite.config.ts',
+      'apps/inbox/vite.config.ts',
     ]) {
       expect(read(config)).toContain("'shiki/wasm': path.resolve(");
     }
@@ -206,7 +269,7 @@ describe('review entry assets', () => {
   // dist/ is gitignored, so this skips cleanly on an unbuilt checkout. The CI
   // job that builds the bundles runs this file right after the build so the
   // assertion is not silently optional there.
-  const bundles = ['apps/review/dist/index.html', 'apps/hook/dist/index.html'];
+  const bundles = ['apps/review/dist/index.html', 'apps/hook/dist/index.html', 'apps/hook/dist/inbox.html', 'apps/hook/dist/surface.html'];
   for (const path of bundles) {
     test.skipIf(!existsSync(resolve(root, path)))(`${path} ships no inlined WebAssembly`, () => {
       // Asserted on a boolean, not the string: these bundles are ~20MB and a

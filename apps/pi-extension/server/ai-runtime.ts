@@ -4,6 +4,9 @@ import { Readable } from "node:stream";
 
 import { isAIEndpointPath } from "../generated/ai/endpoints.ts";
 import { resolveCommandFromWhichOutput } from "../generated/ai/providers/command-path.ts";
+import type { SessionBridge } from "../generated/ai/session-bridge.ts";
+import type { PullSessionBridgeConfig } from "../generated/ai/session-bridge-pull.ts";
+import { isLoopbackHostHeader } from "../generated/loopback-host.ts";
 import { handleApiNotFound, json, toWebRequest } from "./helpers.ts";
 
 export interface PiAIRuntime {
@@ -11,9 +14,29 @@ export interface PiAIRuntime {
 	dispose: () => void;
 }
 
-interface CreatePiAIRuntimeOptions {
+export interface CreatePiAIRuntimeOptions {
 	cwd?: string;
 	getCwd?: () => string;
+	/**
+	 * "Ask this session": the in-process bridge to the Pi session that opened
+	 * this server. With a bridge it is the ONLY Ask AI provider: SDK providers
+	 * serve model catalogs to the agent-job launchers but are never offered or
+	 * reachable for Ask AI.
+	 */
+	sessionBridge?: SessionBridge;
+	/**
+	 * The port this server listens on, once bound. Required for the bridge to
+	 * answer: its requests must carry a loopback Host with exactly this port
+	 * (DNS-rebinding guard). Undefined (not bound yet) refuses bridge requests.
+	 */
+	getServerPort?: () => number | undefined;
+	/**
+	 * "Ask this session" over HTTP (session-bridge-pull.ts) for a host that
+	 * cannot call this process directly. Pi itself always passes an in-process
+	 * `sessionBridge`; this exists so both runtimes serve the same protocol.
+	 * Ignored when `sessionBridge` is given. Callers keep it off in remote mode.
+	 */
+	pullSessionBridge?: PullSessionBridgeConfig;
 }
 
 function whichCmd(cmd: string): string | null {
@@ -35,110 +58,123 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 		const cwd = options.cwd ?? process.cwd();
 		const registry = new ai.ProviderRegistry();
 		const sessionManager = new ai.SessionManager();
-		const modelDiscovery: Promise<void>[] = [];
-		const providerInitializers = new Map<string, () => Promise<void>>();
+		// Model discovery spawns the provider's CLI, so it runs on first explicit
+		// activation (?activate= from a model picker) or the first session — never
+		// at startup.
+		const discovery = ai.createDeferredModelDiscovery();
+		const deferModelDiscovery = discovery.defer;
 
-		try {
-			await import("../generated/ai/providers/claude-agent-sdk.ts");
-			const claudePath = whichCmd("claude");
-			const provider = await ai.createProvider({
-				type: "claude-agent-sdk",
-				cwd,
-				...(claudePath && { claudeExecutablePath: claudePath }),
-			});
-			registry.register(provider);
-		} catch {
-			// Claude SDK not available.
-		}
-
-		try {
-			await import("../generated/ai/providers/codex-app-server.ts");
-			const codexPath = whichCmd("codex");
-			if (codexPath) {
+		const registerSdkProviders = async (registry: InstanceType<typeof ai.ProviderRegistry>): Promise<void> => {
+			try {
+				await import("../generated/ai/providers/claude-agent-sdk.ts");
+				const claudePath = whichCmd("claude");
 				const provider = await ai.createProvider({
-					type: "codex-sdk",
+					type: "claude-agent-sdk",
 					cwd,
-					...(codexPath ? { codexExecutablePath: codexPath } : {}),
+					...(claudePath && { claudeExecutablePath: claudePath }),
 				});
 				const providerId = registry.register(provider);
-				if (provider && "fetchModels" in provider) {
-					providerInitializers.set(
-						providerId,
-						ai.createBestEffortOnce(
-							() => (provider as { fetchModels: () => Promise<void> }).fetchModels(),
-						),
-					);
-				}
+				// A Claude session spawns its own `claude`, so it never waits on discovery
+				// (~2s, up to 10s): the first Ask AI answer starts at once.
+				deferModelDiscovery(providerId, provider, { blockSession: false });
+			} catch {
+				// Claude SDK not available.
 			}
-		} catch {
-			// Codex not available.
-		}
 
-		try {
-			await import("../generated/ai/providers/pi-sdk-node.ts");
-			const piPath = whichCmd("pi");
-			if (piPath) {
-				const provider = await ai.createProvider({
-					type: "pi-sdk",
-					cwd,
-					piExecutablePath: piPath,
-				} as any);
-				if (provider && "fetchModels" in provider) {
-					modelDiscovery.push(
-						(provider as { fetchModels: () => Promise<void> })
-							.fetchModels()
-							.catch(() => {}),
-					);
+			try {
+				await import("../generated/ai/providers/codex-app-server.ts");
+				const codexPath = whichCmd("codex");
+				if (codexPath) {
+					const provider = await ai.createProvider({
+						type: "codex-sdk",
+						cwd,
+						...(codexPath ? { codexExecutablePath: codexPath } : {}),
+					});
+					const providerId = registry.register(provider);
+					deferModelDiscovery(providerId, provider);
 				}
-				registry.register(provider);
+			} catch {
+				// Codex not available.
 			}
-		} catch {
-			// Pi not available.
-		}
 
-		try {
-			await import("../generated/ai/providers/opencode-sdk.ts");
-			const opencodePath = whichCmd("opencode");
-			if (opencodePath) {
-				const provider = await ai.createProvider({
-					type: "opencode-sdk",
-					cwd,
-				});
-				const providerId = registry.register(provider);
-				// Deferred like Codex: fetchModels spawns `opencode serve`, so it
-				// must NOT run eagerly at startup — that spawned a server on every
-				// session for every user with opencode installed, and interrupted
-				// sessions orphaned it. The initializer runs on first explicit
-				// activation (?activate= from the model picker) or first opencode
-				// session.
-				if (provider && "fetchModels" in provider) {
-					providerInitializers.set(
-						providerId,
-						ai.createBestEffortOnce(
-							() => (provider as { fetchModels: () => Promise<void> }).fetchModels(),
-						),
-					);
+			try {
+				await import("../generated/ai/providers/pi-sdk-node.ts");
+				const piPath = whichCmd("pi");
+				if (piPath) {
+					const provider = await ai.createProvider({
+						type: "pi-sdk",
+						cwd,
+						piExecutablePath: piPath,
+					} as any);
+					const providerId = registry.register(provider);
+					// Deferred like Codex: fetchModels spawns `pi` (up to 10s), and
+					// done eagerly it held every plain /api/ai/capabilities answer
+					// until it finished. A Pi session spawns its own `pi` and runs on
+					// Pi's default model when none is picked, so it never waits either.
+					deferModelDiscovery(providerId, provider, { blockSession: false });
 				}
+			} catch {
+				// Pi not available.
 			}
-		} catch {
-			// OpenCode not available.
-		}
+
+			try {
+				await import("../generated/ai/providers/opencode-sdk.ts");
+				const opencodePath = whichCmd("opencode");
+				if (opencodePath) {
+					const provider = await ai.createProvider({
+						type: "opencode-sdk",
+						cwd,
+					});
+					const providerId = registry.register(provider);
+					// Deferred like Codex: fetchModels spawns `opencode serve`, so it
+					// must NOT run eagerly at startup — that spawned a server on every
+					// session for every user with opencode installed, and interrupted
+					// sessions orphaned it. The initializer runs on first explicit
+					// activation (?activate= from the model picker) or first opencode
+					// session.
+					deferModelDiscovery(providerId, provider);
+				}
+			} catch {
+				// OpenCode not available.
+			}
+		};
+
+		const pullBridge = !options.sessionBridge && options.pullSessionBridge
+			? ai.createPullSessionBridge(options.pullSessionBridge)
+			: null;
+		const sessionBridge = options.sessionBridge ?? pullBridge?.bridge;
+		const bridgeProvider = sessionBridge ? new ai.SessionBridgeProvider(sessionBridge) : null;
+
+		// A host session is attached: Ask AI goes to that session and nowhere
+		// else. The bridge is the only Ask AI provider, so /api/ai/capabilities
+		// lists only it (as the default) and /api/ai/session refuses any other
+		// provider id, whatever the client saved. The SDK providers still
+		// register, in a catalog-only registry, so the agent-job launchers keep
+		// their discovered model lists (`?activate=<id>` reports them under
+		// `catalogProviders`).
+		const catalogRegistry = bridgeProvider ? new ai.ProviderRegistry() : null;
+		if (bridgeProvider) registry.register(bridgeProvider, ai.SESSION_BRIDGE_PROVIDER_NAME);
+		await registerSdkProviders(catalogRegistry ?? registry);
 
 		return {
 			endpoints: ai.createAIEndpoints({
 				registry,
+				...(catalogRegistry ? { catalogRegistry } : {}),
 				sessionManager,
 				getCwd: options.getCwd,
-				beforeCapabilities: async () => {
-					await Promise.allSettled(modelDiscovery);
-				},
-				beforeProviderSession: async (providerId) => {
-					await providerInitializers.get(providerId)?.();
-				},
+				beforeProviderSession: discovery.beforeProviderSession,
+				authorizeSessionBridgeRequest: (req: Request) =>
+					isLoopbackHostHeader(req.headers.get("host"), options.getServerPort?.()),
+				...(pullBridge ? { pullBridge } : {}),
 			}),
 			dispose: () => {
+				// Detach first: tearing the sessions down must not stop a turn the
+				// Pi session is already running for us (the decision goes there next).
+				bridgeProvider?.detach();
 				sessionManager.disposeAll();
 				registry.disposeAll();
+				catalogRegistry?.disposeAll();
+				pullBridge?.dispose();
 			},
 		};
 	} catch {
@@ -165,7 +201,16 @@ export async function handlePiAIRequest(
 			});
 			res.writeHead(webRes.status, headers);
 			if (webRes.body) {
-				Readable.fromWeb(webRes.body as any).pipe(res);
+				const body = Readable.fromWeb(webRes.body as any);
+				// A client that goes away (Stop, a superseding question, tab close)
+				// must cancel the web stream so the endpoint's cancel() aborts the
+				// in-flight turn, as it does on the Bun server. `pipe` alone only
+				// unpipes and leaves the turn running; destroying the Node stream
+				// cancels the web stream under it.
+				res.on("close", () => {
+					if (!body.destroyed) body.destroy();
+				});
+				body.pipe(res);
 			} else {
 				res.end();
 			}

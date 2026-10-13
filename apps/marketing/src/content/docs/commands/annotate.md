@@ -14,6 +14,7 @@ The `/plannotator-annotate` command opens files, URLs, or folders in the Plannot
 |-------|---------|--------------|
 | Markdown file | `plannotator annotate README.md` | Opens the file directly |
 | Plain-text file | `plannotator annotate config.yaml` | Opens the file directly, rendered as plain text |
+| Diagram file | `plannotator annotate flow.mmd` | Renders the whole file as one diagram in the diagram viewer |
 | HTML file | `plannotator annotate docs/guide.html` | Renders the HTML directly |
 | URL | `plannotator annotate https://docs.stripe.com/api` | Fetches the page, converts to markdown, then opens |
 | Local app URL | `plannotator annotate http://localhost:5173` | Opens your running dev app live and annotates it in place |
@@ -22,6 +23,17 @@ The `/plannotator-annotate` command opens files, URLs, or folders in the Plannot
 ### Supported file types
 
 Beyond `.md`, `.mdx`, `.txt`, `.html`, and `.htm`, annotate accepts common plain-text config and data formats: `.yaml`, `.yml`, `.json`, `.jsonc`, `.json5`, `.toml`, `.ini`, `.cfg`, `.conf`, `.properties`, `.csv`, `.tsv`, `.log`, `.xml`, and `.env.example`. These render exactly like `.txt` — as plain text you can select and annotate.
+
+### Diagram files
+
+`.mmd` and `.mermaid` (Mermaid) and `.dot` and `.gv` (Graphviz) open in the **diagram viewer** instead of as text: the whole file is the diagram, so no ```` ```mermaid ```` fence is needed. It is the same viewer a diagram fence inside a plan gets — themed to your palette, zoom, pan, fit and a full-size popout — and you comment by clicking a node, an edge, a cluster, or the diagram itself.
+
+```bash
+plannotator annotate architecture.mmd
+plannotator annotate deps.dot
+```
+
+Each comment records the part's own id and its real line in the file, so the exported feedback reads `Diagram node Open .mmd (Start), line 2` — the agent can go straight to that line. Diagram files also join folder sessions and version history like any other document, and they render as the diagram in a share link too.
 
 `.env` is deliberately not supported: it commonly holds secrets, and annotate's version history copies file contents into the data dir (`~/.plannotator/history/`). Use `.env.example` for the secret-free template. Source-code files (`.ts`, `.py`, …) are also excluded — use `plannotator review` for code.
 
@@ -53,6 +65,18 @@ Starts a local server, opens the browser, and blocks until you submit. Formatted
 When you pass a folder, Plannotator opens a file browser showing all markdown and HTML files in the directory tree. Click any file to open it in the annotation UI. This is useful for annotating a set of specs, documentation, or your Obsidian vault.
 
 Build output directories like `_site/`, `public/`, `.docusaurus/`, and `node_modules/` are automatically excluded from the file browser.
+
+## Several files in one review
+
+Pass several file paths to review them together:
+
+```bash
+plannotator annotate spec.md ui/mock.html notes.md
+```
+
+They open as one review, in the order you gave them. The first file opens right away. A switcher in the header ("2 of 3 · mock.html") and the Files tab list them in that order, and each file renders as it would alone (markdown, raw HTML, diagram files). There is one decision for all of them: Send Feedback sends one message with a section per file, in the same order, and with `--gate` one Approve covers every file. Each file's comments are also saved under that file, so they come back when you open it again on its own or in another review. Edit Mode works on each file it would work on alone (`.md`, `.mdx` and `.txt`): your edits save back to that file. Documents the files link to open read-only.
+
+Every argument must be an existing file named by its path. If anything else is mixed in (a word, a URL, a folder, or a bare name Plannotator would have to search the project for), the command keeps its usual behavior: one file among plain words opens that file, and several targets are an error that names them. Agents with the `plannotator` tool pass the files as a list in `target`.
 
 ## URLs
 
@@ -203,7 +227,7 @@ This is the recommended flag for hook integrations. If both `--hook` and `--json
 | Flags | UX | Approve | Close | Send Annotations |
 |---|---|---|---|---|
 | *(none)* | 2-button | n/a | empty | feedback (plaintext) |
-| `--gate` | 3-button | `The user approved.` | empty | feedback (plaintext) |
+| `--gate` | 3-button | `The user approved.`, or the approved-with-notes message when approved with a note | empty | feedback (plaintext) |
 | `--json` | 2-button | n/a | `{"decision":"dismissed"}` | `{"decision":"annotated","feedback":"..."}` |
 | `--gate --json` | 3-button | `{"decision":"approved"}`, or `{"decision":"approved","feedback":"..."}` when approved with notes | `{"decision":"dismissed"}` | `{"decision":"annotated","feedback":"..."}` |
 | `--hook` | 3-button | empty | empty | `{"decision":"block","reason":"..."}` |

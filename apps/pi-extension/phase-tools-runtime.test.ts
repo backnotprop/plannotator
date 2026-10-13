@@ -86,6 +86,7 @@ function createRuntime(initialTools: string[]) {
 	const commands = new Map<string, { handler: (args: string, context: ReturnType<typeof createContext>) => unknown }>();
 	const handlers = new Map<string, Handler[]>();
 	const persisted: Array<Record<string, unknown>> = [];
+	const tools = new Map<string, Record<string, unknown>>();
 	let activeTools = [...initialTools];
 
 	const pi = {
@@ -104,7 +105,9 @@ function createRuntime(initialTools: string[]) {
 		},
 		registerFlag: () => undefined,
 		registerShortcut: () => undefined,
-		registerTool: () => undefined,
+		registerTool: (tool: Record<string, unknown>) => {
+			tools.set(tool.name as string, tool);
+		},
 		sendMessage: () => undefined,
 		sendUserMessage: () => undefined,
 		setActiveTools: (tools: string[]) => {
@@ -126,10 +129,20 @@ function createRuntime(initialTools: string[]) {
 		setActiveTools: (tools: string[]) => {
 			activeTools = [...tools];
 		},
+		tools,
 	};
 }
 
 describe("Plannotator phase tool ownership", () => {
+	// Deliberate pin (#1622): pi's agent loop runs a batch sequentially only when
+	// some tool in it declares executionMode "sequential". Without it, an
+	// "edit plan + plannotator_submit_plan" batch runs in parallel and the submit
+	// reads the plan file before pi's queued edit lands, reviewing a stale plan.
+	test("the submit tool forces pi to run its tool batch sequentially", () => {
+		const runtime = createRuntime([]);
+		expect(runtime.tools.get("plannotator_submit_plan")?.executionMode).toBe("sequential");
+	});
+
 	test("leaving planning removes only tools Plannotator added", async () => {
 		const cwd = makeWorkspace();
 		const runtime = createRuntime([
@@ -308,5 +321,169 @@ describe("Plannotator phase tool ownership", () => {
 			phase: "idle",
 			phaseAddedTools: [],
 		});
+	});
+});
+
+type ModelRef = { provider: string; id: string };
+
+/**
+ * A host whose model and thinking level are real state: `setModel` changes the
+ * model the context reports and every call is recorded, so a test can tell a
+ * model Plannotator set apart from one the user picked.
+ */
+function createModelHost(options: { cwd: string; initialModel: ModelRef; entries: SessionEntry[] }) {
+	const handlers = new Map<string, Handler[]>();
+	const host = {
+		model: options.initialModel,
+		thinking: "medium",
+		modelCalls: [] as ModelRef[],
+		thinkingCalls: [] as string[],
+		entries: options.entries,
+	};
+	const tools = { active: ["read", "bash", "edit", "write"] };
+
+	const pi = {
+		appendEntry: (customType: string, data: unknown) => {
+			host.entries.push({ type: "custom", customType, data });
+		},
+		events: { on: () => () => undefined },
+		getActiveTools: () => [...tools.active],
+		getFlag: () => false,
+		getThinkingLevel: () => host.thinking,
+		on: (event: string, handler: Handler) => {
+			handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+		},
+		registerCommand: () => undefined,
+		registerFlag: () => undefined,
+		registerShortcut: () => undefined,
+		registerTool: () => undefined,
+		sendMessage: () => undefined,
+		sendUserMessage: () => undefined,
+		setActiveTools: (next: string[]) => {
+			tools.active = [...next];
+		},
+		setModel: async (model: ModelRef) => {
+			host.modelCalls.push({ provider: model.provider, id: model.id });
+			host.model = model;
+			return true;
+		},
+		setThinkingLevel: (level: string) => {
+			host.thinkingCalls.push(level);
+			host.thinking = level;
+		},
+	};
+	plannotator(pi as never);
+
+	const base = createContext({ cwd: options.cwd, entries: host.entries });
+	const context = {
+		...base,
+		get model() {
+			return host.model;
+		},
+		modelRegistry: { find: (provider: string, id: string) => ({ provider, id }) },
+	};
+
+	return {
+		host,
+		tools,
+		/** The user picks a model in the host's own UI, not through Plannotator. */
+		userPicks: (model: ModelRef, thinking?: string) => {
+			host.model = model;
+			if (thinking) host.thinking = thinking;
+			host.modelCalls.length = 0;
+			host.thinkingCalls.length = 0;
+		},
+		run: async (event: string) => {
+			for (const handler of handlers.get(event) ?? []) await handler({}, context as never);
+		},
+	};
+}
+
+const SOL = { provider: "openai", id: "gpt-6-sol" };
+const LUNA = { provider: "openai", id: "gpt-6-luna" };
+const PLAN = "- [ ] Step one\n- [ ] Step two\n";
+
+function executingEntries(): SessionEntry[] {
+	return [
+		{
+			type: "custom",
+			customType: "plannotator",
+			data: {
+				phase: "executing",
+				lastSubmittedPath: "PLAN.md",
+				savedState: { model: SOL, thinkingLevel: "medium" },
+				phaseAddedTools: [],
+				framingDelivered: true,
+			},
+		},
+		{ type: "custom", customType: "plannotator-execute", data: { lastSubmittedPath: "PLAN.md", approvedPlan: PLAN } },
+	];
+}
+
+describe("Plannotator keeps the user's model across /tree (#1722)", () => {
+	test("a /tree navigation that stays executing keeps a model picked during execution", async () => {
+		const cwd = makeWorkspace();
+		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+		const runtime = createModelHost({ cwd, initialModel: SOL, entries: executingEntries() });
+		await runtime.run("session_start");
+
+		runtime.userPicks(LUNA, "high");
+		// Re-answering an earlier Ask lands on another node of the same
+		// executing path.
+		await runtime.run("session_tree");
+
+		expect(runtime.host.model).toEqual(LUNA);
+		expect(runtime.host.thinking).toBe("high");
+		expect(runtime.host.modelCalls).toEqual([]);
+		expect(runtime.host.thinkingCalls).toEqual([]);
+		// Tools are still re-derived from the path.
+		expect(runtime.tools.active).toContain("plannotator_mark_done");
+	});
+
+	test("a configured executing model is not re-applied over the user's pick either", async () => {
+		const cwd = makeWorkspace({ phases: { executing: { model: SOL, thinking: "low" } } });
+		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+		const runtime = createModelHost({ cwd, initialModel: SOL, entries: executingEntries() });
+		await runtime.run("session_start");
+
+		runtime.userPicks(LUNA, "high");
+		await runtime.run("session_tree");
+
+		expect(runtime.host.model).toEqual(LUNA);
+		expect(runtime.host.modelCalls).toEqual([]);
+		expect(runtime.host.thinkingCalls).toEqual([]);
+	});
+
+	test("a /tree navigation into planning still applies the planning model", async () => {
+		const cwd = makeWorkspace({ phases: { planning: { model: SOL } } });
+		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+		const runtime = createModelHost({ cwd, initialModel: SOL, entries: executingEntries() });
+		await runtime.run("session_start");
+
+		runtime.userPicks(LUNA);
+		runtime.host.entries.push({
+			type: "custom",
+			customType: "plannotator",
+			data: { phase: "planning", lastSubmittedPath: "PLAN.md", savedState: { model: SOL, thinkingLevel: "medium" } },
+		});
+		await runtime.run("session_tree");
+
+		expect(runtime.host.model).toEqual(SOL);
+		expect(runtime.host.modelCalls.at(-1)).toEqual(SOL);
+	});
+
+	test("a /tree navigation out of plan mode still restores the pre-plan model", async () => {
+		const cwd = makeWorkspace();
+		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+		const runtime = createModelHost({ cwd, initialModel: SOL, entries: executingEntries() });
+		await runtime.run("session_start");
+
+		runtime.userPicks(LUNA);
+		// A path from before plan mode: no plannotator state at all.
+		runtime.host.entries.length = 0;
+		await runtime.run("session_tree");
+
+		expect(runtime.host.model).toEqual(SOL);
+		expect(runtime.host.modelCalls).toEqual([SOL]);
 	});
 });

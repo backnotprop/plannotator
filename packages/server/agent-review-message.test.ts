@@ -32,6 +32,8 @@ describe("buildAgentReviewUserMessage", () => {
       ["jj-last", "jj diff --git -r @-"],
       ["jj-line", "jj diff --git --from 'heads(::@ & ::(trunk()))' --to @"],
       ["jj-all", "jj diff --git --from 'root()' --to @"],
+      // Commits rail: first parent, never `jj diff -r` (all parents on a merge).
+      ["jj-commit:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "jj diff --git --from 'first_parent(commit_id(aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa))' --to 'commit_id(aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)'"],
     ] as const;
 
     for (const [diffType, command] of cases) {
@@ -118,9 +120,8 @@ describe("buildAgentReviewUserMessage", () => {
     expect(message).toContain("do not use absolute filesystem paths");
     expect(message).toContain("- api/ [git, changed] -> /tmp/workspace/api");
     expect(message).toContain("- web/ [jj, changed] -> /tmp/workspace/web");
-    expect(message).toContain("git -C <child-repo-folder>");
-    expect(message).toContain("JJ child repos");
-    expect(message).toContain("GitButler child repos");
+    // Workspace jobs work from the inlined diff; no job allowlist admits `git -C`.
+    expect(message).not.toContain("git -C");
     expect(message).toContain("- app/ [gitbutler, changed] -> /tmp/workspace/app");
     expect(message).toContain(patch);
   });
@@ -273,7 +274,7 @@ describe("buildAgentReviewUserMessage — Ask AI scenario coverage", () => {
     }
   });
 
-  test("buildWorkspacePromptContextLines lists repos and the git -C guidance", () => {
+  test("buildWorkspacePromptContextLines lists repos and never directs agents to `git -C`", () => {
     const lines = buildWorkspacePromptContextLines({
       root: "/tmp/ws",
       repos: [
@@ -281,7 +282,7 @@ describe("buildAgentReviewUserMessage — Ask AI scenario coverage", () => {
       ],
     }).join("\n");
     expect(lines).toContain("workspace root: /tmp/ws");
-    expect(lines).toContain("git -C <child-repo-folder>");
+    expect(lines).not.toContain("git -C");
     expect(lines).toContain("- api/ [git, changed] -> /tmp/ws/api");
   });
 });
@@ -306,9 +307,9 @@ describe("getLocalDiffInstruction", () => {
 });
 
 describe("buildClaudeCommand", () => {
-  test("defaults to Opus 5 when the caller passes no model", () => {
+  test("defaults to the opus alias (the CLI resolves latest) when the caller passes no model", () => {
     const command = buildClaudeCommand("review").command;
-    expect(command[command.indexOf("--model") + 1]).toBe("claude-opus-5");
+    expect(command[command.indexOf("--model") + 1]).toBe("opus");
   });
 
   test("still honours an explicitly requested model", () => {
@@ -327,6 +328,5 @@ describe("buildClaudeCommand", () => {
     expect(allowedTools).toContain("Bash(jj file show:*)");
     expect(allowedTools).toContain("Bash(jj cat:*)");
     expect(allowedTools).toContain("Bash(jj bookmark list:*)");
-    expect(allowedTools).toContain("Bash(git -C:*)");
   });
 });

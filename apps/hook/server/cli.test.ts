@@ -32,7 +32,7 @@ describe("CLI top-level help", () => {
     expect(output).toContain("plannotator [--browser <name>]");
     // Deliberate literal: the review usage line is API surface for agents
     // probing --help (and for the knowledge-skill freshness guard).
-    expect(output).toContain("plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--patch-file <path | ->] [--tailscale] [PR_URL]");
+    expect(output).toContain("plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--patch-file <path | ->] [--tailscale] [DIRECTORY | PR_URL]");
     expect(output).toContain("plannotator annotate <file.md | file.txt | file.html | https://... | folder/>");
     expect(output).toContain("[--markdown] [--no-jina]");
     expect(output).toContain("plannotator annotate-last [--stdin]");
@@ -347,17 +347,13 @@ describe("guide subcommand through the entrypoint", () => {
   // so the test stands in placeholders for whichever one is missing and removes
   // exactly those again afterwards; a real build is left alone.
   test("guide share --json prints the JSON record, wherever --json sits", async () => {
-    const { mkdirSync, mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+    const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
     const { FIXTURE_V1_PR } = await import("@plannotator/shared/guide-format-fixtures");
+    const { removeStubbedHtml, stubHookDistHtml } = await import("../../../tests/helpers/hook-dist-stub");
     const workDir = mkdtempSync(join(tmpdir(), "plannotator-guide-entry-"));
-    const distDir = resolve(import.meta.dir, "../dist");
-    const stubbed = ["index.html", "review.html"].map((name) => join(distDir, name)).filter((path) => !existsSync(path));
-    if (stubbed.length > 0) {
-      mkdirSync(distDir, { recursive: true });
-      for (const path of stubbed) writeFileSync(path, "<!doctype html><title>test stub</title>");
-    }
+    const stubbed = stubHookDistHtml();
     const host = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
@@ -390,7 +386,7 @@ describe("guide subcommand through the entrypoint", () => {
     } finally {
       host.stop(true);
       rmSync(workDir, { recursive: true, force: true });
-      for (const path of stubbed) rmSync(path, { force: true });
+      removeStubbedHtml(stubbed);
     }
   }, 30_000);
 });

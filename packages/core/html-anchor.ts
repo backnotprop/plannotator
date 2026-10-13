@@ -67,6 +67,13 @@ export interface HtmlElementContext {
   component?: string;
   /** Live-app sessions only: the route the element was seen on and the page title. */
   page?: { url: string; title?: string };
+  /**
+   * Media elements only: the file the element shows (`team.jpg`,
+   * `data:image/png`), resolved by the bridge the same way the composer quote
+   * names it — `src`, a lazy `data-src`, `srcset`, `<picture><source>`, a
+   * `<video>`'s `<source>` or `poster` — after the query/fragment scrub.
+   */
+  sourceName?: string;
 }
 
 /** Mirrors `MAX_ANCHOR_SELECTOR_LENGTH` in `@plannotator/ui`. */
@@ -112,6 +119,8 @@ const MAX_CONTEXT_LANDMARK_LENGTH = 80;
 const MAX_CONTEXT_HEADING_LENGTH = 130;
 const MAX_CONTEXT_COMPONENT_LENGTH = 100;
 const MAX_CONTEXT_PAGE_TITLE_LENGTH = 200;
+/** The bridge caps the name at 60; headroom for the parent's own collapse. */
+const MAX_CONTEXT_SOURCE_NAME_LENGTH = 80;
 
 /** Attribute names the context may carry (mirrors CONTEXT_ATTRS in the bridge). */
 export const CONTEXT_ATTR_ALLOWLIST = new Set([
@@ -203,6 +212,16 @@ function contextBytes(value: unknown): number {
 }
 
 /**
+ * Fields an over-budget context sheds, first to last; mirrors `CTX_SHED_ORDER`
+ * in the bridge (a test keeps the two in step). `sourceName` goes last: the
+ * export heading falls back to the `src` attribute without it, and shedding it
+ * is still better than losing the whole context.
+ */
+export const ELEMENT_CONTEXT_SHED_ORDER: ReadonlyArray<keyof HtmlElementContext> = [
+  "outline", "text", "attrs", "classes", "path", "heading", "landmark", "component", "sourceName",
+];
+
+/**
  * Validate a bridge-posted element context. Pure and fail-closed: returns
  * `undefined` if `value` is not a valid element context or tag is missing/empty.
  * Every scalar is re-collapsed (control characters and whitespace runs),
@@ -268,6 +287,8 @@ export function parseHtmlElementContext(value: unknown): HtmlElementContext | un
   if (heading) context.heading = heading;
   const component = collapseContextScalar(value.component, MAX_CONTEXT_COMPONENT_LENGTH);
   if (component) context.component = component;
+  const sourceName = collapseContextScalar(value.sourceName, MAX_CONTEXT_SOURCE_NAME_LENGTH);
+  if (sourceName) context.sourceName = sourceName;
   if (isRecord(value.page)) {
     const url = collapseContextScalar(value.page.url, MAX_PAGE_URL_LENGTH);
     if (url) {
@@ -277,8 +298,7 @@ export function parseHtmlElementContext(value: unknown): HtmlElementContext | un
     }
   }
   // Serialized bound: shed the expendable fields in the bridge's order until the whole fits.
-  const shedOrder: Array<keyof HtmlElementContext> = ["outline", "text", "attrs", "classes", "path", "heading", "landmark", "component"];
-  for (const field of shedOrder) {
+  for (const field of ELEMENT_CONTEXT_SHED_ORDER) {
     if (contextBytes(context) <= MAX_ELEMENT_CONTEXT_BYTES) break;
     delete context[field];
   }

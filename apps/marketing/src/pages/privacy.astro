@@ -12,7 +12,7 @@ import Footer from '../components/Footer.astro';
     <div class="max-w-3xl mx-auto px-8 pt-20 pb-16">
       <article class="prose">
         <h1>Privacy Policy</h1>
-        <p class="text-sm text-muted-foreground">Last updated: July 31, 2026</p>
+        <p class="text-sm text-muted-foreground">Last updated: October 11, 2026</p>
 
         <p><strong>Plannotator does not collect usage telemetry or analytics.</strong> Plans, documents, diffs, annotations, drafts, history, and configuration stay on your machine by default. Some features contact GitHub, your Git remote, a URL you ask Plannotator to fetch, an AI provider, or a hosted sharing service. Those boundaries are described below.</p>
 
@@ -34,7 +34,7 @@ import Footer from '../components/Footer.astro';
         <h2>3. Automatic network requests</h2>
 
         <h3>GitHub release check</h3>
-        <p>Each time a plan review, annotate, archive, share-portal, or code-review app surface loads, it makes one GET request to GitHub's public latest-release API to check whether a newer Plannotator version exists. The request has no plan, document, diff, annotation, or usage-event payload. The Plannotator project owner does not receive usage analytics from this check. GitHub receives an ordinary web request and may process information such as your IP address, user agent, and request origin under GitHub's privacy practices. There is currently no configuration or environment-variable opt-out. Dismissing an update notice only hides that release notice; it does not stop later checks.</p>
+        <p>Plannotator checks whether a newer version exists by sending one GET request to GitHub's public latest-release API, at most once a day per computer (six hours after a failed attempt). The request comes from the Plannotator program on your computer, not from the review page in your browser. It carries no plan, document, diff, annotation, version number, or usage data, and the Plannotator project owner receives no analytics from it. GitHub receives an ordinary web request and may process information such as your IP address and user agent under GitHub's privacy practices. To turn the check off, set <code>PLANNOTATOR_UPDATE_CHECK=0</code>, add <code>&#123; "updateCheck": false &#125;</code> to <code>~/.plannotator/config.json</code>, or switch off "Tell me when a new version is out" in Settings. Running <code>plannotator update</code> always checks, because you asked it to.</p>
 
         <h3>Installer downloads</h3>
         <p>The install scripts download the selected Plannotator binary and checksum from GitHub Releases. When installing the latest version, they first query GitHub's API to resolve the release tag. If available, a token from <code>GITHUB_TOKEN</code>, <code>GH_TOKEN</code>, or <code>gh auth token</code> is sent to that API. Pinning <code>--version</code> skips only the release-resolution API call; the binary and checksum still come from GitHub Releases.</p>
@@ -87,6 +87,7 @@ import Footer from '../components/Footer.astro';
           <li>Set <code>PLANNOTATOR_JINA=0</code> or use <code>--no-jina</code> to prevent URL annotation from using Jina. The requested URL is still fetched directly.</li>
           <li>Set <code>PLANNOTATOR_AI=disabled</code> to disable the in-app AI and review-agent surfaces.</li>
           <li>Set <code>PLANNOTATOR_FEEDBACK_HISTORY=0</code> to stop archiving submitted feedback locally, or delete <code>~/.plannotator/feedback/</code> to remove what has been archived.</li>
+          <li>Set <code>PLANNOTATOR_REVIEW_PROGRESS=0</code> to stop code review saving which files you marked viewed (records include repository file paths), or delete <code>~/.plannotator/review-progress/</code> to remove saved progress.</li>
           <li>Self-host the share portal and paste service, or do not use link sharing.</li>
           <li>Do not send a share link through a service you do not trust with the content or key in that link.</li>
           <li>The automatic GitHub release check currently has no opt-out setting.</li>

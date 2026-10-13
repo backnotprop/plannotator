@@ -11,6 +11,7 @@ import {
 	getVcsContext,
 	getVcsDiffFingerprint,
 	getVcsFileContentsForDiff,
+	getVcsFileBytesForDiff,
 	canStageFiles,
 	runVcsDiff,
 	stageFile,
@@ -18,10 +19,14 @@ import {
 	startPlanReviewServer,
 	startReviewServer,
 	type DiffType,
+	type PlanServerResult,
 	type VcsSelection,
 	unstageFile,
 } from "./server.ts";
 import { BROWSER_SESSION_STOPPED } from "./browser-session-error.ts";
+import type { SessionBridge } from "./generated/ai/session-bridge.ts";
+import type { HostControl } from "./generated/host-control.ts";
+import type { AnnotateBundleFile } from "./generated/annotate-bundle.ts";
 import { openBrowser, isRemoteSession } from "./server/network.ts";
 import { detectProjectName } from "./server/project.ts";
 import { parsePRUrl, checkPRAuth, fetchPR } from "./server/pr.ts";
@@ -31,6 +36,10 @@ import {
 	getDisplayRepo,
 	getCliName,
 	getCliInstallUrl,
+	getPlatformLabel,
+	getPRNumber,
+	getPRHeadFetchSpec,
+	getPRCloneCommand,
 } from "./generated/pr-provider.ts";
 import { parseRemoteUrl } from "./generated/repo.ts";
 import { fetchRef, createWorktree, removeWorktree, ensureObjectAvailable } from "./generated/worktree.ts";
@@ -53,23 +62,52 @@ export {
 	hasReviewBrowserHtml,
 } from "./plannotator-browser-runtime.ts";
 
-export type AnnotateMode = "annotate" | "annotate-folder" | "annotate-last" | "annotate-app";
+export type AnnotateMode = "annotate" | "annotate-folder" | "annotate-last" | "annotate-app" | "annotate-bundle";
 export interface PlanReviewDecision {
 	approved: boolean;
 	feedback?: string;
 	savedPath?: string;
 	agentSwitch?: string;
 	permissionMode?: string;
+	/** The reviewer only answered the plan's questions (`answersOnly: true` on /api/deny). */
+	answersOnly?: boolean;
+	/** The exact plan text an approval was made on (the revision on screen). */
+	plan?: string;
 }
 
 export interface BrowserDecisionSession<T> {
 	url: string;
 	waitForDecision: () => Promise<T>;
 	stop: () => void;
+	/**
+	 * The server's in-process host control (packages/shared/host-control.ts):
+	 * the `plannotator` tool's list reads `status()`, its close calls `close()`
+	 * (the reviewer's Close marked closedBy "agent", draft kept).
+	 */
+	hostControl?: HostControl;
 }
 
+/** Set on a decision the agent's own close produced (host control), with the unsent count kept in the draft. */
+interface AgentClosedFields {
+	closedBy?: "agent";
+	unsentAnnotations?: number;
+}
+
+export type AnnotateDecision = {
+	feedback: string;
+	annotations?: unknown[];
+	exit?: boolean;
+	approved?: boolean;
+	selectedMessageId?: string;
+	feedbackScope?: "message" | "messages";
+	nothingToSend?: boolean;
+} & AgentClosedFields;
+
 type CodeReviewOptions = {
+	/** "Ask this session": the bridge to the Pi session that opened this review. */
+	sessionBridge?: SessionBridge;
 	cwd?: string;
+	includeReviewDirectory?: boolean;
 	defaultBranch?: string;
 	diffType?: DiffType;
 	prUrl?: string;
@@ -90,15 +128,27 @@ type CodeReviewOptions = {
 	 * callers omit it and keep the legacy forward-and-let-it-upgrade behavior.
 	 */
 	openStateFromFlags?: boolean;
+	/**
+	 * `false` when the invocation carried `--no-git-remote-check` (#1553): this
+	 * session makes no `git ls-remote` call at all. Forwarded verbatim to the
+	 * review server, which resolves it against PLANNOTATOR_GIT_REMOTE_CHECK and
+	 * `config.gitRemoteCheck`.
+	 */
+	gitRemoteCheck?: boolean;
 };
 
-type CodeReviewDecision = {
+export type CodeReviewDecision = {
 	approved: boolean;
 	feedback?: string;
+	reviewDirectory?: string;
 	annotations?: unknown[];
 	agentSwitch?: string;
 	exit?: boolean;
-};
+	/** The PR-platform status post (the review went to GitHub/GitLab/Bitbucket); `feedback` is only its status line. */
+	platform?: true;
+	/** What the decision is about as the server shows it at decision time (the active PR URL or working tree). */
+	target?: string;
+} & AgentClosedFields;
 
 const CODE_REVIEW_PROGRESS_STATUS = "plannotator-review";
 // stop -> registration timestamp. The timestamp lets self-preemption skip
@@ -149,6 +199,14 @@ function setCodeReviewProgress(ctx: ExtensionContext, message?: string): void {
 export interface PlanReviewBrowserSession extends BrowserDecisionSession<PlanReviewDecision> {
 	reviewId: string;
 	onDecision: (listener: (result: PlanReviewDecision) => void | Promise<void>) => () => void;
+	/** Push a revised plan into the open tab; null once decided (open a new review). */
+	updatePlan: PlanServerResult["updatePlan"];
+	/**
+	 * The session that opened the review is going away: tell the open tab it
+	 * was closed (draft kept) and refuse later decisions. Call `stop()` after.
+	 * Optional so a host's own session object may omit it.
+	 */
+	closeKeepingDraft?: PlanServerResult["closeKeepingDraft"];
 }
 
 function delay(ms: number): Promise<void> {
@@ -195,7 +253,7 @@ export async function startServerWithSelfPreemption<T>(
 
 async function openBrowserForServer(serverUrl: string, ctx: ExtensionContext): Promise<void> {
 	const browserResult = await openBrowser(serverUrl);
-	if (isRemoteSession()) {
+	if (ctx.mode === "rpc" || isRemoteSession()) {
 		ctx.ui.notify(`[Plannotator] ${serverUrl}`, "info");
 	} else if (!browserResult.opened) {
 		ctx.ui.notify(`Open this URL to review: ${serverUrl}`, "info");
@@ -213,6 +271,7 @@ async function buildLocalWorkspaceReview(
 		getVcsContext,
 		runVcsDiff,
 		getVcsFileContentsForDiff,
+		getVcsFileBytesForDiff,
 		getVcsDiffFingerprint,
 		canStageFiles,
 		stageFile,
@@ -251,7 +310,7 @@ async function waitForDecisionWithCleanup<T>(
 }
 
 export function startBrowserDecisionSession<T>(
-	server: { url: string; stop: () => void },
+	server: { url: string; stop: () => void; hostControl?: HostControl },
 	ctx: ExtensionContext,
 	waitForResult: () => Promise<T>,
 	signal?: AbortSignal,
@@ -306,6 +365,7 @@ export function startBrowserDecisionSession<T>(
 			return decisionPromise;
 		},
 		stop,
+		...(server.hostControl ? { hostControl: server.hostControl } : {}),
 	};
 }
 
@@ -313,6 +373,7 @@ export async function startPlanReviewBrowserSession(
 	ctx: ExtensionContext,
 	planContent: string,
 	signal?: AbortSignal,
+	options: { sessionBridge?: SessionBridge; planRevisions?: boolean } = {},
 ): Promise<PlanReviewBrowserSession> {
 	if (!ctx.hasUI) {
 		throw new Error("Plannotator browser review is unavailable in this session.");
@@ -329,6 +390,8 @@ export async function startPlanReviewBrowserSession(
 		sharingEnabled: resolveSharingEnabled(loadConfig()),
 		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
 		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
+		sessionBridge: options.sessionBridge,
+		planRevisions: options.planRevisions,
 	}));
 
 	const session = startBrowserDecisionSession(server, ctx, server.waitForDecision, signal);
@@ -340,6 +403,8 @@ export async function startPlanReviewBrowserSession(
 		...session,
 		reviewId: server.reviewId,
 		onDecision: server.onDecision,
+		updatePlan: server.updatePlan,
+		closeKeepingDraft: server.closeKeepingDraft,
 	};
 }
 
@@ -404,6 +469,7 @@ async function createCodeReviewBrowserSession(
 	let initialBase: string | undefined;
 	let initialBaseExplicit = false;
 	let initialFingerprint: string | undefined;
+	let initialFileIdentities: Record<string, string> | undefined;
 	let worktreeCleanup: (() => void | Promise<void>) | undefined;
 	let worktreePool: WorktreePool | undefined;
 	let exitHandler: (() => void) | undefined;
@@ -429,7 +495,8 @@ async function createCodeReviewBrowserSession(
 				`Invalid PR/MR URL: ${urlArg}\n` +
 				"Supported formats:\n" +
 				"  GitHub: https://github.com/owner/repo/pull/123\n" +
-				"  GitLab: https://gitlab.com/group/project/-/merge_requests/42",
+				"  GitLab: https://gitlab.com/group/project/-/merge_requests/42\n" +
+				"  Bitbucket Cloud: https://bitbucket.org/workspace/repo/pull-requests/7",
 			);
 		}
 
@@ -440,8 +507,10 @@ async function createCodeReviewBrowserSession(
 			await checkPRAuth(prRef);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			if (msg.includes("not found") || msg.includes("ENOENT")) {
-				throw new Error(`${cliName === "gh" ? "GitHub" : "GitLab"} CLI (${cliName}) is not installed. Install it from ${cliUrl}`);
+			// REST-only platforms (Bitbucket) have no CLI to be missing; their auth
+			// error already names the env vars and token scopes to set.
+			if (cliName && (msg.includes("not found") || msg.includes("ENOENT"))) {
+				throw new Error(`${getPlatformLabel(prRef)} CLI (${cliName}) is not installed. Install it from ${cliUrl}`);
 			}
 			throw err;
 		}
@@ -462,16 +531,22 @@ async function createCodeReviewBrowserSession(
 			let sessionDir: string | undefined;
 			try {
 				const repoDir = options.cwd ?? ctx.cwd;
-				const identifier = prMetadata.platform === "github"
-					? `${prMetadata.owner}-${prMetadata.repo}-${prMetadata.number}`
-					: `${prMetadata.projectPath.replace(/\//g, "-")}-${prMetadata.iid}`;
+				const identifier = `${getDisplayRepo(prMetadata).replace(/\//g, "-")}-${getPRNumber(prMetadata)}`;
 				const suffix = Math.random().toString(36).slice(2, 8);
-				const prNumber = prMetadata.platform === "github" ? prMetadata.number : prMetadata.iid;
+				const prNumber = getPRNumber(prMetadata);
 				sessionDir = join(realpathSync(tmpdir()), `plannotator-pr-${identifier}-${suffix}`);
 				localPath = join(sessionDir, "pool", `pr-${prNumber}`);
-				const fetchRefStr = prMetadata.platform === "github"
-					? `refs/pull/${prMetadata.number}/head`
-					: `refs/merge-requests/${prMetadata.iid}/head`;
+				// GitHub/GitLab: the PR head ref on origin. Bitbucket: the source
+				// branch, from the fork's URL when the PR comes from one.
+				const headFetch = getPRHeadFetchSpec(prMetadata);
+				const fetchRefStr = headFetch.ref;
+				const headRemote = headFetch.remote ?? "origin";
+				// A fork URL fetch must never stop to prompt for credentials.
+				const fetchHead = async (args: string[], cwd: string) => {
+					if (!headFetch.remote) return reviewRuntime.runGit(args, { cwd });
+					const r = spawnSync("git", args, { cwd, encoding: "utf-8", env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+					return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", exitCode: r.status ?? 1 };
+				};
 
 				// Validate inputs from platform API to prevent git flag/path injection
 				if (prMetadata.baseBranch.includes('..') || prMetadata.baseBranch.startsWith('-')) throw new Error(`Invalid base branch: ${prMetadata.baseBranch}`);
@@ -484,9 +559,7 @@ async function createCodeReviewBrowserSession(
 					if (remoteResult.exitCode === 0) {
 						const remoteUrl = remoteResult.stdout.trim();
 						const currentRepo = parseRemoteUrl(remoteUrl);
-						const prRepo = prMetadata.platform === "github"
-							? `${prMetadata.owner}/${prMetadata.repo}`
-							: prMetadata.projectPath;
+						const prRepo = getDisplayRepo(prMetadata);
 						const repoMatches = !!currentRepo && currentRepo.toLowerCase() === prRepo.toLowerCase();
 						const sshHost = remoteUrl.match(/^[^@]+@([^:]+):/)?.[1];
 						const httpsHost = (() => { try { return new URL(remoteUrl).hostname; } catch { return null; } })();
@@ -501,7 +574,12 @@ async function createCodeReviewBrowserSession(
 					setCodeReviewProgress(ctx, `Preparing local ${getMRLabel(prRef)} checkout...`);
 					await fetchRef(reviewRuntime, prMetadata.baseBranch, { cwd: repoDir });
 					await ensureObjectAvailable(reviewRuntime, prMetadata.baseSha, { cwd: repoDir });
-					await fetchRef(reviewRuntime, fetchRefStr, { cwd: repoDir });
+					if (headFetch.remote) {
+						const res = await fetchHead(["fetch", headRemote, "--", fetchRefStr], repoDir);
+						if (res.exitCode !== 0) throw new Error(`git fetch ${headRemote} ${fetchRefStr} failed: ${res.stderr.trim()}`);
+					} else {
+						await fetchRef(reviewRuntime, fetchRefStr, { cwd: repoDir });
+					}
 
 					await createWorktree(reviewRuntime, {
 						ref: "FETCH_HEAD",
@@ -527,27 +605,22 @@ async function createCodeReviewBrowserSession(
 					process.once("exit", exitHandler);
 				} else {
 					// ── Cross-repo: shallow clone + fetch PR head ──
-					const prRepo = prMetadata.platform === "github"
-						? `${prMetadata.owner}/${prMetadata.repo}`
-						: prMetadata.projectPath;
+					const prRepo = getDisplayRepo(prMetadata);
 					if (/^-/.test(prRepo)) throw new Error(`Invalid repository identifier: ${prRepo}`);
-					const cli = prMetadata.platform === "github" ? "gh" : "glab";
-					const host = prMetadata.host;
-					// gh/glab repo clone doesn't accept --hostname; set GH_HOST/GITLAB_HOST env instead
-					const isDefaultHost = host === "github.com" || host === "gitlab.com";
-					const cloneEnv = isDefaultHost ? undefined : {
-						...process.env,
-						...(prMetadata.platform === "github" ? { GH_HOST: host } : { GITLAB_HOST: host }),
-					};
+					// gh/glab repo clone doesn't accept --hostname, so the clone
+					// command carries GH_HOST/GITLAB_HOST env overrides instead.
+					const cloneCommand = getPRCloneCommand(prMetadata, localPath);
+					const cloneEnv = cloneCommand.env ? { ...process.env, ...cloneCommand.env } : undefined;
+					const [cloneCmd, ...cloneArgs] = cloneCommand.argv;
 
 					setCodeReviewProgress(ctx, `Cloning ${prRepo}...`);
-					const cloneResult = spawnSync(cli, ["repo", "clone", prRepo, localPath, "--", "--depth=1", "--no-checkout"], { encoding: "utf-8", env: cloneEnv });
+					const cloneResult = spawnSync(cloneCmd, cloneArgs, { encoding: "utf-8", env: cloneEnv });
 					if ((cloneResult.status ?? 1) !== 0) {
-						throw new Error(`${cli} repo clone failed: ${(cloneResult.stderr ?? "").trim()}`);
+						throw new Error(`${cloneCmd === "git" ? "git clone" : `${cloneCmd} repo clone`} failed: ${(cloneResult.stderr ?? "").trim()}`);
 					}
 
 					setCodeReviewProgress(ctx, `Fetching ${getMRLabel(prRef)} branch...`);
-					const fetchResult = await reviewRuntime.runGit(["fetch", "--depth=200", "origin", fetchRefStr], { cwd: localPath });
+					const fetchResult = await fetchHead(["fetch", "--depth=200", headRemote, fetchRefStr], localPath);
 					if (fetchResult.exitCode !== 0) throw new Error(`Failed to fetch PR head ref: ${fetchResult.stderr.trim()}`);
 
 					const checkoutResult = await reviewRuntime.runGit(["checkout", "FETCH_HEAD"], { cwd: localPath });
@@ -613,9 +686,10 @@ async function createCodeReviewBrowserSession(
 		diffType = "static-patch";
 	} else {
 		// --- Local Review Mode ---
-		const cwd = options.cwd ?? ctx.cwd;
+		let cwd = options.cwd ?? ctx.cwd;
 		const config = loadConfig();
 		const managedVcs = await detectManagedVcs(cwd, options.vcsType);
+		if (options.includeReviewDirectory) cwd = await managedVcs?.getRoot?.(cwd) ?? cwd;
 		const forcedVcs = !!options.vcsType && options.vcsType !== "auto";
 		// Flag-sourced open state: validate strictly before any diff work, and
 		// resolve the effective requested base/diff type (promotion included).
@@ -679,6 +753,7 @@ async function createCodeReviewBrowserSession(
 			gitRef = result.gitRef;
 			diffError = result.error;
 			initialFingerprint = result.fingerprint;
+			initialFileIdentities = result.fileIdentities;
 			// Remember which base the initial diff was computed against so it can
 			// be forwarded to the server below. Only matters when the caller
 			// overrode the detected default; otherwise it matches gitCtx already.
@@ -704,17 +779,21 @@ async function createCodeReviewBrowserSession(
 	}
 
 	const server = await startServerWithSelfPreemption(() => startReviewServer({
+		sessionBridge: options.sessionBridge,
 		rawPatch,
 		gitRef,
 		error: diffError,
 		origin: "pi",
-		project: detectProjectName(),
+		project: detectProjectName(options.includeReviewDirectory ? gitCtx?.cwd ?? workspace?.root ?? options.cwd : options.cwd),
+		includeReviewDirectory: options.includeReviewDirectory,
 		diffType,
 		gitContext: gitCtx,
 		initialBase,
 		initialBaseExplicit,
 		openStatePinned: openStateFromFlags,
+		gitRemoteCheck: options.gitRemoteCheck,
 		initialFingerprint,
+		initialFileIdentities,
 		prMetadata,
 		prPatchIncomplete,
 		workspace,
@@ -743,7 +822,7 @@ export async function openMarkdownAnnotation(
 	sourceInfo?: string,
 	sourceConverted?: boolean,
 	gate?: boolean,
-): Promise<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }> {
+): Promise<AnnotateDecision> {
 	const session = await startMarkdownAnnotationSession(
 		ctx,
 		filePath,
@@ -774,7 +853,11 @@ export async function startMarkdownAnnotationSession(
 	 * proxy. The bridge sources are loaded here from the vendored
 	 * bridge-script module, mirroring how the Bun CLI supplies them. */
 	liveTargetUrl?: string,
-): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>> {
+	/** "Ask this session": the bridge to the Pi session that opened this annotation. */
+	sessionBridge?: SessionBridge,
+	/** Several files reviewed as one (mode "annotate-bundle"), in review order. */
+	bundleFiles?: AnnotateBundleFile[],
+): Promise<BrowserDecisionSession<AnnotateDecision>> {
 	if (!ctx.hasUI) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
 	}
@@ -812,12 +895,14 @@ export async function startMarkdownAnnotationSession(
 	}
 
 	const server = await startServerWithSelfPreemption(() => startAnnotateServer({
+		sessionBridge,
 		markdown: resolvedMarkdown,
 		filePath,
 		origin: "pi",
 		mode,
 		liveApp,
 		folderPath,
+		bundleFiles,
 		recentMessages,
 		sourceInfo,
 		sourceConverted,
@@ -843,7 +928,7 @@ export async function openLastMessageAnnotation(
 	lastText: string,
 	gate?: boolean,
 	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
-): Promise<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }> {
+): Promise<AnnotateDecision> {
 	const session = await startLastMessageAnnotationSession(ctx, lastText, gate, recentMessages);
 	return session.waitForDecision();
 }
@@ -853,7 +938,8 @@ export async function startLastMessageAnnotationSession(
 	lastText: string,
 	gate?: boolean,
 	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
-): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>> {
+	sessionBridge?: SessionBridge,
+): Promise<BrowserDecisionSession<AnnotateDecision>> {
 	return startMarkdownAnnotationSession(
 		ctx,
 		"last-message",
@@ -867,6 +953,8 @@ export async function startLastMessageAnnotationSession(
 		undefined,
 		undefined,
 		recentMessages,
+		undefined,
+		sessionBridge,
 	);
 }
 

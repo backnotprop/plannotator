@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import type { Block } from '../../types';
 import { copyTextToClipboard } from '../../utils/clipboard';
-import { applyHighlight, codeBlockClassName } from '../../utils/codeHighlight';
+import { applyHighlight, codeBlockClassName, codeBlockKeepsLayout } from '../../utils/codeHighlight';
 import { useFenceTheme } from '../../hooks/useFenceTheme';
 
 interface CodeBlockProps {
@@ -68,7 +68,11 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ block, onHover, onLeave })
         )}
       </button>
       <pre className="rounded-lg text-[13px] overflow-x-auto bg-muted/50 border border-border/30">
-        <code ref={codeRef} className={codeClassName}>{block.content}</code>
+        <code
+          ref={codeRef}
+          className={codeClassName}
+          data-keep-layout={codeBlockKeepsLayout(block.content) ? '' : undefined}
+        >{block.content}</code>
       </pre>
     </div>
   );

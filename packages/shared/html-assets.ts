@@ -130,6 +130,7 @@ function escapeHtmlText(value: string): string {
 const CONTENT_TYPES_BY_EXT: Record<string, string> = {
   ".apng": "image/apng",
   ".avif": "image/avif",
+  ".bmp": "image/bmp",
   ".css": "text/css; charset=utf-8",
   ".gif": "image/gif",
   ".ico": "image/x-icon",

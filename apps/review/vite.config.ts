@@ -5,6 +5,7 @@ import { viteSingleFile } from 'vite-plugin-singlefile';
 import tailwindcss from '@tailwindcss/vite';
 import pkg from '../../package.json';
 import { DEMO_FILE_CONTENTS } from '../../packages/review-editor/demoData';
+import { katexWoff2Only } from '../../build/katex-woff2-only';
 
 function demoFileContentPlugin(): Plugin {
   return {
@@ -30,7 +31,7 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
-  plugins: [demoFileContentPlugin(), react(), tailwindcss(), viteSingleFile()],
+  plugins: [demoFileContentPlugin(), react(), tailwindcss(), katexWoff2Only(), viteSingleFile()],
   resolve: {
     alias: {
       // Drop the dead Oniguruma WASM (~622 KB base64, inlined twice here: main

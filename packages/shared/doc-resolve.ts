@@ -5,18 +5,28 @@
  * Resolving which file a path names is separated from reading it so
  * authorization sits on one seam: every reachable path comes from
  * `resolveDocTarget`, and `isPathAllowed` alone decides whether it is served.
- * Resolution may `stat`; it never reads contents.
+ * Resolution may `stat`; it never reads contents (`readPlanFile` reads the
+ * plan file once, at server start).
+ *
+ * Plan review adds one path outside the roots: when the harness reports the
+ * plan's own file (Claude Code writes it under `~/.claude/plans/`),
+ * `resolvePlanLinkedDoc` serves the documents the plan links from that
+ * directory. Only exact link targets are served, the directory never becomes
+ * an allowed root, and a named file there shadows a project document of the
+ * same relative name. That base is not used for root resolution.
  */
 
-import { realpathSync, statSync } from "fs";
-import { basename, dirname, join } from "path";
+import { readFileSync, realpathSync, statSync } from "fs";
+import { basename, dirname, join, posix } from "path";
 import { parseCodePath, type ParsedCodePath } from "./code-file";
 import {
 	getAnnotatableDocRegex,
+	getExtraMarkdownExtensions,
 	isAbsoluteUserPath,
 	isAnnotatableTextPath,
 	isCodeFilePath,
 	isWithinProjectRoot,
+	MAX_ANNOTATABLE_FILE_BYTES,
 	resolveCodeFile,
 	resolveMarkdownFile,
 	resolveUserPath,
@@ -122,6 +132,132 @@ export function getTrustedBaseDir(base: string | null | undefined, roots: string
 	if (!base) return null;
 	const resolvedBase = resolveUserPath(base);
 	return isPathAllowed(resolvedBase, roots) ? resolvedBase : null;
+}
+
+/**
+ * A plan file on disk whose contents match the plan under review. Its
+ * directory serves the documents the plan links, but is never an allowed root.
+ */
+export interface PlanFile {
+	dir: string;
+	/** The plan's link targets, computed once (`planLinkTargets`). */
+	targets: Set<string>;
+}
+
+/**
+ * Read a harness-supplied plan path, returning null unless the file holds the
+ * plan under review. The path is model-generated tool input, so without the
+ * content check it could name any directory as the plan's own.
+ */
+export function readPlanFile(planFilePath: unknown, plan: string): PlanFile | null {
+	if (typeof planFilePath !== "string" || !plan) return null;
+	if (!isAbsoluteUserPath(planFilePath) || !/\.md$/i.test(planFilePath)) return null;
+	const path = resolveUserPath(planFilePath);
+	try {
+		const stat = statSync(path);
+		if (!stat.isFile() || stat.size > MAX_ANNOTATABLE_FILE_BYTES) return null;
+		if (readFileSync(path, "utf8").trimEnd() !== plan.trimEnd()) return null;
+		const real = realpathSync(path);
+		return { dir: dirname(real), targets: planLinkTargets(plan) };
+	} catch {
+		return null;
+	}
+}
+
+// A link target and a requested path compare equal after this: no fragment or
+// query, percent-decoded, and `./` or `a/../` segments collapsed.
+function normalizeLinkTarget(target: string): string {
+	let path = target.trim().replace(/[?#].*$/, "");
+	try {
+		path = decodeURIComponent(path);
+	} catch {
+		// A malformed escape stays literal.
+	}
+	return path ? posix.normalize(path) : "";
+}
+
+// Code renders as text, so a link written inside a fence or a code span is not
+// one. A line scan rather than one regex: a fence regex backtracks
+// quadratically on a long run of backticks or tildes.
+function stripCode(plan: string): string {
+	const kept: string[] = [];
+	let fence: string | null = null;
+	for (const line of plan.split("\n")) {
+		const opener = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+		if (fence) {
+			if (opener && opener[1][0] === fence[0] && opener[1].length >= fence.length && !opener[2].trim()) fence = null;
+			continue;
+		}
+		// A backtick fence's info string cannot contain a backtick (CommonMark).
+		if (opener && !(opener[1][0] === "`" && opener[2].includes("`"))) {
+			fence = opener[1];
+			continue;
+		}
+		kept.push(line);
+	}
+	return kept.join("\n").replace(/`[^`\n]*`/g, "");
+}
+
+// Wiki-link targets without an extension open as `.md`, as the renderer does.
+const WIKI_LINK_DOC_EXTENSION = /\.(mdx?|txt|html?)$/i;
+
+/**
+ * The link targets the plan text makes clickable: markdown links
+ * `[label](target)`, wiki links `[[target]]` / `[[target|label]]`, and
+ * `href` attributes in raw HTML. Plain mentions of a filename do not count,
+ * and neither does a longer name that contains the requested one, or a link
+ * written inside code.
+ */
+export function planLinkTargets(plan: string): Set<string> {
+	const targets = new Set<string>();
+	const text = stripCode(plan);
+	const add = (target: string) => {
+		const normalized = normalizeLinkTarget(target);
+		if (normalized) targets.add(normalized);
+	};
+	// One level of balanced parentheses, as the renderer allows in a destination.
+	for (const match of text.matchAll(/\]\(((?:[^()\n]|\([^()\n]*\))+)\)/g)) add(match[1]);
+	for (const match of text.matchAll(/\[\[([^\]|[\n]+)(?:\|[^\]\n]+)?\]\]/g)) {
+		const target = match[1].trim();
+		const hasExtension =
+			WIKI_LINK_DOC_EXTENSION.test(target) ||
+			getExtraMarkdownExtensions().some((ext) => target.toLowerCase().endsWith(ext));
+		add(hasExtension ? target : `${target}.md`);
+	}
+	for (const match of text.matchAll(/\bhref\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)')/gi)) add(match[1] ?? match[2]);
+	return targets;
+}
+
+/** Whether `base` is the plan file's directory, the base the plan review client sends. */
+export function isPlanDirBase(base: string | null | undefined, planFile: PlanFile | null | undefined): boolean {
+	return !!planFile && !!base && resolveUserPath(base) === planFile.dir;
+}
+
+/**
+ * A document the plan links relative to its own directory. Only a relative
+ * path that is exactly one of the plan's link targets is served, and it must
+ * stay inside that directory after symlink resolution, so the directory's
+ * other files (other plans in `~/.claude/plans/`) stay unreachable.
+ *
+ * This runs before root resolution, so a linked file beside the plan shadows
+ * a project document of the same relative name.
+ */
+export function resolvePlanLinkedDoc(
+	requestedPath: string,
+	base: string | null | undefined,
+	planFile: PlanFile | null | undefined,
+): string | null {
+	if (!planFile || !isPlanDirBase(base, planFile)) return null;
+	// Everything below reads the normalized key, never the raw request: the raw
+	// string's `?` or `#` suffix would still reach the path join, where
+	// `linked.md?/../other.md` collapses to a sibling the plan never linked.
+	const key = normalizeLinkTarget(requestedPath);
+	if (!key || isAbsoluteUserPath(key)) return null;
+	if (!getAnnotatableDocRegex().test(key) && !/\.html?$/i.test(key)) return null;
+	if (!planFile.targets.has(key)) return null;
+	const candidate = resolveUserPath(key, planFile.dir);
+	if (!isPathAllowed(candidate, [planFile.dir])) return null;
+	return isReadableFile(candidate) ? candidate : null;
 }
 
 export type ResolveAllowedDocPathResult =

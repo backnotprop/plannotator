@@ -5,6 +5,7 @@ import { formatRelativeTime, renderChatMarkdown } from '../../utils/aiChatFormat
 import { OverlayScrollArea } from '../OverlayScrollArea';
 import { SparklesIcon } from '../SparklesIcon';
 import { AIProviderBar } from './AIProviderBar';
+import { SessionAskActions, SessionAskNote, SessionAskStatus, sessionAskErrorTone, type SessionAskAction } from './SessionAskNotice';
 import { submitHint } from '../../utils/platform';
 
 interface DocumentAIChatPanelProps {
@@ -19,6 +20,10 @@ interface DocumentAIChatPanelProps {
   aiProviders?: AIProviderOption[];
   aiConfig?: { providerId: string | null; model: string | null; reasoningEffort?: string | null };
   onAIConfigChange?: (config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => void;
+  /** "Ask this session": the reviewer's choice on a busy answer. */
+  onSessionAskAction?: (questionId: string, action: SessionAskAction) => void;
+  /** Optional note under the provider bar on how to get "Ask this session" (askSessionSetupHint). */
+  askSessionSetupHint?: string | null;
 }
 
 function truncate(text: string, max = 180): string {
@@ -64,6 +69,8 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
   aiProviders = [],
   aiConfig,
   onAIConfigChange,
+  onSessionAskAction,
+  askSessionSetupHint,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [generalInput, setGeneralInput] = useState('');
@@ -109,7 +116,11 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
           )}
 
           {messages.map(entry => (
-            <DocumentQAPair key={entry.question.id} entry={entry} />
+            <DocumentQAPair
+              key={entry.question.id}
+              entry={entry}
+              onSessionAskAction={onSessionAskAction}
+            />
           ))}
         </div>
       </OverlayScrollArea>
@@ -136,6 +147,7 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
         onProviderChange={(providerId) => onAIConfigChange?.({ providerId })}
         onModelChange={(model) => onAIConfigChange?.({ model })}
         onReasoningEffortChange={(reasoningEffort) => onAIConfigChange?.({ reasoningEffort })}
+        setupHint={askSessionSetupHint}
       />
 
       {onAskGeneral && (
@@ -152,7 +164,10 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
   );
 };
 
-const DocumentQAPair = memo<{ entry: AIChatEntry }>(({ entry }) => {
+const DocumentQAPair = memo<{
+  entry: AIChatEntry;
+  onSessionAskAction?: (questionId: string, action: SessionAskAction) => void;
+}>(({ entry, onSessionAskAction }) => {
   const { question, response } = entry;
   const renderedResponse = useMemo(
     () => response.text ? renderChatMarkdown(response.text) : null,
@@ -190,17 +205,26 @@ const DocumentQAPair = memo<{ entry: AIChatEntry }>(({ entry }) => {
 
       <div className="group relative p-2.5 rounded-lg border border-border/50 bg-popover/50 hover:bg-muted/30 transition-colors">
         {response.error ? (
-          <p className="text-xs text-destructive">{response.error}</p>
+          <>
+            <p className={`text-xs ${sessionAskErrorTone(response)}`}>{response.error}</p>
+            <SessionAskActions
+              response={response}
+              onAction={onSessionAskAction ? (action) => onSessionAskAction(question.id, action) : undefined}
+            />
+          </>
         ) : response.text ? (
           <div className="text-xs">
             {renderedResponse}
             {response.isStreaming && <span className="ai-streaming-cursor inline-block ml-0.5" />}
           </div>
+        ) : response.status ? (
+          <SessionAskStatus response={response} />
         ) : response.isStreaming ? (
           <span className="text-xs text-muted-foreground">
             <span className="ai-streaming-cursor" /> Thinking...
           </span>
         ) : null}
+        {!response.error && <SessionAskNote response={response} />}
       </div>
     </div>
   );

@@ -1,0 +1,19 @@
+{
+  "name": "@plannotator/relay",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "The Plannotator Inbox relay: a Cloudflare Worker and one Durable Object per mailbox that carry encrypted pushes between an Inbox and its phones.",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "deploy": "wrangler deploy",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241218.0",
+    "@plannotator/core": "workspace:*",
+    "typescript": "~5.8.2",
+    "wrangler": "^4.127.1"
+  }
+}

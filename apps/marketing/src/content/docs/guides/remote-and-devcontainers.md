@@ -93,6 +93,14 @@ Or via `docker run`:
 docker run -e PLANNOTATOR_REMOTE=1 -e PLANNOTATOR_PORT=9999 -p 9999:9999 your-image
 ```
 
+## Proxies and forwarded hostnames
+
+Plannotator answers only the hostnames it expects in the `Host` header: `localhost` and other loopback names everywhere, plus, in remote mode, IP addresses, this machine's hostname (and its `.local` name) and `PLANNOTATOR_URL_HOST`. Port forwarding (SSH, VS Code, `docker -p`) arrives as `localhost` or an IP address and needs nothing; so do GitHub Codespaces and VS Code dev tunnels, whose forwarders present `localhost` to the server. A code-server or Coder port proxy is recognized from the `VSCODE_PROXY_URI` it sets. If another proxy or tunnel forwards its own hostname (a reverse proxy, a Docker service name), Plannotator answers `403` and names the setting to change:
+
+```bash
+export PLANNOTATOR_ALLOWED_HOSTS=my-proxy.example.com
+```
+
 ## Custom browser
 
 The `PLANNOTATOR_BROWSER` environment variable lets you specify a custom browser or script for opening the UI.

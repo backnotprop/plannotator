@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { homedir } from "os";
 import path from "path";
 import {
   applyEdits,
@@ -177,7 +176,9 @@ describe("formatWithLineNumbers", () => {
 describe("getPlanBackingPath", () => {
   test("returns path inside data dir active/{project}/_active-plan.md", () => {
     const result = getPlanBackingPath("myproject");
-    const dataDir = process.env.PLANNOTATOR_DATA_DIR || path.join(homedir(), ".plannotator");
+    // The test preload sandboxes the data dir; never compare against the real one.
+    const dataDir = process.env.PLANNOTATOR_DATA_DIR!;
+    expect(dataDir).toBeTruthy();
     expect(result).toBe(path.join(dataDir, "active", "myproject", "_active-plan.md"));
   });
 

@@ -6,6 +6,7 @@
  * launch a browser session, wait, and receive a structured JSON result.
  */
 
+import { appHtmlResponse, likelyAppHtmlEncoding, prewarmAppHtml } from "@plannotator/shared/app-html";
 import type { Origin } from "@plannotator/shared/agents";
 import {
   createFactsResult,
@@ -16,6 +17,7 @@ import {
   type GoalSetupResult,
 } from "@plannotator/shared/goal-setup";
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
+import { createRequestHostGuard } from "./request-host-guard";
 import { getRepoInfo } from "./repo";
 import {
   handleFavicon,
@@ -24,6 +26,7 @@ import {
   handleUpload,
 } from "./shared-handlers";
 import { detectGitUser, getServerConfig, saveConfig } from "./config";
+import { agentToolHostForServer } from "./ai-runtime";
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { isWSL } from "./browser";
 
@@ -100,6 +103,7 @@ export async function startGoalSetupServer(
     resolveDecision(result);
   };
 
+  const requestHostGuard = createRequestHostGuard();
   const server = await startBunServerOnAvailablePort((port) =>
     Bun.serve({
         hostname: getServerHostname(),
@@ -108,6 +112,10 @@ export async function startGoalSetupServer(
         idleTimeout: 0,
 
         async fetch(req) {
+          // Host allowlist first, before any route (request-host-guard.ts).
+          const hostRefusal = requestHostGuard.check(req);
+          if (hostRefusal) return hostRefusal;
+
           const url = new URL(req.url);
 
           if (
@@ -123,7 +131,7 @@ export async function startGoalSetupServer(
               repoInfo,
               projectRoot: process.cwd(),
               isWSL: wslFlag,
-              serverConfig: getServerConfig(gitUser),
+              serverConfig: getServerConfig(gitUser, agentToolHostForServer()),
               sharingEnabled: false,
             });
           }
@@ -197,9 +205,7 @@ export async function startGoalSetupServer(
 
           if (url.pathname === "/favicon.png") return handleFavicon();
 
-          return new Response(htmlContent, {
-            headers: { "Content-Type": "text/html" },
-          });
+          return appHtmlResponse(req, htmlContent, isRemote);
         },
 
         error(err) {
@@ -214,6 +220,9 @@ export async function startGoalSetupServer(
 
   const port = server.port!;
   const serverUrl = buildAdvertisedUrl(port);
+  // Remote sessions serve the app page compressed (#1617); start the likely
+  // encoding (gzip over plain http) now so the first load does not wait.
+  if (isRemote) prewarmAppHtml(htmlContent, likelyAppHtmlEncoding(false));
   onReady?.(serverUrl, isRemote, port);
 
   return {

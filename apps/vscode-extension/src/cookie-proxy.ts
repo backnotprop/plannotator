@@ -21,6 +21,8 @@ export function createCookieProxy(
   return new Promise((resolve, reject) => {
     const events = new EventEmitter();
     let upstream: string | null = null;
+    /** `http://127.0.0.1:<port>` once listening: the origin the panel's page has. */
+    let proxyOrigin: string | null = null;
 
     const server = http.createServer((req, res) => {
       const reqUrl = new globalThis.URL(req.url!, "http://localhost");
@@ -59,6 +61,15 @@ export function createCookieProxy(
         host: targetUrl.host,
         "accept-encoding": "identity",
       };
+      // The page lives on this proxy's origin, so its writes carry
+      // `Origin: http://127.0.0.1:<proxy port>` while Host now names the
+      // server. Re-anchor that one Origin onto the upstream so the server's
+      // same-origin check sees its own page (servers also accept
+      // `Sec-Fetch-Site: same-origin`, which covers older extensions). Any
+      // other Origin passes through untouched and stays foreign.
+      if (proxyOrigin && req.headers.origin === proxyOrigin) {
+        proxyHeaders.origin = new globalThis.URL(upstream).origin;
+      }
 
       // Buffer request body so retries can replay it
       const bodyChunks: Buffer[] = [];
@@ -124,6 +135,7 @@ export function createCookieProxy(
       const addr = server.address();
       if (addr && typeof addr === "object") {
         const port = addr.port;
+        proxyOrigin = `http://127.0.0.1:${port}`;
         resolve({
           server,
           port,
@@ -300,6 +312,22 @@ function injectScript(html: string, savedCookies: string): string {
         writeText:function(t){bridgeWrite(t);return Promise.resolve();},
         readText:function(){return bridgeRead();}
       }});}catch(err){}
+      // External-link bridge (#1583): the webview sandbox has no allow-popups,
+      // so window.open and target=_blank links do nothing in this frame. Route
+      // absolute http(s) URLs to the extension host (vscode.env.openExternal);
+      // anything else keeps the native behavior.
+      function externalHref(u){try{var r=new URL(String(u),location.href);if((r.protocol==="http:"||r.protocol==="https:")&&r.origin!==location.origin)return r.href;}catch(err){}return null;}
+      function openExternal(href){window.parent.postMessage({type:"plannotator-open-external",url:href},"*");}
+      var nativeOpen=window.open;
+      window.open=function(u,t,f){var href=u?externalHref(u):null;if(href){openExternal(href);return null;}return nativeOpen.apply(window,arguments);};
+      document.addEventListener("click",function(e){
+        if(e.defaultPrevented||e.button!==0)return;
+        var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;
+        if(!a||a.target!=="_blank")return;
+        var href=externalHref(a.getAttribute("href"));
+        if(!href)return;
+        e.preventDefault();openExternal(href);
+      },false);
       function fieldSelection(el){
         if(el&&(el.tagName==="INPUT"||el.tagName==="TEXTAREA")&&el.selectionStart!=null&&el.selectionEnd>el.selectionStart){
           return el.value.slice(el.selectionStart,el.selectionEnd);

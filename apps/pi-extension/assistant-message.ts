@@ -70,12 +70,31 @@ function getCurrentBranch(ctx: ExtensionContext): SessionEntryLike[] {
 	return ctx.sessionManager.getBranch() as SessionEntryLike[];
 }
 
-export function getLastAssistantMessageSnapshot(ctx: ExtensionContext): LastAssistantMessageSnapshot | null {
+/**
+ * True for the assistant message that holds the tool call `toolCallId`. Pi
+ * saves an assistant message at message_end, BEFORE its tool calls run, so
+ * while the `plannotator` tool runs `last`, the newest assistant message is the
+ * one calling it ("Opening it in Plannotator now."), not the answer the user
+ * means; the tool skips it.
+ */
+export function isAssistantEntryForToolCall(entry: { message?: unknown }, toolCallId: string): boolean {
+	const message = entry.message;
+	if (!isRecord(message) || message.role !== "assistant" || !Array.isArray(message.content)) return false;
+	return message.content.some(
+		(block: unknown) => isRecord(block) && block.type === "toolCall" && block.id === toolCallId,
+	);
+}
+
+/** Entries the last-message lookups skip (see `isAssistantEntryForToolCall`). */
+export type AssistantEntryFilter = (entry: { id: string; message?: unknown }) => boolean;
+
+export function getLastAssistantMessageSnapshot(ctx: ExtensionContext, skip?: AssistantEntryFilter): LastAssistantMessageSnapshot | null {
 	// "Last" means the active conversation branch, not the newest message anywhere
 	// in the append-only session file.
 	const branch = getCurrentBranch(ctx);
 	for (let i = branch.length - 1; i >= 0; i--) {
 		const entry = branch[i];
+		if (skip?.(entry)) continue;
 		if (entry.type === "message" && entry.message) {
 			const text = getAssistantMessageText(entry.message);
 			if (text) return { entryId: entry.id, text };
@@ -104,12 +123,14 @@ export function findAssistantMessageByEntryId(
 export function getRecentAssistantMessages(
 	ctx: ExtensionContext,
 	limit: number,
+	skip?: AssistantEntryFilter,
 ): RecentAssistantMessage[] {
 	const branch = getCurrentBranch(ctx);
 	const out: RecentAssistantMessage[] = [];
 	for (let i = branch.length - 1; i >= 0 && out.length < limit; i--) {
 		const entry = branch[i];
 		if (entry.type !== "message" || !entry.message) continue;
+		if (skip?.(entry)) continue;
 		const text = getAssistantMessageText(entry.message);
 		if (!text) continue;
 		out.push({ messageId: entry.id, text, timestamp: normalizeTimestamp(entry.timestamp) });

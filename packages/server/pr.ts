@@ -11,12 +11,16 @@ import type {
   PRContext,
   PRRuntime,
   PRReviewFileComment,
+  PRReviewFileLevelComment,
+  PRReviewAction,
   PRReviewSubmissionResult,
   PRStackTree,
   PRListItem,
 } from "@plannotator/shared/pr-types";
 import {
   parsePRUrl as parsePRUrlCore,
+  parseFileLevelComments as parseFileLevelCommentsCore,
+  parsePRReviewAction as parsePRReviewActionCore,
   prRefFromMetadata,
   getPlatformLabel,
   getMRLabel,
@@ -31,6 +35,7 @@ import {
   fetchPR as fetchPRCore,
   fetchPRContext as fetchPRContextCore,
   fetchPRFileContent as fetchPRFileContentCore,
+  fetchPRFileBytes as fetchPRFileBytesCore,
   submitPRReview as submitPRReviewCore,
   fetchPRViewedFiles as fetchPRViewedFilesCore,
   markPRFilesViewed as markPRFilesViewedCore,
@@ -38,8 +43,8 @@ import {
   fetchPRList as fetchPRListCore,
 } from "@plannotator/shared/pr-provider";
 
-export type { PRRef, PRMetadata, PRContext, PRReviewFileComment, PRReviewSubmissionResult, PRStackTree, PRListItem } from "@plannotator/shared/pr-types";
-export { prRefFromMetadata, isSameProject, getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo, getCliName, getCliInstallUrl } from "@plannotator/shared/pr-types";
+export type { PRRef, PRMetadata, PRContext, PRReviewFileComment, PRReviewFileLevelComment, PRReviewSubmissionResult, PRStackTree, PRListItem } from "@plannotator/shared/pr-types";
+export { prRefFromMetadata, isSameProject, getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo, getCliName, getCliInstallUrl, getPRNumber, getPRPlatformCapabilities, getPRHeadFetchSpec, getPRCloneCommand } from "@plannotator/shared/pr-types";
 export type { GithubPRMetadata } from "@plannotator/shared/pr-types";
 
 const runtime: PRRuntime = {
@@ -82,6 +87,8 @@ const runtime: PRRuntime = {
 export const prCommandRuntime: PRRuntime = runtime;
 
 export const parsePRUrl = parsePRUrlCore;
+export const parseFileLevelComments = parseFileLevelCommentsCore;
+export const parsePRReviewAction = parsePRReviewActionCore;
 
 export function checkPRAuth(ref: PRRef): Promise<void> {
   return checkAuthCore(runtime, ref);
@@ -111,15 +118,20 @@ export function fetchPRFileContent(
   return fetchPRFileContentCore(runtime, ref, sha, filePath);
 }
 
+export function fetchPRFileBytes(ref: PRRef, sha: string, filePath: string, maxBytes: number) {
+  return fetchPRFileBytesCore(runtime, ref, sha, filePath, maxBytes);
+}
+
 /** Submit a review through the Bun command runtime. */
 export function submitPRReview(
   ref: PRRef,
   headSha: string,
-  action: "approve" | "comment",
+  action: PRReviewAction,
   body: string,
   fileComments: PRReviewFileComment[],
+  fileLevelComments: PRReviewFileLevelComment[] = [],
 ): Promise<PRReviewSubmissionResult> {
-  return submitPRReviewCore(runtime, ref, headSha, action, body, fileComments);
+  return submitPRReviewCore(runtime, ref, headSha, action, body, fileComments, fileLevelComments);
 }
 
 export function fetchPRViewedFiles(

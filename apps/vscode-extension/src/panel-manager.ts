@@ -6,7 +6,24 @@ import { buildWrapperThemeScript } from "./vscode-theme";
 // bridge injected in cookie-proxy.ts).
 type ClipboardWriteMessage = { type: "plannotator-clipboard-write"; text: string };
 type ClipboardReadMessage = { type: "plannotator-clipboard-read"; id: number };
-type WebviewMessage = ClipboardWriteMessage | ClipboardReadMessage;
+// External links (PR pages, release notes): the nested app iframe inherits the
+// webview's sandbox, which has no allow-popups, so window.open and
+// target=_blank links are dead there. The cookie-proxy bridge routes absolute
+// http(s) URLs up here instead (#1583).
+type OpenExternalMessage = { type: "plannotator-open-external"; url: string };
+type WebviewMessage = ClipboardWriteMessage | ClipboardReadMessage | OpenExternalMessage;
+
+/** The http(s) URL an open-external message may open, or null. */
+export function externalUrlToOpen(raw: unknown): string | null {
+  if (typeof raw !== "string" || raw.length > 4096) return null;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
 
 export class PanelManager {
   private panels: Set<vscode.WebviewPanel> = new Set();
@@ -39,6 +56,10 @@ export class PanelManager {
       } else if (msg.type === "plannotator-clipboard-read") {
         const text = await vscode.env.clipboard.readText();
         panel.webview.postMessage({ type: "plannotator-clipboard-data", id: msg.id, text });
+      } else if (msg.type === "plannotator-open-external") {
+        const target = externalUrlToOpen(msg.url);
+        // VS Code asks before opening an untrusted domain.
+        if (target) await vscode.env.openExternal(vscode.Uri.parse(target));
       }
     });
 
@@ -93,6 +114,15 @@ function getHtml(url: string, origin: string): string {
         // clipboard) and responses back down to the app iframe.
         if (d && (d.type === "plannotator-clipboard-write" || d.type === "plannotator-clipboard-read")) {
           vscodeApi.postMessage(d);
+          return;
+        }
+        // Only the app frame itself may ask to open a link: a page nested
+        // inside it (an annotated HTML document) has a different source.
+        if (d && d.type === "plannotator-open-external") {
+          var app = document.getElementById("pn-frame");
+          if (app && e.source === app.contentWindow && typeof d.url === "string") {
+            vscodeApi.postMessage({ type: "plannotator-open-external", url: d.url });
+          }
           return;
         }
         if (d && d.type === "plannotator-clipboard-data") {

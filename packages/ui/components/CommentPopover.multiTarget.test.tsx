@@ -188,6 +188,36 @@ describe.if(hasDom)('CommentPopover multi-target seams', () => {
     expect(el.selectionStart).toBe(3);
   });
 
+  test('the one-click thumbs-up is opt-in: absent (markdown composers) renders none', async () => {
+    // Only the HTML pinpoint composer passes onQuickLookGood; a markdown or
+    // global composer growing a 👍 would be a regression.
+    const thumbs = () => document.querySelectorAll('[data-comment-popover] [data-quick-look-good]');
+    await mountPopover();
+    expect(thumbs().length).toBe(0);
+    let fired = 0;
+    await remount({ onQuickLookGood: () => fired++ });
+    expect(thumbs().length).toBe(1);
+    await act(async () => (thumbs()[0] as HTMLButtonElement).click());
+    expect(fired).toBe(1);
+  });
+
+  test('a thumbs-up click returns focus to the opener, like Save', async () => {
+    // Without the restore, focus drops to <body> once the host closes the
+    // composer, and the next keystroke goes nowhere.
+    const opener = document.createElement('button');
+    document.body.appendChild(opener);
+    opener.focus();
+    await mountPopover({ onQuickLookGood: () => {} });
+    const thumbs = document.querySelector<HTMLButtonElement>('[data-comment-popover] [data-quick-look-good]');
+    if (!thumbs) throw new Error('thumbs-up missing');
+    thumbs.focus();
+    await act(async () => thumbs.click());
+    await act(async () => {
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+    });
+    expect(document.activeElement).toBe(opener);
+  });
+
   test('yieldState drives fade and click-through classes with a reduced-motion-aware style', async () => {
     await mountPopover({ targetChips: CHIPS, yieldState: 'none' });
     expect(popoverEl().className).toContain('pn-composer-yieldable');

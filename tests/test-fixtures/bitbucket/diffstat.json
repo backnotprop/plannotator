@@ -1,0 +1,84 @@
+{
+  "values": [
+    {
+      "type": "diffstat",
+      "lines_added": 0,
+      "lines_removed": 0,
+      "status": "added",
+      "old": null,
+      "new": {
+        "path": "dot.png",
+        "type": "commit_file",
+        "escaped_path": "dot.png",
+        "links": {
+          "self": {
+            "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/src/c0a227ce2c516b48f1093561a903bf89f2b4282a/dot.png"
+          }
+        }
+      }
+    },
+    {
+      "type": "diffstat",
+      "lines_added": 0,
+      "lines_removed": 1,
+      "status": "removed",
+      "old": {
+        "path": "notes.txt",
+        "type": "commit_file",
+        "escaped_path": "notes.txt",
+        "links": {
+          "self": {
+            "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/src/6155635443f4e180e6eb5a4b3b9d219e3bd9cfb2/notes.txt"
+          }
+        }
+      },
+      "new": null
+    },
+    {
+      "type": "diffstat",
+      "lines_added": 3,
+      "lines_removed": 0,
+      "status": "added",
+      "old": null,
+      "new": {
+        "path": "src/greet.ts",
+        "type": "commit_file",
+        "escaped_path": "src/greet.ts",
+        "links": {
+          "self": {
+            "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/src/c0a227ce2c516b48f1093561a903bf89f2b4282a/src/greet.ts"
+          }
+        }
+      }
+    },
+    {
+      "type": "diffstat",
+      "lines_added": 4,
+      "lines_removed": 0,
+      "status": "modified",
+      "old": {
+        "path": "src/math.ts",
+        "type": "commit_file",
+        "escaped_path": "src/math.ts",
+        "links": {
+          "self": {
+            "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/src/6155635443f4e180e6eb5a4b3b9d219e3bd9cfb2/src/math.ts"
+          }
+        }
+      },
+      "new": {
+        "path": "src/math.ts",
+        "type": "commit_file",
+        "escaped_path": "src/math.ts",
+        "links": {
+          "self": {
+            "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/src/c0a227ce2c516b48f1093561a903bf89f2b4282a/src/math.ts"
+          }
+        }
+      }
+    }
+  ],
+  "pagelen": 500,
+  "size": 4,
+  "page": 1
+}

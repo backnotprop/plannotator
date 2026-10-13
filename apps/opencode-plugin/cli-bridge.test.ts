@@ -1,8 +1,9 @@
 import { describe, expect, mock, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
+  annotateCliTargets,
   buildAnnotateCliArgs,
   buildAnnotatePromptFromBridgeOutcome,
   buildCliBridgeEnv,
@@ -11,12 +12,131 @@ import {
   canLaunchGatedAnnotate,
   formatUserFacingCliStderrLine,
   getRecentAssistantMessages,
+  handleCliCommand,
   injectSessionPrompt,
 } from "./cli-bridge";
 import { composeReviewApprovedMessage, getReviewApprovedPrompt, getReviewDeniedSuffix } from "@plannotator/shared/prompts";
 import { OpenCodePromptDeliveryError } from "./prompt-delivery-error";
+import { parseAnnotateArgs } from "@plannotator/shared/annotate-args";
 
 describe("OpenCode CLI bridge helpers", () => {
+  test.skipIf(process.platform === "win32")("an older CLI refuses directory reviews before opening the caller repo", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "plannotator-review-skew-"));
+    mkdirSync(path.join(root, "caller"));
+    mkdirSync(path.join(root, "target"));
+    const binary = path.join(root, "old-cli.ts");
+    const opened = path.join(root, "review-opened");
+    const previous = process.env.PLANNOTATOR_BIN;
+    // Model the old binary's contract: opencode-review ignores positional
+    // words; unknown commands exit before opening any UI.
+    writeFileSync(binary, `#!/usr/bin/env bun
+import { writeFileSync } from "node:fs";
+await Bun.stdin.text();
+if (process.argv[2] !== "opencode-review") {
+  console.error("Unknown command: " + process.argv[2]);
+  process.exit(1);
+}
+writeFileSync(${JSON.stringify(opened)}, "opened");
+console.log(JSON.stringify({ decision: "annotated", feedback: "caller feedback" }));
+`, { mode: 0o755 });
+    const client = {
+      app: { log: mock((_entry: { message: string }) => {}) },
+      session: { prompt: mock(async (_input: unknown) => ({})) },
+      tui: { showToast: mock((_input: any) => {}) },
+    };
+    const toasts = () => client.tui.showToast.mock.calls.map(([entry]) => entry.body.message).join("\n");
+    try {
+      process.env.PLANNOTATOR_BIN = binary;
+      await handleCliCommand({ command: "plannotator-review", client, sessionId: "caller", cwd: path.join(root, "caller"), rawArgs: "../target" });
+      expect(existsSync(opened)).toBe(false);
+      expect(client.session.prompt).not.toHaveBeenCalled();
+      expect(client.app.log.mock.calls.map(([entry]) => entry.message).join("\n")).toContain("Update the Plannotator CLI");
+      expect(toasts()).toContain("Update the Plannotator CLI");
+      // Binaries older than 0.27.11 have no unknown-command guard: the stdin
+      // JSON reaches the plan hook path, which fails with its own message.
+      const ancient = path.join(root, "ancient-cli.ts");
+      writeFileSync(ancient, `#!/usr/bin/env bun
+await Bun.stdin.text();
+console.error("No plan content in hook event");
+process.exit(1);
+`, { mode: 0o755 });
+      process.env.PLANNOTATOR_BIN = ancient;
+      client.app.log.mockClear();
+      await handleCliCommand({ command: "plannotator-review", client, sessionId: "caller", cwd: path.join(root, "caller"), rawArgs: "../target" });
+      expect(client.app.log.mock.calls.map(([entry]) => entry.message).join("\n")).toContain("Update the Plannotator CLI");
+      process.env.PLANNOTATOR_BIN = binary;
+      // Prose names no directory, so it keeps the old command and still works
+      // against an old binary exactly as before (#1483 tolerance).
+      await handleCliCommand({ command: "plannotator-review", client, sessionId: "caller", cwd: path.join(root, "caller"), rawArgs: "please review my changes" });
+      expect(existsSync(opened)).toBe(true);
+      expect(client.session.prompt).toHaveBeenCalledTimes(1);
+      // Path-shaped prose among several words is ignored, not refused, and
+      // still takes the old command (v0.27.23 regression).
+      rmSync(opened);
+      await handleCliCommand({ command: "plannotator-review", client, sessionId: "caller", cwd: path.join(root, "caller"), rawArgs: "look at the api/users code" });
+      expect(existsSync(opened)).toBe(true);
+      // A sole path-shaped typo is refused before the CLI runs, visibly.
+      rmSync(opened);
+      client.tui.showToast.mockClear();
+      await handleCliCommand({ command: "plannotator-review", client, sessionId: "caller", cwd: path.join(root, "caller"), rawArgs: "./backnd" });
+      expect(existsSync(opened)).toBe(false);
+      expect(toasts()).toContain("does not exist");
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_BIN;
+      else process.env.PLANNOTATOR_BIN = previous;
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 20_000); // spawns the stub CLI several times; the 5s default flakes
+
+  // Several file paths are one review: each path its own CLI argument (one
+  // joined argument would be "File not found"), the agent's prompt names
+  // every file, and an older CLI's "pick one" error reads as "update".
+  test.skipIf(process.platform === "win32")("several file paths reach the CLI as one review; an older CLI reads as update", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "plannotator-annotate-bundle-bridge-"));
+    writeFileSync(path.join(root, "spec.md"), "# Spec\n");
+    writeFileSync(path.join(root, "mock.html"), "<h1>Mock</h1>");
+    const argvFile = path.join(root, "argv.json");
+    const current = path.join(root, "cli.ts");
+    writeFileSync(current, `#!/usr/bin/env bun
+import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(argvFile)}, JSON.stringify(process.argv.slice(2)));
+console.log(JSON.stringify({ decision: "annotated", feedback: "two notes" }));
+`, { mode: 0o755 });
+    const older = path.join(root, "older-cli.ts");
+    writeFileSync(older, `#!/usr/bin/env bun
+console.error("Ambiguous annotate arguments: 2 of them each resolve to an existing target.\\nRe-run with exactly one target: plannotator annotate <file>");
+process.exit(1);
+`, { mode: 0o755 });
+    const client = {
+      app: { log: mock((_entry: { message: string }) => {}) },
+      session: { prompt: mock(async (_input: unknown) => ({})) },
+      tui: { showToast: mock((_input: any) => {}) },
+    };
+    const previous = process.env.PLANNOTATOR_BIN;
+    try {
+      process.env.PLANNOTATOR_BIN = current;
+      await handleCliCommand({ command: "plannotator-annotate", client, sessionId: "s1", cwd: root, rawArgs: "spec.md mock.html" });
+      expect(JSON.parse(readFileSync(argvFile, "utf8"))).toEqual([
+        "annotate",
+        path.join(root, "spec.md"),
+        path.join(root, "mock.html"),
+        "--json",
+      ]);
+      const delivered = JSON.stringify(client.session.prompt.mock.calls[0]?.[0]);
+      expect(delivered).toContain(path.join(root, "spec.md"));
+      expect(delivered).toContain(path.join(root, "mock.html"));
+
+      process.env.PLANNOTATOR_BIN = older;
+      client.app.log.mockClear();
+      await handleCliCommand({ command: "plannotator-annotate", client, sessionId: "s1", cwd: root, rawArgs: "spec.md mock.html" });
+      expect(client.app.log.mock.calls.map(([entry]) => entry.message).join("\n")).toContain("update Plannotator to open several files at once");
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_BIN;
+      else process.env.PLANNOTATOR_BIN = previous;
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 20_000);
+
   test("maps OpenCode sharing context into child CLI env", () => {
     expect(buildCliBridgeEnv({
       sharingEnabled: false,
@@ -31,6 +151,13 @@ describe("OpenCode CLI bridge helpers", () => {
     expect(buildCliBridgeEnv({ sharingEnabled: true })).toEqual({
       PLANNOTATOR_SHARE: "enabled",
     });
+  });
+
+  test("marks a host that can register the plannotator tool, and only that one", () => {
+    // What lets the child's Settings offer the agent tool switch: a host
+    // without a tool domain (or OpenCode 1) must not get it.
+    expect(buildCliBridgeEnv({ toolCapable: true })).toEqual({ PLANNOTATOR_OPENCODE_TOOL_CAPABLE: "1" });
+    expect(buildCliBridgeEnv({ sharingEnabled: true })).not.toHaveProperty("PLANNOTATOR_OPENCODE_TOOL_CAPABLE");
   });
 
   test("builds annotate CLI args without folding flags into the path", () => {
@@ -73,6 +200,30 @@ describe("OpenCode CLI bridge helpers", () => {
       "--json",
       "--markdown",
     ]);
+  });
+
+  // Failure caught: a slash command's words passed as ONE argument (the real
+  // CLI reads ". notes.md" as one path), an unquoted path with spaces split
+  // into words, or a dash word in prose reaching the CLI as a real flag.
+  test("slash-command annotate words become separate CLI arguments only when the whole names nothing", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "plannotator-annotate-words-"));
+    try {
+      writeFileSync(path.join(root, "notes.md"), "# Notes\n");
+      writeFileSync(path.join(root, "my notes.md"), "# Notes\n");
+      const targets = (raw: string) => annotateCliTargets(parseAnnotateArgs(raw), raw, root);
+      expect(targets(". notes.md")).toEqual([".", "notes.md"]);
+      expect(targets('"my notes.md" please --gate')).toEqual(["my notes.md", "please"]);
+      expect(targets("my notes.md")).toEqual(["my notes.md"]);
+      expect(targets("nothere.md")).toEqual(["nothere.md"]);
+      // A URL with prose after it once went to the CLI as one "URL".
+      expect(targets("https://example.com/page the pricing part")).toEqual(["https://example.com/page", "the", "pricing", "part"]);
+      expect(targets("https://example.com/page")).toEqual(["https://example.com/page"]);
+      expect(targets("notes.md --require-approval")).toEqual(["notes.md --require-approval"]);
+      expect(buildAnnotateCliArgs(parseAnnotateArgs(". notes.md --gate"), targets(". notes.md --gate")))
+        .toEqual(["annotate", ".", "notes.md", "--json", "--gate"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test("requires a session before launching a gated capable annotate bridge", () => {
@@ -124,6 +275,18 @@ describe("OpenCode CLI bridge helpers", () => {
 
     expect(prompt).toContain("Please address");
     expect(prompt).not.toContain("artifact is approved");
+  });
+
+  // #1701: the CLI's --json record for a bare Done keeps the zero-state
+  // sentence as feedback and adds nothingToSend; the bridge starts no turn.
+  test("a Done with nothing to send builds no prompt", () => {
+    for (const target of [{ kind: "message" as const }, { kind: "file" as const, fileHeader: "File" as const, filePath: "notes.md" }]) {
+      expect(buildAnnotatePromptFromBridgeOutcome({
+        decision: "annotated",
+        feedback: "User reviewed the document and has no feedback.",
+        nothingToSend: true,
+      }, target)).toBeNull();
+    }
   });
 
   test("classifies CLI bridge prompt-delivery failures for fallback prevention", async () => {
@@ -271,6 +434,32 @@ describe("OpenCode CLI bridge helpers", () => {
       isPRMode: true,
       feedback: "PR comment only.",
     });
+    // An older CLI sends no `platform`; isPRMode stays the fallback.
     expect(prFeedback.message).toBe("PR comment only.");
+  });
+
+  // A CLI that knows the flag always sends it as a boolean, so PR-mode
+  // feedback (including PR description / PR comment notes, which carry no
+  // code annotations) gets the suffix, and only the platform status post
+  // goes through verbatim.
+  test("the CLI's platform flag, not isPRMode, decides the verbatim status post", () => {
+    const prFeedback = buildReviewPromptFromBridgeOutcome({
+      decision: "annotated",
+      approved: false,
+      isPRMode: true,
+      platform: false,
+      feedback: "## PR description\n\n> Adds the parser\n\nExplain the fallback.",
+    });
+    expect(prFeedback.message).toContain("Explain the fallback.");
+    expect(prFeedback.message).toContain(getReviewDeniedSuffix("opencode"));
+
+    const statusPost = buildReviewPromptFromBridgeOutcome({
+      decision: "annotated",
+      approved: false,
+      isPRMode: true,
+      platform: true,
+      feedback: "Pull request reviewed on GitHub: https://github.com/o/r/pull/1",
+    });
+    expect(statusPost.message).toBe("Pull request reviewed on GitHub: https://github.com/o/r/pull/1");
   });
 });

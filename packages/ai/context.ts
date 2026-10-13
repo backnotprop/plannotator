@@ -95,6 +95,9 @@ export function buildForkPreamble(ctx: AIContext): string {
     }
     case "annotate": {
       lines.push(`## Annotating: ${ctx.annotate.filePath}`);
+      if (ctx.annotate.bundlePosition) {
+        lines.push(`File ${ctx.annotate.bundlePosition.index} of ${ctx.annotate.bundlePosition.total} in a review of several files.`);
+      }
       if (ctx.annotate.sourceInfo) {
         lines.push(`Source: ${ctx.annotate.sourceInfo}`);
       }
@@ -222,6 +225,10 @@ function buildAnnotatePrompt(
     "",
     `## Document: ${ctx.annotate.filePath}`,
   ];
+
+  if (ctx.annotate.bundlePosition) {
+    sections.push(`File ${ctx.annotate.bundlePosition.index} of ${ctx.annotate.bundlePosition.total} in a review of several files.`);
+  }
 
   if (ctx.annotate.sourceInfo) {
     sections.push(`Source: ${ctx.annotate.sourceInfo}`);

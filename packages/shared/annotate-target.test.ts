@@ -3,12 +3,17 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
+  ANNOTATE_BUNDLE_HINT,
   annotateInputNamesExistingTarget,
+  annotatePathExists,
   buildAmbiguousAnnotateArgsMessage,
   buildUnresolvedAnnotateArgsMessage,
+  probeAnnotateBundlePath,
   probeAnnotateToken,
+  resolveAnnotateBundleFiles,
   selectAnnotateTokenTarget,
 } from "./annotate-target";
+import { PLANNOTATOR_BUNDLE_HINT_LINE } from "./plannotator-tool";
 
 let root: string;
 
@@ -252,5 +257,168 @@ describe("message builders", () => {
     });
     expect(message).toContain("If you are an agent reading this");
     expect(message).toContain("plannotator annotate <path-or-url> --markdown --no-jina");
+  });
+});
+
+// The bundle rule (0.29): several arguments that are ALL existing files named
+// by their paths open as one review. The failure these guard: prose, a URL,
+// a folder or a searched name turning into a bundle (opening something the
+// user did not name), or several real paths still answered with the
+// ambiguity error.
+describe("bundle rule", () => {
+  const select = (input: string | string[]) =>
+    selectAnnotateTokenTarget(input, (token) => probeAnnotateToken(token, root, { bareDirectories: false }), {
+      bundlePath: (token) => probeAnnotateBundlePath(token, root),
+      pathExists: (token) => annotatePathExists(token, root),
+    });
+
+  test("several existing paths open as a bundle, in the typed order", () => {
+    const selection = select(["notes.md", "docs/page.html", "plan.md"]);
+    expect(selection.kind).toBe("bundle");
+    if (selection.kind !== "bundle") return;
+    expect(selection.files.map((file) => file.value)).toEqual([
+      join(root, "notes.md"),
+      join(root, "docs/page.html"),
+      join(root, "plan.md"),
+    ]);
+  });
+
+  test("absolute and @ paths count; duplicates of one file are dropped", () => {
+    const selection = select([join(root, "plan.md"), "@notes.md", "./plan.md", "notes.md"]);
+    expect(selection.kind).toBe("bundle");
+    if (selection.kind !== "bundle") return;
+    expect(selection.files.map((file) => file.value)).toEqual([join(root, "plan.md"), join(root, "notes.md")]);
+  });
+
+  test("the same file twice is one file, not a bundle", () => {
+    const selection = select(["plan.md", "./plan.md"]);
+    expect(selection.kind).toBe("single");
+    if (selection.kind === "single") expect(selection.candidate.value).toBe(join(root, "plan.md"));
+  });
+
+  test("prose plus one file keeps the single-target fast path", () => {
+    const selection = select("look at notes.md please");
+    expect(selection.kind).toBe("single");
+    if (selection.kind === "single") expect(selection.candidate.value).toBe(join(root, "notes.md"));
+  });
+
+  test("prose plus two files keeps the ambiguity error", () => {
+    expect(select("compare notes.md and plan.md").kind).toBe("multiple");
+  });
+
+  test("a URL, a folder, or a name found only by search among the paths is the ambiguity error", () => {
+    expect(select(["notes.md", "https://example.com/page"]).kind).toBe("multiple");
+    expect(select(["notes.md", "docs/"]).kind).toBe("multiple");
+    // nested.md exists only as notes/deep/nested.md: found by search, a guess.
+    expect(select(["plan.md", "nested.md"]).kind).toBe("multiple");
+  });
+
+  // The failure: `annotate a.md typo.md` opened only a.md (the tolerant
+  // fast path), and the host said "Opened 2 files".
+  test("a list of file paths with a missing one fails naming it, never narrows", () => {
+    expect(select(["notes.md", "typo.md"])).toEqual({ kind: "missing", missing: ["typo.md"] });
+    expect(select(["nope/a.md", "plan.md", "~/nope-b.md"])).toEqual({ kind: "missing", missing: ["nope/a.md", "~/nope-b.md"] });
+    // Prose around a path is still the fast path, a folder still the
+    // ambiguity error, and a searched name is not "missing".
+    expect(select("look at notes.md please").kind).toBe("single");
+    expect(select(["notes.md", "docs/"]).kind).toBe("multiple");
+    expect(select(["plan.md", "nested.md"]).kind).toBe("multiple");
+  });
+
+  // The failure (#1718 re-review): `annotate . a.md` said "File not found: ."
+  // for a directory that exists. An existing path is never missing: a stray
+  // `.` / `..` keeps the #1182 fast path, an existing folder the ambiguity.
+  test("an existing directory among file paths is never reported missing", () => {
+    for (const input of [[".", "notes.md"], ["notes.md", ".."], ["docs", "notes.md"]]) {
+      const selection = select(input);
+      expect(selection.kind).not.toBe("missing");
+    }
+    const dot = select([".", "notes.md"]);
+    expect(dot.kind === "single" && dot.candidate.value).toBe(join(root, "notes.md"));
+    const parent = select(["notes.md", ".."]);
+    expect(parent.kind === "single" && parent.candidate.value).toBe(join(root, "notes.md"));
+    expect(select(["docs/", "notes.md"]).kind).toBe("multiple");
+    // With a real typo beside the directory, only the typo is named.
+    expect(select([".", "notes.md", "typo.md"])).toEqual({ kind: "missing", missing: ["typo.md"] });
+  });
+
+  test("an existing unsupported file still makes a bundle, so it fails naming itself", () => {
+    const selection = select(["plan.md", "script.py"]);
+    expect(selection.kind).toBe("bundle");
+    if (selection.kind !== "bundle") return;
+    const resolved = resolveAnnotateBundleFiles(selection.files.map((file) => file.value));
+    expect(resolved.ok).toBe(false);
+    if (!resolved.ok) expect(resolved.message).toContain(join(root, "script.py"));
+  });
+
+  test("without a bundle probe the #1182 tiers are unchanged", () => {
+    const selection = selectAnnotateTokenTarget(["notes.md", "plan.md"], (token) =>
+      probeAnnotateToken(token, root, { bareDirectories: false }),
+    );
+    expect(selection.kind).toBe("multiple");
+  });
+
+  test("dash tokens still disable tolerance before the bundle rule", () => {
+    expect(select(["notes.md", "plan.md", "--bogus"]).kind).toBe("flagged");
+  });
+
+  test("the probe names files by path only", () => {
+    expect(probeAnnotateBundlePath("plan.md", root)).toBe(join(root, "plan.md"));
+    expect(probeAnnotateBundlePath("nested.md", root)).toBeNull();
+    expect(probeAnnotateBundlePath("docs", root)).toBeNull();
+    expect(probeAnnotateBundlePath("https://example.com/a.md", root)).toBeNull();
+    expect(probeAnnotateBundlePath("@scope/README.md", root)).toBe(join(root, "@scope/README.md"));
+  });
+});
+
+describe("resolveAnnotateBundleFiles", () => {
+  test("names each file's render mode in order; --markdown converts HTML", () => {
+    const paths = [join(root, "docs/page.html"), join(root, "plan.md"), join(root, "config.yaml")];
+    expect(resolveAnnotateBundleFiles(paths)).toEqual({
+      ok: true,
+      files: [
+        { path: paths[0], renderAs: "html" },
+        { path: paths[1], renderAs: "markdown" },
+        { path: paths[2], renderAs: "markdown" },
+      ],
+    });
+    const converted = resolveAnnotateBundleFiles(paths, { convertHtml: true });
+    expect(converted.ok && converted.files[0]?.renderAs).toBe("markdown");
+  });
+
+  test("diagram sources render through the diagram engine", () => {
+    const mmd = join(root, "flow.mmd");
+    writeFileSync(mmd, "graph TD; A-->B");
+    const resolved = resolveAnnotateBundleFiles([mmd, join(root, "plan.md")]);
+    expect(resolved.ok && resolved.files[0]?.renderAs).toBe("mermaid");
+  });
+
+  test("a .env file is named as refused, not as an unknown type", () => {
+    const env = join(root, ".env");
+    writeFileSync(env, "SECRET=1");
+    const resolved = resolveAnnotateBundleFiles([join(root, "plan.md"), env]);
+    expect(resolved.ok).toBe(false);
+    if (!resolved.ok) {
+      expect(resolved.message).toContain(`File refused: ${env}`);
+      expect(resolved.message).not.toContain("no extension");
+    }
+  });
+
+  test("a file over the annotate cap fails naming it", () => {
+    const big = join(root, "big.md");
+    writeFileSync(big, "x".repeat(2 * 1024 * 1024 + 1));
+    const resolved = resolveAnnotateBundleFiles([join(root, "plan.md"), big]);
+    expect(resolved.ok).toBe(false);
+    if (!resolved.ok) expect(resolved.message).toContain(big);
+  });
+
+  test("the ambiguity error gains the bundle hint only when asked", () => {
+    const candidates = [{ token: "a.md", value: "/r/a.md" }, { token: "https://x", value: "https://x" }];
+    expect(buildAmbiguousAnnotateArgsMessage(candidates)).not.toContain(ANNOTATE_BUNDLE_HINT);
+    expect(buildAmbiguousAnnotateArgsMessage(candidates, { bundleHint: true })).toContain(ANNOTATE_BUNDLE_HINT);
+  });
+
+  test("the tool contract's copy of the hint matches, so hosts can tell an older CLI apart", () => {
+    expect(PLANNOTATOR_BUNDLE_HINT_LINE).toBe(ANNOTATE_BUNDLE_HINT);
   });
 });

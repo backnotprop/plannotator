@@ -12,6 +12,7 @@ import { setWebMcpPolicy, type WebMcpPolicy } from './webmcp/policy';
 import { setMathRendererLoader, type MathRenderer, type MathRendererLoader } from './utils/math';
 import { setIdentityGenerator, type IdentityGenerator } from './utils/generateIdentity';
 import { setAlertIconRenderer, type AlertIconRenderer } from './components/blocks/AlertBlock';
+import { setFenceThemeResolver, type FenceThemeResolver } from './utils/syntaxTheme';
 import { configStore } from './config';
 import type { ServerSyncFn } from './config/configStore';
 import type { ExternalAnnotationEvent, VaultNode } from './types';
@@ -40,6 +41,7 @@ export type {
   MathRendererLoader,
   IdentityGenerator,
   AlertIconRenderer,
+  FenceThemeResolver,
 };
 
 type ExternalAnnotationBase = { id: string; source?: string };
@@ -93,6 +95,15 @@ export interface PlannotatorUIConfig {
    * today; the package bundles no icon set. A host with one registers a renderer.
    */
   alertIconRenderer?: AlertIconRenderer;
+  /**
+   * Pick the Shiki theme code fences render in, per (palette id, resolved
+   * mode). Return `undefined` to keep the default resolution (the palette's
+   * `SHIKI_THEME_MAP` entry, else `pierre-dark` / `pierre-light`). Applies to
+   * every fence-style surface (Viewer fences, the code-file hover preview, the
+   * plan diff view, code review suggestion snippets); the code-review diff
+   * pane keeps its own pair. An unknown theme name renders plain text.
+   */
+  fenceTheme?: FenceThemeResolver;
   /** Re-hydrate settings from the installed (SYNCHRONOUS) storageBackend after install. */
   loadSettingsFromBackend?: boolean;
 }
@@ -114,6 +125,7 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.mathRendererLoader) setMathRendererLoader(config.mathRendererLoader);
   if (config.identityGenerator) setIdentityGenerator(config.identityGenerator);
   if (config.alertIconRenderer) setAlertIconRenderer(config.alertIconRenderer);
+  if (config.fenceTheme) setFenceThemeResolver(config.fenceTheme);
   // Re-hydrate AFTER storageBackend is installed (load-bearing order — gated last).
   if (config.loadSettingsFromBackend) configStore.loadFromBackend();
 }

@@ -36,6 +36,7 @@ interface FakeSpawn {
 let spawned: FakeSpawn[] = [];
 let clientFactory: () => unknown = () => ({});
 let spawnGate: Promise<void> | null = null;
+let serverError: Error | null = null;
 
 mock.module("@opencode-ai/sdk", () => ({
 	createOpencodeServer: async (opts: {
@@ -43,6 +44,7 @@ mock.module("@opencode-ai/sdk", () => ({
 		port?: number;
 		timeout?: number;
 	}) => {
+		if (serverError) throw serverError;
 		const record: FakeSpawn = { ...opts, closed: false };
 		spawned.push(record);
 		if (spawnGate) await spawnGate;
@@ -69,6 +71,7 @@ beforeEach(() => {
 	spawned = [];
 	clientFactory = () => ({});
 	spawnGate = null;
+	serverError = null;
 });
 
 describe("OpenCodeProvider server lifecycle", () => {
@@ -173,6 +176,49 @@ describe("OpenCodeProvider server lifecycle", () => {
 		provider.dispose();
 		expect(spawned[1]!.closed).toBe(true);
 	});
+
+	test("surfaces a friendly error when opencode is not on PATH (ENOENT)", async () => {
+		const provider = makeProvider();
+		const listenersBefore = process.listeners("exit").length;
+
+		const enoent = Object.assign(new Error("spawn opencode ENOENT"), {
+			code: "ENOENT",
+		});
+		serverError = enoent;
+
+		const failure = await provider.ensureServer().then(
+			() => null,
+			(err: unknown) => err as Error,
+		);
+		expect(failure?.message).toContain("not found on PATH");
+		expect(failure?.cause).toBe(enoent);
+
+		// Must not register an exit handler when spawn fails before completion
+		expect(process.listeners("exit").length).toBe(listenersBefore);
+
+		// Provider recovers cleanly when CLI becomes available
+		serverError = null;
+		await provider.ensureServer();
+		expect(spawned.length).toBe(1);
+		expect(spawned[0]!.closed).toBe(false);
+		expect(process.listeners("exit").length).toBe(listenersBefore + 1);
+
+		provider.dispose();
+		expect(spawned[0]!.closed).toBe(true);
+		expect(process.listeners("exit").length).toBe(listenersBefore);
+	});
+
+	test("passes other startup failures through unchanged", async () => {
+		const provider = makeProvider();
+		// The SDK's exit failure embeds the child's stderr; "not found" there
+		// is not a missing binary and must not be rewritten as one.
+		const exited = new Error(
+			"Server exited with code 1\nServer output: Error: model not found",
+		);
+		serverError = exited;
+
+		await expect(provider.ensureServer()).rejects.toBe(exited);
+	});
 });
 
 describe("no eager opencode spawn at runtime startup", () => {
@@ -192,7 +238,7 @@ describe("no eager opencode spawn at runtime startup", () => {
 			const end = src.indexOf("OpenCode not available", start);
 			expect(end).toBeGreaterThan(start);
 			const block = src.slice(start, end);
-			expect(block).toContain("providerInitializers.set");
+			expect(block).toContain("deferModelDiscovery(providerId, provider)");
 			expect(block).not.toContain("modelDiscovery.push");
 		});
 	}

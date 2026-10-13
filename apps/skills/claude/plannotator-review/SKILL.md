@@ -1,13 +1,15 @@
 ---
 name: plannotator-review
-description: Open Plannotator's browser-based code review UI for the current worktree or a pull request URL, then act on the feedback that comes back.
+description: Open Plannotator's browser-based code review UI for the current worktree, another directory, or a pull request URL, then act on the feedback that comes back.
 allowed-tools: Bash(plannotator:*)
 disable-model-invocation: true
 ---
 
 # Plannotator Review
 
-Arguments pass through to `plannotator review`: a PR/MR URL, `--git` / `--gitbutler`, and the session-only open-state flags `--base <ref>` / `--diff-type <type>` (git-only; for a stacked branch, `--base <the branch below yours>` reviews just that layer).
+Arguments pass through to `plannotator review`: one directory or PR/MR URL, `--git` / `--gitbutler`, and the session-only open-state flags `--base <ref>` / `--diff-type <type>` (git-only; for a stacked branch, `--base <the branch below yours>` reviews just that layer).
+
+For another repository or worktree, pass its path relative to this session or an absolute path, e.g. `/plannotator-review ../feature-worktree`. Quote paths containing spaces. Supply a target, not prose; feedback names the directory where changes belong.
 
 ## Code review feedback
 
@@ -16,3 +18,5 @@ Arguments pass through to `plannotator review`: a PR/MR URL, `--git` / `--gitbut
 ## Your task
 
 If the review above contains feedback or annotations, address them in the same conversation. If no changes were requested (an approval/LGTM-style result), acknowledge that review passed and continue.
+
+If the review was moved to the background, wait for it to finish. If Claude Code stopped it at its background time limit before the user decided, tell the user, and only when they ask, run `plannotator review $ARGUMENTS` again with `run_in_background` and `timeout: 7200000`: their annotations are restored from the saved draft.

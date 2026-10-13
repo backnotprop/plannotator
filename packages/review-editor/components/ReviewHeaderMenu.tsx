@@ -9,23 +9,21 @@ import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { THEME_MODES } from '@plannotator/ui/components/themeModes';
 import { MenuVersionSection } from '@plannotator/ui/components/MenuVersionSection';
 import { ReviewAgentsIcon } from '@plannotator/ui/components/ReviewAgentsIcon';
-import { TextShimmer } from '@plannotator/ui/components/TextShimmer';
 import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
-import { GitHubIcon } from '@plannotator/ui/components/GitHubIcon';
-import { GitLabIcon } from '@plannotator/ui/components/GitLabIcon';
+import { PRPlatformIcon } from '@plannotator/ui/components/PRPlatformIcon';
 import { modKey } from '@plannotator/ui/utils/platform';
 import type { UpdateInfo } from '@plannotator/ui/hooks/useUpdateCheck';
 import type { Origin } from '@plannotator/shared/agents';
 
 export interface CompactReviewDestination {
   value: 'agent' | 'platform';
-  platform: 'github' | 'gitlab';
+  platform: 'github' | 'gitlab' | 'bitbucket';
   platformLabel: string;
   onChange: (value: 'agent' | 'platform') => void;
 }
 
 export interface CompactReviewAction {
-  id: 'exit' | 'feedback' | 'approve' | 'copy' | 'note' | 'discard-finish';
+  id: 'exit' | 'feedback' | 'approve' | 'copy' | 'note' | 'comment' | 'discard-finish';
   label: string;
   subtitle?: string;
   onSelect: () => void;
@@ -34,7 +32,6 @@ export interface CompactReviewAction {
 
 interface ReviewHeaderMenuProps {
   onOpenSettings: () => void;
-  onOpenReviewSetup?: () => void;
   onOpenExport: () => void;
   onCopyAgentInstructions: () => void;
   onToggleFileTree: () => void;
@@ -57,7 +54,6 @@ interface ReviewHeaderMenuProps {
 
 export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
   onOpenSettings,
-  onOpenReviewSetup,
   onOpenExport,
   onCopyAgentInstructions,
   onToggleFileTree,
@@ -106,13 +102,8 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
           aria-expanded={isOpen}
         >
           {isOpen ? <CloseIcon /> : <MenuIcon />}
-          {showUpdateDot ? (
-            <TextShimmer className="hidden lg:inline text-xs font-medium" duration={2.5} spread={1.5}>
-              Options
-            </TextShimmer>
-          ) : (
-            <span className="hidden lg:inline">Options</span>
-          )}
+          {/* The dot says an update is out; the label never moves (no shimmer). */}
+          <span className="hidden lg:inline">Options</span>
           {showUpdateDot && (
             <span className="absolute top-0.5 right-0.5 lg:-top-0.5 lg:-right-0.5 w-2 h-2 rounded-full bg-primary ring-2 ring-background" />
           )}
@@ -144,9 +135,7 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
                           }`}
                         >
                           {destination === 'platform'
-                            ? compactDestination.platform === 'gitlab'
-                              ? <GitLabIcon className="w-3.5 h-3.5" />
-                              : <GitHubIcon className="w-3.5 h-3.5" />
+                            ? <PRPlatformIcon platform={compactDestination.platform} className="w-3.5 h-3.5" />
                             : <AgentDestinationIcon />
                           }
                           <span className="truncate">{label}</span>
@@ -207,20 +196,6 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
             icon={<SettingsIcon />}
             label="Settings"
           />
-          {onOpenReviewSetup && (
-            <ActionMenuItem
-              onClick={() => {
-                closeMenu();
-                onOpenReviewSetup();
-              }}
-              icon={(
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 5h16M4 10h16M4 15h16M4 20h10" />
-                </svg>
-              )}
-              label="Set up review view"
-            />
-          )}
           <ActionMenuItem
             onClick={() => {
               closeMenu();
@@ -396,7 +371,7 @@ const CompactReviewActionIcon: React.FC<{ kind: CompactReviewAction['id'] }> = (
       </svg>
     );
   }
-  if (kind === 'feedback' || kind === 'note') {
+  if (kind === 'feedback' || kind === 'note' || kind === 'comment') {
     return (
       <svg className="w-3.5 h-3.5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-4l-4 4v-4z" />

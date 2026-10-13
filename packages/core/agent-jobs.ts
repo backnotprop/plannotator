@@ -45,8 +45,11 @@ export function getAgentJobAnnotationContext(
   diffContext?: AgentJobDiffContext,
 ): AgentJobAnnotationContext {
   if (!diffContext) return {};
-  if (diffContext.mode.startsWith("commit:")) {
-    const commitSha = diffContext.mode.slice("commit:".length);
+  // `commit:<sha>` (git) and `jj-commit:<commit id>` (jj) are the same
+  // single-commit detour; findings anchor to that commit's diff either way.
+  const commitPrefix = ["commit:", "jj-commit:"].find((prefix) => diffContext.mode.startsWith(prefix));
+  if (commitPrefix) {
+    const commitSha = diffContext.mode.slice(commitPrefix.length);
     return commitSha ? { commitSha } : {};
   }
   if (!diffContext.mode.startsWith("gitbutler:")) return {};
@@ -89,6 +92,9 @@ export interface AgentJobInfo {
   exitCode?: number;
   /** Last ~500 chars of stderr on failure. */
   error?: string;
+  /** Non-fatal problem worth surfacing on a job that may still be "done"
+   *  (e.g. a Claude job whose every shell command was refused, #1627). */
+  warning?: string;
   /** The actual command that was spawned (for display/debug). */
   command: string[];
   /** Working directory where the process was spawned. */

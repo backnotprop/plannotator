@@ -73,10 +73,10 @@ describe("direct review output", () => {
     });
   });
 
-  test("platform status without annotations does not acquire the denial suffix", () => {
+  test("the marked platform status post does not acquire the denial suffix", () => {
     expect(
       buildReviewOutput(
-        { approved: false, feedback: "Review posted to GitHub.", annotations: [] },
+        { approved: false, feedback: "Review posted to GitHub.", annotations: [], platform: true },
         "amp",
         { prompts: { review: { denied: "Verify the findings." } } },
       ),
@@ -86,12 +86,32 @@ describe("direct review output", () => {
     });
   });
 
+  // PR description, PR comment and editor comments ride only in `feedback`,
+  // so such a review has zero annotations; it is still the reviewer's
+  // feedback and gets the suffix like any other.
+  test("feedback with zero code annotations gets the suffix when it is not the platform post", () => {
+    const feedback = "## PR description\n\nExplain the fallback.";
+    expect(
+      buildReviewOutput(
+        { approved: false, feedback, annotations: [] },
+        "amp",
+        { prompts: { review: { denied: "Verify the findings." } } },
+      ),
+    ).toEqual({ decision: "annotated", message: `${feedback}\nVerify the findings.` });
+  });
+
   test("submitted text identical to the close message is still feedback", () => {
     const feedback = "Review session closed without feedback.";
 
     expect(
-      buildReviewOutput({ approved: false, feedback, annotations: [] }, "amp", {}),
-    ).toEqual({ decision: "annotated", message: feedback });
+      buildReviewOutput({ approved: false, feedback, annotations: [] }, "amp", { prompts: { review: { denied: "Verify." } } }),
+    ).toEqual({ decision: "annotated", message: `${feedback}\nVerify.` });
+  });
+
+  test("an empty submit stays empty", () => {
+    expect(
+      buildReviewOutput({ approved: false, feedback: "", annotations: [] }, "amp", { prompts: { review: { denied: "Verify." } } }),
+    ).toEqual({ decision: "annotated", message: "" });
   });
 
   test("dismissal takes precedence over approval and unsent annotations", () => {

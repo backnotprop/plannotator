@@ -11,7 +11,7 @@
 
 import { join } from "node:path";
 import type { ReviewGitRuntime } from "./review-core";
-import type { PRMetadata } from "./pr-types";
+import { getPRHeadFetchSpec, getPRNumber, type PRMetadata } from "./pr-types";
 import { createWorktree, removeWorktree, fetchRef, ensureObjectAvailable } from "./worktree";
 
 export interface PoolEntry {
@@ -113,15 +113,13 @@ export function createWorktreePool(
       }
 
       const create = async (): Promise<PoolEntry> => {
-        const number = metadata.platform === "github" ? metadata.number : metadata.iid;
+        const number = getPRNumber(metadata);
         const worktreePath = join(config.sessionDir, "pool", `pr-${number}`);
-        const refSpec = metadata.platform === "github"
-          ? `refs/pull/${number}/head`
-          : `refs/merge-requests/${number}/head`;
+        const head = getPRHeadFetchSpec(metadata);
 
         await fetchRef(runtime, metadata.baseBranch, { cwd: config.repoDir });
         await ensureObjectAvailable(runtime, metadata.baseSha, { cwd: config.repoDir });
-        await fetchRef(runtime, refSpec, { cwd: config.repoDir });
+        await fetchRef(runtime, head.ref, { cwd: config.repoDir, ...(head.remote ? { remote: head.remote } : {}) });
 
         await createWorktree(runtime, {
           ref: "FETCH_HEAD",

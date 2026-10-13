@@ -25,6 +25,36 @@ export function isAddressInUseError(err: unknown): boolean {
   );
 }
 
+/**
+ * Every configured port is taken. `message` keeps the historical text (Pi's
+ * self-preemption and tests match it); `cliMessage` is the one line a CLI
+ * prints instead of a stack trace.
+ */
+export class PortInUseError extends Error {
+  constructor(
+    message: string,
+    readonly port: number,
+    /** The configured range, when PLANNOTATOR_PORT names one. */
+    readonly range: readonly [number, number] | null,
+    /** True when the port came from PLANNOTATOR_PORT, false for the remote-mode default. */
+    readonly fromEnv: boolean,
+  ) {
+    super(message);
+    this.name = "PortInUseError";
+  }
+
+  get cliMessage(): string {
+    if (this.range) {
+      return `Plannotator: every port in PLANNOTATOR_PORT ${this.range[0]}-${this.range[1]} is already in use, most likely by other Plannotator sessions. Finish or close one, or widen the range.`;
+    }
+    const what = this.fromEnv
+      ? `port ${this.port} (PLANNOTATOR_PORT)`
+      : `port ${this.port}`;
+    const why = this.fromEnv ? "" : " (remote mode uses a fixed port so it can be forwarded)";
+    return `Plannotator: ${what} is already in use, most likely by another Plannotator session${why}. Finish or close that session, or set PLANNOTATOR_PORT to a different port.`;
+  }
+}
+
 function getRemoteOverride(): boolean | null {
   const remote = process.env.PLANNOTATOR_REMOTE;
   if (remote === undefined) {
@@ -105,6 +135,7 @@ export async function startBunServerOnAvailablePort<TServer>(
   startServer: (port: number) => TServer,
 ): Promise<TServer> {
   const { ports: configuredPorts, isRange } = getServerPortConfiguration();
+  const fromEnv = Boolean(process.env.PLANNOTATOR_PORT && parsePortSelection(process.env.PLANNOTATOR_PORT));
   const portsToTry = isRange
     ? configuredPorts
     : Array(MAX_FIXED_PORT_RETRIES).fill(configuredPorts[0]);
@@ -128,16 +159,25 @@ export async function startBunServerOnAvailablePort<TServer>(
         const hint = isRemoteSession()
           ? " (set PLANNOTATOR_PORT to use different port)"
           : "";
-        throw new Error(
+        throw new PortInUseError(
           `Port ${port} in use after ${MAX_FIXED_PORT_RETRIES} retries${hint}`,
+          port,
+          null,
+          fromEnv,
         );
       }
 
-      const configured = `${configuredPorts[0]}-${configuredPorts.at(-1)}`;
+      const first = configuredPorts[0] as number;
+      const last = configuredPorts.at(-1) as number;
       const hint = isRemoteSession()
         ? " (set PLANNOTATOR_PORT to use a different port or range)"
         : "";
-      throw new Error(`Port selection ${configured} exhausted${hint}`);
+      throw new PortInUseError(
+        `Port selection ${first}-${last} exhausted${hint}`,
+        port,
+        [first, last],
+        true,
+      );
     }
   }
 

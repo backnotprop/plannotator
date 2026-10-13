@@ -12,6 +12,8 @@
  * for non-opted-in documents must go red here.
  */
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { parseHtmlElementContext } from "@plannotator/core/html-anchor";
+import { exportAnnotations } from "../../utils/parser";
 import { ANNOTATION_HIGHLIGHT_CSS, BRIDGE_SCRIPT } from "./bridge-script";
 import {
   DIFF_HIGHLIGHT_CSS,
@@ -1409,6 +1411,8 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       '<div id="l-container"><span>This text is far too long to serve as a hover label for anything</span></div>',
       '<div id="l-long" class="extraverboseclasstokennameone extraverboseclasstokennametwo">x</div>',
       "<p id=\"l-known\">Paragraph text</p>",
+      '<video id="l-video-aria" aria-label="Product demo"></video>',
+      '<video id="l-video"></video>',
       "</div>",
     ].join("");
     postBridge({ type: "plannotator-bridge-set-vim-mode", enabled: false });
@@ -1425,6 +1429,10 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       // Class-token labels obey the 40-char cap like every other rung.
       ["#l-long", "extraverboseclasstokennameone extraverbo"],
       ["#l-known", "Paragraph"], // known tags keep their names
+      // A media element's accessible name beats its kind; the kind only
+      // replaces "container" when the page names nothing.
+      ["#l-video-aria", "Product demo"],
+      ["#l-video", "Video"],
     ];
     let x = 10;
     for (const [selector, expected] of cases) {
@@ -1497,6 +1505,122 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
+  // Failure to catch: a pinpoint on one of several images quoting only
+  // "[element: Image]", so the agent cannot tell which image was meant.
+  test("a text-less pinpoint names WHICH element: alt, else the source file, never a query or data payload", async () => {
+    document.body.innerHTML = [
+      '<div class="gallery">',
+      '<img id="i-alt" alt="Team photo" src="https://cdn.test/img/team.jpg?sig=SECRET#frag">',
+      '<img id="i-file" src="/assets/avatars/jane%20doe.png?v=3">',
+      '<img id="i-data" src="data:image/png;base64,iVBORw0KGgoSECRETPAYLOAD">',
+      '<img id="i-lazy" src="data:image/gif;base64,R0lGOD" data-src="/img/hero-banner.webp">',
+      '<img id="i-bracket" alt="Chart [Q3] &quot;final&quot;" src="chart.svg">',
+      '<button id="b-icon" aria-label="Open menu"><svg></svg></button>',
+      '<video id="v-title" title="Product demo"><source src="/media/demo.mp4?t=1"></video>',
+      '<iframe id="f-src" src="prototype.html?step=2"></iframe>',
+      '<video id="v-aria" aria-label="Launch clip" src="/media/launch.mp4"></video>',
+      '<img id="i-srcset" srcset="small.png, large.png 2x">',
+      '<img id="i-srcset-w" srcset="hero-480.jpg 480w, hero-960.jpg 960w">',
+      "</div>",
+    ].join("");
+    postBridge({ type: "plannotator-bridge-set-vim-mode", enabled: false });
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+
+    const cases: Array<[string, string]> = [
+      ["#i-alt", '[element: Image "Team photo" (team.jpg)]'],
+      ["#i-file", "[element: Image (jane doe.png)]"],
+      ["#i-data", "[element: Image (data:image/png)]"],
+      ["#i-lazy", "[element: Image (hero-banner.webp)]"],
+      // Brackets and double quotes cannot break the one-token placeholder.
+      ["#i-bracket", "[element: Image \"Chart (Q3) 'final'\" (chart.svg)]"],
+      ["#b-icon", '[element: Button "Open menu"]'],
+      ["#v-title", '[element: Video "Product demo" (demo.mp4)]'],
+      ["#f-src", "[element: Frame (prototype.html)]"],
+      // The aria-label is the label, so it is not repeated as the name.
+      ["#v-aria", "[element: Launch clip (launch.mp4)]"],
+      // srcset candidates split on commas first: no trailing comma.
+      ["#i-srcset", "[element: Image (small.png)]"],
+      ["#i-srcset-w", "[element: Image (hero-480.jpg)]"],
+    ];
+    let x = 10;
+    for (const [selector, expected] of cases) {
+      const el = document.querySelector<HTMLElement>(selector)!;
+      hoverAt(el, (x += 40), 40);
+      const { messages } = await clickAndCollectSelection(el, x, 40);
+      expect(messages.length).toBe(1);
+      expect(messages[0]!.text).toBe(expected);
+      postBridge({ type: "plannotator-bridge-cancel-selection" });
+    }
+
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
+    document.body.replaceChildren();
+  });
+
+  // Failure to catch (0.28.1 smoke): the composer quote naming the real file
+  // while the exported heading said only "<img> element" or "(data:image/gif)",
+  // because the export read the src attribute alone. The context now carries
+  // the bridge's own resolution, so quote and heading name the same file.
+  test("the exported heading names the same file the composer quote does, whatever attribute carries it", async () => {
+    document.body.innerHTML = [
+      "<div>",
+      '<img id="p-srcset" srcset="hero-480.jpg 480w, hero-960.jpg 960w">',
+      '<img id="p-lazy" src="data:image/gif;base64,R0lGOD" data-src="/img/real.png?v=2">',
+      '<picture><source srcset="/img/pic.avif 1x, /img/pic@2x.avif 2x"><img id="p-picture"></picture>',
+      '<video id="p-poster" poster="/media/cover.jpg?sig=x"></video>',
+      '<video id="p-source"><source src="/media/clip.mp4"></video>',
+      '<img id="p-src" alt="Team" src="https://cdn.test/team.jpg?sig=SECRET">',
+      "</div>",
+    ].join("");
+    postBridge({ type: "plannotator-bridge-set-vim-mode", enabled: false });
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+
+    const cases: Array<[string, string, string]> = [
+      ["#p-srcset", "[element: Image (hero-480.jpg)]", "Feedback on the <img> element (hero-480.jpg)"],
+      ["#p-lazy", "[element: Image (real.png)]", "Feedback on the <img> element (real.png)"],
+      ["#p-picture", "[element: Image (pic.avif)]", "Feedback on the <img> element (pic.avif)"],
+      ["#p-poster", "[element: Video (cover.jpg)]", "Feedback on the <video> element (cover.jpg)"],
+      ["#p-source", "[element: Video (clip.mp4)]", "Feedback on the <video> element (clip.mp4)"],
+      ["#p-src", '[element: Image "Team" (team.jpg)]', 'Feedback on the <img> element — "Team" (team.jpg)'],
+    ];
+    let x = 10;
+    for (const [selector, quote, heading] of cases) {
+      const el = document.querySelector<HTMLElement>(selector)!;
+      hoverAt(el, (x += 40), 40);
+      const { messages } = await clickAndCollectSelection(el, x, 40);
+      expect(messages.length).toBe(1);
+      expect(messages[0]!.text).toBe(quote);
+      // Through the parent's trust boundary, then the export.
+      const elementContext = parseHtmlElementContext(messages[0]!.context);
+      expect(JSON.stringify(elementContext)).not.toContain("SECRET");
+      const out = exportAnnotations([], [{
+        id: "a", blockId: "", startOffset: 0, endOffset: 0, type: "COMMENT", text: "note",
+        originalText: quote, createdA: 1, elementContext,
+      }]);
+      expect(out).toContain(`## 1. ${heading}\n`);
+      postBridge({ type: "plannotator-bridge-cancel-selection" });
+    }
+
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
+    document.body.replaceChildren();
+  });
+
+  test("an image pin saved with the old bare placeholder still restores through its anchor", async () => {
+    // Restore never reads the quote for a text-less element: the anchor binds
+    // it. Drafts saved before the description grew must keep their marker.
+    document.body.innerHTML = '<div><img id="hero" alt="Hero" src="hero.png"><p>Body</p></div>';
+    postBridge({
+      type: "plannotator-bridge-find-and-mark",
+      id: "old-image-pin",
+      originalText: "[element: Image]",
+      annotationType: "comment",
+      anchor: { selector: "#hero", tagName: "img", text: "" },
+    });
+    await flushOverlay();
+    expect(markersFor("old-image-pin").length).toBe(1);
+    postBridge({ type: "plannotator-bridge-clear-marks" });
+    document.body.replaceChildren();
+  });
+
   test("identical text-less siblings fail closed instead of rebinding (D1)", async () => {
     // Two structurally identical icons: any structure-derived signature
     // (tag/classes/child count/size) is identical across them, so a
@@ -1541,6 +1665,128 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
 
     postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
     document.body.replaceChildren();
+  });
+
+  // Failure to catch: a pin on an <img> with no id or data-* identity never
+  // restoring, because it got no anchor at all (every screenshot in an HTML
+  // report, every chart in a generated page). The D1 contract must survive
+  // the fix: a source two elements share, or an inline data:/blob: source,
+  // gives no anchor, and a crafted source anchor never binds an ambiguous
+  // match.
+  test("a media pin without stable identity restores by its source; shared and inline sources fail closed", async () => {
+    document.body.innerHTML = [
+      '<div class="gallery">',
+      '<img src="charts/a.png">',
+      '<img src="charts/b.png?sig=SECRET#frag">',
+      '<img src="charts/dup.png"><img src="charts/dup.png">',
+      '<img src="data:image/png;base64,iVBORw0KGgo=">',
+      "</div>",
+    ].join("");
+    postBridge({ type: "plannotator-bridge-set-vim-mode", enabled: false });
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+
+    type Anchor = { selector: string; tagName: string; text?: string };
+    const images = () => document.querySelectorAll<HTMLElement>("div.gallery > img");
+    const pin = async (el: HTMLElement, x: number): Promise<Anchor | undefined> => {
+      hoverAt(el, x, 40);
+      const { messages } = await clickAndCollectSelection(el, x, 40);
+      expect(messages.length).toBe(1);
+      postBridge({ type: "plannotator-bridge-cancel-selection" });
+      return messages[0]!.anchor as Anchor | undefined;
+    };
+    const restore = async (id: string, anchor: Anchor) => {
+      postBridge({
+        type: "plannotator-bridge-find-and-mark",
+        id,
+        originalText: "[element: Image]",
+        annotationType: "comment",
+        anchor,
+      });
+      await flushOverlay();
+      return markersFor(id).length;
+    };
+
+    // The anchor checks the image by its path; the signed query reaches it
+    // only as a digest, never in plain text.
+    const anchor = await pin(images()[1]!, 80);
+    expect(anchor?.text).toMatch(/^src:charts\/b\.png\?[0-9a-f]{8}$/);
+    expect(JSON.stringify(anchor)).not.toContain("SECRET");
+    expect(await restore("b", anchor!)).toBe(1);
+    postBridge({ type: "plannotator-bridge-clear-marks" });
+
+    // A sibling inserted in front moves the positional selector onto charts/a.png;
+    // the source check rejects that element and finds charts/b.png by its source.
+    const inserted = document.createElement("img");
+    inserted.setAttribute("src", "charts/new.png");
+    images()[0]!.before(inserted);
+    expect(await restore("b-moved", anchor!)).toBe(1);
+    postBridge({ type: "plannotator-bridge-clear-marks" });
+    // Once no element shows charts/b.png, nothing binds, at any position.
+    images()[2]!.setAttribute("src", "charts/c.png");
+    expect(await restore("b-gone", anchor!)).toBe(0);
+
+    // Shared and inline sources: no anchor at all.
+    expect(await pin(images()[3]!, 120)).toBeUndefined();
+    expect(await pin(images()[5]!, 160)).toBeUndefined();
+    // A crafted anchor naming the shared source binds neither copy.
+    expect(await restore("dup", { selector: "div.gallery > img:nth-of-type(9)", tagName: "img", text: "src:charts/dup.png" })).toBe(0);
+    expect(visibleMarkers().length).toBe(0);
+    expect(document.querySelector("[data-bind-id]")).toBeNull();
+
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
+    document.body.replaceChildren();
+  });
+
+  // Failures to catch: (1) a source told apart only by its query
+  // (/_next/image?url=…, /thumb?id=…) binding a pin to a DIFFERENT image once
+  // the query changes, because the key dropped the query; (2) a pin saved in
+  // one session not restoring in the next because the key carried the
+  // session's asset route (port + token) instead of the author's path.
+  test("a media source anchor tells queries apart and survives a re-rooted base", async () => {
+    const baseEl = document.createElement("base");
+    baseEl.setAttribute("href", "http://127.0.0.1:41111/api/html-assets/TOKEN-ONE/");
+    document.head.prepend(baseEl);
+    try {
+      document.body.innerHTML = '<div class="gallery"><p>Report</p><img src="thumb?id=1"><img src="charts/a.png"></div>';
+      postBridge({ type: "plannotator-bridge-set-vim-mode", enabled: false });
+      postBridge({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+
+      type Anchor = { selector: string; tagName: string; text?: string };
+      const images = () => document.querySelectorAll<HTMLElement>("div.gallery > img");
+      const pin = async (el: HTMLElement, x: number): Promise<Anchor | undefined> => {
+        hoverAt(el, x, 40);
+        const { messages } = await clickAndCollectSelection(el, x, 40);
+        expect(messages.length).toBe(1);
+        postBridge({ type: "plannotator-bridge-cancel-selection" });
+        return messages[0]!.anchor as Anchor | undefined;
+      };
+      const restore = async (id: string, anchor: Anchor) => {
+        postBridge({ type: "plannotator-bridge-find-and-mark", id, originalText: "[element: Image]", annotationType: "comment", anchor });
+        await flushOverlay();
+        const count = markersFor(id).length;
+        postBridge({ type: "plannotator-bridge-clear-marks" });
+        return count;
+      };
+
+      const thumb = await pin(images()[0]!, 80);
+      const chart = await pin(images()[1]!, 120);
+      expect(thumb).toBeDefined();
+      expect(chart?.text).toBe("src:charts/a.png");
+
+      // The next session serves the same file under another port and token.
+      baseEl.setAttribute("href", "http://127.0.0.1:42222/api/html-assets/TOKEN-TWO/");
+      expect(await restore("chart-next-session", chart!)).toBe(1);
+
+      // Same path, another query: a different image, at the same position.
+      images()[0]!.setAttribute("src", "thumb?id=2");
+      expect(await restore("thumb-other-query", thumb!)).toBe(0);
+      images()[0]!.setAttribute("src", "thumb?id=1");
+      expect(await restore("thumb-same-query", thumb!)).toBe(1);
+    } finally {
+      postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
+      baseEl.remove();
+      document.body.replaceChildren();
+    }
   });
 
   // --- Element context: the agent-facing description a pinpoint carries ---
@@ -1601,7 +1847,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     const toggle = document.querySelector<HTMLElement>("button.nav-toggle")!;
     hoverAt(toggle, 60, 30);
     const button = await clickAndCollectSelection(toggle, 60, 30);
-    expect(button.messages[0]!.text).toBe("[element: Button]");
+    expect(button.messages[0]!.text).toBe('[element: Button "Open menu"]');
     const buttonContext = button.messages[0]!.context as Record<string, unknown>;
     expect(buttonContext.name).toBe("Open menu");
     expect(buttonContext.role).toBe("button");
@@ -1789,6 +2035,21 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     expect(context.text).toBe("Beta text");
     expect(new TextEncoder().encode(JSON.stringify(context)).length).toBeLessThanOrEqual(1024);
     expect(keys.get("alpha")).toBeTruthy();
+    postBridge({ type: "plannotator-bridge-cancel-selection" });
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
+    document.body.replaceChildren();
+  });
+
+  test("a shift-clicked image names which image it is, like the primary", async () => {
+    document.body.innerHTML = MULTI_MARKUP + '<img id="extra" alt="Pricing chart" src="/img/pricing.png?x=1">';
+    await startMultiDraft();
+    const img = document.querySelector<HTMLElement>("img#extra")!;
+    const added = await collectMessages(
+      ["plannotator-bridge-multi-target-added"],
+      () => clickAt(img, 60, 60, true),
+    );
+    expect(added.length).toBe(1);
+    expect(added[0]!.text).toBe('[element: Image "Pricing chart" (pricing.png)]');
     postBridge({ type: "plannotator-bridge-cancel-selection" });
     postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
     document.body.replaceChildren();

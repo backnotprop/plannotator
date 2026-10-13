@@ -1,0 +1,70 @@
+{
+  "id": 873432728,
+  "created_on": "2026-09-30T06:59:25.208463+00:00",
+  "updated_on": "2026-09-30T06:59:25.214512+00:00",
+  "content": {
+    "type": "rendered",
+    "raw": "Inline on new line 9.",
+    "markup": "markdown",
+    "html": "<p>Inline on new line 9.</p>"
+  },
+  "user": {
+    "display_name": "Ada Reviewer",
+    "links": {
+      "self": {
+        "href": "https://api.bitbucket.org/2.0/users/%7B00000000-0000-4000-8000-00000000a0a0%7D"
+      },
+      "avatar": {
+        "href": "https://secure.gravatar.com/avatar/00000000000000000000000000000000?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FAR-2.png"
+      },
+      "html": {
+        "href": "https://bitbucket.org/%7B00000000-0000-4000-8000-00000000a0a0%7D/"
+      }
+    },
+    "type": "user",
+    "uuid": "{00000000-0000-4000-8000-00000000a0a0}",
+    "account_id": "557058:00000000-0000-4000-8000-00000000a0a0",
+    "nickname": "Ada Reviewer"
+  },
+  "deleted": false,
+  "inline": {
+    "from": null,
+    "to": 9,
+    "path": "src/math.ts",
+    "start_from": null,
+    "start_to": null,
+    "outdated": false,
+    "context_lines": "--- a/src/math.ts\n+++ b/src/math.ts\n@@ -6,2 +6,6 @@\n   return a - b;\n }\n+\n+export function mul(a: number, b: number): number {\n+  return a * b;\n+}\n",
+    "src_rev": "c0a227ce2c51",
+    "dest_rev": "6155635443f4",
+    "base_rev": null
+  },
+  "pending": false,
+  "type": "pullrequest_comment",
+  "links": {
+    "self": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/pullrequests/1/comments/873432728"
+    },
+    "html": {
+      "href": "https://bitbucket.org/ws/repo/pull-requests/1/_/diff#comment-873432728"
+    },
+    "code": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/diff/ws/repo:c0a227ce2c51..6155635443f4?path=src%2Fmath.ts"
+    }
+  },
+  "pullrequest": {
+    "type": "pullrequest",
+    "id": 1,
+    "title": "Add mul and greet",
+    "draft": false,
+    "links": {
+      "self": {
+        "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/pullrequests/1"
+      },
+      "html": {
+        "href": "https://bitbucket.org/ws/repo/pull-requests/1"
+      }
+    },
+    "queued": false
+  }
+}

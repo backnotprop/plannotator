@@ -68,6 +68,8 @@ If the reviewer approves while leaving notes, direct structured transport preser
 
 The object is emitted as a single line of JSON per invocation. One invocation, one decision, one line on stdout.
 
+Approved and annotated objects also carry `annotationCount`, the number of annotations the decision carried, for example `"annotationCount": 2`. Read unknown fields as optional: older versions omit this one. The strict result record (`--require-approval`, `--result-file`) does not include it.
+
 ## `--gate`
 
 A three-way review decision. The annotation UI adds an Approve button alongside Close and Send Annotations. The reviewer declares intent explicitly:
@@ -76,7 +78,7 @@ A three-way review decision. The annotation UI adds an Approve button alongside 
 - **Send Annotations.** The reviewer has specific changes. The feedback is returned verbatim.
 - **Close.** The session ends without a decision. Neither a signal to the agent nor an instruction set.
 
-In plaintext mode, Approve emits the single line `The user approved.` on stdout so templates and agents can distinguish approval from close without needing `--json`. Close emits nothing. Send Annotations emits the feedback markdown. For hook integrations, use `--hook` instead, which emits hook-native JSON directly.
+In plaintext mode, Approve emits the single line `The user approved.` on stdout so templates and agents can distinguish approval from close without needing `--json`. An approval that carries a note (**Approve with a note…** or **Approve with notes**) prints the approved-with-notes message instead (the `approvedWithNotes` prompt, see [custom feedback](/docs/guides/custom-feedback/)), so the note is never dropped. `--hook` has no message on approval, so those two items are hidden there. Close emits nothing. Send Annotations emits the feedback markdown. For hook integrations, use `--hook` instead, which emits hook-native JSON directly.
 
 ## `--json`
 
@@ -166,6 +168,8 @@ See [Hook Integration](/docs/guides/hook-integration/) for copy-paste recipes th
 By default, every decision exits `0`; existing plaintext, JSON, and hook integrations are unchanged. With `--require-approval`, only `approved` exits `0`; `annotated` and `dismissed` publish their JSON result before exiting `1`.
 
 Strict invocations that are misconfigured or cannot start exit `2` — bad flag combinations, an invalid `--result-file` destination, and every annotate startup failure (missing or unreadable path, unreachable URL, empty folder, ambiguous filename, oversized file). Those startup failures exit `1` for non-strict invocations, as they always have; under a strict flag `1` means "the reviewer did not approve", so a mistyped path must never be reported as a rejection.
+
+A strict gate takes one target, or several existing file paths to review together (`plannotator annotate spec.md plan.md tasks.md --gate --json --require-approval`): one review of all of them, in that order, where Approve covers every file. Any other set of arguments exits `2`: a list with a missing file, a URL or folder among the paths, or extra words. Extra words used to be ignored silently.
 
 A failed atomic publish also exits `2`, but that code means the result *file* was not published — the reviewer's decision was already written to stdout. Only a stdout write failure leaves no record at all.
 

@@ -23,6 +23,16 @@ pi install ./plannotator/apps/pi-extension
 pi -e npm:@plannotator/pi-extension
 ```
 
+**In Oh My Pi (OMP):** OMP loads this extension as an OMP plugin. See [Oh My Pi](#oh-my-pi-omp) below.
+
+## Update
+
+```bash
+pi update --extensions
+```
+
+This updates your installed Pi packages, Plannotator included. `pi update npm:@plannotator/pi-extension` updates only Plannotator, and `pi update --all` updates Pi and every package. A plain `pi update` updates only Pi itself, not Plannotator. Restart Pi after updating.
+
 ## Pi version and project trust
 
 Plannotator requires **Pi 0.79.1 or newer**. Updating only the Plannotator
@@ -50,6 +60,43 @@ pi remove npm:@plannotator/pi-extension
 If Pi was configured by the full Plannotator installer, `plannotator uninstall`
 also detects and removes the extension through Pi.
 
+## Oh My Pi (OMP)
+
+[Oh My Pi](https://omp.sh) loads Pi extensions as OMP plugins, so this
+extension runs in OMP too. Install it, then restart OMP:
+
+```bash
+omp plugin install @plannotator/pi-extension
+```
+
+Update with `omp plugin upgrade @plannotator/pi-extension`. Remove with
+`omp plugin uninstall @plannotator/pi-extension`.
+
+Open reviews with the extension's commands: `/plannotator-review`,
+`/plannotator-annotate`, `/plannotator-last`, and `/plannotator-plan-mode`.
+Reviews opened this way get [Ask this session](#ask-this-session): Ask AI sends
+the question to the OMP session and streams the answer back. The label reads
+"Ask this session · Pi".
+
+Reviews started by the `plannotator` CLI from OMP's shell do not get Ask this
+session. This includes the `/skill:plannotator-*` skills from the CLI installer
+and the agent running `plannotator` with its bash tool. The CLI has no
+connection back to OMP, so Ask AI offers only separate AI providers, and the
+header badge reads "Oh My Pi" instead of "Pi". For agent-opened reviews with Ask
+this session, the agent uses the [`plannotator` tool](#the-plannotator-tool),
+which is **on by default in OMP**. OMP lists extension tools as `xd://` devices,
+one short line each in its system prompt (about 50 tokens for this one), and
+loads the full description only when the agent reads it, so the agent finds it
+as `xd://plannotator`. To keep it out, set `PLANNOTATOR_AGENT_TOOL=0` or
+`{ "agentTool": false }` in `~/.plannotator/config.json`, then restart OMP.
+
+Start plan mode with `omp --plan` or `/plannotator-plan-mode`. With the
+extension loaded, `--plan` starts Plannotator's plan mode instead of choosing a
+plan model.
+
+Checked with OMP 18.8.9 and 18.10.2 (commands, plan mode, the `plannotator`
+tool, and Ask this session).
+
 ## Build from source
 
 If installing from a local clone, build the HTML assets first:
@@ -72,7 +119,7 @@ Start Pi in plan mode:
 pi --plan
 ```
 
-Or toggle it during a session with `/plannotator-plan-mode` or `Ctrl+Alt+P`. The command accepts an optional file path argument (`/plannotator-plan-mode plans/auth.md`) or prompts you to choose one interactively.
+Or toggle it during a session with `/plannotator-plan-mode` or `Ctrl+Alt+P`.
 
 In plan mode the agent is restricted — destructive commands are blocked, writes are limited to the plan file. It explores your codebase, then writes a plan using markdown checklists:
 
@@ -89,6 +136,10 @@ When the agent calls `plannotator_submit_plan`, the Plannotator UI opens in your
 - **Approve with notes** to proceed but include implementation guidance
 
 The agent iterates on the plan until you approve, then executes with full tool access. On resubmission, Plan Diff highlights what changed since the previous version.
+
+The submit tool does not wait for you: it returns as soon as the review opens, the agent ends its turn, and your decision reaches it later as a new message. While the review is open you can keep chatting with the agent in Pi, or ask it questions from the review's Ask AI panel ("Ask this session"). It still cannot change code: planning restrictions stay on until you approve. If the agent revises the plan while the review is open, the open tab updates to the new version and keeps your comments. Leaving plan mode closes an open review.
+
+Pressing Esc in Pi no longer cancels an open plan review. To abandon a review, leave plan mode (`/plannotator-plan-mode` or `Ctrl+Alt+P`).
 
 ### Programmatic plan-mode control
 
@@ -204,6 +255,9 @@ Use these inside `instructions` strings. They render once, when the phase is ent
 ### Code review
 
 Run `/plannotator-review` to open your current VCS changes in the code review UI. Annotate specific lines, switch between the modes supported by the detected Git, GitButler, or JJ provider, and submit feedback that gets sent to the agent. Pass `--git` or `--gitbutler` to force that provider; GitButler requires `but` 0.21.0 or newer on `PATH`. Pass `--patch-file <path>` to review a static caller-supplied unified diff without a repository.
+### Ask this session
+
+In plan review, code review, annotate and `/plannotator-last`, Ask AI is answered by your Pi session ("Ask this session"). It is the only Ask AI option there, so there is no provider picker. Your question shows in Pi's chat. If the agent is busy, choose **Ask when it finishes** or **Interrupt and ask now**. In remote mode you pick a separate provider instead. Review agents, Code Tour and Guided Review still run their own models.
 
 ### Shared Plannotator event API
 
@@ -229,6 +283,7 @@ Plan review is asynchronous:
 - Plannotator opens the browser review and immediately responds with `{ status: "handled", result: { status: "pending", reviewId } }`
 - when the human approves or rejects in the browser, Plannotator emits `plannotator:review-result` with `{ reviewId, approved, feedback, savedPath?, agentSwitch?, permissionMode? }`
 - callers can query `review-status` with the same `reviewId` to recover from startup races or session restarts
+- the review tab outlives `/reload` and session switches: a decision made there after the session was replaced is recorded for `review-status` (the replaced runtime emits nothing, since its event bus is gone), so the new session can pick it up
 
 The other shared actions remain request/response flows. Payloads are intentionally minimal and only include fields the shared implementation actually uses.
 
@@ -281,6 +336,24 @@ URL targets work too. A loopback `http` URL that answers with an HTML page (a ru
 
 Run `/plannotator-last` to annotate the agent's most recent response. The message opens in the annotation UI where you can highlight text, add comments, and send structured feedback back to the agent.
 
+### The `plannotator` tool
+
+The agent can have a `plannotator` tool (off by default on Pi, on by default in [Oh My Pi](#oh-my-pi-omp); see below for turning it on). When you ask it to "open notes.md in Plannotator", it calls the tool instead of running the CLI:
+
+- **Open:** `annotate` a file, folder or URL (`gate: true` adds an Approve button), `review` changes or a PR (`options.base` sets the compare ref), or `last` (the agent's last answer; the message in which the agent calls the tool is skipped). The review opens exactly as the matching slash command opens it, with Ask this session. The tool returns at once with a session id (`pn-3f2a9c`) and the URL, and the agent's turn ends. Your decision arrives later as a new message that starts with `Plannotator: notes.md (pn-3f2a9c) — Feedback · 2 comments.` If the agent asked for a gated sign-off, a plain Approve is sent to it too.
+- **List:** the reviews this Pi session opened that are still open, including the ones you opened with `/plannotator-*` commands and plan reviews. Each line shows the id, what it shows, the URL, its age and how many comments you have not sent yet.
+- **Close:** one review by id, or `"all"`. This is the same as your Close, except that your unsent comments stay saved as a draft. Nothing is sent to the agent. Plan reviews are not closed this way: they end with your decision or when you leave plan mode.
+
+Another Pi session cannot list or close these reviews. After `/reload` or `/resume` of the same session, the agent still sees the reviews that are open. After `/new` it does not, because that is another session. In remote mode (or with a single `PLANNOTATOR_PORT`) every review uses the same port, so the tool opens only one review at a time and tells the agent which one to close first. The tool is active only in an interactive Pi session: in print or JSON mode the agent does not get it, because nothing could deliver your decision later. To review several files together, the agent passes a list as `target` (for example `["spec.md", "mock.html"]`); they open as one review in that order, with one decision. Decisions from the slash commands now also start with the same `Plannotator: … (pn-…) — …` line.
+
+The tool is off by default on Pi, because Pi sends its full definition (about 780 tokens) with every request: turn it on with `PLANNOTATOR_AGENT_TOOL=1` or `{ "agentTool": true }` in `~/.plannotator/config.json` (the environment variable wins in both directions). In Oh My Pi it is on by default, because OMP lists it as one short line; `PLANNOTATOR_AGENT_TOOL=0` or `{ "agentTool": false }` keeps it out there. Off, the agent has no `plannotator` tool and the slash commands and plan mode work as before. The setting is read when a session starts, so it applies to the next session (or after `/reload`; in OMP, restart OMP); the tool list never changes during a session, which keeps the model's prompt cache intact.
+
+The extension also ships the `plannotator` knowledge skill (a CLI reference) for installs without the CLI installer's copy. It is user-invoked only: load it with `/skill:plannotator`; it is not listed in the model's system prompt.
+
+### The `plannotator_inbox` tool
+
+With this tool the agent writes to your Plannotator Inbox and reads it: `send_message` starts or continues a thread (a question, a note, files to annotate as attachments), `read_thread` and `wait_for_reply` read your answers, `list_decisions` and `record_decision` keep the project's decisions, and `get_guide_brief` and `submit_guide` send you a guided review. The actions are the ones your Inbox offers when the session starts. When you press Send on a reply, the session that sent the message wakes: the reply goes in as a follow-up once Pi is idle (a run is never interrupted), and the thread shows "Delivered to Pi". If two Pi processes have the same session open, the one you used last gets it. The tool appears only when an Inbox is installed (you ran `plannotator inbox` once) and the `inboxTool` setting is on for Pi. It is off by default on Pi, because Pi sends every tool's full definition with each request. Turn it on with `export PLANNOTATOR_INBOX_TOOL=1`, or with `{ "inboxTool": { "pi": true } }` in `~/.plannotator/config.json` (the Inbox's Settings writes this key; the environment variable wins). The setting is read when a session starts. A call starts a stopped Inbox in the background. In print or JSON mode the tool is inactive.
+
 ### Archive browser
 
 The Plannotator archive browser is available through the shared event API as `archive`, which opens the saved plan/decision browser for future callers. The orchestrator does not expose a dedicated archive command yet.
@@ -294,9 +367,11 @@ During execution, the agent marks completed steps with `[DONE:n]` markers. Progr
 | Command | Description |
 |---------|-------------|
 | `/plannotator-plan-mode` | Toggle plan mode. The agent writes a markdown plan file anywhere in the working directory and submits its path |
-| `/plannotator-review` | Open code review UI for current changes |
+| `/plannotator-review [DIRECTORY \| PR_URL]` | Open code review UI for current changes, another repository/worktree, or a PR |
 | `/plannotator-annotate <file>` | Open markdown file in annotation UI |
 | `/plannotator-last` | Annotate the last assistant message |
+
+When the `plannotator` tool is turned on, the agent opens, lists and closes reviews with it (see above).
 
 ## Flags
 

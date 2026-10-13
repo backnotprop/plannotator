@@ -6,6 +6,7 @@ import {
   supportsAnnotateApprovalNotes,
   supportsAnnotateClientLease,
 } from "./annotate-output";
+import { serializeStrictAnnotateResult } from "./strict-annotate-result";
 
 describe("annotate stdout", () => {
   test("preserves legacy plaintext output byte-for-byte", () => {
@@ -45,11 +46,68 @@ describe("annotate stdout", () => {
     )).toBe('{"decision":"approved"}');
   });
 
-  test("advertises approval notes only for gated direct JSON", () => {
-    expect(supportsAnnotateApprovalNotes({ gate: true, json: true, hook: false })).toBe(true);
-    expect(supportsAnnotateApprovalNotes({ gate: false, json: true, hook: false })).toBe(false);
-    expect(supportsAnnotateApprovalNotes({ gate: true, json: false, hook: false })).toBe(false);
-    expect(supportsAnnotateApprovalNotes({ gate: true, json: true, hook: true })).toBe(false);
+  // The OpenCode bridge names the count in its decision heading. Failure
+  // caught: the count leaking into plaintext, hook output or the strict record
+  // (which scripts compare byte for byte), or missing from the JSON record.
+  test("the JSON record carries annotationCount; plaintext, hook and the strict record do not", () => {
+    const sent = { feedback: "Revise this.", annotations: [{}, {}] };
+    expect(JSON.parse(formatAnnotateOutcome(sent, { hook: false, json: true }) as string))
+      .toEqual({ decision: "annotated", feedback: "Revise this.", annotationCount: 2 });
+    expect(JSON.parse(formatAnnotateOutcome({ ...sent, approved: true }, { hook: false, json: true }) as string))
+      .toEqual({ decision: "approved", feedback: "Revise this.", annotationCount: 2 });
+    expect(formatAnnotateOutcome({ feedback: "", exit: true, annotations: [] }, { hook: false, json: true }))
+      .toBe('{"decision":"dismissed"}');
+    expect(formatAnnotateOutcome(sent, { hook: false, json: false })).toBe("Revise this.");
+    expect(formatAnnotateOutcome(sent, { hook: true, json: false })).toBe('{"decision":"block","reason":"Revise this."}');
+    expect(serializeStrictAnnotateResult(sent)).not.toContain("annotationCount");
+  });
+
+  // #1701: a bare Done gains ONE additive JSON field; plaintext, hook and the
+  // strict-gate record keep their bytes.
+  test("a Done with nothing to send adds nothingToSend to the JSON record only", () => {
+    const done = { feedback: "User reviewed the document and has no feedback.", nothingToSend: true };
+    expect(formatAnnotateOutcome(done, { hook: false, json: true }))
+      .toBe('{"decision":"annotated","feedback":"User reviewed the document and has no feedback.","nothingToSend":true}');
+    expect(formatAnnotateOutcome(done, { hook: false, json: false }))
+      .toBe("User reviewed the document and has no feedback.");
+    expect(formatAnnotateOutcome(done, { hook: true, json: false }))
+      .toBe('{"decision":"block","reason":"User reviewed the document and has no feedback."}');
+    expect(serializeStrictAnnotateResult(done))
+      .toBe('{"decision":"annotated","feedback":"User reviewed the document and has no feedback."}');
+    expect(formatAnnotateOutcome({ feedback: "Revise this." }, { hook: false, json: true }))
+      .toBe('{"decision":"annotated","feedback":"Revise this."}');
+  });
+
+  // Failure caught: "Approve with a note…" hidden in a gated session whose
+  // output delivers the note (plaintext, which the Claude Code mod and the
+  // classic skill launch), or shown where it is dropped (--hook, no gate).
+  test("advertises approval notes for every gated output except --hook", () => {
+    expect(supportsAnnotateApprovalNotes({ gate: true, hook: false })).toBe(true);
+    expect(supportsAnnotateApprovalNotes({ gate: false, hook: false })).toBe(false);
+    expect(supportsAnnotateApprovalNotes({ gate: true, hook: true })).toBe(false);
+  });
+
+  test("plaintext approval with a note prints the configured approved-with-notes prompt", () => {
+    const config = { prompts: { annotate: { approvedWithNotes: "APPROVED {{context}} :: {{feedback}}" } } };
+    expect(formatAnnotateOutcome(
+      { feedback: "Rename the header.", approved: true },
+      { hook: false, json: false },
+      { runtime: "claude-code", context: "File: /tmp/page.html", config },
+    )).toBe("APPROVED File: /tmp/page.html :: Rename the header.");
+    // The default prompt still carries the note and the file it is about.
+    const framed = formatAnnotateOutcome(
+      { feedback: "Rename the header.", approved: true },
+      { hook: false, json: false },
+      { context: "File: /tmp/page.html", config: {} },
+    );
+    expect(framed).toContain("Rename the header.");
+    expect(framed).toContain("File: /tmp/page.html");
+    // Whitespace is no note: the legacy marker, byte for byte.
+    expect(formatAnnotateOutcome(
+      { feedback: "  \n", approved: true },
+      { hook: false, json: false },
+      { config: {} },
+    )).toBe("The user approved.");
   });
 
   test("advertises client-lease only for gated direct JSON, local sessions", () => {
@@ -113,6 +171,20 @@ describe("annotate client-lease call sites", () => {
       expect(site).toContain("clientLeaseSupported: supportsAnnotateClientLease({");
       expect(site).toContain("isRemote: isRemoteSession()");
     }
+
+    // Every CLI-flag site decides "Approve with a note…" through the shared
+    // predicate (a hardcoded or missing advert hides it, or offers it where
+    // the note is dropped). The one exception is opencode-annotate-last: its
+    // only output is the structured record, so the advert is the gate itself.
+    const bridge = "approvalNotesSupported: input.gate === true,";
+    const bridgeSites = sites.filter((site) => site.includes(bridge));
+    expect(bridgeSites).toHaveLength(1);
+    expect(bridgeSites[0]).toContain('mode: "annotate-last"');
+    for (const site of sites.filter((site) => !site.includes(bridge))) {
+      expect(site).toContain("approvalNotesSupported: supportsAnnotateApprovalNotes({");
+    }
+    const advertUses = source.split("approvalNotesSupported: supportsAnnotateApprovalNotes({").length - 1;
+    expect(advertUses).toBe(sites.length - 1);
 
     // Cross-check the brace scan against a plain occurrence count, so a call
     // site the scanner failed to slice cannot pass by being invisible.

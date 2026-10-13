@@ -16,6 +16,11 @@ describe('isCodeFilePath', () => {
     expect(isCodeFilePath('styles.css')).toBe(true);
   });
 
+  test('matches ES module and CommonJS variants', () => {
+    for (const name of ['build.mjs', 'config.cjs', 'types.mts', 'shim.cts']) expect(isCodeFilePath(name)).toBe(true);
+    expect(isCodeFilePath('bundle.ms')).toBe(false);
+  });
+
   test('matches paths with directories', () => {
     expect(isCodeFilePath('src/components/Button.tsx')).toBe(true);
     expect(isCodeFilePath('./utils/helpers.ts')).toBe(true);

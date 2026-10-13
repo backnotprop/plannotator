@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- No network: every byte arrives over the bridge (connect-src 'none').
+         An agent's HTML page runs in HtmlViewer's srcdoc frame and inherits
+         this policy: its own folder's files load from the shell's asset
+         origin, nothing else does. That origin is the plannotator-asset:
+         scheme on iOS and https://appassets.androidplatform.net on Android
+         (the virtual origin the Android shell intercepts and never fetches).
+         One file serves both: on iOS the web view blocks every https load, so
+         the Android origin loads nothing there, and on Android nothing serves
+         plannotator-asset:. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' plannotator-asset: https://appassets.androidplatform.net; style-src 'unsafe-inline' plannotator-asset: https://appassets.androidplatform.net; img-src data: blob: plannotator-asset: https://appassets.androidplatform.net; font-src data: plannotator-asset: https://appassets.androidplatform.net; media-src data: blob: plannotator-asset: https://appassets.androidplatform.net; frame-src plannotator-asset: https://appassets.androidplatform.net about: data: blob:; worker-src blob:; connect-src 'none'; base-uri plannotator-asset: https://appassets.androidplatform.net; form-action 'none'" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Plannotator</title>
+  </head>
+  <body class="overflow-hidden overscroll-none antialiased">
+    <div id="root" class="h-full overflow-hidden"></div>
+    <script type="module" src="/surface.tsx"></script>
+  </body>
+</html>

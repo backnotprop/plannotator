@@ -65,7 +65,8 @@ The devcontainer is pre-configured with:
 
 **Plugin not updating?**
 ```bash
-rm -rf ~/.cache/opencode/node_modules/@plannotator
+rm -rf ~/.cache/opencode/node_modules/@plannotator      # OpenCode 1
+rm -rf ~/.cache/opencode/npm/@plannotator/opencode@*    # OpenCode 2
 ```
 
 **OpenCode crashes/aborts on startup?**

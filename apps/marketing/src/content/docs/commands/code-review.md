@@ -16,6 +16,30 @@ The `/plannotator-review` command opens an interactive code review UI for your l
 /plannotator-review
 ```
 
+**Review another repository or worktree:**
+
+```bash
+plannotator review ../feature-worktree
+plannotator review "../my repo" --base main
+```
+
+The slash command accepts the same target: `/plannotator-review ./backend`.
+Paths resolve relative to the invoking terminal or agent session. A directory
+inside a repository selects its root; a non-repository parent reviews its nested
+repositories together. The target selects the review workspace, not a file filter.
+Feedback returns to the invoking session and names the directory active at submission,
+including after switching worktrees.
+
+Supply one directory or PR URL. A sole word is a directory target: a file, or a
+missing path-shaped word (containing `/`, or starting with `.` or `~`), is an error.
+Inside a sentence, a path-shaped word that names an existing directory is the target;
+one that names nothing or a file is prose. Two directories, or a directory combined
+with `--patch-file`, is an error. Other words are ignored as prose with a notice, so
+`/plannotator-review review the frontend/backend split` still reviews the current
+workspace; write `./backend` rather than a bare `backend` inside a sentence. OpenCode directory
+targets require an updated Plannotator CLI; an older binary is rejected instead of
+opening the wrong repo.
+
 **Review a GitHub pull request:**
 
 ```
@@ -25,6 +49,8 @@ The `/plannotator-review` command opens an interactive code review UI for your l
 PR review uses the `gh` CLI for authentication, so private repos work automatically if you're authenticated with `gh auth login`.
 
 GitLab merge request URLs are also supported when the `glab` CLI is installed and authenticated.
+
+Bitbucket Cloud pull request URLs (`https://bitbucket.org/<workspace>/<repo>/pull-requests/<id>`) work with an Atlassian API token instead of a CLI. See [Bitbucket Cloud PR review](/docs/guides/bitbucket/).
 
 **Review a patch file, with no repository:**
 
@@ -44,7 +70,7 @@ no diff-staleness refresh. Annotating, Ask AI, Guided Review and submitting
 feedback all work as usual, and the header names the patch instead of a branch.
 
 Because it replaces VCS detection entirely, `--patch-file` cannot be combined
-with a PR/MR URL, `--base`, `--diff-type`, `--git`/`--gitbutler`, or
+with a directory, a PR/MR URL, `--base`, `--diff-type`, `--git`/`--gitbutler`, or
 `--local`/`--no-local`; each combination is a startup error naming the conflict,
 as is an empty or unreadable patch.
 
@@ -84,6 +110,8 @@ Send Feedback → PR context included in feedback
 Approve → configured approval prompt sent to agent
 ```
 
+When you switch the review destination to the PR or MR itself, the header posts a platform review instead. **Post Comments** posts a neutral comment review. **Post comments, then…** opens the submission dialog with a choice between **Comment** and **Request changes**, and the empty-state **Request changes…** opens it with Request changes selected. On GitHub, Request changes posts a real "Changes requested" review. GitHub does not let you request changes on your own pull request, so that option is disabled there. GitLab has no request-changes review, so on GitLab the review posts as a comment. On Bitbucket Cloud, Approve and Request changes set your decision on the pull request (Bitbucket's Approve and Request changes buttons), after your comments are posted.
+
 ## Stacked PRs and MRs
 
 When a PR or MR targets a non-default branch, Plannotator marks it as stacked in the review header. The default view remains **Layer**, which matches the platform diff and is the safe mode for posting inline review comments.
@@ -103,9 +131,11 @@ By default the review opens showing **all changes since your base branch** — e
 - **Last commit** - the diff introduced by the most recent commit
 - **vs main** (or your default branch) - all committed changes on your branch compared to the base branch. Only appears when you're on a branch other than the default.
 
-The first time you open a review, a setup dialog lets you choose your default view and diff type; you can change both later in **Settings → Git** or reopen the dialog from the review header menu. On repos where the base branch can't be resolved, the review falls back to uncommitted changes.
+Your default view and diff type live in **Settings → Git**. On repos where the base branch can't be resolved, the review falls back to uncommitted changes.
 
 If the base branch has moved on GitHub since your last fetch, a "Baseline is behind" banner offers a one-click fetch so you're reviewing against the real base.
+
+Answering that question needs one network call, `git ls-remote --symref origin HEAD`. It runs when the review opens, when the diff loads, when you switch diff type or base (the "Diff out of date · Refresh" button counts), and when you press Fetch — at most once a minute, and never on a timer, so a review page you leave open makes no further requests. If a remote probe is expensive or intrusive on your setup — most sharply when SSH authentication is backed by a hardware token, where each probe is a physical touch prompt — turn it off entirely with `plannotator review --no-git-remote-check`, `PLANNOTATOR_GIT_REMOTE_CHECK=0`, or `{ "gitRemoteCheck": false }` in `~/.plannotator/config.json`. The compare target then comes from your local refs only and the banner never appears — and with it the one-click Fetch, since that button lives in the banner. Fetching from your own terminal is unaffected. The trade-off: a push that lands mid-review is noticed on your next refresh, switch, or reload rather than within the minute.
 
 You can also pick a specific commit as the diff base from the base branch picker. This lets you compare against any of the last 20 commits on your branch rather than just the branch tip.
 
@@ -128,7 +158,7 @@ plannotator review --base HEAD~3
 
 `--base` accepts anything git resolves: a local branch, a remote-tracking ref, a tag, or a commit SHA. `--diff-type` accepts the nine git diff modes (`since-base`, `local-vs-remote`, `uncommitted`, `staged`, `unstaged`, `last-commit`, `branch`, `merge-base`, `all`).
 
-Both flags are **session-only**: they seed how the session opens, the base picker and diff type dropdown stay fully usable, and nothing is written to your saved defaults — your next plain `plannotator review` opens exactly as before. A flagged session also skips the one-time first-run setup dialog without consuming it, so it still greets your next ordinary review.
+Both flags are **session-only**: they seed how the session opens, the base picker and diff type dropdown stay fully usable, and nothing is written to your saved defaults — your next plain `plannotator review` opens exactly as before.
 
 Notes:
 
@@ -153,6 +183,14 @@ from, preferring its remote bookmark. Bookmarks generated by `jj git push
 work; the commit id is used instead. When jj cannot resolve a fork point at all,
 the base falls back to `trunk()`.
 
+The **Commits** panel view works in jj workspaces too (pure jj and colocated
+with git). The rail starts at the working copy `@` and follows first parents;
+a fresh, empty working copy with no description is left out. The badge on the
+working copy reads `@`, and each row shows its change id. The divider sits
+where the line of work meets its base (the **Line** base, or the revision you
+picked for it). Clicking a revision opens its diff against its first parent.
+It needs jj 0.33 or newer.
+
 ### GitButler diff modes
 
 Plannotator automatically recognizes an active GitButler workspace when the checked-out ref is `gitbutler/workspace` (or the legacy `gitbutler/integration` ref) and the repository has GitButler's local target-ref configuration. GitButler CLI **0.21.0 or newer** must be available as `but` on `PATH`. Use `--gitbutler` to require this provider explicitly, or `--git` to inspect the repository through Plannotator's ordinary Git provider instead.
@@ -175,10 +213,29 @@ The standalone GitButler CLI installer supports macOS and Linux. On Windows, ins
 
 The review UI shows your changes in a familiar diff format:
 
-- **Left panel views** — a `Git status | Tree | Commits` toggle in the header (see below)
+- **Left panel views** — a `Tree | Git status | Commits` toggle in the header (see below)
 - **Viewed tracking** to mark files as reviewed and track your progress
 - **Unified diff** showing additions and deletions in context
 - **Annotation tools** with the same annotation types as plan review (delete, comment, quick label, "looks good")
+
+### Viewed tracking
+
+For local Git and pull-request reviews, viewed marks are saved independently of
+annotation drafts. They survive feedback submission, server restarts, and reopening
+the same review—even with **Auto-mark viewed** turned off. Unchanged files keep
+their marks; changed files become unviewed. Local Git progress is scoped to the
+worktree, branch, and comparison selection; pull-request progress is scoped to the
+PR and its Layer or Full-stack view.
+
+Files whose content cannot be reliably identified, such as oversized untracked
+files, do not restore as viewed. Workspace, non-Git, and piped-patch reviews retain
+their existing draft-based viewed tracking.
+
+Progress is stored under `~/.plannotator/review-progress/` (or
+`PLANNOTATOR_DATA_DIR`), one small record per file that includes the file's path.
+Nothing prunes it; `plannotator uninstall --purge` removes it. To turn it off, set
+`PLANNOTATOR_REVIEW_PROGRESS=0` or add `{ "reviewProgress": false }` to
+`~/.plannotator/config.json`; viewed marks then use the draft-based tracking.
 
 ### Auto-mark viewed
 
@@ -219,11 +276,11 @@ Call Flow is syntactic and does not resolve types, imports, runtime dispatch, or
 
 ### Panel views
 
-The left panel has three views. The header toggle is session-scoped — glancing at another view never changes your saved default (that's a Settings / setup-dialog decision).
+The left panel has three views. **Tree** is the default. The header toggle is session-scoped — glancing at another view never changes your saved default (change that in Settings → Git).
 
-- **Git status** (default) — your changes grouped the way `git status` groups them: **Committed / Changes / Untracked**. Each row shows viewed state, a stage/unstage button, the change-type letter, and +/- counts. Only available with the "All changes" diff.
-- **Tree** — the classic file tree over whichever diff type you've selected.
-- **Commits** — a linear history rail of your branch, newest first, with an "In origin/main" divider where your work meets the base. Clicking a commit opens that commit's own diff (vs its parent), headed by the full commit message. Local git sessions only; a commit is never saved as your opening view.
+- **Git status** — your changes grouped the way `git status` groups them: **Committed / Changes / Untracked**. Each row shows viewed state, a stage/unstage button, the change-type letter, and +/- counts. Only available with the "All changes" diff.
+- **Tree** (default) — the classic file tree over whichever diff type you've selected.
+- **Commits** — a linear history rail of your branch, newest first, with an "In origin/main" divider where your work meets the base. Clicking a commit opens that commit's own diff (vs its parent), headed by the full commit message. Local git and jj sessions (not GitButler, Perforce, multi-repo workspaces, or PR reviews); a commit is never saved as your opening view.
 
 ## Annotating code
 
@@ -232,6 +289,10 @@ Select any text in the diff to annotate it, just like in plan review. Your annot
 ## Ask AI
 
 When an AI provider is available, the diff viewer includes inline AI chat. Select lines in the diff and choose "Ask AI" to ask questions about the code. Responses stream into a sidebar panel grouped by file.
+
+### Ask this session
+
+When the review was opened from Claude Code (with the [Plannotator mod](/docs/guides/claude-code/#the-plannotator-mod)), Pi, or OpenCode 2, Ask AI is answered by that agent session. It is the only option: there is no provider picker. Your question shows in the agent's chat. If the agent is busy, choose **Ask when it finishes** or **Interrupt and ask now**. In remote mode, with `--tailscale`, from OpenCode 1, or with the Claude Code mod off, you pick a provider as described below. Review agents, Code Tour and Guided Review still run their own Claude or Codex models. See [Ask this session](/docs/guides/ai-features/#ask-this-session).
 
 ### Supported providers
 
@@ -318,6 +379,7 @@ Runtime keys use Plannotator's runtime identifiers. For code review, the current
 | `/api/image` | GET | Serve image by path |
 | `/api/upload` | POST | Upload image attachment |
 | `/api/draft` | GET/POST/DELETE | Auto-save annotation drafts |
+| `/api/review-progress?snapshot=<snapshotId>` | GET/POST | Load or save durable viewed-file progress; writes carry the scope key and per-file fingerprints, and stale snapshots are rejected |
 | `/api/ai/capabilities` | GET | Check available AI providers |
 | `/api/ai/session` | POST | Create or fork an AI session |
 | `/api/ai/query` | POST | Send prompt, stream SSE response |

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { handleDoc, handleDocExists, handleFileBrowserFiles } from "./reference-handlers";
+import { readPlanFile } from "@plannotator/shared/doc-resolve";
 import type { VaultNode } from "@plannotator/shared/reference-common";
 import type { WorkspaceStatusPayload } from "@plannotator/shared/workspace-status";
 
@@ -489,5 +490,70 @@ describe("raw HTML size cap", () => {
 		expect(withoutBase.status).toBe(413);
 		expect(withBase.status).toBe(413);
 		expect((await withBase.json() as { error?: string }).error).toBe("File too large (max 2MB)");
+	});
+});
+
+describe("handleDoc with a plan file", () => {
+	function setup() {
+		const root = makeTempDir("plannotator-plan-doc-root-");
+		const planDir = realpathSync(makeTempDir("plannotator-plan-doc-plans-"));
+		const plan = "# Plan\n\n[evidence](evidence.md) and [design](docs/design.md)\n";
+		writeTempFile(planDir, "plan.md", plan);
+		writeTempFile(planDir, "evidence.md", "# Evidence\n");
+		writeTempFile(planDir, "other-plan.md", "# Other\n");
+		writeTempFile(root, "docs/design.md", "# Design\n");
+		const planFile = readPlanFile(join(planDir, "plan.md"), plan);
+		return { root, planDir, planFile };
+	}
+
+	async function getPlanDoc(path: string, base: string, rootPaths: string[], planFile: ReturnType<typeof readPlanFile>) {
+		const url = new URL("http://localhost/api/doc");
+		url.searchParams.set("path", path);
+		url.searchParams.set("base", base);
+		return handleDoc(new Request(url.toString()), { rootPaths, planFile });
+	}
+
+	test("serves a document the plan links beside it", async () => {
+		const { root, planDir, planFile } = setup();
+		const res = await getPlanDoc("evidence.md", planDir, [root], planFile);
+
+		expect(res.status).toBe(200);
+		expect((await res.json() as { markdown?: string }).markdown).toContain("# Evidence");
+	});
+
+	test("does not serve a plan-directory file the plan does not link", async () => {
+		const { root, planDir, planFile } = setup();
+		const res = await getPlanDoc("other-plan.md", planDir, [root], planFile);
+
+		expect(res.status).not.toBe(200);
+	});
+
+	test("still resolves project documents against the roots", async () => {
+		const { root, planDir, planFile } = setup();
+		const res = await getPlanDoc("docs/design.md", planDir, [root], planFile);
+
+		expect(res.status).toBe(200);
+		expect((await res.json() as { markdown?: string }).markdown).toContain("# Design");
+	});
+
+	test("a plan directory inside the project keeps the project-root fallback for HTML", async () => {
+		const root = realpathSync(makeTempDir("plannotator-plan-doc-inrepo-"));
+		const planDir = join(root, "plans");
+		const plan = "# Plan\n\n[report](report.html)\n";
+		writeTempFile(planDir, "plan.md", plan);
+		writeTempFile(root, "report.html", "<h1>Report</h1>");
+		const planFile = readPlanFile(join(planDir, "plan.md"), plan);
+		const res = await getPlanDoc("report.html", planDir, [root], planFile);
+
+		expect(res.status).toBe(200);
+		expect((await res.json() as { filepath?: string }).filepath).toBe(join(root, "report.html"));
+	});
+
+	test("a query suffix on a linked name cannot reach an unlinked sibling", async () => {
+		const { root, planDir, planFile } = setup();
+		const res = await getPlanDoc("evidence.md?/../other-plan.md", planDir, [root], planFile);
+
+		const body = await res.json() as { markdown?: string };
+		expect(body.markdown ?? "").not.toContain("# Other");
 	});
 });

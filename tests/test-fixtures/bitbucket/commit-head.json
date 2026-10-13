@@ -1,0 +1,97 @@
+{
+  "type": "commit",
+  "hash": "c0a227ce2c516b48f1093561a903bf89f2b4282a",
+  "date": "2026-09-30T06:58:44+00:00",
+  "author": {
+    "type": "author",
+    "raw": "Ada Reviewer <ada@example.invalid>",
+    "user": {
+      "display_name": "Ada Reviewer",
+      "links": {
+        "self": {
+          "href": "https://api.bitbucket.org/2.0/users/%7B00000000-0000-4000-8000-00000000a0a0%7D"
+        },
+        "avatar": {
+          "href": "https://secure.gravatar.com/avatar/00000000000000000000000000000000?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FAR-2.png"
+        },
+        "html": {
+          "href": "https://bitbucket.org/%7B00000000-0000-4000-8000-00000000a0a0%7D/"
+        }
+      },
+      "type": "user",
+      "uuid": "{00000000-0000-4000-8000-00000000a0a0}",
+      "account_id": "557058:00000000-0000-4000-8000-00000000a0a0",
+      "nickname": "Ada Reviewer"
+    }
+  },
+  "message": "Add greet, drop notes, add image\n",
+  "summary": {
+    "type": "rendered",
+    "raw": "Add greet, drop notes, add image\n",
+    "markup": "markdown",
+    "html": "<p>Add greet, drop notes, add image</p>"
+  },
+  "links": {
+    "self": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/commit/c0a227ce2c516b48f1093561a903bf89f2b4282a"
+    },
+    "html": {
+      "href": "https://bitbucket.org/ws/repo/commits/c0a227ce2c516b48f1093561a903bf89f2b4282a"
+    },
+    "diff": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/diff/c0a227ce2c516b48f1093561a903bf89f2b4282a"
+    },
+    "approve": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/commit/c0a227ce2c516b48f1093561a903bf89f2b4282a/approve"
+    },
+    "comments": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/commit/c0a227ce2c516b48f1093561a903bf89f2b4282a/comments"
+    },
+    "statuses": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/commit/c0a227ce2c516b48f1093561a903bf89f2b4282a/statuses"
+    },
+    "patch": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/patch/c0a227ce2c516b48f1093561a903bf89f2b4282a"
+    }
+  },
+  "parents": [
+    {
+      "hash": "e2101a9e484c0a39815c69fb7c69c4f20f17781c",
+      "links": {
+        "self": {
+          "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/commit/e2101a9e484c0a39815c69fb7c69c4f20f17781c"
+        },
+        "html": {
+          "href": "https://bitbucket.org/ws/repo/commits/e2101a9e484c0a39815c69fb7c69c4f20f17781c"
+        }
+      },
+      "type": "commit"
+    }
+  ],
+  "rendered": {
+    "message": {
+      "type": "rendered",
+      "raw": "Add greet, drop notes, add image\n",
+      "markup": "markdown",
+      "html": "<p>Add greet, drop notes, add image</p>"
+    }
+  },
+  "repository": {
+    "type": "repository",
+    "full_name": "ws/repo",
+    "links": {
+      "self": {
+        "href": "https://api.bitbucket.org/2.0/repositories/ws/repo"
+      },
+      "html": {
+        "href": "https://bitbucket.org/ws/repo"
+      },
+      "avatar": {
+        "href": "https://bytebucket.org/ravatar/%7B00000000-0000-4000-8000-0000000000bb%7D?ts=default"
+      }
+    },
+    "name": "repo",
+    "uuid": "{00000000-0000-4000-8000-0000000000bb}"
+  },
+  "participants": []
+}

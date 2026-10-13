@@ -4,9 +4,9 @@
  * OpenCode's V2 plugin API gained command EXECUTION in anomalyco/opencode
  * PR #44765 (issue #2185): the command draft grew an `add({ name, description,
  * execute })` method whose callback fully owns the invocation, so nothing
- * reaches the model unless it says so. That shape currently ships only on the
- * `beta` and `dev` dist-tags of `@opencode-ai/plugin`; `next` and `latest`
- * still carry a draft of `{ list, get, update, remove }` with no `add`.
+ * reaches the model unless it says so. Stable @opencode/plugin carries that
+ * shape; older V2 hosts have a draft of `{ list, get, update, remove }` with
+ * no `add`.
  *
  * `ctx.command.transform` therefore proves NOTHING: it exists on both. The only
  * honest probe is the draft handed to the callback, which is what this module
@@ -17,7 +17,16 @@
  * translation client, so the two hosts cannot drift.
  */
 
-import { handleCliCommand, type OpenCodeBridgeAgent, type OpenCodeBridgeContext } from "./cli-bridge";
+import type { ParsedAnnotateArgs } from "@plannotator/shared/annotate-args";
+import {
+  handleCliCommand,
+  type CliLaunch,
+  type DisposableSessionBridge,
+  type OpenCodeBridgeAgent,
+  type OpenCodeBridgeContext,
+} from "./cli-bridge";
+import { commandSubject, type OpenCodeLaunchRegistry } from "./plannotator-tool";
+import { createOpenCodeSessionBridge } from "./opencode-session-bridge";
 import {
   createV2BridgeClient,
   readListPayload,
@@ -36,7 +45,7 @@ export const NATIVE_COMMANDS: ReadonlyArray<{ name: string; description: string 
   {
     name: "plannotator-review",
     description:
-      "Open the Plannotator code review UI for current changes or a PR URL; pass --git or --gitbutler to force that provider",
+      "Open the Plannotator code review UI for current changes, a directory, or a PR URL; pass --git or --gitbutler to force that provider",
   },
   {
     name: "plannotator-annotate",
@@ -66,6 +75,25 @@ export interface CliCommandRequest {
   rawArgs: string;
   cwd?: string;
   bridge?: OpenCodeBridgeContext;
+  createSessionBridge?: () => DisposableSessionBridge | undefined;
+  /** The `plannotator` tool's pre-split annotate arguments. */
+  annotateArgs?: ParsedAnnotateArgs;
+  /** The tool's list of files, opened as one review. */
+  annotateBundle?: readonly string[];
+  /** The tracked launch (the tool's list/close, the decision heading). */
+  launch?: CliLaunch;
+}
+
+/**
+ * "Ask this session" for a native command: a bridge to the invoking session,
+ * or undefined on a host whose plugin API cannot prompt the session.
+ */
+export function createNativeCommandSessionBridge(
+  ctx: V2ContextLike,
+  sessionID: string,
+): DisposableSessionBridge | undefined {
+  if (!sessionID || typeof ctx.session?.prompt !== "function") return undefined;
+  return createOpenCodeSessionBridge({ ctx, sessionID });
 }
 
 export interface NativeCommandDeps {
@@ -80,6 +108,12 @@ export interface NativeCommandDeps {
   runCommand?: (request: CliCommandRequest) => Promise<void>;
   /** Test seam for the reclaim schedule; production uses real timers. */
   wait?: (ms: number) => Promise<void>;
+  /**
+   * The plugin's record of open reviews per session. A slash command's review
+   * is recorded there too, so the `plannotator` tool's list/close see it and
+   * its decision message names its session id.
+   */
+  launches?: OpenCodeLaunchRegistry;
 }
 
 /** Resolve the invocation's working directory, session location first. */
@@ -98,6 +132,14 @@ export async function runNativeCommand(
   command: string,
   invocation: V2CommandInvocation,
   deps: NativeCommandDeps,
+  /** The `plannotator` tool's launch: its own record and pre-split arguments. */
+  tool?: {
+    launch: CliLaunch;
+    annotateArgs?: ParsedAnnotateArgs;
+    annotateBundle?: readonly string[];
+    /** Where and while the tool's session-URL notice may be posted. */
+    notice?: { sessionID: string; open: () => boolean };
+  },
 ): Promise<void> {
   const sessionID = invocation.sessionID;
   // The raw argument tail, exactly as OpenCode 1 forwards it. The CLI's own
@@ -107,7 +149,29 @@ export async function runNativeCommand(
   // `sessionID` is what lets the bridge put the session URL where the user can
   // actually see it. Without it (and on a host with no `session.synthetic`) a
   // remote review would only print its URL into a stream OpenCode discards.
-  const client = createV2BridgeClient({ ctx: deps.ctx, getAgents: deps.getAgents, sessionID });
+  // A tool launch posts its URL notice into the CALLING session, and only
+  // while the tool call is open, so the notice is always promoted inside the
+  // caller's running turn. Its decision therefore never needs the
+  // co-promoting steer (which would push a late decision into a running
+  // turn) and is always queued. Never the root while a subagent calls: a
+  // background subagent's root is idle, and a notice left pending there was
+  // promoted alone as a model turn the next time the root woke.
+  const client = createV2BridgeClient({
+    ctx: deps.ctx,
+    getAgents: deps.getAgents,
+    sessionID,
+    ...(tool ? { alwaysQueue: true } : {}),
+    ...(tool?.notice ? { notice: tool.notice } : {}),
+    // A slash command that fails shows why in the transcript; a tool launch
+    // answers its failure as the tool result instead.
+    ...(tool ? {} : { failureNotices: true }),
+  });
+
+  // A slash command's own review is recorded like a tool launch, so the
+  // tool's list/close cover it ("opened in this conversation").
+  const described = !tool && deps.launches && sessionID ? commandSubject(command, rawArgs) : null;
+  const tracked = described && deps.launches ? deps.launches.begin(sessionID, described.kind, described.subject) : undefined;
+  const launch = tool?.launch ?? tracked?.observer;
 
   const run = deps.runCommand ?? ((request: CliCommandRequest) => handleCliCommand(request as never));
   try {
@@ -118,8 +182,13 @@ export async function runNativeCommand(
       rawArgs,
       cwd: await resolveDirectory(deps.ctx, sessionID),
       bridge: await deps.getBridgeContext(),
+      createSessionBridge: () => createNativeCommandSessionBridge(deps.ctx, sessionID),
+      ...(tool?.annotateArgs ? { annotateArgs: tool.annotateArgs } : {}),
+      ...(tool?.annotateBundle ? { annotateBundle: tool.annotateBundle } : {}),
+      ...(launch ? { launch } : {}),
     });
   } finally {
+    tracked?.end();
     // The client may be watching the host's event stream for its session-URL
     // notice. A review that ends without sending feedback never settles that
     // watch on its own, so the invocation closes it. Disposing twice is a no-op.

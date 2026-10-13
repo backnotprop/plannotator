@@ -12,10 +12,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   resolveAIEnabled,
+  resolveClaudeSandbox,
   resolveCursorSandbox,
+  resolveGitRemoteCheck,
   resolveUseGlimpse,
   resolveAnnotateHistory,
   resolveGuideHistory,
+  resolveReviewProgress,
+  resolveAgentTool,
+  agentToolHostOf,
+  agentToolSaveFailed,
+  AGENT_TOOL_DEFAULTS,
   resolveUseJina,
   resolveTodoProviderEnabled,
   resolveUrlHost,
@@ -266,6 +273,36 @@ describe("resolveCursorSandbox", () => {
   });
 });
 
+describe("resolveClaudeSandbox (#1627)", () => {
+  const CLAUDE_ENV = "PLANNOTATOR_CLAUDE_SANDBOX";
+  const original = process.env[CLAUDE_ENV];
+  beforeEach(() => {
+    delete process.env[CLAUDE_ENV];
+  });
+  afterAll(() => {
+    if (original === undefined) delete process.env[CLAUDE_ENV];
+    else process.env[CLAUDE_ENV] = original;
+  });
+
+  test("defaults to true (defer to the user's Claude Code sandbox setting)", () => {
+    expect(resolveClaudeSandbox({})).toBe(true);
+  });
+
+  test("config.claudeSandbox is honored when the env var is unset", () => {
+    expect(resolveClaudeSandbox({ claudeSandbox: false })).toBe(false);
+    expect(resolveClaudeSandbox({ claudeSandbox: true })).toBe(true);
+  });
+
+  test("env values 0 / false / disabled turn it off, and env wins over config", () => {
+    for (const v of ["0", "false", "disabled", "FALSE"]) {
+      process.env[CLAUDE_ENV] = v;
+      expect(resolveClaudeSandbox({ claudeSandbox: true })).toBe(false);
+    }
+    process.env[CLAUDE_ENV] = "1";
+    expect(resolveClaudeSandbox({ claudeSandbox: false })).toBe(true);
+  });
+});
+
 // config.json is hand-edited, so boolean settings often arrive as quoted
 // strings ("false" instead of false). Each boolean resolver must coerce those
 // instead of passing the raw string through to `=== false` checks downstream.
@@ -295,6 +332,12 @@ describe("config.json boolean coercion", () => {
       resolve: resolveGuideHistory,
     },
     {
+      name: "resolveReviewProgress",
+      envVar: "PLANNOTATOR_REVIEW_PROGRESS",
+      key: "reviewProgress",
+      resolve: (config) => resolveReviewProgress(config),
+    },
+    {
       name: "resolveUseJina",
       envVar: "PLANNOTATOR_JINA",
       key: "jina",
@@ -305,6 +348,18 @@ describe("config.json boolean coercion", () => {
       envVar: "PLANNOTATOR_CURSOR_SANDBOX",
       key: "cursorSandbox",
       resolve: resolveCursorSandbox,
+    },
+    {
+      name: "resolveClaudeSandbox",
+      envVar: "PLANNOTATOR_CLAUDE_SANDBOX",
+      key: "claudeSandbox",
+      resolve: resolveClaudeSandbox,
+    },
+    {
+      name: "resolveGitRemoteCheck",
+      envVar: "PLANNOTATOR_GIT_REMOTE_CHECK",
+      key: "gitRemoteCheck",
+      resolve: (config) => resolveGitRemoteCheck(false, config),
     },
   ];
 
@@ -358,6 +413,130 @@ describe("config.json boolean coercion", () => {
       });
     });
   }
+});
+
+describe("resolveReviewProgress env handling", () => {
+  test("off/on vocabulary wins over the config key", () => {
+    for (const v of ["0", "false", "FALSE", "off", "disabled", " false "]) {
+      expect(resolveReviewProgress({ reviewProgress: true }, { PLANNOTATOR_REVIEW_PROGRESS: v })).toBe(false);
+    }
+    for (const v of ["1", "true", "on"]) {
+      expect(resolveReviewProgress({ reviewProgress: false }, { PLANNOTATOR_REVIEW_PROGRESS: v })).toBe(true);
+    }
+  });
+
+  test("an empty-but-set env var counts as unset, so the config key decides", () => {
+    expect(resolveReviewProgress({ reviewProgress: false }, { PLANNOTATOR_REVIEW_PROGRESS: "" })).toBe(false);
+    expect(resolveReviewProgress({}, { PLANNOTATOR_REVIEW_PROGRESS: "" })).toBe(true);
+  });
+});
+
+describe("resolveAgentTool", () => {
+  // The failure this guards: a user who turned the tool on (or off) gets the
+  // other answer, so the agent's tool list does not match their setting.
+  test("unset: the host's default (owner's call: on for the Claude Code mod and Oh My Pi, off on Pi and OpenCode 2)", () => {
+    expect(AGENT_TOOL_DEFAULTS).toEqual({ "claude-code": true, pi: false, "oh-my-pi": true, opencode: false });
+    for (const host of ["claude-code", "pi", "oh-my-pi", "opencode"] as const) {
+      expect(resolveAgentTool({}, {}, host)).toBe(AGENT_TOOL_DEFAULTS[host]);
+      // An empty or unrecognized env value counts as unset.
+      expect(resolveAgentTool({}, { PLANNOTATOR_AGENT_TOOL: "" }, host)).toBe(AGENT_TOOL_DEFAULTS[host]);
+      expect(resolveAgentTool({}, { PLANNOTATOR_AGENT_TOOL: "yes" }, host)).toBe(AGENT_TOOL_DEFAULTS[host]);
+    }
+  });
+
+  test("config.json overrides the host default in both directions", () => {
+    expect(resolveAgentTool({ agentTool: true }, {}, "pi")).toBe(true);
+    expect(resolveAgentTool({ agentTool: "1" as never }, {}, "opencode")).toBe(true);
+    expect(resolveAgentTool({ agentTool: false }, {}, "claude-code")).toBe(false);
+    expect(resolveAgentTool({ agentTool: "false" as never }, {}, "claude-code")).toBe(false);
+    expect(resolveAgentTool({ agentTool: "nope" as never }, {}, "pi")).toBe(false);
+  });
+
+  // Oh My Pi defaults on, but an explicit choice still decides there, both ways.
+  test("Oh My Pi: config.json and the env var override its default in both directions", () => {
+    expect(resolveAgentTool({}, {}, "oh-my-pi")).toBe(true);
+    expect(resolveAgentTool({ agentTool: false }, {}, "oh-my-pi")).toBe(false);
+    expect(resolveAgentTool({}, { PLANNOTATOR_AGENT_TOOL: "0" }, "oh-my-pi")).toBe(false);
+    expect(resolveAgentTool({ agentTool: true }, { PLANNOTATOR_AGENT_TOOL: "off" }, "oh-my-pi")).toBe(false);
+    expect(resolveAgentTool({ agentTool: false }, { PLANNOTATOR_AGENT_TOOL: "1" }, "oh-my-pi")).toBe(true);
+    // Plain Pi keeps its default: off.
+    expect(resolveAgentTool({}, {}, "pi")).toBe(false);
+  });
+
+  test("the env var wins over agentTool in config.json, in both directions", () => {
+    for (const v of ["0", "false", "OFF", "disabled", " off "]) {
+      expect(resolveAgentTool({ agentTool: true }, { PLANNOTATOR_AGENT_TOOL: v }, "claude-code")).toBe(false);
+    }
+    for (const v of ["1", "true", "On"]) {
+      expect(resolveAgentTool({ agentTool: false }, { PLANNOTATOR_AGENT_TOOL: v }, "pi")).toBe(true);
+    }
+  });
+
+  test("only the tool hosts name one", () => {
+    expect(agentToolHostOf("claude-code")).toBe("claude-code");
+    expect(agentToolHostOf("pi")).toBe("pi");
+    // The Pi extension's in-process servers name their host, Pi or Oh My Pi.
+    expect(agentToolHostOf("oh-my-pi")).toBe("oh-my-pi");
+    expect(agentToolHostOf("opencode")).toBe("opencode");
+    expect(agentToolHostOf("codex")).toBeNull();
+    expect(agentToolHostOf(undefined)).toBeNull();
+  });
+});
+
+// What a later Settings toggle / "turn the tool on" offer reads: the
+// effective value for the session's host, whether the file decided it, and
+// an env override that a toggle cannot change.
+describe("getServerConfig agent tool advert", () => {
+  const savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
+  const savedEnv = process.env.PLANNOTATOR_AGENT_TOOL;
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "plannotator-agent-tool-advert-"));
+    process.env.PLANNOTATOR_DATA_DIR = dir;
+    delete process.env.PLANNOTATOR_AGENT_TOOL;
+  });
+  afterEach(() => {
+    if (savedDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+    else process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
+    if (savedEnv === undefined) delete process.env.PLANNOTATOR_AGENT_TOOL;
+    else process.env.PLANNOTATOR_AGENT_TOOL = savedEnv;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("unset: the host default, marked not configured; no host, nothing", () => {
+    expect(getServerConfig(null, "pi")).toMatchObject({ agentTool: false, agentToolConfigured: false, agentToolHost: "pi", agentToolEnabled: false });
+    expect(getServerConfig(null, "claude-code")).toMatchObject({ agentTool: true, agentToolConfigured: false, agentToolHost: "claude-code", agentToolEnabled: true });
+    // Oh My Pi: on by default, so the Settings row shows it on and the one-time offer has nothing to offer.
+    expect(getServerConfig(null, "oh-my-pi")).toMatchObject({ agentTool: true, agentToolConfigured: false, agentToolHost: "oh-my-pi", agentToolEnabled: true });
+    const codex = getServerConfig(null, "codex");
+    expect([codex.agentTool, codex.agentToolHost, codex.agentToolEnabled]).toEqual([undefined, undefined, undefined]);
+  });
+
+  test("a saved choice is reported, and an env override is reported beside it", () => {
+    saveConfig({ agentTool: true });
+    expect(getServerConfig(null, "opencode")).toMatchObject({ agentTool: true, agentToolConfigured: true, agentToolEnabled: true });
+    expect(getServerConfig(null, "opencode").agentToolEnv).toBeUndefined();
+    process.env.PLANNOTATOR_AGENT_TOOL = "0";
+    expect(getServerConfig(null, "opencode")).toMatchObject({ agentTool: true, agentToolEnv: false, agentToolEnabled: false });
+  });
+
+  test("agentToolSaveFailed tells a write that reached config.json from one that did not", () => {
+    saveConfig({ agentTool: true });
+    expect(agentToolSaveFailed({ agentTool: true })).toBe(false);
+    expect(agentToolSaveFailed({ displayName: "x" } as { agentTool?: unknown })).toBe(false);
+    // A data dir that is a file: saveConfig logs and returns, nothing is written.
+    const blocker = join(dir, "not-a-dir");
+    writeFileSync(blocker, "");
+    process.env.PLANNOTATOR_DATA_DIR = blocker;
+    const savedWrite = process.stderr.write;
+    process.stderr.write = (() => true) as typeof process.stderr.write;
+    try {
+      saveConfig({ agentTool: true });
+    } finally {
+      process.stderr.write = savedWrite;
+    }
+    expect(agentToolSaveFailed({ agentTool: true })).toBe(true);
+  });
 });
 
 describe("favicon config persistence", () => {
@@ -595,5 +774,57 @@ describe("resolveSharingEnabled", () => {
     expect(resolveSharingEnabled({ share: "disabled" }, {})).toBe(false);
     expect(resolveSharingEnabled({ share: "disabled" }, { PLANNOTATOR_SHARE: "enabled" })).toBe(true);
     expect(resolveSharingEnabled({}, { PLANNOTATOR_SHARE: "disabled" })).toBe(false);
+  });
+});
+
+/**
+ * `--no-git-remote-check` / PLANNOTATOR_GIT_REMOTE_CHECK / config.gitRemoteCheck (#1553).
+ * Guards the precedence order itself: this is the switch that decides whether
+ * a review session may touch the network at all, and getting the order wrong
+ * means either an opt-out that silently does nothing (the user still gets a
+ * hardware-key prompt per probe) or an env var that overrides an explicit
+ * command-line flag.
+ */
+describe("resolveGitRemoteCheck precedence", () => {
+  const ENV_VAR = "PLANNOTATOR_GIT_REMOTE_CHECK";
+
+  const cases: Array<{
+    label: string;
+    cli: boolean;
+    env?: string;
+    config: PlannotatorConfig;
+    expected: boolean;
+  }> = [
+    { label: "nothing set → on", cli: false, config: {}, expected: true },
+    { label: "config false → off", cli: false, config: { gitRemoteCheck: false }, expected: false },
+    { label: "config true → on", cli: false, config: { gitRemoteCheck: true }, expected: true },
+    { label: "env 0 → off", cli: false, env: "0", config: {}, expected: false },
+    { label: "env false → off", cli: false, env: "false", config: {}, expected: false },
+    { label: "env disabled → off", cli: false, env: "disabled", config: {}, expected: false },
+    { label: "env FALSE (case) → off", cli: false, env: "FALSE", config: {}, expected: false },
+    { label: "env 1 → on", cli: false, env: "1", config: {}, expected: true },
+    { label: "env garbage → on", cli: false, env: "maybe", config: {}, expected: true },
+    { label: "env beats config false", cli: false, env: "1", config: { gitRemoteCheck: false }, expected: true },
+    { label: "env beats config true", cli: false, env: "0", config: { gitRemoteCheck: true }, expected: false },
+    { label: "CLI flag beats env on", cli: true, env: "1", config: {}, expected: false },
+    { label: "CLI flag beats config true", cli: true, config: { gitRemoteCheck: true }, expected: false },
+  ];
+
+  for (const c of cases) {
+    test(c.label, () => {
+      const env: NodeJS.ProcessEnv = c.env === undefined ? {} : { [ENV_VAR]: c.env };
+      expect(resolveGitRemoteCheck(c.cli, c.config, env)).toBe(c.expected);
+    });
+  }
+
+  test("reads process.env by default", () => {
+    const original = process.env[ENV_VAR];
+    try {
+      process.env[ENV_VAR] = "0";
+      expect(resolveGitRemoteCheck(false, {})).toBe(false);
+    } finally {
+      if (original === undefined) delete process.env[ENV_VAR];
+      else process.env[ENV_VAR] = original;
+    }
   });
 });

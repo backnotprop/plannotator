@@ -4,7 +4,7 @@ import serverPlugin, {
   pushComposedSystemReminder,
   replacePlanningSystemParts,
 } from "./server";
-import { createV2BridgeClient, formatSessionUrlNotice } from "./v2-client";
+import { commandFailureNoticeText, createV2BridgeClient, dropSessionUrlNotices, formatCommandFailureNotice, formatSessionUrlNotice } from "./v2-client";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -35,6 +35,8 @@ function createContext(
 ) {
   let toolDefinition: Record<string, any> | undefined;
   let sessionContextHook: SessionContextHook | undefined;
+  const contextHooks: SessionContextHook[] = [];
+  const generateHooks: SessionContextHook[] = [];
   const sessionGet = mock(async () => ({ location: { directory: "/project" } }));
 
   return {
@@ -50,7 +52,11 @@ function createContext(
       session: {
         get: sessionGet,
         hook: async (name: string, callback: SessionContextHook) => {
-          if (name === "context") sessionContextHook = callback;
+          if (name === "context") {
+            sessionContextHook = callback;
+            contextHooks.push(callback);
+          }
+          if (name === "generate") generateHooks.push(callback);
           return { dispose: async () => {} };
         },
       },
@@ -67,6 +73,13 @@ function createContext(
     },
     getToolDefinition: () => toolDefinition,
     getSessionContextHook: () => sessionContextHook,
+    /** Run every registered context hook, in registration order, like the host. */
+    runContextHooks: async (event: Parameters<SessionContextHook>[0]) => {
+      for (const hook of contextHooks) await hook(event);
+    },
+    runGenerateHooks: async (event: Parameters<SessionContextHook>[0]) => {
+      for (const hook of generateHooks) await hook(event);
+    },
     sessionGet,
   };
 }
@@ -76,6 +89,15 @@ describe("OpenCode V2 server plugin", () => {
     expect(serverPlugin.id).toBe("plannotator");
     expect(serverPlugin.setup).toBeInstanceOf(Function);
   });
+
+  // OpenCode 1.18.34 also runs this V2 setup, with a context that has no
+  // `session` or `tool` domain (seen live). Failure caught: setup throwing on
+  // an unguarded `ctx.session.hook` / `ctx.tool.transform` there.
+  for (const workflow of ["plan-agent", "all-agents", "manual"] as const) {
+    test(`${workflow}: setup completes on a context without session or tool domains`, async () => {
+      await expect(serverPlugin.setup({ options: { workflow } } as never)).resolves.toBeUndefined();
+    });
+  }
 
   test("registers submit_plan with the V2 JSON Schema tool contract", async () => {
     const testContext = createContext();
@@ -468,5 +490,108 @@ describe("V2 plan review URL delivery", () => {
     expect(() => createPlanReadyNotifier(client)(SESSION_URL)).not.toThrow();
     await Promise.resolve();
     await Promise.resolve();
+  });
+});
+
+// After a plan decision the still-pending session-URL notice (a steer) is
+// promoted at the boundary right after the tool result, so the model read the
+// notice LAST and could answer it instead of the decision (seen live on
+// 2.0.22). The notice is for the person; the model never needs it.
+describe("session-URL notices stay out of the model context", () => {
+  const notice = (url = "http://localhost:19432") => ({ role: "user", content: [{ type: "text", text: formatSessionUrlNotice(url) }] });
+  const user = (text: string) => ({ role: "user", content: [{ type: "text", text }] });
+  const assistant = (text: string) => ({ role: "assistant", content: [{ type: "text", text }] });
+  const toolResult = (text: string) => ({ role: "tool", content: [{ type: "tool-result", id: "call_1", name: "submit_plan", result: { type: "text", value: text } }] });
+
+  test("a notice promoted after the decision is dropped, so the decision is read last", () => {
+    const messages: unknown[] = [
+      user("make a plan"),
+      assistant("calling submit_plan"),
+      toolResult("YOUR PLAN WAS NOT APPROVED."),
+      user("<system-reminder>plan mode</system-reminder>"),
+      notice(),
+    ];
+
+    expect(dropSessionUrlNotices(messages)).toBe(1);
+    expect(messages).toEqual([
+      user("make a plan"),
+      assistant("calling submit_plan"),
+      toolResult("YOUR PLAN WAS NOT APPROVED."),
+      user("<system-reminder>plan mode</system-reminder>"),
+    ]);
+  });
+
+  test("older notices in history and notices beside feedback are dropped too", () => {
+    const messages: unknown[] = [notice("http://localhost:1"), user("q"), assistant("a"), notice("http://localhost:2"), user("# Code Review Feedback")];
+    expect(dropSessionUrlNotices(messages)).toBe(2);
+    expect(messages).toEqual([user("q"), assistant("a"), user("# Code Review Feedback")]);
+  });
+
+  test("a lone notice after the model's reply is kept rather than ending the request on the assistant", () => {
+    const messages: unknown[] = [user("q"), assistant("a"), notice()];
+    expect(dropSessionUrlNotices(messages)).toBe(0);
+    expect(messages).toHaveLength(3);
+  });
+
+  // Failure caught: a slash command's failure notice (for the person) read by
+  // the model alongside the next message it answers.
+  test("a slash command's failure notice is dropped like the URL notice", () => {
+    const failure = user(commandFailureNoticeText("plannotator-annotate", "File not found: nothere.md"));
+    const messages: unknown[] = [user("q"), assistant("a"), failure, user("annotate notes.md instead")];
+    expect(dropSessionUrlNotices(messages)).toBe(1);
+    expect(messages).toEqual([user("q"), assistant("a"), user("annotate notes.md instead")]);
+  });
+
+  // Failure caught: the person pasting the failure line they SAW (the
+  // notice's description) to ask about it, and that message vanishing from
+  // every later model request.
+  test("a typed or pasted copy of the failure line is never dropped", () => {
+    const seen = formatCommandFailureNotice("plannotator-annotate", "File not found: nothere.md");
+    const messages: unknown[] = [user(seen), assistant("a"), user(`${seen}\n\nwhy?`), assistant("b"), user("next")];
+    expect(dropSessionUrlNotices(messages)).toBe(0);
+    expect(messages).toHaveLength(5);
+  });
+
+  test("text that only resembles a notice is left alone", () => {
+    const messages: unknown[] = [
+      user("Plannotator session ready: http://localhost:1 — what is this?"),
+      { role: "assistant", content: [{ type: "text", text: formatSessionUrlNotice("http://localhost:1") }] },
+      { role: "user", content: [{ type: "text", text: formatSessionUrlNotice("http://localhost:1") }, { type: "text", text: "more" }] },
+    ];
+    expect(dropSessionUrlNotices(messages)).toBe(0);
+  });
+
+  for (const workflow of ["plan-agent", "manual"] as const) {
+    test(`${workflow}: the plugin filters every model request`, async () => {
+      const testContext = createContext({ workflow });
+      await serverPlugin.setup(testContext.context as never);
+      const event = {
+        agent: "build",
+        system: [{ type: "text" as const, text: "system" }],
+        messages: [user("q"), assistant("calling"), toolResult("Plan approved!"), notice()] as unknown[],
+        tools: {},
+      };
+
+      await testContext.runContextHooks(event);
+
+      expect(event.messages).toEqual([user("q"), assistant("calling"), toolResult("Plan approved!")]);
+    });
+  }
+
+  // Plan review's "Quick answer from this session" is a `session.generate`
+  // request, built through the `generate` hook rather than `context`.
+  test("session.generate requests (plan review quick answers) are filtered too", async () => {
+    const testContext = createContext({ workflow: "plan-agent" });
+    await serverPlugin.setup(testContext.context as never);
+    const event = {
+      agent: "plan",
+      system: [{ type: "text" as const, text: "system" }],
+      messages: [user("make a plan"), assistant("calling submit_plan"), notice(), user("[Plannotator Ask AI] why step 2?")] as unknown[],
+      tools: {},
+    };
+
+    await testContext.runGenerateHooks(event);
+
+    expect(event.messages).toEqual([user("make a plan"), assistant("calling submit_plan"), user("[Plannotator Ask AI] why step 2?")]);
   });
 });

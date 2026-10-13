@@ -1,7 +1,7 @@
 # Synthesis: Flue as a Plannotator agent-job provider
 
 Date: 2026-07-02
-Subject: /Users/ramos/oss-agents/flue (`@flue/runtime` 1.0.0-beta.1, Apache-2.0)
+Subject: a local checkout of Flue (`@flue/runtime` 1.0.0-beta.1, Apache-2.0)
 Method: shallow breadth dive + three deep-dive subagent reports (runtime execution
 model; CLI headless invocation; SDK/HTTP surface + ops).
 

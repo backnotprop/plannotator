@@ -56,6 +56,22 @@ describe('groupAnnotationsByDocument', () => {
     expect(groups[2].annotations).toHaveLength(2);
   });
 
+  // A review of several files reads in the order the files were given: the
+  // open one keeps its place instead of jumping to the top.
+  test('a fixed order (a bundle) wins over open-first and path order', () => {
+    const groups = groupAnnotationsByDocument(
+      [
+        { path: '/repo/notes/alpha.md', annotations: [ann('a1')] },
+        { path: '/repo/elsewhere.md', annotations: [ann('e1')] },
+        { path: '/repo/notes/zeta.md', annotations: [ann('z1')] },
+      ],
+      '/repo/notes/alpha.md',
+      ['/repo'],
+      ['/repo/notes/zeta.md', '/repo/notes/alpha.md'],
+    );
+    expect(groups.map((g) => g.path)).toEqual(['/repo/notes/zeta.md', '/repo/notes/alpha.md', '/repo/elsewhere.md']);
+  });
+
   test('drops documents with no annotations, including the open one', () => {
     const groups = groupAnnotationsByDocument(
       [

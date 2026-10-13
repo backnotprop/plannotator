@@ -150,13 +150,13 @@ plannotator archive                    # Browse saved plan decisions read-only
 
 Plannotator does not collect usage telemetry or analytics. Plans, diffs, annotations, drafts, history, and configuration stay local by default.
 
-Each plan review, annotate, archive, share-portal, and code-review app surface checks GitHub for the latest Plannotator release when it loads. This sends no plan or review content and gives the Plannotator project owner no usage analytics, although GitHub receives an ordinary request. There is currently no opt-out setting. Local Git code review can also query the configured `origin` with `git ls-remote` to detect the default branch and a stale baseline; it does not send the local diff.
+Each plan review, annotate, archive, share-portal, and code-review app surface checks GitHub for the latest Plannotator release when it loads. This sends no plan or review content and gives the Plannotator project owner no usage analytics, although GitHub receives an ordinary request. There is currently no opt-out setting for the release check. Local Git code review can also query the configured `origin` with `git ls-remote` to detect the default branch and a stale baseline; it does not send the local diff. That remote query runs when the review opens, when the page loads its diff, when you switch the diff type or base (including the "Diff out of date &middot; Refresh" button), and when you press Fetch &mdash; never on a timer, so an idle review page makes no network calls. Turn it off entirely with `plannotator review --no-git-remote-check`, `PLANNOTATOR_GIT_REMOTE_CHECK=0`, or `{ "gitRemoteCheck": false }` in `~/.plannotator/config.json`; the compare target then comes from local refs only and the "behind GitHub" banner never appears.
 
 Content leaves the local workflow only when a network feature needs it:
 
 - URL annotation fetches the requested site, through Jina Reader by default for public pages or directly when Jina is disabled or unavailable.
 - GitHub and GitLab review uses your authenticated CLI and Git remote to retrieve PR or MR data.
-- Ask AI and review agents send the selected question and relevant plan, document, repository, or diff context to your configured provider.
+- Ask AI and review agents send the selected question and relevant plan, document, repository, or diff context to your configured provider. When Ask AI is answered by the agent session that opened Plannotator ("Ask this session"), the question goes to that session instead.
 - Sharing sends the complete link to whoever or whatever service you use to deliver it. Encrypted short links upload ciphertext to the paste service.
 - Workspaces is a separate hosted product, so the open source app's local-storage model does not apply to content placed there.
 
@@ -233,6 +233,10 @@ Then finish the step for your agent:
 | **Kiro CLI** | Nothing. Skills and an example agent are installed automatically. Try `kiro-cli chat --agent plannotator`. | [README](apps/kiro-cli/README.md) |
 | **OpenCode** | Add `"plugin": ["@plannotator/opencode@latest"]` to `opencode.json`. Restart OpenCode. | [README](apps/opencode-plugin/README.md) |
 | **Pi** | Skip the installer. Just `pi install npm:@plannotator/pi-extension`. Start Pi with `--plan`, or toggle with `/plannotator-plan-mode`. | [README](apps/pi-extension/README.md) |
+
+**Updating:** run the installer again for the binary and slash commands. It also updates an installed Claude Code plugin when the `claude` command is on your PATH (opt out with `--skip-claude-plugin`); otherwise run `claude plugin marketplace update plannotator`, then `claude plugin update plannotator@plannotator`, then restart Claude Code (refreshing the marketplace alone does not update the plugin). Pi: `pi update --extensions` (a plain `pi update` updates only Pi).
+
+On Claude Code 2.1.287 or newer, plan review, code review and annotate don't make Claude wait: Claude ends its turn and your decision arrives later as a message. Set `PLANNOTATOR_CLAUDE_MOD=0` to go back to the classic flow.
 
 Full walkthroughs live in the [installation docs](https://docs.plannotator.ai/open-source/start/installation).
 

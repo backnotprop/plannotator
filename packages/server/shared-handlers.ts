@@ -232,6 +232,27 @@ export interface ServerReadyMetadata {
   url: string;
   isRemote: boolean;
   port: number;
+  /**
+   * What this server shows, in full (absolute path, URL, bundle files,
+   * reviewed directory or PR URL), so a host names the right file before any
+   * decision. Additive; absent when the CLI did not set it.
+   */
+  target?: string | string[];
+}
+
+let serverReadyTarget: string | string[] | undefined;
+
+/**
+ * The full target the next ready line names (`ServerReadyMetadata.target`).
+ * The CLI serves one session per process and sets it once it has resolved
+ * what it opens, before the server starts.
+ */
+export function setServerReadyTarget(target: string | readonly string[] | undefined): void {
+  if (target === undefined || (typeof target === "string" ? !target.trim() : target.length === 0)) {
+    serverReadyTarget = undefined;
+    return;
+  }
+  serverReadyTarget = typeof target === "string" ? target : [...target];
 }
 
 export function writeServerReadyMetadata(readyFile: string, metadata: ServerReadyMetadata): void {
@@ -253,7 +274,7 @@ export async function handleServerReady(
   const readyFile = options.readyFile ?? process.env.PLANNOTATOR_READY_FILE;
   if (readyFile) {
     try {
-      writeServerReadyMetadata(readyFile, { url, isRemote, port });
+      writeServerReadyMetadata(readyFile, { url, isRemote, port, ...(serverReadyTarget !== undefined && { target: serverReadyTarget }) });
     } catch (error) {
       if (options.readyFile) throw error;
       // Best effort: host plugins use this side channel to open the browser.

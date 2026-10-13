@@ -66,18 +66,20 @@ describe("Pi extension startup boundary", () => {
 		expect(manifest.files).toContain("todo-providers/");
 	});
 
-	test("ships the plannotator knowledge skill through the pi manifest", () => {
+	test("ships the plannotator knowledge skill without a static manifest entry", () => {
 		// #1377 install reach: Pi users got the extension but none of the CLI
-		// reference every other host installs as a skill. Three things have to
-		// line up or it silently stops shipping again: vendor.sh must make the
-		// copy, `files` must include it, and `pi.skills` must name it (Pi
-		// resolves non-glob manifest entries relative to the package root).
+		// reference every other host installs as a skill. vendor.sh must make
+		// the copy and `files` must ship it and the module that offers it.
+		// #1642: it must NOT be declared in `pi.skills` — a static entry always
+		// loads, so it collides with the CLI installer's ~/.agents/skills copy.
+		// bundled-skill.ts offers it from resources_discover instead.
 		const manifest = JSON.parse(
 			readFileSync(join(extensionDirectory, "package.json"), "utf-8"),
 		) as { files?: unknown; pi?: { skills?: unknown } };
 
 		expect(manifest.files).toContain("skills/");
-		expect(manifest.pi?.skills).toEqual(["skills/plannotator/SKILL.md"]);
+		expect(manifest.files).toContain("bundled-skill.ts");
+		expect(manifest.pi?.skills).toBeUndefined();
 
 		// Assert the vendor step rather than the vendored file: a fresh checkout
 		// has not run vendor.sh yet, and this must not depend on build order.

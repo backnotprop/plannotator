@@ -1,3 +1,4 @@
+import type { UpdateCheckSetting } from '../hooks/useUpdateCheckSetting';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { AnnotateAgentTerminalSide } from '@plannotator/core/agent-terminal';
@@ -7,6 +8,12 @@ import type { TokenHoverDelay } from '@plannotator/core/token-hover';
 import { configStore, useConfigValue, setReviewPanelView, setReviewDefaultDiffType, setReviewAutoViewed } from '../config';
 import { setWebMcpToolsEnabled, useWebMcpToolsEnabled } from '../webmcp/preference';
 import { DIAGRAM_SHADOW_OPTIONS } from '../utils/diagramShadow';
+import {
+  agentToolAppliesWhen,
+  agentToolCostNote,
+  agentToolHostName,
+  type AgentToolSetting,
+} from '../utils/agentToolSetting';
 import { loadDiffFont } from '../utils/diffFonts';
 import { TaterSpritePullup } from './TaterSpritePullup';
 import { getIdentity, regenerateIdentity, setCustomIdentity, isIdentityEditable } from '../utils/identity';
@@ -64,12 +71,12 @@ import {
 } from '../utils/defaultNotesApp';
 import { useAgents } from '../hooks/useAgents';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
-import { type QuickLabel, getQuickLabels, saveQuickLabels, resetQuickLabels, DEFAULT_QUICK_LABELS, getLabelColors, LABEL_COLOR_MAP } from '../utils/quickLabels';
 import { ThemeTab } from './ThemeTab';
-import { isMac, modKey, modKeyWord, altKey } from '../utils/platform';
+import { modKey, modKeyWord } from '../utils/platform';
 import { getAIProviderSettings, resolveAIProviderSelection } from '../utils/aiProvider';
 import { AISettingsTab } from './AISettingsTab';
 import { HooksTab } from './settings/HooksTab';
+import { QuickLabelsTab } from './settings/QuickLabelsTab';
 import { OverlayScrollArea } from './OverlayScrollArea';
 import {
   getFileBrowserSettings,
@@ -87,6 +94,13 @@ interface SettingsProps {
   onIdentityChange?: (oldIdentity: string, newIdentity: string) => void;
   origin?: Origin | null;
   mode?: 'plan' | 'annotate' | 'review';
+  /**
+   * `mode="annotate"` only: offer the document tabs plan review has (Display,
+   * Saving, Labels, and the Obsidian / Bear / Octarine integrations) and hide
+   * the plan-only OpenCode agent-switch row. Plannotator's annotate app passes
+   * true; a host that omits it keeps the pre-parity annotate tab set.
+   */
+  annotateParity?: boolean;
   onUIPreferencesChange?: (prefs: UIPreferences) => void;
   /** Externally controlled open state (for mobile menu integration) */
   externalOpen?: boolean;
@@ -95,6 +109,22 @@ interface SettingsProps {
   aiProviders?: Array<{ id: string; name: string; capabilities: Record<string, boolean>; models?: Array<{ id: string; label: string; default?: boolean }> }>;
   /** Git user name from `git config user.name`, for quick identity set */
   gitUser?: string;
+  /** Present when the server advertises the auto-update setting (#1634);
+   *  `env` is PLANNOTATOR_AUTO_UPDATE when it overrides the config file.
+   *  Hosts that omit it get no toggle. */
+  autoUpdateSetting?: { env?: boolean };
+  /** Present when the server reports the update-notice switch (serverConfig.updateCheck,
+   *  useUpdateCheckSetting); `env` is PLANNOTATOR_UPDATE_CHECK when it overrides the
+   *  config file. Hosts that omit it get no row. */
+  updateCheckSetting?: UpdateCheckSetting;
+  /** The `plannotator` agent tool switch, as the server reports it
+   *  (parseAgentToolSetting of serverConfig: present only when the session's
+   *  host registers the tool). Shown only together with onAgentToolChange;
+   *  hosts that omit them get no row. */
+  agentToolSetting?: AgentToolSetting;
+  /** Saves the agent tool switch (saveAgentToolSetting); rejects with a
+   *  readable Error, which the row shows. */
+  onAgentToolChange?: (enabled: boolean) => Promise<void>;
   /** Current session is a local git review where since-base ISN'T offered
    *  (base ref unresolvable) — the Git tab shows a note that the Git-status
    *  preference can't take effect in THIS repo. */
@@ -254,6 +284,53 @@ function ToggleSwitch({ checked, onChange, label, description, disabled = false 
           }`}
         />
       </button>
+    </div>
+  );
+}
+
+/**
+ * The `plannotator` agent tool switch. The value is the one the NEXT session
+ * uses (the tool list is part of the model's prompt, so a running session
+ * never changes it). Writes go straight to POST /api/config and wait for the
+ * answer, so a failed save is reported and the switch stays where it was.
+ */
+function AgentToolSettingRow({ setting, onChange }: {
+  readonly setting: AgentToolSetting;
+  readonly onChange: (enabled: boolean) => Promise<void>;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const locked = setting.env !== undefined;
+  const change = async (next: boolean) => {
+    if (saving || locked) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onChange(next);
+    } catch (e) {
+      setError(e instanceof Error && e.message ? e.message : 'Could not save the setting.');
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div data-agent-tool-setting={setting.host} aria-busy={saving}>
+      <ToggleSwitch
+        checked={setting.enabled}
+        onChange={(next) => void change(next)}
+        disabled={locked}
+        label="Let the agent open reviews (plannotator tool)"
+        description={
+          locked
+            ? `Set by PLANNOTATOR_AGENT_TOOL in your environment, so it is ${setting.enabled ? 'on' : 'off'} here.`
+            : `${agentToolHostName(setting.host)} can open reviews itself and keep working. ${agentToolCostNote(setting.host)} Applies from ${agentToolAppliesWhen(setting.host)}.`
+        }
+      />
+      {error && (
+        <p role="alert" data-agent-tool-setting-error className="mt-1 text-xs text-destructive">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -930,8 +1007,10 @@ const CommentsTab: React.FC = () => {
   );
 };
 
-export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [], gitUser, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false }) => {
+export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, updateCheckSetting, agentToolSetting, onAgentToolChange, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false }) => {
   const webmcpTools = useWebMcpToolsEnabled();
+  const autoUpdate = useConfigValue('autoUpdate');
+  const updateChecksOn = updateCheckSetting ? updateCheckSetting.on : true;
   const [showDialog, setShowDialog] = useState(false);
   const settingsWasOpenRef = useRef(false);
   const [themePreview, setThemePreview] = useState(false);
@@ -981,6 +1060,8 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   // The agent switch default depends on the surface: plan approval hands off to
   // the build agent, review feedback stays on the current agent.
   const agentSurface: AgentSwitchSurface = mode === 'review' ? 'review' : 'plan';
+  // Annotate with parity on gets the same document tabs as plan review.
+  const annotateDocumentTabs = mode === 'annotate' && annotateParity;
   const [agent, setAgent] = useState<AgentSwitchSettings>(() => getAgentSwitchDefaults(agentSurface));
   const [planSave, setPlanSave] = useState<PlanSaveSettings>({ enabled: true, customPath: null });
   const [uiPrefs, setUiPrefs] = useState<UIPreferences>({ tocEnabled: true, stickyActionsEnabled: true, planWidth: 'compact' });
@@ -988,9 +1069,6 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const [agentWarning, setAgentWarning] = useState<string | null>(null);
   const [autoCloseDelay, setAutoCloseDelayState] = useState<AutoCloseDelay>('off');
   const [defaultNotesApp, setDefaultNotesApp] = useState<DefaultNotesApp>('ask');
-  const [quickLabelsState, setQuickLabelsState] = useState<QuickLabel[]>([]);
-  const [editingTipIndex, setEditingTipIndex] = useState<number | null>(null);
-  const [editingTipValue, setEditingTipValue] = useState('');
   const [aiProvider, setAiProvider] = useState<string | null>(null);
   const [fileBrowserSettings, setFileBrowserSettings] = useState<FileBrowserSettings>({ enabled: false, directories: [] });
   const [newDirPath, setNewDirPath] = useState('');
@@ -1001,7 +1079,11 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const mainTabs = useMemo(() => {
     const t: { id: SettingsTab; label: string }[] = [{ id: 'general', label: 'General' }];
     t.push({ id: 'theme', label: 'Theme' });
-    if (mode === 'plan') {
+    // Annotate renders the same document viewer as plan review, so the
+    // document-level tabs apply there too. Only rows that describe a plan
+    // decision (plan snapshots, plan-arrival auto-save, plan-time hooks,
+    // post-approval permission mode / agent switch) stay plan-only.
+    if (mode === 'plan' || annotateDocumentTabs) {
       t.push({ id: 'display', label: 'Display' });
       t.push({ id: 'saving', label: 'Saving' });
       t.push({ id: 'labels', label: 'Labels' });
@@ -1023,11 +1105,11 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       t.push({ id: 'hooks', label: 'Hooks' });
     }
     return t;
-  }, [mode, aiProviders.length]);
+  }, [mode, annotateDocumentTabs, aiProviders.length]);
 
   const integrationTabs: { id: SettingsTab; label: string }[] = [
     { id: 'files', label: 'Files' },
-    ...(mode === 'plan'
+    ...(mode === 'plan' || annotateDocumentTabs
       ? [{ id: 'obsidian' as SettingsTab, label: 'Obsidian' }, { id: 'bear' as SettingsTab, label: 'Bear' }, { id: 'octarine' as SettingsTab, label: 'Octarine' }]
       : []),
   ];
@@ -1055,7 +1137,6 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       setPermissionMode(getPermissionModeSettings().mode);
       setAutoCloseDelayState(getAutoCloseDelay());
       setDefaultNotesApp(getDefaultNotesApp());
-      setQuickLabelsState(getQuickLabels());
       const aiSettings = getAIProviderSettings();
       setAiProvider(resolveAIProviderSelection({ providers: aiProviders, origin, settings: aiSettings }).providerId);
       setFileBrowserSettings(getFileBrowserSettings());
@@ -1366,6 +1447,58 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                       </div>
                     </div>
 
+                    {/* Update notices: on by default. Writes updateCheck to
+                        ~/.plannotator/config.json; off makes no request to GitHub. */}
+                    {updateCheckSetting && (
+                      <>
+                        <div className="border-t border-border" />
+                        <ToggleSwitch
+                          checked={updateChecksOn}
+                          onChange={(v) => updateCheckSetting.onChange(v)}
+                          disabled={updateCheckSetting.env !== undefined}
+                          label="Tell me when a new version is out"
+                          description={
+                            updateCheckSetting.env !== undefined
+                              ? 'Set by PLANNOTATOR_UPDATE_CHECK in your environment.'
+                              : 'This computer asks GitHub once a day, never your browser. Off makes no request at all.'
+                          }
+                        />
+                      </>
+                    )}
+
+                    {/* Auto-update (#1634): opt-in, default off. Writes
+                        autoUpdate to ~/.plannotator/config.json. It needs
+                        update checks, so it is locked while they are off. */}
+                    {autoUpdateSetting && (
+                      <>
+                        <div className="border-t border-border" />
+                        <ToggleSwitch
+                          checked={(autoUpdateSetting.env ?? autoUpdate) && updateChecksOn}
+                          onChange={(v) => configStore.set('autoUpdate', v)}
+                          disabled={autoUpdateSetting.env !== undefined || !updateChecksOn}
+                          label="Keep Plannotator up to date"
+                          description={
+                            autoUpdateSetting.env !== undefined
+                              ? 'Set by PLANNOTATOR_AUTO_UPDATE in your environment.'
+                              : !updateChecksOn
+                                ? 'Needs update checks (above).'
+                                : 'Installs new releases in the background, at most once a day, never while another review is open.'
+                          }
+                        />
+                      </>
+                    )}
+
+                    {/* The `plannotator` agent tool switch: only where the
+                        server reports a tool host (Claude Code mod, Pi,
+                        OpenCode 2). Writes agentTool to config.json; applies
+                        to the next session. */}
+                    {agentToolSetting && onAgentToolChange && (
+                      <>
+                        <div className="border-t border-border" />
+                        <AgentToolSettingRow setting={agentToolSetting} onChange={onAgentToolChange} />
+                      </>
+                    )}
+
                     {/* Agent tools (WebMCP). Shown only when the browser
                         exposes document.modelContext; off unregisters the
                         tools for this browser. Cookie-only and idle at its
@@ -1428,8 +1561,9 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                       </>
                     )}
 
-                    {/* Agent Switching (OpenCode only) */}
-                    {origin === 'opencode' && (
+                    {/* Agent Switching (OpenCode only). Applied on plan
+                        approval only; annotate decisions never switch agents. */}
+                    {origin === 'opencode' && !annotateDocumentTabs && (
                       <>
                         <div className="border-t border-border" />
                         <div className="space-y-2">
@@ -1689,9 +1823,9 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                     {/* Plan Width */}
                     <div className="space-y-3">
                       <div>
-                        <div className="text-sm font-medium flex items-center gap-2">Plan Width</div>
+                        <div className="text-sm font-medium flex items-center gap-2">{mode === 'annotate' ? 'Document Width' : 'Plan Width'}</div>
                         <div className="text-xs text-muted-foreground">
-                          Maximum width of the plan card
+                          {mode === 'annotate' ? 'Maximum width of the document card' : 'Maximum width of the plan card'}
                         </div>
                       </div>
                       <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-0.5">
@@ -1815,7 +1949,9 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                 {/* === SAVING TAB === */}
                 {activeTab === 'saving' && (
                   <>
-                    {/* Plan Saving */}
+                    {/* Plan Saving — decision snapshots in plans/ are written
+                        on plan approve/deny only. */}
+                    {mode === 'plan' && (<>
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <div>
@@ -1858,6 +1994,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                     </div>
 
                     <div className="border-t border-border" />
+                    </>)}
 
                     {/* Default Notes App */}
                     <div className="space-y-2">
@@ -1941,191 +2078,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                 )}
 
                 {/* === LABELS TAB === */}
-                {activeTab === 'labels' && (
-                  <>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="text-sm font-medium flex items-center gap-2">Quick Labels</div>
-                        <div className="text-xs text-muted-foreground">
-                          Preset annotations for one-click feedback
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => {
-                          resetQuickLabels();
-                          setQuickLabelsState(DEFAULT_QUICK_LABELS);
-                        }}
-                        className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-                      >
-                        Reset to defaults
-                      </button>
-                    </div>
-
-                    <style>{`
-                      @keyframes tip-slide-open {
-                        from { opacity: 0; transform: translateY(-4px); }
-                        to   { opacity: 1; transform: translateY(0); }
-                      }
-                    `}</style>
-                    <div className="space-y-1.5">
-                      {quickLabelsState.map((label, index) => {
-                        const colors = getLabelColors(label.color);
-                        const hasTip = !!label.tip;
-                        const isEditingTip = editingTipIndex === index;
-                        return (
-                          <div key={index} className="rounded-lg overflow-hidden" style={{ backgroundColor: colors.bg }}>
-                            {/* Main row */}
-                            <div className="flex items-center gap-2 p-2">
-                              <span className="text-sm flex-shrink-0">{label.emoji}</span>
-                              <input
-                                type="text"
-                                value={label.text}
-                                onChange={(e) => {
-                                  const updated = [...quickLabelsState];
-                                  updated[index] = {
-                                    ...label,
-                                    text: e.target.value,
-                                    id: e.target.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
-                                  };
-                                  setQuickLabelsState(updated);
-                                  saveQuickLabels(updated);
-                                }}
-                                className="flex-1 px-2 py-1 bg-background/80 rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
-                              />
-                              {/* Tip indicator button */}
-                              <button
-                                onClick={() => {
-                                  if (isEditingTip) {
-                                    setEditingTipIndex(null);
-                                  } else {
-                                    setEditingTipIndex(index);
-                                    setEditingTipValue(label.tip || '');
-                                  }
-                                }}
-                                className={`relative p-1 rounded transition-all flex-shrink-0 ${
-                                  hasTip
-                                    ? 'bg-foreground/10 text-foreground/70 hover:text-foreground border border-foreground/15'
-                                    : 'text-muted-foreground/30 hover:text-muted-foreground/60 border border-dashed border-muted-foreground/20 hover:border-muted-foreground/40'
-                                }`}
-                                title={hasTip ? `Tip: ${label.tip}` : 'Add AI instruction tip'}
-                              >
-                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                                </svg>
-                                {hasTip && (
-                                  <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-foreground/50" />
-                                )}
-                              </button>
-                              <select
-                                value={label.color}
-                                onChange={(e) => {
-                                  const updated = [...quickLabelsState];
-                                  updated[index] = { ...label, color: e.target.value };
-                                  setQuickLabelsState(updated);
-                                  saveQuickLabels(updated);
-                                }}
-                                className="px-1.5 py-1 bg-background/80 rounded text-[10px] focus:outline-none focus:ring-1 focus:ring-primary/50"
-                              >
-                                {Object.keys(LABEL_COLOR_MAP).map(c => (
-                                  <option key={c} value={c}>{c}</option>
-                                ))}
-                              </select>
-                              <span className="text-[10px] text-muted-foreground/50 font-mono w-8 text-center flex-shrink-0">
-                                {index < 10 ? `${altKey}${isMac ? '' : '+'}${index === 9 ? '0' : index + 1}` : ''}
-                              </span>
-                              <button
-                                onClick={() => {
-                                  const updated = quickLabelsState.filter((_, i) => i !== index);
-                                  setQuickLabelsState(updated);
-                                  saveQuickLabels(updated);
-                                  if (editingTipIndex === index) setEditingTipIndex(null);
-                                }}
-                                className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors flex-shrink-0"
-                                title="Remove label"
-                              >
-                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                              </button>
-                            </div>
-                            {/* Tip editor — slides open below the row */}
-                            {isEditingTip && (
-                              <div
-                                className="flex items-center gap-1.5 px-2 pb-2 pt-0"
-                                style={{ animation: 'tip-slide-open 0.15s ease-out' }}
-                              >
-                                <svg className="w-3 h-3 text-muted-foreground/40 flex-shrink-0 ml-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
-                                </svg>
-                                <input
-                                  type="text"
-                                  value={editingTipValue}
-                                  onChange={(e) => setEditingTipValue(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      const updated = [...quickLabelsState];
-                                      updated[index] = { ...label, tip: editingTipValue || undefined };
-                                      setQuickLabelsState(updated);
-                                      saveQuickLabels(updated);
-                                      setEditingTipIndex(null);
-                                    }
-                                    if (e.key === 'Escape') {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      setEditingTipIndex(null);
-                                    }
-                                  }}
-                                  placeholder="AI instruction tip..."
-                                  className="flex-1 px-2 py-1 bg-background/60 rounded text-[10px] text-muted-foreground placeholder:text-muted-foreground/30 focus:outline-none focus:ring-1 focus:ring-primary/50"
-                                  autoFocus
-                                  onFocus={(e) => { e.target.setSelectionRange(0, 0); e.target.scrollLeft = 0; }}
-                                />
-                                <button
-                                  onClick={() => {
-                                    const updated = [...quickLabelsState];
-                                    updated[index] = { ...label, tip: editingTipValue || undefined };
-                                    setQuickLabelsState(updated);
-                                    saveQuickLabels(updated);
-                                    setEditingTipIndex(null);
-                                  }}
-                                  className="p-1 rounded text-muted-foreground/50 hover:text-green-500 hover:bg-green-500/10 transition-colors flex-shrink-0"
-                                  title="Save tip"
-                                >
-                                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                  </svg>
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {quickLabelsState.length < 12 && (
-                      <button
-                        onClick={() => {
-                          const newLabel: QuickLabel = {
-                            id: `custom-${Date.now()}`,
-                            emoji: '📌',
-                            text: 'New label',
-                            color: 'blue',
-                          };
-                          const updated = [...quickLabelsState, newLabel];
-                          setQuickLabelsState(updated);
-                          saveQuickLabels(updated);
-                        }}
-                        className="w-full py-1.5 text-xs text-muted-foreground hover:text-foreground border border-dashed border-border rounded-lg hover:border-foreground/30 transition-colors"
-                      >
-                        + Add label
-                      </button>
-                    )}
-
-                    <div className="text-[10px] text-muted-foreground/70">
-                      Use {altKey}{isMac ? '' : '+'}1 through {altKey}{isMac ? '' : '+'}0 when the annotation toolbar is visible to apply a label instantly.
-                    </div>
-                  </>
-                )}
+                {activeTab === 'labels' && <QuickLabelsTab />}
 
                 {/* === VIM TAB === */}
                 {activeTab === 'vim' && mode !== 'review' && (
@@ -2256,7 +2209,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                       <div>
                         <div className="text-sm font-medium">Obsidian Integration</div>
                         <div className="text-xs text-muted-foreground">
-                          Auto-save approved plans to your vault
+                          {mode === 'annotate' ? 'Save documents to your vault from the Options menu. When on, plan review also saves each approved plan here.' : 'Auto-save approved plans to your vault'}
                         </div>
                       </div>
                       <button
@@ -2385,7 +2338,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                           </div>
 
                           <div className="text-[10px] text-muted-foreground/70">
-                            Plans saved to: {obsidian.vaultPath === CUSTOM_PATH_SENTINEL
+                            {mode === 'annotate' ? 'Saved to' : 'Plans saved to'}: {obsidian.vaultPath === CUSTOM_PATH_SENTINEL
                               ? (obsidian.customPath || '...')
                               : (obsidian.vaultPath || '...')}/{obsidian.folder || 'plannotator'}/
                           </div>
@@ -2396,13 +2349,14 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 {`---
 created: ${new Date().toISOString().slice(0, 19)}Z
 source: plannotator
-tags: [plan, ...]
+tags: [${mode === 'annotate' ? 'plannotator' : 'plan'}, ...]
 ---`}
                             </pre>
                           </div>
 
                           <div className="border-t border-border/30" />
 
+                          {mode === 'plan' && (<>
                           <div className="flex items-center justify-between">
                             <div>
                               <div className="text-xs font-medium">Auto-save on Plan Arrival</div>
@@ -2423,6 +2377,7 @@ tags: [plan, ...]
                               }`} />
                             </button>
                           </div>
+                          </>)}
 
                           <div className="flex items-center justify-between">
                             <div>
@@ -2457,7 +2412,7 @@ tags: [plan, ...]
                       <div>
                         <div className="text-sm font-medium">Bear Notes</div>
                         <div className="text-xs text-muted-foreground">
-                          Auto-save approved plans to Bear
+                          {mode === 'annotate' ? 'Save documents to Bear from the Options menu. When on, plan review also saves each approved plan here.' : 'Auto-save approved plans to Bear'}
                         </div>
                       </div>
                       <button
@@ -2503,6 +2458,7 @@ tags: [plan, ...]
                           </select>
                         </div>
 
+                        {mode === 'plan' && (<>
                         <div className="border-t border-border/30" />
 
                         <div className="flex items-center justify-between">
@@ -2525,6 +2481,7 @@ tags: [plan, ...]
                             }`} />
                           </button>
                         </div>
+                        </>)}
                       </div>
                     )}
                   </>
@@ -2537,7 +2494,7 @@ tags: [plan, ...]
                       <div>
                         <div className="text-sm font-medium">Octarine</div>
                         <div className="text-xs text-muted-foreground">
-                          Auto-save approved plans to Octarine
+                          {mode === 'annotate' ? 'Save documents to Octarine from the Options menu. When on, plan review also saves each approved plan here.' : 'Auto-save approved plans to Octarine'}
                         </div>
                       </div>
                       <button
@@ -2585,9 +2542,10 @@ tags: [plan, ...]
                         </div>
 
                         <div className="text-[10px] text-muted-foreground/70">
-                          Plans saved to: {octarine.workspace || '...'} / {octarine.folder || 'plannotator'}/
+                          {mode === 'annotate' ? 'Saved to' : 'Plans saved to'}: {octarine.workspace || '...'} / {octarine.folder || 'plannotator'}/
                         </div>
 
+                        {mode === 'plan' && (<>
                         <div className="border-t border-border/30" />
 
                         <div className="flex items-center justify-between">
@@ -2610,6 +2568,7 @@ tags: [plan, ...]
                             }`} />
                           </button>
                         </div>
+                        </>)}
                       </div>
                     )}
                   </>

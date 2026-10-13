@@ -28,6 +28,8 @@
  *   origin.
  */
 
+import { isLoopbackHostname } from "./loopback-host";
+
 /** The literal loopback address every transport must bind. */
 export const LIVE_PROXY_LOOPBACK_HOST = "127.0.0.1";
 
@@ -80,19 +82,9 @@ export interface HeaderReader {
   get(name: string): string | null;
 }
 
-/** True for hostnames that name the local loopback: localhost, the IPv6
- * loopback, or a LITERAL IPv4 address in 127.0.0.0/8. A string-prefix test
- * would also match DNS names like 127.0.0.1.evil.example that resolve
- * anywhere, so the 127/8 rung requires exactly four numeric octets. WHATWG
- * URL parsing canonicalizes numeric spellings (127.1, 0177.0.0.1,
- * 2130706433) to dotted-decimal before a hostname reaches this check. */
-export function isLoopbackHostname(hostname: string): boolean {
-  const host = hostname.toLowerCase();
-  if (host === "localhost" || host === "::1" || host === "[::1]") return true;
-  const octets = /^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (!octets) return false;
-  return Number(octets[1]) <= 255 && Number(octets[2]) <= 255 && Number(octets[3]) <= 255;
-}
+/** Loopback hostname predicate; defined in ./loopback-host (shared with the
+ * Ask this session Host guard) and re-exported here for existing callers. */
+export { isLoopbackHostname };
 
 /** True when the Host header names this proxy on loopback. */
 export function isAllowedProxyHost(hostHeader: string | null, port: number): boolean {

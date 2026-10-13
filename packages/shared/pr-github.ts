@@ -4,8 +4,8 @@
  * All functions use the `gh` CLI via the PRRuntime abstraction.
  */
 
-import type { PRRuntime, PRMetadata, PRContext, PRReviewThread, PRThreadComment, PRReviewFileComment, PRReviewSubmissionResult, CommandResult, PRStackTree, PRStackNode, PRListItem } from "./pr-types";
-import { encodeApiFilePath } from "./pr-types";
+import type { PRRuntime, PRMetadata, PRContext, PRReviewThread, PRThreadComment, PRReviewFileComment, PRReviewFileLevelComment, PRReviewAction, PRReviewSubmissionResult, CommandResult, PRStackTree, PRStackNode, PRListItem } from "./pr-types";
+import { decodeBase64Bytes, encodeApiFilePath, isNotFoundCommandFailure, type PRFileBytesResult } from "./pr-types";
 import { parsePaginatedArray } from "./cli-pagination";
 
 // GitHub-specific PRRef shape (used internally)
@@ -162,6 +162,9 @@ export async function fetchGhPR(
     runtime.runCommand("gh", [
       "pr", "diff", String(ref.number),
       "--repo", repo,
+      // `auto` is the default, but CLICOLOR_FORCE / GH_FORCE_TTY in the
+      // user's environment would still color it (#1661).
+      "--color=never",
     ]),
     runtime.runCommand("gh", [
       "pr", "view", String(ref.number),
@@ -509,6 +512,54 @@ export async function fetchGhPRFileContent(
   }
 }
 
+/**
+ * One file at one commit as raw bytes (image preview). The contents API
+ * inlines base64 up to 1 MB; larger files come back as `encoding: "none"`,
+ * and the blobs API (base64, up to 100 MB) serves them — but only after the
+ * reported size passed the cap, so an oversized file costs no second call.
+ */
+export async function fetchGhPRFileBytes(
+  runtime: PRRuntime,
+  ref: GhPRRef,
+  sha: string,
+  filePath: string,
+  maxBytes: number,
+): Promise<PRFileBytesResult> {
+  const contents = await runtime.runCommand("gh", hostnameArgs(ref.host, [
+    "api",
+    `repos/${ref.owner}/${ref.repo}/contents/${encodeApiFilePath(filePath)}?ref=${sha}`,
+    "--jq", "{type,sha,size,encoding,content}",
+  ]));
+  if (contents.exitCode !== 0) {
+    if (isNotFoundCommandFailure(contents.stderr)) return { kind: "missing" };
+    throw new Error(`GitHub contents API failed: ${contents.stderr.trim() || `exit ${contents.exitCode}`}`);
+  }
+  const meta = JSON.parse(contents.stdout) as {
+    type?: string; sha?: string; size?: number; encoding?: string; content?: string;
+  };
+  if (meta.type !== "file" || typeof meta.size !== "number") return { kind: "missing" };
+  if (meta.size > maxBytes) return { kind: "too-large", size: meta.size };
+  const etag = meta.sha ? `"${meta.sha}"` : undefined;
+  if (meta.encoding === "base64" && typeof meta.content === "string") {
+    return { kind: "ok", bytes: decodeBase64Bytes(meta.content), ...(etag ? { etag } : {}) };
+  }
+  if (!meta.sha || !/^[0-9a-f]{40,64}$/i.test(meta.sha)) return { kind: "missing" };
+
+  const blob = await runtime.runCommand("gh", hostnameArgs(ref.host, [
+    "api",
+    `repos/${ref.owner}/${ref.repo}/git/blobs/${meta.sha}`,
+    "--jq", "{size,encoding,content}",
+  ]));
+  if (blob.exitCode !== 0) {
+    if (isNotFoundCommandFailure(blob.stderr)) return { kind: "missing" };
+    throw new Error(`GitHub blobs API failed: ${blob.stderr.trim() || `exit ${blob.exitCode}`}`);
+  }
+  const body = JSON.parse(blob.stdout) as { size?: number; encoding?: string; content?: string };
+  if (typeof body.size === "number" && body.size > maxBytes) return { kind: "too-large", size: body.size };
+  if (body.encoding !== "base64" || typeof body.content !== "string") return { kind: "missing" };
+  return { kind: "ok", bytes: decodeBase64Bytes(body.content), ...(etag ? { etag } : {}) };
+}
+
 // --- Viewed Files ---
 
 /**
@@ -643,45 +694,220 @@ export async function markGhFilesViewed(
 // --- Submit PR Review ---
 
 /**
- * Submit one atomic GitHub review.
+ * Append file-level comments to a review body as `**path:** text` paragraphs,
+ * the shape every file-scoped comment took before #1599. Used for GitLab and
+ * for any GitHub file-level thread that could not be created.
+ */
+export function foldFileLevelComments(
+  body: string,
+  comments: PRReviewFileLevelComment[],
+): string {
+  return [body, ...comments.map((c) => `**${c.path}:** ${c.body}`)]
+    .filter((part) => part.trim().length > 0)
+    .join("\n\n");
+}
+
+const ADD_FILE_THREAD_MUTATION = `mutation($reviewId: ID!, $path: String!, $body: String!) {
+  addPullRequestReviewThread(input: { pullRequestReviewId: $reviewId, path: $path, body: $body, subjectType: FILE }) {
+    thread { id }
+  }
+}`;
+
+const PENDING_REVIEW_REMAINS =
+  "A pending review remains on the pull request; submit or discard it on GitHub before retrying.";
+
+/** GitHub requires a body on a COMMENT or REQUEST_CHANGES review; the client uses the same placeholder. */
+const COMMENT_BODY_PLACEHOLDER = "See inline comments.";
+
+const MAX_ERROR_DETAIL = 300;
+
+/**
+ * GitHub's own reason for a refusal, read from the JSON body `gh api` prints
+ * on stdout: REST `errors[]` (strings or `{ message }` objects) and GraphQL
+ * `errors[].message`, else a REST top-level `message`. `gh` itself only puts
+ * the generic status line ("Unprocessable Entity (HTTP 422)") on stderr.
+ * Returns undefined when stdout is not a GitHub error body.
+ */
+export function githubErrorDetail(stdout: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const body = parsed as { message?: unknown; errors?: unknown };
+  const reasons: string[] = [];
+  if (Array.isArray(body.errors)) {
+    for (const item of body.errors) {
+      const text = typeof item === "string"
+        ? item
+        : typeof item === "object" && item !== null && typeof (item as { message?: unknown }).message === "string"
+          ? (item as { message: string }).message
+          : undefined;
+      const trimmed = text?.trim();
+      if (trimmed && !reasons.includes(trimmed)) reasons.push(trimmed);
+    }
+  }
+  if (reasons.length === 0 && typeof body.message === "string" && body.message.trim()) {
+    reasons.push(body.message.trim());
+  }
+  if (reasons.length === 0) return undefined;
+  const detail = reasons.join("; ");
+  return detail.length > MAX_ERROR_DETAIL ? `${detail.slice(0, MAX_ERROR_DETAIL - 1)}…` : detail;
+}
+
+/** Short, human-readable failure text for a `gh` call; never raw JSON. */
+function commandError(result: CommandResult): string {
+  const stderr = result.stderr.trim();
+  const stdout = result.stdout.trim();
+  const detail = githubErrorDetail(stdout);
+  if (detail) {
+    if (!stderr || stderr.includes(detail)) return stderr || detail;
+    return `${stderr}: ${detail}`;
+  }
+  if (stderr) return stderr;
+  // A JSON body without a readable reason is not shown verbatim.
+  if (stdout && !stdout.startsWith("{") && !stdout.startsWith("[")) {
+    return stdout.length > MAX_ERROR_DETAIL ? `${stdout.slice(0, MAX_ERROR_DETAIL - 1)}…` : stdout;
+  }
+  return `exit code ${result.exitCode}`;
+}
+
+/**
+ * Submit a GitHub review.
  *
- * GitHub either accepts the complete review or this rejects before reporting
- * success, so no narrowed retry result is needed.
+ * Without file-level comments this is one atomic create-review call: GitHub
+ * either accepts the complete review or this rejects before reporting success.
+ *
+ * File-level comments (#1599) are not documented on the create-review
+ * `comments[]` array, so the review is built from documented calls instead:
+ * create it PENDING with the line comments, add each file comment as a
+ * GraphQL `addPullRequestReviewThread(subjectType: FILE)` on that review, then
+ * submit it with the event and body. A file comment GitHub rejects is folded
+ * into the submitted body, so it is never lost. A pending review is visible
+ * only to its author, so nothing is public until the submit succeeds.
  */
 export async function submitGhPRReview(
   runtime: PRRuntime,
   ref: GhPRRef,
   headSha: string,
-  action: "approve" | "comment",
+  action: PRReviewAction,
   body: string,
   fileComments: PRReviewFileComment[],
+  fileLevelComments: PRReviewFileLevelComment[] = [],
 ): Promise<PRReviewSubmissionResult> {
-  const payload = JSON.stringify({
-    commit_id: headSha,
-    body,
-    event: action === "approve" ? "APPROVE" : "COMMENT",
-    comments: fileComments,
-  });
-
-  const endpoint = `repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/reviews`;
-
-  let result: CommandResult;
-
-  if (runtime.runCommandWithInput) {
-    result = await runtime.runCommandWithInput(
-      "gh",
-      hostnameArgs(ref.host, ["api", endpoint, "--method", "POST", "--input", "-"]),
-      payload,
-    );
-  } else {
+  if (!runtime.runCommandWithInput) {
     throw new Error("Runtime does not support stdin input; cannot submit PR review");
   }
+  const run = runtime.runCommandWithInput.bind(runtime);
+  const event = action === "approve" ? "APPROVE" : action === "request_changes" ? "REQUEST_CHANGES" : "COMMENT";
+  const reviewsEndpoint = `repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/reviews`;
+  const api = (endpoint: string, method: string, input: unknown) =>
+    run("gh", hostnameArgs(ref.host, ["api", endpoint, "--method", method, "--input", "-"]), JSON.stringify(input));
 
-  if (result.exitCode !== 0) {
-    const message = result.stderr.trim() || result.stdout.trim() || `exit code ${result.exitCode}`;
-    throw new Error(`Failed to submit PR review: ${message}`);
+  const submitAtomic = async (reviewBody: string): Promise<PRReviewSubmissionResult> => {
+    const result = await api(reviewsEndpoint, "POST", {
+      commit_id: headSha,
+      body: reviewBody,
+      event,
+      comments: fileComments,
+    });
+    if (result.exitCode !== 0) {
+      throw new Error(`Failed to submit PR review: ${commandError(result)}`);
+    }
+    return { status: "complete" };
+  };
+
+  if (fileLevelComments.length === 0) return submitAtomic(body);
+
+  // 1. Pending review carrying the line comments. Nothing exists if this
+  //    fails, so fall back to the pre-#1599 single call (file comments in the
+  //    body): the new path never fails where the old one would have worked.
+  const created = await api(reviewsEndpoint, "POST", { commit_id: headSha, comments: fileComments });
+  let reviewId: number | undefined;
+  let reviewNodeId: string | undefined;
+  if (created.exitCode === 0) {
+    try {
+      const parsed = JSON.parse(created.stdout);
+      if (typeof parsed?.id === "number" && typeof parsed?.node_id === "string") {
+        reviewId = parsed.id;
+        reviewNodeId = parsed.node_id;
+      }
+    } catch {
+      // handled below
+    }
+  }
+  if (reviewId === undefined || reviewNodeId === undefined) {
+    if (created.exitCode === 0) {
+      // A pending review may exist but we cannot address it; do not post a
+      // second review on top of it.
+      throw new Error(`Failed to submit PR review: GitHub's reply to creating the review could not be read. ${PENDING_REVIEW_REMAINS}`);
+    }
+    // Throws with the pre-#1599 error when the single call fails too (e.g. an
+    // invalid line comment), so only a successful fallback is logged.
+    const result = await submitAtomic(foldFileLevelComments(body, fileLevelComments));
+    console.error(`[plannotator] pending review could not be created (${commandError(created)}); file comments were posted in the review body`);
+    return result;
   }
 
+  // 2. One file-level thread per comment, attached to the pending review.
+  const folded: PRReviewFileLevelComment[] = [];
+  for (const comment of fileLevelComments) {
+    const result = await run(
+      "gh",
+      hostnameArgs(ref.host, ["api", "graphql", "--input", "-"]),
+      JSON.stringify({
+        query: ADD_FILE_THREAD_MUTATION,
+        variables: { reviewId: reviewNodeId, path: comment.path, body: comment.body },
+      }),
+    );
+    let threadId: unknown;
+    if (result.exitCode === 0) {
+      try {
+        const parsed = JSON.parse(result.stdout);
+        if (!Array.isArray(parsed?.errors) || parsed.errors.length === 0) {
+          threadId = parsed?.data?.addPullRequestReviewThread?.thread?.id;
+        }
+      } catch {
+        // treated as a failure below
+      }
+    }
+    if (typeof threadId !== "string") {
+      console.error(`[plannotator] file comment on ${comment.path} could not be posted as a file thread (${commandError(result)}); posting it in the review body`);
+      folded.push(comment);
+    }
+  }
+
+  // 3. Submit. On failure discard the pending review so a retry starts clean.
+  let submitBody = foldFileLevelComments(body, folded);
+  if (event !== "APPROVE" && submitBody.trim().length === 0) submitBody = COMMENT_BODY_PLACEHOLDER;
+  const submitted = await api(`${reviewsEndpoint}/${reviewId}/events`, "POST", {
+    event,
+    body: submitBody,
+  });
+  if (submitted.exitCode !== 0) {
+    const message = commandError(submitted);
+    // The submit may have landed with only its response lost; never delete or
+    // report a failure for a review GitHub already shows as submitted.
+    const current = await runtime.runCommand("gh", hostnameArgs(ref.host, ["api", `${reviewsEndpoint}/${reviewId}`]));
+    if (current.exitCode === 0) {
+      try {
+        const state = JSON.parse(current.stdout)?.state;
+        if (typeof state === "string" && state !== "PENDING") return { status: "complete" };
+      } catch {
+        // unknown state: treat as still pending
+      }
+    }
+    const deleted = await runtime.runCommand(
+      "gh",
+      hostnameArgs(ref.host, ["api", `${reviewsEndpoint}/${reviewId}`, "--method", "DELETE"]),
+    );
+    if (deleted.exitCode !== 0) {
+      throw new Error(`Failed to submit PR review: ${message}. ${PENDING_REVIEW_REMAINS}`);
+    }
+    throw new Error(`Failed to submit PR review: ${message}`);
+  }
   return { status: "complete" };
 }
 

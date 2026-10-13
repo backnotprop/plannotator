@@ -3,7 +3,7 @@ import { storage } from '@plannotator/ui/utils/storage';
 /**
  * One-time gate for the PR feedback-destination spotlight — the coachmark that
  * points first-time PR reviewers at the header's Agent/GitHub destination
- * switcher. Cookie-based, mirroring the guide-intro and review-setup gates.
+ * switcher. Cookie-based, mirroring the other review first-run gates.
  * Versioned so a meaningful revision can re-show it.
  */
 const SPOTLIGHT_SEEN_KEY = 'plannotator-review-dest-spotlight-seen';

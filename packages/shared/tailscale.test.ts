@@ -13,6 +13,7 @@ import {
   buildServeArgs,
   buildServeOffArgs,
   checkServeStatusPort,
+  serveStatusProxy,
   describeTailscaleFailure,
   detectTailnetHost,
   extractServeHttpsUrl,
@@ -132,6 +133,33 @@ describe("serve command construction", () => {
       "http://127.0.0.1:19432",
     ]);
     expect(buildServeOffArgs(19432)).toEqual(["serve", "--https=19432", "off"]);
+  });
+
+  test("the Inbox's two-port form: a stable tailnet HTTPS port in front of this run's loopback port", () => {
+    expect(buildServeArgs(52817, 8443)).toEqual(["serve", "--bg", "--https=8443", "http://127.0.0.1:52817"]);
+  });
+});
+
+describe("serveStatusProxy", () => {
+  // The shape `tailscale serve status --json` printed on a Mac (1.9x) with a 443 mapping and the Inbox's 8443.
+  const status = JSON.stringify({
+    TCP: { "443": { HTTPS: true }, "8443": { HTTPS: true } },
+    Web: {
+      "macbook.tail0000.ts.net:443": { Handlers: { "/": { Proxy: "http://127.0.0.1:5274" } } },
+      "macbook.tail0000.ts.net:8443": { Handlers: { "/": { Proxy: "http://127.0.0.1:52817" } } },
+    },
+  });
+
+  test("names the proxy target of the mapping on a port, so a caller can tell its own from another's", () => {
+    expect(serveStatusProxy(status, 8443)).toEqual({ state: "mapped", proxy: "http://127.0.0.1:52817" });
+    expect(serveStatusProxy(status, 443)).toEqual({ state: "mapped", proxy: "http://127.0.0.1:5274" });
+    expect(serveStatusProxy(status, 9443)).toEqual({ state: "free" });
+    expect(serveStatusProxy("null", 8443)).toEqual({ state: "free" });
+    expect(serveStatusProxy("not json", 8443)).toEqual({ state: "malformed" });
+  });
+
+  test("a mapping with no proxy handler (a TCP forward) reads as someone else's", () => {
+    expect(serveStatusProxy(JSON.stringify({ TCP: { "8443": { TCPForward: "127.0.0.1:22" } } }), 8443)).toEqual({ state: "mapped", proxy: "" });
   });
 });
 

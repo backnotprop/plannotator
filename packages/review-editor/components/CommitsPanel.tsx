@@ -34,13 +34,16 @@ interface CommitsPanelProps {
   onSelectPanelView: (view: ReviewPanelView) => void;
   /** Whether the Git status segment is offered (since-base capable repos). */
   showSectionsOption: boolean;
+  /** Badge on the `isHead` row: `HEAD` for git, `@` (the working copy) for jj. */
+  headLabel?: string;
 }
 
 const CommitRow: React.FC<{
   commit: CommitListEntry;
   isActive: boolean;
+  headLabel: string;
   onSelect: () => void;
-}> = ({ commit, isActive, onSelect }) => (
+}> = ({ commit, isActive, headLabel, onSelect }) => (
   <button
     onClick={onSelect}
     className={`w-full text-left px-2 py-1.5 transition-colors ${
@@ -53,7 +56,7 @@ const CommitRow: React.FC<{
       <span className="text-xs truncate flex-1">{commit.subject}</span>
       {commit.isHead && (
         <span className="text-[9px] leading-none px-1 py-0.5 rounded bg-primary/15 text-primary font-medium flex-shrink-0">
-          HEAD
+          {headLabel}
         </span>
       )}
       <span className="text-[10px] text-muted-foreground/70 tabular-nums flex-shrink-0">
@@ -105,6 +108,7 @@ export const CommitsPanel: React.FC<CommitsPanelProps> = ({
   onRetry,
   onSelectPanelView,
   showSectionsOption,
+  headLabel = 'HEAD',
 }) => {
   // isPastBase is a suffix of the linear walk (reachability from the base is
   // monotone along first parents), so one boundary is exhaustive.
@@ -168,6 +172,7 @@ export const CommitsPanel: React.FC<CommitsPanelProps> = ({
                   <CommitRow
                     commit={commit}
                     isActive={commit.sha === activeCommitSha}
+                    headLabel={headLabel}
                     onSelect={() => onSelectCommit(commit.sha)}
                   />
                 </React.Fragment>

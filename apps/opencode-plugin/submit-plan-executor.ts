@@ -3,7 +3,7 @@ import path from "node:path";
 import {
   getPlanApprovedPrompt,
   getPlanApprovedWithNotesPrompt,
-  getPlanDeniedPrompt,
+  composePlanDeniedMessage,
   getPlanToolName,
 } from "@plannotator/shared/prompts";
 import { sanitizeTag } from "@plannotator/shared/project";
@@ -27,6 +27,8 @@ export interface SubmitPlanReviewResult {
   feedback?: string;
   savedPath?: string;
   agentSwitch?: string;
+  /** The reviewer only answered the plan's questions: `plan.answered`. */
+  answersOnly?: boolean;
 }
 
 export interface SubmitPlanInvocation {
@@ -111,11 +113,11 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
   if (!reviewResult.approved) {
     const lineNumberedPlan = formatWithLineNumbers(planContent);
     const totalLines = planContent.split("\n").length;
-    return getPlanDeniedPrompt("opencode", undefined, {
+    return composePlanDeniedMessage("opencode", undefined, {
       toolName: getPlanToolName("opencode"),
       planFileRule: "",
       feedback: reviewResult.feedback || "Plan changes requested",
-    }) + `\n\n## Current Plan (${totalLines} lines)\n\nThe plan below shows the current state with line numbers. Use these exact line numbers in your next \`submit_plan\` call:\n\n\`\`\`\n${lineNumberedPlan}\n\`\`\`\n\nCall \`submit_plan\` with targeted edits to address the feedback above.`;
+    }, { answersOnly: reviewResult.answersOnly }) + `\n\n## Current Plan (${totalLines} lines)\n\nThe plan below shows the current state with line numbers. Use these exact line numbers in your next \`submit_plan\` call:\n\n\`\`\`\n${lineNumberedPlan}\n\`\`\`\n\nCall \`submit_plan\` with targeted edits to address the feedback above.`;
   }
 
   try {

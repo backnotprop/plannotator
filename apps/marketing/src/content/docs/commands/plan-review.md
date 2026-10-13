@@ -29,6 +29,8 @@ Agent resubmits → Plan Diff shows what changed
 
 The hook configuration lives at `apps/hook/hooks/hooks.json` and matches the `ExitPlanMode` tool name.
 
+On Claude Code 2.1.287 or newer, the [Plannotator mod](/docs/guides/claude-code/#the-plannotator-mod) runs plan review instead of the hook, and Claude does not wait. When the review opens, Claude ends its turn, and your decision arrives later as a message. A revised plan updates the same tab. After you approve, Claude calls `ExitPlanMode` once more and works from the exact plan text you approved.
+
 ## Codex flow
 
 Codex does not expose a dedicated `ExitPlanMode` interception point. Instead, Plannotator integrates through Codex's experimental `Stop` hook.

@@ -50,6 +50,54 @@ describe("completion semantics — empty/unparseable output fails the job", () =
     expect(parseClaudeStreamOutput("not json\n{ broken")).toBeNull();
   });
 
+  // Claude Code 2.1.x emits one result event per settled turn when the main
+  // agent launches background subagents (result_index 0..n); the trailing ones
+  // can be empty or errors. Reading only the LAST result failed runs that did
+  // deliver findings ("Review finished but produced no usable findings").
+  const findings = { findings: [{ file: "a.ts", line: 1, end_line: 1, severity: "nit", description: "d", reasoning: "r" }] };
+  const emptyTrailing = { type: "result", subtype: "success", is_error: false, num_turns: 0, result_index: 2 };
+
+  test("parseClaudeStreamOutput reads findings from an earlier result when trailing results are empty", () => {
+    const stdout = [
+      JSON.stringify({ type: "result", subtype: "success", is_error: false, result_index: 0, structured_output: findings }),
+      JSON.stringify({ ...emptyTrailing, result_index: 1 }),
+      JSON.stringify(emptyTrailing),
+    ].join("\n");
+    expect(parseClaudeStreamOutput(stdout)).toEqual(findings);
+  });
+
+  test("parseClaudeStreamOutput keeps earlier findings when a trailing result is an error", () => {
+    const stdout = [
+      JSON.stringify({ type: "result", subtype: "success", is_error: false, result_index: 0, structured_output: findings }),
+      JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: true, num_turns: 0, result_index: 1 }),
+    ].join("\n");
+    expect(parseClaudeStreamOutput(stdout)).toEqual(findings);
+  });
+
+  test("parseClaudeStreamOutput prefers the newest result that carries findings", () => {
+    const newer = { findings: [] };
+    const stdout = [
+      JSON.stringify({ type: "result", is_error: false, structured_output: findings }),
+      JSON.stringify({ type: "result", is_error: false, structured_output: newer }),
+      JSON.stringify(emptyTrailing),
+    ].join("\n");
+    expect(parseClaudeStreamOutput(stdout)).toEqual(newer);
+  });
+
+  test("parseClaudeStreamOutput returns null when no result event carries findings", () => {
+    const stdout = [
+      JSON.stringify({ type: "result", is_error: false, result_index: 0 }),
+      JSON.stringify({ type: "result", is_error: true, result_index: 1 }),
+      JSON.stringify({ type: "result", is_error: false, structured_output: { summary: "no findings key" } }),
+    ].join("\n");
+    expect(parseClaudeStreamOutput(stdout)).toBeNull();
+  });
+
+  test("parseClaudeStreamOutput never uses an error result, even with findings attached", () => {
+    const stdout = JSON.stringify({ type: "result", is_error: true, structured_output: findings });
+    expect(parseClaudeStreamOutput(stdout)).toBeNull();
+  });
+
   test("markJobReviewFailed flips the job to failed with a calm, leak-free reason", () => {
     const job = { status: "running" } as unknown as AgentJobInfo;
     markJobReviewFailed(job, REVIEW_OUTPUT_FAILED);

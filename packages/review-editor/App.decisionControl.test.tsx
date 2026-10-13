@@ -42,10 +42,6 @@ mock.module("./workerPool", () => ({
   useIsWorkerPoolReadyOrDisabled: () => true,
   useWorkerPoolThemeSync: () => {},
 }));
-// Image assets only Vite can load; the values are never asserted.
-mock.module("@plannotator/ui/assets/workspaces.webp", () => ({ default: "workspaces.webp" }));
-mock.module("@plannotator/ui/assets/review-sections.png", () => ({ default: "review-sections.png" }));
-mock.module("@plannotator/ui/assets/review-tree.png", () => ({ default: "review-tree.png" }));
 
 const hasDom = typeof document !== "undefined";
 
@@ -62,15 +58,14 @@ const memoryBackend: StorageBackend = {
   removeItem: (key) => void memory.delete(key),
 };
 
-/** Suppress the one-time dialog chain (guide intro → look-and-feel → review
- *  setup → edit mode → token hover → terminal tools) so the header is
- *  interactable on first render. */
+/** Suppress the one-time dialog chain (guide intro → look-and-feel → edit
+ *  mode → token hover → terminal tools) so the header is interactable on
+ *  first render. */
 function seedFirstRunSeen(): void {
   memory.set("plannotator-plan-look-choice-resolved", "true");
   memory.set("plannotator-announce-tui-herdr-seen", "1");
   memory.set("plannotator-guide-intro-seen", "2");
   memory.set("plannotator-guide-hint-acked", "true");
-  memory.set("plannotator-review-setup-seen", "true");
   memory.set("plannotator-edit-mode-announcement-seen", "3");
   memory.set("plannotator-review-dest-spotlight-seen", "1");
 }
@@ -117,8 +112,13 @@ class StubEventSource {
 
 interface SubmittedBody {
   endpoint: "feedback" | "exit" | "pr-action";
+  /** /api/pr-action only: the review event the dialog posted (#1611). */
+  action?: string;
+  body?: string;
   approved?: boolean;
   feedback?: string;
+  /** /api/feedback only: set by the platform path's status post, never by an agent-path decision. */
+  platform?: unknown;
   annotations?: Array<{
     id?: string;
     type?: string;
@@ -141,6 +141,8 @@ let advertiseApprovalNotes = false;
 /** Extra fields merged into the /api/diff payload — a PR session is entered by
  *  shipping `prMetadata` (+ `platformUser`) exactly the way the server does. */
 let prDiffExtras: Record<string, unknown> | null = null;
+/** What /api/ai/capabilities answers; Ask AI is off unless a test says so. */
+let aiCapabilities: Record<string, unknown> = { available: false, providers: [] };
 
 /** GithubPRMetadata shape the diff payload carries in PR mode. */
 const PR_METADATA = {
@@ -215,11 +217,12 @@ function makeFetch(): typeof fetch {
       });
     }
     if (url.pathname === "/api/pr-action") {
-      submissions.push({ endpoint: "pr-action" });
+      const posted = JSON.parse(String(init?.body ?? "{}")) as { action?: string; body?: string };
+      submissions.push({ endpoint: "pr-action", action: posted.action, body: posted.body });
       return Response.json({ ok: true, submission: { status: "complete" } });
     }
     if (url.pathname === "/api/diff/fresh") return Response.json({ fresh: true });
-    if (url.pathname === "/api/ai/capabilities") return Response.json({ available: false, providers: [] });
+    if (url.pathname === "/api/ai/capabilities") return Response.json(aiCapabilities);
     if (url.pathname === "/api/draft") return Response.json({ error: "Not found" }, { status: 404 });
     if (url.pathname === "/api/feedback") {
       submissions.push({
@@ -344,6 +347,7 @@ afterEach(async () => {
   failFeedbackPosts = 0;
   advertiseApprovalNotes = false;
   prDiffExtras = null;
+  aiCapabilities = { available: false, providers: [] };
   seededExternalAnnotations = [];
   memory.clear();
   resetStorageBackend();
@@ -388,6 +392,9 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     expect(body.approved).toBe(false);
     expect((body.annotations ?? []).some((a) => a.id === "ext-1")).toBe(true);
     expect(body.feedback).toContain("still drops null");
+    // Agent-path feedback is never marked as the platform status post: a host
+    // that saw the flag would log it instead of delivering it.
+    expect("platform" in body).toBe(false);
   });
 
   test("Request changes… delivers the note as a scope:'general' sentinel annotation and in the export", async () => {
@@ -658,6 +665,51 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     expect(submissions).toHaveLength(0);
   });
 
+  test("the Ask this session announcement takes the last turn, and Mod+Enter cannot post behind it", async () => {
+    const DIALOG = "[data-ask-session-announcement-dialog]";
+    aiCapabilities = {
+      available: true,
+      providers: [{
+        id: "session-bridge",
+        name: "session-bridge",
+        label: "Ask this session · Claude Code",
+        capabilities: {},
+        models: [],
+        sessionBridge: { host: "claude-code", status: "ready", modes: { turn: true, transient: false } },
+      }],
+      defaultProvider: null,
+    };
+    await mount(() => document.querySelector(DIALOG), () => {
+      seedFirstRunSeen();
+      memory.set("plannotator-token-hover-announcement-seen", "1");
+    });
+
+    expect(document.querySelector(DIALOG)?.getAttribute("data-ask-session-agent")).toBe("claude-code");
+    expect(document.querySelector(`${DIALOG} [data-ask-session-status="connected"]`)).not.toBeNull();
+
+    const gotIt = Array.from(document.querySelectorAll<HTMLButtonElement>(`${DIALOG} button`))
+      .find((button) => button.textContent?.trim() === "Got it");
+    if (!gotIt) throw new Error("Dismiss action did not render");
+    await act(async () => {
+      gotIt.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true }));
+    });
+    await settle();
+    expect(submissions).toHaveLength(0);
+
+    await act(async () => gotIt.click());
+    await settle();
+    expect(document.querySelector(DIALOG)).toBeNull();
+    expect(memory.get("plannotator-announce-ask-session-seen")).toBe("1");
+    expect(submissions).toHaveLength(0);
+  });
+
+  test("the Ask this session announcement never shares a load with the terminal-tools one", async () => {
+    aiCapabilities = { available: true, providers: [], defaultProvider: null };
+    await mount(() => document.querySelector("[data-terminal-tools-announcement-dialog]"), seedFirstRunSeenExceptTerminalTools);
+    expect(document.querySelector("[data-ask-session-announcement-dialog]")).toBeNull();
+    expect(memory.has("plannotator-announce-ask-session-seen")).toBe(false);
+  });
+
   test("compact touch offers a positive decision row at zero and it posts", async () => {
     // SAFETY: implements the MediaQueryList surface the shell hooks consume;
     // coarse-pointer matches put the app in its compact touch layout.
@@ -700,8 +752,25 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
 // the self-approval mute regressing into a dead end or a live approve, and
 // Mod+Enter double-firing while the dialog is open.
 describe.if(hasDom)("review decision control (platform mode)", () => {
-  const submissionDialogOpen = (title: "Post Review Comments" | `Approve ${string}`) =>
+  const submissionDialogOpen = (title: "Post Review Comments" | "Request Changes" | `Approve ${string}`) =>
     Array.from(document.querySelectorAll("h2")).some((el) => el.textContent === title);
+
+  const eventRadio = (value: "comment" | "request_changes") =>
+    document.querySelector<HTMLInputElement>(`[data-review-event-choice] input[value="${value}"]`);
+
+  const dialogConfirm = (label: string) =>
+    Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+      .find((el) => el.textContent?.trim() === label);
+
+  async function typeGeneralComment(text: string): Promise<void> {
+    const input = document.querySelector<HTMLTextAreaElement>('textarea[placeholder="Leave a comment..."]');
+    if (!input) throw new Error("general comment field is not open");
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      setter.call(input, text);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
 
   async function pressModEnter(): Promise<void> {
     await act(async () => {
@@ -725,6 +794,90 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     expect(submissionDialogOpen("Post Review Comments")).toBe(true);
     // The dialog owns submission: opening it must post NOTHING.
     expect(submissions).toHaveLength(0);
+    // #1611: the primary keeps the plain comment flow, no event choice.
+    expect(document.querySelector("[data-review-event-choice]")).toBeNull();
+  });
+
+  // #1611: the menu promised a request-changes choice that did not exist and
+  // every review posted as COMMENT. These guard the choice reaching the wire.
+  test("Post comments, then… offers Comment / Request changes and posts the chosen event", async () => {
+    seedPlatformSession();
+    seededExternalAnnotations = [EXTERNAL_FINDING];
+    await mountReview();
+    await settle();
+    await settle();
+
+    await openMenu();
+    const thenItem = menuItem("Post comments, then");
+    if (!thenItem) throw new Error("Post comments, then… did not render");
+    await act(async () => thenItem.click());
+    await settle();
+
+    expect(eventRadio("comment")?.checked).toBe(true);
+    const requestChanges = eventRadio("request_changes");
+    if (!requestChanges) throw new Error("Request changes choice did not render");
+    expect(requestChanges.disabled).toBe(false);
+    await act(async () => requestChanges.click());
+    await settle();
+    expect(submissionDialogOpen("Request Changes")).toBe(true);
+
+    const confirm = dialogConfirm("Request Changes");
+    if (!confirm) throw new Error("Request Changes confirm did not render");
+    await act(async () => confirm.click());
+    await settle();
+    const posted = submissions.filter((s) => s.endpoint === "pr-action");
+    expect(posted).toHaveLength(1);
+    expect(posted[0]!.action).toBe("request_changes");
+    // GitHub refuses an empty REQUEST_CHANGES body; inline-only gets the placeholder.
+    expect(posted[0]!.body?.trim()).toBeTruthy();
+  });
+
+  // The status post that follows a platform submission is the ONLY
+  // /api/feedback body that may carry `platform: true`. Hosts used to infer it
+  // from an empty annotations array, which silently dropped agent-path
+  // feedback made only of PR description / PR comment / editor comments.
+  test("the status post after a platform submission marks itself platform: true", async () => {
+    seedPlatformSession();
+    seededExternalAnnotations = [EXTERNAL_FINDING];
+    await mountReview();
+    await settle();
+    await settle();
+
+    await act(async () => primaryButton()!.click());
+    await settle();
+    const confirm = dialogConfirm("Post Comments");
+    if (!confirm) throw new Error("Post Comments confirm did not render");
+    await act(async () => confirm.click());
+    await settle();
+    await settle();
+
+    expect(submissions.filter((s) => s.endpoint === "pr-action")).toHaveLength(1);
+    const status = submissions.filter((s) => s.endpoint === "feedback");
+    expect(status).toHaveLength(1);
+    expect(status[0]!.platform).toBe(true);
+    expect(status[0]!.annotations).toEqual([]);
+  });
+
+  test("empty-state Request changes… preselects Request changes and posts it", async () => {
+    seedPlatformSession();
+    await mountReview();
+
+    await openMenu();
+    const requestItem = menuItem("Request changes");
+    if (!requestItem) throw new Error("Request changes… did not render");
+    expect(requestItem.disabled).toBe(false);
+    await act(async () => requestItem.click());
+    await settle();
+
+    expect(submissionDialogOpen("Request Changes")).toBe(true);
+    expect(eventRadio("request_changes")?.checked).toBe(true);
+    await typeGeneralComment("Please split the parser change.");
+    await act(async () => dialogConfirm("Request Changes")!.click());
+    await settle();
+    const posted = submissions.filter((s) => s.endpoint === "pr-action");
+    expect(posted).toHaveLength(1);
+    expect(posted[0]!.action).toBe("request_changes");
+    expect(posted[0]!.body).toBe("Please split the parser change.");
   });
 
   test("Approve with comments… opens the dialog in approve mode, still posting nothing", async () => {
@@ -795,7 +948,7 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     expect(statuses[0]!.feedback).toContain("approved on GitHub");
   });
 
-  test("self-authored empty state: muted primary is a no-op (click and Mod+Enter); Request changes… stays live", async () => {
+  test("self-authored empty state: muted primary is a no-op (click and Mod+Enter); Request changes… mutes, Comment… stays live", async () => {
     seedPlatformSession({ selfAuthored: true });
     await mountReview();
 
@@ -816,20 +969,33 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     expect(submissionDialogOpen("Approve PR")).toBe(false);
     expect(submissions).toHaveLength(0);
 
-    // No dead end: the menu's Request changes… still opens the comment dialog.
+    // GitHub refuses REQUEST_CHANGES on your own PR like APPROVE (#1611), so
+    // Request changes… mutes with the reason; Comment… is the live path.
     await openMenu();
     const approveItem = menuItem("Approve with a comment");
     if (!approveItem) throw new Error("muted approve item must render, not disappear");
     expect(approveItem.disabled).toBe(true);
     const requestItem = menuItem("Request changes");
-    if (!requestItem) throw new Error("Request changes… did not render");
-    expect(requestItem.disabled).toBe(false);
-    // Roving focus skips the dead row: initial focus lands on the first
+    if (!requestItem) throw new Error("Request changes… must render muted, not disappear");
+    expect(requestItem.disabled).toBe(true);
+    expect(requestItem.textContent).toContain("You can't request changes on your own PR");
+    const commentItem = menuItem("Comment…");
+    if (!commentItem) throw new Error("Comment… did not render");
+    expect(commentItem.disabled).toBe(false);
+    // Roving focus skips the dead rows: initial focus lands on the first
     // NON-disabled row, so keyboard users are never stranded on the mute.
-    expect(document.activeElement).toBe(requestItem);
+    expect(document.activeElement).toBe(commentItem);
     await act(async () => requestItem.click());
     await settle();
+    expect(submissionDialogOpen("Request Changes")).toBe(false);
+    await act(async () => commentItem.click());
+    await settle();
     expect(submissionDialogOpen("Post Review Comments")).toBe(true);
+    // The dialog's Request changes option is disabled with the reason.
+    expect(eventRadio("comment")?.checked).toBe(true);
+    expect(eventRadio("request_changes")?.disabled).toBe(true);
+    expect(document.getElementById("review-request-changes-reason")?.textContent)
+      .toContain("own pull request");
     expect(submissions).toHaveLength(0);
   });
 

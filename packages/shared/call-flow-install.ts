@@ -9,6 +9,7 @@
  * download. The data-dir lease in call-flow-install-lock.ts separately
  * serializes verified publication across server processes.
  */
+import { isSameOriginOrNoOrigin } from "./request-origin";
 import { installCallFlowLanguagePack, installCallFlowRuntime, preflightCallFlowNode } from "./call-flow";
 import type { CallFlowNodePreflight, CallFlowRuntimeInstallResult } from "./call-flow";
 import type { CallFlowLanguageId } from "./call-flow-languages";
@@ -132,11 +133,10 @@ export class CallFlowInstallCoordinator {
  * the request host. Same-origin requests and non-browser clients (no Origin
  * header) pass.
  */
-export function callFlowInstallOriginAllowed(originHeader: string | null | undefined, requestHost: string): boolean {
-  if (!originHeader) return true;
-  try {
-    return new URL(originHeader).host === requestHost;
-  } catch {
-    return false;
-  }
+export function callFlowInstallOriginAllowed(
+  originHeader: string | null | undefined,
+  requestHost: string,
+  fetchSite?: string | string[] | null,
+): boolean {
+  return isSameOriginOrNoOrigin(originHeader, requestHost, fetchSite);
 }

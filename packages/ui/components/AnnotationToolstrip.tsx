@@ -36,6 +36,12 @@ export interface AnnotationToolstripProps {
    * retain the complete action-mode group.
    */
   hideQuickLabel?: boolean;
+  /**
+   * Omit only the Redline action. Defaults to false. For a host whose
+   * composer is its own (the Inbox surface on a phone draws Select, Pinpoint,
+   * Markup and Comment).
+   */
+  hideRedline?: boolean;
 }
 
 /** Render the shared input-method and annotation-mode controls. */
@@ -50,6 +56,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
   iconOnly = false,
   hideInputMethodSwitch = false,
   hideQuickLabel = false,
+  hideRedline = false,
 }) => {
   const [showHelp, setShowHelp] = useState(false);
   const [helpTab, setHelpTab] = useState<'selection' | 'plannotator'>('selection');
@@ -136,6 +143,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
               </svg>
             }
           />
+          {!hideRedline && (
           <ToolstripButton
             active={mode === 'redline'}
             onClick={() => onModeChange('redline')}
@@ -150,6 +158,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
               </svg>
             }
           />
+          )}
           {!hideQuickLabel && (
             <ToolstripButton
               active={mode === 'quickLabel'}

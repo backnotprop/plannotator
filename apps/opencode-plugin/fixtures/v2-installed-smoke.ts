@@ -10,11 +10,17 @@ if (!opencodeBin || !pluginTarball) {
 }
 
 // OpenCode 2 installs the configured plugin through the throwaway registry below before the
-// plugin
-// can appear in /api/plugin, and it answers /api/health only once the server has finished
-// booting. On a warm macOS dev box that is ~0.8s to healthy and ~6s to activated; on a cold
-// Linux CI runner the measured numbers are ~9s and ~47s. These budgets are sized for the slow
-// path with headroom — the job's own timeout is the real backstop against a genuine hang.
+// plugin can appear in /api/plugin, and it answers its status endpoint only once the server
+// has finished booting. On a warm macOS dev box that is ~0.8s to healthy and ~6s to activated;
+// on a cold Linux CI runner the measured numbers are ~9s and ~47s. These budgets are sized for
+// the slow path with headroom — the job's own timeout is the real backstop against a genuine
+// hang.
+//
+// The status endpoint moved: current OpenCode 2 serves /api/info (upstream 13453f2da,
+// "refactor(protocol): consolidate server status", removed /api/health), while older builds
+// only have /api/health. The readiness poll tries them newest first, so the smoke runs against
+// either.
+const STATUS_ENDPOINTS = ["/api/info", "/api/health"] as const;
 const HEALTH_TIMEOUT_MS = readTimeout("PLANNOTATOR_SMOKE_HEALTH_TIMEOUT_MS", 120_000);
 const PLUGIN_TIMEOUT_MS = readTimeout("PLANNOTATOR_SMOKE_PLUGIN_TIMEOUT_MS", 300_000);
 // Per-request cap so one wedged request can never swallow the whole budget: the loop has to
@@ -56,8 +62,8 @@ for (const entry of readdirSync(stubSource)) {
   if (entry.endsWith(".md")) copyFileSync(path.join(stubSource, entry), path.join(stubsDir, entry));
 }
 
-// Set when the host is known to ship the post-#44765 command API (the `beta` /
-// `dev` channels). CI runs a `next` build, where the stubs legitimately win.
+// Set when the host is known to ship the post-#44765 command API, including the
+// stable @opencode/cli used in CI. Older V2 hosts can still exercise the fallback.
 const expectNativeCommands = process.env.PLANNOTATOR_SMOKE_EXPECT_NATIVE === "1";
 
 const env = {
@@ -179,29 +185,33 @@ async function waitForHealthyServer(url: string): Promise<void> {
   let lastReport = Date.now();
   let lastSeen = "no response yet";
   while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`${url}/api/health`, {
-        headers: authHeaders(),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
-      const body = (await response.text()).slice(0, 500);
-      if (response.ok) {
-        console.error(`healthy after ${elapsed()}`);
-        return;
+    const attempts: string[] = [];
+    for (const endpoint of STATUS_ENDPOINTS) {
+      try {
+        const response = await fetch(`${url}${endpoint}`, {
+          headers: authHeaders(),
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
+        const body = (await response.text()).slice(0, 500);
+        if (response.ok) {
+          console.error(`healthy (${endpoint}) after ${elapsed()}`);
+          return;
+        }
+        attempts.push(`${endpoint} HTTP ${response.status}: ${body}`);
+      } catch (error) {
+        attempts.push(`${endpoint} ${(error as Error).name}: ${(error as Error).message}`);
       }
-      lastSeen = `HTTP ${response.status}: ${body}`;
-    } catch (error) {
-      lastSeen = `${(error as Error).name}: ${(error as Error).message}`;
     }
+    lastSeen = attempts.join(" | ");
     if (Date.now() - lastReport >= PROGRESS_INTERVAL_MS) {
       lastReport = Date.now();
-      console.error(`still waiting for /api/health after ${elapsed()} — last: ${lastSeen}`);
+      console.error(`still waiting for ${STATUS_ENDPOINTS.join(" or ")} after ${elapsed()} — last: ${lastSeen}`);
     }
     await Bun.sleep(250);
   }
   throw new Error(
     `OpenCode 2 smoke server did not become healthy within ${HEALTH_TIMEOUT_MS}ms (waited ${elapsed()}). ` +
-      `Last /api/health result: ${lastSeen}`,
+      `Last status result: ${lastSeen}`,
   );
 }
 

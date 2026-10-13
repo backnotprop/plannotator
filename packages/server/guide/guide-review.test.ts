@@ -1,7 +1,8 @@
 import { describe, it, expect } from "bun:test";
 import { readFileSync } from "node:fs";
+import * as guideReview from "./guide-review";
+import * as coreGuidePrompt from "@plannotator/shared/guide-prompt";
 import {
-  GUIDE_NO_SECTIONS_ERROR,
   GUIDE_REVIEW_PROMPT,
   buildGuideMarkerOutputContract,
   buildGuideUserMessage,
@@ -9,7 +10,6 @@ import {
   composeGuideMethodology,
   createGuideSession,
   repairGuideJsonText,
-  validateGuideOutput,
   parseGuideStreamOutput,
 } from "./guide-review";
 import { GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS } from "@plannotator/shared/guide";
@@ -32,125 +32,24 @@ function guideJson(sections: unknown, extra: Record<string, unknown> = {}): stri
   return JSON.stringify({ title: "T", intent: "I", sections, unplacedFiles: [], ...extra });
 }
 
-describe("validateGuideOutput", () => {
-  it("gives a diffs-only section a fallback title instead of a blank chapter (round 12)", () => {
-    const raw = JSON.parse(guideJson([{ title: "", overview: "", diffs: [{ file: "src/a.ts" }] }]));
-    const result = validateGuideOutput(raw, FILES);
-    if ("error" in result) throw new Error(result.error);
-    expect(result.guide.sections[0].title).toBe("Untitled section");
-    expect(result.guide.sections[0].diffs).toEqual([{ file: "src/a.ts" }]);
-  });
+// validateGuideOutput's own coverage lives beside it in
+// packages/core/guide-prompt.test.ts.
 
-  it("first placement wins on duplicate refs; loser section keeps its other files", () => {
-    const raw = JSON.parse(
-      guideJson([
-        { title: "One", overview: "o", diffs: [{ file: "src/a.ts" }] },
-        { title: "Two", overview: "o", diffs: [{ file: "src/a.ts" }, { file: "src/b.ts" }] },
-      ]),
-    );
-    const result = validateGuideOutput(raw, FILES);
-    if ("error" in result) throw new Error(result.error);
-    expect(result.guide.sections[0].diffs).toEqual([{ file: "src/a.ts" }]);
-    expect(result.guide.sections[1].diffs).toEqual([{ file: "src/b.ts" }]);
-  });
-
-  it("drops refs outside changedFiles and fails closed when nothing survives", () => {
-    const raw = JSON.parse(guideJson([{ title: "X", overview: "", diffs: [{ file: "not/changed.ts" }] }]));
-    const result = validateGuideOutput(raw, FILES);
-    expect("error" in result).toBe(true);
-  });
-
-  it("explains a fully-invalidated guide whose refs were outside the changeset (count + example paths)", () => {
-    // The model guided a different commit than the one under review — the
-    // failure card must say so instead of the bare generic message. Asserts
-    // the data the message carries (count, example paths, the Commits-panel
-    // pointer), not the surrounding prose.
-    const raw = JSON.parse(
-      guideJson([
-        { title: "X", overview: "o", diffs: [{ file: "other/one.ts" }, { file: "other/two.ts" }] },
-        { title: "Y", overview: "o", diffs: [{ file: "other/three.ts" }, { file: "other/four.ts" }] },
-      ]),
-    );
-    const result = validateGuideOutput(raw, FILES);
-    if (!("error" in result)) throw new Error("expected a validation error");
-    expect(result.error).toContain("4 file(s) outside the changeset");
-    expect(result.error).toContain("other/one.ts");
-    expect(result.error).toContain("Commits panel");
-    // Examples are capped at 3 — the fourth path must not be listed.
-    expect(result.error).not.toContain("other/four.ts");
-  });
-
-  it("keeps the generic message for genuinely structural emptiness (no outside-changeset drops)", () => {
-    const noSections = validateGuideOutput(JSON.parse(guideJson([])), FILES);
-    if (!("error" in noSections)) throw new Error("expected a validation error");
-    expect(noSections.error).toBe(GUIDE_NO_SECTIONS_ERROR);
-
-    // A zero-diff section with a blank overview dies structurally, not
-    // because of the changeset — same generic message.
-    const blankOverview = validateGuideOutput(
-      JSON.parse(guideJson([{ title: "S", overview: "", diffs: [] }])),
-      FILES,
-    );
-    if (!("error" in blankOverview)) throw new Error("expected a validation error");
-    expect(blankOverview.error).toBe(GUIDE_NO_SECTIONS_ERROR);
-  });
-
-  it("keeps a deliberate prose-only section but drops one that LOST its diffs to validation", () => {
-    const raw = JSON.parse(
-      guideJson([
-        { title: "Context", overview: "Background reading.", diffs: [] },
-        { title: "Ghost", overview: "Had only invalid refs.", diffs: [{ file: "not/changed.ts" }] },
-        { title: "Real", overview: "o", diffs: [{ file: "src/a.ts" }] },
-      ]),
-    );
-    const result = validateGuideOutput(raw, FILES);
-    if ("error" in result) throw new Error(result.error);
-    expect(result.guide.sections.map((s) => s.title)).toEqual(["Context", "Real"]);
-  });
-
-  it("unplacedFiles = unplaced changed files, deduped against placements, ignoring fabricated entries", () => {
-    const raw = JSON.parse(
-      guideJson([{ title: "S", overview: "o", diffs: [{ file: "src/a.ts" }] }], {
-        // a.ts is placed (must not double-render); fake.ts is not a changed file.
-        unplacedFiles: ["src/a.ts", "fake.ts", "src/b.ts"],
-      }),
-    );
-    const result = validateGuideOutput(raw, FILES);
-    if ("error" in result) throw new Error(result.error);
-    expect(result.guide.unplacedFiles?.sort()).toEqual(["src/b.ts", "src/c.ts"]);
-  });
-
-  it("carries per-file summaries through, omitting blank/non-string ones without dropping the ref", () => {
-    const raw = JSON.parse(
-      guideJson([
-        {
-          title: "S",
-          overview: "o",
-          diffs: [
-            { file: "src/a.ts", summary: "Adds the thing." },
-            { file: "src/b.ts", summary: "   " },
-            { file: "src/c.ts", summary: 42 },
-          ],
-        },
-      ]),
-    );
-    const result = validateGuideOutput(raw, FILES);
-    if ("error" in result) throw new Error(result.error);
-    expect(result.guide.sections[0].diffs).toEqual([
-      { file: "src/a.ts", summary: "Adds the thing." },
-      { file: "src/b.ts" },
-      { file: "src/c.ts" },
-    ]);
-  });
-
-  it("coerces non-string title/intent from prompt-only marker engines", () => {
-    const raw = JSON.parse(guideJson([{ title: "S", overview: "o", diffs: [{ file: "src/a.ts" }] }]));
-    raw.title = 42;
-    raw.intent = { nested: true };
-    const result = validateGuideOutput(raw, FILES);
-    if ("error" in result) throw new Error(result.error);
-    expect(result.guide.title).toBe("Guided review");
-    expect(result.guide.intent).toBe("");
+describe("guide prompt re-exports", () => {
+  it("serves the published @plannotator/core/guide-prompt implementation, not a copy", () => {
+    // External hosts (Workspaces) generate guides from @plannotator/core; the
+    // in-app engines must run the very same prompt, schema and validator, so a
+    // re-inlined server copy that could drift from the published one fails here.
+    // (@plannotator/shared/guide-prompt is the one-line re-export of core.)
+    for (const name of [
+      "GUIDE_REVIEW_PROMPT",
+      "GUIDE_SCHEMA_JSON",
+      "GUIDE_NO_SECTIONS_ERROR",
+      "buildGuideUserMessage",
+      "validateGuideOutput",
+    ] as const) {
+      expect(guideReview[name]).toBe(coreGuidePrompt[name]);
+    }
   });
 });
 
@@ -201,6 +100,33 @@ describe("parseGuideStreamOutput", () => {
     expect(Array.isArray(out?.sections)).toBe(true);
   });
 
+  // Multiple result events: see findClaudeStructuredOutput in claude-review.ts.
+  it("reads an earlier result's guide when trailing results are empty or errors", () => {
+    const guide = JSON.parse(guideJson([{ title: "Early", overview: "o", diffs: [{ file: "f" }] }]));
+    const stream = [
+      JSON.stringify({ type: "result", is_error: false, result_index: 0, structured_output: guide }),
+      JSON.stringify({ type: "result", is_error: false, num_turns: 0, result_index: 1 }),
+      JSON.stringify({ type: "result", is_error: true, num_turns: 0, result_index: 2 }),
+    ].join("\n");
+    expect(parseGuideStreamOutput(stream)?.sections?.[0]?.title).toBe("Early");
+  });
+
+  it("still repairs a truncated result line followed by an empty trailing result", () => {
+    const guide = guideJson([{ title: "S", overview: "o", diffs: [{ file: "f" }] }]);
+    const stream = [
+      `{"type":"result","structured_output":${guide.slice(0, guide.length - 20)}`,
+      JSON.stringify({ type: "result", is_error: false, num_turns: 0 }),
+    ].join("\n");
+    expect(Array.isArray(parseGuideStreamOutput(stream)?.sections)).toBe(true);
+  });
+
+  it("returns null when no result event carries a guide with sections", () => {
+    const stream = [
+      JSON.stringify({ type: "result", is_error: false, structured_output: { sections: [] } }),
+      JSON.stringify({ type: "result", is_error: false, num_turns: 0 }),
+    ].join("\n");
+    expect(parseGuideStreamOutput(stream)).toBeNull();
+  });
   it("returns null on empty stdout", () => {
     expect(parseGuideStreamOutput("")).toBeNull();
   });
@@ -293,6 +219,36 @@ describe("guide extra instructions (#1265)", () => {
     expect(built.label).toBe("Guide Repair");
     expect(built.prompt).not.toContain("## Additional reviewer instructions");
     expect(built.prompt).not.toContain("Use product names.");
+  });
+});
+
+describe("createGuideSession Claude completion with several result events", () => {
+  it("captures the newest result's structured_output for repair, not a trailing empty result", async () => {
+    const jobId = "claude-invalid-then-empty";
+    // An output the parse rejects (no sections), then a trailing empty result:
+    // the repair UI must still get the rejected output to start from.
+    const rejected = { title: "T", intent: "I", sections: [] };
+    const stdout = [
+      JSON.stringify({ type: "result", is_error: false, result_index: 0, structured_output: rejected }),
+      JSON.stringify({ type: "result", is_error: false, num_turns: 0, result_index: 1 }),
+    ].join("\n");
+    const session = createGuideSession();
+    const result = await session.onJobComplete({ job: { id: jobId, engine: "claude" }, meta: { stdout }, changedFiles: FILES });
+    expect(result.summary).toBeNull();
+    expect(JSON.parse(session.getFailedPayload(jobId) ?? "null")).toEqual(rejected);
+  });
+
+  it("completes a guide delivered by an earlier result event", async () => {
+    const jobId = "claude-valid-then-empty";
+    const guide = JSON.parse(guideJson([{ title: "Early", overview: "o", diffs: [{ file: "src/a.ts", summary: "A." }] }]));
+    const stdout = [
+      JSON.stringify({ type: "result", is_error: false, result_index: 0, structured_output: guide }),
+      JSON.stringify({ type: "result", is_error: true, num_turns: 0, result_index: 1 }),
+    ].join("\n");
+    const session = createGuideSession();
+    const result = await session.onJobComplete({ job: { id: jobId, engine: "claude" }, meta: { stdout }, changedFiles: FILES });
+    expect(result.summary?.correctness).toBe("Guide Generated");
+    expect(session.getGuide(jobId)?.sections[0].title).toBe("Early");
   });
 });
 

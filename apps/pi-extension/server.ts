@@ -34,6 +34,7 @@ export {
 	getVcsContext,
 	getVcsDiffFingerprint,
 	getVcsFileContentsForDiff,
+	getVcsFileBytesForDiff,
 	prepareLocalReviewDiff,
 	resolveInitialDiffType,
 	resolveVcsCwd,

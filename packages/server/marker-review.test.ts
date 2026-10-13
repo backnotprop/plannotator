@@ -135,14 +135,23 @@ describe("buildMarkerCommand: opencode", () => {
     expect(command[1]).toBe("run");
     expect(command[command.indexOf("--format") + 1]).toBe("json");
     expect(command[command.indexOf("--agent") + 1]).toBe("plan");
-    expect(command[command.indexOf("--dir") + 1]).toBe("/repo");
     expect(command[command.indexOf("--model") + 1]).toBe("opencode/glm-5.1");
     expect(command).not.toContain("--dangerously-skip-permissions");
     expect(command[command.length - 1]).toBe("review this");
   });
 
-  test("omits --model when empty; --dir when no cwd", () => {
+  test("omits --model when empty", () => {
     expect(buildMarkerCommand(opencode, "p", "", "/repo").command).not.toContain("--model");
+  });
+
+  // #1609: OpenCode v2's `run` rejects `--dir` ("Unrecognized flag: --dir in
+  // command opencode run"). The working directory rides the job's spawn cwd
+  // instead (asserted end-to-end in agent-jobs-launch.test.ts), so the argv must
+  // never carry it, with or without a cwd.
+  test("never passes --dir, with or without a cwd (#1609)", () => {
+    const withCwd = buildMarkerCommand(opencode, "p", "opencode/glm-5.1", "/repo").command;
+    expect(withCwd).not.toContain("--dir");
+    expect(withCwd).not.toContain("/repo");
     expect(buildMarkerCommand(opencode, "p").command).not.toContain("--dir");
   });
 });

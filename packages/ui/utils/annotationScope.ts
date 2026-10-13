@@ -87,6 +87,12 @@ export function groupAnnotationsByDocument(
   documents: Iterable<AnnotationDocumentInput>,
   currentPath: string | null,
   roots: readonly string[] = [],
+  /**
+   * A fixed reading order (a review of several files): groups follow it, the
+   * open document included, and documents outside it come after, by path.
+   * Absent: the open document first, the rest by path.
+   */
+  order?: readonly string[] | null,
 ): AnnotationDocumentGroup[] {
   const normalizedCurrent = currentPath ? normalizeBrowserPath(currentPath) : null;
   const groups: AnnotationDocumentGroup[] = [];
@@ -101,6 +107,12 @@ export function groupAnnotationsByDocument(
       annotations: [...doc.annotations],
       isCurrent: path === normalizedCurrent,
     });
+  }
+  if (order) {
+    const ranks = new Map(order.map((path, index) => [normalizeBrowserPath(path), index]));
+    const rank = (path: string) => ranks.get(path) ?? order.length;
+    groups.sort((a, b) => rank(a.path) - rank(b.path) || a.path.localeCompare(b.path));
+    return groups;
   }
   groups.sort((a, b) => {
     if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
@@ -124,6 +136,8 @@ export function buildAnnotationDocumentGroups(input: {
   cached: Iterable<readonly [string, readonly Annotation[]]>;
   current: { key: string; label?: string; annotations: readonly Annotation[] };
   roots?: readonly string[];
+  /** A fixed reading order; see groupAnnotationsByDocument. */
+  order?: readonly string[] | null;
 }): AnnotationDocumentGroup[] {
   const byPath = new Map<string, readonly Annotation[]>();
   for (const [path, annotations] of input.cached) byPath.set(path, annotations);
@@ -136,6 +150,7 @@ export function buildAnnotationDocumentGroups(input: {
     })),
     input.current.key,
     input.roots ?? [],
+    input.order,
   );
 }
 

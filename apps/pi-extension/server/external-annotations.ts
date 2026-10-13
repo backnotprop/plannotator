@@ -37,8 +37,7 @@ export function createExternalAnnotationHandler(mode: "plan" | "review") {
 	const subscribers = new Set<ServerResponse>();
 	const transform = mode === "plan" ? transformPlanInput : transformReviewInput;
 
-	// Wire store mutations → SSE broadcast
-	store.onMutation((event: ExternalAnnotationEvent<StorableAnnotation>) => {
+	const broadcast = (event: ExternalAnnotationEvent<StorableAnnotation>) => {
 		const data = serializeSSEEvent(event);
 		for (const res of subscribers) {
 			try {
@@ -48,9 +47,15 @@ export function createExternalAnnotationHandler(mode: "plan" | "review") {
 				subscribers.delete(res);
 			}
 		}
-	});
+	};
+
+	// Wire store mutations → SSE broadcast
+	store.onMutation(broadcast);
 
 	return {
+		/** Send an event that is not a store mutation (session-closed) to every open stream. */
+		broadcast,
+
 		/** Push annotations directly into the store (bypasses HTTP, reuses same validation). */
 		addAnnotations(body: unknown): { ids: string[] } | { error: string } {
 			const parsed = transform(body);

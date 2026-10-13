@@ -25,33 +25,62 @@ const ChatBubbleIcon = () => (
 // ---------------------------------------------------------------------------
 
 interface CompletionOverlayProps {
-  submitted: 'approved' | 'denied' | 'feedback' | 'exited' | null | false;
+  /** `done`: the session finished with nothing sent (an annotate Done with
+   *  no feedback). Neutral styling. `done` and `exited` (Close) send nothing,
+   *  so neither shows the "response has been sent" line. */
+  submitted: 'approved' | 'denied' | 'feedback' | 'done' | 'exited' | null | false;
   title: string;
   subtitle: string;
   agentLabel: string;
+  /**
+   * Optional destinations shown under the subtitle as ordinary links (opened
+   * in a new tab by a real click, so no popup blocker applies) — e.g. the PR
+   * a platform review was just posted to. Omitted or empty renders nothing.
+   */
+  links?: ReadonlyArray<{ href: string; label: string }>;
 }
 
-export function CompletionOverlay({ submitted, title, subtitle, agentLabel }: CompletionOverlayProps) {
+export function CompletionOverlay({ submitted, title, subtitle, agentLabel, links }: CompletionOverlayProps) {
   const { state, enableAndStart } = useAutoClose(!!submitted);
 
   if (!submitted) return null;
 
   const isApproved = submitted === 'approved';
+  const isDone = submitted === 'done';
+  const sentNothing = isDone || submitted === 'exited';
 
   return (
-    <div className="fixed inset-0 z-[100] bg-background flex items-center justify-center">
+    <div className="fixed inset-0 z-[100] bg-background flex items-center justify-center" data-completion-state={submitted}>
       <div className="text-center space-y-6 max-w-md px-8">
         <div
           className={`mx-auto w-16 h-16 rounded-full flex items-center justify-center ${
-            isApproved ? 'bg-success/20 text-success' : 'bg-accent/20 text-accent'
+            isApproved ? 'bg-success/20 text-success'
+            : isDone ? 'bg-muted text-muted-foreground'
+            : 'bg-accent/20 text-accent'
           }`}
         >
-          {isApproved ? <CheckIcon /> : <ChatBubbleIcon />}
+          {isApproved || isDone ? <CheckIcon /> : <ChatBubbleIcon />}
         </div>
 
         <div className="space-y-2">
           <h2 className="text-xl font-semibold text-foreground">{title}</h2>
           <p className="text-muted-foreground">{subtitle}</p>
+          {links && links.length > 0 && (
+            <div className="flex flex-col items-center gap-1 pt-1">
+              {links.map((link) => (
+                <a
+                  key={link.href}
+                  href={link.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-completion-link
+                  className="text-sm font-medium text-primary underline-offset-4 hover:underline break-all"
+                >
+                  {link.label}
+                </a>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="pt-4 border-t border-border space-y-2">
@@ -87,7 +116,7 @@ export function CompletionOverlay({ submitted, title, subtitle, agentLabel }: Co
                   </label>
                   <p className="text-xs text-muted-foreground/60">You can change the delay in Settings.</p>
                 </>
-              ) : (
+              ) : sentNothing ? null : (
                 <p className="text-xs text-muted-foreground/60">Your response has been sent.</p>
               )}
             </>

@@ -11,7 +11,11 @@ import { basename, resolve } from "node:path";
 
 import {
   type DiffResult,
+  type DiffSide,
+  type DiffSideSource,
+  type DiffSideSources,
   type DiffType,
+  type FileBytesRead,
   type GitCommandOptions,
   type GitCommandResult,
   type GitContext,
@@ -21,6 +25,7 @@ import {
   getWorkingTreeDiffFromBase,
   hashFingerprintPart,
   MAX_REVIEW_FILE_CONTENT_BYTES,
+  readDiffSideBytes,
   runBoundedTrackedDiff,
   validateFilePath,
 } from "./review-core";
@@ -774,29 +779,33 @@ async function readWorkingTreeFile(
   return runtime.readTextFile(fullPath);
 }
 
-/** Resolve full old/new file content for expandable GitButler diffs. */
-export async function getGitButlerFileContentsForDiff(
+/**
+ * Which object each side of a changed file is for a GitButler view: the one
+ * table behind both hunk expansion (text) and the image preview (bytes).
+ */
+async function resolveGitButlerSideSources(
   runtime: ReviewGitButlerRuntime,
   diffType: DiffType,
   filePath: string,
   oldPath?: string,
   cwd?: string,
-): Promise<{ oldContent: string | null; newContent: string | null }> {
+): Promise<DiffSideSources | null> {
   validateFilePath(filePath);
   const oldFilePath = oldPath ?? filePath;
   validateFilePath(oldFilePath);
 
   const parsed = parseGitButlerDiffType(diffType);
-  if (!parsed) return { oldContent: null, newContent: null };
+  if (!parsed) return null;
   const root = await getActiveWorkspaceRoot(runtime, cwd);
-  if (!root) return { oldContent: null, newContent: null };
+  if (!root) return null;
   const status = await loadStatus(runtime, root);
 
   if (parsed.kind === "workspace") {
     await validateWorkspaceMergeBase(runtime, status.mergeBase.commitId, root);
     return {
-      oldContent: await gitShow(runtime, status.mergeBase.commitId, oldFilePath, root),
-      newContent: await readWorkingTreeFile(runtime, root, filePath),
+      cwd: root,
+      old: { kind: "object", rev: status.mergeBase.commitId, path: oldFilePath },
+      new: { kind: "worktree", path: filePath },
     };
   }
 
@@ -808,11 +817,56 @@ export async function getGitButlerFileContentsForDiff(
     const resolved = await resolvedBranchRange(runtime, status, parsed.branchName, root);
     if (resolved) range = resolved;
   }
-  if (!range) return { oldContent: null, newContent: null };
+  if (!range) return null;
   return {
-    oldContent: await gitShow(runtime, range.base, oldFilePath, root),
-    newContent: await gitShow(runtime, range.tip, filePath, root),
+    cwd: root,
+    old: { kind: "object", rev: range.base, path: oldFilePath },
+    new: { kind: "object", rev: range.tip, path: filePath },
   };
+}
+
+async function readGitButlerSideText(
+  runtime: ReviewGitButlerRuntime,
+  source: DiffSideSource | null,
+  root: string,
+): Promise<string | null> {
+  if (!source) return null;
+  return source.kind === "object"
+    ? gitShow(runtime, source.rev, source.path, root)
+    : readWorkingTreeFile(runtime, root, source.path);
+}
+
+/** Resolve full old/new file content for expandable GitButler diffs. */
+export async function getGitButlerFileContentsForDiff(
+  runtime: ReviewGitButlerRuntime,
+  diffType: DiffType,
+  filePath: string,
+  oldPath?: string,
+  cwd?: string,
+): Promise<{ oldContent: string | null; newContent: string | null }> {
+  const sources = await resolveGitButlerSideSources(runtime, diffType, filePath, oldPath, cwd);
+  if (!sources?.cwd) return { oldContent: null, newContent: null };
+  return {
+    oldContent: await readGitButlerSideText(runtime, sources.old, sources.cwd),
+    newContent: await readGitButlerSideText(runtime, sources.new, sources.cwd),
+  };
+}
+
+/** One side of a GitButler view as raw bytes for the image preview. */
+export async function getGitButlerFileBytesForDiff(
+  runtime: ReviewGitButlerRuntime,
+  diffType: DiffType,
+  filePath: string,
+  oldPath: string | undefined,
+  side: DiffSide,
+  maxBytes: number,
+  cwd?: string,
+): Promise<FileBytesRead> {
+  const sources = await resolveGitButlerSideSources(runtime, diffType, filePath, oldPath, cwd);
+  if (!sources) return { kind: "unavailable" };
+  const source = side === "old" ? sources.old : sources.new;
+  if (!source) return { kind: "missing" };
+  return readDiffSideBytes(runtime, source, maxBytes, sources.cwd);
 }
 
 /** Fingerprint the exact visible GitButler patch for the freshness endpoint. */

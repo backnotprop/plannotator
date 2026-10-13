@@ -9,17 +9,22 @@ import {
 	type PRMetadata,
 	type PRRef,
 	type PRReviewFileComment,
+	type PRReviewFileLevelComment,
+	type PRReviewAction,
 	type PRReviewSubmissionResult,
 	type PRRuntime,
 	type PRStackTree,
 	type PRListItem,
 	parsePRUrl as parsePRUrlCore,
+	parseFileLevelComments as parseFileLevelCommentsCore,
+	parsePRReviewAction as parsePRReviewActionCore,
 } from "../generated/pr-types.ts";
 import {
 	checkAuth as checkAuthCore,
 	fetchPRContext as fetchPRContextCore,
 	fetchPR as fetchPRCore,
 	fetchPRFileContent as fetchPRFileContentCore,
+	fetchPRFileBytes as fetchPRFileBytesCore,
 	fetchPRViewedFiles as fetchPRViewedFilesCore,
 	fetchPRStack as fetchPRStackCore,
 	fetchPRList as fetchPRListCore,
@@ -71,6 +76,8 @@ const prRuntime: PRRuntime = {
 export const prCommandRuntime: PRRuntime = prRuntime;
 
 export const parsePRUrl = parsePRUrlCore;
+export const parseFileLevelComments = parseFileLevelCommentsCore;
+export const parsePRReviewAction = parsePRReviewActionCore;
 export function checkPRAuth(ref: PRRef) {
 	return checkAuthCore(prRuntime, ref);
 }
@@ -86,13 +93,17 @@ export function fetchPRContext(ref: PRRef) {
 export function fetchPRFileContent(ref: PRRef, sha: string, filePath: string) {
 	return fetchPRFileContentCore(prRuntime, ref, sha, filePath);
 }
+export function fetchPRFileBytes(ref: PRRef, sha: string, filePath: string, maxBytes: number) {
+	return fetchPRFileBytesCore(prRuntime, ref, sha, filePath, maxBytes);
+}
 /** Submit a review through the Pi Node.js command runtime. */
 export function submitPRReview(
 	ref: PRRef,
 	headSha: string,
-	action: "approve" | "comment",
+	action: PRReviewAction,
 	body: string,
 	fileComments: PRReviewFileComment[],
+	fileLevelComments: PRReviewFileLevelComment[] = [],
 ): Promise<PRReviewSubmissionResult> {
 	return submitPRReviewCore(
 		prRuntime,
@@ -101,6 +112,7 @@ export function submitPRReview(
 		action,
 		body,
 		fileComments,
+		fileLevelComments,
 	);
 }
 

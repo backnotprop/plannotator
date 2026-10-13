@@ -12,6 +12,11 @@ export interface AnnotateOutcome {
   feedback: string;
   exit?: boolean;
   approved?: boolean;
+  /** The editor's Done with nothing to send. Read only by the host result
+   *  record; stdout, `--json` and the strict gate keep `feedback` as is. */
+  nothingToSend?: boolean;
+  /** The submitted annotations; the non-strict `--json` record reports their count. */
+  annotations?: unknown[];
 }
 
 /**

@@ -21,8 +21,9 @@ export function useActiveSection(
     const viewport = scrollElement ?? contentContainer;
     if (!contentContainer || !viewport) return;
     
-    // Find all heading elements with data-block-id
-    const headings = contentContainer.querySelectorAll('[data-block-type="heading"]');
+    // Only document headings: a heading inside a question card's context has
+    // no block id and is not a TOC section.
+    const headings = contentContainer.querySelectorAll('[data-block-type="heading"][data-block-id]');
     if (headings.length === 0) return;
     
     // Track which headings are currently intersecting

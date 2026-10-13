@@ -14,6 +14,7 @@ import {
   getServerPorts,
   startBunServerOnAvailablePort,
   buildAdvertisedUrl,
+  PortInUseError,
 } from "./remote";
 
 // Save and restore env between tests
@@ -260,6 +261,36 @@ describe("Bun non-range port compatibility", () => {
     } finally {
       await closeServer(servers[0]);
     }
+  });
+});
+
+describe("PortInUseError", () => {
+  test("a failed fixed-port bind is a PortInUseError the CLI can print as one line", async () => {
+    clearEnv();
+    const { start, servers } = await occupyConsecutivePorts(1);
+    process.env.PLANNOTATOR_REMOTE = "1";
+    process.env.PLANNOTATOR_PORT = String(start);
+
+    try {
+      const error = await startBunServerOnAvailablePort(startTestBunServer).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(PortInUseError);
+      expect((error as PortInUseError).cliMessage).toContain(`port ${start} (PLANNOTATOR_PORT) is already in use`);
+      expect((error as PortInUseError).cliMessage).not.toContain("\n");
+    } finally {
+      await closeServer(servers[0]);
+    }
+  });
+
+  test("the remote-mode default port names why it is fixed and how to move off it", () => {
+    const message = new PortInUseError("Port 19432 in use after 5 retries", 19432, null, false).cliMessage;
+    expect(message).toContain("port 19432 is already in use");
+    expect(message).toContain("remote mode uses a fixed port");
+    expect(message).toContain("PLANNOTATOR_PORT");
+  });
+
+  test("an exhausted range names the range", () => {
+    const message = new PortInUseError("Port selection 9000-9002 exhausted", 9002, [9000, 9002], true).cliMessage;
+    expect(message).toContain("9000-9002");
   });
 });
 

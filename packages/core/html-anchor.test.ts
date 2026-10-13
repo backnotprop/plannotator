@@ -449,4 +449,28 @@ describe("parseHtmlElementContext", () => {
     expect(oversized).toBeDefined();
     expect(bytes(oversized)).toBeLessThanOrEqual(MAX_ELEMENT_CONTEXT_BYTES);
   });
+
+  // Failure to catch: an image pin on a long live-app route whose context
+  // only fits WITHOUT `sourceName` being dropped whole (undefined) because
+  // `sourceName` was not in the shed order.
+  test("an oversized context sheds sourceName before it drops the whole context", () => {
+    const base = { tag: "img", role: "img", name: "Hero" };
+    const sourceName = "hero-banner-with-a-long-name.webp";
+    // A route sized so the context fits with a few bytes to spare, then
+    // overflows once sourceName rides along.
+    const slack = 8;
+    const urlLength = MAX_ELEMENT_CONTEXT_BYTES - bytes({ ...base, page: { url: "" } }) - slack;
+    const page = { url: `/${"r".repeat(urlLength - 1)}` };
+    expect(bytes({ ...base, page })).toBeLessThanOrEqual(MAX_ELEMENT_CONTEXT_BYTES);
+    expect(bytes({ ...base, sourceName, page })).toBeGreaterThan(MAX_ELEMENT_CONTEXT_BYTES);
+
+    const shed = parseHtmlElementContext({ ...base, sourceName, page });
+    expect(shed).toBeDefined();
+    expect(shed?.sourceName).toBeUndefined();
+    expect(shed?.page?.url).toBe(page.url);
+    expect(shed?.name).toBe("Hero");
+
+    // With room to spare it is kept.
+    expect(parseHtmlElementContext({ ...base, sourceName, page: { url: "/home" } })?.sourceName).toBe(sourceName);
+  });
 });

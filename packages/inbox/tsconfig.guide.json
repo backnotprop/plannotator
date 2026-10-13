@@ -1,0 +1,24 @@
+{
+  // The guide reader (guide/GuideReader.tsx), checked under the settings of
+  // what it imports (the guide chain and review-editor's AllFilesCodeView),
+  // not the window's strict ones; the window's typecheck reads its shape from
+  // guide/reader-module.d.ts. Like apps/guides-show/tsconfig.viewer.json this
+  // is for local use, not a CI gate: review-editor carries pre-existing type
+  // errors under every config in the repo. Its own files must report none
+  // (`bunx tsc --noEmit -p packages/inbox/tsconfig.guide.json | grep packages/inbox`).
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": ["bun-types"]
+  },
+  "include": ["guide/**/*.ts", "guide/**/*.tsx"],
+  "exclude": ["node_modules"]
+}

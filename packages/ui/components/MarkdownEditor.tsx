@@ -34,6 +34,15 @@ export type { SlashCommandItem, SlashCommandsConfig } from '@plannotator/atomic-
 export { selectionToolbar } from '@plannotator/atomic-editor';
 export type { SelectionToolbarConfig, InlineFormat } from '@plannotator/atomic-editor';
 
+/* Host link widgets (engine ≥0.9.0), re-exported for the same reason as
+   wikiLinks. linkWidgets(...specs) lets a host swap an inline markdown link
+   for its own WidgetType when a spec's match(link) returns one (null keeps
+   the engine's normal link rendering). Compose it through the `extensions`
+   prop; dispatch refreshLinkWidgets.of(null) on the view to re-run every
+   spec's match after host state the specs read has changed. */
+export { linkWidgets, refreshLinkWidgets } from '@plannotator/atomic-editor';
+export type { LinkWidgetSpec, LinkWidgetLink } from '@plannotator/atomic-editor';
+
 /* Host-configured embed media authoring. The picker is per editor mount so its
    callbacks can close over live route state; nothing enters configurePlannotatorUI.
    The package owns paragraph-safe splicing while the host owns embed grammar. */

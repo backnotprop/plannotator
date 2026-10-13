@@ -8,6 +8,7 @@ import {
   getAnnotateMessageFeedbackPrompt,
 } from "@plannotator/shared/prompts";
 import { deliverOpenCodePrompt } from "./prompt-delivery-error";
+import type { SessionBridge } from "@plannotator/ai/session-bridge";
 
 export interface EmbeddedPlanReviewInput {
   client: any;
@@ -19,6 +20,10 @@ export interface EmbeddedPlanReviewInput {
   timeoutSeconds: number | null;
   abortSignal?: AbortSignal;
   logReady: (url: string, isRemote: boolean, port: number) => void;
+  /** "Ask this session": in-process bridge to the session (quick answers while the plan waits). */
+  sessionBridge?: SessionBridge;
+  /** The host can register the `plannotator` tool: serverConfig advertises its switch. */
+  opencodeToolCapable?: boolean;
 }
 
 export interface EmbeddedPlanReviewResult {
@@ -26,6 +31,7 @@ export interface EmbeddedPlanReviewResult {
   feedback?: string;
   savedPath?: string;
   agentSwitch?: string;
+  answersOnly?: boolean;
 }
 
 async function loadPlanServer() {
@@ -43,6 +49,8 @@ export async function deliverEmbeddedAnnotateMessagePrompt(input: {
   sessionId: string;
   approved: boolean;
   feedback: string;
+  /** The agent that wrote the annotated message, when known and addressable (#1612). */
+  agent?: string;
 }): Promise<void> {
   const text = input.approved
     ? getAnnotateApprovedWithNotesPrompt("opencode", undefined, {
@@ -57,6 +65,7 @@ export async function deliverEmbeddedAnnotateMessagePrompt(input: {
     prompt: {
       path: { id: input.sessionId },
       body: {
+        ...(input.agent && { agent: input.agent }),
         parts: [{ type: "text", text }],
       },
     },
@@ -79,6 +88,8 @@ export async function runEmbeddedPlanReview(
     pasteApiUrl: input.pasteApiUrl,
     htmlContent: input.htmlContent,
     opencodeClient: input.client,
+    sessionBridge: input.sessionBridge,
+    ...(input.opencodeToolCapable ? { opencodeToolCapable: true } : {}),
     onReady: async (url, isRemote, port) => {
       await handleServerReady(url, isRemote, port);
       input.logReady(url, isRemote, port);
@@ -116,7 +127,7 @@ export async function handleEmbeddedCommand(
     getPasteApiUrl: () => string | undefined;
     directory?: string;
   },
-): Promise<{ approved?: boolean; feedback?: string | null }> {
+): Promise<{ approved?: boolean; feedback?: string | null; agent?: string }> {
   const {
     handleReviewCommand,
     handleAnnotateCommand,

@@ -76,6 +76,58 @@ export async function decrypt(
   return new TextDecoder().decode(decrypted);
 }
 
+/**
+ * The Inbox relay's envelope (adr/implementation/inbox-mobile.md, section 4):
+ * the same byte layout as `encrypt`, `base64url(IV || ciphertext || tag)`
+ * with a fresh 12-byte IV, under a key the caller holds (base64url, 32 bytes).
+ * The plaintext is UTF-8 text, JSON in practice.
+ */
+export async function encryptWithKey(plaintext: string, key: string): Promise<string> {
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    base64urlToBytes(key).buffer as ArrayBuffer,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt']
+  );
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, cryptoKey, new TextEncoder().encode(plaintext));
+  const combined = new Uint8Array(iv.length + encrypted.byteLength);
+  combined.set(iv, 0);
+  combined.set(new Uint8Array(encrypted), iv.length);
+  return bytesToBase64url(combined);
+}
+
+/** Open an envelope from `encryptWithKey` (or `encrypt`): the same layout, so the same reader. Throws on a wrong key or a changed byte. */
+export function decryptWithKey(envelope: string, key: string): Promise<string> {
+  return decrypt(envelope, key);
+}
+
+const RELAY_KEY_INFO = 'plannotator-inbox relay key v1';
+const RELAY_AUTH_INFO = 'plannotator-inbox relay auth v1';
+const RELAY_UP_INFO = 'plannotator-inbox relay up v1';
+const RELAY_COLLAPSE_INFO = 'plannotator-inbox relay collapse v1';
+
+/**
+ * The values a pairing secret gives one phone at the relay (section 4,
+ * "Keys"), each HKDF-SHA256 over the secret with the device id as salt:
+ * `key`, the AES-256-GCM key of every envelope the Inbox sends the phone
+ * (down items and pushes); `upKey`, the key of every command the phone sends
+ * up, so the relay cannot reflect one direction's envelope into the other;
+ * `collapseKey`, the HMAC key of the push's collapse id (the Inbox's alone:
+ * a MAC under the envelope key would reuse one key for two jobs); and `relaySecret`, the phone's bearer at the relay (which keeps only the
+ * SHA-256 of that string). All base64url without padding.
+ */
+export async function deriveRelayKeys(pairingSecret: string, deviceId: string): Promise<{ key: string; upKey: string; collapseKey: string; relaySecret: string }> {
+  const ikm = await crypto.subtle.importKey('raw', base64urlToBytes(pairingSecret).buffer as ArrayBuffer, 'HKDF', false, ['deriveBits']);
+  const salt = new TextEncoder().encode(deviceId);
+  const derive = async (info: string) =>
+    bytesToBase64url(
+      new Uint8Array(await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt, info: new TextEncoder().encode(info) }, ikm, 256))
+    );
+  return { key: await derive(RELAY_KEY_INFO), upKey: await derive(RELAY_UP_INFO), collapseKey: await derive(RELAY_COLLAPSE_INFO), relaySecret: await derive(RELAY_AUTH_INFO) };
+}
+
 // --- Helpers ---
 
 function bytesToBase64url(bytes: Uint8Array): string {

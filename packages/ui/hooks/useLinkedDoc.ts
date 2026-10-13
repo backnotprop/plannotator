@@ -8,17 +8,19 @@
 
 import { useState, useCallback, useRef } from "react";
 import { normalizeBrowserPath } from "@plannotator/core/browser-paths";
-import type { Annotation, ImageAttachment } from "../types";
+import { isDiagramRenderKind } from "@plannotator/core/annotatable";
+import type { Annotation, DocumentRenderAs, ImageAttachment } from "../types";
 import type { ViewerHandle } from "../components/Viewer";
 import type { SidebarTab } from "./useSidebar";
 import type { SourceSaveCapability } from "@plannotator/core/source-save";
 import type { VersionInfo } from "./usePlanDiff";
+import { annotationOwnsHighlight } from "../utils/annotationOwnsHighlight";
 
 export interface LinkedDocLoadData {
   markdown?: string;
   filepath?: string;
   isConverted?: boolean;
-  renderAs?: 'markdown' | 'html';
+  renderAs?: DocumentRenderAs;
   rawHtml?: string;
   shareHtml?: string;
   sourceSave?: SourceSaveCapability;
@@ -72,10 +74,10 @@ export interface UseLinkedDocOptions {
   setGlobalAttachments: (att: ImageAttachment[]) => void;
   /** Current render mode + raw HTML of the base document. An HTML linked/folder file
    *  swaps these to render raw; back() restores the base values from this snapshot. */
-  renderAs: 'markdown' | 'html';
+  renderAs: DocumentRenderAs;
   rawHtml: string;
   shareHtml: string;
-  setRenderAs: (r: 'markdown' | 'html') => void;
+  setRenderAs: (r: DocumentRenderAs) => void;
   setRawHtml: (html: string) => void;
   setShareHtml: (html: string) => void;
   viewerRef: React.RefObject<ViewerHandle | null>;
@@ -105,7 +107,7 @@ interface SavedPlanState {
   annotations: Annotation[];
   selectedAnnotationId: string | null;
   globalAttachments: ImageAttachment[];
-  renderAs: 'markdown' | 'html';
+  renderAs: DocumentRenderAs;
   rawHtml: string;
   shareHtml: string;
 }
@@ -121,6 +123,29 @@ export interface CachedDocState {
    *  needing to re-fetch it) once the fresh /api/doc data is gone. */
   previousPlan?: string | null;
   versionInfo?: VersionInfo | null;
+}
+
+/**
+ * The session's documents split the way FEEDBACK must be: the root document
+ * (the plan, the annotated file, or the folder itself) once, and every other
+ * document once under its own path. `getDocAnnotations()` is NOT this split —
+ * it also carries the active document's live state, which the host exports
+ * from its own state too, so exporting both printed the open document twice.
+ */
+export interface FeedbackDocuments {
+  /**
+   * The root document's stashed state while a linked document is open. Null
+   * while the root itself is the active document: its annotations are then
+   * the host's live state, which the host exports itself.
+   */
+  root: (CachedDocState & { renderAs: DocumentRenderAs }) | null;
+  /**
+   * Every document other than the root that carries state, keyed by path:
+   * the cached documents plus the active linked document's live state. The
+   * root's own annotations are never here; a copy of the root's path opened
+   * from the root itself is a separate annotation set and is listed by path.
+   */
+  documents: Map<string, CachedDocState>;
 }
 
 export interface LinkedDocSessionState {
@@ -155,8 +180,12 @@ export interface UseLinkedDocReturn {
   back: () => void;
   /** Dismiss the current error */
   dismissError: () => void;
-  /** All linked doc annotations including the active doc's live state (keyed by filepath) */
+  /** All linked doc annotations including the active doc's live state (keyed by filepath).
+   *  For counts and the cross-file panel; a feedback export reads getFeedbackDocuments(). */
   getDocAnnotations: () => Map<string, CachedDocState>;
+  /** The root document and every other document, each exactly once — what a
+   *  feedback export reads (see FeedbackDocuments). */
+  getFeedbackDocuments: () => FeedbackDocuments;
   /**
    * Replace the stored annotations of a document that is NOT the active one —
    * a cached linked doc, or the stashed source document. This is what lets the
@@ -284,7 +313,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     if (saved.annotations.length) {
       setTimeout(() => {
         viewerRef.current?.clearAllHighlights();
-        viewerRef.current?.applySharedAnnotations(saved.annotations);
+        viewerRef.current?.applySharedAnnotations(saved.annotations.filter(annotationOwnsHighlight));
       }, HIGHLIGHT_REAPPLY_DELAY);
     }
   }, [
@@ -382,7 +411,11 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     // Swap to linked doc — an .html file renders raw (HtmlViewer), a markdown
     // file parses to blocks (Viewer). Drive renderAs/rawHtml per file so the
     // App's renderAs === 'html' ? HtmlViewer : Viewer switch flips automatically.
-    const docRenderAs = data.renderAs === 'html' ? 'html' : 'markdown';
+    // A diagram source (.mmd/.dot) keeps the markdown state path — the raw
+    // text is the document body — but names its engine so the App renders it
+    // as one diagram instead of parsing it as markdown.
+    const docRenderAs: DocumentRenderAs =
+      data.renderAs === 'html' ? 'html' : isDiagramRenderKind(data.renderAs) ? data.renderAs : 'markdown';
     const hostMarkdown = docRenderAs === 'html' || !notifyDocumentLoaded ? undefined : onDocumentLoaded?.(data);
     const nextMarkdown = notifyDocumentLoaded
       ? hostMarkdown ?? cached?.markdown ?? data.markdown ?? ''
@@ -410,7 +443,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     if (cached?.annotations.length) {
       setTimeout(() => {
         viewerRef.current?.clearAllHighlights();
-        viewerRef.current?.applySharedAnnotations(cached.annotations);
+        viewerRef.current?.applySharedAnnotations(cached.annotations.filter(annotationOwnsHighlight));
       }, HIGHLIGHT_REAPPLY_DELAY);
     }
   }, [
@@ -557,7 +590,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     if (state.root.annotations.length) {
       setTimeout(() => {
         viewerRef.current?.clearAllHighlights();
-        viewerRef.current?.applySharedAnnotations(state.root.annotations);
+        viewerRef.current?.applySharedAnnotations(state.root.annotations.filter(annotationOwnsHighlight));
       }, HIGHLIGHT_REAPPLY_DELAY);
     }
   }, [
@@ -639,6 +672,37 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     // identity of this callback is what tells memoized readers to recompute.
   }, [linkedDoc, annotations, globalAttachments, sourceFilePath, sourceConverted, getDocumentMarkdown, storeRevision]);
 
+  const getFeedbackDocuments = useCallback((): FeedbackDocuments => {
+    const documents = new Map(docCache.current);
+    if (linkedDoc) {
+      documents.set(linkedDoc.filepath, {
+        annotations: [...annotations],
+        globalAttachments: [...globalAttachments],
+        markdown: getDocumentMarkdown?.(linkedDoc.filepath, linkedDoc.markdown) ?? linkedDoc.markdown,
+        isConverted: linkedDoc.isConverted,
+      });
+    }
+    // A cache entry under the root's own path is NOT the root: it is a copy
+    // the reviewer opened from the root itself (an HTML "Home" link, or
+    // index.html#intro from index.html — a backlink only routes through
+    // back() while a linked doc is open). Its comments are a separate set the
+    // counts include, so it is exported under its path, never dropped.
+    const saved = linkedDoc ? savedPlanState.current : null;
+    return {
+      root: saved
+        ? {
+            annotations: [...saved.annotations],
+            globalAttachments: [...saved.globalAttachments],
+            markdown: saved.markdown,
+            isConverted: !!sourceConverted,
+            renderAs: saved.renderAs,
+          }
+        : null,
+      documents,
+    };
+    // storeRevision: same reason as getDocAnnotations above.
+  }, [linkedDoc, annotations, globalAttachments, sourceConverted, getDocumentMarkdown, storeRevision]);
+
   return {
     isActive: linkedDoc !== null,
     filepath: linkedDoc?.filepath ?? null,
@@ -649,6 +713,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     back,
     dismissError,
     getDocAnnotations,
+    getFeedbackDocuments,
     updateStoredAnnotations,
     snapshotSession,
     restoreSession,

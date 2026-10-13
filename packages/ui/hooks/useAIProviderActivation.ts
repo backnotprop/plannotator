@@ -23,13 +23,26 @@ export interface ActivatedAIProvider extends AIProviderOption {
 
 export function useAIProviderActivation(options: {
   onCapabilities: (providers: ActivatedAIProvider[], defaultProvider: string | null) => void;
+  /**
+   * The Ask AI providers the server currently lists. When given, an id not in
+   * it is never activated: at page load the selection can still hold a saved
+   * provider id (e.g. `codex-sdk`) for one render before the resolver moves it
+   * to what the server offers, and activating that id would start its model
+   * discovery even though Ask AI does not offer it (a session-bridge server
+   * lists only the bridge). Omitted keeps the old behavior.
+   */
+  providers?: ReadonlyArray<Pick<AIProviderOption, 'id'>>;
 }) {
   const activatedRef = useRef<Set<string>>(new Set());
   const onCapabilitiesRef = useRef(options.onCapabilities);
   onCapabilitiesRef.current = options.onCapabilities;
+  const providersRef = useRef(options.providers);
+  providersRef.current = options.providers;
 
   return useCallback((providerId: string | null | undefined) => {
     if (!providerId || activatedRef.current.has(providerId)) return;
+    const listed = providersRef.current;
+    if (listed && !listed.some(provider => provider.id === providerId)) return;
     activatedRef.current.add(providerId);
     fetch(`/api/ai/capabilities?activate=${encodeURIComponent(providerId)}`)
       .then(res => (res.ok ? res.json() : null))

@@ -62,6 +62,16 @@ describe("emitAnnotateDecision", () => {
     );
   });
 
+  // #1701: a bare Done keeps the zero-state sentence as feedback and marks
+  // it; it must not be framed as feedback for the agent to address.
+  test("a Done with nothing to send closes the session", () => {
+    emitAnnotateDecision(
+      '{"decision":"annotated","feedback":"User reviewed the document and has no feedback.","nothingToSend":true}',
+      "Markdown Annotations",
+    );
+    expect(output()).toBe("Annotation session closed.\n");
+  });
+
   test("empty output closes the session", () => {
     emitAnnotateDecision("", "Markdown Annotations");
     expect(output()).toBe("Annotation session closed.\n");

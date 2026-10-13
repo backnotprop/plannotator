@@ -91,13 +91,13 @@ describe('AlertBlock title line', () => {
   // the entire line and the next line must be blank — so decorative prose is
   // untouched. Do not "fix" this by requiring a bold title.
   test.skipIf(!hasDom)('E: an emoji alone becomes the icon and keeps the type word as the title', async () => {
-    const el = await render('warning', '🚧\n\ntot.page is bound to the old D1.');
+    const el = await render('warning', '🚧\n\nThe preview domain is bound to the old database.');
     expect(titleRow(el).querySelector('.alert-emoji')?.textContent).toBe('🚧');
     expect(titleRow(el).textContent).toBe('🚧Warning');
     expect(srOnly(el)).toBeNull();
     // The line is relocated, not duplicated: it is gone from the body.
     expect(el.querySelector('.alert-body')?.textContent).not.toContain('🚧');
-    expect(paragraphs(el)).toEqual(['tot.page is bound to the old D1.']);
+    expect(paragraphs(el)).toEqual(['The preview domain is bound to the old database.']);
   });
 
   test.skipIf(!hasDom)('a title line with no body renders no body wrapper', async () => {

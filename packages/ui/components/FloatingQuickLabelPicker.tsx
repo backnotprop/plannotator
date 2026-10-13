@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { type QuickLabel, getQuickLabels } from '../utils/quickLabels';
+import { type QuickLabel, getQuickLabels, quickLabelIndexForDigit } from '../utils/quickLabels';
 import { QuickLabelDropdown } from './QuickLabelDropdown';
 
 interface FloatingQuickLabelPickerProps {
@@ -78,7 +78,7 @@ export const FloatingQuickLabelPicker: React.FC<FloatingQuickLabelPickerProps> =
       if (isDigit && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         const digit = parseInt(e.code.slice(5), 10);
-        const index = digit === 0 ? 9 : digit - 1;
+        const index = quickLabelIndexForDigit(digit);
         if (index < quickLabels.length) {
           onSelect(quickLabels[index]);
         }

@@ -40,6 +40,17 @@ In Claude Code:
 
 **Important:** Restart Claude Code after installing the plugin for the hooks to take effect.
 
+### Updating the plugin
+
+Refreshing the marketplace alone does not update an installed plugin. From a terminal:
+
+```bash
+claude plugin marketplace update plannotator
+claude plugin update plannotator@plannotator
+```
+
+Or inside Claude Code: run `/plugin marketplace update plannotator`, then open `/plugin`, go to **Installed**, select **plannotator** and choose **Update now**. Then restart Claude Code. Run the install script again to update the `plannotator` binary.
+
 ## Manual Installation (Hooks)
 
 If you prefer not to use the plugin system, add this to your `~/.claude/settings.json`:
@@ -65,7 +76,22 @@ If you prefer not to use the plugin system, add this to your `~/.claude/settings
 
 ## How It Works
 
-When Claude Code calls `ExitPlanMode`, this hook intercepts and:
+### The Plannotator mod (Claude Code 2.1.287+)
+
+In the interactive terminal on Claude Code 2.1.287 or newer, the plugin runs the Plannotator mod. It is on by default:
+
+- Plan review, `/plannotator-review`, `/plannotator-annotate` and `/plannotator-last` don't make Claude wait. Claude ends its turn and your decision arrives later as a message. You can keep chatting meanwhile.
+- A revised plan updates the same tab. After you approve, Claude calls `ExitPlanMode` once more and works from the exact plan text you approved.
+- Claude can open Plannotator itself with its `plannotator` tool.
+- Ask AI in the review is answered by this Claude session ("Ask this session").
+
+While a plan review is open Claude is not blocked, so if you leave plan mode yourself before you approve, it can start editing.
+
+Turn the mod off with `PLANNOTATOR_CLAUDE_MOD=0` or `{ "claudeCodeMod": false }` in `~/.plannotator/config.json` (read when Claude Code starts). Older Claude Code, `claude -p` and SDK runs, and Windows always use the classic hook below.
+
+### The classic hook
+
+When Claude Code calls `ExitPlanMode`, this hook intercepts and waits for your decision (Claude waits too):
 
 1. Opens Plannotator UI in your browser
 2. Lets you annotate the plan visually
@@ -81,6 +107,8 @@ When Claude Code calls `ExitPlanMode`, this hook intercepts and:
 | `PLANNOTATOR_PORT` | Fixed port to use. Default: random locally, `19432` for remote sessions. |
 | `PLANNOTATOR_BROWSER` | Custom browser to open plans in. macOS: app name or path. Linux/Windows: executable path. |
 | `PLANNOTATOR_SHARE_URL` | Custom share portal URL for self-hosting. Default: `https://share.plannotator.ai`. |
+| `PLANNOTATOR_CLAUDE_MOD` | The Plannotator mod is on by default. Set to `0` / `false` / `off` / `disabled` to turn it off and use the classic hook. Read when Claude Code starts. |
+| `PLANNOTATOR_MOD_DEBUG` | Set to `1` before starting Claude Code to write a mod debug log to `~/.plannotator/claude-code-mod/debug.log`. |
 
 ## Remote / Devcontainer Usage
 
@@ -110,7 +138,7 @@ Plannotator's slash commands are installed as Claude Code skills in `~/.claude/s
 
 | Command | Description |
 |---------|-------------|
-| `/plannotator-review [--git \| --gitbutler]` | Open code review UI for current changes or a GitHub PR; optionally force the Git or GitButler provider |
+| `/plannotator-review [--git \| --gitbutler] [DIRECTORY \| PR_URL]` | Open code review UI for current changes, another repository/worktree, or a PR; optionally force the Git or GitButler provider |
 | `/plannotator-annotate <file.md \| file.html \| https://... \| folder/>` | Annotate a file, URL, or folder |
 | `/plannotator-last` | Annotate the agent's last message |
 

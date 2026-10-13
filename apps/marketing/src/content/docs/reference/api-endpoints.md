@@ -69,6 +69,8 @@ Body:
 }
 ```
 
+Optional: `"answersOnly": true` when the only feedback is answers to the plan's [questions](/docs/guides/questions/). The agent then receives the `plan.answered` message instead of the denied message. Any value other than the boolean `true` is ignored.
+
 ## Review server
 
 Used during code review (`/plannotator-review`).
@@ -81,6 +83,7 @@ Used during code review (`/plannotator-review`).
 | `/api/call-flow/install` | POST | Starts or joins the selective core/pack install; the consented UI calls it once per target per review session, while Retry/install-ahead use the same route. Body `{ languageIds?: [...] }`; omission uses the current review plan (Node 22+ preflight; same-origin only) |
 | `/api/call-flow/install-status` | GET | Polls `{ state, stage?, languageIds?, currentLanguageId?, error? }` across `downloading`, `verifying`, `installing-deps`, `building` |
 | `/api/review-analysis` | GET / POST | GET refreshes adverts without mutation; POST persists independent `{ semanticDiff, callFlow }` flags and returns adverts |
+| `/api/review-progress?snapshot=<snapshotId>` | GET/POST | Load or save durable viewed-file progress; writes carry the scope key and per-file fingerprints, and stale snapshots return 409 |
 | `/api/feedback` | POST | Submit review feedback |
 | `/api/image` | GET | Serve a local image by path |
 | `/api/upload` | POST | Upload an image attachment |

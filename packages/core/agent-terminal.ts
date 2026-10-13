@@ -43,13 +43,14 @@ export type AnnotateAgentTerminalMode =
   | "annotate"
   | "annotate-last"
   | "annotate-folder"
+  | "annotate-bundle"
   | string
   | undefined;
 
 export function supportsAnnotateAgentTerminalMode(
   mode: AnnotateAgentTerminalMode,
 ): boolean {
-  return mode === "annotate" || mode === "annotate-folder";
+  return mode === "annotate" || mode === "annotate-folder" || mode === "annotate-bundle";
 }
 
 /**

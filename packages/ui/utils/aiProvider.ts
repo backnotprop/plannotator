@@ -8,25 +8,58 @@
 
 import { storage } from './storage';
 import { AGENT_CONFIG, getAgentAIProviderTypes, type Origin } from '@plannotator/core/agents';
+import { resolveModelChoice, type CatalogModel } from '@plannotator/core/model-catalog';
 
 const PROVIDER_KEY = 'plannotator-ai-provider';
 const MODELS_KEY = 'plannotator-ai-models';
 const PROVIDER_BY_ORIGIN_KEY = 'plannotator-ai-provider-by-origin';
 
-export interface AIProviderModel {
-  id: string;
-  label: string;
-  default?: boolean;
-  /** Reasoning-effort options this model supports (provider-reported, e.g. Codex). */
-  reasoningEfforts?: { id: string; label: string }[];
-  /** The model's default reasoning effort. */
-  defaultReasoningEffort?: string;
-}
+/** A provider-reported model — the shared catalog shape. */
+export type AIProviderModel = CatalogModel;
 
 export interface AIProviderOption {
   id: string;
   name: string;
   models?: AIProviderModel[];
+  /** Where `models` came from, when the server says (`/api/ai/capabilities`). */
+  modelsSource?: 'fallback' | 'discovered';
+  /** The installed CLI's version, when the server reports it. */
+  toolVersion?: string;
+  /** Display label overriding the name lookup (e.g. "Ask this session · Pi"). */
+  label?: string;
+  /** Present only on the "Ask this session" provider: the host session's live status. */
+  sessionBridge?: SessionBridgeInfo;
+}
+
+/** "Ask this session": Ask AI answered by the agent session that opened Plannotator. */
+export const SESSION_BRIDGE_PROVIDER_NAME = 'session-bridge';
+
+export interface SessionBridgeInfo {
+  host: string;
+  status: 'ready' | 'busy' | 'blocked' | 'gone';
+  modes: { turn: boolean; transient: boolean };
+}
+
+/** Error codes "Ask this session" answers with that the panel turns into actions. */
+export const SESSION_ASK_ERROR_CODES = {
+  agentBusy: 'agent_busy',
+  blocked: 'session_blocked',
+  gone: 'session_gone',
+  /** The person typed into the session while it answered: a note under the partial answer, not an error. */
+  takenOver: 'session_taken_over',
+} as const;
+
+export function isSessionBridgeProvider(provider: Pick<AIProviderOption, 'name' | 'sessionBridge'> | null | undefined): boolean {
+  return !!provider && (provider.name === SESSION_BRIDGE_PROVIDER_NAME || !!provider.sessionBridge);
+}
+
+/**
+ * The "Ask this session" provider, whatever its status. A server that has one
+ * offers nothing else (the session that opened Plannotator is the only thing
+ * Ask AI talks to), so when it is present it is the selection.
+ */
+export function findSessionBridge(providers: AIProviderOption[]): AIProviderOption | null {
+  return providers.find(isSessionBridgeProvider) ?? null;
 }
 
 export interface AIProviderSettings {
@@ -135,13 +168,11 @@ export function resolveAIModelForProvider(
 ): string | null {
   if (!provider) return null;
   const models = provider.models ?? [];
-  const modelIds = new Set(models.map(m => m.id));
-  const preferredModel = preferredModels[provider.id];
-  if (preferredModel && (modelIds.size === 0 || modelIds.has(preferredModel))) {
-    return preferredModel;
-  }
-  const defaultModel = models.find(m => m.default) ?? models[0];
-  return defaultModel?.id ?? null;
+  const preferredModel = preferredModels[provider.id] ?? '';
+  // Providers that report no models take the saved pick verbatim; otherwise
+  // the shared resolver (same one the server and the launchers use).
+  if (models.length === 0) return preferredModel || null;
+  return resolveModelChoice(preferredModel, models) || null;
 }
 
 export function resolveAIProviderSelection(options: {
@@ -157,7 +188,13 @@ export function resolveAIProviderSelection(options: {
   const byId = (id: string | null | undefined) =>
     id ? providers.find(provider => provider.id === id) ?? null : null;
 
+  // "Ask this session" is the only choice when the server offers it, even when
+  // the session is busy, blocked or gone: a saved pick never routes a question
+  // anywhere else (and is not rewritten, so it still applies to sessions with
+  // no bridge). Without a bridge this is the previous order.
+  const sessionBridge = findSessionBridge(providers);
   const provider =
+    sessionBridge ??
     byId(origin ? settings.providerByOrigin[origin] : null) ??
     findOriginAIProvider(providers, origin) ??
     byId(settings.providerId) ??

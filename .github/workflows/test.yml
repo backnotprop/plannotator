@@ -15,6 +15,10 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # A backstop, not a budget: green runs take 16-19 minutes. Some DOM tests
+    # run on fake timers, where bun's per-test timeout cannot fire, so a stuck
+    # await would otherwise idle until GitHub's 6-hour default.
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -78,7 +82,9 @@ jobs:
           packages/review-editor/components/DiffViewer.fullContentSwap.test.tsx
           packages/review-editor/components/DiffViewer.oversizedStub.test.tsx
           packages/review-editor/components/DiffViewer.binaryNotice.test.tsx
+          packages/review-editor/components/DiffViewer.imagePreview.test.tsx
           packages/review-editor/components/DiffViewer.headerControls.test.tsx
+          packages/review-editor/components/DiffViewer.markdownPreview.test.tsx
 
       # Seam contracts + the remaining DOM-gated tests. Scoped to the DOM files
       # (not the whole ui suite) to keep this process light. Files get isolated
@@ -97,6 +103,14 @@ jobs:
           packages/ui/components/html-viewer/HtmlViewer.bridgeAsset.test.tsx
           packages/ui/components/Viewer.vimMode.integration.test.tsx
           packages/ui/hooks/useVimSelection.test.tsx
+          packages/ui/hooks/useVimSelection.selectionScope.test.tsx
+          packages/ui/hooks/useModelCatalogs.dom.test.tsx
+          packages/ui/hooks/useAIProviderActivation.dom.test.tsx
+          packages/ui/components/ModelSourceHint.dom.test.tsx
+          packages/ui/components/ai/AIProviderBar.dom.test.tsx
+          packages/ui/components/ai/SessionAskNotice.dom.test.tsx
+          packages/ui/hooks/useAIChat.sessionAsk.test.tsx
+          packages/ui/hooks/useAgentSettings.dom.test.tsx
           packages/ui/utils/codeHighlight.test.ts
           packages/ui/utils/htmlChrome.test.ts
           packages/ui/utils/inputMethod.test.ts
@@ -110,17 +124,68 @@ jobs:
           packages/ui/components/ThemeProvider.favicon.test.tsx
           packages/ui/components/MermaidBlock.theme.test.tsx
           packages/ui/components/DiagramBlock.anchor.test.tsx
+          packages/ui/components/DiagramBlock.askAI.test.tsx
+          packages/ui/components/Viewer.askAISelectionLine.test.tsx
+          packages/ui/components/ImageLightbox.test.tsx
+          packages/inbox/images.test.tsx
+          packages/inbox/codeAttachment.test.tsx
+          packages/inbox/links.test.tsx
+          packages/inbox/issueRefs.test.tsx
+          packages/inbox/attachmentKinds.test.tsx
+          packages/inbox/updates.test.tsx
+          packages/inbox/replaced.test.tsx
+          packages/inbox/threadFolding.test.tsx
+          packages/inbox/seenOnSight.test.tsx
+          packages/inbox/projectList.test.tsx
+          packages/inbox/sidebarQuiet.test.tsx
+          packages/inbox/soundIntro.test.tsx
+          packages/inbox/soundSettings.test.tsx
+          packages/inbox/attachmentStepping.test.tsx
+          packages/inbox/attachmentSteppingSave.test.tsx
+          packages/inbox/listColumn.test.tsx
+          packages/inbox/endedSession.test.tsx
+          packages/inbox/markRead.test.tsx
+          packages/inbox/fileBack.test.tsx
+          packages/inbox/archived.test.tsx
+          packages/inbox/decisionsPicker.test.tsx
+          packages/inbox/openStaysPut.test.tsx
+          packages/inbox/phoneList.test.tsx
+          packages/inbox/toastPhone.test.tsx
+          packages/inbox/attachmentsHeader.test.tsx
+          packages/inbox/themeToggle.test.tsx
+          packages/inbox/agentsCard.test.tsx
+          packages/inbox/agentsSettings.test.tsx
+          packages/inbox/settingsSections.test.tsx
+          packages/ui/components/MenuVersionSection.test.tsx
+          packages/ui/components/blocks/QuestionBlock.test.tsx
+          packages/ui/components/blocks/QuestionBlock.host.test.tsx
+          packages/ui/components/blocks/QuestionBlock.decisionToggle.test.tsx
+          packages/ui/components/blocks/QuestionBlock.decisionAnyQuestion.test.tsx
+          packages/ui/hooks/useAnnotationHighlighter.questionSkip.test.tsx
+          packages/ui/hooks/usePinpoint.question.test.tsx
+          packages/ui/utils/blockTargeting.blocks.test.tsx
+          packages/ui/components/blocks/BlockquoteBlock.test.tsx
+          packages/ui/components/RenderedMarkdown.hostSeams.test.tsx
+          packages/ui/components/plan-diff/PlanCleanDiffView.seams.test.tsx
+          packages/ui/components/AnnotationPanel.questions.test.tsx
+          packages/ui/hooks/useActiveSection.test.tsx
+          packages/editor/hooks/useQuestionAnswers.test.tsx
           packages/ui/components/diagram/DiagramViewer.test.tsx
           packages/ui/utils/diagramAnchor.test.ts
           packages/ui/utils/diagramAnchorGraphviz.test.ts
           packages/ui/hooks/useAnnotationHighlighter.diagramSkip.test.tsx
+          packages/ui/hooks/useAnnotationHighlighter.blankSelection.test.tsx
           packages/ui/components/Viewer.diagramLazyRestore.test.tsx
           packages/ui/components/Viewer.diagramAnchorHostile.test.tsx
           packages/ui/components/CommentPopover.skillReferences.test.tsx
+          packages/ui/components/CommentPopover.mentionChips.test.tsx
           packages/ui/components/SkillReferenceMenu.placement.test.tsx
           packages/ui/components/sidebar/FileBrowser.test.ts
           packages/editor/editableDocumentsHook.test.tsx
           packages/review-editor/components/ReviewSubmissionDialog.ui.test.tsx
+          packages/review-editor/App.panelView.test.tsx
+          packages/review-editor/App.agentTool.test.tsx
+          packages/review-editor/App.commitsJj.test.tsx
           packages/review-editor/components/AnnotationToolbar.placement.test.tsx
           packages/review-editor/dock/panels/ReviewPROverviewPanel.ui.test.tsx
           packages/review-editor/components/FileHeader.edit.test.tsx
@@ -130,6 +195,11 @@ jobs:
           packages/review-editor/components/AllFilesCodeView.lifecycle.test.tsx
           packages/review-editor/components/AllFilesCodeView.generated.test.tsx
           packages/review-editor/components/AllFilesCodeView.autoViewed.test.tsx
+          packages/review-editor/components/AllFilesCodeView.imagePreview.test.tsx
+          packages/review-editor/components/AllFilesCodeView.markdownPreview.test.tsx
+          packages/review-editor/components/MarkdownFilePreview.test.tsx
+          packages/review-editor/hooks/useMarkdownPreview.test.tsx
+          packages/review-editor/components/MarkdownViewMenu.test.tsx
           packages/review-editor/components/DiffViewer.compactTouchSelection.test.tsx
           packages/guide-viewer/GuideSectionCard.test.tsx
           packages/guide-viewer/GuideView.test.tsx
@@ -141,6 +211,7 @@ jobs:
           packages/review-editor/components/TokenHoverAnnouncementDialog.test.tsx
           packages/review-editor/utils/stitchTokenIdentifier.test.ts
           packages/review-editor/hooks/useAutoViewed.test.tsx
+          packages/review-editor/hooks/useReviewProgress.test.tsx
           packages/review-editor/hooks/useCallFlowAnalysis.test.tsx
           packages/review-editor/hooks/useCallFlowInstall.test.tsx
           packages/review-editor/hooks/useCallFlowAutoInstall.test.tsx
@@ -153,9 +224,12 @@ jobs:
           packages/review-editor/components/FileTreeNode.controls.test.tsx
           packages/ui/components/Settings.analysis.test.tsx
           packages/ui/components/AnnotationPanel.props.test.tsx
+          packages/ui/components/AnnotationPanel.cardHeader.test.tsx
+          packages/ui/components/AnnotationPanel.editMentions.test.tsx
           packages/ui/components/Viewer.consumer.test.tsx
           packages/ui/components/Viewer.documentHeader.test.tsx
           packages/ui/components/Viewer.codeBlockHighlightSwap.test.tsx
+          packages/ui/components/ImageAnnotator/ImageAnnotator.layout.test.tsx
           packages/ui/components/ImageAnnotator/ImageAnnotator.shortcuts.test.tsx
           packages/ui/utils/undoHistory.dom.test.ts
           packages/ui/utils/codeBlockMark.test.ts
@@ -174,19 +248,31 @@ jobs:
           packages/editor/App.archiveReadOnly.test.tsx
           packages/editor/App.htmlChrome.test.tsx
           packages/editor/App.decisionControl.test.tsx
+          packages/editor/App.planRevision.test.tsx
+          packages/editor/askSessionDrafts.test.tsx
           packages/review-editor/App.decisionControl.test.tsx
           packages/ui/components/TerminalToolsAnnouncementDialog.test.tsx
           packages/editor/App.terminalToolsAnnouncement.test.tsx
+          packages/ui/components/AskSessionAnnouncementDialog.test.tsx
+          packages/editor/App.askSessionAnnouncement.test.tsx
+          packages/ui/components/AgentToolAnnouncementDialog.test.tsx
+          packages/ui/components/ServerSessionReplacedBanner.test.tsx
+          packages/editor/App.agentTool.test.tsx
+          packages/ui/hooks/useFirstRunAnnouncementWindow.test.tsx
           packages/review-editor/components/ReviewSidebar.generalComment.test.tsx
+          packages/review-editor/components/ReviewSidebar.outdated.test.tsx
           packages/ui/components/HtmlSurfaceControls.test.tsx
           packages/ui/components/AnnotationPanel.unanchored.test.tsx
           packages/ui/hooks/useHtmlRefresh.test.tsx
           packages/ui/hooks/useSharing.contentRevision.test.tsx
           packages/ui/hooks/useSharing.shortUrlLifecycle.test.tsx
           packages/ui/components/AnnotationToolbar.commentOnly.test.tsx
+          packages/ui/components/AnnotationToolbar.selectionActions.test.tsx
+          packages/ui/components/CommentPopover.mentionSource.test.tsx
+          packages/ui/components/Viewer.mentionSource.test.tsx
+          packages/ui/components/html-viewer/HtmlViewer.mentionSource.test.tsx
           packages/ui/components/AnnotationToolstrip.test.tsx
           packages/ui/components/StickyHeaderLane.test.tsx
-          packages/ui/components/CommentPopover.quickLookGood.test.tsx
           packages/editor/actionsLabelMode.test.ts
           packages/ui/webmcp/useToolset.seam.test.tsx
           packages/ui/components/AnnotationPanel.inReplyTo.test.tsx
@@ -195,21 +281,29 @@ jobs:
           packages/ui/components/MathBlock.firstPaint.test.tsx
           packages/ui/components/DiagramBlock.lazyRetry.test.tsx
           packages/ui/components/DecisionControl.test.tsx
+          packages/ui/components/DiffFileTree.test.tsx
           packages/ui/components/ActionMenu.test.tsx
           packages/ui/components/PlanHeaderMenu.mobile.test.tsx
           packages/review-editor/components/ReviewHeaderMenu.mobile.test.tsx
           packages/editor/App.editModeShortcut.test.tsx
           packages/editor/App.editModeCrossBlockHighlights.test.tsx
           packages/editor/App.markdownUnanchored.test.tsx
+          packages/editor/App.restoreAcrossEdit.test.tsx
+          packages/editor/App.documentDrafts.test.tsx
+          packages/editor/App.bundle.test.tsx
+          packages/editor/annotationDraftStaleRetry.test.tsx
           packages/ui/components/blocks/AlertBlock.title.test.tsx
           packages/ui/components/blocks/AlertBlock.seam.test.tsx
+          packages/ui/hooks/useFenceTheme.seam.test.tsx
           packages/ui/components/blocks/AlertBlock.annotation.test.tsx
           packages/ui/components/Viewer.driftedRestore.test.tsx
           packages/ui/components/Viewer.crossBlockRestore.test.tsx
+          packages/ui/components/Viewer.restoreMovedAnchors.test.tsx
           packages/ui/components/Viewer.alertDraftRestore.test.tsx
           packages/ui/components/AnnotationPanel.allFiles.test.tsx
           packages/ui/hooks/useLinkedDoc.crossFile.test.tsx
           packages/ui/hooks/useLinkedDoc.revealSidebar.test.tsx
+          packages/ui/hooks/useLinkedDoc.reapplyFilter.test.tsx
           packages/ui/components/html-viewer/htmlLinkProtocol.test.tsx
           packages/editor/hooks/useAnnotationJump.test.tsx
           packages/ui/components/TableOfContents.linkedDoc.test.tsx
@@ -219,7 +313,10 @@ jobs:
           packages/ui/components/sidebar/SidebarContainer.mobile.test.tsx
           packages/ui/components/ui/mobile-foundation.test.tsx
           packages/ui/components/Settings.vim.test.tsx
+          packages/ui/components/Settings.annotateParity.test.tsx
           packages/ui/components/Settings.compactDisplay.test.tsx
+          packages/ui/components/Settings.agentTool.test.tsx
+          packages/ui/components/settings/QuickLabelsTab.test.tsx
           packages/ui/components/AnnotationToolbar.touchTargets.test.tsx
           packages/ui/components/AnnotationToolbar.modeShortcutGuard.test.tsx
           packages/ui/components/PermissionModeSetup.mobile.test.tsx
@@ -233,6 +330,7 @@ jobs:
           packages/ui/hooks/useViewportEnvironment.test.tsx
           packages/ui/hooks/useIsMobile.test.tsx
           packages/ui/hooks/useVimDocumentFocus.test.tsx
+          packages/ui/hooks/useScrollKeyRouting.test.tsx
           packages/ui/hooks/useScrollViewport.test.ts
           packages/review-editor/components/ExpandedCommentDialog.mobile.test.tsx
           packages/review-editor/components/DiffTypePicker.openState.test.tsx
@@ -280,7 +378,10 @@ jobs:
         # zizmor: ignore[adhoc-packages] This integration test requires the exact
         # globally installed CLI. Owner: maintainers; reassess a locked fixture
         # by 2027-08-11.
-        run: npm install --global @opencode-ai/cli@0.0.0-next-16775
+        # OpenCode 2 publishes as @opencode/cli since upstream moved to the
+        # opencode npm scope (@opencode-ai/cli stopped at 0.0.0-*-192xx). The
+        # package still ships the `opencode2` bin the smoke step resolves.
+        run: npm install --global @opencode/cli@2.0.19
 
       - name: Build OpenCode plugin assets
         run: bun run build:review && bun run build:hook && bun run build:opencode
@@ -299,10 +400,41 @@ jobs:
       - name: Run installed-package smoke
         # Glob the tarball so this job survives version bumps; npm pack wrote
         # exactly one plannotator-opencode-*.tgz into RUNNER_TEMP above.
+        # The pinned host has the native command API, so a markdown stub
+        # still owning a /plannotator-* name is a real shadowing bug: fail on it.
+        env:
+          PLANNOTATOR_SMOKE_EXPECT_NATIVE: "1"
         run: >-
           bun run --cwd apps/opencode-plugin smoke:v2 --
           "$(command -v opencode2)"
           "$RUNNER_TEMP"/plannotator-opencode-*.tgz
+
+      # The Plannotator Inbox connection on the same installed package: the
+      # plannotator_inbox tool and the reply wake, on the real OpenCode 2 with
+      # a scripted model endpoint, against the binary compiled with the
+      # release flags (apps/opencode-plugin/inbox-v2.test.ts).
+      - name: Compile the binary for the Inbox proofs
+        run: >-
+          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig
+          --define '__CLI_VERSION__="0.0.0-dev"' --outfile .local/plannotator
+
+      - name: Run the Inbox connection proofs on the installed package
+        env:
+          PLANNOTATOR_INBOX_TEST_BINARY: ${{ github.workspace }}/.local/plannotator
+          INBOX_PROOF_DIR: ${{ github.workspace }}/.local/proof/inbox-opencode
+        run: |
+          export OPENCODE2_BIN="$(command -v opencode2)"
+          export OPENCODE_PLUGIN_TARBALL="$(ls "$RUNNER_TEMP"/plannotator-opencode-*.tgz)"
+          export PLANNOTATOR_DATA_DIR="$(mktemp -d)"
+          bun test apps/opencode-plugin/inbox-v2.test.ts apps/opencode-plugin/inbox.test.ts
+
+      - name: Keep the Inbox transcripts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: inbox-opencode-proof
+          path: .local/proof/
+          if-no-files-found: ignore
 
   guides-show:
     name: guides.show viewer (budgets + pinned manifest)
@@ -404,7 +536,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Run focused uninstall tests
-        run: bun test packages/server/uninstall.test.ts apps/hook/server/cli.test.ts
+        run: bun test packages/server/uninstall.test.ts apps/hook/server/cli.test.ts packages/server/auto-update.test.ts
 
   pi-extension-ai-runtime-windows:
     # Exercises the Pi extension's Node/jiti server mirror on Windows with an
@@ -514,6 +646,15 @@ jobs:
         # A missing or mismatched release asset surfaces as a curl 404
         # in this step with no obvious connection to the test's purpose.
         run: scripts\install.cmd v0.17.1 --skip-attestation
+
+      - name: install.cmd remembered its command-line flags
+        shell: pwsh
+        run: |
+          $f = Join-Path $env:USERPROFILE ".plannotator\install-flags.json"
+          if (-not (Test-Path $f)) { throw "install.cmd did not write $f" }
+          $flags = @((Get-Content -Raw $f | ConvertFrom-Json).flags)
+          if (($flags -join ",") -ne "skip-attestation") { throw "expected [skip-attestation], got: $(Get-Content -Raw $f)" }
+          Write-Host "✓ install.cmd wrote install-flags.json: $(Get-Content -Raw $f)"
 
       - name: Verify Gemini settings.json was merged correctly
         shell: pwsh
@@ -718,6 +859,15 @@ jobs:
         shell: pwsh
         run: .\scripts\install.ps1 v0.17.1 -SkipAttestation
 
+      - name: install.ps1 remembered its command-line switches
+        shell: pwsh
+        run: |
+          $f = Join-Path $env:USERPROFILE ".plannotator\install-flags.json"
+          if (-not (Test-Path $f)) { throw "install.ps1 did not write $f" }
+          $flags = @((Get-Content -Raw $f | ConvertFrom-Json).flags)
+          if (($flags -join ",") -ne "skip-attestation") { throw "expected [skip-attestation], got: $(Get-Content -Raw $f)" }
+          Write-Host "✓ install.ps1 wrote install-flags.json: $(Get-Content -Raw $f)"
+
       - name: Config opt-in resolves PLANNOTATOR_DATA_DIR tilde paths
         shell: pwsh
         run: |
@@ -758,3 +908,41 @@ jobs:
 
           Write-Host "✓ PLANNOTATOR_DATA_DIR tilde expansion found config.json"
           Write-Host "✓ Config-driven verifyAttestation rejected before download/install"
+
+      - name: Reinstall while plannotator.exe is running (auto-update path)
+        shell: pwsh
+        run: |
+          # Background auto-update runs install.ps1 while a session may still be
+          # running the installed exe. Windows refuses to overwrite or delete a
+          # running .exe, so install.ps1 renames it aside first. Exercise that
+          # for real: keep the installed binary running, reinstall, and check
+          # the swap, the survivor, and the later .old sweep.
+          $installDir = "$env:LOCALAPPDATA\plannotator"
+          $exe = Join-Path $installDir "plannotator.exe"
+          $env:PLANNOTATOR_DATA_DIR = Join-Path $env:RUNNER_TEMP "plannotator-running-exe"
+          $env:PLANNOTATOR_BROWSER = "$env:SystemRoot\System32\whoami.exe"
+          $sentinel = Join-Path $installDir "plannotator.exe.older-notes.txt"
+          Set-Content -Path $sentinel -Value "not ours to delete"
+
+          $proc = Start-Process -PassThru -WindowStyle Hidden -FilePath $exe -ArgumentList 'annotate','README.md'
+          Start-Sleep -Seconds 5
+          if ($proc.HasExited) { throw "plannotator.exe exited early (code $($proc.ExitCode)); the running-exe case was not exercised" }
+          $locked = $false
+          try { [System.IO.File]::Delete($exe) } catch { $locked = $true }
+          if (-not $locked) { throw "Deleting the running exe succeeded, so this step does not cover the locked case" }
+
+          .\scripts\install.ps1 v0.17.1 -SkipAttestation
+          if (-not (Test-Path $exe)) { throw "plannotator.exe missing after reinstalling over a running binary" }
+          if ($proc.HasExited) { throw "the running plannotator.exe died during the reinstall" }
+          $aside = @(Get-ChildItem -Path $installDir -Filter "plannotator.exe.old*" -File | Where-Object { $_.Name -ne (Split-Path $sentinel -Leaf) })
+          if ($aside.Count -ne 1) { throw "expected the running exe renamed aside once, found: $($aside.Name -join ', ')" }
+          if ((Get-Item $exe).Length -le 0) { throw "the newly installed plannotator.exe is empty" }
+
+          Stop-Process -Id $proc.Id -Force
+          $proc.WaitForExit()
+          Start-Sleep -Seconds 1
+          .\scripts\install.ps1 v0.17.1 -SkipAttestation
+          $left = @(Get-ChildItem -Path $installDir -Filter "plannotator.exe.old*" -File | Where-Object { $_.Name -ne (Split-Path $sentinel -Leaf) })
+          if ($left.Count -ne 0) { throw "stale renamed-aside exe not swept: $($left.Name -join ', ')" }
+          if (-not (Test-Path $sentinel)) { throw "the .old sweep deleted an unrelated file" }
+          Write-Host "✓ Reinstalled over a running plannotator.exe; the aside copy was swept later and nothing else was touched"

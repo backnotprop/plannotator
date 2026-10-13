@@ -1,0 +1,34 @@
+{
+  "path": "dot.png",
+  "commit": {
+    "hash": "c0a227ce2c516b48f1093561a903bf89f2b4282a",
+    "links": {
+      "self": {
+        "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/commit/c0a227ce2c516b48f1093561a903bf89f2b4282a"
+      },
+      "html": {
+        "href": "https://bitbucket.org/ws/repo/commits/c0a227ce2c516b48f1093561a903bf89f2b4282a"
+      }
+    },
+    "type": "commit"
+  },
+  "type": "commit_file",
+  "attributes": [
+    "binary"
+  ],
+  "escaped_path": "dot.png",
+  "size": 70,
+  "mimetype": "image/png",
+  "links": {
+    "self": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/src/c0a227ce2c516b48f1093561a903bf89f2b4282a/dot.png"
+    },
+    "meta": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/src/c0a227ce2c516b48f1093561a903bf89f2b4282a/dot.png?format=meta"
+    },
+    "history": {
+      "href": "https://api.bitbucket.org/2.0/repositories/ws/repo/filehistory/c0a227ce2c516b48f1093561a903bf89f2b4282a/dot.png"
+    }
+  },
+  "has_malware_warning": false
+}

@@ -1,0 +1,223 @@
+/**
+ * A guided review open in the Inbox (the record's 4.2): it takes the window
+ * the way an attachment does, under a header naming who sent it, with
+ * Plannotator's guide viewer below. The viewer mounts through a dynamic import
+ * (React.lazy): in the single-file build its code is inline and its modules
+ * run at page load, but nothing of the guide renders until Open. Reviewed
+ * ticks are kept with the thread, on the message in the store, so they
+ * survive a reload, another browser and the Inbox moving to another port.
+ *
+ * The person comments on the diffs as in the review app (a line number, a
+ * drag across lines, or code selected): each comment is kept in the store
+ * with the thread's other annotations, listed in the panel beside the guide
+ * and in the reply's "N annotations", and rides the next Send as the review
+ * app's export under "Feedback on the guided review". A resolved thread
+ * shows the guide read-only.
+ */
+
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { parseGuideSnapshot, type GuideSnapshot } from '@plannotator/core/guide-format';
+import type { InboxAnnotationRecord, InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
+import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
+import type { CodeAnnotation } from '@plannotator/ui/types';
+import { InboxApiError, inboxApi } from '../api';
+import { guideCommentOf } from '../attachments';
+import { agentName, clockTime, plural } from '../format';
+import { Icon } from '../icons';
+
+// `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
+const GuideReader = lazy(() => import('#guide-reader'));
+
+export interface GuidePaneProps {
+  thread: InboxThread;
+  message: InboxMessageWire;
+  /** Back to the thread. */
+  onBack: () => void;
+  /** Close the guide and the thread. */
+  onClose: () => void;
+}
+
+const NO_BLOCKS: never[] = [];
+const NO_ANNOTATIONS: never[] = [];
+
+export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) {
+  const [snapshot, setSnapshot] = useState<GuideSnapshot | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [reviewed, setReviewed] = useState<boolean[]>(() => message.guide_reviewed ?? []);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // This guide's comments waiting for a Send, as the store keeps them.
+  const [records, setRecords] = useState<InboxAnnotationRecord[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [scrollTarget, setScrollTarget] = useState<{ id: string; token: number } | null>(null);
+  // Read only once archived, unless the guide arrived after the archive line (it behaves as an open thread's).
+  const archiveSeq = thread.archive_seq ?? null;
+  const readOnly = thread.resolved_at !== null && !(archiveSeq !== null && (message.seq ?? 0) > archiveSeq);
+  /**
+   * Bumped by every local save or removal: a read of the thread's annotations
+   * that started before it answers with the store as it was, and must not put
+   * back a comment just removed or drop one just saved.
+   */
+  const localWrites = useRef(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSnapshot(null);
+    setError(null);
+    setReviewed(message.guide_reviewed ?? []);
+    setSaveError(null);
+    setSelectedId(null);
+    inboxApi
+      .guide(message.id)
+      .then((answer) => {
+        if (cancelled) return;
+        const parsed = parseGuideSnapshot(answer.snapshot);
+        if (parsed.ok) setSnapshot(parsed.value);
+        else setError(`This guided review could not be read (${parsed.error.path}: ${parsed.error.message}).`);
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : 'The guided review did not load.');
+      });
+    return () => {
+      cancelled = true;
+    };
+    // A tick saved from another tab arrives with the thread; the open pane keeps its own until then.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [message.id]);
+
+  // The comments: read with the thread's annotations, again whenever the thread changes (a Send, an edit in the reply's list, another tab).
+  useEffect(() => {
+    let cancelled = false;
+    const startedAt = localWrites.current;
+    inboxApi
+      .attachments(thread.thread_id)
+      .then((model) => {
+        if (cancelled || localWrites.current !== startedAt) return;
+        setRecords(model.annotations.filter((r) => r.message_id === message.id && r.guide));
+      })
+      .catch(() => {
+        // The thread went away; the pane closes with it.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [thread, message.id]);
+
+  const changeReviewed = (next: boolean[]) => {
+    setReviewed(next);
+    setSaveError(null);
+    inboxApi.saveGuideReviewed(message.id, next).then(
+      (saved) => setReviewed(saved.reviewed),
+      (cause: unknown) => setSaveError(cause instanceof Error ? cause.message : 'The reviewed tick was not saved.'),
+    );
+  };
+
+  const comments = useMemo(() => records.map(guideCommentOf).filter((c): c is CodeAnnotation => c !== null), [records]);
+
+  const save = useCallback(
+    (annotation: CodeAnnotation) => {
+      setSaveError(null);
+      localWrites.current += 1;
+      inboxApi.saveGuideAnnotation(message.id, annotation).then(
+        (saved) => {
+          // Again on the answer: a read that started while the write was in flight may not hold it.
+          localWrites.current += 1;
+          setRecords((list) => [...list.filter((r) => r.id !== saved.annotation.id), saved.annotation]);
+        },
+        (cause: unknown) => setSaveError(cause instanceof InboxApiError ? cause.message : 'The comment was not saved.'),
+      );
+    },
+    [message.id],
+  );
+  const remove = useCallback((id: string) => {
+    setSaveError(null);
+    localWrites.current += 1;
+    inboxApi.removeAnnotation(id).then(
+      () => {
+        localWrites.current += 1;
+        setRecords((list) => list.filter((r) => r.id !== id));
+      },
+      (cause: unknown) => setSaveError(cause instanceof InboxApiError ? cause.message : 'The comment was not removed.'),
+    );
+  }, []);
+  const edit = (id: string, updates: Partial<CodeAnnotation>) => {
+    const before = comments.find((c) => c.id === id);
+    if (before) save({ ...before, ...updates });
+  };
+  const showComment = (id: string) => {
+    setSelectedId(id);
+    setScrollTarget((current) => ({ id, token: (current?.token ?? 0) + 1 }));
+  };
+
+  const readerComments = useMemo(
+    () => (readOnly ? undefined : { annotations: comments, selectedId, onSelect: setSelectedId, onSave: save, onDelete: remove, scrollTarget }),
+    [readOnly, comments, selectedId, save, remove, scrollTarget],
+  );
+
+  return (
+    <section className="ib-viewer" aria-label="Guided review" data-guide-message={message.id}>
+      <div className="ib-vhead">
+        <button type="button" className="ib-back" onClick={onBack}>
+          <Icon name="back" size={15} />
+          Thread
+        </button>
+        <span className="ib-vsep" />
+        <span className="ib-fn">Guided review</span>
+        <span className="ib-from">
+          from {agentName(message.author)} in {thread.project.name}, sent {clockTime(message.created_at)}
+        </span>
+        <span className="ib-sp" />
+        <button type="button" className="ib-iconbtn" onClick={onClose} title="Close" aria-label="Close the guided review">
+          <Icon name="x" />
+        </button>
+      </div>
+      <div className="ib-gsplit">
+        <div className="ib-gbody">
+          {saveError && (
+            <div className="ib-error ib-gerror" role="alert">
+              {saveError}
+            </div>
+          )}
+          {error ? (
+            <div className="ib-error ib-gerror" role="alert">
+              {error}
+            </div>
+          ) : snapshot ? (
+            <Suspense fallback={null}>
+              <GuideReader snapshot={snapshot} reviewed={reviewed} onReviewedChange={changeReviewed} comments={readerComments} />
+            </Suspense>
+          ) : null}
+        </div>
+        <div className="ib-apanel ib-gpanel" data-guide-comments={comments.length}>
+          <AnnotationPanel
+            emptyHint={readOnly ? undefined : 'Click a line number, drag across lines, or select code to comment'}
+            isOpen
+            annotations={NO_ANNOTATIONS}
+            blocks={NO_BLOCKS}
+            codeAnnotations={comments}
+            onSelect={showComment}
+            onDelete={remove}
+            selectedId={selectedId}
+            onSelectCodeAnnotation={showComment}
+            onDeleteCodeAnnotation={remove}
+            onEditCodeAnnotation={readOnly ? undefined : edit}
+            width="100%"
+            readOnly={readOnly}
+          />
+          {comments.length > 0 && (
+            <div className="ib-gstrip">
+              <span className="ib-rchip" data-strip-chip="">
+                {plural(comments.length, 'comment')}
+              </span>
+              <span className="ib-l">ride your next Send to {agentName(message.author)}.</span>
+              <span className="ib-sp" />
+              <button type="button" className="ib-btn ib-sm" onClick={onBack}>
+                <Icon name="back" size={14} />
+                Back to the thread
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}

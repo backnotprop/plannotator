@@ -154,6 +154,9 @@ export const env = {
     },
     async writeText(_value: string): Promise<void> {},
   },
+  async openExternal(_uri: Uri): Promise<boolean> {
+    return true;
+  },
 };
 
 export const comments = {
