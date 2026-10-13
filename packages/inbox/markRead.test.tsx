@@ -82,7 +82,7 @@ async function serverSection(threadId: string): Promise<string | undefined> {
   return model.sections.find((s) => s.threads.some((t) => t.thread_id === threadId))?.id;
 }
 
-const TESTS = 12;
+const TESTS = 13;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -428,6 +428,26 @@ test.skipIf(!hasDom)('one session, words only (Keep open by default): the words 
   expect(replies.map((p) => p.path)).toEqual([`/api/inbox/messages/${ids.sameUpdate}/reply`]);
   expect(replies[0]!.body).toMatchObject({ words: 'Still deciding.', questions: [], skip_unanswered: false });
   expect((await questionStates(ids.same)).map((q) => q.state)).toEqual(['open']);
+  // The reply the session gets (on its update) still says its question is open.
+  const mine = await personMessages(ids.same);
+  expect(mine.map((m) => [m.reply_to, m.body])).toEqual([
+    [ids.sameUpdate, "Still deciding.\n\nNo question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox."],
+  ]);
+});
+
+test.skipIf(!hasDom)('two sessions, words only (Keep open by default): the words go to B, and B is told nothing about A\'s questions', async () => {
+  const el = await renderApp(`#thread=${ids.mixed}`);
+  act(() => button(el, 'Reply').click());
+  await settle();
+  expect(el.querySelector('[data-skip-chip]')?.getAttribute('data-skip-chip')).toBe('keep');
+  type(el, 'Thanks, carry on.');
+  act(() => button(el, 'Send').click());
+  await until(() => el.querySelector('textarea') === null, 'the Send');
+  const replies = posted.filter((p) => p.path.endsWith('/reply'));
+  expect(replies.map((p) => p.path)).toEqual([`/api/inbox/messages/${ids.update}/reply`]);
+  const mine = await personMessages(ids.mixed);
+  expect(mine.map((m) => [m.reply_to, m.body])).toEqual([[ids.update, 'Thanks, carry on.']]);
+  expect((await questionStates(ids.mixed)).map((q) => q.state)).toEqual(['open']);
 });
 
 test.skipIf(!hasDom)('with a file open beside the thread, E stands down in the viewer and on the page; aimed at the thread it still marks read', async () => {

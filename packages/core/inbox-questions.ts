@@ -349,6 +349,13 @@ export function composeInboxReplyBody(input: {
   sent: readonly QuestionAnswer[];
   earlier: readonly QuestionAnswer[];
   words: string | undefined;
+  /**
+   * The questions the still-open line counts when the reply sends no answer
+   * and no skip. Default: `questions`. The Inbox passes every question the
+   * replied-to message's session asked in the thread, so words sent to its
+   * later plain update still tell it that its questions stay open.
+   */
+  stillOpen?: readonly InboxQuestionRecord[];
 }): string {
   // The same rule as the answers section's "x of y answered" line
   // (formatQuestionAnswersSection): a pick, Other or text answers; a note
@@ -373,7 +380,7 @@ export function composeInboxReplyBody(input: {
   const words = input.words?.trim() ?? "";
   // A reply that answers and skips nothing (words, annotations, or both)
   // leaves every question open, and says so: the agent must not ask again.
-  const stillOpen = input.sent.length === 0 ? inboxStillOpenLine(input.questions) : "";
+  const stillOpen = input.sent.length === 0 ? inboxStillOpenLine(input.stillOpen ?? input.questions) : "";
   return [sentence, words, stillOpen, section].filter((part) => part !== "").join("\n\n");
 }
 

@@ -120,6 +120,43 @@ describe("a reply that answers nothing", () => {
   });
 });
 
+describe("a session asked, then posted a plain update (the words go to the update)", () => {
+  test("same session: the reply to the update counts the questions the session asked earlier", () => {
+    const { store, project, asked } = setup();
+    const update = store.sendMessage({ project_id: project.id, author: AGENT, reply_to: asked.id, body: "Update: the list builds now." }).message;
+    const result = store.sendReply(update.id, { words: "Still deciding.", idempotency_key: "k-1", skip_unanswered: false });
+    expect(result.reply.body).toBe(`Still deciding.\n\n${STILL_OPEN_3}`);
+    expect(store.questionsOf(asked.id).map((q) => q.state)).toEqual(["open", "open", "open"]);
+    // The phone door and older windows send no skip_unanswered: the same body.
+    expect(store.sendReply(update.id, { words: "Later.", idempotency_key: "k-2" }).reply.body).toBe(`Later.\n\n${STILL_OPEN_3}`);
+  });
+
+  test("another session posted the update: its reply says nothing about the first session's questions", () => {
+    const { store, project, asked } = setup();
+    const other = { ...AGENT, host: "pi", session: "ses_b" };
+    const update = store.sendMessage({ project_id: project.id, author: other, reply_to: asked.id, body: "Nightly build is green." }).message;
+    const result = store.sendReply(update.id, { words: "Thanks.", idempotency_key: "k-1" });
+    expect(result.reply.body).toBe("Thanks.");
+  });
+
+  test("same session, a question in the update too: the line counts both messages' questions", () => {
+    const { store, project, asked } = setup();
+    const update = store.sendMessage({ project_id: project.id, author: AGENT, reply_to: asked.id, body: question("Deploy tonight?", ["Yes", "No"]) }).message;
+    const result = store.sendReply(update.id, { words: "Later.", idempotency_key: "k-1" });
+    expect(result.reply.body).toBe("Later.\n\nNo questions answered yet; all 4 are still open. Don't re-ask them; the person will answer in the Inbox.");
+  });
+
+  test("a partial answer on the update is byte-identical to before: its own questions only, no still-open line", () => {
+    const { store, project, asked } = setup();
+    const update = store.sendMessage({ project_id: project.id, author: AGENT, reply_to: asked.id, body: question("Deploy tonight?", ["Yes", "No"]) }).message;
+    const q = store.questionsOf(update.id)[0]!;
+    const result = store.sendReply(update.id, { words: "Yes.", idempotency_key: "k-1", questions: [{ key: q.key, revision: 0, answer: pickFor(q, "Yes") }] });
+    expect(result.reply.body.split("\n\n").slice(0, 2)).toEqual(["Answered 1 question.", "Yes."]);
+    expect(result.reply.body).toContain("1 of 1 question answered.");
+    expect(result.reply.body).not.toContain("still open");
+  });
+});
+
 describe("a reply that answers at least one question is unchanged", () => {
   test("partial with skip: first line, words, the answers section; no still-open line", () => {
     const { store, asked, questions } = setup();
