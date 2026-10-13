@@ -930,7 +930,7 @@ export interface InboxAgentsModel {
   connect_env_off: boolean;
   /** PLANNOTATOR_INBOX_TOOL's value when set. */
   tool_env: boolean | null;
-  /** PLANNOTATOR_INBOX_NOTES=0: no note offer, no note rows. */
+  /** PLANNOTATOR_INBOX_NOTES=0: no note offer, and note rows only for a note already written (it can be turned off, not added). */
   notes_env_off?: boolean;
   /** The one-time note question was answered. */
   notes_offered: boolean;

@@ -197,14 +197,24 @@ test("Settings' note switch refuses an agent not found here too, and writes noth
   expect(existsSync(join(dataDir, "inbox", "agent-notes.json"))).toBe(false);
 });
 
-test("PLANNOTATOR_INBOX_NOTES=0: no note rows, no offer, and a note cannot be added", async () => {
+test("PLANNOTATOR_INBOX_NOTES=0: no offer, no row for an agent without a note, a note cannot be added, and one already written is listed so it can be turned off", async () => {
   mkdirSync(join(fake.home, ".codex"), { recursive: true });
   writeFileSync(join(fake.home, ".codex", "AGENTS.md"), "Mine.\n");
+  mkdirSync(join(fake.home, ".gemini"), { recursive: true });
+  // A note written before the variable was set.
+  const before = await start();
+  await post(before, "/api/inbox/agents", { agent: "gemini", note: true });
+  await before.stop();
   const s = await start({ PLANNOTATOR_INBOX_NOTES: "0" });
   const model = await get(s);
   expect(row(model, "codex").note).toBeNull();
+  expect(row(model, "gemini").note?.state).toBe("added");
   expect((model as unknown as { notes_env_off: boolean }).notes_env_off).toBe(true);
   const refused = await post(s, "/api/inbox/agents", { agent: "codex", note: true });
   expect([refused.status, ((await refused.json()) as { code: string }).code]).toEqual([400, "notes_disabled"]);
   expect(readFileSync(join(fake.home, ".codex", "AGENTS.md"), "utf8")).toBe("Mine.\n");
+  const off = (await (await post(s, "/api/inbox/agents", { agent: "gemini", note: false })).json()) as Model;
+  expect(row(off, "gemini").note).toBeNull();
+  // Plannotator created GEMINI.md for the note, so turning it off removes the file.
+  expect(existsSync(join(fake.home, ".gemini", "GEMINI.md"))).toBe(false);
 });

@@ -305,7 +305,7 @@ export function AgentsSettings({ model, onModel, context }: { model: InboxAgents
         <div className="ib-callout" role="note">
           <Icon name="info" />
           <span>
-            <code>PLANNOTATOR_INBOX_NOTES=0</code> is set, so Plannotator offers no notes and adds none. Notes already written stay until you remove them.
+            <code>PLANNOTATOR_INBOX_NOTES=0</code> is set, so Plannotator offers no notes and adds none. A note already written is listed below, where you can turn it off.
           </span>
         </div>
       )}
