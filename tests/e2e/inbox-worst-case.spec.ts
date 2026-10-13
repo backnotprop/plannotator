@@ -391,12 +391,24 @@ for (const width of [920, 1024, 1180, 1280]) {
         // The file takes the whole pane; the panel opens over it from the header's button, and closes.
         expect(doc.width).toBeGreaterThan(pane.width - 4);
         await expect(view.locator('.ib-apanel')).toBeHidden();
-        await view.locator('[data-annotations-sheet]').click();
+        const button = view.locator('[data-annotations-sheet]');
+        await expect(button).toHaveAttribute('aria-label', /^Comments, \d+$/);
+        await button.click();
         await expect(view.locator('.ib-apanel')).toBeVisible();
+        await expect(view.locator('.ib-apanel')).toHaveAttribute('id', (await button.getAttribute('aria-controls'))!);
         expect((await view.locator('.ib-apanel').boundingBox())!.width).toBeLessThanOrEqual(301);
         await shot(page, `fold-${width}-sheet`);
+        // Its close, and Escape from inside it, close it and give focus back to the button.
         await view.getByRole('button', { name: 'Close the comments' }).click();
         await expect(view.locator('.ib-apanel')).toBeHidden();
+        await expect(button).toBeFocused();
+        await button.click();
+        await view.getByRole('button', { name: 'Close the comments' }).focus();
+        await page.keyboard.press('Escape');
+        await expect(view.locator('.ib-apanel')).toBeHidden();
+        await expect(button).toBeFocused();
+        // The file stays open: Escape went to the sheet only.
+        await expect(view).toBeVisible();
       } else {
         await expect(view.locator('[data-annotations-sheet]')).toHaveCount(0);
         await expect(view.locator('.ib-apanel')).toBeVisible();
@@ -444,11 +456,21 @@ test('a guided review at 1024 and 900 keeps its diffs readable, with its comment
       if (width < 1280) {
         await expect(viewer).toHaveClass(/\bib-fold\b/);
         expect((await viewer.locator('.ib-gbody').boundingBox())!.width).toBeGreaterThan(width - 260);
-        await viewer.locator('[data-guide-comments-sheet]').click();
+        const button = viewer.locator('[data-guide-comments-sheet]');
+        await button.click();
         await expect(viewer.locator('.ib-gpanel')).toBeVisible();
+        await expect(viewer.locator('.ib-gpanel')).toHaveAttribute('id', (await button.getAttribute('aria-controls'))!);
         await shot(page, `guide-${width}-sheet`);
         await viewer.getByRole('button', { name: 'Close the comments' }).click();
         await expect(viewer.locator('.ib-gpanel')).toBeHidden();
+        await expect(button).toBeFocused();
+        // Escape closes the sheet first; the guide stays open.
+        await button.click();
+        await viewer.getByRole('button', { name: 'Close the comments' }).focus();
+        await page.keyboard.press('Escape');
+        await expect(viewer.locator('.ib-gpanel')).toBeHidden();
+        await expect(button).toBeFocused();
+        await expect(viewer).toBeVisible();
       } else {
         await expect(viewer).not.toHaveClass(/\bib-fold\b/);
         await expect(viewer.locator('[data-guide-comments-sheet]')).toHaveCount(0);

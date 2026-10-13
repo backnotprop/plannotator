@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { inboxAttachmentKindLabel, isInboxTextKind, type InboxAnnotationRecord, type InboxAttachmentState, type InboxProjectRepo } from '@plannotator/core/inbox-types';
 import { CodeFileView } from '@plannotator/ui/components/CodeFilePopout';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
@@ -228,6 +228,13 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   useEffect(() => {
     if (!folded) setSheet(false);
   }, [folded]);
+  const sheetButtonRef = useRef<HTMLButtonElement>(null);
+  const sheetId = useId();
+  /** Close the sheet from inside it (its close, Escape): focus goes back to the button that opened it. */
+  const closeSheet = () => {
+    setSheet(false);
+    sheetButtonRef.current?.focus({ preventScroll: true });
+  };
   const [endNote, setEndNote] = useState<string | null>(null);
   const endTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [announced, setAnnounced] = useState('');
@@ -630,11 +637,19 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         {folded && hasPanel && (
           <button
             type="button"
+            ref={sheetButtonRef}
             className={`ib-btn ib-sm ib-vcomments${sheet ? ' ib-on' : ''}`}
             onClick={() => setSheet((v) => !v)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape' && sheet && !event.defaultPrevented) {
+                event.preventDefault();
+                closeSheet();
+              }
+            }}
             aria-expanded={sheet}
-            aria-label={`Annotations, ${annotations.length}`}
-            title="Annotations"
+            aria-controls={sheetId}
+            aria-label={`Comments, ${annotations.length}`}
+            title="Comments"
             data-annotations-sheet=""
           >
             <Icon name="comment" size={15} />
@@ -807,14 +822,26 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             </div>
           )}
         </div>
-        <div className="ib-apanel" role={folded ? 'region' : undefined} aria-label={folded ? 'Comments' : undefined}>
+        <div
+          className="ib-apanel"
+          id={sheetId}
+          role={folded ? 'region' : undefined}
+          aria-label={folded ? 'Comments' : undefined}
+          onKeyDown={(event) => {
+            // Escape closes the open sheet, unless something inside (an edit box) already used it.
+            if (event.key === 'Escape' && folded && sheet && !event.defaultPrevented) {
+              event.preventDefault();
+              closeSheet();
+            }
+          }}
+        >
           {/* The folded panel's sheet: its own title and close (a phone's touch presentation has neither). */}
           {folded && (
             <div className="ib-sheet-h">
               <b>Comments</b>
               <span className="ib-mut">{annotations.length}</span>
               <span className="ib-sp" />
-              <button type="button" className="ib-iconbtn" onClick={() => setSheet(false)} aria-label="Close the comments">
+              <button type="button" className="ib-iconbtn" onClick={closeSheet} aria-label="Close the comments">
                 <Icon name="x" />
               </button>
             </div>

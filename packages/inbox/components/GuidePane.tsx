@@ -15,7 +15,7 @@
  * shows the guide read-only.
  */
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { parseGuideSnapshot, type GuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxAnnotationRecord, InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
@@ -73,6 +73,20 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
   useEffect(() => {
     if (!folded) setSheet(false);
   }, [folded]);
+  const sheetButtonRef = useRef<HTMLButtonElement>(null);
+  const sheetId = useId();
+  /** Close the sheet from inside it (its close, Escape): focus goes back to the button that opened it. */
+  const closeSheet = () => {
+    setSheet(false);
+    sheetButtonRef.current?.focus({ preventScroll: true });
+  };
+  // Escape closes the open sheet before it closes the guide (App's handler skips a used Escape).
+  const onSheetKey = (event: React.KeyboardEvent) => {
+    if (event.key === 'Escape' && folded && sheet && !event.defaultPrevented) {
+      event.preventDefault();
+      closeSheet();
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -189,9 +203,12 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
         {folded && (
           <button
             type="button"
+            ref={sheetButtonRef}
             className={`ib-btn ib-sm ib-vcomments${sheet ? ' ib-on' : ''}`}
             onClick={() => setSheet((v) => !v)}
+            onKeyDown={onSheetKey}
             aria-expanded={sheet}
+            aria-controls={sheetId}
             aria-label={`Comments, ${comments.length}`}
             title="Comments"
             data-guide-comments-sheet=""
@@ -223,6 +240,8 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
         </div>
         <div
           className="ib-apanel ib-gpanel"
+          id={sheetId}
+          onKeyDown={onSheetKey}
           role={folded ? 'region' : undefined}
           aria-label={folded ? 'Comments' : undefined}
           data-guide-comments={comments.length}
@@ -233,7 +252,7 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
               <b>Comments</b>
               <span className="ib-mut">{comments.length}</span>
               <span className="ib-sp" />
-              <button type="button" className="ib-iconbtn" onClick={() => setSheet(false)} aria-label="Close the comments">
+              <button type="button" className="ib-iconbtn" onClick={closeSheet} aria-label="Close the comments">
                 <Icon name="x" />
               </button>
             </div>

@@ -220,7 +220,24 @@ test.skipIf(!hasDom)('a PDF has no comments panel or Comments button, unless oth
   const note = record(shot, imageCommentAnnotation({ id: 'ann-shot', name: 'checkout.png', text: 'Cut off.' }), 'ann-shot');
   await renderPane(spec, { phone: true, others: [shot], records: [note] });
   expect(host!.querySelector('[data-attachment-pane]')!.classList.contains('ib-nopanel')).toBe(false);
-  expect(host!.querySelector('[data-annotations-sheet]')).not.toBeNull();
+  const button = host!.querySelector<HTMLButtonElement>('[data-annotations-sheet]')!;
+  expect(button).not.toBeNull();
+  expect(button.getAttribute('aria-label')).toMatch(/^Comments, \d+$/);
+  const panel = host!.querySelector('.ib-apanel')!;
+  expect(button.getAttribute('aria-controls')).toBe(panel.id);
+  // The sheet's close, and Escape inside it, close it and give focus back to the button.
+  await act(async () => button.click());
+  expect(button.getAttribute('aria-expanded')).toBe('true');
+  const close = panel.querySelector<HTMLButtonElement>('button[aria-label="Close the comments"]')!;
+  await act(async () => close.click());
+  expect(button.getAttribute('aria-expanded')).toBe('false');
+  expect(document.activeElement).toBe(button);
+  await act(async () => button.click());
+  await act(async () => {
+    close.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  });
+  expect(button.getAttribute('aria-expanded')).toBe('false');
+  expect(document.activeElement).toBe(button);
 });
 
 // Row 52: a 1×1 image was blown up to a block of one colour; row 51: a panorama became a sliver.
