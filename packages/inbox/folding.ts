@@ -8,7 +8,7 @@
 
 import { isInboxNote, type InboxMessageWire, type InboxQuestion, type InboxThread } from '@plannotator/core/inbox-types';
 import { QUESTION_ANSWERS_HEADING, type QuestionAnswer } from '@plannotator/core/question-block';
-import { sliceText } from '@plannotator/core/text-cut';
+import { sliceText } from '@plannotator/core/inbox-questions';
 
 /**
  * Where "new since you looked" starts: the seq of the person's last look at

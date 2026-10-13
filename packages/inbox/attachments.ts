@@ -5,7 +5,7 @@
  */
 
 import { shouldStripFrontmatter } from '@plannotator/core/annotatable';
-import { cutText } from '@plannotator/core/text-cut';
+import { cutText } from '@plannotator/core/inbox-questions';
 import { readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { AnnotationType, type Annotation, type Block, type CodeAnnotation, type ImageAttachment } from '@plannotator/ui/types';
 import { diagramDocumentBlocks, exportLinkedDocAnnotations, parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';

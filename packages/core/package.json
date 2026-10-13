@@ -33,7 +33,6 @@
     "./html-anchor": "./html-anchor.ts",
     "./inbox-types": "./inbox-types.ts",
     "./inbox-questions": "./inbox-questions.ts",
-    "./text-cut": "./text-cut.ts",
     "./diagram-anchor": "./diagram-anchor.ts",
     "./open-in-apps": "./open-in-apps.ts",
     "./project": "./project.ts",

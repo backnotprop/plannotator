@@ -8,7 +8,7 @@
 
 import { forwardRef, lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { diagramTargetName, diagramTargetText, type DiagramAnchor } from '@plannotator/core/diagram-anchor';
-import { sliceText } from '@plannotator/core/text-cut';
+import { sliceText } from '@plannotator/core/inbox-questions';
 import { inboxAttachmentKindLabel, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type SurfaceOpenAttachment } from '@plannotator/core/inbox-types';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
 import { HtmlViewer } from '@plannotator/ui/components/html-viewer';

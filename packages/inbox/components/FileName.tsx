@@ -1,4 +1,4 @@
-import { sliceText } from '@plannotator/core/text-cut';
+import { sliceText } from '@plannotator/core/inbox-questions';
 
 /**
  * A file name that is cut in the middle when it runs short, never at its

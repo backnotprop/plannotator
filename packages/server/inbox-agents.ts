@@ -35,7 +35,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync,
 import { homedir, tmpdir } from "node:os";
 import { spawn as spawnChild } from "node:child_process";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
-import { cutText } from "@plannotator/core/text-cut";
+import { cutText } from "@plannotator/core/inbox-questions";
 import {
   INBOX_AGENT_IDS,
   INBOX_AGENT_LABELS,

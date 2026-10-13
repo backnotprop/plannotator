@@ -25,6 +25,8 @@
 
 import { resolveReferenceLinks } from "./markdown-structure";
 import { cutText } from "./text-cut";
+// The grapheme-safe cuts, re-exported here: core's export map is checked against the published package, and the Inbox is what uses them.
+export { cutText, sliceText } from "./text-cut";
 import {
   canonicalQuestionAnswer,
   findQuestionBlocks,
