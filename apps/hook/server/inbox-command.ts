@@ -47,6 +47,8 @@ const LOCK_HELD_ENV = "PLANNOTATOR_INBOX_LOCK_HELD";
  * Set on an Inbox started detached (`--background`, a connection or the shim
  * starting a stopped one, the window's Restart): such a start never connects
  * agents, which only a person's `plannotator inbox` does. Scrubbed at start.
+ * LOCK_HELD_ENV alone means the same (an older Inbox's spawn, which predates
+ * this marker; see runInboxCommand).
  */
 const DETACHED_ENV = "PLANNOTATOR_INBOX_DETACHED";
 /** How long a starter waits for a detached Inbox to answer its health check. */
@@ -356,7 +358,11 @@ export interface InboxCommandAssets {
 export async function runInboxCommand(args: readonly string[], assets: InboxCommandAssets = {}): Promise<never> {
   const dataDir = getPlannotatorDataDir();
   // Only a person's `plannotator inbox` connects agents, never a detached start.
-  const detached = process.env[DETACHED_ENV] === "1";
+  // An Inbox older than DETACHED_ENV (0.28.17 and before) spawns its detached
+  // starts (its Restart into an updated binary, --background, a connection)
+  // with only LOCK_HELD_ENV, which every detached start has carried since the
+  // first Inbox and a person's run never does; so it counts as detached too.
+  const detached = process.env[DETACHED_ENV] === "1" || process.env[LOCK_HELD_ENV] === "1";
   delete process.env[DETACHED_ENV];
   // PLANNOTATOR_INBOX_CONNECT=0 in this shell skips it, also on an Inbox an agent started.
   const connect = !detached && !inboxConnectDisabled(process.env);
