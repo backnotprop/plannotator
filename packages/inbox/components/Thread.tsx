@@ -73,13 +73,18 @@ function spanWords(from: string, to: string): string {
 const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /**
- * The new messages whose top is below the view (under the pill's band), in
- * thread order, leaving out arrivals the person has already seen on sight
- * (`data-sighted`): what the "↓ N new" pill counts and goes to.
+ * What the "↓ N new" pill counts and goes to, in thread order, of the
+ * messages whose top is below the view (under the pill's band): the arrivals
+ * not yet seen on sight (`data-arrival`, design record
+ * "inbox-new-in-open-thread": the pill counts only unseen arrivals below);
+ * only when none waits there, the messages that were new when the thread
+ * opened (`data-new`). An arrival already seen (`data-sighted`) never counts.
  */
 function newBelow(body: HTMLElement): HTMLElement[] {
   const bottom = body.getBoundingClientRect().bottom - PILL_BAND_PX;
-  return [...body.querySelectorAll<HTMLElement>('[data-message-article][data-new]:not([data-sighted])')].filter((a) => a.getBoundingClientRect().top > bottom);
+  const below = (selector: string) => [...body.querySelectorAll<HTMLElement>(selector)].filter((a) => a.getBoundingClientRect().top > bottom);
+  const arrivals = below('[data-message-article][data-arrival]:not([data-sighted])');
+  return arrivals.length > 0 ? arrivals : below('[data-message-article][data-new]:not([data-arrival]):not([data-sighted])');
 }
 
 /** A folded line's snippet: the message's first words, or the person's answers. */
@@ -775,6 +780,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   const [sighted, setSighted] = useState<{ threadId: string; ids: ReadonlySet<string> }>(() => ({ threadId: thread.thread_id, ids: new Set() }));
   const sightedIds: ReadonlySet<string> = sighted.threadId === thread.thread_id ? sighted.ids : NO_IDS;
   const arrivals = useMemo(() => (onSeen ? unseenArrivals(thread.messages, seenThrough) : []), [onSeen, thread.messages, seenThrough]);
+  /** The arrivals still to be seen (and those seen whose look is not recorded yet): the pill counts these first. */
+  const arrivalIds = useMemo(() => new Set(arrivals.map((m) => m.id)), [arrivals]);
   const candidates = arrivals.filter((m) => !sightedIds.has(m.id) && !fold.folded.has(m.id) && !hiddenNow.has(m.id)).map((m) => m.id);
   /** A file over the thread: full screen, or where it cannot sit beside it (a phone, a stacked window). */
   const fileCovers = file !== null && (full || phone || fileStacked);
@@ -888,9 +895,10 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   }, [foldState, thread, file?.id, updateChrome, sighted]);
 
   /**
-   * n goes to the first new message (at the divider); the pill to the first
-   * new message below the view, which is the first new one unless the person
-   * has read past it.
+   * n goes to the first new message (at the divider); the pill to what it
+   * counts (newBelow): the first arrival not yet seen below the view, else
+   * the first message new at the open below it, which is the first new one
+   * unless the person has read past it.
    */
   const jumpNew = useCallback((below = false) => {
     const body = bodyRef.current;
@@ -1529,6 +1537,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                 data-folded=""
                 data-new={isNew ? '' : undefined}
                 data-sighted={sightedIds.has(message.id) ? '' : undefined}
+                data-arrival={arrivalIds.has(message.id) ? '' : undefined}
                 data-arrived={arrivedIds.has(message.id) ? '' : undefined}
                 tabIndex={-1}
               >
@@ -1640,6 +1649,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
               data-open={one ? undefined : ''}
               data-new={isNew ? '' : undefined}
               data-sighted={sightedIds.has(message.id) ? '' : undefined}
+              data-arrival={arrivalIds.has(message.id) ? '' : undefined}
               data-arrived={arrivedIds.has(message.id) ? '' : undefined}
               tabIndex={-1}
             >

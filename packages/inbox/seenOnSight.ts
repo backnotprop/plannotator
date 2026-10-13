@@ -11,7 +11,9 @@
  *
  * The rules are pure and live here; `useSeenOnSight` runs them over the
  * thread's DOM with an IntersectionObserver (and the scroll, visibility and
- * focus events that change the answer without crossing a threshold).
+ * focus events that change the answer without crossing a threshold). "On
+ * screen" also means on top: a sheet, a popover or a toast drawn over the
+ * first lines hides them (`onTop`).
  */
 
 import { useEffect, useRef } from 'react';
@@ -27,22 +29,60 @@ export const FIRST_LINES_PX = 96;
 export const AT_END_PX = 24;
 /** The band at the bottom of the thread the "↓ N new" pill sits over while it shows. */
 export const PILL_BAND_PX = 56;
+/** The first line when the message has no sender row to measure. */
+export const FIRST_LINE_PX = 24;
+/** How often the dwell checks again while it runs: a sheet or a toast opening over the thread raises no event here. */
+export const RECHECK_MS = 250;
 
 export interface Span {
   top: number;
   bottom: number;
 }
 
+/** The first lines of a message, and `line`: the bottom of its first line (the sender row). */
+export interface FirstLines extends Span {
+  line: number;
+}
+
 /** The first lines of a message: from the top of its sender row to 96 px under it, or its bottom when it is shorter. */
-export function firstLines(article: Span, senderTop: number | null, senderBottom: number | null): Span {
+export function firstLines(article: Span, senderTop: number | null, senderBottom: number | null): FirstLines {
   const top = senderTop ?? article.top;
-  return { top, bottom: Math.min(article.bottom, (senderBottom ?? top) + FIRST_LINES_PX) };
+  return {
+    top,
+    bottom: Math.min(article.bottom, (senderBottom ?? top) + FIRST_LINES_PX),
+    line: Math.min(article.bottom, senderBottom ?? top + FIRST_LINE_PX),
+  };
+}
+
+/**
+ * What must be on screen: the first lines, or only the first line when the
+ * view is too short to hold the first lines above the pill's band (a phone on
+ * its side with the keyboard up), so a short view can still see a message.
+ */
+export function requiredLines(lines: FirstLines, view: Span, band = 0): Span {
+  if (view.bottom - band - view.top >= lines.bottom - lines.top) return { top: lines.top, bottom: lines.bottom };
+  return { top: lines.top, bottom: lines.line };
 }
 
 /** The first lines are wholly inside the view, above the band the pill covers (0 when it does not show). */
 export function firstLinesInView(lines: Span, view: Span, band = 0): boolean {
   if (lines.bottom <= lines.top) return false;
   return lines.top >= view.top - 1 && lines.bottom <= view.bottom - band + 1;
+}
+
+/**
+ * The points to test for something drawn over the first lines: the middle
+ * of the article's visible width, near the top of the lines and halfway down.
+ */
+export function samplePoints(lines: Span, article: { left: number; right: number }, view: { left: number; right: number }): { x: number; y: number }[] {
+  const left = Math.max(article.left, view.left);
+  const right = Math.min(article.right, view.right);
+  const x = right > left ? (left + right) / 2 : (article.left + article.right) / 2;
+  const height = lines.bottom - lines.top;
+  return [
+    { x, y: lines.top + Math.min(8, height / 2) },
+    { x, y: lines.top + height / 2 },
+  ];
 }
 
 /**
@@ -105,12 +145,42 @@ function dialogOpen(): boolean {
   return typeof document !== 'undefined' && document.querySelector('dialog[open]') !== null;
 }
 
-/** The first lines of a message article, measured now. */
-export function measureFirstLines(article: HTMLElement): Span {
+/**
+ * How far the article is drawn from where it sits: the entrance animation of
+ * an arrival (`data-arrived`, a 6 px rise) moves it while it runs, and where
+ * it sits is what counts.
+ */
+function entranceShift(article: HTMLElement): number {
+  if (!article.hasAttribute('data-arrived') || typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') return 0;
+  const transform = window.getComputedStyle(article).transform;
+  if (!transform || transform === 'none') return 0;
+  const values = /^matrix(3d)?\(([^)]*)\)$/.exec(transform)?.[2]?.split(',').map(Number);
+  if (!values) return 0;
+  const ty = values.length === 16 ? values[13] : values[5];
+  return ty !== undefined && Number.isFinite(ty) ? ty : 0;
+}
+
+/** The first lines of a message article, measured now, without the entrance animation's shift. */
+export function measureFirstLines(article: HTMLElement): FirstLines {
+  const shift = entranceShift(article);
   const box = article.getBoundingClientRect();
   const sender = article.querySelector<HTMLElement>('.ib-sender, .ib-fline');
   const head = sender?.getBoundingClientRect() ?? null;
-  return firstLines(box, head ? head.top : null, head ? head.bottom : null);
+  return firstLines({ top: box.top - shift, bottom: box.bottom - shift }, head ? head.top - shift : null, head ? head.bottom - shift : null);
+}
+
+/**
+ * Nothing is drawn over the first lines: at each sample point the topmost
+ * element is inside the article (a sheet, a popover, the toast or a menu over
+ * them is not). Where the browser cannot tell (no `elementFromPoint`), the
+ * other checks decide alone.
+ */
+function onTop(article: HTMLElement, lines: Span, view: DOMRect): boolean {
+  if (typeof document.elementFromPoint !== 'function') return true;
+  return samplePoints(lines, article.getBoundingClientRect(), view).every(({ x, y }) => {
+    const hit = document.elementFromPoint(x, y);
+    return hit !== null && article.contains(hit);
+  });
 }
 
 export interface SeenOnSightOptions {
@@ -169,7 +239,9 @@ export function useSeenOnSight({ bodyRef, candidates, covered, pill, onSeen }: S
       const article = articleOf(id);
       if (!article) return false;
       const view = body.getBoundingClientRect();
-      return firstLinesInView(measureFirstLines(article), view, state.current.pill ? PILL_BAND_PX : 0);
+      const band = state.current.pill ? PILL_BAND_PX : 0;
+      const lines = requiredLines(measureFirstLines(article), view, band);
+      return firstLinesInView(lines, view, band) && onTop(article, lines, view);
     };
     const evaluate = () => {
       for (const id of candidates) {
@@ -205,10 +277,14 @@ export function useSeenOnSight({ bodyRef, candidates, covered, pill, onSeen }: S
     document.addEventListener('visibilitychange', evaluate);
     // A dialog closing hands focus back inside the page.
     document.addEventListener('focusin', evaluate);
+    // A sheet, a popover or the toast opening or closing over the first lines
+    // raises none of the events above: look again while there is something to see.
+    const recheck = setInterval(evaluate, RECHECK_MS);
     evaluateRef.current = evaluate;
     evaluate();
     return () => {
       evaluateRef.current = null;
+      clearInterval(recheck);
       observer?.disconnect();
       body.removeEventListener('scroll', evaluate);
       window.removeEventListener('resize', evaluate);

@@ -169,8 +169,10 @@ export function settleOwn(
       // message that arrived while it was open included: seen, by its state
       // (often Quiet); not yet seen, back as unread (New, or Waiting when it asks).
       if (isOpenRow(row, open) || !hasNewAgentActivity(old, row, openedHere)) put(section.id, row);
-      // Archived by the person while it was open (markHeldRowArchived): the archive settles (the row
-      // leaves); the agent's message that brought it back waits behind "N new", like any agent activity.
+      // Archived by the person while it was open (markHeldRowArchived), and an agent wrote in it after
+      // the close (an agent message before the close made it the open row, settled above by its state:
+      // back unread when not seen): the archive settles (the row leaves) and that message waits behind
+      // "N new", like any agent activity.
       else if (old && (old.resolved_at ?? null) !== null && old.back_from_archive !== true) continue;
       // Held: the state on screen, in the section that state sits in.
       else if (old) put(known.has(old.section) ? old.section : section.id, old);

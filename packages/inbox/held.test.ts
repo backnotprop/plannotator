@@ -305,6 +305,27 @@ describe('the open thread', () => {
     expect(heldNotice(onScreen, bySection(asked, other), undefined, closedAs(null)).count).toBe(1);
   });
 
+  // The failure this guards: the person archived the thread they had open
+  // and the agent answered in it before they closed it. The archive branch of
+  // settleOwn dropped the row (waiting behind "N new"), so the reply they did
+  // not see vanished from the list on close.
+  test('archived while open, then the agent writes in it before the close: unseen, it settles back unread', () => {
+    const open = { ...r('open', 'billing-svc', 1, 'new', 0), unread: false, resolved_at: null } as InboxListRow;
+    const archivedShown = markHeldRowArchived(bySection(open, other), 'open', at(2));
+    // The agent's reply brings it back from the archive while it is still open: the row tells it in place.
+    const cameBack = { ...r('open', 'billing-svc', 4, 'new', 1), resolved_at: at(2), back_from_archive: true } as InboxListRow;
+    const whileOpen = refreshHeldRows(archivedShown, bySection(cameBack, other), OPEN);
+    expect(whileOpen.flatMap((s) => s.threads).find((t) => t.thread_id === 'open')).toBe(cameBack);
+    expect(heldNotice(whileOpen, bySection(cameBack, other), undefined, OPEN).count).toBe(0);
+    // Closed before seeing it: back in New, bold.
+    const settled = settleOwn(whileOpen, bySection(cameBack, other), undefined, closedAs(cameBack));
+    expect(ids(settled)).toEqual(['new:open,other']);
+    expect(settled.find((s) => s.id === 'new')!.threads[0]).toMatchObject({ unread: true, unseen: 1 });
+    // The same reply after the close (the row at the close was the archived one): it waits behind "N new".
+    const archivedAtClose = archivedShown.flatMap((s) => s.threads).find((t) => t.thread_id === 'open')!;
+    expect(ids(settleOwn(archivedShown, bySection(cameBack, other), undefined, closedAs(archivedAtClose)))).toEqual(['new:other']);
+  });
+
   test('settleThread (the list the thread covered): only that row moves, to its place in the section its state gives it', () => {
     const quietOpen = r('open', 'billing-svc', 1, 'quiet', 0);
     const q2 = r('q2', 'docs-site', 9, 'quiet', 0);

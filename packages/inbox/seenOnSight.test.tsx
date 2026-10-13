@@ -15,7 +15,21 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAuthor, InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
-import { FIRST_LINES_PX, SEEN_DWELL_MS, firstLines, firstLinesInView, followBy, latestAgentSeq, lookThrough, unseenArrivals } from './seenOnSight';
+import {
+  FIRST_LINES_PX,
+  FIRST_LINE_PX,
+  RECHECK_MS,
+  SEEN_DWELL_MS,
+  firstLines,
+  firstLinesInView,
+  followBy,
+  latestAgentSeq,
+  lookThrough,
+  measureFirstLines,
+  requiredLines,
+  samplePoints,
+  unseenArrivals,
+} from './seenOnSight';
 
 const hasDom = typeof document !== 'undefined';
 // Viewer pulls in web-highlighter, which reads `window` at module-eval time.
@@ -49,14 +63,15 @@ const OPENED: InboxMessageWire[] = [
   message(ROOT, AGENT, 2, 'The refund webhook is wired.', { person_seen_seq: 2 }),
   message('msg_P1', PERSON, 4, 'Good. Retries?'),
 ];
-const thread = (...arrivals: InboxMessageWire[]): InboxThread => ({
+const threadOf = (opened: readonly InboxMessageWire[], ...arrivals: InboxMessageWire[]): InboxThread => ({
   thread_id: ROOT,
   project: PROJECT,
   subject: 'Refund events',
   thread_name: null,
   resolved_at: null,
-  messages: [...OPENED, ...arrivals],
+  messages: [...opened, ...arrivals],
 });
+const thread = (...arrivals: InboxMessageWire[]): InboxThread => threadOf(OPENED, ...arrivals);
 const A2 = message('msg_A2', AGENT, 6, 'Retries are on, three attempts.');
 const A3 = message('msg_A3', AGENT, 8, 'And the dashboard shows them.');
 
@@ -64,6 +79,9 @@ const A3 = message('msg_A3', AGENT, 8, 'And the dashboard shows them.');
 
 /** Each message's box in the view (the body is 0..800). Absent: far below. */
 let boxes: Record<string, { top: number; height: number }> = {};
+/** Things drawn over the thread (a sheet, a popover, the toast): the vertical span each covers. */
+let covers: { top: number; bottom: number }[] = [];
+const coverElement = typeof document !== 'undefined' ? document.createElement('div') : null;
 const observers: { fire: () => void; observed: Element[] }[] = [];
 let visibility: DocumentVisibilityState = 'visible';
 let focused = true;
@@ -83,6 +101,7 @@ const rect = (top: number, height: number) => ({ top, bottom: top + height, left
 beforeEach(() => {
   if (!hasDom) return;
   boxes = {};
+  covers = [];
   visibility = 'visible';
   focused = true;
   observers.length = 0;
@@ -103,6 +122,17 @@ beforeEach(() => {
       // The sender row: the top 30 px of its message.
       if (this.classList.contains('ib-sender') || this.classList.contains('ib-fline')) return rect(box.top, 30);
       return this === article ? rect(box.top, box.height) : rect(box.top, 0);
+    },
+  });
+  // What is drawn on top at a point: a cover over it, else the message whose box holds it, else the thread's body.
+  stub(document, 'elementFromPoint', {
+    value: (_x: number, y: number) => {
+      if (covers.some((c) => y >= c.top && y < c.bottom)) return coverElement;
+      for (const article of document.querySelectorAll<HTMLElement>('[data-message-article]')) {
+        const box = boxes[article.getAttribute('data-message-article')!];
+        if (box && y >= box.top && y < box.top + box.height) return article.querySelector('.ib-sender, .ib-fline') ?? article;
+      }
+      return document.querySelector('.ib-pbody');
     },
   });
   stub(document, 'visibilityState', { get: () => visibility });
@@ -152,9 +182,13 @@ interface PaneProps {
   file?: { id: string; version: 'current' | 'sent'; focus: string | null } | null;
   phone?: boolean;
   covered?: boolean;
+  /** The thread as the person opened it (default OPENED), and the look before and at the open. */
+  base?: InboxMessageWire[];
+  lookSeq?: number;
+  seenThrough?: number;
 }
 
-function pane({ thread, onSeen, file = null, phone = false, covered = false }: PaneProps) {
+function pane({ thread, onSeen, file = null, phone = false, covered = false, lookSeq = 2, seenThrough = 2 }: PaneProps) {
   return (
     <div className="pn-inbox">
       <ThreadPane
@@ -168,8 +202,8 @@ function pane({ thread, onSeen, file = null, phone = false, covered = false }: P
         file={file}
         onOpenFile={() => {}}
         onOpenGuide={() => {}}
-        lookSeq={2}
-        seenThrough={2}
+        lookSeq={lookSeq}
+        seenThrough={seenThrough}
         onSeen={onSeen}
         phone={phone}
         covered={covered}
@@ -184,10 +218,10 @@ async function openThenArrive(props: Omit<PaneProps, 'thread'>, ...arrivals: Inb
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
-    root.render(pane({ ...props, thread: thread() }));
+    root.render(pane({ ...props, thread: threadOf(props.base ?? OPENED) }));
   });
   await wait(0);
-  act(() => root!.render(pane({ ...props, thread: thread(...arrivals) })));
+  act(() => root!.render(pane({ ...props, thread: threadOf(props.base ?? OPENED, ...arrivals) })));
   await wait(0);
   return host;
 }
@@ -316,6 +350,70 @@ describe.skipIf(!hasDom)('seen on sight in the thread pane', () => {
     expect(pill.hasAttribute('data-off')).toBe(true);
   });
 
+  // The failure this guards: a phone's New message sheet (or the decision card,
+  // the annotations list, the Mark read toast) drawn over the end of the thread
+  // hid the arrival, and it was still marked seen.
+  test('something drawn over the first lines (a sheet) hides them: nothing is seen until it goes, and a cover mid-dwell restarts it', async () => {
+    boxes = { msg_A2: { top: 400, height: 200 } };
+    covers = [{ top: 300, bottom: 800 }];
+    const seen: number[] = [];
+    await openThenArrive({ onSeen: (through) => seen.push(through) }, A2);
+    await wait(SEEN_DWELL_MS + 200);
+    expect(seen).toEqual([]);
+    // Only the lower half of the first lines under the toast: still hidden.
+    covers = [{ top: 450, bottom: 800 }];
+    await wait(SEEN_DWELL_MS + RECHECK_MS);
+    expect(seen).toEqual([]);
+    // The sheet goes (no event: the recheck notices); a cover for a moment mid-dwell restarts it.
+    covers = [];
+    await wait(RECHECK_MS + 350);
+    covers = [{ top: 300, bottom: 800 }];
+    await wait(RECHECK_MS + 100);
+    covers = [];
+    await wait(500);
+    expect(seen).toEqual([]);
+    await wait(SEEN_DWELL_MS);
+    expect(seen).toEqual([6]);
+  });
+
+  // The failure this guards: the pill counted every message new at the open
+  // as well as the arrival, and went to the first new message below the view,
+  // an older one, so reaching the arrival took several clicks.
+  test('the pill counts and goes to the unseen arrivals first; only when none waits below, to what was new at the open', async () => {
+    const R = message(ROOT, AGENT, 2, 'The refund webhook is wired.');
+    const B1 = message('msg_B1', AGENT, 3, 'Retries next.');
+    const B2 = message('msg_B2', AGENT, 5, 'Retries are on.');
+    const B3 = message('msg_B3', AGENT, 7, 'And the dashboard.');
+    const C = message('msg_C', AGENT, 9, 'One more thing.');
+    boxes = { [ROOT]: { top: 0, height: 300 }, msg_B1: { top: 1000, height: 200 }, msg_B2: { top: 1300, height: 200 }, msg_B3: { top: 1600, height: 200 }, msg_C: { top: 2000, height: 200 } };
+    const scrolled: string[] = [];
+    stub(HTMLElement.prototype, 'scrollIntoView', {
+      value(this: HTMLElement) {
+        scrolled.push(this.getAttribute('data-message-article') ?? (this.hasAttribute('data-new-divider') ? 'divider' : this.className));
+      },
+    });
+    const seen: number[] = [];
+    const el = await openThenArrive({ onSeen: (through) => seen.push(through), base: [R, B1, B2, B3], lookSeq: 2, seenThrough: 7 }, C);
+    const pill = el.querySelector<HTMLButtonElement>('[data-new-pill]')!;
+    // Three messages were new at the open and are below too; the pill counts the arrival alone.
+    expect(['msg_B1', 'msg_B2', 'msg_B3', 'msg_C'].every((id) => el.querySelector(`[data-message-article="${id}"]`)!.hasAttribute('data-new'))).toBe(true);
+    expect(pill.textContent).toBe('1 new');
+    // One click lands on the arrival, not the first new message.
+    act(() => pill.click());
+    expect(scrolled).toEqual(['msg_C']);
+    expect(document.activeElement).toBe(el.querySelector('[data-message-article="msg_C"] [data-fold-head]'));
+    // Seen there; scrolled back up, the pill falls back to what was new at the open, and goes to its divider.
+    boxes.msg_C = { top: 400, height: 200 };
+    act(() => void el.querySelector('.ib-pbody')!.dispatchEvent(new Event('scroll')));
+    await wait(SEEN_DWELL_MS + 150);
+    expect(seen).toEqual([9]);
+    boxes.msg_C = { top: 2000, height: 200 };
+    act(() => void el.querySelector('.ib-pbody')!.dispatchEvent(new Event('scroll')));
+    expect(pill.textContent).toBe('3 new');
+    act(() => pill.click());
+    expect(scrolled.at(-1)).toBe('divider');
+  });
+
   test('first lines under the pill do not count', async () => {
     // A3 sits below the view (the pill shows), A2's first lines in the pill's band at the bottom.
     boxes = { msg_A2: { top: 760, height: 400 }, msg_A3: { top: 2000, height: 200 } };
@@ -372,13 +470,59 @@ describe.skipIf(!hasDom)('seen on sight in the thread pane', () => {
     await openThenArrive({ onSeen: () => {} }, A2);
     expect(scrolls).toEqual([]);
   });
+
+  test("an arrival's first lines are measured where it sits, not where its entrance draws it", () => {
+    const article = document.createElement('article');
+    article.setAttribute('data-message-article', 'msg_X');
+    const sender = document.createElement('div');
+    sender.className = 'ib-sender';
+    article.appendChild(sender);
+    document.body.appendChild(article);
+    try {
+      // Drawn 6 px low while its entrance runs.
+      boxes = { msg_X: { top: 406, height: 200 } };
+      expect(measureFirstLines(article)).toEqual({ top: 406, bottom: 436 + FIRST_LINES_PX, line: 436 });
+      article.setAttribute('data-arrived', '');
+      const computed = window.getComputedStyle;
+      stub(window, 'getComputedStyle', {
+        writable: true,
+        value: (element: Element) => (element === article ? ({ transform: 'matrix(1, 0, 0, 1, 0, 6)' } as CSSStyleDeclaration) : computed(element)),
+      });
+      expect(measureFirstLines(article)).toEqual({ top: 400, bottom: 430 + FIRST_LINES_PX, line: 430 });
+    } finally {
+      article.remove();
+    }
+  });
 });
 
 describe('the rules', () => {
   test('the first lines: the sender row and 96 px under it, or the whole message when shorter', () => {
-    expect(firstLines({ top: 100, bottom: 600 }, 116, 146)).toEqual({ top: 116, bottom: 146 + FIRST_LINES_PX });
-    expect(firstLines({ top: 100, bottom: 180 }, 116, 146)).toEqual({ top: 116, bottom: 180 });
-    expect(firstLines({ top: 100, bottom: 600 }, null, null)).toEqual({ top: 100, bottom: 100 + FIRST_LINES_PX });
+    expect(firstLines({ top: 100, bottom: 600 }, 116, 146)).toEqual({ top: 116, bottom: 146 + FIRST_LINES_PX, line: 146 });
+    expect(firstLines({ top: 100, bottom: 180 }, 116, 146)).toEqual({ top: 116, bottom: 180, line: 146 });
+    expect(firstLines({ top: 100, bottom: 600 }, null, null)).toEqual({ top: 100, bottom: 100 + FIRST_LINES_PX, line: 100 + FIRST_LINE_PX });
+  });
+
+  // The failure this guards: on a view shorter than the first lines plus the
+  // pill's band (a phone on its side, the keyboard up) nothing could ever be seen.
+  test('a view too short for the first lines above the pill needs only the first line', () => {
+    const lines = { top: 100, bottom: 226, line: 130 };
+    expect(requiredLines(lines, { top: 0, bottom: 800 }, 56)).toEqual({ top: 100, bottom: 226 });
+    expect(requiredLines(lines, { top: 0, bottom: 160 }, 56)).toEqual({ top: 100, bottom: 130 });
+    expect(firstLinesInView(requiredLines({ top: 10, bottom: 136, line: 40 }, { top: 0, bottom: 160 }, 56), { top: 0, bottom: 160 }, 56)).toBe(true);
+    // Without the pill the same view holds the first lines whole.
+    expect(requiredLines(lines, { top: 0, bottom: 160 }, 0)).toEqual({ top: 100, bottom: 226 });
+    expect(requiredLines(lines, { top: 0, bottom: 100 }, 0)).toEqual({ top: 100, bottom: 130 });
+  });
+
+  test('the points tested for a cover: the middle of the visible width, near the top of the lines and halfway down', () => {
+    expect(samplePoints({ top: 100, bottom: 200 }, { left: 0, right: 600 }, { left: 100, right: 500 })).toEqual([
+      { x: 300, y: 108 },
+      { x: 300, y: 150 },
+    ]);
+    expect(samplePoints({ top: 100, bottom: 104 }, { left: 0, right: 200 }, { left: 0, right: 200 })).toEqual([
+      { x: 100, y: 102 },
+      { x: 100, y: 102 },
+    ]);
   });
 
   test('in view: wholly inside, above the pill\'s band when it shows', () => {

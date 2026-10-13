@@ -11,11 +11,15 @@
  *   The "N new · Show" line never counts or names the open thread; another
  *   thread's news still waits behind it.
  * - Scrolled up: nothing moves, the pill says "1 new" and goes to it; the
- *   store keeps it unseen until it has been on screen.
+ *   store keeps it unseen until it has been on screen. With messages new at
+ *   the open also below the view, the pill counts the arrival alone and one
+ *   click lands on it.
  * - Closed before seeing it: the row settles unread (Waiting, it asks).
  *   Closed after seeing it: Quiet.
  * - A phone (WebKit, iPhone 15): the same rule; Back shows the row unbolded in
- *   place when seen, and back unread in Waiting when not.
+ *   place when seen, and back unread in Waiting when not. An arrival under a
+ *   bottom sheet (New message's "not running" sheet) is not seen until the
+ *   sheet closes.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  * PNGs land in .local/proof/seen-on-sight/ (PLANNOTATOR_E2E_PROOF_DIR).
@@ -39,7 +43,7 @@ const DWELL_MS = 1000;
 const LONG = ['The refund pipeline, step by step.', ...Array.from({ length: 40 }, (_, i) => `Step ${i + 1}: the worker reads the event, checks the idempotency key, and writes the ledger row.`)].join('\n\n');
 const QUESTION = [':::question', 'Retry a refund on a Stripe 409?', '', '- [ ] Yes, with the same key', '- [ ] No, dead-letter it', ':::'].join('\n');
 
-type Key = 'end' | 'up' | 'unseen' | 'seen' | 'phoneSeen' | 'phoneUnseen' | 'other';
+type Key = 'end' | 'up' | 'pill' | 'unseen' | 'seen' | 'phoneSeen' | 'phoneUnseen' | 'phoneSheet' | 'other';
 
 interface World {
   url: string;
@@ -61,8 +65,18 @@ test.beforeAll(async () => {
   expect(started.status, started.stderr).toBe(0);
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const projects = {} as World['projects'];
-  const bodies: Record<Key, string> = { end: 'The refund webhook is wired.', up: LONG, unseen: LONG, seen: 'The refund webhook is wired.', phoneSeen: 'The refund webhook is wired.', phoneUnseen: LONG, other: 'Unrelated.' };
-  for (const key of ['end', 'up', 'unseen', 'seen', 'phoneSeen', 'phoneUnseen'] as const) {
+  const bodies: Record<Key, string> = {
+    end: 'The refund webhook is wired.',
+    up: LONG,
+    pill: 'The refund webhook is wired.',
+    unseen: LONG,
+    seen: 'The refund webhook is wired.',
+    phoneSeen: 'The refund webhook is wired.',
+    phoneUnseen: LONG,
+    phoneSheet: LONG,
+    other: 'Unrelated.',
+  };
+  for (const key of ['end', 'up', 'pill', 'unseen', 'seen', 'phoneSeen', 'phoneUnseen', 'phoneSheet'] as const) {
     const path = scratchProject(join(root, 'src'), `billing-${key}`);
     const sent = await agent.send({ project_path: path, subject: `Refund events (${key})`, body: bodies[key], agent_session: `ses_${key}` } as Parameters<SimAgent['send']>[0]);
     projects[key] = { path, id: '', thread: String(sent.thread_id), root: String(sent.message_id) };
@@ -197,6 +211,36 @@ test('desktop, scrolled up: nothing moves, the pill says 1 new, the store keeps 
   }
 });
 
+// The failure this guards: the pill counted the messages that were new when
+// the thread opened as well as the arrival, and went to the first of them, so
+// reaching the arrival took more than one click.
+test('desktop, new messages below at the open and an arrival: the pill counts the arrival alone, and one click lands on it', async ({ browser }: { browser: Browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' });
+  try {
+    const id = world.projects.pill.thread;
+    // Two long messages the person has not seen yet: new when the thread opens.
+    const first = await reply('pill', LONG);
+    await reply('pill', LONG);
+    const page = await context.newPage();
+    await page.goto(`${world.url}/`);
+    await inFront(page);
+    await openRow(page, 'pill');
+    // It opens at the "New since you looked" divider; the second new message is below the view.
+    await expect(page.locator(`[data-message-article="${first.message_id}"]`)).toBeInViewport();
+    const arrived = await reply('pill', 'One more: the 409 path retries with the same key.');
+    const pill = page.locator('[data-new-pill]');
+    await expect(pill).not.toHaveAttribute('data-off', '');
+    await expect(pill).toHaveText('1 new');
+    await shot(page, '06a-desktop-pill-arrival-only');
+    await pill.click();
+    await expect(page.locator(`[data-message-article="${arrived.message_id}"]`)).toBeInViewport();
+    await expect.poll(async () => (await storeRow(id)).unseen, { timeout: 6000 }).toBe(0);
+    await expect(pill).toHaveAttribute('data-off', '');
+  } finally {
+    await context.close();
+  }
+});
+
 test('desktop, closed before seeing it: the row settles unread in Waiting; closed after seeing it: Quiet', async ({ browser }: { browser: Browser }) => {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' });
   try {
@@ -268,6 +312,57 @@ test('phone (WebKit, iPhone 15): seen on sight with the same rule; Back shows it
     await expect.poll(() => sectionOf(page, unseen)).toBe('waiting');
     expect(await isBold(page, unseen)).toBe(true);
     await shot(page, '09-phone-back-unseen-waiting');
+  } finally {
+    await context?.close();
+    await own?.close();
+  }
+});
+
+// The failure this guards: a bottom sheet over the end of the thread (here New
+// message's "not running" sheet) hid the arrival, and it was marked seen anyway.
+test('phone (WebKit, iPhone 15): an arrival under New message\'s sheet is not seen until the sheet closes', async () => {
+  let own: Browser | null = null;
+  let context: BrowserContext | null = null;
+  try {
+    own = await webkit.launch({ args: [] });
+    context = await own.newContext({ ...devices['iPhone 15'], colorScheme: 'dark' });
+    const page = await context.newPage();
+    await page.goto(`${world.url}/`);
+    await inFront(page);
+
+    const id = world.projects.phoneSheet.thread;
+    await expect(row(page, id)).toBeVisible();
+    await openRow(page, 'phoneSheet', true);
+    // At the end of the thread, then the sheet over it.
+    const body = page.locator('section.ib-pane .ib-pbody');
+    await body.evaluate((b) => (b.scrollTop = b.scrollHeight));
+    await page.locator('section.ib-pane [data-new-message]').tap();
+    const sheet = page.locator('[data-not-running]');
+    await expect(sheet).toBeVisible();
+
+    const arrived = await reply('phoneSheet', 'Retries are on: three attempts, then the dead-letter queue.');
+    const article = page.locator(`[data-message-article="${arrived.message_id}"]`);
+    await expect(article).toHaveCount(1);
+    await expect.poll(() => isBold(page, id)).toBe(true);
+    // The view followed it to the end: its first lines are inside the thread's view, under the sheet.
+    const under = await article.evaluate((a) => {
+      const view = a.closest('.ib-pbody')!.getBoundingClientRect();
+      const r = (a.querySelector('.ib-sender') ?? a).getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + 8);
+      return { inView: r.top >= view.top && r.bottom <= view.bottom, covered: hit !== null && hit.closest('[data-not-running]') !== null };
+    });
+    expect(under).toEqual({ inView: true, covered: true });
+    await shot(page, '10-phone-arrival-under-sheet');
+    await page.waitForTimeout(DWELL_MS + 1200);
+    expect((await storeRow(id)).unseen).toBe(1);
+    expect(await isBold(page, id)).toBe(true);
+
+    // The sheet closes (a press outside it): now it is on screen, and seen a second later.
+    await body.dispatchEvent('mousedown');
+    await expect(sheet).toHaveCount(0);
+    await expect.poll(async () => (await storeRow(id)).unseen, { timeout: 6000 }).toBe(0);
+    await expect.poll(() => isBold(page, id)).toBe(false);
+    await shot(page, '11-phone-sheet-closed-seen');
   } finally {
     await context?.close();
     await own?.close();

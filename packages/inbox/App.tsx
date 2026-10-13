@@ -90,6 +90,9 @@ configurePlannotatorUI({
 });
 
 const SIDEBAR_OPEN_COOKIE = 'plannotator-inbox-sidebar-open';
+/** A look seen on sight that the server did not take is sent again this many times, 1 s, 2 s, 4 s… apart. */
+const SEEN_RETRIES = 5;
+const SEEN_RETRY_MS = 1000;
 
 interface Route {
   page: 'inbox' | 'settings' | 'decisions' | 'whats-new';
@@ -458,21 +461,56 @@ function Inbox() {
   /**
    * Seen on sight (seenOnSight.ts): messages that arrived in the open thread
    * have been on screen; record the look up to `through` (never past it) and
-   * let the row unbold in place.
+   * let the row unbold in place. `look.through` rises only once the server
+   * took the look; a look that failed is sent again (a few times, waiting
+   * longer each time) unless a later one covers it.
    */
   const lookRef = useRef(look);
   lookRef.current = look;
+  /** Per thread, the furthest look on its way to the server. */
+  const seenPosting = useRef(new Map<string, number>());
+  const seenRetries = useRef(new Set<ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const retries = seenRetries.current;
+    return () => {
+      for (const timer of retries) clearTimeout(timer);
+      retries.clear();
+    };
+  }, []);
   const seenOnSight = useCallback(
     (threadId: string, through: number) => {
       const current = lookRef.current;
       if (!current || current.threadId !== threadId || (current.through !== null && current.through >= through)) return;
-      const next = { ...current, through };
-      lookRef.current = next;
-      setLook(next);
-      void inboxApi
-        .seen(threadId, through)
-        .then(() => refreshList(false))
-        .catch(() => {});
+      if ((seenPosting.current.get(threadId) ?? -1) >= through) return;
+      seenPosting.current.set(threadId, through);
+      const attempt = (tries: number) => {
+        void inboxApi
+          .seen(threadId, through)
+          .then(() => {
+            if (seenPosting.current.get(threadId) === through) seenPosting.current.delete(threadId);
+            const now = lookRef.current;
+            if (now && now.threadId === threadId && (now.through === null || now.through < through)) {
+              const next = { ...now, through };
+              lookRef.current = next;
+              setLook(next);
+            }
+            return refreshList(false);
+          })
+          .catch(() => {
+            // A later look on its way covers this one.
+            if (seenPosting.current.get(threadId) !== through) return;
+            if (tries >= SEEN_RETRIES) {
+              seenPosting.current.delete(threadId);
+              return;
+            }
+            const timer = setTimeout(() => {
+              seenRetries.current.delete(timer);
+              attempt(tries + 1);
+            }, SEEN_RETRY_MS * 2 ** tries);
+            seenRetries.current.add(timer);
+          });
+      };
+      attempt(0);
     },
     [refreshList],
   );
