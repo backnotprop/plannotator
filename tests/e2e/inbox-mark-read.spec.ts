@@ -250,7 +250,7 @@ test('one session asked, then posted an update: a words-only Send writes exactly
 
 test('a words-only reply left as it is: the questions stay open, and the agent gets the words and the still-open line', async () => {
   const { page, agents, project } = world;
-  const asked = await agents.codex.send({ project_path: project, subject: 'Pricing page: a few calls', body: INVOICES.replace('invoice list', 'pricing page') });
+  const asked = await agents.codex.send({ project_path: project, subject: 'Pricing page: a few calls', thread: 'pricing', body: INVOICES.replace('invoice list', 'pricing page') });
   const threadId = asked.thread_id as string;
   await page.goto(`${world.url}#thread=${threadId}`);
   const pane = page.locator('section.ib-pane');
