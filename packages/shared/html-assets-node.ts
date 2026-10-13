@@ -16,19 +16,22 @@ export const MAX_HTML_ASSET_BYTES = 50 * 1024 * 1024;
  * `../assets/x.css` from `lessons/page.html` resolves, with `basePath` naming
  * the document's folder under that root. `widened` marks that wider root:
  * the page under review can then reach every file in the folder, so hidden
- * paths are refused there (`refusesHiddenHtmlAssetPath`).
+ * paths are refused there (`refusesHiddenHtmlAssetPath`). A document that
+ * itself sits in a hidden folder (`.drafts/page.html`) is not widened: its
+ * own folder stays its root, as for a single file, so its `style.css` loads.
  */
 export function htmlAssetContext(
   htmlFilePath: string,
   folderPath?: string,
 ): { root: string; basePath: string; widened: boolean } {
   const directory = dirname(resolvePath(htmlFilePath));
-  if (!folderPath || !isWithinDirectory(htmlFilePath, folderPath)) {
-    return { root: directory, basePath: "", widened: false };
-  }
+  const ownFolder = { root: directory, basePath: "", widened: false };
+  if (!folderPath || !isWithinDirectory(htmlFilePath, folderPath)) return ownFolder;
   const root = realpathSync(folderPath);
   const documentDirectory = dirname(realpathSync(htmlFilePath));
-  return { root, basePath: relative(root, documentDirectory).split("\\").join("/"), widened: true };
+  const basePath = relative(root, documentDirectory).split(sep).join("/");
+  if (basePath.split("/").some((segment) => segment.startsWith("."))) return ownFolder;
+  return { root, basePath, widened: true };
 }
 
 /**
