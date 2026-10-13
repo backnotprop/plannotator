@@ -5,13 +5,15 @@
  * seen once its first lines have been on screen for a second, with the tab
  * visible, the window focused and nothing over the thread. happy-dom has no
  * layout and no IntersectionObserver, so the test gives the elements their
- * boxes and drives a stand-in observer. The real browser proof is
+ * boxes and drives a stand-in observer. Time is the test's: the dwell, the
+ * recheck and every other timer run on fake timers that `wait` advances, so
+ * the result never depends on how fast the runner is. The real browser proof is
  * tests/e2e/inbox-seen-on-sight.spec.ts; the rules alone are checked at the
  * bottom without a DOM.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAuthor, InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
@@ -98,8 +100,12 @@ function stub<T extends object>(target: T, key: string, descriptor: PropertyDesc
 
 const rect = (top: number, height: number) => ({ top, bottom: top + height, left: 0, right: 0, width: 0, height, x: 0, y: top, toJSON() {} });
 
+/** One turn of the event loop that the fake timers leave alone (they fake `setTimeout`, not `setImmediate`): fetch replies and effects settle. */
+const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
+
 beforeEach(() => {
   if (!hasDom) return;
+  jest.useFakeTimers();
   boxes = {};
   covers = [];
   visibility = 'visible';
@@ -168,11 +174,15 @@ afterEach(() => {
   host = null;
   globalThis.fetch = savedFetch;
   for (const undo of restore.splice(0).reverse()) undo();
+  jest.useRealTimers();
 });
 
+/** Let `ms` of the test's time pass: every timer due in it fires, in order, then the page settles. */
 async function wait(ms: number) {
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, ms));
+    await settle();
+    jest.advanceTimersByTime(ms);
+    await settle();
   });
 }
 
