@@ -360,6 +360,11 @@ describe("a CLI is asked what it is before it is handed an mcp add", () => {
     const report = await connect({ FAKE_PI_VERSION: "0.85.1" });
     expect(report.manual).toEqual(["pi"]);
     expect(fake.calls()).toEqual([]);
+    // The terminal says why, once; the next run says nothing more about it.
+    expect(formatConnectReport(report)).toContain("Pi needs connecting by hand: Pi before 0.99 has no `pi mcp`; update Pi, or add plannotator-inbox to ~/.pi/agent/mcp.json by hand.");
+    const again = await connect({ FAKE_PI_VERSION: "0.85.1" });
+    expect(again.manual).toEqual(["pi"]);
+    expect(formatConnectReport(again)).toEqual([]);
   });
 
   test("a program that only shares the name (cln's `pi` printing digits, amp.rs, another codex) is never handed an mcp add", async () => {

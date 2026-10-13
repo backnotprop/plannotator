@@ -683,6 +683,8 @@ export interface InboxAgentsFile {
   last_report?: InboxConnectReport & { seen?: boolean };
   /** Each agent's last failure reason, so a lasting one is said once (the run still tries again). */
   failures?: Partial<Record<InboxAgentId, string>>;
+  /** Each agent's last "connect it by hand" reason, so it is said once (said again when it changes). */
+  manual_said?: Partial<Record<InboxAgentId, string>>;
 }
 
 export function inboxAgentsPath(dataDir: string): string {
@@ -864,6 +866,7 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
   if (timer) clearTimeout(timer);
 
   const failures = { ...(file.failures ?? {}) };
+  const manualSaid = { ...(file.manual_said ?? {}) };
   for (const spec of toConnect) {
     const outcome = settled.get(spec.id);
     if (!outcome) {
@@ -871,6 +874,7 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
       continue;
     }
     if (outcome.kind !== "failed") delete failures[spec.id];
+    if (outcome.kind !== "manual") delete manualSaid[spec.id];
     switch (outcome.kind) {
       case "added":
         report.added.push(spec.id);
@@ -894,12 +898,16 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
         break;
       case "manual":
         report.manual.push(spec.id);
+        // Why only a person can connect it (Pi before 0.99, no CLI on PATH): said once.
+        if (manualSaid[spec.id] !== outcome.why) (report.manual_why ??= []).push({ agent: spec.id, why: outcome.why });
+        manualSaid[spec.id] = outcome.why;
         break;
       case "none":
         break;
     }
   }
   file.failures = failures;
+  file.manual_said = manualSaid;
   for (const spec of pending) {
     if (toConnect.includes(spec)) continue;
     const record = file.agents[spec.id];
@@ -934,6 +942,9 @@ export function formatConnectReport(report: InboxConnectReport): string[] {
   }
   for (const failure of report.failed) {
     lines.push(`Couldn't connect ${INBOX_AGENT_LABELS[failure.agent]}: ${failure.reason}. Plannotator tries again at the next plannotator inbox.`);
+  }
+  for (const manual of report.manual_why ?? []) {
+    lines.push(`${INBOX_AGENT_LABELS[manual.agent]} needs connecting by hand: ${manual.why}.`);
   }
   for (const foreign of report.foreign) {
     lines.push(`${INBOX_AGENT_LABELS[foreign.agent]} has its own ${INBOX_MCP_SERVER_NAME} entry${foreign.path ? ` in ${foreign.path}` : ""}; left alone.`);

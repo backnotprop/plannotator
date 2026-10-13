@@ -862,6 +862,8 @@ export interface InboxConnectReport {
   foreign: { agent: InboxAgentId; path: string | null }[];
   /** Found, but only a person can connect them (no CLI on PATH, a config file Plannotator does not edit). */
   manual: InboxAgentId[];
+  /** Why each manual agent needs a person, said once per reason (the terminal prints these). */
+  manual_why?: { agent: InboxAgentId; why: string }[];
   /** Did not finish within the time limits; tried again at the next run. */
   unfinished: InboxAgentId[];
   /** Claude Code's plugin gives it the `plannotator_inbox` tool already. */
