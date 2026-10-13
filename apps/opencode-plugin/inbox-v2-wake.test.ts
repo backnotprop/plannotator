@@ -31,6 +31,8 @@ import {
 let stubs: string[] = [];
 const worlds: InboxWorld[] = [];
 const saved = { ...process.env };
+/** Each test's wakes, stopped after it so no lease timer or event loop outlives it. */
+const stops: AbortController[] = [];
 
 beforeAll(() => {
   stubs = stubBuiltHtml();
@@ -39,6 +41,7 @@ afterAll(() => {
   removeStubbedHtml(stubs);
 });
 afterEach(async () => {
+  for (const stop of stops.splice(0)) stop.abort();
   for (const key of ["PLANNOTATOR_DATA_DIR", "PLANNOTATOR_INBOX_TOOL", "PLANNOTATOR_BIN"]) {
     if (saved[key] === undefined) delete process.env[key];
     else process.env[key] = saved[key];
@@ -117,7 +120,9 @@ describe.skipIf(process.platform === "win32")("OpenCode 2's Inbox wake on a host
         pending = apply;
       },
     };
-    await registerInboxOpenCode2(toolDomain, v2 as never, connection!, async (sessionID) => ({ root: sessionID }));
+    const stop = new AbortController();
+    stops.push(stop);
+    await registerInboxOpenCode2(toolDomain, v2 as never, connection!, async (sessionID) => ({ root: sessionID }), { signal: stop.signal });
     expect(events.subscribers).toBe(1);
     expect(events.aborted).toBe(0);
 
@@ -138,5 +143,37 @@ describe.skipIf(process.platform === "win32")("OpenCode 2's Inbox wake on a host
     expect(delivered.text).toContain("Retry with the same key.");
     expect(events.aborted).toBe(0);
     w.proof(`delivered through the events alone:\n${delivered.text}`);
+
+    // Stopping the wakes ends the event subscription.
+    stop.abort();
+    await waitFor("the event subscription to end", () => (events.aborted === 1 ? true : undefined), 5_000);
+  }, 60_000);
+
+  test("a draft without `add` (an older host): no tool, and the wakes stop at once (the event subscription ends)", async () => {
+    const w = createInboxWorld("plannotator-inbox-oc2-noadd-", "06-opencode2-draft-without-add", "opencode2");
+    worlds.push(w);
+    startInbox(w);
+    mkdirSync(w.dataDir, { recursive: true });
+    writeFileSync(path.join(w.dataDir, "config.json"), JSON.stringify({ inboxTool: { opencode: true } }));
+    process.env.PLANNOTATOR_DATA_DIR = w.dataDir;
+    process.env.PLANNOTATOR_BIN = path.join(w.bin, "plannotator");
+
+    const connection = await findInboxConnection();
+    expect(connection).not.toBeNull();
+    const events = eventStream();
+    const v2 = {
+      location: { directory: w.project },
+      event: { subscribe: events.subscribe },
+      session: { prompt: async () => {} },
+    };
+    const stop = new AbortController();
+    stops.push(stop);
+    // An eager host whose draft has no `add`.
+    const toolDomain: InboxToolDomainLike = { transform: (apply) => void apply({}) };
+    const added = await registerInboxOpenCode2(toolDomain, v2 as never, connection!, async (sessionID) => ({ root: sessionID }), { signal: stop.signal });
+    expect(added).toBe(false);
+    expect(events.subscribers).toBe(1);
+    await waitFor("the event subscription to end", () => (events.aborted === 1 ? true : undefined), 5_000);
+    w.proof("a draft without add: registered nothing, and the wakes' event subscription ended");
   }, 60_000);
 });

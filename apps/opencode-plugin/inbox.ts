@@ -61,18 +61,25 @@ export async function findInboxConnection(): Promise<InboxAgentConnection | null
 }
 
 /**
- * OpenCode 1: the Inbox reminder on one request's system prompt, appended as
- * its own part (OpenCode 1 lays the system prompt out in parts it caches on
- * their own; merging would change the parts before it). The no-wake wording:
- * OpenCode 1 cannot deliver a reply as a turn. Never on a title request;
- * never twice. The caller decides whether the request's agent has the tool
- * (`openCode1AgentHasInbox`).
+ * OpenCode 1: the Inbox reminder on one request's system prompt, appended to
+ * the end of the LAST part, so the text before it stays byte for byte and the
+ * part count never changes (#1114: OpenCode 1.18 sends one system part and
+ * only merges extras when there are more than two; a part of our own would
+ * leave two parts that never merge, which breaks single-system-message chat
+ * templates such as Qwen3's). The no-wake wording: OpenCode 1 cannot deliver
+ * a reply as a turn. Never on a title request; never twice. The caller decides
+ * whether the request's agent has the tool (`openCode1AgentHasInbox`).
  */
 export function addInboxReminderOpenCode1(system: string[]): void {
   const lower = system.join("\n").toLowerCase();
   if (lower.includes("title generator") || lower.includes("generate a title")) return;
   if (system.some((part) => part.includes(INBOX_REMINDER_TEXT_NO_WAKE))) return;
-  system.push(INBOX_REMINDER_TEXT_NO_WAKE);
+  const last = system.length - 1;
+  if (last < 0) {
+    system.push(INBOX_REMINDER_TEXT_NO_WAKE);
+    return;
+  }
+  system[last] = system[last] ? `${system[last]}\n\n${INBOX_REMINDER_TEXT_NO_WAKE}` : INBOX_REMINDER_TEXT_NO_WAKE;
 }
 
 /** A name against an OpenCode tool-switch key, which may hold `*` wildcards. */
@@ -118,11 +125,17 @@ export async function registerInboxOpenCode2(
   v2: V2ContextLike,
   connection: InboxAgentConnection,
   resolveRoot: (sessionID: string) => Promise<{ root: string }>,
+  options: { signal?: AbortSignal } = {},
 ): Promise<boolean> {
   const transform = toolDomain?.transform;
   const spec = inboxAgentTool(connection.tools, { wakes: typeof v2.session?.prompt === "function" });
   if (typeof transform !== "function" || !spec) return false;
   const wakes = typeof v2.session?.prompt === "function" ? new OpenCode2Wakes(v2, connection, resolveRoot) : null;
+  // `signal` ends the wakes (their event subscription and lease timers): the plugin's lifetime otherwise.
+  if (wakes && options.signal) {
+    if (options.signal.aborted) wakes.dispose();
+    else options.signal.addEventListener("abort", () => wakes.dispose(), { once: true });
+  }
   let added = false;
   await transform((tools) => {
     if (typeof tools?.add !== "function") {
