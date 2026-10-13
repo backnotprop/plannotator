@@ -14,6 +14,7 @@ import {
   INBOX_NOTE_BLOCK,
   INBOX_NOTE_END,
   INBOX_NOTE_START,
+  inboxNotesDisabled,
   noteStatus,
   noteTarget,
   planInboxNoteRemoval,
@@ -198,4 +199,86 @@ test("uninstall: every recorded note, plus a file with our markers whose record 
   expect(read(file(".codex", "AGENTS.md"))).toBe("Mine.\n");
   expect(existsSync(file(".gemini", "GEMINI.md"))).toBe(false);
   expect(read(file(".pi", "agent", "CLAUDE.md"))).toBe("Pi rules\n");
+});
+
+describe("review follow-ups", () => {
+  test("a symlinked parent folder (~/.claude -> dotfiles): the record names the resolved file, and off deletes the file the note created", () => {
+    const dotfiles = join(fake.root, "dotfiles", "claude");
+    mkdirSync(dotfiles, { recursive: true });
+    symlinkSync(dotfiles, file(".claude"));
+    expect(addInboxNote("claude-code", dataDir, e)).toMatchObject({ ok: true, action: "created" });
+    expect(readInboxAgentNotes(dataDir).notes["claude-code"]?.path).toBe(join(dotfiles, "rules", "plannotator-inbox.md"));
+    expect(removeInboxNote("claude-code", dataDir, e)).toMatchObject({ ok: true, action: "deleted" });
+    expect(existsSync(join(dotfiles, "rules", "plannotator-inbox.md"))).toBe(false);
+  });
+
+  test("mixed line endings: the dominant one for the new lines, every other byte kept, and a re-add does not touch the file", () => {
+    const path = file(".codex", "AGENTS.md");
+    const before = "# Rules\r\nOne.\r\nTwo.\nThree.\r\n";
+    write(path, before);
+    addInboxNote("codex", dataDir, e);
+    const after = read(path);
+    expect(after.startsWith(before)).toBe(true);
+    expect(after.slice(before.length)).toBe(`\r\n${INBOX_NOTE_BLOCK.replace(/\n/g, "\r\n")}\r\n`);
+    const mtime = statSync(path).mtimeMs;
+    Bun.sleepSync(20);
+    expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "unchanged" });
+    expect(statSync(path).mtimeMs).toBe(mtime);
+    removeInboxNote("codex", dataDir, e);
+    expect(read(path)).toBe(before);
+  });
+
+  test("a UTF-8 BOM is kept through add and remove", () => {
+    const path = file(".codex", "AGENTS.md");
+    mkdirSync(file(".codex"), { recursive: true });
+    writeFileSync(path, Buffer.from([0xef, 0xbb, 0xbf, ...Buffer.from("Mine.\n")]));
+    addInboxNote("codex", dataDir, e);
+    expect([...readFileSync(path).subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    removeInboxNote("codex", dataDir, e);
+    expect(readFileSync(path)).toEqual(Buffer.from([0xef, 0xbb, 0xbf, ...Buffer.from("Mine.\n")]));
+  });
+
+  test("a file over 1 MiB is refused", () => {
+    write(file(".codex", "AGENTS.md"), "x".repeat(1024 * 1024 + 1));
+    expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: false });
+    expect(noteStatus("codex", dataDir, e)).toMatchObject({ state: "refused", reason: "it is larger than 1 MiB" });
+  });
+
+  test("one file shared by two agents (Pi's AGENTS.md is a link to Codex's): one section, kept while either has it on", () => {
+    write(file(".codex", "AGENTS.md"), "Shared.\n");
+    mkdirSync(file(".pi", "agent"), { recursive: true });
+    symlinkSync(file(".codex", "AGENTS.md"), file(".pi", "agent", "AGENTS.md"));
+    expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "added" });
+    expect(addInboxNote("pi", dataDir, e)).toMatchObject({ ok: true, action: "shared" });
+    expect(read(file(".codex", "AGENTS.md")).split(INBOX_NOTE_START)).toHaveLength(2);
+    expect(noteStatus("pi", dataDir, e).shared_with).toEqual(["codex"]);
+    expect(removeInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "kept-shared" });
+    expect(read(file(".codex", "AGENTS.md"))).toContain(INBOX_NOTE_START);
+    expect(removeInboxNote("pi", dataDir, e)).toMatchObject({ ok: true, action: "removed" });
+    expect(read(file(".codex", "AGENTS.md"))).toBe("Shared.\n");
+  });
+
+  test("uninstall names a damaged section it left", () => {
+    write(file(".codex", "AGENTS.md"), `Mine.\n${INBOX_NOTE_START}\nno end\n`);
+    const plan = planInboxNoteRemoval(dataDir, e, INBOX_AGENT_LABELS);
+    expect(plan.items).toEqual([]);
+    expect(plan.skipped).toEqual(["the Plannotator section in ~/.codex/AGENTS.md is damaged, so uninstall left it; fix or delete it by hand"]);
+  });
+
+  test("with agent-notes.json lost, uninstall still deletes Claude Code's own rules file when the note is all it holds", () => {
+    write(file(".claude", "rules", "plannotator-inbox.md"), `${INBOX_NOTE_BLOCK}\n`);
+    const plan = planInboxNoteRemoval(dataDir, e, INBOX_AGENT_LABELS);
+    expect(plan.items.map((item) => item.describe)).toEqual(["Note for Claude Code (~/.claude/rules/plannotator-inbox.md, created by Plannotator: file removed if empty)"]);
+    plan.items[0]!.apply();
+    expect(existsSync(file(".claude", "rules", "plannotator-inbox.md"))).toBe(false);
+  });
+
+  test("OpenCode never creates its AGENTS.md: the status is unavailable, not 'would create'", () => {
+    expect(noteStatus("opencode", dataDir, e)).toMatchObject({ state: "unavailable", create: false });
+  });
+
+  test("PLANNOTATOR_INBOX_NOTES=0 turns notes off", () => {
+    expect(inboxNotesDisabled({ PLANNOTATOR_INBOX_NOTES: "0" })).toBe(true);
+    expect(inboxNotesDisabled({})).toBe(false);
+  });
 });

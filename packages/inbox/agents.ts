@@ -27,7 +27,7 @@ export function cardReport(model: InboxAgentsModel): InboxConnectReport | null {
 
 /** Whether the one-time note question is still open and has someone to ask about. */
 export function noteQuestionOpen(model: InboxAgentsModel): boolean {
-  return !model.notes_offered && noteCandidates(model).length > 0;
+  return !model.notes_env_off && !model.notes_offered && noteCandidates(model).length > 0;
 }
 
 /** "Connected Codex, Gemini CLI and Cursor to the Inbox." and the muted rest. */
@@ -64,9 +64,14 @@ export function noteResultLine(result: { ok: true; action: string; path: string 
   }
 }
 
-/** The ids ticked by default: every candidate (the coordinator's brief; OpenCode is never offered a file it would create). */
+/**
+ * The ticks by default (DESIGN.md, question 2): unticked for the agents
+ * Plannotator already reminds at each session start (Claude Code with its
+ * plugin, Pi and OpenCode with Plannotator's extension or plugin: their reach
+ * is the tool), ticked for the rest.
+ */
 export function defaultPicks(model: InboxAgentsModel): Record<InboxNoteAgentId, boolean> {
   const picks = {} as Record<InboxNoteAgentId, boolean>;
-  for (const row of noteCandidates(model)) picks[row.id as InboxNoteAgentId] = true;
+  for (const row of noteCandidates(model)) picks[row.id as InboxNoteAgentId] = row.reach.kind !== 'tool';
   return picks;
 }

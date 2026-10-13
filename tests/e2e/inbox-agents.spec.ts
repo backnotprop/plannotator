@@ -114,7 +114,7 @@ test('plannotator inbox connects the agents found; the card asks once about the 
     fake.install('amp');
     const later = run(['--no-open']);
     expect(later.status, later.stderr).toBe(0);
-    expect(later.stderr).toContain('Connected Amp to the Inbox (new on this computer). Change it in Settings.');
+    expect(later.stderr).toContain('Connected Amp to the Inbox (new on this computer).');
     expect(adds().sort()).toEqual(['amp', 'codex', 'gemini']);
     await page.reload();
     await expect(card.locator('.ib-conn-head b')).toHaveText('Connected Amp to the Inbox (new on this computer).');

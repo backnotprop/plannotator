@@ -169,3 +169,47 @@ test.skipIf(!hasDom)('the agents not found fold behind the harness picker, edito
   act(() => more.click());
   expect([...el.querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toContain('VS Code');
 });
+
+test.skipIf(!hasDom)('Claude Code, Pi and OpenCode keep their Inbox tool switch when not found here; a found Pi without the extension shows it too', () => {
+  const base = model();
+  const notFound: InboxAgentRow = {
+    ...tool('opencode', 'OpenCode'),
+    detected: false,
+    reach: { kind: 'manual', on: false, state: 'manual', path: null, locked: false, reason: null },
+    tool: { on: false, locked: false },
+    reminder: { on: false, locked: false, needs_tool: true },
+  };
+  const piCli: InboxAgentRow = { ...mcp('pi', 'Pi', '~/.pi/agent/mcp.json'), tool: { on: false, locked: false }, reminder: { on: false, locked: false, needs_tool: true } };
+  const el = mount({ ...base, agents: [base.agents[1]!, piCli, notFound] });
+  expect(group(el, 'opencode').querySelector('.ib-agstate')?.textContent).toBe('Not found on this computer');
+  expect(group(el, 'opencode').querySelector('[aria-label="The Inbox tool: OpenCode"]')).not.toBeNull();
+  expect(group(el, 'pi').querySelector('[aria-label="The Inbox tool: Pi"]')).not.toBeNull();
+  expect(group(el, 'pi').querySelector('[aria-label="Reaches the Inbox: Pi"]')).not.toBeNull();
+});
+
+test.skipIf(!hasDom)('a second click while a change to that agent saves is ignored', async () => {
+  const el = mount(model());
+  let calls = 0;
+  let release: () => void = () => {};
+  globalThis.fetch = (async () => {
+    calls += 1;
+    await new Promise<void>((resolve) => (release = resolve));
+    return new Response(JSON.stringify({ ...model(), error: null }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }) as unknown as typeof fetch;
+  const sw = group(el, 'codex').querySelector('[role="switch"]') as HTMLButtonElement;
+  act(() => sw.click());
+  expect(sw.getAttribute('aria-busy')).toBe('true');
+  act(() => sw.click());
+  expect(calls).toBe(1);
+  await act(async () => {
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(sw.getAttribute('aria-busy')).toBeNull();
+});
+
+test.skipIf(!hasDom)('OpenCode with no AGENTS.md says "no file yet", never "would create"; PLANNOTATOR_INBOX_NOTES=0 says notes are off', () => {
+  const el = mount(model({ notes_env_off: true }));
+  expect(rows(group(el, 'opencode'))[2]!.v).toBe('~/.config/opencode/AGENTS.md · no file yetShow');
+  expect([...el.querySelectorAll('[role="note"]')].map((n) => n.textContent).join(' ')).toContain('PLANNOTATOR_INBOX_NOTES=0 is set');
+});

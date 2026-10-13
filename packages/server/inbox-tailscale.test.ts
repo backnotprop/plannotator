@@ -183,6 +183,17 @@ describe("Inbox over your tailnet", () => {
     expect(await codeOf(on)).toEqual([403, "local_only"]);
     expect(await codeOf(await throughServe(inbox, "/api/inbox/pairing", { method: "POST", headers: own, body: "{}" }))).toEqual([403, "local_only"]);
     expect(((await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/settings`)).json()) as Json).via).toBe("local");
+
+    // The agents on this computer (their files, their switches, the card): this computer only, read or write.
+    expect(await codeOf(await throughServe(inbox, "/api/inbox/agents"))).toEqual([403, "local_only"]);
+    for (const [path, body] of [
+      ["/api/inbox/agents", { agent: "codex", reach: true }],
+      ["/api/inbox/agents/notes", { add: ["codex"] }],
+      ["/api/inbox/agents/seen", {}],
+    ] as const) {
+      const response = await throughServe(inbox, path, { method: "POST", headers: own, body: JSON.stringify({ ...body, serverSession: inbox.serverSession }) });
+      expect([path, ...(await codeOf(response))]).toEqual([path, 403, "local_only"]);
+    }
   });
 
   test("a message's image (#1813) reads through the tailnet for the owner like the other read routes; a wrong login, no login and another site are refused", async () => {

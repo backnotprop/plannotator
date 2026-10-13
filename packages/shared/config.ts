@@ -277,7 +277,7 @@ export interface PlannotatorConfig {
   /**
    * The Plannotator Inbox's one-line reminder at session start
    * (INBOX_REMINDER_TEXT), on the hosts that register `plannotator_inbox`
-   * (the Claude Code mod, Pi, OpenCode), set in this file: `true` / `false`
+   * (the Claude Code mod, Pi, OpenCode), set in this file or by the Inbox's Settings → Agents: `true` / `false`
    * for every host, or one boolean per host. It only ever applies where that
    * session has the Inbox tool and the Inbox has run on this computer
    * (`inbox/inbox.json` exists at session start), so the tool switch

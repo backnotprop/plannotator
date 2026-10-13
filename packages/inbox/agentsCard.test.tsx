@@ -83,7 +83,7 @@ function recordFetch(answer: (path: string, body: Record<string, unknown>) => un
   }) as typeof fetch;
 }
 
-function mount(start: InboxAgentsModel): { el: HTMLElement; current: () => InboxAgentsModel; settings: string[] } {
+function mount(start: InboxAgentsModel): { el: HTMLElement; current: () => InboxAgentsModel; settings: string[]; set: (next: InboxAgentsModel) => void } {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
@@ -105,7 +105,11 @@ function mount(start: InboxAgentsModel): { el: HTMLElement; current: () => Inbox
     root = createRoot(host!);
     render();
   });
-  return { el: host, current: () => current, settings };
+  const set = (next: InboxAgentsModel) => act(() => {
+    current = next;
+    render();
+  });
+  return { el: host, current: () => current, settings, set };
 }
 
 const flush = () => act(async () => void (await new Promise((resolve) => setTimeout(resolve, 0))));
@@ -191,4 +195,48 @@ test.skipIf(!hasDom)('a failure: amber, names the reason, Try again turns the ag
 test.skipIf(!hasDom)('nothing new and the question answered: no card at all', () => {
   const { el } = mount(model({ notes_offered: true, last_report: { ...model().last_report!, seen: true } }));
   expect(el.querySelector('[data-agents-card]')).toBeNull();
+});
+
+const picked = (el: HTMLElement) =>
+  [...el.querySelectorAll('.ib-conn-picks li')].map((li) => [li.querySelector('.ib-conn-pick')?.textContent, (li.querySelector('input') as HTMLInputElement).checked]);
+
+test.skipIf(!hasDom)('the ticks follow the model until the person touches one: a late-connected agent joins ticked; one Plannotator reminds joins unticked', () => {
+  const pi = (): InboxAgentRow => ({ ...row('pi', 'Pi', { path: '~/.pi/agent/AGENTS.md', create: true }), reach: { kind: 'tool', on: true, state: 'connected', path: null, locked: false, reason: null } });
+  const start = model({ agents: [row('codex', 'Codex', { path: '~/.codex/AGENTS.md' })] });
+  const { el, set } = mount(start);
+  expect(picked(el)).toEqual([['Codex', true]]);
+  // The run finished after the window opened: Gemini and Pi arrive.
+  set(model({ agents: [row('codex', 'Codex', { path: '~/.codex/AGENTS.md' }), row('gemini', 'Gemini CLI', { path: '~/.gemini/GEMINI.md', create: true }), pi()] }));
+  expect(picked(el)).toEqual([['Codex', true], ['Gemini CLI', true], ['Pi', false]]);
+  // Touched: the person's ticks stay when the model changes again.
+  act(() => (el.querySelectorAll('.ib-conn-picks input')[0] as HTMLInputElement).click());
+  set(model({ agents: [row('codex', 'Codex', { path: '~/.codex/AGENTS.md' }), row('gemini', 'Gemini CLI', { path: '~/.gemini/GEMINI.md', create: true }), pi()] }));
+  expect(picked(el)).toEqual([['Codex', false], ['Gemini CLI', true], ['Pi', false]]);
+});
+
+test.skipIf(!hasDom)('Try again: the server\'s refusal shows; once it works the amber line goes and the agent joins the question', async () => {
+  const report = { ...model().last_report!, added: ['gemini' as const], failed: [{ agent: 'codex' as const, reason: 'boom', path: null }] };
+  const failing = model({ last_report: report, agents: [row('codex', 'Codex', { path: '~/.codex/AGENTS.md' }, false), row('gemini', 'Gemini CLI', { path: '~/.gemini/GEMINI.md', create: true })] });
+  const { el } = mount(failing);
+  recordFetch(() => ({ ...failing, error: 'codex mcp add exited with code 3 (still broken)' }));
+  act(() => button(el, 'Try again').click());
+  await flush();
+  expect(el.querySelector('[role="alert"]')?.textContent).toBe('codex mcp add exited with code 3 (still broken)');
+  expect(el.querySelector('.ib-conn-fail')).not.toBeNull();
+  recordFetch(() => ({ ...model({ last_report: { ...report, failed: [] } }), error: null }));
+  act(() => button(el, 'Try again').click());
+  await flush();
+  expect(el.querySelector('.ib-conn-fail')).toBeNull();
+  expect(picked(el).map(([name]) => name)).toContain('Codex');
+});
+
+test.skipIf(!hasDom)('a file shared with another agent says so on its row', () => {
+  const { el } = mount(model({ agents: [row('pi', 'Pi', { path: '~/.pi/agent/AGENTS.md', shared_with: ['codex'] })] }));
+  expect(el.querySelector('.ib-conn-picks')?.textContent).toContain('This file is shared with Codex: one section serves both.');
+});
+
+test.skipIf(!hasDom)('PLANNOTATOR_INBOX_NOTES=0: the head only, no question', () => {
+  const { el } = mount(model({ notes_env_off: true }));
+  expect(el.querySelector('[role="group"]')).toBeNull();
+  expect(el.querySelector('.ib-conn-head b')?.textContent).toContain('Connected Codex');
 });

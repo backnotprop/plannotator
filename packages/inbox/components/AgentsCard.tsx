@@ -29,7 +29,9 @@ export function AgentsCard({
   const id = useId();
   const report = cardReport(model);
   const asking = noteQuestionOpen(model);
-  const [picks, setPicks] = useState<Record<string, boolean>>(() => defaultPicks(model));
+  // The ticks follow the model (the window can open before connecting is done) until the person touches one.
+  const [touched, setTouched] = useState<Record<string, boolean> | null>(null);
+  const picks: Record<string, boolean> = touched ?? defaultPicks(model);
   const [preview, setPreview] = useState(false);
   const [results, setResults] = useState<NoteResult[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -67,7 +69,9 @@ export function AgentsCard({
   const retry = async (agent: (typeof model.agents)[number]['id']) => {
     setRetrying(agent);
     try {
-      onModel(await inboxApi.saveAgent(agent, { reach: true }));
+      const next = await inboxApi.saveAgent(agent, { reach: true });
+      onModel(next);
+      if (next.error) setError(next.error);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -106,6 +110,11 @@ export function AgentsCard({
           </span>
         </div>
       ))}
+      {error && !(asking && !results) && (
+        <p className="ib-error ib-conn-err" role="alert">
+          {error}
+        </p>
+      )}
       {report?.foreign.map((foreign) => (
         <div className="ib-conn-fail ib-conn-quiet" role="status" key={foreign.agent}>
           <Icon name="info" />
@@ -141,7 +150,7 @@ export function AgentsCard({
                   <input
                     type="checkbox"
                     checked={picks[row.id] === true}
-                    onChange={(event) => setPicks((current) => ({ ...current, [row.id]: event.target.checked }))}
+                    onChange={(event) => setTouched({ ...picks, [row.id]: event.target.checked })}
                   />
                   <HostMark host={row.id} />
                   {row.label}
@@ -154,6 +163,12 @@ export function AgentsCard({
                   <span className="ib-conn-why">
                     <Icon name="info" />
                     <span>Pi reads only one of its instruction files; this is the one.</span>
+                  </span>
+                )}
+                {row.note?.shared_with && row.note.shared_with.length > 0 && (
+                  <span className="ib-conn-why">
+                    <Icon name="info" />
+                    <span>This file is shared with {row.note.shared_with.map((id) => INBOX_AGENT_LABELS[id]).join(' and ')}: one section serves both.</span>
                   </span>
                 )}
                 {row.note?.target && (
@@ -181,7 +196,7 @@ export function AgentsCard({
               {error}
             </p>
           )}
-          <div className="ib-conn-acts">
+          <div className="ib-conn-acts" data-busy={busy || undefined}>
             <button
               type="button"
               className="ib-btn ib-pri ib-sm"
@@ -197,7 +212,7 @@ export function AgentsCard({
             >
               {busy ? 'Adding…' : addLabel(count)}
             </button>
-            <button type="button" className="ib-btn ib-ghost ib-sm" onClick={() => void answer([])}>
+            <button type="button" className="ib-btn ib-ghost ib-sm" aria-disabled={busy || undefined} onClick={() => !busy && void answer([])}>
               Not now
             </button>
             <span className="ib-conn-small">Asked once. Change it later in Settings.</span>

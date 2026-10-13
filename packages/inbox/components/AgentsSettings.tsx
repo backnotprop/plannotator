@@ -1,14 +1,26 @@
 import { useId, useState, type ReactNode } from 'react';
-import type { InboxAgentId, InboxAgentRow, InboxAgentsModel } from '@plannotator/core/inbox-types';
+import { INBOX_AGENT_LABELS, type InboxAgentId, type InboxAgentRow, type InboxAgentsModel } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon } from '../icons';
 import { ConnectPicker } from './ConnectPicker';
 
-type Change = { reach?: boolean; reminder?: boolean; note?: boolean };
+type Change = { reach?: boolean; tool?: boolean; reminder?: boolean; note?: boolean };
 
-function Switch({ on, label, disabled, onClick }: { on: boolean; label: string; disabled?: boolean; onClick: () => void }) {
-  return <button type="button" role="switch" className="ib-sw" aria-checked={on} aria-label={label} disabled={disabled} onClick={onClick} />;
+function Switch({ on, label, disabled, busy, onClick }: { on: boolean; label: string; disabled?: boolean; busy?: boolean; onClick: () => void }) {
+  // While a change to this agent is saving, a second click is ignored (aria-busy), never queued.
+  return (
+    <button
+      type="button"
+      role="switch"
+      className="ib-sw"
+      aria-checked={on}
+      aria-label={label}
+      aria-busy={busy || undefined}
+      disabled={disabled}
+      onClick={() => !busy && onClick()}
+    />
+  );
 }
 
 /** How an agent reaches the Inbox, beside its name. */
@@ -59,10 +71,22 @@ function Row({ k, v, r, sub, warn, na }: { k: string; v: ReactNode; r?: ReactNod
   );
 }
 
-function AgentGroup({ row, noteText, onChange, pending }: { row: InboxAgentRow; noteText: string; onChange: (change: Change) => void; pending: Set<string> }) {
+function AgentGroup({
+  row,
+  noteText,
+  onChange,
+  pending,
+  busy,
+}: {
+  row: InboxAgentRow;
+  noteText: string;
+  onChange: (change: Change) => void;
+  pending: Set<string>;
+  busy: boolean;
+}) {
   const [show, setShow] = useState(false);
   const id = useId();
-  const state = stateOf(row);
+  const state = row.detected ? stateOf(row) : { text: 'Not found on this computer', tone: 'off' as const };
   const next = `${row.label}'s next session`;
   const reach = row.reach;
   const reachValue =
@@ -110,7 +134,7 @@ function AgentGroup({ row, noteText, onChange, pending }: { row: InboxAgentRow; 
           ? 'would create'
           : 'no note yet'
         : note.state === 'unavailable'
-          ? 'would create'
+          ? 'no file yet'
           : ''
     : '';
   const noteSub =
@@ -118,9 +142,11 @@ function AgentGroup({ row, noteText, onChange, pending }: { row: InboxAgentRow; 
       ? "You edited this note, so Plannotator won't update it. Turning it off removes it as you left it."
       : note?.state === 'unavailable' || note?.state === 'damaged' || note?.state === 'refused'
         ? note.reason
-        : note?.target
-          ? `This file is a link to ${note.target}; the note goes there.`
-          : null;
+        : note?.shared_with && note.shared_with.length > 0
+          ? `This file is shared with ${note.shared_with.map((id) => INBOX_AGENT_LABELS[id]).join(' and ')}: one section, kept while either has it on.`
+          : note?.target
+            ? `This file is a link to ${note.target}; the note goes there.`
+            : null;
 
   return (
     <div className="ib-agent" data-agent={row.id}>
@@ -140,11 +166,27 @@ function AgentGroup({ row, noteText, onChange, pending }: { row: InboxAgentRow; 
           reachSwitchable ? (
             <>
               {pending.has(`${row.id}:reach`) && <span className="ib-agpending">{next}</span>}
-              <Switch on={reach.on} label={`Reaches the Inbox: ${row.label}`} disabled={reach.locked} onClick={() => onChange({ reach: !reach.on })} />
+              <Switch on={reach.on} label={`Reaches the Inbox: ${row.label}`} disabled={reach.locked} busy={busy} onClick={() => onChange({ reach: !reach.on })} />
             </>
           ) : null
         }
       />
+      {row.tool && reach.kind !== 'tool' && (
+        <Row
+          k="The Inbox tool"
+          v={
+            <>
+              the <code>plannotator_inbox</code> tool, with Plannotator&apos;s {row.id === 'pi' ? 'extension' : 'plugin'}
+            </>
+          }
+          r={
+            <>
+              {pending.has(`${row.id}:tool`) && <span className="ib-agpending">{next}</span>}
+              <Switch on={row.tool.on} label={`The Inbox tool: ${row.label}`} disabled={row.tool.locked} busy={busy} onClick={() => onChange({ tool: !row.tool!.on })} />
+            </>
+          }
+        />
+      )}
       {row.reminder && (
         <Row
           k="Reminder at session start"
@@ -156,6 +198,7 @@ function AgentGroup({ row, noteText, onChange, pending }: { row: InboxAgentRow; 
                 on={row.reminder.on}
                 label={`Reminder at session start: ${row.label}`}
                 disabled={row.reminder.locked || row.reminder.needs_tool}
+                busy={busy}
                 onClick={() => onChange({ reminder: !row.reminder!.on })}
               />
             </>
@@ -179,12 +222,12 @@ function AgentGroup({ row, noteText, onChange, pending }: { row: InboxAgentRow; 
               note.state === 'absent' || note.state === 'added' || note.state === 'edited' ? (
                 <>
                   {pending.has(`${row.id}:note`) && <span className="ib-agpending">{next}</span>}
-                  <Switch on={noteOn} label={`Note in its instructions: ${row.label}`} onClick={() => onChange({ note: !noteOn })} />
+                  <Switch on={noteOn} label={`Note in its instructions: ${row.label}`} busy={busy} onClick={() => onChange({ note: !noteOn })} />
                 </>
               ) : null
             }
             sub={noteSub}
-            warn={note.state !== 'edited' && noteSub !== null && !note.target}
+            warn={(note.state === 'unavailable' || note.state === 'damaged' || note.state === 'refused') && noteSub !== null}
           />
           {show && (
             <div className="ib-agrow ib-agnote" id={`${id}-note`}>
@@ -213,11 +256,16 @@ export function AgentsSettings({ model, onModel, context }: { model: InboxAgents
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [more, setMore] = useState(false);
+  const [busy, setBusy] = useState<Set<string>>(new Set());
+  // The three Plannotator hosts stay listed (their Inbox tool switch) even when not found on this computer.
+  const shown = model.agents.filter((row) => row.detected || row.tool);
   const detected = model.agents.filter((row) => row.detected);
-  const undetected = model.agents.filter((row) => !row.detected);
+  const undetected = model.agents.filter((row) => !row.detected && !row.tool);
 
   const change = async (agent: InboxAgentId, input: Change) => {
+    if (busy.has(agent)) return;
     setError(null);
+    setBusy((current) => new Set([...current, agent]));
     try {
       const next = await inboxApi.saveAgent(agent, input);
       onModel(next);
@@ -225,6 +273,12 @@ export function AgentsSettings({ model, onModel, context }: { model: InboxAgents
       else setPending((current) => new Set([...current, ...Object.keys(input).map((key) => `${agent}:${key}`)]));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy((current) => {
+        const next = new Set(current);
+        next.delete(agent);
+        return next;
+      });
     }
   };
 
@@ -247,14 +301,22 @@ export function AgentsSettings({ model, onModel, context }: { model: InboxAgents
           </span>
         </div>
       )}
+      {model.notes_env_off && (
+        <div className="ib-callout" role="note">
+          <Icon name="info" />
+          <span>
+            <code>PLANNOTATOR_INBOX_NOTES=0</code> is set, so Plannotator offers no notes and adds none. Notes already written stay until you remove them.
+          </span>
+        </div>
+      )}
       {error && (
         <p className="ib-error" role="alert">
           {error}
         </p>
       )}
       <div className="ib-agents">
-        {detected.map((row) => (
-          <AgentGroup key={row.id} row={row} noteText={model.note_text} pending={pending} onChange={(input) => void change(row.id, input)} />
+        {shown.map((row) => (
+          <AgentGroup key={row.id} row={row} noteText={model.note_text} pending={pending} busy={busy.has(row.id)} onChange={(input) => void change(row.id, input)} />
         ))}
         {detected.length === 0 && (
           <div className="ib-agrow ib-agna">

@@ -54,7 +54,10 @@ else main();
 function main() {
   // A grandchild that keeps our stdout open after we exit (a daemon an agent CLI leaves behind).
   if (list(process.env.FAKE_AGENT_GRANDCHILD).includes(name)) require("child_process").spawn("sleep", ["30"], { stdio: "inherit" }).unref();
-  if (list(process.env.FAKE_AGENT_FAIL).includes(name)) {
+  // FAKE_AGENT_FAIL_FILE: the same list read from a file, so a test can fix the failure between runs.
+  const failFile = process.env.FAKE_AGENT_FAIL_FILE;
+  const failing = list(process.env.FAKE_AGENT_FAIL).concat(failFile && fs.existsSync(failFile) ? list(fs.readFileSync(failFile, "utf8").trim()) : []);
+  if (failing.includes(name)) {
     process.stderr.write("boom: " + name + " could not write its config (permission denied)\n");
     process.exit(3);
   }

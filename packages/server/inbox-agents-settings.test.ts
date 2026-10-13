@@ -151,3 +151,52 @@ test("the window guards: another site, an old tab", async () => {
   expect(stale.status).toBe(409);
   expect(existsSync(join(fake.home, ".codex", "AGENTS.md"))).toBe(false);
 });
+
+test("Try again: a failure the person fixed leaves the last report, so the card's amber line goes and the agent can take a note", async () => {
+  fake.install("codex");
+  const failFile = join(fake.root, "fail");
+  writeFileSync(failFile, "codex");
+  const s = await start({ FAKE_AGENT_FAIL_FILE: failFile });
+  await s.connectAgents();
+  const failed = await get(s);
+  expect((failed.last_report as unknown as { failed: { agent: string }[] }).failed.map((f) => f.agent)).toEqual(["codex"]);
+  const still = (await (await post(s, "/api/inbox/agents", { agent: "codex", reach: true })).json()) as Model;
+  expect(still.error).toContain("codex mcp add exited with code 3");
+  writeFileSync(failFile, "");
+  const fixed = (await (await post(s, "/api/inbox/agents", { agent: "codex", reach: true })).json()) as Model;
+  expect(fixed.error).toBeNull();
+  expect((fixed.last_report as unknown as { failed: unknown[] }).failed).toEqual([]);
+  expect(row(fixed, "codex").reach.state).toBe("connected");
+});
+
+test("the Inbox tool switch of Claude Code, Pi and OpenCode stays in reach when the agent is not found here", async () => {
+  const s = await start();
+  const model = await get(s);
+  for (const id of ["claude-code", "pi", "opencode"]) {
+    expect(row(model, id).detected).toBe(false);
+    expect((row(model, id) as AgentRow & { tool: { on: boolean } }).tool).toBeDefined();
+  }
+  const on = (await (await post(s, "/api/inbox/agents", { agent: "pi", tool: true })).json()) as Model & { agents: (AgentRow & { tool: { on: boolean } })[] };
+  expect(on.agents.find((a) => a.id === "pi")!.tool.on).toBe(true);
+  expect(loadConfig().inboxTool).toEqual({ pi: true });
+});
+
+test("the card never writes a note for an agent not found here, and a question whose every add failed stays open", async () => {
+  const s = await start();
+  const answer = (await (await post(s, "/api/inbox/agents/notes", { add: ["gemini"] })).json()) as Model & { results: { ok: boolean; reason?: string }[] };
+  expect(answer.results).toEqual([{ ok: false, agent: "gemini", reason: "Gemini CLI was not found on this computer", path: null }] as never);
+  expect(answer.notes_offered).toBe(false);
+  expect(existsSync(join(fake.home, ".gemini"))).toBe(false);
+});
+
+test("PLANNOTATOR_INBOX_NOTES=0: no note rows, no offer, and a note cannot be added", async () => {
+  mkdirSync(join(fake.home, ".codex"), { recursive: true });
+  writeFileSync(join(fake.home, ".codex", "AGENTS.md"), "Mine.\n");
+  const s = await start({ PLANNOTATOR_INBOX_NOTES: "0" });
+  const model = await get(s);
+  expect(row(model, "codex").note).toBeNull();
+  expect((model as unknown as { notes_env_off: boolean }).notes_env_off).toBe(true);
+  const refused = await post(s, "/api/inbox/agents", { agent: "codex", note: true });
+  expect([refused.status, ((await refused.json()) as { code: string }).code]).toEqual([400, "notes_disabled"]);
+  expect(readFileSync(join(fake.home, ".codex", "AGENTS.md"), "utf8")).toBe("Mine.\n");
+});

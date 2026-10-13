@@ -1647,3 +1647,4 @@ pre code.pn-code[data-keep-layout] {
   .ib-aghead { padding: 11px 12px 4px; flex-wrap: wrap; }
   .ib-aghead .ib-agvia { flex-basis: 100%; order: 3; margin-left: 40px; margin-top: -4px; }
 }
+.ib-conn-err { margin: -4px 14px 12px; }
