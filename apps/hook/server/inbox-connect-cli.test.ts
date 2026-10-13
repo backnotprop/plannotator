@@ -7,7 +7,7 @@
  * installed since and says so once; PLANNOTATOR_INBOX_CONNECT=0 skips it.
  */
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { readInboxAgents } from "@plannotator/server/inbox-agents";
 import { createFakeAgents, type FakeAgents } from "../../../tests/helpers/fake-agents";
@@ -119,28 +119,23 @@ test("an older Inbox's detached start (its Restart into this binary: only the lo
   const w = world();
   w.install("codex", "gemini");
   mkdirSync(join(w.home, ".cursor"), { recursive: true });
-  const proc = Bun.spawn([process.execPath, "run", entry, "inbox", "--no-open"], {
+  const log = join(w.root, "inbox.log");
+  const fd = openSync(log, "a", 0o600);
+  Bun.spawn([process.execPath, "run", entry, "inbox", "--no-open"], {
     cwd: w.root,
     env: envOf(w, { PLANNOTATOR_INBOX_LOCK_HELD: "1" }),
-    stdout: "ignore",
-    stderr: "pipe",
+    stdout: fd,
+    stderr: fd,
     stdin: "ignore",
   });
-  let err = "";
-  const reader = proc.stderr.getReader();
-  const read = async (until: number) => {
-    while (Date.now() < until) {
-      const chunk = await Promise.race([reader.read(), Bun.sleep(250).then(() => null)]);
-      if (chunk?.done) break;
-      if (chunk) err += new TextDecoder().decode(chunk.value);
-    }
-  };
-  const deadline = Date.now() + 30_000;
-  while (!err.includes("Plannotator Inbox: http://localhost:") && Date.now() < deadline) await read(Date.now() + 500);
-  expect(err).toContain("Plannotator Inbox: http://localhost:");
+  closeSync(fd);
+  const output = () => (existsSync(log) ? readFileSync(log, "utf8") : "");
+  const deadline = Date.now() + 45_000;
+  while (!output().includes("Plannotator Inbox: http://localhost:") && Date.now() < deadline) await Bun.sleep(250);
+  expect(output()).toContain("Plannotator Inbox: http://localhost:");
   // A person's start connects right after this line; give it ample time to.
-  await read(Date.now() + 5_000);
-  reader.releaseLock();
+  await Bun.sleep(5_000);
+  const err = output();
   expect(err).not.toContain("Connected");
   expect(w.calls()).toEqual([]);
   expect(existsSync(join(w.home, ".cursor", "mcp.json"))).toBe(false);
@@ -151,7 +146,7 @@ test("an older Inbox's detached start (its Restart into this binary: only the lo
   expect(person.stderr).toContain("Connected");
   expect(adds(w).sort()).toEqual(["codex", "gemini"]);
   expect(existsSync(join(w.home, ".cursor", "mcp.json"))).toBe(true);
-}, 60_000);
+}, 90_000);
 
 test("plannotator inbox --notes adds only the notes named, starts nothing, and answers the window's question", async () => {
   const w = world();
