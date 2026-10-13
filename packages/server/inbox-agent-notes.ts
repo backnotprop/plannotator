@@ -231,7 +231,9 @@ function stripBlock(text: string, start: number, end: number): string {
   let to = end;
   if (text.startsWith("\r\n", to)) to += 2;
   else if (text[to] === "\n") to += 1;
-  if (text.slice(Math.max(0, from - 4), from) === "\r\n\r\n") from -= 2;
+  // The blank line is the one line break right before the block, after the previous line's own
+  // ending, whichever ending that line had ("c\n\r\n" in a mostly-CRLF file ending in a lone LF).
+  if (from >= 3 && text.slice(from - 2, from) === "\r\n" && text[from - 3] === "\n") from -= 2;
   else if (from >= 2 && text[from - 1] === "\n" && text[from - 2] === "\n") from -= 1;
   return text.slice(0, from) + text.slice(to);
 }

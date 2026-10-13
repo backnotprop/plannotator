@@ -112,6 +112,17 @@ describe("the marked section", () => {
     expect(readInboxAgentNotes(dataDir).notes.codex).toBeUndefined();
   });
 
+  test("a mostly-CRLF file that ends in a lone LF comes back byte for byte after add then remove", () => {
+    const path = file(".codex", "AGENTS.md");
+    for (const before of ["a\r\nb\r\nc\n", "a\nb\nc\r\n", "a\r\n\r\n"]) {
+      write(path, before);
+      expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true });
+      expect(read(path)).toContain(INBOX_NOTE_START);
+      expect(removeInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "removed" });
+      expect(JSON.stringify(read(path))).toBe(JSON.stringify(before));
+    }
+  });
+
   test("a symlinked file (dotfiles) is written at its target and stays a link", () => {
     const real = join(fake.root, "dotfiles", "GEMINI.md");
     write(real, "Mine.\n");
