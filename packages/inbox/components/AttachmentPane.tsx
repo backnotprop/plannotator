@@ -23,6 +23,7 @@ import {
   codeRangeOf,
 } from '../attachments';
 import { whenTime, formatBytes } from '../format';
+import { titleIfClipped } from '../clipTitle';
 import { useRefRepo } from '../links';
 import { ImageAttachmentView } from './ImageAttachmentView';
 import { AttachmentStepper, type StepSource } from './AttachmentStepper';
@@ -567,6 +568,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   return (
     <section
       ref={sectionRef}
+      onPointerOver={titleIfClipped}
       tabIndex={-1}
       className={`ib-view${full ? ' ib-full' : ''}${phone ? ' ib-phone' : ''}${phone && sheet ? ' ib-panel-open' : ''}`}
       aria-label={multi ? `${attachment.name}, attachment ${index + 1} of ${steps.length}` : attachment.name}
@@ -840,7 +842,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             {guard.to === null ? 'Save it and close' : 'Save it and go on'}
           </button>
           <button type="button" className="ib-btn ib-sm" onClick={discardAndGo} disabled={guardSaving} data-guard-discard="">
-            {guard.to === null ? 'Discard and close the file' : <>Discard and go to <FileName name={guard.to} /></>}
+            {guard.to === null ? 'Discard and close the file' : <span className="ib-gto">Discard and go to <FileName name={guard.to} /></span>}
           </button>
           <button type="button" className="ib-btn ib-sm ib-ghost" onClick={keepWriting} data-guard-keep="">
             Keep writing

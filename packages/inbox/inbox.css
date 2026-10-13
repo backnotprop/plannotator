@@ -1706,9 +1706,9 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
 /* Right-to-left text. The names and subjects the window draws carry dir="auto", and a cell in a row starts at its
    text's own start (a row is a button, which aligns left), so an Arabic subject is cut at its end, not its start. */
 .ib-row [dir="auto"], .ib-nrow [dir="auto"], .ib-mrow [dir="auto"], .ib-arcsub [dir="auto"], .ib-fline [dir="auto"], .ib-proj [dir="auto"] { text-align: start; }
-/* A message paragraph takes its direction from its own text: Arabic reads right to left, English as before. */
+/* A message paragraph takes its direction from its own text: Arabic reads right to left, English as before (text-align is
+   left at its default, start, which follows that direction; an `align` attribute in a message's HTML still wins). */
 .ib-body :is(p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th) { unicode-bidi: plaintext; }
-.ib-body :is(p, li, h1, h2, h3, h4, h5, h6, blockquote) { text-align: start; }
 
 /* A file name (components/FileName.tsx): its start gives way with "…", its end (the date, the version, the
    extension) keeps its width. `.ib-fname-wrap` draws the whole name, broken where it must. */
@@ -1723,6 +1723,9 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
 /* The open file's one column never grows past the pane for a row's content ("Discard and go to <a long name>"
    was a 1,215 px button and scrolled the whole window sideways): its rows shrink their content instead. */
 .ib-view { grid-template-columns: minmax(0, 1fr); }
+/* The button's words and the name are one item (the button's 7 px gap after the words' own space read as two spaces). */
+.ib-gto { display: flex; min-width: 0; }
+.ib-gto > .ib-fname { margin-inline-start: 0.28em; }
 
 /* A message's time keeps its line when the sender line is long (a real, long project name): the name wraps instead. */
 .ib-sender .ib-tm { flex: none; white-space: nowrap; }
@@ -1765,10 +1768,10 @@ details.ib-wn-skipped[open] > summary { margin-bottom: 6px; }
   .ib-body :is(th, td), .ib-body :is(th, td) :not(pre) > code { overflow-wrap: break-word; word-break: normal; }
   /* The notifications line: its words take the row, its buttons go under them. */
   .ib-askline .ib-grow { flex: 1 1 calc(100% - 30px); }
-  /* "↓ N new" is the foot's first row (Thread.tsx), never over a sender's row. */
-  .ib-pfoot > .ib-npill-wrap { position: static; height: auto; margin: 0 0 8px; }
-  .ib-pfoot > .ib-npill-wrap:has(> [data-off]) { display: none; }
-  .pn-inbox .ib-pfoot .ib-npill { transform: none; height: 36px; }
+  /* "↓ N new" is laid over the middle of the foot's row (Thread.tsx): never over a sender's row, and the foot keeps its height. */
+  .ib-pfoot .ib-acts:has(> .ib-npill-wrap) { position: relative; }
+  .ib-pfoot .ib-acts > .ib-npill-wrap { position: absolute; left: 50%; top: 50%; bottom: auto; height: auto; transform: translate(-50%, -50%); }
+  .pn-inbox .ib-pfoot .ib-npill, .pn-inbox .ib-pfoot .ib-npill[data-off] { transform: none; height: 36px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18); }
   /* Settings → Archived: Unarchive stays on its row; the subject takes up to two lines. */
   .ib-srow.ib-arcrow { flex-wrap: nowrap; align-items: flex-start; }
   .ib-arcrow > .ib-mk { margin-top: 3px; }

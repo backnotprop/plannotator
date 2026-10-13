@@ -74,7 +74,8 @@ export type WorstCaseThread =
   | 'storageUrl'
   | 'archived'
   | 'longFile'
-  | 'pill';
+  | 'pill'
+  | 'centered';
 
 export interface WorstCaseWorld {
   dataDir: string;
@@ -321,6 +322,9 @@ export async function seedWorstCase(options: { dataDir: string; src?: string; no
   // A question from a session that has ended (it woke through a connection and stopped polling).
   threads.ended = send('billing', { ...CLAUDE, session: 'ses_wc_gone' }, question('Ship the ledger migration tonight?', ['Yes, tonight', 'Wait for Monday']), { subject: 'Ledger migration tonight?', wakes: true }).thread_id;
   threads.ended2 = send('billing', { ...CLAUDE, session: 'ses_wc_gone2' }, question('Rotate the processor API key this week?', ['Yes', 'Next week']), { subject: 'Rotate the processor key?', wakes: true }).thread_id;
+
+  // HTML in a message that centres itself: its own align attribute, and its parent's.
+  threads.centered = send('billing', PI, ['A release banner in HTML.', '', '<p align="center">Centered by its own attribute.</p>', '', '<div align="center">', '<p>Centered by its parent.</p>', '</div>'].join('\n'), { subject: 'Release banner' }).thread_id;
 
   // Settings → Storage: a subject that is one long URL.
   threads.storageUrl = send('billing', PI, 'The incident write-up is published.', {

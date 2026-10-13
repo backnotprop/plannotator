@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { inboxApi, type ArchivedModel } from '../api';
 import { agentName, dayWords, formatCount, plural } from '../format';
+import { titleIfClipped } from '../clipTitle';
 import { AuthorMark, Icon } from '../icons';
 
 /** Rows the block reads at a time ("Show more" reads the next ones). The server allows up to 200 per read. */
@@ -47,8 +48,8 @@ function ArchivedRow({ row, busy, onUnarchive }: { row: InboxListRow; busy: bool
       <AuthorMark author={row.author} />
       <span className="ib-arcinfo">
         <span className="ib-arcsub">
-          {row.thread_name && <span className="ib-key"><span className="ib-keyt" dir="auto" title={row.thread_name}>{row.thread_name}</span></span>}
-          <span className="ib-st" dir="auto" title={subject}>{subject}</span>
+          {row.thread_name && <span className="ib-key"><span className="ib-keyt" dir="auto" data-clip="">{row.thread_name}</span></span>}
+          <span className="ib-st" dir="auto" data-clip="">{subject}</span>
         </span>
         <span className="ib-d">
           {agentName(row.author)} · Archived {row.resolved_at ? dayWords(row.resolved_at) : ''} · {plural(row.message_count, 'message')}
@@ -160,7 +161,7 @@ export function ArchivedBlock({ refreshKey, onUnarchive }: ArchivedBlockProps) {
     </ul>
   );
   return (
-    <div className="ib-arcblock" data-settings-archived={loaded ? loaded.total : ''}>
+    <div className="ib-arcblock" onPointerOver={titleIfClipped} data-settings-archived={loaded ? loaded.total : ''}>
       {loaded && loaded.total > 0 && (
         <p className="ib-arcnone" data-archived-count="">
           {plural(loaded.total, 'archived thread')}

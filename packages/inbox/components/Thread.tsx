@@ -14,6 +14,7 @@ import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import { attachmentSequence } from '../stepping';
 import { AnnotationsChip } from './AnnotationsChip';
 import { agentName, clockTime, dayWords, fullTime, plural, whenTime } from '../format';
+import { titleIfClipped } from '../clipTitle';
 import { answerWords, foldSnippet, holdingsOf, isDelivered, isPersonReply, lastNonNote, lookBoundary, newSinceLook, planFolds, snippetText, type FoldSnippet, type Holding } from '../folding';
 import { AuthorMark, DecisionDiamond, Icon } from '../icons';
 import { PILL_BAND_PX, atEnd, followBy, lookThrough, measureFirstLines, unseenArrivals, useSeenOnSight } from '../seenOnSight';
@@ -815,7 +816,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     },
     [onSeen, thread.thread_id],
   );
-  useSeenOnSight({ bodyRef, candidates, covered: covered || fileCovers, pill: chrome.pill > 0, onSeen: sawOne });
+  // On a phone the pill sits in the foot and covers none of the thread.
+  useSeenOnSight({ bodyRef, candidates, covered: covered || fileCovers, pill: chrome.pill > 0 && !phone, onSeen: sawOne });
 
   // Arrivals while the thread is open: announced to a screen reader, drawn
   // with a short entrance, and, when the person is at the end of the thread,
@@ -1398,6 +1400,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     <>
     <section
       ref={sectionRef}
+      onPointerOver={titleIfClipped}
       className={`ib-pane${fileOpen ? ' ib-withfile' : ''}`}
       aria-label={thread.subject ?? 'Thread'}
       data-thread-id={thread.thread_id}
@@ -1583,7 +1586,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                       <Icon name="reply" />
                     </span>
                   )}
-                  <span className="ib-fl-nm" title={name}>{name}</span>
+                  <span className="ib-fl-nm" data-clip="">{name}</span>
                   <span className="ib-fl-sn" dir="auto" data-snippet={snippet.kind} title={snippetText(snippet)}>
                     <SnippetText snippet={snippet} />
                   </span>
@@ -1659,7 +1662,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
               )}
               {/* Spans, not divs: in a multi-message thread this sits inside the fold button. */}
               <span className="ib-whobox">
-                <span className="ib-who" aria-hidden={cover || undefined} title={`${name} in ${thread.project.name}`}>
+                <span className="ib-who" aria-hidden={cover || undefined} data-clip="">
                   <bdi>{name}</bdi> <span>in <bdi>{thread.project.name}</bdi></span>
                 </span>
                 {count ? (
@@ -1821,8 +1824,6 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         </div>
       </div>
       <div className="ib-pfoot">
-        {/* A phone has no room to float the pill over the messages (it sat on a sender's row): it is the foot's first row there. */}
-        {showNew && phone && newPill}
         {/* One status region, always mounted, so a screen reader announces the note when it appears. */}
         <div role="status" id={noteId} data-asker-note="">
           {showAskerNote && asking && <AskerEndedNote asking={asking} project={thread.project.name} anyLive={anyOtherLive} />}
@@ -1969,6 +1970,10 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                 </span>
               </>
             )}
+            {/* A phone has no room to float the pill over the messages (it sat on a sender's row): it sits in this
+                row's empty middle, laid over it, so the foot and the thread's view keep their size and Reply stays put.
+                With Send waiting the row has no empty middle, and no pill. */}
+            {showNew && phone && !waiting && newPill}
           </div>
           </>
         )}

@@ -1,6 +1,7 @@
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { agentName, formatCount, questionCount, shortTime } from '../format';
+import { titleIfClipped } from '../clipTitle';
 import { AuthorMark, Icon } from '../icons';
 import { ListColumnEdge } from '../shell/ListColumnEdge';
 import { SidebarTrigger, useSidebar } from '../shell/sidebar';
@@ -64,13 +65,13 @@ function SubjectLine({ row }: { row: InboxListRow }) {
     <>
       {row.thread_name && (
         <span className="ib-key">
-          <span className="ib-keyt" dir="auto" title={row.thread_name}>
+          <span className="ib-keyt" dir="auto" data-clip="">
             {row.thread_name}
           </span>
         </span>
       )}
       <span className="ib-s">
-        <span className="ib-st" dir="auto" title={subjectOf(row)}>
+        <span className="ib-st" dir="auto" data-clip="">
           {subjectOf(row)}
         </span>
       </span>
@@ -112,7 +113,7 @@ function WideRow({ row, selected, filtered, onOpen }: { row: InboxListRow; selec
       data-thread-id={row.thread_id}
       data-section={row.section}
     >
-      {!filtered && <span className="ib-p" dir="auto" title={row.project.name}>{row.project.name}</span>}
+      {!filtered && <span className="ib-p" dir="auto" data-clip="">{row.project.name}</span>}
       {!filtered && <span>{badgeEl}</span>}
       <span className="ib-subj">
         {filtered && badgeEl}
@@ -169,7 +170,7 @@ function NarrowRow({ row, selected, filtered, onOpen }: { row: InboxListRow; sel
       data-section={row.section}
     >
       <div className="ib-l1">
-        <span className="ib-p" dir="auto" title={filtered ? agentName(row.author) : row.project.name}>{filtered ? agentName(row.author) : row.project.name}</span>
+        <span className="ib-p" dir="auto" data-clip="">{filtered ? agentName(row.author) : row.project.name}</span>
         {count && <span className={`ib-c${row.section === 'quiet' ? ' ib-qlabel' : ''}`}>{count}</span>}
         <span className={`ib-t${count ? '' : ' ib-alone'}`}>{shortTime(row.last_at)}</span>
       </div>
@@ -203,7 +204,7 @@ function PhoneRow({ row, filtered, onOpen }: { row: InboxListRow; filtered: bool
     >
       <span className="ib-m1">
         <AuthorMark author={row.author} />
-        <span className="ib-p" dir="auto" title={filtered ? agentName(row.author) : row.project.name}>{filtered ? agentName(row.author) : row.project.name}</span>
+        <span className="ib-p" dir="auto" data-clip="">{filtered ? agentName(row.author) : row.project.name}</span>
         <span className="ib-t">{shortTime(row.last_at)}</span>
       </span>
       <span className="ib-m2" dir="auto">{subjectOf(row)}</span>
@@ -254,17 +255,18 @@ export function InboxList(props: InboxListProps) {
   return (
     <section
       ref={listRef}
+      onPointerOver={titleIfClipped}
       id={columnId}
       className={`ib-listcol${props.narrow ? ' ib-narrow' : ''}${resizable ? ' ib-resizable' : ''}${props.filtered ? ' ib-noproj' : ''}`}
       aria-label={props.title}
     >
       <div className="ib-lhead">
         <SidebarTrigger />
-        <h1 dir="auto" title={props.title}>
+        <h1 dir="auto" data-clip="">
           {props.title}
         </h1>
         {props.path && (
-          <span className="ib-path" title={props.path}>
+          <span className="ib-path" data-clip="">
             {props.path}
           </span>
         )}

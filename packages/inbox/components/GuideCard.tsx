@@ -20,7 +20,7 @@ export function GuideCard({ guide, onOpen }: { guide: InboxGuideRef; onOpen: () 
             <Icon name="book" size={18} />
           </span>
           <span className="ib-att-text">
-            <span className="ib-nm" title={`Guided review: ${guide.title}`}>
+            <span className="ib-nm" data-clip="">
               Guided review: <bdi>{guide.title}</bdi>
             </span>
             <span className="ib-kd">

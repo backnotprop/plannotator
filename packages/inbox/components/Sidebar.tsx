@@ -38,11 +38,6 @@ export interface SidebarProps {
 }
 
 /**
- * The Inbox's navigation: the Tater mark, the sections, the projects and
- * Settings. Drawn inside Workspaces' sidebar primitive (`../shell`): docked,
- * in the hover peek, and as the sheet on a phone width, which a pick closes.
- */
-/**
  * Whether a scroll area has more below what it shows: the project list fades
  * at its foot while it does, so a list cut mid-name says it scrolls.
  */
@@ -65,6 +60,11 @@ function useMoreBelow<T extends HTMLElement>(deps: unknown) {
   return [ref, more] as const;
 }
 
+/**
+ * The Inbox's navigation: the Tater mark, the sections, the projects and
+ * Settings. Drawn inside Workspaces' sidebar primitive (`../shell`): docked,
+ * in the hover peek, and as the sheet on a phone width, which a pick closes.
+ */
 export function Sidebar(props: SidebarProps) {
   const firstRun = props.projects.length === 0;
   const { setOpenMobile } = useSidebar();

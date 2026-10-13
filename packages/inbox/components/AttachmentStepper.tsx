@@ -251,7 +251,7 @@ export function AttachmentStepper(props: AttachmentStepperProps) {
             ·
           </span>
           <span className="ib-stepnm" data-step-name="">
-            <FileName name={current.attachment.name} title={false} />
+            <FileName name={current.attachment.name} />
           </span>
           <Icon name="chevD" size={13} />
         </button>

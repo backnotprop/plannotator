@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { sliceText } from '@plannotator/core/inbox-questions';
 
 /**
@@ -11,14 +12,16 @@ import { sliceText } from '@plannotator/core/inbox-questions';
  * reads right to left and is cut at its own end.
  *
  * `wrap` draws the whole name, broken where it must, for places with room
- * (the download card).
+ * (the download card). A cut name gets its whole name as hover text
+ * (`data-clip`, clipTitle.ts) only while it is cut.
  */
-export function FileName({ name, className, wrap = false, title = true }: { name: string; className?: string; wrap?: boolean; title?: boolean }) {
+export function FileName({ name, className, wrap = false }: { name: string; className?: string; wrap?: boolean }) {
+  useEffect(keepNamesWholeOnCopy, []);
   const [head, tail] = splitFileName(name);
   const cls = `ib-fname${wrap ? ' ib-fname-wrap' : ''}${className ? ` ${className}` : ''}`;
   if (wrap || !tail) {
     return (
-      <span className={cls} dir="auto" title={title ? name : undefined}>
+      <span className={cls} dir="auto" data-clip={wrap ? undefined : ''}>
         <span className="ib-fname-h">{name}</span>
       </span>
     );
@@ -28,7 +31,7 @@ export function FileName({ name, className, wrap = false, title = true }: { name
   // name from `data-name` (inbox.css draws it as a visually hidden ::after).
   // The text content stays the name.
   return (
-    <span className={cls} dir="auto" title={title ? name : undefined} data-name={name}>
+    <span className={cls} dir="auto" data-clip="" data-name={name}>
       <span className="ib-fname-h" aria-hidden="true">
         {head}
       </span>
@@ -37,6 +40,39 @@ export function FileName({ name, className, wrap = false, title = true }: { name
       </span>
     </span>
   );
+}
+
+let copyListeners = 0;
+
+/**
+ * The two parts of a cut name are flex items, so a selection's text puts a
+ * line break between them: a copy that takes in a cut name gets the name
+ * whole instead. Installed once while any FileName is on the page.
+ */
+function keepNamesWholeOnCopy(): () => void {
+  if (copyListeners++ === 0) document.addEventListener('copy', onCopy);
+  return () => {
+    if (--copyListeners === 0) document.removeEventListener('copy', onCopy);
+  };
+}
+
+function onCopy(event: ClipboardEvent): void {
+  const selection = document.getSelection();
+  if (!selection || selection.isCollapsed || !event.clipboardData) return;
+  const text = selection.toString();
+  let whole = text;
+  for (const el of document.querySelectorAll<HTMLElement>('.ib-fname[data-name]')) {
+    if (!selection.containsNode(el, true)) continue;
+    const head = el.querySelector('.ib-fname-h')?.textContent ?? '';
+    const tail = el.querySelector('.ib-fname-t')?.textContent ?? '';
+    if (!head || !tail) continue;
+    // A selection across the cut holds the head's last character, the break, then the tail's first, however
+    // much of either part it took.
+    whole = whole.split(`${head.slice(-1)}\n${tail.slice(0, 1)}`).join(`${head.slice(-1)}${tail.slice(0, 1)}`);
+  }
+  if (whole === text) return;
+  event.clipboardData.setData('text/plain', whole);
+  event.preventDefault();
 }
 
 /** Names this short are never cut in the middle: there is nothing to keep apart. */

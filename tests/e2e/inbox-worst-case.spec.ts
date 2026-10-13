@@ -89,8 +89,8 @@ test.afterAll(async () => {
   }
 });
 
-async function open(browser: Browser, w: Width, hash = ''): Promise<{ context: BrowserContext; page: Page }> {
-  const context = await browser.newContext({ viewport: { width: w.width, height: w.height }, isMobile: !!w.touch, hasTouch: !!w.touch, deviceScaleFactor: 1, reducedMotion: 'reduce' });
+async function open(browser: Browser, w: Width, hash = '', colorScheme: 'light' | 'dark' = 'light'): Promise<{ context: BrowserContext; page: Page }> {
+  const context = await browser.newContext({ viewport: { width: w.width, height: w.height }, isMobile: !!w.touch, hasTouch: !!w.touch, deviceScaleFactor: 1, reducedMotion: 'reduce', colorScheme });
   const page = await context.newPage();
   await page.goto(`${world.url}/${hash ? `#${hash}` : ''}`);
   await page.waitForSelector('.pn-inbox');
@@ -138,13 +138,14 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: join(proofDir, `${name}.png`) });
 }
 
-for (const w of WIDTHS) {
-  test(`${w.name}: the list, a thread with files, a message table, Decisions and Settings hold their shapes`, async ({ browser }) => {
-    const { context, page } = await open(browser, w);
+// Every width in light, and the widest and a phone in dark too.
+for (const [w, scheme] of [...WIDTHS.map((w) => [w, 'light'] as const), [WIDTHS[0]!, 'dark'] as const, [WIDTHS[4]!, 'dark'] as const]) {
+  test(`${w.name}${scheme === 'dark' ? ' dark' : ''}: the list, a thread with files, a message table, Decisions and Settings hold their shapes`, async ({ browser }) => {
+    const { context, page } = await open(browser, w, '', scheme);
     try {
       // The list, and the real project names (rows 1 to 5).
       expect(await shapes(page)).toEqual([]);
-      await shot(page, `${w.name}-list`);
+      await shot(page, `${w.name}-${scheme}-list`);
       // The thread with files: tiles keep one height and the changed file keeps its count (rows 16 to 19).
       await page.goto(`${world.url}/#thread=${world.seed.threads.files}`);
       await page.waitForSelector('section.ib-pane .ib-atts.ib-tiles');
@@ -154,7 +155,7 @@ for (const w of WIDTHS) {
       const heights = new Set((await tiles.evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().height)))).filter((h) => h > 0));
       expect([...heights], 'tiles in one grid have one height').toHaveLength(1);
       await expect(page.locator(`section.ib-pane .ib-atts.ib-tiles [data-attachment-name="${world.seed.files.changed}"]`).last()).toContainText('2 annotations');
-      await shot(page, `${w.name}-files`);
+      await shot(page, `${w.name}-${scheme}-files`);
       // A message with a table and a tall screenshot (rows 8, 33).
       await page.goto(`${world.url}/#thread=${world.seed.threads.kitchen}`);
       await page.waitForSelector('section.ib-pane .ib-body table');
@@ -165,7 +166,7 @@ for (const w of WIDTHS) {
       const img = page.locator('section.ib-pane .ib-body img[data-ib-tall]');
       await expect(img).toHaveCount(1);
       expect((await img.boundingBox())!.height).toBeLessThanOrEqual(481);
-      await shot(page, `${w.name}-kitchen`);
+      await shot(page, `${w.name}-${scheme}-kitchen`);
       // Decisions: the text column keeps a readable width (row 62) and a long decision three lines (row 63).
       await page.goto(`${world.url}/#decisions=${world.ids.billing}`);
       await page.waitForSelector('[data-decision-id]');
@@ -175,7 +176,7 @@ for (const w of WIDTHS) {
       expect((await text.boundingBox())!.width, 'a decision has room to read').toBeGreaterThan(Math.min(260, w.width - 140));
       expect(LONG_DECISION.length).toBe(2000);
       expect((await text.boundingBox())!.height, 'a long decision shows three lines').toBeLessThan(80);
-      await shot(page, `${w.name}-decisions`);
+      await shot(page, `${w.name}-${scheme}-decisions`);
       // Settings: Storage keeps its sizes and Delete in view (rows 64, 65); Archived keeps Unarchive on its row (row 67).
       await page.goto(`${world.url}/#settings/storage`);
       await page.waitForSelector('[data-store-project]');
@@ -184,7 +185,7 @@ for (const w of WIDTHS) {
       expect(await shapes(page)).toEqual([]);
       const table = await page.locator('.ib-stbl').evaluate((el) => ({ table: el.getBoundingClientRect().right, card: (el.closest('.ib-card') ?? el.parentElement)!.getBoundingClientRect().right }));
       expect(table.table).toBeLessThanOrEqual(table.card + 1);
-      await shot(page, `${w.name}-storage`);
+      await shot(page, `${w.name}-${scheme}-storage`);
       await page.goto(`${world.url}/#settings/archived`);
       await page.waitForSelector('[data-archived-thread]');
       await page.waitForTimeout(300);
@@ -195,7 +196,7 @@ for (const w of WIDTHS) {
         return { rowTop: r.top, rowBottom: r.bottom, button: b.top };
       });
       expect(row.button, 'Unarchive sits beside the subject, not under it').toBeLessThan(row.rowTop + 40);
-      await shot(page, `${w.name}-archived`);
+      await shot(page, `${w.name}-${scheme}-archived`);
     } finally {
       await context.close();
     }
@@ -215,13 +216,16 @@ test('the names: real folder names, a parent folder for two "api", days and year
     await expect(page.locator(`[data-thread-id="${world.seed.threads.lastYear}"] .ib-t`)).toHaveText(new RegExp(`, ${new Date().getFullYear() - 1}$`));
     // No subject is cut inside a character (row 26).
     for (const subject of await page.locator('.ib-lbody .ib-st').allTextContents()) expect(subject).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
-    // Everything the list cuts with "…" has its full text on hover (row 23).
-    const untitled = await page.evaluate(() =>
-      [...document.querySelectorAll<HTMLElement>('.ib-lbody .ib-st, .ib-lbody .ib-keyt, .ib-lbody .ib-p')]
-        .filter((el) => el.scrollWidth > el.clientWidth + 1 && !el.title)
-        .map((el) => el.textContent),
+    // Hovered, what the list cuts with "…" has its full text as its title, and what it does not cut has none (row 23).
+    const titles = await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('.ib-lbody .ib-st, .ib-lbody .ib-keyt, .ib-lbody .ib-p')].map((el) => {
+        el.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
+        return { cut: el.scrollWidth > el.clientWidth + 1, text: el.textContent, title: el.getAttribute('title') };
+      }),
     );
-    expect(untitled).toEqual([]);
+    expect(titles.filter((t) => t.cut).length, 'the seed cuts something in this list').toBeGreaterThan(0);
+    expect(titles.filter((t) => t.cut && t.title !== t.text)).toEqual([]);
+    expect(titles.filter((t) => !t.cut && t.title !== null)).toEqual([]);
     // A long project name and its folder stay in the 60 px header (row 25).
     await page.goto(`${world.url}/#project=${world.ids.long}&thread=${world.seed.threads.multiDay}`);
     await page.waitForSelector('section.ib-pane');
@@ -287,7 +291,74 @@ test('a long file name never widens the window: the stepping guard, the header (
     await page.waitForSelector('[data-step-guard]', { timeout: 10_000 });
     expect(await shapes(page)).toEqual([]);
     await expect(page.locator('[data-guard-discard]')).toHaveText(`Discard and go to ${world.seed.files.long}`);
+    // One space between the words and the name, not the words' space and the button's gap (about 4 px, not 11).
+    const space = await page.locator('[data-guard-discard] .ib-gto').evaluate((el) => {
+      const words = document.createRange();
+      words.selectNodeContents(el.firstChild!);
+      return el.querySelector('.ib-fname')!.getBoundingClientRect().left - words.getBoundingClientRect().right;
+    });
+    expect(space).toBeLessThan(7);
     await shot(page, 'guard-1440');
+  } finally {
+    await context.close();
+  }
+});
+
+test('message HTML keeps its own alignment; an Arabic paragraph reads right to left and an English one left to right (row 14)', async ({ browser }) => {
+  const { context, page } = await open(browser, WIDTHS[0]!, `thread=${world.seed.threads.centered}`);
+  try {
+    await page.waitForSelector('section.ib-pane .ib-body p');
+    /** Where a paragraph's text sits in its box: the gap left and right of the text's own extent. */
+    const placement = (match: string) =>
+      page.locator('section.ib-pane .ib-body p', { hasText: match }).first().evaluate((p) => {
+        const range = document.createRange();
+        range.selectNodeContents(p);
+        const text = range.getBoundingClientRect();
+        const box = p.getBoundingClientRect();
+        const style = getComputedStyle(p);
+        return { left: text.left - box.left - parseFloat(style.paddingLeft), right: box.right - parseFloat(style.paddingRight) - text.right, align: style.textAlign };
+      });
+    // `<p align="center">` and a `<p>` inside `<div align="center">`: centred, as the message's HTML says.
+    for (const match of ['Centered by its own attribute.', 'Centered by its parent.']) {
+      const at = await placement(match);
+      expect(at.align, match).toMatch(/center/);
+      expect(Math.abs(at.left - at.right), match).toBeLessThan(4);
+      expect(at.left, match).toBeGreaterThan(100);
+    }
+    await shot(page, 'centered-1440');
+    await page.goto(`${world.url}/#thread=${world.seed.threads.arabic}`);
+    await page.waitForSelector('section.ib-pane .ib-body p');
+    await page.waitForTimeout(300);
+    const arabic = await placement('تمت مراجعة');
+    expect(arabic.right, 'the Arabic paragraph starts at the right').toBeLessThan(2);
+    expect(arabic.left).toBeGreaterThan(20);
+    const english = await placement('The duplicates are in');
+    expect(english.left, 'the English paragraph starts at the left').toBeLessThan(2);
+    expect(english.right).toBeGreaterThan(20);
+  } finally {
+    await context.close();
+  }
+});
+
+test('a file name cut in two copies whole, and reads whole to a screen reader (row 16)', async ({ browser }) => {
+  const { context, page } = await open(browser, WIDTHS[2]!, `thread=${world.seed.threads.files}`);
+  try {
+    const name = world.seed.files.b;
+    const tile = page.locator(`section.ib-pane .ib-atts.ib-tiles [data-attachment-name="${name}"]`).first();
+    await expect(tile).toBeVisible();
+    const copied = await tile.locator('.ib-fname').evaluate((el) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const selection = document.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      const data = new DataTransfer();
+      document.dispatchEvent(new ClipboardEvent('copy', { clipboardData: data, bubbles: true, cancelable: true }));
+      return { selected: selection.toString(), copied: data.getData('text/plain') };
+    });
+    expect(copied.selected, 'the two parts are apart in the selection').toContain('\n');
+    expect(copied.copied).toBe(name);
+    expect(await tile.locator('.ib-fname').textContent()).toBe(name);
   } finally {
     await context.close();
   }
