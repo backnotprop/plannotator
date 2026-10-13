@@ -142,9 +142,9 @@ test.afterAll(async () => {
 
 test('Settings says nothing is archived yet', async () => {
   const { page } = world;
-  await page.goto(new URL('#settings', world.url).href);
+  await page.goto(new URL('#settings/archived', world.url).href);
   const block = page.locator('[data-settings-archived]');
-  await expect(block.locator('[data-archived-empty]')).toHaveText('Nothing archived.');
+  await expect(block.locator('[data-archived-empty]')).toContainText('Nothing archived.');
   await block.scrollIntoViewIfNeeded();
   await shot('01-settings-empty');
 });
@@ -187,7 +187,7 @@ test('the archived open thread keeps its row until the person leaves; then no se
 
 test('Settings lists the archived threads newest first, grouped by project with counts', async () => {
   const { page, threads } = world;
-  await page.goto(new URL('#settings', world.url).href);
+  await page.goto(new URL('#settings/archived', world.url).href);
   const block = page.locator('[data-settings-archived]');
   await expect(block.locator('[data-archived-thread]')).toHaveCount(3);
   const order = await block.locator('[data-archived-thread]').evaluateAll((rows) => rows.map((r) => r.getAttribute('data-archived-thread')));
@@ -214,14 +214,14 @@ test('Unarchive opens the thread back in the main list', async () => {
   await openQuiet(page);
   await expect(page.locator(`.ib-lbody [data-row="${threads.deploy}"]`)).toBeVisible();
   await shot('06-unarchived-open', ['light']);
-  await page.goto(new URL('#settings', world.url).href);
+  await page.goto(new URL('#settings/archived', world.url).href);
   await expect(page.locator('[data-settings-archived] [data-archived-thread]')).toHaveCount(2);
   expect(world.errors).toEqual([]);
 });
 
 test("an agent's reply into an archived thread brings it back to the list and out of the Archived block", async () => {
   const { page, threads } = world;
-  await page.goto(new URL('#settings', world.url).href);
+  await page.goto(new URL('#settings/archived', world.url).href);
   const block = page.locator('[data-settings-archived]');
   await expect(block.locator(`[data-archived-thread="${threads.build}"]`)).toBeVisible();
   const claude = world.agents[0]!;
@@ -233,8 +233,8 @@ test("an agent's reply into an archived thread brings it back to the list and ou
   // The block reads again as the store moves: the thread leaves it.
   await expect(block.locator(`[data-archived-thread="${threads.build}"]`)).toHaveCount(0);
   await expect(block.locator('[data-archived-thread]')).toHaveCount(1);
-  // The sidebar's Inbox is an action: the list on screen catches up (held order).
-  await page.getByRole('complementary', { name: 'Inbox navigation' }).getByRole('button', { name: /^Inbox/ }).click();
+  // Leaving Settings is an action: the list on screen catches up (held order).
+  await page.locator('[data-settings-back]').click();
   const row = page.locator(`.ib-lbody [data-row="${threads.build}"]`);
   await expect(row).toBeVisible();
   await expect(page.locator(`[data-section-id="waiting"] [data-row="${threads.build}"]`)).toBeVisible();

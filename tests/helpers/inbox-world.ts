@@ -112,6 +112,8 @@ export function worldEnv(w: InboxWorld): Record<string, string> {
     PLANNOTATOR_INSTALL_SCRIPT_URL: process.env.PLANNOTATOR_INSTALL_SCRIPT_URL || "http://127.0.0.1:9/install.sh",
     // Phones are hidden until the iPhone app ships; only the phone proofs turn them on.
     PLANNOTATOR_INBOX_PHONES: w.phones ? "1" : "0",
+    // Never run a real agent's CLI: a world's PATH holds the person's own (packages/server/inbox-agents.ts).
+    PLANNOTATOR_INBOX_CONNECT: "0",
     TMPDIR: tmpdir(),
   };
 }

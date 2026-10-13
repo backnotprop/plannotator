@@ -14,8 +14,9 @@ import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import { attachmentSequence } from '../stepping';
 import { AnnotationsChip } from './AnnotationsChip';
 import { agentName, clockTime, dayWords, plural } from '../format';
-import { answerWords, foldSnippet, holdingsOf, isDelivered, lookBoundary, newSinceLook, planFolds, snippetText, type FoldSnippet, type Holding } from '../folding';
+import { answerWords, foldSnippet, holdingsOf, isDelivered, isPersonReply, lastNonNote, lookBoundary, newSinceLook, planFolds, snippetText, type FoldSnippet, type Holding } from '../folding';
 import { AuthorMark, DecisionDiamond, Icon } from '../icons';
+import { PILL_BAND_PX, atEnd, followBy, lookThrough, measureFirstLines, unseenArrivals, useSeenOnSight } from '../seenOnSight';
 import { DecisionCard } from './DecisionCard';
 import { GuideCard } from './GuideCard';
 import { inboxMessageImageBase } from '../images';
@@ -71,10 +72,19 @@ function spanWords(from: string, to: string): string {
 
 const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/** The first new message whose top is below the view (under the pill's band), or null. */
-function newBelow(body: HTMLElement): HTMLElement | null {
-  const bottom = body.getBoundingClientRect().bottom - 56;
-  return [...body.querySelectorAll<HTMLElement>('[data-message-article][data-new]')].find((a) => a.getBoundingClientRect().top > bottom) ?? null;
+/**
+ * What the "↓ N new" pill counts and goes to, in thread order, of the
+ * messages whose top is below the view (under the pill's band): the arrivals
+ * not yet seen on sight (`data-arrival`, design record
+ * "inbox-new-in-open-thread": the pill counts only unseen arrivals below);
+ * only when none waits there, the messages that were new when the thread
+ * opened (`data-new`). An arrival already seen (`data-sighted`) never counts.
+ */
+function newBelow(body: HTMLElement): HTMLElement[] {
+  const bottom = body.getBoundingClientRect().bottom - PILL_BAND_PX;
+  const below = (selector: string) => [...body.querySelectorAll<HTMLElement>(selector)].filter((a) => a.getBoundingClientRect().top > bottom);
+  const arrivals = below('[data-message-article][data-arrival]:not([data-sighted])');
+  return arrivals.length > 0 ? arrivals : below('[data-message-article][data-new]:not([data-arrival]):not([data-sighted])');
 }
 
 /** A folded line's snippet: the message's first words, or the person's answers. */
@@ -293,9 +303,10 @@ export function MessageBody({
 export interface ThreadPaneProps {
   thread: InboxThread;
   /**
-   * The thread's list row's `sent`: the person's reply is the last message,
-   * and when the agent read it (by the store's seq, so a reply the agent was
-   * not given still reads as unread), or null.
+   * The thread's list row's `sent`: the person's reply is the last message
+   * (the Inbox's own notes read past), and when the agent read it (by the
+   * store's seq, so a reply the agent was not given still reads as unread),
+   * or null.
    */
   sent: { at: string; checked_at: string | null } | null;
   /** The thread's questions changed through a pick (the response's questions for that message). */
@@ -321,6 +332,19 @@ export interface ThreadPaneProps {
    * the first thread it is given.
    */
   lookSeq?: number | null;
+  /**
+   * Seen on sight (design record "inbox-new-in-open-thread", approved
+   * 2026-10-12): the seq the window's looks this visit covered (the look
+   * recorded when the thread opened, raised as arrivals are seen). An agent
+   * message after it arrived while the thread was open; once its first lines
+   * have been on screen for a second (window in front, nothing over the
+   * thread) the pane calls `onSeen` with the seq the look may now cover.
+   * Null: the thread carries no seqs (an older Inbox). Absent `onSeen`: off.
+   */
+  seenThrough?: number | null;
+  onSeen?: (throughSeq: number) => void;
+  /** Something over the thread from outside the pane (a guided review, a dialog): nothing counts as seen. */
+  covered?: boolean;
   /** The thread's list row as it is now: Mark read's state and whether it is offered. Null until the list has it. */
   row?: InboxListRow | null;
   /** Mark read, or move it back (the pressed button). Absent: no Mark read button. */
@@ -380,7 +404,7 @@ function useThreadAttachments(threadId: string, revision: unknown) {
   return { model, load, patch };
 }
 
-export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile, onOpenGuide, lookSeq, row, onMarkRead, onArchive, replyRequest, onReplyOpened, backLabel = 'Inbox', phone = false, stacked = false, fileStacked = false, onBackToList }: ThreadPaneProps) {
+export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, row, onMarkRead, onArchive, replyRequest, onReplyOpened, backLabel = 'Inbox', phone = false, stacked = false, fileStacked = false, onBackToList }: ThreadPaneProps) {
   const root = thread.messages[0]!;
   const asker = agentName(root.author);
   // Archived (resolved). What an agent wrote after the archive line behaves as
@@ -458,7 +482,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   // A reply the person sends during this visit is a look at everything before
   // it (the list's rule), so what it answers stops being new at once.
   const boundary = useMemo(
-    () => (opened === null ? null : Math.max(opened, ...thread.messages.filter((m) => m.author.kind === 'person').map((m) => m.seq ?? 0))),
+    () => (opened === null ? null : Math.max(opened, ...thread.messages.filter(isPersonReply).map((m) => m.seq ?? 0))),
     [opened, thread.messages],
   );
   const fresh = useMemo(() => newSinceLook(thread.messages, boundary), [thread.messages, boundary]);
@@ -531,7 +555,9 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     anchorRef.current = { id, top: id ? (articleOf(id)?.getBoundingClientRect().top ?? 0) : 0, focus: null, folding: false };
     if (allOpen) {
       const last = thread.messages[thread.messages.length - 1]!;
-      setFoldState((current) => (current ? { ...current, folded: new Set(thread.messages.filter((m) => m !== last).map((m) => m.id)), revealed: new Set() } : current));
+      // The last real message stays open with it when notes trail it (it carries the reply's line).
+      const lastReal = lastNonNote(thread.messages);
+      setFoldState((current) => (current ? { ...current, folded: new Set(thread.messages.filter((m) => m !== last && m !== lastReal).map((m) => m.id)), revealed: new Set() } : current));
       setHeaderFiles({ threadId: thread.thread_id, open: new Set([...headerOpen].filter((id) => id === last.id)) });
       announce('Earlier messages folded');
     } else {
@@ -730,8 +756,10 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     revisions.current.clear();
   }, [thread.thread_id]);
 
-  // The subject in the header once it scrolls away, and the "↓ N new" pill while new messages are below the view.
-  const [chrome, setChrome] = useState({ subject: false, pill: false });
+  // The subject in the header once it scrolls away, and the "↓ N new" pill
+  // while new messages the person has not seen are below the view (its count:
+  // those messages, never everything new this visit).
+  const [chrome, setChrome] = useState({ subject: false, pill: 0 });
   const updateChrome = useCallback(() => {
     const body = bodyRef.current;
     if (!body) return;
@@ -739,14 +767,80 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     const subject = body.querySelector<HTMLElement>('.ib-subject');
     const next = {
       subject: subject !== null && subject.getBoundingClientRect().bottom < box.top + 4,
-      // Any new message below the view, not only the first.
-      pill: newBelow(body) !== null,
+      pill: newBelow(body).length,
     };
     setChrome((current) => (current.subject === next.subject && current.pill === next.pill ? current : next));
   }, []);
+
+  // ── Seen on sight (design record "inbox-new-in-open-thread", variant A) ──
+  // An agent message that arrives while the thread is open counts as seen once
+  // its first lines have been on screen for a second, the window in front and
+  // nothing over the thread; the window then records the look up to it.
+  /** Arrivals the person has seen this visit (kept for the visit: the pill leaves them out). */
+  const [sighted, setSighted] = useState<{ threadId: string; ids: ReadonlySet<string> }>(() => ({ threadId: thread.thread_id, ids: new Set() }));
+  const sightedIds: ReadonlySet<string> = sighted.threadId === thread.thread_id ? sighted.ids : NO_IDS;
+  const arrivals = useMemo(() => (onSeen ? unseenArrivals(thread.messages, seenThrough) : []), [onSeen, thread.messages, seenThrough]);
+  /** The arrivals still to be seen (and those seen whose look is not recorded yet): the pill counts these first. */
+  const arrivalIds = useMemo(() => new Set(arrivals.map((m) => m.id)), [arrivals]);
+  const candidates = arrivals.filter((m) => !sightedIds.has(m.id) && !fold.folded.has(m.id) && !hiddenNow.has(m.id)).map((m) => m.id);
+  /** A file over the thread: full screen, or where it cannot sit beside it (a phone, a stacked window). */
+  const fileCovers = file !== null && (full || phone || fileStacked);
+  const arrivalsRef = useRef(arrivals);
+  arrivalsRef.current = arrivals;
+  const sightedRef = useRef(sightedIds);
+  sightedRef.current = sightedIds;
+  const sawOne = useCallback(
+    (id: string) => {
+      if (sightedRef.current.has(id)) return;
+      const ids = new Set(sightedRef.current).add(id);
+      sightedRef.current = ids;
+      setSighted({ threadId: thread.thread_id, ids });
+      // The look goes as far as every arrival up to it was seen, never past one that was not.
+      const through = lookThrough(arrivalsRef.current, ids);
+      if (through !== null) onSeen?.(through);
+    },
+    [onSeen, thread.thread_id],
+  );
+  useSeenOnSight({ bodyRef, candidates, covered: covered || fileCovers, pill: chrome.pill > 0, onSeen: sawOne });
+
+  // Arrivals while the thread is open: announced to a screen reader, drawn
+  // with a short entrance, and, when the person is at the end of the thread,
+  // scrolled into view just far enough to show their first lines.
+  const known = useRef<{ threadId: string; ids: Set<string> } | null>(null);
+  const atEndRef = useRef(false);
+  const [arrived, setArrived] = useState<{ threadId: string; ids: ReadonlySet<string> }>(() => ({ threadId: thread.thread_id, ids: new Set() }));
+  const arrivedIds: ReadonlySet<string> = arrived.threadId === thread.thread_id ? arrived.ids : NO_IDS;
+  useLayoutEffect(() => {
+    const ids = thread.messages.map((m) => m.id);
+    const before = known.current;
+    known.current = { threadId: thread.thread_id, ids: new Set(ids) };
+    if (!before || before.threadId !== thread.thread_id) return;
+    const added = thread.messages.filter((m) => m.author.kind === 'agent' && !before.ids.has(m.id));
+    if (added.length === 0) return;
+    setArrived((current) => ({ threadId: thread.thread_id, ids: new Set([...(current.threadId === thread.thread_id ? current.ids : []), ...added.map((m) => m.id)]) }));
+    const first = added[0]!;
+    const asks = added.some((m) => (m.questions ?? []).some((q) => q.state === 'open'));
+    announce(
+      added.length === 1 ? `New message from ${agentName(first.author)}${asks ? ', with a question' : ''}` : `${added.length} new messages${asks ? ', with a question' : ''}`,
+    );
+    const body = bodyRef.current;
+    if (!body || !atEndRef.current) return;
+    const article = articleOf(first.id);
+    if (!article) return;
+    const by = followBy(measureFirstLines(article), body.getBoundingClientRect());
+    if (by > 0) body.scrollBy?.({ top: by, behavior: reducedMotion() ? 'auto' : 'smooth' });
+    // `announce` and `articleOf` are this render's; only a new thread payload matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [thread]);
+
   useEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
+    const trackEnd = () => {
+      atEndRef.current = atEnd(body);
+    };
+    trackEnd();
+    body.addEventListener('scroll', trackEnd, { passive: true });
     body.addEventListener('scroll', updateChrome, { passive: true });
     window.addEventListener('resize', updateChrome);
     // The thread's own box changes without a scroll or a window resize when
@@ -755,6 +849,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     const resized = typeof ResizeObserver === 'function' ? new ResizeObserver(() => updateChrome()) : null;
     resized?.observe(body);
     return () => {
+      body.removeEventListener('scroll', trackEnd);
       body.removeEventListener('scroll', updateChrome);
       window.removeEventListener('resize', updateChrome);
       resized?.disconnect();
@@ -797,18 +892,19 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       }
     }
     updateChrome();
-  }, [foldState, thread, file?.id, updateChrome]);
+  }, [foldState, thread, file?.id, updateChrome, sighted]);
 
   /**
-   * n goes to the first new message (at the divider); the pill to the first
-   * new message below the view, which is the first new one unless the person
-   * has read past it.
+   * n goes to the first new message (at the divider); the pill to what it
+   * counts (newBelow): the first arrival not yet seen below the view, else
+   * the first message new at the open below it, which is the first new one
+   * unless the person has read past it.
    */
   const jumpNew = useCallback((below = false) => {
     const body = bodyRef.current;
     const first = body?.querySelector<HTMLElement>('[data-message-article][data-new]');
     if (!body || !first) return;
-    const target = below ? (newBelow(body) ?? first) : first;
+    const target = below ? (newBelow(body)[0] ?? first) : first;
     const divider = target === first ? body.querySelector<HTMLElement>('[data-new-divider]') : null;
     (divider ?? target).scrollIntoView?.({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' });
     target.querySelector<HTMLElement>('[data-fold-head]')?.focus({ preventScroll: true });
@@ -983,7 +1079,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   const picksCount = picked.length;
   // Picks the agent's replacement dropped since the person's last reply: the
   // reply box shows them struck, never in "N picks".
-  const lastReplyAt = thread.messages.filter((m) => m.author.kind === 'person').at(-1)?.created_at ?? '';
+  const lastReplyAt = thread.messages.filter(isPersonReply).at(-1)?.created_at ?? '';
   const dropped = thread.messages.flatMap((m) =>
     (m.questions ?? []).filter((q) => {
       if (q.state !== 'superseded' || q.answer === null) return false;
@@ -1149,8 +1245,11 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   };
 
   // The last message is the person's: say where it is. A New message names
-  // the session's host it went to, and is delivered as a turn (step 8).
-  const last = thread.messages[thread.messages.length - 1]!;
+  // the session's host it went to, and is delivered as a turn (step 8). The
+  // Inbox's own notes (Mark read's set-aside note, a late Undo's reopened
+  // note) are read past: they are not the person's reply, and the line stays
+  // on the reply before them.
+  const last = lastNonNote(thread.messages) ?? thread.messages[0]!;
   const askedBy = (message: InboxMessageWire) => (message.reply_to ? thread.messages.find((m) => m.id === message.reply_to) : undefined);
   // A reply the person sent to another session names the session that took it
   // ("Claude Code (another session)" when it is the asker's own host).
@@ -1379,7 +1478,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
           <div className="ib-tmeta" data-thread-meta="">
             <span>{plural(thread.messages.length, 'message')}</span>
             <span className="ib-tdot" aria-hidden="true" />
-            <span>{spanWords(root.created_at, last.created_at)}</span>
+            <span>{spanWords(root.created_at, thread.messages[thread.messages.length - 1]!.created_at)}</span>
             {showNew && (
               <>
                 <span className="ib-tdot" aria-hidden="true" />
@@ -1437,6 +1536,9 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                 data-message-article={message.id}
                 data-folded=""
                 data-new={isNew ? '' : undefined}
+                data-sighted={sightedIds.has(message.id) ? '' : undefined}
+                data-arrival={arrivalIds.has(message.id) ? '' : undefined}
+                data-arrived={arrivedIds.has(message.id) ? '' : undefined}
                 tabIndex={-1}
               >
                 <button type="button" className={`ib-fline${isNew ? ' ib-fl-unread' : ''}`} data-fold-head="" aria-expanded={false} aria-label={label} onClick={() => toggleMessage(message.id)}>
@@ -1546,6 +1648,9 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
               data-message-article={message.id}
               data-open={one ? undefined : ''}
               data-new={isNew ? '' : undefined}
+              data-sighted={sightedIds.has(message.id) ? '' : undefined}
+              data-arrival={arrivalIds.has(message.id) ? '' : undefined}
+              data-arrived={arrivedIds.has(message.id) ? '' : undefined}
               tabIndex={-1}
             >
               <div className="ib-sender">
@@ -1679,9 +1784,17 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         {showNew && (
           // While new messages are below the view: a pill that goes to them.
           <div className="ib-npill-wrap">
-            <button type="button" className="ib-npill" data-new-pill="" data-off={chrome.pill ? undefined : ''} tabIndex={chrome.pill ? 0 : -1} aria-hidden={!chrome.pill} onClick={() => jumpNew(true)}>
+            <button
+              type="button"
+              className="ib-npill"
+              data-new-pill=""
+              data-off={chrome.pill > 0 ? undefined : ''}
+              tabIndex={chrome.pill > 0 ? 0 : -1}
+              aria-hidden={chrome.pill === 0}
+              onClick={() => jumpNew(true)}
+            >
               <Icon name="arrowDown" size={15} />
-              {fresh.size} new
+              {Math.max(1, chrome.pill)} new
             </button>
           </div>
         )}

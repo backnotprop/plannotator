@@ -128,7 +128,9 @@ describe("the device door, on the binary", () => {
   test("7.1: the window makes an offer, with the QR link, the six digits, the computer and its addresses", async () => {
     const before = Date.now();
     const made = await offer();
-    expect(Object.keys(made).sort()).toEqual(["addresses", "computer", "link", "offer"]);
+    expect(Object.keys(made).sort()).toEqual(["addresses", "computer", "link", "offer", "reachable"]);
+    // No way switched on: the window shows no code for it (Pair a phone's step 1 is the gate).
+    expect(made.reachable).toBe(false);
     expect(made.offer.code).toMatch(/^\d{6}$/);
     const ttl = Date.parse(made.offer.expires_at) - before;
     expect(ttl).toBeGreaterThan(9.9 * 60_000);
@@ -325,6 +327,14 @@ describe("the device door, on the binary", () => {
     const noKey = await door(`threads/${threadId}/seen`, { body: {} });
     expect(noKey.status).toBe(422);
     expect(await noKey.json()).toEqual({ error: "idempotency_key: required on a phone's command.", code: "validation_error", field: "idempotency_key" });
+    // through_seq (seen on sight) passes the door unchanged: a cap below every message covers nothing; a bad one is refused.
+    expect(row.unseen).toBeGreaterThan(0);
+    const capped = await door(`threads/${threadId}/seen`, { body: { idempotency_key: keys(), through_seq: 0 } });
+    expect(capped.status).toBe(200);
+    expect(((await capped.json()) as Json).thread).toMatchObject({ thread_id: threadId, unseen: row.unseen });
+    const badCap = await door(`threads/${threadId}/seen`, { body: { idempotency_key: keys(), through_seq: "all" } });
+    expect(badCap.status).toBe(422);
+    expect(((await badCap.json()) as Json)).toMatchObject({ code: "validation_error", field: "through_seq" });
     const seen = await door(`threads/${threadId}/seen`, { body: { idempotency_key: keys() } });
     expect(seen.status).toBe(200);
     expect(((await seen.json()) as Json).thread).toMatchObject({ thread_id: threadId, unseen: 0 });

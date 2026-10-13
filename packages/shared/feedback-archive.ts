@@ -317,7 +317,12 @@ function normalizeAnnotation(raw: unknown): FeedbackAnnotationRecord {
   if (type) record.type = type;
   const text = asString(a.text);
   if (text) record.text = text;
-  const originalText = asString(a.originalText) ?? asString(a.selectedText) ?? asString(a.tokenText);
+  // A code-review comment made in a Markdown preview quotes rendered text.
+  const markdownPreview = typeof a.markdownPreview === "object" && a.markdownPreview !== null
+    ? (a.markdownPreview as Record<string, unknown>)
+    : undefined;
+  const originalText = asString(a.originalText) ?? asString(a.selectedText) ?? asString(a.tokenText)
+    ?? asString(markdownPreview?.originalText);
   if (originalText) record.originalText = originalText;
   const file = asString(a.filePath) ?? asString(a.file);
   if (file) record.file = file;

@@ -32,6 +32,8 @@ import {
 import { handleInboxServerReady, startInboxServer } from "@plannotator/server/inbox";
 import { exposureWarning, type InboxTailscaleState } from "@plannotator/server/inbox-tailscale";
 import { openBrowser } from "@plannotator/server/browser";
+import { formatConnectReport, inboxConnectDisabled } from "@plannotator/server/inbox-agents";
+import type { InboxConnectReport } from "@plannotator/core/inbox-types";
 import { writeUrlQr } from "@plannotator/server/qr";
 import { getCliVersion } from "./cli";
 import { inboxHostSessionFromEnv, runInboxMcpShim } from "./inbox-mcp-shim";
@@ -39,6 +41,12 @@ import { inboxHostSessionFromEnv, runInboxMcpShim } from "./inbox-mcp-shim";
 export const INBOX_LOG_FILE = "inbox.log";
 /** Set by a starter that holds the start lock for the detached Inbox it spawns. */
 const LOCK_HELD_ENV = "PLANNOTATOR_INBOX_LOCK_HELD";
+/**
+ * Set on an Inbox started detached (`--background`, a connection or the shim
+ * starting a stopped one, the window's Restart): such a start never connects
+ * agents, which only a person's `plannotator inbox` does. Scrubbed at start.
+ */
+const DETACHED_ENV = "PLANNOTATOR_INBOX_DETACHED";
 /** How long a starter waits for a detached Inbox to answer its health check. */
 const START_TIMEOUT_MS = 20_000;
 
@@ -67,7 +75,7 @@ function spawnDetachedInbox(dataDir: string, tailscale: boolean): void {
     cwd: dir,
     windowsHide: true,
     stdio: ["ignore", log, log],
-    env: { ...process.env, PLANNOTATOR_DATA_DIR: dataDir, [LOCK_HELD_ENV]: "1" },
+    env: { ...process.env, PLANNOTATOR_DATA_DIR: dataDir, [LOCK_HELD_ENV]: "1", [DETACHED_ENV]: "1" },
   });
   child.unref();
   closeSync(log);
@@ -177,8 +185,36 @@ async function publishRunningInbox(entry: InboxRegistryEntry): Promise<void> {
   }
 }
 
+/** What connecting the agents did, on stderr (stdout is unchanged). Nothing when nothing changed. */
+function reportConnect(report: InboxConnectReport | undefined): void {
+  if (!report) return;
+  for (const line of formatConnectReport(report)) process.stderr.write(`${line}\n`);
+}
+
+/**
+ * `plannotator inbox` with an Inbox already running (an agent may have
+ * started it with --background): ask it to connect the agents on this
+ * computer, through its token-guarded connection route. An Inbox that
+ * predates the route answers 404, and connects nothing.
+ */
+async function connectRunningInbox(entry: InboxRegistryEntry): Promise<void> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${entry.port}/api/inbox/control/connect`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${entry.token}`, "Content-Type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(40_000),
+    });
+    if (!response.ok) return;
+    const body = (await response.json()) as { connect?: InboxConnectReport };
+    reportConnect(body.connect);
+  } catch {
+    // The agents are connected at the next run.
+  }
+}
+
 /** Run the Inbox server in this process until a signal or the stop route ends it. */
-async function serveInbox(dataDir: string, open: boolean, htmlContent: string | undefined, tailscale: boolean): Promise<never> {
+async function serveInbox(dataDir: string, open: boolean, htmlContent: string | undefined, tailscale: boolean, connect: boolean): Promise<never> {
   // A detached Inbox runs under its starter's lock; anyone else takes it, so
   // two people (or a person and an agent) never start two writers on one store.
   const lockHeldByStarter = process.env[LOCK_HELD_ENV] === "1";
@@ -193,6 +229,7 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
     process.stderr.write(`Plannotator Inbox: ${running.url}\n`);
     if (tailscale) await publishRunningInbox(running);
     if (open) await openBrowser(running.url);
+    if (connect) await connectRunningInbox(running);
     process.exit(0);
   }
   let inbox: Awaited<ReturnType<typeof startInboxServer>>;
@@ -203,6 +240,7 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
       process.stderr.write(`Plannotator Inbox: ${entry.url}\n`);
       if (tailscale) await publishRunningInbox(entry);
       if (open) await openBrowser(entry.url);
+      if (connect) await connectRunningInbox(entry);
       process.exit(0);
     }
     inbox = await startInboxServer({
@@ -237,6 +275,9 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
   process.once("SIGINT", () => shutdown(130));
   process.once("SIGTERM", () => shutdown(143));
   await handleInboxServerReady(inbox, { open });
+  // Off the request path: the window is already open, and the card shows what
+  // this did once it is done (GET /api/inbox/agents).
+  if (connect) void inbox.connectAgents().then(reportConnect, () => {});
   const tailnet = inbox.tailscale.state();
   if (tailnet.on || tailscale) {
     // This process's stderr already carries the server's own exposure warning.
@@ -258,6 +299,11 @@ export interface InboxCommandAssets {
 
 export async function runInboxCommand(args: readonly string[], assets: InboxCommandAssets = {}): Promise<never> {
   const dataDir = getPlannotatorDataDir();
+  // Only a person's `plannotator inbox` connects agents, never a detached start.
+  const detached = process.env[DETACHED_ENV] === "1";
+  delete process.env[DETACHED_ENV];
+  // PLANNOTATOR_INBOX_CONNECT=0 in this shell skips it, also on an Inbox an agent started.
+  const connect = !detached && !inboxConnectDisabled(process.env);
 
   if (args[0] === "mcp") {
     if (args.length > 1) usageError(`Unknown inbox mcp option: ${args[1]}`);
@@ -307,7 +353,8 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     process.stderr.write(`Plannotator Inbox: ${entry.url}\n`);
     if (tailscale) await publishRunningInbox(entry);
     if (!noOpen) await openBrowser(entry.url);
+    if (connect) await connectRunningInbox(entry);
     process.exit(0);
   }
-  return serveInbox(dataDir, !noOpen, assets.htmlContent, tailscale);
+  return serveInbox(dataDir, !noOpen, assets.htmlContent, tailscale, connect);
 }

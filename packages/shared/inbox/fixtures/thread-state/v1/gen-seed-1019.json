@@ -9,48 +9,7 @@
     "start": "2026-10-12T10:00:00.000Z",
     "step_ms": 1000
   },
-  "known_violations": [
-    {
-      "step": 11,
-      "kind": "A",
-      "test": "KNOWN VIOLATION A",
-      "rule": "The Inbox's own notes (set-aside, reopened) are neither the person's reply nor a look.",
-      "spec": "t1 in holding, unseen 2",
-      "today": "t1 in holding, unseen 0"
-    },
-    {
-      "step": 12,
-      "kind": "A",
-      "test": "KNOWN VIOLATION A",
-      "rule": "The Inbox's own notes (set-aside, reopened) are neither the person's reply nor a look.",
-      "spec": "t1 in holding, unseen 2",
-      "today": "t1 in holding, unseen 0"
-    },
-    {
-      "step": 13,
-      "kind": "A",
-      "test": "KNOWN VIOLATION A",
-      "rule": "The Inbox's own notes (set-aside, reopened) are neither the person's reply nor a look.",
-      "spec": "t1 in stopped, unseen 3",
-      "today": "t1 in stopped, unseen 1"
-    },
-    {
-      "step": 14,
-      "kind": "A",
-      "test": "KNOWN VIOLATION A",
-      "rule": "The Inbox's own notes (set-aside, reopened) are neither the person's reply nor a look.",
-      "spec": "t1 in stopped, unseen 3",
-      "today": "t1 in stopped, unseen 1"
-    },
-    {
-      "step": 15,
-      "kind": "A",
-      "test": "KNOWN VIOLATION A",
-      "rule": "The Inbox's own notes (set-aside, reopened) are neither the person's reply nor a look.",
-      "spec": "t1 in stopped, unseen 3",
-      "today": "t1 in stopped, unseen 1"
-    }
-  ],
+  "known_violations": [],
   "steps": [
     {
       "event": {
@@ -776,7 +735,7 @@
           "t1": {
             "section": "holding",
             "unread": true,
-            "unseen": 0,
+            "unseen": 2,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
@@ -860,7 +819,7 @@
           "t1": {
             "section": "holding",
             "unread": true,
-            "unseen": 0,
+            "unseen": 2,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
@@ -957,7 +916,7 @@
           "t1": {
             "section": "stopped",
             "unread": true,
-            "unseen": 1,
+            "unseen": 3,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
@@ -1047,7 +1006,7 @@
           "t1": {
             "section": "stopped",
             "unread": true,
-            "unseen": 1,
+            "unseen": 3,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
@@ -1137,7 +1096,7 @@
           "t1": {
             "section": "stopped",
             "unread": true,
-            "unseen": 1,
+            "unseen": 3,
             "read": false,
             "archived": false,
             "agent_after_archive": false,

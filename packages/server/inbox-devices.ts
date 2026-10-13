@@ -49,6 +49,15 @@ import { readInboxRegistry, updateOwnInboxRegistry, type InboxRegistryEntry } fr
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { runTailscale, serveStatusProxy, TAILSCALE_SERVE_TIMEOUT_MS, type TailscaleRunner } from "@plannotator/shared/tailscale";
 import { createInboxLan, LanUnavailableError } from "./inbox-lan";
+import {
+  PAIRING_CHECKS_DEADLINE_MS,
+  readPairingChecks,
+  runTailscaleQuietly,
+  type PairingChecks,
+  type PairingProbes,
+  type PairingTailscaleRunner,
+} from "./inbox-pairing-checks";
+import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { enableTailscaleServe, removeTailscaleServe, TailscaleServeError } from "./tailscale-serve";
 
 /** The pairing offer's lifetime (limit, contract section 1): long enough to fetch a phone. */
@@ -114,11 +123,44 @@ const ALLOWLIST: readonly { method: "GET" | "POST"; route: RegExp; window: (m: R
   { method: "POST", route: /^threads\/([^/]+)\/message$/, window: (m) => `/api/inbox/threads/${m[1]}/message` },
 ];
 
+/** Where a pairing attempt reached the door: the Wi-Fi's listener, the tailnet's, or this computer's own port (the simulator). */
+export type PairingVia = "wifi" | "tailnet" | "local";
+
+/**
+ * What reached the door while an offer showed (design of record
+ * `.product/approved/inbox-settings-tabs/`, section 4.1): the window says it
+ * live, and when the code expires with nothing seen it shows the
+ * troubleshooting list instead.
+ */
+export interface PairingAttempt {
+  via: PairingVia;
+  /**
+   * `wrong_code`: six digits that did not match. `code_over_wifi`: digits
+   * typed over the Wi-Fi, which pairs by the QR only. `old_code`: the secret
+   * of an earlier code. `expired`: a phone came after the code closed.
+   * `redeemed`: the phone paired.
+   */
+  result: "wrong_code" | "code_over_wifi" | "old_code" | "expired" | "redeemed";
+  at: string;
+  /** `wrong_code`: tries left on this code. */
+  tries_left?: number;
+  /** `redeemed`: the phone's name. */
+  device?: string;
+}
+
+/** How long one read of Pair a phone's checks answers again: the flow asks on open, on Check again and after each switch. */
+export const PAIRING_CHECKS_FRESH_MS = 3_000;
+
+/** The most attempts one offer keeps (a phone retrying in a loop must not grow it without end). */
+const PAIRING_ATTEMPTS_KEPT = 20;
+
 interface Offer {
   secret: string;
   code: string;
   expiresAt: number;
   wrong: number;
+  redeemed: boolean;
+  attempts: PairingAttempt[];
 }
 
 interface CommandLine {
@@ -152,6 +194,12 @@ export interface InboxDevicesContext {
   dispatch: (req: Request) => Promise<Response>;
   now?: () => Date;
   tailscale?: TailscaleRunner;
+  /** Tests: how step 1's checks run `tailscale` (may be asynchronous). Default: `tailscale` when given, else the CLI as a child process. */
+  checksTailscale?: PairingTailscaleRunner;
+  /** Tests: the checks' deadline. Default `PAIRING_CHECKS_DEADLINE_MS`. */
+  checksDeadlineMs?: number;
+  /** Step 1 of Pair a phone: how its checks are read (inbox-pairing-checks.ts). Default: this computer's own tools. */
+  probes?: Partial<PairingProbes>;
   /** The relay (packages/server/inbox-relay.ts): told of each pairing, whose answer carries the mailbox, and of each removal. */
   relay?: {
     paired: (device: InboxDevice) => Promise<{ url: string; mailbox_id: string } | null>;
@@ -221,6 +269,8 @@ export function createInboxDevices(context: InboxDevicesContext) {
   /** Each device's open event streams, closed when it is removed. */
   const streams = new Map<string, Set<AbortController>>();
   let offer: Offer | null = null;
+  /** The last offer made, kept after it closes so the window can say what reached the door while it showed. */
+  let lastOffer: Offer | null = null;
   let name: string | null = null;
   const tailnet: TailnetState = { on: false, address: null, error: null };
 
@@ -249,7 +299,8 @@ export function createInboxDevices(context: InboxDevicesContext) {
     const secret = randomBytes(32).toString("base64url");
     const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
     const expiresAt = now().getTime() + PAIRING_OFFER_MS;
-    offer = { secret, code, expiresAt, wrong: 0 };
+    offer = { secret, code, expiresAt, wrong: 0, redeemed: false, attempts: [] };
+    lastOffer = offer;
     const reach = addresses();
     const params = [`v=1`, `name=${encodeURIComponent(computer().name)}`];
     if (reach.tailnet) params.push(`tailnet=${encodeURIComponent(reach.tailnet)}`);
@@ -260,6 +311,34 @@ export function createInboxDevices(context: InboxDevicesContext) {
       link: `plannotator://pair?${params.join("&")}`,
       computer: computer(),
       addresses: reach,
+      // A phone can use the code only through an address it carries; the window never shows a code without one.
+      reachable: reach.tailnet !== null || (reach.lan !== null && reach.fingerprint !== null),
+    };
+  };
+
+  const attempt = (target: Offer | null, entry: Omit<PairingAttempt, "at">) => {
+    if (!target) return;
+    target.attempts.push({ ...entry, at: now().toISOString() });
+    if (target.attempts.length > PAIRING_ATTEMPTS_KEPT) target.attempts.splice(0, target.attempts.length - PAIRING_ATTEMPTS_KEPT);
+  };
+
+  /** The last offer as the window reads it: never its secret or its code. */
+  const offerView = () => {
+    if (!lastOffer) return null;
+    const state = lastOffer.redeemed
+      ? "redeemed"
+      : lastOffer.wrong >= PAIRING_CODE_TRIES
+        ? "closed"
+        : lastOffer.expiresAt <= now().getTime()
+          ? "expired"
+          : offer === lastOffer
+            ? "open"
+            : "closed";
+    return {
+      expires_at: new Date(lastOffer.expiresAt).toISOString(),
+      state,
+      tries_left: Math.max(PAIRING_CODE_TRIES - lastOffer.wrong, 0),
+      attempts: lastOffer.attempts,
     };
   };
 
@@ -270,7 +349,8 @@ export function createInboxDevices(context: InboxDevicesContext) {
    * Wi-Fi can publish) would let a listener in the middle relay the person's
    * own six digits. So the LAN takes the QR secret only (contract section 3).
    */
-  const redeem = async (req: Request, secretOnly: boolean): Promise<Response> => {
+  const redeem = async (req: Request, via: PairingVia): Promise<Response> => {
+    const secretOnly = via === "wifi";
     const body = await context.readBody(req);
     const byName = checkInboxThreadName(body.name);
     if (!byName.ok) throw new InboxError("validation_error", `name: ${byName.message}`, { field: "name" });
@@ -279,20 +359,30 @@ export function createInboxDevices(context: InboxDevicesContext) {
     const secret = typeof body.secret === "string" && body.secret ? body.secret : null;
     const code = typeof body.code === "string" && body.code ? body.code : null;
     if (secretOnly && !secret && code) {
+      attempt(openOffer() ?? lastOffer, { via, result: "code_over_wifi" });
       return refuse(400, "code_not_accepted_here", "Over the Wi-Fi, pair by scanning the QR code on your computer's screen.");
     }
     if (!secret && !code) throw new InboxError("validation_error", "secret or code: one is required.", { field: "secret" });
     const open = openOffer();
     const expired = () => refuse(410, "offer_expired", "This pairing code is no longer open. Make a new one on your computer.");
-    if (!open) return expired();
+    if (!open) {
+      attempt(lastOffer, { via, result: "expired" });
+      return expired();
+    }
     if (secret ? !sameSecret(secret, open.secret) : code !== open.code) {
-      if (secret) return expired();
+      if (secret) {
+        attempt(open, { via, result: "old_code" });
+        return expired();
+      }
       open.wrong += 1;
       const triesLeft = Math.max(PAIRING_CODE_TRIES - open.wrong, 0);
+      attempt(open, { via, result: "wrong_code", tries_left: triesLeft });
       if (triesLeft === 0) offer = null;
       return refuse(401, "pairing_code_wrong", "That code is not the one on your computer.", { tries_left: triesLeft });
     }
     offer = null;
+    open.redeemed = true;
+    attempt(open, { via, result: "redeemed", device: byName.name });
     const token = `tok_${randomBytes(32).toString("base64url")}`;
     const device = devices.add({ id: inboxId("dev"), name: byName.name, platform: platform.name, token, secret: open.secret, at: now().toISOString() });
     // The relay (section 4): the mailbox, made at the first pairing, and this phone registered there; null when it cannot be reached.
@@ -388,11 +478,12 @@ export function createInboxDevices(context: InboxDevicesContext) {
     return refuse(404, "device_route_not_found", "Not a phone route.");
   };
 
-  const door = async (req: Request, url: URL, secretOnly = false): Promise<Response> => {
+  /** `via`: the listener the request reached (the window's own port when the caller says nothing). */
+  const door = async (req: Request, url: URL, via: PairingVia = "local"): Promise<Response> => {
     try {
       if (req.headers.get("origin") !== null) return refuse(403, "origin_not_allowed", "Browser requests are not accepted here.");
       const route = url.pathname.startsWith(DOOR_PREFIX) ? url.pathname.slice(DOOR_PREFIX.length) : "";
-      if (route === "pair" && req.method === "POST") return await redeem(req, secretOnly);
+      if (route === "pair" && req.method === "POST") return await redeem(req, via);
       const token = bearer(req);
       if (!token) return refuse(401, "device_token_missing", "This request needs the phone's token.");
       const device = devices.byToken(token);
@@ -449,9 +540,9 @@ export function createInboxDevices(context: InboxDevicesContext) {
 
   let doorServer: ReturnType<typeof Bun.serve> | null = null;
 
-  /** A listener that serves the door and nothing else: the tailnet's, and (`secretOnly`, QR pairing only) the Wi-Fi's. */
+  /** A listener that serves the door and nothing else: the tailnet's, and (QR pairing only) the Wi-Fi's. */
   const doorOnly =
-    (secretOnly: boolean) =>
+    (via: PairingVia) =>
     (req: Request): Promise<Response> | Response => {
       let url: URL;
       try {
@@ -460,7 +551,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
         return refuse(404, "device_route_not_found", "Not a phone route.");
       }
       if (url.pathname !== "/api/inbox/device" && !url.pathname.startsWith(DOOR_PREFIX)) return refuse(404, "device_route_not_found", "Not a phone route.");
-      return door(req, url, secretOnly);
+      return door(req, url, via);
     };
 
   // ── The Wi-Fi (contract section 3): the same door-only handler, over TLS on every interface. ──
@@ -482,13 +573,13 @@ export function createInboxDevices(context: InboxDevicesContext) {
     },
     save: saveLan,
     name: () => computer().name,
-    fetch: doorOnly(true),
+    fetch: doorOnly("wifi"),
   });
 
   /** The door listener, on the port it had last time when it is free. */
   const openDoorListener = (): number => {
     if (doorServer) return doorServer.port as number;
-    const serve = (port: number) => Bun.serve({ hostname: "127.0.0.1", port, idleTimeout: 0, fetch: doorOnly(false) } as Parameters<typeof Bun.serve>[0]);
+    const serve = (port: number) => Bun.serve({ hostname: "127.0.0.1", port, idleTimeout: 0, fetch: doorOnly("tailnet") } as Parameters<typeof Bun.serve>[0]);
     const last = context.registry().tailnet?.door_port;
     try {
       doorServer = last ? serve(last) : serve(0);
@@ -625,12 +716,68 @@ export function createInboxDevices(context: InboxDevicesContext) {
   const staleTab = (body: Record<string, unknown>) =>
     checkServerSession(body, context.serverSession) === "mismatch" ? json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409) : null;
 
+  /**
+   * A read another site started (a page elsewhere loading this URL): the
+   * pairing reads say what reached this computer and run its tools, so only
+   * the window's own page asks for them.
+   */
+  const crossSiteRead = (req: Request): boolean => {
+    const site = req.headers.get("sec-fetch-site")?.trim().toLowerCase();
+    if (site === "cross-site" || site === "same-site") return true;
+    return !isSameOriginOrNoOrigin(req.headers.get("origin"), req.headers.get("host") ?? "", site);
+  };
+  const crossOrigin = () => refuse(403, "cross_origin", "Cross-origin requests are not accepted.");
+
+  /**
+   * Step 1's checks: one read in flight at a time, shared by every caller,
+   * and kept `PAIRING_CHECKS_FRESH_MS` after it lands. `fresh` (Check again,
+   * after a switch) skips a kept answer but still joins a read in flight.
+   */
+  let checks: { at: number; done: boolean; value: Promise<PairingChecks> } | null = null;
+  const deadline = context.checksDeadlineMs ?? PAIRING_CHECKS_DEADLINE_MS;
+  const pairingChecks = (fresh: boolean): Promise<PairingChecks> => {
+    // A read in flight is joined only while it is within its deadline (readPairingChecks settles by then; this
+    // is the backstop), so a read that never settled can never stay the shared one.
+    const inFlight = checks && !checks.done && Date.now() - checks.at < deadline + 1_000;
+    if (checks && (inFlight || (checks.done && !fresh && Date.now() - checks.at < PAIRING_CHECKS_FRESH_MS))) return checks.value;
+    const value = readPairingChecks({
+      dataDir: context.dataDir,
+      // Tests hand in a scripted runner; this computer's own `tailscale` runs as a child process, never blocking the Inbox.
+      tailscale: context.checksTailscale ?? context.tailscale ?? runTailscaleQuietly,
+      httpsPort: INBOX_TAILNET_HTTPS_PORT,
+      ownTargets,
+      probes: context.probes,
+      deadlineMs: deadline,
+    });
+    const entry = { at: Date.now(), done: false, value };
+    checks = entry;
+    value.then(
+      () => {
+        entry.done = true;
+        entry.at = Date.now();
+      },
+      () => {
+        if (checks === entry) checks = null;
+      },
+    );
+    return value;
+  };
+
   const windowRoute = async (req: Request, url: URL): Promise<Response | null> => {
     const path = url.pathname;
     if (path === "/api/inbox/pairing") {
-      if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+      // The last offer's state and what reached the door while it showed; never its secret or code.
+      if (req.method === "GET") return crossSiteRead(req) ? crossOrigin() : json({ offer: offerView() });
+      if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
       const stale = staleTab(await context.readBody(req));
       return stale ?? json(makeOffer(), 201);
+    }
+    if (path === "/api/inbox/pairing/checks") {
+      if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+      if (crossSiteRead(req)) return crossOrigin();
+      // Step 1 of Pair a phone: advisory only. Reads, never turns anything on.
+      const answer = await pairingChecks(url.searchParams.get("fresh") === "1");
+      return json({ checks: answer, lan: lan.state(), tailnet });
     }
     if (path === "/api/inbox/devices") {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -652,6 +799,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
       const stale = staleTab(body);
       if (stale) return stale;
       if (typeof body.on !== "boolean") throw new InboxError("validation_error", "on: must be a boolean.", { field: "on" });
+      checks = null;
       return setTailnet(body.on);
     }
     if (path === "/api/inbox/lan") {
@@ -661,6 +809,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
       const stale = staleTab(body);
       if (stale) return stale;
       if (typeof body.on !== "boolean") throw new InboxError("validation_error", "on: must be a boolean.", { field: "on" });
+      checks = null;
       try {
         return json({ lan: lan.set(body.on) });
       } catch (error) {

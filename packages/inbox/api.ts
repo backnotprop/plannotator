@@ -245,6 +245,45 @@ export interface PairingOffer {
   link: string;
   computer: { name: string };
   addresses: { tailnet: string | null; lan: string | null; fingerprint: string | null };
+  /** The code carries an address a phone can use (a way is on and working). Absent from an older Inbox. */
+  reachable?: boolean;
+}
+
+/** What reached the door while a code showed (GET /api/inbox/pairing, packages/server/inbox-devices.ts). */
+export interface PairingAttempt {
+  via: 'wifi' | 'tailnet' | 'local';
+  result: 'wrong_code' | 'code_over_wifi' | 'old_code' | 'expired' | 'redeemed';
+  at: string;
+  tries_left?: number;
+  device?: string;
+}
+
+/** The last pairing offer as the window reads it: never its secret or code. */
+export interface PairingOfferView {
+  expires_at: string;
+  state: 'open' | 'expired' | 'closed' | 'redeemed';
+  tries_left: number;
+  attempts: PairingAttempt[];
+}
+
+/** Step 1 of Pair a phone: what this computer can tell about each way (packages/server/inbox-pairing-checks.ts). Advisory only. */
+export interface PairingChecks {
+  wifi: {
+    address: string | null;
+    network: string | null;
+    openssl: boolean;
+    certificate: boolean;
+    bonjour: boolean;
+    firewall: 'off' | 'on' | 'block_all' | 'unknown';
+  };
+  tailscale: {
+    /** `cli_missing`: no `tailscale` command on PATH; `no_answer`: it did not answer in time. */
+    state: 'running' | 'stopped' | 'signed_out' | 'needs_approval' | 'starting' | 'cli_missing' | 'no_answer' | 'unknown';
+    login: string | null;
+    https_certs: boolean | null;
+    port_free: boolean | null;
+    error: string | null;
+  };
 }
 
 /** "Reach from my tailnet": the switch, the address while it works, and why not when it does not. */
@@ -328,7 +367,16 @@ export const inboxApi = {
   },
   thread: (threadId: string) => get<ThreadModel>(`/api/inbox/threads/${encodeURIComponent(threadId)}`),
   settings: () => get<SettingsModel>('/api/inbox/settings'),
-  seen: (threadId: string) => post<unknown>(`/api/inbox/threads/${encodeURIComponent(threadId)}/seen`, {}),
+  /**
+   * The person looked at the thread. `throughSeq`: the seq of the newest
+   * message the window showed; the look stops there, so a message that landed
+   * after the window read the thread stays new (an older Inbox ignores it).
+   */
+  seen: (threadId: string, throughSeq?: number | null) =>
+    post<{ thread: InboxListRow }>(
+      `/api/inbox/threads/${encodeURIComponent(threadId)}/seen`,
+      typeof throughSeq === 'number' ? { through_seq: throughSeq } : {},
+    ),
   /** Mark read (the thread leaves the top for Quiet, its waiting questions closed) or its Undo. */
   markRead: (threadId: string, read: boolean) =>
     post<{ thread: InboxListRow }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/${read ? 'read' : 'unread'}`, {}),
@@ -414,6 +462,9 @@ export const inboxApi = {
     post<{ message: InboxMessage; replayed: boolean }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/message`, input),
   // Phones: pairing, the paired devices, the tailnet and Wi-Fi switches (packages/server/inbox-devices.ts).
   pairPhone: () => post<PairingOffer>('/api/inbox/pairing', {}),
+  pairingOffer: () => get<{ offer: PairingOfferView | null }>('/api/inbox/pairing'),
+  /** `fresh`: skip the answer the Inbox keeps a few seconds (Check again, after a switch). */
+  pairingChecks: (fresh = false) => get<{ checks: PairingChecks; lan: LanState; tailnet: TailnetState }>(`/api/inbox/pairing/checks${fresh ? '?fresh=1' : ''}`),
   devices: () => get<{ devices: PairedDevice[] }>('/api/inbox/devices'),
   removeDevice: (id: string) => post<{ device: PairedDevice }>(`/api/inbox/devices/${encodeURIComponent(id)}/revoke`, {}),
   tailnet: () => get<{ tailnet: TailnetState }>('/api/inbox/tailnet'),

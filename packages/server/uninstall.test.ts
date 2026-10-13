@@ -2064,3 +2064,42 @@ describe("host and platform integrations", () => {
     });
   });
 });
+
+describe("the Inbox's agent connections (inbox-agents.ts)", () => {
+  const cursorFile = (fixture: Fixture) => join(fixture.homeDir, ".cursor", "mcp.json");
+  const ours = { command: "/old/bin/plannotator", args: ["inbox", "mcp"] };
+
+  function seed(fixture: Fixture): void {
+    writeJson(cursorFile(fixture), { mcpServers: { mine: { command: "x" }, "plannotator-inbox": ours } });
+    writeJson(join(fixture.dataDir, "inbox", "agents.json"), {
+      v: 1,
+      agents: { cursor: { state: "added", reach: "mcp", path: cursorFile(fixture), command: ["/old/bin/plannotator", "inbox", "mcp"], at: "2026-10-12T00:00:00.000Z" } },
+    });
+  }
+
+  test("--dry-run lists the entry and changes nothing", async () => {
+    const fixture = createFixture();
+    seed(fixture);
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: true }, fixture.environment);
+    expect(result.planned).toContain(`MCP server plannotator-inbox from Cursor (${join("~", ".cursor", "mcp.json")}, that entry only)`);
+    expect((readJson(cursorFile(fixture)).mcpServers as Record<string, unknown>)["plannotator-inbox"]).toEqual(ours);
+  });
+
+  test("a plain uninstall removes the entry, keeps the person's others, and forgets the record", async () => {
+    const fixture = createFixture();
+    seed(fixture);
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
+    expect(result.removed).toContain(`MCP server plannotator-inbox from Cursor (${join("~", ".cursor", "mcp.json")}, that entry only)`);
+    expect(readJson(cursorFile(fixture)).mcpServers).toEqual({ mine: { command: "x" } });
+    expect((readJson(join(fixture.dataDir, "inbox", "agents.json")).agents as Record<string, unknown>).cursor).toBeUndefined();
+  });
+
+  test("an entry that runs something else now is named and left", async () => {
+    const fixture = createFixture();
+    seed(fixture);
+    writeJson(cursorFile(fixture), { mcpServers: { "plannotator-inbox": { command: "theirs" } } });
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
+    expect(result.warnings).toContain(`Skipped: Cursor's "plannotator-inbox" now runs something else (changed by hand), so it is yours.`);
+    expect(readJson(cursorFile(fixture)).mcpServers).toEqual({ "plannotator-inbox": { command: "theirs" } });
+  });
+});

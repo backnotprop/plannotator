@@ -47,6 +47,8 @@ let savedMatchMedia: typeof window.matchMedia;
 /** The window's event stream, which the test fires by hand (the stream itself is not needed). */
 let pokeStream: (() => void) | null = null;
 let posted: string[] = [];
+/** The JSON bodies the window posted, with their paths. */
+let postedBodies: { path: string; body: Record<string, unknown> }[] = [];
 
 function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
@@ -77,13 +79,13 @@ async function readLine(): Promise<string> {
 }
 
 /** An agent writes while the person reads (the server's stdin). */
-async function agentSends(body: string): Promise<string> {
-  (child!.stdin as import('bun').FileSink).write(`${JSON.stringify({ send: { project: world.project, session: 'ses_late', body } })}\n`);
+async function agentSends(body: string, reply_to?: string): Promise<string> {
+  (child!.stdin as import('bun').FileSink).write(`${JSON.stringify({ send: { project: world.project, session: 'ses_late', body, ...(reply_to ? { reply_to } : {}) } })}\n`);
   (child!.stdin as import('bun').FileSink).flush();
   return (JSON.parse(await readLine()) as { sent: string }).sent;
 }
 
-const TESTS = 8;
+const TESTS = 9;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -122,8 +124,12 @@ beforeEach(() => {
   media = { phone: false, reduce: false };
   savedFetch = globalThis.fetch;
   posted = [];
+  postedBodies = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    if ((init?.method ?? 'GET') === 'POST') posted.push(String(input));
+    if ((init?.method ?? 'GET') === 'POST') {
+      posted.push(String(input));
+      postedBodies.push({ path: String(input), body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {} });
+    }
     const answer = await loopback(String(input), init?.method ?? 'GET', init?.body ? String(init.body) : undefined);
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
@@ -301,6 +307,34 @@ test.skipIf(!hasDom)("an agent's message that arrives while reading stays behind
   expect(sectionOfRow(el, late)).toBe('new');
   expect(el.querySelector('[data-inbox-notice]')).toBeNull();
   expect(document.activeElement).toBe(rowOf(el, late));
+});
+
+// The failure this guards (design record "inbox-new-in-open-thread", the
+// /seen race): the look sent when a thread opens marked the thread seen up to
+// whatever the server held when it took the look, so a message that landed
+// between the window's read and the look was marked seen without being shown.
+// The look now carries `through_seq`, the newest agent message of the read.
+test.skipIf(!hasDom)('the look sent on open covers the newest agent message the window read, and an arrival after it stays unseen', async () => {
+  const first = world.news[0]!;
+  // The thread holds two agent messages before the person opens it.
+  await agentSends('A follow-up before you looked.', first);
+  const read = JSON.parse((await loopback(`/api/inbox/threads/${first}`)).text) as { thread: { messages: { seq: number; author: { kind: string } }[] } };
+  const newest = Math.max(...read.thread.messages.filter((m) => m.author.kind === 'agent').map((m) => m.seq));
+  const el = await renderApp(`#project=${world.project}`);
+  await openRow(el, first);
+  const looks = postedBodies.filter((p) => p.path.startsWith(`/api/inbox/threads/${first}/seen`));
+  expect(looks.length).toBe(1);
+  expect(looks[0]!.body.through_seq).toBe(newest);
+
+  // An agent message lands in the open thread: drawn, but not shown long enough to count (happy-dom lays
+  // nothing out), so the store keeps it unseen and the list's "N new" never names the open thread.
+  const arrival = await agentSends('Arrived while you read.', first);
+  act(() => pokeStream!());
+  await until(() => el.querySelector(`[data-message-article="${arrival}"]`) !== null, 'the arrival in the thread');
+  await wait(1300);
+  expect(await serverSection(first)).toBe('new');
+  expect(el.querySelector('[data-inbox-notice]')).toBeNull();
+  expect(postedBodies.filter((p) => p.path.startsWith(`/api/inbox/threads/${first}/seen`)).length).toBe(1);
 });
 
 test.skipIf(!hasDom)('under reduced motion the close settles at once, with nothing animated', async () => {

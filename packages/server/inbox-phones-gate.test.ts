@@ -44,6 +44,8 @@ const PHONE_ROUTES: [method: string, path: string][] = [
   ["POST", "/api/inbox/device/pair"],
   ["POST", "/api/inbox/device/revoke"],
   ["POST", "/api/inbox/pairing"],
+  ["GET", "/api/inbox/pairing"],
+  ["GET", "/api/inbox/pairing/checks"],
   ["GET", "/api/inbox/devices"],
   ["POST", "/api/inbox/devices/dev_x/revoke"],
   ["GET", "/api/inbox/tailnet"],

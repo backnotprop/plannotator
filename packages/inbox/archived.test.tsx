@@ -170,7 +170,7 @@ const go = async (hash: string) => {
 
 // First, while the server holds nothing archived.
 test.skipIf(!hasDom)('Settings says when nothing is archived', async () => {
-  const el = await renderApp('#settings');
+  const el = await renderApp('#settings/archived');
   await until(() => el.querySelector('[data-archived-empty]') !== null, 'the empty Archived block');
   expect(el.querySelector('[data-settings-archived]')?.textContent).toContain('Nothing archived.');
   expect(el.querySelector('[data-archived-project]')).toBeNull();
@@ -193,7 +193,7 @@ test.skipIf(!hasDom)('archive the open thread: its row stays until the person le
   // Gone from every section, Quiet included; the rest of the world is still there.
   expect(listRow(el, world.stopped)).not.toBeNull();
 
-  await go('#settings');
+  await go('#settings/archived');
   await until(() => archivedRow(el, world.waiting) !== null, 'the row in Settings');
   const row = archivedRow(el, world.waiting)!;
   expect(row.textContent).toContain('Which search index should the docs use?');
@@ -232,7 +232,7 @@ test.skipIf(!hasDom)('several projects: rows grouped under a header per project 
   await setArchived(b.waiting, true);
   await setArchived(a.filed, true);
   try {
-    const el = await renderApp('#settings');
+    const el = await renderApp('#settings/archived');
     await until(() => el.querySelectorAll('[data-archived-thread]').length === 3, 'three archived rows');
     const block = el.querySelector('[data-settings-archived]')!;
     expect(block.querySelector('select')).toBeNull();
@@ -277,7 +277,7 @@ test.skipIf(!hasDom)("an agent's reply into an archived thread brings it back to
   const world = worlds[1]!;
   await setArchived(world.filed, true);
   try {
-    const el = await renderApp('#settings');
+    const el = await renderApp('#settings/archived');
     await until(() => archivedRow(el, world.filed) !== null, 'the archived row');
     const answer = await agentReply(world.filed, 'One more thing.\n\n:::question\nShip the CSV export today?\n\n- [ ] Yes\n- [ ] No\n:::');
     expect(answer.status).toBe(200);
@@ -288,7 +288,7 @@ test.skipIf(!hasDom)("an agent's reply into an archived thread brings it back to
     const list = await renderApp('#');
     await until(() => listRow(list, world.filed) !== null, 'the row back in the list');
     expect(listRow(list, world.filed)!.closest('[data-section-id]')?.getAttribute('data-section-id')).toBe('waiting');
-    await go('#settings');
+    await go('#settings/archived');
     await until(() => list.querySelector('[data-settings-archived]')?.getAttribute('data-settings-archived') === '0', 'the Archived block without it');
     expect(archivedRow(list, world.filed)).toBeNull();
     // Opened, it still says archived (the agent wrote after it), with Unarchive in its foot.

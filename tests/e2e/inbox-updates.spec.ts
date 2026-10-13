@@ -65,6 +65,8 @@ test.beforeAll(async () => {
       PLANNOTATOR_BROWSER: 'none',
       PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
       PLANNOTATOR_INBOX_PHONES: '0',
+      // Never a real agent's CLI from PATH (packages/server/inbox-agents.ts).
+      PLANNOTATOR_INBOX_CONNECT: '0',
       // Never GitHub (the seeded cache answers), never the real install script.
       PLANNOTATOR_UPDATE_API_URL: 'http://127.0.0.1:9/releases/latest',
       PLANNOTATOR_INSTALL_SCRIPT_URL: `http://127.0.0.1:${installerPort}/install.sh`,

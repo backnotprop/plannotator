@@ -3,7 +3,33 @@ import type { IDockviewPanelProps } from 'dockview-react';
 import { AllFilesCodeView } from '../../components/AllFilesCodeView';
 import { CommitDescriptionHeader } from '../../components/CommitDescriptionHeader';
 import { ImageDiffPreview } from '../../components/ImageDiffPreview';
-import { useReviewState } from '../ReviewStateContext';
+import { MarkdownViewMenu } from '../../components/MarkdownViewMenu';
+// Lazy: loaded the first time a Markdown file is previewed.
+const MarkdownFilePreview = React.lazy(async () => ({ default: (await import('../../components/MarkdownFilePreview')).MarkdownFilePreview }));
+import type { DiffFile } from '../../types';
+import { useReviewState, useReviewStateOptional } from '../ReviewStateContext';
+
+/**
+ * A Markdown card's view control. Reads review state itself: Pierre's header
+ * slot republishes only on updateItem, but a context consumer inside it still
+ * re-renders, so Changes <-> Read updates the label without touching the item.
+ */
+function ReviewMarkdownViewControl({ file, iconOnly, touch }: { file: DiffFile; iconOnly: boolean; touch: boolean }) {
+  const preview = useReviewStateOptional()?.markdownPreview;
+  if (!preview) return null;
+  return (
+    <MarkdownViewMenu
+      filePath={file.path}
+      view={preview.viewOf(file.path)}
+      views={preview.viewsFor(file)}
+      status={file.status}
+      onChoose={(view) => preview.choose(file.path, view)}
+      iconOnly={iconOnly}
+      touch={touch}
+      disabledReason={preview.lockReason(file.path)}
+    />
+  );
+}
 
 export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
   const state = useReviewState();
@@ -37,6 +63,47 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
     [state.imagePreviewAvailable, snapshotId, compact],
   );
 
+  // Rendered Markdown views (one Source / Changes / Read menu per Markdown
+  // file). The card fetches its own contents, lazily, when CodeView mounts
+  // its header slot.
+  const preview = state.markdownPreview;
+  const reviewBase = state.reviewBase;
+  const reviewSnapshotId = state.feedbackDiffContext?.snapshotId;
+  const imagesAvailable = state.imagePreviewAvailable === true;
+  const markdownPreview = useMemo(
+    () =>
+      preview
+        ? {
+            previewedPaths: preview.previewedPaths,
+            isPreviewable: preview.isPreviewable,
+            show: preview.show,
+            onEditingFileChange: preview.setEditingFile,
+            registerViewTarget: preview.registerViewTarget,
+            renderViewControl: ({ file, iconOnly, touch }: { file: DiffFile; iconOnly: boolean; touch: boolean }) => (
+              <ReviewMarkdownViewControl file={file} iconOnly={iconOnly} touch={touch} />
+            ),
+            render: ({ file, onHeightChange }: { file: DiffFile; onHeightChange: () => void }) => (
+              <React.Suspense key={`${reviewSnapshotId ?? ''}:${file.path}`} fallback={null}>
+              <MarkdownFilePreview
+                key={`${reviewSnapshotId ?? ''}:${file.path}`}
+                filePath={file.path}
+                oldPath={file.oldPath}
+                status={file.status}
+                patch={file.patch}
+                reviewBase={reviewBase}
+                reviewSnapshotId={reviewSnapshotId}
+                imageSnapshotId={snapshotId}
+                imagesAvailable={imagesAvailable}
+                variant="all-files"
+                onHeightChange={onHeightChange}
+              />
+              </React.Suspense>
+            ),
+          }
+        : undefined,
+    [preview, reviewBase, reviewSnapshotId, snapshotId, imagesAvailable],
+  );
+
   // Stable element identity per commit — an inline JSX literal would be a new
   // object every context re-render and churn the measuring ResizeObserver in
   // AllFilesCodeView (leadingContent is in its effect deps).
@@ -65,6 +132,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       reviewSnapshotId={state.feedbackDiffContext?.snapshotId}
       contextExpansionAvailable={state.contextExpansionAvailable}
       renderImagePreview={renderImagePreview}
+      markdownPreview={markdownPreview}
       compactTouchLayout={state.isCompactTouchLayout}
       onLineSelection={state.onLineSelection}
       onAddAnnotationForFile={state.onAddAnnotationForFile}

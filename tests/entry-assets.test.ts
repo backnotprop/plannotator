@@ -92,6 +92,26 @@ describe('review entry assets', () => {
     expect(read('packages/review-editor/App.tsx')).not.toContain('mermaid-eager');
   });
 
+  // The review app renders Mermaid and Graphviz fences as code, never as
+  // diagrams (Markdown preview; approval record, 2026-10-12 amendment:
+  // performance wins). A lazy import does not help here: the single-file
+  // build inlines every dynamic import, so naming a diagram engine anywhere in
+  // the review app's graph puts ~6.7 MB of runtimes into every review page.
+  // The built-bundle markers below are the proof; this names the culprit.
+  test('the review app imports no diagram engine, not even lazily', () => {
+    const diagramModule = /(?:from\s+|import\s*\(?\s*)['"](?:[^'"]*(?:components\/(?:MermaidBlock|GraphvizBlock|DiagramBlock|Viewer)|components\/diagram\/[^'"]*|utils\/(?:mermaid|graphviz|diagram-render)[^'"\/]*)|mermaid|@viz-js\/viz)['"]/;
+    const walk = (dir: string): string[] =>
+      readdirSync(resolve(root, dir), { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory()
+          ? entry.name === 'node_modules' || entry.name === 'dist' ? [] : walk(`${dir}/${entry.name}`)
+          : /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [`${dir}/${entry.name}`] : [],
+      );
+    const offenders = ['packages/review-editor', 'packages/guide-viewer', 'apps/review']
+      .flatMap(walk)
+      .filter((path) => diagramModule.test(read(path)));
+    expect(offenders).toEqual([]);
+  });
+
   // The other half of the optimization: the renderers must stay OFF the
   // static import graph of the components, otherwise a host's bundler puts
   // them back into every document read and the slots become decoration.
@@ -181,7 +201,9 @@ describe('review entry assets', () => {
   //   registration marker is asserted ABSENT from both bundles: since Mermaid
   //   12 the plan editor loads the runtime lazily by policy, and an eager
   //   import creeping back in would only show up as a bigger portal entry
-  //   chunk. The review bundle carries no Mermaid at all.
+  //   chunk. The review bundle carries no Mermaid and no Graphviz at all: its
+  //   Markdown preview shows diagram fences as code (see the import guard
+  //   above), so both presence markers are asserted absent there.
   // - Presence markers (a KaTeX class name, a Mermaid diagram id, an
   //   Emscripten symbol from Graphviz, the bridge global), which only say the
   //   runtime is still inlined by inlineDynamicImports. KaTeX is inlined
@@ -194,7 +216,7 @@ describe('review entry assets', () => {
   const REGISTRATION_MARKERS = ['plannotator-math-eager', 'uniqueUsernameGenerator'];
   const markerExpectations: Array<[bundle: string, present: string[], absent: string[]]> = [
     ['apps/hook/dist/index.html', [...REGISTRATION_MARKERS, 'katex-display', 'flowchart-v2', 'viz_set_y_invert', '__plannotatorLiveConfig'], ['plannotator-mermaid-eager']],
-    ['apps/review/dist/index.html', [...REGISTRATION_MARKERS, 'katex-display', '__plannotatorLiveConfig'], ['plannotator-mermaid-eager', 'flowchart-v2']],
+    ['apps/review/dist/index.html', [...REGISTRATION_MARKERS, 'katex-display', '__plannotatorLiveConfig'], ['plannotator-mermaid-eager', 'flowchart-v2', 'viz_set_y_invert']],
   ];
   for (const [path, present, absent] of markerExpectations) {
     test.skipIf(!existsSync(resolve(root, path)))(`${path} carries the eager registration and renderer markers`, () => {

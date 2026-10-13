@@ -159,6 +159,10 @@ export interface GitContext {
   /** Requested and effective modes when startup used one of those fallbacks. */
   diffFallback?: ReviewDiffFallback;
   cwd?: string;
+  /** Absolute repository top level (`git rev-parse --show-toplevel`). Patch
+   *  paths are relative to it, while `cwd` may be the subfolder the review
+   *  was started from. Git only; absent when it could not be resolved. */
+  root?: string;
   vcsType?: "git" | "gitbutler" | "jj" | "p4";
   /** Hash of the exact GitButler branch/commit topology used for this context. */
   gitButlerRevision?: string;
@@ -845,6 +849,7 @@ export async function getGitContext(
       },
     },
     cwd,
+    ...(currentTreePath ? { root: currentTreePath } : {}),
     vcsType: "git",
     recentCommits,
   };

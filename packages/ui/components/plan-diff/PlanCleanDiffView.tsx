@@ -6,7 +6,7 @@
  * hover in Viewer) — no text selection, no web-highlighter.
  */
 
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback, createContext, useContext, useMemo } from "react";
 import { parseMarkdownToBlocks, computeListIndices } from "../../utils/parser";
 import { applyHighlight, codeBlockClassName, codeBlockKeepsLayout } from "../../utils/codeHighlight";
 import { useFenceTheme } from "../../hooks/useFenceTheme";
@@ -14,16 +14,34 @@ import { ListItemBody } from "../ListItemBody";
 import { BlockquoteBlock, BLOCKQUOTE_CLASS_NAME } from "../blocks/BlockquoteBlock";
 import type { Block, Annotation, EditorMode, ImageAttachment } from "../../types";
 import { AnnotationType } from "../../types";
-import type {
-  PlanDiffBlock,
-  InlineDiffToken,
-  InlineDiffWrap,
+import {
+  foldUnchangedPlanDiff,
+  type PlanDiffBlock,
+  type PlanDiffFold,
+  type InlineDiffToken,
+  type InlineDiffWrap,
 } from "../../utils/planDiffEngine";
 import type { QuickLabel } from "../../utils/quickLabels";
 import { AnnotationToolbar } from "../AnnotationToolbar";
 import { CommentPopover } from "../CommentPopover";
 import { FloatingQuickLabelPicker } from "../FloatingQuickLabelPicker";
 import { getIdentity } from "../../utils/identity";
+
+/**
+ * Which version a rendered chunk comes from: 'old' for a removed block and
+ * the old half of a modified block, 'new' for everything else.
+ */
+export type PlanDiffSide = "old" | "new";
+
+/** Host renderer for one parsed markdown block (see `renderBlock`). */
+export type PlanDiffBlockRenderer = (
+  block: Block,
+  orderedIndex: number | null,
+  side: PlanDiffSide,
+) => React.ReactNode;
+
+/** Provided only when a host passes `renderBlock`; absent, chunks render as always. */
+const RenderBlockContext = createContext<PlanDiffBlockRenderer | null>(null);
 
 interface PlanCleanDiffViewProps {
   blocks: PlanDiffBlock[];
@@ -39,7 +57,32 @@ interface PlanCleanDiffViewProps {
    * "Classic" diff view exposed in the mode switcher.
    */
   wordLevel?: boolean;
+  /**
+   * Optional: render each parsed markdown block (headings, paragraphs, code,
+   * tables, …) with the host's renderer instead of the view's built-in
+   * simple one. Not used for inline word-level modified blocks. Absent, the
+   * view renders exactly as before.
+   */
+  renderBlock?: PlanDiffBlockRenderer;
+  /**
+   * Optional: a left gutter on every block naming its source lines
+   * ("11–12", "old 15–16"; a modified block shows both). Needs the line
+   * ranges `computePlanDiff` fills. Absent, no gutter.
+   */
+  lineGutter?: boolean;
+  /**
+   * Optional: fold long runs of unchanged sections behind a "N unchanged
+   * sections" row that expands in place (see `foldUnchangedPlanDiff`).
+   */
+  foldUnchanged?: boolean;
+  /**
+   * Optional: classes for unchanged blocks, replacing the default dimming
+   * (`opacity-60 hover:opacity-100 transition-opacity`).
+   */
+  unchangedClassName?: string;
 }
+
+const DEFAULT_UNCHANGED_CLASS = "opacity-60 hover:opacity-100 transition-opacity";
 
 export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
   blocks,
@@ -49,6 +92,10 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
   selectedAnnotationId = null,
   mode = "selection",
   wordLevel = true,
+  renderBlock,
+  lineGutter = false,
+  foldUnchanged = false,
+  unchangedClassName,
 }) => {
   const modeRef = useRef<EditorMode>(mode);
   const onAddAnnotationRef = useRef(onAddAnnotation);
@@ -286,22 +333,104 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
   // Check if a block index has been annotated (for highlight ring)
   const isBlockAnnotated = (index: number) => annotatedBlockIds.has(`diff-block-${index}`);
 
+  // Fold state per fold key (expanded folds render their pieces in place).
+  const [expandedFolds, setExpandedFolds] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleFold = useCallback((key: string) => {
+    setExpandedFolds((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+  const segments = useMemo(
+    () => (foldUnchanged ? foldUnchangedPlanDiff(blocks) : null),
+    [blocks, foldUnchanged],
+  );
+
+  const renderDiffBlock = (block: PlanDiffBlock, index: number, key: React.Key) => {
+    const rendered = (
+      <DiffBlockRenderer
+        key={lineGutter ? undefined : key}
+        block={block}
+        index={index}
+        hoveredIndex={hoveredBlock?.index ?? null}
+        hoveredDiffContext={hoveredBlock?.diffContext}
+        isBlockAnnotated={isBlockAnnotated}
+        wordLevel={wordLevel}
+        unchangedClassName={unchangedClassName}
+        onHover={onAddAnnotation ? (el, diffContext) => handleHover(el, block, index, diffContext) : undefined}
+        onLeave={onAddAnnotation ? handleLeave : undefined}
+        onClick={onAddAnnotation ? (el, diffContext) => handleBlockClick(block, index, el, diffContext) : undefined}
+      />
+    );
+    if (!lineGutter) return rendered;
+    return (
+      <GutterRow key={key} labels={blockGutterLabels(block)}>
+        {rendered}
+      </GutterRow>
+    );
+  };
+
+  const renderFold = (fold: PlanDiffFold, index: number) => {
+    const expanded = expandedFolds.has(fold.key);
+    const noun = fold.sectionCount === 1 ? "section" : "sections";
+    const row = expanded ? (
+      <button
+        type="button"
+        data-plan-diff-fold=""
+        aria-expanded
+        onClick={() => toggleFold(fold.key)}
+        className="annotation-exclude flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+      >
+        <FoldChevron expanded />
+        Hide {fold.sectionCount} unchanged {noun}
+      </button>
+    ) : (
+      <button
+        type="button"
+        data-plan-diff-fold=""
+        aria-expanded={false}
+        onClick={() => toggleFold(fold.key)}
+        className="annotation-exclude flex w-full min-w-0 items-center gap-2 rounded-md bg-muted/40 px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+      >
+        <FoldChevron expanded={false} />
+        <span className="flex-none">{fold.sectionCount} unchanged {noun}</span>
+        {fold.headings.length > 0 && (
+          <span className="min-w-0 truncate text-muted-foreground/70">
+            · {fold.headings.join(" · ")}
+          </span>
+        )}
+        <span className="ml-auto flex-none pl-2">Show</span>
+      </button>
+    );
+    return (
+      <React.Fragment key={fold.key}>
+        {lineGutter ? (
+          <GutterRow labels={expanded ? [] : [rangeLabel(fold.newStart, fold.newEnd) ?? ""]}>{row}</GutterRow>
+        ) : (
+          row
+        )}
+        {expanded && fold.pieces.map((piece, i) => renderDiffBlock(piece, index, `${fold.key}-${i}`))}
+      </React.Fragment>
+    );
+  };
+
+  const body = segments
+    ? segments.map((segment, i) =>
+        segment.kind === "fold"
+          ? renderFold(segment, i)
+          : renderDiffBlock(segment.block, segment.index, `seg-${i}`),
+      )
+    : blocks.map((block, index) => renderDiffBlock(block, index, index));
+
   return (
     <div className="space-y-1">
-      {blocks.map((block, index) => (
-        <DiffBlockRenderer
-          key={index}
-          block={block}
-          index={index}
-          hoveredIndex={hoveredBlock?.index ?? null}
-          hoveredDiffContext={hoveredBlock?.diffContext}
-          isBlockAnnotated={isBlockAnnotated}
-          wordLevel={wordLevel}
-          onHover={onAddAnnotation ? (el, diffContext) => handleHover(el, block, index, diffContext) : undefined}
-          onLeave={onAddAnnotation ? handleLeave : undefined}
-          onClick={onAddAnnotation ? (el, diffContext) => handleBlockClick(block, index, el, diffContext) : undefined}
-        />
-      ))}
+      {renderBlock ? (
+        <RenderBlockContext.Provider value={renderBlock}>{body}</RenderBlockContext.Provider>
+      ) : (
+        body
+      )}
 
       {/* Block hover toolbar (selection mode) */}
       {hoveredBlock && !commentPopover && !quickLabelPicker && (
@@ -350,6 +479,61 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
   );
 };
 
+// --- Line gutter + fold row (optional seams) ---
+
+/** "11–12", or "14" for one line; null when the side has no lines. */
+function rangeLabel(start?: number, end?: number): string | null {
+  if (start === undefined) return null;
+  return end !== undefined && end !== start ? `${start}–${end}` : `${start}`;
+}
+
+/** The gutter lines for one rendered diff block. */
+function blockGutterLabels(block: PlanDiffBlock): string[] {
+  const newLabel = rangeLabel(block.newStart, block.newEnd);
+  const oldLabel = rangeLabel(block.oldStart, block.oldEnd);
+  switch (block.type) {
+    case "removed":
+      return oldLabel ? [`old ${oldLabel}`] : [];
+    case "modified":
+      return [newLabel, oldLabel ? `old ${oldLabel}` : null].filter((l): l is string => !!l);
+    default:
+      return newLabel ? [newLabel] : [];
+  }
+}
+
+/** A block beside its source-line gutter. The gutter is never selectable or part of a quote. */
+// Baseline alignment puts the label beside the first line of text, past a
+// heading's top margin.
+const GutterRow: React.FC<{ labels: string[]; children: React.ReactNode }> = ({ labels, children }) => (
+  <div className="flex items-baseline gap-3">
+    <div
+      data-plan-diff-gutter=""
+      aria-hidden="true"
+      className="annotation-exclude w-[4.5rem] flex-none select-none text-right font-mono text-[11px] leading-4 tabular-nums text-muted-foreground/70"
+    >
+      {labels.map((label, i) => (
+        <div key={i}>{label}</div>
+      ))}
+    </div>
+    <div className="min-w-0 flex-1">{children}</div>
+  </div>
+);
+
+const FoldChevron: React.FC<{ expanded: boolean }> = ({ expanded }) => (
+  <svg
+    aria-hidden="true"
+    className={`h-3 w-3 flex-none transition-transform ${expanded ? "rotate-90" : ""}`}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={2.5}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M9 6l6 6-6 6" />
+  </svg>
+);
+
 // --- DiffBlockRenderer with hover support ---
 
 interface DiffBlockRendererProps {
@@ -360,13 +544,15 @@ interface DiffBlockRendererProps {
   isBlockAnnotated: (index: number) => boolean;
   /** When false, force block-level fallback even if inlineTokens is populated. */
   wordLevel: boolean;
+  /** Replaces the default unchanged-block dimming classes when set. */
+  unchangedClassName?: string;
   onHover?: (element: HTMLElement, diffContext: Annotation['diffContext']) => void;
   onLeave?: () => void;
   onClick?: (element: HTMLElement, diffContext: Annotation['diffContext']) => void;
 }
 
 const DiffBlockRenderer: React.FC<DiffBlockRendererProps> = ({
-  block, index, hoveredIndex, hoveredDiffContext, isBlockAnnotated, wordLevel, onHover, onLeave, onClick,
+  block, index, hoveredIndex, hoveredDiffContext, isBlockAnnotated, wordLevel, unchangedClassName, onHover, onLeave, onClick,
 }) => {
   const hoverProps = (diffContext: Annotation['diffContext']) => onHover ? {
     onMouseEnter: (e: React.MouseEvent<HTMLElement>) => onHover(e.currentTarget, diffContext),
@@ -387,7 +573,7 @@ const DiffBlockRenderer: React.FC<DiffBlockRendererProps> = ({
   switch (block.type) {
     case "unchanged":
       return (
-        <div className="plan-diff-unchanged opacity-60 hover:opacity-100 transition-opacity">
+        <div className={`plan-diff-unchanged ${unchangedClassName ?? DEFAULT_UNCHANGED_CLASS}`}>
           <MarkdownChunk content={block.content} />
         </div>
       );
@@ -410,7 +596,7 @@ const DiffBlockRenderer: React.FC<DiffBlockRendererProps> = ({
           data-diff-block-index={index}
           {...hoverProps('removed')}
         >
-          <MarkdownChunk content={block.content} />
+          <MarkdownChunk content={block.content} side="old" />
         </div>
       );
 
@@ -436,7 +622,7 @@ const DiffBlockRenderer: React.FC<DiffBlockRendererProps> = ({
             className={`plan-diff-removed line-through decoration-destructive/30 opacity-60 transition-shadow ${ringClass('removed')}`}
             {...hoverProps('removed')}
           >
-            <MarkdownChunk content={block.oldContent!} />
+            <MarkdownChunk content={block.oldContent!} side="old" />
           </div>
           <div
             className={`plan-diff-added transition-shadow ${ringClass('modified')}`}
@@ -567,7 +753,8 @@ const InlineModifiedBlock: React.FC<InlineModifiedBlockProps> = ({
 
 // --- Rendering components (unchanged from main) ---
 
-const MarkdownChunk: React.FC<{ content: string }> = ({ content }) => {
+const MarkdownChunk: React.FC<{ content: string; side?: PlanDiffSide }> = ({ content, side = "new" }) => {
+  const renderBlock = useContext(RenderBlockContext);
   const blocks = React.useMemo(
     () => parseMarkdownToBlocks(content),
     [content]
@@ -580,6 +767,16 @@ const MarkdownChunk: React.FC<{ content: string }> = ({ content }) => {
     () => computeListIndices(blocks),
     [blocks]
   );
+
+  if (renderBlock) {
+    return (
+      <>
+        {blocks.map((block, i) => (
+          <React.Fragment key={block.id}>{renderBlock(block, orderedIndices[i], side)}</React.Fragment>
+        ))}
+      </>
+    );
+  }
 
   return (
     <>

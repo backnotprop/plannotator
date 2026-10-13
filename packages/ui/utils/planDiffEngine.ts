@@ -43,6 +43,17 @@ export interface PlanDiffBlock {
   inlineTokens?: InlineDiffToken[];
   /** Structural wrap metadata paired with inlineTokens. */
   inlineWrap?: InlineDiffWrap;
+  /**
+   * Source line range of this block in the OLD text: 1-based, inclusive,
+   * trimmed of leading and trailing blank lines. Absent when the block has
+   * no non-blank old line (added blocks, or an all-blank chunk). Filled by
+   * `computePlanDiff`; plan review ignores it.
+   */
+  oldStart?: number;
+  oldEnd?: number;
+  /** Same as `oldStart`/`oldEnd`, in the NEW text (absent on removed blocks). */
+  newStart?: number;
+  newEnd?: number;
 }
 
 export interface PlanDiffStats {
@@ -61,6 +72,35 @@ function countLines(text: string): number {
     return lines.length - 1;
   }
   return lines.length;
+}
+
+/**
+ * The trimmed line range a chunk occupies when its first line is `start`
+ * (1-based): leading and trailing blank lines are not counted. Empty when the
+ * chunk has no non-blank line.
+ */
+function trimmedLineRange(
+  value: string,
+  start: number
+): { start?: number; end?: number } {
+  const lines = value.split("\n");
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  let first = 0;
+  while (first < lines.length && lines[first].trim() === "") first++;
+  if (first >= lines.length) return {};
+  let last = lines.length - 1;
+  while (last > first && lines[last].trim() === "") last--;
+  return { start: start + first, end: start + last };
+}
+
+function oldRange(value: string, start: number): Pick<PlanDiffBlock, "oldStart" | "oldEnd"> {
+  const r = trimmedLineRange(value, start);
+  return r.start === undefined ? {} : { oldStart: r.start, oldEnd: r.end };
+}
+
+function newRange(value: string, start: number): Pick<PlanDiffBlock, "newStart" | "newEnd"> {
+  const r = trimmedLineRange(value, start);
+  return r.start === undefined ? {} : { newStart: r.start, newEnd: r.end };
 }
 
 const INLINE_DIFFABLE_TYPES = new Set<Block["type"]>([
@@ -580,6 +620,10 @@ export function computePlanDiff(
 
   const blocks: PlanDiffBlock[] = [];
   const stats: PlanDiffStats = { additions: 0, deletions: 0, modifications: 0 };
+  // First line (1-based) of the next chunk on each side; the restored chunk
+  // values hold the real source lines, so counting them keeps both in step.
+  let oldLine = 1;
+  let newLine = 1;
 
   for (let i = 0; i < changes.length; i++) {
     const change = changes[i];
@@ -594,7 +638,11 @@ export function computePlanDiff(
         oldContent: change.value,
         lines: countLines(next.value),
         ...(inline ? { inlineTokens: inline.tokens, inlineWrap: inline.wrap } : {}),
+        ...oldRange(change.value, oldLine),
+        ...newRange(next.value, newLine),
       });
+      oldLine += countLines(change.value);
+      newLine += countLines(next.value);
       stats.modifications++;
       stats.additions += countLines(next.value);
       stats.deletions += countLines(change.value);
@@ -604,23 +652,209 @@ export function computePlanDiff(
         type: "added",
         content: change.value,
         lines: countLines(change.value),
+        ...newRange(change.value, newLine),
       });
+      newLine += countLines(change.value);
       stats.additions += countLines(change.value);
     } else if (change.removed) {
       blocks.push({
         type: "removed",
         content: change.value,
         lines: countLines(change.value),
+        ...oldRange(change.value, oldLine),
       });
+      oldLine += countLines(change.value);
       stats.deletions += countLines(change.value);
     } else {
       blocks.push({
         type: "unchanged",
         content: change.value,
         lines: countLines(change.value),
+        ...oldRange(change.value, oldLine),
+        ...newRange(change.value, newLine),
       });
+      oldLine += countLines(change.value);
+      newLine += countLines(change.value);
     }
   }
 
   return { blocks, stats };
+}
+
+// --- Folding unchanged runs (code review's rendered Markdown diff) ---------
+
+/** A run of unchanged sections hidden behind one row. */
+export interface PlanDiffFold {
+  kind: "fold";
+  /** Stable for the same diff: `fold-<block index>-<first hidden piece>`. */
+  key: string;
+  /** The hidden sections, each an 'unchanged' block with its own ranges. */
+  pieces: PlanDiffBlock[];
+  /** How many sections are hidden (`pieces.length`). */
+  sectionCount: number;
+  /** Plain text of the hidden headings, at most three. */
+  headings: string[];
+  oldStart?: number;
+  oldEnd?: number;
+  newStart?: number;
+  newEnd?: number;
+}
+
+export type PlanDiffSegment =
+  | { kind: "block"; block: PlanDiffBlock; index: number }
+  | PlanDiffFold;
+
+const MAX_FOLD_HEADINGS = 3;
+
+/** Heading text without inline markdown markers. */
+function plainHeadingText(text: string): string {
+  return text
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[*_`~]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+interface UnchangedPiece {
+  piece: PlanDiffBlock;
+  heading?: string;
+}
+
+/**
+ * Split an unchanged chunk into one piece per markdown block: each piece is
+ * the exact source text from its block's first line up to the next block's
+ * (blank lines stay with the piece before them; anything before the first
+ * block, such as frontmatter, stays with the first piece). Concatenating the
+ * pieces gives the chunk back byte for byte.
+ */
+function splitUnchangedChunk(block: PlanDiffBlock): UnchangedPiece[] {
+  const content = block.content;
+  const parsed = parseMarkdownToBlocks(content);
+  if (parsed.length <= 1) {
+    const only = parsed[0];
+    return [only?.type === "heading" ? { piece: block, heading: plainHeadingText(only.content) } : { piece: block }];
+  }
+
+  // Character offset of the start of each 1-based line.
+  const lineOffsets: number[] = [0];
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] === "\n") lineOffsets.push(i + 1);
+  }
+  const lineCount = countLines(content);
+  const starts = Array.from(
+    new Set(parsed.map((b) => b.startLine).filter((line) => line >= 1 && line <= lineCount))
+  ).sort((a, b) => a - b);
+  if (starts.length === 0) return [{ piece: block }];
+  starts[0] = 1;
+
+  // The chunk's untrimmed first line on each side (its ranges are trimmed).
+  const contentLines = content.split("\n");
+  let leadingBlank = 0;
+  while (leadingBlank < contentLines.length && contentLines[leadingBlank].trim() === "") leadingBlank++;
+  const oldBase = block.oldStart !== undefined ? block.oldStart - leadingBlank : undefined;
+  const newBase = block.newStart !== undefined ? block.newStart - leadingBlank : undefined;
+
+  const headingByStart = new Map<number, string>();
+  for (const b of parsed) {
+    if (b.type === "heading" && !headingByStart.has(b.startLine)) {
+      headingByStart.set(b.startLine, plainHeadingText(b.content));
+    }
+  }
+
+  return starts.map((startLine, i) => {
+    const nextStart = starts[i + 1];
+    const from = lineOffsets[startLine - 1] ?? content.length;
+    const to = nextStart !== undefined ? lineOffsets[nextStart - 1] ?? content.length : content.length;
+    const pieceContent = content.slice(from, to);
+    const piece: PlanDiffBlock = {
+      type: "unchanged",
+      content: pieceContent,
+      lines: countLines(pieceContent),
+      ...(oldBase !== undefined ? oldRange(pieceContent, oldBase + startLine - 1) : {}),
+      ...(newBase !== undefined ? newRange(pieceContent, newBase + startLine - 1) : {}),
+    };
+    // A heading piece begins at the heading itself (i > 0), or the first
+    // piece's parsed block is the heading.
+    const heading = headingByStart.get(i === 0 ? parsed[0].startLine : startLine);
+    return heading !== undefined ? { piece, heading } : { piece };
+  });
+}
+
+/** The span of several pieces' ranges on each side. */
+function spanOf(pieces: PlanDiffBlock[]): Pick<PlanDiffBlock, "oldStart" | "oldEnd" | "newStart" | "newEnd"> {
+  const withOld = pieces.filter((p) => p.oldStart !== undefined);
+  const withNew = pieces.filter((p) => p.newStart !== undefined);
+  return {
+    ...(withOld.length > 0
+      ? { oldStart: withOld[0].oldStart, oldEnd: withOld[withOld.length - 1].oldEnd }
+      : {}),
+    ...(withNew.length > 0
+      ? { newStart: withNew[0].newStart, newEnd: withNew[withNew.length - 1].newEnd }
+      : {}),
+  };
+}
+
+/** Consecutive pieces as one unchanged block (kept together so list numbering stays continuous). */
+function joinPieces(pieces: PlanDiffBlock[]): PlanDiffBlock {
+  if (pieces.length === 1) return pieces[0];
+  const content = pieces.map((p) => p.content).join("");
+  return { type: "unchanged", content, lines: countLines(content), ...spanOf(pieces) };
+}
+
+/**
+ * Fold long runs of unchanged sections behind one row, the way a code diff
+ * folds unmodified lines. Changed blocks pass through. Each unchanged block
+ * keeps `context` sections next to each neighbouring change visible (none
+ * toward the start or end of the document) and folds the rest when at least
+ * `minHidden` would be hidden; otherwise it is shown whole, untouched.
+ *
+ * Pure: the same blocks always give the same segments and fold keys.
+ */
+export function foldUnchangedPlanDiff(
+  blocks: PlanDiffBlock[],
+  options: { context?: number; minHidden?: number } = {}
+): PlanDiffSegment[] {
+  const context = Math.max(0, options.context ?? 1);
+  const minHidden = Math.max(1, options.minHidden ?? 2);
+  const segments: PlanDiffSegment[] = [];
+
+  blocks.forEach((block, index) => {
+    if (block.type !== "unchanged") {
+      segments.push({ kind: "block", block, index });
+      return;
+    }
+    const pieces = splitUnchangedChunk(block);
+    const head = index > 0 ? Math.min(context, pieces.length) : 0;
+    const tail = index < blocks.length - 1 ? Math.min(context, pieces.length - head) : 0;
+    const hidden = pieces.length - head - tail;
+    if (hidden < minHidden) {
+      segments.push({ kind: "block", block, index });
+      return;
+    }
+    if (head > 0) {
+      segments.push({ kind: "block", block: joinPieces(pieces.slice(0, head).map((p) => p.piece)), index });
+    }
+    const folded = pieces.slice(head, head + hidden);
+    const foldPieces = folded.map((p) => p.piece);
+    segments.push({
+      kind: "fold",
+      key: `fold-${index}-${head}`,
+      pieces: foldPieces,
+      sectionCount: foldPieces.length,
+      headings: folded
+        .map((p) => p.heading)
+        .filter((h): h is string => !!h)
+        .slice(0, MAX_FOLD_HEADINGS),
+      ...spanOf(foldPieces),
+    });
+    if (tail > 0) {
+      segments.push({
+        kind: "block",
+        block: joinPieces(pieces.slice(head + hidden).map((p) => p.piece)),
+        index,
+      });
+    }
+  });
+
+  return segments;
 }

@@ -214,6 +214,13 @@ export const INBOX_COMMAND_USAGE = [
   "Over the tailnet at every start: the Inbox's Settings, PLANNOTATOR_INBOX_TAILSCALE=1,",
   "or { \"inboxTailscale\": true } in config.json. Agents and MCP stay on this computer;",
   "another Tailscale login is let in only when config.json inboxTailscaleAllow names it.",
+  "",
+  "A person's plannotator inbox (not --background) also connects the agents found on",
+  "this computer that are not connected yet: a plannotator-inbox MCP server in each",
+  "terminal agent and the Claude app, the inbox tool for Pi and OpenCode with",
+  "Plannotator's extension or plugin. It never adds back one removed or turned off,",
+  "never replaces another plannotator-inbox, and says what it added on stderr.",
+  "PLANNOTATOR_INBOX_CONNECT=0 skips it. plannotator uninstall removes what it added.",
 ].join("\n");
 
 /** `plannotator update`'s usage; the command is update-command.ts. */

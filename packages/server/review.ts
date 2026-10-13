@@ -58,6 +58,10 @@ import {
   handleReviewImageRequest,
   readPRImageSide,
 } from "@plannotator/shared/review-image";
+import {
+  REVIEW_MARKDOWN_IMAGE_ENDPOINT,
+  handleReviewMarkdownImageRequest,
+} from "@plannotator/shared/review-markdown-image";
 import type { DiffSide, FileBytesRead } from "@plannotator/shared/review-core";
 import {
   createDefaultSemanticDiffRuntime,
@@ -158,6 +162,7 @@ import { countUnsentDraftComments, hostSessionClosedEvent } from "@plannotator/s
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 import { isAIEndpointPath, isLongLivedAIEndpointPath, type AIEndpoints, type SessionBridge } from "@plannotator/ai";
 import { isWSL } from "./browser";
+import { getExtraMarkdownExtensions } from "@plannotator/shared/resolve-file";
 import { handleOpenInApps, handleOpenIn } from "./open-in";
 import type { LocalWorkspaceReview, WorkspaceDiffType } from "./review-workspace";
 import { handleCodeNavResolve, handleCodeNavHover, extractChangedFiles } from "./code-nav";
@@ -363,6 +368,10 @@ export async function startReviewServer(
   // every diff payload. Off where nothing can be read: a static patch has
   // no repository, and P4 drops binary files from its patch entirely.
   const imagePreviewSupported = !isStaticPatchMode && gitContext?.vcsType !== "p4";
+  // Markdown preview capability advert: the preview renders the full file, so
+  // it is offered wherever /api/file-content can read one (never a static
+  // patch). Its images (/api/review-markdown-image) follow imagePreviewSupported.
+  const markdownPreviewSupported = !isStaticPatchMode;
   const runImageRead = createConcurrencyLimiter(REVIEW_IMAGE_READ_CONCURRENCY);
   const sourceKindAdvert = isStaticPatchMode
     ? ({ sourceKind: "patch" } as const)
@@ -2325,6 +2334,7 @@ export async function startReviewServer(
 
               serverSession,
               imagePreviewSupported,
+              markdownPreviewSupported,
               ...sourceKindAdvert,
               // Mount is the only place the pin matters, so it rides /api/diff
               // alone (not the switch endpoints).
@@ -2332,6 +2342,9 @@ export async function startReviewServer(
               shareBaseUrl,
               repoInfo,
               isWSL: wslFlag,
+              // config.json `markdownExtensions`: extra extensions the review
+              // UI's Markdown preview treats as Markdown.
+              markdownExtensions: getExtraMarkdownExtensions(),
               // PR mode advertises the ready PR checkout (null while warming), so
               // the Open-in button gates correctly from the initial load — not
               // the launch repo. Non-PR keeps the workspace/local cwd.
@@ -2745,6 +2758,7 @@ export async function startReviewServer(
 
                   serverSession,
                   imagePreviewSupported,
+                  markdownPreviewSupported,
                   ...sourceKindAdvert,
                   diffType: currentDiffType,
                   diffOptions: workspace.diffOptions,
@@ -2917,6 +2931,7 @@ export async function startReviewServer(
 
                 serverSession,
                 imagePreviewSupported,
+                markdownPreviewSupported,
                 ...sourceKindAdvert,
                 diffType: currentDiffType,
                 // Echo the base the server actually used. resolveBaseBranch
@@ -2987,6 +3002,7 @@ export async function startReviewServer(
 
                   serverSession,
                   imagePreviewSupported,
+                  markdownPreviewSupported,
                   ...sourceKindAdvert,
                   prDiffScope: currentPRDiffScope,
                   ...(layerPatchIncomplete && { prPatchIncomplete: true, prPatchUpgradeAvailable: layerUpgradeAvailable }),
@@ -3050,6 +3066,7 @@ export async function startReviewServer(
 
                   serverSession,
                   imagePreviewSupported,
+                  markdownPreviewSupported,
                   ...sourceKindAdvert,
                   prDiffScope: currentPRDiffScope,
                   ...(layerPatchIncomplete && { prPatchIncomplete: true, prPatchUpgradeAvailable: layerUpgradeAvailable }),
@@ -3104,6 +3121,7 @@ export async function startReviewServer(
 
                 serverSession,
                 imagePreviewSupported,
+                markdownPreviewSupported,
                 ...sourceKindAdvert,
                 prDiffScope: currentPRDiffScope,
                 semanticDiff: await getSemanticDiffAdvert(),
@@ -3239,6 +3257,7 @@ export async function startReviewServer(
 
                 serverSession,
                 imagePreviewSupported,
+                markdownPreviewSupported,
                 ...sourceKindAdvert,
                 prMetadata: pr.metadata,
                 // The new PR's checkout (null while warming) so Open-in re-roots
@@ -3355,53 +3374,77 @@ export async function startReviewServer(
             }
           }
 
+          // Where the current mode reads one side of a repository path, as
+          // bytes: shared by /api/review-image (#1598) and the Markdown
+          // preview's /api/review-markdown-image, in the same priority order
+          // as /api/file-content below.
+          const readReviewSide = async (
+            side: DiffSide,
+            filePath: string,
+            oldPath: string | undefined,
+            maxBytes: number,
+            signal?: AbortSignal,
+          ): Promise<FileBytesRead> => {
+            if (workspace) return workspace.getFileBytes(filePath, oldPath, side, maxBytes);
+            const prCwd = resolvePRLocalCwd();
+            if (isPRMode && currentPRDiffScope === "full-stack" && prCwd && prMetadata?.defaultBranch) {
+              const baseRef = await resolvePRFullStackBaseRef(gitRuntime, prMetadata.defaultBranch, prCwd);
+              if (!baseRef) return { kind: "missing" };
+              return getFileBytesForDiff(gitRuntime, "merge-base", baseRef, filePath, oldPath, side, maxBytes, prCwd);
+            }
+            if (hasLocalAccess) {
+              return getVcsFileBytesForDiff(
+                currentDiffType as DiffType,
+                currentBase,
+                filePath,
+                oldPath,
+                side,
+                maxBytes,
+                gitContext?.cwd,
+              );
+            }
+            if (isPRMode && prMetadata && prRef) {
+              const ref = prRef;
+              return readPRImageSide({
+                gitRuntime,
+                poolCwd: prCwd,
+                oldSha: prMetadata.mergeBaseSha ?? prMetadata.baseSha,
+                headSha: prMetadata.headSha,
+                side,
+                filePath,
+                oldPath,
+                maxBytes,
+                fetchBytes: (sha, path, max) => fetchPRFileBytes(ref, sha, path, max),
+                signal,
+              });
+            }
+            return { kind: "unavailable" };
+          };
+
+          // API: An image a reviewed Markdown file shows, read at that side's
+          // revision. Every decision is in the shared handler.
+          if (url.pathname === REVIEW_MARKDOWN_IMAGE_ENDPOINT && req.method === "GET") {
+            const result = await handleReviewMarkdownImageRequest({
+              params: url.searchParams,
+              ifNoneMatch: req.headers.get("if-none-match"),
+              available: imagePreviewSupported,
+              patch: currentPatch,
+              markdownExtensions: getExtraMarkdownExtensions(),
+              isCurrentSnapshot: (snapshot) => snapshot === currentSnapshotId(),
+              signal: req.signal,
+              readSide: (side, filePath, oldPath, maxBytes, signal) =>
+                runImageRead(() => readReviewSide(side, filePath, oldPath, maxBytes, signal), signal),
+            });
+            return new Response(result.body as BodyInit | null, {
+              status: result.status,
+              headers: result.headers,
+            });
+          }
+
           // API: One side of a changed image, as bytes (#1598). Every decision
           // (eligibility, caps, sniffing, headers) is in the shared handler;
-          // this closure only says where the current mode reads a side from,
-          // in the same priority order as /api/file-content below.
+          // readReviewSide only says where the current mode reads a side from.
           if (url.pathname === REVIEW_IMAGE_ENDPOINT && req.method === "GET") {
-            const readSide = async (
-              side: DiffSide,
-              filePath: string,
-              oldPath: string | undefined,
-              maxBytes: number,
-              signal?: AbortSignal,
-            ): Promise<FileBytesRead> => {
-              if (workspace) return workspace.getFileBytes(filePath, oldPath, side, maxBytes);
-              const prCwd = resolvePRLocalCwd();
-              if (isPRMode && currentPRDiffScope === "full-stack" && prCwd && prMetadata?.defaultBranch) {
-                const baseRef = await resolvePRFullStackBaseRef(gitRuntime, prMetadata.defaultBranch, prCwd);
-                if (!baseRef) return { kind: "missing" };
-                return getFileBytesForDiff(gitRuntime, "merge-base", baseRef, filePath, oldPath, side, maxBytes, prCwd);
-              }
-              if (hasLocalAccess) {
-                return getVcsFileBytesForDiff(
-                  currentDiffType as DiffType,
-                  currentBase,
-                  filePath,
-                  oldPath,
-                  side,
-                  maxBytes,
-                  gitContext?.cwd,
-                );
-              }
-              if (isPRMode && prMetadata && prRef) {
-                const ref = prRef;
-                return readPRImageSide({
-                  gitRuntime,
-                  poolCwd: prCwd,
-                  oldSha: prMetadata.mergeBaseSha ?? prMetadata.baseSha,
-                  headSha: prMetadata.headSha,
-                  side,
-                  filePath,
-                  oldPath,
-                  maxBytes,
-                  fetchBytes: (sha, path, max) => fetchPRFileBytes(ref, sha, path, max),
-                  signal,
-                });
-              }
-              return { kind: "unavailable" };
-            };
             const result = await handleReviewImageRequest({
               params: url.searchParams,
               ifNoneMatch: req.headers.get("if-none-match"),
@@ -3410,7 +3453,7 @@ export async function startReviewServer(
               isCurrentSnapshot: (snapshot) => snapshot === currentSnapshotId(),
               signal: req.signal,
               readSide: (side, filePath, oldPath, maxBytes, signal) =>
-                runImageRead(() => readSide(side, filePath, oldPath, maxBytes, signal), signal),
+                runImageRead(() => readReviewSide(side, filePath, oldPath, maxBytes, signal), signal),
             });
             return new Response(result.body as BodyInit | null, {
               status: result.status,

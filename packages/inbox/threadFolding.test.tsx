@@ -526,8 +526,10 @@ test.skipIf(!hasDom)('the pill shows while ANY new message is below the view, an
   });
   const el = await render(grown);
   const pill = el.querySelector<HTMLButtonElement>('[data-new-pill]')!;
-  // The first new message is in view, the second is not.
-  expect(pill.textContent).toBe('2 new');
+  // The first new message is in view, the second is not: the pill counts what
+  // is below the view (it used to print every new message of the visit, "2 new";
+  // design record "inbox-new-in-open-thread").
+  expect(pill.textContent).toBe('1 new');
   expect(pill.hasAttribute('data-off')).toBe(false);
   act(() => pill.click());
   expect(scrolled.at(-1)).toBe('msg_A5');
@@ -597,4 +599,94 @@ test.skipIf(!hasDom)('the thread box shrinking (the reply box opening below it) 
   act(() => root!.unmount());
   root = null;
   expect(watcher.connected).toBe(false);
+});
+
+// The Inbox's own notes (Mark read's set-aside note, a late Undo's reopened
+// note) are written as the person's messages but are not the person's reply
+// and not a look (violation A in adr/implementation/inbox-thread-state.md).
+// The failures these guard: the "Saved for / Delivered to" line moved under the
+// note (or vanished, the row's `sent` being the reply's), and an agent message
+// posted inside the Undo window stopped reading New once the note went.
+const SET_ASIDE_NOTE = "Set aside for now; don't wait on these:\n\n- Q1. Which shortcut opens search?";
+
+async function renderWithSent(thread: InboxThread, sent: { at: string; checked_at: string | null } | null, lookSeq?: number | null) {
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(
+      <div className="pn-inbox">
+        <ThreadPane
+          thread={thread}
+          sent={sent}
+          onQuestions={() => {}}
+          onChanged={async () => {}}
+          onClose={() => {}}
+          decisions={[]}
+          onOpenDecisionPage={() => {}}
+          file={null}
+          onOpenFile={() => {}}
+          onOpenGuide={() => {}}
+          lookSeq={lookSeq}
+        />
+      </div>,
+    );
+  });
+  await settle();
+  return host;
+}
+
+test.skipIf(!hasDom)("a reply, then the Inbox's set-aside note: the Saved for / Delivered to line sits on the reply, never on the note", async () => {
+  const [q] = questionsOf(ROOT, ONE_OPEN);
+  const thread: InboxThread = {
+    thread_id: ROOT,
+    project: PROJECT,
+    subject: 'Search for the docs site',
+    thread_name: null,
+    resolved_at: null,
+    messages: [
+      message(ROOT, AGENT, 2, ONE_OPEN, { questions: [{ ...q!, state: 'closed', set_aside_at: '2026-10-10T12:00:00.000Z' } as InboxQuestion], person_seen_seq: 2 }),
+      message('msg_P1', PERSON, 5, 'Still thinking about the shortcut.'),
+      message('msg_N1', PERSON, 7, SET_ASIDE_NOTE, { set_aside: [`${ROOT}/${q!.key}`] }),
+    ],
+  };
+  const saved = await renderWithSent(thread, { at: thread.messages[1]!.created_at, checked_at: null });
+  // The reply stays open with the note after it, so its line shows.
+  expect(shown(saved)).toEqual(['msg_A1:line', 'msg_P1:open', 'msg_N1:open']);
+  expect(article(saved, 'msg_P1')!.querySelector('[data-delivery]')?.textContent).toContain('Saved for');
+  expect(article(saved, 'msg_N1')!.querySelector('[data-delivery]')).toBeNull();
+  act(() => root!.unmount());
+  host!.remove();
+  const delivered = await renderWithSent(thread, { at: thread.messages[1]!.created_at, checked_at: '2026-10-10T13:00:00.000Z' });
+  expect(article(delivered, 'msg_P1')!.querySelector('[data-delivery]')?.textContent).toContain('Delivered to');
+  expect(article(delivered, 'msg_N1')!.querySelector('[data-delivery]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('an agent message posted inside the Undo window still reads New after the set-aside note; the visit boundary ignores the note', async () => {
+  const [q] = questionsOf(ROOT, ONE_OPEN);
+  const thread: InboxThread = {
+    thread_id: ROOT,
+    project: PROJECT,
+    subject: 'Search for the docs site',
+    thread_name: null,
+    resolved_at: null,
+    messages: [
+      // Mark read counted the look at the question (seq 2); the news (4) came inside the Undo window; the note (6) after.
+      message(ROOT, AGENT, 2, ONE_OPEN, { questions: [{ ...q!, state: 'closed', set_aside_at: '2026-10-10T12:00:00.000Z' } as InboxQuestion], person_seen_seq: 2 }),
+      message('msg_A2', AGENT, 4, 'CI is green. The index is 1.8 MB.'),
+      message('msg_N1', PERSON, 6, SET_ASIDE_NOTE, { set_aside: [`${ROOT}/${q!.key}`] }),
+    ],
+  };
+  // The boundary read from the thread (lookBoundary): the note is no look.
+  const fromThread = await renderWithSent(thread, null);
+  expect(article(fromThread, 'msg_A2')!.hasAttribute('data-new')).toBe(true);
+  expect(fromThread.querySelector('[data-thread-meta]')!.textContent).toContain('1 new since you looked');
+  // No reply line under the note: it is not the person's reply.
+  expect(fromThread.querySelector('[data-delivery]')).toBeNull();
+  act(() => root!.unmount());
+  host!.remove();
+  // The window's look from before this visit (lookSeq): the visit boundary takes the person's replies, not the note.
+  const fromVisit = await renderWithSent(thread, null, 2);
+  expect(article(fromVisit, 'msg_A2')!.hasAttribute('data-new')).toBe(true);
+  expect(fromVisit.querySelector('[data-new-divider]')).not.toBeNull();
 });

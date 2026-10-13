@@ -386,6 +386,28 @@ export interface CodeAnnotation {
    * inline on the current diff and never posted as an inline PR comment.
    */
   outdated?: boolean;
+  /**
+   * Code review only: a comment made by selecting text in a Markdown file's
+   * rendered preview. Always file-scoped (`scope: 'file'`); `lineStart` /
+   * `lineEnd` are the file-comment sentinels, not source lines. Exported with
+   * the quoted text; in PR mode it goes into the review body, never inline.
+   * Additive: annotations without it behave exactly as before.
+   */
+  markdownPreview?: MarkdownPreviewAnchor;
+}
+
+/** Where a comment made in a rendered Markdown preview points (see `CodeAnnotation.markdownPreview`). */
+export interface MarkdownPreviewAnchor {
+  /** The rendered text the reviewer selected. */
+  originalText: string;
+  /** The preview view it was made in: the rendered diff or the whole new version. */
+  view: 'diff' | 'whole';
+  /** In the rendered diff: the kind of section the selection started in. */
+  diffContext?: 'added' | 'removed' | 'modified' | 'unchanged';
+  /** web-highlighter positions, valid only in the view it was made in;
+   *  other views re-anchor by text. */
+  startMeta?: AnnotationTextMeta;
+  endMeta?: AnnotationTextMeta;
 }
 
 /** Token-level metadata passed from selection to annotation creation. */

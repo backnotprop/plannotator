@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { heldNotice, markHeldRowArchived, refreshHeldRows, settleOwn } from './held';
+import { heldNotice, markHeldRowArchived, refreshHeldRows, settleOwn, settleThread } from './held';
 
 function row(id: string, project: string, last_at: string, last_author: 'agent' | 'person'): InboxListRow {
   return { thread_id: id, project: { id: `prj_${project}`, name: project }, last_at, last_author } as InboxListRow;
@@ -27,6 +27,60 @@ describe('heldNotice', () => {
     expect(heldNotice(shown, fresh)).toEqual({ count: 2, text: '2 new in docs-site' });
     const across = sections(...fresh[0]!.threads, row('d', 'billing-svc', '2026-10-07T10:08:00Z', 'agent'));
     expect(heldNotice(shown, across)).toEqual({ count: 3, text: '3 new' });
+  });
+
+  // The failure this guards: the Inbox's set-aside note is a person-authored
+  // line, so an agent message followed by the note before the list read again
+  // made the row's last message the person's, and the agent's message slipped
+  // in without "N new".
+  test("an agent message followed by the Inbox's note still counts; the note alone does not", () => {
+    const shown = sections({ ...row('a', 'billing-svc', '2026-10-07T10:00:00Z', 'agent'), last_agent_at: '2026-10-07T10:00:00Z' } as InboxListRow);
+    const noteOnly = sections({ ...row('a', 'billing-svc', '2026-10-07T10:00:10Z', 'person'), last_agent_at: '2026-10-07T10:00:00Z' } as InboxListRow);
+    expect(heldNotice(shown, noteOnly).count).toBe(0);
+    const agentThenNote = sections({ ...row('a', 'billing-svc', '2026-10-07T10:00:10Z', 'person'), last_agent_at: '2026-10-07T10:00:05Z' } as InboxListRow);
+    expect(heldNotice(shown, agentThenNote)).toEqual({ count: 1, text: '1 new in billing-svc' });
+  });
+
+  // The failure this guards (inbox-replaced.spec.ts): the agent replaced a
+  // question in the thread the person had open, the person then sent; counting
+  // by last_agent_at alone made that replacement "1 new" on close, so the
+  // notice the person pressed next was a stale one and a new thread stayed held.
+  test('an agent message the person replied after is not news, on screen or not; a later agent message is', () => {
+    const shown = sections({ ...row('a', 'billing-svc', '2026-10-12T10:00:00Z', 'agent'), last_agent_at: '2026-10-12T10:00:00Z', sent: null } as InboxListRow);
+    const replacedThenSent = { ...row('a', 'billing-svc', '2026-10-12T10:02:00Z', 'person'), last_agent_at: '2026-10-12T10:01:00Z', sent: { at: '2026-10-12T10:02:00Z', checked_at: null } } as InboxListRow;
+    expect(heldNotice(shown, sections(replacedThenSent)).count).toBe(0);
+    expect(settleOwn(shown, sections(replacedThenSent))[0]!.threads[0]).toBe(replacedThenSent);
+    // The same with a note after the reply: still the person's.
+    const noteAfter = { ...replacedThenSent, last_at: '2026-10-12T10:03:00Z' } as InboxListRow;
+    expect(heldNotice(shown, sections(noteAfter)).count).toBe(0);
+    // The agent writes after the reply: news.
+    const later = { ...row('a', 'billing-svc', '2026-10-12T10:04:00Z', 'agent'), last_agent_at: '2026-10-12T10:04:00Z', sent: null } as InboxListRow;
+    expect(heldNotice(shown, sections(later))).toEqual({ count: 1, text: '1 new in billing-svc' });
+    // Not on screen, a new thread beside it: only the new thread counts.
+    const fresh = { ...row('b', 'billing-svc', '2026-10-12T10:05:00Z', 'agent'), last_agent_at: '2026-10-12T10:05:00Z', sent: null } as InboxListRow;
+    expect(heldNotice(shown, sections(replacedThenSent, fresh))).toEqual({ count: 1, text: '1 new in billing-svc' });
+  });
+
+  // The failure this guards: a row not on screen counted as news whenever it
+  // held any agent message, so a thread unarchived on the phone or in another
+  // tab whose last real word is the person's (Sent, or Quiet once the agent
+  // read the reply) raised "1 new" and stayed out of the list on settle.
+  test("a row not on screen whose last real message is the person's is not news; one whose agent message is followed only by a note is", () => {
+    const other = { ...row('other', 'docs-site', '2026-10-12T10:00:00Z', 'agent'), last_agent_at: '2026-10-12T10:00:00Z', sent: null, section: 'waiting', unseen: 1 } as InboxListRow;
+    const shown: InboxListSection[] = [{ id: 'waiting', label: 'Waiting on you', threads: [other] }];
+    const replied = { ...row('replied', 'docs-site', '2026-10-12T11:00:00Z', 'person'), last_agent_at: '2026-10-12T09:00:00Z', section: 'sent', unseen: 0, sent: { at: '2026-10-12T11:00:00Z', checked_at: null } } as InboxListRow;
+    const checked = { ...row('checked', 'docs-site', '2026-10-12T11:00:00Z', 'person'), last_agent_at: '2026-10-12T09:00:00Z', section: 'quiet', unseen: 0, sent: { at: '2026-10-12T11:00:00Z', checked_at: '2026-10-12T11:05:00Z' } } as InboxListRow;
+    // The agent wrote, then the Inbox's note went: `sent` reads past the note, so it is null and the row is news.
+    const noted = { ...row('noted', 'docs-site', '2026-10-12T11:10:00Z', 'person'), last_agent_at: '2026-10-12T11:09:00Z', section: 'new', unseen: 1, sent: null } as InboxListRow;
+    const latest: InboxListSection[] = [
+      { id: 'waiting', label: 'Waiting on you', threads: [other] },
+      { id: 'new', label: 'New since you looked', threads: [noted] },
+      { id: 'sent', label: 'Sent', threads: [replied] },
+      { id: 'quiet', label: 'Quiet', threads: [checked] },
+    ];
+    expect(heldNotice(shown, latest)).toEqual({ count: 1, text: '1 new in docs-site' });
+    const settled = settleOwn(shown, latest);
+    expect(Object.fromEntries(settled.map((s) => [s.id, s.threads.map((t) => t.thread_id)]))).toEqual({ waiting: ['other'], new: [], sent: ['replied'], quiet: ['checked'] });
   });
 });
 
@@ -170,5 +224,119 @@ describe('markHeldRowArchived', () => {
     expect(refreshHeldRows(marked, sections(b))[0]!.threads[0]).toBe(marked[0]!.threads[0]);
     // Unarchived again: the list has it, and its fresh state replaces the archived one.
     expect(refreshHeldRows(marked, sections(a, b))[0]!.threads[0]).toBe(a);
+  });
+});
+
+// A new message in the thread the person has open (design record
+// "inbox-new-in-open-thread", approved 2026-10-12): the open thread's row
+// tells its state in place and is never in "N new"; on close it settles where
+// its state puts it, an unseen arrival bringing it back unread.
+describe('the open thread', () => {
+  const at = (minute: number) => `2026-10-12T10:${String(minute).padStart(2, '0')}:00Z`;
+  const r = (id: string, project: string, minute: number, section: InboxListRow['section'], unseen: number) =>
+    ({ ...row(id, project, at(minute), 'agent'), last_agent_at: at(minute), sent: null, section, unseen, unread: section !== 'quiet' && section !== 'sent' }) as InboxListRow;
+  const bySection = (...rows: InboxListRow[]): InboxListSection[] =>
+    (['stopped', 'holding', 'waiting', 'new', 'sent', 'quiet'] as const).map((id) => ({ id, label: id, threads: rows.filter((x) => x.section === id) }));
+  const ids = (list: InboxListSection[]) => list.filter((s) => s.threads.length > 0).map((s) => `${s.id}:${s.threads.map((t) => t.thread_id).join(',')}`);
+
+  // Opened from New: the look unbolded it on screen, in place. Then the agent posts in it.
+  const openShown = { ...r('open', 'billing-svc', 1, 'new', 0), unread: false } as InboxListRow;
+  const other = r('other', 'docs-site', 0, 'new', 1);
+  const shown = bySection(openShown, other);
+  const arrived = r('open', 'billing-svc', 5, 'new', 1);
+  const asked = r('open', 'billing-svc', 5, 'waiting', 1);
+  const seen = r('open', 'billing-svc', 5, 'quiet', 0);
+  const elsewhere = r('elsewhere', 'docs-site', 6, 'new', 1);
+  /** The thread open now; and as it stood when it closed (what arrived while open is its own business, nothing after). */
+  const OPEN = { threadId: 'open' };
+  const closedAs = (asOf: InboxListRow | null) => ({ threadId: 'open', asOf });
+
+  test('an arrival in the open thread is never in "N new"; another thread\'s still is, and the line names only that one', () => {
+    expect(heldNotice(shown, bySection(arrived, other), undefined, OPEN)).toEqual({ count: 0, text: null });
+    expect(heldNotice(shown, bySection(arrived, other, elsewhere), undefined, OPEN)).toEqual({ count: 1, text: '1 new in docs-site' });
+    // Without the exemption (no thread open), the same arrival is news as before.
+    expect(heldNotice(shown, bySection(arrived, other)).count).toBe(1);
+  });
+
+  test('the open thread\'s row goes bold in place on arrival and unbolds in place once seen; it never moves', () => {
+    const onArrival = refreshHeldRows(shown, bySection(asked, other, elsewhere), OPEN);
+    expect(ids(onArrival)).toEqual(['new:open,other']);
+    expect(onArrival.find((s) => s.id === 'new')!.threads[0]).toBe(asked);
+    expect(onArrival.find((s) => s.id === 'new')!.threads[0]).toMatchObject({ unread: true, unseen: 1 });
+    const onSeen = refreshHeldRows(onArrival, bySection(seen, other, elsewhere), OPEN);
+    expect(ids(onSeen)).toEqual(['new:open,other']);
+    expect(onSeen.find((s) => s.id === 'new')!.threads[0]).toMatchObject({ unread: false, unseen: 0 });
+    // Without the exemption the arrival waits behind "N new": the row keeps what it showed.
+    expect(refreshHeldRows(shown, bySection(asked, other)).find((s) => s.id === 'new')!.threads[0]).toBe(openShown);
+  });
+
+  test('closed before the arrival was seen: it settles unread, in New, or in Waiting when it asks', () => {
+    expect(ids(settleOwn(shown, bySection(arrived, other), undefined, closedAs(arrived)))).toEqual(['new:open,other']);
+    const settled = settleOwn(shown, bySection(asked, other, elsewhere), undefined, closedAs(asked));
+    expect(ids(settled)).toEqual(['waiting:open', 'new:other']);
+    expect(settled.find((s) => s.id === 'waiting')!.threads[0]).toMatchObject({ unread: true });
+    // Another thread's agent activity still waits behind Show.
+    expect(heldNotice(settled, bySection(asked, other, elsewhere))).toEqual({ count: 1, text: '1 new in docs-site' });
+    // Without the exemption (the old rule) the unseen arrival waited behind Show and the row kept its old state.
+    expect(ids(settleOwn(shown, bySection(asked, other)))).toEqual(['new:open,other']);
+  });
+
+  test('closed after the arrival was seen: it settles where its state puts it (Quiet)', () => {
+    expect(ids(settleOwn(shown, bySection(seen, other), undefined, closedAs(seen)))).toEqual(['new:other', 'quiet:open']);
+  });
+
+  test('a thread opened from a link, not on screen: closed unseen, it comes in unread; nothing else an agent started does', () => {
+    const away = bySection(other);
+    expect(heldNotice(away, bySection(arrived, other), new Set(['open']), OPEN).count).toBe(0);
+    expect(ids(settleOwn(away, bySection(arrived, other, elsewhere), new Set(['open']), closedAs(arrived)))).toEqual(['new:open,other']);
+  });
+
+  // The failure this guards (inbox-replaced.spec.ts): an agent message that
+  // lands in the beat between the close and the settle was taken as part of
+  // the open visit, so it skipped "1 new" and moved the row by itself.
+  test('an agent message after the close is news like any other, in the beat before the list settles', () => {
+    // Closed with nothing new (the row as on screen); then the agent asks in it.
+    const atClose = { ...openShown, section: 'quiet', unseen: 0 } as InboxListRow;
+    const onScreen = bySection({ ...atClose }, other);
+    expect(heldNotice(onScreen, bySection(asked, other), undefined, closedAs(atClose))).toEqual({ count: 1, text: '1 new in billing-svc' });
+    expect(refreshHeldRows(onScreen, bySection(asked, other), closedAs(atClose)).find((s) => s.id === 'quiet')!.threads[0]).toMatchObject({ unseen: 0 });
+    expect(ids(settleOwn(onScreen, bySection(asked, other), undefined, closedAs(atClose)))).toEqual(['new:other', 'quiet:open']);
+    // No row for it at the close (an older list): nothing is exempt.
+    expect(heldNotice(onScreen, bySection(asked, other), undefined, closedAs(null)).count).toBe(1);
+  });
+
+  // The failure this guards: the person archived the thread they had open
+  // and the agent answered in it before they closed it. The archive branch of
+  // settleOwn dropped the row (waiting behind "N new"), so the reply they did
+  // not see vanished from the list on close.
+  test('archived while open, then the agent writes in it before the close: unseen, it settles back unread', () => {
+    const open = { ...r('open', 'billing-svc', 1, 'new', 0), unread: false, resolved_at: null } as InboxListRow;
+    const archivedShown = markHeldRowArchived(bySection(open, other), 'open', at(2));
+    // The agent's reply brings it back from the archive while it is still open: the row tells it in place.
+    const cameBack = { ...r('open', 'billing-svc', 4, 'new', 1), resolved_at: at(2), back_from_archive: true } as InboxListRow;
+    const whileOpen = refreshHeldRows(archivedShown, bySection(cameBack, other), OPEN);
+    expect(whileOpen.flatMap((s) => s.threads).find((t) => t.thread_id === 'open')).toBe(cameBack);
+    expect(heldNotice(whileOpen, bySection(cameBack, other), undefined, OPEN).count).toBe(0);
+    // Closed before seeing it: back in New, bold.
+    const settled = settleOwn(whileOpen, bySection(cameBack, other), undefined, closedAs(cameBack));
+    expect(ids(settled)).toEqual(['new:open,other']);
+    expect(settled.find((s) => s.id === 'new')!.threads[0]).toMatchObject({ unread: true, unseen: 1 });
+    // The same reply after the close (the row at the close was the archived one): it waits behind "N new".
+    const archivedAtClose = archivedShown.flatMap((s) => s.threads).find((t) => t.thread_id === 'open')!;
+    expect(ids(settleOwn(archivedShown, bySection(cameBack, other), undefined, closedAs(archivedAtClose)))).toEqual(['new:other']);
+  });
+
+  test('settleThread (the list the thread covered): only that row moves, to its place in the section its state gives it', () => {
+    const quietOpen = r('open', 'billing-svc', 1, 'quiet', 0);
+    const q2 = r('q2', 'docs-site', 9, 'quiet', 0);
+    const w1 = r('w1', 'docs-site', 7, 'waiting', 1);
+    const w2 = r('w2', 'docs-site', 3, 'waiting', 1);
+    const before = bySection(quietOpen, q2, w1, w2, other);
+    const moved = settleThread(before, bySection(asked, q2, w1, w2, other, elsewhere), 'open');
+    // Newest first in Waiting: w1 (10:07), open (10:05), w2 (10:03). The new thread `elsewhere` stays out.
+    expect(ids(moved)).toEqual(['waiting:w1,open,w2', 'new:other', 'quiet:q2']);
+    expect(moved.find((s) => s.id === 'new')!.threads[0]).toBe(other);
+    // No row for it in the list read: nothing changes.
+    expect(ids(settleThread(before, bySection(q2), 'open'))).toEqual(ids(before));
   });
 });

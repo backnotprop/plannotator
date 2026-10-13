@@ -63,6 +63,7 @@ import {
   type InboxThreadSummary,
   checkInboxThreadName,
   inboxThreadNameKey,
+  isInboxNote,
 } from "@plannotator/core/inbox-types";
 import { inboxListSections, inboxRowUnread, inboxSectionOf } from "./list";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
@@ -222,6 +223,12 @@ function refusalError(refusal: InboxAnswerRefusal): InboxError {
         { key: refusal.key, superseded_by: refusal.superseded_by },
       );
   }
+}
+
+/** A thread's last message, the Inbox's own notes read past (`isInboxNote`). */
+function lastNonNote(messages: readonly InboxMessage[]): InboxMessage | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) if (!isInboxNote(messages[i]!)) return messages[i];
+  return undefined;
 }
 
 /** The most ids one send may supersede. */
@@ -623,6 +630,8 @@ export class InboxStore {
     if (!root || root.thread_id !== threadId) return null;
     const messages = this.threadMessages(threadId);
     const last = messages[messages.length - 1] ?? root;
+    // The Inbox's own notes are not the person's reply: the last word is the last other message's.
+    const lastWord = lastNonNote(messages) ?? root;
     const questions = messages.flatMap((m) => this.questionsOf(m.id));
     return {
       thread_id: threadId,
@@ -635,7 +644,8 @@ export class InboxStore {
       message_count: messages.length,
       resolved_at: root.resolved_at,
       questions: summarizeInboxQuestions(questions),
-      waiting_on_person: root.resolved_at === null && last.author.kind === "agent",
+      // A standing Mark read means nothing here waits on the person.
+      waiting_on_person: root.resolved_at === null && lastWord.author.kind === "agent" && this.readAt(root, messages) === null,
     };
   }
 
@@ -660,9 +670,13 @@ export class InboxStore {
     const messages = this.threadMessages(threadId);
     const seqOf = (m: InboxMessage) => this.messageSeq.get(m.id) ?? 0;
     let lastPersonSeq = 0;
+    let lastAgentAt: string | null = null;
     let waitingSince: string | null = null;
     for (const message of messages) {
-      if (message.author.kind === "person") lastPersonSeq = seqOf(message);
+      // The person's reply is a look; the Inbox's own notes (Mark read's
+      // set-aside note, a late Undo's reopened note) are not.
+      if (message.author.kind === "person" && !isInboxNote(message)) lastPersonSeq = seqOf(message);
+      if (message.author.kind === "agent") lastAgentAt = message.created_at;
       if (waitingSince === null && this.questionsOf(message.id).some((q) => q.state === "open" && !q.orphaned)) {
         waitingSince = message.created_at;
       }
@@ -670,10 +684,11 @@ export class InboxStore {
     // A reply of the person's is a look at everything before it.
     const seenSeq = Math.max(root.person_seen_seq ?? 0, lastPersonSeq);
     const unseen = messages.filter((m) => m.author.kind === "agent" && seqOf(m) > seenSeq).length;
-    const last = messages[messages.length - 1] ?? root;
+    // The last message with the Inbox's notes read past: rule 7 (Sent) and "came back".
+    const lastReal = lastNonNote(messages) ?? root;
     const sent =
-      last.author.kind === "person"
-        ? { at: last.created_at, checked_at: (root.agent_checked_seq ?? 0) >= seqOf(last) ? (root.agent_checked_at ?? null) : null }
+      lastReal.author.kind === "person"
+        ? { at: lastReal.created_at, checked_at: (root.agent_checked_seq ?? 0) >= seqOf(lastReal) ? (root.agent_checked_at ?? null) : null }
         : null;
     // An agent wrote after the person archived the thread (mail apps' rule):
     // it comes back to the list while something there waits (an agent
@@ -683,11 +698,11 @@ export class InboxStore {
     // handled. Derived; the thread stays resolved until the person acts.
     const archiveSeq = this.archiveSeq(threadId);
     const agentAfterArchive = archiveSeq !== null && messages.some((m) => m.author.kind === "agent" && seqOf(m) > archiveSeq);
-    // The person's last real reply: Mark read's set-aside note and its Undo's
-    // reopened note are the Inbox's, not a reply that waits on the agent (as readAt).
-    const lastReal = [...messages].reverse().find((m) => !(m.author.kind === "person" && (m.set_aside || m.reopened)));
+    // Mark read on a came-back thread sends it back to the archive: while
+    // that read stands, the person's reply before it no longer holds it out.
+    const readAt = this.readAt(root, messages);
     const replyUnread =
-      lastReal !== undefined &&
+      readAt === null &&
       lastReal.author.kind === "person" &&
       seqOf(lastReal) > (archiveSeq ?? 0) &&
       (root.agent_checked_seq ?? 0) < seqOf(lastReal);
@@ -701,7 +716,7 @@ export class InboxStore {
       ...summary,
       agent_after_archive: agentAfterArchive,
       back_from_archive: backFromArchive,
-      read_at: this.readAt(root, messages),
+      read_at: readAt,
       project: { id: project.id, name: project.name },
       thread_name: root.thread_name ?? null,
       answered_not_sent: (root.resolved_at === null || backFromArchive) && summary.questions.open === 0 && summary.questions.picked > 0,
@@ -709,6 +724,7 @@ export class InboxStore {
       unseen,
       sent,
       guide: messages.some((m) => m.guide != null),
+      last_agent_at: lastAgentAt,
     };
     const section = inboxSectionOf(facts);
     return { ...facts, section, unread: inboxRowUnread(section) };
@@ -768,10 +784,11 @@ export class InboxStore {
    * moves the thread to Quiet without archiving it: every question still
    * waiting on the person (open, or picked and not sent) is closed as a skip
    * (`set_aside`, never a decision), and the thread counts as looked at. It
-   * comes back when an agent writes again. Moving back reopens every question
-   * a Mark read closed exactly as it was, a saved pick included (its revision
-   * goes up by one, so a pick in flight is refused rather than lost). No
-   * write when nothing changes. An archived thread refuses.
+   * comes back when an agent writes again. Moving back reopens the questions
+   * that Mark read closed (not an earlier one's) exactly as they were, a
+   * saved pick included (its revision goes up by one, so a pick in flight is
+   * refused rather than lost). No write when nothing changes. An archived
+   * thread refuses.
    */
   markRead(threadId: string, read: boolean): InboxListRow {
     const root = this.messages.get(threadId);
@@ -793,10 +810,13 @@ export class InboxStore {
         const at = this.stamp();
         let latestAgent = 0;
         for (const m of members) if (m.author.kind === "agent") latestAgent = Math.max(latestAgent, this.messageSeq.get(m.id) ?? 0);
+        // This Mark read's identity: the seq of its root line, kept on each
+        // question it closes, so its Undo reopens exactly those.
+        const readSeq = this.seq + 1;
         this.appendMessage(
           {
             ...root,
-            person_read_seq: this.seq + 1,
+            person_read_seq: readSeq,
             person_read_at: at,
             person_seen_seq: Math.max(root.person_seen_seq ?? 0, latestAgent),
             // The look before, so an Undo puts unseen news back as it was.
@@ -812,6 +832,7 @@ export class InboxStore {
               revision: record.revision + 1,
               set_aside: {
                 at,
+                read_seq: readSeq,
                 previous: {
                   answer: record.answer,
                   revision: record.revision,
@@ -826,7 +847,11 @@ export class InboxStore {
         }
       }
     } else {
-      const closed = records.filter((r) => r.set_aside);
+      // Undo reopens only what its own Mark read closed (owner ruling
+      // 2026-10-12): a question an earlier Mark read set aside, and told the
+      // agent about, stays closed. With no Mark read on the root there is
+      // nothing to undo.
+      const closed = records.filter((r) => this.closedByThisRead(r, root));
       if (root.person_read_seq != null || closed.length > 0) {
         const at = this.stamp();
         if (root.person_read_seq != null) {
@@ -895,6 +920,18 @@ export class InboxStore {
     const row = this.listRow(threadId);
     if (!row) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
     return row;
+  }
+
+  /**
+   * The root's current Mark read closed this question: its `set_aside`
+   * names that Mark read (`read_seq`), or, on a record older than the field,
+   * was written at that Mark read's `person_read_at` (the same stamp).
+   */
+  private closedByThisRead(record: InboxQuestionRecord, root: InboxMessage): boolean {
+    const setAside = record.set_aside;
+    if (!setAside || root.person_read_seq == null) return false;
+    if (setAside.read_seq !== undefined) return setAside.read_seq === root.person_read_seq;
+    return root.person_read_at != null && setAside.at === root.person_read_at;
   }
 
   /**
@@ -975,18 +1012,29 @@ export class InboxStore {
     return out;
   }
 
-  /** The person looked at a thread: its agent messages so far are no longer new. No write when nothing is new. */
-  markSeen(threadId: string): InboxListRow {
+  /**
+   * The person looked at a thread: its agent messages so far are no longer
+   * new. No write when nothing is new. `throughSeq` caps the look at what the
+   * window showed: it covers only agent messages whose seq is at or below it,
+   * so a message that landed after the window read the thread stays new. A
+   * cap at or below the look already recorded writes nothing (a look never
+   * goes back), and one past the newest message is the newest message.
+   * Without it: every agent message so far (older clients, the phone door).
+   */
+  markSeen(threadId: string, throughSeq?: number): InboxListRow {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
     // What listRow counts as seen: the last look, or the person's own last
-    // reply. Only an agent message after both is new, so only then is a write due.
+    // reply (never the Inbox's notes). Only an agent message after both is
+    // new, so only then is a write due.
     let seen = root.person_seen_seq ?? 0;
     let latestAgent = 0;
     for (const id of this.threadMembers.get(threadId) ?? []) {
       const seq = this.messageSeq.get(id) ?? 0;
-      if (this.messages.get(id)?.author.kind === "person") seen = Math.max(seen, seq);
-      else latestAgent = Math.max(latestAgent, seq);
+      const message = this.messages.get(id);
+      if (message?.author.kind === "agent") {
+        if (throughSeq === undefined || seq <= throughSeq) latestAgent = Math.max(latestAgent, seq);
+      } else if (message && !isInboxNote(message)) seen = Math.max(seen, seq);
     }
     if (latestAgent > seen) {
       const at = this.stamp();

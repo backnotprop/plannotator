@@ -33,7 +33,8 @@
     "./live-proxy": "./live-proxy.ts",
     "./inbox": "./inbox.ts",
     "./inbox-tailscale": "./inbox-tailscale.ts",
-    "./inbox-mcp": "./inbox-mcp.ts"
+    "./inbox-mcp": "./inbox-mcp.ts",
+    "./inbox-agents": "./inbox-agents.ts"
   },
   "files": [
     "*.ts",

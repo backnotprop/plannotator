@@ -89,6 +89,9 @@ function sandbox(): Sandbox {
       BROWSER: browser,
       GIT_CONFIG_GLOBAL: "/dev/null",
       GIT_CONFIG_NOSYSTEM: "1",
+      // A person's `plannotator inbox` runs the agents' own CLIs from PATH;
+      // these tests never do (inbox-connect-cli.test.ts proves it with fakes).
+      PLANNOTATOR_INBOX_CONNECT: "0",
     },
   };
 }

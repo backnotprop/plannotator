@@ -80,7 +80,7 @@ import {
 } from '@plannotator/ui/utils/agentToolAnnouncement';
 import { useAgentToolSetting } from '@plannotator/ui/hooks/useAgentToolSetting';
 import { useLatchedTrue } from '@plannotator/ui/hooks/useLatchedTrue';
-import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration, Annotation, CommentAnnotation, AgentJobInfo, type ArtifactAnnotationMeta, type CallFlowAnnotationTarget } from '@plannotator/ui/types';
+import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration, Annotation, CommentAnnotation, AgentJobInfo, type ArtifactAnnotationMeta, type CallFlowAnnotationTarget, type ImageAttachment, type MarkdownPreviewAnchor } from '@plannotator/ui/types';
 import type { CommentAskAIHandler } from '@plannotator/ui/components/CommentPopover';
 import { useResizablePanel } from '@plannotator/ui/hooks/useResizablePanel';
 import { useCodeAnnotationDraft, type CodeDraftMergeItems, type CodeDraftTargetState } from '@plannotator/ui/hooks/useCodeAnnotationDraft';
@@ -223,6 +223,8 @@ import { DEMO_TOUR_ID } from './demoTour';
 import { GuideScreen } from './components/guide/GuideScreen';
 import { DEMO_GUIDE_ID } from './demoGuide';
 import { buildPRArtifacts } from './utils/prArtifacts';
+import { useMarkdownPreview, useMarkdownPreviewKeys } from './hooks/useMarkdownPreview';
+import { setExtraMarkdownExtensions } from '@plannotator/ui/utils/markdownExtensions';
 import {
   submitPlatformReviewTargets,
 } from './utils/platformReviewSubmission';
@@ -688,6 +690,10 @@ const ReviewApp: React.FC = () => {
   // bytes of changed images? Absent (old server, demo) reads as false, so no
   // preview renders and no /api/review-image request is ever issued.
   const [imagePreviewSupported, setImagePreviewSupported] = useState(false);
+  // Markdown preview capability advert: the server can hand both sides of a
+  // file in full (and serve a Markdown file's own images). Absent (old
+  // server, demo) reads as false: no preview UI at all.
+  const [markdownPreviewSupported, setMarkdownPreviewSupported] = useState(false);
   // Session-constant capability advert from `/api/diff`: 'patch' means the
   // diff is caller-supplied bytes (`plannotator review --patch-file`) with no
   // repository behind it. ABSENT reads as 'vcs', so an old server keeps every
@@ -2287,10 +2293,12 @@ const ReviewApp: React.FC = () => {
         gitContext?: GitContext;
         diffOptions?: DiffOption[];
         agentCwd?: string | null;
+        markdownExtensions?: string[];
         sharingEnabled?: boolean;
         approvalNotesSupported?: boolean;
         serverSession?: string;
         imagePreviewSupported?: boolean;
+        markdownPreviewSupported?: boolean;
         sourceKind?: ReviewSourceKind;
         repoInfo?: { display: string; branch?: string };
         prMetadata?: PRMetadata;
@@ -2362,11 +2370,15 @@ const ReviewApp: React.FC = () => {
           setCommittedBase(initial);
         }
         if (data.agentCwd !== undefined) setAgentCwd(data.agentCwd);
+        // `markdownExtensions` in config.json: extra extensions the Markdown
+        // preview (and local-link detection) treat as Markdown.
+        setExtraMarkdownExtensions(data.markdownExtensions);
         if (data.sharingEnabled !== undefined) setSharingEnabled(data.sharingEnabled);
         setApprovalNotesSupported(readApprovalNotesAdvert(data.approvalNotesSupported));
         // Stale-tab guard: every decision echoes this server's nonce.
         adoptServerSession(data.serverSession);
         setImagePreviewSupported(data.imagePreviewSupported === true);
+        setMarkdownPreviewSupported(data.markdownPreviewSupported === true);
         // Session-constant: a static patch session has no diff-type switch to
         // re-advertise it on, so `/api/diff` is the only place it can arrive.
         setSourceKind(data.sourceKind === 'patch' ? 'patch' : 'vcs');
@@ -2617,6 +2629,52 @@ const ReviewApp: React.FC = () => {
 
     addCodeAnnotationsWithHistory([withPRContext(newAnnotation)]);
   }, [identity, withPRContext, addCodeAnnotationsWithHistory]);
+
+  // --- Markdown preview (rendered Markdown files in the review) ---
+  // One Source / Changes / Read menu per Markdown file: a file set by hand
+  // keeps its view for the session; every other file starts in the last view
+  // picked (remembered). Off entirely when the server has no full contents to
+  // show (old server, static patch).
+  const markdownPreview = useMarkdownPreview({
+    files,
+    supported: markdownPreviewSupported && !isStaticPatch,
+  });
+
+  // A comment made by selecting text in a previewed Markdown file: an
+  // ordinary file-scoped comment that carries the quoted text, so the
+  // sidebar lists it under the file, drafts keep it, undo covers it, the
+  // export quotes it, and a PR review puts it in the body.
+  const handleAddMarkdownPreviewComment = useCallback((
+    filePath: string,
+    comment: { id: string; text: string; anchor: MarkdownPreviewAnchor; images?: ImageAttachment[] },
+  ) => {
+    const trimmed = comment.text.trim();
+    if (!trimmed) return;
+    const newAnnotation: CodeAnnotation = {
+      id: comment.id,
+      type: 'comment',
+      scope: 'file',
+      filePath,
+      lineStart: 1,
+      lineEnd: 1,
+      side: 'new',
+      text: trimmed,
+      ...(comment.images?.length ? { images: comment.images } : {}),
+      markdownPreview: comment.anchor,
+      createdAt: Date.now(),
+      author: identity,
+    };
+    addCodeAnnotationsWithHistory([withPRContext(newAnnotation)]);
+  }, [identity, withPRContext, addCodeAnnotationsWithHistory]);
+
+  // Ask AI about a selection in a previewed Markdown file (selection-scope
+  // ask, labelled with the file, like the PR description's).
+  const handleAskAIForMarkdownPreview = useCallback<CommentAskAIHandler>((question, context) => {
+    askAI({
+      prompt: question,
+      scope: { kind: 'selection', label: context.label ?? 'Markdown preview', text: context.text },
+    });
+  }, [askAI]);
 
   // Edit annotation
   const handleEditAnnotation = useCallback((
@@ -2956,6 +3014,25 @@ const ReviewApp: React.FC = () => {
     return () => window.removeEventListener('keydown', handler);
   }, [files, activeFileIndex, isDiffPanelActive, guideOpen, handleToggleViewed, isPathStageable, stageFile]);
 
+  // `P`: the current Markdown file in its next view: the open one, or in All
+  // files the one holding focus or the pointer, else the top-most Markdown
+  // file in view (resolved when the key is pressed).
+  const resolveAllFilesViewTarget = useCallback(
+    () => markdownPreview?.resolveViewTarget() ?? null,
+    [markdownPreview],
+  );
+  useMarkdownPreviewKeys({
+    controller: markdownPreview,
+    targetPath: isDiffPanelActive
+      ? files[activeFileIndex]?.path ?? null
+      : isAllFilesActive
+        ? resolveAllFilesViewTarget
+        : null,
+    files,
+    enabled: !guideOpen && (isDiffPanelActive || isAllFilesActive),
+    onLocked: (reason) => toast(reason, { id: 'markdown-view-locked' }),
+  });
+
   // Shared function: apply a PR response (used by both initial load and PR switch)
   function applyPRResponse(data: PRSessionUpdate & {
     rawPatch: string; gitRef: string;
@@ -2968,6 +3045,7 @@ const ReviewApp: React.FC = () => {
     agentCwd?: string | null;
     approvalNotesSupported?: boolean;
     imagePreviewSupported?: boolean;
+    markdownPreviewSupported?: boolean;
     draftState?: CodeDraftTargetState;
   }) {
     const isPRSwitch = !!data.prMetadata;
@@ -2981,6 +3059,7 @@ const ReviewApp: React.FC = () => {
       setApprovalNotesSupported(readApprovalNotesAdvert(data.approvalNotesSupported));
     }
     if (data.imagePreviewSupported !== undefined) setImagePreviewSupported(data.imagePreviewSupported === true);
+    if (data.markdownPreviewSupported !== undefined) setMarkdownPreviewSupported(data.markdownPreviewSupported === true);
     const nextFiles = parseDiffToFiles(data.rawPatch);
     dockApi?.getPanel(REVIEW_DIFF_PANEL_ID)?.api.close();
     needsInitialDiffPanel.current = true;
@@ -3090,6 +3169,7 @@ const ReviewApp: React.FC = () => {
         baseBehindRemote?: boolean;
         approvalNotesSupported?: boolean;
         imagePreviewSupported?: boolean;
+        markdownPreviewSupported?: boolean;
         superseded?: boolean;
       };
 
@@ -3112,6 +3192,7 @@ const ReviewApp: React.FC = () => {
         setApprovalNotesSupported(readApprovalNotesAdvert(data.approvalNotesSupported));
       }
       if (data.imagePreviewSupported !== undefined) setImagePreviewSupported(data.imagePreviewSupported === true);
+      if (data.markdownPreviewSupported !== undefined) setMarkdownPreviewSupported(data.markdownPreviewSupported === true);
 
       const nextFiles = orderFilesBySections(parseDiffToFiles(data.rawPatch), data.sections);
       // Durable progress reconciles every new snapshot independently of the
@@ -3851,6 +3932,9 @@ const ReviewApp: React.FC = () => {
     contextExpansionAvailable: !isStaticPatch,
     imagePreviewAvailable: imagePreviewSupported && !isStaticPatch,
     snapshotId,
+    markdownPreview,
+    onAddMarkdownPreviewComment: handleAddMarkdownPreviewComment,
+    onAskAIForMarkdownPreview: aiAvailable ? handleAskAIForMarkdownPreview : undefined,
     // Outdated comments (#1590) carry line numbers from an earlier version of
     // the PR: they stay in the sidebar and the export, never on the diff.
     allAnnotations: diffAnnotations,
@@ -3963,7 +4047,7 @@ const ReviewApp: React.FC = () => {
   }), [
     files, diffData?.rawPatch, activeFileIndex, guideOpen, effectiveDiffStyle, handleDiffStyleChange, isCompactTouchLayout, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
-    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions, isStaticPatch, imagePreviewSupported, snapshotId,
+    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions, isStaticPatch, imagePreviewSupported, snapshotId, markdownPreview, handleAddMarkdownPreviewComment, handleAskAIForMarkdownPreview,
     diffAnnotations, externalAnnotations,
     visibleDescriptionAnnotations, selectedDescriptionAnnotationId, handleAddDescriptionAnnotation,
     handleSelectDescriptionAnnotation, handleDeleteDescriptionAnnotation, handleAskAIForDescription,
@@ -5525,6 +5609,7 @@ const ReviewApp: React.FC = () => {
               resizeHandle={fileTreeResizeHandle}
             >
               <FileTree
+                markdownPreviewedPaths={markdownPreview?.previewedPaths}
                 files={files}
                 activeFileIndex={activeFileIndex}
                 onSelectPROverview={() => completeNavigatorSelection(openPROverviewPanel)}

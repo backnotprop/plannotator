@@ -40,6 +40,9 @@
     "hand-12-archive-unarchive-keeps-everything.json",
     "hand-13-mark-read-before-archive-is-kept.json",
     "hand-14-undo-after-an-earlier-mark-read.json",
-    "hand-15-archive-holds-the-set-aside-note.json"
+    "hand-15-archive-holds-the-set-aside-note.json",
+    "hand-16-undo-reopens-only-its-own-mark-read.json",
+    "hand-17-came-back-mark-read-then-reply.json",
+    "hand-18-look-capped-by-through.json"
   ]
 }

@@ -663,3 +663,82 @@ describe("Replaces: lines (the Plannotator Inbox)", () => {
     expect(parseQuestionBlock("question-text", `Why?\nReplaces: ${OLD}.`)!.replaces).toEqual([OLD]);
   });
 });
+
+// The owner's 0.28.17 report: a task-list choice longer than 200 characters
+// could never be picked in the Inbox ("… is not one of the question's
+// choices") and never showed as picked in plan review, because the answer's
+// `selected` was cut to 200 characters while the label was not.
+const LONG_SPIKE =
+  "Spike first. Find out what the sign-in grants (a Claude subscription paying for turns the platform runs?) and whether Anthropic allows it for a third-party product; the placeholder stays off the product until both answers are in";
+// The same text as a long label set off from a short "why" by ` - ` / ` — `:
+// the label before the separator is still over 200 characters.
+const LONG_DASH = `${LONG_SPIKE} - keeps it reversible`;
+const LONG_EM = `${LONG_SPIKE} — keeps it reversible`;
+// The short-lead form (` - ` right after the lead) splits as always.
+const SHORT_LEAD = "Spike first - find out what the sign-in grants (a Claude subscription paying for turns the platform runs?) and whether Anthropic allows it for a third-party product; the placeholder stays off the product until both answers are in";
+
+describe("long task-list choices (picked as written)", () => {
+  const block = (choice: string) => `Which way?\n\n- [ ] ${choice}\n- [ ] Ship it now`;
+
+  for (const [name, choice] of [
+    ["no separator", LONG_SPIKE],
+    ["a ' - ' separator", LONG_DASH],
+    ["a ' — ' separator", LONG_EM],
+  ] as const) {
+    test(`${name}: the label round-trips through parseQuestionAnswer whole`, () => {
+      const q = parseQuestionBlock("question", block(choice))!;
+      const label = q.choices[0].label;
+      expect(label.length).toBeGreaterThan(200);
+      const saved = parseQuestionAnswer({ v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: [label] })!;
+      expect(saved.selected).toEqual([label]);
+      expect(questionStatus(q, saved)).toBe("answered");
+      const index = indexQuestionBlocks([{ id: "b", type: "directive", directiveKind: "question", content: block(choice), startLine: 1 }]);
+      const out = formatQuestionAnswersSection(questionExportItems(index), [saved]);
+      expect(out).toContain(`Answer: ${label}`);
+    });
+  }
+
+  test("the separators keep their label/description split", () => {
+    for (const choice of [LONG_DASH, LONG_EM]) {
+      const q = parseQuestionBlock("question", block(choice))!;
+      expect(q.choices[0]).toMatchObject({ label: LONG_SPIKE, description: "keeps it reversible" });
+    }
+    const short = parseQuestionBlock("question", block(SHORT_LEAD))!;
+    expect(short.choices[0].label).toBe("Spike first");
+    expect(short.choices[0].description).toStartWith("find out what");
+  });
+
+  test("an answer an older build cut at 200 characters maps back to the one choice it names", () => {
+    const q = parseQuestionBlock("question", block(LONG_SPIKE))!;
+    const cut = LONG_SPIKE.slice(0, 200);
+    const stored: QuestionAnswer = { v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: [cut] };
+    expect(canonicalQuestionAnswer(q, stored).selected).toEqual([LONG_SPIKE]);
+    // Two choices sharing their first 200 characters: ambiguous, left as stored.
+    const twin = parseQuestionBlock("question", `Which way?\n\n- [ ] ${LONG_SPIKE}\n- [ ] ${LONG_SPIKE.slice(0, 200)} but later`)!;
+    expect(canonicalQuestionAnswer(twin, stored).selected).toEqual([cut]);
+  });
+
+  test("the export prints the full label for an answer an older build cut at 200 characters", () => {
+    const index = indexQuestionBlocks([{ id: "b", type: "directive", directiveKind: "question", content: block(LONG_SPIKE), startLine: 1 }]);
+    const q = index[0].question;
+    const cut: QuestionAnswer = { v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: [LONG_SPIKE.slice(0, 200)] };
+    const out = formatQuestionAnswersSection(questionExportItems(index), [cut]);
+    expect(out).toContain(`Answer: ${LONG_SPIKE}`);
+  });
+
+  test("a long label adds no looser matching: only its exact 200-character cut maps", () => {
+    const q = parseQuestionBlock("question", block(LONG_SPIKE))!;
+    expect(q.choices.some((c) => c.aliases)).toBe(false);
+    const stored = (label: string): QuestionAnswer => ({ v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: [label] });
+    // Case or punctuation never maps here, as in a question with no long label.
+    const loose = stored("ship it now.");
+    expect(canonicalQuestionAnswer(q, loose)).toBe(loose);
+    const cutLoose = stored(LONG_SPIKE.slice(0, 200).toUpperCase());
+    expect(canonicalQuestionAnswer(q, cutLoose)).toBe(cutLoose);
+  });
+
+  test("selected stays bounded: a label longer than any block body is cut", () => {
+    const parsed = parseQuestionAnswer(answer({ selected: ["x".repeat(30_000)] }))!;
+    expect(parsed.selected[0].length).toBe(20_000);
+  });
+});

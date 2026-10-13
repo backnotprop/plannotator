@@ -23,10 +23,13 @@ Two limits exist because pairing cannot work without them: an offer lives 10 min
 | `addresses.tailnet` | `host:port` of the tailnet publication, or null when "Reach from my tailnet" is off |
 | `addresses.lan` | `ip:port` of the LAN listener, or null when "Reach from this Wi-Fi" is off |
 | `addresses.fingerprint` | The LAN certificate's SHA-256 (section 3), or null with the LAN off |
+| `reachable` | The code carries an address a phone can use (added 2026-10-12 for the window's Pair a phone flow, which shows a code only once a way is on; the phone never reads this answer) |
+
+The window also reads, for Pair a phone (window routes, never on the door; the phone's exchanges are unchanged): `GET /api/inbox/pairing`, the last offer's state and what reached the door while it showed (`attempts`: which listener, and wrong code, digits over the Wi-Fi, an older code, after it closed, or redeemed; never the secret or the code), and `GET /api/inbox/pairing/checks`, what this computer can tell about the two ways before any is on.
 
 An offer is single use. It closes when it is redeemed, when it expires, after 5 wrong codes, or when the window makes a new one: one offer is open at a time, so six digits always name one offer. The offer lives in the server's memory only; a restart closes it.
 
-Pairing needs the phone to reach the computer once, over the same Wi-Fi or the tailnet; the relay does not carry a redemption in v1. With both addresses null the offer still answers (a simulator reaches the Inbox on `127.0.0.1`), and "Pair a phone" offers the "Reach from this Wi-Fi" switch in place.
+Pairing needs the phone to reach the computer once, over the same Wi-Fi or the tailnet; the relay does not carry a redemption in v1. With both addresses null the offer still answers (a simulator reaches the Inbox on `127.0.0.1`, `reachable: false`), and the window never shows such a code: Pair a phone starts at "How will your phone reach this computer?" and shows the code only once a way is switched on.
 
 ### The tailnet publication
 
@@ -126,8 +129,8 @@ The allowlist. Each row is the window's handler as it is today, with the request
 | `GET threads/archived[?project=prj_...&offset=n&limit=n]` | `GET /api/inbox/threads/archived` | | `{ serverSession, cursor, project, projects: [{ id, name, archived }], total, offset, limit, threads: [row] }`: the archived threads, newest archived first, a page at a time (`limit` 1 to 200, default 50). An explicit allowlist row (GET, read only), before `threads/:id`; added 2026-10-12, no exchange of its own | |
 | `GET projects` | `GET /api/inbox/projects` | | `{ serverSession, cursor, projects: [{ id, key, name, root, created_at, threads, unread }] }` | 7.6 |
 | `GET threads/:id` | `GET /api/inbox/threads/:id` | | `{ serverSession, cursor, thread, decisions, row }` (`row`, the thread's list row, and `thread.archive_seq`, the archive line's seq or null, additive since 2026-10-12) | 7.7 |
-| `POST threads/:id/seen` | same | `{ idempotency_key }` | `{ thread: row }` | 7.8 |
-| `POST threads/:id/read`, `POST threads/:id/unread` | same | `{ idempotency_key }` | `{ thread: row }`: Mark read (the row goes to Quiet, its waiting questions close unanswered) and its Undo; added after section 7, no exchange of its own | |
+| `POST threads/:id/seen` | same | `{ idempotency_key, through_seq? }` | `{ thread: row }`. `through_seq` (optional, added 2026-10-12 with seen on sight, design record "inbox-new-in-open-thread"; additive, the door forwards it unchanged): an integer, the seq (`thread.messages[].seq`) of the newest message the phone actually showed. The look then covers only the agent messages at or below it, so a message that landed after the phone read the thread stays new. Behind the recorded look (at or below it): no-op, nothing written, the look is never lowered; ahead of the thread's newest message: capped to the newest (the same as no `through_seq`). Absent or `null`: every agent message so far, as before. Anything but a whole number of 0 or more: `422 { "code": "validation_error", "field": "through_seq" }`, nothing written. An Inbox older than the field ignores it and marks everything | 7.8 |
+| `POST threads/:id/read`, `POST threads/:id/unread` | same | `{ idempotency_key }` | `{ thread: row }`: Mark read (the row goes to Quiet, its waiting questions close unanswered; on a thread that came back from the archive it goes back to Archived at once, even while the person's earlier reply there waits on the agent) and its Undo (it reopens only the questions that Mark read closed; one an earlier Mark read closed stays closed); added after section 7, no exchange of its own. Row semantics since 2026-10-12, the wire unchanged: the Inbox's own notes to the agent (person messages carrying `set_aside` or `reopened`) are neither the person's reply nor a look, so a row's `sent`, `unseen`, `waiting_on_person` and `back_from_archive` read past them (and `waiting_on_person` is false while a Mark read stands), and the row gains the additive `last_agent_at` (the latest agent message's time; `last_at` and `last_author` still count the notes). The thread-state model (`adr/implementation/inbox-thread-state.md`) and its trace fixtures say the same | |
 | `GET events[?cursor=n]` | `GET /api/inbox/events` | `Last-Event-ID` or `?cursor=` | SSE: `hello`, `record` per store line (`id:` = seq), `status`, a heartbeat every 15 s | 7.9 |
 | `POST messages/:id/picks` | same | `{ idempotency_key, questions: [{ key, revision, answer or null }] }` | `{ message_id, questions, reply: null }` | 7.10 |
 | `POST messages/:id/reply` | same | `{ idempotency_key, words?, questions?, feedback?, annotation_ids?, skip_unanswered? }` (`skip_unanswered: true` skips the message's questions left without a pick) | `{ message_id, questions, reply, replayed, decisions, decisions_refused }` | 7.11 |
@@ -378,7 +381,7 @@ Every command a phone sends carries one key: `idempotency_key` in the request bo
 |---|---|---|
 | Pick | `POST messages/:id/picks` | body `idempotency_key` |
 | Send | `POST messages/:id/reply` | body `idempotency_key` (also the store's own key) |
-| Seen | `POST threads/:id/seen` | body `idempotency_key` |
+| Seen | `POST threads/:id/seen` | body `idempotency_key` (beside the optional `through_seq`) |
 | Mark read, Undo | `POST threads/:id/read`, `POST threads/:id/unread` | body `idempotency_key` |
 | Resolve | `POST messages/:id/resolve` | body `idempotency_key` |
 | Delete | `POST threads/:id/delete` | body `idempotency_key` |
@@ -584,6 +587,16 @@ curl -sS -X POST "$INBOX/api/inbox/device/threads/msg_01K70000000000000000000010
 ```
 
 `{ "thread": <the row of 7.5, now "unseen": 0> }`. Without the key: `422 { "error": "idempotency_key: required on a phone's command.", "code": "validation_error", "field": "idempotency_key" }`.
+
+Seen on sight (added 2026-10-12, design record "inbox-new-in-open-thread"; the window does it, and the phone apps are asked to do the same): a phone records the look when the thread opens with `through_seq` set to the newest message seq in the thread it read, so a message landing between the read and the look stays new. An agent message that arrives while the thread is open counts as seen once its first lines (the sender row and about 96 pt of the body, or all of it if shorter) have been on screen for 1 s while the app is active and the thread is frontmost (no file, sheet or dialog over it); the phone then sends `seen` again with `through_seq` = that message's seq (only when every arrival before it was seen too, so the look never passes a message the person was not shown):
+
+```sh
+curl -sS -X POST "$INBOX/api/inbox/device/threads/msg_01K70000000000000000000010/seen" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"idempotency_key":"00000000-0000-4000-8000-000000000002","through_seq":214}'
+```
+
+The thread-state traces show the rule (`hand-18-look-capped-by-through`, the `seen` event's `through`).
 
 ### 7.9 The event stream
 

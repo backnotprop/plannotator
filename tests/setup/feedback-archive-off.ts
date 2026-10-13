@@ -42,6 +42,12 @@ process.env.PLANNOTATOR_RELAY_URL = "http://127.0.0.1:9";
 // `tailscale` CLI. Tests that need it inject a scripted runner.
 delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
 
+// `plannotator inbox` connects the agents it finds on PATH (packages/server/
+// inbox-agents.ts) by running their own CLIs. Tests never run a real agent
+// CLI: every process that inherits this environment skips the step. The
+// connect proofs turn it on in their own spawned env, with a PATH of fakes.
+process.env.PLANNOTATOR_INBOX_CONNECT = "0";
+
 // The update check asks GitHub once a day from a release build (the Inbox with
 // an X.Y.Z version, the compiled CLI). Tests never reach GitHub: a closed
 // loopback port refuses at once, so an unintended check fails fast and is

@@ -10,7 +10,7 @@ Event sequences with the list state the Inbox gives after each step. A phone kit
 | `name`, `description` | The trace and what it shows |
 | `source`, `seed` | `"hand"` (seed `null`) or `"generated"` (the fast-check seed it came from) |
 | `clock` | `start` and `step_ms`: everything written at step n is stamped `start + n * step_ms`. No two steps share a time, so no `last_at` or `resolved_at` ties: a thread id ends in random characters, and a tie's order would change from run to run. Break ties on the thread id yourself; the store's own test exercises that |
-| `known_violations` | A list, empty when none: `{ step, kind, test, rule, spec, today }` for each step where the Inbox breaks a rule of the model (`kind` `A`, `B` or `C`, as in the model doc). `expect` records what it does today; `spec` says what the rule wants. Skip those steps, or assert today's answer, until the fix lands |
+| `known_violations` | A list, empty when none: `{ step, kind, test, rule, spec, today }` for each step where the Inbox breaks a rule of the model (`kind` `A`, `B` or `C`, as in the model doc). `expect` records what it does then; `spec` says what the rule wants. A, B and C are fixed, so every list is empty now: every step's `expect` is the rule's answer. The field stays in the format for a violation found later |
 | `steps` | One entry per event, in order |
 
 ## A step
@@ -30,7 +30,7 @@ Labels: `m1`, `m2`, ... are messages in the order they were written; `t1`, `t2`,
 | `type` | Fields | What it is |
 |---|---|---|
 | `agent_message` | `project` (`repo0` or `repo1`), `session` (roots only: `ses_a`, `ses_b` or `null`), `reply_to` (a message label or `null`), `supersedes` (optional, one entry: the replied-to message, or its first question), `body` | An agent's `send_message`. Without `reply_to` it joins the newest unnamed thread that session started in the project, only while that thread is open (never an older open one), else starts a thread; with no session it always starts one. `lands_in` says where it went. The body is Markdown with `:::question` blocks |
-| `seen` | `thread` | The person opened the thread |
+| `seen` | `thread`, `through` (optional, a message label) | The person looked at the thread (`POST /seen`). Without `through`: every agent message in it so far. With `through`: the look stops at that message's seq (`through_seq`), so an agent message written after it stays new; a cap at or behind the recorded look changes nothing, and one past the thread's newest message (it may name another thread's later message) covers all of it. Only `hand-18-look-capped-by-through` uses it; a kit that replays the field as the server does needs nothing else |
 | `pick` | `message`, `key`, `choice` (a choice label) or `text` | The person saved an answer, not sent |
 | `send` | `message`, `words`, `skip_unanswered` | The person's Send on that message: every picked question on it, plus the words; `skip_unanswered: true` also sends its open questions as skips (`false` is Keep open). Each Send uses its own idempotency key |
 | `mark_read`, `unread` | `thread` | Mark read, and its Undo |
@@ -52,7 +52,7 @@ Labels: `m1`, `m2`, ... are messages in the order they were written; `t1`, `t2`,
 
 `packages/shared/inbox/store.test.ts` writes and checks them (`buildTraceFiles`). Every step runs against the real store and the test's independent model, with every invariant checked, before it is recorded.
 
-- `hand-*.json`: the hand-written edges (`HAND_TRACES`): Mark read racing a new agent message, archive then the agent writes again, supersede chains, the Send that skips with Keep open, and the rest.
+- `hand-*.json`: the hand-written edges (`HAND_TRACES`): Mark read racing a new agent message, archive then the agent writes again, supersede chains, the Send that skips with Keep open, the look capped by `through`, and the rest.
 - `gen-seed-*.json`: generated sequences. Seeds 1001 to 1024; each began as `fc.sample(fc.array(traceOpArb, { minLength: 14, maxLength: 24 }), { seed, numRuns: 1 })` (fast-check 4.9.0) after one root message, with only the events that wrote something kept. Once written, a file's events are data: the test replays them from the file and never samples again, so a fast-check upgrade changes nothing here.
 
 The test fails when a file differs from what the store does now. To regenerate after a change to the rules (from the repo root), keeping every trace's events:
@@ -63,4 +63,6 @@ PLANNOTATOR_INBOX_TRACES=write bun test packages/shared/inbox/store.test.ts
 
 `PLANNOTATOR_INBOX_TRACES=resample` also draws the generated traces' events again from their seeds; use it only when `traceOpArb` itself changes.
 
-A change of this format goes in a new `v2` folder; `v1` changes only when the Inbox's behaviour does.
+A change of this format goes in a new `v2` folder; `v1` changes only when the Inbox's behaviour does. The fix of violations A, B and C (2026-10-12) was such a change: the format is the same, the files were regenerated in place (their `known_violations` emptied, the steps that met them now expecting the rule's answer), and `hand-16-undo-reopens-only-its-own-mark-read` and `hand-17-came-back-mark-read-then-reply` were added. A kit that skipped the steps listed in `known_violations` can stop skipping them.
+
+The look's cap (`through_seq`, 2026-10-12, design record "inbox-new-in-open-thread") added the optional `through` field to the `seen` event and one trace, `hand-18-look-capped-by-through`. That is additive: the format stays `v1`, no existing file changed (a `seen` without `through` behaves exactly as before), and the generated traces never use the field.

@@ -31,6 +31,8 @@ import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { inboxStatus, readInboxRegistry, stopInbox } from "@plannotator/shared/inbox/registry";
 import { INBOX_TAILNET_HTTPS_PORT, takeDownInboxTailnet } from "./inbox-devices";
 import { takeDownInboxTailscale } from "./inbox-tailscale";
+import { forgetInboxAgents, planInboxAgentRemoval, type AgentEnvironment } from "./inbox-agents";
+import type { InboxAgentId } from "@plannotator/core/inbox-types";
 import {
   applyEdits,
   createScanner,
@@ -431,6 +433,9 @@ export async function runPlannotatorUninstall(
 
   await removeHostPlugins(request, environment, paths, state);
   removeHostConfigEntries(request, environment, paths, state);
+  // Plain uninstall too: with the binary gone, an agent's plannotator-inbox
+  // entry would fail to start at every launch.
+  await removeInboxAgentConnections(request, environment, state);
   removeInstalledFiles(request, environment, paths, state);
   if (dataDirSafetyIssue) {
     state.warnings.push(
@@ -505,6 +510,53 @@ export function formatUninstallResult(result: UninstallResult): string {
   }
 
   return lines.join("\n");
+}
+
+/** The agents' boundary (inbox-agents.ts) over uninstall's own. */
+function agentEnvironmentOf(environment: UninstallEnvironment): AgentEnvironment {
+  return {
+    platform: environment.platform,
+    homeDir: environment.homeDir,
+    env: environment.env,
+    which: (command) => environment.which(command),
+    run: async (argv) => {
+      const result = await environment.runCommand(argv[0]!, argv.slice(1));
+      return { exitCode: result.exitCode, timedOut: result.timedOut, stdout: result.stdout ?? "", stderr: "" };
+    },
+  };
+}
+
+/**
+ * The `plannotator-inbox` MCP entries `plannotator inbox` added to the
+ * agents on this computer (inbox-agents.ts): the recorded ones that still run
+ * Plannotator, then any found in the known files whose record is gone. An
+ * entry the person changed to run something else is theirs and is named. A
+ * failure is a warning, never a reason to keep the CLI.
+ */
+async function removeInboxAgentConnections(
+  request: UninstallRequest,
+  environment: UninstallEnvironment,
+  state: MutableUninstallResult,
+): Promise<void> {
+  // With no record (agents.json lost), only an entry that runs exactly this binary is taken as ours.
+  const plan = planInboxAgentRemoval(state.dataDir, agentEnvironmentOf(environment), [environment.execPath, "inbox", "mcp"]);
+  for (const skipped of plan.skipped) state.warnings.push(`Skipped: ${skipped}.`);
+  if (request.dryRun) {
+    for (const item of plan.items) state.planned.push(item.describe);
+    return;
+  }
+  const removed: InboxAgentId[] = [];
+  for (const item of plan.items) {
+    const problem = await item.apply();
+    if (problem) {
+      state.warnings.push(`Could not remove ${item.describe}: ${problem}.`);
+      continue;
+    }
+    state.removed.push(item.describe);
+    removed.push(item.agent);
+  }
+  // A plain uninstall keeps the data: forget these records so a reinstall connects them again.
+  if (!request.purge) forgetInboxAgents(state.dataDir, removed);
 }
 
 function formatUninstallRetryCommand(request: UninstallRequest): string {

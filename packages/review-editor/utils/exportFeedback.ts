@@ -1,4 +1,4 @@
-import type { CodeAnnotation, ConventionalLabel, ConventionalDecoration, CommentAnnotation, Annotation, ArtifactAnnotationMeta } from '@plannotator/ui/types';
+import type { CodeAnnotation, ConventionalLabel, ConventionalDecoration, CommentAnnotation, Annotation, ArtifactAnnotationMeta, MarkdownPreviewAnchor } from '@plannotator/ui/types';
 import type { PRMetadata } from '@plannotator/shared/pr-types';
 import { getMRLabel, getMRNumberLabel, getDisplayRepo } from '@plannotator/shared/pr-types';
 import { exportAnnotations, parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
@@ -173,6 +173,26 @@ export function formatCallFlowAnnotationTargets(annotation: CodeAnnotation): str
   return `\n\n**Selected call-flow steps:**\n${rows.join('\n')}`;
 }
 
+const MARKDOWN_PREVIEW_CONTEXT_LABEL: Record<NonNullable<MarkdownPreviewAnchor['diffContext']>, string> = {
+  added: 'in added text',
+  removed: 'in removed text',
+  modified: 'in changed text',
+  unchanged: 'in unchanged text',
+};
+
+/**
+ * The quoted text of a comment made in a Markdown file's rendered preview,
+ * as a Markdown quote, plus where in the rendered diff it was when that says
+ * something (removed text no longer exists in the file).
+ */
+export function markdownPreviewQuote(anchor: MarkdownPreviewAnchor): string {
+  const quote = anchor.originalText.trim().split('\n').map((line) => `> ${line}`).join('\n');
+  const where = anchor.diffContext && anchor.diffContext !== 'unchanged'
+    ? `\n_(${MARKDOWN_PREVIEW_CONTEXT_LABEL[anchor.diffContext]})_`
+    : '';
+  return `${quote}${where}\n`;
+}
+
 function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel = '###', currentDiff?: FeedbackDiffContext): string {
   let output = '';
 
@@ -188,6 +208,17 @@ function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel =
   for (const ann of sorted) {
     const scope = ann.scope ?? 'line';
     const prefix = formatConventionalPrefix(ann.conventionalLabel, ann.decorations);
+
+    if (scope === 'file' && ann.markdownPreview) {
+      output += `${headingLevel} Comment on the rendered Markdown\n`;
+      output += commitMismatchNote(ann, commitShaFromMode(currentDiff?.mode));
+      output += gitButlerMismatchNote(ann, currentDiff);
+      output += `${markdownPreviewQuote(ann.markdownPreview)}\n`;
+      if (ann.text) output += `${prefix}${ann.text}\n`;
+      else if (prefix) output += `${prefix.trimEnd()}\n`;
+      output += '\n';
+      continue;
+    }
 
     if (scope === 'file') {
       output += `${headingLevel} File Comment\n`;

@@ -32,12 +32,42 @@ Run `plannotator inbox` once before you connect an agent. That first run writes 
 
 You never need to keep the Inbox running yourself. When an agent calls it and it is stopped, it starts in the background, and no tab opens.
 
+### Your agents are connected for you
+
+When you run `plannotator inbox` (not `--background`, which is how agents start it), it connects the agents it finds on this computer that are not connected yet, and says which on the terminal:
+
+```
+Connected Codex, Gemini CLI and Cursor to the Inbox (Claude Code was already on).
+Agents use it from their next session. Change this in the Inbox's Settings.
+```
+
+| Agent | Found when | What is added |
+|-------|------------|---------------|
+| Claude Code | the Plannotator plugin is enabled | nothing: the plugin already gives it the `plannotator_inbox` tool |
+| Pi, OpenCode | Plannotator's extension or plugin is installed | the inbox tool turned on (`inboxTool` in `~/.plannotator/config.json`) |
+| Pi without the extension | Pi 0.99 or later on your `PATH` (older Pi has no `pi mcp`: connect it by hand) | `pi mcp add plannotator-inbox` |
+| Codex | `codex` on your `PATH` (a `~/.codex` or `$CODEX_HOME` folder without the CLI: connect it by hand) | `codex mcp add plannotator-inbox` (the Codex app and IDE extension share it) |
+| Gemini CLI | `gemini` on your `PATH` (`$GEMINI_CLI_HOME` honored) | `gemini mcp add -s user plannotator-inbox` |
+| Windsurf / Devin, Amp | `devin` or `amp` on your `PATH` | the agent's own `mcp add plannotator-inbox` |
+| Cursor, Kiro | `~/.cursor` exists or `cursor` / `cursor-agent` is on your `PATH`; `~/.kiro` exists or `kiro-cli` is on your `PATH` | one `plannotator-inbox` key in `~/.cursor/mcp.json` or `~/.kiro/settings/mcp.json` |
+| The Claude app | its settings folder exists | one key in `claude_desktop_config.json` (restart the Claude app) |
+
+Each entry runs `<your plannotator binary> inbox mcp`. The agent uses it from its next session. Before it runs an agent's own command, Plannotator checks the program's `--version`, so a different program with the same name is never handed it. Cline is not connected automatically yet: add it in Cline's MCP settings. When an agent started the Inbox in the background, a later `plannotator inbox` connects agents with the Inbox's environment (the `PATH` and home it was started with).
+
+- Every later `plannotator inbox` connects an agent installed since, and says so once ("Connected Amp to the Inbox (new on this computer)").
+- An agent you turned off in Settings, or whose entry you removed, is never added back by itself.
+- An existing `plannotator-inbox` entry that runs something else is never replaced.
+- In a JSON file only that one entry is added; every other byte of the file stays as it was. A file Plannotator cannot edit that way (comments, a duplicate key) is left as it was, and the terminal says why.
+- Editors (VS Code, Zed, JetBrains, Goose) are never changed. Settings has a one-click link or a snippet for each.
+- `PLANNOTATOR_INBOX_CONNECT=0` skips this step.
+- `plannotator uninstall` removes every entry it added (never one you added yourself). `--dry-run` lists them first.
+
 ## What you see
 
 - **The list.** One row per thread, in sections: Stopped on you, Holding up work, Waiting on you, New since you looked, Sent, and Quiet (folded). Sent waits on the agent, not on you, so it sits below what is new. A row shows the project, the agent, the subject and how many questions wait. New agent activity does not reorder the rows under you. It waits behind "N new in <project>" until you act. Nothing you do in an open thread reorders the list either: the list catches up when you leave the thread.
 - **Projects.** The sidebar lists each project an agent wrote from: the repository, or the folder when there is none. Click a project to see only its threads.
 - **A thread.** It reads like email. Questions render as cards, and a click saves your pick at once. **Send** carries your picks, your words and your annotations as one reply. **Mod+Enter** sends. A Send skips the questions you left unanswered, and the reply tells the agent so; the reply box says how many before you send, and **Keep open** leaves them open for that Send. After a Send the reply reads "Saved for <agent>" until the agent reads it, then "Delivered to <agent>, <time>". Messages you already read fold to one line (click one to open it, or **Expand all**), and a thread opens at **New since you looked**; `j` and `k` move between messages and `n` jumps to the first new one.
-- **Mark read.** To get a thread out of the top without answering it, press **Mark read** in the thread's header (or `E`, or the button that shows when you hover a row). The thread moves to Quiet, marked "Read", and its unanswered questions close. A few seconds later the agent that asked gets one note from you: "Set aside for now; don't wait on these:" and the questions. The thread comes back to the top when the agent writes again. **Undo** in the toast, or `Z`, reopens the questions as they were; the pressed **Read** button does the same later. If an agent was stopped on the thread, the toast says so and offers **Reply**.
+- **Mark read.** To get a thread out of the top without answering it, press **Mark read** in the thread's header (or `E`, or the button that shows when you hover a row). The thread moves to Quiet, marked "Read", and its unanswered questions close. A few seconds later the agent that asked gets one note from you: "Set aside for now; don't wait on these:" and the questions. The thread comes back to the top when the agent writes again. **Undo** in the toast, or `Z`, reopens the questions that Mark read closed, as they were; the pressed **Read** button does the same later. Questions an earlier Mark read closed stay closed. If an agent was stopped on the thread, the toast says so and offers **Reply**.
 - **Archive.** The archive icon in the thread's header ends the thread: its questions close, and the agent's next message starts a new thread. **Unarchive** in the thread's foot reopens it. (Agents call this `resolve_message`.)
 - **New message.** Next to Reply, **New message** writes to an agent session that is running now in the thread's project (Claude Code, Pi or OpenCode 2 with the inbox tool; Pi and OpenCode 2 sessions are listed once they have written in that project). With one session running, the message goes to it; with several, you pick one. The session takes it as its next turn. The message belongs only to the session you picked: another agent session reading the thread does not take it. When no session is running, the button says so and offers Reply instead.
 - **When the session that asked has ended.** A reply goes to the session that asked. If the session asked through the Claude Code, Pi or OpenCode 2 connection and is no longer running (the Inbox has not heard from it for a minute), the thread says so before you reply: the message reads "session ended" and a note sits above the reply box. When you press **Send** and another session is running in the project, you choose where the reply goes: one of those sessions, or **Leave it for the next agent**. The button names your choice. **Esc** goes back to your reply. The session you pick is told that the reply was written to a session that ended, and to read the thread first. When no session is running, **Send** saves the reply in the thread until an agent reads it. Nothing is ever sent to another session unless you pick it. An agent connected through MCP alone (or OpenCode 1) is never called ended, because the Inbox cannot tell when it stops; your reply goes to it as before.
@@ -62,7 +92,7 @@ The mod is off in `claude -p`, in SDK runs and on Windows. There the tool is not
 
 ### Pi
 
-Install the [Pi extension](/docs/getting-started/installation/#pi), then turn the inbox tool on for Pi. It is off by default on Pi, because Pi sends every tool's full definition with each request:
+Install the [Pi extension](/docs/getting-started/installation/#pi), then run `plannotator inbox`: it turns the inbox tool on for Pi when it finds the extension. The tool is off by default on Pi, because Pi sends every tool's full definition with each request. To turn it on yourself:
 
 ```bash
 export PLANNOTATOR_INBOX_TOOL=1
@@ -72,7 +102,7 @@ Start a new Pi session (or `/reload`). A reply arrives as a follow-up message on
 
 ### OpenCode
 
-Add the [OpenCode plugin](/docs/getting-started/installation/#opencode), then turn the inbox tool on for OpenCode. It is off by default on OpenCode, for the same reason as Pi:
+Add the [OpenCode plugin](/docs/getting-started/installation/#opencode), then run `plannotator inbox`: it turns the inbox tool on for OpenCode when it finds the plugin in your global opencode config. The tool is off by default on OpenCode, for the same reason as Pi. To turn it on yourself:
 
 ```bash
 export PLANNOTATOR_INBOX_TOOL=1
@@ -199,6 +229,7 @@ Everything lives under `~/.plannotator/inbox/` (or `$PLANNOTATOR_DATA_DIR/inbox/
 | `blobs/<sha256>` | The version of each attached file as it was sent, and each guided review |
 | `markups/<sha256>.png` | The images you marked up when commenting on an image attachment |
 | `seq.json` | The highest event number ever written, kept across deletions |
+| `agents.json` | The agents `plannotator inbox` found or connected, so it never adds one back that you turned off |
 | `claims/`, `leases/` and `connection-tools.json` | Bookkeeping for the Pi and OpenCode connections |
 
 The Inbox stores the files agents attached as they were when sent, the messages and your replies. It sets no size limits. To free space, use **Delete thread** or **Delete project** in **Settings**, which also remove sent files that nothing else uses. Your choices for the inbox tool, notifications and the tailnet are kept in `~/.plannotator/config.json` (`inboxTool`, `inboxReminder`, `inboxNotifications`, `inboxSound`, `inboxTailscale`, `inboxTailscaleAllow`).
@@ -211,7 +242,7 @@ The Inbox stores the files agents attached as they were when sent, the messages 
 plannotator uninstall --purge
 ```
 
-This stops a running Inbox first, then deletes `~/.plannotator/inbox/` with the rest of the Plannotator data. If the Inbox does not stop, uninstall still removes the plugins, skills, hooks and config entries, but keeps your Plannotator data (`~/.plannotator`) and the `plannotator` binary. Quit the Inbox and run the command again to finish. Add `--dry-run` to see what would be removed.
+Both forms remove the `plannotator-inbox` entries `plannotator inbox` added to your agents (an entry you changed to run something else is left, and named). `--purge` also stops a running Inbox first, then deletes `~/.plannotator/inbox/` with the rest of the Plannotator data. If the Inbox does not stop, uninstall still removes the plugins, skills, hooks and config entries, but keeps your Plannotator data (`~/.plannotator`) and the `plannotator` binary. Quit the Inbox and run the command again to finish. Add `--dry-run` to see what would be removed.
 
 ## Troubleshooting
 
