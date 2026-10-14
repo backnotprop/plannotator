@@ -6,120 +6,9 @@ A plan review UI for Claude Code that intercepts `ExitPlanMode` via hooks, letti
 
 ## Project Structure
 
-```
-plannotator/
-├── apps/
-│   ├── hook/                     # Claude Code plugin (no commands/ — core skills installed to ~/.claude/skills act as slash commands)
-│   │   ├── .claude-plugin/plugin.json
-│   │   ├── hooks/hooks.json      # PermissionRequest hook config + "modules" (the Claude Code mod)
-│   │   ├── hooks/mod/            # The Claude Code mod: non-blocking plan review/annotate/review/last + Ask this session (see "Claude Code mod")
-│   │   ├── tests/                # `claude plugin test` harness tests (scripts/test-claude-code-mod.sh; bun skips them)
-│   │   ├── server/index.ts       # Entry point (plan + review + annotate + archive subcommands)
-│   │   └── dist/                 # Built single-file apps (index.html, review.html)
-│   ├── opencode-plugin/          # OpenCode plugin
-│   │   ├── commands/             # Slash command stubs (review, annotate, last — plugin intercepts execution)
-│   │   ├── index.ts              # OpenCode 1 entry with submit_plan tool + review/annotate event handlers
-│   │   ├── server.ts             # OpenCode 2 adapter (stable @opencode/plugin types; older-host capability fallbacks)
-│   │   ├── plannotator-tool.ts   # OpenCode 2 `plannotator` tool + per-session launch record (list/close); see "OpenCode 2: the plannotator tool"
-│   │   ├── plannotator.html      # Built plan review app
-│   │   └── review-editor.html    # Built code review app
-│   ├── amp-plugin/               # Amp plugin
-│   │   ├── plannotator.ts        # Native Amp command-palette integration
-│   │   └── README.md             # Install and local development notes
-│   ├── droid-plugin/             # Droid plugin
-│   │   ├── .factory-plugin/plugin.json
-│   │   ├── commands/             # Slash command entrypoints
-│   │   └── lib/                  # Shared command wrapper helpers
-│   ├── marketing/                # Marketing site, docs, and blog (plannotator.ai)
-│   │   └── astro.config.mjs      # Astro 5 static site with content collections
-│   ├── vibe/                     # Mistral Vibe integration source (consumed by scripts/install.sh; auto-detected via $VIBE_HOME, default ~/.vibe)
-│   │   ├── hooks/hooks.toml      # Reference copy of the managed pre_tool hook block install.sh writes into $VIBE_HOME/hooks.toml (macOS/Linux only)
-│   │   └── skills/               # Vibe-specific skills (review, annotate, last) with PLANNOTATOR_ORIGIN=mistral-vibe baked in; not installed on Windows
-│   ├── kiro-cli/                 # Kiro CLI integration source (consumed by scripts/install.sh; auto-detected via ~/.kiro)
-│   │   ├── agents/plannotator.json   # Example Kiro custom agent
-│   │   └── skills/               # Kiro-specific skill packages (review, annotate); setup-goal + visual-explainer install from apps/skills/extra
-│   ├── paste-service/            # Paste service for short URL sharing
-│   │   ├── core/                 # Platform-agnostic logic (handler, storage interface, cors)
-│   │   ├── stores/               # Storage backends (fs, kv, s3)
-│   │   └── targets/              # Deployment entries (bun.ts, cloudflare.ts)
-│   ├── inbox/                    # The Plannotator Inbox window's Vite single-file build (packages/inbox); build:hook copies it to apps/hook/dist/inbox.html, and the phone's surface (build:surface) to apps/hook/dist/surface.html
-│   ├── review/                   # Standalone review server (for development)
-│   │   ├── index.html
-│   │   ├── index.tsx
-│   │   └── vite.config.ts
-│   ├── guides-show/               # guides.show — portable Guided Review viewer (multi-file CDN build) + Cloudflare Worker (viewer/, worker/, share/, build/); the Worker is the only host target, self-hosting = deploying it under your own account
-│   ├── relay/                     # The Inbox relay (mobile steps R1, R2, R3): a Cloudflare Worker + one Durable Object per mailbox (src/index.ts, src/mailbox.ts), holding only ciphertext and hashes: pushes, and the phone's reads and answers while it is away; src/apns-h2.ts is a standalone HTTP/2 client for APNs over connect(); src/fcm.ts sends Android pushes through FCM HTTP v1 with plain fetch. Private, own version line, owner-deployed (never from CI; README.md has the deploy); its proof (test/) runs `wrangler dev` in the relay workflow and is skipped by the root `bun test`
-│   ├── vscode-extension/         # VS Code extension — opens plans in editor tabs
-│   │   ├── bin/                   # Router scripts (open-in-vscode, xdg-open)
-│   │   ├── src/                   # extension.ts, cookie-proxy.ts, ipc-server.ts, panel-manager.ts, editor-annotations.ts, vscode-theme.ts
-│   │   └── package.json           # Extension manifest (publisher: backnotprop)
-│   └── skills/                    # Agent skills (agentskills.io format)
-│       ├── core/                  # CORE skills (single-sourced) — installed to ~/.claude/skills and ~/.agents/skills (Codex)
-│       │   ├── plannotator/           # Knowledge layer: model-invocable CLI reference (subcommands, flags, exit codes) an agent loads on generic "use Plannotator" intent; freshness-guarded against apps/hook/server/cli.ts by plannotator-skill-reference.test.ts. Unreleased subcommands (`HIDDEN_SUBCOMMANDS` in cli.ts: today `t3` and `t3-hook`, the opt-in T3 Code connection; `inbox` was the last to launch) still run and keep `<sub> --help`, but stay out of `plannotator --help`, "Did you mean" suggestions and this skill (the test requires their absence); un-hide by deleting from that set, adding the top-level usage lines and documenting it here
-│       │   ├── plannotator-review/    # Lightweight: opens review UI
-│       │   ├── plannotator-annotate/  # Lightweight: opens annotate UI
-│       │   └── plannotator-last/      # Lightweight: annotates last message
-│       └── extra/                 # EXTRA skills — NOT default-installed (except Kiro); add via `npx skills add backnotprop/plannotator/apps/skills/extra --global`
-│           ├── plannotator-compound/        # Research analysis agent (map-reduce over denied plans)
-│           ├── plannotator-setup-goal/      # Goal package scaffolder for /goal workflows
-│           └── plannotator-visual-explainer/ # Visual HTML generator (plans, diagrams, PR explainers) with Plannotator theming
-├── packages/
-│   ├── server/                   # Shared server implementation
-│   │   ├── index.ts              # startPlannotatorServer(), handleServerReady()
-│   │   ├── review.ts             # startReviewServer(), handleReviewServerReady()
-│   │   ├── annotate.ts           # startAnnotateServer(), handleAnnotateServerReady()
-│   │   ├── inbox.ts              # startInboxServer(), handleInboxServerReady(): the Plannotator Inbox (Bun-only, loopback-only; see "Plannotator Inbox")
-│   │   ├── inbox-mcp.ts          # The Inbox's MCP tools (send_message, read_thread, resolve_message, wait_for_reply, list_decisions, record_decision, get_guide_brief, submit_guide)
-│   │   ├── inbox-tailscale.ts    # "Over your tailnet": `plannotator inbox --tailscale`, the owner-only tailnet listener and its serve mapping (see "Plannotator Inbox")
-│   │   ├── storage.ts            # Re-exports from @plannotator/shared/storage
-│   │   ├── share-url.ts          # Server-side share URL generation for remote sessions
-│   │   ├── remote.ts             # isRemoteSession(), getServerPort()
-│   │   ├── browser.ts            # openBrowser()
-│   │   ├── draft.ts              # Re-exports from @plannotator/shared/draft
-│   │   ├── integrations.ts       # Obsidian, Bear integrations
-│   │   ├── ide.ts                # VS Code diff integration (openEditorDiff)
-│   │   ├── editor-annotations.ts  # VS Code editor annotation endpoints
-│   │   └── project.ts            # Project name detection for tags
-│   ├── ui/                       # Shared React components + theme
-│   │   ├── theme.css             # Single source of truth for color tokens + Tailwind bridge
-│   │   ├── components/           # Viewer, Toolbar, Settings, etc.
-│   │   │   ├── icons/            # Shared SVG icon components (themeIcons, etc.)
-│   │   │   ├── diagram/          # The diagram engine's viewer (DiagramViewer, DiagramCanvas, DiagramOverlay, DiagramComposer, DiagramSourcePane, DiagramPopout + hooks); DiagramBlock.tsx is the fence side
-│   │   │   ├── plan-diff/        # PlanDiffBadge, PlanDiffViewer, clean/raw diff views
-│   │   │   └── sidebar/          # SidebarContainer, SidebarTabs, VersionBrowser, ArchiveBrowser
-│   │   ├── shortcuts/            # Keyboard shortcut registry (see Keyboard Shortcuts section below)
-│   │   │   ├── core.ts           # Engine: parser, formatter, dispatcher, validator
-│   │   │   ├── runtime.ts        # Engine: useShortcutScope, useDoubleTapShortcuts hooks
-│   │   │   ├── index.ts          # Barrel — re-exports engine + scopes from both subfolders
-│   │   │   ├── plan-review/      # Scopes for plan-editor surfaces (annotationMode, annotationPanel, annotationToolbar, commentPopover, documentView, goalSetup, htmlAnnotate, imageAnnotator, inputMethod, sidebar, viewer, vimSelection)
-│   │   │   └── code-review/      # Scopes for review-editor surfaces (ai, allFilesDiff, annotationToolbar, fileTree, prComments, suggestionModal, tourDialog)
-│   │   ├── shortcuts.test.ts     # Registry unit tests (parser, dispatcher, validator)
-│   │   ├── utils/                # parser.ts, sharing.ts, storage.ts, planSave.ts, agentSwitch.ts, planDiffEngine.ts, planAgentInstructions.ts, annotateAgentInstructions.ts
-│   │   ├── hooks/                # useAnnotationHighlighter.ts, useSharing.ts, usePlanDiff.ts, useSidebar.ts, useLinkedDoc.ts, useAnnotationDraft.ts, useCodeAnnotationDraft.ts, useArchive.ts
-│   │   └── types.ts
-│   ├── ai/                       # Provider-agnostic AI backbone (providers, sessions, endpoints)
-│   ├── core/                     # @plannotator/core — browser-safe, zero-dep universal slice (pure utils + types) shared by ui + shared; published so @plannotator/ui can be installed standalone. `shared` re-exports the moved modules via one-line shims so Plannotator is unchanged.
-│   ├── shared/                   # Node/git/server logic + cross-runtime types (re-exports browser-safe modules from @plannotator/core)
-│   │   ├── storage.ts            # Plan saving, version history, archive listing (node:fs only)
-│   │   ├── draft.ts              # Annotation draft persistence (node:fs only)
-│   │   ├── project.ts            # Pure string helpers (sanitizeTag, extractRepoName, extractDirName)
-│   │   └── inbox/                # The Inbox store (store.ts, append-only JSONL; thread routing), the per-thread list sections (list.ts), layout + line reader (schema.ts), registry (registry.ts: inbox/inbox.json)
-│   ├── inbox/                    # The Plannotator Inbox window (App, sidebar, list, thread, empty state, Settings), composed from ui, and surface/ (what a phone hosts); built by apps/inbox
-│   ├── t3-code/                  # @plannotator/t3-code — the opt-in T3 Code connection (Ask this session through a Claude Bash hook); loaded by the CLI only for `t3` / `t3-hook` (see "T3 Code")
-│   ├── guide-viewer/             # @plannotator/guide-viewer — the Guided Review chain (GuideView → GuideSectionCard → GuideFileCard → GuideViewportManager) behind a narrow GuideHost context; used by review-editor (ReviewGuideHost + AllFilesCodeView) and by the guides.show viewer (readOnly). Also home of diffParser, DiffFile, and the two markdown renderers.
-│   ├── editor/                   # Plan review app
-│   │   ├── App.tsx               # Main plan review app
-│   │   └── shortcuts.ts          # planReviewSurface + annotateSurface — composes plan-review scopes into per-surface registries
-│   └── review-editor/            # Code review UI
-│       ├── App.tsx               # Main review app
-│       ├── shortcuts.ts          # codeReviewSurface — composes code-review scopes into the review registry
-│       ├── components/           # DiffViewer, FileTree, ReviewSidebar
-│       ├── dock/                 # Dockview center panel infrastructure
-│       ├── demoData.ts           # Demo diff for standalone mode
-│       └── index.css             # Review-specific styles
-├── .claude-plugin/marketplace.json  # For marketplace install
-└── legacy/                       # Old pre-monorepo code (reference only)
-```
+The monorepo layout: every app and package directory (hook, opencode-plugin, paste-service, server, ui, core and others) with what each file or folder is for.
+
+Details: [docs/overview/project-structure.md](docs/overview/project-structure.md) — read it before working on Project Structure.
 
 ## Server Runtimes
 
@@ -347,25 +236,9 @@ When a user denies a plan and Claude resubmits, the UI shows what changed betwee
 
 ## Portable Guided Reviews
 
-Decision record: `adr/decisions/007-portable-guided-reviews-20260815.md`; spec: `adr/implementation/portable-guided-reviews.md`.
+How a Guided Review exports as one self-contained HTML file, the invariants that keep the exported diff and viewer stable, and hosted share links.
 
-A guide exports as ONE small HTML file (size ≈ the diff, never the app) that pins a specific viewer build on `guides.show` (`viewer.<hash>.js/.css` + SRI). Format lives in `@plannotator/core/guide-format` (versioned strict snapshot, `createGuideHtml`, fixtures + a compatibility test that must keep parsing every shipped fixture); the pinned build is the generated `@plannotator/core/guide-viewer-manifest` (regenerate with `bun run --cwd apps/guides-show build:viewer && bun run --cwd apps/guides-show sync:manifest`; CI fails if stale).
-
-Invariants: the diff a guide describes is captured when the guide job LAUNCHES (`buildCommand`'s `launchReview`, carried server-side like `changedFilesSnapshot` — never on the SSE-broadcast `AgentJobInfo`) and stored beside the saved guide as `{id}.patch` (patch written before the envelope that references it; deleted together). Exports never read the on-screen diff. `/v1/` on guides.show is add-only (content-hashed, never overwritten or deleted) so exported files keep opening; the viewer is the same guide chain (`@plannotator/guide-viewer`) over `AllFilesCodeView` in `readOnly` mode — no drift by construction. Read-only hosts stub the annotation composer/popovers at build time (`apps/guides-show/build/read-only-stubs-plugin.ts`); do not add app-only surfaces to the guide chain without going through the `GuideHost` contract.
-
-Viewer runtime invariants (`apps/guides-show/viewer/`): the highlight worker is fetched from guides.show and constructed locally, and HOW is decided by a live probe (`portablePool.tsx`: blob classic → blob module → data classic → data module; a one-line worker must answer), never by `location.protocol` — Chrome refuses blob *module* workers from `file://` asynchronously (its console says "cross-origin redirects of the top-level worker script") but accepts classic ones, and headless checks with `--allow-file-access-from-files` hide that, so test `file://` exports WITHOUT that flag. The worker bundle must stay import-free (`check-budgets` asserts it) so it can run as a classic worker. A pool that is not initialized within 4 s is dropped (`PoolWatchdog`) and the guide re-renders on the main thread; Pierre renders nothing while waiting on a pool whose workers died, so this is what keeps diffs from going blank. The exported document's plain-text fallback article is opacity 0 for the first 2.5 s (CSS-only reveal), so a cold viewer download shows the theme ground, then the guide skeleton, then the guide — never a flash of the fallback prose. The portable page must not set `overflow` on `body`/`html`: `GuideViewportManager.findScrollRoot` walks up for an `overflow-y: auto|scroll` ancestor to use as its IntersectionObserver root + scroll-event source, and an overflow on body propagates to the viewport without body itself scrolling — the manager would observe a never-scrolling element, mark everything "near", rank by distance from the middle of the whole document, and CodeViews would only mount on hover (`requestMount`). The manager now treats body/html as the window regardless, but keep the CSS clean too.
-
-Three producers share the one pure export (`createGuideHtml`): the in-app **Download portable guide** button, `plannotator guide export --id <saved>`, and the agent path `plannotator guide export --guide guide.json --patch guide.patch` (`packages/server/guide/guide-cli.ts`, `buildAuthoredGuideSnapshot`) used by the standalone `plannotator-guide` agent skill (its own repo, `plannotator/guides` — deliberately NOT part of this repo or its installers). The authored form takes the same `{ title, intent, sections, unplacedFiles? }` shape the in-app generator emits plus optional `review { gitRef, base }`, `source`, `generator`; it is STRICT where the in-app validator is lenient (a file not in the patch, or placed twice, is an error listing the patch's files — exit 1 — rather than a silently dropped chapter), fills `source` from git in cwd (`origin` → owner/repo, branch, head sha) unless the guide supplies one, and round-trips the built snapshot through the strict format parser so a bad `source`/`generator` fails at export time. `--patch -` reads stdin. The skill's worked example is the `AUTHORED` fixture in `guide-cli.test.ts` — keep them in step.
-
-### Hosted share links (guide share hosting)
-
-Contract: `adr/implementation/guide-share-hosting.md` (names, routes, shapes and error codes there are final; change them there first). A guide can also be shared as a link on a guide host instead of a downloaded file: the review header's Share menu offers **Download portable guide** (unchanged) and **Create share link**; the CLI has `plannotator guide share --id <saved> | --guide g.json --patch p.patch | --snapshot s.json [--public] [--ttl 7d|24h|30m|3600] [--json]` (stdout: the URL, or `{ id, url, deleteToken, expiresAt? }` with `--json`; stderr: the size and the exact `Delete with: plannotator guide unshare <id> --token <t>` line) and `plannotator guide unshare <id> --token <t>` (removal goes to the host a saved guide's record names, else `PLANNOTATOR_GUIDE_SHARE_URL` / `guideShareUrl`). `--id` refuses with exit 1 while the saved guide already records a link. Exit codes match `export` (0 / 1 not found, invalid, service error / 2 usage). The upload itself is `shareGuide` / `unshareGuide` in `packages/server/guide/guide-share.ts` (vendored to Pi as `apps/pi-extension/generated/guide-share.ts`; both review servers expose the same `/share`, `/share-info` and `DELETE /share` endpoints). No upload ever happens without the Create click or the CLI command.
-
-Two modes, encrypted by default. **Encrypted** stores `encrypt(await compress(snapshot))` (the same `@plannotator/core/crypto` + `@plannotator/core/compress` pair plan share links use); the key is generated by the uploader and lives ONLY in the URL fragment (`#key=<key>`, `GUIDE_SHARE_KEY_PARAM`), which browsers never send to the server, so the host holds ciphertext it cannot read and the page it serves is a shell that fetches `/api/g/<id>` and decrypts in the browser. **Plain** (`--public` / "Allow link previews", `{ public: true }`) stores the snapshot JSON (validated server-side with `parseGuideSnapshotJson`) so the hosted page can carry `<title>`, `og:*` and the guide text; use it when a chat app should unfurl the link. Both modes cap the stored body at `MAX_SHARED_GUIDE_BYTES` (25 MiB; `413`), have no expiry unless `ttlSeconds` (CLI `--ttl`) sets one, and return a one-time `deleteToken` (16 random bytes base64url, stored as a hex SHA-256) that is the only way to remove the guide besides the saved-envelope record.
-
-Where it lives: `apps/guides-show/share/` (`core/handler.ts` is the pure request handler, `core/storage.ts` the `GuideStore` interface, `stores/{r2,memory}.ts`), served by the Cloudflare Worker (`apps/guides-show/worker/index.ts`, R2 bucket binding `GUIDES` = `guides-show-guides`). "Self-hostable" means deploying that Worker yourself and pointing `PLANNOTATOR_GUIDE_SHARE_URL` at it. Routes: `POST /api/g` (`201 { id, url, deleteToken, expiresAt? }`, `400`/`413`/`429`), `GET /g/<id>` (HTML, `Cache-Control: public, max-age=300`, styled 404 page), `GET /api/g/<id>` (the stored body, CORS `*`), `DELETE /api/g/<id>` with `Authorization: Bearer <deleteToken>` (`204`/`401`/`404`), `OPTIONS /api/g*`. Upload guards: the size cap plus a per-IP rate limit on creation only (Cloudflare's `[[ratelimits]]` binding, 20 creates per minute per `CF-Connecting-IP`, `429` + `Retry-After`), optional in the Worker's `Env` and fail-open whenever it cannot resolve, so local runs and self-hosts without the binding are unlimited. Guides are kept indefinitely by decision (no host-imposed TTL, nothing prunes the bucket); only an upload's own `ttlSeconds` expires one, enforced on read.
-
-Invariants: hosted pages of either mode carry `<meta name=GUIDE_HOSTED_META_NAME>` (plus `<link rel=canonical>`, `robots noindex`, `og:*`), which is how the viewer knows to add its client-side **Download** button (builds the portable file from the DOM-reconstructed viewer pin, never re-fetches, never includes the hosted meta); the encrypted shell (`createGuideShellHtml`) additionally carries `<meta name=GUIDE_PAYLOAD_META_NAME>` naming `/api/g/<id>` and NO title, intent or payload in the HTML; a plain page embeds the snapshot like an export and has no payload meta. The key must never appear anywhere but the fragment (not in a query string, not in a request, not in a stored record other than the uploader's own envelope). The uploader sends its viewer pin (`{ js, css, jsIntegrity, cssIntegrity, langs? }` from `GUIDE_VIEWER_MANIFEST`) and the host renders with it on its OWN `/v1/` (`baseUrl` is never sent); without a pin the host uses its bundled manifest. Error pages name the serving host, never guides.show, and store failures answer `500 { error: "internal error" }` with the real message logged host-side only. One link per guide in Plannotator (`409` on a second upload); removal goes to the host the record names. Deploying the Worker with the `guides-show-guides` bucket is a separate, explicit step: no production deploy without a bucket, and never as part of a build.
+Details: [docs/overview/portable-guided-reviews.md](docs/overview/portable-guided-reviews.md) — read it before working on Portable Guided Reviews.
 
 ## Data Types
 
