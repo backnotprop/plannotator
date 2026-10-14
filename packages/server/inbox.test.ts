@@ -13,7 +13,9 @@ import { questionKey, type QuestionAnswer } from "@plannotator/core/question-blo
 import type { InboxQuestion } from "@plannotator/core/inbox-types";
 import { inboxStatus, readInboxRegistry } from "@plannotator/shared/inbox/registry";
 import { INBOX_SERVER_SESSION_MISMATCH_ERROR } from "@plannotator/core/server-session";
-import { INBOX_MCP_INSTRUCTIONS, INBOX_MCP_TOOLS } from "./inbox-mcp";
+import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
+import { inboxAgentTool, parseInboxToolList } from "@plannotator/shared/inbox/connection";
+import { INBOX_MCP_INSTRUCTIONS, INBOX_MCP_TOOLS, INBOX_STOP_EXAMPLE, SEND_BODY_DESCRIPTION } from "./inbox-mcp";
 import { INBOX_FORBIDDEN_PORT, startInboxServer, type InboxServer } from "./inbox";
 
 const roots: string[] = [];
@@ -350,6 +352,28 @@ describe("security refusals, by real requests", () => {
   });
 });
 
+describe("send_message's body teaches the Inbox-only Stopped / Holds up lines", () => {
+  test("its example reads as a stopped question that holds up two pieces of work", () => {
+    expect(SEND_BODY_DESCRIPTION).toContain(INBOX_STOP_EXAMPLE);
+    const [question, ...rest] = parseInboxQuestionBlocks(INBOX_STOP_EXAMPLE);
+    expect(rest).toEqual([]);
+    expect(question!.prompt).toBe("Which database password should I use for staging?");
+    expect(question!.stopped).toBe("can't run the migration without it");
+    expect(question!.holds_up).toEqual(["staging deploy", "release notes"]);
+    expect(question!.parsed.choices.map((choice) => choice.label)).toEqual(['The one in 1Password "staging-db"', "Make a new one"]);
+  });
+
+  test("it states the bare-negative rule the parser applies", () => {
+    expect(SEND_BODY_DESCRIPTION).toContain("never write `Stopped: no`");
+    for (const value of ["no", "none", "n/a", "-"]) {
+      expect(SEND_BODY_DESCRIPTION).toContain(`\`${value}\``);
+      const [question] = parseInboxQuestionBlocks(`:::question\nWhich one?\n\nStopped: ${value}\nHolds up: ${value}\n\n- [ ] A\n- [ ] B\n:::`);
+      expect(question!.stopped).toBeNull();
+      expect(question!.holds_up).toEqual([]);
+    }
+  });
+});
+
 describe("questions end to end: MCP send, window picks and Send, agent reads", () => {
   test("send_message with question blocks, pick, Send, wait_for_reply returns the answer", async () => {
     const root = tempRoot();
@@ -381,6 +405,14 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
     for (const name of ["get_guide_brief", "submit_guide"]) {
       expect(tools.tools.find((t) => t.name === name)!.description!.length).toBeLessThan(2048);
     }
+    // The Inbox-only `Stopped:` / `Holds up:` lines ride send_message's `body`
+    // field (a field description reaches the model whole), and from there the
+    // `plannotator_inbox` tool's `body` too.
+    const bodySchema = (tools.tools.find((t) => t.name === "send_message")!.inputSchema.properties as Record<string, { description?: string }>).body!;
+    expect(bodySchema.description).toBe(SEND_BODY_DESCRIPTION);
+    const agentTool = inboxAgentTool(parseInboxToolList({ tools: tools.tools }))!;
+    const agentBody = (agentTool.inputSchema.properties as Record<string, { description: string }>).body!.description;
+    expect(agentBody).toContain(SEND_BODY_DESCRIPTION);
 
     const sendResult = await client.callTool({
       name: "send_message",
