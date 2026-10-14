@@ -152,7 +152,7 @@ jobs:
           packages/inbox/decisionsPicker.test.tsx
           packages/inbox/openStaysPut.test.tsx
           packages/inbox/phoneList.test.tsx
-          packages/inbox/toastPhone.test.tsx
+          packages/inbox/toast.test.tsx
           packages/inbox/attachmentsHeader.test.tsx
           packages/inbox/sentQuestionLocked.test.tsx
           packages/inbox/themeToggle.test.tsx

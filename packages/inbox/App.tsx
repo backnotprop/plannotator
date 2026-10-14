@@ -63,7 +63,7 @@ import { DecisionsPage } from './components/Decisions';
 import { GuidePane } from './components/GuidePane';
 import { AboutBlock, FailedDialog, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
 import { unsentReply } from './unsent';
-import { InboxToast, type InboxToastModel } from './components/Toast';
+import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
 import { canToggleRead, MARK_READ_UNDO_MS, markReadToast } from './markRead';
 import { lookBoundary } from './folding';
 import { latestAgentSeq } from './seenOnSight';
@@ -1001,12 +1001,15 @@ function Inbox() {
   const showToast = (next: Omit<InboxToastModel, 'id'>, ms = MARK_READ_UNDO_MS) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast({ ...next, id: Date.now() });
-    say(next.text);
+    say(toastSpeech(next));
     toastTimer.current = setTimeout(() => {
       toastTimer.current = null;
       setToast(null);
     }, ms);
   };
+  /** A write that failed: its message, whole (it may wrap). */
+  const showError = (cause: unknown) =>
+    showToast({ icon: 'warn', lead: cause instanceof Error ? cause.message : 'The thread did not change.', wrap: true });
   useEffect(() => () => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
   }, []);
@@ -1024,7 +1027,7 @@ function Inbox() {
     try {
       await inboxApi.markRead(threadId, read);
     } catch (cause) {
-      showToast({ text: cause instanceof Error ? cause.message : 'The thread did not change.', warn: true });
+      showError(cause);
       return;
     }
     await afterWrite();
@@ -1035,12 +1038,12 @@ function Inbox() {
       return;
     }
     if (!before) return;
-    const closed = before.questions.open + before.questions.picked;
-    const copy = markReadToast(before, closed, deferred);
+    const { warn, ...copy } = markReadToast(before, deferred);
     showToast({
       ...copy,
+      icon: warn ? 'warn' : 'check',
       onUndo: () => void markRead(threadId, false),
-      ...(copy.warn
+      ...(warn
         ? {
             onReply: () => {
               void (async () => {
@@ -1052,8 +1055,6 @@ function Inbox() {
           }
         : {}),
     });
-    // The toast's own words (Quiet or Archived, moved or still to move).
-    say(copy.text);
   };
 
   /** Archive (the MCP's resolve) or Unarchive, with Undo. */
@@ -1061,7 +1062,7 @@ function Inbox() {
     try {
       await inboxApi.resolve(rootId, next);
     } catch (cause) {
-      showToast({ text: cause instanceof Error ? cause.message : 'The thread did not change.', warn: true });
+      showError(cause);
       return;
     }
     // The list leaves archived threads out (Settings lists them). While the
@@ -1073,8 +1074,8 @@ function Inbox() {
     }
     await afterWrite();
     if (next) {
-      showToast({ text: 'Archived. The next message starts a new thread.', short: 'Archived.', onUndo: () => void archive(threadId, rootId, false) });
-      say('Archived.');
+      // The thread's foot says the next message starts a new thread.
+      showToast({ icon: 'archive', lead: 'Archived', onUndo: () => void archive(threadId, rootId, false) });
     } else {
       dismissToast();
       say('Unarchived.');
@@ -1089,15 +1090,15 @@ function Inbox() {
     try {
       await inboxApi.resolve(row.thread_id, false);
     } catch (cause) {
-      showToast({ text: cause instanceof Error ? cause.message : 'The thread did not change.', warn: true });
+      showError(cause);
       return false;
     }
     go({ page: 'inbox', project: null, thread: row.thread_id });
     await refreshList(true);
-    const subject = row.subject ?? 'The thread';
     showToast({
-      text: `Moved back to your Inbox: “${subject}”.`,
-      short: 'Unarchived.',
+      icon: 'check',
+      lead: 'Back in your Inbox',
+      detail: `“${row.subject ?? '(no subject)'}”`,
       onUndo: () => void archive(row.thread_id, row.thread_id, true),
     });
     return true;
@@ -1808,7 +1809,7 @@ function Inbox() {
           onKeep={() => setSoundDialog('shown')}
           onTurnOff={() => {
             setSoundDialog('shown');
-            void sound.setEnabled(false).then((saved) => showToast({ text: saved ? 'Sound off.' : 'The sound setting was not saved.', warn: !saved }, 4200));
+            void sound.setEnabled(false).then((saved) => showToast(saved ? { icon: 'mute', lead: 'Sound off' } : { icon: 'warn', lead: 'Sound setting not saved' }, 4200));
           }}
         />
       )}
@@ -1822,7 +1823,7 @@ function Inbox() {
           onClosed={() => setAgentNote('shown')}
         />
       )}
-      {toast && soundDialog !== 'open' && !agentNoteOpen && <InboxToast toast={toast} onDismiss={dismissToast} phone={phone} />}
+      {toast && soundDialog !== 'open' && !agentNoteOpen && <InboxToast toast={toast} phone={phone} />}
       <SearchHost
         mounted={searchMounted}
         open={searchOpen}

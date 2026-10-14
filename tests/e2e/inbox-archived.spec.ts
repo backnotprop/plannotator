@@ -209,7 +209,7 @@ test('Unarchive opens the thread back in the main list', async () => {
   await block.locator(`[data-archived-thread="${threads.deploy}"]`).getByRole('button', { name: 'Unarchive Preview deploy is up' }).click();
   await expect(page).toHaveURL(new RegExp(`#thread=${threads.deploy}$`));
   await expect(page.locator('section.ib-pane').getByRole('heading', { name: 'Preview deploy is up' })).toBeVisible();
-  await expect(page.locator('[data-inbox-toast]')).toContainText('Moved back to your Inbox');
+  await expect(page.locator('[data-inbox-toast]')).toContainText('Back in your Inbox');
   // Back in the list, in whatever section its state puts it: opening it was a look, so a news-only thread is Quiet.
   await openQuiet(page);
   await expect(page.locator(`.ib-lbody [data-row="${threads.deploy}"]`)).toBeVisible();

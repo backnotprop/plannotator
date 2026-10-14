@@ -289,9 +289,12 @@ test.skipIf(!hasDom)('E marks the open thread read; a stopped thread warns with 
   expect(head().textContent).toContain('Read');
   expect(el.querySelector('[data-read-line]')?.textContent).toContain('2 questions were closed unanswered');
   const toast = document.querySelector('[data-inbox-toast]') as HTMLElement;
-  expect(toast.textContent).toContain('will move to Quiet');
-  expect(toast.textContent).toContain('Claude Code was stopped on it.');
+  expect(toast.querySelector('.ib-tlead')?.textContent).toBe('Marked read');
+  expect(toast.querySelector('.ib-tdetail')?.textContent).toBe('Claude Code was stopped');
   expect(toast.querySelector('[data-toast-reply]')).not.toBeNull();
+  // The window's live region says it once, as sentences (the toast itself is not a live region).
+  await until(() => document.querySelector('[data-inbox-live]')?.textContent === 'Marked read. Claude Code was stopped.', 'the live region');
+  expect(toast.getAttribute('role')).toBeNull();
   expect((await questionStates(ids.stopped)).map((q) => q.state)).toEqual(['closed', 'closed']);
   expect(await serverSection(ids.stopped)).toBe('quiet');
   // The row keeps its place while the thread is open.
@@ -339,7 +342,7 @@ test.skipIf(!hasDom)('the row hover action marks read without opening the thread
   expect(el.querySelector('[data-section-id="quiet"] .ib-n')?.textContent).toBe('1');
   // A plain toast: no warning, no Reply.
   const toast = document.querySelector('[data-inbox-toast]') as HTMLElement;
-  expect(toast.textContent).toContain('It comes back when Claude Code writes again.');
+  expect(toast.textContent).toContain('Moved to Quiet');
   expect(toast.querySelector('[data-toast-reply]')).toBeNull();
   // Quiet is folded: open it, and the row says why it is there, with no action of its own.
   act(() => (el.querySelector('[data-section-id="quiet"] .ib-band') as HTMLButtonElement).click());
