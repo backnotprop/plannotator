@@ -35,6 +35,8 @@ export interface InboxListProps {
   scope?: string | null;
   /** Opens search: on a phone, the list header's search icon (inbox.css shows it there only). */
   onSearch?: (opener: HTMLElement) => void;
+  /** What an empty list says (one project whose threads are all archived). Drawn only while no row shows. */
+  empty?: ReactNode;
 }
 
 function badgeOf(row: InboxListRow): string | null {
@@ -287,6 +289,7 @@ export function InboxList(props: InboxListProps) {
             <b>Show</b>
           </button>
         )}
+        {visible.length === 0 && props.empty}
         {visible.map((section) => {
           const quiet = section.id === 'quiet';
           const open = !quiet || quietOpen;

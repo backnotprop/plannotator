@@ -37,6 +37,20 @@ export interface NotificationSettings {
 export interface ProjectFolder extends InboxProject {
   threads: number;
   unread: number;
+  /** Threads the window's list holds (not archived). Absent from an older Inbox: the folder is always drawn. */
+  listed?: number;
+  /** Archived threads (resolved, none come back). Absent from an older Inbox. */
+  archived?: number;
+}
+
+/** The project menu's batches (POST /api/inbox/projects/:id/read and /resolve): the threads each took. */
+export interface ProjectBatchAnswer<B> {
+  project: ProjectFolder | null;
+  batch: B;
+  threads: InboxListRow[];
+  replayed: boolean;
+  /** The batch stopped partway: `batch` names what it changed (Undo covers those); the rest did not change. */
+  error?: { code: string; message: string };
 }
 
 export interface ListModel {
@@ -418,6 +432,18 @@ export const inboxApi = {
   /** Mark read (the thread leaves the top for Quiet, its waiting questions closed) or its Undo. */
   markRead: (threadId: string, read: boolean) =>
     post<{ thread: InboxListRow }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/${read ? 'read' : 'unread'}`, {}),
+  /** The project menu's Mark all as read: Mark read on every thread waiting on the person. */
+  markProjectRead: (projectId: string, batchId: string) =>
+    post<ProjectBatchAnswer<{ read: string[] }>>(`/api/inbox/projects/${encodeURIComponent(projectId)}/read`, { batch_id: batchId }),
+  /** Its Undo: exactly the threads the batch took. */
+  unmarkProjectRead: (projectId: string, threads: readonly string[]) =>
+    post<{ threads: InboxListRow[]; skipped: string[] }>(`/api/inbox/projects/${encodeURIComponent(projectId)}/unread`, { threads }),
+  /** The project menu's Archive all: every listed thread resolved (one that came back is marked read instead). */
+  archiveProject: (projectId: string, batchId: string) =>
+    post<ProjectBatchAnswer<{ resolved: string[]; read: string[] }>>(`/api/inbox/projects/${encodeURIComponent(projectId)}/resolve`, { resolved: true, batch_id: batchId }),
+  /** Its Undo: exactly the threads the batch took. */
+  unarchiveProject: (projectId: string, threads: { resolved: readonly string[]; read: readonly string[] }) =>
+    post<{ threads: InboxListRow[]; skipped: string[] }>(`/api/inbox/projects/${encodeURIComponent(projectId)}/resolve`, { resolved: false, threads }),
   pick: (messageId: string, key: string, revision: number, answer: QuestionAnswer | null) =>
     post<{ questions: InboxQuestion[] }>(`/api/inbox/messages/${encodeURIComponent(messageId)}/picks`, {
       questions: [{ key, revision, answer }],

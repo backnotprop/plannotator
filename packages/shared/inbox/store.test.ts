@@ -23,11 +23,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { questionKey, type QuestionAnswer } from "@plannotator/core/question-block";
 import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
-import { INBOX_SECTIONS, inboxThreadNameKey, type InboxListRow, type InboxListSection, type InboxSectionId } from "@plannotator/core/inbox-types";
+import { INBOX_SECTIONS, inboxRowOffersMarkRead, inboxThreadNameKey, type InboxListRow, type InboxListSection, type InboxSectionId } from "@plannotator/core/inbox-types";
 // The sidebar's counts and the decisions the Send route records, from the code that computes them.
 import { waitingCount } from "../../inbox/held";
 import { recordDecisionsForReply, waitingDecisionCount } from "../../server/inbox-decisions";
 import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "./list";
+import { archiveProject, markProjectRead, unarchiveProject, unmarkProjectRead } from "./project-batch";
 import { InboxError, parseInboxLine } from "./schema";
 import { InboxStore } from "./store";
 
@@ -1485,6 +1486,167 @@ describe("the thread-state model", () => {
 
   test("every hand-written edge runs clean through the model", () => {
     for (const trace of HAND_TRACES) runTrace(trace.events);
+  });
+});
+
+// ─────────────────────────── the project menu's batches ───────────────────────────
+//
+// Mark all as read and Archive all (packages/shared/inbox/project-batch.ts)
+// are loops over the single actions. The model decides on its own which
+// threads each takes (Mark all: every listed thread waiting on the person;
+// Archive all: every listed thread, Mark read for one that came back), then
+// applies the single rules thread by thread; the store runs the real batch.
+// Every invariant holds after every batch and every Undo, between generated
+// steps, and a batch undone back to back gives the project back as it was.
+
+type BatchItem =
+  | { kind: "op"; op: Op }
+  | { kind: "batch"; action: "read" | "archive"; root: number }
+  // The Undo of the last batch, whatever happened since.
+  | { kind: "undo" };
+
+const batchItemArb: fc.Arbitrary<BatchItem> = fc.oneof(
+  { arbitrary: stateOpArb.map((op) => ({ kind: "op" as const, op })), weight: 8 },
+  { arbitrary: fc.record({ kind: fc.constant("batch" as const), action: fc.constantFrom("read" as const, "archive" as const), root: fc.nat(1) }), weight: 2 },
+  { arbitrary: fc.constant({ kind: "undo" as const }), weight: 1 },
+);
+
+interface BatchDone {
+  projectId: string;
+  action: "read" | "archive";
+  read: string[];
+  resolved: string[];
+}
+
+/** Each thread of the project, as the store's routing placed it (the model checks routing step by step). */
+function modelThreadsOf(world: StateWorld, projectId: string): ModelThread[] {
+  return [...world.model.threads.values()].filter((t) => world.store.message(t.id)!.project_id === projectId);
+}
+
+/** A project's rows as a batch then its Undo must give them back (revisions move; nothing else may). */
+function projectSnapshot(world: StateWorld, projectId: string) {
+  return world.store
+    .listRows({ projectId })
+    .map((row) => ({ id: row.thread_id, resolved: row.resolved_at !== null, back: row.back_from_archive === true, ...readSnapshot(world, row.thread_id) }));
+}
+
+/** Apply one thread's single action to the model, with the messages the store wrote for that thread. */
+function modelSingle(world: StateWorld, op: Op, threadId: string, created: readonly string[], tick: number): void {
+  const mine = created.filter((id) => world.store.message(id)!.thread_id === threadId);
+  expect(world.model.apply(op, threadId, mine, world.store, tick)).toBe("ok");
+}
+
+function batchStep(world: StateWorld, item: Exclude<BatchItem, { kind: "op" }>, last: BatchDone | null): BatchDone | null {
+  const tick = ++world.tick;
+  world.clock.now += STATE_STEP_MS;
+  world.timeOf.set(tick, world.clock.now);
+  world.lastRead = null;
+  const created: string[] = [];
+  const stop = world.store.subscribe((line) => {
+    if (line.kind === "message" && world.store.messageCursor(line.id) === line.seq) created.push(line.id);
+  });
+  let done: BatchDone | null = null;
+  // What the model must skip on Undo: a thread the single action now refuses (archived, and no agent wrote after the line).
+  const refusesUnread = (id: string) => {
+    const t = world.model.threads.get(id)!;
+    return t.resolved && !world.model.agentAfter(t);
+  };
+  const skipRead = item.kind === "undo" && last ? new Set(last.read.filter(refusesUnread)) : new Set<string>();
+  try {
+    if (item.kind === "undo") {
+      if (!last) return null;
+      if (last.action === "read") {
+        expect(new Set(unmarkProjectRead(world.store, last.projectId, last.read).skipped)).toEqual(skipRead);
+      } else {
+        const result = unarchiveProject(world.store, last.projectId, { resolved: last.resolved, read: last.read });
+        expect(new Set(result.skipped)).toEqual(skipRead);
+      }
+    } else {
+      const project = world.store.listProjects().find((p) => p.name === `repo${item.root}`);
+      if (!project) return null;
+      if (item.action === "read") done = { projectId: project.id, action: "read", resolved: [], ...markProjectRead(world.store, project.id) };
+      else done = { projectId: project.id, action: "archive", ...archiveProject(world.store, project.id) };
+    }
+  } finally {
+    stop();
+  }
+
+  if (item.kind === "undo") {
+    // The model, thread by thread, in the order the store wrote (resolved before read).
+    for (const id of last!.resolved) modelSingle(world, { op: "resolve", target: 0, resolved: false }, id, created, tick);
+    for (const id of last!.read) if (!skipRead.has(id)) modelSingle(world, { op: "read", target: 0, read: false }, id, created, tick);
+  } else {
+    // The model decides which threads the batch takes, by its own rules.
+    const threads = modelThreadsOf(world, done!.projectId).filter((t) => !world.model.archived(t));
+    if (item.action === "read") {
+      const waits = threads.filter((t) => SHWN.includes(world.model.section(t))).map((t) => t.id);
+      expect(new Set(done!.read)).toEqual(new Set(waits));
+      for (const id of done!.read) modelSingle(world, { op: "read", target: 0, read: true }, id, created, tick);
+    } else {
+      expect(new Set(done!.resolved)).toEqual(new Set(threads.filter((t) => !t.resolved).map((t) => t.id)));
+      expect(new Set(done!.read)).toEqual(new Set(threads.filter((t) => t.resolved).map((t) => t.id)));
+      for (const id of done!.resolved) modelSingle(world, { op: "resolve", target: 0, resolved: true }, id, created, tick);
+      for (const id of done!.read) modelSingle(world, { op: "read", target: 0, read: true }, id, created, tick);
+    }
+    // A batch never writes a message (the set-aside notes go later, thread by thread).
+    expect(created).toEqual([]);
+  }
+  checkThreadState(world);
+  if (done) {
+    const rows = world.store.listRows({ projectId: done.projectId });
+    // Mark all as read leaves nothing waiting on the person; Archive all leaves nothing listed (the project hides).
+    if (done.action === "read") expect(rows.filter((r) => inboxRowOffersMarkRead(r))).toEqual([]);
+    else expect(rows.filter((r) => !inboxRowArchived(r))).toEqual([]);
+  }
+  return done;
+}
+
+describe("the thread-state model: the project menu's batches", () => {
+  test("generated histories with batches and their Undo between the steps: the store agrees with the model after every step", () => {
+    let batches = 0;
+    let undone = 0;
+    fc.assert(
+      fc.property(fc.array(batchItemArb, { minLength: 15, maxLength: 50, size: "max" }), (items) => {
+        const world = stateWorld();
+        let last: BatchDone | null = null;
+        for (const item of items) {
+          if (item.kind === "op") {
+            stateStep(world, item.op);
+            continue;
+          }
+          const done = batchStep(world, item, last);
+          if (item.kind === "undo") {
+            if (last) undone += 1;
+            last = null;
+          } else if (done) {
+            last = done;
+            batches += 1;
+          }
+        }
+      }),
+      { numRuns: 200, seed: 20261014 },
+    );
+    expect(batches).toBeGreaterThan(0);
+    expect(undone).toBeGreaterThan(0);
+  });
+
+  test("a batch undone back to back gives the project back exactly as it was", () => {
+    let touched = 0;
+    fc.assert(
+      fc.property(fc.array(stateOpArb, { minLength: 10, maxLength: 35, size: "max" }), fc.constantFrom("read" as const, "archive" as const), (ops, action) => {
+        const world = stateWorld();
+        for (const op of ops) stateStep(world, op);
+        for (const project of world.store.listProjects()) {
+          const before = projectSnapshot(world, project.id);
+          const done = batchStep(world, { kind: "batch", action, root: Number(project.name.slice(4)) }, null)!;
+          touched += done.read.length + done.resolved.length;
+          batchStep(world, { kind: "undo" }, done);
+          expect(projectSnapshot(world, project.id)).toEqual(before);
+        }
+      }),
+      { numRuns: 100, seed: 20261016 },
+    );
+    expect(touched).toBeGreaterThan(0);
   });
 });
 

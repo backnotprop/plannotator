@@ -140,7 +140,7 @@ test('the toggle closes and opens the sidebar on the spring, and the list takes 
   const { page, url } = world;
   await page.goto(url);
   await expect(side(page)).toBeVisible();
-  await expect(side(page).getByRole('button', { name: 'billing-svc' })).toBeVisible();
+  await expect(side(page).getByRole('button', { name: /^billing-svc(?: \d+)?$/ })).toBeVisible();
   const list = page.locator('.ib-listcol');
   await expect.poll(() => list.evaluate((el) => el.getBoundingClientRect().left)).toBe(WIDTH);
   await shot('open');
@@ -242,7 +242,7 @@ test('closed, the left edge peeks the navigation after a rest, and it works', as
   await page.mouse.move(120, 450, { steps: 4 });
   await page.waitForTimeout(350);
   await shot('peek');
-  await side(page).getByRole('button', { name: 'docs-site' }).click();
+  await side(page).getByRole('button', { name: /^docs-site(?: \d+)?$/ }).click();
   await expect(page.locator('.ib-lhead h1')).toHaveText('docs-site');
   await page.mouse.move(900, 450, { steps: 6 });
   await expect(peek).not.toHaveAttribute('data-visible', '');

@@ -290,8 +290,8 @@ test('agents write three threads in two projects; the rows land in the six secti
   await expect(namedRow.locator('.ib-key')).toHaveText('refund-webhooks');
   await expect(page.locator('.ib-band')).toHaveText([/^Stopped on you\s*1$/, /^Holding up work\s*1$/, /^Waiting on you\s*1$/]);
   await expect(side(page).getByRole('button', { name: /^Inbox/ })).toContainText('3');
-  await expect(side(page).getByRole('button', { name: /^billing-svc/ })).toContainText('2');
-  await expect(side(page).getByRole('button', { name: /^docs-site/ })).toContainText('1');
+  await expect(side(page).getByRole('button', { name: /^billing-svc(?: \d+)?$/ })).toContainText('2');
+  await expect(side(page).getByRole('button', { name: /^docs-site(?: \d+)?$/ })).toContainText('1');
   await shot('1.1-list');
 });
 
@@ -311,13 +311,13 @@ test('a project folder filters the list and the sections still apply', async () 
   expect(await leftOf(page, '.ib-band')).toBe(labelLeft - 12);
   expect(await leftOf(page, `${named} .ib-mk`)).toBeGreaterThan(labelLeft + 200);
 
-  await side(page).getByRole('button', { name: /^docs-site/ }).click();
+  await side(page).getByRole('button', { name: /^docs-site(?: \d+)?$/ }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'docs-site' })).toBeVisible();
   await expect(page.locator('.ib-path')).toHaveText(new RegExp(`docs-site$`));
   await expect(page.locator('.ib-lbody [data-thread-id]')).toHaveCount(1);
   await expect(page.locator('.ib-band')).toHaveText([/^Holding up work\s*1$/]);
 
-  await side(page).getByRole('button', { name: /^billing-svc/ }).click();
+  await side(page).getByRole('button', { name: /^billing-svc(?: \d+)?$/ }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'billing-svc' })).toBeVisible();
   await expect(page.locator('.ib-band')).toHaveText([/^Stopped on you\s*1$/, /^Waiting on you\s*1$/]);
   // One project: no project column at all, and no empty block where it was. The
@@ -415,7 +415,7 @@ test('a pick is saved at once and the agent reads it through read_thread', async
       const time = rect(el.querySelector('.ib-t')!);
       return { shape: el.className.split(' ')[0], text: el.querySelector('.ib-c')!.textContent, gap: time.left - count.right, sameLine: Math.abs(count.top - time.top) < 4 };
     });
-  for (const [folder, narrowShape] of [[/^Inbox/, 'ib-nrow'], [/^billing-svc/, 'ib-row']] as const) {
+  for (const [folder, narrowShape] of [[/^Inbox/, 'ib-nrow'], [/^billing-svc(?: \d+)?$/, 'ib-row']] as const) {
     await side(page).getByRole('button', { name: folder }).click();
     for (const width of [1440, 1000, 820]) {
       await page.setViewportSize({ width, height: 900 });
